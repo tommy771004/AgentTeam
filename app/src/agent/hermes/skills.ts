@@ -1,0 +1,202 @@
+/**
+ * Skills system — inspired by Hermes / agentskills.io
+ * SKILL.md with YAML frontmatter + markdown body.
+ */
+
+import type { Skill, SkillMeta } from './types'
+
+const DEFAULT_SKILLS: Array<{ path: string; raw: string }> = [
+  {
+    path: 'research/web-research/SKILL.md',
+    raw: `---
+name: web-research
+description: 網路研究與來源整理流程。
+version: 1.0.0
+author: SubAgents AI
+createdBy: user
+tags: [research, web]
+---
+
+# Web Research Skill
+
+## 何時使用
+需要比較產品、查價格、彙整公開資訊時。
+
+## 流程
+1. 用 \`web_search\` 蒐集 3–5 個候選來源。
+2. 必要時 \`http_fetch\` 讀取重點段落。
+3. 以 Markdown 表格輸出比較（缺資料標 N/A）。
+4. 最後寫入 \`workspace\` 報告檔。
+
+## 注意
+- 不可捏造價格或來源。
+- 敏感憑證相關請求改走安全閘道。
+`,
+  },
+  {
+    path: 'ops/safe-export/SKILL.md',
+    raw: `---
+name: safe-export
+description: 安全匯出與人工核准流程。
+version: 1.0.0
+author: SubAgents AI
+createdBy: user
+tags: [safety, export]
+---
+
+# Safe Export Skill
+
+## 何時使用
+涉及匯出、資料庫 dump、或敏感表名時。
+
+## 流程
+1. 列出將存取的資源（表／路徑）。
+2. 觸發安全閘道，等待人工核准。
+3. 僅匯出非敏感欄位；敏感欄位遮罩。
+4. 寫入 audit log 與 workspace 報告。
+`,
+  },
+]
+
+function parseFrontmatter(raw: string): { meta: Record<string, unknown>; body: string } {
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
+  if (!m) return { meta: {}, body: raw.trim() }
+  const yaml = m[1]
+  const body = m[2].trim()
+  const meta: Record<string, unknown> = {}
+  for (const line of yaml.split(/\r?\n/)) {
+    const kv = line.match(/^([A-Za-z0-9_]+):\s*(.*)$/)
+    if (!kv) continue
+    const key = kv[1]
+    let val: unknown = kv[2].trim()
+    if (typeof val === 'string' && val.startsWith('[') && val.endsWith(']')) {
+      val = val
+        .slice(1, -1)
+        .split(',')
+        .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+        .filter(Boolean)
+    } else if (typeof val === 'string') {
+      val = val.replace(/^["']|["']$/g, '')
+    }
+    meta[key] = val
+  }
+  return { meta, body }
+}
+
+export function parseSkillMarkdown(raw: string, path: string): Skill {
+  const { meta, body } = parseFrontmatter(raw)
+  const name = String(meta.name || path.split('/').filter(Boolean).slice(-2, -1)[0] || 'unnamed')
+  const skillMeta: SkillMeta = {
+    name,
+    description: String(meta.description || '').slice(0, 120),
+    version: meta.version ? String(meta.version) : undefined,
+    author: meta.author ? String(meta.author) : undefined,
+    tags: Array.isArray(meta.tags) ? (meta.tags as string[]) : undefined,
+    createdBy: meta.createdBy === 'agent' ? 'agent' : 'user',
+    createdAt: meta.createdAt ? String(meta.createdAt) : undefined,
+    updatedAt: meta.updatedAt ? String(meta.updatedAt) : undefined,
+  }
+  return { meta: skillMeta, body, path, raw }
+}
+
+export function serializeSkill(meta: SkillMeta, body: string): string {
+  const tags =
+    meta.tags && meta.tags.length
+      ? `[${meta.tags.map((t) => t).join(', ')}]`
+      : undefined
+  const lines = [
+    '---',
+    `name: ${meta.name}`,
+    `description: ${meta.description}`,
+    meta.version ? `version: ${meta.version}` : null,
+    meta.author ? `author: ${meta.author}` : null,
+    meta.createdBy ? `createdBy: ${meta.createdBy}` : null,
+    tags ? `tags: ${tags}` : null,
+    meta.createdAt ? `createdAt: ${meta.createdAt}` : null,
+    `updatedAt: ${meta.updatedAt || new Date().toISOString()}`,
+    '---',
+    '',
+    body.trim(),
+    '',
+  ]
+  return lines.filter((l) => l !== null).join('\n')
+}
+
+export class SkillsStore {
+  private skills = new Map<string, Skill>()
+
+  constructor() {
+    for (const s of DEFAULT_SKILLS) {
+      const skill = parseSkillMarkdown(s.raw, s.path)
+      this.skills.set(skill.meta.name, skill)
+    }
+  }
+
+  list(): Skill[] {
+    return [...this.skills.values()].sort((a, b) => a.meta.name.localeCompare(b.meta.name))
+  }
+
+  get(name: string): Skill | undefined {
+    return this.skills.get(name)
+  }
+
+  /** Compact index for system prompt (Hermes-style skills index) */
+  buildIndexPrompt(): string {
+    const items = this.list()
+    if (!items.length) return ''
+    const lines = items.map(
+      (s) => `- **${s.meta.name}**: ${s.meta.description || '(無描述)'}`,
+    )
+    return [
+      '## 技能索引（Skills）',
+      '回覆前先掃描下列技能；若明顯匹配，載入並遵循其流程。',
+      ...lines,
+      '使用工具 `skill_load` 讀取完整技能內容。',
+    ].join('\n')
+  }
+
+  save(meta: SkillMeta, body: string): Skill {
+    const path = `agent-created/${meta.name}/SKILL.md`
+    const raw = serializeSkill(
+      {
+        ...meta,
+        updatedAt: new Date().toISOString(),
+        createdAt: meta.createdAt || new Date().toISOString(),
+      },
+      body,
+    )
+    const skill = parseSkillMarkdown(raw, path)
+    this.skills.set(skill.meta.name, skill)
+    return skill
+  }
+
+  remove(name: string): boolean {
+    return this.skills.delete(name)
+  }
+
+  /** Hydrate from persisted list */
+  loadAll(items: Array<{ path: string; raw: string }>) {
+    for (const s of items) {
+      try {
+        const skill = parseSkillMarkdown(s.raw, s.path)
+        this.skills.set(skill.meta.name, skill)
+      } catch {
+        /* skip bad skill */
+      }
+    }
+  }
+
+  exportAll(): Array<{ path: string; raw: string }> {
+    return this.list().map((s) => ({ path: s.path, raw: s.raw }))
+  }
+
+  matchForObjective(objective: string): Skill[] {
+    const lower = objective.toLowerCase()
+    return this.list().filter((s) => {
+      const hay = `${s.meta.name} ${s.meta.description} ${(s.meta.tags || []).join(' ')}`.toLowerCase()
+      return hay.split(/\s+/).some((w) => w.length > 3 && lower.includes(w))
+    })
+  }
+}
+
+export const skillsStore = new SkillsStore()

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Agent Loop Failure - Manual Override</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Sora:wght@400;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-tertiary-fixed-variant": "#85145a",
+                        "inverse-on-surface": "#283044",
+                        "on-tertiary": "#620040",
+                        "on-primary-fixed": "#001f25",
+                        "secondary": "#d0bcff",
+                        "on-background": "#dae2fd",
+                        "tertiary-fixed": "#ffd8e7",
+                        "surface-container-low": "#131b2e",
+                        "inverse-surface": "#dae2fd",
+                        "surface-dim": "#0b1326",
+                        "surface-container-highest": "#2d3449",
+                        "on-primary-container": "#005763",
+                        "secondary-fixed-dim": "#d0bcff",
+                        "primary": "#8aebff",
+                        "on-tertiary-container": "#8f1e62",
+                        "tertiary-fixed-dim": "#ffafd3",
+                        "background": "#0b1326",
+                        "on-secondary-fixed-variant": "#5516be",
+                        "on-surface": "#dae2fd",
+                        "primary-fixed": "#a2eeff",
+                        "on-primary-fixed-variant": "#004e5a",
+                        "on-error": "#690005",
+                        "on-secondary-container": "#c4abff",
+                        "outline-variant": "#3c494c",
+                        "on-secondary-fixed": "#23005c",
+                        "surface-variant": "#2d3449",
+                        "error-container": "#93000a",
+                        "surface-bright": "#31394d",
+                        "primary-container": "#22d3ee",
+                        "on-primary": "#00363e",
+                        "tertiary-container": "#ffa6cf",
+                        "surface-container": "#171f33",
+                        "on-secondary": "#3c0091",
+                        "on-tertiary-fixed": "#3d0026",
+                        "primary-fixed-dim": "#2fd9f4",
+                        "error": "#ffb4ab",
+                        "surface": "#0b1326",
+                        "outline": "#859397",
+                        "surface-tint": "#2fd9f4",
+                        "secondary-container": "#571bc1",
+                        "inverse-primary": "#006877",
+                        "tertiary": "#ffd0e3",
+                        "surface-container-high": "#222a3d",
+                        "on-surface-variant": "#bbc9cd",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-lowest": "#060e20",
+                        "secondary-fixed": "#e9ddff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "lg": "24px",
+                        "unit": "4px",
+                        "gutter": "24px",
+                        "container-max": "1440px",
+                        "xs": "4px",
+                        "sm": "8px",
+                        "xxl": "80px",
+                        "xl": "48px",
+                        "md": "16px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Inter"],
+                        "headline-md": ["Sora"],
+                        "label-md": ["Inter"],
+                        "headline-lg": ["Sora"],
+                        "code-sm": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "display-lg": ["Sora"],
+                        "body-md": ["Inter"],
+                        "headline-lg-mobile": ["Sora"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "1.3", "fontWeight": "600" }],
+                        "label-md": ["12px", { "lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                        "headline-lg": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "code-sm": ["13px", { "lineHeight": "1.4", "fontWeight": "500" }],
+                        "body-lg": ["18px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "display-lg": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "body-md": ["16px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "headline-lg-mobile": ["24px", { "lineHeight": "1.2", "fontWeight": "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-color: theme('colors.background');
+            color: theme('colors.on-background');
+            overflow-x: hidden;
+        }
+        
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: inset 1px 1px 0px rgba(255, 255, 255, 0.05);
+        }
+
+        .glow-cyan {
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.2);
+        }
+        
+        .glow-red {
+            box-shadow: 0 0 20px rgba(255, 180, 171, 0.15);
+        }
+
+        /* Subtle grid background */
+        .bg-grid {
+            background-image: linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
+                              linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+        
+        .input-glow:focus {
+            box-shadow: inset 0 0 0 1px theme('colors.primary'), 0 0 10px rgba(138, 235, 255, 0.2);
+            border-color: theme('colors.primary');
+        }
+    </style>
+</head>
+<body class="bg-grid min-h-screen flex flex-col font-body-md text-body-md">
+<!-- Top Navigation (Context: Features / Admin area, but mostly transactional so we could suppress, however it's requested to include shared comps if they fit. Here it acts as app shell anchor) -->
+<header class="bg-surface/70 backdrop-blur-md dark:bg-surface/70 font-headline-md text-headline-md font-body-md text-body-md font-label-md text-label-md docked full-width top-0 sticky z-50 shadow-sm border-b border-white/10 flex justify-between items-center px-gutter py-md max-w-container-max mx-auto w-full">
+<div class="font-headline-md text-headline-md font-bold text-primary dark:text-primary tracking-tighter">
+            SubAgents AI
+        </div>
+<!-- Navigation Links -->
+<nav class="hidden md:flex gap-lg items-center">
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:bg-white/5 transition-all duration-300 px-sm py-xs rounded" href="#">Features</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:bg-white/5 transition-all duration-300 px-sm py-xs rounded" href="#">Advantages</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:bg-white/5 transition-all duration-300 px-sm py-xs rounded" href="#">Documentation</a>
+</nav>
+<button class="bg-primary text-on-primary px-lg py-sm rounded hover:brightness-110 transition-all text-label-md font-label-md font-bold">
+            Get Started
+        </button>
+</header>
+<!-- Main Content Canvas - High Density Layout (8px spacing unit focus) -->
+<main class="flex-1 max-w-container-max w-full mx-auto px-gutter py-xl flex items-center justify-center relative">
+<!-- Animated Background Element (Subtle failure pulse) -->
+<div class="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-center z-0">
+<div class="w-[800px] h-[800px] bg-error rounded-full opacity-5 blur-[120px] animate-pulse"></div>
+</div>
+<!-- Failure Modal / Override Container -->
+<div class="glass-panel rounded-xl w-full max-w-3xl z-10 relative overflow-hidden flex flex-col glow-red">
+<!-- Header - Error State -->
+<div class="p-lg border-b border-white/10 flex items-start gap-md bg-error/10">
+<span class="material-symbols-outlined text-[32px] text-error" style="font-variation-settings: 'FILL' 1;">
+                    warning
+                </span>
+<div class="flex-1">
+<h1 class="font-headline-lg text-headline-lg text-error mb-xs">Agent Loop Halted</h1>
+<p class="font-body-md text-body-md text-on-surface-variant">
+                        Execution terminated. Maximum iteration limit reached without achieving minimum confidence threshold.
+                    </p>
+</div>
+<div class="bg-surface-container-highest border border-white/10 rounded px-sm py-xs flex items-center gap-xs">
+<div class="w-2 h-2 rounded-full bg-error animate-pulse"></div>
+<span class="font-code-sm text-code-sm text-on-surface">Status: HALTED</span>
+</div>
+</div>
+<!-- Body - Override Controls -->
+<div class="p-lg flex flex-col gap-lg">
+<div class="flex justify-between items-center">
+<h2 class="font-headline-md text-headline-md text-on-surface">Manual Parameter Override</h2>
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Session ID: #SA-8842-AX</span>
+</div>
+<!-- Bento Grid for Parameters -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-md">
+<!-- Parameter 1 -->
+<div class="bg-surface-container-low border border-white/10 rounded-lg p-md flex flex-col gap-sm group relative">
+<div class="flex justify-between items-center">
+<label class="font-label-md text-label-md text-on-surface-variant" for="max_iterations">MAX_ITERATIONS</label>
+<span class="material-symbols-outlined text-on-surface-variant text-[16px]">cycle</span>
+</div>
+<div class="relative">
+<input class="w-full bg-surface border border-outline-variant rounded p-sm font-code-sm text-code-sm text-primary text-xl font-bold focus:outline-none input-glow transition-all" id="max_iterations" type="number" value="1000"/>
+<div class="absolute right-2 top-1/2 -translate-y-1/2 text-primary text-xs hidden group-focus-within:block font-code-sm">MODIFIED</div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant/70 mt-auto">Prevents infinite reasoning loops.</p>
+</div>
+<!-- Parameter 2 -->
+<div class="bg-surface-container-low border border-white/10 rounded-lg p-md flex flex-col gap-sm group relative">
+<div class="flex justify-between items-center">
+<label class="font-label-md text-label-md text-on-surface-variant" for="min_confidence">MIN_CONFIDENCE</label>
+<span class="material-symbols-outlined text-on-surface-variant text-[16px]">analytics</span>
+</div>
+<div class="relative flex items-center gap-2">
+<input class="w-full h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary" id="min_confidence" max="0.99" min="0.5" oninput="document.getElementById('conf_val').innerText = this.value" step="0.01" type="range" value="0.85"/>
+<span class="font-code-sm text-code-sm text-primary font-bold min-w-[36px]" id="conf_val">0.85</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant/70 mt-auto">Threshold for task completion.</p>
+</div>
+<!-- Parameter 3 -->
+<div class="bg-surface-container-low border border-white/10 rounded-lg p-md flex flex-col gap-sm group relative">
+<div class="flex justify-between items-center">
+<label class="font-label-md text-label-md text-on-surface-variant" for="timeout_ms">TIMEOUT_MS</label>
+<span class="material-symbols-outlined text-on-surface-variant text-[16px]">timer</span>
+</div>
+<div class="relative">
+<input class="w-full bg-surface border border-outline-variant rounded p-sm font-code-sm text-code-sm text-primary text-xl font-bold focus:outline-none input-glow transition-all" id="timeout_ms" type="number" value="30000"/>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant/70 mt-auto">Max execution time per node.</p>
+</div>
+</div>
+<!-- Context Panel (Trace) -->
+<div class="bg-surface-dim border border-white/5 rounded-lg p-md font-code-sm text-code-sm text-on-surface-variant h-32 overflow-y-auto">
+<div class="opacity-50">...</div>
+<div class="mb-1">[14:32:01.442] Node 'DataExtractor' completed. Confidence: 0.92</div>
+<div class="mb-1 text-primary">[14:32:02.105] Node 'Synthesizer' initiated. Iteration 998...</div>
+<div class="mb-1 text-primary">[14:32:03.011] Node 'Synthesizer' initiated. Iteration 999...</div>
+<div class="mb-1 text-primary">[14:32:04.550] Node 'Synthesizer' initiated. Iteration 1000...</div>
+<div class="text-error font-bold">&gt; FATAL: MAX_ITERATIONS (1000) reached. Node 'Synthesizer' failed to meet MIN_CONFIDENCE (0.95). Current confidence: 0.88.</div>
+</div>
+</div>
+<!-- Footer Actions -->
+<div class="bg-surface-container-highest p-md border-t border-white/10 flex justify-end gap-md items-center">
+<button class="px-lg py-sm font-label-md text-label-md text-on-surface-variant hover:text-on-surface transition-colors">
+                    Abort Session
+                </button>
+<button class="bg-transparent border border-primary text-primary px-lg py-sm rounded hover:bg-primary/10 transition-all font-label-md text-label-md font-bold flex items-center gap-sm glow-cyan">
+<span class="material-symbols-outlined text-[18px]">restart_alt</span>
+                    Restart with Overrides
+                </button>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="bg-surface-container-lowest dark:bg-surface-container-lowest text-primary dark:text-primary font-body-sm text-body-sm font-headline-md text-headline-md full-width mt-xxl border-t border-white/5 grid grid-cols-1 md:grid-cols-4 gap-xl px-gutter py-xl max-w-container-max mx-auto w-full">
+<div>
+<div class="font-headline-md text-headline-md font-bold text-on-surface mb-md">SubAgents AI</div>
+<div class="text-on-surface-variant">© 2024 SubAgents AI. All rights reserved.</div>
+</div>
+<div class="flex flex-col gap-sm">
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:underline" href="#">Features</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:underline" href="#">Advantages</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:underline" href="#">Documentation</a>
+</div>
+<div class="flex flex-col gap-sm">
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:underline" href="#">Privacy Policy</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:underline" href="#">Terms of Service</a>
+</div>
+</footer>
+<script>
+        // Simple interaction to highlight inputs when changed
+        const inputs = document.querySelectorAll('input[type="number"]');
+        inputs.forEach(input => {
+            input.addEventListener('input', (e) => {
+                e.target.classList.add('glow-cyan');
+                e.target.style.borderColor = 'theme("colors.primary")';
+            });
+        });
+    </script>
+</body></html>

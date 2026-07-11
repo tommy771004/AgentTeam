@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Execution Archive - SubAgents AI</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Sora:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface": "#0b1326",
+                        "surface-container-low": "#131b2e",
+                        "secondary-container": "#571bc1",
+                        "on-background": "#dae2fd",
+                        "on-tertiary-container": "#8f1e62",
+                        "on-primary-fixed": "#001f25",
+                        "on-secondary-container": "#c4abff",
+                        "surface-variant": "#2d3449",
+                        "on-primary-container": "#005763",
+                        "inverse-primary": "#006877",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-fixed-variant": "#5516be",
+                        "tertiary-fixed-dim": "#ffafd3",
+                        "surface-container": "#171f33",
+                        "primary-fixed-dim": "#2fd9f4",
+                        "on-surface-variant": "#bbc9cd",
+                        "on-tertiary-fixed": "#3d0026",
+                        "inverse-surface": "#dae2fd",
+                        "on-primary": "#00363e",
+                        "error": "#ffb4ab",
+                        "inverse-on-surface": "#283044",
+                        "on-tertiary-fixed-variant": "#85145a",
+                        "on-secondary-fixed": "#23005c",
+                        "primary": "#8aebff",
+                        "surface-dim": "#0b1326",
+                        "secondary-fixed": "#e9ddff",
+                        "tertiary-container": "#ffa6cf",
+                        "on-primary-fixed-variant": "#004e5a",
+                        "on-secondary": "#3c0091",
+                        "secondary-fixed-dim": "#d0bcff",
+                        "tertiary-fixed": "#ffd8e7",
+                        "on-surface": "#dae2fd",
+                        "tertiary": "#ffd0e3",
+                        "surface-bright": "#31394d",
+                        "outline-variant": "#3c494c",
+                        "surface-container-high": "#222a3d",
+                        "background": "#0b1326",
+                        "primary-container": "#22d3ee",
+                        "error-container": "#93000a",
+                        "surface-tint": "#2fd9f4",
+                        "primary-fixed": "#a2eeff",
+                        "on-tertiary": "#620040",
+                        "surface-container-highest": "#2d3449",
+                        "outline": "#859397",
+                        "surface-container-lowest": "#060e20",
+                        "on-error": "#690005",
+                        "secondary": "#d0bcff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "xs": "4px",
+                        "unit": "4px",
+                        "sm": "8px",
+                        "xl": "48px",
+                        "md": "16px",
+                        "lg": "24px",
+                        "container-max": "1440px",
+                        "xxl": "80px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "body-md": ["Inter", "sans-serif"],
+                        "headline-md": ["Sora", "sans-serif"],
+                        "headline-lg-mobile": ["Sora", "sans-serif"],
+                        "headline-lg": ["Sora", "sans-serif"],
+                        "display-lg": ["Sora", "sans-serif"],
+                        "code-sm": ["Inter", "monospace"],
+                        "label-md": ["Inter", "sans-serif"],
+                        "body-lg": ["Inter", "sans-serif"],
+                        "body-sm": ["Inter", "sans-serif"]
+                    },
+                    "fontSize": {
+                        "body-md": ["16px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "1.3", "fontWeight": "600" }],
+                        "headline-lg-mobile": ["24px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "headline-lg": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "display-lg": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "code-sm": ["13px", { "lineHeight": "1.4", "fontWeight": "500" }],
+                        "label-md": ["12px", { "lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                        "body-lg": ["18px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .glass-panel {
+            background-color: rgba(30, 41, 59, 0.7); /* Custom fallback closer to design intent */
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .glow-cyan {
+            box-shadow: 0 0 8px rgba(138, 235, 255, 0.4);
+        }
+        .glow-violet {
+            box-shadow: 0 0 8px rgba(208, 188, 255, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface min-h-screen flex flex-col font-body-md selection:bg-primary selection:text-on-primary">
+<!-- TopNavBar (Generated from Shared Components) -->
+<header class="bg-surface/70 backdrop-blur-md dark:bg-surface/70 w-full top-0 sticky z-50 border-b border-white/10 shadow-sm">
+<div class="flex justify-between items-center px-gutter py-md max-w-container-max mx-auto">
+<!-- Brand -->
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">hub</span>
+<span class="font-headline-md text-headline-md font-bold text-primary dark:text-primary tracking-tighter">SubAgents AI</span>
+</div>
+<!-- Navigation -->
+<nav class="hidden md:flex gap-lg items-center">
+<a class="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors hover:bg-white/5 px-sm py-xs rounded" href="#">Features</a>
+<a class="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors hover:bg-white/5 px-sm py-xs rounded" href="#">Advantages</a>
+<a class="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors hover:bg-white/5 px-sm py-xs rounded" href="#">Documentation</a>
+</nav>
+<!-- Actions -->
+<div class="flex items-center gap-md">
+<button class="font-label-md text-label-md bg-primary text-on-primary px-md py-sm rounded hover:bg-primary-fixed transition-all duration-300 active:scale-95">Get Started</button>
+</div>
+</div>
+</header>
+<!-- Main Canvas -->
+<main class="flex-grow w-full max-w-container-max mx-auto px-gutter py-xl">
+<!-- Header Section -->
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-lg gap-md">
+<div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface mb-xs">Execution Archive</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Review, audit, and reload past session data.</p>
+</div>
+<!-- Search Input -->
+<div class="relative w-full md:w-96">
+<span class="material-symbols-outlined absolute left-sm top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px]">search</span>
+<input class="w-full bg-surface-container-high border border-outline/30 text-on-surface font-body-sm rounded-lg pl-[40px] pr-sm py-sm focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary transition-all placeholder:text-outline" placeholder="Search by ID, Status, or Parameter..." type="text"/>
+</div>
+</div>
+<!-- Data Grid (High Density) -->
+<div class="glass-panel rounded-xl overflow-hidden shadow-lg relative">
+<!-- Simulated Light Reflection Edge -->
+<div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-white/10 to-transparent"></div>
+<!-- Table Header -->
+<div class="grid grid-cols-[120px_minmax(200px,1fr)_150px_180px_140px] gap-sm px-md py-sm border-b border-outline/20 bg-surface-container-highest/50">
+<div class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Status</div>
+<div class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Execution ID</div>
+<div class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Confidence</div>
+<div class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Timestamp</div>
+<div class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider text-right">Actions</div>
+</div>
+<!-- Table Body -->
+<div class="flex flex-col">
+<!-- Row 1 (Success) -->
+<div class="grid grid-cols-[120px_minmax(200px,1fr)_150px_180px_140px] gap-sm px-md py-[10px] border-b border-outline/10 hover:bg-surface-bright/30 transition-colors items-center group">
+<div class="flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-primary glow-cyan"></span>
+<span class="font-code-sm text-code-sm text-primary">Success</span>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface truncate pr-sm">exe_01HQ7YV8M9K4</div>
+<div class="flex items-center gap-xs">
+<span class="font-code-sm text-code-sm text-on-surface">98.5%</span>
+<div class="w-16 h-1 bg-surface-container rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[98.5%]"></div>
+</div>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant">2024-03-15 14:32:11</div>
+<div class="flex justify-end">
+<button class="opacity-0 group-hover:opacity-100 font-label-md text-label-md flex items-center gap-xs text-primary border border-primary/30 hover:border-primary hover:bg-primary/10 px-sm py-[4px] rounded transition-all">
+<span class="material-symbols-outlined text-[16px]">refresh</span> Reload
+                        </button>
+</div>
+</div>
+<!-- Row 2 (Success) -->
+<div class="grid grid-cols-[120px_minmax(200px,1fr)_150px_180px_140px] gap-sm px-md py-[10px] border-b border-outline/10 hover:bg-surface-bright/30 transition-colors items-center group">
+<div class="flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-primary glow-cyan"></span>
+<span class="font-code-sm text-code-sm text-primary">Success</span>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface truncate pr-sm">exe_01HQ7YTW2X9A</div>
+<div class="flex items-center gap-xs">
+<span class="font-code-sm text-code-sm text-on-surface">92.1%</span>
+<div class="w-16 h-1 bg-surface-container rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[92.1%] opacity-80"></div>
+</div>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant">2024-03-15 13:15:44</div>
+<div class="flex justify-end">
+<button class="opacity-0 group-hover:opacity-100 font-label-md text-label-md flex items-center gap-xs text-primary border border-primary/30 hover:border-primary hover:bg-primary/10 px-sm py-[4px] rounded transition-all">
+<span class="material-symbols-outlined text-[16px]">refresh</span> Reload
+                        </button>
+</div>
+</div>
+<!-- Row 3 (Failed) -->
+<div class="grid grid-cols-[120px_minmax(200px,1fr)_150px_180px_140px] gap-sm px-md py-[10px] border-b border-outline/10 hover:bg-surface-bright/30 transition-colors items-center group bg-error/5">
+<div class="flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-error shadow-[0_0_8px_rgba(255,180,171,0.4)]"></span>
+<span class="font-code-sm text-code-sm text-error">Failed</span>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface truncate pr-sm">exe_01HQ7YRH8B2C</div>
+<div class="flex items-center gap-xs">
+<span class="font-code-sm text-code-sm text-on-surface-variant">--</span>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant">2024-03-15 11:02:59</div>
+<div class="flex justify-end">
+<button class="opacity-0 group-hover:opacity-100 font-label-md text-label-md flex items-center gap-xs text-primary border border-primary/30 hover:border-primary hover:bg-primary/10 px-sm py-[4px] rounded transition-all">
+<span class="material-symbols-outlined text-[16px]">bug_report</span> Debug
+                        </button>
+</div>
+</div>
+<!-- Row 4 (Success - Lower Confidence) -->
+<div class="grid grid-cols-[120px_minmax(200px,1fr)_150px_180px_140px] gap-sm px-md py-[10px] border-b border-outline/10 hover:bg-surface-bright/30 transition-colors items-center group">
+<div class="flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-secondary glow-violet"></span>
+<span class="font-code-sm text-code-sm text-secondary">Warning</span>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface truncate pr-sm">exe_01HQ7YKX4N5L</div>
+<div class="flex items-center gap-xs">
+<span class="font-code-sm text-code-sm text-on-surface">64.3%</span>
+<div class="w-16 h-1 bg-surface-container rounded-full overflow-hidden">
+<div class="h-full bg-secondary w-[64.3%]"></div>
+</div>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant">2024-03-14 18:45:10</div>
+<div class="flex justify-end">
+<button class="opacity-0 group-hover:opacity-100 font-label-md text-label-md flex items-center gap-xs text-primary border border-primary/30 hover:border-primary hover:bg-primary/10 px-sm py-[4px] rounded transition-all">
+<span class="material-symbols-outlined text-[16px]">refresh</span> Reload
+                        </button>
+</div>
+</div>
+<!-- Row 5 (Success) -->
+<div class="grid grid-cols-[120px_minmax(200px,1fr)_150px_180px_140px] gap-sm px-md py-[10px] hover:bg-surface-bright/30 transition-colors items-center group">
+<div class="flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-primary glow-cyan"></span>
+<span class="font-code-sm text-code-sm text-primary">Success</span>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface truncate pr-sm">exe_01HQ7YF2P8Q1</div>
+<div class="flex items-center gap-xs">
+<span class="font-code-sm text-code-sm text-on-surface">99.1%</span>
+<div class="w-16 h-1 bg-surface-container rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[99.1%]"></div>
+</div>
+</div>
+<div class="font-code-sm text-code-sm text-on-surface-variant">2024-03-14 09:20:05</div>
+<div class="flex justify-end">
+<button class="opacity-0 group-hover:opacity-100 font-label-md text-label-md flex items-center gap-xs text-primary border border-primary/30 hover:border-primary hover:bg-primary/10 px-sm py-[4px] rounded transition-all">
+<span class="material-symbols-outlined text-[16px]">refresh</span> Reload
+                        </button>
+</div>
+</div>
+</div>
+<!-- Pagination / Footer of Grid -->
+<div class="flex justify-between items-center px-md py-sm border-t border-outline/20 bg-surface-container/30">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Showing 1-5 of 142 executions</span>
+<div class="flex gap-xs">
+<button class="p-xs text-on-surface-variant hover:text-on-surface transition-colors disabled:opacity-50"><span class="material-symbols-outlined text-[20px]">chevron_left</span></button>
+<button class="p-xs text-on-surface-variant hover:text-on-surface transition-colors"><span class="material-symbols-outlined text-[20px]">chevron_right</span></button>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer (Generated from Shared Components) -->
+<footer class="bg-surface-container-lowest dark:bg-surface-container-lowest w-full mt-xxl border-t border-white/5 relative z-10">
+<div class="grid grid-cols-1 md:grid-cols-4 gap-xl px-gutter py-xl max-w-container-max mx-auto">
+<!-- Brand Column -->
+<div class="flex flex-col gap-sm">
+<span class="font-headline-md text-headline-md font-bold text-on-surface tracking-tighter">SubAgents AI</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-sm">© 2024 SubAgents AI. All rights reserved.</p>
+</div>
+<!-- Links Column -->
+<div class="flex flex-col gap-sm">
+<span class="font-body-md text-body-md font-bold text-on-surface mb-xs">Product</span>
+<a class="font-body-sm text-body-sm text-on-surface-variant hover:text-primary hover:underline transition-colors" href="#">Features</a>
+<a class="font-body-sm text-body-sm text-on-surface-variant hover:text-primary hover:underline transition-colors" href="#">Advantages</a>
+</div>
+<!-- Links Column -->
+<div class="flex flex-col gap-sm">
+<span class="font-body-md text-body-md font-bold text-on-surface mb-xs">Resources</span>
+<a class="font-body-sm text-body-sm text-on-surface-variant hover:text-primary hover:underline transition-colors" href="#">Documentation</a>
+</div>
+<!-- Links Column -->
+<div class="flex flex-col gap-sm">
+<span class="font-body-md text-body-md font-bold text-on-surface mb-xs">Legal</span>
+<a class="font-body-sm text-body-sm text-on-surface-variant hover:text-primary hover:underline transition-colors" href="#">Privacy Policy</a>
+<a class="font-body-sm text-body-sm text-on-surface-variant hover:text-primary hover:underline transition-colors" href="#">Terms of Service</a>
+</div>
+</div>
+</footer>
+</body></html>

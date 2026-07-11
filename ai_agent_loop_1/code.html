@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AI Agent Loop - Technical Documentation</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                            "on-tertiary-fixed": "#3d0026",
+                            "inverse-surface": "#dae2fd",
+                            "surface-tint": "#2fd9f4",
+                            "surface-container-low": "#131b2e",
+                            "on-primary": "#00363e",
+                            "on-surface": "#dae2fd",
+                            "surface-dim": "#0b1326",
+                            "surface-container-highest": "#2d3449",
+                            "surface-container": "#171f33",
+                            "secondary-fixed": "#e9ddff",
+                            "primary-fixed-dim": "#2fd9f4",
+                            "on-tertiary-container": "#8f1e62",
+                            "surface-bright": "#31394d",
+                            "on-background": "#dae2fd",
+                            "on-primary-fixed": "#001f25",
+                            "inverse-primary": "#006877",
+                            "surface": "#0b1326",
+                            "error": "#ffb4ab",
+                            "on-tertiary": "#620040",
+                            "background": "#0b1326",
+                            "on-secondary-fixed": "#23005c",
+                            "on-primary-fixed-variant": "#004e5a",
+                            "surface-variant": "#2d3449",
+                            "outline-variant": "#3c494c",
+                            "error-container": "#93000a",
+                            "primary-container": "#22d3ee",
+                            "inverse-on-surface": "#283044",
+                            "on-error": "#690005",
+                            "tertiary-fixed-dim": "#ffafd3",
+                            "on-secondary": "#3c0091",
+                            "secondary-fixed-dim": "#d0bcff",
+                            "secondary": "#d0bcff",
+                            "on-secondary-fixed-variant": "#5516be",
+                            "tertiary": "#ffd0e3",
+                            "outline": "#859397",
+                            "on-secondary-container": "#c4abff",
+                            "on-primary-container": "#005763",
+                            "tertiary-fixed": "#ffd8e7",
+                            "primary-fixed": "#a2eeff",
+                            "surface-container-high": "#222a3d",
+                            "primary": "#8aebff",
+                            "on-tertiary-fixed-variant": "#85145a",
+                            "on-error-container": "#ffdad6",
+                            "tertiary-container": "#ffa6cf",
+                            "on-surface-variant": "#bbc9cd",
+                            "surface-container-lowest": "#060e20",
+                            "secondary-container": "#571bc1"
+                    },
+                    "borderRadius": {
+                            "DEFAULT": "0.125rem",
+                            "lg": "0.25rem",
+                            "xl": "0.5rem",
+                            "full": "0.75rem"
+                    },
+                    "spacing": {
+                            "sm": "8px",
+                            "md": "16px",
+                            "lg": "24px",
+                            "container-max": "1440px",
+                            "unit": "4px",
+                            "gutter": "24px",
+                            "xxl": "80px",
+                            "xl": "48px",
+                            "xs": "4px"
+                    },
+                    "fontFamily": {
+                            "headline-lg-mobile": ["Sora"],
+                            "code-sm": ["Inter"],
+                            "label-md": ["Inter"],
+                            "body-lg": ["Inter"],
+                            "body-sm": ["Inter"],
+                            "body-md": ["Inter"],
+                            "headline-lg": ["Sora"],
+                            "display-lg": ["Sora"],
+                            "headline-md": ["Sora"]
+                    },
+                    "fontSize": {
+                            "headline-lg-mobile": ["24px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                            "code-sm": ["13px", { "lineHeight": "1.4", "fontWeight": "500" }],
+                            "label-md": ["12px", { "lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                            "body-lg": ["18px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                            "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                            "body-md": ["16px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                            "headline-lg": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                            "display-lg": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                            "headline-md": ["24px", { "lineHeight": "1.3", "fontWeight": "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+        }
+        .glass-panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 10px;
+            height: 1px;
+            background: rgba(255,255,255,0.5);
+            opacity: 0.5;
+        }
+        .code-block {
+            font-family: 'Inter', monospace; /* Fallback for mono */
+            font-feature-settings: "tnum", "zero";
+        }
+        .glow-accent {
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.2);
+        }
+        .glow-text {
+            text-shadow: 0 0 8px rgba(34, 211, 238, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen flex flex-col">
+<!-- TopNavBar -->
+<nav class="bg-surface/70 backdrop-blur-md dark:bg-surface/70 w-full top-0 sticky z-50 border-b border-white/10 shadow-sm flex justify-between items-center px-gutter py-md max-w-container-max mx-auto">
+<div class="flex items-center gap-lg">
+<div class="font-headline-md text-headline-md font-bold text-primary dark:text-primary tracking-tighter">
+                SubAgents AI
+            </div>
+<div class="hidden md:flex gap-lg">
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:bg-white/5 transition-all duration-300 font-label-md text-label-md px-md py-sm rounded-DEFAULT" href="#">Features</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:bg-white/5 transition-all duration-300 font-label-md text-label-md px-md py-sm rounded-DEFAULT" href="#">Advantages</a>
+<a class="text-primary border-b-2 border-primary pb-1 font-label-md text-label-md px-md py-sm rounded-DEFAULT" href="#">Documentation</a>
+</div>
+</div>
+<div class="flex items-center gap-md">
+<button class="bg-primary-container text-on-primary-container px-lg py-sm rounded-DEFAULT font-label-md text-label-md hover:bg-primary transition-colors scale-95 transition-transform glow-accent">
+                Get Started
+            </button>
+</div>
+</nav>
+<!-- Main Canvas -->
+<main class="flex-grow flex flex-col items-center w-full max-w-container-max mx-auto px-gutter py-xl gap-xl">
+<!-- Header Section -->
+<header class="w-full text-left flex flex-col gap-sm border-b border-white/10 pb-xl">
+<div class="flex items-center gap-sm text-primary mb-sm">
+<span class="material-symbols-outlined" data-weight="fill" style="font-variation-settings: 'FILL' 1;">terminal</span>
+<span class="font-code-sm text-code-sm uppercase tracking-widest opacity-80">v2.4.1 // Core Protocol</span>
+</div>
+<h1 class="font-display-lg text-display-lg text-primary glow-text">AI Agent Loop: Execution Protocol</h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant max-w-3xl">Structured, Rule-based System Prompting for predictable and autonomous agent orchestration.</p>
+</header>
+<!-- System Definition (01_system_definition.md) -->
+<section class="w-full flex flex-col gap-lg">
+<h2 class="font-headline-md text-headline-md text-on-surface border-l-4 border-primary pl-md">01_system_definition.md</h2>
+<div class="glass-panel rounded-lg p-lg flex flex-col md:flex-row items-center justify-between gap-md relative overflow-hidden">
+<!-- Abstract visual representation of loop -->
+<div class="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-primary/5 via-transparent to-transparent pointer-events-none"></div>
+<div class="flex flex-col items-center gap-sm z-10 w-full md:w-1/5">
+<div class="w-12 h-12 rounded-full border border-primary flex items-center justify-center bg-surface-container-highest shadow-[0_0_15px_rgba(34,211,238,0.2)]">
+<span class="material-symbols-outlined text-primary">input</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface">[Receive Input]</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant hidden md:block z-10">arrow_forward</span>
+<div class="flex flex-col items-center gap-sm z-10 w-full md:w-1/5">
+<div class="w-12 h-12 rounded-full border border-primary/50 flex items-center justify-center bg-surface-container-highest">
+<span class="material-symbols-outlined text-primary/70">memory</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface">[Process]</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant hidden md:block z-10">arrow_forward</span>
+<div class="flex flex-col items-center gap-sm z-10 w-full md:w-1/5">
+<div class="w-12 h-12 rounded-full border border-primary/50 flex items-center justify-center bg-surface-container-highest">
+<span class="material-symbols-outlined text-primary/70">play_arrow</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface">[Execute]</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant hidden md:block z-10">arrow_forward</span>
+<div class="flex flex-col items-center gap-sm z-10 w-full md:w-1/5">
+<div class="w-12 h-12 rounded-full border border-primary/50 flex items-center justify-center bg-surface-container-highest">
+<span class="material-symbols-outlined text-primary/70">check_circle</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface">[Validate]</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant hidden md:block z-10">arrow_forward</span>
+<div class="flex flex-col items-center gap-sm z-10 w-full md:w-1/5">
+<div class="w-12 h-12 rounded-full border border-error/50 flex items-center justify-center bg-surface-container-highest">
+<span class="material-symbols-outlined text-error/70">stop</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface">[Terminate]</span>
+</div>
+</div>
+</section>
+<!-- Execution Rules (02_execution_rules.md) -->
+<section class="w-full flex flex-col gap-lg mt-xl">
+<h2 class="font-headline-md text-headline-md text-on-surface border-l-4 border-primary pl-md">02_execution_rules.md</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-lg w-full">
+<!-- Pattern 1 -->
+<div class="glass-panel rounded-lg p-lg flex flex-col gap-md transition-all hover:bg-surface-container-high border border-white/5 hover:border-primary/30">
+<div class="flex items-center gap-sm pb-sm border-b border-white/10">
+<span class="material-symbols-outlined text-primary">sync_alt</span>
+<h3 class="font-headline-md-mobile text-headline-md-mobile text-on-surface">Pattern 1: Turn-based</h3>
+</div>
+<div class="flex flex-col gap-sm font-code-sm text-code-sm">
+<div class="flex flex-col"><span class="text-on-surface-variant">Model:</span><span class="text-primary">1 Input = 1 Action</span></div>
+<div class="flex flex-col"><span class="text-on-surface-variant">Trigger:</span><span class="text-secondary">User Request (Synchronous)</span></div>
+<div class="flex flex-col"><span class="text-on-surface-variant">Validation:</span><span class="text-on-surface">Output schema match</span></div>
+<div class="flex flex-col mt-sm pt-sm border-t border-white/5"><span class="text-error">Anti-pattern:</span><span class="text-error-container">Infinite looping without user ACK</span></div>
+</div>
+</div>
+<!-- Pattern 2 -->
+<div class="glass-panel rounded-lg p-lg flex flex-col gap-md transition-all hover:bg-surface-container-high border border-white/5 hover:border-primary/30">
+<div class="flex items-center gap-sm pb-sm border-b border-white/10">
+<span class="material-symbols-outlined text-primary">route</span>
+<h3 class="font-headline-md-mobile text-headline-md-mobile text-on-surface">Pattern 2: Goal-based</h3>
+</div>
+<div class="flex flex-col gap-sm font-code-sm text-code-sm">
+<div class="flex flex-col"><span class="text-on-surface-variant">Model:</span><span class="text-primary">Autonomous Iteration</span></div>
+<div class="flex flex-col"><span class="text-on-surface-variant">Trigger:</span><span class="text-secondary">Complex Objective Assigned</span></div>
+<div class="flex flex-col"><span class="text-on-surface-variant">Validation:</span><span class="text-on-surface">Sub-task completion metrics</span></div>
+<div class="flex flex-col mt-sm pt-sm border-t border-white/5"><span class="text-error">Anti-pattern:</span><span class="text-error-container">Drifting from primary objective (Hallucination)</span></div>
+</div>
+</div>
+<!-- Pattern 3 -->
+<div class="glass-panel rounded-lg p-lg flex flex-col gap-md transition-all hover:bg-surface-container-high border border-white/5 hover:border-primary/30">
+<div class="flex items-center gap-sm pb-sm border-b border-white/10">
+<span class="material-symbols-outlined text-primary">schedule</span>
+<h3 class="font-headline-md-mobile text-headline-md-mobile text-on-surface">Pattern 3: Time-based</h3>
+</div>
+<div class="flex flex-col gap-sm font-code-sm text-code-sm">
+<div class="flex flex-col"><span class="text-on-surface-variant">Model:</span><span class="text-primary">Cron-job style</span></div>
+<div class="flex flex-col"><span class="text-on-surface-variant">Trigger:</span><span class="text-secondary">Temporal Schedule (CRON expr)</span></div>
+<div class="flex flex-col"><span class="text-on-surface-variant">Validation:</span><span class="text-on-surface">Execution timestamp &amp; duration limit</span></div>
+<div class="flex flex-col mt-sm pt-sm border-t border-white/5"><span class="text-error">Anti-pattern:</span><span class="text-error-container">Overlapping execution windows</span></div>
+</div>
+</div>
+<!-- Pattern 4 -->
+<div class="glass-panel rounded-lg p-lg flex flex-col gap-md transition-all hover:bg-surface-container-high border border-white/5 hover:border-primary/30">
+<div class="flex items-center gap-sm pb-sm border-b border-white/10">
+<span class="material-symbols-outlined text-primary">bolt</span>
+<h3 class="font-headline-md-mobile text-headline-md-mobile text-on-surface">Pattern 4: Proactive</h3>
+</div>
+<div class="flex flex-col gap-sm font-code-sm text-code-sm">
+<div class="flex flex-col"><span class="text-on-surface-variant">Model:</span><span class="text-primary">Event-driven</span></div>
+<div class="flex flex-col"><span class="text-on-surface-variant">Trigger:</span><span class="text-secondary">System Event / Webhook Payload</span></div>
+<div class="flex flex-col"><span class="text-on-surface-variant">Validation:</span><span class="text-on-surface">Event signature verification</span></div>
+<div class="flex flex-col mt-sm pt-sm border-t border-white/5"><span class="text-error">Anti-pattern:</span><span class="text-error-container">Reaction loops (Event triggers another event)</span></div>
+</div>
+</div>
+</div>
+</section>
+<!-- Agent Prompt Schema & Example (Side-by-side on large screens) -->
+<div class="w-full grid grid-cols-1 lg:grid-cols-2 gap-xl mt-xl">
+<!-- Agent Prompt Schema (03_agent_prompt_schema.md) -->
+<section class="flex flex-col gap-lg">
+<h2 class="font-headline-md text-headline-md text-on-surface border-l-4 border-primary pl-md">03_agent_prompt_schema.md</h2>
+<div class="glass-panel rounded-lg p-md overflow-x-auto bg-[#0a0f1a] border border-white/5 relative">
+<div class="absolute top-0 right-0 p-sm text-outline-variant font-code-sm text-xs">JSON</div>
+<pre class="font-code-sm text-code-sm text-on-surface leading-relaxed whitespace-pre">{
+  <span class="text-primary">"system_prompt"</span>: {
+    <span class="text-primary">"role"</span>: <span class="text-secondary">"Orchestrator"</span>,
+    <span class="text-primary">"constraints"</span>: [
+      <span class="text-secondary">"Output strictly JSON"</span>,
+      <span class="text-secondary">"Do not execute arbitrary code"</span>
+    ],
+    <span class="text-primary">"parsing_schema"</span>: {
+      <span class="text-primary">"loop_type"</span>: <span class="text-secondary">"ENUM(Turn, Goal, Time, Proactive)"</span>,
+      <span class="text-primary">"trigger_context"</span>: <span class="text-secondary">"String"</span>,
+      <span class="text-primary">"execution_sequence"</span>: [
+        {
+          <span class="text-primary">"step_id"</span>: <span class="text-secondary">"Int"</span>,
+          <span class="text-primary">"tool"</span>: <span class="text-secondary">"String"</span>,
+          <span class="text-primary">"parameters"</span>: <span class="text-secondary">"Object"</span>
+        }
+      ]
+    }
+  }
+}
+</pre>
+</div>
+</section>
+<!-- Example Parsing -->
+<section class="flex flex-col gap-lg">
+<h2 class="font-headline-md text-headline-md text-on-surface border-l-4 border-primary pl-md">Scenario Example</h2>
+<div class="glass-panel rounded-lg p-lg flex flex-col gap-md bg-surface-container-low border border-white/5">
+<div class="flex flex-col gap-sm">
+<div class="text-on-surface-variant font-label-md text-label-md uppercase tracking-wider">User Input</div>
+<div class="bg-surface-container-highest p-sm rounded border border-white/10 font-body-md text-on-surface">
+                            "Find 3 AI tools for code generation."
+                        </div>
+</div>
+<div class="flex justify-center py-xs">
+<span class="material-symbols-outlined text-outline-variant">keyboard_double_arrow_down</span>
+</div>
+<div class="flex flex-col gap-sm">
+<div class="text-on-surface-variant font-label-md text-label-md uppercase tracking-wider flex justify-between">
+<span>Internal State Parsing</span>
+<span class="text-primary animate-pulse">● Active</span>
+</div>
+<div class="bg-[#0a0f1a] p-md rounded border border-primary/20 font-code-sm text-code-sm text-on-surface overflow-x-auto">
+<pre class="whitespace-pre"><span class="text-on-surface-variant">// Parsed Execution Sequence</span>
+{
+  "loop_type": <span class="text-primary">"Turn-based"</span>,
+  "trigger": <span class="text-secondary">"User Request"</span>,
+  "execution_sequence": [
+    {
+      "step_id": 1,
+      "tool": <span class="text-primary">"WebSearchTool"</span>,
+      "parameters": {"query": "AI code generation tools"}
+    },
+    {
+      "step_id": 2,
+      "tool": <span class="text-primary">"FilterTool"</span>,
+      "parameters": {"limit": 3}
+    }
+  ]
+}
+</pre>
+</div>
+</div>
+</div>
+</section>
+</div>
+</main>
+<!-- Footer -->
+<footer class="bg-surface-container-lowest dark:bg-surface-container-lowest w-full mt-xxl border-t border-white/5 grid grid-cols-1 md:grid-cols-4 gap-xl px-gutter py-xl max-w-container-max mx-auto">
+<div class="flex flex-col gap-md">
+<div class="font-headline-md text-headline-md font-bold text-on-surface">SubAgents AI</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant">© 2024 SubAgents AI. All rights reserved.</div>
+</div>
+<div class="flex flex-col gap-sm font-body-sm text-body-sm">
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:underline" href="#">Features</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:underline" href="#">Advantages</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:underline" href="#">Documentation</a>
+</div>
+<div class="flex flex-col gap-sm font-body-sm text-body-sm">
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:underline" href="#">Privacy Policy</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:underline" href="#">Terms of Service</a>
+</div>
+<div class="flex flex-col gap-sm">
+<!-- Reserved for social links or secondary branding -->
+</div>
+</footer>
+</body></html>

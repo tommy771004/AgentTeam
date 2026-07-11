@@ -1,0 +1,585 @@
+import { contextBridge, ipcRenderer } from 'electron'
+
+const api = {
+  platform: () => ipcRenderer.invoke('app:platform') as Promise<string>,
+  version: () => ipcRenderer.invoke('app:version') as Promise<string>,
+  notify: (title: string, body: string) =>
+    ipcRenderer.invoke('app:notify', title, body) as Promise<{ ok: boolean }>,
+  showWindow: () => ipcRenderer.invoke('app:showWindow') as Promise<{ ok: boolean }>,
+  userDataPath: () => ipcRenderer.invoke('app:userDataPath') as Promise<string>,
+  /** Prevent system sleep while long agent runs (ChatGPT-style) */
+  power: {
+    preventSleep: () =>
+      ipcRenderer.invoke('power:preventSleep') as Promise<{ ok: boolean; id?: number }>,
+    allowSleep: () =>
+      ipcRenderer.invoke('power:allowSleep') as Promise<{ ok: boolean }>,
+  },
+  webhook: {
+    start: (opts?: { port?: number; token?: string }) =>
+      ipcRenderer.invoke('webhook:start', opts || {}) as Promise<{
+        running: boolean
+        port: number
+        token: string
+        url: string | null
+        lastError: string | null
+        hitCount: number
+      }>,
+    stop: () =>
+      ipcRenderer.invoke('webhook:stop') as Promise<{
+        running: boolean
+        port: number
+        token: string
+        url: string | null
+        lastError: string | null
+        hitCount: number
+      }>,
+    status: () =>
+      ipcRenderer.invoke('webhook:status') as Promise<{
+        running: boolean
+        port: number
+        token: string
+        url: string | null
+        lastError: string | null
+        hitCount: number
+      }>,
+    onEvent: (cb: (payload: {
+      receivedAt: string
+      path: string
+      source?: string
+      subject?: string
+      hasAttachment?: boolean
+      body?: string
+      keyword?: string
+      headers: Record<string, string>
+      raw: unknown
+    }) => void) => {
+      const handler = (_: unknown, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('webhook:event', handler)
+      return () => {
+        ipcRenderer.removeListener('webhook:event', handler)
+      }
+    },
+  },
+  archive: {
+    list: () => ipcRenderer.invoke('archive:list') as Promise<unknown[]>,
+    save: (record: unknown) =>
+      ipcRenderer.invoke('archive:save', record) as Promise<{ ok: boolean; path: string }>,
+    get: (id: string) => ipcRenderer.invoke('archive:get', id) as Promise<unknown | null>,
+    delete: (id: string) =>
+      ipcRenderer.invoke('archive:delete', id) as Promise<{ ok: boolean }>,
+  },
+  settings: {
+    get: () => ipcRenderer.invoke('settings:get') as Promise<unknown | null>,
+    set: (settings: unknown) =>
+      ipcRenderer.invoke('settings:set', settings) as Promise<{ ok: boolean }>,
+  },
+  llm: {
+    models: (req: { baseUrl: string; apiKey: string }) =>
+      ipcRenderer.invoke('llm:models', req) as Promise<{ models: string[] }>,
+    chat: (req: {
+      baseUrl: string
+      apiKey: string
+      model: string
+      messages: unknown[]
+      temperature?: number
+      max_tokens?: number
+      tools?: unknown[]
+      tool_choice?: unknown
+    }) =>
+      ipcRenderer.invoke('llm:chat', req) as Promise<{
+        content: string
+        tokensUsed: number
+        model: string
+        toolCalls?: Array<{ id: string; name: string; arguments: string }>
+        finishReason?: string
+      }>,
+  },
+  tools: {
+    webSearch: (query: string, limit?: number) =>
+      ipcRenderer.invoke('tools:webSearch', query, limit) as Promise<{
+        query: string
+        results: Array<{ title: string; snippet: string; url?: string }>
+      }>,
+    httpFetch: (url: string, maxChars?: number) =>
+      ipcRenderer.invoke('tools:httpFetch', url, maxChars) as Promise<{
+        ok: boolean
+        text: string
+        status?: number
+      }>,
+    httpRequest: (input: { url: string; method?: string; headers?: Record<string, string>; body?: string; maxChars?: number }) =>
+      ipcRenderer.invoke('tools:httpRequest', input) as Promise<{ ok: boolean; text: string; status?: number }>,
+    workspaceList: (path?: string) =>
+      ipcRenderer.invoke('tools:workspaceList', path) as Promise<{
+        path: string
+        entries: Array<{ name: string; dir: boolean }>
+      }>,
+    workspaceRead: (path: string) =>
+      ipcRenderer.invoke('tools:workspaceRead', path) as Promise<{
+        ok: boolean
+        content: string
+      }>,
+    workspaceWrite: (path: string, content: string) =>
+      ipcRenderer.invoke('tools:workspaceWrite', path, content) as Promise<{
+        ok: boolean
+        path: string
+        bytes: number
+        error?: string
+      }>,
+    workspaceDownload: (url: string, path: string) =>
+      ipcRenderer.invoke('tools:workspaceDownload', url, path) as Promise<{ ok: boolean; path: string; bytes: number; error?: string }>,
+    workspaceMkdir: (path: string) =>
+      ipcRenderer.invoke('tools:workspaceMkdir', path) as Promise<{ ok: boolean; path: string; error?: string }>,
+    workspaceMove: (from: string, to: string) =>
+      ipcRenderer.invoke('tools:workspaceMove', from, to) as Promise<{ ok: boolean; from: string; to: string; error?: string }>,
+    workspaceDelete: (path: string, recursive?: boolean) =>
+      ipcRenderer.invoke('tools:workspaceDelete', path, recursive) as Promise<{ ok: boolean; path: string; error?: string }>,
+    workspaceRoot: () => ipcRenderer.invoke('tools:workspaceRoot') as Promise<string>,
+    memorySet: (key: string, value: string) =>
+      ipcRenderer.invoke('tools:memorySet', key, value) as Promise<{ ok: boolean }>,
+    memoryGet: (key: string) =>
+      ipcRenderer.invoke('tools:memoryGet', key) as Promise<string | null>,
+  },
+  scheduler: {
+    list: () => ipcRenderer.invoke('scheduler:list') as Promise<unknown[]>,
+    saveAll: (jobs: unknown) =>
+      ipcRenderer.invoke('scheduler:saveAll', jobs) as Promise<{ ok: boolean }>,
+    onTick: (cb: (payload: { at: string }) => void) => {
+      const handler = (_: unknown, payload: { at: string }) => cb(payload)
+      ipcRenderer.on('scheduler:tick', handler)
+      return () => ipcRenderer.removeListener('scheduler:tick', handler)
+    },
+  },
+  events: {
+    list: () => ipcRenderer.invoke('events:list') as Promise<unknown[]>,
+    saveAll: (events: unknown) =>
+      ipcRenderer.invoke('events:saveAll', events) as Promise<{ ok: boolean }>,
+  },
+  hermes: {
+    get: () => ipcRenderer.invoke('hermes:get') as Promise<unknown | null>,
+    set: (data: unknown) =>
+      ipcRenderer.invoke('hermes:set', data) as Promise<{ ok: boolean }>,
+  },
+  mcp: {
+    discover: (projectRoot?: string) => ipcRenderer.invoke('mcp:discover', projectRoot) as Promise<{
+      servers: Array<{ id: string; name: string; enabled: boolean; transport: 'http' | 'stdio'; url?: string; command?: string; args?: string[] }>
+      sources: string[]
+    }>,
+    httpRpc: (input: {
+      url: string
+      headers?: Record<string, string>
+      body: unknown
+    }) => ipcRenderer.invoke('mcp:httpRpc', input) as Promise<unknown>,
+    stdioListTools: (input: { id: string; command: string; args: string[] }) =>
+      ipcRenderer.invoke('mcp:stdioListTools', input) as Promise<
+        Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>
+      >,
+    stdioCallTool: (input: {
+      id: string
+      command: string
+      args: string[]
+      toolName: string
+      arguments: Record<string, unknown>
+    }) =>
+      ipcRenderer.invoke('mcp:stdioCallTool', input) as Promise<{
+        ok: boolean
+        content: string
+        error?: string
+      }>,
+    stdioEnsure: (input: { id: string; command: string; args: string[] }) =>
+      ipcRenderer.invoke('mcp:stdioEnsure', input) as Promise<{
+        id: string
+        command: string
+        args: string[]
+        alive: boolean
+        pid: number | null
+        startedAt: string | null
+        lastError: string | null
+        requestCount: number
+      }>,
+    stdioStop: (id: string) =>
+      ipcRenderer.invoke('mcp:stdioStop', id) as Promise<{ ok: boolean }>,
+    stdioStopAll: () =>
+      ipcRenderer.invoke('mcp:stdioStopAll') as Promise<{ ok: boolean; stopped: number }>,
+    stdioSessions: () =>
+      ipcRenderer.invoke('mcp:stdioSessions') as Promise<
+        Array<{
+          id: string
+          command: string
+          args: string[]
+          alive: boolean
+          pid: number | null
+          startedAt: string | null
+          lastError: string | null
+          requestCount: number
+        }>
+      >,
+  },
+  shell: {
+    bash: (input: { command: string; cwd?: string; timeoutMs?: number }) =>
+      ipcRenderer.invoke('shell:bash', input) as Promise<{
+        ok: boolean
+        code: number | null
+        stdout: string
+        stderr: string
+        timedOut?: boolean
+      }>,
+  },
+  project: {
+    pick: (opts?: { defaultPath?: string }) =>
+      ipcRenderer.invoke('project:pick', opts) as Promise<{
+        canceled: boolean
+        path: string | null
+        error?: string
+      }>,
+    inspect: (root: string) =>
+      ipcRenderer.invoke('project:inspect', root) as Promise<{
+        root: string
+        name: string
+        isGit: boolean
+        branch: string | null
+        remote: string | null
+        worktrees: Array<{
+          path: string
+          branch: string
+          bare: boolean
+          detached: boolean
+        }>
+        dirty: boolean
+      }>,
+    branches: (root: string) =>
+      ipcRenderer.invoke('project:branches', root) as Promise<string[]>,
+    /** Sync tools/bash cwd with ProjectContextBar */
+    setActiveRoot: (root: string | null) =>
+      ipcRenderer.invoke('project:setActiveRoot', root) as Promise<{
+        ok: boolean
+        root: string
+        mode: 'project' | 'sandbox'
+        error?: string
+      }>,
+    getActiveRoot: () =>
+      ipcRenderer.invoke('project:getActiveRoot') as Promise<{
+        root: string
+        mode: 'project' | 'sandbox'
+        projectRoot: string | null
+      }>,
+    /** App 選單 / 系統匣「選擇專案資料夾」推送的路徑 */
+    onSelected: (cb: (path: string) => void) => {
+      const handler = (_: unknown, p: string) => cb(p)
+      ipcRenderer.on('project:selected', handler)
+      return () => {
+        ipcRenderer.removeListener('project:selected', handler)
+      }
+    },
+  },
+  cli: {
+    which: (binary: string) =>
+      ipcRenderer.invoke('cli:which', binary) as Promise<{
+        found: boolean
+        path: string | null
+      }>,
+    discover: () =>
+      ipcRenderer.invoke('cli:discover') as Promise<{
+        clis: Array<{
+          id: string
+          kind: string
+          name: string
+          foundBinary: boolean
+          binaryPath: string | null
+          configPaths: string[]
+          hasAuth: boolean
+          authNote: string
+          models: Array<{ id: string; label: string; depths: string[] }>
+          defaultModel?: string
+          defaultDepth?: string
+          notes: string[]
+        }>
+        summary: string
+      }>,
+    applyDiscovery: (currentProviders: unknown[]) =>
+      ipcRenderer.invoke('cli:applyDiscovery', currentProviders) as Promise<{
+        providers: unknown[]
+        summary: string
+        clis: unknown[]
+        suggestedModel?: string
+        suggestedDepth?: string
+      }>,
+    runAgent: (input: {
+      kind: 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
+      binary?: string
+      prompt: string
+      cwd?: string
+      model?: string
+      depth?: string
+      agentMode?: string
+      approvalMode?: 'always' | 'auto' | 'full'
+      unattended?: boolean
+      timeoutMs?: number
+    }) =>
+      ipcRenderer.invoke('cli:runAgent', input) as Promise<{
+        ok: boolean
+        output: string
+        command: string
+        kind: string
+        code: number | null
+        timedOut?: boolean
+        cancelled?: boolean
+        error?: string
+        runId?: string
+      }>,
+    /** Stop in-flight CLI agent (and tagged cli-agent bash) */
+    cancel: () =>
+      ipcRenderer.invoke('cli:cancel') as Promise<{ ok: boolean; killed: number }>,
+  },
+  /** CodeGraph — project code knowledge graph (local CLI) */
+  codegraph: {
+    detect: () =>
+      ipcRenderer.invoke('codegraph:detect') as Promise<{
+        installed: boolean
+        binaryPath: string | null
+        version: string | null
+      }>,
+    status: (projectRoot?: string) =>
+      ipcRenderer.invoke('codegraph:status', projectRoot) as Promise<{
+        installed: boolean
+        binaryPath: string | null
+        projectRoot: string
+        indexed: boolean
+        indexPath: string | null
+        version: string | null
+        raw: string
+        error?: string
+      }>,
+    init: (projectRoot?: string) =>
+      ipcRenderer.invoke('codegraph:init', projectRoot) as Promise<{
+        ok: boolean
+        output: string
+        error?: string
+      }>,
+    sync: (projectRoot?: string) =>
+      ipcRenderer.invoke('codegraph:sync', projectRoot) as Promise<{
+        ok: boolean
+        output: string
+        error?: string
+      }>,
+    explore: (input: {
+      projectRoot?: string
+      query: string
+      maxFiles?: number
+    }) =>
+      ipcRenderer.invoke('codegraph:explore', input) as Promise<{
+        ok: boolean
+        query: string
+        projectRoot: string
+        output: string
+        json?: unknown
+        error?: string
+        command: string
+      }>,
+    query: (input: {
+      projectRoot?: string
+      search: string
+      kind?: string
+      limit?: number
+      json?: boolean
+    }) =>
+      ipcRenderer.invoke('codegraph:query', input) as Promise<{
+        ok: boolean
+        query: string
+        projectRoot: string
+        output: string
+        json?: unknown
+        error?: string
+        command: string
+      }>,
+    callers: (input: {
+      projectRoot?: string
+      symbol: string
+      limit?: number
+      json?: boolean
+    }) =>
+      ipcRenderer.invoke('codegraph:callers', input) as Promise<{
+        ok: boolean
+        query: string
+        projectRoot: string
+        output: string
+        json?: unknown
+        error?: string
+        command: string
+      }>,
+    callees: (input: {
+      projectRoot?: string
+      symbol: string
+      limit?: number
+      json?: boolean
+    }) =>
+      ipcRenderer.invoke('codegraph:callees', input) as Promise<{
+        ok: boolean
+        query: string
+        projectRoot: string
+        output: string
+        json?: unknown
+        error?: string
+        command: string
+      }>,
+    impact: (input: {
+      projectRoot?: string
+      symbol: string
+      depth?: number
+      json?: boolean
+    }) =>
+      ipcRenderer.invoke('codegraph:impact', input) as Promise<{
+        ok: boolean
+        query: string
+        projectRoot: string
+        output: string
+        json?: unknown
+        error?: string
+        command: string
+      }>,
+    node: (input: { projectRoot?: string; name: string; file?: string }) =>
+      ipcRenderer.invoke('codegraph:node', input) as Promise<{
+        ok: boolean
+        query: string
+        projectRoot: string
+        output: string
+        json?: unknown
+        error?: string
+        command: string
+      }>,
+  },
+  term: {
+    create: (opts?: { cwd?: string; title?: string }) =>
+      ipcRenderer.invoke('term:create', opts || {}) as Promise<{
+        id: string
+        title: string
+        cwd: string
+        alive: boolean
+        createdAt: string
+      }>,
+    list: () =>
+      ipcRenderer.invoke('term:list') as Promise<
+        Array<{ id: string; title: string; cwd: string; alive: boolean; createdAt: string }>
+      >,
+    write: (id: string, data: string) =>
+      ipcRenderer.invoke('term:write', id, data) as Promise<{ ok: boolean; error?: string }>,
+    kill: (id: string) =>
+      ipcRenderer.invoke('term:kill', id) as Promise<{ ok: boolean }>,
+    killAll: () => ipcRenderer.invoke('term:killAll') as Promise<{ ok: boolean }>,
+    onData: (
+      cb: (payload: { id: string; stream: 'stdout' | 'stderr'; data: string }) => void,
+    ) => {
+      const handler = (_: unknown, payload: { id: string; stream: 'stdout' | 'stderr'; data: string }) =>
+        cb(payload)
+      ipcRenderer.on('term:data', handler)
+      return () => ipcRenderer.removeListener('term:data', handler)
+    },
+    onExit: (cb: (payload: { id: string; code: number | null }) => void) => {
+      const handler = (_: unknown, payload: { id: string; code: number | null }) => cb(payload)
+      ipcRenderer.on('term:exit', handler)
+      return () => ipcRenderer.removeListener('term:exit', handler)
+    },
+  },
+  opencode: {
+    scanAgents: (projectRoot?: string) =>
+      ipcRenderer.invoke('opencode:scanAgents', projectRoot) as Promise<{
+        global: Array<Record<string, unknown>>
+        project: Array<Record<string, unknown>>
+        dirs: string[]
+        configHint?: string | null
+        error?: string
+      }>,
+    loadBundle: (projectRoot?: string) =>
+      ipcRenderer.invoke('opencode:loadBundle', projectRoot) as Promise<{
+        layers: Array<{ path: string; data: Record<string, unknown> }>
+        agents: Array<Record<string, unknown>>
+        commands: Array<Record<string, unknown>>
+        sources: string[]
+        error?: string
+      }>,
+    detect: () =>
+      ipcRenderer.invoke('opencode:detect') as Promise<{
+        found: boolean
+        path: string | null
+        version: string | null
+      }>,
+    run: (input: { prompt: string; timeoutMs?: number; cwd?: string }) =>
+      ipcRenderer.invoke('opencode:run', input) as Promise<{
+        ok: boolean
+        output: string
+        error?: string
+      }>,
+    hint: () =>
+      ipcRenderer.invoke('opencode:hint') as Promise<{ ok: boolean; message: string }>,
+  },
+  gateway: {
+    telegramStart: (opts: { token: string; allowedChatIds?: string }) =>
+      ipcRenderer.invoke('gateway:telegramStart', opts) as Promise<{
+        telegram: {
+          running: boolean
+          botUsername: string | null
+          lastError: string | null
+          updateOffset: number
+          messageCount: number
+          lastMessageAt: string | null
+        }
+      }>,
+    telegramStop: () =>
+      ipcRenderer.invoke('gateway:telegramStop') as Promise<{
+        telegram: {
+          running: boolean
+          botUsername: string | null
+          lastError: string | null
+          updateOffset: number
+          messageCount: number
+          lastMessageAt: string | null
+        }
+      }>,
+    status: () =>
+      ipcRenderer.invoke('gateway:status') as Promise<{
+        telegram: {
+          running: boolean
+          botUsername: string | null
+          lastError: string | null
+          updateOffset: number
+          messageCount: number
+          lastMessageAt: string | null
+        }
+      }>,
+    send: (input: {
+      channel: 'telegram' | 'webhook' | 'system'
+      chatId: string
+      text: string
+      token?: string
+    }) =>
+      ipcRenderer.invoke('gateway:send', input) as Promise<{ ok: boolean; error?: string }>,
+    onInbound: (
+      cb: (msg: {
+        channel: 'telegram' | 'webhook' | 'system'
+        chatId: string
+        text: string
+        from?: string
+        messageId?: string | number
+        receivedAt: string
+        raw?: unknown
+      }) => void,
+    ) => {
+      const handler = (_: unknown, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('gateway:inbound', handler)
+      return () => {
+        ipcRenderer.removeListener('gateway:inbound', handler)
+      }
+    },
+  },
+  plugins: {
+    list: () => ipcRenderer.invoke('plugins:list') as Promise<unknown[]>,
+    save: (manifest: unknown) =>
+      ipcRenderer.invoke('plugins:save', manifest) as Promise<{ ok: boolean; path: string }>,
+    delete: (id: string) =>
+      ipcRenderer.invoke('plugins:delete', id) as Promise<{ ok: boolean }>,
+    dir: () => ipcRenderer.invoke('plugins:dir') as Promise<string>,
+  },
+}
+
+contextBridge.exposeInMainWorld('subagents', api)
+
+export type SubAgentsAPI = typeof api

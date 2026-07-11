@@ -1,0 +1,327 @@
+/**
+ * LLM client — OpenAI-compatible Chat Completions + function calling.
+ */
+
+import type { LlmSettings, ModelSource } from './types'
+import { DEFAULT_CLI_PROVIDERS } from './cliProviders'
+
+export type { LlmSettings }
+
+export const DEFAULT_LLM_SETTINGS: LlmSettings = {
+  enabled: false,
+  /** 空白 = 由使用者或一鍵偵測填入 */
+  baseUrl: '',
+  apiKey: '',
+  model: '',
+  discoveredModels: [],
+  roleModels: {
+    orchestrator: '',
+    analyst: '',
+    synthesizer: '',
+    executor: '',
+  },
+  authLevel: 2,
+  minConfidence: 0.8,
+  maxIterationsDefault: 5,
+  safetyEnabled: true,
+  toolsEnabled: true,
+  webSearchEnabled: true,
+  functionCalling: true,
+  haltOnPayloadOverflow: false,
+  maxToolPayloadKb: 50,
+  maxToolRounds: 4,
+  webhookEnabled: false,
+  webhookPort: 8787,
+  webhookToken: '',
+  customTools: [],
+  customToolSecrets: {},
+  mcpEnabled: false,
+  mcpServers: [],
+  telegramEnabled: false,
+  telegramBotToken: '',
+  telegramAllowedChatIds: '',
+  telegramAutoRun: true,
+  telegramReplyWithResult: true,
+  cliProviders: DEFAULT_CLI_PROVIDERS.map((p) => ({
+    ...p,
+    models: [],
+  })),
+  bashRequireAsk: true,
+  approvalMode: 'auto',
+  /** Progressive disclosure of capability bundles (tools + runbooks) */
+  capabilitiesEnabled: true,
+  alwaysOnCapabilities: [],
+  toolSearchEnabled: true,
+  toolSearchThreshold: 24,
+  codeModeEnabled: true,
+
+  // ChatGPT-style prefs
+  theme: 'dark',
+  reducedMotion: 'system',
+  uiFontSize: 14,
+  codeFontSize: 13,
+  translucentSidebar: true,
+  enterBehavior: 'enter',
+  followUpMode: 'steer',
+  notifyOnComplete: true,
+  soundOnComplete: false,
+  preventSleepWhileRunning: false,
+  ambientSuggestions: true,
+  personality: 'default',
+  customAboutUser: '',
+  customResponseStyle: '',
+  memoryEnabled: true,
+  memoryWriteEnabled: true,
+  referenceChatHistory: true,
+  temporaryChatDefault: false,
+  autoArchiveDays: 0,
+  gitBranchPrefix: 'agent/',
+  gitCommitInstructions: '',
+  gitPrInstructions: '',
+  gitCreateDraftPr: true,
+  gitForcePush: false,
+}
+
+export type RoleModelKey = 'orchestrator' | 'analyst' | 'synthesizer' | 'executor'
+
+/** Map display / runtime role names → settings.roleModels key */
+export function roleModelKey(role: string): RoleModelKey | null {
+  if (role === 'orchestrator' || role === 'Manager' || role === 'sub-orchestrator')
+    return 'orchestrator'
+  if (role === 'analyst' || role === 'Analyzer-1' || role === 'leaf' || role === 'leaf-worker')
+    return 'analyst'
+  if (role === 'synthesizer' || role === 'Writer') return 'synthesizer'
+  if (role === 'executor' || role === 'Core') return 'executor'
+  return null
+}
+
+export type ResolvedRoleModel = {
+  model: string
+  source: ModelSource
+  roleKey: RoleModelKey | null
+  /** True when roleModels[role] was empty and we fell back */
+  usedFallback: boolean
+}
+
+/**
+ * Resolve which model a sub-agent role actually uses.
+ * Config source: Settings.roleModels (in-app), NOT per-vendor agent md files.
+ * Empty role slot → global settings.model (may already include thread override).
+ */
+export function resolveRoleModel(settings: LlmSettings, role: string): ResolvedRoleModel {
+  const map = settings.roleModels || DEFAULT_LLM_SETTINGS.roleModels
+  const key = roleModelKey(role)
+  const roleOverride = key ? (map[key] || '').trim() : ''
+  const fallback = (settings.model || '').trim()
+  if (roleOverride) {
+    return { model: roleOverride, source: 'role', roleKey: key, usedFallback: false }
+  }
+  if (fallback) {
+    return { model: fallback, source: 'fallback', roleKey: key, usedFallback: true }
+  }
+  return { model: '', source: 'none', roleKey: key, usedFallback: true }
+}
+
+/** Resolve model for a sub-agent role. */
+export function modelForRole(settings: LlmSettings, role: string): string {
+  return resolveRoleModel(settings, role).model
+}
+
+export function withRoleModel(settings: LlmSettings, role: string): LlmSettings {
+  const resolved = resolveRoleModel(settings, role)
+  return { ...settings, model: resolved.model }
+}
+
+export interface ChatMessageExt {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | null
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
+  tool_call_id?: string
+  name?: string
+}
+
+export interface ToolCallRequest {
+  id: string
+  name: string
+  arguments: string
+}
+
+export interface LlmChatResult {
+  content: string
+  tokensUsed: number
+  model: string
+}
+
+export interface LlmToolsResult extends LlmChatResult {
+  toolCalls: ToolCallRequest[]
+  finishReason?: string
+}
+
+export async function chatCompletion(
+  settings: LlmSettings,
+  messages: Array<{ role: string; content: string }>,
+  opts?: { temperature?: number; maxTokens?: number },
+): Promise<LlmChatResult> {
+  const r = await chatCompletionWithTools(
+    settings,
+    messages.map((m) => ({ role: m.role as ChatMessageExt['role'], content: m.content })),
+    [],
+    { ...opts, toolChoice: 'none' },
+  )
+  return { content: r.content, tokensUsed: r.tokensUsed, model: r.model }
+}
+
+export async function chatCompletionWithTools(
+  settings: LlmSettings,
+  messages: ChatMessageExt[],
+  tools: unknown[],
+  opts?: {
+    temperature?: number
+    maxTokens?: number
+    toolChoice?: 'auto' | 'none' | 'required'
+  },
+): Promise<LlmToolsResult> {
+  if (!settings.enabled) {
+    throw new Error('LLM is disabled. Enable it in Settings.')
+  }
+  if (!settings.apiKey.trim()) {
+    throw new Error('API key is missing. Configure it in Settings.')
+  }
+
+  const body = {
+    model: settings.model,
+    messages,
+    temperature: opts?.temperature ?? 0.4,
+    max_tokens: opts?.maxTokens ?? 1200,
+    ...(tools.length
+      ? {
+          tools,
+          tool_choice: opts?.toolChoice ?? 'auto',
+        }
+      : {}),
+  }
+
+  if (window.subagents?.llm?.chat) {
+    const r = await window.subagents.llm.chat({
+      baseUrl: settings.baseUrl,
+      apiKey: settings.apiKey,
+      ...body,
+    })
+    return normalizeChatResult(r, settings.model)
+  }
+
+  const base = settings.baseUrl.replace(/\/$/, '')
+  const res = await fetch(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${settings.apiKey}`,
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText)
+    throw new Error(`LLM HTTP ${res.status}: ${errText.slice(0, 200)}`)
+  }
+
+  const data = await res.json()
+  return normalizeChatResult(data, settings.model)
+}
+
+function normalizeChatResult(data: unknown, fallbackModel: string): LlmToolsResult {
+  const d = data as {
+    content?: string
+    tokensUsed?: number
+    model?: string
+    toolCalls?: ToolCallRequest[]
+    finishReason?: string
+    choices?: Array<{
+      finish_reason?: string
+      message?: {
+        content?: string | null
+        tool_calls?: Array<{
+          id: string
+          type?: string
+          function?: { name?: string; arguments?: string }
+        }>
+      }
+    }>
+    usage?: { total_tokens?: number }
+  }
+
+  // Already normalized from IPC
+  if (d.toolCalls || (typeof d.content === 'string' && !d.choices)) {
+    return {
+      content: (d.content || '').trim(),
+      tokensUsed: d.tokensUsed ?? 0,
+      model: d.model || fallbackModel,
+      toolCalls: d.toolCalls || [],
+      finishReason: d.finishReason,
+    }
+  }
+
+  const choice = d.choices?.[0]
+  const msg = choice?.message
+  const toolCalls: ToolCallRequest[] = (msg?.tool_calls || []).map((tc) => ({
+    id: tc.id,
+    name: tc.function?.name || '',
+    arguments: tc.function?.arguments || '{}',
+  }))
+
+  return {
+    content: (msg?.content || '').trim(),
+    tokensUsed: d.usage?.total_tokens ?? 0,
+    model: d.model || fallbackModel,
+    toolCalls,
+    finishReason: choice?.finish_reason,
+  }
+}
+
+export async function runSubAgentTask(
+  settings: LlmSettings,
+  role: string,
+  objective: string,
+  step: string,
+  context: string,
+  toolContext?: string,
+): Promise<LlmChatResult> {
+  const system = `You are the "${role}" sub-agent in SubAgents AI multi-agent framework.
+Follow the loop protocol: process only your assigned step, be concise, factual, and structured in Markdown.
+Use tool results as primary evidence. Never invent credentials or private data. If data is unavailable mark as N/A.`
+
+  return chatCompletion(settings, [
+    { role: 'system', content: system },
+    {
+      role: 'user',
+      content: `Objective: ${objective}\n\nYour step: ${step}\n\nTool results:\n${toolContext || '(no tools ran)'}\n\nContext so far:\n${context || '(none)'}\n\nProduce the step output only.`,
+    },
+  ])
+}
+
+export async function synthesizeReport(
+  settings: LlmSettings,
+  objective: string,
+  stepOutputs: string[],
+  dod: string,
+): Promise<LlmChatResult> {
+  return chatCompletion(
+    settings,
+    [
+      {
+        role: 'system',
+        content:
+          'You are the Writer/Synthesizer sub-agent. Produce a polished Markdown report with title, executive summary, key findings, and a short JSON example block if relevant.',
+      },
+      {
+        role: 'user',
+        content: `Objective: ${objective}\n\nDefinition of Done: ${dod}\n\nStep outputs:\n${stepOutputs.map((s, i) => `### Step ${i + 1}\n${s}`).join('\n\n')}`,
+      },
+    ],
+    { maxTokens: 2000 },
+  )
+}

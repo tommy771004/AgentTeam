@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Agent Loop Execution Logs - SubAgents AI</title>
+<!-- Fonts & Icons -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Sora:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Config -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-tertiary-fixed-variant": "#85145a",
+                        "inverse-on-surface": "#283044",
+                        "on-tertiary": "#620040",
+                        "on-primary-fixed": "#001f25",
+                        "secondary": "#d0bcff",
+                        "on-background": "#dae2fd",
+                        "tertiary-fixed": "#ffd8e7",
+                        "surface-container-low": "#131b2e",
+                        "inverse-surface": "#dae2fd",
+                        "surface-dim": "#0b1326",
+                        "surface-container-highest": "#2d3449",
+                        "on-primary-container": "#005763",
+                        "secondary-fixed-dim": "#d0bcff",
+                        "primary": "#8aebff",
+                        "on-tertiary-container": "#8f1e62",
+                        "tertiary-fixed-dim": "#ffafd3",
+                        "background": "#0b1326",
+                        "on-secondary-fixed-variant": "#5516be",
+                        "on-surface": "#dae2fd",
+                        "primary-fixed": "#a2eeff",
+                        "on-primary-fixed-variant": "#004e5a",
+                        "on-error": "#690005",
+                        "on-secondary-container": "#c4abff",
+                        "outline-variant": "#3c494c",
+                        "on-secondary-fixed": "#23005c",
+                        "surface-variant": "#2d3449",
+                        "error-container": "#93000a",
+                        "surface-bright": "#31394d",
+                        "primary-container": "#22d3ee",
+                        "on-primary": "#00363e",
+                        "tertiary-container": "#ffa6cf",
+                        "surface-container": "#171f33",
+                        "on-secondary": "#3c0091",
+                        "on-tertiary-fixed": "#3d0026",
+                        "primary-fixed-dim": "#2fd9f4",
+                        "error": "#ffb4ab",
+                        "surface": "#0b1326",
+                        "outline": "#859397",
+                        "surface-tint": "#2fd9f4",
+                        "secondary-container": "#571bc1",
+                        "inverse-primary": "#006877",
+                        "tertiary": "#ffd0e3",
+                        "surface-container-high": "#222a3d",
+                        "on-surface-variant": "#bbc9cd",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-lowest": "#060e20",
+                        "secondary-fixed": "#e9ddff"
+                    },
+                    borderRadius: {
+                        DEFAULT: "0.125rem",
+                        lg: "0.25rem",
+                        xl: "0.5rem",
+                        full: "0.75rem"
+                    },
+                    spacing: {
+                        lg: "24px",
+                        unit: "4px",
+                        gutter: "24px",
+                        "container-max": "1440px",
+                        xs: "4px",
+                        sm: "8px",
+                        xxl: "80px",
+                        xl: "48px",
+                        md: "16px"
+                    },
+                    fontFamily: {
+                        "body-sm": ["Inter"],
+                        "headline-md": ["Sora"],
+                        "label-md": ["Inter"],
+                        "headline-lg": ["Sora"],
+                        "code-sm": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "display-lg": ["Sora"],
+                        "body-md": ["Inter"],
+                        "headline-lg-mobile": ["Sora"]
+                    },
+                    fontSize: {
+                        "body-sm": ["14px", { lineHeight: "1.5", fontWeight: "400" }],
+                        "headline-md": ["24px", { lineHeight: "1.3", fontWeight: "600" }],
+                        "label-md": ["12px", { lineHeight: "1", letterSpacing: "0.05em", fontWeight: "600" }],
+                        "headline-lg": ["32px", { lineHeight: "1.2", letterSpacing: "-0.01em", fontWeight: "600" }],
+                        "code-sm": ["13px", { lineHeight: "1.4", fontWeight: "500" }],
+                        "body-lg": ["18px", { lineHeight: "1.6", fontWeight: "400" }],
+                        "display-lg": ["48px", { lineHeight: "1.1", letterSpacing: "-0.02em", fontWeight: "700" }],
+                        "body-md": ["16px", { lineHeight: "1.5", fontWeight: "400" }],
+                        "headline-lg-mobile": ["24px", { lineHeight: "1.2", fontWeight: "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        /* Custom scrollbar for terminal */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(133, 147, 151, 0.2); /* outline-variant roughly */
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(133, 147, 151, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface min-h-screen overflow-hidden font-body-md text-body-md relative">
+<!-- Base Layer Dashboard (Simulated Background) -->
+<div class="absolute inset-0 z-0 opacity-20 pointer-events-none filter blur-sm">
+<!-- TopNavBar (Shared Component) -->
+<header class="bg-surface/70 backdrop-blur-md border-b border-white/10 shadow-sm full-width top-0 sticky z-50">
+<div class="flex justify-between items-center px-gutter py-md max-w-container-max mx-auto">
+<div class="font-headline-md text-headline-md font-bold text-primary tracking-tighter">
+                    SubAgents AI
+                </div>
+<nav class="hidden md:flex gap-lg">
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:bg-white/5 duration-300 font-label-md text-label-md" href="#">Features</a>
+<a class="text-primary border-b-2 border-primary pb-1 font-label-md text-label-md scale-95 transition-transform" href="#">Advantages</a>
+<a class="text-on-surface-variant hover:text-primary transition-colors hover:bg-white/5 duration-300 font-label-md text-label-md" href="#">Documentation</a>
+</nav>
+<div class="hidden">search</div>
+<button class="bg-primary text-on-primary font-label-md text-label-md px-lg py-sm rounded border border-primary hover:bg-transparent hover:text-primary transition-colors">
+                    Get Started
+                </button>
+</div>
+</header>
+<!-- Dummy Content to create texture -->
+<main class="max-w-container-max mx-auto px-gutter py-xl">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-lg mt-xl">
+<div class="bg-surface-container rounded-xl h-64 border border-outline-variant"></div>
+<div class="bg-surface-container rounded-xl h-64 border border-outline-variant col-span-2"></div>
+</div>
+</main>
+</div>
+<!-- Glassmorphic Dim Overlay -->
+<div class="fixed inset-0 bg-surface/80 backdrop-blur-md z-40 flex items-center justify-center p-gutter">
+<!-- Main Log Modal Container -->
+<div class="w-full max-w-[1200px] h-[921px] bg-surface-container border border-outline-variant rounded-xl shadow-[0_0_40px_rgba(34,211,238,0.05)] flex flex-col relative overflow-hidden">
+<!-- Modal Header -->
+<div class="flex items-center justify-between px-lg py-md border-b border-outline-variant bg-surface-container-high shrink-0">
+<div class="flex items-center gap-md">
+<span class="material-symbols-outlined text-error" style="font-variation-settings: 'FILL' 1;">warning</span>
+<h2 class="font-headline-md text-headline-md text-on-surface">Execution Interrupted</h2>
+<span class="bg-error-container text-on-error px-sm py-xs rounded font-code-sm text-code-sm border border-error/20 ml-md">
+                        EXIT_CODE_137
+                    </span>
+</div>
+<button class="text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<!-- Modal Body (Grid Layout) -->
+<div class="flex-1 flex flex-col md:flex-row overflow-hidden">
+<!-- Left Sidebar: Analysis & Context -->
+<aside class="w-full md:w-80 bg-surface-container-high/50 border-r border-outline-variant p-lg flex flex-col gap-xl overflow-y-auto shrink-0">
+<!-- Status Card -->
+<div class="flex flex-col gap-sm">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Current Status</span>
+<div class="flex items-center gap-sm">
+<span class="w-3 h-3 rounded-full bg-error animate-pulse shadow-[0_0_8px_rgba(255,180,171,0.6)]"></span>
+<span class="font-headline-lg-mobile text-headline-lg-mobile text-error">Halted</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">
+                            The agent loop encountered a critical validation violation and was forcefully suspended to prevent state corruption.
+                        </p>
+</div>
+<hr class="border-outline-variant/50"/>
+<!-- Metadata -->
+<div class="flex flex-col gap-md">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Trace Context</span>
+<div class="grid grid-cols-1 gap-sm">
+<div class="flex flex-col">
+<span class="font-code-sm text-code-sm text-on-surface-variant">Agent ID</span>
+<span class="font-code-sm text-code-sm text-primary">ag_9f82b7c4_delta</span>
+</div>
+<div class="flex flex-col mt-sm">
+<span class="font-code-sm text-code-sm text-on-surface-variant">Task Definition</span>
+<span class="font-body-sm text-body-sm text-on-surface">"Aggregate Q3 financial data and generate anomalous transaction report."</span>
+</div>
+<div class="flex flex-col mt-sm">
+<span class="font-code-sm text-code-sm text-on-surface-variant">Timestamp</span>
+<span class="font-code-sm text-code-sm text-on-surface">2023-10-27T14:32:08.451Z</span>
+</div>
+</div>
+</div>
+<hr class="border-outline-variant/50"/>
+<!-- Trigger Rule -->
+<div class="flex flex-col gap-sm">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Violated Rule</span>
+<div class="bg-surface p-sm rounded border border-outline-variant relative overflow-hidden group">
+<!-- Subtle highlight effect -->
+<div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-error/30 to-transparent"></div>
+<span class="font-code-sm text-code-sm text-error block mb-xs">MemoryConstraintViolation</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+                                Tool output payload exceeded the maximum allowable context window allocation.
+                            </p>
+</div>
+<button class="mt-md w-full bg-transparent border border-outline text-on-surface font-label-md text-label-md py-sm rounded hover:bg-white/5 hover:border-primary transition-all duration-300 flex items-center justify-center gap-sm">
+<span class="material-symbols-outlined text-[18px]">restart_alt</span>
+                            Restart Agent
+                        </button>
+</div>
+</aside>
+<!-- Right Area: Full Terminal Output -->
+<main class="flex-1 bg-surface-container-lowest flex flex-col overflow-hidden relative">
+<!-- Glass highlight edge -->
+<div class="absolute top-0 left-0 w-full h-[1px] bg-white/5 z-10"></div>
+<!-- Terminal Toolbar -->
+<div class="flex items-center justify-between px-md py-sm border-b border-outline-variant/30 bg-surface-container-lowest shrink-0">
+<div class="flex items-center gap-sm text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px]">terminal</span>
+<span class="font-code-sm text-code-sm">stdout.log</span>
+</div>
+<div class="flex gap-sm">
+<button class="text-on-surface-variant hover:text-primary transition-colors" title="Copy Logs">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-colors" title="Download">
+<span class="material-symbols-outlined text-[18px]">download</span>
+</button>
+</div>
+</div>
+<!-- Terminal Scrolling Area -->
+<div class="flex-1 overflow-auto p-md md:p-lg relative">
+<!-- Simulated Shader background for depth (optional, keeping subtle) -->
+<div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-primary/5 via-transparent to-transparent pointer-events-none"></div>
+<pre class="font-code-sm text-code-sm text-on-surface-variant whitespace-pre-wrap leading-relaxed relative z-10 break-words"><span class="text-outline">System  |</span> <span class="text-primary">Initializing</span> SubAgent runtime environment (v2.4.1-rc)
+<span class="text-outline">System  |</span> Loading capabilities profile: <span class="text-secondary">enterprise_data_analyst</span>
+<span class="text-outline">System  |</span> Binding tool registry... [OK]
+<span class="text-outline">System  |</span> Agent Loop Started. Max iterations: 20.
+
+<span class="text-outline">[T+0.01s]</span> <span class="text-primary-container font-bold">INFO</span>    : Analyzing task definition.
+<span class="text-outline">[T+0.15s]</span> <span class="text-primary-container font-bold">INFO</span>    : Extracting entities: { "target": "Q3 financial data", "action": "anomaly detection" }
+<span class="text-outline">[T+0.42s]</span> <span class="text-tertiary font-bold">THOUGHT</span> : To find anomalies in Q3 financial data, I first need to retrieve all transaction records for the months of July, August, and September from the main ledger database.
+<span class="text-outline">[T+0.88s]</span> <span class="text-secondary font-bold">ACTION</span>  : Invoking tool <span class="text-on-surface">`sql_database_query`</span>
+<span class="text-outline">          </span> <span class="text-outline-variant">Input payload:</span>
+<span class="text-outline">          </span> <span class="text-primary-fixed-dim">{
+             "query": "SELECT * FROM transactions WHERE date &gt;= '2023-07-01' AND date &lt;= '2023-09-30'",
+             "timeout_ms": 30000
+           }</span>
+
+<span class="text-outline">[T+2.10s]</span> <span class="text-on-surface-variant">... Tool execution in progress ...</span>
+<span class="text-outline">[T+4.55s]</span> <span class="text-on-surface-variant">... Database responding, streaming results ...</span>
+
+<span class="text-outline">[T+8.12s]</span> <span class="text-error font-bold">ERROR</span>   : Tool execution interrupted by internal supervisor.
+<span class="text-outline">[T+8.13s]</span> <span class="text-error font-bold">FATAL</span>   : <span class="text-on-error-container bg-error-container px-xs py-[2px] rounded">MemoryConstraintViolation</span>
+<span class="text-outline">          </span> Trigger: The resulting payload from `sql_database_query` reached <span class="text-error">142.5 MB</span>, 
+<span class="text-outline">          </span> exceeding the configured context window limit of 50.0 MB.
+<span class="text-outline">          </span> 
+<span class="text-outline">          </span> <span class="text-outline-variant">Stack Trace:</span>
+<span class="text-outline">          </span>   at SubAgents.Runtime.ToolExecutor.stream_response (ToolExecutor.py:214)
+<span class="text-outline">          </span>   at SubAgents.Runtime.Supervisor.enforce_limits (Supervisor.py:88)
+<span class="text-outline">          </span>   at SubAgents.Core.AgentLoop.step (AgentLoop.py:105)
+
+<span class="text-outline">[T+8.15s]</span> <span class="text-primary-container font-bold">INFO</span>    : Initiating safe shutdown sequence.
+<span class="text-outline">[T+8.18s]</span> <span class="text-primary-container font-bold">INFO</span>    : Releasing database connection pool... [OK]
+<span class="text-outline">[T+8.20s]</span> <span class="text-primary-container font-bold">INFO</span>    : Flushing temporary memory buffers... [OK]
+<span class="text-outline">System  |</span> <span class="text-error">Agent Loop Halted forcefully.</span>
+                        </pre>
+</div>
+</main>
+</div>
+</div>
+</div>
+</body></html>
