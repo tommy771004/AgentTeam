@@ -8,6 +8,14 @@ import { resolveCliApproval } from './cliApproval'
 
 export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
 
+export type LocalCliAttachmentPayload = {
+  name: string
+  mimeType?: string
+  kind?: 'image' | 'text' | 'binary'
+  dataUrl?: string
+  textContent?: string
+}
+
 export async function runPromptViaLocalCli(opts: {
   kind: LocalRunnerKind
   binary?: string
@@ -18,6 +26,8 @@ export async function runPromptViaLocalCli(opts: {
   agentMode?: string
   approvalMode?: ApprovalMode
   unattended?: boolean
+  /** Materialized on disk by Electron for CLI vision/file tools */
+  attachments?: LocalCliAttachmentPayload[]
   onLog?: (line: string) => void
 }): Promise<{ ok: boolean; output: string; command: string; error?: string }> {
   if (!window.subagents?.cli?.runAgent) {
@@ -32,6 +42,13 @@ export async function runPromptViaLocalCli(opts: {
   if (opts.cwd) opts.onLog?.(`cwd: ${opts.cwd}`)
   if (opts.model) opts.onLog?.(`model: ${opts.model}`)
   if (opts.depth) opts.onLog?.(`depth: ${opts.depth}`)
+  if (opts.attachments?.length) {
+    const nImg = opts.attachments.filter((a) => a.kind === 'image' || a.dataUrl).length
+    const nOther = opts.attachments.length - nImg
+    opts.onLog?.(
+      `attachments: ${opts.attachments.length}（圖 ${nImg} · 檔 ${nOther}）→ 寫入專案 .subagents/chat-attachments/`,
+    )
+  }
   const approval = resolveCliApproval(
     opts.kind,
     opts.approvalMode,
@@ -51,6 +68,7 @@ export async function runPromptViaLocalCli(opts: {
     approvalMode: opts.approvalMode,
     unattended: opts.unattended,
     timeoutMs: 300_000,
+    attachments: opts.attachments,
   })
   if (r.cancelled) {
     opts.onLog?.('■ CLI 已取消')

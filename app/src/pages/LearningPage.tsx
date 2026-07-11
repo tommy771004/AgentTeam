@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import { ThemePage } from '../components/SectionNav'
 import { SettingsHeader } from '../components/settings/SettingsChrome'
 import { useLearningStore } from '../store/learningStore'
 import { useAgentStore } from '../store/agentStore'
+import { PluginMarketplace } from '../components/PluginMarketplace'
 
 const SECTIONS = [
   { id: 'memory', label: '持久記憶', icon: 'psychology' },
@@ -11,8 +13,10 @@ const SECTIONS = [
   { id: 'drafts', label: '學習草稿', icon: 'rate_review' },
   { id: 'search', label: '跨會話搜尋', icon: 'manage_search' },
   { id: 'prompt', label: '人格與上下文', icon: 'badge' },
-  { id: 'plugins', label: '外掛', icon: 'extension' },
+  { id: 'plugins', label: '擴充能力', icon: 'extension' },
 ]
+
+const SECTION_IDS = new Set(SECTIONS.map((s) => s.id))
 
 const META: Record<string, { title: string; subtitle: string }> = {
   memory: { title: '持久記憶', subtitle: 'USER / MEMORY · 跨 session 保留。' },
@@ -20,11 +24,19 @@ const META: Record<string, { title: string; subtitle: string }> = {
   drafts: { title: '學習草稿', subtitle: '成功執行後自動產生的技能草稿。' },
   search: { title: '跨會話搜尋', subtitle: '在記憶、技能與封存中檢索。' },
   prompt: { title: '人格與上下文', subtitle: 'SOUL / AGENTS 穩定提示層。' },
-  plugins: { title: '外掛', subtitle: 'Edge 能力擴充。' },
+  plugins: {
+    title: '擴充能力',
+    subtitle: '連線授權後，在「新任務」直接下指令即可。',
+  },
 }
 
 export function LearningPage() {
-  const [section, setSection] = useState('memory')
+  const [params, setParams] = useSearchParams()
+  const tabParam = params.get('tab') || 'memory'
+  const section = SECTION_IDS.has(tabParam) ? tabParam : 'memory'
+  const setSection = (id: string) => {
+    setParams(id === 'memory' ? {} : { tab: id })
+  }
   const {
     load,
     memory,
@@ -45,13 +57,7 @@ export function LearningPage() {
     saveSkill,
     removeSkill,
     refresh,
-    plugins,
-    setPluginEnabled,
-    importPlugin,
-    removePlugin,
   } = useLearningStore()
-  const [pluginJson, setPluginJson] = useState('')
-  const [pluginDir, setPluginDir] = useState('')
   const archive = useAgentStore((s) => s.archive)
   const loadArchive = useAgentStore((s) => s.loadArchive)
 
@@ -69,7 +75,6 @@ export function LearningPage() {
   useEffect(() => {
     void load()
     void loadArchive()
-    void window.subagents?.plugins?.dir?.().then(setPluginDir)
   }, [load, loadArchive])
 
   useEffect(() => {
@@ -92,8 +97,10 @@ export function LearningPage() {
       sections={SECTIONS}
       activeId={section}
       onChange={setSection}
+      narrow={section !== 'plugins'}
+      immersive={section === 'plugins'}
     >
-      <SettingsHeader title={meta.title} subtitle={meta.subtitle} />
+      {section !== 'plugins' && <SettingsHeader title={meta.title} subtitle={meta.subtitle} />}
       <div className="flex flex-col gap-4">
         {section === 'memory' && (
           <div className="space-y-4">
@@ -368,94 +375,7 @@ export function LearningPage() {
           </div>
         )}
 
-        {section === 'plugins' && (
-          <div className="space-y-4">
-            <div className="app-panel p-5 space-y-3">
-              <h2 className="font-semibold flex items-center gap-2">
-                <Icon name="extension" size={18} className="text-primary" />
-                外掛（Hermes Edge 哲學）
-              </h2>
-              <p className="text-sm text-on-surface-variant">
-                能力放在邊緣，不膨脹核心 tool schema。JSON 外掛可注入 Skills 與 prompt 片段。
-              </p>
-              {pluginDir && (
-                <p className="text-[11px] font-[family-name:var(--font-mono)] text-outline">
-                  目錄：{pluginDir}
-                </p>
-              )}
-              <div className="space-y-2">
-                {plugins.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between gap-3 border border-white/10 rounded-lg px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <div className="font-medium text-sm">{p.name}</div>
-                      <div className="text-[11px] text-outline truncate">
-                        {p.id} · v{p.version || '—'} · {p.description || ''}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <label className="text-xs flex items-center gap-1">
-                        <input
-                          type="checkbox"
-                          checked={p.enabled}
-                          onChange={(e) => void setPluginEnabled(p.id, e.target.checked)}
-                          className="accent-primary-container"
-                        />
-                        啟用
-                      </label>
-                      {p.id !== 'example-edge' && (
-                        <button
-                          type="button"
-                          className="text-xs text-error"
-                          onClick={() => void removePlugin(p.id)}
-                        >
-                          移除
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="app-panel p-5 space-y-2">
-              <h3 className="text-sm font-semibold">匯入外掛 JSON</h3>
-              <textarea
-                className={ta}
-                rows={8}
-                value={pluginJson}
-                onChange={(e) => setPluginJson(e.target.value)}
-                placeholder='{"id":"my","name":"My","enabled":true,"skills":[],"promptAppend":"..."}'
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  try {
-                    const m = JSON.parse(pluginJson)
-                    if (!m.id || !m.name) throw new Error('需要 id 與 name')
-                    void importPlugin(m)
-                    setPluginJson('')
-                    if (window.subagents?.plugins?.save) {
-                      void window.subagents.plugins.save(m)
-                    }
-                  } catch (e) {
-                    alert(e instanceof Error ? e.message : String(e))
-                  }
-                }}
-                className="px-3 py-2 rounded-lg bg-primary-container text-on-primary-container text-xs font-semibold"
-              >
-                匯入並啟用
-              </button>
-            </div>
-            <p className="text-xs text-outline">
-              委派隔離：Manager 可呼叫 <code className="text-primary">delegate_task</code>
-              產生 leaf 子代理（獨立上下文、禁止再委派／skill_save）。支援{' '}
-              <code className="text-primary">background + notify_on_complete</code>
-              。MCP 長連線 stdio；訊息閘道見設定 → Telegram。
-            </p>
-          </div>
-        )}
+        {section === 'plugins' && <PluginMarketplace />}
 
         {section === 'prompt' && (
           <div className="space-y-4">

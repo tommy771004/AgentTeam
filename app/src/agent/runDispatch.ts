@@ -10,13 +10,20 @@ import { useSettingsStore } from '../store/settingsStore'
 import { useProjectStore } from '../store/projectStore'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
-import { selectToolsForStep } from './tools/registry'
-import { assembleCapabilities, capabilityOwnsTool } from './capabilities'
 import { parseSubagentMentions } from './opencode/agents'
 import {
   openCodeRuntimeOverrides,
   parseRegistryMentions,
 } from './opencode/agentRegistry'
+import { buildIntentPreloadIds } from './intentPreload'
+import type { ChatAttachment } from './types'
+import {
+  attachmentsToTextAppendix,
+  attachmentsPathAppendix,
+  defaultGoalForAttachments,
+  hydrateAttachmentsFromDisk,
+  materializeAttachmentsOnDisk,
+} from '../lib/chatAttachments'
 
 export type DispatchResult = {
   path: 'builtin' | 'cli'
@@ -56,9 +63,16 @@ export async function dispatchThreadTask(
     forceLoopType?: LoopType
     /** Merged into OpenCode + history overrides */
     overrides?: RuntimeOverrides
+    /** Chat composer attachments for this turn */
+    attachments?: ChatAttachment[]
   },
 ): Promise<DispatchResult> {
-  const raw = goal.trim()
+  let attachments =
+    opts?.attachments || opts?.overrides?.userAttachments || ([] as ChatAttachment[])
+  let raw = goal.trim()
+  if (!raw && attachments.length) {
+    raw = defaultGoalForAttachments(attachments)
+  }
   if (!raw) {
     return { path: 'builtin', status: 'failed', error: 'empty goal' }
   }
@@ -67,7 +81,9 @@ export async function dispatchThreadTask(
   const tid = opts?.threadId || thr.activeId
   const thread = thr.threads.find((t) => t.id === tid)
   const settings = useSettingsStore.getState().settings
-  const projectRoot = useProjectStore.getState().root
+  // Per-run project pin (scheduler) overrides UI project for this dispatch only
+  const projectRoot =
+    (opts?.overrides?.projectRoot || '').trim() || useProjectStore.getState().root
   const agent = useAgentStore.getState()
 
   if (agent.isRunning) {
@@ -78,33 +94,27 @@ export async function dispatchThreadTask(
     }
   }
 
+  // Materialize + hydrate for vision / CLI shared paths
+  if (attachments.length) {
+    attachments = await materializeAttachmentsOnDisk(attachments, {
+      projectRoot: projectRoot || undefined,
+      sessionId: tid || undefined,
+    })
+    attachments = await hydrateAttachmentsFromDisk(attachments)
+  }
+
   const runner: ThreadRunner = opts?.runner || thread?.runner || 'builtin'
   const mentioned = parseRegistryMentions(raw)
   const legacy = parseSubagentMentions(raw)
   const subId = mentioned.subagents[0] || legacy.subagents[0]
-  const text = mentioned.cleaned || legacy.cleaned || raw
+  let text = mentioned.cleaned || legacy.cleaned || raw
   const depth = (thread?.thinkingDepth || 'deep') as ThinkingDepth
   const agentMode = (thread?.agentMode || 'build') as AgentMode
   const model = thread?.model || settings.model
   const speed = thread?.speed || 'standard'
-  // FC starts with the highest-signal 1–2 relevant capability packs, matching
-  // the heuristic router without exposing the whole catalog.
-  const intentTools = selectToolsForStep(text, text, '', {
-    webSearchEnabled: settings.webSearchEnabled !== false,
-  })
-  const preloadCandidates = assembleCapabilities(settings, {
-    includeMcpCaps: settings.mcpEnabled,
-    projectRoot,
-  }).all
-    .filter((cap) => intentTools.some((tool) => capabilityOwnsTool(cap, tool)))
-    .map((cap) => cap.id)
-    .filter((id) => id !== 'core-utils')
-    .slice(0, 2)
-  if (projectRoot) {
-    for (const id of ['codegraph', 'workspace']) {
-      if (!preloadCandidates.includes(id)) preloadCandidates.push(id)
-    }
-  }
+  // Intent preload v2: builtins + skills + enabled plugins/MCP + project packs
+  // (use raw goal text for intent; attachment paths added later)
+  const preloadCandidates = buildIntentPreloadIds(text, settings, projectRoot, { max: 8 })
 
   if (runner !== 'builtin') {
     const kind = runner as LocalRunnerKind
@@ -116,6 +126,14 @@ export async function dispatchThreadTask(
         error: `執行引擎 ${kind} 未在設定中啟用/授權。請到設定 → CLI 提供者勾選授權並掃描。`,
       }
     }
+    // CLI path: materialize attachments to disk in Electron; pass serializable payloads
+    const cliAttachments = attachments.map((a) => ({
+      name: a.name,
+      mimeType: a.mimeType,
+      kind: a.kind,
+      dataUrl: a.dataUrl,
+      textContent: a.textContent,
+    }))
     await agent.startLocalCliExecution({
       kind,
       prompt: text,
@@ -126,6 +144,7 @@ export async function dispatchThreadTask(
       agentMode,
       approvalMode: settings.approvalMode,
       unattended: opts?.overrides?.unattended === true,
+      attachments: cliAttachments.length ? cliAttachments : undefined,
     })
     const a = useAgentStore.getState().agent
     return {
@@ -135,6 +154,17 @@ export async function dispatchThreadTask(
       result: a.result,
       error: a.haltReason,
     }
+  }
+
+  // Builtin: embed text files + multimodal images in the engine path
+  const appendix = [
+    attachmentsToTextAppendix(attachments),
+    attachmentsPathAppendix(attachments),
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  if (appendix) {
+    text = `${text}\n\n${appendix}`.slice(0, 120_000)
   }
 
   const baseOverrides: RuntimeOverrides = openCodeRuntimeOverrides({
@@ -183,6 +213,9 @@ export async function dispatchThreadTask(
       ...(opts?.overrides?.preloadUnlockedTools || []),
       ...threadUnlocks,
     ],
+    userAttachments: attachments.length
+      ? attachments
+      : opts?.overrides?.userAttachments,
   }
 
   const forceLoop =

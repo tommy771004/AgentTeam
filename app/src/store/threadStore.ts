@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type { SpeedMode, ThinkingDepth } from '../agent/thinking'
 import type { AgentMode, ExecutionStatus, LoopType } from '../agent/types'
+import type { ChatAttachment } from '../agent/types'
+import { sanitizeAttachmentsForStorage } from '../lib/chatAttachments'
 
 const KEY = 'subagents.threads.v5'
 
@@ -14,6 +16,8 @@ export type ThreadBubble = {
   role: 'user' | 'assistant' | 'system'
   content: string
   at: string
+  /** Optional user message attachments (images / files) */
+  attachments?: ChatAttachment[]
 }
 
 export type Thread = {
@@ -71,7 +75,12 @@ interface ThreadStore {
   setAgentMode: (id: string, mode: AgentMode) => void
   setRunner: (id: string, runner: ThreadRunner) => void
   setLoopType: (id: string, loop: LoopType | null) => void
-  pushBubble: (threadId: string, role: ThreadBubble['role'], content: string) => void
+  pushBubble: (
+    threadId: string,
+    role: ThreadBubble['role'],
+    content: string,
+    attachments?: ChatAttachment[],
+  ) => void
   clearBubbles: (threadId: string) => void
   setShowRunPanel: (v: boolean) => void
   setShowThreadList: (v: boolean) => void
@@ -280,18 +289,23 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     persist(threads, get().activeId)
   },
 
-  pushBubble: (threadId, role, content) => {
+  pushBubble: (threadId, role, content, attachments) => {
     const c = content.trim()
-    if (!c) return
+    const atts = attachments?.length ? attachments : undefined
+    if (!c && !atts?.length) return
     const bubble: ThreadBubble = {
       id: `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
       role,
-      content: c.slice(0, 8000),
+      content: (c || (atts?.length ? `（${atts.length} 個附件）` : '')).slice(0, 8000),
       at: new Date().toISOString(),
+      attachments: sanitizeAttachmentsForStorage(atts),
     }
     const threads = get().threads.map((t) => {
       if (t.id !== threadId) return t
-      const title = t.title === '新對話' && role === 'user' ? titleFromText(c) : t.title
+      const title =
+        t.title === '新對話' && role === 'user'
+          ? titleFromText(c || atts?.[0]?.name || '附件')
+          : t.title
       return {
         ...t,
         title,

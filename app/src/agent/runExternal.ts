@@ -6,7 +6,7 @@
  * When busy: automation sources enqueue (G3) instead of permanent miss.
  */
 
-import type { LoopType, RuntimeOverrides } from './types'
+import type { ChatAttachment, LoopType, RuntimeOverrides } from './types'
 import { dispatchThreadTask, type DispatchResult } from './runDispatch'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
@@ -29,6 +29,21 @@ export type ExternalRunOpts = {
   sourceLabel?: string
   /** Extra overrides merged into dispatch */
   overrides?: RuntimeOverrides
+  /** Pin project for this run (scheduler multi-project) */
+  projectRoot?: string
+  /** Chat attachments (Telegram images, etc.) */
+  attachments?: ChatAttachment[]
+  /** Extra context folded into system (webhook body, TG meta) */
+  extraContext?: string
+  /**
+   * Continue an existing thread (interactive follow-up queue).
+   * When set, does not create a new thread.
+   */
+  reuseThreadId?: string
+  /** User bubble already shown — skip duplicate on drain */
+  skipUserBubble?: boolean
+  /** Interactive: enqueue when busy even if not unattended automation */
+  enqueueWhenBusy?: boolean
   /** Navigate to home (caller may also navigate) */
   preferHome?: boolean
   /**
@@ -65,20 +80,32 @@ function isAutomationSource(opts: ExternalRunOpts): boolean {
     opts.unattended === true ||
     Boolean(
       opts.sourceLabel &&
-        /排程|定時|webhook|telegram|事件|scheduler|cron|gateway|TG\b|佇列/i.test(
+        /排程|定時|webhook|telegram|事件|scheduler|cron|gateway|TG\b|佇列|對話追問/i.test(
           opts.sourceLabel,
         ),
     )
   )
 }
 
+function shouldEnqueueWhenBusy(opts: ExternalRunOpts): boolean {
+  return (
+    isAutomationSource(opts) ||
+    opts.enqueueWhenBusy === true ||
+    Boolean(opts.reuseThreadId)
+  )
+}
+
 /**
  * Run an objective from automation/external source with full thread UX.
+ * Also used for interactive follow-ups (reuseThreadId + enqueueWhenBusy).
  */
 export async function runExternalObjective(
   opts: ExternalRunOpts,
 ): Promise<ExternalRunResult> {
-  const objective = opts.objective.trim()
+  let objective = opts.objective.trim()
+  if (!objective && opts.attachments?.length) {
+    objective = '請分析我附上的圖片或檔案。'
+  }
   if (!objective) {
     return {
       path: 'builtin',
@@ -88,17 +115,36 @@ export async function runExternalObjective(
     }
   }
 
+  // Materialize attachments early so queue persistence keeps filePath
+  let attachments = opts.attachments
+  if (attachments?.length) {
+    try {
+      const { materializeAttachmentsOnDisk } = await import('../lib/chatAttachments')
+      const { useProjectStore } = await import('../store/projectStore')
+      attachments = await materializeAttachmentsOnDisk(attachments, {
+        projectRoot: opts.projectRoot || useProjectStore.getState().root || undefined,
+        sessionId: opts.reuseThreadId || opts.meta?.scheduleJobId,
+      })
+    } catch {
+      /* keep original */
+    }
+  }
+
   const agent = useAgentStore.getState()
   if (agent.isRunning) {
-    // G3: automation → enqueue instead of permanent miss
-    if (isAutomationSource(opts) && !opts._fromQueue) {
-      const item = enqueueExternalRun({ ...opts, unattended: true })
+    // Unified queue: automation + interactive follow-up
+    if (shouldEnqueueWhenBusy(opts) && !opts._fromQueue) {
+      const item = enqueueExternalRun({
+        ...opts,
+        attachments,
+        unattended: opts.unattended ?? isAutomationSource(opts),
+      })
       if (item) {
         return {
           path: 'builtin',
           status: 'skipped',
           error: '已有任務執行中 — 已加入待跑佇列',
-          threadId: useThreadStore.getState().activeId,
+          threadId: opts.reuseThreadId || useThreadStore.getState().activeId,
           skipped: true,
           skipReason: 'queued',
           queued: true,
@@ -109,7 +155,7 @@ export async function runExternalObjective(
         path: 'builtin',
         status: 'skipped',
         error: '已有任務執行中（佇列已滿或重複）',
-        threadId: useThreadStore.getState().activeId,
+        threadId: opts.reuseThreadId || useThreadStore.getState().activeId,
         skipped: true,
         skipReason: 'busy',
       }
@@ -129,18 +175,39 @@ export async function runExternalObjective(
 
   const settings = useSettingsStore.getState().settings
   const loopType = opts.loopType || 'Goal-based'
-  const tid = thr.createThread({
-    title: (opts.title || objective).slice(0, 48),
-    loopType,
-    thinkingDepth: 'standard',
-  })
+
+  // Reuse existing thread (interactive follow-up) or create new
+  let tid = opts.reuseThreadId || ''
+  const existing = tid ? thr.threads.find((t) => t.id === tid) : null
+  if (!existing) {
+    tid = thr.createThread({
+      title: (opts.title || objective).slice(0, 48),
+      loopType,
+      thinkingDepth: 'standard',
+      runner: opts.runner || 'builtin',
+    })
+  }
   thr.selectThread(tid)
   if (opts.runner) thr.setRunner(tid, opts.runner)
   thr.setShowRunPanel(true)
   thr.setRunningThreadId(tid)
-  thr.pushBubble(tid, 'user', objective)
-  if (opts.sourceLabel) {
+  if (!opts.skipUserBubble) {
+    thr.pushBubble(tid, 'user', objective, attachments)
+  }
+  if (opts.sourceLabel && !opts.skipUserBubble) {
     thr.pushBubble(tid, 'system', opts.sourceLabel)
+  } else if (opts.sourceLabel && opts._fromQueue) {
+    thr.pushBubble(tid, 'system', opts.sourceLabel)
+  }
+  if (opts.extraContext?.trim() && !opts.skipUserBubble) {
+    thr.pushBubble(
+      tid,
+      'system',
+      `事件內容（節錄）\n${opts.extraContext.trim().slice(0, 2000)}`,
+    )
+  }
+  if (opts.projectRoot?.trim() && !opts.skipUserBubble) {
+    thr.pushBubble(tid, 'system', `專案綁定：${opts.projectRoot.trim()}`)
   }
   thr.setThreadStatus(tid, 'running')
 
@@ -152,6 +219,25 @@ export async function runExternalObjective(
 
   const sourceIsAutomation = isAutomationSource(opts)
 
+  // Hydrate image dataUrls from disk for builtin vision
+  if (attachments?.length) {
+    try {
+      const { hydrateAttachmentsFromDisk } = await import('../lib/chatAttachments')
+      attachments = await hydrateAttachmentsFromDisk(attachments)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const extraSystem = [
+    opts.overrides?.extraSystemContext,
+    opts.extraContext?.trim()
+      ? `## External event / channel context\n${opts.extraContext.trim().slice(0, 12_000)}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
   const overrides: RuntimeOverrides = {
     ...(opts.overrides || {}),
     eventPreMatched: opts.eventPreMatched ?? opts.overrides?.eventPreMatched,
@@ -160,6 +246,11 @@ export async function runExternalObjective(
     temporary,
     unattended: opts.overrides?.unattended ?? sourceIsAutomation,
     hitlTimeoutMs: opts.overrides?.hitlTimeoutMs,
+    projectRoot: opts.projectRoot?.trim() || opts.overrides?.projectRoot,
+    extraSystemContext: extraSystem || undefined,
+    userAttachments: attachments?.length
+      ? attachments
+      : opts.overrides?.userAttachments,
   }
 
   try {
@@ -168,6 +259,7 @@ export async function runExternalObjective(
       runner: opts.runner,
       overrides,
       forceLoopType: loopType,
+      attachments,
     })
     const status = useAgentStore.getState().agent.status
     thr.setThreadStatus(tid, status)
@@ -185,7 +277,6 @@ export async function runExternalObjective(
     } catch {
       /* caller errors non-fatal */
     }
-    // Drain automation queue after free (preserves onSettled on queued items)
     void drainExternalRunQueue((o) =>
       runExternalObjective({ ...o, _fromQueue: true }),
     )

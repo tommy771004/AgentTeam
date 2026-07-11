@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { CommandComposer } from '../components/CommandComposer'
 import { ThreadSidebar } from '../components/ThreadSidebar'
@@ -12,6 +12,7 @@ import { useAgentStore } from '../store/agentStore'
 import { useSlashExecutor } from '../hooks/useSlashExecutor'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { useSettingsStore } from '../store/settingsStore'
+import { useLearningStore } from '../store/learningStore'
 import { inferRunnerFromModel } from '../agent/localCliRun'
 import type { AgentMode, LoopType } from '../agent/types'
 import type { ThinkingDepth } from '../agent/thinking'
@@ -23,6 +24,21 @@ import {
 } from '../agent/opencode/agents'
 import { dispatchThreadTask } from '../agent/runDispatch'
 import { loopTypeZh } from '../i18n/zh'
+import {
+  countReadyConnectors,
+  listPrimaryAbilities,
+  type CapabilityCard,
+  type CapabilityReadyState,
+} from '../lib/capabilityStatus'
+import type { ChatAttachment } from '../agent/types'
+import {
+  defaultGoalForAttachments,
+  materializeAttachmentsOnDisk,
+} from '../lib/chatAttachments'
+import { useProjectStore } from '../store/projectStore'
+import { queueLength, subscribeRunQueue } from '../agent/runQueue'
+import { RunQueueStrip } from '../components/RunQueueStrip'
+import { AttachmentThumb } from '../components/AttachmentThumb'
 
 const MODES: Array<{ type: LoopType; label: string }> = [
   { type: 'Goal-based', label: '目標' },
@@ -39,6 +55,28 @@ const SUGGESTIONS = [
   { text: '/model', icon: 'smart_toy' },
   { text: '/help', icon: 'help' },
 ]
+
+const ABILITY_STATE_LABEL: Record<CapabilityReadyState, string> = {
+  ready: '可用',
+  needs_auth: '需授權',
+  not_installed: '可安裝',
+  optional_extra: '內建',
+}
+
+const ABILITY_ICON: Record<string, string> = {
+  github: 'code',
+  notion: 'description',
+  web: 'public',
+  workspace: 'folder_open',
+}
+
+function focusComposerWithDraft(text: string) {
+  window.dispatchEvent(
+    new CustomEvent('subagents:focus-composer', {
+      detail: { openSlash: text.startsWith('/') },
+    }),
+  )
+}
 
 /**
  * OpenCode 風格：Build/Plan + 模型/深度 + Threads + 內嵌執行
@@ -57,6 +95,13 @@ export function ProtocolsPage() {
   const { run: runSlash } = useSlashExecutor()
   const settings = useSettingsStore((s) => s.settings)
   const updateSettings = useSettingsStore((s) => s.update)
+  const plugins = useLearningStore((s) => s.plugins)
+  const loadLearning = useLearningStore((s) => s.load)
+  const primaryAbilities = useMemo(() => listPrimaryAbilities(plugins), [plugins])
+  const projectRoot = useProjectStore((s) => s.root)
+  const readyCaps = useMemo(() => countReadyConnectors(plugins), [plugins])
+  const fcOn = settings.functionCalling !== false
+  const toolsOn = settings.toolsEnabled !== false
 
   const {
     hydrate,
@@ -83,13 +128,23 @@ export function ProtocolsPage() {
   const setSessionAllow = usePermissionAskStore((s) => s.setSessionAllow)
 
   const scrollRef = useRef<HTMLDivElement>(null)
-  /** Follow-up queue while agent is busy (ChatGPT Queue mode) */
-  const followUpQueue = useRef<string[]>([])
+  /** Ability-card try → force preload on next run */
+  const pendingPreloadIds = useRef<string[]>([])
+  const [globalQueueLen, setGlobalQueueLen] = useState(0)
   const thread = activeThread()
+
+  useEffect(() => {
+    setGlobalQueueLen(queueLength())
+    return subscribeRunQueue(() => setGlobalQueueLen(queueLength()))
+  }, [])
 
   useEffect(() => {
     hydrate()
   }, [hydrate])
+
+  useEffect(() => {
+    void loadLearning()
+  }, [loadLearning])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -168,31 +223,68 @@ export function ProtocolsPage() {
     },
   ]
 
-  const runEmbedded = async (goal: string) => {
-    const raw = goal.trim()
-    if (!raw || raw.startsWith('/')) return
+  const runEmbedded = async (
+    goal: string,
+    attachmentsIn: ChatAttachment[] = [],
+    preloadIds?: string[],
+  ) => {
+    let raw = goal.trim()
+    if (raw.startsWith('/')) return
+    let attachments = attachmentsIn
+    if (!raw && attachments.length) {
+      raw = defaultGoalForAttachments(attachments)
+    }
+    if (!raw) return
     if (!activeId) return
 
-    // ChatGPT-style follow-up while running
+    // Persist attachments to disk early (bubble + queue + vision share filePath)
+    if (attachments.length) {
+      attachments = await materializeAttachmentsOnDisk(attachments, {
+        projectRoot: projectRoot || undefined,
+        sessionId: activeId,
+      })
+    }
+
+    const forcePreload = [
+      ...(preloadIds || []),
+      ...pendingPreloadIds.current,
+    ].filter(Boolean)
+    pendingPreloadIds.current = []
+
+    // ChatGPT-style follow-up while running → unified global queue
     const running =
       busy || isRunning || useAgentStore.getState().isRunning
     if (running) {
       const mode = settings.followUpMode || 'steer'
       if (mode === 'queue') {
-        pushBubble(activeId, 'user', raw)
+        pushBubble(activeId, 'user', raw, attachments)
+        const { runExternalObjective } = await import('../agent/runExternal')
+        const r = await runExternalObjective({
+          objective: raw,
+          reuseThreadId: activeId,
+          runner,
+          attachments,
+          enqueueWhenBusy: true,
+          skipUserBubble: true,
+          unattended: false,
+          sourceLabel: '對話追問',
+          overrides: forcePreload.length
+            ? { preloadCapabilityIds: forcePreload }
+            : undefined,
+        })
         pushBubble(
           activeId,
           'system',
-          `已加入佇列（第 ${followUpQueue.current.length + 1} 則），目前任務完成後執行`,
+          r.queued
+            ? `已加入全域待跑佇列（約 ${queueLength()} 則），目前任務完成後自動執行`
+            : r.error || '忙碌中',
         )
-        followUpQueue.current.push(raw)
         setDraftInput('')
         return
       }
       // steer: stop current run and start with new goal
       pushBubble(activeId, 'system', '轉向目前執行：已中止前一個任務')
       useAgentStore.getState().stopExecution()
-      followUpQueue.current = []
       // brief yield so engine fully stops
       await new Promise((r) => setTimeout(r, 80))
     }
@@ -203,7 +295,7 @@ export function ProtocolsPage() {
 
     setBusy(true)
     setDraftInput('')
-    pushBubble(activeId, 'user', raw)
+    pushBubble(activeId, 'user', raw, attachments)
     setShowRunPanel(true)
     setRunningThreadId(activeId)
     setThreadStatus(activeId, 'running')
@@ -215,16 +307,37 @@ export function ProtocolsPage() {
     if (settings.temporaryChatDefault) {
       pushBubble(activeId, 'system', '臨時對話：本次不讀寫跨對話記憶')
     }
-
+    if (forcePreload.length) {
+      pushBubble(
+        activeId,
+        'system',
+        `強制預載能力：${forcePreload.join(', ')}`,
+      )
+    }
+    if (runner === 'builtin' && (!fcOn || !toolsOn)) {
+      pushBubble(
+        activeId,
+        'system',
+        '提示：函式呼叫/工具已關閉 — MCP 漸進載入與 connector fallback 會降級；圖片仍盡力以 multimodal 送出。',
+      )
+    }
     try {
       if (runner !== 'builtin') {
         pushBubble(
           activeId,
           'system',
-          `執行引擎：本機 ${runner} CLI（使用既有登入，不複製 token）`,
+          attachments.length
+            ? `執行引擎：本機 ${runner} CLI · 附件 ${attachments.length} 個將寫入 .subagents/chat-attachments/ 供 CLI 讀取`
+            : `執行引擎：本機 ${runner} CLI（使用既有登入，不複製 token）`,
         )
       }
-      const dispatched = await dispatchThreadTask(raw, { threadId: activeId })
+      const dispatched = await dispatchThreadTask(raw, {
+        threadId: activeId,
+        attachments,
+        overrides: forcePreload.length
+          ? { preloadCapabilityIds: forcePreload }
+          : undefined,
+      })
       if (dispatched.error && !dispatched.result && dispatched.status === 'failed') {
         pushBubble(activeId, 'system', dispatched.error)
         setThreadStatus(activeId, 'failed')
@@ -256,13 +369,7 @@ export function ProtocolsPage() {
       setBusy(false)
       setRunningThreadId(null)
       setShowRunPanel(true)
-      // Drain follow-up queue
-      const next = followUpQueue.current.shift()
-      if (next) {
-        requestAnimationFrame(() => {
-          void runEmbedded(next)
-        })
-      }
+      // Global queue drained by agentStore when isRunning clears
     }
   }
 
@@ -508,33 +615,72 @@ export function ProtocolsPage() {
                     今天要完成什麼？
                   </h1>
                   <p className="text-sm text-on-surface-variant max-w-md mb-2">
-                    <strong className="text-on-surface">Build</strong> 實作 ·{' '}
-                    <strong className="text-on-surface">Plan</strong> 唯讀規劃 · 設定模型與深度。
-                    執行在右側，不跳頁。
+                    直接下任務即可——GitHub、Notion 等連線授權後，不必再管底層工具。
+                    <strong className="text-on-surface"> Build</strong> 實作 ·{' '}
+                    <strong className="text-on-surface">Plan</strong> 規劃。
                   </p>
                   <p className="text-[11px] text-outline mb-6 font-[family-name:var(--font-mono)]">
                     {agentDef.label} · {effectiveModel} · {depthDef.label}
                   </p>
-                  {settings.ambientSuggestions !== false && (
+
+                  {/* Task-first ability chips — no MCP jargon */}
+                  <div className="w-full mb-5">
+                    <div className="flex items-center justify-between gap-2 mb-2 px-0.5">
+                      <p className="text-[11px] font-semibold tracking-wide text-outline uppercase">
+                        直接試用
+                      </p>
+                      <a
+                        href="#/learning?tab=plugins"
+                        className="text-[11px] font-semibold text-primary hover:underline"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          window.location.hash = '#/learning?tab=plugins'
+                        }}
+                      >
+                        擴充能力 →
+                      </a>
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
-                      {SUGGESTIONS.map((s) => (
-                        <button
-                          key={s.text}
-                          type="button"
-                          onClick={() => {
-                            setDraftInput(s.text)
-                            window.dispatchEvent(
-                              new CustomEvent('subagents:focus-composer', {
-                                detail: { openSlash: s.text.startsWith('/') },
-                              }),
-                            )
+                      {primaryAbilities.map((ability) => (
+                        <AbilityTryCard
+                          key={ability.id}
+                          ability={ability}
+                          onTry={() => {
+                            pendingPreloadIds.current = [
+                              ...ability.preloadCapabilityIds,
+                            ]
+                            setDraftInput(ability.tryPrompt)
+                            focusComposerWithDraft(ability.tryPrompt)
                           }}
-                          className="text-left px-3 py-2.5 rounded-xl border border-white/10 bg-surface-container/50 hover:border-primary/30 flex items-start gap-2"
-                        >
-                          <Icon name={s.icon} size={16} className="text-outline mt-0.5 shrink-0" />
-                          <span className="text-xs text-on-surface-variant">{s.text}</span>
-                        </button>
+                          onSetup={() => {
+                            window.location.hash = '#/learning?tab=plugins'
+                          }}
+                        />
                       ))}
+                    </div>
+                  </div>
+
+                  {settings.ambientSuggestions !== false && (
+                    <div className="w-full">
+                      <p className="text-[11px] font-semibold tracking-wide text-outline uppercase mb-2 text-left px-0.5">
+                        快捷建議
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+                        {SUGGESTIONS.map((s) => (
+                          <button
+                            key={s.text}
+                            type="button"
+                            onClick={() => {
+                              setDraftInput(s.text)
+                              focusComposerWithDraft(s.text)
+                            }}
+                            className="text-left px-3 py-2.5 rounded-xl border border-white/10 bg-surface-container/50 hover:border-primary/30 flex items-start gap-2"
+                          >
+                            <Icon name={s.icon} size={16} className="text-outline mt-0.5 shrink-0" />
+                            <span className="text-xs text-on-surface-variant">{s.text}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {threads.length > 1 && (
@@ -551,7 +697,7 @@ export function ProtocolsPage() {
                       className={`flex w-full ${b.role === 'user' ? 'justify-end' : 'justify-start'}`}
                     >
                       <div
-                        className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words box-border ${
+                        className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words box-border ${
                           b.role === 'user'
                             ? 'max-w-[85%] bg-primary/15 border border-primary/25'
                             : b.role === 'system'
@@ -564,7 +710,14 @@ export function ProtocolsPage() {
                             {b.role === 'system' ? 'system' : 'assistant'}
                           </div>
                         )}
-                        {b.content}
+                        {b.attachments && b.attachments.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            {b.attachments.map((a) => (
+                              <AttachmentThumb key={a.id} attachment={a} />
+                            ))}
+                          </div>
+                        )}
+                        <div className="whitespace-pre-wrap">{b.content}</div>
                       </div>
                     </div>
                   ))}
@@ -590,6 +743,55 @@ export function ProtocolsPage() {
             {/* 輸入外框：與上方對話欄同寬（同一 chat-column 內容寬） */}
             <div className="shrink-0 w-full pt-3 pb-4 space-y-2 border-t border-white/8">
               <ProjectContextBar />
+              <RunQueueStrip compact className="mb-0" />
+              {/* Feature matrix — path capabilities at a glance */}
+              <div className="flex flex-wrap items-center gap-1.5 px-0.5 text-[10px]">
+                <StatusPill
+                  ok={runner === 'builtin'}
+                  label={runner === 'builtin' ? '內建引擎' : `CLI · ${runner}`}
+                  title={
+                    runner === 'builtin'
+                      ? '完整工具 · 能力包 · HITL'
+                      : '本機 CLI：無內建 MCP/connector 工具生態'
+                  }
+                />
+                <StatusPill
+                  ok={fcOn && toolsOn && runner === 'builtin'}
+                  label={
+                    runner !== 'builtin'
+                      ? 'CLI 模式'
+                      : !toolsOn
+                        ? '工具關'
+                        : fcOn
+                          ? 'FC 開'
+                          : 'FC 關 · 降級'
+                  }
+                  title={
+                    runner !== 'builtin'
+                      ? 'CLI 不跑內建 function-calling 迴圈'
+                      : fcOn && toolsOn
+                        ? 'Function calling + 工具已啟用'
+                        : '關 FC/工具時無 MCP 漸進載入與多模態圖'
+                  }
+                />
+                <StatusPill
+                  ok={Boolean(projectRoot)}
+                  label={projectRoot ? '專案已選' : '未選專案'}
+                  title={projectRoot || '選專案後檔案工具 / 部分 MCP 才對準工作區'}
+                />
+                <StatusPill
+                  ok={readyCaps > 0}
+                  label={readyCaps > 0 ? `已授權 ${readyCaps}` : '未授權連線'}
+                  title="已授權的 connector（GitHub / Notion…）"
+                />
+                {globalQueueLen > 0 && (
+                  <StatusPill
+                    ok
+                    label={`佇列 ${globalQueueLen}`}
+                    title="全域待跑佇列（自動化 + 對話追問共用）· 見自動化頁"
+                  />
+                )}
+              </div>
               <CommandComposer
                 value={draftInput}
                 onChange={setDraftInput}
@@ -605,7 +807,7 @@ export function ProtocolsPage() {
                     : '什麼都能做'
                 }
                 enterBehavior={settings.enterBehavior || 'enter'}
-                onSubmitLine={(line) => void runEmbedded(line)}
+                onSubmitLine={(line, atts) => void runEmbedded(line, atts)}
                 onSlashCommand={async (cmd, args, raw) => {
                   if (activeId) pushBubble(activeId, 'user', raw)
                   if (cmd.name === 'clear' && activeId) clearBubbles(activeId)
@@ -663,6 +865,86 @@ export function ProtocolsPage() {
           <TerminalPanel onClose={() => setShowTerminal(false)} />
         </aside>
       )}
+    </div>
+  )
+}
+
+function StatusPill({
+  ok,
+  label,
+  title,
+}: {
+  ok: boolean
+  label: string
+  title?: string
+}) {
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center px-2 py-0.5 rounded-full border font-medium ${
+        ok
+          ? 'border-primary/25 bg-primary/10 text-primary'
+          : 'border-white/10 bg-white/5 text-outline'
+      }`}
+    >
+      {label}
+    </span>
+  )
+}
+
+function AbilityTryCard({
+  ability,
+  onTry,
+  onSetup,
+}: {
+  ability: CapabilityCard
+  onTry: () => void
+  onSetup: () => void
+}) {
+  const needsSetup = ability.state === 'needs_auth' || ability.state === 'not_installed'
+  const stateCls =
+    ability.state === 'ready'
+      ? 'text-primary bg-primary/10 border-primary/20'
+      : ability.state === 'needs_auth' || ability.state === 'not_installed'
+        ? 'text-amber-200/90 bg-amber-500/10 border-amber-500/20'
+        : 'text-outline bg-white/5 border-white/10'
+
+  return (
+    <div className="text-left px-3 py-2.5 rounded-xl border border-white/10 bg-surface-container/50 hover:border-primary/25 transition-colors">
+      <div className="flex items-start gap-2">
+        <Icon
+          name={ABILITY_ICON[ability.id] || 'extension'}
+          size={16}
+          className="text-outline mt-0.5 shrink-0"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-semibold text-on-surface">{ability.title}</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${stateCls}`}>
+              {ABILITY_STATE_LABEL[ability.state]}
+            </span>
+          </div>
+          <p className="text-[11px] text-on-surface-variant/90 mt-0.5 leading-snug">{ability.blurb}</p>
+          <div className="flex flex-wrap gap-2 mt-2">
+            <button
+              type="button"
+              onClick={onTry}
+              className="text-[11px] font-semibold text-primary hover:underline"
+            >
+              填入試用句
+            </button>
+            {needsSetup && (
+              <button
+                type="button"
+                onClick={onSetup}
+                className="text-[11px] font-semibold text-on-surface-variant hover:text-primary hover:underline"
+              >
+                去授權
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -9,6 +9,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { runBash } from './shellBridge'
+import {
+  executableLookupCommand,
+  firstExecutablePath,
+  isWindows,
+  quoteShellArg,
+} from './platformProcess'
 
 export type OpenCodeAgentFile = {
   id: string
@@ -320,18 +326,19 @@ export async function detectOpenCodeCli(): Promise<{
   version: string | null
 }> {
   const candidates =
-    process.platform === 'win32'
+    isWindows
       ? ['opencode.cmd', 'opencode.exe', 'opencode']
       : ['opencode']
 
   for (const bin of candidates) {
     const r = await runBash({
-      command: process.platform === 'win32' ? `where ${bin}` : `command -v ${bin}`,
+      command: executableLookupCommand(bin),
       timeoutMs: 5000,
     })
     if (r.ok && r.stdout.trim()) {
-      const p = r.stdout.trim().split(/\r?\n/)[0]
-      const ver = await runBash({ command: `"${p}" --version`, timeoutMs: 8000 })
+      const p = firstExecutablePath(r.stdout)
+      if (!p) continue
+      const ver = await runBash({ command: `${quoteShellArg(p)} --version`, timeoutMs: 8000 })
       return {
         found: true,
         path: p,
@@ -351,13 +358,20 @@ export async function runOpenCodePrompt(input: {
   if (!det.found || !det.path) {
     return { ok: false, output: '', error: 'opencode CLI 未安裝或不在 PATH' }
   }
-  const prompt = input.prompt.replace(/"/g, '\\"').slice(0, 4000)
-  const cmd = `"${det.path}" run ${JSON.stringify(input.prompt).slice(0, 4100)} 2>&1 || "${det.path}" ${JSON.stringify(prompt)} 2>&1`
-  const r = await runBash({
-    command: cmd,
+  const prompt = input.prompt.slice(0, 4000)
+  const binary = quoteShellArg(det.path)
+  let r = await runBash({
+    command: `${binary} run ${quoteShellArg(prompt)}`,
     cwd: input.cwd,
     timeoutMs: input.timeoutMs || 120_000,
   })
+  if (!r.ok) {
+    r = await runBash({
+      command: `${binary} ${quoteShellArg(prompt)}`,
+      cwd: input.cwd,
+      timeoutMs: input.timeoutMs || 120_000,
+    })
+  }
   const output = (r.stdout || r.stderr || '').slice(0, 50_000)
   return {
     ok: r.ok,

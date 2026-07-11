@@ -5,8 +5,6 @@
  */
 
 import assert from 'node:assert/strict'
-import { createRequire } from 'node:module'
-import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -14,9 +12,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.resolve(__dirname, '..')
 
 let passed = 0
-function test(name, fn) {
+let skipped = 0
+
+async function test(name, fn) {
   try {
-    fn()
+    const result = await fn()
+    if (result?.skipped) {
+      console.log(`  · ${name} (skipped: ${result.reason})`)
+      skipped++
+      return
+    }
     console.log(`  ✓ ${name}`)
     passed++
   } catch (e) {
@@ -45,7 +50,7 @@ function alignKeepStart(body, keepRecent) {
   return start
 }
 
-test('alignKeepStart does not orphan tool messages', () => {
+await test('alignKeepStart does not orphan tool messages', () => {
   const body = [
     { role: 'user', content: 'hi' },
     { role: 'assistant', content: null, tool_calls: [{ id: '1', type: 'function', function: { name: 'bash', arguments: '{}' } }] },
@@ -81,7 +86,7 @@ function stripBlockedCaps(all, blockedTools) {
     })
 }
 
-test('blockedTools strips empty capabilities from catalog', () => {
+await test('blockedTools strips empty capabilities from catalog', () => {
   const all = [
     { id: 'skills', tools: ['skill_list', 'skill_save'], source: 'builtin' },
     { id: 'core-utils', tools: ['datetime_now'], source: 'builtin' },
@@ -102,7 +107,7 @@ function approvalRequiredFor(state, toolName) {
   )
 }
 
-test('approvalRequiredFor only when capability active', () => {
+await test('approvalRequiredFor only when capability active', () => {
   const state = {
     all: [
       { id: 'shell', deferLoading: true, approvalTools: ['bash'] },
@@ -126,7 +131,7 @@ function preloadCapabilities(intentTools, capabilities, projectRoot) {
   return selected
 }
 
-test('intent preload is capped and project preload adds codegraph/workspace', () => {
+await test('intent preload is capped and project preload adds codegraph/workspace', () => {
   const capabilities = [
     { id: 'core-utils', tools: ['datetime_now'] },
     { id: 'web-research', tools: ['web_search'] },
@@ -146,7 +151,7 @@ function recommendToolTuning(model) {
   return { threshold: 24, payload: 50, rounds: 4 }
 }
 
-test('model tuning preserves baseline and shrinks small-context budgets', () => {
+await test('model tuning preserves baseline and shrinks small-context budgets', () => {
   assert.deepEqual(recommendToolTuning('unknown'), { threshold: 24, payload: 50, rounds: 4 })
   assert.deepEqual(recommendToolTuning('model-16k'), { threshold: 12, payload: 24, rounds: 3 })
   assert.deepEqual(recommendToolTuning('model-128k'), { threshold: 36, payload: 64, rounds: 6 })
@@ -164,7 +169,7 @@ function applyToolSearchVisibility(state, defs, threshold) {
   return { defs: kept, hiddenCount: defs.length - kept.length }
 }
 
-test('tool search hides over threshold except unlocked/always-on', () => {
+await test('tool search hides over threshold except unlocked/always-on', () => {
   const defs = [
     { name: 'load_capability' },
     { name: 'datetime_now' },
@@ -194,7 +199,7 @@ function dedupeKey(opts) {
   ].join('|')
 }
 
-test('automation queue dedupe key', () => {
+await test('automation queue dedupe key', () => {
   const a = dedupeKey({ objective: '  run me  ', loopType: 'Time-based', sourceLabel: 'cron' })
   const b = dedupeKey({ objective: 'run me', loopType: 'Time-based', sourceLabel: 'cron' })
   assert.equal(a, b)
@@ -202,7 +207,7 @@ test('automation queue dedupe key', () => {
   assert.notEqual(a, c)
 })
 
-test('runQueue remove/clear/hydrate APIs exist in source', async () => {
+await test('runQueue remove/clear/hydrate APIs exist in source', async () => {
   const fs = await import('node:fs')
   const p = path.join(appRoot, 'src/agent/runQueue.ts')
   const src = fs.readFileSync(p, 'utf8')
@@ -213,7 +218,7 @@ test('runQueue remove/clear/hydrate APIs exist in source', async () => {
   assert.match(src, /skipReason:\s*'cancelled'/)
 })
 
-test('permissionAskStore tracks timedOut + runStats for archive', async () => {
+await test('permissionAskStore tracks timedOut + runStats for archive', async () => {
   const fs = await import('node:fs')
   const p = path.join(appRoot, 'src/store/permissionAskStore.ts')
   const src = fs.readFileSync(p, 'utf8')
@@ -226,7 +231,7 @@ test('permissionAskStore tracks timedOut + runStats for archive', async () => {
 })
 
 // ── codeMode worker source must disable fetch ──
-test('codeMode worker source disables fetch', async () => {
+await test('codeMode worker source disables fetch', async () => {
   const fs = await import('node:fs')
   const p = path.join(appRoot, 'src/agent/tools/codeMode.ts')
   const src = fs.readFileSync(p, 'utf8')
@@ -261,7 +266,7 @@ function effectiveApprovalMode(mode, unattended) {
   return m
 }
 
-test('approvalMode: full skips asks, always asks side-effect tools, auto passes through', () => {
+await test('approvalMode: full skips asks, always asks side-effect tools, auto passes through', () => {
   // full 模式：即使 capability/pattern 要求 ask 也放行
   assert.equal(decideApprovalNeed('full', 'run_code', true), false)
   assert.equal(decideApprovalNeed('full', 'bash', true), false)
@@ -278,7 +283,7 @@ test('approvalMode: full skips asks, always asks side-effect tools, auto passes 
   assert.equal(decideApprovalNeed('auto', 'workspace_write', false), false)
 })
 
-test('approvalMode: unattended downgrades full → auto (never unsupervised full access)', () => {
+await test('approvalMode: unattended downgrades full → auto (never unsupervised full access)', () => {
   assert.equal(effectiveApprovalMode('full', true), 'auto')
   assert.equal(effectiveApprovalMode('full', false), 'full')
   assert.equal(effectiveApprovalMode('always', true), 'always')
@@ -295,7 +300,7 @@ function resolveCliApproval(kind, mode, unattended, agentMode) {
   return { mode: 'auto', permissive: false }
 }
 
-test('CLI approval mapping permits only interactive Codex/Claude full mode', async () => {
+await test('CLI approval mapping permits only interactive Codex/Claude full mode', async () => {
   assert.deepEqual(resolveCliApproval('codex', 'full', false, 'build'), { mode: 'full', permissive: true })
   assert.deepEqual(resolveCliApproval('claude', 'full', false, 'build'), { mode: 'full', permissive: true })
   assert.deepEqual(resolveCliApproval('codex', 'full', true, 'build'), { mode: 'auto', permissive: false })
@@ -308,7 +313,7 @@ test('CLI approval mapping permits only interactive Codex/Claude full mode', asy
   assert.match(source, /Safe fallback is intentional/)
 })
 
-test('custom tools: bash_template always approval-gated; toolLoop passes sideEffect hint', async () => {
+await test('custom tools: bash_template always approval-gated; toolLoop passes sideEffect hint', async () => {
   const fs = await import('node:fs')
   const custom = fs.readFileSync(path.join(appRoot, 'src/agent/tools/customTools.ts'), 'utf8')
   assert.match(custom, /kind === 'bash_template' \|\| tool\.requiresApproval === true/)
@@ -318,7 +323,7 @@ test('custom tools: bash_template always approval-gated; toolLoop passes sideEff
   assert.match(loop, /sideEffect: Boolean\(ctx\.customMap\.get\(name\)\)/)
 })
 
-test('side-effect drift guard: every registry tool is read-only OR classified', async () => {
+await test('side-effect drift guard: every registry tool is read-only OR classified', async () => {
   const fs = await import('node:fs')
   const registry = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registry.ts'), 'utf8')
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
@@ -356,7 +361,7 @@ test('side-effect drift guard: every registry tool is read-only OR classified', 
   )
 })
 
-test('toolGuard source wires decideApprovalNeed + full-mode safety bypass exists in engine', async () => {
+await test('toolGuard source wires decideApprovalNeed + full-mode safety bypass exists in engine', async () => {
   const fs = await import('node:fs')
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
   assert.match(guard, /decideApprovalNeed/)
@@ -365,7 +370,7 @@ test('toolGuard source wires decideApprovalNeed + full-mode safety bypass exists
   assert.match(engine, /approvalMode === 'full'/)
 })
 
-console.log(`\n${passed} capability smoke tests passed`)
+console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)
 if (process.exitCode) {
   console.error('Capability smoke failed')
 } else {

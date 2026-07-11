@@ -8,6 +8,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { runBash } from './shellBridge'
 import { scanOpenCodeAgents } from './opencodeBridge'
+import { executableLookupCommand, firstExecutablePath } from './platformProcess'
 
 export type DiscoveredModel = {
   id: string
@@ -95,10 +96,10 @@ async function which(bin: string): Promise<string | null> {
     }
   }
   const r = await runBash({
-    command: process.platform === 'win32' ? `where ${bin}` : `command -v ${bin}`,
+    command: executableLookupCommand(bin),
     timeoutMs: 4000,
   })
-  const p = r.stdout.trim().split(/\r?\n/)[0]
+  const p = firstExecutablePath(r.stdout)
   return r.ok && p ? p : null
 }
 
@@ -187,7 +188,7 @@ function isPlausibleClaudeModelId(id: string): boolean {
   const mid = id.trim()
   if (!mid || mid.length > 80) return false
   if (/\.(md|json|js|ts)$/i.test(mid)) return false
-  if (/[\/\\]/.test(mid)) return false
+  if (/[/\\]/.test(mid)) return false
   if (/mythos/i.test(mid)) return false // org-only tier; not general picker
   // family aliases accepted by `claude --model`
   if (/^(sonnet|opus|haiku|fable|best)$/i.test(mid)) return true

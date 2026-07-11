@@ -4,7 +4,8 @@
  * Stdio servers go through Electron main process.
  */
 
-import type { McpServerConfig, McpToolInfo } from '../types'
+import type { LlmSettings, McpServerConfig, McpToolInfo } from '../types'
+import { enrichMcpServerWithSecrets, mcpServerMissingSecret } from './mcpSecrets'
 
 export interface McpCallResult {
   ok: boolean
@@ -57,21 +58,32 @@ async function httpRpc(
   return data.result
 }
 
-export async function mcpListTools(server: McpServerConfig): Promise<McpToolInfo[]> {
+export async function mcpListTools(
+  server: McpServerConfig,
+  settings?: Partial<LlmSettings> | null,
+): Promise<McpToolInfo[]> {
   if (!server.enabled) return []
+  const missing = mcpServerMissingSecret(server, settings)
+  if (missing) {
+    throw new Error(
+      `MCP「${server.name}」缺少授權密鑰（${missing}）。請先在市集授權對應 connector。`,
+    )
+  }
+  const s = enrichMcpServerWithSecrets(server, settings)
 
-  if (server.transport === 'stdio') {
+  if (s.transport === 'stdio') {
     if (!window.subagents?.mcp?.stdioListTools) {
       throw new Error('stdio MCP 僅支援 Electron 環境')
     }
     const tools = await window.subagents.mcp.stdioListTools({
-      id: server.id,
-      command: server.command || '',
-      args: server.args || [],
+      id: s.id,
+      command: s.command || '',
+      args: s.args || [],
+      env: s.env,
     })
     return tools.map((t) => ({
-      serverId: server.id,
-      serverName: server.name,
+      serverId: s.id,
+      serverName: s.name,
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
@@ -80,7 +92,7 @@ export async function mcpListTools(server: McpServerConfig): Promise<McpToolInfo
 
   // Initialize handshake (best-effort for servers that require it)
   try {
-    await httpRpc(server, 'initialize', {
+    await httpRpc(s, 'initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
       clientInfo: { name: 'subagents-ai', version: '1.0.0' },
@@ -89,12 +101,12 @@ export async function mcpListTools(server: McpServerConfig): Promise<McpToolInfo
     /* some servers don't need initialize on same HTTP endpoint */
   }
 
-  const result = (await httpRpc(server, 'tools/list', {})) as {
+  const result = (await httpRpc(s, 'tools/list', {})) as {
     tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>
   }
   return (result.tools || []).map((t) => ({
-    serverId: server.id,
-    serverName: server.name,
+    serverId: s.id,
+    serverName: s.name,
     name: t.name,
     description: t.description,
     inputSchema: t.inputSchema,
@@ -105,25 +117,36 @@ export async function mcpCallTool(
   server: McpServerConfig,
   toolName: string,
   args: Record<string, unknown>,
+  settings?: Partial<LlmSettings> | null,
 ): Promise<McpCallResult> {
   if (!server.enabled) return { ok: false, content: '', error: 'server disabled' }
+  const missing = mcpServerMissingSecret(server, settings)
+  if (missing) {
+    return {
+      ok: false,
+      content: '',
+      error: `MCP「${server.name}」缺少授權密鑰（${missing}）。請先在市集授權對應 connector。`,
+    }
+  }
+  const s = enrichMcpServerWithSecrets(server, settings)
 
   try {
-    if (server.transport === 'stdio') {
+    if (s.transport === 'stdio') {
       if (!window.subagents?.mcp?.stdioCallTool) {
         return { ok: false, content: '', error: 'stdio MCP 僅支援 Electron' }
       }
       const r = await window.subagents.mcp.stdioCallTool({
-        id: server.id,
-        command: server.command || '',
-        args: server.args || [],
+        id: s.id,
+        command: s.command || '',
+        args: s.args || [],
+        env: s.env,
         toolName,
         arguments: args,
       })
       return r
     }
 
-    const result = await httpRpc(server, 'tools/call', {
+    const result = await httpRpc(s, 'tools/call', {
       name: toolName,
       arguments: args,
     })
@@ -150,11 +173,14 @@ function formatMcpContent(result: unknown): string {
   return JSON.stringify(result, null, 2).slice(0, 8000)
 }
 
-export async function listAllMcpTools(servers: McpServerConfig[]): Promise<McpToolInfo[]> {
+export async function listAllMcpTools(
+  servers: McpServerConfig[],
+  settings?: Partial<LlmSettings> | null,
+): Promise<McpToolInfo[]> {
   const out: McpToolInfo[] = []
   for (const s of servers.filter((x) => x.enabled)) {
     try {
-      const tools = await mcpListTools(s)
+      const tools = await mcpListTools(s, settings)
       out.push(...tools)
     } catch (e) {
       out.push({
@@ -169,18 +195,23 @@ export async function listAllMcpTools(servers: McpServerConfig[]): Promise<McpTo
 }
 
 /** Ensure long-lived stdio session (Phase 5) */
-export async function mcpEnsureSession(server: McpServerConfig) {
+export async function mcpEnsureSession(
+  server: McpServerConfig,
+  settings?: Partial<LlmSettings> | null,
+) {
   if (server.transport !== 'stdio') {
     return { ok: false, error: '僅 stdio 支援長連線 session' }
   }
   if (!window.subagents?.mcp?.stdioEnsure) {
     return { ok: false, error: 'stdio session 僅 Electron' }
   }
+  const s = enrichMcpServerWithSecrets(server, settings)
   try {
     const st = await window.subagents.mcp.stdioEnsure({
-      id: server.id,
-      command: server.command || '',
-      args: server.args || [],
+      id: s.id,
+      command: s.command || '',
+      args: s.args || [],
+      env: s.env,
     })
     return { ok: true, status: st }
   } catch (e) {

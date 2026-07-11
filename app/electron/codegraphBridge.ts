@@ -8,6 +8,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { runBash } from './shellBridge'
+import {
+  executableLookupCommand,
+  firstExecutablePath,
+  quoteShellArg,
+} from './platformProcess'
 
 export type CodegraphStatus = {
   installed: boolean
@@ -31,24 +36,13 @@ export type CodegraphCmdResult = {
   command: string
 }
 
-function shellQuote(s: string): string {
-  if (process.platform === 'win32') {
-    return `"${s
-      .replace(/%/g, '%%')
-      .replace(/(\\*)"/g, '$1$1\\"')
-      .replace(/(\\*)$/g, '$1$1')}"`
-  }
-  return `'${s.replace(/'/g, `'\\''`)}'`
-}
-
 async function whichCodegraph(): Promise<string | null> {
   const r = await runBash({
-    command:
-      process.platform === 'win32' ? 'where codegraph' : 'command -v codegraph',
+    command: executableLookupCommand('codegraph'),
     timeoutMs: 5000,
     tag: 'codegraph',
   })
-  const p = r.stdout.trim().split(/\r?\n/)[0] || null
+  const p = firstExecutablePath(r.stdout)
   return r.ok && p ? p : null
 }
 
@@ -85,13 +79,13 @@ export async function codegraphDetect(): Promise<{
   }
   // Avoid POSIX redirects/fallback syntax: this command also runs under cmd.exe.
   let v = await runBash({
-    command: `${shellQuote(binaryPath)} --version`,
+    command: `${quoteShellArg(binaryPath)} --version`,
     timeoutMs: 8000,
     tag: 'codegraph',
   })
   if (!v.ok) {
     v = await runBash({
-      command: `${shellQuote(binaryPath)} version`,
+      command: `${quoteShellArg(binaryPath)} version`,
       timeoutMs: 8000,
       tag: 'codegraph',
     })
@@ -134,7 +128,7 @@ export async function codegraphStatus(projectRoot: string): Promise<CodegraphSta
   }
 
   const r = await runBash({
-    command: `${shellQuote(det.binaryPath)} status -p ${shellQuote(root)}`,
+    command: `${quoteShellArg(det.binaryPath)} status -p ${quoteShellArg(root)}`,
     cwd: root,
     timeoutMs: 30_000,
     tag: 'codegraph',
@@ -173,7 +167,7 @@ export async function codegraphInit(projectRoot: string): Promise<{
   if (!det.binaryPath) return { ok: false, output: '', error: 'codegraph 未安裝' }
 
   const r = await runBash({
-    command: `${shellQuote(det.binaryPath)} init -p ${shellQuote(root)}`,
+    command: `${quoteShellArg(det.binaryPath)} init -p ${quoteShellArg(root)}`,
     cwd: root,
     timeoutMs: 600_000,
     tag: 'codegraph',
@@ -199,7 +193,7 @@ export async function codegraphSync(projectRoot: string): Promise<{
   if (!det.binaryPath) return { ok: false, output: '', error: 'codegraph 未安裝' }
 
   const r = await runBash({
-    command: `${shellQuote(det.binaryPath)} sync -p ${shellQuote(root)}`,
+    command: `${quoteShellArg(det.binaryPath)} sync -p ${quoteShellArg(root)}`,
     cwd: root,
     timeoutMs: 300_000,
     tag: 'codegraph',
@@ -242,7 +236,7 @@ async function runCmd(
   query: string,
   timeoutMs = 120_000,
 ): Promise<CodegraphCmdResult> {
-  const command = `${shellQuote(bin)} ${args}`
+  const command = `${quoteShellArg(bin)} ${args}`
   const r = await runBash({
     command,
     cwd: root,
@@ -296,7 +290,7 @@ export async function codegraphExplore(
   return runCmd(
     pre.bin,
     pre.root,
-    `explore -p ${shellQuote(pre.root)}${max} ${shellQuote(q)}`,
+    `explore -p ${quoteShellArg(pre.root)}${max} ${quoteShellArg(q)}`,
     q,
   )
 }
@@ -318,13 +312,13 @@ export async function codegraphQuery(
       command: '',
     }
   }
-  const kind = opts?.kind ? ` -k ${shellQuote(opts.kind)}` : ''
+  const kind = opts?.kind ? ` -k ${quoteShellArg(opts.kind)}` : ''
   const limit = ` -l ${opts?.limit && opts.limit > 0 ? Math.min(50, opts.limit) : 15}`
   const json = opts?.json === false ? '' : ' -j'
   return runCmd(
     pre.bin,
     pre.root,
-    `query -p ${shellQuote(pre.root)}${kind}${limit}${json} ${shellQuote(q)}`,
+    `query -p ${quoteShellArg(pre.root)}${kind}${limit}${json} ${quoteShellArg(q)}`,
     q,
   )
 }
@@ -351,7 +345,7 @@ export async function codegraphCallers(
   return runCmd(
     pre.bin,
     pre.root,
-    `callers -p ${shellQuote(pre.root)}${limit}${json} ${shellQuote(q)}`,
+    `callers -p ${quoteShellArg(pre.root)}${limit}${json} ${quoteShellArg(q)}`,
     q,
   )
 }
@@ -378,7 +372,7 @@ export async function codegraphCallees(
   return runCmd(
     pre.bin,
     pre.root,
-    `callees -p ${shellQuote(pre.root)}${limit}${json} ${shellQuote(q)}`,
+    `callees -p ${quoteShellArg(pre.root)}${limit}${json} ${quoteShellArg(q)}`,
     q,
   )
 }
@@ -405,7 +399,7 @@ export async function codegraphImpact(
   return runCmd(
     pre.bin,
     pre.root,
-    `impact -p ${shellQuote(pre.root)}${depth}${json} ${shellQuote(q)}`,
+    `impact -p ${quoteShellArg(pre.root)}${depth}${json} ${quoteShellArg(q)}`,
     q,
   )
 }
@@ -427,11 +421,11 @@ export async function codegraphNode(
       command: '',
     }
   }
-  const file = opts?.file ? ` -f ${shellQuote(opts.file)}` : ''
+  const file = opts?.file ? ` -f ${quoteShellArg(opts.file)}` : ''
   return runCmd(
     pre.bin,
     pre.root,
-    `node -p ${shellQuote(pre.root)}${file} ${shellQuote(q)}`,
+    `node -p ${quoteShellArg(pre.root)}${file} ${quoteShellArg(q)}`,
     q,
   )
 }

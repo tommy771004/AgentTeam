@@ -7,6 +7,11 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
 import { randomUUID } from 'node:crypto'
+import {
+  isWindows,
+  shellCommandSpec,
+  terminateProcessTree,
+} from './platformProcess'
 
 export type BashResult = {
   ok: boolean
@@ -50,13 +55,9 @@ export function cancelBash(opts?: {
     const r = activeRuns.get(id)
     if (!r) continue
     try {
-      r.child.kill('SIGTERM')
+      void terminateProcessTree(r.child)
       setTimeout(() => {
-        try {
-          r.child.kill('SIGKILL')
-        } catch {
-          /* ignore */
-        }
+        void terminateProcessTree(r.child, true)
       }, 1500)
       killed += 1
     } catch {
@@ -81,18 +82,20 @@ export async function runBash(input: {
 
   const timeoutMs = Math.min(Math.max(input.timeoutMs || 60_000, 1000), 600_000)
   const cwd = input.cwd && path.isAbsolute(input.cwd) ? input.cwd : process.cwd()
-  const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash'
-  const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-lc', command]
+  const shell = shellCommandSpec(command)
   const runId = input.runId || randomUUID()
 
   return new Promise((resolve) => {
     let stdout = ''
     let stderr = ''
     let settled = false
-    const child = spawn(shell, shellArgs, {
+    const child = spawn(shell.file, shell.args, {
       cwd,
       env: { ...process.env, ...(input.env || {}), HOME: os.homedir() },
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: !isWindows,
+      windowsHide: true,
+      windowsVerbatimArguments: shell.windowsVerbatimArguments,
     })
 
     activeRuns.set(runId, { child, tag: input.tag })
@@ -107,8 +110,8 @@ export async function runBash(input: {
 
     const timer = setTimeout(() => {
       try {
-        child.kill('SIGTERM')
-        setTimeout(() => child.kill('SIGKILL'), 1500)
+        void terminateProcessTree(child)
+        setTimeout(() => void terminateProcessTree(child, true), 1500)
       } catch {
         /* ignore */
       }

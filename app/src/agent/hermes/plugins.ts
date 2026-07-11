@@ -13,9 +13,20 @@
  * }
  */
 
-import { skillsStore } from './skills'
+import { parseSkillMarkdown, skillsStore } from './skills'
 import type { Skill } from './types'
-import type { CustomToolDefinition } from '../types'
+import type { CustomToolDefinition, McpServerConfig } from '../types'
+
+/** Public connector auth metadata (never stores raw secrets). */
+export type ConnectorAuthMeta = {
+  mode: 'pat' | 'api_key' | 'oauth'
+  /** True when a secret exists in pluginSecrets store */
+  hasCredential: boolean
+  accountHint?: string
+  authorizedAt?: string
+  /** Last OAuth authorize URL opened (debug / resume) */
+  lastAuthorizeUrl?: string
+}
 
 export interface PluginManifest {
   id: string
@@ -23,11 +34,17 @@ export interface PluginManifest {
   version?: string
   enabled: boolean
   description?: string
+  installedAt?: string
+  source?: string
   skills?: Array<{ path: string; raw: string }>
   /** Appended to volatile prompt layer */
   promptAppend?: string
   /** Declarative edge tools. Handlers are constrained templates, never plugin JS. */
   customTools?: CustomToolDefinition[]
+  /** MCP servers installed and lifecycle-managed with this plugin. */
+  mcpServers?: McpServerConfig[]
+  /** Connector authorization state (secrets live in pluginSecrets). */
+  connectorAuth?: ConnectorAuthMeta
   /** @deprecated Optional demo tool aliases (name -> description only). */
   toolHints?: Array<{ name: string; description: string }>
 }
@@ -89,6 +106,7 @@ tags: [plugin, demo]
 
 class PluginRegistry {
   private plugins: PluginManifest[] = [{ ...DEFAULT_EXAMPLE }]
+  private injectedSkillNames = new Set<string>()
 
   list(): PluginManifest[] {
     return [...this.plugins]
@@ -103,6 +121,19 @@ class PluginRegistry {
       map.set(p.id, p)
     }
     this.plugins = [...map.values()]
+    // Reconstruct ownership after hydration so skills persisted by older builds
+    // are removed before enabled plugins are applied again.
+    this.injectedSkillNames = new Set(
+      this.plugins.flatMap((plugin) =>
+        (plugin.skills || []).flatMap((entry) => {
+          try {
+            return [parseSkillMarkdown(entry.raw, entry.path).meta.name]
+          } catch {
+            return []
+          }
+        }),
+      ),
+    )
   }
 
   setEnabled(id: string, enabled: boolean) {
@@ -126,10 +157,19 @@ class PluginRegistry {
   apply(): PluginLoadResult {
     let skillsInjected = 0
     const promptFragments: string[] = []
+    for (const name of this.injectedSkillNames) skillsStore.remove(name)
+    this.injectedSkillNames.clear()
     for (const p of this.plugins) {
       if (!p.enabled) continue
       if (p.skills?.length) {
         skillsStore.loadAll(p.skills)
+        for (const entry of p.skills) {
+          try {
+            this.injectedSkillNames.add(parseSkillMarkdown(entry.raw, entry.path).meta.name)
+          } catch {
+            /* malformed skills are skipped by SkillsStore too */
+          }
+        }
         skillsInjected += p.skills.length
       }
       if (p.promptAppend?.trim()) {

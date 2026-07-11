@@ -13,16 +13,14 @@ import { useScheduleStore } from '../store/scheduleStore'
 import { useAgentStore } from '../store/agentStore'
 import { useLearningStore } from '../store/learningStore'
 import { useGatewayStore } from '../store/gatewayStore'
-import type { ScheduleKind } from '../agent/types'
+import { useProjectStore } from '../store/projectStore'
+import type { ScheduleKind, ScheduledJob } from '../agent/types'
 import { JOB_STATUS_ZH, SCHEDULE_KIND_ZH } from '../i18n/zh'
+import { RunQueueStrip } from '../components/RunQueueStrip'
 import {
-  clearRunQueue,
   isRunQueueDraining,
-  listQueuedRuns,
   queueLength,
-  removeQueuedRun,
   subscribeRunQueue,
-  type QueuedExternalRun,
 } from '../agent/runQueue'
 
 const SECTIONS = [
@@ -64,6 +62,7 @@ function SchedulerSection() {
   const { jobs, load, addJob, toggleJob, removeJob } = useScheduleStore()
   const skills = useLearningStore((s) => s.skills)
   const loadLearning = useLearningStore((s) => s.load)
+  const projectRoot = useProjectStore((s) => s.root)
   const [name, setName] = useState('每日指標摘要')
   const [objective, setObjective] = useState(
     '每天 08:00 抓取銷售指標並將摘要報告寫入工作區。',
@@ -73,11 +72,18 @@ function SchedulerSection() {
   const [intervalMinutes, setIntervalMinutes] = useState(30)
   const [runAt, setRunAt] = useState('')
   const [skillNames, setSkillNames] = useState<string[]>([])
+  const [runner, setRunner] = useState<ScheduledJob['runner']>('builtin')
+  const [pinProject, setPinProject] = useState(true)
+  const [projectRootInput, setProjectRootInput] = useState('')
 
   useEffect(() => {
     void load()
     void loadLearning()
   }, [load, loadLearning])
+
+  useEffect(() => {
+    if (projectRoot && !projectRootInput) setProjectRootInput(projectRoot)
+  }, [projectRoot, projectRootInput])
 
   const toggleSkill = (n: string) => {
     setSkillNames((prev) =>
@@ -87,6 +93,7 @@ function SchedulerSection() {
 
   const onCreate = async () => {
     if (!objective.trim()) return
+    const root = pinProject ? (projectRootInput.trim() || projectRoot || '') : ''
     await addJob({
       name: name.trim() || objective.slice(0, 40),
       objective: objective.trim(),
@@ -95,6 +102,8 @@ function SchedulerSection() {
       intervalMinutes: kind === 'interval' ? intervalMinutes : undefined,
       runAt: kind === 'once' ? runAt || new Date(Date.now() + 60_000).toISOString() : undefined,
       skillNames,
+      runner: runner || 'builtin',
+      projectRoot: root || undefined,
     })
     setSkillNames([])
   }
@@ -192,6 +201,41 @@ function SchedulerSection() {
             </div>
           </Field>
         </div>
+        <Field label="執行引擎">
+          <select
+            className={inputCls}
+            value={runner || 'builtin'}
+            onChange={(e) => setRunner(e.target.value as ScheduledJob['runner'])}
+          >
+            <option value="builtin">內建（完整工具 · 能力包）</option>
+            <option value="codex">Codex CLI</option>
+            <option value="claude">Claude CLI</option>
+            <option value="grok">Grok CLI</option>
+            <option value="opencode">OpenCode CLI</option>
+            <option value="cursor">Cursor CLI</option>
+          </select>
+          <p className="text-[11px] text-outline mt-1">
+            CLI 需在設定中授權；完整 GitHub/Notion 工具請用內建。
+          </p>
+        </Field>
+        <Field label="專案綁定">
+          <label className="flex items-center gap-2 text-xs text-on-surface-variant mb-2">
+            <input
+              type="checkbox"
+              checked={pinProject}
+              onChange={(e) => setPinProject(e.target.checked)}
+            />
+            綁定專案路徑（避免排程時跑到錯誤工作區）
+          </label>
+          {pinProject && (
+            <input
+              className={inputCls}
+              value={projectRootInput}
+              onChange={(e) => setProjectRootInput(e.target.value)}
+              placeholder={projectRoot || '絕對路徑，例如 D:\\Project\\foo'}
+            />
+          )}
+        </Field>
         <div className="lg:col-span-2 flex justify-end">
           <button
             type="button"
@@ -236,6 +280,14 @@ function SchedulerSection() {
                     </span>
                   </div>
                   <p className="text-sm text-on-surface-variant truncate mt-0.5">{job.objective}</p>
+                  <p className="text-[11px] text-outline mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                    <span>引擎：{job.runner || 'builtin'}</span>
+                    {job.projectRoot && (
+                      <span className="font-[family-name:var(--font-mono)] truncate max-w-[240px]" title={job.projectRoot}>
+                        專案：{job.projectRoot}
+                      </span>
+                    )}
+                  </p>
                   {!!job.skillNames?.length && (
                     <p className="text-[11px] text-secondary mt-1">
                       Skills：{job.skillNames.join(', ')}
@@ -277,90 +329,31 @@ function AutomationRuntimePanel() {
   const isRunning = useAgentStore((s) => s.isRunning)
   const bgJobs = useGatewayStore((s) => s.jobs)
   const refreshJobs = useGatewayStore((s) => s.refreshJobs)
-  const [queued, setQueued] = useState<QueuedExternalRun[]>(() => listQueuedRuns())
   const [draining, setDraining] = useState(() => isRunQueueDraining())
+  const [qn, setQn] = useState(() => queueLength())
 
   useEffect(() => {
     refreshJobs()
     return subscribeRunQueue(() => {
-      setQueued(listQueuedRuns())
       setDraining(isRunQueueDraining())
+      setQn(queueLength())
     })
   }, [refreshJobs])
 
-  const qn = queueLength()
   const recentBg = bgJobs.slice(0, 6)
 
   return (
-    <div className="app-panel p-4 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <Icon name="pending_actions" size={18} className="text-primary shrink-0" />
-          <h2 className="font-semibold text-sm">運行中佇列</h2>
-          <span className="text-[11px] text-outline font-[family-name:var(--font-mono)]">
-            待跑 {qn}/24
-            {draining ? ' · 消化中' : ''}
-            {isRunning ? ' · 代理忙碌' : ' · 空閒'}
-          </span>
-        </div>
-        {qn > 0 && (
-          <button
-            type="button"
-            className={settingsBtnCls}
-            onClick={() => {
-              const n = clearRunQueue()
-              setQueued(listQueuedRuns())
-              void window.subagents?.notify?.(
-                'SubAgents AI · 佇列',
-                `已清除 ${n} 筆待跑任務`,
-              )
-            }}
-          >
-            清空佇列
-          </button>
-        )}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 px-0.5 text-[11px] text-outline">
+        <span className="font-[family-name:var(--font-mono)]">
+          待跑 {qn}/24
+          {draining ? ' · 消化中' : ''}
+          {isRunning ? ' · 代理忙碌' : ' · 空閒'}
+        </span>
+        <span className="opacity-50">·</span>
+        <span>可調整優先序／置頂／取消；與新任務對話追問共用</span>
       </div>
-
-      {queued.length === 0 ? (
-        <p className="text-xs text-outline">
-          無待跑項目。排程 / Webhook / Telegram 在忙碌時會自動入列並補跑；佇列會持久化，App
-          重啟後仍可恢復。
-        </p>
-      ) : (
-        <div className="divide-y divide-white/5 border border-white/10 rounded-xl overflow-hidden">
-          {queued.map((q, i) => (
-            <div key={q.id} className="px-3 py-2 flex gap-2 items-start text-xs">
-              <span className="font-[family-name:var(--font-mono)] text-outline shrink-0 w-5">
-                {i + 1}.
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-on-surface truncate font-medium">
-                  {q.title || q.objective.slice(0, 48)}
-                </p>
-                <p className="text-outline truncate mt-0.5">
-                  {q.sourceLabel || '自動化'} · {q.loopType || 'Goal-based'} ·{' '}
-                  {new Date(q.enqueuedAt).toLocaleTimeString()}
-                </p>
-                <p className="text-[10px] text-outline/80 font-[family-name:var(--font-mono)] mt-0.5">
-                  {q.id}
-                </p>
-              </div>
-              <button
-                type="button"
-                title="取消此筆"
-                className="shrink-0 px-2 py-1 rounded border border-error/25 text-error text-[10px] font-semibold hover:bg-error/10"
-                onClick={() => {
-                  if (removeQueuedRun(q.id)) {
-                    setQueued(listQueuedRuns())
-                  }
-                }}
-              >
-                取消
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <RunQueueStrip />
 
       <div className="pt-1 border-t border-white/10">
         <div className="flex items-center gap-2 mb-2">

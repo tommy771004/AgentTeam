@@ -7,6 +7,7 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { spawnCommandSpec, terminateProcessTree } from './platformProcess'
 
 type JsonRpc = {
   jsonrpc: '2.0'
@@ -39,6 +40,7 @@ class McpStdioSession {
   readonly id: string
   readonly command: string
   readonly args: string[]
+  readonly env: Record<string, string>
   private child: ChildProcessWithoutNullStreams | null = null
   private nextId = 1
   private pending = new Map<number, Pending>()
@@ -50,10 +52,11 @@ class McpStdioSession {
   requestCount = 0
   private initPromise: Promise<void> | null = null
 
-  constructor(id: string, command: string, args: string[]) {
+  constructor(id: string, command: string, args: string[], env?: Record<string, string>) {
     this.id = id
     this.command = command
     this.args = args
+    this.env = { ...(env || {}) }
   }
 
   get pid(): number | null {
@@ -91,9 +94,12 @@ class McpStdioSession {
         return
       }
       try {
-        this.child = spawn(this.command, this.args, {
+        const spec = spawnCommandSpec(this.command, this.args)
+        this.child = spawn(spec.file, spec.args, {
           stdio: ['pipe', 'pipe', 'pipe'],
-          env: { ...process.env },
+          env: { ...process.env, ...this.env },
+          windowsHide: true,
+          windowsVerbatimArguments: spec.windowsVerbatimArguments,
         })
       } catch (e) {
         reject(e instanceof Error ? e : new Error(String(e)))
@@ -239,9 +245,8 @@ class McpStdioSession {
   private write(msg: JsonRpc) {
     if (!this.child || !this.alive) throw new Error('MCP session not alive')
     const json = JSON.stringify(msg)
-    // Prefer Content-Length framing (MCP standard)
-    const frame = `Content-Length: ${Buffer.byteLength(json, 'utf-8')}\r\n\r\n${json}`
-    this.child.stdin.write(frame)
+    // MCP stdio transport requires one JSON-RPC message per line.
+    this.child.stdin.write(`${json}\n`)
   }
 
   private notify(method: string, params?: Record<string, unknown>) {
@@ -288,7 +293,7 @@ class McpStdioSession {
       } catch {
         /* ignore */
       }
-      this.child.kill()
+      void terminateProcessTree(this.child)
     }
     this.child = null
   }
@@ -296,8 +301,17 @@ class McpStdioSession {
 
 const sessions = new Map<string, McpStdioSession>()
 
-function sessionKey(id: string, command: string, args: string[]) {
-  return `${id}::${command}::${(args || []).join('\0')}`
+function sessionKey(
+  id: string,
+  command: string,
+  args: string[],
+  env?: Record<string, string>,
+) {
+  const envKey = Object.entries(env || {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\0')
+  return `${id}::${command}::${(args || []).join('\0')}::${envKey}`
 }
 
 export async function mcpHttpRpc(input: {
@@ -327,8 +341,9 @@ export async function mcpStdioEnsure(input: {
   id: string
   command: string
   args: string[]
+  env?: Record<string, string>
 }): Promise<McpSessionStatus> {
-  const key = sessionKey(input.id, input.command, input.args || [])
+  const key = sessionKey(input.id, input.command, input.args || [], input.env)
   let s = sessions.get(key)
   if (!s || !s.alive) {
     // dispose stale by id
@@ -338,7 +353,7 @@ export async function mcpStdioEnsure(input: {
         sessions.delete(k)
       }
     }
-    s = new McpStdioSession(input.id, input.command, input.args || [])
+    s = new McpStdioSession(input.id, input.command, input.args || [], input.env)
     sessions.set(key, s)
     await s.start()
   }
@@ -349,8 +364,9 @@ export async function mcpStdioListTools(input: {
   id: string
   command: string
   args: string[]
+  env?: Record<string, string>
 }): Promise<Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>> {
-  const key = sessionKey(input.id, input.command, input.args || [])
+  const key = sessionKey(input.id, input.command, input.args || [], input.env)
   await mcpStdioEnsure(input)
   const s = sessions.get(key)
   if (!s) throw new Error('session missing after ensure')
@@ -364,11 +380,12 @@ export async function mcpStdioCallTool(input: {
   id: string
   command: string
   args: string[]
+  env?: Record<string, string>
   toolName: string
   arguments: Record<string, unknown>
 }): Promise<{ ok: boolean; content: string; error?: string }> {
   try {
-    const key = sessionKey(input.id, input.command, input.args || [])
+    const key = sessionKey(input.id, input.command, input.args || [], input.env)
     await mcpStdioEnsure(input)
     const s = sessions.get(key)
     if (!s) throw new Error('session missing')

@@ -19,6 +19,7 @@ import {
   SupervisorViolation,
 } from '../supervisor'
 import { listAllMcpTools, mcpCallTool } from '../hermes/mcp'
+import { resolveMcpSecretOwnerId } from '../hermes/mcpSecrets'
 import { checkToolPermission, type PermissionPolicy } from '../opencode/permissions'
 import { authorizeTool } from './toolGuard'
 import {
@@ -48,6 +49,11 @@ import {
   isCustomToolApprovalRequired,
   type ResolvedCustomTool,
 } from './customTools'
+import type { ChatAttachment } from '../types'
+import {
+  buildMultimodalUserContent,
+  contentPartsToPlainText,
+} from '../../lib/chatAttachments'
 
 export interface ToolLoopCallbacks {
   onLog?: (
@@ -134,16 +140,24 @@ type McpNameMap = Map<string, { serverId: string; toolName: string }>
 async function buildDynamicMcpTools(settings: LlmSettings): Promise<{
   defs: OpenAiToolDef[]
   map: McpNameMap
+  errors: string[]
 }> {
   const map: McpNameMap = new Map()
   const defs: OpenAiToolDef[] = []
+  const errors: string[] = []
   if (!settings.mcpEnabled || !settings.mcpServers?.length) {
-    return { defs, map }
+    return { defs, map, errors }
   }
   try {
-    const tools = await listAllMcpTools(settings.mcpServers.filter((s) => s.enabled))
+    const tools = await listAllMcpTools(
+      settings.mcpServers.filter((s) => s.enabled),
+      settings,
+    )
     for (const t of tools) {
-      if (t.name === '__error__') continue
+      if (t.name === '__error__') {
+        errors.push(`[${t.serverName}/${t.serverId}] ${t.description || 'probe failed'}`)
+        continue
+      }
       const fn = sanitizeFnName(`mcp_${t.serverId}_${t.name}`)
       map.set(fn, { serverId: t.serverId, toolName: t.name })
       defs.push({
@@ -158,10 +172,10 @@ async function buildDynamicMcpTools(settings: LlmSettings): Promise<{
         },
       })
     }
-  } catch {
-    /* ignore MCP probe failures in FC setup */
+  } catch (e) {
+    errors.push(e instanceof Error ? e.message : String(e))
   }
-  return { defs, map }
+  return { defs, map, errors }
 }
 
 export async function runFunctionCallingLoop(
@@ -172,6 +186,8 @@ export async function runFunctionCallingLoop(
     step: string
     context: string
     seedToolContext?: string
+    /** Images for vision-capable models (text files already in objective) */
+    userAttachments?: ChatAttachment[]
   },
   opts?: ToolLoopOptions,
 ): Promise<ToolLoopResult> {
@@ -221,9 +237,11 @@ export async function runFunctionCallingLoop(
   let mcpMap: McpNameMap = new Map()
   const customMap = new Map<string, ResolvedCustomTool>()
   const allMcpDefs: OpenAiToolDef[] = []
+  let mcpProbeErrors: string[] = []
   if (opts?.includeMcpTools !== false && settings.mcpEnabled) {
     const dyn = await buildDynamicMcpTools(settings)
     mcpMap = dyn.map
+    mcpProbeErrors = dyn.errors
     for (const d of dyn.defs) {
       if (!blocked.has(d.function.name)) allMcpDefs.push(d)
     }
@@ -232,6 +250,9 @@ export async function runFunctionCallingLoop(
         'INFO',
         `MCP 動態工具 ${dyn.defs.length} 個（capability 未載入前不會出現在 schema）`,
       )
+    }
+    if (dyn.errors.length) {
+      cb?.onLog?.('WARN', `MCP 探測失敗 ${dyn.errors.length} 項：\n${dyn.errors.join('\n')}`)
     }
   }
 
@@ -310,9 +331,54 @@ export async function runFunctionCallingLoop(
 
   let tools = rebuildVisibleTools()
 
+  // MCP probe failed → auto-load matching connector HTTP packs (user:*)
+  if (mcpProbeErrors.length && settings.mcpEnabled) {
+    const fallbackIds = new Set<string>()
+    for (const server of (settings.mcpServers || []).filter((s) => s.enabled)) {
+      const hasTools = [...mcpMap.values()].some((m) => m.serverId === server.id)
+      const errHit = mcpProbeErrors.some(
+        (e) => e.includes(server.id) || e.includes(server.name),
+      )
+      if (hasTools && !errHit) continue
+      const owner = server.secretPluginId || resolveMcpSecretOwnerId(server)
+      if (owner) fallbackIds.add(`user:${owner}`)
+    }
+    let loadedFallback = 0
+    for (const id of fallbackIds) {
+      if (!capState.all.some((c) => c.id === id)) continue
+      if (capState.loadedIds.has(id)) continue
+      loadCapability(capState, id)
+      loadedFallback += 1
+      cb?.onLog?.('INFO', `MCP 失敗 fallback：自動載入 ${id}（connector HTTP 工具）`)
+    }
+    if (loadedFallback > 0) {
+      emitLoadedCaps()
+      tools = rebuildVisibleTools()
+      cb?.onLog?.(
+        'INFO',
+        `已自動載入 ${loadedFallback} 個 connector 包以替代失效 MCP`,
+      )
+    }
+  }
+
   const toolCalls: ToolCallRecord[] = []
   const toolChunks: string[] = []
   if (args.seedToolContext) toolChunks.push(args.seedToolContext)
+  if (mcpProbeErrors.length) {
+    const fallbackNote = [...capState.loadedIds]
+      .filter((id) => id.startsWith('user:'))
+      .map((id) => id.slice(5))
+    toolChunks.push(
+      [
+        '### MCP 探測警告（對 agent 可見）',
+        '下列 MCP 伺服器目前無法提供工具。請授權對應 connector 或檢查設定後再試。',
+        ...mcpProbeErrors.map((e) => `- ${e}`),
+        fallbackNote.length
+          ? `\n已自動載入 connector HTTP 工具包：${fallbackNote.join(', ')}。請優先使用 github_* / notion_* 等 custom tools。`
+          : '\n若有對應 connector 已授權，請 load_capability user:<connector-id> 後改用 HTTP 工具。',
+      ].join('\n'),
+    )
+  }
 
   let tokensUsed = 0
   let rounds = 0
@@ -322,11 +388,17 @@ export async function runFunctionCallingLoop(
   const systemExtra = [
     opts?.extraToolsNote || '',
     blocked.size ? `Blocked tools: ${[...blocked].join(', ')}` : '',
+    mcpProbeErrors.length
+      ? `\n## MCP probe warnings\nSome MCP servers failed to list tools. Prefer connector HTTP tools if available, or tell the user to authorize: ${mcpProbeErrors.join(' | ').slice(0, 800)}`
+      : '',
     alwaysInstr ? `\n## Active capability runbooks\n${alwaysInstr}` : '',
     catalog ? `\n## Deferred capabilities\n${catalog}` : '',
   ]
     .filter(Boolean)
     .join('\n')
+
+  const userText = `Objective: ${args.objective}\n\nYour step: ${args.step}\n\nPrior context:\n${args.context || '(none)'}\n\n${args.seedToolContext ? `Pre-fetched tool evidence:\n${args.seedToolContext}` : ''}`
+  const userContent = buildMultimodalUserContent(userText, args.userAttachments)
 
   const messages: ChatMessageExt[] = [
     {
@@ -338,6 +410,7 @@ Rules:
 - Never invent credentials or private data.
 - After tools return, synthesize the step output.
 - Stop calling tools when you have enough evidence.
+- If the user message includes images, describe and use them as primary evidence.
 - MCP tools appear as mcp_<serverId>_<toolName> after their MCP capability is loaded.
 - Use delegate_task only for parallel isolated sub-goals (if available).
 - When a needed tool is missing, call load_capability with the matching capability id first.
@@ -347,7 +420,7 @@ ${systemExtra}`,
     },
     {
       role: 'user',
-      content: `Objective: ${args.objective}\n\nYour step: ${args.step}\n\nPrior context:\n${args.context || '(none)'}\n\n${args.seedToolContext ? `Pre-fetched tool evidence:\n${args.seedToolContext}` : ''}`,
+      content: userContent,
     },
   ]
 
@@ -358,13 +431,22 @@ ${systemExtra}`,
     // Refresh tools each round (capability loads expand the set)
     tools = rebuildVisibleTools()
 
-    // OpenCode-style compaction — preserve tool_calls / tool_call_id chain
-    if (rounds === 1 || rounds % 2 === 0) {
+    // OpenCode-style compaction — preserve tool_calls / tool_call_id chain.
+    // Skip while vision images are still in the transcript (data URLs + compaction would drop them).
+    const hasVisionParts = messages.some(
+      (m) =>
+        Array.isArray(m.content) &&
+        m.content.some((p) => p.type === 'image_url'),
+    )
+    if (!hasVisionParts && (rounds === 1 || rounds % 2 === 0)) {
       try {
         const { maybeCompactMessages } = await import('../opencode/compaction')
         const flat = messages.map((m) => ({
           role: m.role,
-          content: m.content,
+          content:
+            typeof m.content === 'string' || m.content == null
+              ? m.content
+              : contentPartsToPlainText(m.content),
           tool_calls: m.tool_calls,
           tool_call_id: m.tool_call_id,
           name: m.name,
@@ -659,7 +741,7 @@ async function executeOneToolCall(
           if (!server) {
             innerOut = `MCP server not found: ${innerMcp.serverId}`
           } else {
-            const mr = await mcpCallTool(server, innerMcp.toolName, innerArgs)
+            const mr = await mcpCallTool(server, innerMcp.toolName, innerArgs, ctx.settings)
             innerOk = mr.ok
             innerOut = mr.ok ? mr.content : mr.error || 'MCP failed'
           }
@@ -728,7 +810,7 @@ async function executeOneToolCall(
       output = `MCP server not found: ${mcpRef.serverId}`
       ok = false
     } else {
-      const r = await mcpCallTool(server, mcpRef.toolName, args)
+      const r = await mcpCallTool(server, mcpRef.toolName, args, ctx.settings)
       output = r.ok ? r.content : r.error || 'MCP failed'
       ok = r.ok
     }

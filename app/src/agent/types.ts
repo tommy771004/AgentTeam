@@ -1,6 +1,23 @@
 /** Loop patterns from 02_Execution_Rules */
 export type LoopType = 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
 
+/** Chat composer attachment (images / text files) — pure type, no DOM */
+export type ChatAttachmentKind = 'image' | 'text' | 'binary'
+
+export interface ChatAttachment {
+  id: string
+  kind: ChatAttachmentKind
+  name: string
+  mimeType: string
+  size: number
+  /** data: URL for images (session); may be dropped after disk persist */
+  dataUrl?: string
+  /** Extracted text for text-like files */
+  textContent?: string
+  /** Absolute path after Electron materialize — survives reloads / queue */
+  filePath?: string
+}
+
 export type StepStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'SKIPPED'
 
 export type ExecutionStatus =
@@ -185,6 +202,16 @@ export interface RuntimeOverrides {
   preloadCapabilityIds?: string[]
   /** Restore tool_search unlocked tool names across steps / runs */
   preloadUnlockedTools?: string[]
+  /**
+   * User chat attachments (images / text files) for this run.
+   * Images go to vision-capable FC messages; text is folded into the objective.
+   */
+  userAttachments?: ChatAttachment[]
+  /**
+   * Override active project root for this run only (scheduler / multi-project).
+   * Does not permanently change projectStore.
+   */
+  projectRoot?: string
 }
 
 export interface ToolCallRecord {
@@ -362,6 +389,11 @@ export interface LlmSettings {
   customTools: CustomToolDefinition[]
   /** Values used by {{secret:key}} template references; redacted on export. */
   customToolSecrets: Record<string, string>
+  /**
+   * OAuth client credentials for connector plugins (github / notion / google / …).
+   * clientSecret is sensitive — redacted on export like customToolSecrets.
+   */
+  pluginOAuthClients: Record<string, { clientId: string; clientSecret?: string }>
   /** MCP servers (minimal client) */
   mcpServers: McpServerConfig[]
   mcpEnabled: boolean
@@ -465,6 +497,9 @@ export interface SupervisorViolationState {
 /** Time-based / cron-style scheduled job */
 export type ScheduleKind = 'interval' | 'daily' | 'once'
 
+/** Runner id stored on jobs (mirrors thread runners; avoid importing threadStore here) */
+export type JobRunner = 'builtin' | 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
+
 export interface ScheduledJob {
   id: string
   name: string
@@ -480,6 +515,10 @@ export interface ScheduledJob {
   runAt?: string
   /** Hermes-style: skills attached to this cron job */
   skillNames?: string[]
+  /** Execution engine for this job (default builtin) */
+  runner?: JobRunner
+  /** Pin project workspace for this job (absolute path); empty = use current UI project */
+  projectRoot?: string
   lastRunAt: string | null
   nextRunAt: string | null
   lastStatus: 'idle' | 'running' | 'success' | 'failed' | 'skipped'
@@ -491,12 +530,24 @@ export interface McpServerConfig {
   id: string
   name: string
   enabled: boolean
+  /**
+   * Owning package/plugin id (e.g. github-mcp) for settings merge / uninstall ownership.
+   * Absent for pure user-managed servers in Settings.
+   */
+  pluginId?: string
+  /**
+   * Secret owner id for pluginSecrets / customToolSecrets (e.g. github-connector).
+   * May differ from pluginId when npm-MCP is linked to a connector token.
+   */
+  secretPluginId?: string
   /** http JSON-RPC endpoint, e.g. http://127.0.0.1:3100/mcp */
   transport: 'http' | 'stdio'
   url?: string
   /** stdio: command + args */
   command?: string
   args?: string[]
+  /** Extra environment for the stdio child, e.g. Electron's Node compatibility mode. */
+  env?: Record<string, string>
   /** Optional bearer token for HTTP */
   authToken?: string
 }

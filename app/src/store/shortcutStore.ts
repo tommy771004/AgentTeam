@@ -151,14 +151,18 @@ export function chordMatches(e: KeyboardEvent, chord: string): boolean {
 
 /** Format chord for display */
 export function formatChord(chord: string): string {
+  const isMac =
+    typeof navigator !== 'undefined' &&
+    (/Mac|iPhone|iPad|iPod/i.test(navigator.platform) ||
+      /Mac OS X/i.test(navigator.userAgent))
   return chord
     .split('+')
     .map((p) => {
       const x = p.trim()
-      if (/^meta|cmd|command$/i.test(x)) return '⌘'
+      if (/^meta|cmd|command$/i.test(x)) return isMac ? '⌘' : 'Ctrl'
       if (/^ctrl|control$/i.test(x)) return 'Ctrl'
-      if (/^alt|option$/i.test(x)) return '⌥'
-      if (/^shift$/i.test(x)) return '⇧'
+      if (/^alt|option$/i.test(x)) return isMac ? '⌥' : 'Alt'
+      if (/^shift$/i.test(x)) return isMac ? '⇧' : 'Shift'
       return x.length === 1 ? x.toUpperCase() : x
     })
     .join(' + ')

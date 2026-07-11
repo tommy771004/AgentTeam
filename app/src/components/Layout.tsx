@@ -18,6 +18,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/', label: '新任務', icon: 'auto_awesome', end: true },
       { to: '/dashboard', label: '系統總覽', icon: 'dashboard' },
+      { to: '/learning?tab=plugins', label: '擴充', icon: 'extension' },
     ],
   },
   {
@@ -48,6 +49,20 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ]
 
+function navItemActive(to: string, pathname: string, search: string, end?: boolean): boolean {
+  const [path, query = ''] = to.split('?')
+  if (end) return pathname === path || pathname === ''
+  if (path === '/learning' && query.includes('tab=plugins')) {
+    return pathname === '/learning' && new URLSearchParams(search).get('tab') === 'plugins'
+  }
+  if (path === '/learning' && !query) {
+    // 學習中心：plugins 分頁時改亮「擴充」
+    if (pathname !== '/learning') return false
+    return new URLSearchParams(search).get('tab') !== 'plugins'
+  }
+  return pathname === path || pathname.startsWith(`${path}/`)
+}
+
 /** macOS hiddenInset: leave room for traffic lights (close / min / max) */
 function useIsMacDesktop() {
   return useMemo(() => {
@@ -74,6 +89,8 @@ export function Layout() {
   useGlobalShortcuts()
   const bridge = useMemo(() => getElectronBridgeStatus(), [])
   const isMac = useIsMacDesktop()
+  const primaryKey = isMac ? '⌘' : 'Ctrl+'
+  const platformLabel = isMac ? 'macOS' : 'Windows'
 
   const openLiveRun = () => {
     navigate('/')
@@ -143,7 +160,7 @@ export function Layout() {
                 SubAgents
               </div>
               <div className="text-[10px] text-outline truncate tracking-wide">
-                Multi-agent · macOS
+                Multi-agent · {platformLabel}
               </div>
             </div>
           )}
@@ -158,26 +175,32 @@ export function Layout() {
                 </p>
               )}
               <div className="space-y-0.5">
-                {group.items.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.end}
-                    title={item.label}
-                    className={({ isActive }) =>
-                      `macos-nav-item flex items-center gap-2.5 rounded-[11px] px-2.5 py-2 text-[13px] border ${
-                        isActive
+                {group.items.map((item) => {
+                  const active = navItemActive(
+                    item.to,
+                    location.pathname,
+                    location.search,
+                    item.end,
+                  )
+                  return (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      end={item.end}
+                      title={item.label}
+                      className={`macos-nav-item flex items-center gap-2.5 rounded-[11px] px-2.5 py-2 text-[13px] border ${
+                        active
                           ? 'bg-primary/14 text-primary border-primary/25 shadow-[0_0_20px_rgba(43,184,217,0.12)]'
                           : 'text-on-surface-variant hover:bg-white/[0.06] hover:text-on-surface border-transparent'
-                      }`
-                    }
-                  >
-                    <Icon name={item.icon} size={20} />
-                    {!collapsed && (
-                      <span className="font-medium truncate tracking-tight">{item.label}</span>
-                    )}
-                  </NavLink>
-                ))}
+                      }`}
+                    >
+                      <Icon name={item.icon} size={20} />
+                      {!collapsed && (
+                        <span className="font-medium truncate tracking-tight">{item.label}</span>
+                      )}
+                    </NavLink>
+                  )
+                })}
               </div>
             </div>
           ))}
@@ -212,12 +235,12 @@ export function Layout() {
         {!isHome && (
           <header className="h-11 shrink-0 border-b border-white/8 bg-surface/30 backdrop-blur-sm flex items-center justify-between px-4 drag-region">
             <div className="no-drag text-xs text-on-surface-variant pl-2 md:pl-0 truncate">
-              本機多代理 · ⌘/ 指令 · ⌘. 小視窗
+              本機多代理 · {primaryKey}/ 指令 · {primaryKey}. 小視窗
             </div>
             <div className="no-drag flex items-center gap-2">
               <button
                 type="button"
-                title="開啟指令選單（⌘/）"
+                title={`開啟指令選單（${primaryKey}/）`}
                 onClick={() => requestFocusComposer({ openSlash: true })}
                 className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30 font-[family-name:var(--font-mono)]"
               >
@@ -225,7 +248,7 @@ export function Layout() {
               </button>
               <button
                 type="button"
-                title={floatOpen ? '關閉小視窗' : '小視窗（⌘.）'}
+                title={floatOpen ? '關閉小視窗' : `小視窗（${primaryKey}.）`}
                 onClick={() => {
                   if (floatOpen) {
                     setFloatOpen(false)

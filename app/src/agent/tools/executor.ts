@@ -233,6 +233,7 @@ export async function executeTool(
         const filterId = input.serverId ? String(input.serverId) : ''
         const list = await listAllMcpTools(
           filterId ? servers.filter((s) => s.id === filterId) : servers,
+          settings,
         )
         if (!list.length) return { ok: true, output: '（無 MCP 工具或伺服器未啟用）' }
         return {
@@ -259,7 +260,7 @@ export async function executeTool(
             : {}
         const server = (settings.mcpServers || []).find((s) => s.id === serverId)
         if (!server) return { ok: false, output: `找不到 MCP 伺服器：${serverId}` }
-        const r = await mcpCallTool(server, toolName, args)
+        const r = await mcpCallTool(server, toolName, args, settings)
         return {
           ok: r.ok,
           output: r.ok ? r.content : r.error || 'MCP call failed',

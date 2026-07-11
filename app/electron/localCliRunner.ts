@@ -1,15 +1,34 @@
 /**
  * Run a one-shot agent prompt via local CLI binaries (Codex / Claude / Grok / OpenCode / Cursor).
  * Uses existing shell auth — does not re-implement OAuth.
+ *
+ * Chat attachments are materialized to disk under `.subagents/chat-attachments/<runId>/`
+ * and absolute paths are injected into the prompt so CLIs can open/read/vision them.
  */
 
+import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { runBash } from './shellBridge'
+import {
+  executableLookupCommand,
+  firstExecutablePath,
+  quoteShellArg,
+} from './platformProcess'
 import { resolveCliApproval } from '../src/agent/cliApproval'
+import { materializeAttachments } from './attachmentStore'
 
 export type LocalCliKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
 export type CliApprovalMode = 'always' | 'auto' | 'full'
+
+/** Serializable chat attachment from renderer (images as data URL) */
+export type LocalCliAttachment = {
+  name: string
+  mimeType?: string
+  kind?: 'image' | 'text' | 'binary'
+  dataUrl?: string
+  textContent?: string
+}
 
 export type LocalCliRunInput = {
   kind: LocalCliKind
@@ -28,6 +47,8 @@ export type LocalCliRunInput = {
   unattended?: boolean
   timeoutMs?: number
   runId?: string
+  /** User chat attachments — written to disk for CLI vision/file tools */
+  attachments?: LocalCliAttachment[]
 }
 
 export type LocalCliRunResult = {
@@ -40,18 +61,6 @@ export type LocalCliRunResult = {
   cancelled?: boolean
   error?: string
   runId?: string
-}
-
-function shellQuote(s: string): string {
-  if (process.platform === 'win32') {
-    // cmd.exe needs double quotes; POSIX single quotes become literal characters
-    // and make `"'C:\\Program Files\\…'"` fail to launch.
-    return `"${s
-      .replace(/%/g, '%%')
-      .replace(/(\\*)"/g, '$1$1\\"')
-      .replace(/(\\*)$/g, '$1$1')}"`
-  }
-  return `'${s.replace(/'/g, `'\\''`)}'`
 }
 
 function depthToCodexEffort(depth?: string): string {
@@ -90,12 +99,64 @@ export function resolveBinary(kind: LocalCliKind, binary?: string): string {
 }
 
 /**
+ * Write attachments to disk and return prompt block + absolute paths.
+ */
+export function materializeCliAttachments(
+  attachments: LocalCliAttachment[] | undefined,
+  cwd: string | undefined,
+  runId: string,
+): { dir: string | null; paths: string[]; promptBlock: string } {
+  if (!attachments?.length) {
+    return { dir: null, paths: [], promptBlock: '' }
+  }
+
+  const { dir, items } = materializeAttachments(attachments, {
+    projectRoot: cwd,
+    sessionId: runId,
+  })
+
+  const paths: string[] = []
+  const lines: string[] = [
+    '## User attachments (local files)',
+    'The following files were saved for this run. Read them with your file/vision tools.',
+    'Images: open the absolute path and describe/analyze visually when the task requires it.',
+    '',
+  ]
+
+  for (const att of items) {
+    if (att.filePath) {
+      paths.push(att.filePath)
+      const kind =
+        att.kind ||
+        (att.dataUrl ? 'image' : att.textContent != null ? 'text' : 'binary')
+      lines.push(`- [${kind}] ${att.filePath}`)
+      lines.push(`  ref: @${att.filePath}`)
+    } else {
+      lines.push(`- (skipped, no payload) ${att.name}`)
+    }
+  }
+
+  if (!paths.length) {
+    return { dir, paths: [], promptBlock: lines.join('\n') }
+  }
+
+  lines.push('')
+  lines.push(
+    'When analyzing images, use the absolute paths above (do not invent file contents).',
+  )
+  return { dir, paths, promptBlock: lines.join('\n') }
+}
+
+
+/**
  * Build vendor CLI one-shot command (best-effort flags; may vary by version).
  */
 export function buildLocalCliCommand(input: LocalCliRunInput): string {
   const bin = resolveBinary(input.kind, input.binary)
-  const prompt = input.prompt.slice(0, 12000)
-  const q = shellQuote(prompt)
+  // Paths + user goal; allow more room when attachments are inlined as paths
+  const maxPrompt = input.attachments?.length ? 24_000 : 12_000
+  const prompt = input.prompt.slice(0, maxPrompt)
+  const q = quoteShellArg(prompt)
   const model = input.model?.trim()
   const effort = depthToCodexEffort(input.depth)
   const plan = input.agentMode === 'plan'
@@ -105,12 +166,12 @@ export function buildLocalCliCommand(input: LocalCliRunInput): string {
     input.unattended,
     input.agentMode,
   )
-  const binQ = shellQuote(bin)
+  const binQ = quoteShellArg(bin)
 
   switch (input.kind) {
     case 'codex': {
-      const modelFlag = model ? `--model ${shellQuote(model)}` : ''
-      const effortFlag = `--config model_reasoning_effort=${shellQuote(effort)}`
+      const modelFlag = model ? `--model ${quoteShellArg(model)}` : ''
+      const effortFlag = `--config model_reasoning_effort=${quoteShellArg(effort)}`
       const perm = approval.permissive ? '--full-auto' : ''
       return [
         `${binQ} exec ${perm} ${modelFlag} ${effortFlag} ${q}`,
@@ -123,7 +184,7 @@ export function buildLocalCliCommand(input: LocalCliRunInput): string {
         .join(' || ')
     }
     case 'claude': {
-      const modelFlag = model ? `--model ${shellQuote(model)}` : ''
+      const modelFlag = model ? `--model ${quoteShellArg(model)}` : ''
       const perm = plan
         ? '--permission-mode plan'
         : approval.permissive
@@ -135,11 +196,11 @@ export function buildLocalCliCommand(input: LocalCliRunInput): string {
       return `${binQ} -p ${modelFlag} ${perm} ${q}${safeFallback}`
     }
     case 'grok': {
-      const modelFlag = model ? `--model ${shellQuote(model)}` : ''
+      const modelFlag = model ? `--model ${quoteShellArg(model)}` : ''
       return `${binQ} ${modelFlag} ${q}`
     }
     case 'opencode': {
-      const modelFlag = model ? `--model ${shellQuote(model)}` : ''
+      const modelFlag = model ? `--model ${quoteShellArg(model)}` : ''
       return [`${binQ} run ${modelFlag} ${q}`, `${binQ} ${q}`]
         .map((c) => `(${c})`)
         .join(' || ')
@@ -157,17 +218,16 @@ async function preflightBinary(
   kind: LocalCliKind,
   binary: string,
 ): Promise<{ ok: boolean; path: string | null; error?: string }> {
-  // Absolute path: just check exists via shell test
+  // Absolute paths are checked with Node APIs so separators and spaces retain
+  // their native meaning on both Windows and macOS.
   if (path.isAbsolute(binary)) {
-    const r = await runBash({
-      command:
-        process.platform === 'win32'
-          ? `if exist ${shellQuote(binary)} (echo OK) else (exit 1)`
-          : `test -x ${shellQuote(binary)} || test -f ${shellQuote(binary)}`,
-      timeoutMs: 5000,
-      tag: 'cli-preflight',
-    })
-    if (!r.ok) {
+    let exists = false
+    try {
+      exists = fs.statSync(binary).isFile()
+    } catch {
+      exists = false
+    }
+    if (!exists) {
       return {
         ok: false,
         path: null,
@@ -178,12 +238,11 @@ async function preflightBinary(
   }
 
   const r = await runBash({
-    command:
-      process.platform === 'win32' ? `where ${binary}` : `command -v ${shellQuote(binary)}`,
+    command: executableLookupCommand(binary),
     timeoutMs: 5000,
     tag: 'cli-preflight',
   })
-  const found = r.stdout.trim().split(/\r?\n/)[0] || null
+  const found = firstExecutablePath(r.stdout)
   if (!r.ok || !found) {
     return {
       ok: false,
@@ -214,8 +273,16 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
     }
   }
 
+  // Materialize chat attachments so CLI tools/vision can open real files
+  const materialized = materializeCliAttachments(input.attachments, cwd, runId)
+  let prompt = input.prompt
+  if (materialized.promptBlock) {
+    prompt = `${prompt.trim()}\n\n${materialized.promptBlock}`.trim()
+  }
+
   const command = buildLocalCliCommand({
     ...input,
+    prompt,
     binary: pre.path || bin,
   })
 
@@ -229,11 +296,16 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
 
   const output = [r.stdout, r.stderr].filter(Boolean).join('\n\n').trim()
   const cancelled = Boolean(r.cancelled)
+  const attachNote =
+    materialized.paths.length > 0
+      ? `\n\n[attachments: ${materialized.paths.length} file(s) under ${materialized.dir}]`
+      : ''
   return {
     ok: r.ok,
     output:
-      output.slice(0, 100_000) ||
-      (r.ok ? '(empty output)' : cancelled ? '已取消' : 'CLI 無輸出'),
+      (output.slice(0, 100_000) ||
+        (r.ok ? '(empty output)' : cancelled ? '已取消' : 'CLI 無輸出')) +
+      (r.ok ? '' : attachNote),
     command,
     kind,
     code: r.code,

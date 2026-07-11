@@ -25,6 +25,8 @@ interface ScheduleStore {
     dailyAt?: string
     runAt?: string
     skillNames?: string[]
+    runner?: ScheduledJob['runner']
+    projectRoot?: string
   }) => Promise<void>
   updateJobSkills: (id: string, skillNames: string[]) => Promise<void>
   addJobFromObjective: (objective: string) => Promise<void>

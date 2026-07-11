@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_LLM_SETTINGS } from '../agent/llm'
 import { mergeCliProviders } from '../agent/cliProviders'
+import { recommendToolTuning } from '../agent/modelTuning'
 import type { LlmSettings } from '../agent/types'
 
 const STORAGE_KEY = 'subagents.settings.v1'
@@ -13,6 +14,7 @@ function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>)
     mcpServers: [...(DEFAULT_LLM_SETTINGS.mcpServers || [])],
     customTools: [...(DEFAULT_LLM_SETTINGS.customTools || [])],
     customToolSecrets: { ...(DEFAULT_LLM_SETTINGS.customToolSecrets || {}) },
+    pluginOAuthClients: { ...(DEFAULT_LLM_SETTINGS.pluginOAuthClients || {}) },
     cliProviders: mergeCliProviders(DEFAULT_LLM_SETTINGS.cliProviders),
   }
   for (const p of parts) {
@@ -30,6 +32,10 @@ function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>)
       customTools: p.customTools != null ? p.customTools : out.customTools,
       customToolSecrets:
         p.customToolSecrets != null ? { ...out.customToolSecrets, ...p.customToolSecrets } : out.customToolSecrets,
+      pluginOAuthClients:
+        p.pluginOAuthClients != null
+          ? { ...out.pluginOAuthClients, ...p.pluginOAuthClients }
+          : out.pluginOAuthClients,
       cliProviders:
         p.cliProviders != null ? mergeCliProviders(p.cliProviders) : out.cliProviders,
       alwaysOnCapabilities:
@@ -90,7 +96,27 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   update: async (patch) => {
-    const next = mergeSettings(get().settings, patch)
+    let next = mergeSettings(get().settings, patch)
+    // Soft-auto: when model changes and tool budgets still match defaults, apply tuning
+    if (patch.model != null && patch.model !== get().settings.model) {
+      const prev = get().settings
+      const atDefaults =
+        prev.toolSearchThreshold === DEFAULT_LLM_SETTINGS.toolSearchThreshold &&
+        prev.maxToolPayloadKb === DEFAULT_LLM_SETTINGS.maxToolPayloadKb &&
+        prev.maxToolRounds === DEFAULT_LLM_SETTINGS.maxToolRounds
+      const notOverridden =
+        patch.toolSearchThreshold == null &&
+        patch.maxToolPayloadKb == null &&
+        patch.maxToolRounds == null
+      if (atDefaults && notOverridden && String(patch.model).trim()) {
+        const rec = recommendToolTuning(String(patch.model))
+        next = mergeSettings(next, {
+          toolSearchThreshold: rec.toolSearchThreshold,
+          maxToolPayloadKb: rec.maxToolPayloadKb,
+          maxToolRounds: rec.maxToolRounds,
+        })
+      }
+    }
     set({ settings: next })
     saveLocal(next)
     // Live-apply into running engine (personality / memory toggles / safety…)
@@ -190,6 +216,15 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       customToolSecrets: Object.fromEntries(
         Object.keys(settings.customToolSecrets || {}).map((key) => [key, '***REDACTED***']),
       ),
+      pluginOAuthClients: Object.fromEntries(
+        Object.entries(settings.pluginOAuthClients || {}).map(([key, value]) => [
+          key,
+          {
+            clientId: value.clientId,
+            clientSecret: value.clientSecret ? '***REDACTED***' : undefined,
+          },
+        ]),
+      ),
       cliProviders: (settings.cliProviders || []).map((p) => ({
         ...p,
         apiKey: p.apiKey ? '***REDACTED***' : p.apiKey,
@@ -231,6 +266,21 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
             Object.entries(patch.customToolSecrets).map(([key, value]) => [
               key,
               value === '***REDACTED***' ? live[key] || '' : value,
+            ]),
+          )
+        }
+        if (patch.pluginOAuthClients) {
+          const live = get().settings.pluginOAuthClients || {}
+          patch.pluginOAuthClients = Object.fromEntries(
+            Object.entries(patch.pluginOAuthClients).map(([key, value]) => [
+              key,
+              {
+                clientId: value.clientId,
+                clientSecret:
+                  value.clientSecret === '***REDACTED***'
+                    ? live[key]?.clientSecret
+                    : value.clientSecret,
+              },
             ]),
           )
         }

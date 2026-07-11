@@ -57,9 +57,21 @@ function classifyLoopType(input) {
 // ── Tests ───────────────────────────────────────────────────────
 
 let passed = 0
-function test(name, fn) {
+let skipped = 0
+const requireBuilt = process.argv.includes('--require-built')
+
+function skip(reason) {
+  return { skipped: true, reason }
+}
+
+async function test(name, fn) {
   try {
-    fn()
+    const result = await fn()
+    if (result?.skipped) {
+      console.log(`  · ${name} (skipped: ${result.reason})`)
+      skipped++
+      return
+    }
     console.log(`  ✓ ${name}`)
     passed++
   } catch (e) {
@@ -71,46 +83,46 @@ function test(name, fn) {
 
 console.log('SubAgents AI smoke tests\n')
 
-test('classifyLoopType goal', () => {
+await test('classifyLoopType goal', () => {
   assert.equal(
     classifyLoopType('Find me 3 AI editing software tools and compare prices'),
     'Goal-based',
   )
 })
 
-test('classifyLoopType time', () => {
+await test('classifyLoopType time', () => {
   assert.equal(
     classifyLoopType('Every day at 08:00 fetch sales metrics'),
     'Time-based',
   )
 })
 
-test('classifyLoopType proactive', () => {
+await test('classifyLoopType proactive', () => {
   assert.equal(
     classifyLoopType('When email received WITH attachment AND subject CONTAINS Invoice'),
     'Proactive',
   )
 })
 
-test('schedule next interval', () => {
+await test('schedule next interval', () => {
   const from = new Date('2026-01-01T00:00:00Z')
   const next = computeNextRun('interval', { intervalMinutes: 30, from })
   assert.equal(new Date(next).getTime() - from.getTime(), 30 * 60_000)
 })
 
-test('supervisor truncates oversized payload', () => {
+await test('supervisor truncates oversized payload', () => {
   const big = 'x'.repeat(10_000)
   const r = enforceToolPayload('web_search', big, 100, 'truncate')
   assert.equal(r.truncated, true)
   assert.ok(byteLength(r.output) <= 100)
 })
 
-test('supervisor halt mode throws', () => {
+await test('supervisor halt mode throws', () => {
   const big = 'y'.repeat(5000)
   assert.throws(() => enforceToolPayload('http_fetch', big, 50, 'halt'))
 })
 
-test('strict event match semantics (manual)', () => {
+await test('strict event match semantics (manual)', () => {
   const rule = {
     enabled: true,
     source: 'email.received',
@@ -147,11 +159,11 @@ const mainPath = path.join(distElectron, 'main.js')
 const preloadCjs = path.join(distElectron, 'preload.cjs')
 const preloadMjs = path.join(distElectron, 'preload.mjs')
 
-test('electron preload is CJS (.cjs), not broken .mjs+require', () => {
+await test('electron preload is CJS (.cjs), not broken .mjs+require', () => {
   // Only enforce when dist has been built (dev/CI after vite electron build)
   if (!fs.existsSync(distElectron)) {
-    console.log('  · skip (dist-electron not built yet)')
-    return
+    if (requireBuilt) assert.fail('dist-electron must exist after npm run build')
+    return skip('dist-electron not built yet')
   }
   assert.equal(
     fs.existsSync(preloadCjs),
@@ -171,10 +183,10 @@ test('electron preload is CJS (.cjs), not broken .mjs+require', () => {
   assert.match(cjs, /exposeInMainWorld\s*\(\s*[`'"]subagents[`'"]/)
 })
 
-test('electron bridge is ESM/CJS-safe and Windows core paths avoid POSIX shell syntax', () => {
+await test('electron bridge is ESM/CJS-safe and Windows core paths avoid POSIX shell syntax', () => {
   if (!fs.existsSync(mainPath)) {
-    console.log('  · skip (dist-electron/main.js not built yet)')
-    return
+    if (requireBuilt) assert.fail('dist-electron/main.js must exist after npm run build')
+    return skip('dist-electron/main.js not built yet')
   }
   const main = fs.readFileSync(mainPath, 'utf8')
   assert.match(main, /^import\s/m, 'main.js should be ESM (import …)')
@@ -196,12 +208,18 @@ test('electron bridge is ESM/CJS-safe and Windows core paths avoid POSIX shell s
   const projectBridge = fs.readFileSync(path.join(appRoot, 'electron/projectBridge.ts'), 'utf8')
   const localCliRunner = fs.readFileSync(path.join(appRoot, 'electron/localCliRunner.ts'), 'utf8')
   const codegraphBridge = fs.readFileSync(path.join(appRoot, 'electron/codegraphBridge.ts'), 'utf8')
+  const platformProcess = fs.readFileSync(path.join(appRoot, 'electron/platformProcess.ts'), 'utf8')
+  const mcpBridge = fs.readFileSync(path.join(appRoot, 'electron/mcpBridge.ts'), 'utf8')
   assert.doesNotMatch(projectBridge, /2>\/dev\/null|\| head|\|\| true/)
-  assert.match(localCliRunner, /process\.platform === 'win32'/)
-  assert.match(codegraphBridge, /process\.platform === 'win32'/)
+  assert.match(platformProcess, /process\.platform === 'win32'/)
+  assert.match(localCliRunner, /executableLookupCommand/)
+  assert.match(codegraphBridge, /executableLookupCommand/)
+  const mcpWrite = mcpBridge.slice(mcpBridge.indexOf('private write('), mcpBridge.indexOf('private notify('))
+  assert.match(mcpWrite, /stdin\.write\(`\$\{json\}\\n`\)/)
+  assert.doesNotMatch(mcpWrite, /Content-Length/)
 })
 
-console.log(`\n${passed} tests passed`)
+console.log(`\n${passed} tests passed, ${skipped} skipped`)
 if (process.exitCode) {
   console.error('Smoke tests failed')
 } else {

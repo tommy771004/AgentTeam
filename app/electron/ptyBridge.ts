@@ -8,6 +8,12 @@ import { randomUUID } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import type { WebContents } from 'electron'
+import {
+  type CommandSpec,
+  isWindows,
+  spawnCommandSpec,
+  terminateProcessTree,
+} from './platformProcess'
 
 export type TermSessionInfo = {
   id: string
@@ -29,13 +35,16 @@ type Session = {
 
 const sessions = new Map<string, Session>()
 
-function shellCmd(): { file: string; args: string[] } {
-  if (process.platform === 'win32') {
-    return { file: process.env.COMSPEC || 'cmd.exe', args: [] }
+function shellCmd(): CommandSpec {
+  if (isWindows) {
+    return spawnCommandSpec(process.env.COMSPEC || 'cmd.exe', ['/d'])
   }
   const sh = process.env.SHELL || '/bin/bash'
   // interactive login-ish for prompt
-  return { file: sh, args: sh.endsWith('zsh') || sh.endsWith('bash') ? ['-i'] : [] }
+  return spawnCommandSpec(
+    sh,
+    sh.endsWith('zsh') || sh.endsWith('bash') ? ['-i'] : [],
+  )
 }
 
 export function listTermSessions(): TermSessionInfo[] {
@@ -56,8 +65,8 @@ export function createTermSession(opts: {
   const id = `term_${randomUUID().slice(0, 8)}`
   const cwd =
     opts.cwd && path.isAbsolute(opts.cwd) ? opts.cwd : process.cwd()
-  const { file, args } = shellCmd()
-  const child = spawn(file, args, {
+  const shell = shellCmd()
+  const child = spawn(shell.file, shell.args, {
     cwd,
     env: {
       ...process.env,
@@ -65,6 +74,9 @@ export function createTermSession(opts: {
       HOME: os.homedir(),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
+    detached: !isWindows,
+    windowsHide: true,
+    windowsVerbatimArguments: shell.windowsVerbatimArguments,
   })
 
   const session: Session = {
@@ -134,7 +146,7 @@ export function killTerm(id: string): { ok: boolean } {
   const s = sessions.get(id)
   if (!s) return { ok: false }
   try {
-    s.child.kill()
+    void terminateProcessTree(s.child)
   } catch {
     /* ignore */
   }

@@ -169,7 +169,7 @@ const api = {
       headers?: Record<string, string>
       body: unknown
     }) => ipcRenderer.invoke('mcp:httpRpc', input) as Promise<unknown>,
-    stdioListTools: (input: { id: string; command: string; args: string[] }) =>
+    stdioListTools: (input: { id: string; command: string; args: string[]; env?: Record<string, string> }) =>
       ipcRenderer.invoke('mcp:stdioListTools', input) as Promise<
         Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>
       >,
@@ -177,6 +177,7 @@ const api = {
       id: string
       command: string
       args: string[]
+      env?: Record<string, string>
       toolName: string
       arguments: Record<string, unknown>
     }) =>
@@ -185,7 +186,7 @@ const api = {
         content: string
         error?: string
       }>,
-    stdioEnsure: (input: { id: string; command: string; args: string[] }) =>
+    stdioEnsure: (input: { id: string; command: string; args: string[]; env?: Record<string, string> }) =>
       ipcRenderer.invoke('mcp:stdioEnsure', input) as Promise<{
         id: string
         command: string
@@ -223,6 +224,54 @@ const api = {
         stderr: string
         timedOut?: boolean
       }>,
+    openExternal: (url: string) =>
+      ipcRenderer.invoke('shell:openExternal', url) as Promise<{ ok: boolean }>,
+  },
+  oauth: {
+    run: (input: { pluginId: string; clientId: string; clientSecret?: string }) =>
+      ipcRenderer.invoke('oauth:run', input) as Promise<{
+        ok: boolean
+        pluginId: string
+        accessToken?: string
+        refreshToken?: string
+        expiresIn?: number
+        tokenType?: string
+        error?: string
+      }>,
+    refresh: (input: {
+      pluginId: string
+      refreshToken: string
+      clientId: string
+      clientSecret?: string
+      tokenUrl: string
+      tokenAuth?: 'body' | 'basic'
+    }) =>
+      ipcRenderer.invoke('oauth:refresh', input) as Promise<{
+        ok: boolean
+        pluginId: string
+        accessToken?: string
+        refreshToken?: string
+        expiresIn?: number
+        tokenType?: string
+        error?: string
+      }>,
+    cancel: () => ipcRenderer.invoke('oauth:cancel') as Promise<{ ok: boolean }>,
+    onStatus: (
+      cb: (payload: {
+        pluginId: string
+        phase: string
+        userCode?: string
+        verificationUri?: string
+        message?: string
+        error?: string
+      }) => void,
+    ) => {
+      const handler = (_: unknown, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('oauth:status', handler)
+      return () => {
+        ipcRenderer.removeListener('oauth:status', handler)
+      }
+    },
   },
   project: {
     pick: (opts?: { defaultPath?: string }) =>
@@ -314,6 +363,14 @@ const api = {
       approvalMode?: 'always' | 'auto' | 'full'
       unattended?: boolean
       timeoutMs?: number
+      /** Chat attachments (images as data URL) — written to disk for the CLI */
+      attachments?: Array<{
+        name: string
+        mimeType?: string
+        kind?: 'image' | 'text' | 'binary'
+        dataUrl?: string
+        textContent?: string
+      }>
     }) =>
       ipcRenderer.invoke('cli:runAgent', input) as Promise<{
         ok: boolean
@@ -329,6 +386,43 @@ const api = {
     /** Stop in-flight CLI agent (and tagged cli-agent bash) */
     cancel: () =>
       ipcRenderer.invoke('cli:cancel') as Promise<{ ok: boolean; killed: number }>,
+  },
+  /** Persist / reload chat attachments on disk */
+  attachments: {
+    materialize: (input: {
+      attachments: Array<{
+        id?: string
+        name: string
+        mimeType?: string
+        kind?: 'image' | 'text' | 'binary'
+        dataUrl?: string
+        textContent?: string
+        filePath?: string
+        size?: number
+      }>
+      projectRoot?: string
+      sessionId?: string
+    }) =>
+      ipcRenderer.invoke('attachments:materialize', input) as Promise<{
+        ok: boolean
+        dir: string | null
+        items: Array<{
+          id: string
+          name: string
+          mimeType?: string
+          kind?: 'image' | 'text' | 'binary'
+          dataUrl?: string
+          textContent?: string
+          filePath?: string
+          size: number
+        }>
+      }>,
+    readDataUrl: (filePath: string) =>
+      ipcRenderer.invoke('attachments:readDataUrl', filePath) as Promise<{
+        ok: boolean
+        dataUrl?: string
+        error?: string
+      }>,
   },
   /** CodeGraph — project code knowledge graph (local CLI) */
   codegraph: {
@@ -561,6 +655,13 @@ const api = {
         messageId?: string | number
         receivedAt: string
         raw?: unknown
+        attachments?: Array<{
+          name: string
+          mimeType: string
+          kind: 'image' | 'text' | 'binary'
+          dataUrl?: string
+          size?: number
+        }>
       }) => void,
     ) => {
       const handler = (_: unknown, payload: Parameters<typeof cb>[0]) => cb(payload)
@@ -572,6 +673,34 @@ const api = {
   },
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list') as Promise<unknown[]>,
+    catalog: () => ipcRenderer.invoke('plugins:catalog') as Promise<unknown[]>,
+    install: (input: { id: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('plugins:install', input) as Promise<{
+        ok: boolean
+        installed: boolean
+        requiresSetup: boolean
+        id: string
+        error?: string
+        log?: string
+        setupHint?: string
+        manifest?: unknown
+        health?: unknown
+      }>,
+    health: (id: string) =>
+      ipcRenderer.invoke('plugins:health', id) as Promise<{
+        ok: boolean
+        installed: boolean
+        healthy: boolean
+        id: string
+        tools: unknown[]
+        error?: string
+      }>,
+    uninstall: (id: string) =>
+      ipcRenderer.invoke('plugins:uninstall', id) as Promise<{
+        ok: boolean
+        id: string
+        installed: boolean
+      }>,
     save: (manifest: unknown) =>
       ipcRenderer.invoke('plugins:save', manifest) as Promise<{ ok: boolean; path: string }>,
     delete: (id: string) =>

@@ -13,6 +13,17 @@ export type QueuedExternalRun = ExternalRunOpts & {
   dedupeKey: string
 }
 
+/** Serializable attachment (prefer filePath; no huge dataUrls) */
+type PersistedAttachment = {
+  id: string
+  kind: 'image' | 'text' | 'binary'
+  name: string
+  mimeType: string
+  size: number
+  filePath?: string
+  textContent?: string
+}
+
 /** Serializable shape (no functions) for disk */
 export type PersistedQueueItem = {
   id: string
@@ -28,6 +39,12 @@ export type PersistedQueueItem = {
   unattended?: boolean
   /** Re-bind markJobResult after hydrate */
   scheduleJobId?: string
+  projectRoot?: string
+  extraContext?: string
+  reuseThreadId?: string
+  skipUserBubble?: boolean
+  enqueueWhenBusy?: boolean
+  attachments?: PersistedAttachment[]
   /** Safe subset of overrides only */
   overrides?: Pick<
     RuntimeOverrides,
@@ -40,6 +57,8 @@ export type PersistedQueueItem = {
     | 'preloadUnlockedTools'
     | 'maxIterations'
     | 'maxToolRounds'
+    | 'projectRoot'
+    | 'extraSystemContext'
   >
 }
 
@@ -70,7 +89,24 @@ function dedupeKey(opts: ExternalRunOpts): string {
     opts.sourceLabel || '',
     (opts.attachedSkills || []).join(','),
     opts.meta?.scheduleJobId || '',
+    opts.reuseThreadId || '',
   ].join('|')
+}
+
+function persistAttachments(
+  atts: ExternalRunOpts['attachments'],
+): PersistedAttachment[] | undefined {
+  if (!atts?.length) return undefined
+  return atts.map((a) => ({
+    id: a.id,
+    kind: a.kind,
+    name: a.name,
+    mimeType: a.mimeType,
+    size: a.size,
+    filePath: a.filePath,
+    // keep short text only
+    textContent: a.textContent?.slice(0, 4000),
+  }))
 }
 
 function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
@@ -88,6 +124,12 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
     sourceLabel: item.sourceLabel,
     unattended: item.unattended,
     scheduleJobId: item.meta?.scheduleJobId,
+    projectRoot: item.projectRoot,
+    extraContext: item.extraContext?.slice(0, 8000),
+    reuseThreadId: item.reuseThreadId,
+    skipUserBubble: item.skipUserBubble,
+    enqueueWhenBusy: item.enqueueWhenBusy,
+    attachments: persistAttachments(item.attachments),
     overrides: o
       ? {
           eventPreMatched: o.eventPreMatched,
@@ -99,6 +141,8 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
           preloadUnlockedTools: o.preloadUnlockedTools,
           maxIterations: o.maxIterations,
           maxToolRounds: o.maxToolRounds,
+          projectRoot: o.projectRoot,
+          extraSystemContext: o.extraSystemContext?.slice(0, 8000),
         }
       : undefined,
   }
@@ -117,6 +161,12 @@ function fromPersisted(p: PersistedQueueItem): QueuedExternalRun {
     attachedSkills: p.attachedSkills,
     sourceLabel: p.sourceLabel,
     unattended: p.unattended ?? true,
+    projectRoot: p.projectRoot,
+    extraContext: p.extraContext,
+    reuseThreadId: p.reuseThreadId,
+    skipUserBubble: p.skipUserBubble,
+    enqueueWhenBusy: p.enqueueWhenBusy,
+    attachments: p.attachments,
     overrides: p.overrides,
     meta: p.scheduleJobId ? { scheduleJobId: p.scheduleJobId } : undefined,
   }
@@ -228,6 +278,33 @@ export function removeQueuedRun(id: string): boolean {
   } catch {
     /* ignore */
   }
+  return true
+}
+
+/** Move item up/down by one slot (priority). dir -1 = earlier, +1 = later */
+export function moveQueuedRun(id: string, dir: -1 | 1): boolean {
+  hydrateRunQueue()
+  const idx = queue.findIndex((q) => q.id === id)
+  if (idx < 0) return false
+  const j = idx + dir
+  if (j < 0 || j >= queue.length) return false
+  const next = [...queue]
+  const [item] = next.splice(idx, 1)
+  next.splice(j, 0, item)
+  queue.length = 0
+  queue.push(...next)
+  emit()
+  return true
+}
+
+/** Jump item to front of the queue (highest priority) */
+export function promoteQueuedRun(id: string): boolean {
+  hydrateRunQueue()
+  const idx = queue.findIndex((q) => q.id === id)
+  if (idx <= 0) return false
+  const [item] = queue.splice(idx, 1)
+  queue.unshift(item)
+  emit()
   return true
 }
 

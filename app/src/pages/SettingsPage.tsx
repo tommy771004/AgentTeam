@@ -42,6 +42,13 @@ import {
 import { BUILTIN_CAPABILITIES } from '../agent/capabilities'
 import { skillsStore } from '../agent/hermes/skills'
 import { recommendToolTuning } from '../agent/modelTuning'
+import {
+  OAUTH_REDIRECT_URI,
+  PLUGIN_OAUTH_PROVIDERS,
+} from '../agent/hermes/pluginOAuth'
+import { listPluginSecrets, secretNeedsRefresh } from '../agent/hermes/pluginSecrets'
+import { customToolsForSettings } from '../agent/tools/customTools'
+import { pluginRegistry } from '../agent/hermes/plugins'
 
 const SECTION_GROUPS = [
   { id: 'personal', label: '個人' },
@@ -66,6 +73,7 @@ const SECTIONS = [
   { id: 'webhook', label: 'Webhook', icon: 'webhook', group: 'integrate' },
   { id: 'gateway', label: '訊息閘道', icon: 'forum', group: 'integrate' },
   { id: 'mcp', label: 'MCP 伺服器', icon: 'extension', group: 'integrate' },
+  { id: 'oauth', label: '外掛 OAuth', icon: 'key', group: 'integrate' },
   { id: 'bundle', label: '匯出匯入', icon: 'import_export', group: 'system' },
 ]
 
@@ -130,6 +138,10 @@ const SECTION_META: Record<string, { title: string; subtitle: string }> = {
     title: 'MCP 伺服器',
     subtitle: '外部工具協定（HTTP / stdio 長連線）。',
   },
+  oauth: {
+    title: '外掛 OAuth',
+    subtitle: 'Connector Client ID / Secret；裝置碼與本機回呼共用。Redirect：127.0.0.1:19789。',
+  },
   bundle: {
     title: '匯出匯入',
     subtitle: '設定、排程與事件規則備份（含 API 金鑰，請妥善保管）。',
@@ -165,6 +177,10 @@ export function SettingsPage() {
   const [capturingId, setCapturingId] = useState<string | null>(null)
   const [customToolsDraft, setCustomToolsDraft] = useState('')
   const [customToolsError, setCustomToolsError] = useState<string | null>(null)
+  const [oauthRefreshMsg, setOauthRefreshMsg] = useState<string | null>(null)
+  const refreshPluginTokens = useLearningStore((s) => s.refreshPluginTokens)
+  // Recompute secret key list when plugins change
+  const pluginsTick = useLearningStore((s) => s.plugins)
 
   /** Instant apply — no save button */
   const set = (patch: Partial<typeof settings>) => {
@@ -316,12 +332,28 @@ export function SettingsPage() {
   const customToolSecretKeys = useMemo(() => {
     const found = new Set<string>()
     const re = /{{\s*secret:([A-Za-z0-9_.-]+)\s*}}/g
-    for (const tool of settings.customTools || []) {
+    // Settings custom tools + enabled plugin/connector templates
+    for (const tool of customToolsForSettings(settings)) {
       const text = JSON.stringify(tool.template || {})
       for (const match of text.matchAll(re)) found.add(match[1])
     }
+    // Known secret owners from installed packages / MCP secretPluginId
+    for (const plugin of pluginRegistry.list()) {
+      if (plugin.connectorAuth?.hasCredential || plugin.enabled) {
+        // connector ids often double as secret keys
+        if (plugin.id.endsWith('-connector') || plugin.id === 'brave-search' || plugin.id === 'postgres-dsn') {
+          found.add(plugin.id)
+        }
+      }
+      for (const server of plugin.mcpServers || []) {
+        if (server.secretPluginId) found.add(server.secretPluginId)
+      }
+    }
+    // Already stored secrets
+    for (const key of Object.keys(settings.customToolSecrets || {})) found.add(key)
+    for (const { id } of listPluginSecrets()) found.add(id)
     return [...found].sort()
-  }, [settings.customTools])
+  }, [settings.customTools, settings.customToolSecrets, pluginsTick])
   const toolTuning = useMemo(
     () => recommendToolTuning(settings.model || settings.roleModels?.orchestrator || ''),
     [settings.model, settings.roleModels?.orchestrator],
@@ -1545,66 +1577,117 @@ export function SettingsPage() {
               {settings.capabilitiesEnabled !== false && (
                 <SettingsStack title="Always-on 能力包">
                   <p className="text-[12px] text-on-surface-variant mb-2 leading-relaxed">
-                    點選可將 deferred 包改為第一輪就可用（不必 load_capability）。含內建、MCP 伺服器、技能包。
+                    點選可將 deferred 包改為第一輪就可用（不必 load_capability）。依類型分組：內建 / MCP / 外掛 / 技能。
                   </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      ...BUILTIN_CAPABILITIES.map((c) => ({
-                        id: c.id,
-                        description: c.description,
-                        isFixed: c.deferLoading === false,
-                      })),
-                      ...(settings.mcpEnabled
-                        ? (settings.mcpServers || [])
-                            .filter((s) => s.enabled)
-                            .map((s) => ({
-                              id: `mcp:${s.id}`,
-                              description: `MCP「${s.name}」`,
-                              isFixed: false,
-                            }))
-                        : []),
-                      ...skillsStore.list().map((s) => ({
-                        id: `skill:${s.meta.name}`,
-                        description: s.meta.description || s.meta.name,
-                        isFixed: false,
-                      })),
-                    ].map((c) => {
-                      const active =
-                        c.isFixed || (settings.alwaysOnCapabilities || []).includes(c.id)
-                      return (
-                        <button
-                          key={c.id}
-                          type="button"
-                          disabled={c.isFixed}
-                          title={c.description}
-                          onClick={() => {
-                            if (c.isFixed) return
-                            const cur = new Set(settings.alwaysOnCapabilities || [])
-                            if (cur.has(c.id)) cur.delete(c.id)
-                            else cur.add(c.id)
-                            set({ alwaysOnCapabilities: [...cur] })
-                          }}
-                          className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
-                            active
-                              ? 'border-primary/40 bg-primary/15 text-primary'
-                              : 'border-white/10 text-on-surface-variant hover:border-white/25'
-                          } ${c.isFixed ? 'opacity-80 cursor-default' : ''}`}
-                        >
-                          {c.id}
-                          {c.isFixed ? ' · 固定' : active ? ' · on' : ''}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {(settings.alwaysOnCapabilities || []).length > 0 && (
-                    <button
-                      type="button"
-                      className={`${settingsBtnCls} mt-2`}
-                      onClick={() => set({ alwaysOnCapabilities: [] })}
-                    >
-                      清除 always-on 覆寫
-                    </button>
-                  )}
+                  {(() => {
+                    type CapChip = { id: string; description: string; isFixed: boolean }
+                    const groups: Array<{ label: string; items: CapChip[] }> = [
+                      {
+                        label: '內建',
+                        items: BUILTIN_CAPABILITIES.map((c) => ({
+                          id: c.id,
+                          description: c.description,
+                          isFixed: c.deferLoading === false,
+                        })),
+                      },
+                      {
+                        label: 'MCP',
+                        items: settings.mcpEnabled
+                          ? (settings.mcpServers || [])
+                              .filter((s) => s.enabled)
+                              .map((s) => ({
+                                id: `mcp:${s.id}`,
+                                description: `MCP「${s.name}」${s.secretPluginId ? ` · secret=${s.secretPluginId}` : ''}`,
+                                isFixed: false,
+                              }))
+                          : [],
+                      },
+                      {
+                        label: '外掛 / Connector',
+                        items: (() => {
+                          const owners = new Map<string, string[]>()
+                          for (const tool of customToolsForSettings(settings)) {
+                            const o = tool.ownerId || 'settings'
+                            owners.set(o, [...(owners.get(o) || []), tool.name])
+                          }
+                          return [...owners].map(([owner, names]) => ({
+                            id: `user:${owner}`,
+                            description: `${owner}（${names.slice(0, 4).join(', ')}${names.length > 4 ? '…' : ''}）`,
+                            isFixed: false,
+                          }))
+                        })(),
+                      },
+                      {
+                        label: '技能',
+                        items: skillsStore.list().map((s) => ({
+                          id: `skill:${s.meta.name}`,
+                          description: s.meta.description || s.meta.name,
+                          isFixed: false,
+                        })),
+                      },
+                    ]
+                    const toggle = (id: string, isFixed: boolean) => {
+                      if (isFixed) return
+                      const cur = new Set(settings.alwaysOnCapabilities || [])
+                      if (cur.has(id)) cur.delete(id)
+                      else cur.add(id)
+                      set({ alwaysOnCapabilities: [...cur] })
+                    }
+                    return (
+                      <div className="space-y-3">
+                        {groups
+                          .filter((g) => g.items.length > 0)
+                          .map((g) => (
+                            <div key={g.label}>
+                              <div className="text-[10px] font-semibold uppercase tracking-wide text-outline mb-1.5">
+                                {g.label}
+                                <span className="ml-1.5 normal-case font-normal opacity-70">
+                                  {g.items.filter(
+                                    (c) =>
+                                      c.isFixed ||
+                                      (settings.alwaysOnCapabilities || []).includes(c.id),
+                                  ).length}
+                                  /{g.items.length} on
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {g.items.map((c) => {
+                                  const active =
+                                    c.isFixed ||
+                                    (settings.alwaysOnCapabilities || []).includes(c.id)
+                                  return (
+                                    <button
+                                      key={c.id}
+                                      type="button"
+                                      disabled={c.isFixed}
+                                      title={c.description}
+                                      onClick={() => toggle(c.id, c.isFixed)}
+                                      className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
+                                        active
+                                          ? 'border-primary/40 bg-primary/15 text-primary'
+                                          : 'border-white/10 text-on-surface-variant hover:border-white/25'
+                                      } ${c.isFixed ? 'opacity-80 cursor-default' : ''}`}
+                                    >
+                                      {c.id.replace(/^(user|mcp|skill):/, '')}
+                                      {c.isFixed ? ' · 固定' : active ? ' · on' : ''}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        {(settings.alwaysOnCapabilities || []).length > 0 && (
+                          <button
+                            type="button"
+                            className={settingsBtnCls}
+                            onClick={() => set({ alwaysOnCapabilities: [] })}
+                          >
+                            清除 always-on 覆寫
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </SettingsStack>
               )}
               <SettingsRow
@@ -1916,7 +1999,10 @@ export function SettingsPage() {
                   }}
                   spellCheck={false}
                 />
-                <p className="mt-1 text-[11px] text-outline">支援 http_template 與 bash_template；bash 永遠需核准。外掛 manifest 的 customTools 也會自動載入。</p>
+                <p className="mt-1 text-[11px] text-outline">
+                  支援 http_template 與 bash_template；bash 永遠需核准。外掛 manifest 的 customTools 也會自動載入。
+                  下方 secret 鍵會掃描設定 JSON + 已安裝 plugin 模板 + 市集授權 id。
+                </p>
                 {customToolsError && <p className="mt-1 text-[11px] text-error">JSON 無法儲存：{customToolsError}</p>}
               </SettingsStack>
               {customToolSecretKeys.map((key) => (
@@ -1927,7 +2013,7 @@ export function SettingsPage() {
                     value={settings.customToolSecrets?.[key] || ''}
                     onChange={(event) => set({ customToolSecrets: { ...(settings.customToolSecrets || {}), [key]: event.target.value } })}
                     autoComplete="off"
-                    placeholder="只在執行 {{secret:${key}}} 時帶入，不寫入 manifest／匯出檔"
+                    placeholder={`{{secret:${key}}} / 市集授權會自動寫入；也可在此覆寫`}
                   />
                 </SettingsStack>
               ))}
@@ -2086,6 +2172,7 @@ export function SettingsPage() {
                   try {
                     const tools = await listAllMcpTools(
                       (settings.mcpServers || []).filter((s) => s.enabled),
+                      settings,
                     )
                     setMcpProbe(
                       tools.length
@@ -2110,7 +2197,7 @@ export function SettingsPage() {
                   for (const s of (settings.mcpServers || []).filter(
                     (x) => x.enabled && x.transport === 'stdio',
                   )) {
-                    const r = await mcpEnsureSession(s)
+                    const r = await mcpEnsureSession(s, settings)
                     lines.push(
                       r.ok
                         ? `✓ ${s.name} pid=${r.status?.pid} alive=${r.status?.alive}`
@@ -2156,6 +2243,141 @@ export function SettingsPage() {
                 {mcpSessions}
               </pre>
             )}
+          </>
+        )}
+
+        {section === 'oauth' && (
+          <>
+            <SettingsGroup title="本機 OAuth 回呼">
+              <SettingsStack title="Redirect URI（code flow 必須完全一致）">
+                <code className="block text-[12px] font-[family-name:var(--font-mono)] text-on-surface break-all">
+                  {OAUTH_REDIRECT_URI}
+                </code>
+                <p className="mt-2 text-[11px] text-outline leading-relaxed">
+                  GitHub 使用<strong>裝置碼</strong>（通常只需 Client ID）。Notion / Google / Dropbox 等需在開發者後台登錄此 Redirect URI。
+                  Access token 存在本機 secret store；有 refresh_token 時會每分鐘檢查並自動 refresh。
+                </p>
+              </SettingsStack>
+              <SettingsRow
+                title="立即刷新到期 token"
+                description="對所有含 refresh_token 且即將過期的 connector 執行一次 refresh"
+                control={
+                  <button
+                    type="button"
+                    className={settingsBtnCls}
+                    onClick={() => {
+                      void refreshPluginTokens().then((n) => {
+                        setOauthRefreshMsg(n > 0 ? `已刷新 ${n} 個 token` : '目前沒有需要刷新的 token')
+                      })
+                    }}
+                  >
+                    立即 refresh
+                  </button>
+                }
+              />
+              {oauthRefreshMsg && (
+                <p className="px-4 pb-3 text-[11px] text-on-surface-variant">{oauthRefreshMsg}</p>
+              )}
+            </SettingsGroup>
+
+            <SettingsGroup title="OAuth Client 憑證">
+              {Array.from(
+                new Map(
+                  Object.values(PLUGIN_OAUTH_PROVIDERS).map((p) => [
+                    p.clientKey,
+                    {
+                      key: p.clientKey,
+                      flow: p.flow,
+                      docsUrl: p.docsUrl,
+                      needsSecret: p.tokenAuth === 'basic' || p.flow === 'code',
+                    },
+                  ]),
+                ).values(),
+              ).map((row) => {
+                const live = settings.pluginOAuthClients?.[row.key] || { clientId: '', clientSecret: '' }
+                return (
+                  <div key={row.key} className="border-b border-white/[0.06] last:border-0 px-4 py-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-[13px] font-semibold text-on-surface capitalize">{row.key}</div>
+                        <div className="text-[11px] text-outline">
+                          {row.flow === 'device' ? '裝置碼流程' : 'Code + 本機回呼'}
+                          {row.needsSecret ? ' · 建議填 Client Secret' : ''}
+                        </div>
+                      </div>
+                      {row.docsUrl && (
+                        <a
+                          href={row.docsUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] font-semibold text-primary hover:underline"
+                        >
+                          開發者後台
+                        </a>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      className={settingsInputCls + ' font-[family-name:var(--font-mono)] text-[12px]'}
+                      placeholder="Client ID"
+                      value={live.clientId || ''}
+                      autoComplete="off"
+                      onChange={(e) =>
+                        set({
+                          pluginOAuthClients: {
+                            ...(settings.pluginOAuthClients || {}),
+                            [row.key]: { ...live, clientId: e.target.value },
+                          },
+                        })
+                      }
+                    />
+                    <input
+                      type="password"
+                      className={settingsInputCls + ' font-[family-name:var(--font-mono)] text-[12px]'}
+                      placeholder="Client Secret（選填／部分供應商必要）"
+                      value={live.clientSecret || ''}
+                      autoComplete="off"
+                      onChange={(e) =>
+                        set({
+                          pluginOAuthClients: {
+                            ...(settings.pluginOAuthClients || {}),
+                            [row.key]: { ...live, clientSecret: e.target.value },
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                )
+              })}
+            </SettingsGroup>
+
+            <SettingsGroup title="本機 token 狀態">
+              <div className="px-4 py-3 space-y-1.5 text-[12px]">
+                {listPluginSecrets().length === 0 ? (
+                  <p className="text-outline">尚無 connector 密鑰 — 在學習中心 → 外掛完成授權後會顯示於此。</p>
+                ) : (
+                  listPluginSecrets().map(({ id, record }) => (
+                    <div
+                      key={id}
+                      className="flex items-center justify-between gap-2 border-b border-white/[0.05] py-1.5 last:border-0"
+                    >
+                      <span className="font-[family-name:var(--font-mono)] text-on-surface-variant truncate">
+                        {id}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-outline">
+                        {record.refreshToken
+                          ? secretNeedsRefresh(record)
+                            ? 'refresh 待執行'
+                            : record.expiresAt
+                              ? `到期 ${new Date(record.expiresAt).toLocaleString()}`
+                              : '有 refresh_token'
+                          : '無 refresh（PAT / 裝置碼）'}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </SettingsGroup>
           </>
         )}
 

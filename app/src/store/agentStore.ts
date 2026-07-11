@@ -11,6 +11,21 @@ import {
   type LocalRunnerKind,
 } from '../agent/localCliRun'
 
+/** Drain unified run queue after any path frees the global lock */
+function drainQueueAfterRun() {
+  void (async () => {
+    try {
+      const { drainExternalRunQueue } = await import('../agent/runQueue')
+      const { runExternalObjective } = await import('../agent/runExternal')
+      await drainExternalRunQueue((o) =>
+        runExternalObjective({ ...o, _fromQueue: true }),
+      )
+    } catch {
+      /* non-fatal */
+    }
+  })()
+}
+
 interface AgentStore {
   agent: AgentState
   selectedLoopType: LoopType | null
@@ -34,6 +49,14 @@ interface AgentStore {
     agentMode?: string
     approvalMode?: ApprovalMode
     unattended?: boolean
+    /** Chat attachments for CLI (written to disk in Electron) */
+    attachments?: Array<{
+      name: string
+      mimeType?: string
+      kind?: 'image' | 'text' | 'binary'
+      dataUrl?: string
+      textContent?: string
+    }>
   }) => Promise<void>
   stopExecution: () => void
   continueTurn: () => void
@@ -152,6 +175,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         if (['success', 'failed', 'halted'].includes(final.status)) {
           await get().saveToArchive()
         }
+        // Unified queue drain (automation + interactive follow-ups)
+        void drainQueueAfterRun()
       } catch (e) {
         set({ isRunning: false })
         try {
@@ -160,6 +185,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         } catch {
           /* ignore */
         }
+        void drainQueueAfterRun()
         throw e
       }
     },
@@ -323,6 +349,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         if (['success', 'failed', 'halted'].includes(final.status)) {
           await get().saveToArchive()
         }
+        void drainQueueAfterRun()
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         const final = emptyAgentLike({
@@ -357,6 +384,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         } catch {
           /* ignore */
         }
+        void drainQueueAfterRun()
       }
     },
 
@@ -373,6 +401,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       } catch {
         /* ignore */
       }
+      void drainQueueAfterRun()
     },
 
     continueTurn: () => {

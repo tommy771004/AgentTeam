@@ -35,6 +35,7 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   webhookToken: '',
   customTools: [],
   customToolSecrets: {},
+  pluginOAuthClients: {},
   mcpEnabled: false,
   mcpServers: [],
   telegramEnabled: false,
@@ -132,9 +133,16 @@ export function withRoleModel(settings: LlmSettings, role: string): LlmSettings 
   return { ...settings, model: resolved.model }
 }
 
+/** OpenAI-compatible multimodal content parts */
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }
+
+export type ChatMessageContent = string | null | ChatContentPart[]
+
 export interface ChatMessageExt {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | null
+  content: ChatMessageContent
   tool_calls?: Array<{
     id: string
     type: 'function'
@@ -289,16 +297,37 @@ export async function runSubAgentTask(
   step: string,
   context: string,
   toolContext?: string,
+  opts?: {
+    /** Multimodal user content (vision) — when set, bypasses plain string chatCompletion */
+    userContent?: ChatMessageContent
+  },
 ): Promise<LlmChatResult> {
   const system = `You are the "${role}" sub-agent in SubAgents AI multi-agent framework.
 Follow the loop protocol: process only your assigned step, be concise, factual, and structured in Markdown.
-Use tool results as primary evidence. Never invent credentials or private data. If data is unavailable mark as N/A.`
+Use tool results as primary evidence. Never invent credentials or private data. If data is unavailable mark as N/A.
+If the user message includes images, describe and use them as primary evidence.`
+
+  const textBody = `Objective: ${objective}\n\nYour step: ${step}\n\nTool results:\n${toolContext || '(no tools ran)'}\n\nContext so far:\n${context || '(none)'}\n\nProduce the step output only.`
+
+  if (opts?.userContent && typeof opts.userContent !== 'string') {
+    const r = await chatCompletionWithTools(
+      settings,
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: opts.userContent },
+      ],
+      [],
+      { toolChoice: 'none', maxTokens: 1400 },
+    )
+    return { content: r.content, tokensUsed: r.tokensUsed, model: r.model }
+  }
 
   return chatCompletion(settings, [
     { role: 'system', content: system },
     {
       role: 'user',
-      content: `Objective: ${objective}\n\nYour step: ${step}\n\nTool results:\n${toolContext || '(no tools ran)'}\n\nContext so far:\n${context || '(none)'}\n\nProduce the step output only.`,
+      content:
+        typeof opts?.userContent === 'string' ? opts.userContent : textBody,
     },
   ])
 }

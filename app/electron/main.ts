@@ -65,6 +65,11 @@ import {
 } from './ptyBridge'
 import { runLocalCliAgent, type LocalCliKind } from './localCliRunner'
 import {
+  executableLookupCommand,
+  firstExecutablePath,
+  isPathInside,
+} from './platformProcess'
+import {
   codegraphCallees,
   codegraphCallers,
   codegraphDetect,
@@ -76,6 +81,18 @@ import {
   codegraphStatus,
   codegraphSync,
 } from './codegraphBridge'
+import {
+  configurePluginInstallerDir,
+  installPlugin,
+  pluginCatalog,
+  pluginHealth,
+  pluginInstallerDir,
+  pluginManifestPath,
+  uninstallPlugin,
+  validatePluginId,
+} from './pluginInstaller'
+import { cancelOAuth, refreshOAuthToken, runPluginOAuth } from './oauthBridge'
+import { oauthProviderForPlugin } from '../src/agent/hermes/pluginOAuth'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -609,8 +626,18 @@ ipcMain.handle('hermes:get', async () => {
 // ── Plugins directory ───────────────────────────────────────────
 
 function pluginsDir() {
-  return getDataDir('plugins')
+  return pluginInstallerDir()
 }
+
+configurePluginInstallerDir(getDataDir('plugins'))
+
+ipcMain.handle('plugins:catalog', async () => pluginCatalog())
+
+ipcMain.handle('plugins:install', async (_evt, input: unknown) => installPlugin(input))
+
+ipcMain.handle('plugins:health', async (_evt, id: string) => pluginHealth(id))
+
+ipcMain.handle('plugins:uninstall', async (_evt, id: string) => uninstallPlugin(id))
 
 ipcMain.handle('plugins:list', async () => {
   const dir = pluginsDir()
@@ -629,19 +656,86 @@ ipcMain.handle('plugins:list', async () => {
 })
 
 ipcMain.handle('plugins:save', async (_evt, manifest: { id: string }) => {
-  const dir = pluginsDir()
-  const file = path.join(dir, `${manifest.id}.json`)
+  if (!manifest || typeof manifest !== 'object') throw new Error('無效的 plugin manifest')
+  validatePluginId(manifest.id)
+  const file = pluginManifestPath(manifest.id)
   fs.writeFileSync(file, JSON.stringify(manifest, null, 2), 'utf-8')
   return { ok: true, path: file }
 })
 
 ipcMain.handle('plugins:delete', async (_evt, id: string) => {
-  const file = path.join(pluginsDir(), `${id}.json`)
+  const file = pluginManifestPath(id)
   if (fs.existsSync(file)) fs.unlinkSync(file)
   return { ok: true }
 })
 
 ipcMain.handle('plugins:dir', () => pluginsDir())
+
+// ── OAuth (device code + loopback code flow) ────────────────────
+
+ipcMain.handle(
+  'oauth:run',
+  async (
+    evt,
+    input: {
+      pluginId?: string
+      clientId?: string
+      clientSecret?: string
+    },
+  ) => {
+    const pluginId = typeof input?.pluginId === 'string' ? input.pluginId : ''
+    const provider = oauthProviderForPlugin(pluginId)
+    if (!provider) {
+      return { ok: false, pluginId, error: `外掛 ${pluginId} 不支援 OAuth` }
+    }
+    return runPluginOAuth(
+      {
+        pluginId,
+        provider,
+        clientId: String(input?.clientId || '').trim(),
+        clientSecret: input?.clientSecret ? String(input.clientSecret) : undefined,
+      },
+      evt.sender,
+    )
+  },
+)
+
+ipcMain.handle('oauth:cancel', async () => {
+  cancelOAuth()
+  return { ok: true }
+})
+
+ipcMain.handle(
+  'oauth:refresh',
+  async (
+    _evt,
+    input: {
+      pluginId?: string
+      refreshToken?: string
+      clientId?: string
+      clientSecret?: string
+      tokenUrl?: string
+      tokenAuth?: 'body' | 'basic'
+    },
+  ) => {
+    return refreshOAuthToken({
+      pluginId: String(input?.pluginId || ''),
+      refreshToken: String(input?.refreshToken || ''),
+      clientId: String(input?.clientId || ''),
+      clientSecret: input?.clientSecret ? String(input.clientSecret) : undefined,
+      tokenUrl: String(input?.tokenUrl || ''),
+      tokenAuth: input?.tokenAuth,
+    })
+  },
+)
+
+ipcMain.handle('shell:openExternal', async (_evt, url: string) => {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+    throw new Error('無效的 URL')
+  }
+  await shell.openExternal(url)
+  return { ok: true }
+})
 
 // ── MCP bridge ──────────────────────────────────────────────────
 
@@ -655,7 +749,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'mcp:stdioListTools',
-  async (_evt, input: { id: string; command: string; args: string[] }) =>
+  async (_evt, input: { id: string; command: string; args: string[]; env?: Record<string, string> }) =>
     mcpStdioListTools(input),
 )
 
@@ -667,6 +761,7 @@ ipcMain.handle(
       id: string
       command: string
       args: string[]
+      env?: Record<string, string>
       toolName: string
       arguments: Record<string, unknown>
     },
@@ -675,7 +770,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'mcp:stdioEnsure',
-  async (_evt, input: { id: string; command: string; args: string[] }) =>
+  async (_evt, input: { id: string; command: string; args: string[]; env?: Record<string, string> }) =>
     mcpStdioEnsure(input),
 )
 
@@ -813,10 +908,10 @@ ipcMain.handle('cli:which', async (_evt, binary: string) => {
   const bin = (binary || '').trim()
   if (!bin) return { found: false, path: null }
   const r = await runBash({
-    command: process.platform === 'win32' ? `where ${bin}` : `command -v ${bin}`,
+    command: executableLookupCommand(bin),
     timeoutMs: 5000,
   })
-  const p = r.stdout.trim().split(/\r?\n/)[0] || null
+  const p = firstExecutablePath(r.stdout)
   return { found: Boolean(p && r.ok), path: p }
 })
 
@@ -855,11 +950,32 @@ ipcMain.handle(
       approvalMode?: 'always' | 'auto' | 'full'
       unattended?: boolean
       timeoutMs?: number
+      attachments?: Array<{
+        name: string
+        mimeType?: string
+        kind?: 'image' | 'text' | 'binary'
+        dataUrl?: string
+        textContent?: string
+      }>
     },
   ) => {
     const cwd =
       input.cwd && fs.existsSync(input.cwd) ? input.cwd : workspaceRoot()
-    return runLocalCliAgent({ ...input, cwd })
+    // Cap attachment payload size at IPC boundary (avoid huge hangs)
+    const attachments = (input.attachments || []).slice(0, 4).map((a) => ({
+      name: String(a.name || 'file').slice(0, 200),
+      mimeType: a.mimeType,
+      kind: a.kind,
+      dataUrl:
+        typeof a.dataUrl === 'string' && a.dataUrl.length < 12_000_000
+          ? a.dataUrl
+          : undefined,
+      textContent:
+        typeof a.textContent === 'string'
+          ? a.textContent.slice(0, 200_000)
+          : undefined,
+    }))
+    return runLocalCliAgent({ ...input, cwd, attachments })
   },
 )
 
@@ -867,6 +983,59 @@ ipcMain.handle(
 ipcMain.handle('cli:cancel', async () => {
   return cancelBash({ tag: 'cli-agent' })
 })
+
+// ── Chat attachments (disk materialize for bubbles / queue / vision) ──
+ipcMain.handle(
+  'attachments:materialize',
+  async (
+    _evt,
+    input: {
+      attachments?: Array<{
+        id?: string
+        name: string
+        mimeType?: string
+        kind?: 'image' | 'text' | 'binary'
+        dataUrl?: string
+        textContent?: string
+        filePath?: string
+        size?: number
+      }>
+      projectRoot?: string
+      sessionId?: string
+    },
+  ) => {
+    const { materializeAttachments } = await import('./attachmentStore')
+    const projectRoot =
+      input.projectRoot && fs.existsSync(input.projectRoot)
+        ? input.projectRoot
+        : workspaceRoot()
+    const capped = (input.attachments || []).slice(0, 4).map((a) => ({
+      ...a,
+      name: String(a.name || 'file').slice(0, 200),
+      dataUrl:
+        typeof a.dataUrl === 'string' && a.dataUrl.length < 12_000_000
+          ? a.dataUrl
+          : undefined,
+      textContent:
+        typeof a.textContent === 'string'
+          ? a.textContent.slice(0, 200_000)
+          : undefined,
+    }))
+    const r = materializeAttachments(capped, {
+      projectRoot: projectRoot || undefined,
+      sessionId: input.sessionId,
+    })
+    return { ok: true, dir: r.dir, items: r.items }
+  },
+)
+
+ipcMain.handle(
+  'attachments:readDataUrl',
+  async (_evt, filePath: string) => {
+    const { readFileAsDataUrl } = await import('./attachmentStore')
+    return readFileAsDataUrl(String(filePath || ''))
+  },
+)
 
 // ── CodeGraph (https://github.com/colbymchenry/codegraph) ────────
 
@@ -1052,8 +1221,7 @@ function resolveWorkspacePath(rel: string) {
   const cleaned = (rel || '.').replace(/^[/\\]+/, '')
   const full = path.resolve(root, cleaned)
   // Ensure path stays inside root (handle trailing sep)
-  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep
-  if (full !== root && !full.startsWith(rootWithSep)) {
+  if (!isPathInside(root, full)) {
     throw new Error('Path escapes workspace sandbox')
   }
   return full

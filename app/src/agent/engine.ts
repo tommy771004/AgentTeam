@@ -32,7 +32,12 @@ import { learningLoop } from './hermes/learning'
 import { compressStepOutputs } from './hermes/sessionSearch'
 import { skillsStore } from './hermes/skills'
 import { buildToolInput, selectToolsForStep } from './tools/registry'
-import { guardAndExecuteTool } from './tools/toolGuard'
+import { authorizeTool, guardAndExecuteTool } from './tools/toolGuard'
+import {
+  buildCustomToolInput,
+  executeCustomTool,
+  selectCustomToolsForStep,
+} from './tools/customTools'
 import { runFunctionCallingLoop } from './tools/toolLoop'
 import {
   DEFAULT_SUPERVISOR_LIMITS,
@@ -75,6 +80,8 @@ export class AgentLoopEngine {
   private overrides: RuntimeOverrides = {}
   private stepOutputs: string[] = []
   private attachedSkillContext = ''
+  /** Vision / file attachments for this run (FC multimodal) */
+  private userAttachments: import('./types').ChatAttachment[] = []
 
   constructor() {
     this.state = this.emptyState()
@@ -275,6 +282,7 @@ export class AgentLoopEngine {
     this.overrides = overrides || {}
     this.stepOutputs = []
     this.attachedSkillContext = ''
+    this.userAttachments = this.overrides.userAttachments || []
     // Per-conversation model override (thread settings)
     if (this.overrides.model?.trim()) {
       this.settings = { ...this.settings, model: this.overrides.model.trim() }
@@ -581,6 +589,9 @@ export class AgentLoopEngine {
           ...(this.overrides.preloadUnlockedTools || []),
           ...(this.state.unlockedToolNames || []),
         ]
+        if (this.userAttachments.some((a) => a.kind === 'image' && a.dataUrl)) {
+          this.log('INFO', `Multimodal: ${this.userAttachments.filter((a) => a.kind === 'image').length} image(s) in user message`)
+        }
         const loop = await runFunctionCallingLoop(
           roleSettings,
           {
@@ -588,6 +599,7 @@ export class AgentLoopEngine {
             objective: this.state.objective,
             step: step.description,
             context: layers.full.slice(0, 12_000),
+            userAttachments: this.userAttachments,
           },
           {
             limits: this.supervisorLimits(),
@@ -674,13 +686,29 @@ export class AgentLoopEngine {
             approvalRequiredFor,
             formatAlwaysOnInstructions,
           } = await import('./capabilities')
+          let projectRoot = ''
+          try {
+            const { useProjectStore } = await import('../store/projectStore')
+            projectRoot =
+              (this.overrides.projectRoot || '').trim() ||
+              useProjectStore.getState().root ||
+              ''
+          } catch {
+            projectRoot = (this.overrides.projectRoot || '').trim()
+          }
           const capState = assembleCapabilities(this.settings, {
             progressive: this.settings.capabilitiesEnabled !== false,
             preloadIds: [
               ...(this.overrides.attachedSkills || []).map((n) => `skill:${n}`),
+              ...(this.overrides.preloadCapabilityIds || []),
               ...(this.state.loadedCapabilityIds || []),
             ],
+            preloadUnlockedTools: [
+              ...(this.overrides.preloadUnlockedTools || []),
+              ...(this.state.unlockedToolNames || []),
+            ],
             webSearchEnabled: this.settings.webSearchEnabled !== false,
+            projectRoot,
             blockedTools: [
               ...(this.overrides.blockedTools || []),
               ...(agentName === 'Core' || role === 'executor' ? ['delegate_task'] : []),
@@ -714,8 +742,34 @@ export class AgentLoopEngine {
             this.log('INFO', `heuristic capability runbooks active (${this.state.loadedCapabilityIds.length})`)
           }
 
-          if (tools.length) {
-            this.log('PROCESS', `[${agentName}] tools: ${tools.join(', ')}`)
+          // Plugin / connector custom tools (same capability gate as FC)
+          const customTools = selectCustomToolsForStep(
+            step.description,
+            this.state.objective,
+            this.settings,
+            { blockedTools: this.overrides.blockedTools },
+          )
+          for (const custom of customTools) {
+            const ownerCap = `user:${custom.ownerId}`
+            if (!capState.loadedIds.has(ownerCap)) {
+              loadCapability(capState, ownerCap)
+              this.log('INFO', `heuristic auto-load capability «${ownerCap}» for ${custom.name}`)
+            }
+          }
+          {
+            const set = new Set([
+              ...(this.state.loadedCapabilityIds || []),
+              ...[...capState.loadedIds],
+            ])
+            this.state.loadedCapabilityIds = [...set].sort()
+            this.emit()
+          }
+
+          if (tools.length || customTools.length) {
+            this.log(
+              'PROCESS',
+              `[${agentName}] tools: ${[...tools, ...customTools.map((c) => c.name)].join(', ')}`,
+            )
           }
           const toolChunks: string[] = []
           if (runbook) toolChunks.push(`### capability runbooks\n${runbook.slice(0, 2000)}`)
@@ -785,6 +839,63 @@ export class AgentLoopEngine {
             )
             toolChunks.push(`### tool:${tool}\n${out.slice(0, 2000)}`)
           }
+
+          // Connector / plugin custom tools (heuristic path)
+          for (const custom of customTools) {
+            if (this.aborted) break
+            const input = buildCustomToolInput(custom, this.state.objective, step.description)
+            const started = Date.now()
+            const forceAsk = approvalRequiredFor(capState, custom.name)
+            const auth = await authorizeTool({
+              tool: custom.name,
+              input,
+              settings: this.settings,
+              permissionPolicy: this.overrides.permissionPolicy,
+              blockedTools: this.overrides.blockedTools,
+              forceAsk,
+              sideEffect: true,
+              hitlTimeoutMs,
+              unattended: this.overrides.unattended,
+              onLog: (level, message) => this.log(level as LogLevel, message),
+            })
+            if (!auth.allowed) {
+              toolChunks.push(`### tool:${custom.name}\n${auth.output}`)
+              this.log('WARN', auth.output)
+              continue
+            }
+            const result = await executeCustomTool(custom, input, this.settings)
+            let out = result.output
+            try {
+              const enforced = enforceToolPayload(
+                custom.name,
+                out,
+                this.supervisorLimits(),
+                this.settings.haltOnPayloadOverflow ? 'halt' : 'truncate',
+              )
+              out = enforced.output
+            } catch (e) {
+              if (e instanceof SupervisorViolation) throw e
+              throw e
+            }
+            const durationMs = Date.now() - started
+            const record: ToolCallRecord = {
+              id: uuid(),
+              tool: custom.name,
+              input,
+              output: out.slice(0, 4000),
+              ok: result.ok,
+              durationMs,
+              timestamp: nowTime(),
+              step: step.step,
+            }
+            this.state.toolCalls = [...this.state.toolCalls, record]
+            this.emit()
+            this.log(
+              result.ok ? 'SUCCESS' : 'WARN',
+              `tool:${custom.name} ${result.ok ? 'ok' : 'fail'} (${durationMs}ms)`,
+            )
+            toolChunks.push(`### tool:${custom.name}\n${out.slice(0, 2000)}`)
+          }
           toolContext = toolChunks.join('\n\n')
         }
 
@@ -797,10 +908,34 @@ export class AgentLoopEngine {
               objective: this.state.objective,
               settings: this.settings,
               temporary:
-            this.overrides.temporary === true ||
-            this.settings.temporaryChatDefault === true,
+                this.overrides.temporary === true ||
+                this.settings.temporaryChatDefault === true,
               extraContext: [context, this.attachedSkillContext].filter(Boolean).join('\n\n'),
             })
+            // Heuristic path: still support vision when attachments present
+            let userContent: import('./llm').ChatMessageContent | undefined
+            if (this.userAttachments.some((a) => a.kind === 'image')) {
+              try {
+                const {
+                  buildMultimodalUserContent,
+                  hydrateAttachmentsFromDisk,
+                  attachmentsPathAppendix,
+                } = await import('../lib/chatAttachments')
+                const hydrated = await hydrateAttachmentsFromDisk(this.userAttachments)
+                const body = `Objective: ${this.state.objective}\n\nYour step: ${step.description}\n\nTool results:\n${toolContext || '(no tools ran)'}\n\nContext so far:\n${layers.full.slice(0, 10_000)}\n\n${attachmentsPathAppendix(hydrated)}\n\nProduce the step output only.`
+                userContent = buildMultimodalUserContent(body, hydrated)
+                if (Array.isArray(userContent)) {
+                  this.log('INFO', 'Heuristic multimodal: sending image(s) to LLM')
+                } else if (hydrated.some((a) => a.kind === 'image' && !a.dataUrl)) {
+                  this.log(
+                    'WARN',
+                    'Heuristic: images lack dataUrl — path appendix only (open FC for full vision path)',
+                  )
+                }
+              } catch {
+                /* fall through to plain text */
+              }
+            }
             const result = await runSubAgentTask(
               roleSettings,
               role,
@@ -808,6 +943,7 @@ export class AgentLoopEngine {
               step.description,
               layers.full.slice(0, 10_000),
               toolContext,
+              userContent ? { userContent } : undefined,
             )
             output = result.content
             this.state.tokensUsed += result.tokensUsed

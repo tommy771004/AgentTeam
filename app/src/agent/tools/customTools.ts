@@ -2,6 +2,7 @@
 
 import type { CustomToolDefinition, LlmSettings } from '../types'
 import { pluginRegistry } from '../hermes/plugins'
+import { getPluginSecret } from '../hermes/pluginSecrets'
 import type { OpenAiToolDef } from './schemas'
 
 const NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
@@ -27,6 +28,107 @@ export function customToolsForSettings(settings: LlmSettings): ResolvedCustomToo
   return [...byName.values()]
 }
 
+/**
+ * Keyword pick custom tools for heuristic path (non-FC).
+ * Scores against tool name/description/owner + CONNECTOR-style tokens in objective.
+ */
+export function selectCustomToolsForStep(
+  stepDescription: string,
+  objective: string,
+  settings: LlmSettings,
+  opts?: { max?: number; blockedTools?: string[] },
+): ResolvedCustomTool[] {
+  const max = opts?.max ?? 4
+  const blocked = new Set(opts?.blockedTools || [])
+  const hay = `${objective}\n${stepDescription}`.toLowerCase()
+  const scored: Array<{ tool: ResolvedCustomTool; score: number }> = []
+  for (const tool of customToolsForSettings(settings)) {
+    if (blocked.has(tool.name)) continue
+    const bag = `${tool.name} ${tool.description} ${tool.ownerId}`.toLowerCase()
+    let score = 0
+    for (const w of bag.split(/[\s:_\-/|]+/)) {
+      if (w.length < 3) continue
+      if (hay.includes(w)) score += w.length > 6 ? 3 : 1
+    }
+    // Boost well-known product tokens
+    for (const token of [
+      'github',
+      'notion',
+      'linear',
+      'figma',
+      'dropbox',
+      'clickup',
+      'asana',
+      'calendar',
+      'sheet',
+      'postgres',
+      'brave',
+      'homeassistant',
+      'home assistant',
+      'hass',
+      'ha_',
+      '智能家居',
+      '智慧家庭',
+    ]) {
+      if (hay.includes(token) && bag.includes(token.replace(/\s/g, ''))) score += 4
+      if (hay.includes(token) && bag.includes(token)) score += 4
+    }
+    if (score > 0) scored.push({ tool, score })
+  }
+  scored.sort((a, b) => b.score - a.score)
+  return scored.slice(0, max).map((s) => s.tool)
+}
+
+/** Best-effort args for heuristic custom-tool runs */
+export function buildCustomToolInput(
+  tool: ResolvedCustomTool,
+  objective: string,
+  stepDescription: string,
+): Record<string, unknown> {
+  const hay = `${objective}\n${stepDescription}`
+  const out: Record<string, unknown> = {}
+  const repo = hay.match(/\b([\w.-]+)\/([\w.-]+)\b/)
+  const url = hay.match(/https?:\/\/[^\s)\]"'<>]+/i)
+  const uuid = hay.match(
+    /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
+  )
+  for (const [name, p] of Object.entries(tool.params || {})) {
+    if (name === 'owner' && repo) out.owner = repo[1]
+    else if (name === 'repo' && repo) out.repo = repo[2]
+    else if ((name === 'url' || name === 'page_url') && url) out[name] = url[0]
+    else if ((name === 'page_id' || name === 'file_key') && uuid) out[name] = uuid[0]
+    else if (name === 'query' || name === 'q') {
+      out[name] = stepDescription.slice(0, 240) || objective.slice(0, 240)
+    } else if (name === 'state') out.state = 'open'
+    else if (name === 'calendarId') out.calendarId = 'primary'
+    else if (name === 'timeMin') out.timeMin = new Date().toISOString()
+    else if (name === 'path') out.path = ''
+    else if (name === 'range') out.range = 'Sheet1!A1:D20'
+    else if (name === 'base_url') {
+      const m = hay.match(/https?:\/\/[\w.-]+(?::\d+)?/i)
+      out.base_url = m?.[0] || 'http://homeassistant.local:8123'
+    } else if (name === 'entity_id') {
+      const m = hay.match(
+        /\b(?:light|switch|climate|sensor|binary_sensor|media_player|cover|lock|scene|script|fan|input_boolean)\.[\w.]+\b/i,
+      )
+      out.entity_id = m?.[0] || ''
+    } else if (name === 'domain') {
+      if (/關燈|關.*燈|turn.?off.*light|light.?off/i.test(hay)) out.domain = 'light'
+      else if (/開燈|開.*燈|turn.?on.*light|light.?on/i.test(hay)) out.domain = 'light'
+      else if (/插座|switch/i.test(hay)) out.domain = 'switch'
+      else if (/空調|冷氣|climate/i.test(hay)) out.domain = 'climate'
+      else if (/場景|scene/i.test(hay)) out.domain = 'scene'
+      else if (p.required) out.domain = ''
+    } else if (name === 'service') {
+      if (/關|off|關閉/i.test(hay) && !/開關/.test(hay)) out.service = 'turn_off'
+      else if (/開|on|開啟/i.test(hay)) out.service = 'turn_on'
+      else if (/toggle|切換/i.test(hay)) out.service = 'toggle'
+      else if (p.required) out.service = ''
+    } else if (p.required) out[name] = ''
+  }
+  return out
+}
+
 export function customToolDefs(tools: ResolvedCustomTool[]): OpenAiToolDef[] {
   return tools.map((tool) => {
     const properties: Record<string, unknown> = {}
@@ -47,10 +149,37 @@ export function customToolDefs(tools: ResolvedCustomTool[]): OpenAiToolDef[] {
   })
 }
 
-function interpolate(value: string | undefined, input: Record<string, unknown>, settings: LlmSettings) {
+function resolveSecret(key: string, settings: LlmSettings): string {
+  // 1) Settings customToolSecrets  2) pluginSecrets (marketplace OAuth/PAT)
+  const fromSettings = settings.customToolSecrets?.[key]
+  if (fromSettings != null && String(fromSettings).length > 0) return String(fromSettings)
+  const fromPlugin = getPluginSecret(key)?.token
+  if (fromPlugin) return fromPlugin
+  // Also allow ownerId-less aliases without -connector suffix
+  const alt = getPluginSecret(`${key}-connector`)?.token
+  return alt || ''
+}
+
+function interpolate(
+  value: string | undefined,
+  input: Record<string, unknown>,
+  settings: LlmSettings,
+  missingSecrets?: string[],
+) {
   return (value || '').replace(TOKEN, (_all, secretPrefix: string | undefined, key: string) => {
-    const value = secretPrefix ? settings.customToolSecrets?.[key] : input[key]
-    return value == null ? '' : String(value)
+    if (secretPrefix) {
+      const secret = resolveSecret(key, settings)
+      if (!secret) missingSecrets?.push(key)
+      return secret
+    }
+    const v = input[key]
+    // Sensible defaults for optional GitHub state etc.
+    if ((v == null || v === '') && key === 'state') return 'open'
+    if ((v == null || v === '') && key === 'path') return ''
+    if ((v == null || v === '') && key === 'base_url') {
+      return 'http://homeassistant.local:8123'
+    }
+    return v == null ? '' : String(v)
   })
 }
 
@@ -63,8 +192,15 @@ export async function executeCustomTool(
   input: Record<string, unknown>,
   settings: LlmSettings,
 ): Promise<{ ok: boolean; output: string; data?: unknown }> {
+  const missingSecrets: string[] = []
   if (tool.kind === 'bash_template') {
-    const command = interpolate(tool.template.command, input, settings)
+    const command = interpolate(tool.template.command, input, settings, missingSecrets)
+    if (missingSecrets.length) {
+      return {
+        ok: false,
+        output: `缺少授權密鑰：${[...new Set(missingSecrets)].join(', ')}。請先在市集完成 connector 授權。`,
+      }
+    }
     if (!command.trim()) return { ok: false, output: 'bash template resolved to an empty command' }
     const r = await window.subagents?.shell?.bash({ command, timeoutMs: 60_000 })
     if (!r) return { ok: false, output: 'bash_template requires Electron' }
@@ -76,12 +212,23 @@ export async function executeCustomTool(
     }
   }
 
-  const url = interpolate(tool.template.url, input, settings)
+  const url = interpolate(tool.template.url, input, settings, missingSecrets)
   const headers = Object.fromEntries(
-    Object.entries(tool.template.headers || {}).map(([k, v]) => [k, interpolate(v, input, settings)]),
+    Object.entries(tool.template.headers || {}).map(([k, v]) => [
+      k,
+      interpolate(v, input, settings, missingSecrets),
+    ]),
   )
   const method = tool.template.method || 'GET'
-  const body = tool.template.body ? interpolate(tool.template.body, input, settings) : undefined
+  const body = tool.template.body
+    ? interpolate(tool.template.body, input, settings, missingSecrets)
+    : undefined
+  if (missingSecrets.length) {
+    return {
+      ok: false,
+      output: `缺少授權密鑰：${[...new Set(missingSecrets)].join(', ')}。請先在市集完成 connector 授權（例如 GitHub / Notion）。`,
+    }
+  }
   const r = await window.subagents?.tools?.httpRequest?.({ url, method, headers, body, maxChars: 50_000 })
   if (r) return { ok: r.ok, output: r.text, data: r }
   try {

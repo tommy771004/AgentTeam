@@ -134,6 +134,7 @@ export function FloatingConsole() {
             log(`› ${line}`)
             await run({ name: 'run', description: '執行', category: 'agent' }, line, line)
           }}
+          allowAttachments={false}
           onSlashCommand={onSlash}
         />
       </div>

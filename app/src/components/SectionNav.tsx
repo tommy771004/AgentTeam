@@ -110,6 +110,11 @@ export function ThemePage({
   contentClassName,
   /** false = 全寬（知識圖譜等）；預設與設定頁同寬 */
   narrow = true,
+  /**
+   * Codex 式沉浸：隱藏左側區塊選單，內容置中全寬欄
+   *（外掛市集用，貼近參考圖主欄節奏）
+   */
+  immersive = false,
 }: {
   title: string
   subtitle?: string
@@ -121,6 +126,7 @@ export function ThemePage({
   hideNavTitle?: boolean
   contentClassName?: string
   narrow?: boolean
+  immersive?: boolean
 }) {
   return (
     <div className="h-full flex flex-col min-h-0 bg-background">
@@ -130,21 +136,53 @@ export function ThemePage({
         </h1>
         {subtitle && <p className="text-on-surface-variant text-sm mt-1">{subtitle}</p>}
       </div>
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-0 lg:gap-2 px-3 md:px-5 pb-4">
-        <div className="lg:overflow-y-auto custom-scrollbar shrink-0 lg:py-4 lg:pr-2 border-b lg:border-b-0 border-white/8 pb-2 mb-2 lg:mb-0 lg:pb-0">
-          <SectionNav
-            items={sections}
-            activeId={activeId}
-            onChange={onChange}
-            groups={groups}
-            title={hideNavTitle ? undefined : title}
-            hideDescriptions
-          />
-        </div>
-        <div className="flex-1 min-h-0 min-w-0 overflow-y-auto custom-scrollbar lg:pl-6 lg:pr-4 lg:py-6">
+      <div
+        className={`flex-1 min-h-0 flex flex-col lg:flex-row gap-0 lg:gap-2 pb-4 ${
+          immersive ? 'px-0 md:px-0' : 'px-3 md:px-5'
+        }`}
+      >
+        {!immersive && (
+          <div className="lg:overflow-y-auto custom-scrollbar shrink-0 lg:py-4 lg:pr-2 border-b lg:border-b-0 border-white/8 pb-2 mb-2 lg:mb-0 lg:pb-0 px-3 md:px-0">
+            <SectionNav
+              items={sections}
+              activeId={activeId}
+              onChange={onChange}
+              groups={groups}
+              title={hideNavTitle ? undefined : title}
+              hideDescriptions
+            />
+          </div>
+        )}
+        {immersive && (
+          <div className="shrink-0 flex items-center gap-2 px-4 md:px-8 pt-3 pb-1 overflow-x-auto custom-scrollbar border-b border-white/[0.06]">
+            {sections.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => onChange(s.id)}
+                className={`shrink-0 rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors ${
+                  activeId === s.id
+                    ? 'bg-white/[0.1] text-on-surface'
+                    : 'text-outline hover:text-on-surface-variant hover:bg-white/[0.04]'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div
+          className={`flex-1 min-h-0 min-w-0 overflow-y-auto custom-scrollbar ${
+            immersive ? 'lg:px-0 lg:py-2' : 'lg:pl-6 lg:pr-4 lg:py-6'
+          }`}
+        >
           <div
             className={`flex flex-col pb-10 w-full ${
-              narrow ? 'max-w-[820px]' : 'max-w-none'
+              immersive
+                ? 'max-w-[720px] mx-auto px-5 md:px-8 pt-6'
+                : narrow
+                  ? 'max-w-[820px]'
+                  : 'max-w-none'
             } ${contentClassName || ''}`}
           >
             {children}

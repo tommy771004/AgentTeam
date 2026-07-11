@@ -4,6 +4,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent,
+  type DragEvent,
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
@@ -20,13 +22,19 @@ import {
   FOCUS_COMPOSER_EVENT,
   useCommandHistoryStore,
 } from '../store/commandHistoryStore'
+import type { ChatAttachment } from '../agent/types'
+import {
+  filesToAttachments,
+  formatBytes,
+  MAX_ATTACHMENTS,
+} from '../lib/chatAttachments'
 
 export type ComposerMode = 'agent' | 'workspace'
 
 export interface CommandComposerProps {
   value: string
   onChange: (v: string) => void
-  onSubmitLine: (line: string) => void | Promise<void>
+  onSubmitLine: (line: string, attachments: ChatAttachment[]) => void | Promise<void>
   /** Called when a resolved slash command should run */
   onSlashCommand: (cmd: SlashCommand, args: string, raw: string) => void | Promise<void>
   placeholder?: string
@@ -49,10 +57,12 @@ export interface CommandComposerProps {
   footerLeft?: ReactNode
   /** 底部右側（如模型/推理強度 pill） */
   footerRight?: ReactNode
+  /** Enable file/image attachments (default true for agent mode) */
+  allowAttachments?: boolean
 }
 
 /**
- * Codex / Claude Code 風格輸入列：/ 指令、↑ 歷史、Cmd+/ 聚焦
+ * Codex / Claude Code 風格輸入列：/ 指令、↑ 歷史、Cmd+/ 聚焦、貼圖/上傳
  */
 export function CommandComposer({
   value,
@@ -69,15 +79,23 @@ export function CommandComposer({
   enterBehavior = 'enter',
   footerLeft,
   footerRight,
+  allowAttachments,
 }: CommandComposerProps) {
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const [dragOver, setDragOver] = useState(false)
+  const [attaching, setAttaching] = useState(false)
   /** -1 = not browsing history */
   const histIdx = useRef(-1)
   const draftBeforeHist = useRef('')
   const history = useCommandHistoryStore((s) => s.items)
   const pushHistory = useCommandHistoryStore((s) => s.push)
+
+  const canAttach = allowAttachments ?? mode === 'agent'
 
   const slashQuery = useMemo(() => {
     const line = value
@@ -134,6 +152,30 @@ export function CommandComposer({
     return () => window.removeEventListener(FOCUS_COMPOSER_EVENT, handler)
   }, [primary, focusSelf])
 
+  const addFiles = useCallback(
+    async (files: FileList | File[] | null | undefined) => {
+      if (!canAttach || !files || (files as FileList).length === 0) return
+      setAttaching(true)
+      setAttachError(null)
+      try {
+        const { ok, errors } = await filesToAttachments(files, attachments.length)
+        if (ok.length) {
+          setAttachments((prev) => [...prev, ...ok].slice(0, MAX_ATTACHMENTS))
+        }
+        if (errors.length) setAttachError(errors[0] || null)
+      } catch (e) {
+        setAttachError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setAttaching(false)
+      }
+    },
+    [attachments.length, canAttach],
+  )
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id))
+  }, [])
+
   const applyCommand = useCallback(
     (cmd: SlashCommand) => {
       const next = cmd.needsArgs || cmd.argsHint ? `/${cmd.name} ` : `/${cmd.name}`
@@ -152,29 +194,47 @@ export function CommandComposer({
 
   const submit = useCallback(async () => {
     const line = value.trim()
-    if (!line || disabled) return
-    pushHistory(line)
-    histIdx.current = -1
-    const parsed = parseSlashLine(line)
-    if (parsed) {
-      const cmd = resolveSlashCommand(parsed.cmd)
-      if (cmd) {
-        setMenuOpen(false)
-        await onSlashCommand(cmd, parsed.args, parsed.raw)
+    if (disabled || attaching) return
+    if (!line && !attachments.length) return
+    // Slash commands ignore attachments for now
+    if (line.startsWith('/')) {
+      pushHistory(line)
+      histIdx.current = -1
+      const parsed = parseSlashLine(line)
+      if (parsed) {
+        const cmd = resolveSlashCommand(parsed.cmd)
+        if (cmd) {
+          setMenuOpen(false)
+          await onSlashCommand(cmd, parsed.args, parsed.raw)
+          onChange('')
+          return
+        }
+        await onSlashCommand(
+          { name: parsed.cmd, description: '', category: 'session' },
+          parsed.args,
+          parsed.raw,
+        )
         onChange('')
         return
       }
-      await onSlashCommand(
-        { name: parsed.cmd, description: '', category: 'session' },
-        parsed.args,
-        parsed.raw,
-      )
-      onChange('')
-      return
     }
-    await onSubmitLine(line)
+    pushHistory(line || `（${attachments.length} 個附件）`)
+    histIdx.current = -1
+    const toSend = attachments
+    setAttachments([])
+    setAttachError(null)
+    await onSubmitLine(line, toSend)
     onChange('')
-  }, [value, disabled, onChange, onSlashCommand, onSubmitLine, pushHistory])
+  }, [
+    value,
+    disabled,
+    attaching,
+    attachments,
+    onChange,
+    onSlashCommand,
+    onSubmitLine,
+    pushHistory,
+  ])
 
   const browseHistory = (dir: 'up' | 'down') => {
     if (!history.length) return
@@ -284,12 +344,54 @@ export function CommandComposer({
     }
   }
 
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!canAttach) return
+    const items = e.clipboardData?.items
+    if (!items?.length) return
+    const files: File[] = []
+    for (const item of Array.from(items)) {
+      if (item.kind === 'file') {
+        const f = item.getAsFile()
+        if (f) files.push(f)
+      }
+    }
+    if (!files.length) return
+    // Prefer attaching files over pasting binary garbage into textarea
+    e.preventDefault()
+    void addFiles(files)
+  }
+
+  const onDrop = (e: DragEvent) => {
+    if (!canAttach) return
+    e.preventDefault()
+    setDragOver(false)
+    void addFiles(e.dataTransfer?.files)
+  }
+
+  const canSend = !disabled && !attaching && (Boolean(value.trim()) || attachments.length > 0)
+
   return (
     <div
-      className={`relative w-full max-w-full min-w-0 box-border border border-white/12 bg-surface-container/95 backdrop-blur-md transition-shadow focus-within:border-primary/35 focus-within:shadow-[0_0_0_1px_rgba(34,211,238,0.15),0_12px_40px_rgba(0,0,0,0.35)] ${
+      className={`relative w-full max-w-full min-w-0 box-border border bg-surface-container/95 backdrop-blur-md transition-shadow focus-within:border-primary/35 focus-within:shadow-[0_0_0_1px_rgba(34,211,238,0.15),0_12px_40px_rgba(0,0,0,0.35)] ${
         compact ? 'rounded-xl' : 'rounded-2xl'
+      } ${
+        dragOver
+          ? 'border-primary/50 bg-primary/5'
+          : 'border-white/12'
       }`}
       data-composer={primary ? 'primary' : mode}
+      onDragEnter={(e) => {
+        if (!canAttach) return
+        e.preventDefault()
+        setDragOver(true)
+      }}
+      onDragOver={(e) => {
+        if (!canAttach) return
+        e.preventDefault()
+        setDragOver(true)
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
     >
       <SlashCommandMenu
         open={showMenu}
@@ -301,13 +403,88 @@ export function CommandComposer({
         query={slashQuery ?? ''}
       />
 
+      {canAttach && attachments.length > 0 && (
+        <div className="flex flex-wrap gap-2 px-3 pt-3">
+          {attachments.map((a) => (
+            <div
+              key={a.id}
+              className="relative group flex items-center gap-2 rounded-xl border border-white/10 bg-surface/60 pl-1.5 pr-2 py-1.5 max-w-[220px]"
+            >
+              {a.kind === 'image' && a.dataUrl ? (
+                <img
+                  src={a.dataUrl}
+                  alt={a.name}
+                  className="w-10 h-10 rounded-lg object-cover shrink-0 bg-black/20"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
+                  <Icon name={a.kind === 'text' ? 'description' : 'draft'} size={18} className="text-outline" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-medium text-on-surface truncate" title={a.name}>
+                  {a.name}
+                </p>
+                <p className="text-[10px] text-outline">
+                  {a.kind === 'image' ? '圖片' : a.kind === 'text' ? '文字' : '檔案'} ·{' '}
+                  {formatBytes(a.size)}
+                </p>
+              </div>
+              <button
+                type="button"
+                title="移除"
+                onClick={() => removeAttachment(a.id)}
+                className="w-6 h-6 rounded-md text-outline hover:text-error hover:bg-error/10 flex items-center justify-center shrink-0"
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(attachError || dragOver) && (
+        <p
+          className={`px-3 pt-2 text-[11px] ${
+            attachError ? 'text-error' : 'text-primary'
+          }`}
+        >
+          {attachError || '放開以加入附件'}
+        </p>
+      )}
+
       <div className={`flex items-end gap-2 ${compact ? 'p-2' : 'p-3 md:p-3.5'}`}>
         <div className="flex items-center gap-1 shrink-0 pb-2 pl-0.5 text-outline">
-          <Icon
-            name={mode === 'agent' ? 'auto_awesome' : 'terminal'}
-            size={18}
-            className="text-primary"
-          />
+          {canAttach ? (
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                className="hidden"
+                multiple
+                accept="image/*,.txt,.md,.json,.csv,.ts,.tsx,.js,.jsx,.py,.log,.yml,.yaml,.xml,.html,.css,.sql"
+                onChange={(e) => {
+                  void addFiles(e.target.files)
+                  e.target.value = ''
+                }}
+              />
+              <button
+                type="button"
+                title="上傳圖片或檔案（也可貼上 / 拖放）"
+                disabled={disabled || attaching || attachments.length >= MAX_ATTACHMENTS}
+                onClick={() => fileRef.current?.click()}
+                className="w-8 h-8 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/40 flex items-center justify-center disabled:opacity-40"
+              >
+                <Icon name="attach_file" size={18} />
+              </button>
+            </>
+          ) : (
+            <Icon
+              name={mode === 'agent' ? 'auto_awesome' : 'terminal'}
+              size={18}
+              className="text-primary"
+            />
+          )}
         </div>
         <textarea
           ref={taRef}
@@ -315,11 +492,16 @@ export function CommandComposer({
           disabled={disabled}
           onChange={(e) => onInput(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           onFocus={() => {
             if (value.startsWith('/')) setMenuOpen(true)
           }}
           rows={compact ? 2 : 3}
-          placeholder={placeholder}
+          placeholder={
+            canAttach
+              ? placeholder || '輸入任務，或貼上／拖放圖片…'
+              : placeholder
+          }
           className="composer-field flex-1 min-w-0 self-stretch border-0 bg-transparent shadow-none resize-none outline-none ring-0 focus:outline-none focus-visible:outline-none focus:ring-0 text-[15px] text-on-surface placeholder:text-outline/80 leading-relaxed font-[family-name:var(--font-inter)]"
           spellCheck={false}
         />
@@ -334,7 +516,7 @@ export function CommandComposer({
           </button>
           <button
             type="button"
-            disabled={disabled || !value.trim()}
+            disabled={!canSend}
             onClick={() => void submit()}
             className="w-9 h-9 rounded-lg bg-primary-container text-on-primary-container hover:brightness-110 disabled:opacity-40 flex items-center justify-center"
             title={enterBehavior === 'cmdEnter' ? '送出（⌘/Ctrl+Enter）' : '送出（Enter）'}
@@ -354,6 +536,12 @@ export function CommandComposer({
                   ⌘/
                 </kbd>
                 <span>指令</span>
+                {canAttach && (
+                  <>
+                    <span className="opacity-40">·</span>
+                    <span>📎 貼圖/拖放</span>
+                  </>
+                )}
                 <span className="opacity-40">·</span>
                 <span>↑ 歷史</span>
               </span>

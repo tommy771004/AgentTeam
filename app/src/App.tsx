@@ -16,6 +16,7 @@ import { useSettingsStore } from './store/settingsStore'
 import { useLearningStore } from './store/learningStore'
 import { useScheduleStore } from './store/scheduleStore'
 import { useAgentStore } from './store/agentStore'
+import { useProjectStore } from './store/projectStore'
 import {
   startBackgroundJobSubscription,
   useGatewayStore,
@@ -99,6 +100,8 @@ function SchedulerBootstrap() {
           title: job.name || '排程',
           loopType: job.loopType || 'Time-based',
           attachedSkills: job.skillNames || [],
+          runner: job.runner || 'builtin',
+          projectRoot: job.projectRoot || undefined,
           sourceLabel: `定時任務：${job.name}`,
           unattended: true,
           // Durable across app restart (queue persistence rebinds via scheduleJobId)
@@ -185,6 +188,13 @@ function WebhookBootstrap() {
         )
         navigate('/')
         const { runExternalObjective } = await import('./agent/runExternal')
+        const body = (payload.body || '').trim()
+        const subject = (payload.subject || '').trim()
+        const extraParts = [
+          subject ? `Subject: ${subject}` : '',
+          payload.source ? `Source: ${payload.source}` : '',
+          body ? body : '',
+        ].filter(Boolean)
         const r = await runExternalObjective({
           objective: matched.objective,
           title: matched.name,
@@ -192,6 +202,9 @@ function WebhookBootstrap() {
           eventPreMatched: true,
           sourceLabel: `Webhook 事件：${matched.name}`,
           unattended: true,
+          extraContext: extraParts.length
+            ? extraParts.join('\n\n').slice(0, 12_000)
+            : undefined,
         })
         if (r.skipped) {
           void window.subagents?.notify?.(
@@ -258,7 +271,18 @@ function GatewayBootstrap() {
       pushInbound(msg)
 
       const text = (msg.text || '').trim()
-      if (text === '/ping' || text === '/status') {
+      const rawAtts = (
+        msg as {
+          attachments?: Array<{
+            name: string
+            mimeType: string
+            kind: 'image' | 'text' | 'binary'
+            dataUrl?: string
+            size?: number
+          }>
+        }
+      ).attachments
+      if ((text === '/ping' || text === '/status') && !rawAtts?.length) {
         void window.subagents?.gateway?.send({
           channel: msg.channel,
           chatId: msg.chatId,
@@ -270,21 +294,36 @@ function GatewayBootstrap() {
 
       const s = useSettingsStore.getState().settings
       if (!s.telegramAutoRun) return
+      if (!text && !rawAtts?.length) return
 
       void (async () => {
         void window.subagents?.notify?.(
           'SubAgents AI · Telegram',
-          `${msg.from || msg.chatId}: ${text.slice(0, 80)}`,
+          `${msg.from || msg.chatId}: ${(text || '（附件）').slice(0, 80)}`,
         )
         navigate('/')
         const { runExternalObjective } = await import('./agent/runExternal')
+        const attachments = (rawAtts || [])
+          .filter((a) => a.dataUrl || a.kind === 'text')
+          .map((a, i) => ({
+            id: `tg_${Date.now().toString(36)}_${i}`,
+            kind: a.kind === 'image' ? ('image' as const) : a.kind === 'text' ? ('text' as const) : ('binary' as const),
+            name: a.name || `tg-${i}`,
+            mimeType: a.mimeType || 'application/octet-stream',
+            size: a.size || 0,
+            dataUrl: a.dataUrl,
+          }))
         // Goal-based: free-form chat, not event-predicate language
         const r = await runExternalObjective({
-          objective: text,
+          objective: text || (attachments.length ? '請分析我附上的圖片或檔案。' : ''),
           title: `TG ${msg.chatId}`,
           loopType: 'Goal-based',
           sourceLabel: `Telegram · ${msg.from || msg.chatId}`,
           unattended: true,
+          attachments: attachments.length ? attachments : undefined,
+          extraContext: attachments.length
+            ? `Telegram 附件 ${attachments.length} 個（已下載）`
+            : undefined,
         })
         if (r.skipped) {
           await window.subagents?.gateway?.send({
@@ -424,6 +463,33 @@ function PreferencesBootstrap() {
   return null
 }
 
+function PluginTokenRefreshBootstrap() {
+  const start = useLearningStore((s) => s.startTokenRefreshScheduler)
+  const stop = useLearningStore((s) => s.stopTokenRefreshScheduler)
+  const loaded = useLearningStore((s) => s.loaded)
+
+  useEffect(() => {
+    if (!loaded) return
+    start()
+    return () => stop()
+  }, [loaded, start, stop])
+
+  return null
+}
+
+/** When project root changes, rebind npm-mcp ${projectRoot} args + restart sessions */
+function PluginProjectRebindBootstrap() {
+  const rebind = useLearningStore((s) => s.rebindPluginProjectRoots)
+  useEffect(() => {
+    return useProjectStore.subscribe((s, prev) => {
+      if (s.root && s.root !== prev.root) {
+        void rebind(s.root)
+      }
+    })
+  }, [rebind])
+  return null
+}
+
 export default function App() {
   const loadSettings = useSettingsStore((s) => s.load)
   const loadLearning = useLearningStore((s) => s.load)
@@ -454,6 +520,8 @@ export default function App() {
       <SchedulerBootstrap />
       <WebhookBootstrap />
       <GatewayBootstrap />
+      <PluginTokenRefreshBootstrap />
+      <PluginProjectRebindBootstrap />
       <PermissionAskModal />
       <Routes>
         <Route element={<Layout />}>
