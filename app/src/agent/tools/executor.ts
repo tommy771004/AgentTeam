@@ -8,6 +8,7 @@ import { memoryStore } from '../hermes/memory'
 import { skillsStore } from '../hermes/skills'
 import { listAllMcpTools, mcpCallTool } from '../hermes/mcp'
 import { useSettingsStore } from '../../store/settingsStore'
+import { resolveEffectiveProjectRoot } from './runContext'
 
 export interface ToolResult {
   ok: boolean
@@ -22,6 +23,8 @@ export async function executeTool(
   input: Record<string, unknown>,
 ): Promise<ToolResult> {
   const api = window.subagents?.tools
+  // Per-run pin first (scheduler A while UI shows B)
+  const projectRoot = await resolveEffectiveProjectRoot()
 
   try {
     switch (tool) {
@@ -41,7 +44,7 @@ export async function executeTool(
       }
       case 'workspace_list': {
         if (api?.workspaceList) {
-          const r = await api.workspaceList(String(input.path || '.'))
+          const r = await api.workspaceList(String(input.path || '.'), projectRoot)
           return {
             ok: true,
             output: r.entries.map((e) => `${e.dir ? 'dir ' : 'file'} ${e.name}`).join('\n') || '(empty)',
@@ -52,7 +55,7 @@ export async function executeTool(
       }
       case 'workspace_read': {
         if (api?.workspaceRead) {
-          const r = await api.workspaceRead(String(input.path || ''))
+          const r = await api.workspaceRead(String(input.path || ''), projectRoot)
           return { ok: r.ok, output: r.content, data: r }
         }
         return { ok: false, output: 'workspace_read requires Electron' }
@@ -61,14 +64,8 @@ export async function executeTool(
         if (!window.subagents?.shell?.bash) {
           return { ok: false, output: 'bash 僅支援 Electron 環境' }
         }
-        // Prefer project root (user-selected) as cwd
-        let cwd: string | undefined
-        try {
-          const { useProjectStore } = await import('../../store/projectStore')
-          cwd = useProjectStore.getState().root || undefined
-        } catch {
-          /* ignore */
-        }
+        // Prefer per-run pin, then UI project root
+        const cwd = projectRoot
         let command = String(input.command || '')
         // Enforce Git preferences from Settings
         try {
@@ -96,7 +93,11 @@ export async function executeTool(
       }
       case 'workspace_write': {
         if (api?.workspaceWrite) {
-          const r = await api.workspaceWrite(String(input.path || ''), String(input.content || ''))
+          const r = await api.workspaceWrite(
+            String(input.path || ''),
+            String(input.content || ''),
+            projectRoot,
+          )
           return {
             ok: r.ok,
             output: r.ok ? `Wrote ${r.bytes} bytes → ${r.path}` : r.error || 'write failed',
@@ -107,22 +108,34 @@ export async function executeTool(
       }
       case 'workspace_download': {
         if (!api?.workspaceDownload) return { ok: false, output: 'workspace_download requires Electron' }
-        const r = await api.workspaceDownload(String(input.url || ''), String(input.path || ''))
+        const r = await api.workspaceDownload(
+          String(input.url || ''),
+          String(input.path || ''),
+          projectRoot,
+        )
         return { ok: r.ok, output: r.ok ? `Downloaded ${r.bytes} bytes → ${r.path}` : r.error || 'download failed', data: r }
       }
       case 'workspace_mkdir': {
         if (!api?.workspaceMkdir) return { ok: false, output: 'workspace_mkdir requires Electron' }
-        const r = await api.workspaceMkdir(String(input.path || ''))
+        const r = await api.workspaceMkdir(String(input.path || ''), projectRoot)
         return { ok: r.ok, output: r.ok ? `Created directory → ${r.path}` : r.error || 'mkdir failed', data: r }
       }
       case 'workspace_move': {
         if (!api?.workspaceMove) return { ok: false, output: 'workspace_move requires Electron' }
-        const r = await api.workspaceMove(String(input.from || ''), String(input.to || ''))
+        const r = await api.workspaceMove(
+          String(input.from || ''),
+          String(input.to || ''),
+          projectRoot,
+        )
         return { ok: r.ok, output: r.ok ? `Moved ${r.from} → ${r.to}` : r.error || 'move failed', data: r }
       }
       case 'workspace_delete': {
         if (!api?.workspaceDelete) return { ok: false, output: 'workspace_delete requires Electron' }
-        const r = await api.workspaceDelete(String(input.path || ''), input.recursive === true)
+        const r = await api.workspaceDelete(
+          String(input.path || ''),
+          input.recursive === true,
+          projectRoot,
+        )
         return { ok: r.ok, output: r.ok ? `Deleted ${r.path}` : r.error || 'delete failed', data: r }
       }
       case 'table_parse': {
@@ -280,6 +293,26 @@ export async function executeTool(
           input.notifyOnComplete !== false &&
           input.notify_on_complete !== 'false'
 
+        // Inherit parent run pin + explicit capabilities (audit: must not drop inherit)
+        const { getRunProjectRoot, getRunId } = await import('./runContext')
+        const inheritRaw =
+          input.inherit_capabilities ?? input.inheritCapabilities ?? input.capabilities
+        const inheritCapabilities = Array.isArray(inheritRaw)
+          ? inheritRaw.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 12)
+          : typeof inheritRaw === 'string'
+            ? inheritRaw
+                .split(/[,;\s]+/)
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .slice(0, 12)
+            : []
+        const parentCtx = {
+          parentRunId: getRunId(),
+          projectRoot: getRunProjectRoot(),
+          sourceKind: 'delegate' as const,
+          inheritCapabilities,
+        }
+
         if (background) {
           const { enqueueBackgroundDelegate } = await import('../hermes/backgroundJobs')
           const job = enqueueBackgroundDelegate(settings, {
@@ -288,10 +321,11 @@ export async function executeTool(
             role: input.role === 'orchestrator' ? 'orchestrator' : 'leaf',
             background: true,
             notifyOnComplete,
+            ...parentCtx,
           })
           return {
             ok: true,
-            output: `背景委派已排入佇列：${job.id}\n目標：${goal}\n完成時${notifyOnComplete ? '會' : '不會'}桌面通知。可用 delegate_status 查詢。`,
+            output: `背景委派已排入佇列：${job.id}\n目標：${goal}${inheritCapabilities.length ? `\ninherit: ${inheritCapabilities.join(', ')}` : ''}\n完成時${notifyOnComplete ? '會' : '不會'}桌面通知。可用 delegate_status 查詢。`,
             data: job,
           }
         }
@@ -301,6 +335,7 @@ export async function executeTool(
           goal,
           context: input.context ? String(input.context) : undefined,
           role: input.role === 'orchestrator' ? 'orchestrator' : 'leaf',
+          ...parentCtx,
         })
         return {
           ok: r.ok,

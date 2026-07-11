@@ -2,87 +2,13 @@ import { useState } from 'react'
 import { Icon } from './Icon'
 import type { AgentState } from '../agent/types'
 import { useProjectStore } from '../store/projectStore'
+import { MarkdownBody } from './MarkdownBody'
 
 function formatDuration(ms: number) {
   if (!ms) return '—'
   const s = Math.round(ms / 1000)
   if (s < 60) return `${s}s`
   return `${Math.floor(s / 60)}m ${s % 60}s`
-}
-
-/** Simple markdown → light HTML for report body */
-function renderMarkdown(md: string) {
-  const lines = md.split('\n')
-  const html: string[] = []
-  let inCode = false
-  let codeBuf: string[] = []
-  let inList = false
-
-  const flushList = () => {
-    if (inList) {
-      html.push('</ul>')
-      inList = false
-    }
-  }
-
-  for (const line of lines) {
-    if (line.startsWith('```')) {
-      if (inCode) {
-        html.push(
-          `<pre class="bg-[#0b1326] border border-white/10 rounded-lg p-3 overflow-x-auto font-mono text-[12px] text-primary-fixed-dim my-3"><code>${codeBuf.join('\n').replace(/</g, '&lt;')}</code></pre>`,
-        )
-        codeBuf = []
-        inCode = false
-      } else {
-        flushList()
-        inCode = true
-      }
-      continue
-    }
-    if (inCode) {
-      codeBuf.push(line)
-      continue
-    }
-    if (line.startsWith('# ')) {
-      flushList()
-      html.push(`<h1 class="text-2xl font-bold text-on-surface mb-3 font-[family-name:var(--font-sora)]">${esc(line.slice(2))}</h1>`)
-    } else if (line.startsWith('## ')) {
-      flushList()
-      html.push(`<h2 class="text-lg font-semibold text-on-surface mt-5 mb-2 font-[family-name:var(--font-sora)]">${esc(line.slice(3))}</h2>`)
-    } else if (line.startsWith('### ')) {
-      flushList()
-      html.push(`<h3 class="text-base font-semibold text-primary mt-3 mb-1">${esc(line.slice(4))}</h3>`)
-    } else if (line.startsWith('- ')) {
-      if (!inList) {
-        html.push('<ul class="list-disc pl-5 space-y-1 text-on-surface-variant text-sm">')
-        inList = true
-      }
-      html.push(`<li>${inline(line.slice(2))}</li>`)
-    } else if (line.trim() === '') {
-      flushList()
-      html.push('<div class="h-2"></div>')
-    } else {
-      flushList()
-      html.push(`<p class="text-sm text-on-surface-variant leading-relaxed mb-2">${inline(line)}</p>`)
-    }
-  }
-  flushList()
-  if (inCode) {
-    html.push(
-      `<pre class="bg-[#0b1326] border border-white/10 rounded-lg p-3 font-mono text-[12px]"><code>${esc(codeBuf.join('\n'))}</code></pre>`,
-    )
-  }
-  return html.join('\n')
-}
-
-function esc(s: string) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-function inline(s: string) {
-  return esc(s)
-    .replace(/\*\*(.+?)\*\*/g, '<strong class="text-on-surface">$1</strong>')
-    .replace(/`(.+?)`/g, '<code class="text-primary font-mono text-[12px]">$1</code>')
 }
 
 export function ReportModal({
@@ -220,10 +146,9 @@ export function ReportModal({
           />
         </div>
 
-        <div
-          className="flex-1 overflow-y-auto custom-scrollbar p-6"
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(md) }}
-        />
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+          <MarkdownBody content={md} />
+        </div>
 
         <div className="flex flex-col gap-2 px-5 py-3 border-t border-white/10 shrink-0 bg-surface-container-low/50">
           {status && (

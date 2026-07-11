@@ -23,8 +23,18 @@ export function resolveCliApproval(
   if (agentMode === 'plan') {
     return { mode: 'auto', permissive: false, note: 'Plan mode 優先，保留 CLI plan 權限限制' }
   }
-  if (kind === 'codex' || kind === 'claude') {
-    return { mode: 'full', permissive: true, note: '互動完整存取權：已映射 CLI permissive flag' }
+  if (kind === 'codex' || kind === 'claude' || kind === 'grok' || kind === 'cursor') {
+    const notes: Record<string, string> = {
+      grok: '互動完整存取權：已映射 Grok --always-approve',
+      codex: '互動完整存取權：已映射 Codex --dangerously-bypass-approvals-and-sandbox',
+      claude: '互動完整存取權：已映射 Claude --dangerously-skip-permissions',
+      cursor: '互動完整存取權：已映射 Cursor -p --force',
+    }
+    return {
+      mode: 'full',
+      permissive: true,
+      note: notes[kind] || '互動完整存取權：已映射 CLI permissive flag',
+    }
   }
   return { mode: 'auto', permissive: false, note: `${kind} 未宣告穩定 permissive flag，保留 CLI 預設核准` }
 }

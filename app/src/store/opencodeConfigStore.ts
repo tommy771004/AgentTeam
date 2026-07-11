@@ -37,15 +37,20 @@ interface OpenCodeConfigStore {
   lastProjectRoot: string
   /** W3: every parsed field → temporary / review / unsupported（匯入報告） */
   candidates: DiscoveredConfigCandidate[]
-  /** Raw instructions entries (temporary-applied per run via prompt note) */
+  /** Raw instructions entries for lastProjectRoot (temporary-applied per run) */
   instructionsEntries: string[]
+  /** Per-project instructions cache — avoids cross-project bleed when UI root ≠ run pin */
+  instructionsByRoot: Record<string, string[]>
 
   hydrate: (projectRoot?: string) => Promise<void>
   refresh: () => Promise<void>
   /** Adopt a 'review' candidate into Settings (explicit human decision). */
   adoptCandidate: (id: string) => Promise<{ ok: boolean; message: string }>
-  /** Prompt note for temporary-applied instructions（engine 每 run 讀取） */
-  temporaryInstructionsNote: () => string
+  /**
+   * Prompt note for temporary-applied instructions.
+   * Pass projectRoot (run pin) so schedule A ≠ UI B does not mis-apply.
+   */
+  temporaryInstructionsNote: (projectRoot?: string) => string
 }
 
 function mapAgentFiles(raw: Array<Record<string, unknown>>): OpenCodeAgentFileDef[] {
@@ -89,6 +94,7 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
   lastProjectRoot: '',
   candidates: [],
   instructionsEntries: [],
+  instructionsByRoot: {},
 
   hydrate: async (projectRoot) => {
     const root =
@@ -141,6 +147,10 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
         merged,
       ).map((c) => (prevAdopted.has(c.id) ? { ...c, adopted: true } : c))
 
+      const instructions = merged.instructions || []
+      const byRoot = { ...get().instructionsByRoot }
+      if (root) byRoot[root] = instructions
+
       set({
         loaded: true,
         loading: false,
@@ -153,7 +163,8 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
         commands: full.commandsFromMarkdown,
         lastProjectRoot: root,
         candidates,
-        instructionsEntries: merged.instructions || [],
+        instructionsEntries: instructions,
+        instructionsByRoot: byRoot,
       })
     } catch (e) {
       set({
@@ -234,5 +245,14 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
     return { ok: false, message: `未知的採用目標：${id}` }
   },
 
-  temporaryInstructionsNote: () => instructionsPromptNote(get().instructionsEntries),
+  temporaryInstructionsNote: (projectRoot) => {
+    const root = (projectRoot || '').trim() || get().lastProjectRoot || ''
+    const byRoot = get().instructionsByRoot
+    const entries =
+      (root && byRoot[root]) ||
+      get().instructionsEntries ||
+      []
+    // If run pin differs from last hydrate and cache miss, note is empty (engine may re-hydrate)
+    return instructionsPromptNote(entries)
+  },
 }))

@@ -90,6 +90,9 @@ export async function authorizeTool(opts: {
    */
   hitlTimeoutMs?: number
   unattended?: boolean
+  /** Lifecycle hook context (P1-D) */
+  sourceKind?: string
+  objective?: string
   onLog?: (level: string, message: string) => void
 }): Promise<AuthorizeResult> {
   const { tool, input, settings, permissionPolicy, blockedTools, onLog } = opts
@@ -148,11 +151,30 @@ export async function authorizeTool(opts: {
   if ((settings.approvalMode || 'auto') === 'full' && mode !== 'full') {
     onLog?.('INFO', '無人值守任務：完整存取權降級為「代我核准」')
   }
-  const decided = decideApprovalNeed(mode, tool, needAsk, opts.sideEffect === true)
+  // P0: dynamic MCP tools often lack static approval — force HITL for write-like names
+  // under unattended / always modes so schedule/webhook cannot silently mutate.
+  const mcpWrite =
+    (tool.startsWith('mcp_') || tool === 'mcp_call') &&
+    /create|delete|update|write|remove|destroy|unlink|post|put|patch|set_|insert|drop/i.test(
+      tool,
+    )
+  if (mcpWrite) {
+    needAsk = true
+  }
+  const decided = decideApprovalNeed(
+    mode,
+    tool,
+    needAsk,
+    opts.sideEffect === true || mcpWrite,
+  )
   if (needAsk && !decided && mode === 'full') {
     onLog?.('INFO', `完整存取權：自動核准 ${tool}`)
   }
   needAsk = decided
+  // Unattended + side-effect (incl. MCP write): never skip ask even if auto would
+  if (opts.unattended && (mcpWrite || (isSideEffectTool(tool) && needAsk))) {
+    needAsk = true
+  }
 
   // P1-D lifecycle hooks (beforeTool): declarative policy — deny wins over
   // everything; require-approval overrides even approvalMode 'full'.
@@ -161,6 +183,8 @@ export async function authorizeTool(opts: {
     const hookEval = evaluateHooks(collectHookRules(settings), {
       point: 'beforeTool',
       tool,
+      sourceKind: opts.sourceKind as import('../hooks').HookContext['sourceKind'],
+      objective: opts.objective,
     })
     for (const line of hookEval.audits) onLog?.('INFO', line)
     if (hookEval.deny) {
@@ -219,6 +243,8 @@ export async function guardAndExecuteTool(opts: {
   sideEffect?: boolean
   hitlTimeoutMs?: number
   unattended?: boolean
+  sourceKind?: string
+  objective?: string
   onLog?: (level: string, message: string) => void
 }): Promise<GuardResult> {
   const auth = await authorizeTool(opts)

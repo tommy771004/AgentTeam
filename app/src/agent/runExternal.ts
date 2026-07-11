@@ -335,6 +335,7 @@ export async function runExternalObjective(
   const overrides: RuntimeOverrides = {
     ...(opts.overrides || {}),
     runId,
+    sourceKind: opts.sourceKind || opts.overrides?.sourceKind,
     eventPreMatched: opts.eventPreMatched ?? opts.overrides?.eventPreMatched,
     attachedSkills:
       opts.attachedSkills || opts.overrides?.attachedSkills || undefined,
@@ -361,16 +362,43 @@ export async function runExternalObjective(
       void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
     }
     if (ev.deny) {
+      // P0: still complete lifecycle — onSettled / afterRun / drain / archive path
       thr.setThreadStatus(tid, 'failed')
       thr.setRunningThreadId(null)
       thr.pushBubble(tid, 'system', `執行被 hook 政策拒絕：${ev.deny.reason}`)
-      return {
+      const denyResult: ExternalRunResult = {
         path: 'builtin',
         status: 'failed',
         error: `hook deny：${ev.deny.reason}`,
         threadId: tid,
         runId,
       }
+      try {
+        const after = evaluateHooks(collectHookRules(settings), {
+          point: 'afterRun',
+          sourceKind: opts.sourceKind,
+          objective,
+        })
+        for (const line of after.audits) thr.pushBubble(tid, 'system', line)
+        for (const n of after.notifications) {
+          void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+        }
+      } catch {
+        /* non-fatal */
+      }
+      try {
+        await opts.onSettled?.(denyResult)
+      } catch {
+        /* ignore */
+      }
+      void drainExternalRunQueue((o) =>
+        runExternalObjective({
+          ...o,
+          _fromQueue: true,
+          sourceKind: o.sourceKind || 'queue-drain',
+        }),
+      )
+      return denyResult
     }
     if (ev.appendTexts.length) {
       overrides.extraSystemContext = [
@@ -392,24 +420,48 @@ export async function runExternalObjective(
       forceLoopType: loopType,
       attachments,
     })
+    // P0 CLI/dispatch: prefer dispatch result over stale global agent state
     const finalAgent = useAgentStore.getState().agent
-    const status = finalAgent.status
-    thr.setThreadStatus(tid, status)
-    const stepsTail = finalAgent.steps
-      .filter((s) => s.result)
-      .slice(-3)
-      .map((s) => s.result)
-      .join('\n\n')
-    thr.pushBubble(
+    const status =
+      result.status === 'failed' || result.error
+        ? result.status === 'failed'
+          ? 'failed'
+          : finalAgent.status
+        : finalAgent.status || result.status
+    thr.setThreadStatus(
       tid,
-      'assistant',
-      finalAgent.result?.slice(0, 4000) ||
-        stepsTail.slice(0, 4000) ||
-        result.result?.slice(0, 4000) ||
-        `狀態：${status}`,
+      (status === 'success' ||
+      status === 'failed' ||
+      status === 'halted' ||
+      status === 'idle'
+        ? status
+        : finalAgent.status) as 'success' | 'failed' | 'halted' | 'idle' | 'running',
     )
+    if (result.error && result.status === 'failed' && !result.result) {
+      thr.pushBubble(tid, 'system', result.error)
+    } else {
+      const stepsTail = finalAgent.steps
+        .filter((s) => s.result)
+        .slice(-3)
+        .map((s) => s.result)
+        .join('\n\n')
+      thr.pushBubble(
+        tid,
+        'assistant',
+        finalAgent.result?.slice(0, 4000) ||
+          stepsTail.slice(0, 4000) ||
+          result.result?.slice(0, 4000) ||
+          `狀態：${status}`,
+      )
+    }
     thr.setRunningThreadId(null)
-    const finalResult: ExternalRunResult = { ...result, threadId: tid, runId }
+    const finalResult: ExternalRunResult = {
+      ...result,
+      threadId: tid,
+      runId,
+      status: result.status || finalAgent.status,
+      error: result.error || finalAgent.haltReason,
+    }
     // P1-D lifecycle hooks (afterRun): observe / notify
     try {
       const { collectHookRules, evaluateHooks } = await import('./hooks')

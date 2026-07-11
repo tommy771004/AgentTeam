@@ -285,6 +285,15 @@ export class AgentLoopEngine {
     this.stepOutputs = []
     this.attachedSkillContext = ''
     this.userAttachments = this.overrides.userAttachments || []
+    // Per-run project pin for tools/bash (must not use wrong UI project)
+    try {
+      const { setRunProjectRoot, setRunId, clearRunContext } = await import('./tools/runContext')
+      clearRunContext()
+      setRunProjectRoot(this.overrides.projectRoot)
+      setRunId(this.overrides.runId)
+    } catch {
+      /* ignore */
+    }
     // Per-conversation model override (thread settings)
     if (this.overrides.model?.trim()) {
       this.settings = { ...this.settings, model: this.overrides.model.trim() }
@@ -333,12 +342,24 @@ export class AgentLoopEngine {
       // W3: OpenCode instructions — temporary apply per run（不寫入全域設定）
       try {
         const { useOpenCodeConfigStore } = await import('../store/opencodeConfigStore')
-        const note = useOpenCodeConfigStore.getState().temporaryInstructionsNote()
+        // Per-run project pin — must not use wrong UI project's instructions
+        const pinRoot = (this.overrides.projectRoot || root || '').trim()
+        const oc = useOpenCodeConfigStore.getState()
+        // Ensure cache has this root (schedule A while UI on B)
+        if (pinRoot && pinRoot !== oc.lastProjectRoot && !oc.instructionsByRoot[pinRoot]) {
+          await oc.hydrate(pinRoot)
+        }
+        const note = useOpenCodeConfigStore
+          .getState()
+          .temporaryInstructionsNote(pinRoot || undefined)
         if (note) {
           this.projectGuidance = [this.projectGuidance, note]
             .filter(Boolean)
             .join('\n\n')
-          this.log('INFO', 'OpenCode instructions 已暫時套用（本 run，見設定匯入報告）')
+          this.log(
+            'INFO',
+            `OpenCode instructions 已暫時套用（本 run · project=${pinRoot || '—'}，見設定匯入報告）`,
+          )
         }
       } catch {
         /* non-fatal */
@@ -448,6 +469,13 @@ export class AgentLoopEngine {
       this.state.finishedAt = new Date().toISOString()
       this.emit()
       return this.getState()
+    } finally {
+      try {
+        const { clearRunContext } = await import('./tools/runContext')
+        clearRunContext()
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -672,6 +700,9 @@ export class AgentLoopEngine {
             preloadUnlockedTools: preloadUnlocks,
             unattended: this.overrides.unattended === true,
             hitlTimeoutMs: this.overrides.hitlTimeoutMs,
+            sourceKind: this.overrides.sourceKind,
+            objective: this.state.objective,
+            projectRoot: this.overrides.projectRoot,
             // OpenCode policy deny + role isolation
             blockedTools: [
               ...(this.overrides.blockedTools || []),
@@ -857,12 +888,29 @@ export class AgentLoopEngine {
               forceAsk,
               hitlTimeoutMs,
               unattended: this.overrides.unattended,
+              sourceKind: this.overrides.sourceKind,
+              objective: this.state.objective,
               onLog: (level, message) =>
                 this.log(level as LogLevel, message),
             })
             if (!guarded.allowed) {
               toolChunks.push(`### tool:${tool}\n${guarded.output}`)
               this.log('WARN', guarded.output)
+              // P0: record denied tools so step completion / DoD can see failures
+              this.state.toolCalls = [
+                ...this.state.toolCalls,
+                {
+                  id: `deny_${Date.now().toString(36)}`,
+                  tool,
+                  input,
+                  output: guarded.output,
+                  ok: false,
+                  durationMs: Date.now() - started,
+                  timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+                  step: step.step,
+                },
+              ]
+              this.emit()
               continue
             }
             const result = guarded.result
@@ -900,6 +948,23 @@ export class AgentLoopEngine {
               `tool:${tool} ${result.ok ? 'ok' : 'fail'} (${durationMs}ms)`,
             )
             toolChunks.push(`### tool:${tool}\n${out.slice(0, 2000)}`)
+            // P1: afterTool hooks also on heuristic path (parity with FC)
+            try {
+              const { collectHookRules, evaluateHooks } = await import('./hooks')
+              const ev = evaluateHooks(collectHookRules(this.settings), {
+                point: 'afterTool',
+                tool,
+                toolOk: result.ok,
+                sourceKind: this.overrides.sourceKind as import('./hooks').HookContext['sourceKind'],
+                objective: this.state.objective,
+              })
+              for (const line of ev.audits) this.log('INFO', line)
+              for (const n of ev.notifications) {
+                void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+              }
+            } catch {
+              /* non-fatal */
+            }
           }
 
           // Connector / plugin custom tools (heuristic path)
@@ -918,11 +983,27 @@ export class AgentLoopEngine {
               sideEffect: true,
               hitlTimeoutMs,
               unattended: this.overrides.unattended,
+              sourceKind: this.overrides.sourceKind,
+              objective: this.state.objective,
               onLog: (level, message) => this.log(level as LogLevel, message),
             })
             if (!auth.allowed) {
               toolChunks.push(`### tool:${custom.name}\n${auth.output}`)
               this.log('WARN', auth.output)
+              this.state.toolCalls = [
+                ...this.state.toolCalls,
+                {
+                  id: `deny_${Date.now().toString(36)}`,
+                  tool: custom.name,
+                  input,
+                  output: auth.output,
+                  ok: false,
+                  durationMs: Date.now() - started,
+                  timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+                  step: step.step,
+                },
+              ]
+              this.emit()
               continue
             }
             const result = await executeCustomTool(custom, input, this.settings)
@@ -1060,6 +1141,31 @@ export class AgentLoopEngine {
 
     this.stepOutputs.push(output)
     const doneResolved = resolveRoleModel(this.settings, role)
+    // P0: if every tool in this step failed, do not mark COMPLETED as success path
+    const stepTools = (this.state.toolCalls || []).filter((t) => t.step === step.step)
+    const allToolsFailed =
+      stepTools.length > 0 && stepTools.every((t) => t.ok === false)
+    if (allToolsFailed) {
+      this.state.confidence = Math.min(this.state.confidence, 0.35)
+      this.log(
+        'WARN',
+        `步驟 ${step.step} 全部工具失敗（${stepTools.length}）— 標記 FAILED，不計入 DoD 成功`,
+      )
+      this.setStep(index, {
+        status: 'FAILED',
+        durationMs,
+        result: (output || stepTools.map((t) => t.output).join('\n')).slice(0, 280),
+        assignedAgent: agentName,
+        modelUsed: this.useLlm()
+          ? doneResolved.model || '(no model)'
+          : '(simulation)',
+        modelSource: this.useLlm() ? doneResolved.source : 'sim',
+      })
+      this.setSubAgent(agentName, 'error', output.slice(0, 120))
+      this.updateProgress()
+      this.emit()
+      return { ok: false, output, durationMs }
+    }
     this.setStep(index, {
       status: 'COMPLETED',
       durationMs,

@@ -332,7 +332,23 @@ export function enqueueExternalRun(opts: ExternalRunOpts): QueuedExternalRun | n
   }
   queue.push(item)
   while (queue.length > MAX_QUEUE) {
-    queue.shift()
+    const dropped = queue.shift()
+    // P0: never silent-drop schedule jobs — settle as cancelled
+    if (dropped) {
+      try {
+        void dropped.onSettled?.({
+          path: 'builtin',
+          status: 'skipped',
+          error: '佇列已滿，最舊項目被丟棄',
+          threadId: null,
+          skipped: true,
+          skipReason: 'cancelled',
+          runId: dropped.runId,
+        })
+      } catch {
+        /* ignore */
+      }
+    }
   }
   emit()
   return item

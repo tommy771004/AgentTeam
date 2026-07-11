@@ -182,6 +182,11 @@ export type SubagentId = 'general' | 'explore'
 export interface RuntimeOverrides {
   /** Stable trace id assigned by runTask controller; engine adopts it as state.id */
   runId?: string
+  /**
+   * Run entry source for lifecycle hooks (composer / schedule / webhook / …).
+   * Set by runTask; tools forward it into beforeTool/afterTool evaluation.
+   */
+  sourceKind?: string
   maxIterations?: number
   /** Override FC tool rounds for this run */
   maxToolRounds?: number

@@ -119,11 +119,13 @@ export async function dispatchThreadTask(
   if (runner !== 'builtin') {
     const kind = runner as LocalRunnerKind
     if (!isRunnerAuthorized(kind)) {
+      // P0: explicit failed result — do not leave thread on stale agent state
       return {
         path: 'cli',
         kind,
         status: 'failed',
         error: `執行引擎 ${kind} 未在設定中啟用/授權。請到設定 → CLI 提供者勾選授權並掃描。`,
+        result: undefined,
       }
     }
     // CLI path: materialize attachments to disk in Electron; pass serializable payloads
@@ -133,6 +135,7 @@ export async function dispatchThreadTask(
       kind: a.kind,
       dataUrl: a.dataUrl,
       textContent: a.textContent,
+      filePath: a.filePath,
     }))
     await agent.startLocalCliExecution({
       kind,
@@ -145,14 +148,16 @@ export async function dispatchThreadTask(
       approvalMode: settings.approvalMode,
       unattended: opts?.overrides?.unattended === true,
       attachments: cliAttachments.length ? cliAttachments : undefined,
+      runId: opts?.overrides?.runId,
+      loopType: opts?.forceLoopType,
     })
     const a = useAgentStore.getState().agent
     return {
       path: 'cli',
       kind,
-      status: a.status,
+      status: a.status || 'failed',
       result: a.result,
-      error: a.haltReason,
+      error: a.haltReason || (a.status === 'failed' ? a.result : undefined),
     }
   }
 

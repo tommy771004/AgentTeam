@@ -296,21 +296,43 @@ function resolveCliApproval(kind, mode, unattended, agentMode) {
   if (requested === 'full' && unattended) return { mode: 'auto', permissive: false }
   if (requested !== 'full') return { mode: requested, permissive: false }
   if (agentMode === 'plan') return { mode: 'auto', permissive: false }
-  if (kind === 'codex' || kind === 'claude') return { mode: 'full', permissive: true }
+  if (kind === 'codex' || kind === 'claude' || kind === 'grok' || kind === 'cursor') {
+    return { mode: 'full', permissive: true }
+  }
   return { mode: 'auto', permissive: false }
 }
 
-await test('CLI approval mapping permits only interactive Codex/Claude full mode', async () => {
+await test('CLI approval + headless flags for all runners', async () => {
   assert.deepEqual(resolveCliApproval('codex', 'full', false, 'build'), { mode: 'full', permissive: true })
   assert.deepEqual(resolveCliApproval('claude', 'full', false, 'build'), { mode: 'full', permissive: true })
   assert.deepEqual(resolveCliApproval('codex', 'full', true, 'build'), { mode: 'auto', permissive: false })
   assert.deepEqual(resolveCliApproval('claude', 'full', false, 'plan'), { mode: 'auto', permissive: false })
-  assert.deepEqual(resolveCliApproval('grok', 'full', false, 'build'), { mode: 'auto', permissive: false })
+  assert.deepEqual(resolveCliApproval('grok', 'full', false, 'build'), { mode: 'full', permissive: true })
+  assert.deepEqual(resolveCliApproval('cursor', 'full', false, 'build'), { mode: 'full', permissive: true })
   const fs = await import('node:fs')
   const source = fs.readFileSync(path.join(appRoot, 'electron/localCliRunner.ts'), 'utf8')
-  assert.match(source, /--full-auto/)
+  // Codex: non-interactive exec + JSONL (never bare TUI / never legacy-only --full-auto as sole path)
+  assert.match(source, /exec --json/)
+  assert.match(source, /--dangerously-bypass-approvals-and-sandbox/)
   assert.match(source, /--dangerously-skip-permissions/)
-  assert.match(source, /Safe fallback is intentional/)
+  // Claude stream-json requires --verbose
+  assert.match(source, /stream-json/)
+  assert.match(source, /--verbose/)
+  // Grok headless
+  assert.match(source, /case 'grok'/)
+  assert.match(source, /-p \$\{q\}|--single/)
+  assert.match(source, /--always-approve/)
+  assert.match(source, /streaming-json/)
+  // Cursor print mode, OpenCode run
+  assert.match(source, /case 'cursor'/)
+  assert.match(source, /case 'opencode'/)
+  assert.match(source, /opencode.*run|run \$\{modelFlag\}/)
+  assert.match(source, /stripAnsi/)
+  assert.match(source, /createCliStreamParser|onStream/)
+  // No interactive bare fallbacks that hang Electron
+  assert.doesNotMatch(source, /\$\{binQ\} \$\{modelFlag\} \$\{q\}/)
+  const discover = fs.readFileSync(path.join(appRoot, 'electron/cliDiscover.ts'), 'utf8')
+  assert.match(discover, /whichCodex|whichCursorAgent/)
 })
 
 await test('custom tools: bash_template always approval-gated; toolLoop passes sideEffect hint', async () => {
@@ -643,11 +665,14 @@ await test('P1-D: wiring contract — hooks evaluated at all four points; saniti
   const fs = await import('node:fs')
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
   assert.match(guard, /point: 'beforeTool'/)
+  assert.match(guard, /sourceKind: opts\.sourceKind/)
   const runX = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
   assert.match(runX, /point: 'beforeRun'/)
   assert.match(runX, /point: 'afterRun'/)
+  assert.match(runX, /sourceKind: opts\.sourceKind/)
   const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
   assert.match(loop, /point: 'afterTool'/)
+  assert.match(loop, /sourceKind: ctx\.sourceKind/)
   const hooks = fs.readFileSync(path.join(appRoot, 'src/agent/hooks.ts'), 'utf8')
   assert.match(hooks, /sanitizeHookRules/)
   assert.match(hooks, /no 'allow' action/i)

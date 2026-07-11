@@ -49,6 +49,10 @@ interface AgentStore {
     agentMode?: string
     approvalMode?: ApprovalMode
     unattended?: boolean
+    /** Correlate with runTask trace */
+    runId?: string
+    /** Preserve loop type in agent state (not always Goal-based) */
+    loopType?: LoopType
     /** Chat attachments for CLI (written to disk in Electron) */
     attachments?: Array<{
       name: string
@@ -56,6 +60,7 @@ interface AgentStore {
       kind?: 'image' | 'text' | 'binary'
       dataUrl?: string
       textContent?: string
+      filePath?: string
     }>
   }) => Promise<void>
   stopExecution: () => void
@@ -154,6 +159,14 @@ export const useAgentStore = create<AgentStore>((set, get) => {
 
       set({ isRunning: true, showReport: false })
       try {
+        // Center process feed (Codex-style)
+        try {
+          const { useRunActivityStore } = await import('./runActivityStore')
+          useRunActivityStore.getState().begin(overrides?.runId)
+          useRunActivityStore.getState().setStatus('內建引擎執行中…')
+        } catch {
+          /* ignore */
+        }
         // Per-run HITL counters for Archive
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
@@ -164,6 +177,15 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         const force = get().selectedLoopType ?? undefined
         const final = await agentEngine.start(text, force, overrides)
         set({ agent: final, isRunning: false })
+        try {
+          const { useRunActivityStore } = await import('./runActivityStore')
+          useRunActivityStore.getState().setStatus(
+            final.status === 'success' ? '完成' : final.status,
+          )
+          useRunActivityStore.getState().end()
+        } catch {
+          /* ignore */
+        }
         // End of run: clear sticky "代我核准" unless user wants multi-run (opt-in later)
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
@@ -179,6 +201,12 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         void drainQueueAfterRun()
       } catch (e) {
         set({ isRunning: false })
+        try {
+          const { useRunActivityStore } = await import('./runActivityStore')
+          useRunActivityStore.getState().end()
+        } catch {
+          /* ignore */
+        }
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
           usePermissionAskStore.getState().setSessionAllow(false)
@@ -198,20 +226,33 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         return
       }
       const t0 = Date.now()
+      const runId = opts.runId || `cli_${Date.now().toString(36)}`
       const logs: AgentState['logs'] = []
-      const pushLog = (message: string, level: AgentState['logs'][0]['level'] = 'INFO') => {
-        logs.push({
-          id: `l_${logs.length}`,
-          timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
-          level,
-          message,
-        })
+      let toolCalls: AgentState['toolCalls'] = []
+      let draftChars = 0
+      let lastUiPush = 0
+
+      const baseLoop = {
+        loopType: opts.loopType || ('Goal-based' as const),
+        trigger: 'local-cli' as const,
+        executionSequence: ['local-cli'],
+        definitionOfDone: 'CLI returned',
+        maxIterations: 1,
+        fallbackProtocol: '',
+        nextState: 'Halt' as const,
+      }
+
+      const pushLiveAgent = (progress: number, extra?: { result?: string }) => {
         set({
           agent: emptyAgentLike({
+            id: runId,
             objective: prompt,
             status: 'running',
-            progress: 30,
+            progress: Math.min(95, Math.max(5, progress)),
             logs: [...logs],
+            toolCalls: [...toolCalls],
+            result: extra?.result,
+            loopConfig: baseLoop,
             steps: [
               {
                 step: 1,
@@ -233,15 +274,89 @@ export const useAgentStore = create<AgentStore>((set, get) => {
                 modelSource: 'cli',
               },
             ],
+            metrics: {
+              vramLabel: `cli:${opts.kind}`,
+              apiCredits: 0,
+              executionMs: Date.now() - t0,
+            },
             startedAt: new Date(t0).toISOString(),
             finishedAt: null,
           }),
         })
       }
 
+      const pushLog = (message: string, level: AgentState['logs'][0]['level'] = 'INFO') => {
+        logs.push({
+          id: `l_${logs.length}`,
+          timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+          level,
+          message,
+        })
+        // progress: start ~15, climb with logs/draft toward 90
+        const p = 15 + Math.min(70, logs.length * 2 + Math.floor(draftChars / 80))
+        pushLiveAgent(p)
+      }
+
+      // Codex-style center feed
+      let unsubStream: (() => void) | undefined
+      try {
+        const { useRunActivityStore } = await import('./runActivityStore')
+        useRunActivityStore.getState().begin(runId)
+        useRunActivityStore.getState().setStatus(`本機 ${opts.kind} CLI · 啟動中`)
+        unsubStream = window.subagents?.cli?.onStream?.((ev) => {
+          useRunActivityStore.getState().handleCliStream({
+            ...ev,
+            kind: ev.kind as import('./runActivityStore').CliStreamPayload['kind'],
+            path: ev.path,
+            paths: ev.paths,
+            added: ev.added,
+            removed: ev.removed,
+            action: ev.action,
+          })
+          if ((ev.kind === 'tool' || ev.kind === 'file') && (ev.tool || ev.path)) {
+            toolCalls = [
+              ...toolCalls,
+              {
+                id: `cli_tool_${toolCalls.length}`,
+                step: 1,
+                tool: ev.tool || (ev.kind === 'file' ? 'file_edit' : 'tool'),
+                input: {
+                  detail: ev.detail || '',
+                  path: ev.path || '',
+                },
+                output: ev.detail || ev.title || '',
+                ok: ev.ok !== false,
+                durationMs: 0,
+                timestamp: new Date().toISOString(),
+              },
+            ]
+          }
+          if (ev.channel === 'text' || ev.kind === 'text') {
+            draftChars += (ev.delta || ev.detail || '').length
+          }
+          // Throttle full agent re-render (~8/s)
+          const now = Date.now()
+          if (now - lastUiPush > 120) {
+            lastUiPush = now
+            const act = useRunActivityStore.getState()
+            const p = 20 + Math.min(70, Math.floor(draftChars / 40) + act.events.length)
+            pushLiveAgent(p, { result: act.draftText || undefined })
+            if (ev.title || ev.kind === 'status') {
+              pushLog(
+                [ev.title, ev.detail].filter(Boolean).join(' · ').slice(0, 240),
+                ev.kind === 'error' ? 'ERROR' : 'INFO',
+              )
+            }
+          }
+        })
+      } catch {
+        /* browser / missing API */
+      }
+
       set({ isRunning: true, showReport: false })
       const modelLabel = opts.model?.trim() || opts.kind
-      pushLog(`Local CLI runner: ${opts.kind}`)
+      pushLog(`Local CLI runner: ${opts.kind}${opts.runId ? ` · runId=${opts.runId}` : ''}`)
+      if (opts.loopType) pushLog(`loopType: ${opts.loopType}`)
       if (opts.model) pushLog(`model: ${opts.model}`)
       if (opts.depth) pushLog(`depth: ${opts.depth}`)
       if (opts.approvalMode) pushLog(`approvalMode: ${opts.approvalMode}${opts.unattended ? ' · unattended' : ''}`)
@@ -255,8 +370,27 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         }
         const r = await runPromptViaLocalCli({
           ...opts,
+          runId,
           onLog: (line) => pushLog(line),
         })
+        try {
+          unsubStream?.()
+        } catch {
+          /* ignore */
+        }
+        try {
+          const { useRunActivityStore } = await import('./runActivityStore')
+          const act = useRunActivityStore.getState()
+          // Keep thought / process events for center timeline; clear draft so
+          // final answer is only the markdown assistant bubble (no duplicate).
+          if (r.ok) {
+            act.push({ kind: 'done', title: 'CLI 完成', ok: true })
+            act.setStatus('完成')
+          }
+          useRunActivityStore.setState({ draftText: '', active: false })
+        } catch {
+          /* ignore */
+        }
         // Knowledge graph from CLI output
         const knowledge = extractKnowledge(
           prompt,
@@ -267,12 +401,23 @@ export const useAgentStore = create<AgentStore>((set, get) => {
 
         // If user hit stop mid-run, still finalize state
         const final = emptyAgentLike({
+          id: runId,
           objective: prompt,
           status: r.ok ? 'success' : r.error === '使用者取消' ? 'halted' : 'failed',
           progress: 100,
           result: r.output,
           knowledge,
           confidence: r.ok ? 0.88 : 0.35,
+          toolCalls: [...toolCalls],
+          loopConfig: {
+            loopType: opts.loopType || 'Goal-based',
+            trigger: 'local-cli',
+            executionSequence: ['local-cli'],
+            definitionOfDone: 'CLI returned',
+            maxIterations: 1,
+            fallbackProtocol: '',
+            nextState: 'Halt',
+          },
           subAgents: [
             {
               id: `cli-${opts.kind}`,
@@ -351,12 +496,30 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         }
         void drainQueueAfterRun()
       } catch (e) {
+        try {
+          unsubStream?.()
+        } catch {
+          /* ignore */
+        }
+        try {
+          const { useRunActivityStore } = await import('./runActivityStore')
+          useRunActivityStore.getState().push({
+            kind: 'error',
+            title: 'CLI 例外',
+            detail: e instanceof Error ? e.message : String(e),
+          })
+          useRunActivityStore.getState().end()
+        } catch {
+          /* ignore */
+        }
         const msg = e instanceof Error ? e.message : String(e)
         const final = emptyAgentLike({
+          id: runId,
           objective: prompt,
           status: 'failed',
           progress: 100,
           result: msg,
+          toolCalls: [...toolCalls],
           logs: [
             ...logs,
             {
@@ -392,6 +555,14 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       agentEngine.stop()
       // Cancel in-flight local CLI / bash tagged cli-agent
       void window.subagents?.cli?.cancel?.()
+      try {
+        void import('./runActivityStore').then(({ useRunActivityStore }) => {
+          useRunActivityStore.getState().push({ kind: 'status', title: '使用者停止' })
+          useRunActivityStore.getState().end()
+        })
+      } catch {
+        /* ignore */
+      }
       set({ isRunning: false })
       // Clear sticky "代我核准" so a stopped run cannot auto-allow the next one
       try {

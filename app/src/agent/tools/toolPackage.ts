@@ -74,9 +74,27 @@ export function validateToolPackage(raw: unknown): {
       errors.push(`${at}: http_template 需要 url`)
     if (t?.kind === 'bash_template' && !t?.template?.command?.trim())
       errors.push(`${at}: bash_template 需要 command`)
+    // P1: read class must not smuggle write methods
+    if (t?.kind === 'http_template' && t.operationClass === 'read') {
+      const method = String(t.template?.method || 'GET').toUpperCase()
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+        errors.push(
+          `${at}: operationClass=read 但 HTTP method=${method} — 請改為 write/destructive/external`,
+        )
+      }
+    }
   }
   if (errors.length) return { ok: false, errors }
   return { ok: true, errors: [], manifest: m as ToolPackageManifest }
+}
+
+/** Effective operation class after HTTP method sanity. */
+export function effectiveOperationClass(t: ToolPackageTool): OperationClass {
+  if (t.kind === 'http_template' && t.operationClass === 'read') {
+    const method = String(t.template?.method || 'GET').toUpperCase()
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return 'write'
+  }
+  return t.operationClass
 }
 
 /**
@@ -86,8 +104,8 @@ export function validateToolPackage(raw: unknown): {
  */
 export function packageFingerprint(m: ToolPackageManifest): string {
   const priv = m.tools
-    .filter((t) => t.operationClass !== 'read' || t.kind === 'bash_template')
-    .map((t) => `${t.name}:${t.operationClass}:${t.kind}`)
+    .filter((t) => effectiveOperationClass(t) !== 'read' || t.kind === 'bash_template')
+    .map((t) => `${t.name}:${effectiveOperationClass(t)}:${t.kind}`)
     .sort()
   const base = `${m.auth?.secretKey || ''}|${priv.join(',')}`
   let h = 5381
@@ -95,9 +113,12 @@ export function packageFingerprint(m: ToolPackageManifest): string {
   return (h >>> 0).toString(16)
 }
 
-/** True when nothing beyond read-class http tools is present. */
+/** True when nothing beyond read-class http GET/HEAD tools is present. */
 export function packageIsReadOnly(m: ToolPackageManifest): boolean {
-  return m.tools.every((t) => t.operationClass === 'read' && t.kind === 'http_template')
+  return m.tools.every(
+    (t) =>
+      effectiveOperationClass(t) === 'read' && t.kind === 'http_template',
+  )
 }
 
 export type PackageCompileResult = {
@@ -122,19 +143,20 @@ export function compileToolPackage(
   const tools: CustomToolDefinition[] = []
   const withheld: string[] = []
   for (const t of m.tools) {
-    const privileged = t.operationClass !== 'read' || t.kind === 'bash_template'
+    const opClass = effectiveOperationClass(t)
+    const privileged = opClass !== 'read' || t.kind === 'bash_template'
     if (privileged && !approved) {
       withheld.push(t.name)
       continue
     }
     tools.push({
       name: t.name,
-      description: `[${t.operationClass}${t.idempotent ? '·idempotent' : ''}] ${t.description}`,
+      description: `[${opClass}${t.idempotent ? '·idempotent' : ''}] ${t.description}`,
       kind: t.kind,
       template: t.template,
       params: t.params,
       // destructive/write/external cannot opt out of approval; bash always gated upstream
-      requiresApproval: t.operationClass !== 'read',
+      requiresApproval: opClass !== 'read',
       ownerId,
     })
   }

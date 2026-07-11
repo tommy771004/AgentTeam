@@ -107,6 +107,11 @@ export interface ToolLoopOptions {
   /** Unattended automation: shorter HITL timeout → auto deny */
   unattended?: boolean
   hitlTimeoutMs?: number
+  /** Lifecycle hooks context (P1-D) */
+  sourceKind?: string
+  objective?: string
+  /** Per-run project pin (scheduler) — overrides UI project store for tools/MCP */
+  projectRoot?: string
 }
 
 function nowTime(): string {
@@ -195,12 +200,21 @@ export async function runFunctionCallingLoop(
   const cb = opts?.callbacks
   const blocked = new Set((opts?.blockedTools || []).map(String))
   const policy = opts?.permissionPolicy
-  let projectRoot = ''
+  // Per-run pin first (must not silently fall back to wrong UI project)
+  let projectRoot = (opts?.projectRoot || '').trim()
+  if (!projectRoot) {
+    try {
+      const { useProjectStore } = await import('../../store/projectStore')
+      projectRoot = useProjectStore.getState().root || ''
+    } catch {
+      /* browser/unit-test fallback */
+    }
+  }
   try {
-    const { useProjectStore } = await import('../../store/projectStore')
-    projectRoot = useProjectStore.getState().root || ''
+    const { setRunProjectRoot } = await import('./runContext')
+    setRunProjectRoot(projectRoot || undefined)
   } catch {
-    /* browser/unit-test fallback */
+    /* ignore */
   }
 
   // ── Capability progressive disclosure (Pydantic AI 2.0–style) ──
@@ -537,6 +551,8 @@ ${systemExtra}`,
         onLoadedCaps: emitLoadedCaps,
         hitlTimeoutMs,
         unattended: opts?.unattended,
+        sourceKind: opts?.sourceKind,
+        objective: opts?.objective || args.objective,
       })
     }
   }
@@ -585,6 +601,8 @@ async function executeOneToolCall(
     onLoadedCaps?: () => void
     hitlTimeoutMs?: number
     unattended?: boolean
+    sourceKind?: string
+    objective?: string
   },
 ) {
   let args: Record<string, unknown> = {}
@@ -683,6 +701,8 @@ async function executeOneToolCall(
     sideEffect: Boolean(custom),
     hitlTimeoutMs: ctx.hitlTimeoutMs,
     unattended: ctx.unattended,
+    sourceKind: ctx.sourceKind,
+    objective: ctx.objective,
     onLog: (level, message) => {
       ctx.cb?.onLog?.(level as Parameters<NonNullable<ToolLoopCallbacks['onLog']>>[0], message)
     },
@@ -722,6 +742,8 @@ async function executeOneToolCall(
           sideEffect: Boolean(ctx.customMap.get(name)),
           hitlTimeoutMs: ctx.hitlTimeoutMs,
           unattended: ctx.unattended,
+          sourceKind: ctx.sourceKind,
+          objective: ctx.objective,
           onLog: (level, message) => {
             ctx.cb?.onLog?.(
               level as Parameters<NonNullable<ToolLoopCallbacks['onLog']>>[0],
@@ -958,6 +980,8 @@ async function executeOneToolCall(
       point: 'afterTool',
       tool: tc.name,
       toolOk: ok,
+      sourceKind: ctx.sourceKind as import('../hooks').HookContext['sourceKind'],
+      objective: ctx.objective,
     })
     for (const line of ev.audits) ctx.cb?.onLog?.('INFO', line)
     for (const n of ev.notifications) {

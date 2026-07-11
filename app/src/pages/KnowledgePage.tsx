@@ -250,6 +250,11 @@ export function KnowledgePage() {
               {cgStatus?.version && (
                 <span className="ml-2 text-outline">CLI {cgStatus.version}</span>
               )}
+              {cgStatus?.version && /^0\./.test(cgStatus.version.trim()) && (
+                <span className="ml-2 text-outline/80" title="npm i -g @colbymchenry/codegraph@latest">
+                  · 舊版 CLI：explore 自動降級 query
+                </span>
+              )}
             </div>
             <div className="flex flex-wrap gap-1.5">
               <button

@@ -76,6 +76,10 @@ export async function runBash(input: {
   runId?: string
   /** Group tag e.g. 'cli-agent' for bulk cancel */
   tag?: string
+  /** Live stdout chunks (UTF-8) for CLI process feed */
+  onStdout?: (chunk: string) => void
+  /** Live stderr chunks */
+  onStderr?: (chunk: string) => void
 }): Promise<BashResult> {
   const command = (input.command || '').trim()
   if (!command) return { ok: false, code: 1, stdout: '', stderr: 'empty command' }
@@ -125,12 +129,24 @@ export async function runBash(input: {
     }, timeoutMs)
 
     child.stdout?.on('data', (c: Buffer) => {
-      stdout += c.toString('utf-8')
+      const chunk = c.toString('utf-8')
+      stdout += chunk
       if (stdout.length > 100_000) stdout = stdout.slice(-80_000)
+      try {
+        input.onStdout?.(chunk)
+      } catch {
+        /* ignore listener errors */
+      }
     })
     child.stderr?.on('data', (c: Buffer) => {
-      stderr += c.toString('utf-8')
+      const chunk = c.toString('utf-8')
+      stderr += chunk
       if (stderr.length > 40_000) stderr = stderr.slice(-20_000)
+      try {
+        input.onStderr?.(chunk)
+      } catch {
+        /* ignore */
+      }
     })
     child.on('error', (err) => {
       finish({ ok: false, code: 1, stdout, stderr: err.message })

@@ -26,6 +26,7 @@ export async function runPromptViaLocalCli(opts: {
   agentMode?: string
   approvalMode?: ApprovalMode
   unattended?: boolean
+  runId?: string
   /** Materialized on disk by Electron for CLI vision/file tools */
   attachments?: LocalCliAttachmentPayload[]
   onLog?: (line: string) => void
@@ -68,6 +69,7 @@ export async function runPromptViaLocalCli(opts: {
     approvalMode: opts.approvalMode,
     unattended: opts.unattended,
     timeoutMs: 300_000,
+    runId: opts.runId,
     attachments: opts.attachments,
   })
   if (r.cancelled) {

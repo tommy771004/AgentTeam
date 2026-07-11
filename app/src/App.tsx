@@ -125,7 +125,7 @@ function SchedulerBootstrap() {
           )
           return
         }
-        await settleJob(r)
+        // onSettled already called settleJob — do not double-mark
       })()
     }
 
@@ -148,7 +148,7 @@ function WebhookBootstrap() {
     void load()
   }, [load])
 
-  // Auto-start webhook when settings say so (after load)
+  // Auto-start / stop webhook when settings say so (after load)
   useEffect(() => {
     if (!window.subagents?.webhook) return
     void (async () => {
@@ -160,6 +160,13 @@ function WebhookBootstrap() {
           })
         } catch {
           /* main may already own server */
+        }
+      } else {
+        // P1: closing settings must stop existing listener/server
+        try {
+          await window.subagents!.webhook!.stop?.()
+        } catch {
+          /* ignore */
         }
       }
     })()
@@ -316,6 +323,15 @@ function GatewayBootstrap() {
             dataUrl: a.dataUrl,
           }))
         // Goal-based: free-form chat, not event-predicate language
+        const replyTelegram = async (summary: string) => {
+          if (!s.telegramReplyWithResult) return
+          await window.subagents?.gateway?.send({
+            channel: msg.channel,
+            chatId: msg.chatId,
+            text: summary.slice(0, 3500),
+            token: s.telegramBotToken || undefined,
+          })
+        }
         const r = await runExternalObjective({
           sourceKind: 'telegram',
           objective: text || (attachments.length ? '請分析我附上的圖片或檔案。' : ''),
@@ -327,31 +343,29 @@ function GatewayBootstrap() {
           extraContext: attachments.length
             ? `Telegram 附件 ${attachments.length} 個（已下載）`
             : undefined,
+          // P1: reply after queue drain as well
+          onSettled: async (result) => {
+            if (!s.telegramReplyWithResult) return
+            const agent = useAgentStore.getState().agent
+            const summary =
+              agent.result?.slice(0, 3500) ||
+              result.result?.slice(0, 3500) ||
+              `狀態：${result.status}`
+            await replyTelegram(summary)
+          },
         })
         if (r.skipped) {
           await window.subagents?.gateway?.send({
             channel: msg.channel,
             chatId: msg.chatId,
             text: r.queued
-              ? '代理忙碌中，你的訊息已加入待跑佇列，稍後會自動執行。'
+              ? '代理忙碌中，你的訊息已加入待跑佇列，稍後會自動執行並回覆。'
               : '代理忙碌中，請稍後再試。',
             token: s.telegramBotToken || undefined,
           })
           return
         }
-        if (s.telegramReplyWithResult) {
-          const agent = useAgentStore.getState().agent
-          const summary =
-            agent.result?.slice(0, 3500) ||
-            r.result?.slice(0, 3500) ||
-            `狀態：${r.status}`
-          await window.subagents?.gateway?.send({
-            channel: msg.channel,
-            chatId: msg.chatId,
-            text: summary,
-            token: s.telegramBotToken || undefined,
-          })
-        }
+        // Non-queued: onSettled already sent telegram reply when enabled
       })()
     })
     return () => {

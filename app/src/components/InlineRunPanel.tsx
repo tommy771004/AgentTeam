@@ -3,15 +3,20 @@ import { StepTimeline } from './StepTimeline'
 import { LogViewer } from './LogViewer'
 import { InterventionPanel } from './InterventionPanel'
 import { useAgentStore } from '../store/agentStore'
+import { useRunActivityStore } from '../store/runActivityStore'
 import { loopTypeZh } from '../i18n/zh'
+import { MarkdownBody } from './MarkdownBody'
 
 /**
  * CloudCLI-style embedded run progress — no page navigation
  */
 export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
   const { agent, isRunning, stopExecution, continueTurn, resolveIntervention } = useAgentStore()
+  const activity = useRunActivityStore()
 
   const live =
+    isRunning ||
+    activity.active ||
     agent.status === 'running' ||
     agent.status === 'parsing' ||
     agent.status === 'manual_intervention' ||
@@ -69,10 +74,24 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
           <div className="text-[10px] uppercase tracking-wider text-outline font-semibold">
             {loopTypeZh(agent.loopConfig.loopType)} · 迭代 {agent.currentIteration}/
             {agent.loopConfig.maxIterations}
+            {agent.loopConfig.trigger === 'local-cli' ? ' · CLI' : ''}
           </div>
           <p className="text-xs text-on-surface leading-relaxed line-clamp-3">
             {agent.objective || '—'}
           </p>
+          {activity.statusLine ? (
+            <p className="text-[11px] text-secondary line-clamp-2">{activity.statusLine}</p>
+          ) : null}
+          {activity.thought ? (
+            <div className="rounded-lg border border-white/8 bg-surface/50 p-2">
+              <div className="text-[10px] uppercase tracking-wider text-outline font-semibold mb-1">
+                思考
+              </div>
+              <pre className="text-[10px] text-on-surface-variant whitespace-pre-wrap font-[family-name:var(--font-mono)] max-h-20 overflow-y-auto custom-scrollbar line-clamp-6">
+                {activity.thought.slice(-800)}
+              </pre>
+            </div>
+          ) : null}
           <div>
             <div className="flex justify-between text-[10px] text-outline mb-1">
               <span>進度</span>
@@ -173,9 +192,9 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
             <h4 className="text-[10px] uppercase tracking-wider text-primary font-semibold mb-1">
               結果
             </h4>
-            <pre className="text-[11px] text-on-surface-variant whitespace-pre-wrap font-[family-name:var(--font-mono)] max-h-40 overflow-y-auto custom-scrollbar">
-              {agent.result.slice(0, 2000)}
-            </pre>
+            <div className="max-h-48 overflow-y-auto custom-scrollbar">
+              <MarkdownBody content={agent.result.slice(0, 6000)} />
+            </div>
           </div>
         )}
       </div>

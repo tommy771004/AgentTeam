@@ -29,6 +29,12 @@ export interface DelegateTaskInput {
    * Isolation by default; only listed packs are inherited (G4).
    */
   inheritCapabilities?: string[]
+  /** Parent run trace (audit / hooks) */
+  parentRunId?: string
+  /** Parent entry source for hooks (delegate / schedule / …) */
+  sourceKind?: string
+  /** Per-run project pin (must not use UI store alone) */
+  projectRoot?: string
 }
 
 export interface DelegateTaskResult {
@@ -154,6 +160,14 @@ export async function runDelegatedTask(
         .filter(Boolean)
         .slice(0, 12)
       const preloadCapabilityIds = [...new Set([...baseline, ...inherited])]
+      // Pin child tools to parent project (scheduler A while UI shows B)
+      try {
+        const { setRunProjectRoot, setRunId } = await import('../tools/runContext')
+        if (input.projectRoot) setRunProjectRoot(input.projectRoot)
+        if (input.parentRunId) setRunId(`${input.parentRunId}>${id}`)
+      } catch {
+        /* ignore */
+      }
       const loop = await runFunctionCallingLoop(
         childSettings,
         {
@@ -182,6 +196,9 @@ export async function runDelegatedTask(
           includeMcpTools: role === 'leaf' ? false : settings.mcpEnabled,
           unattended: true,
           hitlTimeoutMs: 45_000,
+          sourceKind: (input.sourceKind as import('../hooks').HookContext['sourceKind']) || 'delegate',
+          objective: input.goal,
+          projectRoot: input.projectRoot,
         },
       )
 

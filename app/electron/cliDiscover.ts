@@ -81,18 +81,31 @@ function depthsFromEfforts(levels: Array<{ effort?: string } | string>): Discove
 }
 
 async function which(bin: string): Promise<string | null> {
-  // also check common user bins
+  // also check common user bins (Windows + Unix)
   const candidates = [
     bin,
     home('.grok', 'bin', bin),
     home('.local', 'bin', bin),
     home('.npm-global', 'bin', bin),
+    // OpenAI Codex real binary (PATH often has wrong npm "codex" blog package)
+    home('.codex', '.sandbox-bin', bin),
+    home('.codex', 'plugins', '.plugin-appserver', bin),
+    home('.opencode', 'bin', bin),
+    home('.cursor', 'bin', bin),
     `/usr/local/bin/${bin}`,
     `/opt/homebrew/bin/${bin}`,
   ]
   for (const c of candidates) {
     if (c.includes('/') || c.includes('\\')) {
-      if (exists(c) && fs.statSync(c).isFile()) return c
+      // try bare name and .exe on Windows
+      const tries = process.platform === 'win32' && !c.endsWith('.exe') ? [c, `${c}.exe`] : [c]
+      for (const t of tries) {
+        try {
+          if (exists(t) && fs.statSync(t).isFile()) return t
+        } catch {
+          /* ignore */
+        }
+      }
     }
   }
   const r = await runBash({
@@ -101,6 +114,44 @@ async function which(bin: string): Promise<string | null> {
   })
   const p = firstExecutablePath(r.stdout)
   return r.ok && p ? p : null
+}
+
+/** Prefer OpenAI Codex over unrelated npm packages named "codex". */
+async function whichCodex(): Promise<string | null> {
+  const preferred = [
+    home('.codex', '.sandbox-bin', 'codex.exe'),
+    home('.codex', '.sandbox-bin', 'codex'),
+    home('.codex', 'plugins', '.plugin-appserver', 'codex.exe'),
+    home('.codex', 'plugins', '.plugin-appserver', 'codex'),
+    home('.local', 'bin', 'codex'),
+    home('.local', 'bin', 'codex.exe'),
+  ]
+  for (const p of preferred) {
+    if (exists(p)) {
+      try {
+        if (fs.statSync(p).isFile()) return p
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  const fromPath = await which('codex')
+  if (!fromPath) return null
+  // Reject known wrong package: old "codex-cli" blog generator
+  const lower = fromPath.toLowerCase()
+  if (lower.includes('node_modules') && lower.includes('codex-cli')) {
+    return null
+  }
+  return fromPath
+}
+
+/** Cursor Agent CLI only — never the Cursor IDE `cursor` binary. */
+async function whichCursorAgent(): Promise<string | null> {
+  return (
+    (await which('cursor-agent')) ||
+    (await which('agent')) ||
+    null
+  )
 }
 
 function parseCodexModels(): { models: DiscoveredModel[]; defaultModel?: string; defaultDepth?: string } {
@@ -473,9 +524,9 @@ export async function discoverLocalClis(): Promise<{
 }> {
   const clis: DiscoveredCli[] = []
 
-  // Codex
+  // Codex (OpenAI) — prefer ~/.codex binaries over npm name collisions
   {
-    const binaryPath = await which('codex')
+    const binaryPath = await whichCodex()
     const { models, defaultModel, defaultDepth } = parseCodexModels()
     const configPaths = [home('.codex', 'auth.json'), home('.codex', 'config.toml'), home('.codex', 'models_cache.json')].filter(exists)
     const hasAuth = hasCodexAuth()
@@ -494,8 +545,11 @@ export async function discoverLocalClis(): Promise<{
       defaultModel,
       defaultDepth,
       notes: [
-        binaryPath ? `binary: ${binaryPath}` : 'PATH 中無 codex（可能仍可用本機設定目錄）',
+        binaryPath
+          ? `binary: ${binaryPath}`
+          : '未找到 OpenAI Codex（略過 npm codex-cli 部落格套件；請安裝官方 Codex CLI）',
         models.length ? `models_cache: ${models.length} 個模型` : '無 models_cache.json',
+        'headless: codex exec --json（勿用互動 TUI）',
       ],
     })
   }
@@ -582,9 +636,9 @@ export async function discoverLocalClis(): Promise<{
     })
   }
 
-  // Cursor — no model catalog; user types model or leaves empty for CLI default
+  // Cursor Agent CLI only — never IDE `cursor.exe` (would open editor, hang headless)
   {
-    const binaryPath = (await which('cursor-agent')) || (await which('cursor'))
+    const binaryPath = await whichCursorAgent()
     clis.push({
       id: 'cursor',
       kind: 'cursor',
@@ -593,9 +647,14 @@ export async function discoverLocalClis(): Promise<{
       binaryPath,
       configPaths: [],
       hasAuth: Boolean(binaryPath),
-      authNote: binaryPath ? '偵測到 Cursor binary（模型請手輸或由 CLI 預設）' : '未安裝 cursor-agent',
+      authNote: binaryPath
+        ? '偵測到 Cursor Agent CLI（模型請手輸或由 CLI 預設）'
+        : '未安裝 cursor-agent / agent（勿用 IDE 的 cursor 指令）',
       models: [],
-      notes: [binaryPath ? `binary: ${binaryPath}` : '無 binary'],
+      notes: [
+        binaryPath ? `binary: ${binaryPath}` : '無 cursor-agent binary',
+        'headless: agent -p --output-format stream-json',
+      ],
     })
   }
 

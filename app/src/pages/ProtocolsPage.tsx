@@ -6,6 +6,7 @@ import { ModelDepthMenu } from '../components/ModelDepthMenu'
 import { ApprovalModeMenu } from '../components/ApprovalModeMenu'
 import { ProjectContextBar } from '../components/ProjectContextBar'
 import { InlineRunPanel } from '../components/InlineRunPanel'
+import { RunProcessFeed } from '../components/RunProcessFeed'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import { useAgentStore } from '../store/agentStore'
@@ -38,6 +39,7 @@ import { useProjectStore } from '../store/projectStore'
 import { queueLength, subscribeRunQueue } from '../agent/runQueue'
 import { RunQueueStrip } from '../components/RunQueueStrip'
 import { AttachmentThumb } from '../components/AttachmentThumb'
+import { MarkdownBody } from '../components/MarkdownBody'
 
 const MODES: Array<{ type: LoopType; label: string }> = [
   { type: 'Goal-based', label: '目標' },
@@ -144,12 +146,19 @@ export function ProtocolsPage() {
     void loadLearning()
   }, [loadLearning])
 
+  // Auto-open right task panel while running (Codex-style split)
+  useEffect(() => {
+    if (isRunning || agent.status === 'running' || agent.status === 'parsing') {
+      setShowRunPanel(true)
+    }
+  }, [isRunning, agent.status, setShowRunPanel])
+
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: 'smooth',
     })
-  }, [thread?.bubbles.length, isRunning, agent.logs.length])
+  }, [thread?.bubbles.length, isRunning, agent.logs.length, agent.toolCalls?.length, agent.progress])
 
   useEffect(() => {
     if (thread?.loopType) setSelectedLoopType(thread.loopType)
@@ -295,6 +304,7 @@ export function ProtocolsPage() {
         sourceKind: 'composer',
         reuseThreadId: activeId,
         runner,
+        loopType: activeType,
         attachments,
         overrides: forcePreload.length
           ? { preloadCapabilityIds: forcePreload }
@@ -640,51 +650,60 @@ export function ProtocolsPage() {
                 </div>
               ) : (
                 <div className="w-full space-y-3 pb-2">
-                  {thread?.bubbles.map((b) => (
-                    <div
-                      key={b.id}
-                      className={`flex w-full ${b.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                    >
+                  {(() => {
+                    const items = thread?.bubbles || []
+                    // Codex order: …user → system → [process] → assistant
+                    const lastUser = items.map((b) => b.role).lastIndexOf('user')
+                    const head = lastUser >= 0 ? items.slice(0, lastUser + 1) : items
+                    const rest = lastUser >= 0 ? items.slice(lastUser + 1) : []
+                    const midSystems = rest.filter((b) => b.role === 'system')
+                    const midAssistants = rest.filter((b) => b.role !== 'system')
+                    const renderBubble = (b: (typeof items)[0]) => (
                       <div
-                        className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words box-border ${
-                          b.role === 'user'
-                            ? 'max-w-[85%] bg-primary/15 border border-primary/25'
-                            : b.role === 'system'
-                              ? 'w-full max-w-full bg-surface-container border border-white/8 text-on-surface-variant font-[family-name:var(--font-mono)] text-[12px]'
-                              : 'w-full max-w-full bg-surface-container-high/80 border border-white/10'
-                        }`}
+                        key={b.id}
+                        className={`flex w-full ${b.role === 'user' ? 'justify-end' : 'justify-start'}`}
                       >
-                        {b.role !== 'user' && (
-                          <div className="text-[10px] uppercase tracking-wider text-outline mb-1 font-semibold">
-                            {b.role === 'system' ? 'system' : 'assistant'}
-                          </div>
-                        )}
-                        {b.attachments && b.attachments.length > 0 && (
-                          <div className="flex flex-wrap gap-2 mb-2">
-                            {b.attachments.map((a) => (
-                              <AttachmentThumb key={a.id} attachment={a} />
-                            ))}
-                          </div>
-                        )}
-                        <div className="whitespace-pre-wrap">{b.content}</div>
-                      </div>
-                    </div>
-                  ))}
-                  {live && (
-                    <div className="flex w-full justify-start">
-                      <div className="w-full max-w-full rounded-2xl px-4 py-2.5 bg-surface-container border border-white/10 text-sm text-outline flex items-center gap-2 box-border">
-                        <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                        思考中（{depthDef.label}）…
-                        <button
-                          type="button"
-                          className="text-primary text-xs underline"
-                          onClick={() => setShowRunPanel(true)}
+                        <div
+                          className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words box-border ${
+                            b.role === 'user'
+                              ? 'max-w-[85%] bg-primary/15 border border-primary/25'
+                              : b.role === 'system'
+                                ? 'w-full max-w-full bg-surface-container border border-white/8 text-on-surface-variant font-[family-name:var(--font-mono)] text-[12px]'
+                                : 'w-full max-w-full bg-surface-container-high/80 border border-white/10'
+                          }`}
                         >
-                          看進度
-                        </button>
+                          {b.role !== 'user' && (
+                            <div className="text-[10px] uppercase tracking-wider text-outline mb-1 font-semibold">
+                              {b.role === 'system' ? 'system' : 'assistant'}
+                            </div>
+                          )}
+                          {b.attachments && b.attachments.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mb-2">
+                              {b.attachments.map((a) => (
+                                <AttachmentThumb key={a.id} attachment={a} />
+                              ))}
+                            </div>
+                          )}
+                          {b.role === 'assistant' ? (
+                            <MarkdownBody content={b.content} />
+                          ) : (
+                            <div className="whitespace-pre-wrap">{b.content}</div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )
+                    return (
+                      <>
+                        {head.map(renderBubble)}
+                        {midSystems.map(renderBubble)}
+                        <RunProcessFeed
+                          depthLabel={depthDef.label}
+                          onOpenPanel={() => setShowRunPanel(true)}
+                        />
+                        {midAssistants.map(renderBubble)}
+                      </>
+                    )
+                  })()}
                 </div>
               )}
             </div>

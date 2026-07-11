@@ -108,31 +108,32 @@ const api = {
       }>,
     httpRequest: (input: { url: string; method?: string; headers?: Record<string, string>; body?: string; maxChars?: number }) =>
       ipcRenderer.invoke('tools:httpRequest', input) as Promise<{ ok: boolean; text: string; status?: number }>,
-    workspaceList: (path?: string) =>
-      ipcRenderer.invoke('tools:workspaceList', path) as Promise<{
+    workspaceList: (path?: string, projectRoot?: string) =>
+      ipcRenderer.invoke('tools:workspaceList', path, projectRoot) as Promise<{
         path: string
         entries: Array<{ name: string; dir: boolean }>
+        projectRoot?: string | null
       }>,
-    workspaceRead: (path: string) =>
-      ipcRenderer.invoke('tools:workspaceRead', path) as Promise<{
+    workspaceRead: (path: string, projectRoot?: string) =>
+      ipcRenderer.invoke('tools:workspaceRead', path, projectRoot) as Promise<{
         ok: boolean
         content: string
       }>,
-    workspaceWrite: (path: string, content: string) =>
-      ipcRenderer.invoke('tools:workspaceWrite', path, content) as Promise<{
+    workspaceWrite: (path: string, content: string, projectRoot?: string) =>
+      ipcRenderer.invoke('tools:workspaceWrite', path, content, projectRoot) as Promise<{
         ok: boolean
         path: string
         bytes: number
         error?: string
       }>,
-    workspaceDownload: (url: string, path: string) =>
-      ipcRenderer.invoke('tools:workspaceDownload', url, path) as Promise<{ ok: boolean; path: string; bytes: number; error?: string }>,
-    workspaceMkdir: (path: string) =>
-      ipcRenderer.invoke('tools:workspaceMkdir', path) as Promise<{ ok: boolean; path: string; error?: string }>,
-    workspaceMove: (from: string, to: string) =>
-      ipcRenderer.invoke('tools:workspaceMove', from, to) as Promise<{ ok: boolean; from: string; to: string; error?: string }>,
-    workspaceDelete: (path: string, recursive?: boolean) =>
-      ipcRenderer.invoke('tools:workspaceDelete', path, recursive) as Promise<{ ok: boolean; path: string; error?: string }>,
+    workspaceDownload: (url: string, path: string, projectRoot?: string) =>
+      ipcRenderer.invoke('tools:workspaceDownload', url, path, projectRoot) as Promise<{ ok: boolean; path: string; bytes: number; error?: string }>,
+    workspaceMkdir: (path: string, projectRoot?: string) =>
+      ipcRenderer.invoke('tools:workspaceMkdir', path, projectRoot) as Promise<{ ok: boolean; path: string; error?: string }>,
+    workspaceMove: (from: string, to: string, projectRoot?: string) =>
+      ipcRenderer.invoke('tools:workspaceMove', from, to, projectRoot) as Promise<{ ok: boolean; from: string; to: string; error?: string }>,
+    workspaceDelete: (path: string, recursive?: boolean, projectRoot?: string) =>
+      ipcRenderer.invoke('tools:workspaceDelete', path, recursive, projectRoot) as Promise<{ ok: boolean; path: string; error?: string }>,
     workspaceRoot: () => ipcRenderer.invoke('tools:workspaceRoot') as Promise<string>,
     memorySet: (key: string, value: string) =>
       ipcRenderer.invoke('tools:memorySet', key, value) as Promise<{ ok: boolean }>,
@@ -337,12 +338,13 @@ const api = {
       }>,
     branches: (root: string) =>
       ipcRenderer.invoke('project:branches', root) as Promise<string[]>,
-    /** W2: persistent project guidance (AGENTS.md / CLAUDE.md hierarchy, read-only) */
-    agentsDocs: (root: string) =>
-      ipcRenderer.invoke('project:agentsDocs', root) as Promise<{
+    /** W2: persistent project guidance (AGENTS.md / CLAUDE.md hierarchy, read-only).
+     *  workPath: optional file/dir under root for subdirectory AGENTS layers. */
+    agentsDocs: (root: string, workPath?: string) =>
+      ipcRenderer.invoke('project:agentsDocs', root, workPath) as Promise<{
         docs: Array<{
           path: string
-          scope: 'project' | 'project-parent'
+          scope: 'project' | 'project-parent' | 'project-subdir'
           bytes: number
           truncated: boolean
           mtimeMs: number
@@ -415,6 +417,7 @@ const api = {
       approvalMode?: 'always' | 'auto' | 'full'
       unattended?: boolean
       timeoutMs?: number
+      runId?: string
       /** Chat attachments (images as data URL) — written to disk for the CLI */
       attachments?: Array<{
         name: string
@@ -435,6 +438,30 @@ const api = {
         error?: string
         runId?: string
       }>,
+    /** Live CLI process events (thought / text / tool / log) for center feed */
+    onStream: (
+      cb: (ev: {
+        runId?: string
+        kind: string
+        title?: string
+        detail?: string
+        tool?: string
+        ok?: boolean
+        delta?: string
+        channel?: 'thought' | 'text' | 'stdout' | 'stderr'
+        path?: string
+        paths?: string[]
+        added?: number
+        removed?: number
+        action?: 'edit' | 'create' | 'delete' | 'write' | 'read'
+      }) => void,
+    ) => {
+      const handler = (_: unknown, ev: unknown) => cb(ev as Parameters<typeof cb>[0])
+      ipcRenderer.on('cli:stream', handler)
+      return () => {
+        ipcRenderer.removeListener('cli:stream', handler)
+      }
+    },
     /** Stop in-flight CLI agent (and tagged cli-agent bash) */
     cancel: () =>
       ipcRenderer.invoke('cli:cancel') as Promise<{ ok: boolean; killed: number }>,

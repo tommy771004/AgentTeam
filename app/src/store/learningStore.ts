@@ -880,12 +880,25 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     approveToolPackage: async (pluginId) => {
       const plugin = pluginRegistry.list().find((p) => p.id === pluginId)
       if (!plugin?.toolPackage) return { ok: false, message: `外掛 ${pluginId} 沒有 tool package` }
-      const { validateToolPackage, packageFingerprint } = await import(
+      const { validateToolPackage, packageFingerprint, runToolPackageHealth } = await import(
         '../agent/tools/toolPackage'
       )
       const v = validateToolPackage(plugin.toolPackage)
       if (!v.ok || !v.manifest) {
         return { ok: false, message: `manifest 驗證失敗：${v.errors.join('；')}` }
+      }
+      // Production health caller — surface failures but still allow approve
+      let healthNote = ''
+      try {
+        const health = await runToolPackageHealth(v.manifest)
+        if (health.length) {
+          const bad = health.filter((h) => !h.ok)
+          healthNote = bad.length
+            ? ` · 健康檢查 ${bad.length}/${health.length} 失敗：${bad.map((h) => h.tool).join(', ')}`
+            : ` · 健康檢查 ${health.length} 項通過`
+        }
+      } catch (e) {
+        healthNote = ` · 健康檢查略過：${e instanceof Error ? e.message : String(e)}`
       }
       const next = {
         ...plugin,
@@ -902,7 +915,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
       get().refresh()
       return {
         ok: true,
-        message: `已核准 ${v.manifest.id}@${v.manifest.version} 的權限面（write/destructive 工具已解鎖，執行仍逐次審批）`,
+        message: `已核准 ${v.manifest.id}@${v.manifest.version} 的權限面（write/destructive 工具已解鎖，執行仍逐次審批）${healthNote}`,
       }
     },
 

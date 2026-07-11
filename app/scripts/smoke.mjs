@@ -214,6 +214,12 @@ await test('electron bridge is ESM/CJS-safe and Windows core paths avoid POSIX s
   assert.match(platformProcess, /process\.platform === 'win32'/)
   assert.match(localCliRunner, /executableLookupCommand/)
   assert.match(codegraphBridge, /executableLookupCommand/)
+  // CLI 0.9/1.x: status/init/sync use positional path — never `status -p` (rejects on 0.9)
+  assert.match(codegraphBridge, /status \$\{quoteShellArg/)
+  assert.doesNotMatch(codegraphBridge, /status -p |init -p |sync -p |explore -p /)
+  // explore falls back to query on older CLIs
+  assert.match(codegraphBridge, /supportsExplore|unknown command/)
+  assert.match(codegraphBridge, /runWithOptionalPathFlag|fallback/)
   const mcpWrite = mcpBridge.slice(mcpBridge.indexOf('private write('), mcpBridge.indexOf('private notify('))
   assert.match(mcpWrite, /stdin\.write\(`\$\{json\}\\n`\)/)
   assert.doesNotMatch(mcpWrite, /Content-Length/)

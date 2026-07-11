@@ -1,7 +1,11 @@
 /**
  * CodeGraph CLI bridge — https://github.com/colbymchenry/codegraph
  *
- * Uses local `codegraph` binary (v1.x flags: -p/--path, -j/--json).
+ * Compatible with CLI 0.9.x and 1.x:
+ * - init / status / sync take a **positional** path (not `-p`)
+ * - query / callers / callees / impact accept `-p/--path` (0.9+) and also honor `cwd`
+ * - `explore` / `node` exist only on 1.x — fall back to `query` on older CLIs
+ *
  * Project index: <root>/.codegraph/
  */
 
@@ -36,6 +40,10 @@ export type CodegraphCmdResult = {
   command: string
 }
 
+/** Cached capability probe: whether this binary has the `explore` subcommand (1.x+). */
+let exploreSupported: boolean | null = null
+let exploreProbeBin: string | null = null
+
 async function whichCodegraph(): Promise<string | null> {
   const r = await runBash({
     command: executableLookupCommand('codegraph'),
@@ -68,6 +76,53 @@ function tryParseJson(text: string): unknown | undefined {
   }
 }
 
+function combinedOutput(stdout: string, stderr: string): string {
+  return [stdout, stderr].filter(Boolean).join('\n')
+}
+
+function isUnknownCommand(text: string, cmd: string): boolean {
+  const t = text.toLowerCase()
+  return (
+    t.includes(`unknown command '${cmd}'`) ||
+    t.includes(`unknown command "${cmd}"`) ||
+    t.includes(`error: unknown command '${cmd}'`) ||
+    (t.includes('unknown command') && t.includes(cmd))
+  )
+}
+
+function isUnknownOption(text: string, opt = '-p'): boolean {
+  const t = text.toLowerCase()
+  return t.includes(`unknown option '${opt}'`) || t.includes(`unknown option "${opt}"`)
+}
+
+/**
+ * Probe once whether `codegraph explore` exists (1.x).
+ * Older 0.9.x only has query/callers/impact/… and rejects -p on status/init/sync.
+ */
+async function supportsExplore(bin: string): Promise<boolean> {
+  if (exploreSupported != null && exploreProbeBin === bin) return exploreSupported
+  const r = await runBash({
+    command: `${quoteShellArg(bin)} help`,
+    timeoutMs: 8000,
+    tag: 'codegraph',
+  })
+  const help = combinedOutput(r.stdout, r.stderr)
+  // help lists subcommands; also try `explore --help` if help is sparse
+  let ok = /\bexplore\b/i.test(help)
+  if (!ok) {
+    const e = await runBash({
+      command: `${quoteShellArg(bin)} explore --help`,
+      timeoutMs: 8000,
+      tag: 'codegraph',
+    })
+    const out = combinedOutput(e.stdout, e.stderr)
+    ok = e.ok || (!isUnknownCommand(out, 'explore') && /Usage:|Options:/i.test(out))
+  }
+  exploreSupported = ok
+  exploreProbeBin = bin
+  return ok
+}
+
 export async function codegraphDetect(): Promise<{
   installed: boolean
   binaryPath: string | null
@@ -97,7 +152,7 @@ export async function codegraphDetect(): Promise<{
 export async function codegraphStatus(projectRoot: string): Promise<CodegraphStatus> {
   const root = (projectRoot || '').trim()
   const indexPath = root ? path.join(root, '.codegraph') : null
-  const indexed = Boolean(indexPath && fs.existsSync(indexPath))
+  const indexedOnDisk = Boolean(indexPath && fs.existsSync(indexPath))
 
   const det = await codegraphDetect()
   if (!det.installed || !det.binaryPath) {
@@ -105,8 +160,8 @@ export async function codegraphStatus(projectRoot: string): Promise<CodegraphSta
       installed: false,
       binaryPath: null,
       projectRoot: root,
-      indexed,
-      indexPath: indexed ? indexPath : null,
+      indexed: indexedOnDisk,
+      indexPath: indexedOnDisk ? indexPath : null,
       version: null,
       raw: '',
       error:
@@ -127,20 +182,22 @@ export async function codegraphStatus(projectRoot: string): Promise<CodegraphSta
     }
   }
 
+  // 0.9.x / 1.x: `status [path]` — never `-p` (status rejects it on 0.9).
   const r = await runBash({
-    command: `${quoteShellArg(det.binaryPath)} status -p ${quoteShellArg(root)}`,
+    command: `${quoteShellArg(det.binaryPath)} status ${quoteShellArg(root)}`,
     cwd: root,
     timeoutMs: 30_000,
     tag: 'codegraph',
   })
-  const raw = [r.stdout, r.stderr].filter(Boolean).join('\n').slice(0, 12_000)
+  const raw = combinedOutput(r.stdout, r.stderr).slice(0, 12_000)
   const notInit = /not initialized|Not initialized/i.test(raw)
+  const indexed = !notInit && (indexedOnDisk || r.ok)
 
   return {
     installed: true,
     binaryPath: det.binaryPath,
     projectRoot: root,
-    indexed: !notInit && (indexed || r.ok),
+    indexed,
     indexPath: fs.existsSync(path.join(root, '.codegraph'))
       ? path.join(root, '.codegraph')
       : null,
@@ -166,13 +223,14 @@ export async function codegraphInit(projectRoot: string): Promise<{
   const det = await codegraphDetect()
   if (!det.binaryPath) return { ok: false, output: '', error: 'codegraph 未安裝' }
 
+  // 0.9.x / 1.x: `init [path]` — never `-p`.
   const r = await runBash({
-    command: `${quoteShellArg(det.binaryPath)} init -p ${quoteShellArg(root)}`,
+    command: `${quoteShellArg(det.binaryPath)} init ${quoteShellArg(root)}`,
     cwd: root,
     timeoutMs: 600_000,
     tag: 'codegraph',
   })
-  const output = [r.stdout, r.stderr].filter(Boolean).join('\n').slice(0, 20_000)
+  const output = combinedOutput(r.stdout, r.stderr).slice(0, 20_000)
   return {
     ok: r.ok || fs.existsSync(path.join(root, '.codegraph')),
     output,
@@ -192,13 +250,14 @@ export async function codegraphSync(projectRoot: string): Promise<{
   const det = await codegraphDetect()
   if (!det.binaryPath) return { ok: false, output: '', error: 'codegraph 未安裝' }
 
+  // 0.9.x / 1.x: `sync [path]` — never `-p`.
   const r = await runBash({
-    command: `${quoteShellArg(det.binaryPath)} sync -p ${quoteShellArg(root)}`,
+    command: `${quoteShellArg(det.binaryPath)} sync ${quoteShellArg(root)}`,
     cwd: root,
     timeoutMs: 300_000,
     tag: 'codegraph',
   })
-  const output = [r.stdout, r.stderr].filter(Boolean).join('\n').slice(0, 20_000)
+  const output = combinedOutput(r.stdout, r.stderr).slice(0, 20_000)
   return {
     ok: r.ok,
     output,
@@ -243,7 +302,7 @@ async function runCmd(
     timeoutMs,
     tag: 'codegraph',
   })
-  const output = [r.stdout, r.stderr].filter(Boolean).join('\n\n').trim()
+  const output = combinedOutput(r.stdout, r.stderr).trim()
   const json = tryParseJson(r.stdout || '')
   return {
     ok: r.ok && Boolean(output || json),
@@ -254,6 +313,32 @@ async function runCmd(
     error: r.ok ? undefined : r.stderr || `exit ${r.code}`,
     command,
   }
+}
+
+/**
+ * Build query-like args. Prefer `-p` (0.9+ query/callers/impact), but if the binary
+ * rejects it, retry with cwd-only (1.x often resolves via cwd).
+ */
+async function runWithOptionalPathFlag(
+  bin: string,
+  root: string,
+  subcmd: string,
+  rest: string,
+  query: string,
+  timeoutMs = 120_000,
+): Promise<CodegraphCmdResult> {
+  const withPath = await runCmd(
+    bin,
+    root,
+    `${subcmd} -p ${quoteShellArg(root)} ${rest}`.trim(),
+    query,
+    timeoutMs,
+  )
+  if (withPath.ok || !isUnknownOption(withPath.error || withPath.output || '', '-p')) {
+    return withPath
+  }
+  // Fallback: no -p, rely on cwd (and some CLIs take path as trailing positional)
+  return runCmd(bin, root, `${subcmd} ${rest}`.trim(), query, timeoutMs)
 }
 
 export async function codegraphExplore(
@@ -283,14 +368,42 @@ export async function codegraphExplore(
       command: '',
     }
   }
-  const max =
-    opts?.maxFiles && opts.maxFiles > 0
-      ? ` --max-files ${Math.min(40, opts.maxFiles)}`
-      : ''
-  return runCmd(
+
+  const hasExplore = await supportsExplore(pre.bin)
+  if (hasExplore) {
+    // 1.x: `explore <query>` — project via cwd; optional flags when present.
+    // Do NOT pass `-p` (rejected on some builds / confuses global parser).
+    const max =
+      opts?.maxFiles && opts.maxFiles > 0
+        ? ` --max-files ${Math.min(40, opts.maxFiles)}`
+        : ''
+    const primary = await runCmd(
+      pre.bin,
+      pre.root,
+      `explore${max} ${quoteShellArg(q)}`,
+      q,
+    )
+    if (primary.ok || !isUnknownCommand(primary.error || primary.output || '', 'explore')) {
+      // If max-files unknown, retry without it
+      if (
+        !primary.ok &&
+        /unknown option|unrecognized/i.test(primary.error || primary.output || '') &&
+        max
+      ) {
+        return runCmd(pre.bin, pre.root, `explore ${quoteShellArg(q)}`, q)
+      }
+      return primary
+    }
+    // Probe was stale — fall through to query
+    exploreSupported = false
+  }
+
+  // 0.9.x fallback: symbol search via `query`
+  return runWithOptionalPathFlag(
     pre.bin,
     pre.root,
-    `explore -p ${quoteShellArg(pre.root)}${max} ${quoteShellArg(q)}`,
+    'query',
+    `-j -l 20 ${quoteShellArg(q)}`,
     q,
   )
 }
@@ -312,13 +425,14 @@ export async function codegraphQuery(
       command: '',
     }
   }
-  const kind = opts?.kind ? ` -k ${quoteShellArg(opts.kind)}` : ''
-  const limit = ` -l ${opts?.limit && opts.limit > 0 ? Math.min(50, opts.limit) : 15}`
+  const kind = opts?.kind ? `-k ${quoteShellArg(opts.kind)} ` : ''
+  const limit = `-l ${opts?.limit && opts.limit > 0 ? Math.min(50, opts.limit) : 15}`
   const json = opts?.json === false ? '' : ' -j'
-  return runCmd(
+  return runWithOptionalPathFlag(
     pre.bin,
     pre.root,
-    `query -p ${quoteShellArg(pre.root)}${kind}${limit}${json} ${quoteShellArg(q)}`,
+    'query',
+    `${kind}${limit}${json} ${quoteShellArg(q)}`.trim(),
     q,
   )
 }
@@ -340,12 +454,13 @@ export async function codegraphCallers(
       command: '',
     }
   }
-  const limit = ` -l ${opts?.limit && opts.limit > 0 ? Math.min(50, opts.limit) : 20}`
+  const limit = `-l ${opts?.limit && opts.limit > 0 ? Math.min(50, opts.limit) : 20}`
   const json = opts?.json === false ? '' : ' -j'
-  return runCmd(
+  return runWithOptionalPathFlag(
     pre.bin,
     pre.root,
-    `callers -p ${quoteShellArg(pre.root)}${limit}${json} ${quoteShellArg(q)}`,
+    'callers',
+    `${limit}${json} ${quoteShellArg(q)}`.trim(),
     q,
   )
 }
@@ -367,12 +482,13 @@ export async function codegraphCallees(
       command: '',
     }
   }
-  const limit = ` -l ${opts?.limit && opts.limit > 0 ? Math.min(50, opts.limit) : 20}`
+  const limit = `-l ${opts?.limit && opts.limit > 0 ? Math.min(50, opts.limit) : 20}`
   const json = opts?.json === false ? '' : ' -j'
-  return runCmd(
+  return runWithOptionalPathFlag(
     pre.bin,
     pre.root,
-    `callees -p ${quoteShellArg(pre.root)}${limit}${json} ${quoteShellArg(q)}`,
+    'callees',
+    `${limit}${json} ${quoteShellArg(q)}`.trim(),
     q,
   )
 }
@@ -394,12 +510,13 @@ export async function codegraphImpact(
       command: '',
     }
   }
-  const depth = ` -d ${opts?.depth && opts.depth > 0 ? Math.min(8, opts.depth) : 2}`
+  const depth = `-d ${opts?.depth && opts.depth > 0 ? Math.min(8, opts.depth) : 2}`
   const json = opts?.json === false ? '' : ' -j'
-  return runCmd(
+  return runWithOptionalPathFlag(
     pre.bin,
     pre.root,
-    `impact -p ${quoteShellArg(pre.root)}${depth}${json} ${quoteShellArg(q)}`,
+    'impact',
+    `${depth}${json} ${quoteShellArg(q)}`.trim(),
     q,
   )
 }
@@ -421,11 +538,32 @@ export async function codegraphNode(
       command: '',
     }
   }
-  const file = opts?.file ? ` -f ${quoteShellArg(opts.file)}` : ''
-  return runCmd(
+
+  // 1.x: `node <symbol|file>`; 0.9.x: fall back to query
+  const file = opts?.file ? `-f ${quoteShellArg(opts.file)} ` : ''
+  const primary = await runCmd(
     pre.bin,
     pre.root,
-    `node -p ${quoteShellArg(pre.root)}${file} ${quoteShellArg(q)}`,
+    `node ${file}${quoteShellArg(q)}`.trim(),
+    q,
+  )
+  if (primary.ok || !isUnknownCommand(primary.error || primary.output || '', 'node')) {
+    // If -f unknown, retry without file filter
+    if (
+      !primary.ok &&
+      file &&
+      isUnknownOption(primary.error || primary.output || '', '-f')
+    ) {
+      return runCmd(pre.bin, pre.root, `node ${quoteShellArg(q)}`, q)
+    }
+    return primary
+  }
+
+  return runWithOptionalPathFlag(
+    pre.bin,
+    pre.root,
+    'query',
+    `-j -l 15 ${quoteShellArg(q)}`,
     q,
   )
 }

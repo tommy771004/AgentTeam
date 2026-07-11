@@ -127,6 +127,11 @@ export function enqueueBackgroundDelegate(
     budget?: DelegationBudget
     onLog?: (msg: string) => void
     shouldAbort?: () => boolean
+    /**
+     * Prefer unified runTask controller when free (queue when busy).
+     * Nested FC still uses runDelegatedTask; background goes through runTask.
+     */
+    preferRunTask?: boolean
   },
 ): BackgroundJob {
   const notifyOnComplete = input.notifyOnComplete !== false
@@ -145,23 +150,83 @@ export function enqueueBackgroundDelegate(
   void (async () => {
     job.status = 'running'
     emit(job)
-    opts?.onLog?.(`[bg ${job.id}] 背景委派啟動：${input.goal.slice(0, 80)}`)
+    opts?.onLog?.(
+      `[bg ${job.id}] 背景委派啟動：${input.goal.slice(0, 80)}` +
+        (input.inheritCapabilities?.length
+          ? ` · inherit=[${input.inheritCapabilities.join(',')}]`
+          : '') +
+        (input.projectRoot ? ` · project=${input.projectRoot}` : ''),
+    )
 
     try {
-      const result: DelegateTaskResult = await runDelegatedTask(
-        settings,
-        {
+      let result: DelegateTaskResult
+      const preferRunTask = opts?.preferRunTask !== false
+      const childRunId = `bg_${provisionalId}`
+      const inherited = {
+        goal: input.goal,
+        context: input.context,
+        role: (input.role || 'leaf') as 'leaf' | 'orchestrator',
+        maxRounds: input.maxRounds,
+        inheritCapabilities: input.inheritCapabilities,
+        parentRunId: input.parentRunId,
+        sourceKind: input.sourceKind || 'delegate',
+        projectRoot: input.projectRoot,
+      }
+
+      if (preferRunTask) {
+        // Unified runTask: queue when busy, same hooks/project pin/settle semantics
+        const { runTask } = await import('../runExternal')
+        type ExternalRunResult = Awaited<ReturnType<typeof runTask>>
+        const settled = await new Promise<ExternalRunResult>((resolve) => {
+          void runTask({
+            sourceKind: 'delegate',
+            runId: childRunId,
+            objective: input.goal,
+            title: `委派 · ${input.goal.slice(0, 32)}`,
+            sourceLabel: `背景委派${input.parentRunId ? ` · parent=${input.parentRunId}` : ''}`,
+            projectRoot: input.projectRoot,
+            unattended: true,
+            enqueueWhenBusy: true,
+            overrides: {
+              runId: childRunId,
+              sourceKind: 'delegate',
+              projectRoot: input.projectRoot,
+              preloadCapabilityIds: input.inheritCapabilities,
+              maxToolRounds: input.maxRounds || 3,
+              extraSystemContext: input.context
+                ? `## 父層唯讀上下文\n${input.context.slice(0, 3000)}`
+                : undefined,
+              unattended: true,
+              hitlTimeoutMs: 45_000,
+            },
+            onSettled: (r) => resolve(r),
+          }).then((r) => {
+            if (!r.queued) resolve(r)
+            else {
+              job.status = 'queued'
+              emit(job)
+              // drain will call onSettled
+            }
+          })
+        })
+        result = {
+          id: settled.runId || childRunId,
+          role: inherited.role,
           goal: input.goal,
-          context: input.context,
-          role: input.role || 'leaf',
-          maxRounds: input.maxRounds,
-        },
-        {
+          ok: settled.status === 'success',
+          summary: settled.result || settled.error || `status=${settled.status}`,
+          tokensUsed: 0,
+          toolCalls: [],
+          durationMs: Date.now() - new Date(job.startedAt).getTime(),
+          depth: 1,
+        }
+      } else {
+        result = await runDelegatedTask(settings, inherited, {
           budget: opts?.budget || globalDelegationBudget,
           onLog: opts?.onLog,
           shouldAbort: opts?.shouldAbort,
-        },
-      )
+        })
+      }
 
       // Align job id with delegate id for correlation
       if (result.id && result.id !== job.id) {

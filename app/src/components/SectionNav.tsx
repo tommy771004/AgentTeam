@@ -137,8 +137,10 @@ export function ThemePage({
         {subtitle && <p className="text-on-surface-variant text-sm mt-1">{subtitle}</p>}
       </div>
       <div
-        className={`flex-1 min-h-0 flex flex-col lg:flex-row gap-0 lg:gap-2 pb-4 ${
-          immersive ? 'px-0 md:px-0' : 'px-3 md:px-5'
+        className={`flex-1 min-h-0 flex flex-col gap-0 pb-4 ${
+          immersive
+            ? 'px-0 md:px-0'
+            : 'lg:flex-row lg:gap-2 px-3 md:px-5'
         }`}
       >
         {!immersive && (
@@ -154,7 +156,7 @@ export function ThemePage({
           </div>
         )}
         {immersive && (
-          <div className="shrink-0 flex items-center gap-2 px-4 md:px-8 pt-3 pb-1 overflow-x-auto custom-scrollbar border-b border-white/[0.06]">
+          <div className="w-full shrink-0 flex items-center gap-2 px-4 md:px-8 pt-3 pb-2 overflow-x-auto custom-scrollbar border-b border-white/[0.06]">
             {sections.map((s) => (
               <button
                 key={s.id}

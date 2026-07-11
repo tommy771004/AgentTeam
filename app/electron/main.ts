@@ -926,65 +926,146 @@ ipcMain.handle('project:getActiveRoot', async () => ({
 
 /**
  * W2 / P0-B: read persistent project guidance (AGENTS.md hierarchy).
- * Read-only, name-allowlisted, size-capped — walks UP from root (nearest last)
- * so callers can layer parent → project precedence.
+ * Read-only, name-allowlisted, size-capped.
+ *
+ * When workPath is under project root, walks from the work file/dir UP to
+ * project root (subdirectory AGENTS), then continues parent-of-root levels.
+ * Layer order: farthest parent first → nearest work dir last.
  */
-ipcMain.handle('project:agentsDocs', async (_evt, root: string) => {
-  const AGENTS_FILES = ['AGENTS.md', 'CLAUDE.md']
-  const MAX_BYTES = 24_000
-  const MAX_LEVELS = 3
-  const docs: Array<{
-    path: string
-    scope: 'project' | 'project-parent'
-    bytes: number
-    truncated: boolean
-    mtimeMs: number
-    content: string
-  }> = []
-  try {
-    const start = path.resolve(String(root || '').trim())
-    if (!start || !fs.existsSync(start) || !fs.statSync(start).isDirectory()) {
-      return { docs }
-    }
-    let dir = start
-    const chain: string[] = []
-    for (let i = 0; i < MAX_LEVELS; i++) {
-      chain.push(dir)
-      const parent = path.dirname(dir)
-      if (parent === dir) break
-      // Stop walking up at repo boundary (parent of a .git dir stays out)
-      if (fs.existsSync(path.join(dir, '.git'))) break
-      dir = parent
-    }
-    // parent-most first → project root last (nearest wins on conflict)
-    for (const d of chain.reverse()) {
+ipcMain.handle(
+  'project:agentsDocs',
+  async (_evt, root: string, workPath?: string) => {
+    const AGENTS_FILES = ['AGENTS.md', 'CLAUDE.md']
+    const MAX_BYTES = 24_000
+    const MAX_LEVELS_UP = 3
+    const MAX_SUB_LEVELS = 8
+    const docs: Array<{
+      path: string
+      scope: 'project' | 'project-parent' | 'project-subdir'
+      bytes: number
+      truncated: boolean
+      mtimeMs: number
+      content: string
+    }> = []
+    const seen = new Set<string>()
+
+    const pushDoc = (
+      d: string,
+      scope: 'project' | 'project-parent' | 'project-subdir',
+    ) => {
       for (const name of AGENTS_FILES) {
         const p = path.join(d, name)
         try {
-          if (!fs.existsSync(p)) continue
+          if (seen.has(p) || !fs.existsSync(p)) continue
           const st = fs.statSync(p)
           if (!st.isFile()) continue
           const raw = fs.readFileSync(p, 'utf-8')
           const truncated = Buffer.byteLength(raw, 'utf8') > MAX_BYTES
           docs.push({
             path: p,
-            scope: d === start ? 'project' : 'project-parent',
+            scope,
             bytes: Buffer.byteLength(raw, 'utf8'),
             truncated,
             mtimeMs: st.mtimeMs,
             content: truncated ? raw.slice(0, MAX_BYTES) : raw,
           })
-          break // one guidance file per directory (AGENTS.md preferred)
+          seen.add(p)
+          return // one guidance file per directory
         } catch {
-          /* skip unreadable */
+          /* skip */
         }
       }
     }
-  } catch {
-    /* return what we have */
-  }
-  return { docs }
-})
+
+    try {
+      const projectRoot = path.resolve(String(root || '').trim())
+      if (
+        !projectRoot ||
+        !fs.existsSync(projectRoot) ||
+        !fs.statSync(projectRoot).isDirectory()
+      ) {
+        return { docs }
+      }
+
+      // 1) Subdirectory chain: workPath → … → projectRoot (nearest last)
+      const subChain: string[] = []
+      const work = workPath ? path.resolve(String(workPath).trim()) : ''
+      if (work && isPathInside(projectRoot, work)) {
+        let d = fs.existsSync(work) && fs.statSync(work).isDirectory() ? work : path.dirname(work)
+        for (let i = 0; i < MAX_SUB_LEVELS; i++) {
+          if (!isPathInside(projectRoot, d) && d !== projectRoot) break
+          subChain.push(d)
+          if (d === projectRoot) break
+          const parent = path.dirname(d)
+          if (parent === d) break
+          d = parent
+        }
+      } else {
+        subChain.push(projectRoot)
+      }
+      // parent-most of subchain first
+      for (const d of subChain.reverse()) {
+        pushDoc(d, d === projectRoot ? 'project' : 'project-subdir')
+      }
+
+      // 2) Parents of project root (repo → workspace)
+      let dir = projectRoot
+      for (let i = 0; i < MAX_LEVELS_UP; i++) {
+        if (fs.existsSync(path.join(dir, '.git')) && dir === projectRoot) {
+          // stay: already included project root
+        }
+        const parent = path.dirname(dir)
+        if (parent === dir) break
+        if (fs.existsSync(path.join(dir, '.git')) && dir !== projectRoot) break
+        dir = parent
+        // insert parents at front (farthest first already via push order after reverse)
+        // We push after project docs; re-order: parent docs should precede project
+      }
+      // Re-walk parents cleanly and prepend
+      const parentChain: string[] = []
+      dir = projectRoot
+      for (let i = 0; i < MAX_LEVELS_UP; i++) {
+        const parent = path.dirname(dir)
+        if (parent === dir) break
+        if (fs.existsSync(path.join(dir, '.git'))) break
+        parentChain.push(parent)
+        dir = parent
+      }
+      // parent-most first
+      const parentDocs: typeof docs = []
+      for (const d of parentChain.reverse()) {
+        const before = docs.length + parentDocs.length
+        for (const name of AGENTS_FILES) {
+          const p = path.join(d, name)
+          try {
+            if (seen.has(p) || !fs.existsSync(p)) continue
+            const st = fs.statSync(p)
+            if (!st.isFile()) continue
+            const raw = fs.readFileSync(p, 'utf-8')
+            const truncated = Buffer.byteLength(raw, 'utf8') > MAX_BYTES
+            parentDocs.push({
+              path: p,
+              scope: 'project-parent',
+              bytes: Buffer.byteLength(raw, 'utf8'),
+              truncated,
+              mtimeMs: st.mtimeMs,
+              content: truncated ? raw.slice(0, MAX_BYTES) : raw,
+            })
+            seen.add(p)
+            break
+          } catch {
+            /* skip */
+          }
+        }
+        void before
+      }
+      return { docs: [...parentDocs, ...docs] }
+    } catch {
+      /* return what we have */
+    }
+    return { docs }
+  },
+)
 
 ipcMain.handle('cli:which', async (_evt, binary: string) => {
   const bin = (binary || '').trim()
@@ -1020,7 +1101,7 @@ ipcMain.handle(
 ipcMain.handle(
   'cli:runAgent',
   async (
-    _evt,
+    evt,
     input: {
       kind: LocalCliKind
       binary?: string
@@ -1032,6 +1113,7 @@ ipcMain.handle(
       approvalMode?: 'always' | 'auto' | 'full'
       unattended?: boolean
       timeoutMs?: number
+      runId?: string
       attachments?: Array<{
         name: string
         mimeType?: string
@@ -1057,7 +1139,20 @@ ipcMain.handle(
           ? a.textContent.slice(0, 200_000)
           : undefined,
     }))
-    return runLocalCliAgent({ ...input, cwd, attachments })
+    return runLocalCliAgent({
+      ...input,
+      cwd,
+      attachments,
+      onStream: (ev) => {
+        try {
+          if (!evt.sender.isDestroyed()) {
+            evt.sender.send('cli:stream', ev)
+          }
+        } catch {
+          /* ignore */
+        }
+      },
+    })
   },
 )
 
@@ -1298,8 +1393,18 @@ function setActiveProjectRoot(root: string | null) {
   return { ok: true as const, root: resolved, mode: 'project' as const }
 }
 
-function resolveWorkspacePath(rel: string) {
-  const root = workspaceRoot()
+/**
+ * Resolve path under workspace. Optional rootOverride pins a per-run project
+ * (scheduler A while UI shows B) without mutating global activeProjectRoot.
+ */
+function resolveWorkspacePath(rel: string, rootOverride?: string | null) {
+  let root = workspaceRoot()
+  if (rootOverride && String(rootOverride).trim()) {
+    const resolved = path.resolve(String(rootOverride).trim())
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+      root = resolved
+    }
+  }
   const cleaned = (rel || '.').replace(/^[/\\]+/, '')
   const full = path.resolve(root, cleaned)
   // Ensure path stays inside root (handle trailing sep)
@@ -1309,8 +1414,27 @@ function resolveWorkspacePath(rel: string) {
   return full
 }
 
-ipcMain.handle('tools:workspaceList', async (_evt, relPath = '.') => {
-  const dir = resolveWorkspacePath(relPath)
+function parseWorkspaceArgs(
+  a: unknown,
+  b?: unknown,
+): { relPath: string; projectRoot?: string } {
+  // New form: ({ path, projectRoot }) or (path, projectRoot)
+  if (a && typeof a === 'object' && !Array.isArray(a)) {
+    const o = a as { path?: string; relPath?: string; projectRoot?: string }
+    return {
+      relPath: String(o.path ?? o.relPath ?? '.'),
+      projectRoot: o.projectRoot ? String(o.projectRoot) : undefined,
+    }
+  }
+  return {
+    relPath: String(a ?? '.'),
+    projectRoot: typeof b === 'string' && b.trim() ? b.trim() : undefined,
+  }
+}
+
+ipcMain.handle('tools:workspaceList', async (_evt, a?: unknown, b?: unknown) => {
+  const { relPath, projectRoot } = parseWorkspaceArgs(a ?? '.', b)
+  const dir = resolveWorkspacePath(relPath, projectRoot)
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true })
   }
@@ -1318,12 +1442,13 @@ ipcMain.handle('tools:workspaceList', async (_evt, relPath = '.') => {
     name: d.name,
     dir: d.isDirectory(),
   }))
-  return { path: relPath, entries }
+  return { path: relPath, entries, projectRoot: projectRoot || activeProjectRoot }
 })
 
-ipcMain.handle('tools:workspaceRead', async (_evt, relPath: string) => {
+ipcMain.handle('tools:workspaceRead', async (_evt, a: unknown, b?: unknown) => {
   try {
-    const file = resolveWorkspacePath(relPath)
+    const { relPath, projectRoot } = parseWorkspaceArgs(a, b)
+    const file = resolveWorkspacePath(relPath, projectRoot)
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       return { ok: false, content: `Not found: ${relPath}` }
     }
@@ -1334,27 +1459,41 @@ ipcMain.handle('tools:workspaceRead', async (_evt, relPath: string) => {
   }
 })
 
-ipcMain.handle('tools:workspaceWrite', async (_evt, relPath: string, content: string) => {
+ipcMain.handle('tools:workspaceWrite', async (_evt, a: unknown, b?: unknown, c?: unknown) => {
+  // (relPath, content) | (relPath, content, projectRoot) | ({ path, content, projectRoot })
   try {
-    const file = resolveWorkspacePath(relPath)
+    let relPath: string
+    let content: string
+    let projectRoot: string | undefined
+    if (a && typeof a === 'object' && !Array.isArray(a)) {
+      const o = a as { path?: string; content?: string; projectRoot?: string }
+      relPath = String(o.path || '.')
+      content = String(o.content ?? '')
+      projectRoot = o.projectRoot
+    } else {
+      relPath = String(a || '.')
+      content = String(b ?? '')
+      projectRoot = typeof c === 'string' ? c : undefined
+    }
+    const file = resolveWorkspacePath(relPath, projectRoot)
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, content ?? '', 'utf-8')
     return { ok: true, path: relPath, bytes: Buffer.byteLength(content ?? '', 'utf-8') }
   } catch (e) {
     return {
       ok: false,
-      path: relPath,
+      path: String(a),
       bytes: 0,
       error: e instanceof Error ? e.message : String(e),
     }
   }
 })
 
-ipcMain.handle('tools:workspaceDownload', async (_evt, targetUrl: string, relPath: string) => {
+ipcMain.handle('tools:workspaceDownload', async (_evt, targetUrl: string, relPath: string, projectRoot?: string) => {
   try {
     const url = new URL(targetUrl)
     if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Only http(s) URLs allowed')
-    const file = resolveWorkspacePath(relPath)
+    const file = resolveWorkspacePath(relPath, projectRoot)
     const res = await fetch(url, { redirect: 'follow' })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const body = Buffer.from(await res.arrayBuffer())
@@ -1365,23 +1504,23 @@ ipcMain.handle('tools:workspaceDownload', async (_evt, targetUrl: string, relPat
   } catch (e) { return { ok: false, path: relPath, bytes: 0, error: e instanceof Error ? e.message : String(e) } }
 })
 
-ipcMain.handle('tools:workspaceMkdir', async (_evt, relPath: string) => {
-  try { fs.mkdirSync(resolveWorkspacePath(relPath), { recursive: true }); return { ok: true, path: relPath } }
+ipcMain.handle('tools:workspaceMkdir', async (_evt, relPath: string, projectRoot?: string) => {
+  try { fs.mkdirSync(resolveWorkspacePath(relPath, projectRoot), { recursive: true }); return { ok: true, path: relPath } }
   catch (e) { return { ok: false, path: relPath, error: e instanceof Error ? e.message : String(e) } }
 })
 
-ipcMain.handle('tools:workspaceMove', async (_evt, from: string, to: string) => {
+ipcMain.handle('tools:workspaceMove', async (_evt, from: string, to: string, projectRoot?: string) => {
   try {
-    const source = resolveWorkspacePath(from); const dest = resolveWorkspacePath(to)
+    const source = resolveWorkspacePath(from, projectRoot); const dest = resolveWorkspacePath(to, projectRoot)
     if (!fs.existsSync(source)) throw new Error(`Not found: ${from}`)
     fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.renameSync(source, dest)
     return { ok: true, from, to }
   } catch (e) { return { ok: false, from, to, error: e instanceof Error ? e.message : String(e) } }
 })
 
-ipcMain.handle('tools:workspaceDelete', async (_evt, relPath: string, recursive = false) => {
+ipcMain.handle('tools:workspaceDelete', async (_evt, relPath: string, recursive = false, projectRoot?: string) => {
   try {
-    const file = resolveWorkspacePath(relPath)
+    const file = resolveWorkspacePath(relPath, projectRoot)
     if (!fs.existsSync(file)) throw new Error(`Not found: ${relPath}`)
     const stat = fs.statSync(file)
     if (stat.isDirectory() && !recursive) throw new Error('Directory deletion requires recursive=true')

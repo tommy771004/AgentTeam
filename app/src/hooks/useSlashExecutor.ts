@@ -69,11 +69,19 @@ export function useSlashExecutor() {
     setDraftInput(goal)
     // Single lifecycle controller (thread status / bubbles / busy policy / trace)
     const { runTask } = await import('../agent/runExternal')
+    const thrState = useThreadStore.getState()
+    const active = thrState.threads.find((t) => t.id === tid)
+    const loopType =
+      active?.loopType ||
+      useAgentStore.getState().selectedLoopType ||
+      undefined
     const r = await runTask({
       objective: goal,
       sourceKind: 'slash',
       reuseThreadId: tid || undefined,
       skipUserBubble: opts?.skipUserBubble,
+      runner: active?.runner,
+      loopType: loopType || undefined,
     })
     if (r.skipped && !r.queued) {
       log(`✗ ${r.error || '忙碌中'}`)

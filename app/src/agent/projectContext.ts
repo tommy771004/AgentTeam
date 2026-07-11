@@ -12,7 +12,7 @@
 
 export type AppliedContext = {
   path: string
-  scope: 'project' | 'project-parent'
+  scope: 'project' | 'project-parent' | 'project-subdir'
   bytes: number
   truncated: boolean
   /** djb2 content hash — run snapshot / drift detection */
@@ -24,7 +24,7 @@ export type AppliedContext = {
 const TTL_MS = 30_000
 const MAX_TOTAL_CHARS = 16_000
 
-let cache: { root: string; at: number; docs: AppliedContext[] } | null = null
+let cache: { key: string; at: number; docs: AppliedContext[] } | null = null
 
 function djb2(text: string): string {
   let h = 5381
@@ -34,35 +34,43 @@ function djb2(text: string): string {
   return (h >>> 0).toString(16)
 }
 
-/** Resolve project guidance docs for a root (parent-most first, project root last). */
+/**
+ * Resolve project guidance docs for a root.
+ * Optional workPath (file or dir under root) loads subdirectory AGENTS.md layers.
+ * Order: parent-most → project root → nearest work dir last (highest priority).
+ */
 export async function resolveProjectContext(
   root: string | undefined | null,
+  workPath?: string | null,
 ): Promise<AppliedContext[]> {
-  const key = (root || '').trim()
-  if (!key) return []
-  if (cache && cache.root === key && Date.now() - cache.at < TTL_MS) {
+  const key = `${(root || '').trim()}|${(workPath || '').trim()}`
+  if (!key || key === '|') return []
+  if (cache && cache.key === key && Date.now() - cache.at < TTL_MS) {
     return cache.docs
   }
   const api = window.subagents?.project?.agentsDocs
   if (!api) return []
   try {
-    const r = await api(key)
+    const r = await api((root || '').trim(), workPath ? String(workPath).trim() : undefined)
     let budget = MAX_TOTAL_CHARS
     const docs: AppliedContext[] = (r?.docs || []).map((d, i) => {
       const content = d.content.slice(0, Math.max(0, budget))
       budget -= content.length
+      const scope =
+        d.scope === 'project-subdir' || d.scope === 'project-parent' || d.scope === 'project'
+          ? d.scope
+          : 'project'
       return {
         path: d.path,
-        scope: d.scope,
+        scope,
         bytes: d.bytes,
         truncated: d.truncated || content.length < d.content.length,
         hash: djb2(d.content),
-        // later (nearer project root) docs get higher priority
         priority: i + 1,
         content,
       }
     })
-    cache = { root: key, at: Date.now(), docs }
+    cache = { key, at: Date.now(), docs }
     return docs
   } catch {
     return []
