@@ -10,14 +10,35 @@ const KEY = 'subagents.threads.v5'
 export type ThreadRunner = 'builtin' | 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
 const MAX_THREADS = 40
 const MAX_BUBBLES = 100
+const MAX_BUBBLE_CONTENT_CHARS = 32_000
 
 export type ThreadBubble = {
   id: string
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'run'
   content: string
   at: string
   /** Optional user message attachments (images / files) */
   attachments?: ChatAttachment[]
+  /** Persisted compact process record shown below an assistant answer. */
+  runSummary?: ThreadRunSummary
+}
+
+export type ThreadRunSummary = {
+  durationMs?: number
+  operations: Array<{
+    id: string
+    kind: string
+    title: string
+    detail?: string
+    path?: string
+    ok?: boolean
+  }>
+  files: Array<{
+    path: string
+    action: string
+    added?: number
+    removed?: number
+  }>
 }
 
 export type Thread = {
@@ -81,6 +102,7 @@ interface ThreadStore {
     content: string,
     attachments?: ChatAttachment[],
   ) => void
+  pushRunSummary: (threadId: string, summary: ThreadRunSummary) => void
   clearBubbles: (threadId: string) => void
   setShowRunPanel: (v: boolean) => void
   setShowThreadList: (v: boolean) => void
@@ -296,7 +318,12 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     const bubble: ThreadBubble = {
       id: `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
       role,
-      content: (c || (atts?.length ? `（${atts.length} 個附件）` : '')).slice(0, 8000),
+      // CLI answers can be much longer than ordinary chat. Keep enough output
+      // for the collapsible conversation renderer without unbounded storage.
+      content: (c || (atts?.length ? `（${atts.length} 個附件）` : '')).slice(
+        0,
+        MAX_BUBBLE_CONTENT_CHARS,
+      ),
       at: new Date().toISOString(),
       attachments: sanitizeAttachmentsForStorage(atts),
     }
@@ -313,6 +340,43 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
         updatedAt: new Date().toISOString(),
       }
     })
+    set({ threads })
+    persist(threads, get().activeId)
+  },
+
+  pushRunSummary: (threadId, summary) => {
+    const bubble: ThreadBubble = {
+      id: `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      role: 'run',
+      content: '執行過程',
+      at: new Date().toISOString(),
+      runSummary: {
+        durationMs: summary.durationMs,
+        operations: (summary.operations || []).slice(-40).map((operation, index) => ({
+          id: operation.id || `operation_${index}`,
+          kind: operation.kind || 'tool',
+          title: operation.title.slice(0, 240),
+          detail: operation.detail?.slice(0, 1200),
+          path: operation.path?.slice(0, 600),
+          ok: operation.ok,
+        })),
+        files: (summary.files || []).slice(-80).map((file) => ({
+          path: file.path.slice(0, 600),
+          action: file.action.slice(0, 40),
+          added: file.added,
+          removed: file.removed,
+        })),
+      },
+    }
+    const threads = get().threads.map((thread) =>
+      thread.id === threadId
+        ? {
+            ...thread,
+            bubbles: [...thread.bubbles, bubble].slice(-MAX_BUBBLES),
+            updatedAt: new Date().toISOString(),
+          }
+        : thread,
+    )
     set({ threads })
     persist(threads, get().activeId)
   },

@@ -241,12 +241,12 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     }
 
     // Multi-path file events (Codex batch)
-    const paths = [
+    const paths = [...new Set([
       ...(payload.path ? [payload.path] : []),
       ...(payload.paths || []),
     ]
       .map((p) => String(p).trim())
-      .filter(Boolean)
+      .filter(Boolean))]
 
     if (payload.kind === 'file' || paths.length > 0) {
       for (const p of paths.length ? paths : [payload.detail || '']) {

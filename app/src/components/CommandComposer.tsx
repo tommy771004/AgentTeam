@@ -57,6 +57,11 @@ export interface CommandComposerProps {
   footerLeft?: ReactNode
   /** 底部右側（如模型/推理強度 pill） */
   footerRight?: ReactNode
+  /** Replaces the default attachment button with a contextual + menu. */
+  quickActions?: (controls: {
+    openFilePicker: () => void
+    disabled: boolean
+  }) => ReactNode
   /** Enable file/image attachments (default true for agent mode) */
   allowAttachments?: boolean
 }
@@ -79,6 +84,7 @@ export function CommandComposer({
   enterBehavior = 'enter',
   footerLeft,
   footerRight,
+  quickActions,
   allowAttachments,
 }: CommandComposerProps) {
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -453,39 +459,21 @@ export function CommandComposer({
         </p>
       )}
 
-      <div className={`flex items-end gap-2 ${compact ? 'p-2' : 'p-3 md:p-3.5'}`}>
-        <div className="flex items-center gap-1 shrink-0 pb-2 pl-0.5 text-outline">
-          {canAttach ? (
-            <>
-              <input
-                ref={fileRef}
-                type="file"
-                className="hidden"
-                multiple
-                accept="image/*,.txt,.md,.json,.csv,.ts,.tsx,.js,.jsx,.py,.log,.yml,.yaml,.xml,.html,.css,.sql"
-                onChange={(e) => {
-                  void addFiles(e.target.files)
-                  e.target.value = ''
-                }}
-              />
-              <button
-                type="button"
-                title="上傳圖片或檔案（也可貼上 / 拖放）"
-                disabled={disabled || attaching || attachments.length >= MAX_ATTACHMENTS}
-                onClick={() => fileRef.current?.click()}
-                className="w-8 h-8 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/40 flex items-center justify-center disabled:opacity-40"
-              >
-                <Icon name="attach_file" size={18} />
-              </button>
-            </>
-          ) : (
-            <Icon
-              name={mode === 'agent' ? 'auto_awesome' : 'terminal'}
-              size={18}
-              className="text-primary"
-            />
-          )}
-        </div>
+      {canAttach && (
+        <input
+          ref={fileRef}
+          type="file"
+          className="hidden"
+          multiple
+          accept="image/*,.txt,.md,.json,.csv,.ts,.tsx,.js,.jsx,.py,.log,.yml,.yaml,.xml,.html,.css,.sql"
+          onChange={(e) => {
+            void addFiles(e.target.files)
+            e.target.value = ''
+          }}
+        />
+      )}
+
+      <div className={`flex items-end gap-2 ${compact ? 'p-2' : 'px-3 pt-3 md:px-3.5 md:pt-3.5'}`}>
         <textarea
           ref={taRef}
           value={value}
@@ -505,15 +493,7 @@ export function CommandComposer({
           className="composer-field flex-1 min-w-0 self-stretch border-0 bg-transparent shadow-none resize-none outline-none ring-0 focus:outline-none focus-visible:outline-none focus:ring-0 text-[15px] text-on-surface placeholder:text-outline/80 leading-relaxed font-[family-name:var(--font-inter)]"
           spellCheck={false}
         />
-        <div className="flex flex-col gap-1 shrink-0 pb-0.5">
-          <button
-            type="button"
-            title="指令列表（/ 或 ⌘/）"
-            onClick={() => focusSelf(true)}
-            className="w-9 h-9 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/40 flex items-center justify-center text-sm font-[family-name:var(--font-mono)]"
-          >
-            /
-          </button>
+        <div className="flex shrink-0 pb-0.5">
           <button
             type="button"
             disabled={!canSend}
@@ -529,6 +509,10 @@ export function CommandComposer({
       {(footerLeft || footerRight || !hideHints) && (
         <div className="px-3 pb-2.5 flex items-center justify-between gap-2 min-h-[32px]">
           <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            {quickActions?.({
+              openFilePicker: () => fileRef.current?.click(),
+              disabled: Boolean(disabled || attaching || attachments.length >= MAX_ATTACHMENTS),
+            })}
             {footerLeft}
             {!hideHints && !footerLeft && (
               <span className="text-[10px] text-outline flex items-center gap-1.5">

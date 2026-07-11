@@ -448,11 +448,59 @@ export async function runExternalObjective(
       thr.pushBubble(
         tid,
         'assistant',
-        finalAgent.result?.slice(0, 4000) ||
-          stepsTail.slice(0, 4000) ||
-          result.result?.slice(0, 4000) ||
+        finalAgent.result ||
+          stepsTail ||
+          result.result ||
           `狀態：${status}`,
       )
+    }
+    // Persist a compact execution record beside the final answer. Live activity
+    // is intentionally ephemeral, so this keeps CLI work visible after reload.
+    try {
+      const { useRunActivityStore } = await import('../store/runActivityStore')
+      const activity = useRunActivityStore.getState()
+      const activityOperations = activity.events
+        .filter((event) => event.kind !== 'thought' && event.kind !== 'text')
+        .map((event) => ({
+          id: event.id,
+          kind: event.kind,
+          title: event.title || event.kind,
+          detail: event.detail,
+          path: event.path,
+          ok: event.ok,
+        }))
+      const fallbackOperations = finalAgent.toolCalls.map((tool) => ({
+        id: tool.id,
+        kind: /write|edit|create|patch/i.test(tool.tool) ? 'file' : 'tool',
+        title: /bash|shell/i.test(tool.tool) ? '已執行指令' : `已執行 ${tool.tool}`,
+        detail:
+          typeof tool.input?.command === 'string'
+            ? tool.input.command
+            : tool.output?.slice(0, 400),
+        path: String(tool.input?.path ?? tool.input?.file ?? tool.input?.filePath ?? '') || undefined,
+        ok: tool.ok,
+      }))
+      const fileMap = new Map<string, { path: string; action: string; added?: number; removed?: number }>()
+      for (const file of activity.fileChanges) {
+        fileMap.set(file.path, file)
+      }
+      for (const tool of finalAgent.toolCalls) {
+        if (!/write|edit|create|patch/i.test(tool.tool)) continue
+        const path = String(tool.input?.path ?? tool.input?.file ?? tool.input?.filePath ?? '')
+        if (path && !fileMap.has(path)) {
+          fileMap.set(path, { path, action: /write|create/i.test(tool.tool) ? 'create' : 'edit' })
+        }
+      }
+      const operations = activityOperations.length ? activityOperations : fallbackOperations
+      if (operations.length || fileMap.size) {
+        thr.pushRunSummary(tid, {
+          durationMs: finalAgent.metrics?.executionMs,
+          operations,
+          files: [...fileMap.values()],
+        })
+      }
+    } catch {
+      /* execution summary must not break the task lifecycle */
     }
     thr.setRunningThreadId(null)
     const finalResult: ExternalRunResult = {

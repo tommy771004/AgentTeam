@@ -5,7 +5,6 @@ import { InterventionPanel } from './InterventionPanel'
 import { useAgentStore } from '../store/agentStore'
 import { useRunActivityStore } from '../store/runActivityStore'
 import { loopTypeZh } from '../i18n/zh'
-import { MarkdownBody } from './MarkdownBody'
 
 /**
  * CloudCLI-style embedded run progress — no page navigation
@@ -187,16 +186,11 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
           </div>
         )}
 
-        {agent.result && done && (
-          <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
-            <h4 className="text-[10px] uppercase tracking-wider text-primary font-semibold mb-1">
-              結果
-            </h4>
-            <div className="max-h-48 overflow-y-auto custom-scrollbar">
-              <MarkdownBody content={agent.result.slice(0, 6000)} />
-            </div>
-          </div>
-        )}
+        {agent.result && done ? (
+          <p className="px-0.5 text-[10px] text-outline">
+            最終結果已放入主對話，可在主對話收合或展開。
+          </p>
+        ) : null}
       </div>
     </div>
   )

@@ -137,9 +137,35 @@ export async function dispatchThreadTask(
       textContent: a.textContent,
       filePath: a.filePath,
     }))
+    // Keep CLI follow-ups coherent with builtin runs. The current request is
+    // deliberately first, so the runner's prompt cap never cuts it off.
+    let cliPrompt = text
+    if (settings.referenceChatHistory !== false && thread?.bubbles?.length) {
+      const chat = thread.bubbles.filter(
+        (b) => b.role === 'user' || b.role === 'assistant',
+      )
+      const currentWasStored =
+        chat.at(-1)?.role === 'user' && chat.at(-1)?.content === raw
+      const history = (currentWasStored ? chat.slice(0, -1) : chat)
+        .slice(-12)
+        .map(
+          (b) =>
+            `${b.role === 'user' ? 'User' : 'Assistant'}: ${b.content.slice(0, 600)}`,
+        )
+        .join('\n')
+      if (history) {
+        cliPrompt = [
+          text,
+          '## 近期對話歷史（Reference chat history）',
+          history,
+        ]
+          .join('\n\n')
+          .slice(0, 12_000)
+      }
+    }
     await agent.startLocalCliExecution({
       kind,
-      prompt: text,
+      prompt: cliPrompt,
       binary: resolveCliBinary(kind),
       cwd: projectRoot || undefined,
       model,

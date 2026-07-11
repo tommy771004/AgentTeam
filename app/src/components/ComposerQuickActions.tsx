@@ -1,0 +1,206 @@
+import { useEffect, useRef, useState } from 'react'
+import type { AgentMode, LoopType } from '../agent/types'
+import type { ThreadRunner } from '../store/threadStore'
+import { Icon } from './Icon'
+
+type RunnerOption = {
+  id: ThreadRunner
+  label: string
+  ready: boolean
+  blurb: string
+}
+
+type ComposerQuickActionsProps = {
+  disabled: boolean
+  projectRoot: string | null
+  loopType: LoopType
+  agentMode: AgentMode
+  runner: ThreadRunner
+  runners: RunnerOption[]
+  onAttach: () => void
+  onPickProject: () => void
+  onLoopChange: (type: LoopType) => void
+  onAgentModeChange: (mode: AgentMode) => void
+  onRunnerChange: (runner: ThreadRunner) => void
+  onOpenCapabilities: () => void
+  onToggleRunPanel: () => void
+  onToggleTerminal: () => void
+  onCreateThread: () => void
+}
+
+const LOOPS: Array<{ type: LoopType; label: string; icon: string }> = [
+  { type: 'Goal-based', label: '目標', icon: 'track_changes' },
+  { type: 'Turn-based', label: '回合', icon: 'forum' },
+  { type: 'Time-based', label: '定時', icon: 'schedule' },
+  { type: 'Proactive', label: '事件', icon: 'bolt' },
+]
+
+/** Compact Codex-style + menu for optional conversation controls. */
+export function ComposerQuickActions({
+  disabled,
+  projectRoot,
+  loopType,
+  agentMode,
+  runner,
+  runners,
+  onAttach,
+  onPickProject,
+  onLoopChange,
+  onAgentModeChange,
+  onRunnerChange,
+  onOpenCapabilities,
+  onToggleRunPanel,
+  onToggleTerminal,
+  onCreateThread,
+}: ComposerQuickActionsProps) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [open])
+
+  const choose = (action: () => void) => {
+    action()
+    setOpen(false)
+  }
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        aria-label="新增內容與設定"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-on-surface transition-colors hover:bg-white/15"
+      >
+        <Icon name={open ? 'close' : 'add'} size={22} />
+      </button>
+
+      {open ? (
+        <div className="absolute bottom-full left-0 z-[110] mb-3 max-h-[min(600px,calc(100vh-8rem))] w-[min(768px,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-white/15 bg-[#2c2c2e]/98 p-2 shadow-2xl backdrop-blur-2xl custom-scrollbar">
+          <MenuLabel>新增</MenuLabel>
+          <MenuButton
+            icon="attach_file"
+            title="檔案和資料夾"
+            description="加入圖片、文件或程式檔"
+            disabled={disabled}
+            onClick={() => choose(onAttach)}
+          />
+          <MenuButton
+            icon="folder_open"
+            title={projectRoot ? '更換專案資料夾' : '選擇專案資料夾'}
+            description={projectRoot || '讓任務讀寫本機專案'}
+            onClick={() => choose(onPickProject)}
+          />
+          <MenuButton
+            icon="add_comment"
+            title="新增對話"
+            description="保留目前對話，另開新任務"
+            onClick={() => choose(onCreateThread)}
+          />
+
+          <MenuLabel>工作方式</MenuLabel>
+          <div className="grid grid-cols-2 gap-1 px-1 pb-1">
+            {(['build', 'plan'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => choose(() => onAgentModeChange(mode))}
+                className={`rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-colors ${
+                  agentMode === mode
+                    ? 'bg-white/15 text-on-surface'
+                    : 'text-on-surface-variant hover:bg-white/[0.07]'
+                }`}
+              >
+                <Icon name={mode === 'build' ? 'construction' : 'checklist'} size={16} className="mr-1.5 align-text-bottom" />
+                {mode === 'build' ? 'Build' : '規劃模式'}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-4 gap-1 px-1 pb-1">
+            {LOOPS.map((item) => (
+              <button
+                key={item.type}
+                type="button"
+                title={item.label}
+                onClick={() => choose(() => onLoopChange(item.type))}
+                className={`flex flex-col items-center gap-1 rounded-xl px-1 py-2 text-[10px] transition-colors ${
+                  loopType === item.type
+                    ? 'bg-primary/15 text-primary'
+                    : 'text-on-surface-variant hover:bg-white/[0.07]'
+                }`}
+              >
+                <Icon name={item.icon} size={17} />
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          <MenuLabel>執行引擎</MenuLabel>
+          <div className="flex flex-wrap gap-1 px-1 pb-1">
+            {runners.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                disabled={!option.ready && option.id !== 'builtin'}
+                title={option.ready ? option.blurb : `${option.label} 尚未授權`}
+                onClick={() => choose(() => onRunnerChange(option.id))}
+                className={`rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+                  runner === option.id
+                    ? 'bg-primary/20 text-primary'
+                    : 'bg-white/[0.06] text-on-surface-variant hover:bg-white/10'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          <MenuLabel>更多</MenuLabel>
+          <MenuButton icon="extension" title="擴充能力" description="管理連線、技能與外掛程式" onClick={() => choose(onOpenCapabilities)} />
+          <MenuButton icon="vertical_split" title="任務面板" description="查看目前執行進度" onClick={() => choose(onToggleRunPanel)} />
+          <MenuButton icon="terminal" title="終端機" description="開啟工作區終端" onClick={() => choose(onToggleTerminal)} />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function MenuLabel({ children }: { children: string }) {
+  return <p className="px-2 pt-2 pb-1 text-[11px] font-semibold text-white/45">{children}</p>
+}
+
+function MenuButton({
+  icon,
+  title,
+  description,
+  disabled,
+  onClick,
+}: {
+  icon: string
+  title: string
+  description: string
+  disabled?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-35"
+    >
+      <Icon name={icon} size={19} className="shrink-0 text-on-surface-variant" />
+      <span className="min-w-0">
+        <span className="block text-[13px] font-medium text-on-surface">{title}</span>
+        <span className="block truncate text-[11px] text-on-surface-variant">{description}</span>
+      </span>
+    </button>
+  )
+}
