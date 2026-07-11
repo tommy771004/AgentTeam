@@ -21,6 +21,25 @@ function inline(s: string) {
     )
 }
 
+function isTableRow(s: string): boolean {
+  return /^\s*\|.*\|\s*$/.test(s.trim()) || (s.includes('|') && s.trim().length > 0 && /\|.*\|/.test(s))
+}
+
+function isTableSeparator(s: string): boolean {
+  const t = s.trim()
+  if (!t.includes('-') || !t.includes('|')) return false
+  return /^\|?[\s:|-]+\|?$/.test(t)
+}
+
+function splitTableRow(s: string): string[] {
+  return s
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((c) => c.trim())
+}
+
 export function renderMarkdown(md: string): string {
   if (!md) return ''
   const lines = md.replace(/\r\n/g, '\n').split('\n')
@@ -41,7 +60,8 @@ export function renderMarkdown(md: string): string {
     }
   }
 
-  for (const line of lines) {
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li]
     if (line.startsWith('```')) {
       if (inCode) {
         html.push(
@@ -57,6 +77,40 @@ export function renderMarkdown(md: string): string {
     }
     if (inCode) {
       codeBuf.push(line)
+      continue
+    }
+
+    // GFM 表格：表頭列 + 分隔列（|---|---|）
+    if (isTableRow(line) && li + 1 < lines.length && isTableSeparator(lines[li + 1])) {
+      flushLists()
+      const headers = splitTableRow(line)
+      const rows: string[][] = []
+      let ri = li + 2
+      while (ri < lines.length && isTableRow(lines[ri]) && !isTableSeparator(lines[ri])) {
+        rows.push(splitTableRow(lines[ri]))
+        ri += 1
+      }
+      const thead = headers
+        .map(
+          (h) =>
+            `<th class="px-3 py-1.5 text-left text-xs font-semibold text-on-surface border-b border-white/15 whitespace-nowrap">${inline(h)}</th>`,
+        )
+        .join('')
+      const tbody = rows
+        .map(
+          (cells) =>
+            `<tr class="border-t border-white/8">${headers
+              .map(
+                (_, ci) =>
+                  `<td class="px-3 py-1.5 text-sm text-on-surface-variant align-top">${inline(cells[ci] ?? '')}</td>`,
+              )
+              .join('')}</tr>`,
+        )
+        .join('')
+      html.push(
+        `<div class="overflow-x-auto my-2.5 rounded-lg border border-white/10 bg-surface-container/40"><table class="w-full border-collapse"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`,
+      )
+      li = ri - 1
       continue
     }
 
@@ -91,7 +145,15 @@ export function renderMarkdown(md: string): string {
         html.push('<ul class="list-disc pl-5 space-y-1 text-on-surface-variant text-sm my-1.5">')
         inUl = true
       }
-      html.push(`<li class="leading-relaxed">${inline(ul[1])}</li>`)
+      const task = ul[1].match(/^\[([ xX])\]\s+(.+)$/)
+      if (task) {
+        const done = task[1] !== ' '
+        html.push(
+          `<li class="leading-relaxed list-none -ml-4 flex items-start gap-1.5"><span class="${done ? 'text-primary' : 'text-outline'} shrink-0">${done ? '☑' : '☐'}</span><span class="${done ? 'line-through opacity-70' : ''}">${inline(task[2])}</span></li>`,
+        )
+      } else {
+        html.push(`<li class="leading-relaxed">${inline(ul[1])}</li>`)
+      }
     } else if (ol) {
       if (inUl) {
         html.push('</ul>')

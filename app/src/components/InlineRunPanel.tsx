@@ -128,6 +128,63 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
           )}
         </div>
 
+        {(activity.tasks.length > 0 || (live && agent.loopConfig.trigger === 'local-cli')) && (
+          <div className="rounded-xl border border-white/10 bg-surface-container/40 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-[10px] uppercase tracking-wider text-outline font-semibold">
+                任務清單
+              </h4>
+              {activity.tasks.length > 0 && (
+                <span className="text-[10px] text-outline font-[family-name:var(--font-mono)]">
+                  {activity.tasks.filter((t) => t.status === 'done').length}/
+                  {activity.tasks.length}
+                </span>
+              )}
+            </div>
+            {activity.tasks.length === 0 ? (
+              <p className="text-xs text-outline flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                分析任務中…
+              </p>
+            ) : (
+              <ul className="space-y-1.5">
+                {activity.tasks.map((t) => (
+                  <li key={t.id} className="flex items-start gap-2 text-xs">
+                    {t.status === 'done' ? (
+                      <Icon name="check_circle" size={14} filled className="text-primary shrink-0 mt-px" />
+                    ) : t.status === 'active' ? (
+                      <Icon
+                        name="progress_activity"
+                        size={14}
+                        className="text-primary animate-spin shrink-0 mt-px"
+                      />
+                    ) : t.status === 'failed' ? (
+                      <Icon name="cancel" size={14} className="text-error shrink-0 mt-px" />
+                    ) : (
+                      <Icon
+                        name="radio_button_unchecked"
+                        size={14}
+                        className="text-outline shrink-0 mt-px"
+                      />
+                    )}
+                    <span
+                      className={
+                        t.status === 'done'
+                          ? 'text-on-surface-variant line-through opacity-70'
+                          : t.status === 'active'
+                            ? 'text-on-surface'
+                            : 'text-on-surface-variant'
+                      }
+                    >
+                      {t.text}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {agent.intervention?.active && (
           <InterventionPanel
             intervention={agent.intervention}

@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import {
   isWindows,
   shellCommandSpec,
+  spawnCommandSpec,
   terminateProcessTree,
 } from './platformProcess'
 
@@ -67,42 +68,47 @@ export function cancelBash(opts?: {
   return { ok: killed > 0, killed }
 }
 
-export async function runBash(input: {
-  command: string
+type RunProcessCore = {
   cwd?: string
   timeoutMs?: number
   env?: Record<string, string>
-  /** Optional id for cancelBash({ runId }) */
   runId?: string
-  /** Group tag e.g. 'cli-agent' for bulk cancel */
   tag?: string
-  /** Live stdout chunks (UTF-8) for CLI process feed */
   onStdout?: (chunk: string) => void
-  /** Live stderr chunks */
   onStderr?: (chunk: string) => void
-}): Promise<BashResult> {
-  const command = (input.command || '').trim()
-  if (!command) return { ok: false, code: 1, stdout: '', stderr: 'empty command' }
+}
 
-  const timeoutMs = Math.min(Math.max(input.timeoutMs || 60_000, 1000), 600_000)
-  const cwd = input.cwd && path.isAbsolute(input.cwd) ? input.cwd : process.cwd()
-  const shell = shellCommandSpec(command)
-  const runId = input.runId || randomUUID()
+function runSpawnedProcess(
+  file: string,
+  args: string[],
+  opts: RunProcessCore & { windowsVerbatimArguments?: boolean },
+): Promise<BashResult> {
+  const timeoutMs = Math.min(Math.max(opts.timeoutMs || 60_000, 1000), 600_000)
+  const cwd = opts.cwd && path.isAbsolute(opts.cwd) ? opts.cwd : process.cwd()
+  const runId = opts.runId || randomUUID()
 
   return new Promise((resolve) => {
     let stdout = ''
     let stderr = ''
     let settled = false
-    const child = spawn(shell.file, shell.args, {
+    const child = spawn(file, args, {
       cwd,
-      env: { ...process.env, ...(input.env || {}), HOME: os.homedir() },
+      env: {
+        ...process.env,
+        ...(opts.env || {}),
+        HOME: os.homedir(),
+        // Force non-interactive: never block waiting for a TTY prompt
+        CI: process.env.CI || '1',
+        NO_COLOR: '1',
+        TERM: process.env.TERM || 'dumb',
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: !isWindows,
       windowsHide: true,
-      windowsVerbatimArguments: shell.windowsVerbatimArguments,
+      windowsVerbatimArguments: opts.windowsVerbatimArguments,
     })
 
-    activeRuns.set(runId, { child, tag: input.tag })
+    activeRuns.set(runId, { child, tag: opts.tag })
 
     const finish = (result: BashResult) => {
       if (settled) return
@@ -133,7 +139,7 @@ export async function runBash(input: {
       stdout += chunk
       if (stdout.length > 100_000) stdout = stdout.slice(-80_000)
       try {
-        input.onStdout?.(chunk)
+        opts.onStdout?.(chunk)
       } catch {
         /* ignore listener errors */
       }
@@ -143,7 +149,7 @@ export async function runBash(input: {
       stderr += chunk
       if (stderr.length > 40_000) stderr = stderr.slice(-20_000)
       try {
-        input.onStderr?.(chunk)
+        opts.onStderr?.(chunk)
       } catch {
         /* ignore */
       }
@@ -163,5 +169,53 @@ export async function runBash(input: {
         cancelled: cancelled && code !== 0,
       })
     })
+  })
+}
+
+export async function runBash(input: {
+  command: string
+  cwd?: string
+  timeoutMs?: number
+  env?: Record<string, string>
+  /** Optional id for cancelBash({ runId }) */
+  runId?: string
+  /** Group tag e.g. 'cli-agent' for bulk cancel */
+  tag?: string
+  /** Live stdout chunks (UTF-8) for CLI process feed */
+  onStdout?: (chunk: string) => void
+  /** Live stderr chunks */
+  onStderr?: (chunk: string) => void
+}): Promise<BashResult> {
+  const command = (input.command || '').trim()
+  if (!command) return { ok: false, code: 1, stdout: '', stderr: 'empty command' }
+
+  const shell = shellCommandSpec(command)
+  return runSpawnedProcess(shell.file, shell.args, {
+    ...input,
+    windowsVerbatimArguments: shell.windowsVerbatimArguments,
+  })
+}
+
+/**
+ * Spawn a binary with argv (no shell). Preferred for agent CLIs so Chinese /
+ * multiline prompts and paths never break through cmd.exe quoting.
+ */
+export async function runArgv(input: {
+  file: string
+  args: string[]
+  cwd?: string
+  timeoutMs?: number
+  env?: Record<string, string>
+  runId?: string
+  tag?: string
+  onStdout?: (chunk: string) => void
+  onStderr?: (chunk: string) => void
+}): Promise<BashResult> {
+  const file = (input.file || '').trim()
+  if (!file) return { ok: false, code: 1, stdout: '', stderr: 'empty file' }
+  const spec = spawnCommandSpec(file, input.args || [])
+  return runSpawnedProcess(spec.file, spec.args, {
+    ...input,
+    windowsVerbatimArguments: spec.windowsVerbatimArguments,
   })
 }

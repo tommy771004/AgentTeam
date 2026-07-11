@@ -9,7 +9,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { runBash } from './shellBridge'
+import { runArgv, runBash } from './shellBridge'
 import {
   executableLookupCommand,
   firstExecutablePath,
@@ -30,10 +30,16 @@ export type LocalCliAttachment = {
   textContent?: string
 }
 
+/** 任務清單項目（TodoWrite / update_plan / todo_list）→ 右側面板同步 */
+export type LocalCliPlanItem = {
+  text: string
+  status: 'pending' | 'active' | 'done'
+}
+
 /** Live stream event pushed to renderer during CLI run */
 export type LocalCliStreamEvent = {
   runId: string
-  kind: 'status' | 'thought' | 'text' | 'tool' | 'file' | 'log' | 'error' | 'done' | 'chunk'
+  kind: 'status' | 'thought' | 'text' | 'tool' | 'file' | 'log' | 'error' | 'done' | 'chunk' | 'plan'
   title?: string
   detail?: string
   tool?: string
@@ -45,6 +51,8 @@ export type LocalCliStreamEvent = {
   added?: number
   removed?: number
   action?: 'edit' | 'create' | 'delete' | 'write' | 'read'
+  /** kind=plan 時的完整任務清單快照 */
+  todos?: LocalCliPlanItem[]
 }
 
 export type LocalCliRunInput = {
@@ -168,15 +176,35 @@ export function materializeCliAttachments(
 }
 
 
+function maxTurnsForDepth(depth?: string): number {
+  switch (depth) {
+    case 'fast':
+      return 12
+    case 'standard':
+      return 24
+    case 'deep':
+      return 40
+    case 'max':
+      return 56
+    case 'ultra':
+      return 72
+    default:
+      return 32
+  }
+}
+
 /**
- * Build vendor CLI one-shot command (best-effort flags; may vary by version).
+ * Build argv for direct spawn (preferred). Avoids cmd.exe quoting breakage
+ * on Chinese/multiline prompts which can leave CLI hung with no stdout.
  */
-export function buildLocalCliCommand(input: LocalCliRunInput): string {
-  const bin = resolveBinary(input.kind, input.binary)
-  // Paths + user goal; allow more room when attachments are inlined as paths
+export function buildLocalCliArgv(input: LocalCliRunInput): {
+  file: string
+  args: string[]
+  displayCommand: string
+} {
+  const file = resolveBinary(input.kind, input.binary)
   const maxPrompt = input.attachments?.length ? 24_000 : 12_000
   const prompt = input.prompt.slice(0, maxPrompt)
-  const q = quoteShellArg(prompt)
   const model = input.model?.trim()
   const effort = depthToCodexEffort(input.depth)
   const plan = input.agentMode === 'plan'
@@ -186,63 +214,88 @@ export function buildLocalCliCommand(input: LocalCliRunInput): string {
     input.unattended,
     input.agentMode,
   )
-  const binQ = quoteShellArg(bin)
+  const turns = String(maxTurnsForDepth(input.depth))
+  // Headless Electron has no TTY — permission prompts hang forever with zero output.
+  // Prefer non-blocking approval for all interactive CLI runs.
+  const headlessApprove = !plan
 
+  let args: string[] = []
   switch (input.kind) {
     case 'codex': {
-      // Bare `codex "prompt"` opens interactive TUI and never exits under Electron.
-      // Always use `exec` (non-interactive). Prefer --json JSONL for center feed.
-      // Modern CLI: --dangerously-bypass-approvals-and-sandbox (not legacy --full-auto).
-      const modelFlag = model ? `-m ${quoteShellArg(model)}` : ''
-      const effortFlag = `-c model_reasoning_effort=${quoteShellArg(effort)}`
-      const sandbox = plan
-        ? '-s read-only'
-        : approval.permissive
-          ? '--dangerously-bypass-approvals-and-sandbox'
-          : '-s workspace-write'
-      // --skip-git-repo-check: app project roots may not be git; --color never: clean pipes
-      return `${binQ} exec --json --color never --skip-git-repo-check ${sandbox} ${modelFlag} ${effortFlag} ${q}`
+      args = [
+        'exec',
+        '--json',
+        '--color',
+        'never',
+        '--skip-git-repo-check',
+      ]
+      if (plan) args.push('-s', 'read-only')
+      else if (approval.permissive || headlessApprove)
+        args.push('--dangerously-bypass-approvals-and-sandbox')
+      else args.push('-s', 'workspace-write')
+      if (model) args.push('-m', model)
+      args.push('-c', `model_reasoning_effort=${effort}`)
+      args.push(prompt)
+      break
     }
     case 'claude': {
-      // -p/--print is required for non-interactive. stream-json REQUIRES --verbose.
-      const modelFlag = model ? `--model ${quoteShellArg(model)}` : ''
-      const perm = plan
-        ? '--permission-mode plan'
-        : approval.permissive
-          ? '--dangerously-skip-permissions'
-          : '--permission-mode auto'
-      return `${binQ} -p ${modelFlag} ${perm} --output-format stream-json --verbose ${q}`
+      args = ['-p', '--output-format', 'stream-json', '--verbose']
+      if (model) args.push('--model', model)
+      if (plan) args.push('--permission-mode', 'plan')
+      else if (approval.permissive || headlessApprove)
+        args.push('--dangerously-skip-permissions')
+      else args.push('--permission-mode', 'acceptEdits')
+      args.push('--max-turns', turns)
+      args.push(prompt)
+      break
     }
     case 'grok': {
-      // Bare `grok "prompt"` opens the interactive TUI and never exits → app
-      // times out with ANSI garbage in stdout. Headless one-shot needs -p/--single.
-      // streaming-json: NDJSON thought/text/end for Codex-style center feed.
-      const modelFlag = model ? `--model ${quoteShellArg(model)}` : ''
-      const effortFlag = `--reasoning-effort ${quoteShellArg(effort)}`
-      const perm = plan
-        ? '--permission-mode plan'
-        : approval.permissive
-          ? '--always-approve'
-          : '--permission-mode auto'
-      return `${binQ} -p ${q} ${modelFlag} ${effortFlag} ${perm} --output-format streaming-json`
+      // -p/--single headless; streaming-json for process feed
+      args = [
+        '-p',
+        prompt,
+        '--output-format',
+        'streaming-json',
+        '--max-turns',
+        turns,
+        '--reasoning-effort',
+        effort,
+      ]
+      if (model) args.push('--model', model)
+      if (plan) args.push('--permission-mode', 'plan')
+      else if (approval.permissive || headlessApprove) args.push('--always-approve')
+      else args.push('--permission-mode', 'auto', '--always-approve')
+      break
     }
     case 'opencode': {
-      // `opencode` alone is TUI; `run` is one-shot. No bare fallback.
-      const modelFlag = model ? `--model ${quoteShellArg(model)}` : ''
-      return `${binQ} run ${modelFlag} ${q}`
+      args = ['run']
+      if (model) args.push('--model', model)
+      args.push(prompt)
+      break
     }
     case 'cursor': {
-      // Prefer cursor-agent/agent print mode. Never bare `cursor` (IDE).
-      // --force only when approvalMode full (apply edits without confirmation).
-      const modelFlag = model ? `--model ${quoteShellArg(model)}` : ''
-      const force = approval.permissive && !plan ? '--force' : ''
-      // stream-json for process feed when supported
-      return `${binQ} -p ${force} ${modelFlag} --output-format stream-json ${q}`
+      args = ['-p', '--output-format', 'stream-json']
+      if (model) args.push('--model', model)
+      if ((approval.permissive || headlessApprove) && !plan) args.push('--force')
+      args.push(prompt)
+      break
     }
     default:
-      // Unknown vendor: still pass prompt as arg (best-effort); do not claim TUI safety
-      return `${binQ} ${q}`
+      args = [prompt]
   }
+
+  const displayCommand = [quoteShellArg(file), ...args.map((a) => quoteShellArg(a))].join(
+    ' ',
+  )
+  return { file, args, displayCommand }
+}
+
+/**
+ * Shell-string form (legacy / smoke / logging). Prefer buildLocalCliArgv for spawn.
+ */
+export function buildLocalCliCommand(input: LocalCliRunInput): string {
+  const { displayCommand } = buildLocalCliArgv(input)
+  return displayCommand
 }
 
 async function preflightBinary(
@@ -319,24 +372,32 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
     prompt = `${prompt.trim()}\n\n${materialized.promptBlock}`.trim()
   }
 
-  const command = buildLocalCliCommand({
+  const argv = buildLocalCliArgv({
     ...input,
     prompt,
     binary: pre.path || bin,
   })
+  const command = argv.displayCommand
 
   emit({
     kind: 'status',
     title: `本機 ${kind} CLI`,
-    detail: `model=${input.model || kind}`,
+    detail: `model=${input.model || kind} · maxTurns=${maxTurnsForDepth(input.depth)}`,
+  })
+  emit({
+    kind: 'status',
+    title: '啟動 CLI',
+    detail: `${argv.file} (${argv.args.length} args, direct spawn)`,
   })
 
   // Parse NDJSON (Grok streaming-json) and plain lines into process events
   const streamState = createCliStreamParser(kind, emit)
   let assembledText = ''
 
-  const r = await runBash({
-    command,
+  // Direct argv spawn — do NOT wrap in cmd.exe (breaks CJK/multiline, can hang)
+  const r = await runArgv({
+    file: argv.file,
+    args: argv.args,
     cwd,
     timeoutMs,
     runId,
@@ -400,6 +461,31 @@ export function stripAnsi(text: string): string {
   return text
     .replace(/\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\))/g, '')
     .replace(/\r/g, '')
+}
+
+/** Normalize vendor todo/plan payload entries → LocalCliPlanItem[] */
+export function normalizePlanItems(raw: unknown): LocalCliPlanItem[] {
+  if (!Array.isArray(raw)) return []
+  const out: LocalCliPlanItem[] = []
+  for (const entry of raw) {
+    if (typeof entry === 'string') {
+      if (entry.trim()) out.push({ text: entry.trim().slice(0, 200), status: 'pending' })
+      continue
+    }
+    if (!entry || typeof entry !== 'object') continue
+    const e = entry as Record<string, unknown>
+    const text = String(e.content ?? e.text ?? e.step ?? e.title ?? e.task ?? '').trim()
+    if (!text) continue
+    const s = String(e.status ?? '').toLowerCase()
+    const status: LocalCliPlanItem['status'] =
+      e.completed === true || s.includes('complete') || s.includes('done')
+        ? 'done'
+        : s.includes('progress') || s.includes('active')
+          ? 'active'
+          : 'pending'
+    out.push({ text: text.slice(0, 200), status })
+  }
+  return out.slice(0, 40)
 }
 
 /**
@@ -586,6 +672,14 @@ function createCliStreamParser(
             })
             return { textDelta: '' }
           }
+          // Codex 任務清單（plan tool）→ 右側面板同步
+          if (itemType === 'todo_list' || itemType === 'plan' || itemType === 'update_plan') {
+            const todos = normalizePlanItems(item.items ?? item.plan ?? item.todos)
+            if (todos.length) {
+              emit({ kind: 'plan', title: '任務清單更新', todos })
+            }
+            return { textDelta: '' }
+          }
           // other item types — light status
           if (itemType) {
             emit({
@@ -655,6 +749,17 @@ function createCliStreamParser(
           let detail = inputObj
             ? JSON.stringify(inputObj).slice(0, 400)
             : String(j.input ?? j.arguments ?? j.result ?? j.data ?? j.content ?? '').slice(0, 400)
+
+          // Claude TodoWrite / update_plan 類工具 → 任務清單快照
+          if (inputObj && /todo|plan|task/i.test(name)) {
+            const todos = normalizePlanItems(
+              inputObj.todos ?? inputObj.plan ?? inputObj.items ?? inputObj.tasks,
+            )
+            if (todos.length) {
+              emit({ kind: 'plan', tool: name, title: '任務清單更新', todos })
+              return { textDelta: '' }
+            }
+          }
 
           // Claude Write/Edit/Read tools
           const claudePath = inputObj

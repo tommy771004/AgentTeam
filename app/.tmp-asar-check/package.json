@@ -1,0 +1,17 @@
+{
+  "name": "subagents-ai",
+  "private": true,
+  "version": "1.0.0",
+  "description": "SubAgents AI — Multi-agent loop framework desktop app",
+  "author": "SubAgents AI",
+  "main": "dist-electron/main.js",
+  "type": "module",
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.18.1",
+    "simple-icons": "^11.15.0",
+    "uuid": "^14.0.1",
+    "zustand": "^5.0.14"
+  }
+}

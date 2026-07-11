@@ -8,6 +8,8 @@ import { useThreadStore } from '../store/threadStore'
 import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts'
 import { requestFocusComposer } from '../store/commandHistoryStore'
 import { getElectronBridgeStatus } from '../lib/electronBridge'
+// Vite-bundled brand mark (always in the JS asset graph — no public/ relative-path 404)
+import brandIconUrl from '../assets/subagents-icon-64.png'
 
 type NavItem = { to: string; label: string; icon: string; end?: boolean }
 type NavGroup = { title: string; items: NavItem[] }
@@ -151,9 +153,21 @@ export function Layout() {
             isMac ? 'h-11' : 'h-12'
           }`}
         >
-          <div className="w-8 h-8 rounded-[10px] bg-primary/15 border border-primary/25 flex items-center justify-center shrink-0 shadow-[0_0_20px_rgba(43,184,217,0.15)]">
-            <Icon name="hub" size={18} className="text-primary" filled />
-          </div>
+          <img
+            src={brandIconUrl}
+            alt="SubAgents AI"
+            width={32}
+            height={32}
+            className="w-8 h-8 rounded-[10px] shrink-0 object-cover shadow-[0_0_20px_rgba(43,184,217,0.15)] border border-primary/25 bg-primary/10"
+            draggable={false}
+            onError={(e) => {
+              // Fallback to public/ brand pack (dev + packaged dist/brand)
+              const img = e.currentTarget
+              if (img.dataset.fallback === '1') return
+              img.dataset.fallback = '1'
+              img.src = `${import.meta.env.BASE_URL}brand/subagents-icon-64.png`
+            }}
+          />
           {!collapsed && (
             <div className="min-w-0 animate-macos-fade">
               <div className="font-[family-name:var(--font-sora)] font-semibold text-primary text-[13px] tracking-tight truncate">

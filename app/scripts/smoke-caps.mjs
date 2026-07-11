@@ -311,25 +311,26 @@ await test('CLI approval + headless flags for all runners', async () => {
   assert.deepEqual(resolveCliApproval('cursor', 'full', false, 'build'), { mode: 'full', permissive: true })
   const fs = await import('node:fs')
   const source = fs.readFileSync(path.join(appRoot, 'electron/localCliRunner.ts'), 'utf8')
-  // Codex: non-interactive exec + JSONL (never bare TUI / never legacy-only --full-auto as sole path)
-  assert.match(source, /exec --json/)
+  const shell = fs.readFileSync(path.join(appRoot, 'electron/shellBridge.ts'), 'utf8')
+  // Direct argv spawn (not cmd.exe shell) for agent CLIs
+  assert.match(source, /buildLocalCliArgv/)
+  assert.match(source, /runArgv/)
+  assert.match(shell, /export async function runArgv/)
+  // Codex / Claude / Grok headless flags
+  assert.match(source, /'exec'/)
   assert.match(source, /--dangerously-bypass-approvals-and-sandbox/)
   assert.match(source, /--dangerously-skip-permissions/)
-  // Claude stream-json requires --verbose
   assert.match(source, /stream-json/)
   assert.match(source, /--verbose/)
-  // Grok headless
   assert.match(source, /case 'grok'/)
-  assert.match(source, /-p \$\{q\}|--single/)
-  assert.match(source, /--always-approve/)
   assert.match(source, /streaming-json/)
-  // Cursor print mode, OpenCode run
+  assert.match(source, /--always-approve/)
+  assert.match(source, /--max-turns/)
   assert.match(source, /case 'cursor'/)
   assert.match(source, /case 'opencode'/)
-  assert.match(source, /opencode.*run|run \$\{modelFlag\}/)
   assert.match(source, /stripAnsi/)
   assert.match(source, /createCliStreamParser|onStream/)
-  // No interactive bare fallbacks that hang Electron
+  // No bare shell fallback that opens TUI
   assert.doesNotMatch(source, /\$\{binQ\} \$\{modelFlag\} \$\{q\}/)
   const discover = fs.readFileSync(path.join(appRoot, 'electron/cliDiscover.ts'), 'utf8')
   assert.match(discover, /whichCodex|whichCursorAgent/)
@@ -676,6 +677,105 @@ await test('P1-D: wiring contract — hooks evaluated at all four points; saniti
   const hooks = fs.readFileSync(path.join(appRoot, 'src/agent/hooks.ts'), 'utf8')
   assert.match(hooks, /sanitizeHookRules/)
   assert.match(hooks, /no 'allow' action/i)
+})
+
+// ── Loop Engine × Hermes gap plan (Tasks 1–7) ────────────────────
+function parseDodVerdictMirror(raw) {
+  const match = (raw || '').trim().match(/\{[\s\S]*\}/)
+  if (!match) return null
+  try {
+    const obj = JSON.parse(match[0])
+    if (typeof obj.met !== 'boolean') return null
+    const confidence =
+      typeof obj.confidence === 'number' && Number.isFinite(obj.confidence)
+        ? Math.max(0, Math.min(1, obj.confidence))
+        : obj.met ? 0.85 : 0.4
+    const missing = Array.isArray(obj.missing)
+      ? obj.missing.filter((m) => typeof m === 'string' && m.trim()).slice(0, 8)
+      : []
+    return { met: obj.met, confidence, missing }
+  } catch {
+    return null
+  }
+}
+
+await test('Loop plan: DoD verdict parses and constrains semantic evaluator output', () => {
+  assert.deepEqual(
+    parseDodVerdictMirror('判定：```json\n{"met": false, "confidence": 1.4, "missing": ["缺證據"]}\n```'),
+    { met: false, confidence: 1, missing: ['缺證據'] },
+  )
+  assert.equal(parseDodVerdictMirror('{"confidence": 0.9}'), null)
+})
+
+function parseLlmPlanMirror(raw, forceLoopType) {
+  const loopTypes = ['Turn-based', 'Goal-based', 'Time-based', 'Proactive']
+  const match = (raw || '').match(/\{[\s\S]*\}/)
+  if (!match) return null
+  try {
+    const obj = JSON.parse(match[0])
+    const loopType = forceLoopType || (loopTypes.includes(obj.loopType) ? obj.loopType : 'Goal-based')
+    const steps = Array.isArray(obj.steps)
+      ? obj.steps.filter((s) => typeof s === 'string' && s.trim()).slice(0, 7)
+      : []
+    const dod = typeof obj.definitionOfDone === 'string' ? obj.definitionOfDone.trim().slice(0, 400) : ''
+    if (steps.length < 2 || !dod) return null
+    const maxIterations = typeof obj.maxIterations === 'number' && obj.maxIterations >= 1
+      ? Math.min(8, Math.round(obj.maxIterations))
+      : loopType === 'Goal-based' ? 5 : 1
+    return { loopType, steps, dod, maxIterations }
+  } catch {
+    return null
+  }
+}
+
+await test('Loop plan: LLM plan validation falls back for malformed plans', () => {
+  const plan = parseLlmPlanMirror('{"loopType":"Goal-based","steps":["查詢","比較"],"definitionOfDone":"輸出比較表","maxIterations":3}')
+  assert.equal(plan.loopType, 'Goal-based')
+  assert.equal(plan.maxIterations, 3)
+  assert.equal(parseLlmPlanMirror('{"steps":["only one"],"definitionOfDone":"x"}'), null)
+})
+
+await test('Loop plan: parser/evaluator/iteration contracts are wired', async () => {
+  const fs = await import('node:fs')
+  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+  const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
+  assert.match(engine, /from '\.\/dodEvaluator'/)
+  assert.ok(engine.includes('evaluateDoD('))
+  assert.match(engine, /from '\.\/llmParser'/)
+  assert.ok(engine.includes('parseWithLlm('))
+  assert.match(engine, /allDone && !dodMet/)
+  assert.match(engine, /上一輪 DoD 缺口/)
+  assert.match(parser, /export function buildParseResult/)
+  assert.match(parser, /個\|項\|款\|種/)
+})
+
+await test('Loop plan: memory relevance, failure learning, unattended turn, and CJK matching are wired', async () => {
+  const fs = await import('node:fs')
+  const memory = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/memory.ts'), 'utf8')
+  const prompt = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/promptBuilder.ts'), 'utf8')
+  const learning = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
+  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+  const skills = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/skills.ts'), 'utf8')
+  const intent = fs.readFileSync(path.join(appRoot, 'src/agent/intentPreload.ts'), 'utf8')
+  assert.match(memory, /buildPromptBlock\(enabled = true, objective\?: string\)/)
+  assert.match(prompt, /buildPromptBlock\(memoryOn, opts\?\.objective\)/)
+  assert.match(learning, /onGoalFailure/)
+  assert.match(engine, /noteLearningFailure/)
+  const turn = engine.slice(engine.indexOf('private async runTurnBased'), engine.indexOf('private async runGoalBased'))
+  assert.match(turn, /overrides\.unattended/)
+  assert.match(turn, /waitForUser/)
+  assert.match(skills, /export function cjkAwareHit/)
+  assert.match(intent, /[一-鿿]|\\u4e00/)
+})
+
+await test('attachments: tiny vision images are upscaled above provider minimum', async () => {
+  const fs = await import('node:fs')
+  const attachments = fs.readFileSync(path.join(appRoot, 'src/lib/chatAttachments.ts'), 'utf8')
+  assert.match(attachments, /MIN_VISION_IMAGE_PIXELS = 512/)
+  assert.match(attachments, /visionImageDimensions/)
+  assert.match(attachments, /normalizeImageAttachmentsForVision/)
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  assert.match(runExternal, /normalizeImageAttachmentsForVision/)
 })
 
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)

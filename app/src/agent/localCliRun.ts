@@ -58,6 +58,8 @@ export async function runPromptViaLocalCli(opts: {
   )
   opts.onLog?.(`approval: ${approval.note}`)
 
+  // Prefer long-lived stream subscription before invoke (if available)
+  // so early stdout is not missed; agentStore also subscribes.
   const r = await window.subagents.cli.runAgent({
     kind: opts.kind,
     binary: opts.binary,

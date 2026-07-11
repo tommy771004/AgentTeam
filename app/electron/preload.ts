@@ -454,6 +454,8 @@ const api = {
         added?: number
         removed?: number
         action?: 'edit' | 'create' | 'delete' | 'write' | 'read'
+        /** kind=plan 時的任務清單快照（右側面板同步） */
+        todos?: Array<{ text: string; status?: 'pending' | 'active' | 'done' }>
       }) => void,
     ) => {
       const handler = (_: unknown, ev: unknown) => cb(ev as Parameters<typeof cb>[0])

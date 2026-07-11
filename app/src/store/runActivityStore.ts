@@ -37,10 +37,20 @@ export type FileChangeRecord = {
   at: number
 }
 
+export type RunTaskStatus = 'pending' | 'active' | 'done' | 'failed'
+
+/** 分析出的須執行任務項（TodoWrite / update_plan / checkbox 解析）→ 右側面板即時同步 */
+export type RunTaskItem = {
+  id: string
+  text: string
+  status: RunTaskStatus
+  at: number
+}
+
 /** IPC payload from main → renderer during CLI stream */
 export type CliStreamPayload = {
   runId?: string
-  kind: RunActivityKind | 'chunk'
+  kind: RunActivityKind | 'chunk' | 'plan'
   title?: string
   detail?: string
   tool?: string
@@ -52,6 +62,8 @@ export type CliStreamPayload = {
   added?: number
   removed?: number
   action?: FileChangeRecord['action']
+  /** kind=plan：完整任務清單快照 */
+  todos?: Array<{ text: string; status?: string }>
 }
 
 interface RunActivityStore {
@@ -63,6 +75,8 @@ interface RunActivityStore {
   statusLine: string
   /** Unique file edits for final Codex-style summary card */
   fileChanges: FileChangeRecord[]
+  /** 分析出的須執行任務項 — 右側面板即時同步 */
+  tasks: RunTaskItem[]
 
   begin: (runId?: string) => void
   end: () => void
@@ -72,6 +86,10 @@ interface RunActivityStore {
   appendText: (delta: string) => void
   setStatus: (line: string) => void
   recordFileChange: (f: Omit<FileChangeRecord, 'at'> & { at?: number }) => void
+  /** 以完整快照取代任務清單（結構化 plan 事件） */
+  setTasks: (todos: Array<{ text: string; status?: string }>) => void
+  /** 文字流 checkbox 解析 → 新增或更新單項 */
+  upsertTask: (text: string, status: RunTaskStatus) => void
   handleCliStream: (payload: CliStreamPayload) => void
 }
 
@@ -85,9 +103,46 @@ const MAX_EVENTS = 120
 const MAX_THOUGHT = 12_000
 const MAX_DRAFT = 40_000
 const MAX_FILES = 80
+const MAX_TASKS = 40
 
 function basen(p: string) {
   return p.replace(/\\/g, '/').split('/').filter(Boolean).pop() || p
+}
+
+function normalizeTaskStatus(raw?: string): RunTaskStatus {
+  const s = (raw || '').toLowerCase()
+  if (s.includes('done') || s.includes('complete')) return 'done'
+  if (s.includes('progress') || s.includes('active')) return 'active'
+  if (s.includes('fail') || s.includes('error')) return 'failed'
+  return 'pending'
+}
+
+function taskKey(text: string) {
+  return text.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/** 逐行掃描文字流的 markdown checkbox（- [ ] / - [x]）*/
+const taskLineBuf: Record<'thought' | 'text', string> = { thought: '', text: '' }
+
+function resetTaskLineBuf() {
+  taskLineBuf.thought = ''
+  taskLineBuf.text = ''
+}
+
+function scanTaskLines(
+  channel: 'thought' | 'text',
+  delta: string,
+  upsert: (text: string, status: RunTaskStatus) => void,
+) {
+  taskLineBuf[channel] = (taskLineBuf[channel] + delta).slice(-4000)
+  const parts = taskLineBuf[channel].split('\n')
+  taskLineBuf[channel] = parts.pop() || ''
+  for (const raw of parts) {
+    const m = raw.trim().match(/^[-*]\s*\[([ xX])\]\s+(.+)$/)
+    if (m?.[2]?.trim()) {
+      upsert(m[2].trim().slice(0, 200), m[1] === ' ' ? 'pending' : 'done')
+    }
+  }
 }
 
 export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
@@ -98,8 +153,10 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
   draftText: '',
   statusLine: '',
   fileChanges: [],
+  tasks: [],
 
-  begin: (runId) =>
+  begin: (runId) => {
+    resetTaskLineBuf()
     set({
       runId: runId || nid('run'),
       active: true,
@@ -108,11 +165,14 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       draftText: '',
       statusLine: '啟動中…',
       fileChanges: [],
-    }),
+      tasks: [],
+    })
+  },
 
   end: () => set({ active: false, statusLine: get().statusLine || '完成' }),
 
-  clear: () =>
+  clear: () => {
+    resetTaskLineBuf()
     set({
       runId: null,
       active: false,
@@ -121,7 +181,9 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       draftText: '',
       statusLine: '',
       fileChanges: [],
-    }),
+      tasks: [],
+    })
+  },
 
   push: (ev) => {
     const item: RunActivityEvent = {
@@ -163,6 +225,46 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
 
   setStatus: (line) => set({ statusLine: line.slice(0, 200) }),
 
+  setTasks: (todos) => {
+    const now = Date.now()
+    const seen = new Set<string>()
+    const tasks: RunTaskItem[] = []
+    for (const t of todos.slice(0, MAX_TASKS)) {
+      const text = (t.text || '').trim()
+      if (!text) continue
+      const key = taskKey(text)
+      if (seen.has(key)) continue
+      seen.add(key)
+      const prev = get().tasks.find((x) => taskKey(x.text) === key)
+      tasks.push({
+        id: prev?.id || nid('task'),
+        text: text.slice(0, 200),
+        status: normalizeTaskStatus(t.status),
+        at: prev?.at || now,
+      })
+    }
+    if (tasks.length) set({ tasks })
+  },
+
+  upsertTask: (text, status) => {
+    const clean = text.trim()
+    if (!clean) return
+    const key = taskKey(clean)
+    set((s) => {
+      const idx = s.tasks.findIndex((x) => taskKey(x.text) === key)
+      if (idx >= 0) {
+        if (s.tasks[idx].status === status) return s
+        const tasks = [...s.tasks]
+        tasks[idx] = { ...tasks[idx], status }
+        return { tasks }
+      }
+      if (s.tasks.length >= MAX_TASKS) return s
+      return {
+        tasks: [...s.tasks, { id: nid('task'), text: clean.slice(0, 200), status, at: Date.now() }],
+      }
+    })
+  },
+
   recordFileChange: (f) => {
     const path = (f.path || '').trim()
     if (!path) return
@@ -195,7 +297,22 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
 
   handleCliStream: (payload) => {
     const s = get()
-    if (payload.runId && s.runId && payload.runId !== s.runId) return
+    // Global mutex = one run; accept streams while active even if runId skews
+    // (dispatch runId vs CLI-generated id). Only drop when idle / different completed run.
+    if (!s.active && s.runId && payload.runId && payload.runId !== s.runId) return
+
+    // 結構化任務清單（TodoWrite / update_plan / todo_list）→ 完整快照取代
+    if (payload.kind === 'plan') {
+      if (payload.todos?.length) {
+        get().setTasks(payload.todos)
+        get().push({
+          kind: 'status',
+          title: payload.title || '任務清單更新',
+          detail: `${payload.todos.length} 項`,
+        })
+      }
+      return
+    }
 
     if (payload.channel === 'thought' || payload.kind === 'thought') {
       const delta = payload.delta || payload.detail || ''
@@ -205,6 +322,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
           get().setStatus('思考中…')
         }
         get().appendThought(delta)
+        scanTaskLines('thought', delta, get().upsertTask)
       }
       return
     }
@@ -216,6 +334,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
           get().setStatus('產生回答…')
         }
         get().appendText(delta)
+        scanTaskLines('text', delta, get().upsertTask)
       }
       return
     }

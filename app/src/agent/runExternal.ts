@@ -188,8 +188,12 @@ export async function runExternalObjective(
   let attachments = opts.attachments
   if (attachments?.length) {
     try {
-      const { materializeAttachmentsOnDisk } = await import('../lib/chatAttachments')
+      const {
+        materializeAttachmentsOnDisk,
+        normalizeImageAttachmentsForVision,
+      } = await import('../lib/chatAttachments')
       const { useProjectStore } = await import('../store/projectStore')
+      attachments = await normalizeImageAttachmentsForVision(attachments)
       attachments = await materializeAttachmentsOnDisk(attachments, {
         projectRoot: opts.projectRoot || useProjectStore.getState().root || undefined,
         sessionId: opts.reuseThreadId || opts.meta?.scheduleJobId,
@@ -491,14 +495,60 @@ export async function runExternalObjective(
           fileMap.set(path, { path, action: /write|create/i.test(tool.tool) ? 'create' : 'edit' })
         }
       }
-      const operations = activityOperations.length ? activityOperations : fallbackOperations
-      if (operations.length || fileMap.size) {
-        thr.pushRunSummary(tid, {
-          durationMs: finalAgent.metrics?.executionMs,
-          operations,
-          files: [...fileMap.values()],
+      const stepOps = (finalAgent.steps || []).map((step, index) => ({
+        id: `step_${step.step}_${index}`,
+        kind: step.status === 'FAILED' ? 'error' : 'status',
+        title: step.description || step.action || `步驟 ${step.step}`,
+        detail:
+          step.status === 'COMPLETED'
+            ? '完成'
+            : step.status === 'FAILED'
+              ? (step.result || '失敗').slice(0, 400)
+              : step.status,
+        ok: step.status !== 'FAILED',
+      }))
+      const logOps = (finalAgent.logs || [])
+        .filter((line) => {
+          const m = line.message || ''
+          return m && !m.startsWith('$ ') && m.length < 240
         })
-      }
+        .slice(-16)
+        .map((line) => ({
+          id: line.id,
+          kind: line.level === 'ERROR' ? 'error' : line.level === 'SUCCESS' ? 'done' : 'status',
+          title: line.message.slice(0, 200),
+          detail: line.message.slice(0, 400),
+          ok: line.level !== 'ERROR',
+        }))
+      // Prefer structured stream ops → tools → steps → logs (never empty if run ran)
+      const operations =
+        activityOperations.length > 0
+          ? activityOperations
+          : fallbackOperations.length > 0
+            ? fallbackOperations
+            : stepOps.length > 0
+              ? [...stepOps, ...logOps].slice(-40)
+              : logOps
+      // Always persist a process card so chat shows more than the bare answer
+      thr.pushRunSummary(tid, {
+        durationMs: finalAgent.metrics?.executionMs,
+        operations:
+          operations.length > 0
+            ? operations
+            : [
+                {
+                  id: 'run_done',
+                  kind: status === 'success' ? 'done' : 'status',
+                  title:
+                    result.path === 'cli'
+                      ? `本機 CLI 完成（${result.kind || 'cli'}）`
+                      : `執行完成 · ${status}`,
+                  detail: (finalAgent.result || '').slice(0, 200),
+                  ok: status === 'success',
+                },
+              ],
+        files: [...fileMap.values()],
+      })
     } catch {
       /* execution summary must not break the task lifecycle */
     }

@@ -17,10 +17,11 @@
     "smoke:built": "node scripts/smoke.mjs --require-built",
     "smoke:marketplace": "vite build --config scripts/vite.plugin-e2e.config.ts && node .tmp/plugin-e2e/plugin-installer-e2e.mjs",
     "smoke:plugin-install": "vite build --config scripts/vite.plugin-e2e.config.ts && node .tmp/plugin-e2e/plugin-installer-e2e.mjs --network",
-    "dist": "npm run smoke && npm run build && npm run smoke:built && electron-builder",
-    "dist:mac": "npm run smoke && npm run build && npm run smoke:built && electron-builder --mac",
-    "dist:win": "npm run smoke && npm run build && npm run smoke:built && electron-builder --win",
-    "dist:all": "npm run smoke && npm run build && npm run smoke:built && electron-builder --mac --win"
+    "icons": "node scripts/render-icons.mjs && node scripts/make-ico.mjs",
+    "dist": "npm run icons && npm run smoke && npm run build && npm run smoke:built && electron-builder",
+    "dist:mac": "npm run icons && npm run smoke && npm run build && npm run smoke:built && electron-builder --mac",
+    "dist:win": "npm run icons && npm run smoke && npm run build && npm run smoke:built && electron-builder --win",
+    "dist:all": "npm run icons && npm run smoke && npm run build && npm run smoke:built && electron-builder --mac --win"
   },
   "dependencies": {
     "react": "^19.2.7",
@@ -54,13 +55,36 @@
     "appId": "ai.subagents.desktop",
     "productName": "SubAgents AI",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
+    "icon": "icon.ico",
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "build/icons",
+        "to": "app-icons",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "public/brand",
+        "to": "app-icons",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "app-icons/icon.ico"
+      }
+    ],
     "mac": {
+      "icon": "icons/icon.png",
       "category": "public.app-category.developer-tools",
       "target": [
         {
@@ -74,6 +98,7 @@
       "darkModeSupport": true
     },
     "win": {
+      "icon": "icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -85,7 +110,10 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "installerHeaderIcon": "icon.ico"
     }
   }
 }

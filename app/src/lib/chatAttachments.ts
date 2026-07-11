@@ -16,6 +16,8 @@ export type MultimodalContentPart =
 export const MAX_ATTACHMENTS = 4
 export const MAX_FILE_BYTES = 8 * 1024 * 1024
 export const MAX_IMAGE_EDGE = 1600
+/** Some vision providers reject images below this total pixel count. */
+export const MIN_VISION_IMAGE_PIXELS = 512
 export const MAX_TEXT_CHARS = 80_000
 /** Drop dataUrl when persisting if larger (keep name/meta for UI note) */
 export const PERSIST_DATAURL_MAX = 450_000
@@ -114,18 +116,30 @@ function readAsText(file: Blob): Promise<string> {
   })
 }
 
-/** Downscale + re-encode large images to keep tokens / localStorage sane */
-export async function compressImageFile(file: File | Blob, name: string): Promise<{
+export function visionImageDimensions(width: number, height: number): {
+  width: number
+  height: number
+} {
+  if (width <= 0 || height <= 0 || width * height >= MIN_VISION_IMAGE_PIXELS) {
+    return { width, height }
+  }
+  const scale = Math.sqrt(MIN_VISION_IMAGE_PIXELS / (width * height))
+  return {
+    width: Math.max(1, Math.ceil(width * scale)),
+    height: Math.max(1, Math.ceil(height * scale)),
+  }
+}
+
+async function normalizeImageDataUrl(sourceDataUrl: string, mimeHint: string, name: string): Promise<{
   dataUrl: string
   mimeType: string
   size: number
 }> {
-  const srcUrl = await readAsDataUrl(file)
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const el = new Image()
     el.onload = () => resolve(el)
     el.onerror = () => reject(new Error('無法解碼圖片'))
-    el.src = srcUrl
+    el.src = sourceDataUrl
   })
 
   let { width, height } = img
@@ -135,19 +149,26 @@ export async function compressImageFile(file: File | Blob, name: string): Promis
     width = Math.max(1, Math.round(width * scale))
     height = Math.max(1, Math.round(height * scale))
   }
+  const minimum = visionImageDimensions(width, height)
+  width = minimum.width
+  height = minimum.height
 
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d')
   if (!ctx) {
-    return { dataUrl: srcUrl, mimeType: file.type || 'image/png', size: file.size }
+    return {
+      dataUrl: sourceDataUrl,
+      mimeType: mimeHint || 'image/png',
+      size: Math.ceil((sourceDataUrl.length - sourceDataUrl.indexOf(',') - 1) * 0.75),
+    }
   }
   ctx.drawImage(img, 0, 0, width, height)
 
   // Prefer JPEG for photos; keep PNG for transparency-ish names
   const preferPng =
-    (file.type || '').includes('png') ||
+    (mimeHint || '').includes('png') ||
     extOf(name) === 'png' ||
     extOf(name) === 'gif' ||
     extOf(name) === 'webp'
@@ -158,6 +179,50 @@ export async function compressImageFile(file: File | Blob, name: string): Promis
       : canvas.toDataURL('image/jpeg', 0.84)
   const approxSize = Math.ceil((dataUrl.length - dataUrl.indexOf(',') - 1) * 0.75)
   return { dataUrl, mimeType, size: approxSize }
+}
+
+/** Downscale large images and upsample tiny images for provider vision limits. */
+export async function compressImageFile(file: File | Blob, name: string): Promise<{
+  dataUrl: string
+  mimeType: string
+  size: number
+}> {
+  const srcUrl = await readAsDataUrl(file)
+  return normalizeImageDataUrl(srcUrl, file.type || 'image/png', name)
+}
+
+/**
+ * Normalize externally-created attachments (Telegram, restored queue, paste)
+ * that did not pass through fileToAttachment before reaching a vision provider.
+ */
+export async function normalizeImageAttachmentsForVision(
+  attachments: ChatAttachment[] | undefined,
+): Promise<ChatAttachment[]> {
+  if (!attachments?.length) return []
+  const normalized: ChatAttachment[] = []
+  for (const attachment of attachments) {
+    if (attachment.kind !== 'image' || !attachment.dataUrl) {
+      normalized.push(attachment)
+      continue
+    }
+    try {
+      const image = await normalizeImageDataUrl(
+        attachment.dataUrl,
+        attachment.mimeType,
+        attachment.name,
+      )
+      normalized.push({
+        ...attachment,
+        dataUrl: image.dataUrl,
+        mimeType: image.mimeType,
+        size: image.size,
+      })
+    } catch {
+      // Existing behavior: unreadable images remain a path/metadata fallback.
+      normalized.push(attachment)
+    }
+  }
+  return normalized
 }
 
 export async function fileToAttachment(file: File): Promise<ChatAttachment> {
@@ -369,7 +434,10 @@ export async function hydrateAttachmentsFromDisk(
     try {
       const r = await read(a.filePath)
       if (r.ok && r.dataUrl) {
-        out.push({ ...a, dataUrl: r.dataUrl })
+        const [normalized] = await normalizeImageAttachmentsForVision([
+          { ...a, dataUrl: r.dataUrl },
+        ])
+        out.push(normalized)
       } else {
         out.push(a)
       }

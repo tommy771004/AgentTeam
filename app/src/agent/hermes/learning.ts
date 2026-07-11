@@ -123,6 +123,33 @@ ${stepsMd || '1. 解析目標\n2. 執行工具\n3. 驗證 DoD'}
     }
   }
 
+  /** Record a compact lesson when a run terminates unsuccessfully. */
+  onGoalFailure(input: {
+    objective: string
+    haltReason: string
+    loopType: string
+    failedTools?: string[]
+    memoryEnabled?: boolean
+    memoryWriteEnabled?: boolean
+  }) {
+    const canWrite =
+      input.memoryEnabled !== false && input.memoryWriteEnabled !== false
+    if (!canWrite) return
+    const toolNote = input.failedTools?.length
+      ? `；失敗工具：${input.failedTools.slice(0, 5).join(', ')}`
+      : ''
+    memoryStore.appendMemory(
+      `目標失敗：${input.objective.slice(0, 100)}（${input.loopType}）原因：${input.haltReason.slice(0, 120)}${toolNote}`,
+      ['failure', 'auto'],
+    )
+    this.emit({
+      id: uuid(),
+      type: 'memory_saved',
+      message: '已將失敗教訓寫入記憶（同類目標下次會帶入相關記憶）。',
+      at: new Date().toISOString(),
+    })
+  }
+
   approveSkillDraft(name: string): boolean {
     const draft = this.pendingSkillDrafts.find((d) => d.name === name)
     if (!draft) return false

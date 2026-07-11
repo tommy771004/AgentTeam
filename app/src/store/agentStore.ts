@@ -292,6 +292,22 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           level,
           message,
         })
+        // Mirror logs into center process feed even when CLI stream IPC is missing
+        try {
+          void import('./runActivityStore').then(({ useRunActivityStore }) => {
+            const short = message.slice(0, 200)
+            if (!short || short.startsWith('$ ')) return
+            useRunActivityStore.getState().push({
+              kind: level === 'ERROR' ? 'error' : level === 'SUCCESS' ? 'done' : 'status',
+              title: short,
+              detail: message.slice(0, 500),
+              ok: level !== 'ERROR',
+            })
+            useRunActivityStore.getState().setStatus(short)
+          })
+        } catch {
+          /* ignore */
+        }
         // progress: start ~15, climb with logs/draft toward 90
         const p = 15 + Math.min(70, logs.length * 2 + Math.floor(draftChars / 80))
         pushLiveAgent(p)
@@ -444,7 +460,12 @@ export const useAgentStore = create<AgentStore>((set, get) => {
               action: 'local-cli',
               description: `本機 ${opts.kind} CLI`,
               status: r.ok ? 'COMPLETED' : 'FAILED',
-              result: r.output.slice(0, 4000),
+              // 完整輸出放主對話 assistant 泡泡；右側面板只留摘要
+              result: r.ok
+                ? r.output.trim()
+                  ? `輸出 ${r.output.length.toLocaleString()} 字 · 完整內容見主對話`
+                  : '完成（無輸出）'
+                : (r.error || r.output || 'failed').slice(0, 400),
               durationMs: Date.now() - t0,
               assignedAgent: opts.kind,
               modelUsed: modelLabel,

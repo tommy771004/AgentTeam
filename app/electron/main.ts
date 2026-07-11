@@ -114,6 +114,197 @@ let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
 
+/**
+ * Resolve SubAgents brand icon for window / tray / notifications.
+ *
+ * Search order (real filesystem paths first — Windows shell cannot use asar paths):
+ * 1. Packaged extraResources → resources/app-icons/ (from build/icons + public/brand)
+ * 2. Dev build/icons + public/brand (npm run icons output)
+ * 3. Vite dist/brand (copied from public/)
+ *
+ * Master: build/icons/icon.svg → `npm run icons` → build/icons/* + public/favicon* + public/brand/*
+ * Windows taskbar: must use a real .ico path + setIcon(); a bad BrowserWindow.icon
+ * overrides the .exe resource and falls back to the default Electron atom.
+ */
+function iconSearchDirs(): string[] {
+  const distDir = process.env.DIST || path.join(__dirname, '../dist')
+  const dirs = [
+    // packaged extraResources (outside asar — preferred)
+    path.join(process.resourcesPath, 'app-icons'),
+    path.join(process.resourcesPath, 'icons'),
+    // dev / pre-package
+    path.join(__dirname, '../build/icons'),
+    path.join(__dirname, '../build'),
+    path.join(__dirname, '../public/brand'),
+    path.join(__dirname, '../public'),
+    // Vite public → dist
+    path.join(distDir, 'brand'),
+    distDir,
+  ]
+  // asar / app path last (readable via Electron fs, but bad for native HICON)
+  try {
+    const appPath = app.getAppPath()
+    dirs.push(
+      path.join(appPath, 'build', 'icons'),
+      path.join(appPath, 'build'),
+      path.join(appPath, 'dist', 'brand'),
+      path.join(appPath, 'dist'),
+      path.join(appPath, 'public', 'brand'),
+      path.join(appPath, 'public'),
+    )
+  } catch {
+    /* app not ready */
+  }
+  return dirs
+}
+
+function resolveAppIconPath(prefer: 'window' | 'tray' = 'window'): string | null {
+  const names =
+    prefer === 'tray'
+      ? [
+          'icon-32.png',
+          'icon-64.png',
+          'icon-256.png',
+          'icon.png',
+          'subagents-icon-32.png',
+          'subagents-icon-64.png',
+          'subagents-icon-512.png',
+          'favicon-32.png',
+        ]
+      : process.platform === 'win32'
+        ? [
+            'icon.ico',
+            'icon-256.png',
+            'icon-512.png',
+            'icon.png',
+            'icon-128.png',
+            'subagents-icon-512.png',
+            'subagents-icon-1024.png',
+            'subagents-icon-128.png',
+            'subagents-icon-64.png',
+          ]
+        : [
+            'icon-256.png',
+            'icon-512.png',
+            'icon.png',
+            'icon-128.png',
+            'subagents-icon-512.png',
+            'subagents-icon-1024.png',
+            'subagents-icon-128.png',
+            'icon.ico',
+          ]
+
+  for (const dir of iconSearchDirs()) {
+    for (const n of names) {
+      const p = path.join(dir, n)
+      try {
+        if (fs.existsSync(p) && fs.statSync(p).isFile()) return p
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Windows shell APIs need a real filesystem path (not inside asar).
+ * Copy the brand icon into userData so setIcon always has a stable path.
+ */
+function materializeWindowsIcon(): string | null {
+  if (process.platform !== 'win32') return null
+  const src = resolveAppIconPath('window')
+  if (!src) return null
+  try {
+    const inAsar = src.includes(`${path.sep}app.asar${path.sep}`) || src.includes('/app.asar/')
+    // Prefer already-outside-asar file that nativeImage can load
+    if (!inAsar) {
+      const img = nativeImage.createFromPath(src)
+      if (!img.isEmpty()) return src
+    }
+    const destDir = path.join(app.getPath('userData'), 'app-icons')
+    fs.mkdirSync(destDir, { recursive: true })
+    const outName = /\.ico$/i.test(src) ? 'icon.ico' : path.basename(src)
+    const outPath = path.join(destDir, outName)
+    fs.copyFileSync(src, outPath)
+    const check = nativeImage.createFromPath(outPath)
+    if (check.isEmpty()) {
+      console.warn('[icon] materialize produced empty image', outPath)
+      return src
+    }
+    return outPath
+  } catch (e) {
+    console.warn('[icon] materialize failed', e)
+    return src
+  }
+}
+
+function loadAppIcon(prefer: 'window' | 'tray' = 'window'): Electron.NativeImage {
+  const p =
+    prefer === 'window' && process.platform === 'win32'
+      ? materializeWindowsIcon() || resolveAppIconPath(prefer)
+      : resolveAppIconPath(prefer)
+  if (p) {
+    const img = nativeImage.createFromPath(p)
+    if (!img.isEmpty()) {
+      if (prefer === 'tray' && process.platform === 'win32') {
+        return img.resize({ width: 32, height: 32 })
+      }
+      return img
+    }
+    console.warn('[icon] nativeImage empty for', p)
+  }
+  return nativeImage.createEmpty()
+}
+
+/** BrowserWindow.icon option — only set when we have a verified non-empty image. */
+function browserWindowIconOption(): { icon: string | Electron.NativeImage } | Record<string, never> {
+  if (process.platform === 'win32') {
+    const iconPath = materializeWindowsIcon() || resolveAppIconPath('window')
+    if (!iconPath) return {}
+    const img = nativeImage.createFromPath(iconPath)
+    if (img.isEmpty()) {
+      console.warn('[icon] skip BrowserWindow.icon — empty image at', iconPath)
+      return {}
+    }
+    // Path string for .ico is most reliable for Windows chrome; NativeImage for PNG.
+    if (/\.ico$/i.test(iconPath)) return { icon: iconPath }
+    return { icon: img }
+  }
+  const iconPath = resolveAppIconPath('window')
+  if (!iconPath) return {}
+  const img = nativeImage.createFromPath(iconPath)
+  if (img.isEmpty()) return {}
+  return { icon: img }
+}
+
+/** Apply icon after window exists — constructor alone is not enough on some Win builds. */
+function applyWindowIcon(win: BrowserWindow) {
+  if (process.platform === 'win32') {
+    const iconPath = materializeWindowsIcon() || resolveAppIconPath('window')
+    if (iconPath) {
+      try {
+        win.setIcon(iconPath)
+        console.log('[icon] setIcon ←', iconPath)
+        return
+      } catch (e) {
+        console.warn('[icon] setIcon(path) failed', e)
+      }
+    }
+  }
+  const img = loadAppIcon('window')
+  if (!img.isEmpty()) {
+    try {
+      win.setIcon(img)
+      console.log('[icon] setIcon ← NativeImage', resolveAppIconPath('window'))
+    } catch (e) {
+      console.warn('[icon] setIcon(image) failed', e)
+    }
+  } else {
+    console.warn('[icon] no brand icon found — window may show Electron default')
+  }
+}
+
 function getDataDir(sub = 'executions') {
   const dir = path.join(app.getPath('userData'), sub)
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
@@ -244,13 +435,16 @@ function createAppMenu() {
 }
 
 function createTray() {
-  // Minimal 16x16 cyan-ish PNG (1x)
-  const png = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKElEQVQ4T2NkYGD4z0ABYBzVMKoBBgP+/ydFG6MaRjWM5gE0NQAAK3YB/0m3w0sAAAAASUVORK5CYII=',
-    'base64',
-  )
-  const icon = nativeImage.createFromBuffer(png)
-  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon)
+  let icon = loadAppIcon('tray')
+  if (icon.isEmpty()) {
+    // Fallback 1x1 only if brand assets missing
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKElEQVQ4T2NkYGD4z0ABYBzVMKoBBgP+/ydFG6MaRjWM5gE0NQAAK3YB/0m3w0sAAAAASUVORK5CYII=',
+      'base64',
+    )
+    icon = nativeImage.createFromBuffer(png)
+  }
+  tray = new Tray(icon)
   tray.setToolTip('SubAgents AI')
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -288,6 +482,14 @@ function createTray() {
 }
 
 function createWindow() {
+  const winIconOpt = browserWindowIconOption()
+  if (winIconOpt.icon && typeof winIconOpt.icon === 'string') {
+    console.log('[icon] BrowserWindow ctor ←', winIconOpt.icon)
+  } else if (winIconOpt.icon) {
+    console.log('[icon] BrowserWindow ctor ← NativeImage', resolveAppIconPath('window'))
+  } else {
+    console.warn('[icon] BrowserWindow ctor — no icon option (exe resource / setIcon fallback)')
+  }
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -295,6 +497,8 @@ function createWindow() {
     minHeight: 700,
     title: 'SubAgents AI',
     backgroundColor: '#0b1326',
+    // Window / taskbar icon (dev + packaged). Packaged .exe also uses build/icon.ico.
+    ...winIconOpt,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     // Align with sidebar titlebar spacer (see Layout.tsx .mac-traffic-spacer)
     trafficLightPosition: process.platform === 'darwin' ? { x: 14, y: 14 } : undefined,
@@ -308,12 +512,18 @@ function createWindow() {
     show: false,
   })
 
+  // Constructor icon is flaky on Windows — re-apply after create + before show
+  applyWindowIcon(mainWindow)
+
   mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
     console.error('[preload-error]', preloadPath, error)
   })
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      applyWindowIcon(mainWindow)
+      mainWindow.show()
+    }
   })
 
   // Close → tray (background scheduler keeps running)
@@ -322,9 +532,11 @@ function createWindow() {
       e.preventDefault()
       mainWindow?.hide()
       if (Notification.isSupported()) {
+        const nIcon = loadAppIcon('tray')
         new Notification({
           title: 'SubAgents AI',
           body: '已在背景執行，排程仍會持續運作。',
+          ...(nIcon.isEmpty() ? {} : { icon: nIcon }),
         }).show()
       }
     }
@@ -346,6 +558,10 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Windows taskbar grouping + correct Jump List icon identity
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('ai.subagents.desktop')
+  }
   createAppMenu()
   createWindow()
   createTray()
@@ -1126,19 +1342,35 @@ ipcMain.handle(
     const cwd =
       input.cwd && fs.existsSync(input.cwd) ? input.cwd : workspaceRoot()
     // Cap attachment payload size at IPC boundary (avoid huge hangs)
-    const attachments = (input.attachments || []).slice(0, 4).map((a) => ({
-      name: String(a.name || 'file').slice(0, 200),
-      mimeType: a.mimeType,
-      kind: a.kind,
-      dataUrl:
+    const { isVisionImageTooSmall } = await import('./attachmentStore')
+    const attachments = (input.attachments || []).slice(0, 4).map((a) => {
+      const name = String(a.name || 'file').slice(0, 200)
+      const dataUrl =
         typeof a.dataUrl === 'string' && a.dataUrl.length < 12_000_000
           ? a.dataUrl
-          : undefined,
-      textContent:
-        typeof a.textContent === 'string'
-          ? a.textContent.slice(0, 200_000)
-          : undefined,
-    }))
+          : undefined
+      // Final main-process gate: an outdated renderer or a restored queue must
+      // never pass a tiny image to Grok/other vision CLIs and fail the whole run.
+      if (a.kind === 'image' && dataUrl && isVisionImageTooSmall(dataUrl)) {
+        return {
+          name: `${name}.txt`,
+          mimeType: 'text/plain',
+          kind: 'text' as const,
+          textContent:
+            `圖片「${name}」低於 vision 最小尺寸（512 總像素），已略過視覺傳送以避免 CLI 400 錯誤。`,
+        }
+      }
+      return {
+        name,
+        mimeType: a.mimeType,
+        kind: a.kind,
+        dataUrl,
+        textContent:
+          typeof a.textContent === 'string'
+            ? a.textContent.slice(0, 200_000)
+            : undefined,
+      }
+    })
     return runLocalCliAgent({
       ...input,
       cwd,

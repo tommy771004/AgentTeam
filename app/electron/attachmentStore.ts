@@ -7,6 +7,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 
+/** Mirrors the lowest vision-provider limit currently enforced by Grok. */
+export const MIN_VISION_IMAGE_PIXELS = 512
+
 export type PersistableAttachment = {
   id?: string
   name: string
@@ -55,6 +58,66 @@ export function writeDataUrlToFile(filePath: string, dataUrl: string): number {
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
   fs.writeFileSync(filePath, buf)
   return buf.byteLength
+}
+
+/** Read dimensions from common image headers without adding a native dependency. */
+export function imagePixelCountFromDataUrl(dataUrl: string): number | null {
+  const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(dataUrl)
+  if (!match) return null
+  try {
+    const buffer = match[2]
+      ? Buffer.from(match[3] || '', 'base64')
+      : Buffer.from(decodeURIComponent(match[3] || ''), 'utf8')
+    if (buffer.length < 10) return null
+
+    // PNG IHDR
+    if (buffer.length >= 24 && buffer.subarray(1, 4).toString('ascii') === 'PNG') {
+      return buffer.readUInt32BE(16) * buffer.readUInt32BE(20)
+    }
+    // GIF logical screen descriptor
+    if (buffer.subarray(0, 3).toString('ascii') === 'GIF') {
+      return buffer.readUInt16LE(6) * buffer.readUInt16LE(8)
+    }
+    // WebP extended header (VP8X)
+    if (
+      buffer.length >= 30 &&
+      buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      buffer.subarray(8, 12).toString('ascii') === 'WEBP' &&
+      buffer.subarray(12, 16).toString('ascii') === 'VP8X'
+    ) {
+      const width = 1 + buffer.readUIntLE(24, 3)
+      const height = 1 + buffer.readUIntLE(27, 3)
+      return width * height
+    }
+    // JPEG Start Of Frame markers
+    if (buffer[0] === 0xff && buffer[1] === 0xd8) {
+      let offset = 2
+      while (offset + 9 < buffer.length) {
+        if (buffer[offset] !== 0xff) {
+          offset += 1
+          continue
+        }
+        const marker = buffer[offset + 1]
+        offset += 2
+        if (marker === 0xd8 || marker === 0xd9) continue
+        if (offset + 2 > buffer.length) break
+        const length = buffer.readUInt16BE(offset)
+        if (length < 2 || offset + length > buffer.length) break
+        if (marker >= 0xc0 && marker <= 0xc3) {
+          return buffer.readUInt16BE(offset + 3) * buffer.readUInt16BE(offset + 5)
+        }
+        offset += length
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+export function isVisionImageTooSmall(dataUrl: string): boolean {
+  const pixels = imagePixelCountFromDataUrl(dataUrl)
+  return pixels != null && pixels < MIN_VISION_IMAGE_PIXELS
 }
 
 function resolveBaseDir(projectRoot?: string): string {
@@ -106,8 +169,10 @@ export function materializeAttachments(
   for (const att of attachments) {
     i += 1
     const id = att.id || `att_${i}`
-    // Already on disk and still exists
-    if (att.filePath && fs.existsSync(att.filePath)) {
+    // Existing disk paths are reusable only when no fresh payload was provided.
+    // A renderer may have re-encoded a tiny image for a provider's vision minimum;
+    // retaining the old path here would silently send the original 16×16 file.
+    if (att.filePath && fs.existsSync(att.filePath) && !att.dataUrl && att.textContent == null) {
       items.push({
         ...att,
         id,

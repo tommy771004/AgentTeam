@@ -20,7 +20,20 @@ const GOAL_KEYWORDS = [
   'complete',
   'report',
   'summary',
+  '找',
+  '分析',
+  '研究',
+  '比較',
+  '整理',
+  '彙整',
+  '產生',
+  '建立',
+  '報告',
+  '摘要',
+  '調查',
 ]
+
+const DOD_COUNT_RE = /(\d+)\s*(?:個|項|款|種|items?|tools?|options?|examples?|篇|筆)/i
 
 const TIME_KEYWORDS = [
   'daily',
@@ -57,7 +70,10 @@ function classifyLoopType(input: string): LoopType {
 
   if (TIME_KEYWORDS.some((k) => lower.includes(k) || input.includes(k))) return 'Time-based'
   if (PROACTIVE_KEYWORDS.some((k) => lower.includes(k) || input.includes(k))) return 'Proactive'
-  if (GOAL_KEYWORDS.some((k) => lower.includes(k)) || input.length > 40) return 'Goal-based'
+  if (
+    GOAL_KEYWORDS.some((k) => lower.includes(k) || input.includes(k)) ||
+    input.length > 40
+  ) return 'Goal-based'
 
   // Short imperative → turn-based
   return 'Turn-based'
@@ -135,7 +151,7 @@ function deriveDoD(input: string, loopType: LoopType, stepCount: number): string
   if (loopType === 'Proactive') return 'Action executed successfully based on exact event parameters'
 
   // Goal-based heuristics
-  const threeItems = input.match(/(\d+)\s+/i)
+  const threeItems = input.match(DOD_COUNT_RE)
   if (threeItems) {
     return `Output contains exactly ${threeItems[1]} distinct items with required fields populated`
   }
@@ -180,6 +196,23 @@ export function parseUserRequest(
     maxIterations = Math.max(maxIterations, 5)
   }
 
+  return buildParseResult(
+    objective,
+    loopType,
+    sequence,
+    deriveDoD(objective, loopType, sequence.length),
+    maxIterations,
+  )
+}
+
+/** Shared assembly for heuristic and LLM parsers (03 schema → ParseResult). */
+export function buildParseResult(
+  objective: string,
+  loopType: LoopType,
+  sequence: string[],
+  definitionOfDone: string,
+  maxIterations: number,
+): ParseResult {
   const config: LoopConfiguration = {
     loopType,
     trigger:
@@ -191,7 +224,7 @@ export function parseUserRequest(
             ? 'System clock reaches predefined timestamp'
             : 'Event payload matches boolean criteria',
     executionSequence: sequence,
-    definitionOfDone: deriveDoD(objective, loopType, sequence.length),
+    definitionOfDone,
     maxIterations,
     fallbackProtocol:
       loopType === 'Goal-based'
@@ -202,7 +235,7 @@ export function parseUserRequest(
 
   const steps: ExecutionStep[] = sequence.map((action, i) => ({
     step: i + 1,
-    action: action.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
+    action: action.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_一-鿿]/g, ''),
     description: action,
     status: 'PENDING' as const,
   }))

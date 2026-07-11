@@ -403,6 +403,8 @@ export interface LlmSettings {
   webSearchEnabled: boolean
   /** Use OpenAI function-calling multi-round tool loop when LLM is on */
   functionCalling: boolean
+  /** LLM 解析任務計畫（規格 03）；關閉時只使用啟發式 parser。 */
+  llmParseEnabled?: boolean
   /** Halt loop if tool payload exceeds maxToolPayloadKb (else truncate) */
   haltOnPayloadOverflow: boolean
   maxToolPayloadKb: number

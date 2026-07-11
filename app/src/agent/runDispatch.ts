@@ -23,6 +23,7 @@ import {
   defaultGoalForAttachments,
   hydrateAttachmentsFromDisk,
   materializeAttachmentsOnDisk,
+  normalizeImageAttachmentsForVision,
 } from '../lib/chatAttachments'
 
 export type DispatchResult = {
@@ -96,6 +97,7 @@ export async function dispatchThreadTask(
 
   // Materialize + hydrate for vision / CLI shared paths
   if (attachments.length) {
+    attachments = await normalizeImageAttachmentsForVision(attachments)
     attachments = await materializeAttachmentsOnDisk(attachments, {
       projectRoot: projectRoot || undefined,
       sessionId: tid || undefined,

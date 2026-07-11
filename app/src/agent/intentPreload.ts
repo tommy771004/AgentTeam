@@ -19,6 +19,17 @@ function scoreHay(hay: string, objective: string): number {
     if (w.length < 3) continue
     if (lower.includes(w)) score += w.length > 5 ? 2 : 1
   }
+  // Chinese has no reliable whitespace boundary. Score at most once per CJK
+  // sequence to avoid a long description overpowering every other signal.
+  const cjkSequences = hay.match(/[一-鿿]{2,}/g) || []
+  for (const sequence of cjkSequences) {
+    for (let index = 0; index + 2 <= sequence.length; index++) {
+      if (objective.includes(sequence.slice(index, index + 2))) {
+        score += 2
+        break
+      }
+    }
+  }
   return score
 }
 

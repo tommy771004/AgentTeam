@@ -4,6 +4,7 @@ import { CommandComposer } from '../components/CommandComposer'
 import { ThreadSidebar } from '../components/ThreadSidebar'
 import { ModelDepthMenu } from '../components/ModelDepthMenu'
 import { ApprovalModeMenu } from '../components/ApprovalModeMenu'
+import { ProjectContextBar } from '../components/ProjectContextBar'
 import { InlineRunPanel } from '../components/InlineRunPanel'
 import { RunProcessFeed } from '../components/RunProcessFeed'
 import { TerminalPanel } from '../components/TerminalPanel'
@@ -348,11 +349,12 @@ export function ProtocolsPage() {
                       <>
                         {head.map(renderBubble)}
                         {midSystems.map(renderBubble)}
-                        {midAssistants.map(renderBubble)}
+                        {/* Live process sits ABOVE the final answer (Codex order) */}
                         <RunProcessFeed
                           depthLabel={depthDef.label}
                           onOpenPanel={() => setShowRunPanel(true)}
                         />
+                        {midAssistants.map(renderBubble)}
                       </>
                     )
                   })()}
@@ -360,8 +362,9 @@ export function ProtocolsPage() {
               )}
             </div>
 
-            {/* 對話只保留輸入；其餘控制集中在左下＋選單。 */}
-            <div className="shrink-0 w-full pt-3 pb-4">
+            {/* 專案 pill 置於輸入上方；其餘次要控制集中在左下＋選單。 */}
+            <div className="shrink-0 w-full pt-3 pb-4 space-y-2">
+              <ProjectContextBar />
               <CommandComposer
                 value={draftInput}
                 onChange={setDraftInput}

@@ -27,6 +27,10 @@ import {
   quoteShellArg,
   shellCommandSpec,
 } from '../electron/platformProcess.ts'
+import {
+  imagePixelCountFromDataUrl,
+  isVisionImageTooSmall,
+} from '../electron/attachmentStore.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -171,6 +175,16 @@ await test('platformProcess path + shell helpers', () => {
   const spec = shellCommandSpec('echo hi')
   assert.ok(spec.file)
   assert.ok(Array.isArray(spec.args))
+})
+
+await test('tiny vision image is detected at the Electron CLI boundary', () => {
+  const png = Buffer.alloc(24)
+  png.write('\x89PNG\r\n\x1a\n', 0, 'binary')
+  png.writeUInt32BE(16, 16)
+  png.writeUInt32BE(16, 20)
+  const url = `data:image/png;base64,${png.toString('base64')}`
+  assert.equal(imagePixelCountFromDataUrl(url), 256)
+  assert.equal(isVisionImageTooSmall(url), true)
 })
 
 console.log(`\nproduction modules: ${passed} passed`)

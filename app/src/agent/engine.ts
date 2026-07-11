@@ -18,6 +18,8 @@ import type {
   ToolCallRecord,
 } from './types'
 import { parseUserRequest } from './parser'
+import { evaluateDoD } from './dodEvaluator'
+import { parseWithLlm } from './llmParser'
 import { evaluateSafety, formatPayloadForDisplay } from './safety'
 import { emptyKnowledge, extractKnowledge } from './knowledge'
 import {
@@ -395,6 +397,31 @@ export class AgentLoopEngine {
       this.state.objective = parsed.objective
       this.state.loopConfig = parsed.config
       this.state.steps = parsed.steps
+      // 規格 03：將啟發式 schema 精煉成貼合目標的 LLM 計畫；任何失敗皆保留 fallback。
+      if (this.useLlm() && this.settings.llmParseEnabled !== false) {
+        try {
+          const refined = await parseWithLlm(
+            withRoleModel(this.settings, 'orchestrator'),
+            rawInput,
+            parsed.config.loopType,
+          )
+          if (refined) {
+            // Settings / runtime override owns the iteration budget, not parser output.
+            refined.config.maxIterations = parsed.config.maxIterations
+            this.state.loopConfig = refined.config
+            this.state.steps = refined.steps
+            this.log(
+              'INFO',
+              `LLM 解析：${refined.steps.length} steps · DoD=${refined.config.definitionOfDone.slice(0, 80)}`,
+            )
+          }
+        } catch (e) {
+          this.log(
+            'WARN',
+            `LLM 解析失敗，使用啟發式計畫：${e instanceof Error ? e.message : e}`,
+          )
+        }
+      }
       this.state.subAgents = this.spawnSubAgents(parsed.config.loopType)
       if (forceLoopType) {
         this.log(
@@ -1222,10 +1249,14 @@ export class AgentLoopEngine {
     this.state.confidence = Math.max(this.state.confidence, 0.92)
     this.state.result = output
     this.state.reportTitle = 'Turn Result'
-    this.log('SUCCESS', 'Action completed. Awaiting user validation (ACK).')
-
-    await this.waitForUser()
-    if (this.aborted) return
+    if (this.overrides.unattended === true) {
+      // 排程/webhook 沒有使用者可 ACK；若等待將永久占住全域單一執行鎖。
+      this.log('WARN', '無人值守 Turn-based：跳過人工 ACK，自動確認')
+    } else {
+      this.log('SUCCESS', 'Action completed. Awaiting user validation (ACK).')
+      await this.waitForUser()
+      if (this.aborted) return
+    }
 
     this.state.status = 'success'
     this.state.progress = 100
@@ -1282,8 +1313,36 @@ export class AgentLoopEngine {
       if (brokeEarly) continue
 
       const allDone = this.state.steps.every((s) => s.status === 'COMPLETED')
-      const confidenceOk = this.state.confidence >= this.minConfidence()
-      const dodMet = allDone && confidenceOk
+      let dodMet = allDone && this.state.confidence >= this.minConfidence()
+      let missing: string[] = []
+
+      // 規格 02 Pattern 2：由 validator 對實際產出做語意驗收。
+      // 模擬模式或模型輸出失效時維持既有 confidence fallback。
+      if (allDone && this.useLlm()) {
+        try {
+          const verdict = await evaluateDoD(
+            withRoleModel(this.settings, 'analyst'),
+            this.state.objective,
+            this.state.loopConfig.definitionOfDone,
+            this.stepOutputs,
+          )
+          dodMet = verdict.met
+          missing = verdict.missing
+          this.state.confidence = verdict.confidence
+          this.state.tokensUsed += verdict.tokensUsed
+          this.state.metrics.apiCredits = this.state.tokensUsed
+          this.log(
+            'EVAL',
+            `DoD 語意驗收：met=${verdict.met} confidence=${verdict.confidence.toFixed(2)}` +
+              (missing.length ? ` · 缺口：${missing.join(' | ').slice(0, 300)}` : ''),
+          )
+        } catch (e) {
+          this.log(
+            'WARN',
+            `DoD 語意驗收失敗，回退步驟/信心啟發式：${e instanceof Error ? e.message : e}`,
+          )
+        }
+      }
 
       this.log(
         'EVAL',
@@ -1301,13 +1360,28 @@ export class AgentLoopEngine {
         this.log('ERROR', `Max iterations (${max}) reached without meeting DoD.`)
         this.log('WARN', this.state.loopConfig.fallbackProtocol)
         this.setSubAgent('Manager', 'error')
+        this.noteLearningFailure(this.state.loopConfig.loopType, this.state.haltReason)
         this.emit()
         return
       }
 
-      this.state.steps = this.state.steps.map((s) =>
-        s.status === 'COMPLETED' ? s : { ...s, status: 'PENDING' as const },
-      )
+      if (allDone && !dodMet) {
+        // 全完成但 DoD 未達：全部重跑，避免下一輪 0 steps 空轉。
+        if (missing.length) {
+          this.stepOutputs.push(
+            `### 上一輪 DoD 缺口（本輪必須補齊）\n${missing.map((item) => `- ${item}`).join('\n')}`,
+          )
+          this.log('PROCESS', `迭代回饋：${missing.length} 項缺口已注入下一輪上下文`)
+        }
+        this.state.steps = this.state.steps.map((step) => ({
+          ...step,
+          status: 'PENDING' as const,
+        }))
+      } else {
+        this.state.steps = this.state.steps.map((step) =>
+          step.status === 'COMPLETED' ? step : { ...step, status: 'PENDING' as const },
+        )
+      }
       this.emit()
     }
   }
@@ -1411,6 +1485,7 @@ export class AgentLoopEngine {
       this.state.reportTitle = opts.reportTitle
       this.setSubAgent('Manager', 'error')
       this.log('ERROR', this.state.haltReason)
+      this.noteLearningFailure(opts.loopType, this.state.haltReason)
       this.emit()
       return
     }
@@ -1495,6 +1570,28 @@ export class AgentLoopEngine {
       this.log('INFO', '學習迴圈：已產生技能草稿／記憶摘要（見學習中心）')
     } catch {
       /* non-fatal */
+    }
+  }
+
+  /** Shared failure-lesson hook for max iterations and failed delivery runs. */
+  private noteLearningFailure(loopType: string, haltReason: string) {
+    try {
+      learningLoop.onGoalFailure({
+        objective: this.state.objective,
+        haltReason,
+        loopType,
+        failedTools: [
+          ...new Set((this.state.toolCalls || []).filter((tool) => !tool.ok).map((tool) => tool.tool)),
+        ],
+        memoryEnabled: this.settings.memoryEnabled,
+        memoryWriteEnabled:
+          this.settings.memoryWriteEnabled !== false &&
+          this.overrides.temporary !== true &&
+          this.settings.temporaryChatDefault !== true,
+      })
+      this.log('INFO', '學習迴圈：已記錄失敗教訓（見學習中心／記憶）')
+    } catch {
+      /* learning must never alter task termination */
     }
   }
 

@@ -106,7 +106,9 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
                 </p>
               )}
               {step.result && (
-                <p className="text-sm text-on-surface-variant mt-1">{step.result}</p>
+                <p className="text-sm text-on-surface-variant mt-1 whitespace-pre-wrap break-words line-clamp-6">
+                  {step.result}
+                </p>
               )}
               {isActive && (
                 <p className="text-sm text-primary/70 mt-1 flex items-center gap-1">

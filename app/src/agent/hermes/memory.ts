@@ -87,8 +87,8 @@ export class MemoryStore {
     this.entries = []
   }
 
-  /** Volatile prompt block */
-  buildPromptBlock(enabled = true): string {
+  /** Volatile prompt block; objective adds the most relevant non-recent memories. */
+  buildPromptBlock(enabled = true, objective?: string): string {
     if (!enabled) {
       return '## 持久記憶（Memory）\n（記憶已關閉，不帶入跨對話上下文。）'
     }
@@ -105,6 +105,16 @@ export class MemoryStore {
         '### 近期條目',
         ...recent.map((e) => `- ${e.text.slice(0, 200)}`),
       )
+    }
+    if (objective?.trim()) {
+      const recentIds = new Set(recent.map((entry) => entry.id))
+      const related = this.search(objective, 3).filter((entry) => !recentIds.has(entry.id))
+      if (related.length) {
+        parts.push(
+          '### 與本目標相關記憶',
+          ...related.map((entry) => `- ${entry.text.slice(0, 200)}`),
+        )
+      }
     }
     if (parts.length === 1) {
       parts.push('（尚無記憶。重要偏好請用 memory_append 寫入。）')

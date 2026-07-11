@@ -1572,6 +1572,16 @@ export function SettingsPage() {
                 }
               />
               <SettingsRow
+                title="LLM 任務解析"
+                description="以 LLM 產生貼合目標的步驟與可量測 DoD（規格 03）；失敗時回退啟發式模板"
+                control={
+                  <SettingsToggle
+                    checked={settings.llmParseEnabled !== false}
+                    onChange={(v) => set({ llmParseEnabled: v })}
+                  />
+                }
+              />
+              <SettingsRow
                 title="Capability 漸進披露"
                 description="Pydantic AI 2.0 風格：工具+runbook 打包為 capability，先列目錄，模型 load_capability 後才展開（省 token、較可控）"
                 control={

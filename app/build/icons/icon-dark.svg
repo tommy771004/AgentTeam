@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SubAgents AI — dark tile variant (matches app chrome #0b1326) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none" role="img" aria-label="SubAgents AI">
+  <defs>
+    <linearGradient id="tile" x1="80" y1="60" x2="960" y2="980" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#131b2e"/>
+      <stop offset="100%" stop-color="#0b1326"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="260" y1="220" x2="780" y2="820" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#b8f0ff"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="228" fill="url(#tile)"/>
+  <rect x="48" y="48" width="928" height="928" rx="196" stroke="#22d3ee" stroke-opacity="0.22" stroke-width="4" fill="none"/>
+  <g transform="translate(512 512)" fill="none">
+    <circle r="268" stroke="url(#mark)" stroke-width="36" stroke-linecap="round" stroke-dasharray="720 168" transform="rotate(-28)"/>
+    <circle r="168" stroke="url(#mark)" stroke-width="28" stroke-linecap="round" stroke-dasharray="420 110" transform="rotate(52)" opacity="0.9"/>
+    <g transform="rotate(-90) translate(268 0)"><circle r="52" fill="#0b1326"/><circle r="36" fill="#8aebff"/></g>
+    <g transform="rotate(30) translate(268 0)"><circle r="52" fill="#0b1326"/><circle r="36" fill="#8aebff"/></g>
+    <g transform="rotate(150) translate(268 0)"><circle r="52" fill="#0b1326"/><circle r="36" fill="#8aebff"/></g>
+    <circle r="58" fill="#060e20"/><circle r="40" fill="#8aebff"/><circle r="16" fill="#0b1326"/>
+  </g>
+</svg>

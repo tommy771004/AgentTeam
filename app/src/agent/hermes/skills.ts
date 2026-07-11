@@ -122,6 +122,25 @@ export function serializeSkill(meta: SkillMeta, body: string): string {
   return lines.filter((l) => l !== null).join('\n')
 }
 
+/**
+ * CJK-aware matching: ASCII words use normal containment; Chinese has no
+ * whitespace tokenization, so any matching bigram is treated as a hit.
+ */
+export function cjkAwareHit(hay: string, objective: string): boolean {
+  const lower = objective.toLowerCase()
+  const text = hay.toLowerCase()
+  if (text.split(/\s+/).some((word) => word.length > 3 && lower.includes(word))) {
+    return true
+  }
+  const cjkSequences = text.match(/[一-鿿]{2,}/g) || []
+  for (const sequence of cjkSequences) {
+    for (let index = 0; index + 2 <= sequence.length; index++) {
+      if (objective.includes(sequence.slice(index, index + 2))) return true
+    }
+  }
+  return false
+}
+
 export class SkillsStore {
   private skills = new Map<string, Skill>()
 
@@ -191,11 +210,12 @@ export class SkillsStore {
   }
 
   matchForObjective(objective: string): Skill[] {
-    const lower = objective.toLowerCase()
-    return this.list().filter((s) => {
-      const hay = `${s.meta.name} ${s.meta.description} ${(s.meta.tags || []).join(' ')}`.toLowerCase()
-      return hay.split(/\s+/).some((w) => w.length > 3 && lower.includes(w))
-    })
+    return this.list().filter((skill) =>
+      cjkAwareHit(
+        `${skill.meta.name} ${skill.meta.description} ${(skill.meta.tags || []).join(' ')}`,
+        objective,
+      ),
+    )
   }
 }
 

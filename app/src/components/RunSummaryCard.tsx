@@ -11,13 +11,14 @@ function iconFor(kind: string) {
 
 /** Persisted, collapsible record of what an agent did for one answer. */
 export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
-  const [open, setOpen] = useState(false)
+  // Default expanded so process is visible without an extra click
+  const [open, setOpen] = useState(true)
   const [openOperation, setOpenOperation] = useState<string | null>(null)
   const additions = summary.files.reduce((total, file) => total + (file.added || 0), 0)
   const removals = summary.files.reduce((total, file) => total + (file.removed || 0), 0)
   const label = summary.files.length
     ? `已變更 ${summary.files.length} 個檔案`
-    : `已完成 ${summary.operations.length} 項操作`
+    : `執行過程 · ${summary.operations.length} 項`
 
   return (
     <section className="w-full overflow-hidden rounded-2xl border border-white/10 bg-surface-container/55">

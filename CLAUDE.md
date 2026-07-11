@@ -6,9 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The product is **`app/`** — an Electron desktop app "SubAgents AI" (React 19 + TypeScript + Vite + zustand). Everything else at the root is design input, not code:
 
-- `01_…` / `02_…` / `03_…` `.md` — the loop spec (system definition, four loop patterns, request-parsing schema) the engine implements
-- `ai_agent_loop_*/code.html`, `synthetic_intelligence_interface/DESIGN.md` — Stitch UI mocks / design tokens
-- `docs/` — integration plans; `docs/PYDANTIC_AI_V2_CAPABILITIES.md` maps the capability system concepts to files
+- `docs/01_…` / `02_…` / `03_…` `.md` — the loop spec (system definition, four loop patterns, request-parsing schema) the engine implements
+- `docs/` — integration plans and audits; `docs/PYDANTIC_AI_V2_CAPABILITIES.md` maps capability concepts to files, and `docs/WORKFLOW_AUDIT.md` is the living audit ledger
 
 UI copy, log messages, and some comments are Traditional Chinese mixed with English — keep that style.
 

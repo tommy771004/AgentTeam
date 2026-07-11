@@ -159,7 +159,7 @@ export function buildPromptLayers(opts?: {
     `時間：${new Date().toISOString()}`,
     opts?.objective ? `當前目標：${opts.objective}` : '',
     '',
-    memoryStore.buildPromptBlock(memoryOn),
+    memoryStore.buildPromptBlock(memoryOn, opts?.objective),
     pluginBits.length ? `\n## 外掛片段\n${pluginBits.join('\n\n')}` : '',
   ]
     .filter(Boolean)
