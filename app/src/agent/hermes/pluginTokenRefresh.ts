@@ -1,13 +1,16 @@
 /**
  * Schedules OAuth access-token refresh for connectors that stored a refresh_token.
- * Pure timer + callbacks; actual HTTP lives in Electron `oauth:refresh` or fetch fallback.
+ * P1-A: on Electron the exchange happens in MAIN via `secrets:refresh` using the
+ * vault's refresh_token — the renderer only sees metadata. Browser dev falls back
+ * to the legacy raw-record flow.
  */
 
 import {
   getPluginSecret,
-  listPluginSecrets,
+  listPluginSecretMeta,
+  pluginSecretsVaultApi,
   secretNeedsRefresh,
-  type PluginSecretRecord,
+  type PluginSecretMeta,
 } from './pluginSecrets'
 import { oauthProviderForPlugin } from './pluginOAuth'
 
@@ -15,6 +18,10 @@ export type RefreshClientCreds = { clientId: string; clientSecret?: string }
 
 export type TokenRefreshDeps = {
   getClient: (clientKey: string) => RefreshClientCreds | undefined
+  /**
+   * Browser-fallback exchange (renderer fetch). Electron path ignores this and
+   * calls window.subagents.secrets.refresh (vault-side refresh_token).
+   */
   refresh: (input: {
     pluginId: string
     refreshToken: string
@@ -30,13 +37,15 @@ export type TokenRefreshDeps = {
     tokenType?: string
     error?: string
   }>
+  /** Electron: meta already persisted by main; browser: caller must persist. */
   onRefreshed: (
     pluginId: string,
     result: {
-      accessToken: string
+      accessToken?: string
       refreshToken?: string
       expiresIn?: number
       tokenType?: string
+      meta?: PluginSecretMeta
     },
   ) => void | Promise<void>
   onError?: (pluginId: string, error: string) => void
@@ -50,26 +59,25 @@ let running = false
 
 export function listRefreshCandidates(skewMs = 5 * 60 * 1000): Array<{
   pluginId: string
-  record: PluginSecretRecord
+  meta: PluginSecretMeta
   clientKey: string
   tokenUrl: string
   tokenAuth?: 'body' | 'basic'
 }> {
   const out: Array<{
     pluginId: string
-    record: PluginSecretRecord
+    meta: PluginSecretMeta
     clientKey: string
     tokenUrl: string
     tokenAuth?: 'body' | 'basic'
   }> = []
-  for (const { id, record } of listPluginSecrets()) {
-    if (!secretNeedsRefresh(record, skewMs)) continue
-    const provider = oauthProviderForPlugin(id)
-    if (!provider?.tokenUrl || !record.refreshToken) continue
-    // GitHub device tokens often have no refresh_token; skip if none
+  for (const meta of listPluginSecretMeta()) {
+    if (!secretNeedsRefresh(meta, skewMs)) continue
+    const provider = oauthProviderForPlugin(meta.id)
+    if (!provider?.tokenUrl || !meta.hasRefreshToken) continue
     out.push({
-      pluginId: id,
-      record,
+      pluginId: meta.id,
+      meta,
       clientKey: provider.clientKey,
       tokenUrl: provider.tokenUrl,
       tokenAuth: provider.tokenAuth,
@@ -84,15 +92,34 @@ export async function refreshDueTokens(deps: TokenRefreshDeps): Promise<number> 
   let count = 0
   try {
     const skew = deps.skewMs ?? 5 * 60 * 1000
+    const vault = pluginSecretsVaultApi()
     for (const cand of listRefreshCandidates(skew)) {
       const client = deps.getClient(cand.clientKey)
       if (!client?.clientId) {
         deps.onError?.(cand.pluginId, '缺少 OAuth Client ID，無法 refresh')
         continue
       }
-      const rec = getPluginSecret(cand.pluginId)
-      if (!rec?.refreshToken) continue
       try {
+        if (vault) {
+          // Electron: refresh_token never leaves the vault
+          const r = await vault.refresh({
+            pluginId: cand.pluginId,
+            clientId: client.clientId,
+            clientSecret: client.clientSecret,
+            tokenUrl: cand.tokenUrl,
+            tokenAuth: cand.tokenAuth,
+          })
+          if (!r.ok) {
+            deps.onError?.(cand.pluginId, r.error || 'refresh 失敗')
+            continue
+          }
+          await deps.onRefreshed(cand.pluginId, { meta: r.meta })
+          count += 1
+          continue
+        }
+        // Browser fallback: legacy raw-record exchange
+        const rec = getPluginSecret(cand.pluginId)
+        if (!rec?.refreshToken) continue
         const result = await deps.refresh({
           pluginId: cand.pluginId,
           refreshToken: rec.refreshToken,

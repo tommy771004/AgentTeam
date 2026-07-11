@@ -370,6 +370,289 @@ await test('toolGuard source wires decideApprovalNeed + full-mode safety bypass 
   assert.match(engine, /approvalMode === 'full'/)
 })
 
+// ── W1: runTask busy policy (mirror of runExternal.resolveBusyPolicy) ──
+function resolveBusyPolicy(sourceKind, followUpMode) {
+  switch (sourceKind) {
+    case 'schedule':
+    case 'webhook':
+    case 'telegram':
+    case 'event':
+    case 'delegate':
+    case 'queue-drain':
+      return 'queue'
+    case 'composer':
+    case 'slash':
+    case 'retry':
+      return (followUpMode || 'steer') === 'queue' ? 'queue' : 'steer'
+    default:
+      return 'reject'
+  }
+}
+
+await test('W1: busy policy — automation queues, interactive follows followUpMode, unknown rejects', () => {
+  for (const k of ['schedule', 'webhook', 'telegram', 'event', 'delegate', 'queue-drain']) {
+    assert.equal(resolveBusyPolicy(k, 'steer'), 'queue', k)
+  }
+  assert.equal(resolveBusyPolicy('composer', 'steer'), 'steer')
+  assert.equal(resolveBusyPolicy('composer', 'queue'), 'queue')
+  assert.equal(resolveBusyPolicy('slash', undefined), 'steer')
+  assert.equal(resolveBusyPolicy('retry', 'queue'), 'queue')
+  assert.equal(resolveBusyPolicy(undefined, 'steer'), 'reject')
+})
+
+await test('W1: entry drift guard — no dispatchThreadTask outside controller', async () => {
+  const fs = await import('node:fs')
+  const files = [
+    'src/pages/ProtocolsPage.tsx',
+    'src/hooks/useSlashExecutor.ts',
+    'src/App.tsx',
+    'src/pages/FailedPage.tsx',
+    'src/pages/RecordsPage.tsx',
+    'src/pages/LogsPage.tsx',
+    'src/pages/SuccessPage.tsx',
+    'src/pages/EventsPage.tsx',
+    'src/pages/AutomationPage.tsx',
+  ]
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(appRoot, f), 'utf8')
+    assert.equal(
+      /dispatchThreadTask\s*\(/.test(src),
+      false,
+      `${f} 不可直呼 dispatchThreadTask — 必須走 runTask/runExternalObjective`,
+    )
+  }
+  const controller = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  assert.match(controller, /resolveBusyPolicy/)
+  assert.match(controller, /runId/)
+})
+
+// ── W3: config candidates — every field temporary / review / unsupported ──
+function classifyOpenCodeField(field) {
+  if (['instructions', 'compaction', 'small_model', 'default_agent', 'permission'].includes(field))
+    return 'temporary'
+  if (field === 'model' || field.startsWith('mcp.')) return 'review'
+  return 'unsupported'
+}
+
+await test('W3: opencode fields classify to temporary / review / unsupported — never silent', () => {
+  assert.equal(classifyOpenCodeField('instructions'), 'temporary')
+  assert.equal(classifyOpenCodeField('compaction'), 'temporary')
+  assert.equal(classifyOpenCodeField('model'), 'review')
+  assert.equal(classifyOpenCodeField('mcp.linear'), 'review')
+  assert.equal(classifyOpenCodeField('theme'), 'unsupported')
+  assert.equal(classifyOpenCodeField('keybinds'), 'unsupported')
+})
+
+await test('W3: mcp candidate mapping (url → http, command → stdio, no secrets)', () => {
+  function mcpCandidateToServer(name, raw) {
+    if (!raw || typeof raw !== 'object') return null
+    if (typeof raw.url === 'string') return { name, transport: 'http', url: raw.url }
+    const cmd = raw.command
+    if (Array.isArray(cmd) && cmd.length)
+      return { name, transport: 'stdio', command: String(cmd[0]), args: cmd.slice(1).map(String) }
+    if (typeof cmd === 'string' && cmd.trim()) {
+      const [head, ...rest] = cmd.trim().split(/\s+/)
+      return { name, transport: 'stdio', command: head, args: rest }
+    }
+    return null
+  }
+  assert.deepEqual(mcpCandidateToServer('a', { url: 'http://x/mcp' }), {
+    name: 'a',
+    transport: 'http',
+    url: 'http://x/mcp',
+  })
+  assert.deepEqual(mcpCandidateToServer('b', { command: ['npx', 'server'] }), {
+    name: 'b',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['server'],
+  })
+  assert.equal(mcpCandidateToServer('c', {}), null)
+})
+
+await test('W2: project context wiring contract (IPC + preload + engine + promptBuilder)', async () => {
+  const fs = await import('node:fs')
+  const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
+  assert.match(main, /project:agentsDocs/)
+  assert.match(main, /AGENTS\.md/)
+  const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
+  assert.match(preload, /agentsDocs/)
+  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+  assert.match(engine, /resolveProjectContext/)
+  assert.match(engine, /projectGuidance/)
+  const pb = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/promptBuilder.ts'), 'utf8')
+  assert.match(pb, /projectGuidance/)
+})
+
+// ── P1-A: credential vault contract ──
+await test('P1-A vault: renderer never reads raw tokens; main resolves placeholders', async () => {
+  const fs = await import('node:fs')
+  const renderer = fs.readFileSync(
+    path.join(appRoot, 'src/agent/hermes/pluginSecrets.ts'),
+    'utf8',
+  )
+  // Electron path of getPluginSecret must return null (raw = browser fallback only)
+  assert.match(renderer, /if \(vaultApi\(\)\) return null/)
+  assert.match(renderer, /hydratePluginSecrets/)
+  assert.match(renderer, /removeItem\(STORAGE_KEY\)/) // one-time migration cleans localStorage
+
+  const vault = fs.readFileSync(path.join(appRoot, 'electron/secretsVault.ts'), 'utf8')
+  assert.match(vault, /safeStorage/)
+  assert.match(vault, /resolveSecretPlaceholders/)
+
+  const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
+  assert.match(main, /secrets:list/)
+  assert.match(main, /secrets:refresh/)
+  assert.match(main, /resolveSecretPlaceholders/) // tools:httpRequest + mcp:httpRpc
+
+  const mcpBridge = fs.readFileSync(path.join(appRoot, 'electron/mcpBridge.ts'), 'utf8')
+  assert.match(mcpBridge, /resolveSecretPlaceholders/) // stdio env/args at spawn
+
+  const mcpSecrets = fs.readFileSync(
+    path.join(appRoot, 'src/agent/hermes/mcpSecrets.ts'),
+    'utf8',
+  )
+  assert.match(mcpSecrets, /{{secret:\$\{pluginId\}}}/) // renderer sends placeholder
+})
+
+// ── P1-B: model profile degrade decision (mirror of engine gating) ──
+function decideUseFc(llmOn, toolsEnabled, functionCalling, fcCapable) {
+  return llmOn && toolsEnabled !== false && functionCalling !== false && fcCapable !== false
+}
+
+await test('P1-B: profile tools=false degrades FC before run; unknown stays permissive', () => {
+  assert.equal(decideUseFc(true, true, true, false), false, 'verified no-tools → heuristic')
+  assert.equal(decideUseFc(true, true, true, undefined), true, 'unknown → FC (conservative default is existing behavior)')
+  assert.equal(decideUseFc(true, true, true, true), true)
+  assert.equal(decideUseFc(true, true, false, true), false, 'user switch still wins')
+})
+
+await test('P1-B: engine + settings wiring contract', async () => {
+  const fs = await import('node:fs')
+  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+  assert.match(engine, /modelSupports/)
+  assert.match(engine, /fcCapable !== false/)
+  assert.match(engine, /'vision'\)/)
+  const mp = fs.readFileSync(path.join(appRoot, 'src/agent/modelProfile.ts'), 'utf8')
+  assert.match(mp, /source: 'verified'/)
+  assert.match(mp, /source: 'assumed'/)
+  const store = fs.readFileSync(path.join(appRoot, 'src/store/settingsStore.ts'), 'utf8')
+  assert.match(store, /modelProfiles/)
+})
+
+// ── P1-C: tool package governance (mirror of toolPackage.ts core rules) ──
+function pkgFingerprint(m) {
+  const priv = m.tools
+    .filter((t) => t.operationClass !== 'read' || t.kind === 'bash_template')
+    .map((t) => `${t.name}:${t.operationClass}:${t.kind}`)
+    .sort()
+  const base = `${m.auth?.secretKey || ''}|${priv.join(',')}`
+  let h = 5381
+  for (let i = 0; i < base.length; i++) h = ((h << 5) + h + base.charCodeAt(i)) | 0
+  return (h >>> 0).toString(16)
+}
+function compileWithheld(m, approvedFingerprint) {
+  const readOnly = m.tools.every(
+    (t) => t.operationClass === 'read' && t.kind === 'http_template',
+  )
+  const approved = readOnly || approvedFingerprint === pkgFingerprint(m)
+  return m.tools
+    .filter((t) => (t.operationClass !== 'read' || t.kind === 'bash_template') && !approved)
+    .map((t) => t.name)
+}
+
+await test('P1-C: unapproved packages withhold write/destructive/bash tools', () => {
+  const pkg = {
+    auth: { secretKey: 'x' },
+    tools: [
+      { name: 'list_items', operationClass: 'read', kind: 'http_template' },
+      { name: 'delete_item', operationClass: 'destructive', kind: 'http_template' },
+      { name: 'run_git', operationClass: 'read', kind: 'bash_template' },
+    ],
+  }
+  assert.deepEqual(compileWithheld(pkg, undefined).sort(), ['delete_item', 'run_git'])
+  // approve current fingerprint → everything unlocked
+  assert.deepEqual(compileWithheld(pkg, pkgFingerprint(pkg)), [])
+  // escalation (new write tool) changes fingerprint → withheld again
+  const v2 = { ...pkg, tools: [...pkg.tools, { name: 'update_item', operationClass: 'write', kind: 'http_template' }] }
+  assert.ok(compileWithheld(v2, pkgFingerprint(pkg)).includes('update_item'))
+  // pure read package needs no approval
+  const ro = { tools: [{ name: 'list', operationClass: 'read', kind: 'http_template' }] }
+  assert.deepEqual(compileWithheld(ro, undefined), [])
+})
+
+await test('P1-C: wiring contract — packages compile through the custom-tool pipeline', async () => {
+  const fs = await import('node:fs')
+  const ct = fs.readFileSync(path.join(appRoot, 'src/agent/tools/customTools.ts'), 'utf8')
+  assert.match(ct, /compileToolPackage/)
+  assert.match(ct, /listPendingToolPackages/)
+  const tp = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolPackage.ts'), 'utf8')
+  assert.match(tp, /operationClass 必填/)
+  assert.match(tp, /requiresReview: escalations\.length > 0/)
+  const ls = fs.readFileSync(path.join(appRoot, 'src/store/learningStore.ts'), 'utf8')
+  assert.match(ls, /approveToolPackage/)
+})
+
+// ── P1-D: lifecycle hooks (mirror of hooks.evaluateHooks) ──
+function evaluateHooksMirror(rules, ctx) {
+  const out = { deny: undefined, forceAsk: false, appendTexts: [], audits: [] }
+  const matches = (rule) => {
+    if (rule.point !== ctx.point) return false
+    const m = rule.match
+    if (!m) return true
+    if (m.tool) {
+      const t = ctx.tool || ''
+      const ok = m.tool.endsWith('*') ? t.startsWith(m.tool.slice(0, -1)) : t === m.tool
+      if (!ok) return false
+    }
+    if (m.sourceKind?.length && (!ctx.sourceKind || !m.sourceKind.includes(ctx.sourceKind))) return false
+    if (m.onlyOnFailure && ctx.toolOk !== false) return false
+    return true
+  }
+  for (const rule of rules) {
+    if (rule.enabled === false) continue
+    if (!matches(rule)) continue
+    if (rule.action === 'deny' && !out.deny) out.deny = { rule, reason: rule.reason || rule.id }
+    if (rule.action === 'require-approval') out.forceAsk = true
+    if (rule.action === 'append-context' && rule.text) out.appendTexts.push(rule.text)
+    out.audits.push(rule.id)
+  }
+  return out
+}
+
+await test('P1-D: hook rules — deny wins, require-approval forces ask, prefix + sourceKind match', () => {
+  const rules = [
+    { id: 'no-bash-cron', point: 'beforeTool', match: { tool: 'bash', sourceKind: ['schedule'] }, action: 'deny', reason: '排程禁 bash' },
+    { id: 'ask-mcp', point: 'beforeTool', match: { tool: 'mcp_*' }, action: 'require-approval' },
+    { id: 'ctx', point: 'beforeRun', action: 'append-context', text: 'policy note' },
+    { id: 'fail-log', point: 'afterTool', match: { onlyOnFailure: true }, action: 'log' },
+  ]
+  // deny only when sourceKind matches
+  assert.ok(evaluateHooksMirror(rules, { point: 'beforeTool', tool: 'bash', sourceKind: 'schedule' }).deny)
+  assert.equal(evaluateHooksMirror(rules, { point: 'beforeTool', tool: 'bash', sourceKind: 'composer' }).deny, undefined)
+  // prefix match forces approval
+  assert.equal(evaluateHooksMirror(rules, { point: 'beforeTool', tool: 'mcp_srv_create' }).forceAsk, true)
+  // beforeRun context
+  assert.deepEqual(evaluateHooksMirror(rules, { point: 'beforeRun' }).appendTexts, ['policy note'])
+  // afterTool onlyOnFailure
+  assert.equal(evaluateHooksMirror(rules, { point: 'afterTool', tool: 'x', toolOk: true }).audits.length, 0)
+  assert.equal(evaluateHooksMirror(rules, { point: 'afterTool', tool: 'x', toolOk: false }).audits.length, 1)
+})
+
+await test('P1-D: wiring contract — hooks evaluated at all four points; sanitize caps plugin rules', async () => {
+  const fs = await import('node:fs')
+  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  assert.match(guard, /point: 'beforeTool'/)
+  const runX = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  assert.match(runX, /point: 'beforeRun'/)
+  assert.match(runX, /point: 'afterRun'/)
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /point: 'afterTool'/)
+  const hooks = fs.readFileSync(path.join(appRoot, 'src/agent/hooks.ts'), 'utf8')
+  assert.match(hooks, /sanitizeHookRules/)
+  assert.match(hooks, /no 'allow' action/i)
+})
+
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)
 if (process.exitCode) {
   console.error('Capability smoke failed')

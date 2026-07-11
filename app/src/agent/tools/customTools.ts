@@ -2,7 +2,8 @@
 
 import type { CustomToolDefinition, LlmSettings } from '../types'
 import { pluginRegistry } from '../hermes/plugins'
-import { getPluginSecret } from '../hermes/pluginSecrets'
+import { getPluginSecret, hasPluginSecret } from '../hermes/pluginSecrets'
+import { compileToolPackage, validateToolPackage } from './toolPackage'
 import type { OpenAiToolDef } from './schemas'
 
 const NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
@@ -24,8 +25,50 @@ export function customToolsForSettings(settings: LlmSettings): ResolvedCustomToo
   for (const plugin of pluginRegistry.list()) {
     if (!plugin.enabled) continue
     for (const tool of plugin.customTools || []) add(tool, plugin.id)
+    // P1-C: governed tool packages — validate + compile; unapproved privileged
+    // tools are withheld (read-only surface until user re-approves fingerprint)
+    if (plugin.toolPackage) {
+      const v = validateToolPackage(plugin.toolPackage)
+      if (v.ok && v.manifest) {
+        const compiled = compileToolPackage(v.manifest, plugin.id, plugin.packageReview)
+        for (const tool of compiled.tools) add(tool, plugin.id)
+      }
+    }
   }
   return [...byName.values()]
+}
+
+/** P1-C: packages awaiting privilege review（供 Settings/市集 UI）. */
+export function listPendingToolPackages(): Array<{
+  pluginId: string
+  packageId: string
+  version: string
+  fingerprint: string
+  withheld: string[]
+}> {
+  const out: Array<{
+    pluginId: string
+    packageId: string
+    version: string
+    fingerprint: string
+    withheld: string[]
+  }> = []
+  for (const plugin of pluginRegistry.list()) {
+    if (!plugin.enabled || !plugin.toolPackage) continue
+    const v = validateToolPackage(plugin.toolPackage)
+    if (!v.ok || !v.manifest) continue
+    const compiled = compileToolPackage(v.manifest, plugin.id, plugin.packageReview)
+    if (compiled.needsReview && compiled.withheld.length) {
+      out.push({
+        pluginId: plugin.id,
+        packageId: v.manifest.id,
+        version: v.manifest.version,
+        fingerprint: compiled.fingerprint,
+        withheld: compiled.withheld,
+      })
+    }
+  }
+  return out
 }
 
 /**
@@ -149,8 +192,16 @@ export function customToolDefs(tools: ResolvedCustomTool[]): OpenAiToolDef[] {
   })
 }
 
+/** Renderer-visible availability check (never returns vault tokens on Electron). */
+function secretAvailable(key: string, settings: LlmSettings): boolean {
+  const fromSettings = settings.customToolSecrets?.[key]
+  if (fromSettings != null && String(fromSettings).length > 0) return true
+  return hasPluginSecret(key) || hasPluginSecret(`${key}-connector`)
+}
+
 function resolveSecret(key: string, settings: LlmSettings): string {
-  // 1) Settings customToolSecrets  2) pluginSecrets (marketplace OAuth/PAT)
+  // 1) Settings customToolSecrets  2) pluginSecrets (browser fallback only —
+  //    on Electron raw plugin tokens live in the main vault)
   const fromSettings = settings.customToolSecrets?.[key]
   if (fromSettings != null && String(fromSettings).length > 0) return String(fromSettings)
   const fromPlugin = getPluginSecret(key)?.token
@@ -165,9 +216,20 @@ function interpolate(
   input: Record<string, unknown>,
   settings: LlmSettings,
   missingSecrets?: string[],
+  opts?: {
+    /**
+     * P1-A: keep {{secret:key}} placeholders — main resolves them from the
+     * vault (tools:httpRequest / mcp spawn). Availability still checked here.
+     */
+    deferSecrets?: boolean
+  },
 ) {
   return (value || '').replace(TOKEN, (_all, secretPrefix: string | undefined, key: string) => {
     if (secretPrefix) {
+      if (opts?.deferSecrets) {
+        if (!secretAvailable(key, settings)) missingSecrets?.push(key)
+        return `{{secret:${key}}}`
+      }
       const secret = resolveSecret(key, settings)
       if (!secret) missingSecrets?.push(key)
       return secret
@@ -212,16 +274,19 @@ export async function executeCustomTool(
     }
   }
 
-  const url = interpolate(tool.template.url, input, settings, missingSecrets)
+  // HTTP path: on Electron, leave {{secret:*}} placeholders — the main process
+  // resolves them from the vault so raw tokens never enter the renderer.
+  const deferSecrets = Boolean(window.subagents?.tools?.httpRequest)
+  const url = interpolate(tool.template.url, input, settings, missingSecrets, { deferSecrets })
   const headers = Object.fromEntries(
     Object.entries(tool.template.headers || {}).map(([k, v]) => [
       k,
-      interpolate(v, input, settings, missingSecrets),
+      interpolate(v, input, settings, missingSecrets, { deferSecrets }),
     ]),
   )
   const method = tool.template.method || 'GET'
   const body = tool.template.body
-    ? interpolate(tool.template.body, input, settings, missingSecrets)
+    ? interpolate(tool.template.body, input, settings, missingSecrets, { deferSecrets })
     : undefined
   if (missingSecrets.length) {
     return {

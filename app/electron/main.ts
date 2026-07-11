@@ -14,6 +14,15 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
+  clearVaultSecret,
+  getVaultSecret,
+  hasSecretPlaceholder,
+  listVaultMeta,
+  migrateIntoVault,
+  resolveSecretPlaceholders,
+  setVaultSecret,
+} from './secretsVault'
+import {
   getWebhookStatus,
   setWebhookHandler,
   startWebhookServer,
@@ -744,7 +753,18 @@ ipcMain.handle(
   async (
     _evt,
     input: { url: string; headers?: Record<string, string>; body: unknown },
-  ) => mcpHttpRpc(input),
+  ) => {
+    // P1-A: resolve vault placeholders in MCP HTTP auth headers main-side
+    const headers = Object.fromEntries(
+      Object.entries(input?.headers || {}).map(([k, v]) => [
+        k,
+        typeof v === 'string' && hasSecretPlaceholder(v)
+          ? resolveSecretPlaceholders(v, currentCustomToolSecrets()).text
+          : v,
+      ]),
+    )
+    return mcpHttpRpc({ ...input, headers })
+  },
 )
 
 ipcMain.handle(
@@ -903,6 +923,68 @@ ipcMain.handle('project:getActiveRoot', async () => ({
   mode: activeProjectRoot ? 'project' : 'sandbox',
   projectRoot: activeProjectRoot,
 }))
+
+/**
+ * W2 / P0-B: read persistent project guidance (AGENTS.md hierarchy).
+ * Read-only, name-allowlisted, size-capped — walks UP from root (nearest last)
+ * so callers can layer parent → project precedence.
+ */
+ipcMain.handle('project:agentsDocs', async (_evt, root: string) => {
+  const AGENTS_FILES = ['AGENTS.md', 'CLAUDE.md']
+  const MAX_BYTES = 24_000
+  const MAX_LEVELS = 3
+  const docs: Array<{
+    path: string
+    scope: 'project' | 'project-parent'
+    bytes: number
+    truncated: boolean
+    mtimeMs: number
+    content: string
+  }> = []
+  try {
+    const start = path.resolve(String(root || '').trim())
+    if (!start || !fs.existsSync(start) || !fs.statSync(start).isDirectory()) {
+      return { docs }
+    }
+    let dir = start
+    const chain: string[] = []
+    for (let i = 0; i < MAX_LEVELS; i++) {
+      chain.push(dir)
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      // Stop walking up at repo boundary (parent of a .git dir stays out)
+      if (fs.existsSync(path.join(dir, '.git'))) break
+      dir = parent
+    }
+    // parent-most first → project root last (nearest wins on conflict)
+    for (const d of chain.reverse()) {
+      for (const name of AGENTS_FILES) {
+        const p = path.join(d, name)
+        try {
+          if (!fs.existsSync(p)) continue
+          const st = fs.statSync(p)
+          if (!st.isFile()) continue
+          const raw = fs.readFileSync(p, 'utf-8')
+          const truncated = Buffer.byteLength(raw, 'utf8') > MAX_BYTES
+          docs.push({
+            path: p,
+            scope: d === start ? 'project' : 'project-parent',
+            bytes: Buffer.byteLength(raw, 'utf8'),
+            truncated,
+            mtimeMs: st.mtimeMs,
+            content: truncated ? raw.slice(0, MAX_BYTES) : raw,
+          })
+          break // one guidance file per directory (AGENTS.md preferred)
+        } catch {
+          /* skip unreadable */
+        }
+      }
+    }
+  } catch {
+    /* return what we have */
+  }
+  return { docs }
+})
 
 ipcMain.handle('cli:which', async (_evt, binary: string) => {
   const bin = (binary || '').trim()
@@ -1357,14 +1439,129 @@ ipcMain.handle('tools:httpFetch', async (_evt, targetUrl: string, maxChars = 400
   }
 })
 
+/** Decrypted customToolSecrets from the settings file (main-side only). */
+function currentCustomToolSecrets(): Record<string, string> {
+  try {
+    const file = settingsPath()
+    if (!fs.existsSync(file)) return {}
+    const s = settingsForRenderer(JSON.parse(fs.readFileSync(file, 'utf-8'))) as {
+      customToolSecrets?: Record<string, string>
+    }
+    return s?.customToolSecrets || {}
+  } catch {
+    return {}
+  }
+}
+
 ipcMain.handle('tools:httpRequest', async (_evt, input: { url: string; method?: string; headers?: Record<string, string>; body?: string; maxChars?: number }) => {
   try {
-    const url = new URL(input.url)
+    // P1-A: resolve {{secret:key}} placeholders MAIN-side — raw tokens never
+    // travel through / persist in the renderer.
+    const custom = currentCustomToolSecrets()
+    const missing: string[] = []
+    const resolveText = (t: string | undefined): string | undefined => {
+      if (!t || !hasSecretPlaceholder(t)) return t
+      const r = resolveSecretPlaceholders(t, custom)
+      missing.push(...r.missing)
+      return r.text
+    }
+    const urlText = resolveText(input.url) || input.url
+    const headers = Object.fromEntries(
+      Object.entries(input.headers || {}).map(([k, v]) => [k, resolveText(v) ?? v]),
+    )
+    const body = resolveText(input.body)
+    if (missing.length) {
+      return {
+        ok: false,
+        text: `缺少 secret：${[...new Set(missing)].join(', ')} — 請在 Marketplace 授權或 Settings 補填`,
+        status: 0,
+      }
+    }
+    const url = new URL(urlText)
     if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Only http(s) URLs allowed')
-    const res = await fetch(url, { method: input.method || 'GET', headers: input.headers, body: input.body, redirect: 'follow' })
+    const res = await fetch(url, { method: input.method || 'GET', headers, body, redirect: 'follow' })
     return { ok: res.ok, text: (await res.text()).slice(0, Math.min(Number(input.maxChars) || 50_000, 200_000)), status: res.status }
   } catch (e) { return { ok: false, text: e instanceof Error ? e.message : String(e), status: 0 } }
 })
+
+// ── P1-A: connector credential vault (renderer sees metadata only) ──
+
+ipcMain.handle('secrets:list', async () => listVaultMeta())
+
+ipcMain.handle(
+  'secrets:store',
+  async (
+    _evt,
+    input: {
+      id: string
+      token: string
+      refreshToken?: string
+      expiresIn?: number
+      expiresAt?: number
+      tokenType?: string
+      keepRefreshToken?: boolean
+    },
+  ) => {
+    if (!input?.id || !input?.token?.trim()) {
+      return { ok: false as const, error: 'id 與 token 必填' }
+    }
+    const meta = setVaultSecret(input.id, input.token, input)
+    return { ok: true as const, meta }
+  },
+)
+
+ipcMain.handle('secrets:clear', async (_evt, id: string) => {
+  clearVaultSecret(String(id || ''))
+  return { ok: true }
+})
+
+ipcMain.handle(
+  'secrets:migrate',
+  async (_evt, map: Record<string, { token: string; refreshToken?: string; expiresAt?: number; tokenType?: string; updatedAt?: string }>) => {
+    const imported = migrateIntoVault(
+      (map || {}) as Record<string, import('./secretsVault').VaultRecord>,
+    )
+    return { ok: true, imported }
+  },
+)
+
+/** Refresh using the vault's refresh_token — token never leaves main. */
+ipcMain.handle(
+  'secrets:refresh',
+  async (
+    _evt,
+    input: {
+      pluginId: string
+      clientId: string
+      clientSecret?: string
+      tokenUrl: string
+      tokenAuth?: 'body' | 'basic'
+    },
+  ) => {
+    const rec = getVaultSecret(String(input?.pluginId || ''))
+    if (!rec?.refreshToken) {
+      return { ok: false as const, error: 'vault 中沒有 refresh_token' }
+    }
+    const r = await refreshOAuthToken({
+      pluginId: input.pluginId,
+      refreshToken: rec.refreshToken,
+      clientId: String(input?.clientId || ''),
+      clientSecret: input?.clientSecret,
+      tokenUrl: String(input?.tokenUrl || ''),
+      tokenAuth: input?.tokenAuth,
+    })
+    if (!r.ok || !r.accessToken) {
+      return { ok: false as const, error: r.error || 'refresh 失敗' }
+    }
+    const meta = setVaultSecret(input.pluginId, r.accessToken, {
+      refreshToken: r.refreshToken,
+      expiresIn: r.expiresIn,
+      tokenType: r.tokenType,
+      keepRefreshToken: true,
+    })
+    return { ok: true as const, meta }
+  },
+)
 
 // ── Persistent memory ───────────────────────────────────────────
 

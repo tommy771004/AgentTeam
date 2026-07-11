@@ -951,6 +951,21 @@ async function executeOneToolCall(
   ctx.toolCalls.push(record)
   ctx.cb?.onToolCall?.(record)
   ctx.cb?.onLog?.(ok ? 'SUCCESS' : 'WARN', `tool:${tc.name} ${ok ? 'ok' : 'fail'} (${durationMs}ms)`)
+  // P1-D lifecycle hooks (afterTool): audit / notify only
+  try {
+    const { collectHookRules, evaluateHooks } = await import('../hooks')
+    const ev = evaluateHooks(collectHookRules(ctx.settings), {
+      point: 'afterTool',
+      tool: tc.name,
+      toolOk: ok,
+    })
+    for (const line of ev.audits) ctx.cb?.onLog?.('INFO', line)
+    for (const n of ev.notifications) {
+      void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+    }
+  } catch {
+    /* non-fatal */
+  }
   ctx.toolChunks.push(`### tool:${tc.name}\n${output.slice(0, 2000)}`)
 
   ctx.messages.push({

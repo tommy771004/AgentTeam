@@ -41,6 +41,18 @@ export interface PluginManifest {
   promptAppend?: string
   /** Declarative edge tools. Handlers are constrained templates, never plugin JS. */
   customTools?: CustomToolDefinition[]
+  /**
+   * P1-C: governed tool package (schema-validated; operationClass per tool).
+   * Privileged tools stay withheld until the user approves the fingerprint.
+   */
+  toolPackage?: import('../tools/toolPackage').ToolPackageManifest
+  /** User approval of the package's privilege fingerprint */
+  packageReview?: import('../tools/toolPackage').PackageReview
+  /**
+   * P1-D: declarative lifecycle hook rules (sanitized on collect; may only
+   * restrict/observe — deny / require-approval / append-context / log / notify).
+   */
+  hooks?: unknown[]
   /** MCP servers installed and lifecycle-managed with this plugin. */
   mcpServers?: McpServerConfig[]
   /** Connector authorization state (secrets live in pluginSecrets). */

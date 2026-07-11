@@ -25,7 +25,6 @@ import {
 } from '../src/agent/hermes/mcpSecrets'
 import { setPluginSecret, clearPluginSecret } from '../src/agent/hermes/pluginSecrets'
 import type { McpServerConfig } from '../src/agent/types'
-import { customToolsForSettings } from '../src/agent/tools/customTools'
 import { pluginRegistry } from '../src/agent/hermes/plugins'
 import { buildIntentPreloadIds } from '../src/agent/intentPreload'
 import { DEFAULT_LLM_SETTINGS } from '../src/agent/llm'

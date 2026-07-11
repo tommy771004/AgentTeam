@@ -8,7 +8,7 @@
  */
 
 import type { LlmSettings, McpServerConfig } from '../types'
-import { getPluginSecret } from './pluginSecrets'
+import { getPluginSecret, hasPluginSecret } from './pluginSecrets'
 
 /** secret owner id → env vars to fill when secret is present */
 export const MCP_SECRET_ENV_KEYS: Record<string, string[]> = {
@@ -32,6 +32,17 @@ export const MCP_SECRET_ENV_KEYS: Record<string, string[]> = {
 }
 
 function secretForPlugin(pluginId: string, settings?: Partial<LlmSettings> | null): string {
+  // P1-A: on Electron, send a placeholder — mcpBridge resolves the raw token
+  // from the main-process vault at spawn time (never through the renderer).
+  const hasVault = Boolean(
+    (globalThis as unknown as { subagents?: { secrets?: unknown } }).subagents?.secrets,
+  )
+  if (hasVault) {
+    if (hasPluginSecret(pluginId) || settings?.customToolSecrets?.[pluginId]) {
+      return `{{secret:${pluginId}}}`
+    }
+    return ''
+  }
   const fromPlugin = getPluginSecret(pluginId)?.token
   if (fromPlugin) return fromPlugin
   const fromSettings = settings?.customToolSecrets?.[pluginId]

@@ -219,5 +219,40 @@ customTools 契約 3 個測試)。
 
 ---
 
+## 9. 第六輪稽核(2026-07-11)— 附件/Vision・Marketplace 連接器・OAuth・Windows
+
+本輪外部新增了四個子系統,逐一驗證接線與安全邊界。
+
+### 9.1 新子系統接線驗證(全部通過)
+
+| 子系統 | 驗證 |
+|---|---|
+| **聊天附件 + Vision** | composer(`CommandComposer`/`AttachmentThumb`)→ Electron materialize 落盤(`filePath` 進 runQueue 持久化,重啟補跑不掉圖)→ FC 路徑組 `image_url` 多模態訊息;heuristic 路徑無 dataUrl 時降級為路徑註記並 log 提示;CLI 路徑以 text/path appendix 併入 prompt;Telegram 圖片入站也走同一 attachments 通道(`App.tsx:276-318`) |
+| **per-run projectRoot** | `RuntimeOverrides.projectRoot` → engine(`:689-711`)→ executor workspace/codegraph 工具;排程多專案不再互踩 |
+| **Plugin Marketplace / 連接器** | `pluginCatalog.ts` 11 家連接器(GitHub/Notion/Google Calendar/Sheets/Linear/Figma/Asana/ClickUp/Dropbox/Canva/HA)以 customTools(http_template)出貨 → 沿用 capability/審批/supervisor 全管線;**寫入型工具 9 處 `requiresApproval: true`** |
+| **OAuth(device/code + PKCE)** | `pluginOAuth.ts` 供應商設定單源,renderer 與 Electron `oauthBridge.ts` 共用;loopback 固定port 19789;token 自動刷新 `startTokenRefreshScheduler` 已接 App bootstrap(`App.tsx:467`),Settings 亦可手動刷新 |
+| **Windows 平台化** | `platformProcess.ts` + `executableLookupCommand`;smoke 契約測試禁止核心路徑出現 POSIX-only shell 語法;`--require-built` 模式供 CI 強制驗建置產物 |
+
+### 9.2 OAuth secrets 三層隔離複驗(通過)
+
+1. `pluginOAuthClients`(clientId/clientSecret)→ export 時 **clientSecret 遮蔽**,且重建物件只保留兩欄,任何誤存欄位都會被剝除
+2. `customToolSecrets` → export 全鍵遮蔽(既有)
+3. **連接器 token 本體**(PAT / access / refresh token)→ 獨立 `pluginSecrets` store(`subagents.plugin-secrets.v1`),**不在 settings、不在 hermes 匯出 payload**;plugin manifest 只存 `hasSecret` 布林 — 匯出 bundle 天生不含 token(換機需重新授權,屬正確安全取捨)
+
+### 9.3 本輪發現並已修
+
+| 問題 | 處置 |
+|---|---|
+| `simple-icons` 進了 package.json 但未安裝 → fresh checkout `npm run build` 直接紅(TS2307) | `npm install` 後 build 零錯誤;此類問題 build 本身即攔截,無需額外機制 |
+
+### 9.4 小註記(非缺口)
+
+- `pluginSecrets.ts` 開頭註解寫「Desktop: prefer hermes payload slot」,實作只用 localStorage —
+  註解與程式不符;**現狀(不進 hermes payload)反而是安全上正確的**,建議改註解而非改程式。
+
+驗證:`npm install` + `npm run build` 零錯誤 · `npm run smoke` 全綠(16 capability 測試,0 skipped)。
+
+---
+
 *稽核方式:靜態追蹤 + 呼叫點 grep 驗證;未執行端到端動態測試。
 複驗某條呼應關係時,直接以表中檔案錨點為起點。*

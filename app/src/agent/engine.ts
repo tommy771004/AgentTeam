@@ -80,6 +80,8 @@ export class AgentLoopEngine {
   private overrides: RuntimeOverrides = {}
   private stepOutputs: string[] = []
   private attachedSkillContext = ''
+  /** W2: persistent project guidance (AGENTS.md) resolved per run */
+  private projectGuidance = ''
   /** Vision / file attachments for this run (FC multimodal) */
   private userAttachments: import('./types').ChatAttachment[] = []
 
@@ -312,6 +314,38 @@ export class AgentLoopEngine {
     this.state.status = 'parsing'
     this.state.startedAt = new Date().toISOString()
     this.state.minConfidence = this.minConfidence()
+    // W2: resolve persistent project guidance (AGENTS.md hierarchy) for this run
+    this.projectGuidance = ''
+    try {
+      const { resolveProjectContext, formatProjectGuidance, summarizeProjectContext } =
+        await import('./projectContext')
+      let root = (this.overrides.projectRoot || '').trim()
+      if (!root) {
+        const { useProjectStore } = await import('../store/projectStore')
+        root = useProjectStore.getState().root || ''
+      }
+      const docs = await resolveProjectContext(root)
+      if (docs.length) {
+        this.projectGuidance = formatProjectGuidance(docs)
+        // Run snapshot: source + hash + bytes go to logs (archived)
+        this.log('INFO', `專案指引已載入：${summarizeProjectContext(docs)}`)
+      }
+      // W3: OpenCode instructions — temporary apply per run（不寫入全域設定）
+      try {
+        const { useOpenCodeConfigStore } = await import('../store/opencodeConfigStore')
+        const note = useOpenCodeConfigStore.getState().temporaryInstructionsNote()
+        if (note) {
+          this.projectGuidance = [this.projectGuidance, note]
+            .filter(Boolean)
+            .join('\n\n')
+          this.log('INFO', 'OpenCode instructions 已暫時套用（本 run，見設定匯入報告）')
+        }
+      } catch {
+        /* non-fatal */
+      }
+    } catch {
+      /* non-fatal — run continues without project guidance */
+    }
     // Cross-run restore (thread history) — seed before first step
     if (this.overrides.preloadCapabilityIds?.length) {
       this.state.loadedCapabilityIds = [...new Set(this.overrides.preloadCapabilityIds)]
@@ -333,7 +367,10 @@ export class AgentLoopEngine {
         parsed.config.maxIterations = this.overrides.maxIterations
       }
 
-      this.state.id = `exe_${uuid().slice(0, 12).toUpperCase().replace(/-/g, '')}`
+      // runTask trace id wins so thread / archive / queue / HITL correlate on one id
+      this.state.id =
+        this.overrides.runId?.trim() ||
+        `exe_${uuid().slice(0, 12).toUpperCase().replace(/-/g, '')}`
       this.state.objective = parsed.objective
       this.state.loopConfig = parsed.config
       this.state.steps = parsed.steps
@@ -555,10 +592,34 @@ export class AgentLoopEngine {
 
     // ── Tools + LLM phase ───────────────────────────────────────
     let toolContext = ''
+    // P1-B: model capability profile — degrade BEFORE the call fails mid-run
+    const { modelSupports } = await import('./modelProfile')
+    const stepModel = this.useLlm() ? resolved.model : ''
+    const fcCapable = modelSupports(this.settings, stepModel, 'tools')
+    if (fcCapable === false && this.settings.functionCalling !== false) {
+      this.log(
+        'WARN',
+        `模型 ${stepModel} 標記不支援 tool calls（profile）— 本步降級 heuristic 路徑`,
+      )
+    }
     const useFc =
       this.useLlm() &&
       this.settings.toolsEnabled !== false &&
-      this.settings.functionCalling !== false
+      this.settings.functionCalling !== false &&
+      fcCapable !== false
+    // Vision gate: strip image payloads when profile says unsupported
+    if (
+      this.userAttachments.some((a) => a.kind === 'image') &&
+      modelSupports(this.settings, stepModel, 'vision') === false
+    ) {
+      this.log(
+        'WARN',
+        `模型 ${stepModel} 標記不支援 vision（profile）— 圖片改以路徑註記傳遞`,
+      )
+      this.userAttachments = this.userAttachments.map((a) =>
+        a.kind === 'image' ? { ...a, dataUrl: undefined } : a,
+      )
+    }
 
     try {
       if (useFc) {
@@ -569,6 +630,7 @@ export class AgentLoopEngine {
           role,
           objective: this.state.objective,
           settings: this.settings,
+          projectGuidance: this.projectGuidance || undefined,
           temporary:
             this.overrides.temporary === true ||
             this.settings.temporaryChatDefault === true,
@@ -907,6 +969,7 @@ export class AgentLoopEngine {
               role,
               objective: this.state.objective,
               settings: this.settings,
+              projectGuidance: this.projectGuidance || undefined,
               temporary:
                 this.overrides.temporary === true ||
                 this.settings.temporaryChatDefault === true,

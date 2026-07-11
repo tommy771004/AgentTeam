@@ -18,7 +18,6 @@ import {
 } from '../agent/opencode/agents'
 import type { AgentMode } from '../agent/types'
 import { useProjectStore } from '../store/projectStore'
-import { dispatchThreadTask } from '../agent/runDispatch'
 
 /**
  * Shared slash command handler — Claude / Codex style
@@ -56,10 +55,6 @@ export function useSlashExecutor() {
     const thread = thr.threads.find((t) => t.id === tid)
     const { subagents } = parseSubagentMentions(goal)
     if (tid) {
-      thr.setShowRunPanel(true)
-      thr.setRunningThreadId(tid)
-      thr.setThreadStatus(tid, 'running')
-      if (!opts?.skipUserBubble) thr.pushBubble(tid, 'user', goal)
       if (subagents.length) {
         thr.pushBubble(tid, 'system', `Subagent: @${subagents.join(' @')}`)
       }
@@ -72,25 +67,20 @@ export function useSlashExecutor() {
       }
     }
     setDraftInput(goal)
-    const dispatched = await dispatchThreadTask(goal, { threadId: tid || undefined })
-    if (dispatched.error && dispatched.status === 'failed' && !dispatched.result) {
-      log(`✗ ${dispatched.error}`)
-      if (tid) {
-        thr.pushBubble(tid, 'system', dispatched.error)
-        thr.setThreadStatus(tid, 'failed')
-        thr.setRunningThreadId(null)
-      }
-      return
-    }
-    const a = useAgentStore.getState().agent
-    if (tid) {
-      thr.setThreadStatus(tid, a.status)
-      thr.setRunningThreadId(null)
-      thr.pushBubble(
-        tid,
-        'assistant',
-        a.result?.slice(0, 4000) || dispatched.result?.slice(0, 4000) || `完成：${a.status}`,
-      )
+    // Single lifecycle controller (thread status / bubbles / busy policy / trace)
+    const { runTask } = await import('../agent/runExternal')
+    const r = await runTask({
+      objective: goal,
+      sourceKind: 'slash',
+      reuseThreadId: tid || undefined,
+      skipUserBubble: opts?.skipUserBubble,
+    })
+    if (r.skipped && !r.queued) {
+      log(`✗ ${r.error || '忙碌中'}`)
+    } else if (r.queued) {
+      log('已加入待跑佇列，完成後自動執行')
+    } else if (r.error && r.status === 'failed' && !r.result) {
+      log(`✗ ${r.error}`)
     }
   }
 

@@ -16,6 +16,12 @@ import type {
 } from '../agent/opencode/configTypes'
 import { setHydratedOpenCodeConfig, listRegistryAgents } from '../agent/opencode/agentRegistry'
 import type { RegistryAgent } from '../agent/opencode/agentRegistry'
+import {
+  buildConfigCandidates,
+  instructionsPromptNote,
+  mcpCandidateToServer,
+  type DiscoveredConfigCandidate,
+} from '../agent/opencode/configCandidates'
 import { useProjectStore } from './projectStore'
 
 interface OpenCodeConfigStore {
@@ -29,9 +35,17 @@ interface OpenCodeConfigStore {
   agents: RegistryAgent[]
   commands: OpenCodeCommandFileDef[]
   lastProjectRoot: string
+  /** W3: every parsed field → temporary / review / unsupported（匯入報告） */
+  candidates: DiscoveredConfigCandidate[]
+  /** Raw instructions entries (temporary-applied per run via prompt note) */
+  instructionsEntries: string[]
 
   hydrate: (projectRoot?: string) => Promise<void>
   refresh: () => Promise<void>
+  /** Adopt a 'review' candidate into Settings (explicit human decision). */
+  adoptCandidate: (id: string) => Promise<{ ok: boolean; message: string }>
+  /** Prompt note for temporary-applied instructions（engine 每 run 讀取） */
+  temporaryInstructionsNote: () => string
 }
 
 function mapAgentFiles(raw: Array<Record<string, unknown>>): OpenCodeAgentFileDef[] {
@@ -73,6 +87,8 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
   agents: [],
   commands: [],
   lastProjectRoot: '',
+  candidates: [],
+  instructionsEntries: [],
 
   hydrate: async (projectRoot) => {
     const root =
@@ -114,6 +130,17 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
       }
       setHydratedOpenCodeConfig(full)
 
+      // W3: projection report — nothing parsed may silently disappear
+      const prevAdopted = new Set(
+        get()
+          .candidates.filter((c) => c.adopted)
+          .map((c) => c.id),
+      )
+      const candidates = buildConfigCandidates(
+        (bundle.layers || []) as Array<{ path: string; data: Record<string, unknown> }>,
+        merged,
+      ).map((c) => (prevAdopted.has(c.id) ? { ...c, adopted: true } : c))
+
       set({
         loaded: true,
         loading: false,
@@ -125,6 +152,8 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
         agents: listRegistryAgents({ includeHidden: true }),
         commands: full.commandsFromMarkdown,
         lastProjectRoot: root,
+        candidates,
+        instructionsEntries: merged.instructions || [],
       })
     } catch (e) {
       set({
@@ -138,4 +167,72 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
   refresh: async () => {
     await get().hydrate(get().lastProjectRoot)
   },
+
+  adoptCandidate: async (id) => {
+    const c = get().candidates.find((x) => x.id === id)
+    if (!c) return { ok: false, message: `候選不存在：${id}` }
+    if (c.applyMode !== 'review') {
+      return { ok: false, message: `候選 ${id} 非待採用型（${c.applyMode}）` }
+    }
+    const { useSettingsStore } = await import('./settingsStore')
+    const settings = useSettingsStore.getState()
+
+    if (c.id === 'model') {
+      await settings.update({ model: c.value })
+      set({
+        candidates: get().candidates.map((x) =>
+          x.id === id ? { ...x, adopted: true } : x,
+        ),
+      })
+      return { ok: true, message: `全域模型 → ${c.value}` }
+    }
+
+    if (c.id.startsWith('mcp.')) {
+      const name = c.id.slice(4)
+      let raw: unknown = null
+      try {
+        raw = JSON.parse(c.value)
+      } catch {
+        /* value preview may be truncated — re-read merged later */
+      }
+      const mapped = mcpCandidateToServer(name, raw)
+      if (!mapped) {
+        return { ok: false, message: `無法解析 MCP 候選 ${name}（command/url 缺失或被截斷）` }
+      }
+      const cur = settings.settings.mcpServers || []
+      if (cur.some((s) => s.name === mapped.name)) {
+        set({
+          candidates: get().candidates.map((x) =>
+            x.id === id ? { ...x, adopted: true } : x,
+          ),
+        })
+        return { ok: true, message: `MCP「${name}」已存在，標記為已採用` }
+      }
+      await settings.update({
+        mcpEnabled: true,
+        mcpServers: [
+          ...cur,
+          {
+            id: `oc_${name}_${Date.now().toString(36)}`,
+            name: mapped.name,
+            enabled: true,
+            transport: mapped.transport,
+            url: mapped.url,
+            command: mapped.command,
+            args: mapped.args,
+          },
+        ],
+      })
+      set({
+        candidates: get().candidates.map((x) =>
+          x.id === id ? { ...x, adopted: true } : x,
+        ),
+      })
+      return { ok: true, message: `已加入 MCP 伺服器「${name}」（token 請自行補填）` }
+    }
+
+    return { ok: false, message: `未知的採用目標：${id}` }
+  },
+
+  temporaryInstructionsNote: () => instructionsPromptNote(get().instructionsEntries),
 }))

@@ -55,6 +55,8 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   toolSearchEnabled: true,
   toolSearchThreshold: 24,
   codeModeEnabled: true,
+  modelProfiles: {},
+  hookRules: [],
 
   // ChatGPT-style prefs
   theme: 'dark',

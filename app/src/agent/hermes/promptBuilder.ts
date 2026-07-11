@@ -98,6 +98,11 @@ export function buildPromptLayers(opts?: {
   settings?: Partial<LlmSettings> | null
   /** Temporary chat: skip memory entirely */
   temporary?: boolean
+  /**
+   * W2: persistent project guidance from real AGENTS.md/CLAUDE.md files
+   * (projectContextResolver). Layered ABOVE Hermes user guidance.
+   */
+  projectGuidance?: string
 }): PromptLayers {
   const skillsIndex = skillsStore.buildIndexPrompt()
   const matched = opts?.objective
@@ -137,6 +142,8 @@ export function buildPromptLayers(opts?: {
   const context = [
     '# 專案上下文（context）',
     codegraphHint,
+    // Precedence: project-local AGENTS.md (real files) wins over user/Hermes guidance
+    opts?.projectGuidance ? opts.projectGuidance.slice(0, 16_000) : '',
     agentsDoc.slice(0, 4000),
     opts?.extraContext ? `\n## 額外上下文\n${opts.extraContext.slice(0, 2000)}` : '',
   ]

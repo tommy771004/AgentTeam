@@ -227,6 +227,46 @@ const api = {
     openExternal: (url: string) =>
       ipcRenderer.invoke('shell:openExternal', url) as Promise<{ ok: boolean }>,
   },
+  /** P1-A: connector credential vault — metadata only; raw tokens stay in main */
+  secrets: {
+    list: () =>
+      ipcRenderer.invoke('secrets:list') as Promise<
+        Array<{
+          id: string
+          tokenHint: string
+          expiresAt?: number
+          tokenType?: string
+          updatedAt: string
+          hasRefreshToken: boolean
+          encrypted: boolean
+        }>
+      >,
+    store: (input: {
+      id: string
+      token: string
+      refreshToken?: string
+      expiresIn?: number
+      expiresAt?: number
+      tokenType?: string
+      keepRefreshToken?: boolean
+    }) =>
+      ipcRenderer.invoke('secrets:store', input) as Promise<
+        { ok: true; meta: { id: string; tokenHint: string; expiresAt?: number; tokenType?: string; updatedAt: string; hasRefreshToken: boolean; encrypted: boolean } } | { ok: false; error: string }
+      >,
+    clear: (id: string) => ipcRenderer.invoke('secrets:clear', id) as Promise<{ ok: boolean }>,
+    migrate: (map: Record<string, unknown>) =>
+      ipcRenderer.invoke('secrets:migrate', map) as Promise<{ ok: boolean; imported: number }>,
+    refresh: (input: {
+      pluginId: string
+      clientId: string
+      clientSecret?: string
+      tokenUrl: string
+      tokenAuth?: 'body' | 'basic'
+    }) =>
+      ipcRenderer.invoke('secrets:refresh', input) as Promise<
+        { ok: true; meta: { id: string; tokenHint: string; expiresAt?: number; tokenType?: string; updatedAt: string; hasRefreshToken: boolean; encrypted: boolean } } | { ok: false; error: string }
+      >,
+  },
   oauth: {
     run: (input: { pluginId: string; clientId: string; clientSecret?: string }) =>
       ipcRenderer.invoke('oauth:run', input) as Promise<{
@@ -297,6 +337,18 @@ const api = {
       }>,
     branches: (root: string) =>
       ipcRenderer.invoke('project:branches', root) as Promise<string[]>,
+    /** W2: persistent project guidance (AGENTS.md / CLAUDE.md hierarchy, read-only) */
+    agentsDocs: (root: string) =>
+      ipcRenderer.invoke('project:agentsDocs', root) as Promise<{
+        docs: Array<{
+          path: string
+          scope: 'project' | 'project-parent'
+          bytes: number
+          truncated: boolean
+          mtimeMs: number
+          content: string
+        }>
+      }>,
     /** Sync tools/bash cwd with ProjectContextBar */
     setActiveRoot: (root: string | null) =>
       ipcRenderer.invoke('project:setActiveRoot', root) as Promise<{

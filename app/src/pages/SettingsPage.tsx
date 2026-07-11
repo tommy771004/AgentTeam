@@ -46,8 +46,8 @@ import {
   OAUTH_REDIRECT_URI,
   PLUGIN_OAUTH_PROVIDERS,
 } from '../agent/hermes/pluginOAuth'
-import { listPluginSecrets, secretNeedsRefresh } from '../agent/hermes/pluginSecrets'
-import { customToolsForSettings } from '../agent/tools/customTools'
+import { listPluginSecretMeta, secretNeedsRefresh } from '../agent/hermes/pluginSecrets'
+import { customToolsForSettings, listPendingToolPackages } from '../agent/tools/customTools'
 import { pluginRegistry } from '../agent/hermes/plugins'
 
 const SECTION_GROUPS = [
@@ -164,6 +164,9 @@ export function SettingsPage() {
   const bgJobs = useGatewayStore((s) => s.jobs)
   const projectRoot = useProjectStore((s) => s.root)
   const oc = useOpenCodeConfigStore()
+  const ocCandidates = useOpenCodeConfigStore((s) => s.candidates)
+  const ocSources = useOpenCodeConfigStore((s) => s.sources)
+  const adoptOcCandidate = useOpenCodeConfigStore((s) => s.adoptCandidate)
   const memory = useLearningStore((s) => s.memory)
   const loadLearning = useLearningStore((s) => s.load)
   const deleteMemoryEntry = useLearningStore((s) => s.deleteMemoryEntry)
@@ -175,12 +178,17 @@ export function SettingsPage() {
   const setShortcutChord = useShortcutStore((s) => s.setChord)
   const resetShortcuts = useShortcutStore((s) => s.resetAll)
   const [capturingId, setCapturingId] = useState<string | null>(null)
+  const [hookRulesDraft, setHookRulesDraft] = useState('')
+  const [hookRulesError, setHookRulesError] = useState<string | null>(null)
+  const [verifyingModel, setVerifyingModel] = useState(false)
+  const [modelVerifyMsg, setModelVerifyMsg] = useState('')
   const [customToolsDraft, setCustomToolsDraft] = useState('')
   const [customToolsError, setCustomToolsError] = useState<string | null>(null)
   const [oauthRefreshMsg, setOauthRefreshMsg] = useState<string | null>(null)
   const refreshPluginTokens = useLearningStore((s) => s.refreshPluginTokens)
   // Recompute secret key list when plugins change
   const pluginsTick = useLearningStore((s) => s.plugins)
+  const approveToolPackage = useLearningStore((s) => s.approveToolPackage)
 
   /** Instant apply — no save button */
   const set = (patch: Partial<typeof settings>) => {
@@ -351,7 +359,7 @@ export function SettingsPage() {
     }
     // Already stored secrets
     for (const key of Object.keys(settings.customToolSecrets || {})) found.add(key)
-    for (const { id } of listPluginSecrets()) found.add(id)
+    for (const { id } of listPluginSecretMeta()) found.add(id)
     return [...found].sort()
   }, [settings.customTools, settings.customToolSecrets, pluginsTick])
   const toolTuning = useMemo(
@@ -970,6 +978,71 @@ export function SettingsPage() {
                 {(settings.discoveredModels || []).length > 0 && (
                   <p className="mt-1 text-[11px] text-outline">已從 /models 自動帶入 {settings.discoveredModels.length} 個模型。</p>
                 )}
+                {/* P1-B: capability profile — 已驗證 / 推測 / 未知 */}
+                {(() => {
+                  const p = settings.modelProfiles?.[settings.model || '']
+                  const badge = p
+                    ? p.source === 'verified'
+                      ? '已驗證'
+                      : '推測'
+                    : '未知'
+                  const cap = (v: boolean | undefined, name: string) =>
+                    `${name} ${v === true ? '✓' : v === false ? '✗' : '?'}`
+                  return (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                      <span
+                        className={`px-1.5 py-0.5 rounded font-semibold ${
+                          badge === '已驗證'
+                            ? 'bg-primary/15 text-primary'
+                            : badge === '推測'
+                              ? 'bg-amber-500/15 text-amber-300'
+                              : 'bg-white/10 text-outline'
+                        }`}
+                      >
+                        {badge}
+                      </span>
+                      {p && (
+                        <span className="text-on-surface-variant font-[family-name:var(--font-mono)]">
+                          {cap(p.tools, 'tools')} · {cap(p.vision, 'vision')} ·{' '}
+                          {cap(p.structuredOutput, 'json')}
+                          {p.contextWindow ? ` · ${Math.round(p.contextWindow / 1000)}k ctx` : ''}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        disabled={verifyingModel || !settings.model || !settings.apiKey}
+                        className={`${settingsBtnCls} disabled:opacity-50`}
+                        onClick={async () => {
+                          const id = settings.model?.trim()
+                          if (!id) return
+                          setVerifyingModel(true)
+                          try {
+                            const { verifyModelCapabilities } = await import(
+                              '../agent/modelProfile'
+                            )
+                            const r = await verifyModelCapabilities(settings, id)
+                            await set({
+                              modelProfiles: {
+                                ...(settings.modelProfiles || {}),
+                                [id]: r.profile,
+                              },
+                            })
+                            setModelVerifyMsg(r.logs.join(' · '))
+                          } catch (e) {
+                            setModelVerifyMsg(e instanceof Error ? e.message : String(e))
+                          } finally {
+                            setVerifyingModel(false)
+                          }
+                        }}
+                      >
+                        {verifyingModel ? '驗證中…' : '驗證模型能力（3 次極小呼叫）'}
+                      </button>
+                      {modelVerifyMsg && (
+                        <span className="text-outline">{modelVerifyMsg}</span>
+                      )}
+                    </div>
+                  )
+                })()}
               </SettingsStack>
             </SettingsGroup>
             <div className="flex flex-wrap gap-2 items-center px-0.5">
@@ -1690,6 +1763,33 @@ export function SettingsPage() {
                   })()}
                 </SettingsStack>
               )}
+              {/* P1-D: declarative lifecycle hook rules */}
+              <SettingsStack title="Lifecycle hooks（宣告式規則）">
+                <p className="text-[11px] text-on-surface-variant mb-1 leading-relaxed">
+                  純資料規則，只能限制/觀察：point（beforeRun/beforeTool/afterTool/afterRun）
+                  × action（deny / require-approval / append-context / log / notify）。
+                  require-approval 連「完整存取權」也會攔。外掛 hooks 由 manifest 提供並經 sanitize。
+                </p>
+                <textarea
+                  className={settingsInputCls + ' min-h-[120px] resize-y font-[family-name:var(--font-mono)] text-[11px]'}
+                  value={hookRulesDraft || JSON.stringify(settings.hookRules || [], null, 2)}
+                  onChange={(e) => { setHookRulesDraft(e.target.value); setHookRulesError(null) }}
+                  onBlur={() => {
+                    try {
+                      const parsed = hookRulesDraft.trim() ? JSON.parse(hookRulesDraft) : []
+                      if (!Array.isArray(parsed)) throw new Error('必須是陣列')
+                      void set({ hookRules: parsed })
+                      setHookRulesDraft('')
+                    } catch (err) {
+                      setHookRulesError(err instanceof Error ? err.message : String(err))
+                    }
+                  }}
+                  placeholder='[{"id":"deny-bash-on-schedule","point":"beforeTool","match":{"tool":"bash","sourceKind":["schedule"]},"action":"deny","reason":"排程禁用 bash"}]'
+                />
+                {hookRulesError && (
+                  <p className="text-[11px] text-error mt-1">{hookRulesError}</p>
+                )}
+              </SettingsStack>
               <SettingsRow
                 title="輸出超限中止"
                 description="工具輸出超過上限時中止（否則截斷）"
@@ -1982,6 +2082,46 @@ export function SettingsPage() {
             </SettingsGroup>
 
             <SettingsGroup title="宣告式自訂工具">
+              {/* P1-C: tool packages awaiting privilege review */}
+              {(() => {
+                const pending = listPendingToolPackages()
+                if (!pending.length) return null
+                return (
+                  <SettingsStack title="Tool package 權限審核（待核准）">
+                    <div className="space-y-1.5">
+                      {pending.map((p) => (
+                        <div
+                          key={p.pluginId}
+                          className="flex items-start gap-2 px-3 py-2 rounded-xl border border-amber-500/25 bg-amber-500/5"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[12px] font-semibold text-on-surface font-[family-name:var(--font-mono)]">
+                              {p.packageId}@{p.version}
+                              <span className="ml-2 text-[10px] text-outline">#{p.fingerprint}</span>
+                            </span>
+                            <span className="block text-[11px] text-amber-300/90">
+                              暫扣工具（write/destructive/bash）：{p.withheld.join(', ')}
+                            </span>
+                            <span className="block text-[10px] text-outline mt-0.5">
+                              核准後解鎖 schema；執行時仍逐次 HITL 審批
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            className={`${settingsBtnCls} shrink-0`}
+                            onClick={async () => {
+                              const r = await approveToolPackage(p.pluginId)
+                              setCustomToolsError(r.ok ? null : r.message)
+                            }}
+                          >
+                            核准權限面
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </SettingsStack>
+                )
+              })()}
               <SettingsStack title="Custom tools JSON">
                 <textarea
                   className={settingsInputCls + ' min-h-[180px] resize-y font-[family-name:var(--font-mono)] text-[11px]'}
@@ -2243,6 +2383,67 @@ export function SettingsPage() {
                 {mcpSessions}
               </pre>
             )}
+
+            {/* W3: OpenCode 匯入報告 — 每個欄位三擇一：暫時套用 / 待採用 / 不支援 */}
+            <SettingsGroup title="OpenCode 匯入報告">
+              <p className="text-[12px] text-on-surface-variant mb-2 leading-relaxed px-1">
+                偵測到的設定不會靜默覆蓋全域：暫時套用僅影響本 run；待採用需按「採用」；
+                不支援欄位顯式列出。來源：{ocSources.join('、') || '（尚未偵測到 opencode 設定）'}
+              </p>
+              {ocCandidates.length === 0 ? (
+                <p className="text-[12px] text-outline px-1">無設定候選。</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {ocCandidates.map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-start gap-2 px-3 py-2 rounded-xl border border-white/10"
+                    >
+                      <span
+                        className={`shrink-0 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          c.applyMode === 'temporary'
+                            ? 'bg-primary/15 text-primary'
+                            : c.applyMode === 'review'
+                              ? 'bg-amber-500/15 text-amber-300'
+                              : 'bg-white/10 text-outline'
+                        }`}
+                      >
+                        {c.applyMode === 'temporary'
+                          ? '暫時套用'
+                          : c.applyMode === 'review'
+                            ? c.adopted
+                              ? '已採用'
+                              : '待採用'
+                            : '不支援'}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[12px] font-semibold text-on-surface font-[family-name:var(--font-mono)]">
+                          {c.field}
+                        </span>
+                        <span className="block text-[11px] text-on-surface-variant truncate">
+                          {c.value}
+                        </span>
+                        {c.note && (
+                          <span className="block text-[10px] text-outline mt-0.5">{c.note}</span>
+                        )}
+                      </span>
+                      {c.applyMode === 'review' && !c.adopted && (
+                        <button
+                          type="button"
+                          className={`${settingsBtnCls} shrink-0`}
+                          onClick={async () => {
+                            const r = await adoptOcCandidate(c.id)
+                            setMcpProbe(r.message)
+                          }}
+                        >
+                          採用
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SettingsGroup>
           </>
         )}
 
@@ -2353,23 +2554,29 @@ export function SettingsPage() {
 
             <SettingsGroup title="本機 token 狀態">
               <div className="px-4 py-3 space-y-1.5 text-[12px]">
-                {listPluginSecrets().length === 0 ? (
+                {listPluginSecretMeta().length === 0 ? (
                   <p className="text-outline">尚無 connector 密鑰 — 在學習中心 → 外掛完成授權後會顯示於此。</p>
                 ) : (
-                  listPluginSecrets().map(({ id, record }) => (
+                  listPluginSecretMeta().map((meta) => (
                     <div
-                      key={id}
+                      key={meta.id}
                       className="flex items-center justify-between gap-2 border-b border-white/[0.05] py-1.5 last:border-0"
                     >
                       <span className="font-[family-name:var(--font-mono)] text-on-surface-variant truncate">
-                        {id}
+                        {meta.id}
+                        <span className="ml-2 text-outline">{meta.tokenHint}</span>
+                        {meta.encrypted ? (
+                          <span className="ml-2 text-[10px] text-primary/80">vault</span>
+                        ) : (
+                          <span className="ml-2 text-[10px] text-amber-300/80">未加密（無 OS 鑰匙圈）</span>
+                        )}
                       </span>
                       <span className="shrink-0 text-[11px] text-outline">
-                        {record.refreshToken
-                          ? secretNeedsRefresh(record)
+                        {meta.hasRefreshToken
+                          ? secretNeedsRefresh(meta)
                             ? 'refresh 待執行'
-                            : record.expiresAt
-                              ? `到期 ${new Date(record.expiresAt).toLocaleString()}`
+                            : meta.expiresAt
+                              ? `到期 ${new Date(meta.expiresAt).toLocaleString()}`
                               : '有 refresh_token'
                           : '無 refresh（PAT / 裝置碼）'}
                       </span>

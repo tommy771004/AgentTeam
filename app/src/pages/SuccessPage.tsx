@@ -30,6 +30,7 @@ export function SuccessPage() {
     navigate('/')
     const { runExternalObjective } = await import('../agent/runExternal')
     await runExternalObjective({
+      sourceKind: 'retry',
       objective: input,
       title: '重新開始',
       loopType,

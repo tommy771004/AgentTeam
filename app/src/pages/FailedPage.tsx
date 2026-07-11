@@ -27,6 +27,7 @@ export function FailedPage() {
     navigate('/')
     const { runExternalObjective } = await import('../agent/runExternal')
     await runExternalObjective({
+      sourceKind: 'retry',
       objective: input,
       title: '重試',
       loopType: agent.loopConfig.loopType || 'Goal-based',

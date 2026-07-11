@@ -96,6 +96,7 @@ function SchedulerBootstrap() {
           )
         }
         const r = await runExternalObjective({
+          sourceKind: 'schedule',
           objective: job.objective,
           title: job.name || '排程',
           loopType: job.loopType || 'Time-based',
@@ -196,6 +197,7 @@ function WebhookBootstrap() {
           body ? body : '',
         ].filter(Boolean)
         const r = await runExternalObjective({
+          sourceKind: 'webhook',
           objective: matched.objective,
           title: matched.name,
           loopType: 'Proactive',
@@ -315,6 +317,7 @@ function GatewayBootstrap() {
           }))
         // Goal-based: free-form chat, not event-predicate language
         const r = await runExternalObjective({
+          sourceKind: 'telegram',
           objective: text || (attachments.length ? '請分析我附上的圖片或檔案。' : ''),
           title: `TG ${msg.chatId}`,
           loopType: 'Goal-based',

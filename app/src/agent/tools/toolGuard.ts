@@ -154,6 +154,24 @@ export async function authorizeTool(opts: {
   }
   needAsk = decided
 
+  // P1-D lifecycle hooks (beforeTool): declarative policy — deny wins over
+  // everything; require-approval overrides even approvalMode 'full'.
+  try {
+    const { collectHookRules, evaluateHooks } = await import('../hooks')
+    const hookEval = evaluateHooks(collectHookRules(settings), {
+      point: 'beforeTool',
+      tool,
+    })
+    for (const line of hookEval.audits) onLog?.('INFO', line)
+    if (hookEval.deny) {
+      onLog?.('WARN', `hook deny：${tool} — ${hookEval.deny.reason}`)
+      return { allowed: false, output: `工具被 hook 政策拒絕：${hookEval.deny.reason}` }
+    }
+    if (hookEval.forceAsk) needAsk = true
+  } catch {
+    /* hooks unavailable — never block execution on hook infra */
+  }
+
   if (needAsk) {
     const timeoutMs =
       opts.hitlTimeoutMs ??

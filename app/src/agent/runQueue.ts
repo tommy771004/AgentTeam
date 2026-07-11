@@ -29,6 +29,9 @@ export type PersistedQueueItem = {
   id: string
   enqueuedAt: string
   dedupeKey: string
+  /** runTask trace id — survives restart so archive lineage holds */
+  runId?: string
+  sourceKind?: ExternalRunOpts['sourceKind']
   objective: string
   title?: string
   loopType?: LoopType
@@ -115,6 +118,8 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
     id: item.id,
     enqueuedAt: item.enqueuedAt,
     dedupeKey: item.dedupeKey,
+    runId: item.runId,
+    sourceKind: item.sourceKind,
     objective: item.objective,
     title: item.title,
     loopType: item.loopType,
@@ -153,6 +158,8 @@ function fromPersisted(p: PersistedQueueItem): QueuedExternalRun {
     id: p.id,
     enqueuedAt: p.enqueuedAt,
     dedupeKey: p.dedupeKey,
+    runId: p.runId,
+    sourceKind: p.sourceKind,
     objective: p.objective,
     title: p.title,
     loopType: p.loopType,

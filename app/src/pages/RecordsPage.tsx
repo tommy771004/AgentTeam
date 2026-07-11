@@ -378,6 +378,7 @@ function LogsSection() {
               navigate('/')
               const { runExternalObjective } = await import('../agent/runExternal')
               await runExternalObjective({
+                sourceKind: 'retry',
                 objective: input,
                 title: '日誌重啟',
                 loopType: agent.loopConfig.loopType || 'Goal-based',

@@ -26,6 +26,7 @@ export function LogsPage() {
     navigate('/')
     const { runExternalObjective } = await import('../agent/runExternal')
     await runExternalObjective({
+      sourceKind: 'retry',
       objective: input,
       title: '重啟',
       loopType,

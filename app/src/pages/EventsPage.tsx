@@ -73,6 +73,7 @@ export function EventsPage() {
     navigate('/')
     const { runExternalObjective } = await import('../agent/runExternal')
     const r = await runExternalObjective({
+      sourceKind: 'event',
       objective: matched.objective,
       title: matched.name,
       loopType: 'Proactive',

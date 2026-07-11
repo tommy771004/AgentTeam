@@ -30,6 +30,12 @@ custom 工具的 `sideEffect` hint(`always` 模式補網)、unattended `full →
 **第四輪後 R1 亦已消化**：外部 CLI runner 會接收 approvalMode；僅互動 build 的
 Codex/Claude `full` 映射 permissive flag，無人值守、Plan mode 與未明確支援的 CLI 一律保留預設核准。
 
+**第六輪(同日)— 工具庫再擴張**:Plugin Marketplace 上線,11 家連接器
+(GitHub/Notion/Google Calendar/Sheets/Linear/Figma/Asana/ClickUp/Dropbox/Canva/Home Assistant)
+以 A1 的 customTools 機制出貨,OAuth device/code(+PKCE)授權、token 自動刷新、
+secrets 三層隔離(見 `WORKFLOW_AUDIT.md` 第 9 節)。
+「豐富工具庫」路線自此從核心手刻 → 宣告式自訂 → **目錄化市集**三級完成。
+
 ---
 
 ## 0. 本輪複驗摘要

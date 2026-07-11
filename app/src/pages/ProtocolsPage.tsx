@@ -22,7 +22,6 @@ import {
   nextPrimaryAgent,
   parseSubagentMentions,
 } from '../agent/opencode/agents'
-import { dispatchThreadTask } from '../agent/runDispatch'
 import { loopTypeZh } from '../i18n/zh'
 import {
   countReadyConnectors,
@@ -112,7 +111,6 @@ export function ProtocolsPage() {
     showThreadList,
     setShowRunPanel,
     setShowThreadList,
-    setRunningThreadId,
     setThreadStatus,
     pushBubble,
     setModel,
@@ -251,56 +249,13 @@ export function ProtocolsPage() {
     ].filter(Boolean)
     pendingPreloadIds.current = []
 
-    // ChatGPT-style follow-up while running → unified global queue
-    const running =
-      busy || isRunning || useAgentStore.getState().isRunning
-    if (running) {
-      const mode = settings.followUpMode || 'steer'
-      if (mode === 'queue') {
-        pushBubble(activeId, 'user', raw, attachments)
-        const { runExternalObjective } = await import('../agent/runExternal')
-        const r = await runExternalObjective({
-          objective: raw,
-          reuseThreadId: activeId,
-          runner,
-          attachments,
-          enqueueWhenBusy: true,
-          skipUserBubble: true,
-          unattended: false,
-          sourceLabel: '對話追問',
-          overrides: forcePreload.length
-            ? { preloadCapabilityIds: forcePreload }
-            : undefined,
-        })
-        pushBubble(
-          activeId,
-          'system',
-          r.queued
-            ? `已加入全域待跑佇列（約 ${queueLength()} 則），目前任務完成後自動執行`
-            : r.error || '忙碌中',
-        )
-        setDraftInput('')
-        return
-      }
-      // steer: stop current run and start with new goal
-      pushBubble(activeId, 'system', '轉向目前執行：已中止前一個任務')
-      useAgentStore.getState().stopExecution()
-      // brief yield so engine fully stops
-      await new Promise((r) => setTimeout(r, 80))
-    }
-
-    if (busy && !running) return
-
     const { subagents } = parseSubagentMentions(raw)
 
     setBusy(true)
     setDraftInput('')
-    pushBubble(activeId, 'user', raw, attachments)
-    setShowRunPanel(true)
-    setRunningThreadId(activeId)
-    setThreadStatus(activeId, 'running')
-
     if (thread?.loopType) setSelectedLoopType(thread.loopType)
+
+    // Informational bubbles (before controller takes over lifecycle)
     if (subagents.length) {
       pushBubble(activeId, 'system', `Subagent: @${subagents.join(' @')}`)
     }
@@ -321,43 +276,39 @@ export function ProtocolsPage() {
         '提示：函式呼叫/工具已關閉 — MCP 漸進載入與 connector fallback 會降級；圖片仍盡力以 multimodal 送出。',
       )
     }
+    if (runner !== 'builtin') {
+      pushBubble(
+        activeId,
+        'system',
+        attachments.length
+          ? `執行引擎：本機 ${runner} CLI · 附件 ${attachments.length} 個將寫入 .subagents/chat-attachments/ 供 CLI 讀取`
+          : `執行引擎：本機 ${runner} CLI（使用既有登入，不複製 token）`,
+      )
+    }
+
     try {
-      if (runner !== 'builtin') {
-        pushBubble(
-          activeId,
-          'system',
-          attachments.length
-            ? `執行引擎：本機 ${runner} CLI · 附件 ${attachments.length} 個將寫入 .subagents/chat-attachments/ 供 CLI 讀取`
-            : `執行引擎：本機 ${runner} CLI（使用既有登入，不複製 token）`,
-        )
-      }
-      const dispatched = await dispatchThreadTask(raw, {
-        threadId: activeId,
+      // Single lifecycle controller: busy policy (steer/queue), thread status,
+      // user/assistant bubbles, trace runId, drain — all owned by runTask.
+      const { runTask } = await import('../agent/runExternal')
+      const r = await runTask({
+        objective: raw,
+        sourceKind: 'composer',
+        reuseThreadId: activeId,
+        runner,
         attachments,
         overrides: forcePreload.length
           ? { preloadCapabilityIds: forcePreload }
           : undefined,
       })
-      if (dispatched.error && !dispatched.result && dispatched.status === 'failed') {
-        pushBubble(activeId, 'system', dispatched.error)
-        setThreadStatus(activeId, 'failed')
-        return
+      if (r.queued) {
+        pushBubble(
+          activeId,
+          'system',
+          `已加入全域待跑佇列（約 ${queueLength()} 則），目前任務完成後自動執行`,
+        )
+      } else if (r.skipped) {
+        pushBubble(activeId, 'system', r.error || '忙碌中')
       }
-      const a = useAgentStore.getState().agent
-      setThreadStatus(activeId, a.status)
-      pushBubble(
-        activeId,
-        'assistant',
-        a.result?.slice(0, 4000) ||
-          a.steps
-            .filter((s) => s.result)
-            .slice(-3)
-            .map((s) => s.result)
-            .join('\n\n')
-            .slice(0, 4000) ||
-          dispatched.result?.slice(0, 4000) ||
-          `完成：${a.status}`,
-      )
     } catch (e) {
       setThreadStatus(activeId, 'failed')
       pushBubble(
@@ -367,9 +318,7 @@ export function ProtocolsPage() {
       )
     } finally {
       setBusy(false)
-      setRunningThreadId(null)
       setShowRunPanel(true)
-      // Global queue drained by agentStore when isRunning clears
     }
   }
 

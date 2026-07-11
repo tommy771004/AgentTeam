@@ -115,6 +115,8 @@ interface LearningStore {
   /** Re-bind npm-mcp ${projectRoot} args after project switch. */
   rebindPluginProjectRoots: (projectRoot: string) => Promise<void>
   applyPlugins: () => void
+  /** P1-C: approve a tool package's privilege fingerprint (unlocks withheld tools). */
+  approveToolPackage: (pluginId: string) => Promise<{ ok: boolean; message: string }>
 }
 
 /**
@@ -322,25 +324,26 @@ function buildTokenRefreshDeps(getStore: () => LearningStore) {
     onRefreshed: async (
       pluginId: string,
       result: {
-        accessToken: string
+        accessToken?: string
         refreshToken?: string
         expiresIn?: number
         tokenType?: string
+        /** Electron vault path: main already persisted; only metadata arrives */
+        meta?: { tokenHint: string }
       },
     ) => {
-      setPluginSecret(pluginId, result.accessToken, {
-        refreshToken: result.refreshToken,
-        expiresIn: result.expiresIn,
-        tokenType: result.tokenType,
-        keepRefreshToken: !result.refreshToken,
-      })
-      const settingsStore = useSettingsStore.getState()
-      await settingsStore.update({
-        customToolSecrets: {
-          ...(settingsStore.settings.customToolSecrets || {}),
-          [pluginId]: result.accessToken,
-        },
-      })
+      let tokenHint = result.meta?.tokenHint
+      if (!result.meta && result.accessToken) {
+        // Browser fallback: persist locally (raw token never reaches here on Electron)
+        const meta = await setPluginSecret(pluginId, result.accessToken, {
+          refreshToken: result.refreshToken,
+          expiresIn: result.expiresIn,
+          tokenType: result.tokenType,
+          keepRefreshToken: !result.refreshToken,
+        })
+        tokenHint = meta.tokenHint
+      }
+      // NOTE: no customToolSecrets mirroring — main resolves {{secret:*}} from the vault
       const existing = pluginRegistry.list().find((p) => p.id === pluginId)
       if (existing) {
         const next = {
@@ -348,7 +351,7 @@ function buildTokenRefreshDeps(getStore: () => LearningStore) {
           connectorAuth: {
             mode: (existing.connectorAuth?.mode || 'oauth') as 'pat' | 'api_key' | 'oauth',
             hasCredential: true,
-            accountHint: accountHintFromToken(result.accessToken),
+            accountHint: tokenHint || existing.connectorAuth?.accountHint,
             authorizedAt: new Date().toISOString(),
             lastAuthorizeUrl: existing.connectorAuth?.lastAuthorizeUrl,
           },
@@ -394,6 +397,13 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     pluginError: null,
 
     load: async () => {
+      // P1-A: hydrate vault metadata mirror + one-time localStorage → vault migration
+      try {
+        const { hydratePluginSecrets } = await import('../agent/hermes/pluginSecrets')
+        await hydratePluginSecrets()
+      } catch {
+        /* non-fatal */
+      }
       await loadFromDisk()
       set({
         loaded: true,
@@ -549,7 +559,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
       } else if (api?.delete) {
         await api.delete(id)
       }
-      clearPluginSecret(id)
+      await clearPluginSecret(id)
       pluginRegistry.remove(id)
       pluginRegistry.apply()
       get().refresh()
@@ -755,20 +765,14 @@ export const useLearningStore = create<LearningStore>((set, get) => {
         set({ pluginError: '請輸入有效的 token / API key' })
         return
       }
-      setPluginSecret(id, trimmed, {
+      await setPluginSecret(id, trimmed, {
         refreshToken: extra?.refreshToken,
         expiresIn: extra?.expiresIn,
         tokenType: extra?.tokenType,
         keepRefreshToken: extra?.refreshToken === undefined,
       })
-      // Bridge into customToolSecrets so {{secret:pluginId}} works everywhere
-      const settingsStore = useSettingsStore.getState()
-      await settingsStore.update({
-        customToolSecrets: {
-          ...(settingsStore.settings.customToolSecrets || {}),
-          [id]: trimmed,
-        },
-      })
+      // NOTE: no customToolSecrets mirror — {{secret:pluginId}} resolves from the
+      // vault in main (http/mcp); browser fallback reads the local record directly.
       const mode: 'pat' | 'api_key' | 'oauth' =
         item?.auth?.type === 'oauth' || oauthProviderForPlugin(id)
           ? 'oauth'
@@ -870,6 +874,35 @@ export const useLearningStore = create<LearningStore>((set, get) => {
         const message = error instanceof Error ? error.message : String(error)
         set({ pluginError: message })
         return { ok: false, error: message }
+      }
+    },
+
+    approveToolPackage: async (pluginId) => {
+      const plugin = pluginRegistry.list().find((p) => p.id === pluginId)
+      if (!plugin?.toolPackage) return { ok: false, message: `外掛 ${pluginId} 沒有 tool package` }
+      const { validateToolPackage, packageFingerprint } = await import(
+        '../agent/tools/toolPackage'
+      )
+      const v = validateToolPackage(plugin.toolPackage)
+      if (!v.ok || !v.manifest) {
+        return { ok: false, message: `manifest 驗證失敗：${v.errors.join('；')}` }
+      }
+      const next = {
+        ...plugin,
+        packageReview: {
+          approvedFingerprint: packageFingerprint(v.manifest),
+          approvedAt: new Date().toISOString(),
+          approvedVersion: v.manifest.version,
+        },
+      }
+      pluginRegistry.add(next)
+      pluginRegistry.apply()
+      await persistManifest(next)
+      await get().persist()
+      get().refresh()
+      return {
+        ok: true,
+        message: `已核准 ${v.manifest.id}@${v.manifest.version} 的權限面（write/destructive 工具已解鎖，執行仍逐次審批）`,
       }
     },
 

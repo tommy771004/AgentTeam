@@ -42,6 +42,11 @@ function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>)
         p.alwaysOnCapabilities != null
           ? [...p.alwaysOnCapabilities]
           : out.alwaysOnCapabilities,
+      modelProfiles:
+        p.modelProfiles != null
+          ? { ...out.modelProfiles, ...p.modelProfiles }
+          : out.modelProfiles,
+      hookRules: p.hookRules != null ? [...p.hookRules] : out.hookRules,
     }
   }
   return out

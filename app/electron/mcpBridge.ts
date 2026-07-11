@@ -8,6 +8,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { spawnCommandSpec, terminateProcessTree } from './platformProcess'
+import { hasSecretPlaceholder, resolveSecretPlaceholders } from './secretsVault'
 
 type JsonRpc = {
   jsonrpc: '2.0'
@@ -55,8 +56,17 @@ class McpStdioSession {
   constructor(id: string, command: string, args: string[], env?: Record<string, string>) {
     this.id = id
     this.command = command
-    this.args = args
-    this.env = { ...(env || {}) }
+    // P1-A: renderer sends {{secret:pluginId}} placeholders; raw tokens are
+    // resolved here (main) at spawn time from the credential vault.
+    const resolve = (v: string) =>
+      hasSecretPlaceholder(v) ? resolveSecretPlaceholders(v).text : v
+    this.args = (args || []).map((a) => (typeof a === 'string' ? resolve(a) : a))
+    this.env = Object.fromEntries(
+      Object.entries(env || {}).map(([k, v]) => [
+        k,
+        typeof v === 'string' ? resolve(v) : v,
+      ]),
+    )
   }
 
   get pid(): number | null {

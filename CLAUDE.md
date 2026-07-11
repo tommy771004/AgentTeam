@@ -31,11 +31,11 @@ There is no unit-test runner; smoke scripts cover scheduler math, event matching
 
 ### Execution flow (one global run at a time)
 
-All entry points funnel into the same pipeline:
+All entry points go through ONE lifecycle controller — **`agent/runExternal.ts` `runTask`** (alias `runExternalObjective`). Callers pass `sourceKind` (`composer`/`slash`/`retry`/`schedule`/`webhook`/`telegram`/`event`); the controller owns thread/bubbles, busy policy, trace `runId` (adopted as engine `state.id`, persisted through the queue), and completion callbacks. It then calls `agent/runDispatch.ts` `dispatchThreadTask` — picks `builtin` engine vs external CLI (`codex`/`claude`/… via `agent/localCliRun.ts`) → `store/agentStore.ts` `startExecution` → **`agent/engine.ts` `agentEngine`** (singleton). **Never call `dispatchThreadTask` or `startExecution` from UI code** — a smoke drift guard fails the build if a page does.
 
-- UI composer / slash commands (`hooks/useSlashExecutor.ts`), scheduler ticks, webhook events, Telegram inbound — the latter three are wired in `App.tsx` bootstrap components → `agent/runExternal.ts` (creates a thread, adds bubbles) → **`agent/runDispatch.ts` `dispatchThreadTask`** — picks the runner: `builtin` engine vs external CLI (`codex`/`claude`/… via `agent/localCliRun.ts`, gated by `settings.cliProviders` authorization) → `store/agentStore.ts` `startExecution` → **`agent/engine.ts` `agentEngine`** (singleton `AgentLoopEngine`).
+`agentStore.isRunning` is a global mutex. On busy, `resolveBusyPolicy` decides: automation sources **queue** (`agent/runQueue.ts`, FIFO + dedupe + localStorage persist, max 24, drained when free); interactive sources **steer** (abort current run) or queue per `settings.followUpMode`. Use `onSettled` so once-jobs still get `markJobResult` after 補跑. Event sources pass `eventPreMatched: true` so the Proactive pattern skips its when/if predicate re-check.
 
-`agentStore.isRunning` is a global mutex. Automation (scheduler / webhook / Telegram) that hits a busy lock is **enqueued** (`agent/runQueue.ts`, FIFO + dedupe, max 24) and drained when free — not permanently missed. Use `onSettled` on `runExternalObjective` so once-jobs still get `markJobResult` after 補跑. Event sources pass `eventPreMatched: true` so the Proactive pattern skips its when/if predicate re-check.
+Per run, the engine resolves **project context** (`agent/projectContext.ts` → `project:agentsDocs` IPC): real `AGENTS.md`/`CLAUDE.md` files from the project root (walking up ≤3 levels, stopping at `.git`), injected into prompts ABOVE Hermes user guidance, with path/hash/bytes logged for audit. OpenCode `instructions` are temporary-applied the same way; other discovered opencode fields surface as candidates in Settings →「OpenCode 匯入報告」(temporary / review / unsupported — `agent/opencode/configCandidates.ts`), never silently written to Settings.
 
 ### Engine (`agent/engine.ts`)
 
@@ -66,6 +66,13 @@ The central abstraction for the FC path. `AgentCapability` bundles tools + instr
 `registry.ts` (catalog + `ToolName` union) → `schemas.ts` (OpenAI defs) → `executor.ts` (actual I/O through `window.subagents.*` IPC with browser fallbacks) → `toolGuard.ts` (`authorizeTool`: deny / HITL ask via `permissionAskStore`, shared by FC and heuristic paths) → `supervisor.ts` (payload byte limits, round budgets; can halt or truncate).
 
 Adding a tool touches: `registry.ts` (name + catalog entry), `schemas.ts` (params), `executor.ts` (implementation), and an owning capability in `capabilities/builtins.ts` — otherwise it is ungated.
+
+### Governance & security layers
+
+- **Approval hooks** (`agent/hooks.ts`): declarative lifecycle rules (beforeRun/beforeTool/afterTool/afterRun) from `settings.hookRules` + plugin manifests, sanitized on collect. Rules can only restrict/observe (deny / require-approval / append-context / log / notify — no allow); `require-approval` overrides even approvalMode `full`. Evaluated in `runExternal` (run points), `toolGuard` (beforeTool), `toolLoop` (afterTool).
+- **Credential vault** (`electron/secretsVault.ts`): connector tokens live ONLY in a safeStorage-encrypted file in main. Renderer sees metadata (`pluginSecrets.ts` mirror); `{{secret:key}}` placeholders are resolved main-side (tools:httpRequest, mcp http/stdio). Never add a renderer path that reads raw tokens.
+- **Model profiles** (`agent/modelProfile.ts`): per-model capability facts (`settings.modelProfiles`) with provenance (verified via explicit probe / assumed / unknown). Engine degrades BEFORE calls fail: `tools:false` → heuristic path, `vision:false` → images become path notes.
+- **Tool packages** (`agent/tools/toolPackage.ts`): plugins may ship a `toolPackage` manifest where every tool declares `operationClass` (read/write/destructive/external). Unapproved privilege surfaces compile read-only; escalating updates change the fingerprint and require re-approval in Settings.
 
 ### Supporting layers
 

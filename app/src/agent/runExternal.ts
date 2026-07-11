@@ -1,11 +1,12 @@
 /**
- * Unified external / automation run path.
- * Always: create thread → bubbles → show Run panel → dispatchThreadTask
- * so Scheduler / Webhook / Telegram / Event simulate / retry share one UX.
+ * runTask — the single task lifecycle controller (W1 / P0-A).
+ * Every entry (composer / slash / retry / schedule / webhook / telegram / queue drain)
+ * goes through here: one runId, one busy policy table, one thread/bubble/archive semantic.
  *
- * When busy: automation sources enqueue (G3) instead of permanent miss.
+ * When busy: policy decides queue / steer / reject — no caller re-implements lifecycle.
  */
 
+import { v4 as uuid } from 'uuid'
 import type { ChatAttachment, LoopType, RuntimeOverrides } from './types'
 import { dispatchThreadTask, type DispatchResult } from './runDispatch'
 import { useAgentStore } from '../store/agentStore'
@@ -16,8 +17,51 @@ import {
   enqueueExternalRun,
 } from './runQueue'
 
+/** Where a run request came from — the ONLY thing entries may vary. */
+export type RunSourceKind =
+  | 'composer'
+  | 'slash'
+  | 'retry'
+  | 'schedule'
+  | 'webhook'
+  | 'telegram'
+  | 'event'
+  | 'delegate'
+  | 'queue-drain'
+
+export type BusyPolicy = 'queue' | 'steer' | 'reject'
+
+/**
+ * Declarative busy policy (table-driven; mirrored in smoke-caps).
+ * Interactive sources follow the user's followUpMode preference.
+ */
+export function resolveBusyPolicy(
+  sourceKind: RunSourceKind | undefined,
+  followUpMode: 'steer' | 'queue' | undefined,
+): BusyPolicy {
+  switch (sourceKind) {
+    case 'schedule':
+    case 'webhook':
+    case 'telegram':
+    case 'event':
+    case 'delegate':
+    case 'queue-drain':
+      return 'queue'
+    case 'composer':
+    case 'slash':
+    case 'retry':
+      return (followUpMode || 'steer') === 'queue' ? 'queue' : 'steer'
+    default:
+      return 'reject'
+  }
+}
+
 export type ExternalRunOpts = {
   objective: string
+  /** Entry source — drives busy policy / unattended / trace. Legacy callers may omit. */
+  sourceKind?: RunSourceKind
+  /** Stable run id for trace correlation (assigned here; survives queue). */
+  runId?: string
   /** Thread title */
   title?: string
   loopType?: LoopType
@@ -68,6 +112,8 @@ export type ExternalRunOpts = {
 
 export type ExternalRunResult = DispatchResult & {
   threadId: string | null
+  /** Trace id — correlates thread / archive / queue / HITL */
+  runId?: string
   skipped?: boolean
   /** busy | queued | cancelled */
   skipReason?: string
@@ -75,7 +121,17 @@ export type ExternalRunResult = DispatchResult & {
   queueId?: string
 }
 
+const AUTOMATION_KINDS: ReadonlySet<RunSourceKind> = new Set([
+  'schedule',
+  'webhook',
+  'telegram',
+  'event',
+  'delegate',
+  'queue-drain',
+])
+
 function isAutomationSource(opts: ExternalRunOpts): boolean {
+  if (opts.sourceKind) return AUTOMATION_KINDS.has(opts.sourceKind)
   return (
     opts.unattended === true ||
     Boolean(
@@ -95,9 +151,22 @@ function shouldEnqueueWhenBusy(opts: ExternalRunOpts): boolean {
   )
 }
 
+/** Canonical input name for the lifecycle controller. */
+export type RunTaskInput = ExternalRunOpts
+
+/**
+ * runTask — the ONLY entry to start a run. UI / slash / automation callers
+ * provide input + sourceKind; lifecycle (queue, steer, thread, bubbles,
+ * trace, drain, settle callbacks) is owned here.
+ */
+export async function runTask(input: RunTaskInput): Promise<ExternalRunResult> {
+  return runExternalObjective(input)
+}
+
 /**
  * Run an objective from automation/external source with full thread UX.
  * Also used for interactive follow-ups (reuseThreadId + enqueueWhenBusy).
+ * (Legacy name — prefer `runTask`.)
  */
 export async function runExternalObjective(
   opts: ExternalRunOpts,
@@ -130,12 +199,33 @@ export async function runExternalObjective(
     }
   }
 
+  const runId = opts.runId || `run_${uuid().slice(0, 12)}`
+
   const agent = useAgentStore.getState()
   if (agent.isRunning) {
-    // Unified queue: automation + interactive follow-up
-    if (shouldEnqueueWhenBusy(opts) && !opts._fromQueue) {
+    const policy: BusyPolicy = opts.sourceKind
+      ? resolveBusyPolicy(
+          opts.sourceKind,
+          useSettingsStore.getState().settings.followUpMode,
+        )
+      : shouldEnqueueWhenBusy(opts)
+        ? 'queue'
+        : 'reject'
+
+    if (policy === 'steer' && !opts._fromQueue) {
+      // Interactive steer: abort current run, then proceed with this one
+      const tid0 = opts.reuseThreadId || useThreadStore.getState().activeId
+      if (tid0) {
+        useThreadStore
+          .getState()
+          .pushBubble(tid0, 'system', '轉向目前執行：已中止前一個任務')
+      }
+      useAgentStore.getState().stopExecution()
+      await new Promise((r) => setTimeout(r, 100))
+    } else if (policy === 'queue' && !opts._fromQueue) {
       const item = enqueueExternalRun({
         ...opts,
+        runId,
         attachments,
         unattended: opts.unattended ?? isAutomationSource(opts),
       })
@@ -145,6 +235,7 @@ export async function runExternalObjective(
           status: 'skipped',
           error: '已有任務執行中 — 已加入待跑佇列',
           threadId: opts.reuseThreadId || useThreadStore.getState().activeId,
+          runId,
           skipped: true,
           skipReason: 'queued',
           queued: true,
@@ -156,17 +247,20 @@ export async function runExternalObjective(
         status: 'skipped',
         error: '已有任務執行中（佇列已滿或重複）',
         threadId: opts.reuseThreadId || useThreadStore.getState().activeId,
+        runId,
         skipped: true,
         skipReason: 'busy',
       }
-    }
-    return {
-      path: 'builtin',
-      status: 'skipped',
-      error: '已有任務執行中',
-      threadId: useThreadStore.getState().activeId,
-      skipped: true,
-      skipReason: 'busy',
+    } else if (policy !== 'steer') {
+      return {
+        path: 'builtin',
+        status: 'skipped',
+        error: '已有任務執行中',
+        threadId: useThreadStore.getState().activeId,
+        runId,
+        skipped: true,
+        skipReason: 'busy',
+      }
     }
   }
 
@@ -240,6 +334,7 @@ export async function runExternalObjective(
 
   const overrides: RuntimeOverrides = {
     ...(opts.overrides || {}),
+    runId,
     eventPreMatched: opts.eventPreMatched ?? opts.overrides?.eventPreMatched,
     attachedSkills:
       opts.attachedSkills || opts.overrides?.attachedSkills || undefined,
@@ -253,6 +348,42 @@ export async function runExternalObjective(
       : opts.overrides?.userAttachments,
   }
 
+  // P1-D lifecycle hooks (beforeRun): deny / append-context / log / notify
+  try {
+    const { collectHookRules, evaluateHooks } = await import('./hooks')
+    const ev = evaluateHooks(collectHookRules(settings), {
+      point: 'beforeRun',
+      sourceKind: opts.sourceKind,
+      objective,
+    })
+    for (const line of ev.audits) thr.pushBubble(tid, 'system', line)
+    for (const n of ev.notifications) {
+      void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+    }
+    if (ev.deny) {
+      thr.setThreadStatus(tid, 'failed')
+      thr.setRunningThreadId(null)
+      thr.pushBubble(tid, 'system', `執行被 hook 政策拒絕：${ev.deny.reason}`)
+      return {
+        path: 'builtin',
+        status: 'failed',
+        error: `hook deny：${ev.deny.reason}`,
+        threadId: tid,
+        runId,
+      }
+    }
+    if (ev.appendTexts.length) {
+      overrides.extraSystemContext = [
+        overrides.extraSystemContext,
+        ...ev.appendTexts.map((t) => `## Hook context\n${t}`),
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    }
+  } catch {
+    /* hook infra must never break runs */
+  }
+
   try {
     const result = await dispatchThreadTask(objective, {
       threadId: tid,
@@ -261,24 +392,46 @@ export async function runExternalObjective(
       forceLoopType: loopType,
       attachments,
     })
-    const status = useAgentStore.getState().agent.status
+    const finalAgent = useAgentStore.getState().agent
+    const status = finalAgent.status
     thr.setThreadStatus(tid, status)
+    const stepsTail = finalAgent.steps
+      .filter((s) => s.result)
+      .slice(-3)
+      .map((s) => s.result)
+      .join('\n\n')
     thr.pushBubble(
       tid,
       'assistant',
-      useAgentStore.getState().agent.result?.slice(0, 3500) ||
-        result.result?.slice(0, 3500) ||
+      finalAgent.result?.slice(0, 4000) ||
+        stepsTail.slice(0, 4000) ||
+        result.result?.slice(0, 4000) ||
         `狀態：${status}`,
     )
     thr.setRunningThreadId(null)
-    const finalResult: ExternalRunResult = { ...result, threadId: tid }
+    const finalResult: ExternalRunResult = { ...result, threadId: tid, runId }
+    // P1-D lifecycle hooks (afterRun): observe / notify
+    try {
+      const { collectHookRules, evaluateHooks } = await import('./hooks')
+      const ev = evaluateHooks(collectHookRules(settings), {
+        point: 'afterRun',
+        sourceKind: opts.sourceKind,
+        objective,
+      })
+      for (const line of ev.audits) thr.pushBubble(tid, 'system', line)
+      for (const n of ev.notifications) {
+        void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+      }
+    } catch {
+      /* non-fatal */
+    }
     try {
       await opts.onSettled?.(finalResult)
     } catch {
       /* caller errors non-fatal */
     }
     void drainExternalRunQueue((o) =>
-      runExternalObjective({ ...o, _fromQueue: true }),
+      runExternalObjective({ ...o, _fromQueue: true, sourceKind: o.sourceKind || 'queue-drain' }),
     )
     return finalResult
   } catch (e) {
@@ -291,6 +444,7 @@ export async function runExternalObjective(
       status: 'failed',
       error: msg,
       threadId: tid,
+      runId,
     }
     try {
       await opts.onSettled?.(failResult)
@@ -298,7 +452,7 @@ export async function runExternalObjective(
       /* ignore */
     }
     void drainExternalRunQueue((o) =>
-      runExternalObjective({ ...o, _fromQueue: true }),
+      runExternalObjective({ ...o, _fromQueue: true, sourceKind: o.sourceKind || 'queue-drain' }),
     )
     return failResult
   }
