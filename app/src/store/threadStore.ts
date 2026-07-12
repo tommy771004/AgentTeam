@@ -3,6 +3,7 @@ import type { SpeedMode, ThinkingDepth } from '../agent/thinking'
 import type { AgentMode, ExecutionStatus, LoopType } from '../agent/types'
 import type { ChatAttachment } from '../agent/types'
 import { sanitizeAttachmentsForStorage } from '../lib/chatAttachments'
+import type { ContinueGoalSnapshot } from '../agent/continueGoal'
 
 const KEY = 'subagents.threads.v5'
 
@@ -69,6 +70,11 @@ export type Thread = {
   lastCapabilityIds?: string[]
   /** tool_search unlock set from last run */
   lastUnlockedTools?: string[]
+  /**
+   * P3: last unfinished Goal (DoD / missing) — resume without re-parse.
+   * Cleared on Goal success.
+   */
+  continueGoal?: ContinueGoalSnapshot | null
 }
 
 interface ThreadStore {
@@ -114,6 +120,7 @@ interface ThreadStore {
     capabilityIds: string[],
     unlockedTools?: string[],
   ) => void
+  setContinueGoal: (id: string, snap: ContinueGoalSnapshot | null) => void
   activeThread: () => Thread | null
 }
 
@@ -157,6 +164,10 @@ function migrateThread(raw: Record<string, unknown>): Thread {
     lastUnlockedTools: Array.isArray(raw.lastUnlockedTools)
       ? (raw.lastUnlockedTools as string[]).filter((x) => typeof x === 'string')
       : undefined,
+    continueGoal:
+      raw.continueGoal && typeof raw.continueGoal === 'object'
+        ? (raw.continueGoal as ContinueGoalSnapshot)
+        : undefined,
   }
 }
 
@@ -413,6 +424,20 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
             ...t,
             lastCapabilityIds: caps.length ? caps : t.lastCapabilityIds,
             lastUnlockedTools: unlocks?.length ? unlocks : t.lastUnlockedTools,
+            updatedAt: new Date().toISOString(),
+          }
+        : t,
+    )
+    set({ threads })
+    persist(threads, get().activeId)
+  },
+
+  setContinueGoal: (id, snap) => {
+    const threads = get().threads.map((t) =>
+      t.id === id
+        ? {
+            ...t,
+            continueGoal: snap || undefined,
             updatedAt: new Date().toISOString(),
           }
         : t,

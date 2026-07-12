@@ -61,12 +61,29 @@ class LearningLoop {
   onGoalSuccess(input: {
     objective: string
     steps: Array<{ description: string; result?: string }>
+    /** Successful tool calls for playbook-quality drafts */
+    toolCalls?: Array<{ tool: string; summary?: string }>
     loopType: string
     /** When false, skip auto memory write (ChatGPT-style Memory off) */
     memoryEnabled?: boolean
     memoryWriteEnabled?: boolean
   }) {
     this.onUserTurn()
+    // Skip skill drafts for trivial chat-lite turns (no tools / single generic step)
+    const tools = input.toolCalls || []
+    if (
+      input.loopType === 'Turn-based' &&
+      tools.length === 0 &&
+      input.steps.length <= 1
+    ) {
+      const canWriteLite =
+        input.memoryEnabled !== false && input.memoryWriteEnabled !== false
+      if (canWriteLite && input.objective.length > 20) {
+        // light touch only — no skill spam
+      }
+      return
+    }
+
     const slug =
       input.objective
         .toLowerCase()
@@ -83,6 +100,12 @@ class LearningLoop {
       .map((s, i) => `${i + 1}. ${s.description}${s.result ? ` — ${s.result.slice(0, 120)}` : ''}`)
       .join('\n')
 
+    const toolsMd = tools.length
+      ? tools
+          .map((t, i) => `${i + 1}. \`${t.tool}\`${t.summary ? ` — ${t.summary.slice(0, 100)}` : ''}`)
+          .join('\n')
+      : ''
+
     const body = `# ${name}
 
 ## 何時使用
@@ -90,7 +113,7 @@ class LearningLoop {
 
 ## 流程（由成功執行軌跡濃縮）
 ${stepsMd || '1. 解析目標\n2. 執行工具\n3. 驗證 DoD'}
-
+${toolsMd ? `\n## 成功工具序列\n${toolsMd}\n` : ''}
 ## 注意
 - 此技能由代理自動草稿，請人工審核後再正式啟用。
 - Loop 類型：${input.loopType}

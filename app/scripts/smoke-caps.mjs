@@ -739,14 +739,60 @@ await test('Loop plan: parser/evaluator/iteration contracts are wired', async ()
   const fs = await import('node:fs')
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
+  const replan = fs.readFileSync(path.join(appRoot, 'src/agent/replan.ts'), 'utf8')
   assert.match(engine, /from '\.\/dodEvaluator'/)
   assert.ok(engine.includes('evaluateDoD('))
   assert.match(engine, /from '\.\/llmParser'/)
   assert.ok(engine.includes('parseWithLlm('))
   assert.match(engine, /allDone && !dodMet/)
   assert.match(engine, /上一輪 DoD 缺口/)
+  assert.match(engine, /replanCorrectiveSteps/)
+  assert.match(engine, /formatPlanBubble/)
+  assert.match(engine, /loopTypeMode/)
+  assert.match(engine, /this\.state\.loopConfig\.loopType/)
   assert.match(parser, /export function buildParseResult/)
+  assert.match(parser, /export function isChatLiteObjective/)
+  assert.match(parser, /export function classifyLoopType/)
+  assert.match(parser, /export function formatPlanBubble/)
   assert.match(parser, /個\|項\|款\|種/)
+  assert.match(replan, /export function replanCorrectiveSteps/)
+})
+
+// Mirror of replan.ts + chat-lite classify (conversation loop engineering)
+function replanCorrectiveStepsMirror(missing, objective, opts) {
+  const maxSteps = Math.max(1, Math.min(4, opts?.maxSteps ?? 3))
+  const gaps = (missing || []).map((item) => String(item).trim()).filter(Boolean).slice(0, Math.max(1, maxSteps - 1))
+  const sequence =
+    gaps.length > 0
+      ? gaps.map((gap) => `補齊缺口：${gap}`.slice(0, 240))
+      : [`依目標補齊未達標部分：${String(objective || '').slice(0, 120)}`]
+  if (sequence.length < maxSteps) sequence.push('依 Definition of Done 重新驗證並產出完整結果')
+  return sequence.slice(0, maxSteps)
+}
+
+function isChatLiteObjectiveMirror(input) {
+  const text = (input || '').trim()
+  if (!text || text.length > 100) return false
+  if (/(\d+)\s*(?:個|項|款|種|items?|tools?)/i.test(text)) return false
+  if (/以及|並且|然後|比較|分析|研究|調查|重構|實作|修復/.test(text)) return false
+  if (/find|analyze|research|compare|build|create|報告|摘要/i.test(text)) return false
+  if (text.split(/\n/).filter((line) => line.trim()).length >= 3) return false
+  return true
+}
+
+await test('Loop plan: chat-lite classifies short turns; complex goals do not', () => {
+  assert.equal(isChatLiteObjectiveMirror('你好'), true)
+  assert.equal(isChatLiteObjectiveMirror('什麼是 React？'), true)
+  assert.equal(isChatLiteObjectiveMirror('分析 2025 年 AI 市場趨勢並給出報告'), false)
+  assert.equal(isChatLiteObjectiveMirror('找 3 個 AI 剪輯工具並比較價格'), false)
+})
+
+await test('Loop plan: replanCorrectiveSteps builds gap-driven steps', () => {
+  const steps = replanCorrectiveStepsMirror(['缺價格欄', '缺第三個工具'], '比較工具', { maxSteps: 3 })
+  assert.equal(steps.length, 3)
+  assert.match(steps[0], /缺價格欄/)
+  assert.match(steps[1], /缺第三個工具/)
+  assert.match(steps[2], /Definition of Done/)
 })
 
 await test('Loop plan: memory relevance, failure learning, unattended turn, and CJK matching are wired', async () => {
@@ -757,13 +803,20 @@ await test('Loop plan: memory relevance, failure learning, unattended turn, and 
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const skills = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/skills.ts'), 'utf8')
   const intent = fs.readFileSync(path.join(appRoot, 'src/agent/intentPreload.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
   assert.match(memory, /buildPromptBlock\(enabled = true, objective\?: string\)/)
+  assert.match(memory, /失敗教訓/)
   assert.match(prompt, /buildPromptBlock\(memoryOn, opts\?\.objective\)/)
   assert.match(learning, /onGoalFailure/)
+  assert.match(learning, /toolCalls/)
   assert.match(engine, /noteLearningFailure/)
+  assert.match(engine, /sessionRecallEnabled|searchSessions/)
+  assert.match(runExternal, /loopTypeMode/)
+  assert.match(runExternal, /forcedLoopType|forceLoopType/)
   const turn = engine.slice(engine.indexOf('private async runTurnBased'), engine.indexOf('private async runGoalBased'))
   assert.match(turn, /overrides\.unattended/)
   assert.match(turn, /waitForUser/)
+  assert.match(turn, /sourceKind === 'composer'/)
   assert.match(skills, /export function cjkAwareHit/)
   assert.match(intent, /[一-鿿]|\\u4e00/)
 })
@@ -776,6 +829,69 @@ await test('attachments: tiny vision images are upscaled above provider minimum'
   assert.match(attachments, /normalizeImageAttachmentsForVision/)
   const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
   assert.match(runExternal, /normalizeImageAttachmentsForVision/)
+})
+
+// ── Slice D: continueGoal + chat history + busy UX ───────────────
+function buildChatHistoryContextMirror(bubbles, opts = {}) {
+  const keepRecent = opts.keepRecent ?? 3
+  const chat = bubbles.filter((b) => b.role === 'user' || b.role === 'assistant')
+  if (chat.length <= keepRecent + 1) {
+    return chat.map((b) => `${b.role}: ${b.content}`).join('\n')
+  }
+  const older = chat.slice(0, -keepRecent)
+  const recent = chat.slice(-keepRecent)
+  return [
+    '## 對話摘要',
+    ...older.map((b) => `- ${b.role}: ${b.content.slice(0, 40)}`),
+    '## 近期對話',
+    ...recent.map((b) => `${b.role}: ${b.content}`),
+  ].join('\n')
+}
+
+function isContinueGoalPhraseMirror(text) {
+  return /^(繼續|補齊|接著|再試|重試|繼續補|補上|continue\b|retry\b|keep going)/i.test(
+    (text || '').trim(),
+  )
+}
+
+await test('P3: chat history condenses older turns', () => {
+  const bubbles = Array.from({ length: 8 }, (_, i) => ({
+    role: i % 2 === 0 ? 'user' : 'assistant',
+    content: `msg-${i} ${'x'.repeat(20)}`,
+  }))
+  const ctx = buildChatHistoryContextMirror(bubbles, { keepRecent: 3 })
+  assert.match(ctx, /對話摘要/)
+  assert.match(ctx, /近期對話/)
+  assert.match(ctx, /msg-7/)
+})
+
+await test('P3: continue goal phrase detection', () => {
+  assert.equal(isContinueGoalPhraseMirror('繼續'), true)
+  assert.equal(isContinueGoalPhraseMirror('補齊價格欄'), true)
+  assert.equal(isContinueGoalPhraseMirror('重新做一個完全不同的任務'), false)
+})
+
+await test('P3: continueGoal + steer digest + chatHistory wiring', async () => {
+  const fs = await import('node:fs')
+  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runDispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  const continueGoal = fs.readFileSync(path.join(appRoot, 'src/agent/continueGoal.ts'), 'utf8')
+  const chatHistory = fs.readFileSync(path.join(appRoot, 'src/agent/chatHistory.ts'), 'utf8')
+  const threadStore = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
+  assert.match(continueGoal, /export function buildContinueGoalSnapshot/)
+  assert.match(continueGoal, /export function formatContinueGoalOffer/)
+  assert.match(chatHistory, /export function buildChatHistoryContext/)
+  assert.match(chatHistory, /export function isContinueGoalPhrase/)
+  assert.match(engine, /continueGoal/)
+  assert.match(engine, /persistContinueGoal/)
+  assert.match(engine, /clearContinueGoal/)
+  assert.match(runExternal, /buildSteerPartialDigest/)
+  assert.match(runExternal, /continueGoal/)
+  assert.match(runExternal, /佇列第/)
+  assert.match(runDispatch, /buildChatHistoryContext/)
+  assert.match(threadStore, /setContinueGoal/)
+  assert.match(threadStore, /continueGoal/)
 })
 
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)

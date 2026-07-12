@@ -65,10 +65,25 @@ export function imagePixelCountFromDataUrl(dataUrl: string): number | null {
   const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(dataUrl)
   if (!match) return null
   try {
+    const mime = (match[1] || '').toLowerCase()
     const buffer = match[2]
       ? Buffer.from(match[3] || '', 'base64')
       : Buffer.from(decodeURIComponent(match[3] || ''), 'utf8')
     if (buffer.length < 10) return null
+
+    // SVG icons can be accepted by canvas yet rejected as 16×16 by a vision CLI.
+    if (mime.includes('svg') || buffer.subarray(0, 256).toString('utf8').includes('<svg')) {
+      const svg = buffer.toString('utf8')
+      const dimension = (name: 'width' | 'height') => {
+        const value = new RegExp(`${name}\\s*=\\s*["']?([0-9]+(?:\\.[0-9]+)?)`, 'i').exec(svg)?.[1]
+        return value ? Number(value) : undefined
+      }
+      const width = dimension('width')
+      const height = dimension('height')
+      if (width && height) return Math.round(width * height)
+      const viewBox = /viewBox\s*=\s*["']?\s*[-0-9.]+\s+[-0-9.]+\s+([0-9.]+)\s+([0-9.]+)/i.exec(svg)
+      if (viewBox?.[1] && viewBox[2]) return Math.round(Number(viewBox[1]) * Number(viewBox[2]))
+    }
 
     // PNG IHDR
     if (buffer.length >= 24 && buffer.subarray(1, 4).toString('ascii') === 'PNG') {

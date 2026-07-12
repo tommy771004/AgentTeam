@@ -13,13 +13,14 @@ type RunnerOption = {
 type ComposerQuickActionsProps = {
   disabled: boolean
   projectRoot: string | null
-  loopType: LoopType
+  /** null = auto classify */
+  loopType: LoopType | null
   agentMode: AgentMode
   runner: ThreadRunner
   runners: RunnerOption[]
   onAttach: () => void
   onPickProject: () => void
-  onLoopChange: (type: LoopType) => void
+  onLoopChange: (type: LoopType | null) => void
   onAgentModeChange: (mode: AgentMode) => void
   onRunnerChange: (runner: ThreadRunner) => void
   onOpenCapabilities: () => void
@@ -28,7 +29,8 @@ type ComposerQuickActionsProps = {
   onCreateThread: () => void
 }
 
-const LOOPS: Array<{ type: LoopType; label: string; icon: string }> = [
+const LOOPS: Array<{ type: LoopType | null; label: string; icon: string }> = [
+  { type: null, label: '自動', icon: 'auto_awesome' },
   { type: 'Goal-based', label: '目標', icon: 'track_changes' },
   { type: 'Turn-based', label: '回合', icon: 'forum' },
   { type: 'Time-based', label: '定時', icon: 'schedule' },
@@ -123,12 +125,16 @@ export function ComposerQuickActions({
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-4 gap-1 px-1 pb-1">
+          <div className="grid grid-cols-5 gap-1 px-1 pb-1">
             {LOOPS.map((item) => (
               <button
-                key={item.type}
+                key={item.type ?? 'auto'}
                 type="button"
-                title={item.label}
+                title={
+                  item.type === null
+                    ? '自動分類：短訊息回合制、複雜目標多步迴圈'
+                    : item.label
+                }
                 onClick={() => choose(() => onLoopChange(item.type))}
                 className={`flex flex-col items-center gap-1 rounded-xl px-1 py-2 text-[10px] transition-colors ${
                   loopType === item.type

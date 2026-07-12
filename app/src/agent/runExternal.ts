@@ -7,7 +7,7 @@
  */
 
 import { v4 as uuid } from 'uuid'
-import type { ChatAttachment, LoopType, RuntimeOverrides } from './types'
+import type { AgentState, ChatAttachment, LoopType, RuntimeOverrides } from './types'
 import { dispatchThreadTask, type DispatchResult } from './runDispatch'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
@@ -15,7 +15,44 @@ import { useSettingsStore } from '../store/settingsStore'
 import {
   drainExternalRunQueue,
   enqueueExternalRun,
+  listQueuedRuns,
+  queueLength,
 } from './runQueue'
+import { isContinueGoalPhrase } from './chatHistory'
+
+/** Compact partial result when steer aborts a running task. */
+function buildSteerPartialDigest(agent: AgentState): string {
+  const bits: string[] = []
+  if (agent.objective) bits.push(`目標：${agent.objective.slice(0, 120)}`)
+  if (agent.loopConfig?.loopType) bits.push(`Loop：${agent.loopConfig.loopType}`)
+  if (agent.progress) bits.push(`進度：${Math.round(agent.progress)}%`)
+  const done = (agent.steps || []).filter((s) => s.status === 'COMPLETED')
+  if (done.length) {
+    bits.push(
+      `已完成步驟：${done
+        .slice(-3)
+        .map((s) => s.description)
+        .join(' · ')
+        .slice(0, 200)}`,
+    )
+  }
+  const tools = (agent.toolCalls || []).slice(-4)
+  if (tools.length) {
+    bits.push(
+      `近期工具：${tools.map((t) => `${t.ok ? '✓' : '✗'}${t.tool}`).join(', ')}`,
+    )
+  }
+  if (agent.result?.trim()) {
+    bits.push(`部分產出：${agent.result.trim().slice(0, 400)}`)
+  } else {
+    const stepTail = done
+      .map((s) => s.result)
+      .filter(Boolean)
+      .slice(-1)[0]
+    if (stepTail) bits.push(`部分產出：${String(stepTail).slice(0, 400)}`)
+  }
+  return bits.join('\n').slice(0, 1200)
+}
 
 /** Where a run request came from — the ONLY thing entries may vary. */
 export type RunSourceKind =
@@ -108,6 +145,13 @@ export type ExternalRunOpts = {
   }
   /** Internal: skip re-enqueue when draining queue */
   _fromQueue?: boolean
+  /**
+   * Resume thread.continueGoal (same DoD / missing).
+   * When true, forces Goal-based corrective run.
+   */
+  continueGoal?: boolean
+  /** Extra user hint when continuing (appended to corrective context) */
+  continueHint?: string
 }
 
 export type ExternalRunResult = DispatchResult & {
@@ -217,16 +261,29 @@ export async function runExternalObjective(
         : 'reject'
 
     if (policy === 'steer' && !opts._fromQueue) {
-      // Interactive steer: abort current run, then proceed with this one
-      const tid0 = opts.reuseThreadId || useThreadStore.getState().activeId
+      // Interactive steer: capture partial digest, abort, then proceed
+      const thrBusy = useThreadStore.getState()
+      const tid0 = opts.reuseThreadId || thrBusy.activeId
+      const runningId = thrBusy.runningThreadId
+      const runningTitle = runningId
+        ? thrBusy.threads.find((t) => t.id === runningId)?.title
+        : undefined
+      const partial = buildSteerPartialDigest(useAgentStore.getState().agent)
       if (tid0) {
-        useThreadStore
-          .getState()
-          .pushBubble(tid0, 'system', '轉向目前執行：已中止前一個任務')
+        const lines = [
+          `轉向目前執行：已中止前一個任務${runningTitle ? `（${runningTitle.slice(0, 32)}）` : ''}`,
+        ]
+        if (partial) lines.push('', '### 中止前摘要', partial)
+        thrBusy.pushBubble(tid0, 'system', lines.join('\n'))
       }
       useAgentStore.getState().stopExecution()
       await new Promise((r) => setTimeout(r, 100))
     } else if (policy === 'queue' && !opts._fromQueue) {
+      const thrBusy = useThreadStore.getState()
+      const runningId = thrBusy.runningThreadId
+      const runningTitle = runningId
+        ? thrBusy.threads.find((t) => t.id === runningId)?.title?.slice(0, 32)
+        : undefined
       const item = enqueueExternalRun({
         ...opts,
         runId,
@@ -234,11 +291,13 @@ export async function runExternalObjective(
         unattended: opts.unattended ?? isAutomationSource(opts),
       })
       if (item) {
+        const pos = listQueuedRuns().findIndex((q) => q.id === item.id) + 1
+        const posLabel = pos > 0 ? pos : queueLength()
         return {
           path: 'builtin',
           status: 'skipped',
-          error: '已有任務執行中 — 已加入待跑佇列',
-          threadId: opts.reuseThreadId || useThreadStore.getState().activeId,
+          error: `全域執行中${runningTitle ? `（${runningTitle}）` : ''} — 已加入佇列第 ${posLabel} 位（${queueLength()}/24）`,
+          threadId: opts.reuseThreadId || thrBusy.activeId,
           runId,
           skipped: true,
           skipReason: 'queued',
@@ -249,18 +308,23 @@ export async function runExternalObjective(
       return {
         path: 'builtin',
         status: 'skipped',
-        error: '已有任務執行中（佇列已滿或重複）',
-        threadId: opts.reuseThreadId || useThreadStore.getState().activeId,
+        error: `全域執行中${runningTitle ? `（${runningTitle}）` : ''} — 佇列已滿或重複`,
+        threadId: opts.reuseThreadId || thrBusy.activeId,
         runId,
         skipped: true,
         skipReason: 'busy',
       }
     } else if (policy !== 'steer') {
+      const thrBusy = useThreadStore.getState()
+      const runningId = thrBusy.runningThreadId
+      const runningTitle = runningId
+        ? thrBusy.threads.find((t) => t.id === runningId)?.title?.slice(0, 32)
+        : undefined
       return {
         path: 'builtin',
         status: 'skipped',
-        error: '已有任務執行中',
-        threadId: useThreadStore.getState().activeId,
+        error: `全域執行中${runningTitle ? `（${runningTitle}）` : ''}，請稍候或改用佇列模式`,
+        threadId: thrBusy.activeId,
         runId,
         skipped: true,
         skipReason: 'busy',
@@ -272,15 +336,31 @@ export async function runExternalObjective(
   if (!thr.activeId && thr.threads.length === 0) thr.hydrate()
 
   const settings = useSettingsStore.getState().settings
-  const loopType = opts.loopType || 'Goal-based'
 
   // Reuse existing thread (interactive follow-up) or create new
   let tid = opts.reuseThreadId || ''
   const existing = tid ? thr.threads.find((t) => t.id === tid) : null
+
+  // P3: continueGoal — resume same DoD when flag set or user says 繼續/補齊
+  const existingSnap = existing?.continueGoal || undefined
+  const wantContinue = Boolean(
+    existingSnap &&
+      (opts.continueGoal === true || isContinueGoalPhrase(objective)),
+  )
+  const continueSnap = wantContinue ? existingSnap : undefined
+
+  // Conversation default: omit loopType → auto classify (Chat-lite / Goal).
+  // Continue-goal forces Goal-based; automation / UI pin still force.
+  const forcedLoopType = continueSnap
+    ? ('Goal-based' as LoopType)
+    : opts.loopType
+  const loopTypeMode: 'force' | 'auto' = forcedLoopType ? 'force' : 'auto'
+
   if (!existing) {
     tid = thr.createThread({
       title: (opts.title || objective).slice(0, 48),
-      loopType,
+      // null = auto until user pins a loop type
+      loopType: forcedLoopType || null,
       thinkingDepth: 'standard',
       runner: opts.runner || 'builtin',
     })
@@ -291,6 +371,13 @@ export async function runExternalObjective(
   thr.setRunningThreadId(tid)
   if (!opts.skipUserBubble) {
     thr.pushBubble(tid, 'user', objective, attachments)
+  }
+  if (continueSnap) {
+    thr.pushBubble(
+      tid,
+      'system',
+      `▶ 補齊缺口繼續 · DoD 保留 · 缺口 ${continueSnap.missing.length || 0} 項`,
+    )
   }
   if (opts.sourceLabel && !opts.skipUserBubble) {
     thr.pushBubble(tid, 'system', opts.sourceLabel)
@@ -309,7 +396,12 @@ export async function runExternalObjective(
   }
   thr.setThreadStatus(tid, 'running')
 
-  agent.setSelectedLoopType(loopType)
+  if (forcedLoopType) {
+    agent.setSelectedLoopType(forcedLoopType)
+  } else {
+    // Clear sticky force from previous run so auto classification works
+    agent.setSelectedLoopType(null)
+  }
 
   const temporary =
     opts.overrides?.temporary ??
@@ -336,6 +428,20 @@ export async function runExternalObjective(
     .filter(Boolean)
     .join('\n\n')
 
+  // Pure "繼續" has no extra hint; "補齊價格欄" keeps the phrase as corrective hint.
+  const pureContinue =
+    /^(繼續|接著做?|再試|重試|continue|retry|keep going)\s*[!！.。…]*$/i.test(
+      objective.trim(),
+    )
+  const continueHint =
+    opts.continueHint ||
+    (continueSnap && !pureContinue && objective.trim() !== continueSnap.objective.trim()
+      ? objective.trim()
+      : undefined)
+
+  // When resuming, engine objective is the original goal (not the "繼續" phrase)
+  const dispatchObjective = continueSnap ? continueSnap.objective : objective
+
   const overrides: RuntimeOverrides = {
     ...(opts.overrides || {}),
     runId,
@@ -351,6 +457,20 @@ export async function runExternalObjective(
     userAttachments: attachments?.length
       ? attachments
       : opts.overrides?.userAttachments,
+    loopTypeMode,
+    forceLoopType: forcedLoopType,
+    threadId: tid,
+    continueGoal: continueSnap
+      ? {
+          objective: continueSnap.objective,
+          definitionOfDone: continueSnap.definitionOfDone,
+          loopType: continueSnap.loopType || 'Goal-based',
+          steps: continueSnap.steps,
+          missing: continueSnap.missing,
+          priorDigest: continueSnap.priorDigest,
+          userHint: continueHint,
+        }
+      : opts.overrides?.continueGoal,
   }
 
   // P1-D lifecycle hooks (beforeRun): deny / append-context / log / notify
@@ -417,11 +537,12 @@ export async function runExternalObjective(
   }
 
   try {
-    const result = await dispatchThreadTask(objective, {
+    const result = await dispatchThreadTask(dispatchObjective, {
       threadId: tid,
       runner: opts.runner,
       overrides,
-      forceLoopType: loopType,
+      // Only pin loop when user/automation explicitly chose one
+      forceLoopType: forcedLoopType,
       attachments,
     })
     // P0 CLI/dispatch: prefer dispatch result over stale global agent state

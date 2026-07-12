@@ -1349,9 +1349,16 @@ ipcMain.handle(
         typeof a.dataUrl === 'string' && a.dataUrl.length < 12_000_000
           ? a.dataUrl
           : undefined
+      // CLI adapters classify any data:image URL as visual input even when a
+      // restored attachment lost its `kind`. Gate on the payload, not UI state.
+      const isImagePayload =
+        dataUrl !== undefined &&
+        (a.kind === 'image' ||
+          /^data:image\//i.test(dataUrl) ||
+          (a.mimeType || '').toLowerCase().startsWith('image/'))
       // Final main-process gate: an outdated renderer or a restored queue must
       // never pass a tiny image to Grok/other vision CLIs and fail the whole run.
-      if (a.kind === 'image' && dataUrl && isVisionImageTooSmall(dataUrl)) {
+      if (isImagePayload && dataUrl && isVisionImageTooSmall(dataUrl)) {
         return {
           name: `${name}.txt`,
           mimeType: 'text/plain',

@@ -174,8 +174,14 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         } catch {
           /* ignore */
         }
-        const force = get().selectedLoopType ?? undefined
-        const final = await agentEngine.start(text, force, overrides)
+        // Prefer overrides from runTask/dispatch; selectedLoopType is sticky UI pin only when force.
+        const forceFromOverrides =
+          overrides?.loopTypeMode === 'force'
+            ? overrides.forceLoopType || get().selectedLoopType || undefined
+            : overrides?.loopTypeMode === 'auto'
+              ? undefined
+              : get().selectedLoopType ?? undefined
+        const final = await agentEngine.start(text, forceFromOverrides, overrides)
         set({ agent: final, isRunning: false })
         try {
           const { useRunActivityStore } = await import('./runActivityStore')

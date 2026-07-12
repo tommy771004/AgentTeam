@@ -4,6 +4,7 @@ import { LogViewer } from './LogViewer'
 import { InterventionPanel } from './InterventionPanel'
 import { useAgentStore } from '../store/agentStore'
 import { useRunActivityStore } from '../store/runActivityStore'
+import { useThreadStore } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
 
 /**
@@ -12,6 +13,11 @@ import { loopTypeZh } from '../i18n/zh'
 export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
   const { agent, isRunning, stopExecution, continueTurn, resolveIntervention } = useAgentStore()
   const activity = useRunActivityStore()
+  const continueGoal = useThreadStore((s) => {
+    const tid = s.activeId
+    return tid ? s.threads.find((t) => t.id === tid)?.continueGoal : undefined
+  })
+  const activeId = useThreadStore((s) => s.activeId)
 
   const live =
     isRunning ||
@@ -22,6 +28,19 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
     agent.status === 'awaiting_user'
 
   const done = ['success', 'failed', 'halted'].includes(agent.status)
+
+  const onContinueGoal = async () => {
+    if (!continueGoal || !activeId || isRunning) return
+    const { runTask } = await import('../agent/runExternal')
+    await runTask({
+      objective: continueGoal.objective,
+      sourceKind: 'retry',
+      reuseThreadId: activeId,
+      continueGoal: true,
+      loopType: 'Goal-based',
+      skipUserBubble: false,
+    })
+  }
 
   return (
     <div className="h-full flex flex-col min-h-0 border-l border-white/10 bg-surface/40">
@@ -203,6 +222,31 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
           >
             繼續下一回合
           </button>
+        )}
+
+        {continueGoal && !live && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+            <p className="text-[11px] text-on-surface font-medium">
+              未完成 Goal 可保留 DoD 繼續
+            </p>
+            <p className="text-[10px] text-outline line-clamp-2">
+              {continueGoal.definitionOfDone}
+            </p>
+            {continueGoal.missing.length > 0 && (
+              <ul className="text-[10px] text-on-surface-variant space-y-0.5">
+                {continueGoal.missing.slice(0, 4).map((m) => (
+                  <li key={m}>· {m}</li>
+                ))}
+              </ul>
+            )}
+            <button
+              type="button"
+              onClick={() => void onContinueGoal()}
+              className="w-full py-2 rounded-lg border border-primary/40 text-primary text-xs font-semibold hover:bg-primary/10"
+            >
+              補齊缺口繼續
+            </button>
+          </div>
         )}
 
         <div className="rounded-xl border border-white/10 bg-surface-container/40 p-3">

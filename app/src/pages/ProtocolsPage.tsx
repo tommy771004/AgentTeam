@@ -25,7 +25,7 @@ import {
   materializeAttachmentsOnDisk,
 } from '../lib/chatAttachments'
 import { useProjectStore } from '../store/projectStore'
-import { queueLength } from '../agent/runQueue'
+import { listQueuedRuns, queueLength } from '../agent/runQueue'
 import { ChatBubble } from '../components/ChatBubble'
 import { RunSummaryCard } from '../components/RunSummaryCard'
 
@@ -94,11 +94,12 @@ export function ProtocolsPage() {
   }, [thread?.bubbles.length, isRunning, agent.logs.length, agent.toolCalls?.length, agent.progress])
 
   useEffect(() => {
-    if (thread?.loopType) setSelectedLoopType(thread.loopType)
+    // Sync pin; null = auto classify for this thread
+    setSelectedLoopType(thread?.loopType ?? null)
   }, [thread?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const activeType =
-    thread?.loopType ?? selectedLoopType ?? agent.loopConfig.loopType ?? 'Goal-based'
+  /** null = 自動分類（Chat-lite Turn / Goal …）；非 null = 使用者釘選 */
+  const pinnedLoopType: LoopType | null = thread?.loopType ?? selectedLoopType
   const depth: ThinkingDepth = thread?.thinkingDepth || 'deep'
   const depthDef = getThinkingDepth(depth)
   const speed = thread?.speed || 'standard'
@@ -187,6 +188,7 @@ export function ProtocolsPage() {
     setBusy(true)
     setDraftInput('')
     if (thread?.loopType) setSelectedLoopType(thread.loopType)
+    else setSelectedLoopType(null)
 
     // Informational bubbles (before controller takes over lifecycle)
     if (subagents.length) {
@@ -194,6 +196,9 @@ export function ProtocolsPage() {
     }
     if (settings.temporaryChatDefault) {
       pushBubble(activeId, 'system', '臨時對話：本次不讀寫跨對話記憶')
+    }
+    if (!thread?.loopType) {
+      pushBubble(activeId, 'system', 'Loop：自動分類（短訊息→回合 · 複雜目標→目標迴圈）')
     }
     if (runner !== 'builtin') {
       pushBubble(
@@ -208,23 +213,30 @@ export function ProtocolsPage() {
     try {
       // Single lifecycle controller: busy policy (steer/queue), thread status,
       // user/assistant bubbles, trace runId, drain — all owned by runTask.
+      // Omit loopType when unpinned → engine auto-classifies (Chat-lite / Goal).
       const { runTask } = await import('../agent/runExternal')
       const r = await runTask({
         objective: raw,
         sourceKind: 'composer',
         reuseThreadId: activeId,
         runner,
-        loopType: activeType,
+        loopType: pinnedLoopType || undefined,
         attachments,
       })
       if (r.queued) {
+        const n = queueLength()
+        const pos =
+          r.queueId != null
+            ? listQueuedRuns().findIndex((q) => q.id === r.queueId) + 1
+            : n
         pushBubble(
           activeId,
           'system',
-          `已加入全域待跑佇列（約 ${queueLength()} 則），目前任務完成後自動執行`,
+          r.error ||
+            `全域執行中 — 已加入佇列第 ${pos > 0 ? pos : n} 位（${n}/24），完成後自動執行`,
         )
       } else if (r.skipped) {
-        pushBubble(activeId, 'system', r.error || '忙碌中')
+        pushBubble(activeId, 'system', r.error || '全域執行中')
       }
     } catch (e) {
       setThreadStatus(activeId, 'failed')
@@ -265,10 +277,11 @@ export function ProtocolsPage() {
     return () => window.removeEventListener('subagents:toggle-terminal', onToggle)
   }, [setShowRunPanel])
 
-  const onModeChange = (t: LoopType) => {
+  const onModeChange = (t: LoopType | null) => {
     setSelectedLoopType(t)
     if (activeId) setLoopType(activeId, t)
     // Time / Proactive 真正規則在「自動化」；此處僅標記語意
+    // null = 自動分類
   }
 
   return (
@@ -385,7 +398,7 @@ export function ProtocolsPage() {
                   <ComposerQuickActions
                     disabled={disabled}
                     projectRoot={projectRoot}
-                    loopType={activeType}
+                    loopType={pinnedLoopType}
                     agentMode={agentMode}
                     runner={runner}
                     runners={runnerOptions}

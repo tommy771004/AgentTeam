@@ -28,6 +28,7 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   webSearchEnabled: true,
   functionCalling: true,
   llmParseEnabled: true,
+  sessionRecallEnabled: true,
   haltOnPayloadOverflow: false,
   maxToolPayloadKb: 50,
   maxToolRounds: 4,

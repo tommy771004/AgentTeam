@@ -1582,6 +1582,16 @@ export function SettingsPage() {
                 }
               />
               <SettingsRow
+                title="跨 Session 召回"
+                description="執行開始時搜尋 Archive／記憶／技能，把同類任務摘要注入 prompt（Hermes 召回）"
+                control={
+                  <SettingsToggle
+                    checked={settings.sessionRecallEnabled !== false}
+                    onChange={(v) => set({ sessionRecallEnabled: v })}
+                  />
+                }
+              />
+              <SettingsRow
                 title="Capability 漸進披露"
                 description="Pydantic AI 2.0 風格：工具+runbook 打包為 capability，先列目錄，模型 load_capability 後才展開（省 token、較可控）"
                 control={

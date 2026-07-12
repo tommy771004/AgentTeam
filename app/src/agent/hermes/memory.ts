@@ -115,6 +115,42 @@ export class MemoryStore {
           ...related.map((entry) => `- ${entry.text.slice(0, 200)}`),
         )
       }
+      // P2: hard-surface failure lessons so the model avoids repeating mistakes
+      const failureLessons = this.entries
+        .filter(
+          (entry) =>
+            entry.tags?.includes('failure') &&
+            !recentIds.has(entry.id) &&
+            !related.some((r) => r.id === entry.id),
+        )
+        .slice(0, 3)
+      // Prefer failures that share tokens with the objective
+      const objLower = objective.toLowerCase()
+      const scoredFailures = this.entries
+        .filter((entry) => entry.tags?.includes('failure'))
+        .map((entry) => {
+          let score = 0
+          const hay = entry.text.toLowerCase()
+          for (const w of objLower.split(/\s+/)) {
+            if (w.length > 1 && hay.includes(w)) score += 1
+          }
+          for (const m of objective.match(/[一-鿿]{2,}/g) || []) {
+            if (entry.text.includes(m)) score += 2
+          }
+          return { entry, score }
+        })
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3)
+        .map((x) => x.entry)
+      const lessons = scoredFailures.length ? scoredFailures : failureLessons
+      if (lessons.length) {
+        parts.push(
+          '### 失敗教訓（同類 — 必須避開）',
+          '下列為過去失敗記錄；執行前先讀，勿重蹈相同工具或策略錯誤。',
+          ...lessons.map((entry) => `- ${entry.text.slice(0, 200)}`),
+        )
+      }
     }
     if (parts.length === 1) {
       parts.push('（尚無記憶。重要偏好請用 memory_append 寫入。）')

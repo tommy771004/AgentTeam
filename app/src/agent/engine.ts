@@ -17,9 +17,14 @@ import type {
   SubAgentNode,
   ToolCallRecord,
 } from './types'
-import { parseUserRequest } from './parser'
+import { buildParseResult, formatPlanBubble, parseUserRequest } from './parser'
 import { evaluateDoD } from './dodEvaluator'
 import { parseWithLlm } from './llmParser'
+import { replanCorrectiveSteps } from './replan'
+import {
+  buildContinueGoalSnapshot,
+  formatContinueGoalOffer,
+} from './continueGoal'
 import { evaluateSafety, formatPayloadForDisplay } from './safety'
 import { emptyKnowledge, extractKnowledge } from './knowledge'
 import {
@@ -82,6 +87,8 @@ export class AgentLoopEngine {
   private overrides: RuntimeOverrides = {}
   private stepOutputs: string[] = []
   private attachedSkillContext = ''
+  /** Last DoD missing[] for continueGoal snapshot */
+  private lastDodMissing: string[] = []
   /** W2: persistent project guidance (AGENTS.md) resolved per run */
   private projectGuidance = ''
   /** Vision / file attachments for this run (FC multimodal) */
@@ -285,6 +292,7 @@ export class AgentLoopEngine {
     this.aborted = false
     this.overrides = overrides || {}
     this.stepOutputs = []
+    this.lastDodMissing = []
     this.attachedSkillContext = ''
     this.userAttachments = this.overrides.userAttachments || []
     // Per-run project pin for tools/bash (must not use wrong UI project)
@@ -381,54 +389,172 @@ export class AgentLoopEngine {
     const t0 = Date.now()
 
     try {
-      // forceLoopType re-derives steps/DoD/maxIterations (not just renames the loop)
-      const parsed = parseUserRequest(rawInput, forceLoopType)
-      if (forceLoopType === 'Goal-based') {
-        parsed.config.maxIterations = this.settings.maxIterationsDefault || 5
-      }
-      if (this.overrides.maxIterations) {
-        parsed.config.maxIterations = this.overrides.maxIterations
-      }
+      // Resolve force vs auto: overrides.loopTypeMode wins; else forceLoopType arg means force.
+      const loopMode: 'force' | 'auto' =
+        this.overrides.loopTypeMode ||
+        (forceLoopType || this.overrides.forceLoopType ? 'force' : 'auto')
+      const effectiveForce: LoopType | undefined =
+        loopMode === 'force'
+          ? forceLoopType || this.overrides.forceLoopType
+          : undefined
 
-      // runTask trace id wins so thread / archive / queue / HITL correlate on one id
-      this.state.id =
-        this.overrides.runId?.trim() ||
-        `exe_${uuid().slice(0, 12).toUpperCase().replace(/-/g, '')}`
-      this.state.objective = parsed.objective
-      this.state.loopConfig = parsed.config
-      this.state.steps = parsed.steps
-      // 規格 03：將啟發式 schema 精煉成貼合目標的 LLM 計畫；任何失敗皆保留 fallback。
-      if (this.useLlm() && this.settings.llmParseEnabled !== false) {
-        try {
-          const refined = await parseWithLlm(
-            withRoleModel(this.settings, 'orchestrator'),
-            rawInput,
-            parsed.config.loopType,
-          )
-          if (refined) {
-            // Settings / runtime override owns the iteration budget, not parser output.
-            refined.config.maxIterations = parsed.config.maxIterations
-            this.state.loopConfig = refined.config
-            this.state.steps = refined.steps
-            this.log(
-              'INFO',
-              `LLM 解析：${refined.steps.length} steps · DoD=${refined.config.definitionOfDone.slice(0, 80)}`,
-            )
-          }
-        } catch (e) {
-          this.log(
-            'WARN',
-            `LLM 解析失敗，使用啟發式計畫：${e instanceof Error ? e.message : e}`,
+      // P3: continueGoal — skip re-parse; restore DoD + corrective steps
+      const cg = this.overrides.continueGoal
+      if (cg?.objective && cg.definitionOfDone) {
+        const missing = (cg.missing || []).filter(Boolean)
+        const sequence =
+          missing.length > 0
+            ? replanCorrectiveSteps(missing, cg.objective, { maxSteps: 3 }).map(
+                (s) => s.description,
+              )
+            : cg.steps?.length
+              ? cg.steps
+              : ['依 Definition of Done 補齊未完成項目', '重新驗證並產出完整結果']
+        const maxIter =
+          this.overrides.maxIterations ||
+          this.settings.maxIterationsDefault ||
+          5
+        const resumed = buildParseResult(
+          cg.objective,
+          'Goal-based',
+          sequence,
+          cg.definitionOfDone,
+          maxIter,
+        )
+        this.state.id =
+          this.overrides.runId?.trim() ||
+          `exe_${uuid().slice(0, 12).toUpperCase().replace(/-/g, '')}`
+        this.state.objective = resumed.objective
+        this.state.loopConfig = resumed.config
+        this.state.steps = resumed.steps
+        if (cg.priorDigest) {
+          this.stepOutputs.push(`### 先前執行摘要\n${cg.priorDigest.slice(0, 2000)}`)
+        }
+        if (missing.length) {
+          this.stepOutputs.push(
+            `### 待補齊缺口\n${missing.map((m) => `- ${m}`).join('\n')}`,
           )
         }
-      }
-      this.state.subAgents = this.spawnSubAgents(parsed.config.loopType)
-      if (forceLoopType) {
+        if (cg.userHint?.trim()) {
+          this.stepOutputs.push(`### 本輪使用者指示\n${cg.userHint.trim().slice(0, 800)}`)
+        }
         this.log(
           'INFO',
-          `forceLoopType=${forceLoopType} → ${parsed.steps.length} steps re-derived`,
+          `continueGoal 恢復：DoD 保留 · ${resumed.steps.length} 修正步驟 · 缺口 ${missing.length}`,
+        )
+      } else {
+        // forceLoopType re-derives steps/DoD/maxIterations (not just renames the loop)
+        const parsed = parseUserRequest(rawInput, effectiveForce)
+        if (parsed.config.loopType === 'Goal-based') {
+          parsed.config.maxIterations = this.settings.maxIterationsDefault || 5
+        }
+        if (this.overrides.maxIterations) {
+          parsed.config.maxIterations = this.overrides.maxIterations
+        }
+
+        // runTask trace id wins so thread / archive / queue / HITL correlate on one id
+        this.state.id =
+          this.overrides.runId?.trim() ||
+          `exe_${uuid().slice(0, 12).toUpperCase().replace(/-/g, '')}`
+        this.state.objective = parsed.objective
+        this.state.loopConfig = parsed.config
+        this.state.steps = parsed.steps
+        // 規格 03：將啟發式 schema 精煉成貼合目標的 LLM 計畫；任何失敗皆保留 fallback。
+        // Auto mode: do not pass forceLoopType so LLM may reclassify Turn vs Goal.
+        if (this.useLlm() && this.settings.llmParseEnabled !== false) {
+          try {
+            const refined = await parseWithLlm(
+              withRoleModel(this.settings, 'orchestrator'),
+              rawInput,
+              effectiveForce,
+            )
+            if (refined) {
+              // Settings / runtime override owns the iteration budget for Goal; else use plan.
+              if (refined.config.loopType === 'Goal-based') {
+                refined.config.maxIterations =
+                  this.overrides.maxIterations ||
+                  this.settings.maxIterationsDefault ||
+                  refined.config.maxIterations
+              } else {
+                refined.config.maxIterations = this.overrides.maxIterations || 1
+              }
+              this.state.loopConfig = refined.config
+              this.state.steps = refined.steps
+              this.log(
+                'INFO',
+                `LLM 解析：${refined.config.loopType} · ${refined.steps.length} steps · DoD=${refined.config.definitionOfDone.slice(0, 80)}`,
+              )
+            }
+          } catch (e) {
+            this.log(
+              'WARN',
+              `LLM 解析失敗，使用啟發式計畫：${e instanceof Error ? e.message : e}`,
+            )
+          }
+        }
+      }
+
+      // P2: session recall into extra context (Hermes cross-session)
+      if (
+        this.settings.sessionRecallEnabled !== false &&
+        this.overrides.temporary !== true &&
+        this.settings.temporaryChatDefault !== true
+      ) {
+        try {
+          const { searchSessions } = await import('./hermes/sessionSearch')
+          const { useAgentStore } = await import('../store/agentStore')
+          const hits = searchSessions(rawInput, useAgentStore.getState().archive || [], 3)
+          if (hits.length) {
+            const block = [
+              '## 跨 session 召回（同類任務參考）',
+              ...hits.map(
+                (h) =>
+                  `- [${h.source}] ${h.title}: ${h.snippet.slice(0, 160)}`,
+              ),
+              '若適用請沿用成功做法；若召回為失敗教訓請避開。',
+            ].join('\n')
+            this.attachedSkillContext = [this.attachedSkillContext, block]
+              .filter(Boolean)
+              .join('\n\n')
+            this.log('INFO', `Session 召回：${hits.length} 筆`)
+          }
+        } catch {
+          /* non-fatal */
+        }
+      }
+
+      this.state.subAgents = this.spawnSubAgents(this.state.loopConfig.loopType)
+      if (effectiveForce) {
+        this.log(
+          'INFO',
+          `forceLoopType=${effectiveForce} → ${this.state.steps.length} steps re-derived`,
+        )
+      } else {
+        this.log(
+          'INFO',
+          `loopTypeMode=auto → ${this.state.loopConfig.loopType}（${this.state.steps.length} steps）`,
         )
       }
+
+      // P0: surface plan in chat bubble (visible parse result)
+      try {
+        const { useThreadStore } = await import('../store/threadStore')
+        const thr = useThreadStore.getState()
+        const tid =
+          this.overrides.threadId || thr.runningThreadId || thr.activeId
+        if (tid) {
+          thr.pushBubble(
+            tid,
+            'system',
+            formatPlanBubble(this.state.loopConfig, {
+              mode: effectiveForce ? 'force' : 'auto',
+            }),
+          )
+        }
+      } catch {
+        /* UI bubble is best-effort */
+      }
+
       this.state.status = 'running'
       this.state.currentIteration = 1
       this.state.minConfidence = this.minConfidence()
@@ -437,7 +563,7 @@ export class AgentLoopEngine {
 
       this.log('INFO', 'SubAgents AI Execution Kernel v2.5.0')
       this.log('INFO', `Session ID: ${this.state.id}`)
-      this.log('INFO', `Loop Type: ${parsed.config.loopType}`)
+      this.log('INFO', `Loop Type: ${this.state.loopConfig.loopType}`)
       this.log('INFO', `LLM: ${this.useLlm() ? `ON (${this.settings.model})` : 'OFF (simulation)'}`)
       if (this.overrides.agentMode) {
         this.log('INFO', `OpenCode agent: ${this.overrides.agentMode}${this.overrides.subagentId ? ` + @${this.overrides.subagentId}` : ''}`)
@@ -449,7 +575,7 @@ export class AgentLoopEngine {
         'INFO',
         `Tool rounds: ${this.settings.maxToolRounds || 4} · Min confidence: ${this.minConfidence().toFixed(2)}`,
       )
-      this.log('INFO', `DoD: ${parsed.config.definitionOfDone}`)
+      this.log('INFO', `DoD: ${this.state.loopConfig.definitionOfDone}`)
       this.log('INFO', `Max Iterations: ${this.maxIterations()}`)
       this.log('PROCESS', 'Starting execution routine...')
       this.log('System', 'Hermes 學習層：記憶 / 技能 / Prompt 分層 已掛載')
@@ -461,7 +587,8 @@ export class AgentLoopEngine {
       }
       learningLoop.onUserTurn()
 
-      switch (parsed.config.loopType) {
+      // Must use refined loop type (not the pre-LLM heuristic only)
+      switch (this.state.loopConfig.loopType) {
         case 'Turn-based':
           await this.runTurnBased()
           break
@@ -1249,19 +1376,38 @@ export class AgentLoopEngine {
     this.state.confidence = Math.max(this.state.confidence, 0.92)
     this.state.result = output
     this.state.reportTitle = 'Turn Result'
-    if (this.overrides.unattended === true) {
-      // 排程/webhook 沒有使用者可 ACK；若等待將永久占住全域單一執行鎖。
-      this.log('WARN', '無人值守 Turn-based：跳過人工 ACK，自動確認')
+    // Chat-lite / composer / automation: do not block the global run lock on ACK.
+    // Explicit Turn on Execution page (no sourceKind) still waits for user validation.
+    const chatLiteAck =
+      this.overrides.unattended === true ||
+      this.overrides.sourceKind === 'composer' ||
+      this.overrides.sourceKind === 'slash' ||
+      this.overrides.sourceKind === 'retry'
+    if (chatLiteAck) {
+      this.log(
+        'INFO',
+        this.overrides.unattended === true
+          ? '無人值守 Turn-based：跳過人工 ACK，自動確認'
+          : '對話 Turn/Chat-lite：自動確認，不等待 ACK',
+      )
     } else {
       this.log('SUCCESS', 'Action completed. Awaiting user validation (ACK).')
+      this.state.loopConfig = {
+        ...this.state.loopConfig,
+        nextState: 'Await User Input',
+      }
       await this.waitForUser()
       if (this.aborted) return
     }
 
     this.state.status = 'success'
     this.state.progress = 100
+    this.state.loopConfig = {
+      ...this.state.loopConfig,
+      nextState: chatLiteAck ? 'Halt' : 'Halt',
+    }
     this.setSubAgent('Core', 'done')
-    this.log('SUCCESS', 'User ACK received. Turn complete.')
+    this.log('SUCCESS', chatLiteAck ? 'Turn complete (auto-ACK).' : 'User ACK received. Turn complete.')
     this.noteLearningSuccess('Turn-based')
     this.emit()
   }
@@ -1328,6 +1474,7 @@ export class AgentLoopEngine {
           )
           dodMet = verdict.met
           missing = verdict.missing
+          this.lastDodMissing = missing
           this.state.confidence = verdict.confidence
           this.state.tokensUsed += verdict.tokensUsed
           this.state.metrics.apiCredits = this.state.tokensUsed
@@ -1361,22 +1508,35 @@ export class AgentLoopEngine {
         this.log('WARN', this.state.loopConfig.fallbackProtocol)
         this.setSubAgent('Manager', 'error')
         this.noteLearningFailure(this.state.loopConfig.loopType, this.state.haltReason)
+        this.persistContinueGoal('failed', this.lastDodMissing)
         this.emit()
         return
       }
 
       if (allDone && !dodMet) {
-        // 全完成但 DoD 未達：全部重跑，避免下一輪 0 steps 空轉。
+        // 全完成但 DoD 未達：以缺口 replan，避免盲重跑同一計畫空轉。
         if (missing.length) {
           this.stepOutputs.push(
             `### 上一輪 DoD 缺口（本輪必須補齊）\n${missing.map((item) => `- ${item}`).join('\n')}`,
           )
-          this.log('PROCESS', `迭代回饋：${missing.length} 項缺口已注入下一輪上下文`)
+          this.state.steps = replanCorrectiveSteps(missing, this.state.objective, {
+            maxSteps: 3,
+          })
+          this.state.loopConfig = {
+            ...this.state.loopConfig,
+            executionSequence: this.state.steps.map((s) => s.description),
+          }
+          this.log(
+            'PROCESS',
+            `迭代 replan：${missing.length} 項缺口 → ${this.state.steps.length} 個修正步驟`,
+          )
+        } else {
+          this.state.steps = this.state.steps.map((step) => ({
+            ...step,
+            status: 'PENDING' as const,
+          }))
+          this.log('PROCESS', 'DoD 未達且無 missing 明細：重跑全部步驟')
         }
-        this.state.steps = this.state.steps.map((step) => ({
-          ...step,
-          status: 'PENDING' as const,
-        }))
       } else {
         this.state.steps = this.state.steps.map((step) =>
           step.status === 'COMPLETED' ? step : { ...step, status: 'PENDING' as const },
@@ -1428,17 +1588,69 @@ export class AgentLoopEngine {
     this.refreshKnowledge()
     this.log('SUCCESS', 'Definition of Done met. Terminating loop.')
     this.noteLearningSuccess(this.state.loopConfig.loopType)
+    this.clearContinueGoal()
     this.emit()
+  }
+
+  /** Persist unfinished Goal so chat can resume same DoD. */
+  private persistContinueGoal(
+    lastStatus: 'failed' | 'halted',
+    missing: string[],
+  ) {
+    try {
+      const digest =
+        this.state.result?.trim() ||
+        this.stepOutputs.slice(-2).join('\n---\n').slice(0, 2000) ||
+        ''
+      const snap = buildContinueGoalSnapshot({
+        objective: this.state.objective,
+        definitionOfDone: this.state.loopConfig.definitionOfDone,
+        loopType: this.state.loopConfig.loopType,
+        steps: this.state.steps,
+        missing,
+        priorDigest: digest,
+        lastStatus,
+        runId: this.state.id,
+      })
+      void import('../store/threadStore').then(({ useThreadStore }) => {
+        const thr = useThreadStore.getState()
+        const tid =
+          this.overrides.threadId || thr.runningThreadId || thr.activeId
+        if (!tid) return
+        thr.setContinueGoal(tid, snap)
+        thr.pushBubble(tid, 'system', formatContinueGoalOffer(snap))
+      })
+      this.log('INFO', 'continueGoal 已保存 — 可「補齊缺口繼續」')
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  private clearContinueGoal() {
+    try {
+      void import('../store/threadStore').then(({ useThreadStore }) => {
+        const thr = useThreadStore.getState()
+        const tid =
+          this.overrides.threadId || thr.runningThreadId || thr.activeId
+        if (tid) thr.setContinueGoal(tid, null)
+      })
+    } catch {
+      /* ignore */
+    }
   }
 
   private deriveReportTitle(): string {
     const obj = this.state.objective
-    if (/market|landscape|orchestr/i.test(obj)) {
-      return 'Synthetic Market Landscape: AI Orchestration Tools'
+    if (/market|landscape|orchestr|市場|競品/i.test(obj)) {
+      return `市場／競品分析：${obj.slice(0, 40)}`
     }
-    if (/security|log/i.test(obj)) return 'Security Log Analysis Report'
-    if (/price|competitor/i.test(obj)) return 'Competitive Pricing Analysis'
-    return `Agent Report: ${obj.slice(0, 48)}${obj.length > 48 ? '…' : ''}`
+    if (/security|log|資安|日誌|異常/i.test(obj)) {
+      return `資安／日誌分析：${obj.slice(0, 40)}`
+    }
+    if (/price|competitor|價格|定價/i.test(obj)) {
+      return `定價比較：${obj.slice(0, 40)}`
+    }
+    return `代理報告：${obj.slice(0, 48)}${obj.length > 48 ? '…' : ''}`
   }
 
   // ── Pattern 3: Time-based ─────────────────────────────────────
@@ -1560,6 +1772,14 @@ export class AgentLoopEngine {
           description: s.description,
           result: s.result,
         })),
+        // P2: tool trajectory for higher-quality skill drafts
+        toolCalls: (this.state.toolCalls || [])
+          .filter((t) => t.ok)
+          .slice(0, 16)
+          .map((t) => ({
+            tool: t.tool,
+            summary: (t.output || '').slice(0, 120),
+          })),
         loopType,
         memoryEnabled: this.settings.memoryEnabled,
         memoryWriteEnabled:

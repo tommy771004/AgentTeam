@@ -15,6 +15,8 @@ import {
   subscribeRunQueue,
   type QueuedExternalRun,
 } from '../agent/runQueue'
+import { useAgentStore } from '../store/agentStore'
+import { useThreadStore } from '../store/threadStore'
 
 export function RunQueueStrip({
   compact = false,
@@ -26,6 +28,12 @@ export function RunQueueStrip({
   const [queued, setQueued] = useState<QueuedExternalRun[]>(() => listQueuedRuns())
   const [draining, setDraining] = useState(() => isRunQueueDraining())
   const [open, setOpen] = useState(!compact)
+  const isRunning = useAgentStore((s) => s.isRunning)
+  const runningThreadId = useThreadStore((s) => s.runningThreadId)
+  const runningTitle = useThreadStore((s) => {
+    const id = s.runningThreadId
+    return id ? s.threads.find((t) => t.id === id)?.title : undefined
+  })
 
   useEffect(() => {
     return subscribeRunQueue(() => {
@@ -35,7 +43,7 @@ export function RunQueueStrip({
   }, [])
 
   const n = queueLength()
-  if (n === 0 && compact) return null
+  if (n === 0 && compact && !isRunning) return null
 
   return (
     <div
@@ -52,6 +60,7 @@ export function RunQueueStrip({
           <span className="font-[family-name:var(--font-mono)] text-outline font-normal">
             {n}/24
             {draining ? ' · 消化中' : ''}
+            {isRunning ? ' · 執行中' : ''}
           </span>
         </span>
         <Icon name={open ? 'expand_less' : 'expand_more'} size={16} className="text-outline" />
@@ -59,9 +68,18 @@ export function RunQueueStrip({
 
       {open && (
         <div className="px-3 pb-3 space-y-2 border-t border-white/5 pt-2">
+          {isRunning && (
+            <p className="text-[11px] text-primary/90 rounded-lg bg-primary/10 px-2 py-1.5">
+              目前執行
+              {runningTitle ? `：${runningTitle.slice(0, 40)}` : runningThreadId ? '中' : '中'}
+              {n > 0 ? ` · 其後 ${n} 則排隊` : ''}
+            </p>
+          )}
           {n === 0 ? (
             <p className="text-[11px] text-outline">
-              空。忙碌時排程 / TG / Webhook / 對話追問會入列，完成後自動補跑。
+              {isRunning
+                ? '佇列空。新任務會依 follow-up 設定轉向或入列。'
+                : '空。忙碌時排程 / TG / Webhook / 對話追問會入列，完成後自動補跑。'}
             </p>
           ) : (
             <>

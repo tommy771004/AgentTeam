@@ -71,6 +71,7 @@ export function useSlashExecutor() {
     const { runTask } = await import('../agent/runExternal')
     const thrState = useThreadStore.getState()
     const active = thrState.threads.find((t) => t.id === tid)
+    // Only force loop when thread/UI explicitly pinned; else auto-classify
     const loopType =
       active?.loopType ||
       useAgentStore.getState().selectedLoopType ||

@@ -238,6 +238,30 @@ export interface RuntimeOverrides {
    * Does not permanently change projectStore.
    */
   projectRoot?: string
+  /**
+   * Loop type selection mode for this run:
+   * - force: use forceLoopType / selectedLoopType (automation / user pin)
+   * - auto: classify + optional LLM plan may pick Turn/Goal/… (conversation default)
+   */
+  loopTypeMode?: 'force' | 'auto'
+  /** When loopTypeMode=force, re-derive plan for this loop type. */
+  forceLoopType?: LoopType
+  /** Thread id for plan bubble / UI correlation (optional). */
+  threadId?: string
+  /**
+   * Resume a previous Goal on this thread: keep DoD / missing / steps.
+   * Skips auto-classify re-parse; forces Goal-based corrective plan.
+   */
+  continueGoal?: {
+    objective: string
+    definitionOfDone: string
+    loopType?: LoopType
+    steps?: string[]
+    missing?: string[]
+    priorDigest?: string
+    /** Optional user hint this turn (e.g.「補價格欄」) */
+    userHint?: string
+  }
 }
 
 export interface ToolCallRecord {
@@ -405,6 +429,11 @@ export interface LlmSettings {
   functionCalling: boolean
   /** LLM 解析任務計畫（規格 03）；關閉時只使用啟發式 parser。 */
   llmParseEnabled?: boolean
+  /**
+   * 對話 run 開始時用 sessionSearch 召回 archive/memory/skills 摘要注入 volatile。
+   * 預設開啟；臨時對話仍會跳過。
+   */
+  sessionRecallEnabled?: boolean
   /** Halt loop if tool payload exceeds maxToolPayloadKb (else truncate) */
   haltOnPayloadOverflow: boolean
   maxToolPayloadKb: number

@@ -187,5 +187,14 @@ await test('tiny vision image is detected at the Electron CLI boundary', () => {
   assert.equal(isVisionImageTooSmall(url), true)
 })
 
+await test('tiny SVG and attachment payloads cannot bypass the CLI image gate', () => {
+  const svg = 'data:image/svg+xml,' + encodeURIComponent('<svg width="16" height="16"></svg>')
+  assert.equal(imagePixelCountFromDataUrl(svg), 256)
+  assert.equal(isVisionImageTooSmall(svg), true)
+  const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
+  assert.match(main, /isImagePayload/)
+  assert.match(main, /\^data:image/)
+})
+
 console.log(`\nproduction modules: ${passed} passed`)
 if (process.exitCode) process.exit(process.exitCode)

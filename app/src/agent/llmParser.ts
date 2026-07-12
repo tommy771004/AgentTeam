@@ -39,7 +39,9 @@ export function parseLlmPlan(
       typeof obj.definitionOfDone === 'string'
         ? obj.definitionOfDone.trim().slice(0, 400)
         : ''
-    if (steps.length < 2 || !definitionOfDone) return null
+    // Turn-based / Chat-lite may be a single step; Goal needs ≥2.
+    const minSteps = loopType === 'Turn-based' ? 1 : 2
+    if (steps.length < minSteps || !definitionOfDone) return null
     const maxIterations =
       typeof obj.maxIterations === 'number' && obj.maxIterations >= 1
         ? Math.min(8, Math.round(obj.maxIterations))

@@ -208,19 +208,16 @@ export async function dispatchThreadTask(
     subagent: subId,
   })
 
-  // ChatGPT-style: reference chat history from current thread
+  // Chat history: recent verbatim + older condensed (budget-friendly)
   let extra = baseOverrides.extraSystemContext || ''
   if (settings.referenceChatHistory !== false && thread?.bubbles?.length) {
-    const hist = thread.bubbles
-      .filter((b) => b.role === 'user' || b.role === 'assistant')
-      .slice(-12)
-      .map((b) => `${b.role === 'user' ? 'User' : 'Assistant'}: ${b.content.slice(0, 600)}`)
-      .join('\n')
+    const { buildChatHistoryContext } = await import('./chatHistory')
+    const hist = buildChatHistoryContext(
+      thread.bubbles.map((b) => ({ role: b.role, content: b.content })),
+      { keepRecent: 3, maxChars: 6000, perMessageChars: 600 },
+    )
     if (hist.trim()) {
-      extra = [extra, '## 近期對話歷史（Reference chat history）', hist]
-        .filter(Boolean)
-        .join('\n\n')
-        .slice(0, 6000)
+      extra = [extra, hist].filter(Boolean).join('\n\n').slice(0, 6000)
     }
   }
   if (opts?.overrides?.extraSystemContext) {
@@ -251,11 +248,24 @@ export async function dispatchThreadTask(
       : opts?.overrides?.userAttachments,
   }
 
+  // Pin loop only when this dispatch (or thread) explicitly set one.
+  // Conversation default leaves thread.loopType null → auto classify.
   const forceLoop =
-    opts?.forceLoopType || thread?.loopType || undefined
+    opts?.forceLoopType ||
+    (opts?.overrides?.loopTypeMode === 'force'
+      ? opts?.overrides?.forceLoopType
+      : undefined) ||
+    thread?.loopType ||
+    undefined
   if (forceLoop) {
     agent.setSelectedLoopType(forceLoop)
+    overrides.loopTypeMode = 'force'
+    overrides.forceLoopType = forceLoop
+  } else {
+    agent.setSelectedLoopType(null)
+    overrides.loopTypeMode = overrides.loopTypeMode || 'auto'
   }
+  overrides.threadId = overrides.threadId || tid || undefined
   await agent.startExecution(text, overrides)
   const a = useAgentStore.getState().agent
   // Persist loaded caps for next turn on this thread
