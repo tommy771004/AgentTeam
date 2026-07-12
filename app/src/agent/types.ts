@@ -409,12 +409,17 @@ export type ReducedMotionPreference = 'system' | 'on' | 'off'
 export type EnterBehavior = 'enter' | 'cmdEnter'
 /** Follow-up while agent is running: interrupt/steer vs queue */
 export type FollowUpMode = 'steer' | 'queue'
+/** Provider-specific convenience preset; every option remains OpenAI-compatible. */
+export type ApiProviderPreset = 'aihubmix' | 'openai' | 'openrouter' | 'custom'
 
 export interface LlmSettings {
   enabled: boolean
+  apiProvider: ApiProviderPreset
   baseUrl: string
   apiKey: string
   model: string
+  /** Retried only when an OpenAI-compatible gateway reports no available route. */
+  fallbackModels: string[]
   /** Model ids returned by the configured OpenAI-compatible /models endpoint. */
   discoveredModels: string[]
   /** Per-role model overrides (empty string = fall back to `model`) */

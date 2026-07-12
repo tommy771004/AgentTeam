@@ -8,6 +8,7 @@ export type ToolName =
   | 'http_fetch'
   | 'workspace_list'
   | 'workspace_read'
+  | 'workspace_diff'
   | 'workspace_write'
   | 'workspace_download'
   | 'workspace_mkdir'
@@ -29,6 +30,8 @@ export type ToolName =
   | 'delegate_status'
   | 'message_send'
   | 'json_extract_lite'
+  | 'update_plan'
+  | 'ask_user'
   | 'codegraph_explore'
   | 'codegraph_status'
   | 'codegraph_impact'
@@ -60,6 +63,11 @@ export const TOOL_CATALOG: ToolDef[] = [
     name: 'workspace_read',
     description: 'Read a file from the sandboxed workspace',
     keywords: ['read file', 'open file', 'load', 'ingest', 'parse'],
+  },
+  {
+    name: 'workspace_diff',
+    description: 'Read the current Git working-tree diff for selected workspace files.',
+    keywords: ['diff', 'review changes', 'patch', 'working tree', 'changed files'],
   },
   {
     name: 'workspace_write',
@@ -179,6 +187,16 @@ export const TOOL_CATALOG: ToolDef[] = [
     description: 'json_extract_lite: simple title/items/summary heuristic, not arbitrary schema extraction',
     keywords: ['extract', 'json', 'schema', 'structure', 'parse'],
   },
+  {
+    name: 'update_plan',
+    description: 'Update the current task plan with ordered items and statuses. Use for multi-step work.',
+    keywords: ['update plan', 'task list', 'todo list', 'execution plan', 'plan steps'],
+  },
+  {
+    name: 'ask_user',
+    description: 'Ask the user a structured question with optional choices before continuing.',
+    keywords: ['ask user', 'need clarification', 'clarify', 'choose', 'preference', 'question'],
+  },
 ]
 
 /** Pick tools relevant to a step description + objective. */
@@ -231,6 +249,8 @@ export function buildToolInput(
       return { path: '.' }
     case 'workspace_read':
       return { path: guessFilename(objective, 'input') }
+    case 'workspace_diff':
+      return { paths: [] }
     case 'workspace_write':
       return {
         path: guessFilename(objective, 'report'),
@@ -302,6 +322,14 @@ export function buildToolInput(
       }
     case 'json_extract_lite':
       return { text: priorOutputs.slice(-1)[0] || objective, fields: ['title', 'items', 'summary'] }
+    case 'update_plan':
+      return { todos: [{ text: stepDescription || objective, status: 'active' }] }
+    case 'ask_user':
+      return {
+        question: stepDescription || objective,
+        options: [],
+        allowFreeform: true,
+      }
     default:
       return {}
   }

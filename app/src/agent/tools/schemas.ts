@@ -44,6 +44,12 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
     },
     required: ['path'],
   },
+  workspace_diff: {
+    type: 'object',
+    properties: {
+      paths: { type: 'array', items: { type: 'string' }, description: 'Optional relative file paths to scope the diff' },
+    },
+  },
   workspace_write: {
     type: 'object',
     properties: {
@@ -186,6 +192,48 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
       },
     },
     required: ['text'],
+  },
+  update_plan: {
+    type: 'object',
+    properties: {
+      todos: {
+        type: 'array',
+        description: 'Complete ordered task list snapshot. Replace the previous plan.',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Stable item id (optional)' },
+            text: { type: 'string', description: 'Actionable task description' },
+            status: { type: 'string', enum: ['pending', 'active', 'done', 'failed'] },
+          },
+          required: ['text'],
+        },
+      },
+    },
+    required: ['todos'],
+  },
+  ask_user: {
+    type: 'object',
+    properties: {
+      question: { type: 'string', description: 'Question to show to the user' },
+      reason: { type: 'string', description: 'Why the agent needs this answer' },
+      options: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            label: { type: 'string' },
+            description: { type: 'string' },
+            value: { type: 'string' },
+          },
+          required: ['label'],
+        },
+      },
+      multiSelect: { type: 'boolean', default: false },
+      allowFreeform: { type: 'boolean', default: true },
+      timeoutMs: { type: 'integer', description: 'Question timeout in milliseconds' },
+    },
+    required: ['question'],
   },
   codegraph_explore: {
     type: 'object',

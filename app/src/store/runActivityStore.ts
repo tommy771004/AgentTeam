@@ -243,7 +243,15 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         at: prev?.at || now,
       })
     }
-    if (tasks.length) set({ tasks })
+    if (tasks.length) {
+      set({ tasks })
+      // Persist the latest snapshot on the run's thread. Use runningThreadId
+      // so scheduled runs do not write into the selected UI conversation.
+      void import('./threadStore').then(({ useThreadStore }) => {
+        const threadId = useThreadStore.getState().runningThreadId
+        if (threadId) useThreadStore.getState().setRunPlan(threadId, tasks)
+      })
+    }
   },
 
   upsertTask: (text, status) => {

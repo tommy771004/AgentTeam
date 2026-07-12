@@ -20,12 +20,36 @@ export type ThreadBubble = {
   at: string
   /** Optional user message attachments (images / files) */
   attachments?: ChatAttachment[]
-  /** Persisted compact process record shown below an assistant answer. */
+  /** Persisted compact process record shown before its final assistant answer. */
   runSummary?: ThreadRunSummary
+}
+
+export type ThreadPlanStatus = 'pending' | 'active' | 'done' | 'failed'
+
+export type ThreadPlanItem = {
+  id: string
+  text: string
+  status: ThreadPlanStatus
+  at: string
+}
+
+export type ThreadAgentSummary = {
+  id: string
+  name: string
+  role: string
+  status: 'idle' | 'active' | 'done' | 'error'
+  lastMessage?: string
+  model?: string
 }
 
 export type ThreadRunSummary = {
   durationMs?: number
+  /** Current Git working-tree diff for files touched by the run. */
+  diff?: string
+  /** Plan snapshot captured with this execution, for deterministic replay. */
+  plan?: ThreadPlanItem[]
+  /** Sub-agent roster captured at the end of the run for replay/audit. */
+  agents?: ThreadAgentSummary[]
   operations: Array<{
     id: string
     kind: string
@@ -57,6 +81,8 @@ export type Thread = {
   runner: ThreadRunner
   loopType: LoopType | null
   bubbles: ThreadBubble[]
+  /** Latest structured plan snapshot from update_plan / CLI plan events. */
+  runPlan?: ThreadPlanItem[]
   createdAt: string
   updatedAt: string
   lastStatus?: ExecutionStatus | 'idle'
@@ -93,6 +119,7 @@ interface ThreadStore {
       >
     >,
   ) => string
+  forkThread: (id: string) => string | null
   selectThread: (id: string) => void
   deleteThread: (id: string) => void
   renameThread: (id: string, title: string) => void
@@ -114,6 +141,11 @@ interface ThreadStore {
   setShowThreadList: (v: boolean) => void
   setRunningThreadId: (id: string | null) => void
   setThreadStatus: (id: string, status: ExecutionStatus | 'idle') => void
+  setRunPlan: (
+    id: string,
+    items: Array<{ id?: string; text: string; status?: string }>,
+  ) => void
+  clearRunPlan: (id: string) => void
   /** Persist capability / tool_search state for next run on this thread */
   setLastCapabilities: (
     id: string,
@@ -144,6 +176,23 @@ function migrateThread(raw: Record<string, unknown>): Thread {
   const runnerRaw = String(raw.runner || 'builtin') as ThreadRunner
   const runners: ThreadRunner[] = ['builtin', 'codex', 'claude', 'grok', 'opencode', 'cursor']
   const depthOk = ['fast', 'standard', 'deep', 'max', 'ultra'].includes(depth)
+  const rawPlan = Array.isArray(raw.runPlan) ? raw.runPlan : []
+  const runPlan = rawPlan
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null
+      const value = item as Record<string, unknown>
+      const text = String(value.text || '').trim()
+      if (!text) return null
+      const status = String(value.status || '').toLowerCase()
+      return {
+        id: String(value.id || `plan_${index + 1}`),
+        text: text.slice(0, 200),
+        status: status === 'done' || status === 'active' || status === 'failed' ? status : 'pending',
+        at: String(value.at || now),
+      } as ThreadPlanItem
+    })
+    .filter((item): item is ThreadPlanItem => Boolean(item))
+    .slice(0, 40)
   return {
     id: String(raw.id || uid()),
     title: String(raw.title || '新對話'),
@@ -154,6 +203,7 @@ function migrateThread(raw: Record<string, unknown>): Thread {
     runner: runners.includes(runnerRaw) ? runnerRaw : 'builtin',
     loopType: (raw.loopType as LoopType) || null,
     bubbles: Array.isArray(raw.bubbles) ? (raw.bubbles as Thread['bubbles']) : [],
+    runPlan,
     createdAt: String(raw.createdAt || now),
     updatedAt: String(raw.updatedAt || now),
     lastStatus: (raw.lastStatus as Thread['lastStatus']) || 'idle',
@@ -207,6 +257,7 @@ function emptyThread(partial?: Partial<Thread>): Thread {
     runner: partial?.runner || 'builtin',
     loopType: partial?.loopType ?? null,
     bubbles: [],
+    runPlan: [],
     createdAt: now,
     updatedAt: now,
     lastStatus: 'idle',
@@ -244,6 +295,29 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     set({ threads, activeId: t.id, showRunPanel: false })
     persist(threads, t.id)
     return t.id
+  },
+
+  forkThread: (id) => {
+    const source = get().threads.find((thread) => thread.id === id)
+    if (!source) return null
+    const now = new Date().toISOString()
+    const forked: Thread = {
+      ...source,
+      id: uid(),
+      title: `分支 · ${source.title}`.slice(0, 42),
+      bubbles: source.bubbles.slice(-MAX_BUBBLES).map((bubble) => ({
+        ...bubble,
+        id: `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      })),
+      runPlan: source.runPlan?.map((item) => ({ ...item })),
+      createdAt: now,
+      updatedAt: now,
+      lastStatus: 'idle',
+    }
+    const threads = [forked, ...get().threads].slice(0, MAX_THREADS)
+    set({ threads, activeId: forked.id, showRunPanel: false })
+    persist(threads, forked.id)
+    return forked.id
   },
 
   selectThread: (id) => {
@@ -363,6 +437,21 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       at: new Date().toISOString(),
       runSummary: {
         durationMs: summary.durationMs,
+        diff: summary.diff?.slice(0, 200_000),
+        plan: (summary.plan || []).slice(0, 40).map((item) => ({
+          id: item.id,
+          text: item.text.slice(0, 200),
+          status: item.status,
+          at: item.at,
+        })),
+        agents: (summary.agents || []).slice(0, 16).map((agent) => ({
+          id: agent.id.slice(0, 120),
+          name: agent.name.slice(0, 120),
+          role: agent.role.slice(0, 80),
+          status: agent.status,
+          lastMessage: agent.lastMessage?.slice(0, 400),
+          model: agent.model?.slice(0, 160),
+        })),
         operations: (summary.operations || []).slice(-40).map((operation, index) => ({
           id: operation.id || `operation_${index}`,
           kind: operation.kind || 'tool',
@@ -408,6 +497,45 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   setThreadStatus: (id, status) => {
     const threads = get().threads.map((t) =>
       t.id === id ? { ...t, lastStatus: status, updatedAt: new Date().toISOString() } : t,
+    )
+    set({ threads })
+    persist(threads, get().activeId)
+  },
+
+  setRunPlan: (id, items) => {
+    const now = new Date().toISOString()
+    const previous = get().threads.find((thread) => thread.id === id)?.runPlan || []
+    const statusOf = (raw?: string): ThreadPlanStatus => {
+      const value = (raw || '').toLowerCase()
+      if (value.includes('fail') || value.includes('error')) return 'failed'
+      if (value.includes('done') || value.includes('complete')) return 'done'
+      if (value.includes('active') || value.includes('progress')) return 'active'
+      return 'pending'
+    }
+    const next = items
+      .map((item, index) => {
+        const text = item.text.trim().slice(0, 200)
+        if (!text) return null
+        const old = previous.find((entry) => entry.id === item.id || entry.text === text)
+        return {
+          id: item.id?.trim() || old?.id || `plan_${index + 1}`,
+          text,
+          status: statusOf(item.status),
+          at: old?.at || now,
+        }
+      })
+      .filter((item): item is ThreadPlanItem => Boolean(item))
+      .slice(0, 40)
+    const threads = get().threads.map((thread) =>
+      thread.id === id ? { ...thread, runPlan: next, updatedAt: now } : thread,
+    )
+    set({ threads })
+    persist(threads, get().activeId)
+  },
+
+  clearRunPlan: (id) => {
+    const threads = get().threads.map((thread) =>
+      thread.id === id ? { ...thread, runPlan: [], updatedAt: new Date().toISOString() } : thread,
     )
     set({ threads })
     persist(threads, get().activeId)

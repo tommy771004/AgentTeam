@@ -77,6 +77,7 @@ import {
   executableLookupCommand,
   firstExecutablePath,
   isPathInside,
+  quoteShellArg,
 } from './platformProcess'
 import {
   codegraphCallees,
@@ -710,6 +711,7 @@ ipcMain.handle(
       baseUrl: string
       apiKey: string
       model: string
+      fallbackModels?: string[]
       messages: unknown[]
       temperature?: number
       max_tokens?: number
@@ -718,32 +720,8 @@ ipcMain.handle(
     },
   ) => {
     const base = (req.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '')
-    const payload: Record<string, unknown> = {
-      model: req.model,
-      messages: req.messages,
-      temperature: req.temperature ?? 0.4,
-      max_tokens: req.max_tokens ?? 1200,
-    }
-    if (req.tools && Array.isArray(req.tools) && req.tools.length > 0) {
-      payload.tools = req.tools
-      payload.tool_choice = req.tool_choice ?? 'auto'
-    }
-
-    const res = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${req.apiKey}`,
-      },
-      body: JSON.stringify(payload),
-    })
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => res.statusText)
-      throw new Error(`LLM HTTP ${res.status}: ${errText.slice(0, 300)}`)
-    }
-
-    const data = (await res.json()) as {
+    const candidates = [...new Set([req.model, ...(req.fallbackModels || [])].map((id) => id.trim()).filter(Boolean))]
+    type ChatResponse = {
       choices?: Array<{
         finish_reason?: string
         message?: {
@@ -757,6 +735,41 @@ ipcMain.handle(
       usage?: { total_tokens?: number }
       model?: string
     }
+    let data: ChatResponse | undefined
+    let usedModel = req.model
+    let lastError = ''
+
+    for (const model of candidates) {
+      const payload: Record<string, unknown> = {
+        model,
+        messages: req.messages,
+        temperature: req.temperature ?? 0.4,
+        max_tokens: req.max_tokens ?? 1200,
+      }
+      if (req.tools && Array.isArray(req.tools) && req.tools.length > 0) {
+        payload.tools = req.tools
+        payload.tool_choice = req.tool_choice ?? 'auto'
+      }
+      const res = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${req.apiKey}`,
+        },
+        body: JSON.stringify(payload),
+      })
+      if (res.ok) {
+        data = (await res.json()) as ChatResponse
+        usedModel = model
+        break
+      }
+      const errText = await res.text().catch(() => res.statusText)
+      lastError = `LLM HTTP ${res.status}: ${errText.slice(0, 300)}`
+      // Do not mask authentication, schema, or quota errors. Retry only the
+      // transient gateway condition reported by AIHubMix-compatible routers.
+      if (!errText.includes('no_available_channel')) break
+    }
+    if (!data) throw new Error(lastError || 'LLM request failed')
 
     const choice = data.choices?.[0]
     const msg = choice?.message
@@ -769,7 +782,7 @@ ipcMain.handle(
     return {
       content: (msg?.content || '').trim(),
       tokensUsed: data.usage?.total_tokens ?? 0,
-      model: data.model || req.model,
+      model: data.model || usedModel,
       toolCalls,
       finishReason: choice?.finish_reason,
     }
@@ -1614,6 +1627,15 @@ function workspaceRoot() {
   return getDataDir('workspace')
 }
 
+function workspaceRootFor(rootOverride?: unknown) {
+  const requested = String(rootOverride || '').trim()
+  if (requested) {
+    const resolved = path.resolve(requested)
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) return resolved
+  }
+  return workspaceRoot()
+}
+
 function setActiveProjectRoot(root: string | null) {
   if (!root || !String(root).trim()) {
     activeProjectRoot = null
@@ -1725,6 +1747,37 @@ ipcMain.handle('tools:workspaceWrite', async (_evt, a: unknown, b?: unknown, c?:
       bytes: 0,
       error: e instanceof Error ? e.message : String(e),
     }
+  }
+})
+
+ipcMain.handle('tools:workspaceDiff', async (_evt, rawPaths?: unknown, projectRoot?: unknown) => {
+  try {
+    const root = workspaceRootFor(projectRoot)
+    if (!fs.existsSync(path.join(root, '.git'))) {
+      return { ok: false, diff: '', files: [], error: '目前專案不是 Git working tree' }
+    }
+    const paths = Array.isArray(rawPaths)
+      ? rawPaths
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+          .slice(0, 80)
+      : []
+    // Validate every supplied path before putting it into the shell command.
+    for (const rel of paths) resolveWorkspacePath(rel, root)
+    const scope = paths.length ? ` -- ${paths.map((value) => quoteShellArg(value)).join(' ')}` : ''
+    const result = await runBash({
+      command: `git diff --no-ext-diff --unified=3${scope}`,
+      cwd: root,
+      timeoutMs: 15_000,
+    })
+    return {
+      ok: result.ok,
+      diff: result.stdout.slice(0, 200_000),
+      files: paths,
+      error: result.ok ? undefined : result.stderr.slice(0, 600),
+    }
+  } catch (e) {
+    return { ok: false, diff: '', files: [], error: e instanceof Error ? e.message : String(e) }
   }
 })
 

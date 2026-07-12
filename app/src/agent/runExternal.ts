@@ -367,6 +367,7 @@ export async function runExternalObjective(
   }
   thr.selectThread(tid)
   if (opts.runner) thr.setRunner(tid, opts.runner)
+  thr.clearRunPlan(tid)
   thr.setShowRunPanel(true)
   thr.setRunningThreadId(tid)
   if (!opts.skipUserBubble) {
@@ -547,6 +548,23 @@ export async function runExternalObjective(
     })
     // P0 CLI/dispatch: prefer dispatch result over stale global agent state
     const finalAgent = useAgentStore.getState().agent
+    if (finalAgent.steps.length > 0) {
+      thr.setRunPlan(
+        tid,
+        finalAgent.steps.map((step) => ({
+          id: `step_${step.step}`,
+          text: step.description || step.action || `步驟 ${step.step}`,
+          status:
+            step.status === 'COMPLETED'
+              ? 'done'
+              : step.status === 'FAILED'
+                ? 'failed'
+                : step.status === 'IN_PROGRESS'
+                  ? 'active'
+                  : 'pending',
+        })),
+      )
+    }
     const status =
       result.status === 'failed' || result.error
         ? result.status === 'failed'
@@ -562,25 +580,22 @@ export async function runExternalObjective(
         ? status
         : finalAgent.status) as 'success' | 'failed' | 'halted' | 'idle' | 'running',
     )
-    if (result.error && result.status === 'failed' && !result.result) {
-      thr.pushBubble(tid, 'system', result.error)
-    } else {
-      const stepsTail = finalAgent.steps
-        .filter((s) => s.result)
-        .slice(-3)
-        .map((s) => s.result)
-        .join('\n\n')
-      thr.pushBubble(
-        tid,
-        'assistant',
-        finalAgent.result ||
-          stepsTail ||
-          result.result ||
-          `狀態：${status}`,
-      )
+    const stepsTail = finalAgent.steps
+      .filter((step) => step.result)
+      .slice(-3)
+      .map((step) => step.result)
+      .join('\n\n')
+    const finalAnswer =
+      finalAgent.result ||
+      stepsTail ||
+      result.result ||
+      `狀態：${status}`
+    const hasFinalAnswer = !(result.error && result.status === 'failed' && !result.result)
+    if (!hasFinalAnswer) {
+      thr.pushBubble(tid, 'system', result.error || finalAgent.haltReason || '執行失敗')
     }
-    // Persist a compact execution record beside the final answer. Live activity
-    // is intentionally ephemeral, so this keeps CLI work visible after reload.
+    // Persist a compact process record *before* the answer. This mirrors
+    // OpenCode's part order: context/tools → final text, both live and after reload.
     try {
       const { useRunActivityStore } = await import('../store/runActivityStore')
       const activity = useRunActivityStore.getState()
@@ -650,9 +665,34 @@ export async function runExternalObjective(
             : stepOps.length > 0
               ? [...stepOps, ...logOps].slice(-40)
               : logOps
+      let diff: string | undefined
+      if (fileMap.size > 0) {
+        try {
+          const { useProjectStore } = await import('../store/projectStore')
+          const projectRoot = opts.projectRoot || useProjectStore.getState().root || undefined
+          const result = await window.subagents?.tools?.workspaceDiff?.(
+            [...fileMap.keys()],
+            projectRoot,
+          )
+          if (result?.ok && result.diff.trim()) diff = result.diff.slice(0, 200_000)
+        } catch {
+          /* Diff is an optional review aid; never fail the run summary. */
+        }
+      }
+      const plan = (thr.threads.find((thread) => thread.id === tid)?.runPlan || []).slice(0, 40)
       // Always persist a process card so chat shows more than the bare answer
       thr.pushRunSummary(tid, {
         durationMs: finalAgent.metrics?.executionMs,
+        diff,
+        plan,
+        agents: (finalAgent.subAgents || []).map((agent) => ({
+          id: agent.id,
+          name: agent.name,
+          role: agent.role,
+          status: agent.status,
+          lastMessage: agent.lastMessage,
+          model: agent.model,
+        })),
         operations:
           operations.length > 0
             ? operations
@@ -672,6 +712,9 @@ export async function runExternalObjective(
       })
     } catch {
       /* execution summary must not break the task lifecycle */
+    }
+    if (hasFinalAnswer) {
+      thr.pushBubble(tid, 'assistant', finalAnswer)
     }
     thr.setRunningThreadId(null)
     const finalResult: ExternalRunResult = {

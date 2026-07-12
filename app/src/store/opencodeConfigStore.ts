@@ -32,6 +32,8 @@ interface OpenCodeConfigStore {
   model?: string
   small_model?: string
   default_agent?: string
+  /** Merged project/global permission block, exposed for review in Settings. */
+  permission: OpenCodePermissionBlock
   agents: RegistryAgent[]
   commands: OpenCodeCommandFileDef[]
   lastProjectRoot: string
@@ -89,6 +91,7 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
   loading: false,
   error: null,
   sources: [],
+  permission: {},
   agents: [],
   commands: [],
   lastProjectRoot: '',
@@ -110,6 +113,7 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
           agents: listRegistryAgents({ includeHidden: true }),
           commands: [],
           sources: [],
+          permission: {},
           lastProjectRoot: root,
           error: '非 Electron：僅內建 Build/Plan agent',
         })
@@ -159,6 +163,7 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
         model: full.model,
         small_model: full.small_model,
         default_agent: full.default_agent,
+        permission: full.permission || {},
         agents: listRegistryAgents({ includeHidden: true }),
         commands: full.commandsFromMarkdown,
         lastProjectRoot: root,

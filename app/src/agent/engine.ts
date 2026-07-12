@@ -297,10 +297,11 @@ export class AgentLoopEngine {
     this.userAttachments = this.overrides.userAttachments || []
     // Per-run project pin for tools/bash (must not use wrong UI project)
     try {
-      const { setRunProjectRoot, setRunId, clearRunContext } = await import('./tools/runContext')
+      const { setRunProjectRoot, setRunId, setRunThreadId, clearRunContext } = await import('./tools/runContext')
       clearRunContext()
       setRunProjectRoot(this.overrides.projectRoot)
       setRunId(this.overrides.runId)
+      setRunThreadId(this.overrides.threadId)
     } catch {
       /* ignore */
     }
@@ -888,6 +889,14 @@ export class AgentLoopEngine {
                 // Union across steps within a run
                 const set = new Set([...(this.state.loadedCapabilityIds || []), ...ids])
                 this.state.loadedCapabilityIds = [...set].sort()
+                this.emit()
+              },
+              onQuestionAsked: () => {
+                this.state.status = 'awaiting_user'
+                this.emit()
+              },
+              onQuestionResolved: () => {
+                if (this.state.status === 'awaiting_user') this.state.status = 'running'
                 this.emit()
               },
             },

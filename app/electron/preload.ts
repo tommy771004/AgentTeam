@@ -80,6 +80,7 @@ const api = {
       baseUrl: string
       apiKey: string
       model: string
+      fallbackModels?: string[]
       messages: unknown[]
       temperature?: number
       max_tokens?: number
@@ -124,6 +125,13 @@ const api = {
         ok: boolean
         path: string
         bytes: number
+        error?: string
+      }>,
+    workspaceDiff: (paths?: string[], projectRoot?: string) =>
+      ipcRenderer.invoke('tools:workspaceDiff', paths || [], projectRoot) as Promise<{
+        ok: boolean
+        diff: string
+        files: string[]
         error?: string
       }>,
     workspaceDownload: (url: string, path: string, projectRoot?: string) =>

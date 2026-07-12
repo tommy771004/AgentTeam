@@ -1,5 +1,5 @@
 /**
- * Live in-chat process feed (Codex-style).
+ * Live in-chat process feed (OpenCode-style parts).
  * Always visible while a run is active; completed work is also written into
  * ThreadRunSummary bubbles via runExternal (RunSummaryCard).
  */
@@ -9,6 +9,11 @@ import { useAgentStore } from '../store/agentStore'
 import { useRunActivityStore } from '../store/runActivityStore'
 import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
+import {
+  contextSummary,
+  groupProcessOperations,
+  type ProcessOperation,
+} from '../lib/runPresentation'
 
 function basen(p: string) {
   return p.replace(/\\/g, '/').split('/').filter(Boolean).pop() || p
@@ -33,6 +38,20 @@ function kindIcon(kind: string): string {
   }
 }
 
+function phaseLabel(input: {
+  statusLine: string
+  thought: string
+  draftText: string
+  operationCount: number
+  objective: string
+}) {
+  if (input.draftText.trim()) return '正在撰寫回覆'
+  if (input.thought.trim()) return '正在推理'
+  if (input.operationCount > 0) return '正在執行任務'
+  if (input.statusLine.trim()) return input.statusLine
+  return input.objective ? '正在準備任務' : '正在啟動'
+}
+
 export function RunProcessFeed({
   depthLabel,
   onOpenPanel,
@@ -51,7 +70,9 @@ export function RunProcessFeed({
     fileChanges,
   } = useRunActivityStore()
 
-  const [thoughtOpen, setThoughtOpen] = useState(true)
+  // OpenCode keeps reasoning compact by default; raw streamed thought remains
+  // available for inspection without pushing the answer below the fold.
+  const [thoughtOpen, setThoughtOpen] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
 
   const live =
@@ -64,14 +85,7 @@ export function RunProcessFeed({
 
   /** Flat timeline: stream events + steps + toolCalls + recent logs */
   const timeline = useMemo(() => {
-    const rows: Array<{
-      id: string
-      kind: string
-      title: string
-      detail?: string
-      path?: string
-      ok?: boolean
-    }> = []
+    const rows: ProcessOperation[] = []
     const seen = new Set<string>()
 
     const add = (row: (typeof rows)[0]) => {
@@ -136,8 +150,9 @@ export function RunProcessFeed({
       })
     }
 
-    // Logs as last-resort process trail (CLI without structured stream)
-    if (rows.length < 3) {
+    // Logs are a last-resort process trail for runners without structured
+    // events. Do not mix engine diagnostics into an already useful parts view.
+    if (rows.length === 0) {
       for (const l of (agent.logs || []).slice(-12)) {
         const m = l.message || ''
         if (!m || m.startsWith('$ ') || m.length > 240) continue
@@ -153,6 +168,15 @@ export function RunProcessFeed({
 
     return rows.slice(-48)
   }, [events, agent.steps, agent.toolCalls, agent.logs])
+
+  const groups = useMemo(() => groupProcessOperations(timeline), [timeline])
+  const phase = phaseLabel({
+    statusLine,
+    thought,
+    draftText,
+    operationCount: timeline.length,
+    objective: agent.objective,
+  })
 
   const allFiles = useMemo(() => {
     const map = new Map<string, { path: string; action: string; added?: number; removed?: number }>()
@@ -186,12 +210,12 @@ export function RunProcessFeed({
   if (!live) return null
 
   return (
-    <div className="w-full space-y-2.5 py-1">
-      {/* Status line — no card chrome */}
+    <section className="w-full space-y-2.5 py-1" aria-live="polite" aria-busy={live}>
+      {/* One stable turn status from prompt submission until the first part arrives. */}
       <div className="flex items-center gap-2 text-[12px] text-outline">
-        <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+        <Icon name="progress_activity" size={15} className="shrink-0 animate-spin text-primary" />
         <span className="text-on-surface-variant min-w-0 truncate">
-          {statusLine ||
+          {phase ||
             (agent.loopConfig?.trigger === 'local-cli'
               ? `本機 ${agent.steps[0]?.assignedAgent || 'CLI'} 執行中…`
               : `思考中（${depthLabel}）…`)}
@@ -211,7 +235,7 @@ export function RunProcessFeed({
         ) : null}
       </div>
 
-      {/* Thought */}
+      {/* Reasoning is an optional detail, not a competing second answer. */}
       {thought.trim() ? (
         <div>
           <button
@@ -220,9 +244,9 @@ export function RunProcessFeed({
             onClick={() => setThoughtOpen((v) => !v)}
           >
             <Icon name="psychology" size={15} className="text-secondary" />
-            <span>思考過程</span>
+            <span>推理摘要</span>
             <span className="text-[10px] opacity-70">
-              {thought.length.toLocaleString()} 字 · {thoughtOpen ? '收合' : '展開'}
+              {thought.length.toLocaleString()} 字 · {thoughtOpen ? '收合內容' : '檢視內容'}
             </span>
           </button>
           {thoughtOpen ? (
@@ -234,35 +258,68 @@ export function RunProcessFeed({
       ) : (
         <div className="flex items-center gap-1.5 text-[12px] text-outline/80">
           <Icon name="psychology" size={15} />
-          <span>等待模型輸出過程…</span>
+          <span>等待模型開始回應…</span>
         </div>
       )}
 
-      {/* Process rows — borderless */}
-      {timeline.length > 0 ? (
+      {/* Consecutive read/search parts become one OpenCode-style context group. */}
+      {groups.length > 0 ? (
         <div className="space-y-1">
-          {timeline.map((row) => {
-            const open = expanded === row.id
+          {groups.map((group, index) => {
+            const open = expanded === group.id
+            const active = index === groups.length - 1 && !draftText.trim()
+            if (group.type === 'context') {
+              const detail = group.operations
+                .map((operation) => operation.detail || operation.title)
+                .filter(Boolean)
+                .join('\n')
+              return (
+                <div key={group.id}>
+                  <button
+                    type="button"
+                    className="flex max-w-full items-center gap-1.5 text-left text-[12px] text-outline hover:text-on-surface"
+                    onClick={() => setExpanded((id) => (id === group.id ? null : group.id))}
+                  >
+                    <Icon
+                      name={active ? 'progress_activity' : 'folder_open'}
+                      size={15}
+                      className={active ? 'shrink-0 animate-spin text-primary' : 'shrink-0 opacity-80'}
+                    />
+                    <span className="truncate">{active ? '正在蒐集上下文' : '已蒐集上下文'}</span>
+                    <span className="truncate text-[11px] text-outline/70">
+                      {contextSummary(group.operations)}
+                    </span>
+                    <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" />
+                  </button>
+                  {open ? (
+                    <pre className="ml-5 mt-0.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] custom-scrollbar">
+                      {detail}
+                    </pre>
+                  ) : null}
+                </div>
+              )
+            }
+
+            const row = group.operation
+            const hasDetail = Boolean((row.detail || row.path) && row.detail !== row.title)
             return (
-              <div key={row.id}>
+              <div key={group.id}>
                 <button
                   type="button"
                   className={`flex max-w-full items-center gap-1.5 text-left text-[12px] ${
                     row.ok === false ? 'text-error' : 'text-outline hover:text-on-surface'
                   }`}
-                  onClick={() => setExpanded((id) => (id === row.id ? null : row.id))}
+                  onClick={() => hasDetail && setExpanded((id) => (id === group.id ? null : group.id))}
                 >
-                  <Icon name={kindIcon(row.kind)} size={15} className="shrink-0 opacity-80" />
+                  <Icon
+                    name={active ? 'progress_activity' : kindIcon(row.kind)}
+                    size={15}
+                    className={active ? 'shrink-0 animate-spin text-primary' : 'shrink-0 opacity-80'}
+                  />
                   <span className="truncate">{row.title}</span>
-                  {(row.detail || row.path) && row.detail !== row.title ? (
-                    <Icon
-                      name={open ? 'expand_less' : 'expand_more'}
-                      size={14}
-                      className="shrink-0 opacity-50"
-                    />
-                  ) : null}
+                  {hasDetail ? <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" /> : null}
                 </button>
-                {open && (row.detail || row.path) ? (
+                {open && hasDetail ? (
                   <pre className="ml-5 mt-0.5 whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] line-clamp-5">
                     {row.path && row.path !== row.detail ? `${row.path}\n` : ''}
                     {row.detail}
@@ -294,11 +351,11 @@ export function RunProcessFeed({
       {draftText ? (
         <div className="pt-1">
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-outline">
-            assistant · 串流中
+            assistant · 回覆中
           </div>
           <MarkdownBody content={draftText} />
         </div>
       ) : null}
-    </div>
+    </section>
   )
 }

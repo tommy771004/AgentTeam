@@ -18,6 +18,18 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
     return tid ? s.threads.find((t) => t.id === tid)?.continueGoal : undefined
   })
   const activeId = useThreadStore((s) => s.activeId)
+  const persistedPlan = useThreadStore((s) => {
+    const thread = s.threads.find((item) => item.id === s.activeId)
+    return thread?.runPlan || []
+  })
+  const tasks = activity.tasks.length
+    ? activity.tasks
+    : persistedPlan.map((item) => ({
+        id: item.id,
+        text: item.text,
+        status: item.status,
+        at: Date.parse(item.at) || Date.now(),
+      }))
 
   const live =
     isRunning ||
@@ -147,27 +159,27 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
           )}
         </div>
 
-        {(activity.tasks.length > 0 || (live && agent.loopConfig.trigger === 'local-cli')) && (
+        {(tasks.length > 0 || (live && agent.loopConfig.trigger === 'local-cli')) && (
           <div className="rounded-xl border border-white/10 bg-surface-container/40 p-3">
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-[10px] uppercase tracking-wider text-outline font-semibold">
                 任務清單
               </h4>
-              {activity.tasks.length > 0 && (
+              {tasks.length > 0 && (
                 <span className="text-[10px] text-outline font-[family-name:var(--font-mono)]">
-                  {activity.tasks.filter((t) => t.status === 'done').length}/
-                  {activity.tasks.length}
+                  {tasks.filter((t) => t.status === 'done').length}/
+                  {tasks.length}
                 </span>
               )}
             </div>
-            {activity.tasks.length === 0 ? (
+            {tasks.length === 0 ? (
               <p className="text-xs text-outline flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
                 分析任務中…
               </p>
             ) : (
               <ul className="space-y-1.5">
-                {activity.tasks.map((t) => (
+                {tasks.map((t) => (
                   <li key={t.id} className="flex items-start gap-2 text-xs">
                     {t.status === 'done' ? (
                       <Icon name="check_circle" size={14} filled className="text-primary shrink-0 mt-px" />
@@ -201,6 +213,36 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
                 ))}
               </ul>
             )}
+          </div>
+        )}
+
+        {agent.subAgents.length > 0 && (
+          <div className="rounded-xl border border-white/10 bg-surface-container/40 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-[10px] uppercase tracking-wider text-outline font-semibold">
+                子代理工作樹
+              </h4>
+              <span className="text-[10px] text-outline font-[family-name:var(--font-mono)]">
+                {agent.subAgents.filter((item) => item.status === 'done').length}/{agent.subAgents.length}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {agent.subAgents.map((item) => (
+                <div key={item.id} className="flex items-start gap-2 text-xs">
+                  <Icon
+                    name={item.status === 'done' ? 'check_circle' : item.status === 'error' ? 'cancel' : item.status === 'active' ? 'progress_activity' : 'radio_button_unchecked'}
+                    size={14}
+                    className={item.status === 'done' ? 'text-primary' : item.status === 'error' ? 'text-error' : item.status === 'active' ? 'animate-spin text-primary' : 'text-outline'}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="text-on-surface">{item.name}</span>
+                    <span className="ml-1 text-outline">· {item.role}</span>
+                    {item.model ? <span className="ml-1 text-outline font-mono">· {item.model}</span> : null}
+                    {item.lastMessage ? <span className="mt-0.5 block truncate text-[10px] text-outline">{item.lastMessage}</span> : null}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

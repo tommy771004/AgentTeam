@@ -60,6 +60,18 @@ export async function executeTool(
         }
         return { ok: false, output: 'workspace_read requires Electron' }
       }
+      case 'workspace_diff': {
+        if (!api?.workspaceDiff) return { ok: false, output: 'workspace_diff requires Electron' }
+        const paths = Array.isArray(input.paths)
+          ? input.paths.map(String).filter(Boolean).slice(0, 80)
+          : []
+        const r = await api.workspaceDiff(paths, projectRoot)
+        return {
+          ok: r.ok,
+          output: r.ok ? r.diff || '(working tree clean)' : r.error || 'diff failed',
+          data: r,
+        }
+      }
       case 'bash': {
         if (!window.subagents?.shell?.bash) {
           return { ok: false, output: 'bash 僅支援 Electron 環境' }
@@ -404,6 +416,92 @@ export async function executeTool(
           summary: text.slice(0, 280),
         }
         return { ok: true, output: JSON.stringify(payload, null, 2), data: payload }
+      }
+      case 'update_plan': {
+        const raw = Array.isArray(input.todos)
+          ? input.todos
+          : Array.isArray(input.items)
+            ? input.items
+            : []
+        const todos = raw
+          .map((item, index) => {
+            if (typeof item === 'string') {
+              return { id: `plan_${index + 1}`, text: item, status: 'pending' }
+            }
+            if (!item || typeof item !== 'object') return null
+            const value = item as Record<string, unknown>
+            const text = String(value.text ?? value.title ?? value.task ?? value.step ?? '').trim()
+            if (!text) return null
+            const status = String(value.status ?? '').toLowerCase()
+            return {
+              id: String(value.id || `plan_${index + 1}`),
+              text: text.slice(0, 200),
+              status:
+                status.includes('fail') || status.includes('error')
+                  ? 'failed'
+                  : status.includes('done') || status.includes('complete')
+                    ? 'done'
+                    : status.includes('active') || status.includes('progress')
+                      ? 'active'
+                      : 'pending',
+            }
+          })
+          .filter((item): item is { id: string; text: string; status: string } => Boolean(item))
+          .slice(0, 40)
+        if (!todos.length) return { ok: false, output: 'update_plan 需要至少一個有效的 todos 項目' }
+        try {
+          const { useRunActivityStore } = await import('../../store/runActivityStore')
+          useRunActivityStore.getState().setTasks(todos)
+          useRunActivityStore.getState().push({
+            kind: 'status',
+            title: '任務清單更新',
+            detail: `${todos.length} 項 · ${todos.filter((item) => item.status === 'done').length} 項完成`,
+          })
+          useRunActivityStore.getState().setStatus(`任務清單已更新 · ${todos.length} 項`)
+        } catch {
+          /* UI store is optional in browser / pure execution contexts */
+        }
+        const output = todos
+          .map((item, index) => `${index + 1}. [${item.status}] ${item.text}`)
+          .join('\n')
+        return { ok: true, output: `任務清單已更新（${todos.length} 項）\n${output}`, data: { todos } }
+      }
+      case 'ask_user': {
+        const question = String(input.question || '').trim()
+        if (!question) return { ok: false, output: 'ask_user 需要 question' }
+        const rawOptions = Array.isArray(input.options) ? input.options : []
+        const options = rawOptions
+          .map((option) => {
+            if (typeof option === 'string') return { label: option }
+            if (!option || typeof option !== 'object') return null
+            const value = option as Record<string, unknown>
+            const label = String(value.label || value.title || '').trim()
+            if (!label) return null
+            return {
+              label,
+              description: value.description ? String(value.description) : undefined,
+              value: value.value ? String(value.value) : undefined,
+            }
+          })
+          .filter((option): option is { label: string; description?: string; value?: string } => Boolean(option))
+          .slice(0, 12)
+        const { useQuestionAskStore } = await import('../../store/questionAskStore')
+        const answer = await useQuestionAskStore.getState().requestQuestion({
+          question,
+          options,
+          multiSelect: input.multiSelect === true,
+          allowFreeform: input.allowFreeform !== false,
+          reason: input.reason ? String(input.reason) : undefined,
+          timeoutMs: Number(input.timeoutMs) || undefined,
+        })
+        if (!answer) return { ok: false, output: '使用者取消或逾時，未取得回答' }
+        const output = [
+          answer.answers.length ? `選擇：${answer.answers.join('、')}` : '',
+          answer.freeform ? `補充：${answer.freeform}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+        return { ok: true, output: output || '使用者已回答（無文字內容）', data: answer }
       }
       case 'codegraph_status': {
         let root = input.projectRoot ? String(input.projectRoot) : ''

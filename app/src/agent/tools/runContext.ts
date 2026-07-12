@@ -6,6 +6,7 @@
 
 let runProjectRoot: string | undefined
 let runId: string | undefined
+let runThreadId: string | undefined
 
 export function setRunProjectRoot(root: string | undefined | null) {
   const r = (root || '').trim()
@@ -24,6 +25,14 @@ export function getRunId(): string | undefined {
   return runId
 }
 
+export function setRunThreadId(id: string | undefined | null) {
+  runThreadId = (id || '').trim() || undefined
+}
+
+export function getRunThreadId(): string | undefined {
+  return runThreadId
+}
+
 /** Resolve effective cwd/project for tools: run pin → UI store → undefined */
 export async function resolveEffectiveProjectRoot(): Promise<string | undefined> {
   if (runProjectRoot) return runProjectRoot
@@ -38,4 +47,5 @@ export async function resolveEffectiveProjectRoot(): Promise<string | undefined>
 export function clearRunContext() {
   runProjectRoot = undefined
   runId = undefined
+  runThreadId = undefined
 }

@@ -9,6 +9,7 @@ export function ThreadSidebar() {
     threads,
     activeId,
     createThread,
+    forkThread,
     selectThread,
     deleteThread,
     setShowThreadList,
@@ -91,6 +92,17 @@ export function ThreadSidebar() {
                 }}
               >
                 <Icon name="close" size={14} />
+              </button>
+              <button
+                type="button"
+                className="opacity-0 group-hover:opacity-100 p-1 rounded text-outline hover:text-primary shrink-0"
+                title="建立分支"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  forkThread(t.id)
+                }}
+              >
+                <Icon name="call_split" size={14} />
               </button>
             </div>
           )

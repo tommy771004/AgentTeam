@@ -358,12 +358,12 @@ await test('side-effect drift guard: every registry tool is read-only OR classif
 
   // 唯讀白名單：新工具必須加入這裡「或」進 SIDE_EFFECT_TOOLS / approvalTools，二選一
   const READ_ONLY = new Set([
-    'workspace_list', 'workspace_read', 'datetime_now',
+    'workspace_list', 'workspace_read', 'workspace_diff', 'datetime_now',
     'memory_get', 'memory_search',
     'skill_list', 'skill_load',
     'mcp_list_tools',
     'delegate_status',
-    'json_extract_lite', 'table_parse',
+    'json_extract_lite', 'table_parse', 'update_plan', 'ask_user',
     'codegraph_explore', 'codegraph_status', 'codegraph_impact', 'codegraph_callers',
   ])
   const sideEffectBlock = guard.slice(

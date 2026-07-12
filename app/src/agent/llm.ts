@@ -9,10 +9,12 @@ export type { LlmSettings }
 
 export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   enabled: false,
+  apiProvider: 'custom',
   /** 空白 = 由使用者或一鍵偵測填入 */
   baseUrl: '',
   apiKey: '',
   model: '',
+  fallbackModels: [],
   discoveredModels: [],
   roleModels: {
     orchestrator: '',
@@ -221,6 +223,7 @@ export async function chatCompletionWithTools(
     const r = await window.subagents.llm.chat({
       baseUrl: settings.baseUrl,
       apiKey: settings.apiKey,
+      fallbackModels: settings.fallbackModels,
       ...body,
     })
     return normalizeChatResult(r, settings.model)

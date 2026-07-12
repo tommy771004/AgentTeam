@@ -14,6 +14,26 @@ export const RUN_CODE_TOOL = 'run_code'
 
 export const BUILTIN_CAPABILITIES: AgentCapability[] = [
   {
+    id: 'interaction',
+    description: 'Ask the user structured questions and resume the current run with the answer.',
+    instructions:
+      'Use ask_user when a missing user choice or clarification materially changes the result. Prefer concise options and include freeform input when useful.',
+    tools: ['ask_user'],
+    deferLoading: false,
+    source: 'builtin',
+    group: 'core',
+  },
+  {
+    id: 'planning',
+    description: 'Structured task planning and progress tracking for multi-step runs.',
+    instructions:
+      'Use update_plan for multi-step tasks. Send the complete ordered list each time; use pending, active, done, or failed statuses. Keep items actionable and concise.',
+    tools: ['update_plan'],
+    deferLoading: false,
+    source: 'builtin',
+    group: 'core',
+  },
+  {
     id: 'core-utils',
     description: 'Lightweight utilities: current time and structured extraction.',
     instructions:
@@ -43,7 +63,7 @@ export const BUILTIN_CAPABILITIES: AgentCapability[] = [
 - Paths are relative to the sandbox root.
 - Prefer workspace_list before write when unsure.
 - Write reports under reports/ when delivering deliverables.`,
-    tools: ['workspace_list', 'workspace_read', 'workspace_write', 'workspace_download', 'workspace_mkdir', 'workspace_move', 'workspace_delete', 'table_parse'],
+    tools: ['workspace_list', 'workspace_read', 'workspace_diff', 'workspace_write', 'workspace_download', 'workspace_mkdir', 'workspace_move', 'workspace_delete', 'table_parse'],
     approvalTools: ['workspace_move', 'workspace_delete'],
     deferLoading: true,
     source: 'builtin',

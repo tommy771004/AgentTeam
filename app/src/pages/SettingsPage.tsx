@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { APPROVAL_MODE_DEFS } from '../agent/approvalModes'
 import { ThemePage } from '../components/SectionNav'
@@ -23,6 +23,7 @@ import type {
   ReducedMotionPreference,
   EnterBehavior,
   FollowUpMode,
+  ApiProviderPreset,
 } from '../agent/types'
 import {
   listAllMcpTools,
@@ -42,6 +43,7 @@ import {
 import { BUILTIN_CAPABILITIES } from '../agent/capabilities'
 import { skillsStore } from '../agent/hermes/skills'
 import { recommendToolTuning } from '../agent/modelTuning'
+import { API_PROVIDER_PRESETS, apiProviderPreset } from '../agent/apiProviders'
 import {
   OAUTH_REDIRECT_URI,
   PLUGIN_OAUTH_PROVIDERS,
@@ -112,7 +114,7 @@ const SECTION_META: Record<string, { title: string; subtitle: string }> = {
   },
   llm: {
     title: '語言模型',
-    subtitle: 'OpenAI 相容 API 端點與預設模型。',
+    subtitle: 'AIHubMix、OpenAI、OpenRouter 與其他 OpenAI 相容 API。',
   },
   cli: {
     title: 'CLI 授權',
@@ -936,9 +938,38 @@ export function SettingsPage() {
         {section === 'llm' && (
           <>
             <SettingsGroup title="連線">
+              <SettingsStack title="API 供應商">
+                <select
+                  value={settings.apiProvider || 'custom'}
+                  className={settingsInputCls}
+                  onChange={(e) => {
+                    const provider = apiProviderPreset(e.target.value as ApiProviderPreset)
+                    if (provider.id === 'custom') {
+                      set({ apiProvider: 'custom' })
+                      return
+                    }
+                    set({
+                      apiProvider: provider.id,
+                      baseUrl: provider.baseUrl,
+                      model: provider.defaultModel,
+                      fallbackModels: provider.fallbackModels,
+                      discoveredModels: [],
+                    })
+                  }}
+                >
+                  {API_PROVIDER_PRESETS.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[11px] text-outline">
+                  {apiProviderPreset(settings.apiProvider || 'custom').note}
+                </p>
+              </SettingsStack>
               <SettingsRow
                 title="啟用 LLM"
-                description="使用 OpenAI 相容 API"
+                description="使用所選供應商的 OpenAI 相容 API"
                 control={
                   <SettingsToggle
                     checked={settings.enabled}
@@ -1043,6 +1074,38 @@ export function SettingsPage() {
                     </div>
                   )
                 })()}
+              </SettingsStack>
+              <SettingsStack title="通道備援模型">
+                <input
+                  value={(settings.fallbackModels || []).join(', ')}
+                  onChange={(e) =>
+                    set({
+                      fallbackModels: e.target.value
+                        .split(',')
+                        .map((id) => id.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                  className={settingsInputCls}
+                  placeholder="僅在供應商回報無可用通道時依序重試"
+                />
+                <p className="mt-1 text-[11px] text-outline">
+                  僅在 `no_available_channel` 時自動重試；驗證、配額與格式錯誤不會被掩蓋。
+                </p>
+                {settings.apiProvider === 'aihubmix' && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {apiProviderPreset('aihubmix').fallbackModels.map((model) => (
+                      <button
+                        key={model}
+                        type="button"
+                        className="rounded-full border border-primary/25 bg-primary/10 px-2 py-1 text-[11px] text-primary hover:bg-primary/15"
+                        onClick={() => set({ model })}
+                      >
+                        改用 {model}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </SettingsStack>
             </SettingsGroup>
             <div className="flex flex-wrap gap-2 items-center px-0.5">
@@ -1345,6 +1408,44 @@ export function SettingsPage() {
                     {s}
                   </div>
                 ))
+              )}
+            </SettingsGroup>
+
+            <SettingsGroup title="Project permissions">
+              {Object.keys(oc.permission).length === 0 ? (
+                <div className="px-4 py-3 text-[12px] text-outline">
+                  未設定專案／全域 OpenCode permission；使用內建 Build / Plan 預設規則。
+                </div>
+              ) : (
+                <>
+                  <div className="px-4 py-2 text-[10px] text-outline">
+                    這些規則只會套用到目前載入的專案 run；deny 優先於 ask，bash pattern 依檔案順序由後到前覆蓋。
+                  </div>
+                  {Object.entries(oc.permission).map(([key, value]) => (
+                    <SettingsRow
+                      key={key}
+                      title={key}
+                      description={
+                        typeof value === 'string'
+                          ? value
+                          : `${Object.keys(value || {}).length} pattern 規則`
+                      }
+                      control={
+                        <span
+                          className={`text-[10px] font-mono ${
+                            value === 'deny'
+                              ? 'text-error'
+                              : value === 'ask'
+                                ? 'text-amber-300'
+                                : 'text-emerald-300'
+                          }`}
+                        >
+                          {typeof value === 'string' ? value : 'pattern'}
+                        </span>
+                      }
+                    />
+                  ))}
+                </>
               )}
             </SettingsGroup>
 

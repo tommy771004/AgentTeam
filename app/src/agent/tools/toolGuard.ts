@@ -119,9 +119,11 @@ export async function authorizeTool(opts: {
     const cmd = String(input.command || '')
     let agentId: string | undefined
     try {
+      const { getRunThreadId } = await import('./runContext')
       const { useThreadStore } = await import('../../store/threadStore')
       const thr = useThreadStore.getState()
-      const t = thr.threads.find((x) => x.id === thr.activeId)
+      const runThreadId = getRunThreadId()
+      const t = thr.threads.find((x) => x.id === (runThreadId || thr.activeId))
       agentId = t?.agentMode
     } catch {
       /* ignore */

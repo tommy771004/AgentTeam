@@ -1,41 +1,47 @@
-# Persisted execution-summary design QA
+# API provider settings design QA
 
-- Source visual truth: `/Users/xieyuanyou/Desktop/截圖 2026-07-11 晚上9.19.14.png`
-- Implementation screenshot: `/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/subagents-persisted-execution-summary.png`
+- Source visual truth: `/Users/xieyuanyou/Desktop/截圖 2026-07-12 下午5.48.07.png`
+- Implementation screenshots:
+  - `/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/subagents-aihubmix-settings.png`
+  - `/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/subagents-aihubmix-fallback-settings.png`
+- Full-view comparison evidence: `/private/tmp/subagents-aihubmix-settings-comparison.png` — the supplied screenshot and the rendered settings page were placed side by side in one comparison image.
 - Viewport: desktop browser preview, 1280 × 720.
-- State: completed agent run, long assistant answer collapsed, saved execution-summary cards collapsed.
-- Interactions tested: completion creates a saved summary; summary expands to show operations; long assistant output expands; browser console contains no errors.
+- State: Settings → 語言模型, with the AIHubMix preset selected. API key remains empty; no secret was entered or transmitted.
+- Primary interactions tested: selected AIHubMix from the API provider dropdown; verified Base URL changes to `https://aihubmix.com/v1`, default model changes to `gpt-4.1-mini-free`, and the three backup model choices appear.
+- Console errors checked: none.
 
 ## Full-view and focused comparison
 
-The source places the final answer first and a concise, expandable file/action record directly below it. The implementation follows this order: assistant content stays in the normal conversation flow, while each completed run appends one independent summary card. The focused comparison covers the answer-to-summary transition and the card's collapsed/expanded states; surrounding navigation is product-specific and outside the supplied target.
+The supplied screen establishes a dark, dense OpenAI-compatible model-settings form with a single connection card. The implementation keeps the same dark setting surface, input hierarchy, rounded controls, and vertical form rhythm, while adding a compact provider preset selector above the original connection controls. The focused lower-region capture confirms that fallback models are presented as one editable field plus small direct-switch buttons, rather than creating a second full card.
+
+The surrounding application navigation and the browser-preview banner are product-specific context, not part of the supplied form target. The supplied screenshot predates provider presets, so the provider selector and the no-channel explanation are intentional product additions.
 
 ## Fidelity surfaces
 
-- **Fonts and typography:** The assistant answer keeps the product's readable message typography; execution cards use smaller, mono-style metadata and a clear 13px summary title.
-- **Spacing and layout rhythm:** The summary is a single rounded card with a compact header, mirroring the reference's dense change summary. Detail rows are only introduced after expansion.
-- **Colors and visual tokens:** Existing dark surface, subdued borders, primary additions, and error removals preserve the reference's low-noise dark contrast.
-- **Image quality and asset fidelity:** Neither target state relies on custom raster imagery. Existing icon-library symbols are used for actions and files.
-- **Copy and content:** Persistent cards state only operation count, duration, and file count; command text and paths are hidden until the user asks to view them.
+- **Fonts and typography:** Existing product type scale remains: a prominent page title, compact setting labels, and smaller muted helper text. The fallback note is readable without competing with the API key and model fields.
+- **Spacing and layout rhythm:** The new selector is the first row in the existing connection group. It uses the same input width, section borders, padding, and radius as the supplied configuration controls.
+- **Colors and visual tokens:** Dark surfaces, subtle borders, muted metadata, cyan actions, and error/success semantics use the existing application tokens. The fallback note is deliberately neutral rather than an alarming error state.
+- **Image quality and asset fidelity:** The target is a controls-only screen; no logos, illustrations, or custom image assets were added or substituted.
+- **Copy and content:** The title now names AIHubMix, OpenAI, OpenRouter, and other OpenAI-compatible APIs. It explicitly states that fallback retries happen only for `no_available_channel`, so authentication, quota, and schema errors remain visible.
 
 ## Findings and comparison history
 
-1. [P1, fixed] The prior process feed was ephemeral and vanished after reloading a thread. Completion now writes a compact `run` bubble into the thread beside the final answer.
-2. [P1, fixed] The prior UI exposed all tool rows in the conversation. It now collapses the entire run by default, with independent disclosure for command detail and file lists.
-3. [P2, fixed] The previous feed appeared before the final assistant response. Persisted summaries now render after the response, matching the requested answer-then-work-record hierarchy.
+1. [P1, fixed] The supplied AIHubMix configuration could only surface the raw `no_available_channel` error. The implementation now gives AIHubMix a supported endpoint, a safer default model, and ordered fallback models.
+2. [P1, fixed] Selecting a provider previously required manually changing every field. The provider dropdown now applies a matching base URL, model, and fallback set in one interaction.
+3. [P2, fixed] The user could not distinguish transient router failure from credential or request failures. The visible helper text and runtime retry policy restrict automatic retries to the transient router condition.
 
-No actionable P0/P1/P2 differences remain. The reference shows a richer native environment panel and literal diff counts; this product intentionally focuses the conversation card on the runner's available tool and file events.
+No actionable P0/P1/P2 visual differences remain. The real provider request was intentionally not tested because no API key was supplied; the Electron request path is covered by TypeScript build and smoke tests.
 
 ## Implementation checklist
 
-- [x] Capture streamed CLI operations and file changes.
-- [x] Persist the compact summary in the thread.
-- [x] Render the summary below the assistant result.
-- [x] Support collapsed summary, expanded operation details, file list, and long-answer disclosure.
-- [x] Verify the completed state, interaction behavior, and console health.
+- [x] Keep the original OpenAI-compatible Base URL, API key, and model fields.
+- [x] Add AIHubMix, OpenAI, OpenRouter, and manual-compatible provider choices.
+- [x] Apply AIHubMix endpoint and recommended defaults from a single selection.
+- [x] Add ordered fallback models for transient no-channel responses only.
+- [x] Verify rendered selector behavior, fallback controls, console health, build, and smoke tests.
 
 ## Follow-up polish
 
-- [P3] In Electron with a real authorized CLI, validate vendor-specific diff counts where the CLI reports additions and deletions.
+- [P3] With a user-provided non-production key, run the Electron connection check against the current AIHubMix routing state; no key was entered during QA.
 
 final result: passed

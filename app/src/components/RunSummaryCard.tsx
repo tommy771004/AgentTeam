@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ThreadRunSummary } from '../store/threadStore'
 import { Icon } from './Icon'
+import { contextSummary, groupProcessOperations } from '../lib/runPresentation'
 
 function iconFor(kind: string) {
   if (kind === 'file') return 'edit'
@@ -11,9 +12,11 @@ function iconFor(kind: string) {
 
 /** Persisted, collapsible record of what an agent did for one answer. */
 export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
-  // Default expanded so process is visible without an extra click
-  const [open, setOpen] = useState(true)
+  // Context is visible at a glance; details remain one click away.
+  const [open, setOpen] = useState(false)
   const [openOperation, setOpenOperation] = useState<string | null>(null)
+  const [diffOpen, setDiffOpen] = useState(false)
+  const groups = groupProcessOperations(summary.operations)
   const additions = summary.files.reduce((total, file) => total + (file.added || 0), 0)
   const removals = summary.files.reduce((total, file) => total + (file.removed || 0), 0)
   const label = summary.files.length
@@ -21,7 +24,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
     : `執行過程 · ${summary.operations.length} 項`
 
   return (
-    <section className="w-full overflow-hidden rounded-2xl border border-white/10 bg-surface-container/55">
+    <section className="w-full overflow-hidden rounded-xl border border-white/8 bg-surface-container/35">
       <button
         type="button"
         aria-expanded={open}
@@ -47,18 +50,40 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
 
       {open ? (
         <div className="max-h-[420px] space-y-3 overflow-y-auto border-t border-white/8 px-3.5 py-3 custom-scrollbar">
-          {summary.operations.length ? (
+          {groups.length ? (
             <div className="space-y-1">
-              {summary.operations.map((operation) => {
-                const expanded = openOperation === operation.id
+              {groups.map((group) => {
+                const expanded = openOperation === group.id
+                if (group.type === 'context') {
+                  return (
+                    <div key={group.id}>
+                      <button
+                        type="button"
+                        className="flex max-w-full items-center gap-1.5 text-left text-[12px] text-on-surface-variant hover:text-on-surface"
+                        onClick={() => setOpenOperation((id) => (id === group.id ? null : group.id))}
+                      >
+                        <Icon name="folder_open" size={15} className="shrink-0 opacity-80" />
+                        <span className="truncate">已蒐集上下文</span>
+                        <span className="truncate text-[11px] text-outline">{contextSummary(group.operations)}</span>
+                        <Icon name={expanded ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" />
+                      </button>
+                      {expanded ? (
+                        <pre className="ml-5 mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-all rounded bg-black/15 p-2 text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] custom-scrollbar">
+                          {group.operations.map((operation) => operation.detail || operation.title).join('\n')}
+                        </pre>
+                      ) : null}
+                    </div>
+                  )
+                }
+                const operation = group.operation
                 return (
-                  <div key={operation.id}>
+                  <div key={group.id}>
                     <button
                       type="button"
                       className={`flex max-w-full items-center gap-1.5 text-left text-[12px] ${
                         operation.ok === false ? 'text-error' : 'text-on-surface-variant hover:text-on-surface'
                       }`}
-                      onClick={() => setOpenOperation((id) => (id === operation.id ? null : operation.id))}
+                      onClick={() => setOpenOperation((id) => (id === group.id ? null : group.id))}
                     >
                       <Icon name={iconFor(operation.kind)} size={15} className="shrink-0 opacity-80" />
                       <span className="truncate">{operation.title}</span>
@@ -75,6 +100,53 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
             </div>
           ) : null}
 
+          {summary.plan?.length ? (
+            <div className="overflow-hidden rounded-xl border border-white/8">
+              <div className="border-b border-white/8 px-2.5 py-2 text-[11px] font-medium text-on-surface-variant">
+                任務計畫 · {summary.plan.filter((item) => item.status === 'done').length}/{summary.plan.length}
+              </div>
+              <div className="space-y-1 px-2.5 py-2">
+                {summary.plan.map((item) => (
+                  <div key={item.id} className="flex items-start gap-2 text-[11px]">
+                    <Icon
+                      name={item.status === 'done' ? 'check_circle' : item.status === 'failed' ? 'cancel' : item.status === 'active' ? 'progress_activity' : 'radio_button_unchecked'}
+                      size={14}
+                      className={item.status === 'done' ? 'text-primary' : item.status === 'failed' ? 'text-error' : item.status === 'active' ? 'animate-spin text-primary' : 'text-outline'}
+                    />
+                    <span className={item.status === 'done' ? 'text-on-surface-variant line-through opacity-70' : 'text-on-surface-variant'}>
+                      {item.text}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {summary.agents?.length ? (
+            <div className="overflow-hidden rounded-xl border border-white/8">
+              <div className="border-b border-white/8 px-2.5 py-2 text-[11px] font-medium text-on-surface-variant">
+                子代理工作樹 · {summary.agents.filter((agent) => agent.status === 'done').length}/{summary.agents.length} 完成
+              </div>
+              <div className="space-y-1 px-2.5 py-2">
+                {summary.agents.map((agent) => (
+                  <div key={agent.id} className="flex items-start gap-2 text-[11px]">
+                    <Icon
+                      name={agent.status === 'done' ? 'check_circle' : agent.status === 'error' ? 'cancel' : agent.status === 'active' ? 'progress_activity' : 'radio_button_unchecked'}
+                      size={14}
+                      className={agent.status === 'done' ? 'text-primary' : agent.status === 'error' ? 'text-error' : agent.status === 'active' ? 'animate-spin text-primary' : 'text-outline'}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="text-on-surface-variant">{agent.name}</span>
+                      <span className="ml-1 text-outline">· {agent.role}</span>
+                      {agent.model ? <span className="ml-1 text-outline font-mono">· {agent.model}</span> : null}
+                      {agent.lastMessage ? <span className="mt-0.5 block truncate text-outline">{agent.lastMessage}</span> : null}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {summary.files.length ? (
             <div className="overflow-hidden rounded-xl border border-white/8">
               <div className="border-b border-white/8 px-2.5 py-2 text-[11px] font-medium text-on-surface-variant">變更檔案</div>
@@ -88,6 +160,26 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
                   </span>
                 </div>
               ))}
+              </div>
+            ) : null}
+
+          {summary.diff ? (
+            <div className="overflow-hidden rounded-xl border border-primary/15 bg-black/10">
+              <button
+                type="button"
+                aria-expanded={diffOpen}
+                onClick={() => setDiffOpen((value) => !value)}
+                className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-[11px] font-medium text-on-surface-variant hover:bg-white/[0.04]"
+              >
+                <Icon name="difference" size={15} className="shrink-0 text-primary" />
+                <span className="flex-1">檢視 Git Diff</span>
+                <Icon name={diffOpen ? 'expand_less' : 'expand_more'} size={15} className="shrink-0 text-outline" />
+              </button>
+              {diffOpen ? (
+                <pre className="max-h-[360px] overflow-auto border-t border-white/8 px-2.5 py-2 text-[11px] leading-relaxed text-on-surface-variant font-[family-name:var(--font-mono)] custom-scrollbar">
+                  {summary.diff}
+                </pre>
+              ) : null}
             </div>
           ) : null}
         </div>

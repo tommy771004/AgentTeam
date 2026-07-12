@@ -11,6 +11,7 @@ function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>)
     ...DEFAULT_LLM_SETTINGS,
     roleModels: { ...DEFAULT_LLM_SETTINGS.roleModels },
     discoveredModels: [...DEFAULT_LLM_SETTINGS.discoveredModels],
+    fallbackModels: [...DEFAULT_LLM_SETTINGS.fallbackModels],
     mcpServers: [...(DEFAULT_LLM_SETTINGS.mcpServers || [])],
     customTools: [...(DEFAULT_LLM_SETTINGS.customTools || [])],
     customToolSecrets: { ...(DEFAULT_LLM_SETTINGS.customToolSecrets || {}) },
@@ -29,6 +30,8 @@ function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>)
       mcpServers: p.mcpServers != null ? p.mcpServers : out.mcpServers,
       discoveredModels:
         p.discoveredModels != null ? [...new Set(p.discoveredModels.filter(Boolean))] : out.discoveredModels,
+      fallbackModels:
+        p.fallbackModels != null ? [...new Set(p.fallbackModels.filter(Boolean))] : out.fallbackModels,
       customTools: p.customTools != null ? p.customTools : out.customTools,
       customToolSecrets:
         p.customToolSecrets != null ? { ...out.customToolSecrets, ...p.customToolSecrets } : out.customToolSecrets,
@@ -155,12 +158,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         const r = await window.subagents.llm.chat({
           baseUrl: s.baseUrl,
           apiKey: s.apiKey,
+          fallbackModels: s.fallbackModels,
           model: m,
           messages: [{ role: 'user', content: 'Reply with exactly: pong' }],
           max_tokens: 8,
           temperature: 0,
         })
-        return { ok: true, message: `OK · ${r.model} · ${discoveredModels.length} models · "${r.content.slice(0, 40)}"` }
+        const fallbackNote = r.model && r.model !== m ? ` · 已自動切換備援 ${r.model}` : ''
+        return { ok: true, message: `OK · ${r.model} · ${discoveredModels.length} models${fallbackNote} · "${r.content.slice(0, 40)}"` }
       }
       const base = s.baseUrl.replace(/\/$/, '')
       const res = await fetch(`${base}/models`, {
@@ -172,7 +177,18 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       if (discoveredModels.length) await get().update({ discoveredModels })
       return { ok: true, message: `找到 ${discoveredModels.length} 個模型（target: ${m}）` }
     } catch (e) {
-      return { ok: false, message: e instanceof Error ? e.message : String(e) }
+      const message = e instanceof Error ? e.message : String(e)
+      if (/aihubmix\.com/i.test(s.baseUrl) && message.includes('no_available_channel')) {
+        const tid = message.match(/tid:\s*([\w-]+)/i)?.[1]
+        const fallbacks = s.fallbackModels.length
+          ? s.fallbackModels.join('、')
+          : 'gpt-4.1-mini-free、glm-4.7-flash-free'
+        return {
+          ok: false,
+          message: `AIHubMix 暫時無法路由「${m}」。已嘗試備援模型；請稍後重試或改選：${fallbacks}${tid ? `（tid: ${tid}）` : ''}`,
+        }
+      }
+      return { ok: false, message }
     }
   },
 

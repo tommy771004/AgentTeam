@@ -72,6 +72,9 @@ export interface ToolLoopCallbacks {
   onToolCall?: (record: ToolCallRecord) => void
   /** Fired when load_capability activates a bundle (or preload snapshot) */
   onCapabilityLoad?: (ids: string[]) => void
+  /** Structured ask_user lifecycle for the live run status. */
+  onQuestionAsked?: () => void
+  onQuestionResolved?: () => void
   shouldAbort?: () => boolean
 }
 
@@ -603,6 +606,8 @@ async function executeOneToolCall(
     unattended?: boolean
     sourceKind?: string
     objective?: string
+    onQuestionAsked?: () => void
+    onQuestionResolved?: () => void
   },
 ) {
   let args: Record<string, unknown> = {}
@@ -714,6 +719,7 @@ async function executeOneToolCall(
 
   ctx.cb?.onLog?.('ACTION', `Invoking tool '${tc.name}'`)
   ctx.cb?.onLog?.('EXEC', `Input: ${JSON.stringify(args).slice(0, 200)}`)
+  if (tc.name === 'ask_user') ctx.cb?.onQuestionAsked?.()
 
   const started = Date.now()
   let output = ''
@@ -940,6 +946,7 @@ async function executeOneToolCall(
       ok = false
     }
   }
+  if (tc.name === 'ask_user') ctx.cb?.onQuestionResolved?.()
 
   try {
     const enforced = enforceToolPayload(

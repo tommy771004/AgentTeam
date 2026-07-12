@@ -37,6 +37,13 @@ export function toolPermissionKey(toolName: string): PermissionKey {
       return 'delegate'
     case 'message_send':
       return 'task'
+    case 'update_plan':
+    case 'ask_user':
+      // UI-only coordination tools do not mutate the workspace and remain
+      // available in Plan mode even when task/delegate actions are denied.
+      return 'read'
+    case 'workspace_diff':
+      return 'read'
     default:
       return 'read'
   }
