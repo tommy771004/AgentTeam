@@ -19,6 +19,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: '執行',
     items: [
       { to: '/', label: '新任務', icon: 'auto_awesome', end: true },
+      { to: '/subdesign', label: 'SubDesign', icon: 'palette' },
       { to: '/dashboard', label: '系統總覽', icon: 'dashboard' },
       { to: '/learning?tab=plugins', label: '擴充', icon: 'extension' },
     ],

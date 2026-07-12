@@ -11,6 +11,7 @@ export {
   RUN_CODE_TOOL,
   TOOL_SEARCH_TOOL,
 } from './builtins'
+export { SUBDESIGN_CAPABILITY, SUBDESIGN_CRITIQUE_CAPABILITY } from './subDesign'
 export {
   activeModelSettings,
   activeToolNames,

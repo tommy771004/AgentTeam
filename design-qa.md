@@ -45,3 +45,44 @@ No actionable P0/P1/P2 visual differences remain. The real provider request was 
 - [P3] With a user-provided non-production key, run the Electron connection check against the current AIHubMix routing state; no key was entered during QA.
 
 final result: passed
+
+---
+
+# SubDesign Open Design entry-view QA
+
+- Source visual truth: `/private/tmp/open-design-source/docs/screenshots/01-entry-view.png`.
+- Implementation screenshot: `/private/tmp/subdesign-open-design-entry-implementation.png`.
+- Viewport: 1024 × 768.
+- State: `#/subdesign`, initial Product prototype selection, High fidelity selected, no brief entered.
+- Primary interactions tested: selected 資料儀表板, selected Wireframe, entered a brief, clicked Create, and verified that a `SubDesign · 資料儀表板` Plan thread was created with the brief and fidelity in the composer draft.
+- Console errors checked: none.
+
+## Full-view and focused comparison
+
+The reference and implementation were opened as rendered images at the same 1024 × 768 desktop viewport. The SubDesign work area follows the reference's compact left creation rail, small top-level tabs, warm off-white canvas, fine dividers, restrained radius, low-saturation orange action, and project-thumbnail workspace. The host product's dark global navigation and desktop chrome remain intentionally outside the copied workbench surface.
+
+## Fidelity surfaces
+
+- **Fonts and typography:** compact product type and small uppercase workspace metadata match the reference's quiet hierarchy; no display hero remains.
+- **Spacing and layout rhythm:** the creation rail, 53px top bar, narrow gaps, thin rules, and content-first empty space match the reference's IDE density.
+- **Colors and visual tokens:** the SubDesign canvas uses warm whites and grey dividers with a single terracotta action color; the surrounding application keeps its existing dark chrome.
+- **Image quality and asset fidelity:** the reference uses a controls-only workspace; the implementation uses the existing Material icon set, not substitute illustrations or generated art.
+- **Copy and content:** Open Design labels are adapted to SubDesign's four actual task surfaces and its existing Plan/HITL workflow.
+
+## Findings and comparison history
+
+1. [P2, fixed] The initial implementation imposed a 900px inner workbench and showed a horizontal scrollbar at the reference 1024px viewport. The workbench minimum width is now 720px and its card grid becomes three columns at this viewport; the final rendered view has no horizontal overflow.
+
+No actionable P0/P1/P2 visual differences remain for the selected reference direction. The dark host sidebar is an intentional integration constraint rather than a discrepancy in the SubDesign workbench.
+
+## Implementation checklist
+
+- [x] Replace the hero/card landing page with an IDE-style two-column workbench.
+- [x] Keep surface selection, brief entry, fidelity selection, and task creation interactive.
+- [x] Verify 1024 × 768 rendering, primary interaction flow, and console health.
+
+## Follow-up polish
+
+- [P3] If the global application navigation is redesigned later, provide an optional light shell theme so the outer chrome can match the Open Design reference end-to-end.
+
+final result: passed

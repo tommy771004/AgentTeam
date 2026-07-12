@@ -7,11 +7,13 @@ import {
   Menu,
   nativeImage,
   Notification,
+  dialog,
   powerSaveBlocker,
   safeStorage,
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import {
   clearVaultSecret,
@@ -103,6 +105,14 @@ import {
 } from './pluginInstaller'
 import { cancelOAuth, refreshOAuthToken, runPluginOAuth } from './oauthBridge'
 import { oauthProviderForPlugin } from '../src/agent/hermes/pluginOAuth'
+import {
+  isProjectRelativePath,
+  validateSubDesignArtifactManifest,
+} from '../src/agent/subdesign/artifactManifest'
+import type {
+  SubDesignArtifact,
+  SubDesignExportFormat,
+} from '../src/agent/subdesign/types'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -1674,6 +1684,219 @@ function resolveWorkspacePath(rel: string, rootOverride?: string | null) {
   }
   return full
 }
+
+const SUBDESIGN_ARTIFACT_ROOT = '.subagents/subdesign/artifacts'
+const SUBDESIGN_MAX_EXPORT_FILES = 80
+const SUBDESIGN_MAX_EXPORT_BYTES = 50 * 1024 * 1024
+
+function safeSubDesignExportName(value: string): string {
+  const normalized = value.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+  return (normalized || 'subdesign-artifact').slice(0, 80)
+}
+
+function artifactFile(root: string, relativePath: string): string {
+  if (!isProjectRelativePath(relativePath)) throw new Error(`不安全的 artifact path：${relativePath}`)
+  const file = resolveWorkspacePath(relativePath, root)
+  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error(`找不到 artifact file：${relativePath}`)
+  const realRoot = fs.realpathSync(root)
+  const realFile = fs.realpathSync(file)
+  if (!isPathInside(realRoot, realFile)) throw new Error(`artifact symlink escapes workspace：${relativePath}`)
+  return realFile
+}
+
+function crc32(input: Buffer): number {
+  let crc = 0xffffffff
+  for (const byte of input) {
+    crc ^= byte
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+function createStoredZip(files: Array<{ name: string; data: Buffer }>): Buffer {
+  const local: Buffer[] = []
+  const central: Buffer[] = []
+  let offset = 0
+  const now = new Date()
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2)
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()
+  for (const file of files) {
+    const name = Buffer.from(file.name.replaceAll('\\', '/'), 'utf8')
+    const data = file.data
+    const checksum = crc32(data)
+    const header = Buffer.alloc(30 + name.length)
+    header.writeUInt32LE(0x04034b50, 0)
+    header.writeUInt16LE(20, 4)
+    header.writeUInt16LE(0x800, 6)
+    header.writeUInt16LE(0, 8)
+    header.writeUInt16LE(dosTime, 10)
+    header.writeUInt16LE(dosDate, 12)
+    header.writeUInt32LE(checksum, 14)
+    header.writeUInt32LE(data.length, 18)
+    header.writeUInt32LE(data.length, 22)
+    header.writeUInt16LE(name.length, 26)
+    header.writeUInt16LE(0, 28)
+    name.copy(header, 30)
+    local.push(header, data)
+
+    const directory = Buffer.alloc(46 + name.length)
+    directory.writeUInt32LE(0x02014b50, 0)
+    directory.writeUInt16LE(20, 4)
+    directory.writeUInt16LE(20, 6)
+    directory.writeUInt16LE(0x800, 8)
+    directory.writeUInt16LE(0, 10)
+    directory.writeUInt16LE(dosTime, 12)
+    directory.writeUInt16LE(dosDate, 14)
+    directory.writeUInt32LE(checksum, 16)
+    directory.writeUInt32LE(data.length, 20)
+    directory.writeUInt32LE(data.length, 24)
+    directory.writeUInt16LE(name.length, 28)
+    directory.writeUInt16LE(0, 30)
+    directory.writeUInt16LE(0, 32)
+    directory.writeUInt16LE(0, 34)
+    directory.writeUInt16LE(0, 36)
+    directory.writeUInt32LE(0, 38)
+    directory.writeUInt32LE(offset, 42)
+    name.copy(directory, 46)
+    central.push(directory)
+    offset += header.length + data.length
+  }
+  const centralData = Buffer.concat(central)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0)
+  end.writeUInt16LE(0, 4)
+  end.writeUInt16LE(0, 6)
+  end.writeUInt16LE(files.length, 8)
+  end.writeUInt16LE(files.length, 10)
+  end.writeUInt32LE(centralData.length, 12)
+  end.writeUInt32LE(offset, 16)
+  end.writeUInt16LE(0, 20)
+  return Buffer.concat([...local, centralData, end])
+}
+
+function htmlDocumentForPdf(artifact: SubDesignArtifact, content: string): string {
+  const body = artifact.renderer === 'html' || artifact.renderer === 'deck-html'
+    ? content
+    : `<pre style="white-space:pre-wrap;font:12px/1.6 ui-monospace,monospace">${content.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</pre>`
+  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">`
+  return /<head[^>]*>/i.test(body)
+    ? body.replace(/<head[^>]*>/i, (head) => `${head}${csp}`)
+    : `<!doctype html><html><head>${csp}<style>@page{margin:18mm}body{margin:0;color:#292725;background:#fff}</style></head><body>${body}</body></html>`
+}
+
+async function exportSubDesignArtifact(input: {
+  artifact: unknown
+  format: SubDesignExportFormat
+  projectRoot?: string
+  suggestedName?: string
+}) {
+  const validation = validateSubDesignArtifactManifest(input.artifact)
+  if (!validation.ok) return { ok: false as const, error: `artifact manifest invalid：${validation.errors.join('；')}` }
+  const artifact = validation.manifest
+  if (!['html', 'zip', 'pdf'].includes(input.format) || !artifact.exports.includes(input.format)) {
+    return { ok: false as const, error: `artifact 不支援 ${input.format} export。` }
+  }
+  try {
+    const root = workspaceRootFor(input.projectRoot)
+    const entryFile = artifactFile(root, artifact.entry)
+    const related = [...new Set([artifact.entry, ...artifact.supportingFiles])]
+    if (related.length > SUBDESIGN_MAX_EXPORT_FILES) throw new Error('export file count exceeds limit')
+    const files = related.map((relativePath) => {
+      const file = artifactFile(root, relativePath)
+      const data = fs.readFileSync(file)
+      return { name: relativePath, data }
+    })
+    const totalBytes = files.reduce((sum, file) => sum + file.data.length, 0)
+    if (totalBytes > SUBDESIGN_MAX_EXPORT_BYTES) throw new Error('export exceeds 50MB limit')
+    const extension = input.format === 'zip' ? 'zip' : input.format
+    const defaultPath = path.join(app.getPath('downloads'), `${safeSubDesignExportName(input.suggestedName || artifact.title)}-r${artifact.revision}.${extension}`)
+    const filters = input.format === 'pdf'
+      ? [{ name: 'PDF', extensions: ['pdf'] }]
+      : input.format === 'zip'
+        ? [{ name: 'ZIP', extensions: ['zip'] }]
+        : [{ name: 'HTML', extensions: ['html'] }]
+    const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getFocusedWindow()
+    const saveOptions = { title: `Export ${artifact.title}`, defaultPath, filters }
+    const save = parent
+      ? await dialog.showSaveDialog(parent, saveOptions)
+      : await dialog.showSaveDialog(saveOptions)
+    if (save.canceled || !save.filePath) return { ok: false as const, cancelled: true as const }
+
+    let output: Buffer
+    if (input.format === 'html') {
+      output = fs.readFileSync(entryFile)
+    } else if (input.format === 'zip') {
+      output = createStoredZip([
+        { name: 'artifact-manifest.json', data: Buffer.from(JSON.stringify(artifact, null, 2), 'utf8') },
+        ...files,
+      ])
+    } else {
+      const previewWindow = new BrowserWindow({
+        show: false,
+        webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+      })
+      try {
+        const content = fs.readFileSync(entryFile, 'utf8').slice(0, 200_000)
+        await previewWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlDocumentForPdf(artifact, content))}`)
+        output = await previewWindow.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true })
+      } finally {
+        if (!previewWindow.isDestroyed()) previewWindow.destroy()
+      }
+    }
+    fs.writeFileSync(save.filePath, output)
+    return {
+      ok: true as const,
+      path: save.filePath,
+      bytes: output.length,
+      sha256: createHash('sha256').update(output).digest('hex'),
+      artifactId: artifact.id,
+      revision: artifact.revision,
+      format: input.format,
+    }
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+ipcMain.handle('subdesign:listArtifacts', async (_evt, projectRoot?: string) => {
+  try {
+    const root = workspaceRootFor(projectRoot)
+    const dir = resolveWorkspacePath(SUBDESIGN_ARTIFACT_ROOT, root)
+    if (!fs.existsSync(dir)) return { ok: true, artifacts: [] }
+    const artifacts = fs.readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .slice(0, 120)
+      .map((entry) => {
+        try {
+          const manifestPath = path.join(dir, entry.name, 'manifest.json')
+          if (!fs.existsSync(manifestPath)) return null
+          const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown
+          const result = validateSubDesignArtifactManifest(parsed)
+          return result.ok ? result.manifest : null
+        } catch {
+          return null
+        }
+      })
+      .filter((artifact): artifact is SubDesignArtifact => Boolean(artifact))
+    return { ok: true, artifacts }
+  } catch (error) {
+    return { ok: false, artifacts: [], error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('subdesign:readArtifact', async (_evt, input: { entry?: string; projectRoot?: string }) => {
+  try {
+    const root = workspaceRootFor(input?.projectRoot)
+    const file = artifactFile(root, String(input?.entry || ''))
+    return { ok: true, content: fs.readFileSync(file, 'utf8').slice(0, 200_000) }
+  } catch (error) {
+    return { ok: false, content: '', error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('subdesign:exportArtifact', async (_evt, input: Parameters<typeof exportSubDesignArtifact>[0]) => {
+  return exportSubDesignArtifact(input)
+})
 
 function parseWorkspaceArgs(
   a: unknown,

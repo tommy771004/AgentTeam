@@ -4,6 +4,7 @@
  */
 
 import type { AgentCapability } from './types'
+import { SUBDESIGN_CAPABILITY, SUBDESIGN_CRITIQUE_CAPABILITY } from './subDesign'
 
 /** Framework-managed tool name (reserved). */
 export const LOAD_CAPABILITY_TOOL = 'load_capability'
@@ -171,4 +172,6 @@ Prefer existing skills over inventing new procedures.`,
     source: 'builtin',
     group: 'mcp',
   },
+  SUBDESIGN_CAPABILITY,
+  SUBDESIGN_CRITIQUE_CAPABILITY,
 ]

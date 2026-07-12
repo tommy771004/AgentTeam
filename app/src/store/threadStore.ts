@@ -44,6 +44,31 @@ export type ThreadAgentSummary = {
 
 export type ThreadRunSummary = {
   durationMs?: number
+  subDesign?: {
+    briefId: string
+    stage: string
+    selectedDirectionId?: string
+    designSystemId?: string
+    artifactId?: string
+    artifactRevision?: number
+    critique?: {
+      revision: number
+      verdict: 'pass' | 'needs-revision'
+      blockerCount: number
+      scores: {
+        briefCoverage: number
+        brandConformance: number
+        accessibility: number
+        implementationReadiness: number
+      }
+    }
+    exports?: Array<{
+      format: 'html' | 'zip' | 'pdf'
+      revision: number
+      path: string
+      sha256: string
+    }>
+  }
   /** Current Git working-tree diff for files touched by the run. */
   diff?: string
   /** Plan snapshot captured with this execution, for deterministic replay. */
@@ -96,6 +121,8 @@ export type Thread = {
   lastCapabilityIds?: string[]
   /** tool_search unlock set from last run */
   lastUnlockedTools?: string[]
+  /** Structured SubDesign session linked to this thread. */
+  subDesignBriefId?: string
   /**
    * P3: last unfinished Goal (DoD / missing) — resume without re-parse.
    * Cleared on Goal success.
@@ -136,6 +163,12 @@ interface ThreadStore {
     attachments?: ChatAttachment[],
   ) => void
   pushRunSummary: (threadId: string, summary: ThreadRunSummary) => void
+  appendSubDesignExport: (threadId: string, item: {
+    format: 'html' | 'zip' | 'pdf'
+    revision: number
+    path: string
+    sha256: string
+  }) => void
   clearBubbles: (threadId: string) => void
   setShowRunPanel: (v: boolean) => void
   setShowThreadList: (v: boolean) => void
@@ -152,6 +185,7 @@ interface ThreadStore {
     capabilityIds: string[],
     unlockedTools?: string[],
   ) => void
+  setSubDesignBriefId: (id: string, briefId: string | null) => void
   setContinueGoal: (id: string, snap: ContinueGoalSnapshot | null) => void
   activeThread: () => Thread | null
 }
@@ -214,6 +248,10 @@ function migrateThread(raw: Record<string, unknown>): Thread {
     lastUnlockedTools: Array.isArray(raw.lastUnlockedTools)
       ? (raw.lastUnlockedTools as string[]).filter((x) => typeof x === 'string')
       : undefined,
+    subDesignBriefId:
+      typeof raw.subDesignBriefId === 'string' && raw.subDesignBriefId.trim()
+        ? raw.subDesignBriefId.trim().slice(0, 120)
+        : undefined,
     continueGoal:
       raw.continueGoal && typeof raw.continueGoal === 'object'
         ? (raw.continueGoal as ContinueGoalSnapshot)
@@ -261,6 +299,7 @@ function emptyThread(partial?: Partial<Thread>): Thread {
     createdAt: now,
     updatedAt: now,
     lastStatus: 'idle',
+    subDesignBriefId: partial?.subDesignBriefId,
   }
 }
 
@@ -437,6 +476,30 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       at: new Date().toISOString(),
       runSummary: {
         durationMs: summary.durationMs,
+        subDesign: summary.subDesign
+          ? {
+              briefId: summary.subDesign.briefId.slice(0, 120),
+              stage: summary.subDesign.stage.slice(0, 40),
+              selectedDirectionId: summary.subDesign.selectedDirectionId?.slice(0, 80),
+              designSystemId: summary.subDesign.designSystemId?.slice(0, 120),
+              artifactId: summary.subDesign.artifactId?.slice(0, 120),
+              artifactRevision: summary.subDesign.artifactRevision,
+              critique: summary.subDesign.critique
+                ? {
+                    revision: summary.subDesign.critique.revision,
+                    verdict: summary.subDesign.critique.verdict,
+                    blockerCount: summary.subDesign.critique.blockerCount,
+                    scores: summary.subDesign.critique.scores,
+                  }
+                : undefined,
+              exports: summary.subDesign.exports?.slice(0, 12).map((item) => ({
+                format: item.format,
+                revision: item.revision,
+                path: item.path.slice(0, 600),
+                sha256: item.sha256.slice(0, 128),
+              })),
+            }
+          : undefined,
         diff: summary.diff?.slice(0, 200_000),
         plan: (summary.plan || []).slice(0, 40).map((item) => ({
           id: item.id,
@@ -477,6 +540,37 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
           }
         : thread,
     )
+    set({ threads })
+    persist(threads, get().activeId)
+  },
+
+  appendSubDesignExport: (threadId, item) => {
+    const threads = get().threads.map((thread) => {
+      if (thread.id !== threadId) return thread
+      const bubbles = [...thread.bubbles]
+      let index = -1
+      for (let cursor = bubbles.length - 1; cursor >= 0; cursor -= 1) {
+        if (bubbles[cursor].role === 'run' && Boolean(bubbles[cursor].runSummary?.subDesign)) {
+          index = cursor
+          break
+        }
+      }
+      if (index < 0) return thread
+      const current = bubbles[index].runSummary
+      if (!current?.subDesign) return thread
+      const exports = [
+        item,
+        ...(current.subDesign.exports || []).filter((entry) => !(entry.format === item.format && entry.revision === item.revision && entry.path === item.path)),
+      ].slice(0, 12)
+      bubbles[index] = {
+        ...bubbles[index],
+        runSummary: {
+          ...current,
+          subDesign: { ...current.subDesign, exports },
+        },
+      }
+      return { ...thread, bubbles, updatedAt: new Date().toISOString() }
+    })
     set({ threads })
     persist(threads, get().activeId)
   },
@@ -555,6 +649,20 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
             updatedAt: new Date().toISOString(),
           }
         : t,
+    )
+    set({ threads })
+    persist(threads, get().activeId)
+  },
+
+  setSubDesignBriefId: (id, briefId) => {
+    const threads = get().threads.map((thread) =>
+      thread.id === id
+        ? {
+            ...thread,
+            subDesignBriefId: briefId?.trim() || undefined,
+            updatedAt: new Date().toISOString(),
+          }
+        : thread,
     )
     set({ threads })
     persist(threads, get().activeId)

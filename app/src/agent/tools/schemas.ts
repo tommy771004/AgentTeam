@@ -276,6 +276,143 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
     },
     required: ['symbol'],
   },
+  design_brief_update: {
+    type: 'object',
+    properties: {
+      briefId: { type: 'string', description: 'Linked SubDesign brief id (optional in a linked thread)' },
+      objective: { type: 'string' },
+      audience: { type: 'string' },
+      platform: { type: 'string', enum: ['responsive', 'web-desktop', 'mobile-ios', 'desktop-app'] },
+      fidelity: { type: 'string', enum: ['wireframe', 'high-fidelity'] },
+      designSystemId: { type: 'string' },
+      constraints: { type: 'array', items: { type: 'string' } },
+      acceptanceCriteria: { type: 'array', items: { type: 'string' } },
+      directions: {
+        type: 'array',
+        maxItems: 3,
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            title: { type: 'string' },
+            summary: { type: 'string' },
+            rationale: { type: 'string' },
+            risk: { type: 'string' },
+          },
+          required: ['title', 'summary'],
+        },
+      },
+      stage: { type: 'string', enum: ['brief', 'direction', 'build', 'critique', 'deliver'] },
+    },
+  },
+  design_direction_select: {
+    type: 'object',
+    properties: {
+      briefId: { type: 'string' },
+      directionId: { type: 'string' },
+      title: { type: 'string', description: 'Required only when creating a direction card inline' },
+      summary: { type: 'string' },
+      rationale: { type: 'string' },
+      risk: { type: 'string' },
+    },
+    required: ['directionId'],
+  },
+  design_system_list: {
+    type: 'object',
+    properties: {},
+  },
+  design_system_read: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'project or a safe design-system id' },
+    },
+    required: ['id'],
+  },
+  design_system_create: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'Safe folder id, e.g. editorial-light' },
+      title: { type: 'string' },
+      category: { type: 'string' },
+      content: { type: 'string', description: 'Complete DESIGN.md content; omit to use the starter contract' },
+    },
+    required: ['id', 'title'],
+  },
+  design_system_update: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      content: { type: 'string', description: 'Complete DESIGN.md content' },
+      title: { type: 'string', description: 'Used only when content is omitted' },
+    },
+    required: ['id', 'content'],
+  },
+  design_artifact_register: {
+    type: 'object',
+    properties: {
+      manifest: {
+        type: 'object',
+        description: 'Artifact manifest. entry and supportingFiles are project-relative only.',
+        properties: {
+          id: { type: 'string' },
+          briefId: { type: 'string' },
+          kind: { type: 'string', enum: ['html', 'deck', 'react-component', 'markdown-document', 'svg', 'design-system'] },
+          title: { type: 'string' },
+          entry: { type: 'string' },
+          renderer: { type: 'string', enum: ['html', 'deck-html', 'markdown', 'svg', 'code', 'design-system'] },
+          exports: { type: 'array', items: { type: 'string', enum: ['html', 'pdf', 'zip', 'jsx', 'md', 'svg', 'txt'] } },
+          supportingFiles: { type: 'array', items: { type: 'string' } },
+          designSystemId: { type: 'string' },
+          status: { type: 'string', enum: ['streaming', 'complete', 'error'] },
+          revision: { type: 'integer' },
+        },
+        required: ['id', 'kind', 'title', 'entry', 'renderer'],
+      },
+      briefId: { type: 'string', description: 'Optional when the thread is linked to a brief.' },
+    },
+    required: ['manifest'],
+  },
+  design_critique: {
+    type: 'object',
+    properties: {
+      critique: {
+        type: 'object',
+        properties: {
+          artifactId: { type: 'string' },
+          briefId: { type: 'string' },
+          briefCoverage: { type: 'integer', minimum: 0, maximum: 100 },
+          brandConformance: { type: 'integer', minimum: 0, maximum: 100 },
+          accessibility: { type: 'integer', minimum: 0, maximum: 100 },
+          implementationReadiness: { type: 'integer', minimum: 0, maximum: 100 },
+          findings: {
+            type: 'array',
+            maxItems: 40,
+            items: {
+              type: 'object',
+              properties: {
+                severity: { type: 'string', enum: ['blocker', 'warning', 'note'] },
+                message: { type: 'string' },
+                path: { type: 'string' },
+              },
+              required: ['severity', 'message'],
+            },
+          },
+          verdict: { type: 'string', enum: ['pass', 'needs-revision'] },
+        },
+        required: ['artifactId', 'briefCoverage', 'brandConformance', 'accessibility', 'implementationReadiness', 'findings', 'verdict'],
+      },
+    },
+    required: ['critique'],
+  },
+  design_artifact_export: {
+    type: 'object',
+    properties: {
+      artifactId: { type: 'string', description: 'Registered SubDesign artifact id' },
+      format: { type: 'string', enum: ['html', 'pdf', 'zip'] },
+      briefId: { type: 'string' },
+    },
+    required: ['artifactId', 'format'],
+  },
 }
 
 export function buildOpenAiTools(opts?: {

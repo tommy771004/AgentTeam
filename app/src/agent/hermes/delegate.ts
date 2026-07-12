@@ -151,7 +151,23 @@ export async function runDelegatedTask(
     if (settings.enabled && settings.apiKey) {
       const blockedTools =
         role === 'leaf'
-          ? ['skill_save', 'delegate_task', 'run_code']
+          ? [
+              'skill_save',
+              'delegate_task',
+              'run_code',
+              'bash',
+              'workspace_write',
+              'workspace_download',
+              'workspace_mkdir',
+              'workspace_move',
+              'workspace_delete',
+              'design_system_create',
+              'design_system_update',
+              'design_artifact_register',
+              'design_artifact_export',
+              'message_send',
+              'mcp_call',
+            ]
           : ['delegate_task']
       // Baseline + optional parent-chosen inherit_capabilities (G4)
       const baseline = ['core-utils', 'web-research', 'memory']
@@ -189,7 +205,7 @@ export async function runDelegatedTask(
           haltOnPayloadOverflow: settings.haltOnPayloadOverflow,
           extraToolsNote:
             role === 'leaf'
-              ? `LEAF 限制：禁止 skill_save、禁止再次 delegate_task / run_code。獨立上下文。preload caps=[${preloadCapabilityIds.join(', ')}]`
+              ? `LEAF 限制：只讀 brief/artifact evidence；禁止寫 workspace、bash、skill_save、message_send、MCP write、再次 delegate_task / run_code。獨立上下文。preload caps=[${preloadCapabilityIds.join(', ')}]`
               : '子 orchestrator：本層禁止再 delegate 以控制深度。',
           blockedTools,
           preloadCapabilityIds,

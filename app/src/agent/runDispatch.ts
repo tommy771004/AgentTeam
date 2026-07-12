@@ -16,6 +16,8 @@ import {
   parseRegistryMentions,
 } from './opencode/agentRegistry'
 import { buildIntentPreloadIds } from './intentPreload'
+import { buildSubDesignRuntimeContext } from './subdesign/prompt'
+import { getSubDesignBriefForThread, useSubDesignStore } from '../store/subDesignStore'
 import type { ChatAttachment } from './types'
 import {
   attachmentsToTextAppendix,
@@ -114,9 +116,20 @@ export async function dispatchThreadTask(
   const agentMode = (thread?.agentMode || 'build') as AgentMode
   const model = thread?.model || settings.model
   const speed = thread?.speed || 'standard'
+  const subDesignBrief = tid ? getSubDesignBriefForThread(tid) : null
+  const subDesignSystem = subDesignBrief?.designSystemId
+    ? useSubDesignStore.getState().systems.find((system) => system.id === subDesignBrief.designSystemId)
+    : undefined
+  const subDesignContext = subDesignBrief
+    ? buildSubDesignRuntimeContext(subDesignBrief, subDesignSystem)
+    : ''
   // Intent preload v2: builtins + skills + enabled plugins/MCP + project packs
   // (use raw goal text for intent; attachment paths added later)
   const preloadCandidates = buildIntentPreloadIds(text, settings, projectRoot, { max: 8 })
+  if (subDesignBrief) {
+    preloadCandidates.unshift('subdesign-workflow')
+    if (subDesignBrief.stage === 'critique') preloadCandidates.unshift('design-critique')
+  }
 
   if (runner !== 'builtin') {
     const kind = runner as LocalRunnerKind
@@ -141,7 +154,7 @@ export async function dispatchThreadTask(
     }))
     // Keep CLI follow-ups coherent with builtin runs. The current request is
     // deliberately first, so the runner's prompt cap never cuts it off.
-    let cliPrompt = text
+    let cliPrompt = subDesignContext ? `${subDesignContext}\n\n## Current request\n${text}` : text
     if (settings.referenceChatHistory !== false && thread?.bubbles?.length) {
       const chat = thread.bubbles.filter(
         (b) => b.role === 'user' || b.role === 'assistant',
@@ -157,7 +170,7 @@ export async function dispatchThreadTask(
         .join('\n')
       if (history) {
         cliPrompt = [
-          text,
+          cliPrompt,
           '## 近期對話歷史（Reference chat history）',
           history,
         ]
@@ -222,6 +235,9 @@ export async function dispatchThreadTask(
   }
   if (opts?.overrides?.extraSystemContext) {
     extra = [extra, opts.overrides.extraSystemContext].filter(Boolean).join('\n\n')
+  }
+  if (subDesignContext) {
+    extra = [extra, subDesignContext].filter(Boolean).join('\n\n').slice(0, 16_000)
   }
 
   // G1: cross-run capability restore from thread history

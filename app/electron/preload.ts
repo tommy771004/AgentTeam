@@ -148,6 +148,37 @@ const api = {
     memoryGet: (key: string) =>
       ipcRenderer.invoke('tools:memoryGet', key) as Promise<string | null>,
   },
+  subdesign: {
+    listArtifacts: (projectRoot?: string) =>
+      ipcRenderer.invoke('subdesign:listArtifacts', projectRoot) as Promise<{
+        ok: boolean
+        artifacts: unknown[]
+        error?: string
+      }>,
+    readArtifact: (input: { entry: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:readArtifact', input) as Promise<{
+        ok: boolean
+        content: string
+        error?: string
+      }>,
+    exportArtifact: (input: {
+      artifact: unknown
+      format: 'html' | 'zip' | 'pdf'
+      projectRoot?: string
+      suggestedName?: string
+    }) =>
+      ipcRenderer.invoke('subdesign:exportArtifact', input) as Promise<{
+        ok: boolean
+        cancelled?: boolean
+        path?: string
+        bytes?: number
+        sha256?: string
+        artifactId?: string
+        revision?: number
+        format?: 'html' | 'zip' | 'pdf'
+        error?: string
+      }>,
+  },
   scheduler: {
     list: () => ipcRenderer.invoke('scheduler:list') as Promise<unknown[]>,
     saveAll: (jobs: unknown) =>

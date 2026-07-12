@@ -20,6 +20,9 @@ export type GuardResult =
 const SIDE_EFFECT_TOOLS = new Set([
   'bash',
   'workspace_write',
+  'design_system_create',
+  'design_system_update',
+  'design_artifact_export',
   'workspace_download',
   'workspace_mkdir',
   'workspace_move',
@@ -33,6 +36,17 @@ const SIDE_EFFECT_TOOLS = new Set([
   'memory_append',
   'run_code',
   'delegate_task',
+])
+
+const SUBDESIGN_WRITE_TOOLS = new Set([
+  'workspace_write',
+  'workspace_download',
+  'workspace_mkdir',
+  'workspace_move',
+  'workspace_delete',
+  'design_system_create',
+  'design_system_update',
+  'design_artifact_export',
 ])
 
 /** Side-effect classification (dynamic MCP tools count as network). */
@@ -102,6 +116,24 @@ export async function authorizeTool(opts: {
     const msg = `工具被隔離策略封鎖：${tool}`
     onLog?.('WARN', msg)
     return { allowed: false, output: msg }
+  }
+
+  // SubDesign direction gate is evaluated at tool time so a direction selected
+  // after ask_user can unlock Build during the same run.
+  if (SUBDESIGN_WRITE_TOOLS.has(tool)) {
+    try {
+      const { getRunThreadId } = await import('./runContext')
+      const { useSubDesignStore } = await import('../../store/subDesignStore')
+      const threadId = getRunThreadId()
+      const brief = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
+      if (brief && !brief.selectedDirectionId) {
+        const msg = `SubDesign direction gate：請先選定 direction，再使用 ${tool}。`
+        onLog?.('WARN', msg)
+        return { allowed: false, output: msg }
+      }
+    } catch {
+      /* Optional SubDesign store is unavailable in pure/unit contexts. */
+    }
   }
 
   let needAsk = opts.forceAsk === true
