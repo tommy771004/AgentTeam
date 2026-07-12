@@ -36,6 +36,8 @@ interface OpenCodeConfigStore {
   permission: OpenCodePermissionBlock
   agents: RegistryAgent[]
   commands: OpenCodeCommandFileDef[]
+  /** OpenCode plugin references; displayed as review-only permission summary. */
+  plugins: string[]
   lastProjectRoot: string
   /** W3: every parsed field → temporary / review / unsupported（匯入報告） */
   candidates: DiscoveredConfigCandidate[]
@@ -94,6 +96,7 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
   permission: {},
   agents: [],
   commands: [],
+  plugins: [],
   lastProjectRoot: '',
   candidates: [],
   instructionsEntries: [],
@@ -112,6 +115,7 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
           loading: false,
           agents: listRegistryAgents({ includeHidden: true }),
           commands: [],
+          plugins: [],
           sources: [],
           permission: {},
           lastProjectRoot: root,
@@ -166,6 +170,7 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
         permission: full.permission || {},
         agents: listRegistryAgents({ includeHidden: true }),
         commands: full.commandsFromMarkdown,
+        plugins: full.plugin || [],
         lastProjectRoot: root,
         candidates,
         instructionsEntries: instructions,

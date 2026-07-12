@@ -3,6 +3,8 @@ import { getThinkingDepth } from '../agent/thinking'
 import { getPrimaryAgent } from '../agent/opencode/agents'
 import { useThreadStore } from '../store/threadStore'
 import { useSettingsStore } from '../store/settingsStore'
+import { forkOpenCodeSession } from '../agent/opencode/serverClient'
+import { extractOpenCodeSessionId } from '../agent/opencode/sessionMapping'
 
 export function ThreadSidebar() {
   const {
@@ -99,7 +101,30 @@ export function ThreadSidebar() {
                 title="建立分支"
                 onClick={(e) => {
                   e.stopPropagation()
-                  forkThread(t.id)
+                  const forkedId = forkThread(t.id)
+                  const sourceSession = t.externalRun
+                  if (!forkedId || sourceSession?.provider !== 'opencode' || !sourceSession.serverUrl || !sourceSession.sessionId) return
+                  void forkOpenCodeSession(sourceSession.serverUrl, sourceSession.sessionId).then((raw) => {
+                    const sessionId = extractOpenCodeSessionId(raw)
+                    if (!sessionId) {
+                      useThreadStore.getState().setExternalRun(forkedId, undefined)
+                      useThreadStore.getState().pushBubble(forkedId, 'system', 'OpenCode fork 未回傳 session id，已保留為本地分支。')
+                      return
+                    }
+                    useThreadStore.getState().setExternalRun(forkedId, {
+                      ...sourceSession,
+                      sessionId,
+                      parentSessionId: sourceSession.sessionId,
+                      childSessionIds: undefined,
+                      status: 'starting',
+                      completionReason: 'fork-created',
+                      finishedAt: undefined,
+                    })
+                    useThreadStore.getState().pushBubble(forkedId, 'system', `OpenCode fork 已同步 · ${sessionId}`)
+                  }).catch((error) => {
+                    useThreadStore.getState().setExternalRun(forkedId, undefined)
+                    useThreadStore.getState().pushBubble(forkedId, 'system', `OpenCode fork 失敗，已保留為本地分支：${error instanceof Error ? error.message : String(error)}`)
+                  })
                 }}
               >
                 <Icon name="call_split" size={14} />

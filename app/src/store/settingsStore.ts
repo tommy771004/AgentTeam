@@ -13,6 +13,7 @@ function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>)
     discoveredModels: [...DEFAULT_LLM_SETTINGS.discoveredModels],
     fallbackModels: [...DEFAULT_LLM_SETTINGS.fallbackModels],
     mcpServers: [...(DEFAULT_LLM_SETTINGS.mcpServers || [])],
+    mcpAgentServers: { ...(DEFAULT_LLM_SETTINGS.mcpAgentServers || {}) },
     customTools: [...(DEFAULT_LLM_SETTINGS.customTools || [])],
     customToolSecrets: { ...(DEFAULT_LLM_SETTINGS.customToolSecrets || {}) },
     pluginOAuthClients: { ...(DEFAULT_LLM_SETTINGS.pluginOAuthClients || {}) },
@@ -28,6 +29,15 @@ function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>)
         ...(p.roleModels || {}),
       },
       mcpServers: p.mcpServers != null ? p.mcpServers : out.mcpServers,
+      mcpAgentServers:
+        p.mcpAgentServers != null
+          ? Object.fromEntries(
+              Object.entries(p.mcpAgentServers).map(([agent, ids]) => [
+                agent,
+                [...new Set((ids || []).filter(Boolean))],
+              ]),
+            )
+          : out.mcpAgentServers,
       discoveredModels:
         p.discoveredModels != null ? [...new Set(p.discoveredModels.filter(Boolean))] : out.discoveredModels,
       fallbackModels:

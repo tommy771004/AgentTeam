@@ -57,7 +57,7 @@ export function buildIntentPreloadIds(
   // 1) Builtin keyword router → owning capabilities
   const intentTools = selectToolsForStep(text, text, '', {
     webSearchEnabled: settings.webSearchEnabled !== false,
-  })
+  }).filter((tool) => settings.subAgentsEnabled === true || !tool.startsWith('delegate_'))
   const assembled = assembleCapabilities(settings, {
     includeMcpCaps: settings.mcpEnabled,
     projectRoot: projectRoot || undefined,

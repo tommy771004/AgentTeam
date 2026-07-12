@@ -49,6 +49,7 @@ export function mergeOpenCodeConfigs(
   let agent: Record<string, OpenCodeAgentConfig> = {}
   let command: Record<string, OpenCodeCommandConfig> = {}
   let mcp: Record<string, unknown> = {}
+  let plugin: string[] = []
   let instructions: string[] = []
   let compaction: OpenCodeMergedConfig['compaction']
 
@@ -71,6 +72,9 @@ export function mergeOpenCodeConfigs(
     if (d.mcp && typeof d.mcp === 'object') {
       mcp = { ...mcp, ...(d.mcp as Record<string, unknown>) }
     }
+    if (Array.isArray(d.plugin)) {
+      plugin = [...plugin, ...d.plugin.map(String).filter(Boolean)]
+    }
     if (Array.isArray(d.instructions)) {
       instructions = [...instructions, ...(d.instructions as string[])]
     }
@@ -87,6 +91,7 @@ export function mergeOpenCodeConfigs(
     agent,
     command,
     mcp,
+    plugin: [...new Set(plugin)],
     instructions,
     compaction,
     sources,

@@ -30,6 +30,7 @@ import { emptyKnowledge, extractKnowledge } from './knowledge'
 import {
   DEFAULT_LLM_SETTINGS,
   resolveRoleModel,
+  runPrimaryAgentTask,
   runSubAgentTask,
   synthesizeReport,
   withRoleModel,
@@ -212,6 +213,25 @@ export class AgentLoopEngine {
   private useLlm(): boolean {
     if (this.overrides.useLlm === false) return false
     return this.settings.enabled && Boolean(this.settings.apiKey)
+  }
+
+  private subAgentsEnabled(): boolean {
+    return this.settings.subAgentsEnabled === true
+  }
+
+  /** Role models are only authoritative when Sub Agent mode is enabled. */
+  private executionSettings(role: string): LlmSettings {
+    return this.subAgentsEnabled() ? withRoleModel(this.settings, role) : this.settings
+  }
+
+  private executionModel(role: string): ReturnType<typeof resolveRoleModel> {
+    if (this.subAgentsEnabled()) return resolveRoleModel(this.settings, role)
+    return {
+      model: this.settings.model || '',
+      source: this.settings.model ? 'primary' : 'none',
+      roleKey: null,
+      usedFallback: true,
+    }
   }
 
   stop() {
@@ -465,7 +485,7 @@ export class AgentLoopEngine {
         if (this.useLlm() && this.settings.llmParseEnabled !== false) {
           try {
             const refined = await parseWithLlm(
-              withRoleModel(this.settings, 'orchestrator'),
+              this.executionSettings('orchestrator'),
               rawInput,
               effectiveForce,
             )
@@ -563,6 +583,7 @@ export class AgentLoopEngine {
       this.emit()
 
       this.log('INFO', 'SubAgents AI Execution Kernel v2.5.0')
+      this.log('INFO', `Sub Agent: ${this.subAgentsEnabled() ? 'ON' : 'OFF'}（${this.subAgentsEnabled() ? '套用角色模型' : '使用全域模型'}）`)
       this.log('INFO', `Session ID: ${this.state.id}`)
       this.log('INFO', `Loop Type: ${this.state.loopConfig.loopType}`)
       this.log('INFO', `LLM: ${this.useLlm() ? `ON (${this.settings.model})` : 'OFF (simulation)'}`)
@@ -639,7 +660,7 @@ export class AgentLoopEngine {
     name: string,
     role: SubAgentNode['role'],
   ): SubAgentNode {
-    const r = resolveRoleModel(this.settings, role)
+    const r = this.executionModel(role)
     return {
       id,
       name,
@@ -651,6 +672,7 @@ export class AgentLoopEngine {
   }
 
   private spawnSubAgents(loopType: LoopType): SubAgentNode[] {
+    if (!this.subAgentsEnabled()) return []
     if (loopType === 'Turn-based') {
       return [this.nodeForRole('ag-core', 'Core', 'executor')]
     }
@@ -682,6 +704,7 @@ export class AgentLoopEngine {
   }
 
   private pickAgentForStep(index: number, total: number): string {
+    if (!this.subAgentsEnabled()) return 'Primary'
     if (this.state.subAgents.length === 1) return this.state.subAgents[0].name
     if (index === 0) return 'Manager'
     if (index >= total - 1) return 'Writer'
@@ -697,7 +720,7 @@ export class AgentLoopEngine {
     const role =
       this.state.subAgents.find((a) => a.name === agentName)?.role || 'executor'
 
-    const resolved = resolveRoleModel(this.settings, role)
+    const resolved = this.executionModel(role)
     this.setStep(index, {
       status: 'IN_PROGRESS',
       assignedAgent: agentName,
@@ -711,9 +734,12 @@ export class AgentLoopEngine {
       modelSource: this.useLlm() ? resolved.source : 'sim',
     })
     this.log('EXEC', `[${agentName}] step ${step.step}: ${step.description}`)
+    const modelSourceLabel = this.subAgentsEnabled()
+      ? (resolved.usedFallback ? 'fallback→global' : 'roleModels')
+      : 'primary/global'
     this.log(
       'INFO',
-      `[${agentName}] model=${this.useLlm() ? resolved.model || '—' : 'simulation'} (${this.useLlm() ? (resolved.usedFallback ? 'fallback→global' : 'roleModels') : 'sim'})`,
+      `[${agentName}] model=${this.useLlm() ? resolved.model || '—' : 'simulation'} (${this.useLlm() ? modelSourceLabel : 'sim'})`,
     )
 
     // Safety gate
@@ -808,7 +834,7 @@ export class AgentLoopEngine {
       if (useFc) {
         this.log('INFO', `[${agentName}] function-calling tool loop enabled`)
         this.log('System', 'Binding tool registry… [OK]')
-        const roleSettings = withRoleModel(this.settings, role)
+        const roleSettings = this.executionSettings(role)
         const layers = buildPromptLayers({
           role,
           objective: this.state.objective,
@@ -851,6 +877,8 @@ export class AgentLoopEngine {
             haltOnPayloadOverflow: this.settings.haltOnPayloadOverflow === true,
             includeMcpTools: this.settings.mcpEnabled,
             permissionPolicy: this.overrides.permissionPolicy,
+            permissionProjection: this.overrides.permissionProjection,
+            mcpAgentId: this.overrides.mcpAgentId || this.overrides.agentMode || 'build',
             preloadCapabilityIds: preloadCaps,
             preloadUnlockedTools: preloadUnlocks,
             unattended: this.overrides.unattended === true,
@@ -965,6 +993,7 @@ export class AgentLoopEngine {
             ],
             webSearchEnabled: this.settings.webSearchEnabled !== false,
             projectRoot,
+            agentId: this.overrides.mcpAgentId || this.overrides.agentMode || 'build',
             blockedTools: [
               ...(this.overrides.blockedTools || []),
               ...(agentName === 'Core' || role === 'executor' ? ['delegate_task'] : []),
@@ -973,7 +1002,10 @@ export class AgentLoopEngine {
 
           const tools = selectToolsForStep(step.description, this.state.objective, step.action, {
             webSearchEnabled: this.settings.webSearchEnabled !== false,
-          }).filter((t) => !(this.overrides.blockedTools || []).includes(t))
+          }).filter((t) =>
+            (this.settings.subAgentsEnabled === true || !t.startsWith('delegate_')) &&
+            !(this.overrides.blockedTools || []).includes(t),
+          )
 
           // Auto-load owning capabilities so heuristic path gets runbooks + approvalTools
           for (const tool of tools) {
@@ -1047,6 +1079,8 @@ export class AgentLoopEngine {
               input,
               settings: this.settings,
               permissionPolicy: this.overrides.permissionPolicy,
+              permissionProjection: this.overrides.permissionProjection,
+              mcpAgentId: this.overrides.mcpAgentId || this.overrides.agentMode || 'build',
               blockedTools: this.overrides.blockedTools,
               forceAsk,
               hitlTimeoutMs,
@@ -1141,6 +1175,7 @@ export class AgentLoopEngine {
               input,
               settings: this.settings,
               permissionPolicy: this.overrides.permissionPolicy,
+              permissionProjection: this.overrides.permissionProjection,
               blockedTools: this.overrides.blockedTools,
               forceAsk,
               sideEffect: true,
@@ -1208,7 +1243,7 @@ export class AgentLoopEngine {
         if (this.useLlm()) {
           try {
             const context = this.stepOutputs.slice(-3).join('\n---\n')
-            const roleSettings = withRoleModel(this.settings, role)
+            const roleSettings = this.executionSettings(role)
             const layers = buildPromptLayers({
               role,
               objective: this.state.objective,
@@ -1243,15 +1278,24 @@ export class AgentLoopEngine {
                 /* fall through to plain text */
               }
             }
-            const result = await runSubAgentTask(
-              roleSettings,
-              role,
-              this.state.objective,
-              step.description,
-              layers.full.slice(0, 10_000),
-              toolContext,
-              userContent ? { userContent } : undefined,
-            )
+            const result = this.subAgentsEnabled()
+              ? await runSubAgentTask(
+                  roleSettings,
+                  role,
+                  this.state.objective,
+                  step.description,
+                  layers.full.slice(0, 10_000),
+                  toolContext,
+                  userContent ? { userContent } : undefined,
+                )
+              : await runPrimaryAgentTask(
+                  roleSettings,
+                  this.state.objective,
+                  step.description,
+                  layers.full.slice(0, 10_000),
+                  toolContext,
+                  userContent ? { userContent } : undefined,
+                )
             output = result.content
             this.state.tokensUsed += result.tokensUsed
             this.state.metrics.apiCredits = this.state.tokensUsed
@@ -1303,7 +1347,7 @@ export class AgentLoopEngine {
     this.log('EVAL', `Confidence… [Current: ${this.state.confidence.toFixed(2)}]`)
 
     this.stepOutputs.push(output)
-    const doneResolved = resolveRoleModel(this.settings, role)
+    const doneResolved = this.executionModel(role)
     // P0: if every tool in this step failed, do not mark COMPLETED as success path
     const stepTools = (this.state.toolCalls || []).filter((t) => t.step === step.step)
     const allToolsFailed =
@@ -1427,7 +1471,12 @@ export class AgentLoopEngine {
     const max = this.maxIterations()
     this.state.loopConfig.maxIterations = max
     this.log('INFO', 'Pattern: Goal-based — Autonomous iteration until DoD')
-    this.log('INFO', 'Spawning orchestrator agent...')
+    this.log(
+      'INFO',
+      this.subAgentsEnabled()
+        ? 'Spawning orchestrator agent...'
+        : 'Sub Agent 關閉：由主代理直接執行。',
+    )
     this.setSubAgent('Manager', 'active')
     await delay(300)
     this.log('INFO', 'Allocating resources for semantic processing.')
@@ -1476,7 +1525,7 @@ export class AgentLoopEngine {
       if (allDone && this.useLlm()) {
         try {
           const verdict = await evaluateDoD(
-            withRoleModel(this.settings, 'analyst'),
+            this.executionSettings('analyst'),
             this.state.objective,
             this.state.loopConfig.definitionOfDone,
             this.stepOutputs,
@@ -1564,11 +1613,11 @@ export class AgentLoopEngine {
     if (this.useLlm()) {
       try {
         this.log('PROCESS', 'Writer synthesizing final report via LLM...')
-        const writerResolved = resolveRoleModel(this.settings, 'synthesizer')
-        const writerSettings = withRoleModel(this.settings, 'synthesizer')
+        const writerResolved = this.executionModel('synthesizer')
+        const writerSettings = this.executionSettings('synthesizer')
         this.log(
           'INFO',
-          `Writer model=${writerSettings.model} (${writerResolved.usedFallback ? 'fallback→global' : 'roleModels'})`,
+          `Writer model=${writerSettings.model} (${this.subAgentsEnabled() ? (writerResolved.usedFallback ? 'fallback→global' : 'roleModels') : 'primary/global'})`,
         )
         this.setSubAgent('Writer', 'active', undefined, {
           model: writerResolved.model || undefined,
@@ -1843,7 +1892,7 @@ export class AgentLoopEngine {
 
     return `# ${title}
 
-This report synthesizes findings from ${this.state.subAgents.length} sub-agents analyzing the objective.
+This report synthesizes findings from ${this.subAgentsEnabled() ? `${this.state.subAgents.length} sub-agents` : 'the primary agent'} analyzing the objective.
 
 ## Executive Summary
 

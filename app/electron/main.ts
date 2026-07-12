@@ -12,6 +12,7 @@ import {
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import {
   clearVaultSecret,
@@ -51,6 +52,7 @@ import {
   detectOpenCodeCli,
   loadOpenCodeBundle,
   runOpenCodePrompt,
+  resolveOpenCodeInstructions,
   scanOpenCodeAgents,
   spawnOpenCodeInteractive,
 } from './opencodeBridge'
@@ -103,6 +105,17 @@ import {
 } from './pluginInstaller'
 import { cancelOAuth, refreshOAuthToken, runPluginOAuth } from './oauthBridge'
 import { oauthProviderForPlugin } from '../src/agent/hermes/pluginOAuth'
+import type { CliConfigSnapshot } from '../src/agent/types'
+import {
+  abortOpenCodeRun,
+  checkOpenCodeServer,
+  getOpenCodeServerInfo,
+  openCodeServerRequest,
+  runOpenCodeServerPrompt,
+  startOpenCodeServer,
+  stopOpenCodeServers,
+  type OpenCodeServerMode,
+} from './opencodeServerBridge'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -634,6 +647,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  void stopOpenCodeServers()
   isQuitting = true
   mcpStdioStopAll()
   killAllTerms()
@@ -1110,6 +1124,72 @@ ipcMain.handle(
 )
 
 ipcMain.handle('opencode:hint', async () => spawnOpenCodeInteractive({ cwd: workspaceRoot() }))
+ipcMain.handle('opencode:resolveInstructions', async (_evt, input: { projectRoot?: string; entries?: string[] }) =>
+  resolveOpenCodeInstructions(
+    input?.projectRoot && fs.existsSync(input.projectRoot) ? input.projectRoot : workspaceRoot(),
+    Array.isArray(input?.entries) ? input.entries : [],
+  ),
+)
+
+// ── OpenCode localhost server adapter ──────────────────────────
+
+ipcMain.handle('opencodeServer:health', async (_evt, url?: string) => checkOpenCodeServer(url))
+ipcMain.handle('opencodeServer:info', async (_evt, url?: string) => getOpenCodeServerInfo(url))
+ipcMain.handle('opencodeServer:start', async (_evt, opts?: { cwd?: string; port?: number }) =>
+  startOpenCodeServer({
+    cwd: opts?.cwd && fs.existsSync(opts.cwd) ? opts.cwd : workspaceRoot(),
+    port: opts?.port,
+  }),
+)
+ipcMain.handle('opencodeServer:stop', async () => stopOpenCodeServers())
+ipcMain.handle('opencodeServer:abort', async (_evt, runId?: string) => abortOpenCodeRun(runId))
+ipcMain.handle('opencodeServer:config', async (_evt, url: string) =>
+  openCodeServerRequest(url, '/config'),
+)
+ipcMain.handle('opencodeServer:providers', async (_evt, url: string) =>
+  openCodeServerRequest(url, '/config/providers'),
+)
+ipcMain.handle('opencodeServer:experimentalToolIds', async (_evt, url: string) =>
+  openCodeServerRequest(url, '/experimental/tool/ids'),
+)
+ipcMain.handle('opencodeServer:sessions', async (_evt, url: string) =>
+  openCodeServerRequest(url, '/session'),
+)
+ipcMain.handle('opencodeServer:children', async (_evt, input: { url: string; sessionId: string }) =>
+  openCodeServerRequest(input.url, `/session/${encodeURIComponent(input.sessionId)}/children`),
+)
+ipcMain.handle('opencodeServer:todo', async (_evt, input: { url: string; sessionId: string }) =>
+  openCodeServerRequest(input.url, `/session/${encodeURIComponent(input.sessionId)}/todo`),
+)
+ipcMain.handle('opencodeServer:fork', async (_evt, input: { url: string; sessionId: string; messageId?: string }) =>
+  openCodeServerRequest(input.url, `/session/${encodeURIComponent(input.sessionId)}/fork`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input.messageId ? { messageID: input.messageId } : {}),
+  }),
+)
+ipcMain.handle('opencodeServer:diff', async (_evt, input: { url: string; sessionId: string }) =>
+  openCodeServerRequest(input.url, `/session/${encodeURIComponent(input.sessionId)}/diff`),
+)
+ipcMain.handle('opencodeServer:revert', async (_evt, input: { url: string; sessionId: string; messageId: string; partId?: string }) =>
+  openCodeServerRequest(input.url, `/session/${encodeURIComponent(input.sessionId)}/revert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messageID: input.messageId, partID: input.partId }),
+  }),
+)
+ipcMain.handle('opencodeServer:lsp', async (_evt, url: string) =>
+  openCodeServerRequest(url, '/lsp'),
+)
+ipcMain.handle('opencodeServer:formatter', async (_evt, url: string) =>
+  openCodeServerRequest(url, '/formatter'),
+)
+ipcMain.handle('opencodeServer:mcp', async (_evt, url: string) =>
+  openCodeServerRequest(url, '/mcp'),
+)
+ipcMain.handle('opencodeServer:agents', async (_evt, url: string) =>
+  openCodeServerRequest(url, '/agent'),
+)
 
 // ── Project / Git worktree ──────────────────────────────────────
 
@@ -1339,16 +1419,22 @@ ipcMain.handle(
       model?: string
       depth?: string
       agentMode?: string
+      thinkingVariant?: string
+      showThinking?: boolean
+      serverMode?: OpenCodeServerMode
+      serverUrl?: string
       approvalMode?: 'always' | 'auto' | 'full'
       unattended?: boolean
       timeoutMs?: number
       runId?: string
+      configSnapshot?: CliConfigSnapshot
       attachments?: Array<{
         name: string
         mimeType?: string
         kind?: 'image' | 'text' | 'binary'
         dataUrl?: string
         textContent?: string
+        filePath?: string
       }>
     },
   ) => {
@@ -1389,8 +1475,69 @@ ipcMain.handle(
           typeof a.textContent === 'string'
             ? a.textContent.slice(0, 200_000)
             : undefined,
+        filePath: typeof a.filePath === 'string' ? a.filePath.slice(0, 1200) : undefined,
       }
     })
+    if (input.kind === 'opencode' && input.serverMode === 'server' && attachments.length > 0) {
+      return {
+        ok: false,
+        output: '',
+        command: 'opencode server',
+        kind: 'opencode' as const,
+        code: 2,
+        error: 'OpenCode server mode 暫不接受附件；請改用 auto/cli 以走一次性 CLI attachment adapter。',
+        runId: input.runId,
+        configSnapshot: input.configSnapshot,
+      }
+    }
+    if (input.kind === 'opencode' && input.serverMode !== 'cli' && attachments.length === 0) {
+      const serverRunId = input.runId || `oc_${Date.now().toString(36)}`
+      const externalStartedAt = new Date().toISOString()
+      const server = await runOpenCodeServerPrompt({
+        mode: input.serverMode || 'auto',
+        baseUrl: input.serverUrl,
+        prompt: input.prompt,
+        cwd,
+        model: input.model,
+        agent: input.agentMode === 'plan' ? 'plan' : 'build',
+        runId: serverRunId,
+        timeoutMs: input.timeoutMs,
+        onEvent: (event) => {
+          try {
+            if (!evt.sender.isDestroyed()) evt.sender.send('cli:stream', { ...event, runId: serverRunId })
+          } catch {
+            /* ignore */
+          }
+        },
+      })
+      if (server.used) {
+        return {
+          ok: server.ok,
+          output: server.output,
+          command: `opencode server ${server.baseUrl || input.serverUrl || ''} session=${server.sessionId || '—'}`,
+          kind: 'opencode' as const,
+          code: server.ok ? 0 : 1,
+          timedOut: server.timedOut,
+          cancelled: server.cancelled,
+          error: server.error,
+          runId: serverRunId,
+          configSnapshot: input.configSnapshot,
+          externalRun: {
+            provider: 'opencode' as const,
+            serverUrl: server.baseUrl,
+            sessionId: server.sessionId,
+            version: server.version,
+            configFingerprint: input.configSnapshot
+              ? createHash('sha256').update(JSON.stringify(input.configSnapshot)).digest('hex').slice(0, 16)
+              : undefined,
+            status: server.ok ? 'success' as const : server.cancelled ? 'aborted' as const : 'failed' as const,
+            completionReason: server.completionReason,
+            startedAt: externalStartedAt,
+            finishedAt: new Date().toISOString(),
+          },
+        }
+      }
+    }
     return runLocalCliAgent({
       ...input,
       cwd,
@@ -1410,7 +1557,11 @@ ipcMain.handle(
 
 /** Cancel in-flight CLI specialist processes (tag: cli-agent) */
 ipcMain.handle('cli:cancel', async () => {
-  return cancelBash({ tag: 'cli-agent' })
+  const [cli, server] = await Promise.all([
+    Promise.resolve(cancelBash({ tag: 'cli-agent' })),
+    abortOpenCodeRun(),
+  ])
+  return { ok: cli.ok || server.ok, killed: cli.killed + server.killed }
 })
 
 // ── Chat attachments (disk materialize for bubbles / queue / vision) ──

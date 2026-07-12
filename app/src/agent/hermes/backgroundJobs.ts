@@ -136,6 +136,22 @@ export function enqueueBackgroundDelegate(
 ): BackgroundJob {
   const notifyOnComplete = input.notifyOnComplete !== false
   const provisionalId = `bg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+  if (settings.subAgentsEnabled !== true) {
+    return {
+      id: provisionalId,
+      goal: input.goal,
+      status: 'failed',
+      notifyOnComplete,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      ok: false,
+      error: 'Sub Agent 功能目前已關閉，背景委派未排入。',
+      summary: 'Sub Agent 功能目前已關閉，背景委派未排入。',
+      durationMs: 0,
+      tokensUsed: 0,
+      depth: 0,
+    }
+  }
   const job: BackgroundJob = {
     id: provisionalId,
     goal: input.goal,
@@ -171,6 +187,9 @@ export function enqueueBackgroundDelegate(
         parentRunId: input.parentRunId,
         sourceKind: input.sourceKind || 'delegate',
         projectRoot: input.projectRoot,
+        parentPermissionPolicy: input.parentPermissionPolicy,
+        parentPermissionProjection: input.parentPermissionProjection,
+        parentMcpAgentId: input.parentMcpAgentId,
       }
 
       if (preferRunTask) {
@@ -198,6 +217,9 @@ export function enqueueBackgroundDelegate(
                 : undefined,
               unattended: true,
               hitlTimeoutMs: 45_000,
+              permissionPolicy: input.parentPermissionPolicy,
+              permissionProjection: input.parentPermissionProjection,
+              mcpAgentId: input.parentMcpAgentId,
             },
             onSettled: (r) => resolve(r),
           }).then((r) => {
