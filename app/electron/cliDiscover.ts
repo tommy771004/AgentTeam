@@ -6,6 +6,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { app } from 'electron'
 import { runBash } from './shellBridge'
 import { scanOpenCodeAgents } from './opencodeBridge'
 import { executableLookupCommand, firstExecutablePath } from './platformProcess'
@@ -442,7 +443,12 @@ function extractClaudeModelsFromBinary(binaryPath?: string | null): DiscoveredMo
 }
 
 function parseOpenCodeConfig(): { models: DiscoveredModel[]; path: string | null } {
+  const userDataDir = path.join(app.getPath('userData'), 'opencode')
   const paths = [
+    // app-owned OpenCode-format config first (doesn't require opencode CLI installed) …
+    path.join(userDataDir, 'opencode.json'),
+    path.join(userDataDir, 'opencode.jsonc'),
+    // … plus the external opencode CLI's own global config, if present, as a bonus source.
     home('.config', 'opencode', 'opencode.jsonc'),
     home('.config', 'opencode', 'opencode.json'),
     home('.opencode', 'opencode.json'),
