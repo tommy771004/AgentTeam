@@ -19,11 +19,16 @@ export function toolPermissionKey(toolName: string): PermissionKey {
   }
   switch (toolName) {
     case 'workspace_write':
+    case 'design_system_create':
+    case 'design_system_update':
+    case 'design_artifact_export':
     case 'skill_save':
     case 'bash':
       return 'edit'
     case 'workspace_read':
     case 'workspace_list':
+    case 'design_system_list':
+    case 'design_system_read':
     case 'datetime_now':
     case 'json_extract_lite':
       return 'read'
@@ -45,6 +50,10 @@ export function toolPermissionKey(toolName: string): PermissionKey {
       return 'task'
     case 'update_plan':
     case 'ask_user':
+    case 'design_brief_update':
+    case 'design_direction_select':
+    case 'design_artifact_register':
+    case 'design_critique':
       // UI-only coordination tools do not mutate the workspace and remain
       // available in Plan mode even when task/delegate actions are denied.
       return 'read'
@@ -100,6 +109,9 @@ export function deniedToolsFromPolicy(policy: PermissionPolicy | undefined): str
   if (!policy) return []
   const all = [
     'workspace_write',
+    'design_system_create',
+    'design_system_update',
+    'design_artifact_export',
     'skill_save',
     'bash',
     'web_search',

@@ -12,6 +12,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { AutomationPage } from './pages/AutomationPage'
 import { RecordsPage } from './pages/RecordsPage'
 import { LearningPage } from './pages/LearningPage'
+import { SubDesignPage } from './pages/SubDesignPage'
 import { useSettingsStore } from './store/settingsStore'
 import { useLearningStore } from './store/learningStore'
 import { useScheduleStore } from './store/scheduleStore'
@@ -545,6 +546,7 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<ProtocolsPage />} />
+          <Route path="subdesign" element={<SubDesignPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="automation" element={<AutomationPage />} />
           <Route path="docs" element={<DocsPage />} />

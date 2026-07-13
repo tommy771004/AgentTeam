@@ -8,6 +8,15 @@ import { memoryStore } from '../hermes/memory'
 import { skillsStore } from '../hermes/skills'
 import { listAllMcpTools, mcpCallTool } from '../hermes/mcp'
 import { useSettingsStore } from '../../store/settingsStore'
+import { getRunThreadId, resolveEffectiveProjectRoot } from './runContext'
+import {
+  defaultDesignSystemMarkdown,
+  designSystemPath,
+  isSafeDesignSystemId,
+  readDesignSystem,
+  scanDesignSystems,
+  DESIGN_SYSTEM_ROOT,
+} from '../subdesign/designSystem'
 import { resolveEffectiveProjectRoot } from './runContext'
 import { isMcpServerAllowedForAgent, mcpServersForAgent } from '../opencode/mcpAccess'
 
@@ -481,7 +490,230 @@ export async function executeTool(
         const output = todos
           .map((item, index) => `${index + 1}. [${item.status}] ${item.text}`)
           .join('\n')
-        return { ok: true, output: `任務清單已更新（${todos.length} 項）\n${output}`, data: { todos } }
+        let subDesignStage: string | undefined
+        try {
+          const { stageFromPlan } = await import('../subdesign/brief')
+          const { useSubDesignStore } = await import('../../store/subDesignStore')
+          const threadId = getRunThreadId()
+          const linked = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
+          const inferred = stageFromPlan(todos)
+          if (linked && inferred && (inferred !== 'build' || linked.selectedDirectionId)) {
+            const stageResult = useSubDesignStore.getState().setStage(linked.id, inferred)
+            if (stageResult.ok) subDesignStage = stageResult.brief.stage
+          }
+        } catch {
+          /* SubDesign metadata is optional for normal task plans. */
+        }
+        return {
+          ok: true,
+          output: `任務清單已更新（${todos.length} 項）${subDesignStage ? ` · SubDesign=${subDesignStage}` : ''}\n${output}`,
+          data: { todos, subDesignStage },
+        }
+      }
+      case 'design_brief_update': {
+        const { useSubDesignStore } = await import('../../store/subDesignStore')
+        const threadId = getRunThreadId()
+        const briefId = String(input.briefId || '').trim()
+        const linked = briefId
+          ? useSubDesignStore.getState().findById(briefId)
+          : threadId
+            ? useSubDesignStore.getState().findByThreadId(threadId)
+            : null
+        if (!linked) return { ok: false, output: '找不到與目前 thread 關聯的 SubDesign brief。' }
+        const patch: Record<string, unknown> = {}
+        for (const key of [
+          'objective',
+          'audience',
+          'platform',
+          'fidelity',
+          'designSystemId',
+          'constraints',
+          'acceptanceCriteria',
+          'directions',
+        ]) {
+          if (Object.prototype.hasOwnProperty.call(input, key)) patch[key] = input[key]
+        }
+        const updated = useSubDesignStore.getState().updateBrief(linked.id, patch)
+        if (!updated) return { ok: false, output: 'brief 更新失敗。' }
+        let finalBrief = updated
+        if (input.stage) {
+          const stageResult = useSubDesignStore.getState().setStage(linked.id, String(input.stage) as never)
+          if (!stageResult.ok) return { ok: false, output: stageResult.error, data: updated }
+          finalBrief = stageResult.brief
+        }
+        return {
+          ok: true,
+          output: `SubDesign brief 已更新：stage=${finalBrief.stage} · direction=${finalBrief.selectedDirectionId || '未選定'}`,
+          data: finalBrief,
+        }
+      }
+      case 'design_direction_select': {
+        const { useSubDesignStore } = await import('../../store/subDesignStore')
+        const threadId = getRunThreadId()
+        const briefId = String(input.briefId || '').trim()
+        const linked = briefId
+          ? useSubDesignStore.getState().findById(briefId)
+          : threadId
+            ? useSubDesignStore.getState().findByThreadId(threadId)
+            : null
+        if (!linked) return { ok: false, output: '找不到與目前 thread 關聯的 SubDesign brief。' }
+        const result = useSubDesignStore.getState().selectDirection(linked.id, String(input.directionId || ''), {
+          title: input.title ? String(input.title) : undefined,
+          summary: input.summary ? String(input.summary) : undefined,
+          rationale: input.rationale ? String(input.rationale) : undefined,
+          risk: input.risk ? String(input.risk) : undefined,
+        })
+        if (!result.ok) return { ok: false, output: result.error, data: linked }
+        return {
+          ok: true,
+          output: `Direction「${result.brief.selectedDirectionId}」已選定；Build stage 已解鎖。`,
+          data: result.brief,
+        }
+      }
+      case 'design_system_list': {
+        const systems = await scanDesignSystems(projectRoot)
+        const { useSubDesignStore } = await import('../../store/subDesignStore')
+        useSubDesignStore.getState().setSystems(systems)
+        return {
+          ok: true,
+          output: systems.length
+            ? systems.map((system) => `${system.id}: ${system.title} · ${system.colors.join(', ') || 'no swatches'}`).join('\n')
+            : '尚未找到 DESIGN.md 或 .subagents/subdesign/design-systems/*。',
+          data: systems,
+        }
+      }
+      case 'design_system_read': {
+        const id = String(input.id || '').trim()
+        if (id !== 'project' && !isSafeDesignSystemId(id)) {
+          return { ok: false, output: '不安全的 design system id。' }
+        }
+        const system = await readDesignSystem(id, projectRoot)
+        if (!system) return { ok: false, output: `讀不到 design system：${id}` }
+        return { ok: true, output: system.content.slice(0, 20_000), data: system }
+      }
+      case 'design_system_create': {
+        const id = String(input.id || '').trim()
+        const title = String(input.title || '').trim()
+        if (!projectRoot) return { ok: false, output: '請先選擇 project root，才能建立 design system。' }
+        if (!isSafeDesignSystemId(id) || !title) return { ok: false, output: 'id / title 不合法。' }
+        if (!api?.workspaceMkdir || !api.workspaceWrite) return { ok: false, output: 'design system 寫入需要 Electron workspace API。' }
+        const dir = await api.workspaceMkdir(`${DESIGN_SYSTEM_ROOT}/${id}`, projectRoot)
+        if (!dir.ok && !/exist/i.test(dir.error || '')) return { ok: false, output: dir.error || '建立資料夾失敗。' }
+        const content = String(input.content || '').trim() || defaultDesignSystemMarkdown(title, String(input.category || 'custom'))
+        const result = await api.workspaceWrite(designSystemPath(id), content, projectRoot)
+        if (!result.ok) return { ok: false, output: result.error || '寫入 DESIGN.md 失敗。' }
+        return { ok: true, output: `已建立 design system ${id} → ${result.path}`, data: { id, path: result.path } }
+      }
+      case 'design_system_update': {
+        const id = String(input.id || '').trim()
+        const content = String(input.content || '').trim()
+        if (!projectRoot) return { ok: false, output: '請先選擇 project root，才能更新 design system。' }
+        if (!isSafeDesignSystemId(id) || !content) return { ok: false, output: 'id / content 不合法。' }
+        if (!api?.workspaceWrite) return { ok: false, output: 'design system 寫入需要 Electron workspace API。' }
+        const result = await api.workspaceWrite(designSystemPath(id), content, projectRoot)
+        if (!result.ok) return { ok: false, output: result.error || '更新 DESIGN.md 失敗。' }
+        return { ok: true, output: `已更新 design system ${id} → ${result.path}`, data: { id, path: result.path } }
+      }
+      case 'design_artifact_register': {
+        const { useSubDesignStore } = await import('../../store/subDesignStore')
+        const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
+        const threadId = getRunThreadId()
+        const linked = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
+        const rawManifest = input.manifest && typeof input.manifest === 'object'
+          ? { ...(input.manifest as Record<string, unknown>) }
+          : null
+        if (!rawManifest) return { ok: false, output: 'manifest 必須是 object。' }
+        const briefId = String(input.briefId || rawManifest.briefId || linked?.id || '').trim()
+        if (!briefId) return { ok: false, output: '找不到 SubDesign brief，不能登記 artifact。' }
+        if (linked && briefId !== linked.id) {
+          return { ok: false, output: 'artifact briefId 與目前 thread 不一致。' }
+        }
+        rawManifest.briefId = briefId
+        if (!rawManifest.designSystemId && linked?.designSystemId) rawManifest.designSystemId = linked.designSystemId
+        const result = useSubDesignArtifactStore.getState().register(rawManifest, {
+          briefId,
+          designSystemId: linked?.designSystemId,
+        })
+        if (!result.ok) return { ok: false, output: `artifact manifest invalid：${result.errors.join('；')}` }
+        return {
+          ok: true,
+          output: `Artifact「${result.artifact.title}」已登記（revision ${result.artifact.revision}）→ ${result.artifact.entry}`,
+          data: result.artifact,
+        }
+      }
+      case 'design_critique': {
+        const { critiqueAllowsDeliver } = await import('../subdesign/critique')
+        const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
+        const { useSubDesignCritiqueStore } = await import('../../store/subDesignCritiqueStore')
+        const { useSubDesignStore } = await import('../../store/subDesignStore')
+        const rawCritique = input.critique && typeof input.critique === 'object'
+          ? { ...(input.critique as Record<string, unknown>) }
+          : null
+        if (!rawCritique) return { ok: false, output: 'critique 必須是 object。' }
+        const artifactId = String(rawCritique.artifactId || '').trim()
+        const artifact = useSubDesignArtifactStore.getState().findById(artifactId)
+        if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }
+        const threadId = getRunThreadId()
+        const linked = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
+        const briefId = String(rawCritique.briefId || linked?.id || artifact.briefId).trim()
+        if (linked && briefId !== linked.id) return { ok: false, output: 'critique briefId 與目前 thread 不一致。' }
+        rawCritique.briefId = briefId
+        const result = useSubDesignCritiqueStore.getState().record(rawCritique, { briefId })
+        if (!result.ok) return { ok: false, output: `critique invalid：${result.errors.join('；')}` }
+        const nextStage = critiqueAllowsDeliver(result.critique) ? 'deliver' : 'critique'
+        const brief = useSubDesignStore.getState().findById(briefId)
+        const stageResult = brief ? useSubDesignStore.getState().setStage(brief.id, nextStage) : null
+        return {
+          ok: true,
+          output: `Critique ${result.critique.verdict}（revision ${result.critique.revision}） · stage=${stageResult?.ok ? stageResult.brief.stage : nextStage}`,
+          data: result.critique,
+        }
+      }
+      case 'design_artifact_export': {
+        const { critiqueAllowsDeliver } = await import('../subdesign/critique')
+        const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
+        const { useSubDesignCritiqueStore } = await import('../../store/subDesignCritiqueStore')
+        const artifactId = String(input.artifactId || '').trim()
+        const format = String(input.format || '').trim() as 'html' | 'zip' | 'pdf'
+        if (!artifactId || !['html', 'zip', 'pdf'].includes(format)) {
+          return { ok: false, output: 'artifactId / format 不合法。' }
+        }
+        const artifact = useSubDesignArtifactStore.getState().findById(artifactId)
+        if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }
+        if (!artifact.exports.includes(format)) return { ok: false, output: `artifact 不支援 ${format} export。` }
+        const critique = useSubDesignCritiqueStore.getState().latestForArtifact(artifact.id)
+        if (!critique || !critiqueAllowsDeliver(critique)) {
+          return { ok: false, output: 'Artifact 尚未通過 critique；請先修正 blocker / needs-revision findings。' }
+        }
+        const exportApi = window.subagents?.subdesign
+        if (!exportApi?.exportArtifact) return { ok: false, output: 'artifact export 需要 Electron desktop。' }
+        const result = await exportApi.exportArtifact({
+          artifact,
+          format,
+          projectRoot,
+          suggestedName: artifact.title,
+        })
+        if (!result.ok) {
+          return {
+            ok: false,
+            output: result.cancelled ? '使用者取消 export。' : result.error || 'artifact export 失敗。',
+            data: result,
+          }
+        }
+        const { useSubDesignExportStore } = await import('../../store/subDesignExportStore')
+        const record = useSubDesignExportStore.getState().record({
+          artifactId: artifact.id,
+          revision: result.revision || artifact.revision,
+          format,
+          path: result.path || '',
+          bytes: result.bytes || 0,
+          sha256: result.sha256 || '',
+        })
+        return {
+          ok: true,
+          output: `Artifact 已 export：${format} · revision ${record.revision} · ${record.path} · sha256 ${record.sha256}`,
+          data: record,
+        }
       }
       case 'ask_user': {
         const question = String(input.question || '').trim()

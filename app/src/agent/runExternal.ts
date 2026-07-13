@@ -11,6 +11,10 @@ import type { AgentState, ChatAttachment, ExternalRunRef, LoopType, RuntimeOverr
 import { dispatchThreadTask, type DispatchResult } from './runDispatch'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
+import { useSubDesignStore } from '../store/subDesignStore'
+import { useSubDesignArtifactStore } from '../store/subDesignArtifactStore'
+import { useSubDesignCritiqueStore } from '../store/subDesignCritiqueStore'
+import { useSubDesignExportStore } from '../store/subDesignExportStore'
 import { useSettingsStore } from '../store/settingsStore'
 import {
   drainExternalRunQueue,
@@ -776,9 +780,48 @@ export async function runExternalObjective(
         }
       }
       const plan = (thr.threads.find((thread) => thread.id === tid)?.runPlan || []).slice(0, 40)
+      const subDesignBrief = useSubDesignStore.getState().findByThreadId(tid)
+      const subDesignArtifact = subDesignBrief
+        ? useSubDesignArtifactStore.getState().findByBriefId(subDesignBrief.id)[0]
+        : null
+      const subDesignCritique = subDesignArtifact
+        ? useSubDesignCritiqueStore.getState().latestForArtifact(subDesignArtifact.id)
+        : null
+      const subDesignExports = subDesignArtifact
+        ? useSubDesignExportStore.getState().findByArtifactId(subDesignArtifact.id)
+        : []
       // Always persist a process card so chat shows more than the bare answer
       thr.pushRunSummary(tid, {
         durationMs: finalAgent.metrics?.executionMs,
+        subDesign: subDesignBrief
+          ? {
+              briefId: subDesignBrief.id,
+              stage: subDesignBrief.stage,
+              selectedDirectionId: subDesignBrief.selectedDirectionId,
+              designSystemId: subDesignBrief.designSystemId,
+              artifactId: subDesignArtifact?.id,
+              artifactRevision: subDesignArtifact?.revision,
+              critique: subDesignCritique
+                ? {
+                    revision: subDesignCritique.revision || 1,
+                    verdict: subDesignCritique.verdict,
+                    blockerCount: subDesignCritique.findings.filter((finding) => finding.severity === 'blocker').length,
+                    scores: {
+                      briefCoverage: subDesignCritique.briefCoverage,
+                      brandConformance: subDesignCritique.brandConformance,
+                      accessibility: subDesignCritique.accessibility,
+                      implementationReadiness: subDesignCritique.implementationReadiness,
+                    },
+                  }
+                : undefined,
+              exports: subDesignExports.map((item) => ({
+                format: item.format,
+                revision: item.revision,
+                path: item.path,
+                sha256: item.sha256,
+              })),
+            }
+          : undefined,
         diff,
         plan,
         agents: (finalAgent.subAgents || []).map((agent) => ({

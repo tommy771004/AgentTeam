@@ -50,6 +50,14 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
 
       {open ? (
         <div className="max-h-[420px] space-y-3 overflow-y-auto border-t border-white/8 px-3.5 py-3 custom-scrollbar">
+          {summary.subDesign ? (
+            <div className="rounded-xl border border-[#c96646]/20 bg-[#c96646]/5 px-2.5 py-2 text-[11px] text-on-surface-variant">
+              <div className="flex items-center gap-1.5 font-medium"><Icon name="palette" size={14} className="text-[#c96646]" /> SubDesign · {summary.subDesign.stage}</div>
+              <div className="mt-1 text-outline">brief {summary.subDesign.briefId}{summary.subDesign.selectedDirectionId ? ` · direction ${summary.subDesign.selectedDirectionId}` : ' · 尚未選定 direction'}{summary.subDesign.designSystemId ? ` · system ${summary.subDesign.designSystemId}` : ''}</div>
+              {summary.subDesign.critique ? <div className="mt-1 text-outline">critique r{summary.subDesign.critique.revision} · {summary.subDesign.critique.verdict} · {summary.subDesign.critique.blockerCount} blockers</div> : null}
+              {summary.subDesign.exports?.length ? <div className="mt-1 text-outline">exports · {summary.subDesign.exports.map((item) => `${item.format.toUpperCase()} r${item.revision}`).join(' · ')}</div> : null}
+            </div>
+          ) : null}
           {groups.length ? (
             <div className="space-y-1">
               {groups.map((group) => {

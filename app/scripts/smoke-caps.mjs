@@ -456,6 +456,10 @@ await test('side-effect drift guard: every registry tool is read-only OR classif
     'delegate_status',
     'json_extract_lite', 'table_parse', 'update_plan', 'ask_user',
     'codegraph_explore', 'codegraph_status', 'codegraph_impact', 'codegraph_callers',
+    // SubDesign coordination mutates local metadata only; it never writes workspace files.
+    'design_brief_update', 'design_direction_select', 'design_system_list', 'design_system_read',
+    'design_artifact_register',
+    'design_critique',
   ])
   const sideEffectBlock = guard.slice(
     guard.indexOf('SIDE_EFFECT_TOOLS'),
@@ -610,6 +614,28 @@ await test('W2: project context wiring contract (IPC + preload + engine + prompt
   assert.match(engine, /projectGuidance/)
   const pb = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/promptBuilder.ts'), 'utf8')
   assert.match(pb, /projectGuidance/)
+})
+
+await test('SubDesign Phase 4/5: critique gate + Electron export contract', async () => {
+  const fs = await import('node:fs')
+  const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
+  const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
+  const critique = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/critique.ts'), 'utf8')
+  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  const capability = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/subDesign.ts'), 'utf8')
+  const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  assert.match(critique, /critiqueAllowsDeliver/)
+  assert.match(guard, /design_artifact_export/)
+  assert.match(capability, /design_artifact_export/)
+  assert.match(main, /subdesign:exportArtifact/)
+  assert.match(main, /printToPDF/)
+  assert.match(main, /createHash\(['"]sha256['"]\)/)
+  assert.match(main, /isProjectRelativePath/)
+  assert.match(preload, /exportArtifact:/)
+  assert.match(page, /CritiquePanel/)
+  assert.match(page, /ArtifactDeliveryPanel/)
+  assert.match(runExternal, /sha256/)
 })
 
 // ── P1-A: credential vault contract ──

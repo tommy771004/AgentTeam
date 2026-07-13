@@ -1,0 +1,61 @@
+import { useEffect, useState } from 'react'
+import type { SubDesignArtifact } from '../../agent/subdesign/types'
+import { useProjectStore } from '../../store/projectStore'
+import { Icon } from '../Icon'
+
+function withPreviewCsp(content: string): string {
+  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">`
+  if (/<head[^>]*>/i.test(content)) return content.replace(/<head[^>]*>/i, (head) => `${head}${csp}`)
+  return `<!doctype html><html><head>${csp}</head><body>${content}</body></html>`
+}
+
+export function ArtifactPreview({ artifact }: { artifact: SubDesignArtifact | null }) {
+  const projectRoot = useProjectStore((state) => state.root)
+  const [content, setContent] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!artifact) {
+      setContent('')
+      setError(null)
+      return
+    }
+    setLoading(true)
+    setError(null)
+    void (async () => {
+      try {
+        const api = window.subagents?.tools
+        if (!api?.workspaceRead) throw new Error('Preview 需要 Electron workspace API。')
+        const result = await api.workspaceRead(artifact.entry, projectRoot || undefined)
+        if (!result.ok) throw new Error(result.content || '讀取 artifact 失敗。')
+        if (!cancelled) setContent(result.content)
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [artifact, projectRoot])
+
+  return (
+    <section className="min-h-[260px] overflow-hidden rounded-md border border-[#e7e3de] bg-white">
+      <div className="flex items-center justify-between border-b border-[#efebe6] px-3 py-2.5"><div className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold"><Icon name="preview" size={15} className="text-[#c96646]" /><span className="truncate">{artifact?.title || 'Artifact preview'}</span></div>{artifact ? <span className="text-[9px] text-[#a19a92]">sandboxed · revision {artifact.revision}</span> : null}</div>
+      {!artifact ? <div className="grid min-h-[220px] place-items-center px-4 text-center text-[10px] text-[#a39b93]">選擇一個 artifact 查看安全 preview。</div> : null}
+      {loading ? <div className="grid min-h-[220px] place-items-center text-[10px] text-[#a39b93]">讀取 artifact…</div> : null}
+      {error ? <div className="m-3 rounded-md border border-[#ead2c9] bg-[#fff7f3] px-3 py-3 text-[10px] text-[#a24f36]">{error}</div> : null}
+      {!loading && !error && artifact && content ? (
+        artifact.renderer === 'html' || artifact.renderer === 'deck-html' ? (
+          <iframe title={`${artifact.title} preview`} sandbox="allow-scripts" srcDoc={withPreviewCsp(content)} className="h-[360px] w-full border-0 bg-white" />
+        ) : (
+          <pre className="m-3 max-h-[340px] overflow-auto whitespace-pre-wrap rounded-md bg-[#f8f7f4] p-3 text-[10px] leading-relaxed text-[#5c554e]">{content}</pre>
+        )
+      ) : null}
+    </section>
+  )
+}
+

@@ -36,6 +36,15 @@ export type ToolName =
   | 'codegraph_status'
   | 'codegraph_impact'
   | 'codegraph_callers'
+  | 'design_brief_update'
+  | 'design_direction_select'
+  | 'design_system_list'
+  | 'design_system_read'
+  | 'design_system_create'
+  | 'design_system_update'
+  | 'design_artifact_register'
+  | 'design_critique'
+  | 'design_artifact_export'
 
 export interface ToolDef {
   name: ToolName
@@ -196,6 +205,51 @@ export const TOOL_CATALOG: ToolDef[] = [
     name: 'ask_user',
     description: 'Ask the user a structured question with optional choices before continuing.',
     keywords: ['ask user', 'need clarification', 'clarify', 'choose', 'preference', 'question'],
+  },
+  {
+    name: 'design_brief_update',
+    description: 'Update the linked SubDesign brief metadata, direction cards, or stage.',
+    keywords: ['subdesign', 'design brief', 'design brief update', 'audience', 'constraints', 'acceptance criteria', 'direction cards'],
+  },
+  {
+    name: 'design_direction_select',
+    description: 'Record the user-selected SubDesign direction and unlock Build stage.',
+    keywords: ['design direction', 'select direction', 'direction selected', 'choose direction', 'design choice'],
+  },
+  {
+    name: 'design_system_list',
+    description: 'List project DESIGN.md and SubDesign design systems.',
+    keywords: ['design system list', 'design systems', 'design.md', 'brand rules', 'tokens'],
+  },
+  {
+    name: 'design_system_read',
+    description: 'Read a selected DESIGN.md design system and return its parsed summary.',
+    keywords: ['read design system', 'read design.md', 'design tokens', 'brand system'],
+  },
+  {
+    name: 'design_system_create',
+    description: 'Create a versioned SubDesign DESIGN.md under the project workspace.',
+    keywords: ['create design system', 'new design system', 'write design.md', 'brand contract'],
+  },
+  {
+    name: 'design_system_update',
+    description: 'Update a versioned SubDesign DESIGN.md under the project workspace.',
+    keywords: ['update design system', 'update design.md', 'edit brand rules', 'write tokens'],
+  },
+  {
+    name: 'design_artifact_register',
+    description: 'Register a validated project-relative SubDesign artifact manifest for preview and revision tracking.',
+    keywords: ['artifact manifest', 'register artifact', 'preview artifact', 'design output', 'revision'],
+  },
+  {
+    name: 'design_critique',
+    description: 'Record a structured read-only critique for a SubDesign artifact.',
+    keywords: ['design critique', 'critique artifact', 'accessibility review', 'brand conformance', 'brief coverage', 'verdict'],
+  },
+  {
+    name: 'design_artifact_export',
+    description: 'Export a validated SubDesign artifact as HTML, PDF, or ZIP after user approval.',
+    keywords: ['export artifact', 'export design', 'download prototype', 'pdf', 'zip', 'deliver artifact'],
   },
 ]
 
