@@ -1,15 +1,30 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { critiqueAllowsDeliver } from '../agent/subdesign/critique'
 import { buildSubDesignPrompt } from '../agent/subdesign/prompt'
-import type { SubDesignPlatform, SubDesignStage } from '../agent/subdesign/types'
+import {
+  OPEN_DESIGN_TEMPLATE_SOURCE,
+  SUBDESIGN_TEMPLATE_CATEGORIES,
+  SUBDESIGN_TEMPLATES,
+  openDesignRecordToTemplate,
+  type SubDesignTemplateCategory,
+} from '../agent/subdesign/templateCatalog'
+import { loadOpenDesignCatalog, type OpenDesignCatalogRecord } from '../agent/openDesign/catalog'
+import type { SubDesignPlatform } from '../agent/subdesign/types'
 import { stageLabel } from '../agent/subdesign/types'
+import { findLatestPassedSubDesignPreference } from '../agent/subdesign/preference'
 import { Icon } from '../components/Icon'
 import { ArtifactDeliveryPanel } from '../components/subdesign/ArtifactDeliveryPanel'
 import { ArtifactPreview } from '../components/subdesign/ArtifactPreview'
 import { ArtifactRail } from '../components/subdesign/ArtifactRail'
 import { CritiquePanel } from '../components/subdesign/CritiquePanel'
+import { CritiqueTheater } from '../components/subdesign/CritiqueTheater'
+import { ArtifactTweakPanel } from '../components/subdesign/ArtifactTweakPanel'
+import { ReferenceImportPanel } from '../components/subdesign/ReferenceImportPanel'
+import { RunProcessFeed } from '../components/RunProcessFeed'
+import { runTask } from '../agent/runExternal'
 import { useAgentStore } from '../store/agentStore'
+import { useLearningStore } from '../store/learningStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSubDesignArtifactStore } from '../store/subDesignArtifactStore'
 import { useSubDesignCritiqueStore } from '../store/subDesignCritiqueStore'
@@ -17,18 +32,21 @@ import { useSubDesignExportStore } from '../store/subDesignExportStore'
 import { hydrateSubDesignStores } from '../store/subDesignPersistence'
 import { useSubDesignStore } from '../store/subDesignStore'
 import { useThreadStore } from '../store/threadStore'
+import { useRunActivityStore } from '../store/runActivityStore'
+import { useOpenDesignPackStore } from '../store/openDesignPackStore'
 
 type DesignSurface = {
   id: 'prototype' | 'dashboard' | 'design-system' | 'deck'
   title: string
+  description: string
   icon: string
 }
 
 const SURFACES: readonly DesignSurface[] = [
-  { id: 'prototype', title: '產品原型', icon: 'web' },
-  { id: 'dashboard', title: '資料儀表板', icon: 'dashboard' },
-  { id: 'design-system', title: 'Design System', icon: 'palette' },
-  { id: 'deck', title: '簡報與報告', icon: 'slideshow' },
+  { id: 'prototype', title: '產品原型', description: '網頁、桌面或行動介面', icon: 'web' },
+  { id: 'dashboard', title: '即時看板', description: '資料與決策工作台', icon: 'dashboard' },
+  { id: 'design-system', title: 'Design System', description: '品牌規則與元件語言', icon: 'palette' },
+  { id: 'deck', title: '簡報與報告', description: '可交付的敘事內容', icon: 'slideshow' },
 ]
 
 const PLATFORMS: ReadonlyArray<{ id: SubDesignPlatform; label: string }> = [
@@ -37,15 +55,6 @@ const PLATFORMS: ReadonlyArray<{ id: SubDesignPlatform; label: string }> = [
   { id: 'mobile-ios', label: 'Mobile iOS' },
   { id: 'desktop-app', label: 'Desktop app' },
 ]
-
-const STAGES: readonly SubDesignStage[] = ['brief', 'direction', 'build', 'critique', 'deliver']
-const STAGE_NAMES: Record<SubDesignStage, string> = {
-  brief: '需求',
-  direction: '方向',
-  build: '建立',
-  critique: '檢查',
-  deliver: '交付',
-}
 
 function formatRelativeTime(value: string): string {
   const date = new Date(value)
@@ -56,47 +65,18 @@ function formatRelativeTime(value: string): string {
   return `${Math.round(minutes / 1440)} 天前`
 }
 
-function StageRail({ stage }: { stage: SubDesignStage | null }) {
-  const activeIndex = stage ? STAGES.indexOf(stage) : 0
-
-  return (
-    <ol aria-label="SubDesign 流程" className="flex items-start gap-0 px-1">
-      {STAGES.map((item, index) => {
-        const current = index === activeIndex
-        const complete = index < activeIndex
-        return (
-          <li key={item} className="flex min-w-0 flex-1 items-start last:flex-none">
-            <div className="flex min-w-[42px] flex-col items-center gap-1.5">
-              <span
-                className={`grid h-7 w-7 place-items-center rounded-full border text-[11px] font-semibold ${
-                  current
-                    ? 'border-primary bg-primary text-on-primary shadow-[0_0_18px_rgba(125,216,240,0.28)]'
-                    : complete
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-white/12 bg-white/[0.03] text-outline'
-                }`}
-              >
-                {complete ? <Icon name="check" size={14} /> : index + 1}
-              </span>
-              <span className={`whitespace-nowrap text-[11px] ${current ? 'font-semibold text-primary' : 'text-outline'}`}>
-                {STAGE_NAMES[item]}
-              </span>
-            </div>
-            {index < STAGES.length - 1 ? (
-              <span className={`mt-3 h-px min-w-2 flex-1 ${complete ? 'bg-primary/45' : 'bg-white/10'}`} />
-            ) : null}
-          </li>
-        )
-      })}
-    </ol>
-  )
+function SelectChevron() {
+  return <Icon name="expand_more" size={16} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-outline" />
 }
 
 export function SubDesignPage() {
   const navigate = useNavigate()
+  const { briefId: routeBriefId } = useParams<{ briefId?: string }>()
   const createThread = useThreadStore((state) => state.createThread)
   const setSubDesignBriefId = useThreadStore((state) => state.setSubDesignBriefId)
-  const setDraftInput = useAgentStore((state) => state.setDraftInput)
+  const hydrateThreads = useThreadStore((state) => state.hydrate)
+  const agent = useAgentStore((state) => state.agent)
+  const isRunning = useAgentStore((state) => state.isRunning)
   const projectRoot = useProjectStore((state) => state.root)
   const briefs = useSubDesignStore((state) => state.briefs)
   const selectedBriefId = useSubDesignStore((state) => state.selectedBriefId)
@@ -107,22 +87,66 @@ export function SubDesignPage() {
   const refreshSystems = useSubDesignStore((state) => state.refreshSystems)
   const createBrief = useSubDesignStore((state) => state.createBrief)
   const artifacts = useSubDesignArtifactStore((state) => state.artifacts)
+  const critiques = useSubDesignCritiqueStore((state) => state.critiques)
+  const memoryEntries = useLearningStore((state) => state.memory.entries)
   const setArtifactProjectRoot = useSubDesignArtifactStore((state) => state.setProjectRoot)
   const setCritiqueProjectRoot = useSubDesignCritiqueStore((state) => state.setProjectRoot)
   const setExportProjectRoot = useSubDesignExportStore((state) => state.setProjectRoot)
+  const installOpenDesignPack = useOpenDesignPackStore((state) => state.install)
+  const setOpenDesignPackEnabled = useOpenDesignPackStore((state) => state.setEnabled)
+  const openDesignPackBusyId = useOpenDesignPackStore((state) => state.busyId)
+  const openDesignPackError = useOpenDesignPackStore((state) => state.error)
+  const rehydrateOpenDesignPacks = useOpenDesignPackStore((state) => state.rehydrateEnabled)
+  const reindexOpenDesignPacks = useOpenDesignPackStore((state) => state.reindex)
+  const runningThreadId = useThreadStore((state) => state.runningThreadId)
+  const setShowRunPanel = useThreadStore((state) => state.setShowRunPanel)
+  const linkedThread = useThreadStore((state) =>
+    routeBriefId ? state.threads.find((thread) => thread.subDesignBriefId === routeBriefId) : null,
+  )
+  const activityActive = useRunActivityStore((state) => state.active)
 
   const [surfaceId, setSurfaceId] = useState<DesignSurface['id']>('prototype')
   const [platform, setPlatform] = useState<SubDesignPlatform>('responsive')
   const [brief, setBrief] = useState('')
   const [designSystemId, setDesignSystemId] = useState('')
+  const [templateCategory, setTemplateCategory] = useState<SubDesignTemplateCategory>('all')
+  const [templateId, setTemplateId] = useState<string | undefined>()
+  const [templateQuery, setTemplateQuery] = useState('')
+  const [catalogRecords, setCatalogRecords] = useState<OpenDesignCatalogRecord[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(true)
+  const [catalogWarning, setCatalogWarning] = useState('')
   const [selectedArtifactKey, setSelectedArtifactKey] = useState<string | null>(null)
+  const [startingRun, setStartingRun] = useState(false)
 
   const activeSurface = useMemo(
     () => SURFACES.find((surface) => surface.id === surfaceId) || SURFACES[0],
     [surfaceId],
   )
-  const activeBrief = briefs.find((item) => item.id === selectedBriefId) || briefs[0] || null
+  const routeBrief = routeBriefId ? briefs.find((item) => item.id === routeBriefId) || null : null
+  const activeBrief = routeBriefId ? routeBrief : briefs.find((item) => item.id === selectedBriefId) || briefs[0] || null
+  const activeBriefId = activeBrief?.id
+  const activeBriefSurface = activeBrief?.surface
+  const activeBriefDesignSystemId = activeBrief?.designSystemId
+  const activeBriefTemplateId = activeBrief?.templateId
   const selectedSystem = systems.find((system) => system.id === designSystemId)
+  const catalogTemplates = useMemo(
+    () => catalogRecords.filter((record) => record.kind === 'template').map(openDesignRecordToTemplate),
+    [catalogRecords],
+  )
+  const allTemplates = useMemo(() => {
+    if (!catalogTemplates.length) return SUBDESIGN_TEMPLATES
+    const bySource = new Set(catalogTemplates.map((template) => template.sourcePath))
+    return [...catalogTemplates, ...SUBDESIGN_TEMPLATES.filter((template) => !bySource.has(template.sourcePath))]
+  }, [catalogTemplates])
+  const visibleTemplates = allTemplates.filter((template) =>
+    (templateCategory === 'all' || template.category === templateCategory) &&
+    `${template.title} ${template.summary}`.toLowerCase().includes(templateQuery.trim().toLowerCase()),
+  )
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<SubDesignTemplateCategory, number>()
+    for (const template of allTemplates) counts.set(template.category, (counts.get(template.category) || 0) + 1)
+    return counts
+  }, [allTemplates])
   const visibleArtifacts = activeBrief
     ? artifacts.filter((artifact) => artifact.briefId === activeBrief.id)
     : []
@@ -131,8 +155,34 @@ export function SubDesignPage() {
     visibleArtifacts[0] ||
     null
   const latestCritique = useSubDesignCritiqueStore((state) =>
-    selectedArtifact ? state.latestForArtifact(selectedArtifact.id) : null,
+    selectedArtifact ? state.latestForArtifact(selectedArtifact.id, selectedArtifact.revision) : null,
   )
+  const selectedCatalogRecord = catalogRecords.find((record) => record.id === templateId) || null
+  const latestPassedPreference = useMemo(
+    () => findLatestPassedSubDesignPreference(briefs, artifacts, critiques, { projectRoot, memoryEntries }),
+    [artifacts, briefs, critiques, memoryEntries, projectRoot],
+  )
+  const installedOpenDesignPack = useOpenDesignPackStore((state) =>
+    selectedCatalogRecord ? state.installed(selectedCatalogRecord) : null,
+  )
+
+  const runIsLive = Boolean(
+    activeBrief &&
+      (startingRun || runningThreadId === activeBrief.threadId) &&
+      (startingRun || isRunning || activityActive || ['running', 'parsing', 'manual_intervention', 'awaiting_user'].includes(agent.status)),
+  )
+
+  useEffect(() => {
+    hydrateThreads()
+  }, [hydrateThreads])
+
+  useEffect(() => {
+    if (routeBriefId) {
+      if (briefs.some((item) => item.id === routeBriefId) && selectedBriefId !== routeBriefId) selectBrief(routeBriefId)
+      return
+    }
+    if (!selectedBriefId && briefs[0]) selectBrief(briefs[0].id)
+  }, [briefs, routeBriefId, selectBrief, selectedBriefId])
 
   useEffect(() => {
     setProjectRoot(projectRoot || '')
@@ -151,12 +201,37 @@ export function SubDesignPage() {
   ])
 
   useEffect(() => {
-    if (!activeBrief) return
-    setSurfaceId(activeBrief.surface)
-    setDesignSystemId(activeBrief.designSystemId || '')
-  }, [activeBrief])
+    let active = true
+    setCatalogLoading(true)
+    void loadOpenDesignCatalog().then((index) => {
+      if (!active) return
+      setCatalogRecords(index.records)
+      setCatalogWarning(index.warnings[0] || '')
+      setCatalogLoading(false)
+      reindexOpenDesignPacks(index.records)
+      void rehydrateOpenDesignPacks(index.records)
+    })
+    return () => {
+      active = false
+    }
+  }, [reindexOpenDesignPacks, rehydrateOpenDesignPacks])
+
+  useEffect(() => {
+    if (!activeBriefId || !activeBriefSurface) return
+    setSurfaceId(activeBriefSurface)
+    setDesignSystemId(activeBriefDesignSystemId || '')
+    setTemplateId(activeBriefTemplateId)
+  }, [activeBriefDesignSystemId, activeBriefId, activeBriefSurface, activeBriefTemplateId])
+
+  useEffect(() => {
+    if (!latestPassedPreference) return
+    if (!designSystemId && latestPassedPreference.designSystemId) setDesignSystemId(latestPassedPreference.designSystemId)
+    if (!templateId && latestPassedPreference.templateId) setTemplateId(latestPassedPreference.templateId)
+  }, [designSystemId, latestPassedPreference, templateId])
 
   const startSubDesign = () => {
+    const preferredDesignSystemId = designSystemId || latestPassedPreference?.designSystemId
+    const preferredTemplateId = templateId || latestPassedPreference?.templateId
     const threadId = createThread({
       title: `SubDesign · ${activeSurface.title}`,
       agentMode: 'plan',
@@ -168,13 +243,17 @@ export function SubDesignPage() {
       objective: brief,
       platform,
       fidelity: 'high-fidelity',
-      designSystemId: designSystemId || undefined,
+      designSystemId: preferredDesignSystemId,
+      templateId: preferredTemplateId,
+      skillIds: selectedCatalogRecord?.entryPaths.some((entry) => /SKILL\.md$/i.test(entry))
+        ? [selectedCatalogRecord.id]
+        : latestPassedPreference?.skillIds,
+      provenance: selectedCatalogRecord ? [selectedCatalogRecord] : latestPassedPreference?.provenance,
       projectRoot: projectRoot || undefined,
     })
     setSubDesignBriefId(threadId, created.id)
     selectBrief(created.id)
-    setDraftInput(buildSubDesignPrompt(created, selectedSystem))
-    navigate(`/?thread=${threadId}`)
+    navigate(`/subdesign/${created.id}`)
   }
 
   const resumeBrief = (id: string) => {
@@ -183,137 +262,245 @@ export function SubDesignPage() {
     selectBrief(item.id)
     setSurfaceId(item.surface)
     setDesignSystemId(item.designSystemId || '')
-    navigate(`/?thread=${item.threadId}`)
+    setTemplateId(item.templateId)
+    navigate(`/subdesign/${item.id}`)
+  }
+
+  const startBriefRun = async () => {
+    if (!activeBrief || startingRun || runIsLive) return
+    setStartingRun(true)
+    setShowRunPanel(false)
+    try {
+      await runTask({
+        objective: buildSubDesignPrompt(activeBrief, selectedSystem),
+        sourceKind: 'composer',
+        reuseThreadId: activeBrief.threadId,
+        runner: linkedThread?.runner || 'builtin',
+        loopType: linkedThread?.loopType || undefined,
+      })
+    } finally {
+      setStartingRun(false)
+    }
+  }
+
+  const openTranscript = () => {
+    if (!activeBrief) return
+    const threadStore = useThreadStore.getState()
+    threadStore.selectThread(activeBrief.threadId)
+    threadStore.setShowRunPanel(true)
+    navigate(`/?thread=${encodeURIComponent(activeBrief.threadId)}`)
   }
 
   return (
     <div className="h-full min-w-0 overflow-auto bg-background text-on-background">
-      <main className="mx-auto w-full max-w-[1180px] px-5 py-7 md:px-8 lg:py-10">
-        <header className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="font-[family-name:var(--font-sora)] text-[25px] font-semibold tracking-tight text-on-surface">
-              SubDesign
-            </h1>
-            <p className="mt-1 text-[13px] text-outline">建立可交付的設計 artifact。</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void refreshSystems(projectRoot || undefined)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-[12px] font-medium text-outline transition-colors hover:border-primary/30 hover:text-primary"
-          >
-            <Icon name="refresh" size={14} />
-            {systemsLoading ? '掃描中…' : '更新 Design systems'}
-          </button>
-        </header>
-
-        <section className="mt-8">
-          <StageRail stage={activeBrief?.stage || null} />
+      <main className="mx-auto w-full max-w-[1240px] px-5 pb-16 pt-8 md:px-8 lg:pt-12">
+        {routeBriefId && briefs.length > 0 && !activeBrief ? (
+          <section className="mx-auto mb-6 max-w-[820px] rounded-2xl border border-error/25 bg-error/10 px-4 py-3 text-[12px] text-error">
+            找不到這個 SubDesign brief：<span className="font-mono">{routeBriefId}</span>。請回到 SubDesign 首頁選擇既有設計。
+          </section>
+        ) : null}
+        {activeBrief ? (
+          <section className="mx-auto mb-7 max-w-[820px] overflow-hidden rounded-2xl border border-primary/20 bg-primary/[0.04]">
+            <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+              <span className={`grid h-8 w-8 place-items-center rounded-xl ${runIsLive ? 'bg-primary/15 text-primary' : 'bg-white/[0.06] text-outline'}`}>
+                <Icon name={runIsLive ? 'progress_activity' : 'palette'} size={17} className={runIsLive ? 'animate-spin' : ''} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[12px] font-semibold text-on-surface">{runIsLive ? 'SubDesign 正在執行' : `目前設計 · ${stageLabel(activeBrief.stage)}`}</p>
+                <p className="truncate text-[11px] text-outline">{activeBrief.objective} · brief {activeBrief.id}</p>
+              </div>
+              {runIsLive ? <span className="rounded-full border border-primary/25 px-2 py-1 text-[10px] font-semibold text-primary">LIVE</span> : <button type="button" onClick={() => void startBriefRun()} disabled={startingRun} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[11px] font-semibold text-on-primary disabled:opacity-50"><Icon name="play_arrow" size={14} />{startingRun ? '啟動中…' : '在此頁開始執行'}</button>}
+            </div>
+            {runIsLive ? <div className="border-t border-primary/15 px-4 pb-3"><RunProcessFeed depthLabel="SubDesign" onOpenPanel={openTranscript} /></div> : null}
+          </section>
+        ) : null}
+        <section className="mx-auto max-w-[820px] text-center">
+          <h1 className="font-[family-name:var(--font-sora)] text-[34px] font-semibold tracking-tight text-on-surface md:text-[42px]">
+            你今天想設計什麼？
+          </h1>
+          <p className="mt-3 text-[14px] text-outline">從一個 brief 開始，交給 SubAgents 完成設計流程。</p>
         </section>
 
-        <section className="app-panel mt-7 overflow-hidden">
-          <div className="px-5 pb-0 pt-5 md:px-6 md:pt-6">
+        <section className="mx-auto mt-7 max-w-[820px]">
+          <div className="overflow-hidden rounded-[22px] border border-primary/40 bg-surface-container-low shadow-[0_0_0_1px_rgba(125,216,240,0.05),0_18px_45px_rgba(0,0,0,0.2)]">
             <label htmlFor="subdesign-brief" className="sr-only">設計目標</label>
             <textarea
               id="subdesign-brief"
               value={brief}
               onChange={(event) => setBrief(event.target.value)}
-              placeholder="描述你想建立的設計…"
-              className="min-h-[128px] w-full resize-y bg-transparent text-[18px] leading-relaxed text-on-surface outline-none placeholder:text-outline/70"
+              placeholder="例如：設計一個商品詳情頁"
+              className="min-h-[172px] w-full resize-y bg-transparent px-6 py-5 text-[17px] leading-relaxed text-on-surface outline-none placeholder:text-outline/70"
             />
-          </div>
-          <div className="flex flex-col gap-3 border-t border-white/[0.08] px-5 py-4 md:flex-row md:items-center md:px-6">
-            <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-3">
-              <label className="relative">
-                <span className="sr-only">輸出類型</span>
+            <div className="flex flex-col gap-3 border-t border-white/[0.08] px-4 py-4 sm:flex-row sm:items-center">
+              <div className="relative sm:w-[190px]">
                 <select
                   value={surfaceId}
                   onChange={(event) => setSurfaceId(event.target.value as DesignSurface['id'])}
-                  className="h-10 w-full appearance-none rounded-xl border border-white/10 bg-surface-container-low px-3 pr-8 text-[12px] text-on-surface outline-none focus:border-primary/45"
+                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
+                  aria-label="設計範本"
                 >
-                  {SURFACES.map((surface) => (
-                    <option key={surface.id} value={surface.id}>{surface.title}</option>
-                  ))}
+                  {SURFACES.map((surface) => <option key={surface.id} value={surface.id}>{surface.title}</option>)}
                 </select>
-                <Icon name="expand_more" size={16} className="pointer-events-none absolute right-2.5 top-3 text-outline" />
-              </label>
-              <label className="relative">
-                <span className="sr-only">平台</span>
+                <SelectChevron />
+              </div>
+              <div className="relative sm:w-[174px]">
                 <select
                   value={platform}
                   onChange={(event) => setPlatform(event.target.value as SubDesignPlatform)}
-                  className="h-10 w-full appearance-none rounded-xl border border-white/10 bg-surface-container-low px-3 pr-8 text-[12px] text-on-surface outline-none focus:border-primary/45"
+                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
+                  aria-label="設計平台"
                 >
-                  {PLATFORMS.map((item) => (
-                    <option key={item.id} value={item.id}>{item.label}</option>
-                  ))}
+                  {PLATFORMS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                 </select>
-                <Icon name="expand_more" size={16} className="pointer-events-none absolute right-2.5 top-3 text-outline" />
-              </label>
-              <label className="relative">
-                <span className="sr-only">Design system</span>
-                <select
-                  value={designSystemId}
-                  onChange={(event) => setDesignSystemId(event.target.value)}
-                  className="h-10 w-full appearance-none rounded-xl border border-white/10 bg-surface-container-low px-3 pr-8 text-[12px] text-on-surface outline-none focus:border-primary/45"
-                >
-                  <option value="">使用專案 Design system</option>
-                  {systems.map((system) => (
-                    <option key={system.id} value={system.id}>{system.title}</option>
-                  ))}
-                </select>
-                <Icon name="expand_more" size={16} className="pointer-events-none absolute right-2.5 top-3 text-outline" />
-              </label>
+                <SelectChevron />
+              </div>
+              <span className="hidden flex-1 sm:block" />
+              <button
+                type="button"
+                onClick={startSubDesign}
+                className="macos-btn inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-[13px] font-semibold text-on-primary shadow-[0_8px_22px_rgba(43,184,217,0.18)] hover:bg-primary-container focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                <Icon name="send" size={17} />建立設計
+              </button>
             </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-[12px] text-outline">
+            <label className="relative inline-flex items-center gap-1.5">
+              <Icon name="palette" size={15} className="text-primary" />
+              <select
+                value={designSystemId}
+                onChange={(event) => setDesignSystemId(event.target.value)}
+                className="appearance-none bg-transparent pr-5 text-[12px] text-outline outline-none hover:text-on-surface"
+                aria-label="Design system"
+              >
+                <option value="">使用專案 Design system</option>
+                {systems.map((system) => <option key={system.id} value={system.id}>{system.title}</option>)}
+              </select>
+              <Icon name="expand_more" size={14} className="pointer-events-none absolute right-0 text-outline" />
+            </label>
+            <button type="button" onClick={() => navigate('/design-systems')} className="inline-flex items-center gap-1 text-[11px] text-outline hover:text-primary" aria-label="管理 Design system"><Icon name="open_in_new" size={13} />管理</button>
+            <span className="h-4 w-px bg-white/10" aria-hidden />
+            <span className="inline-flex items-center gap-1.5 truncate"><Icon name="folder" size={15} />{projectRoot ? projectRoot.split(/[\\/]/).filter(Boolean).pop() : '尚未選擇工作目錄'}</span>
             <button
               type="button"
-              onClick={startSubDesign}
-              className="macos-btn inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-[13px] font-semibold text-on-primary shadow-[0_8px_24px_rgba(43,184,217,0.18)] hover:bg-primary-container focus:outline-none focus:ring-2 focus:ring-primary/50"
+              onClick={() => void refreshSystems(projectRoot || undefined)}
+              className="ml-auto inline-flex items-center gap-1 text-[12px] text-outline hover:text-primary"
             >
-              <Icon name="arrow_forward" size={16} />開始設計
+              <Icon name="refresh" size={14} />{systemsLoading ? '掃描中…' : '更新'}
             </button>
           </div>
         </section>
 
-        {activeBrief ? (
-          <section className="mt-10">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-[15px] font-semibold text-on-surface">{activeBrief.objective}</h2>
-                <p className="mt-1 text-[12px] text-outline">{stageLabel(activeBrief.stage)} · {formatRelativeTime(activeBrief.updatedAt)}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => resumeBrief(activeBrief.id)}
-                className="inline-flex items-center gap-1.5 text-[12px] font-medium text-primary hover:text-primary-fixed"
-              >
-                繼續此設計 <Icon name="arrow_forward" size={14} />
-              </button>
-            </div>
-
-            <div className="mt-4 grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
-              <ArtifactRail
-                artifacts={visibleArtifacts}
-                selectedKey={selectedArtifact ? `${selectedArtifact.id}:${selectedArtifact.revision}` : null}
-                onSelect={(artifact) => setSelectedArtifactKey(`${artifact.id}:${artifact.revision}`)}
+        <section className="mx-auto mt-10 max-w-[1120px]">
+          <div className="flex flex-col items-center gap-3">
+            <h2 className="text-center text-[13px] font-semibold text-outline">從範本開始</h2>
+            <label className="relative w-full max-w-[420px]">
+              <span className="sr-only">搜尋 Open Design template</span>
+              <Icon name="search" size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
+              <input
+                value={templateQuery}
+                onChange={(event) => setTemplateQuery(event.target.value)}
+                placeholder="搜尋本機 Open Design template…"
+                className="h-10 w-full rounded-xl border border-white/10 bg-surface-container-low pl-9 pr-3 text-[12px] text-on-surface outline-none placeholder:text-outline/70 focus:border-primary/40"
               />
-              <ArtifactPreview artifact={selectedArtifact} />
+            </label>
+            <div className="flex w-full gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+              {SUBDESIGN_TEMPLATE_CATEGORIES.map((category) => {
+                const selected = category.id === templateCategory
+                const count = category.id === 'all' ? allTemplates.length : categoryCounts.get(category.id) || 0
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => setTemplateCategory(category.id)}
+                    className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] transition-colors ${
+                      selected
+                        ? 'border-primary bg-primary text-on-primary'
+                        : 'border-white/10 bg-surface-container-low text-outline hover:border-primary/35 hover:text-on-surface'
+                    }`}
+                  >
+                    {category.label} <span className="opacity-70">{count}</span>
+                  </button>
+                )
+              })}
             </div>
-
-            {selectedArtifact ? (
-              <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                <CritiquePanel critique={latestCritique} />
-                <ArtifactDeliveryPanel
-                  artifact={selectedArtifact}
-                  critiquePassed={Boolean(latestCritique && critiqueAllowsDeliver(latestCritique))}
-                />
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {visibleTemplates.map((template) => {
+              const selected = template.id === templateId
+              const unavailable = template.availability === 'requires-capability'
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  disabled={unavailable}
+                  onClick={() => {
+                    if (!template.surface) return
+                    setTemplateId(template.id)
+                    setSurfaceId(template.surface)
+                    setBrief((current) => current || template.suggestedObjective)
+                  }}
+                  className={`group min-h-[166px] rounded-2xl border text-left transition-all ${
+                    selected
+                      ? 'border-primary/45 bg-primary/[0.08] shadow-[0_0_22px_rgba(43,184,217,0.08)]'
+                      : unavailable
+                        ? 'cursor-not-allowed border-white/[0.07] bg-surface-container-low/60 opacity-65'
+                        : 'border-white/10 bg-surface-container-low hover:-translate-y-0.5 hover:border-primary/30 hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <span className={`grid h-[92px] place-items-center border-b ${selected ? 'border-primary/20 text-primary' : 'border-white/[0.07] text-outline group-hover:text-primary'}`}>
+                    <Icon name={template.icon} size={34} />
+                  </span>
+                  <span className="block px-4 pb-4 pt-3">
+                    <span className="flex items-center justify-between gap-2 text-[14px] font-semibold text-on-surface">
+                      <span>{template.title}</span>
+                      {unavailable ? <span className="text-[10px] font-medium text-outline">尚未啟用</span> : null}
+                    </span>
+                    <span className="mt-1 block text-[12px] text-outline">{template.summary}</span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          {selectedCatalogRecord ? (
+            <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/[0.05] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-[12px] font-semibold text-on-surface">{installedOpenDesignPack ? '已納入本機 content pack' : '將這個 Open Design 內容納入工作流？'}</p>
+                <p className="mt-1 truncate text-[11px] text-outline">{selectedCatalogRecord.sourcePath} · digest {selectedCatalogRecord.digest.slice(0, 12)}… · {selectedCatalogRecord.licensePaths.length ? '已找到授權檔' : '未找到授權檔'}</p>
               </div>
-            ) : null}
-          </section>
-        ) : briefs.length ? (
-          <section className="mt-10">
-            <h2 className="text-[15px] font-semibold text-on-surface">最近的設計</h2>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-outline">{selectedCatalogRecord.kind}</span>
+                <button
+                  type="button"
+                  disabled={openDesignPackBusyId === `open-design:${selectedCatalogRecord.id}`}
+                  onClick={() => {
+                    if (installedOpenDesignPack) void setOpenDesignPackEnabled(selectedCatalogRecord, !installedOpenDesignPack.enabled)
+                    else void installOpenDesignPack(selectedCatalogRecord, projectRoot || undefined)
+                  }}
+                  className="rounded-lg border border-primary/35 px-3 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/10 disabled:opacity-50"
+                >
+                  {openDesignPackBusyId === `open-design:${selectedCatalogRecord.id}` ? '處理中…' : installedOpenDesignPack?.enabled ? '停用 pack' : installedOpenDesignPack ? '啟用 pack' : '安裝 pack'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {openDesignPackError ? <p className="mt-2 text-[11px] text-error">Content pack：{openDesignPackError}</p> : null}
+          <p className="mt-4 text-center text-[11px] text-outline">
+            {catalogLoading ? '正在讀取本機 Open Design inventory…' : catalogWarning ? `Inventory fallback：${catalogWarning}` : `已索引 ${allTemplates.length} 個本機 vendor template。`}
+            {' '}圖像、影片、HyperFrames 與音訊需先啟用對應 capability。參考來源：{' '}
+            <a href={OPEN_DESIGN_TEMPLATE_SOURCE} target="_blank" rel="noreferrer" className="text-primary hover:underline">Open Design templates</a>
+          </p>
+        </section>
+
+        {briefs.length ? (
+          <section className="mx-auto mt-11 max-w-[820px]">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-[13px] font-semibold text-outline">繼續最近設計</h2>
+              {activeBrief ? <span className="text-[12px] text-primary">{stageLabel(activeBrief.stage)}</span> : null}
+            </div>
             <div className="mt-3 divide-y divide-white/[0.08] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
-              {briefs.slice(0, 6).map((item) => {
+              {briefs.slice(0, 4).map((item) => {
                 const surface = SURFACES.find((candidate) => candidate.id === item.surface) || SURFACES[0]
                 return (
                   <button
@@ -329,6 +516,35 @@ export function SubDesignPage() {
                   </button>
                 )
               })}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="mx-auto mt-8 max-w-[820px]">
+          <ReferenceImportPanel brief={activeBrief} />
+        </section>
+
+        {selectedArtifact ? (
+          <section className="mx-auto mt-11 max-w-[1120px]">
+            <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
+              <ArtifactRail
+                artifacts={visibleArtifacts}
+                selectedKey={`${selectedArtifact.id}:${selectedArtifact.revision}`}
+                onSelect={(artifact) => setSelectedArtifactKey(`${artifact.id}:${artifact.revision}`)}
+              />
+              <ArtifactPreview artifact={selectedArtifact} />
+            </div>
+            <div className="mt-4 grid gap-4 xl:grid-cols-3">
+              <div className="xl:col-span-3">
+                <CritiqueTheater brief={activeBrief} artifact={selectedArtifact} critique={latestCritique} />
+              </div>
+              <ArtifactTweakPanel artifact={selectedArtifact} />
+              <CritiquePanel critique={latestCritique} />
+              <ArtifactDeliveryPanel
+                artifact={selectedArtifact}
+                critique={latestCritique}
+                critiquePassed={Boolean(latestCritique && critiqueAllowsDeliver(latestCritique))}
+              />
             </div>
           </section>
         ) : null}

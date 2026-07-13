@@ -39,7 +39,7 @@ interface SubDesignCritiqueStore {
     | { ok: true; critique: SubDesignCritique }
     | { ok: false; errors: string[] }
   findByArtifactId: (artifactId: string) => SubDesignCritique[]
-  latestForArtifact: (artifactId: string) => SubDesignCritique | null
+  latestForArtifact: (artifactId: string, revision?: number) => SubDesignCritique | null
 }
 
 export const useSubDesignCritiqueStore = create<SubDesignCritiqueStore>((set, get) => ({
@@ -77,5 +77,5 @@ export const useSubDesignCritiqueStore = create<SubDesignCritiqueStore>((set, ge
 
   findByArtifactId: (artifactId) => get().critiques.filter((item) => item.artifactId === artifactId),
 
-  latestForArtifact: (artifactId) => get().critiques.find((item) => item.artifactId === artifactId) || null,
+  latestForArtifact: (artifactId, revision) => get().critiques.find((item) => item.artifactId === artifactId && (revision == null || item.revision === revision)) || null,
 }))

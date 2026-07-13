@@ -114,6 +114,41 @@ export async function readDesignSystem(
   return { ...parseDesignSystemMarkdown(content, { id, sourcePath }), content }
 }
 
+export async function createDesignSystemDocument(input: {
+  id: string
+  title: string
+  category?: string
+  content?: string
+  projectRoot?: string
+}): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const id = input.id.trim()
+  const title = input.title.trim()
+  if (!input.projectRoot) return { ok: false, error: '請先選擇 project root。' }
+  if (!isSafeDesignSystemId(id) || id === 'project' || !title) return { ok: false, error: 'id / title 不合法。' }
+  const api = workspaceTools()
+  if (!api?.workspaceMkdir || !api.workspaceWrite) return { ok: false, error: '建立 design system 需要 Electron workspace API。' }
+  const dir = await api.workspaceMkdir(`${DESIGN_SYSTEM_ROOT}/${id}`, input.projectRoot)
+  if (!dir.ok && !/exist/i.test(dir.error || '')) return { ok: false, error: dir.error || '建立 design system 資料夾失敗。' }
+  const content = input.content?.trim() || defaultDesignSystemMarkdown(title, input.category || 'custom')
+  const result = await api.workspaceWrite(designSystemPath(id), content, input.projectRoot)
+  return result.ok ? { ok: true, path: result.path } : { ok: false, error: result.error || '寫入 DESIGN.md 失敗。' }
+}
+
+export async function updateDesignSystemDocument(input: {
+  id: string
+  content: string
+  projectRoot?: string
+}): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const id = input.id.trim()
+  if (!input.projectRoot) return { ok: false, error: '請先選擇 project root。' }
+  if (id !== 'project' && !isSafeDesignSystemId(id)) return { ok: false, error: 'design system id 不合法。' }
+  if (!input.content.trim()) return { ok: false, error: 'DESIGN.md 內容不可為空。' }
+  const api = workspaceTools()
+  if (!api?.workspaceWrite) return { ok: false, error: '更新 design system 需要 Electron workspace API。' }
+  const result = await api.workspaceWrite(designSystemPath(id), input.content, input.projectRoot)
+  return result.ok ? { ok: true, path: result.path } : { ok: false, error: result.error || '更新 DESIGN.md 失敗。' }
+}
+
 export async function scanDesignSystems(projectRoot?: string): Promise<DesignSystemSummary[]> {
   const api = workspaceTools()
   if (!api?.workspaceList || !api.workspaceRead) return []
@@ -181,4 +216,3 @@ export function defaultDesignSystemMarkdown(title: string, category = 'custom'):
   const safeTitle = title.trim() || 'New Design System'
   return `---\ntitle: ${safeTitle}\ncategory: ${category}\n---\n\n# ${safeTitle}\n\n## Overview\n\nDescribe the product context and the visual principle.\n\n## Audience\n\nDescribe the primary audience and their needs.\n\n## Color\n\n- Primary: #2B6CB0\n- Accent: #ED8936\n- Surface: #F7FAFC\n\n## Typography\n\nUse a readable sans-serif with clear hierarchy.\n\n## Spacing/Layout\n\nUse a consistent spacing scale and responsive constraints.\n\n## Components\n\nDocument component states, focus, loading, empty, and error states.\n\n## Motion\n\nKeep motion purposeful and respect reduced-motion preferences.\n\n## Content voice\n\nBe direct, useful, and human.\n\n## Do/Don't\n\n- Do make hierarchy visible.\n- Don't use color as the only signal.\n`
 }
-

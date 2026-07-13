@@ -46,6 +46,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: '系統',
     items: [
+      { to: '/design-systems', label: 'Design Systems', icon: 'palette' },
       { to: '/docs', label: '文件說明', icon: 'menu_book' },
       { to: '/settings', label: '設定', icon: 'settings' },
     ],

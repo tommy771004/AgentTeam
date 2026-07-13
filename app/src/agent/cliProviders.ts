@@ -32,6 +32,13 @@ export interface CliProviderConfig {
   baseUrl?: string
   /** CLI 二進位名稱或絕對路徑（可空白 = 由偵測填入） */
   cliBinary?: string
+  /** Last read-only local probe; never includes credentials. */
+  lastProbeAt?: string
+  diagnostic?: {
+    foundBinary: boolean
+    binaryPath: string | null
+    authNote: string
+  }
   models: CliModelOption[]
 }
 

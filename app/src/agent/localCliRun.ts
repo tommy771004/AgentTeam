@@ -6,6 +6,7 @@ import type { AgentState, ApprovalMode, CliConfigSnapshot, ExternalRunRef } from
 import { emptyKnowledge } from './knowledge'
 import { resolveCliApproval } from './cliApproval'
 
+export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
 export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
 export type LocalCliConfigSnapshot = CliConfigSnapshot
 
@@ -170,6 +171,7 @@ export function inferRunnerFromModel(
     if (p.id === 'anthropic' || p.id === 'claude') return 'claude'
     if (p.id === 'grok') return 'grok'
     if (p.id === 'opencode') return 'opencode'
+    if (p.id === 'google' || p.id === 'gemini') return 'gemini'
     if (p.id === 'cursor') return 'cursor'
   }
   return 'builtin'

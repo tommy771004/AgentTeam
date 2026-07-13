@@ -439,6 +439,12 @@ export interface CliProviderConfig {
   apiKey?: string
   baseUrl?: string
   cliBinary?: string
+  lastProbeAt?: string
+  diagnostic?: {
+    foundBinary: boolean
+    binaryPath: string | null
+    authNote: string
+  }
   models: CliModelOption[]
 }
 

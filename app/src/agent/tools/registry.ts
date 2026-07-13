@@ -43,6 +43,10 @@ export type ToolName =
   | 'design_system_create'
   | 'design_system_update'
   | 'design_artifact_register'
+  | 'design_artifact_patch'
+  | 'design_artifact_tweak'
+  | 'design_artifact_capture'
+  | 'design_artifact_lint'
   | 'design_critique'
   | 'design_artifact_export'
 
@@ -242,14 +246,34 @@ export const TOOL_CATALOG: ToolDef[] = [
     keywords: ['artifact manifest', 'register artifact', 'preview artifact', 'design output', 'revision'],
   },
   {
+    name: 'design_artifact_patch',
+    description: 'Apply a bounded in-place text patch to an already registered SubDesign artifact file.',
+    keywords: ['artifact patch', 'tweak artifact', 'edit artifact', 'in place', '原地調整', '微調'],
+  },
+  {
+    name: 'design_artifact_tweak',
+    description: 'Apply one declared structured live-control tweak to an already registered artifact.',
+    keywords: ['artifact tweak', 'structured tweak', 'live tweak', 'parameter', 'color control', '即時調參'],
+  },
+  {
+    name: 'design_artifact_capture',
+    description: 'Capture a sandboxed screenshot or DOM snapshot for a registered SubDesign artifact.',
+    keywords: ['artifact screenshot', 'capture artifact', 'DOM evidence', 'screenshot evidence', '截圖', '證據'],
+  },
+  {
+    name: 'design_artifact_lint',
+    description: 'Run deterministic semantic lint against the registered artifact and create attested lint evidence.',
+    keywords: ['artifact lint', 'semantic lint', 'accessibility lint', 'evidence lint', '語意檢查'],
+  },
+  {
     name: 'design_critique',
     description: 'Record a structured read-only critique for a SubDesign artifact.',
     keywords: ['design critique', 'critique artifact', 'accessibility review', 'brand conformance', 'brief coverage', 'verdict'],
   },
   {
     name: 'design_artifact_export',
-    description: 'Export a validated SubDesign artifact as HTML, PDF, or ZIP after user approval.',
-    keywords: ['export artifact', 'export design', 'download prototype', 'pdf', 'zip', 'deliver artifact'],
+    description: 'Export a validated SubDesign artifact as HTML, PDF, PPTX, MP4, or ZIP after user approval.',
+    keywords: ['export artifact', 'export design', 'download prototype', 'pdf', 'pptx', 'mp4', 'zip', 'deliver artifact'],
   },
 ]
 

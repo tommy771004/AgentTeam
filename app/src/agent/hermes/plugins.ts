@@ -57,6 +57,13 @@ export interface PluginManifest {
   mcpServers?: McpServerConfig[]
   /** Connector authorization state (secrets live in pluginSecrets). */
   connectorAuth?: ConnectorAuthMeta
+  /** Provenance for vendor content packs; never contains executable hooks or secrets. */
+  openDesign?: {
+    packId: string
+    digest: string
+    trustState: 'bundled' | 'community-reviewed' | 'local-user' | 'remote-unverified'
+    licensePaths: string[]
+  }
   /** @deprecated Optional demo tool aliases (name -> description only). */
   toolHints?: Array<{ name: string; description: string }>
 }

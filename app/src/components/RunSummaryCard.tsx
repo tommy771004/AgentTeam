@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ThreadRunSummary } from '../store/threadStore'
 import { Icon } from './Icon'
 import { contextSummary, groupProcessOperations } from '../lib/runPresentation'
@@ -12,6 +13,7 @@ function iconFor(kind: string) {
 
 /** Persisted, collapsible record of what an agent did for one answer. */
 export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
+  const navigate = useNavigate()
   // Context is visible at a glance; details remain one click away.
   const [open, setOpen] = useState(false)
   const [openOperation, setOpenOperation] = useState<string | null>(null)
@@ -48,16 +50,29 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
         <Icon name={open ? 'expand_less' : 'expand_more'} size={18} className="shrink-0 text-outline" />
       </button>
 
+      {summary.subDesign ? (
+        <div className="border-t border-white/8 bg-primary/[0.04] px-3.5 py-3 text-[11px] text-on-surface-variant">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 font-medium">
+              <Icon name="palette" size={14} className="shrink-0 text-primary" />
+              <span>SubDesign · {summary.subDesign.stage}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate(`/subdesign/${summary.subDesign?.briefId}`)}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-primary/25 px-2 py-1 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/10 focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <Icon name="open_in_new" size={13} />查看設計
+            </button>
+          </div>
+          <div className="mt-1 text-outline">brief {summary.subDesign.briefId}{summary.subDesign.selectedDirectionId ? ` · direction ${summary.subDesign.selectedDirectionId}` : ' · 尚未選定 direction'}{summary.subDesign.designSystemId ? ` · system ${summary.subDesign.designSystemId}` : ''}</div>
+          {summary.subDesign.critique ? <div className="mt-1 text-outline">critique r{summary.subDesign.critique.revision} · {summary.subDesign.critique.verdict} · {summary.subDesign.critique.blockerCount} blockers</div> : null}
+          {summary.subDesign.exports?.length ? <div className="mt-1 text-outline">exports · {summary.subDesign.exports.map((item) => `${item.format.toUpperCase()} r${item.revision}`).join(' · ')}</div> : null}
+        </div>
+      ) : null}
+
       {open ? (
         <div className="max-h-[420px] space-y-3 overflow-y-auto border-t border-white/8 px-3.5 py-3 custom-scrollbar">
-          {summary.subDesign ? (
-            <div className="rounded-xl border border-[#c96646]/20 bg-[#c96646]/5 px-2.5 py-2 text-[11px] text-on-surface-variant">
-              <div className="flex items-center gap-1.5 font-medium"><Icon name="palette" size={14} className="text-[#c96646]" /> SubDesign · {summary.subDesign.stage}</div>
-              <div className="mt-1 text-outline">brief {summary.subDesign.briefId}{summary.subDesign.selectedDirectionId ? ` · direction ${summary.subDesign.selectedDirectionId}` : ' · 尚未選定 direction'}{summary.subDesign.designSystemId ? ` · system ${summary.subDesign.designSystemId}` : ''}</div>
-              {summary.subDesign.critique ? <div className="mt-1 text-outline">critique r{summary.subDesign.critique.revision} · {summary.subDesign.critique.verdict} · {summary.subDesign.critique.blockerCount} blockers</div> : null}
-              {summary.subDesign.exports?.length ? <div className="mt-1 text-outline">exports · {summary.subDesign.exports.map((item) => `${item.format.toUpperCase()} r${item.revision}`).join(' · ')}</div> : null}
-            </div>
-          ) : null}
           {groups.length ? (
             <div className="space-y-1">
               {groups.map((group) => {

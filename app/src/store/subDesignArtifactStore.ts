@@ -66,7 +66,7 @@ export const useSubDesignArtifactStore = create<SubDesignArtifactStore>((set, ge
     if (!result.ok) return result
     const existing = get().artifacts.find((item) => item.id === result.manifest.id)
     const artifact = existing
-      ? { ...result.manifest, createdAt: existing.createdAt, revision: Math.max(existing.revision + 1, result.manifest.revision) }
+      ? { ...result.manifest, createdAt: existing.createdAt, revision: Math.max(existing.revision + 1, result.manifest.revision), updatedAt: new Date().toISOString() }
       : result.manifest
     const artifacts = [artifact, ...get().artifacts].slice(0, 80)
     set({ artifacts })

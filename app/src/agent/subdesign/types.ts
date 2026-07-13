@@ -1,3 +1,5 @@
+import type { OpenDesignProvenance } from '../openDesign/catalog'
+
 export type SubDesignSurface = 'prototype' | 'dashboard' | 'design-system' | 'deck'
 
 export type SubDesignStage = 'brief' | 'direction' | 'build' | 'critique' | 'deliver'
@@ -18,6 +20,17 @@ export type SubDesignDirection = {
   risk?: string
 }
 
+export type SubDesignReference = {
+  id: string
+  kind: 'screenshot' | 'url'
+  source: string
+  storedPath: string
+  title?: string
+  importedAt: string
+  sha256: string
+  designSystemId?: string
+}
+
 export type SubDesignBrief = {
   id: string
   threadId: string
@@ -27,6 +40,10 @@ export type SubDesignBrief = {
   platform?: SubDesignPlatform
   fidelity?: SubDesignFidelity
   designSystemId?: string
+  templateId?: string
+  skillIds?: string[]
+  provenance?: OpenDesignProvenance[]
+  references?: SubDesignReference[]
   constraints: string[]
   acceptanceCriteria: string[]
   directions: SubDesignDirection[]
@@ -69,7 +86,24 @@ export type SubDesignArtifactRenderer =
   | 'code'
   | 'design-system'
 
-export type SubDesignArtifactExport = 'html' | 'pdf' | 'zip' | 'jsx' | 'md' | 'svg' | 'txt'
+export type SubDesignArtifactExport = 'html' | 'pdf' | 'zip' | 'pptx' | 'mp4' | 'jsx' | 'md' | 'svg' | 'txt'
+
+export type SubDesignArtifactTweakKind = 'color' | 'text' | 'number' | 'select' | 'boolean'
+
+export type SubDesignArtifactTweak = {
+  id: string
+  label: string
+  kind: SubDesignArtifactTweakKind
+  path: string
+  find: string
+  replaceTemplate: string
+  value: string
+  defaultValue?: string
+  min?: number
+  max?: number
+  step?: number
+  options?: string[]
+}
 
 export type SubDesignArtifact = {
   id: string
@@ -80,11 +114,19 @@ export type SubDesignArtifact = {
   renderer: SubDesignArtifactRenderer
   exports: SubDesignArtifactExport[]
   supportingFiles: string[]
+  tweaks?: SubDesignArtifactTweak[]
   designSystemId?: string
   status: 'streaming' | 'complete' | 'error'
   revision: number
   createdAt: string
   updatedAt: string
+}
+
+export type SubDesignArtifactPatchOperation = {
+  path: string
+  find: string
+  replace: string
+  expectedMatches?: number
 }
 
 export type SubDesignCritiqueFinding = {
@@ -94,10 +136,15 @@ export type SubDesignCritiqueFinding = {
 }
 
 export type SubDesignCritiqueEvidence = {
-  kind: 'screenshot' | 'dom' | 'lint' | 'build' | 'manual'
+  kind: 'screenshot' | 'dom' | 'lint' | 'build' | 'manual' | 'template-attribution' | 'design-system' | 'asset-license'
   summary: string
   path?: string
   capturedAt?: string
+  evidenceId?: string
+  sha256?: string
+  source?: string
+  artifactId?: string
+  revision?: number
 }
 
 export type SubDesignCritique = {
@@ -114,7 +161,56 @@ export type SubDesignCritique = {
   verdict: 'pass' | 'needs-revision'
 }
 
-export type SubDesignExportFormat = 'html' | 'zip' | 'pdf'
+export type SubDesignCritiquePanelistId = 'visual' | 'accessibility' | 'implementation'
+
+export type SubDesignCritiquePanelist = {
+  id: SubDesignCritiquePanelistId
+  label: string
+  focus: string
+  status: 'pending' | 'active' | 'complete' | 'interrupted'
+  score?: number
+  summary?: string
+}
+
+export type SubDesignCritiqueRound = {
+  id: string
+  label: string
+  status: 'pending' | 'active' | 'complete' | 'interrupted'
+  panelists: SubDesignCritiquePanelist[]
+  compositeScore?: number
+  startedAt?: string
+  completedAt?: string
+}
+
+export type SubDesignCritiqueSessionEvent = {
+  id: string
+  at: string
+  kind: 'status' | 'panelist' | 'evidence' | 'score' | 'error'
+  roundId?: string
+  panelistId?: SubDesignCritiquePanelistId
+  message: string
+  score?: number
+}
+
+export type SubDesignCritiqueSession = {
+  id: string
+  briefId: string
+  artifactId: string
+  artifactRevision: number
+  status: 'running' | 'completed' | 'interrupted' | 'failed'
+  threshold: number
+  currentRoundIndex: number
+  previewStep: number
+  rounds: SubDesignCritiqueRound[]
+  scoreHistory: number[]
+  compositeScore?: number
+  events: SubDesignCritiqueSessionEvent[]
+  startedAt: string
+  finishedAt?: string
+  interruptReason?: string
+}
+
+export type SubDesignExportFormat = 'html' | 'zip' | 'pdf' | 'pptx' | 'mp4'
 
 export type SubDesignExportRecord = {
   id: string
@@ -135,6 +231,10 @@ export type SubDesignBriefPatch = Partial<
     | 'platform'
     | 'fidelity'
     | 'designSystemId'
+    | 'templateId'
+    | 'skillIds'
+    | 'provenance'
+    | 'references'
     | 'constraints'
     | 'acceptanceCriteria'
     | 'directions'
