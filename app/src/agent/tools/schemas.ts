@@ -384,6 +384,21 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
           brandConformance: { type: 'integer', minimum: 0, maximum: 100 },
           accessibility: { type: 'integer', minimum: 0, maximum: 100 },
           implementationReadiness: { type: 'integer', minimum: 0, maximum: 100 },
+          evidence: {
+            type: 'array',
+            maxItems: 30,
+            description: 'Required evidence for delivery: screenshot, dom, and lint entries.',
+            items: {
+              type: 'object',
+              properties: {
+                kind: { type: 'string', enum: ['screenshot', 'dom', 'lint', 'build', 'manual'] },
+                summary: { type: 'string' },
+                path: { type: 'string' },
+                capturedAt: { type: 'string' },
+              },
+              required: ['kind', 'summary'],
+            },
+          },
           findings: {
             type: 'array',
             maxItems: 40,
@@ -399,7 +414,7 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
           },
           verdict: { type: 'string', enum: ['pass', 'needs-revision'] },
         },
-        required: ['artifactId', 'briefCoverage', 'brandConformance', 'accessibility', 'implementationReadiness', 'findings', 'verdict'],
+        required: ['artifactId', 'briefCoverage', 'brandConformance', 'accessibility', 'implementationReadiness', 'evidence', 'findings', 'verdict'],
       },
     },
     required: ['critique'],

@@ -149,6 +149,22 @@ const api = {
       ipcRenderer.invoke('tools:memoryGet', key) as Promise<string | null>,
   },
   subdesign: {
+    readMetadata: (projectRoot?: string) =>
+      ipcRenderer.invoke('subdesign:readMetadata', projectRoot) as Promise<{
+        ok: boolean
+        briefs: unknown[]
+        artifacts: unknown[]
+        critiques: unknown[]
+        exports: unknown[]
+        error?: string
+      }>,
+    writeMetadata: (input: { kind: 'brief' | 'artifact' | 'critique' | 'export'; payload: unknown; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:writeMetadata', input) as Promise<{
+        ok: boolean
+        path?: string
+        bytes?: number
+        error?: string
+      }>,
     listArtifacts: (projectRoot?: string) =>
       ipcRenderer.invoke('subdesign:listArtifacts', projectRoot) as Promise<{
         ok: boolean

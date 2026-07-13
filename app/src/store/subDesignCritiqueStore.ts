@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { normalizeSubDesignCritique } from '../agent/subdesign/critique'
+import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
 import type { SubDesignCritique } from '../agent/subdesign/types'
 
 const STORAGE_KEY = 'subagents.subdesign.critiques.v1'
@@ -31,7 +32,10 @@ function persist(critiques: SubDesignCritique[]) {
 
 interface SubDesignCritiqueStore {
   critiques: SubDesignCritique[]
-  record: (input: unknown, defaults?: { briefId?: string }) =>
+  projectRoot: string
+  setProjectRoot: (root: string) => void
+  hydrateCanonical: (items: unknown[]) => void
+  record: (input: unknown, defaults?: { briefId?: string }, projectRoot?: string) =>
     | { ok: true; critique: SubDesignCritique }
     | { ok: false; errors: string[] }
   findByArtifactId: (artifactId: string) => SubDesignCritique[]
@@ -40,8 +44,23 @@ interface SubDesignCritiqueStore {
 
 export const useSubDesignCritiqueStore = create<SubDesignCritiqueStore>((set, get) => ({
   critiques: loadCritiques(),
+  projectRoot: '',
 
-  record: (input, defaults) => {
+  setProjectRoot: (root) => set({ projectRoot: root }),
+
+  hydrateCanonical: (items) => {
+    const critiques = items
+      .map((item) => {
+        const result = normalizeSubDesignCritique(item)
+        return result.ok ? result.critique : null
+      })
+      .filter((item): item is SubDesignCritique => Boolean(item))
+      .slice(0, 120)
+    set({ critiques })
+    persist(critiques)
+  },
+
+  record: (input, defaults, projectRoot) => {
     const result = normalizeSubDesignCritique(input, defaults)
     if (!result.ok) return result
     const history = get().critiques.filter((item) => item.artifactId === result.critique.artifactId)
@@ -52,6 +71,7 @@ export const useSubDesignCritiqueStore = create<SubDesignCritiqueStore>((set, ge
     const critiques = [critique, ...get().critiques].slice(0, 120)
     set({ critiques })
     persist(critiques)
+    persistSubDesignMetadata('critique', critique, projectRoot || get().projectRoot)
     return { ok: true, critique }
   },
 

@@ -638,6 +638,27 @@ await test('SubDesign Phase 4/5: critique gate + Electron export contract', asyn
   assert.match(runExternal, /sha256/)
 })
 
+await test('SubDesign Phase 6: canonical metadata, artifact IPC, bash gate, and critique evidence', async () => {
+  const fs = await import('node:fs')
+  const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
+  const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
+  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  const critique = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/critique.ts'), 'utf8')
+  const preview = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/ArtifactPreview.tsx'), 'utf8')
+  assert.match(main, /subdesign:readMetadata/)
+  assert.match(main, /subdesign:writeMetadata/)
+  assert.match(main, /SUBDESIGN_METADATA_ROOT/)
+  assert.match(preload, /readMetadata:/)
+  assert.match(preload, /writeMetadata:/)
+  assert.match(preview, /readArtifact/)
+  assert.match(guard, /isSubDesignWritableBashCommand/)
+  assert.match(guard, /tool === 'bash'/)
+  assert.match(critique, /critiqueHasRequiredEvidence/)
+  assert.match(critique, /screenshot/)
+  assert.match(critique, /dom/)
+  assert.match(critique, /lint/)
+})
+
 // ── P1-A: credential vault contract ──
 await test('P1-A vault: renderer never reads raw tokens; main resolves placeholders', async () => {
   const fs = await import('node:fs')

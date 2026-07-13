@@ -1836,8 +1836,10 @@ function resolveWorkspacePath(rel: string, rootOverride?: string | null) {
 }
 
 const SUBDESIGN_ARTIFACT_ROOT = '.subagents/subdesign/artifacts'
+const SUBDESIGN_METADATA_ROOT = '.subagents/subdesign'
 const SUBDESIGN_MAX_EXPORT_FILES = 80
 const SUBDESIGN_MAX_EXPORT_BYTES = 50 * 1024 * 1024
+const SUBDESIGN_MAX_METADATA_BYTES = 2 * 1024 * 1024
 
 function safeSubDesignExportName(value: string): string {
   const normalized = value.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
@@ -1852,6 +1854,55 @@ function artifactFile(root: string, relativePath: string): string {
   const realFile = fs.realpathSync(file)
   if (!isPathInside(realRoot, realFile)) throw new Error(`artifact symlink escapes workspace：${relativePath}`)
   return realFile
+}
+
+function safeSubDesignMetadataId(value: unknown): string {
+  const id = String(value || '').trim()
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,159}$/.test(id)) throw new Error('不安全的 SubDesign metadata id')
+  return id
+}
+
+function subDesignMetadataFile(root: string, kind: 'brief' | 'artifact' | 'critique' | 'export', payload: Record<string, unknown>): string {
+  if (kind === 'brief') return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/briefs/${safeSubDesignMetadataId(payload.id)}.json`, root)
+  if (kind === 'artifact') return resolveWorkspacePath(`${SUBDESIGN_ARTIFACT_ROOT}/${safeSubDesignMetadataId(payload.id)}/manifest.json`, root)
+  if (kind === 'critique') return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/critiques/${safeSubDesignMetadataId(payload.artifactId)}-r${Math.max(1, Math.floor(Number(payload.revision) || 1))}.json`, root)
+  return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/exports/${safeSubDesignMetadataId(payload.id)}.json`, root)
+}
+
+function readJsonDirectory(root: string, relativeDir: string, limit = 160): unknown[] {
+  const dir = resolveWorkspacePath(relativeDir, root)
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return []
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .slice(0, limit)
+    .map((entry) => {
+      try {
+        return JSON.parse(fs.readFileSync(path.join(dir, entry.name), 'utf8')) as unknown
+      } catch {
+        return null
+      }
+    })
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+}
+
+function readStoredSubDesignArtifacts(root: string): SubDesignArtifact[] {
+  const dir = resolveWorkspacePath(SUBDESIGN_ARTIFACT_ROOT, root)
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return []
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .slice(0, 120)
+    .map((entry) => {
+      try {
+        const manifestPath = path.join(dir, entry.name, 'manifest.json')
+        if (!fs.existsSync(manifestPath)) return null
+        const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown
+        const result = validateSubDesignArtifactManifest(parsed)
+        return result.ok ? result.manifest : null
+      } catch {
+        return null
+      }
+    })
+    .filter((artifact): artifact is SubDesignArtifact => Boolean(artifact))
 }
 
 function crc32(input: Buffer): number {
@@ -2011,26 +2062,46 @@ async function exportSubDesignArtifact(input: {
 ipcMain.handle('subdesign:listArtifacts', async (_evt, projectRoot?: string) => {
   try {
     const root = workspaceRootFor(projectRoot)
-    const dir = resolveWorkspacePath(SUBDESIGN_ARTIFACT_ROOT, root)
-    if (!fs.existsSync(dir)) return { ok: true, artifacts: [] }
-    const artifacts = fs.readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .slice(0, 120)
-      .map((entry) => {
-        try {
-          const manifestPath = path.join(dir, entry.name, 'manifest.json')
-          if (!fs.existsSync(manifestPath)) return null
-          const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown
-          const result = validateSubDesignArtifactManifest(parsed)
-          return result.ok ? result.manifest : null
-        } catch {
-          return null
-        }
-      })
-      .filter((artifact): artifact is SubDesignArtifact => Boolean(artifact))
-    return { ok: true, artifacts }
+    return { ok: true, artifacts: readStoredSubDesignArtifacts(root) }
   } catch (error) {
     return { ok: false, artifacts: [], error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('subdesign:readMetadata', async (_evt, projectRoot?: string) => {
+  try {
+    const root = workspaceRootFor(projectRoot)
+    return {
+      ok: true,
+      briefs: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/briefs`, 80),
+      artifacts: readStoredSubDesignArtifacts(root),
+      critiques: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/critiques`, 160),
+      exports: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/exports`, 160),
+    }
+  } catch (error) {
+    return { ok: false, briefs: [], artifacts: [], critiques: [], exports: [], error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('subdesign:writeMetadata', async (_evt, input: { kind?: string; payload?: unknown; projectRoot?: string }) => {
+  try {
+    const kind = input?.kind
+    if (kind !== 'brief' && kind !== 'artifact' && kind !== 'critique' && kind !== 'export') throw new Error('不支援的 SubDesign metadata kind')
+    if (!input.payload || typeof input.payload !== 'object' || Array.isArray(input.payload)) throw new Error('metadata payload 必須是 object')
+    const payload = input.payload as Record<string, unknown>
+    if (kind === 'artifact') {
+      const validation = validateSubDesignArtifactManifest(payload)
+      if (!validation.ok) throw new Error(`artifact manifest invalid：${validation.errors.join('；')}`)
+    }
+    const content = JSON.stringify(payload, null, 2)
+    if (Buffer.byteLength(content, 'utf8') > SUBDESIGN_MAX_METADATA_BYTES) throw new Error('metadata exceeds 2MB limit')
+    const root = workspaceRootFor(input.projectRoot)
+    const file = subDesignMetadataFile(root, kind, payload)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, content, 'utf8')
+    return { ok: true, path: path.relative(root, file).replaceAll(path.sep, '/'), bytes: Buffer.byteLength(content, 'utf8') }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
 })
 
