@@ -7,6 +7,8 @@ function modelSourceLabel(src?: ModelSource): string {
       return '角色模型'
     case 'fallback':
       return '全域退回'
+    case 'primary':
+      return '全域主代理'
     case 'cli':
       return 'CLI'
     case 'sim':

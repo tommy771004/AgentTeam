@@ -22,6 +22,7 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
     synthesizer: '',
     executor: '',
   },
+  subAgentsEnabled: false,
   authLevel: 2,
   minConfidence: 0.8,
   maxIterationsDefault: 5,
@@ -42,6 +43,7 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   pluginOAuthClients: {},
   mcpEnabled: false,
   mcpServers: [],
+  mcpAgentServers: {},
   telegramEnabled: false,
   telegramBotToken: '',
   telegramAllowedChatIds: '',
@@ -309,9 +311,14 @@ export async function runSubAgentTask(
     userContent?: ChatMessageContent
   },
 ): Promise<LlmChatResult> {
-  const system = `You are the "${role}" sub-agent in SubAgents AI multi-agent framework.
+  const system = settings.subAgentsEnabled === true
+    ? `You are the "${role}" sub-agent in SubAgents AI multi-agent framework.
 Follow the loop protocol: process only your assigned step, be concise, factual, and structured in Markdown.
 Use tool results as primary evidence. Never invent credentials or private data. If data is unavailable mark as N/A.
+If the user message includes images, describe and use them as primary evidence.`
+    : `You are the primary agent in SubAgents AI.
+Process the assigned step directly using the available evidence, be concise, factual, and structured in Markdown.
+Never invent credentials or private data. If data is unavailable mark as N/A.
 If the user message includes images, describe and use them as primary evidence.`
 
   const textBody = `Objective: ${objective}\n\nYour step: ${step}\n\nTool results:\n${toolContext || '(no tools ran)'}\n\nContext so far:\n${context || '(none)'}\n\nProduce the step output only.`
@@ -339,6 +346,26 @@ If the user message includes images, describe and use them as primary evidence.`
   ])
 }
 
+/** Execute a step with the primary agent; never consults roleModels. */
+export async function runPrimaryAgentTask(
+  settings: LlmSettings,
+  objective: string,
+  step: string,
+  context: string,
+  toolContext?: string,
+  opts?: { userContent?: ChatMessageContent },
+): Promise<LlmChatResult> {
+  return runSubAgentTask(
+    { ...settings, subAgentsEnabled: false },
+    'primary',
+    objective,
+    step,
+    context,
+    toolContext,
+    opts,
+  )
+}
+
 export async function synthesizeReport(
   settings: LlmSettings,
   objective: string,
@@ -351,7 +378,9 @@ export async function synthesizeReport(
       {
         role: 'system',
         content:
-          'You are the Writer/Synthesizer sub-agent. Produce a polished Markdown report with title, executive summary, key findings, and a short JSON example block if relevant.',
+          settings.subAgentsEnabled === true
+            ? 'You are the Writer/Synthesizer sub-agent. Produce a polished Markdown report with title, executive summary, key findings, and a short JSON example block if relevant.'
+            : 'You are the primary agent. Produce a polished Markdown report with title, executive summary, key findings, and a short JSON example block if relevant.',
       },
       {
         role: 'user',

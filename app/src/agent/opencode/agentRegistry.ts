@@ -3,7 +3,7 @@
  * Runtime resolution of model / permission / prompt / steps
  */
 
-import type { PermissionPolicy, RuntimeOverrides } from '../types'
+import type { PermissionPolicy, PermissionProjection, RuntimeOverrides } from '../types'
 import {
   PRIMARY_AGENTS,
   SUBAGENTS,
@@ -16,6 +16,8 @@ import {
 } from './permissions'
 import {
   extractBashPermission,
+  mergePermissionProjectionsRestrictive,
+  projectOpenCodePermissions,
   resolvePatternPermission,
   toPermissionPolicy,
   type OpenCodeAgentFileDef,
@@ -33,6 +35,7 @@ export type RegistryAgent = {
   model?: string
   systemHint: string
   permission: PermissionPolicy
+  permissionProjection?: PermissionProjection
   /** Raw OpenCode permission (for bash patterns) */
   permissionBlock?: OpenCodePermissionBlock
   bashPermission?: PermissionRule
@@ -64,6 +67,7 @@ function fromBuiltinPrimary(p: AgentModeDef): RegistryAgent {
     kind: 'primary',
     systemHint: p.systemHint,
     permission: p.permission,
+    permissionProjection: { rules: {}, unsupported: [] },
     color: p.color,
     source: 'builtin',
   }
@@ -99,6 +103,7 @@ function fromFileDef(a: OpenCodeAgentFileDef): RegistryAgent {
     model: a.model,
     systemHint: a.body || a.description || `Agent ${a.id}`,
     permission: { ...base, ...pol },
+    permissionProjection: projectOpenCodePermissions(a.permission),
     permissionBlock: a.permission,
     bashPermission: extractBashPermission(a.permission),
     temperature: a.temperature,
@@ -116,6 +121,19 @@ function buildRegistry(cfg: OpenCodeMergedConfig | null): RegistryAgent[] {
     ...SUBAGENTS.map(fromBuiltinSub),
   ]
   const byId = new Map(list.map((a) => [a.id, a]))
+
+  // Apply global OpenCode permission conservatively to builtin agents too.
+  if (cfg?.permission) {
+    const globalPolicy = toPermissionPolicy(cfg.permission)
+    const globalProjection = projectOpenCodePermissions(cfg.permission)
+    for (const agent of byId.values()) {
+      agent.permission = mergePermissionPoliciesRestrictive(agent.permission, globalPolicy)
+      agent.permissionProjection = mergePermissionProjectionsRestrictive(
+        globalProjection,
+        agent.permissionProjection,
+      )
+    }
+  }
 
   // JSON agent: override or add
   if (cfg?.agent) {
@@ -145,6 +163,11 @@ function buildRegistry(cfg: OpenCodeMergedConfig | null): RegistryAgent[] {
         model: ac.model || existing?.model,
         systemHint: prompt,
         permission: { ...(existing?.permission || {}), ...pol },
+        permissionProjection: projectOpenCodePermissions({
+          ...(existing?.permissionBlock || {}),
+          ...(cfg.permission || {}),
+          ...(ac.permission || {}),
+        }),
         permissionBlock: {
           ...(existing?.permissionBlock || {}),
           ...(ac.permission || {}),
@@ -170,6 +193,10 @@ function buildRegistry(cfg: OpenCodeMergedConfig | null): RegistryAgent[] {
     // merge global permission defaults
     if (cfg?.permission) {
       reg.permission = { ...toPermissionPolicy(cfg.permission), ...reg.permission }
+      reg.permissionProjection = mergePermissionProjectionsRestrictive(
+        projectOpenCodePermissions(cfg.permission),
+        reg.permissionProjection,
+      )
       reg.bashPermission =
         reg.bashPermission || extractBashPermission(cfg.permission)
       reg.permissionBlock = { ...cfg.permission, ...reg.permissionBlock }
@@ -247,11 +274,12 @@ export function resolveAgentRuntime(opts: {
   const sub = opts.subagentId ? getRegistryAgent(opts.subagentId) : undefined
 
   const active = sub || primary
-  const permission: PermissionPolicy = {
-    ...primary.permission,
-    ...(sub?.permission || {}),
-  }
-  const denied = deniedToolsFromPolicy(permission)
+  const restrictivePermission = mergePermissionPoliciesRestrictive(primary.permission, sub?.permission)
+  const permissionProjection = mergePermissionProjectionsRestrictive(
+    primary.permissionProjection,
+    sub?.permissionProjection,
+  )
+  const denied = deniedToolsFromPolicy(restrictivePermission)
   const model =
     opts.model?.trim() ||
     sub?.model ||
@@ -267,7 +295,8 @@ export function resolveAgentRuntime(opts: {
     extra: {
       agentMode: primary.id === 'plan' ? 'plan' : 'build',
       subagentId: sub?.id as RuntimeOverrides['subagentId'],
-      permissionPolicy: permission,
+      permissionPolicy: restrictivePermission,
+      permissionProjection,
       blockedTools: denied,
       extraSystemContext: hints.join('\n\n'),
       maxToolRounds: sub?.steps || primary.steps,
@@ -278,7 +307,8 @@ export function resolveAgentRuntime(opts: {
   base.extraSystemContext = [base.extraSystemContext, hints.join('\n\n')]
     .filter(Boolean)
     .join('\n\n')
-  base.permissionPolicy = permission
+  base.permissionPolicy = restrictivePermission
+  base.permissionProjection = permissionProjection
   base.blockedTools = [...new Set([...(base.blockedTools || []), ...denied])]
   if (model) base.model = model
 
@@ -289,6 +319,23 @@ export function resolveAgentRuntime(opts: {
     maxToolRounds: base.maxToolRounds,
     temperature: sub?.temperature ?? primary.temperature,
   }
+}
+
+function mergePermissionPoliciesRestrictive(
+  ...policies: Array<PermissionPolicy | undefined>
+): PermissionPolicy {
+  const rank: Record<PermissionAction, number> = { allow: 0, ask: 1, deny: 2 }
+  const out: PermissionPolicy = {}
+  for (const policy of policies) {
+    for (const [key, action] of Object.entries(policy || {})) {
+      if (!action) continue
+      const previous = out[key as keyof PermissionPolicy]
+      if (!previous || rank[action] > rank[previous]) {
+        out[key as keyof PermissionPolicy] = action
+      }
+    }
+  }
+  return out
 }
 
 /** Parse @mentions against full registry (not just builtin) */

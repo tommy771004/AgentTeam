@@ -1,8 +1,8 @@
 /**
  * Shared tool permission + HITL ask — used by FC toolLoop AND heuristic executeTool path.
  */
-import type { ApprovalMode, LlmSettings, PermissionPolicy } from '../types'
-import { checkToolPermission } from '../opencode/permissions'
+import type { ApprovalMode, LlmSettings, PermissionPolicy, PermissionProjection } from '../types'
+import { checkProjectedToolPermission, checkToolPermission } from '../opencode/permissions'
 import { executeTool, type ToolResult } from './executor'
 
 export type AuthorizeResult =
@@ -120,6 +120,7 @@ export async function authorizeTool(opts: {
   input: Record<string, unknown>
   settings: LlmSettings
   permissionPolicy?: PermissionPolicy
+  permissionProjection?: PermissionProjection
   blockedTools?: string[]
   /** Capability-declared approvalTools → always HITL ask (Pydantic v2 style) */
   forceAsk?: boolean
@@ -136,8 +137,17 @@ export async function authorizeTool(opts: {
   objective?: string
   onLog?: (level: string, message: string) => void
 }): Promise<AuthorizeResult> {
-  const { tool, input, settings, permissionPolicy, blockedTools, onLog } = opts
+  const { tool, input, settings, permissionPolicy, permissionProjection, blockedTools, onLog } = opts
   const blocked = new Set(blockedTools || [])
+
+  if (
+    settings.subAgentsEnabled !== true &&
+    (tool === 'delegate_task' || tool === 'delegate_status')
+  ) {
+    const msg = `Sub Agent 功能目前已關閉：${tool}`
+    onLog?.('WARN', msg)
+    return { allowed: false, output: msg }
+  }
 
   if (blocked.has(tool)) {
     const msg = `工具被隔離策略封鎖：${tool}`
@@ -165,6 +175,16 @@ export async function authorizeTool(opts: {
   }
 
   let needAsk = opts.forceAsk === true
+  const projected = checkProjectedToolPermission(permissionProjection, tool, input)
+  if (permissionProjection?.unsupported.length) {
+    onLog?.('WARN', `OpenCode unsupported permission keys：${permissionProjection.unsupported.join(', ')}`)
+  }
+  if (projected === 'deny') {
+    const msg = `OpenCode permission deny：${tool}`
+    onLog?.('WARN', msg)
+    return { allowed: false, output: msg }
+  }
+  if (projected === 'ask') needAsk = true
   if (permissionPolicy) {
     const act = checkToolPermission(permissionPolicy, tool)
     if (act === 'deny') {
@@ -300,6 +320,9 @@ export async function guardAndExecuteTool(opts: {
   input: Record<string, unknown>
   settings: LlmSettings
   permissionPolicy?: PermissionPolicy
+  permissionProjection?: PermissionProjection
+  /** OpenCode agent id for MCP per-agent access checks in the executor. */
+  mcpAgentId?: string
   blockedTools?: string[]
   forceAsk?: boolean
   sideEffect?: boolean
@@ -320,6 +343,11 @@ export async function guardAndExecuteTool(opts: {
   const result = await executeTool(
     opts.tool as Parameters<typeof executeTool>[0],
     opts.input,
+    {
+      permissionPolicy: opts.permissionPolicy,
+      permissionProjection: opts.permissionProjection,
+      mcpAgentId: opts.mcpAgentId,
+    },
   )
   return { allowed: true, result }
 }

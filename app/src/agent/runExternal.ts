@@ -7,7 +7,7 @@
  */
 
 import { v4 as uuid } from 'uuid'
-import type { AgentState, ChatAttachment, LoopType, RuntimeOverrides } from './types'
+import type { AgentState, ChatAttachment, ExternalRunRef, LoopType, RuntimeOverrides } from './types'
 import { dispatchThreadTask, type DispatchResult } from './runDispatch'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
@@ -169,6 +169,82 @@ export type ExternalRunResult = DispatchResult & {
   queueId?: string
 }
 
+/**
+ * Pull the server-owned todo/children snapshot into the local Thread after a
+ * server run. Failures are intentionally non-fatal: the completed session and
+ * local transcript remain authoritative when an older server lacks an endpoint.
+ */
+async function syncOpenCodeSessionMapping(
+  threadId: string,
+  externalRun?: ExternalRunRef,
+): Promise<void> {
+  if (externalRun?.provider !== 'opencode' || !externalRun.serverUrl || !externalRun.sessionId) return
+  try {
+    const [{ getOpenCodeSessionTodo, getOpenCodeSessionChildren }, { mapOpenCodeTodoToThreadPlan, normalizeOpenCodeChildren }] =
+      await Promise.all([
+        import('./opencode/serverClient'),
+        import('./opencode/sessionMapping'),
+      ])
+    const [todoResult, childrenResult] = await Promise.allSettled([
+      getOpenCodeSessionTodo(externalRun.serverUrl, externalRun.sessionId),
+      getOpenCodeSessionChildren(externalRun.serverUrl, externalRun.sessionId),
+    ])
+    const plan = todoResult.status === 'fulfilled'
+      ? mapOpenCodeTodoToThreadPlan(todoResult.value)
+      : []
+    if (plan.length) useThreadStore.getState().setRunPlan(threadId, plan)
+
+    const children = childrenResult.status === 'fulfilled'
+      ? normalizeOpenCodeChildren(childrenResult.value)
+      : []
+    const childSessionIds = children.map((child) => child.id)
+    const activeBefore = useThreadStore.getState().activeId
+    for (const child of children) {
+      const state = useThreadStore.getState()
+      if (state.threads.some((thread) =>
+        thread.externalRun?.provider === 'opencode' &&
+        thread.externalRun.serverUrl === externalRun.serverUrl &&
+        thread.externalRun.sessionId === child.id,
+      )) continue
+      const childThreadId = state.createThread({
+        title: `子任務 · ${child.title}`.slice(0, 48),
+        runner: 'opencode',
+        agentMode: 'build',
+        loopType: null,
+      })
+      useThreadStore.getState().setExternalRun(childThreadId, {
+        ...externalRun,
+        sessionId: child.id,
+        parentSessionId: child.parentId || externalRun.sessionId,
+        childSessionIds: undefined,
+        status: 'running',
+        startedAt: child.time || externalRun.startedAt,
+        finishedAt: undefined,
+        completionReason: 'child-session-discovered',
+      })
+      useThreadStore.getState().pushBubble(
+        childThreadId,
+        'system',
+        `OpenCode child session 已同步 · ${child.id}`,
+      )
+    }
+    if (activeBefore) {
+      useThreadStore.getState().selectThread(activeBefore)
+      useThreadStore.getState().setShowRunPanel(true)
+    }
+    if (plan.length || childSessionIds.length) {
+      useThreadStore.getState().setExternalRun(threadId, {
+        ...externalRun,
+        childSessionIds: childSessionIds.length ? childSessionIds : externalRun.childSessionIds,
+        lastTodoAt: plan.length ? new Date().toISOString() : externalRun.lastTodoAt,
+        lastChildrenAt: childrenResult.status === 'fulfilled' ? new Date().toISOString() : externalRun.lastChildrenAt,
+      })
+    }
+  } catch {
+    /* Session mapping is an audit enhancement; never change run outcome. */
+  }
+}
+
 const AUTOMATION_KINDS: ReadonlySet<RunSourceKind> = new Set([
   'schedule',
   'webhook',
@@ -229,6 +305,21 @@ export async function runExternalObjective(
       status: 'failed',
       error: 'empty objective',
       threadId: null,
+    }
+  }
+
+  // Background delegates can sit in the queue while Settings changes. Recheck
+  // the opt-in at drain time so disabling Sub Agent cannot start a stale child run.
+  if (
+    opts.sourceKind === 'delegate' &&
+    useSettingsStore.getState().settings.subAgentsEnabled !== true
+  ) {
+    return {
+      path: 'builtin',
+      status: 'failed',
+      error: 'Sub Agent 功能目前已關閉，委派未啟動。',
+      threadId: null,
+      runId: opts.runId,
     }
   }
 
@@ -451,6 +542,10 @@ export async function runExternalObjective(
     ...(opts.overrides || {}),
     runId,
     sourceKind: opts.sourceKind || opts.overrides?.sourceKind,
+    agentMode:
+      opts.overrides?.agentMode ||
+      thr.threads.find((thread) => thread.id === tid)?.agentMode ||
+      'build',
     eventPreMatched: opts.eventPreMatched ?? opts.overrides?.eventPreMatched,
     attachedSkills:
       opts.attachedSkills || opts.overrides?.attachedSkills || undefined,
@@ -552,6 +647,7 @@ export async function runExternalObjective(
     })
     // P0 CLI/dispatch: prefer dispatch result over stale global agent state
     const finalAgent = useAgentStore.getState().agent
+    await syncOpenCodeSessionMapping(tid, finalAgent.externalRun)
     if (finalAgent.steps.length > 0) {
       thr.setRunPlan(
         tid,

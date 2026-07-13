@@ -17,6 +17,7 @@ import {
 } from './platformProcess'
 import { resolveCliApproval } from '../src/agent/cliApproval'
 import { materializeAttachments } from './attachmentStore'
+import type { CliConfigSnapshot, ExternalRunRef } from '../src/agent/types'
 
 export type LocalCliKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
 export type CliApprovalMode = 'always' | 'auto' | 'full'
@@ -28,6 +29,7 @@ export type LocalCliAttachment = {
   kind?: 'image' | 'text' | 'binary'
   dataUrl?: string
   textContent?: string
+  filePath?: string
 }
 
 /** 任務清單項目（TodoWrite / update_plan / todo_list）→ 右側面板同步 */
@@ -64,6 +66,10 @@ export type LocalCliRunInput = {
   model?: string
   /** App thinking depth → vendor effort */
   depth?: string
+  /** Provider-specific reasoning variant, when explicitly configured. */
+  thinkingVariant?: string
+  /** Ask OpenCode to include reasoning blocks in its JSON stream. */
+  showThinking?: boolean
   /** build | plan */
   agentMode?: string
   /** App-level approval policy, mapped only where the target CLI supports it. */
@@ -72,8 +78,12 @@ export type LocalCliRunInput = {
   unattended?: boolean
   timeoutMs?: number
   runId?: string
+  /** Safe OpenCode config lineage captured before dispatch. */
+  configSnapshot?: CliConfigSnapshot
   /** User chat attachments — written to disk for CLI vision/file tools */
   attachments?: LocalCliAttachment[]
+  /** Internal materialized paths; OpenCode consumes these through --file. */
+  attachmentPaths?: string[]
   /** Live NDJSON / chunk callback for center process feed */
   onStream?: (ev: LocalCliStreamEvent) => void
 }
@@ -88,6 +98,8 @@ export type LocalCliRunResult = {
   cancelled?: boolean
   error?: string
   runId?: string
+  configSnapshot?: CliConfigSnapshot
+  externalRun?: ExternalRunRef
 }
 
 function depthToCodexEffort(depth?: string): string {
@@ -272,6 +284,13 @@ export function buildLocalCliArgv(input: LocalCliRunInput): {
     case 'opencode': {
       args = ['run']
       if (model) args.push('--model', model)
+      if (input.agentMode === 'build' || input.agentMode === 'plan') {
+        args.push('--agent', input.agentMode)
+      }
+      if (input.thinkingVariant?.trim()) args.push('--variant', input.thinkingVariant.trim())
+      if (input.showThinking) args.push('--thinking')
+      args.push('--format', 'json')
+      for (const file of input.attachmentPaths || []) args.push('--file', file)
       args.push(prompt)
       break
     }
@@ -383,6 +402,7 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
     ...input,
     prompt,
     binary: pre.path || bin,
+    attachmentPaths: materialized.paths,
   })
   const command = argv.displayCommand
 
@@ -432,11 +452,12 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
       ? `\n\n[attachments: ${materialized.paths.length} file(s) under ${materialized.dir}]`
       : ''
   const cleanErr = stripAnsi(r.stderr || '').trim()
+  const permissionError = streamState.getPermissionRequest()
 
   emit({
     kind: r.ok ? 'done' : 'error',
-    title: r.ok ? 'CLI 完成' : cancelled ? '已取消' : r.timedOut ? '逾時' : 'CLI 失敗',
-    detail: r.ok ? undefined : cleanErr || undefined,
+    title: r.ok ? 'CLI 完成' : permissionError ? 'OpenCode 權限要求' : cancelled ? '已取消' : r.timedOut ? '逾時' : 'CLI 失敗',
+    detail: r.ok ? undefined : permissionError || cleanErr || undefined,
     ok: r.ok,
   })
 
@@ -458,7 +479,15 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
         : r.timedOut
           ? '逾時（CLI 未在時限內結束；請確認使用 headless：codex exec / claude -p / grok -p / gemini -p / cursor -p / opencode run）'
           : cleanErr || `exit ${r.code}`,
+      : permissionError
+        ? permissionError
+        : cancelled
+          ? '使用者取消'
+          : r.timedOut
+            ? '逾時（CLI 未在時限內結束；請確認使用 headless：codex exec / claude -p / grok -p / cursor -p / opencode run）'
+            : cleanErr || `exit ${r.code}`,
     runId,
+    configSnapshot: input.configSnapshot,
   }
 }
 
@@ -495,6 +524,71 @@ export function normalizePlanItems(raw: unknown): LocalCliPlanItem[] {
   return out.slice(0, 40)
 }
 
+export type OpenCodeNormalizedEvent =
+  | { kind: 'text'; delta: string }
+  | { kind: 'thought'; delta: string }
+  | { kind: 'status'; title: string; detail?: string; ok?: boolean }
+  | { kind: 'tool'; title: string; tool: string; detail?: string; ok?: boolean }
+  | { kind: 'file'; title: string; path: string; paths: string[]; action: 'edit' | 'create' | 'delete' }
+  | { kind: 'plan'; title: string; todos: LocalCliPlanItem[] }
+  | { kind: 'error'; title: string; detail: string; ok: false; permission?: string }
+
+/** Normalize OpenCode `run --format json` events without coupling the runner to one version. */
+export function normalizeOpenCodeEvent(raw: Record<string, unknown>): OpenCodeNormalizedEvent | null {
+  const type = String(raw.type || raw.event || raw.name || '').toLowerCase()
+  const subtype = String(raw.subtype || raw.status || '').toLowerCase()
+  const part = raw.part && typeof raw.part === 'object' ? (raw.part as Record<string, unknown>) : raw
+  const text = String(part.text ?? part.delta ?? part.content ?? raw.data ?? '').trim()
+
+  if (type === 'text' || type === 'message' || type === 'assistant' || type === 'content' || part.type === 'text') {
+    return text ? { kind: 'text', delta: text } : null
+  }
+  if (type === 'reasoning' || type === 'thinking' || type === 'thought' || part.type === 'reasoning') {
+    return text ? { kind: 'thought', delta: text } : null
+  }
+  if (type.includes('permission') || type === 'permission.asked' || type === 'permission_request') {
+    const detail = String(raw.message ?? raw.reason ?? raw.permission ?? raw.title ?? text ?? 'OpenCode permission request')
+    return {
+      kind: 'error',
+      title: 'OpenCode 權限要求',
+      detail: `${detail.slice(0, 380)}（一次性 CLI 無法回覆 permission request，已停止並請改用 server adapter）`,
+      ok: false,
+      permission: detail.slice(0, 380),
+    }
+  }
+  if (type === 'tool_use' || type === 'tool_call' || type === 'tool' || type === 'tool_result' || type === 'function_call') {
+    const name = String(raw.name ?? raw.tool ?? raw.tool_name ?? part.name ?? 'tool')
+    const input = raw.input ?? raw.arguments ?? part.input ?? part.arguments
+    return {
+      kind: 'tool',
+      title: type === 'tool_result' || subtype === 'completed' ? `已執行 ${name}` : `執行 ${name}…`,
+      tool: name,
+      detail: input && typeof input === 'object' ? JSON.stringify(input).slice(0, 400) : String(input ?? raw.result ?? '').slice(0, 400),
+      ok: raw.error == null && raw.ok !== false,
+    }
+  }
+  if (type === 'file' || type === 'edit' || type === 'write' || type === 'delete' || type === 'file_change' || type === 'file_edit') {
+    const file = String(raw.path ?? raw.file ?? raw.filename ?? part.path ?? '').trim()
+    if (!file) return null
+    const action = type === 'write' || type === 'file_change' ? 'create' : type === 'delete' ? 'delete' : 'edit'
+    return { kind: 'file', title: `已編輯 ${file.split(/[\\/]/).pop()}`, path: file, paths: [file], action }
+  }
+  if (type === 'todo' || type === 'todos' || type === 'plan' || type === 'todowrite' || type === 'update_plan') {
+    const todos = normalizePlanItems(raw.todos ?? raw.plan ?? raw.items ?? part.todos ?? part.items)
+    return todos.length ? { kind: 'plan', title: '任務清單更新', todos } : null
+  }
+  if (type === 'error' || type === 'failed' || subtype === 'error') {
+    return { kind: 'error', title: 'OpenCode 錯誤', detail: String(raw.message ?? raw.error ?? text ?? 'unknown error').slice(0, 400), ok: false }
+  }
+  if (type === 'step_start' || type === 'step_finish' || type === 'status' || type === 'server.connected' || type === 'session.status') {
+    return { kind: 'status', title: type, detail: String(raw.message ?? raw.status ?? raw.reason ?? '').slice(0, 220), ok: subtype !== 'error' }
+  }
+  if (type === 'finish' || type === 'done' || type === 'complete' || type === 'session.completed') {
+    return { kind: 'status', title: '回合完成', detail: String(raw.reason ?? raw.status ?? '').slice(0, 220), ok: true }
+  }
+  return null
+}
+
 /**
  * Line-buffer stdout and emit structured events for all vendor JSONL dialects:
  * - Grok: {type:thought|text|end, data}
@@ -511,6 +605,8 @@ function createCliStreamParser(
   let lastPlainEmit = 0
   let plainLineCount = 0
   const jsonStreaming = kind === 'grok' || kind === 'claude' || kind === 'codex' || kind === 'gemini' || kind === 'cursor'
+  let permissionRequest = ''
+  const jsonStreaming = kind === 'grok' || kind === 'claude' || kind === 'codex' || kind === 'cursor' || kind === 'opencode'
 
   const appendText = (data: string) => {
     if (!data) return ''
@@ -542,6 +638,20 @@ function createCliStreamParser(
         const j = JSON.parse(clean) as Record<string, unknown>
         const type = String(j.type || j.event || '')
         const subtype = String(j.subtype || '')
+
+        if (kind === 'opencode') {
+          const normalized = normalizeOpenCodeEvent(j)
+          if (normalized) {
+            if (normalized.kind === 'text' || normalized.kind === 'thought') {
+              if (normalized.kind === 'text') return { textDelta: appendText(normalized.delta) }
+              emit(normalized)
+              return { textDelta: '' }
+            }
+            if (normalized.kind === 'error' && normalized.permission) permissionRequest = normalized.detail
+            emit(normalized)
+            return { textDelta: '' }
+          }
+        }
 
         // ── Grok ──
         if (type === 'thought' || type === 'reasoning' || type === 'thinking') {
@@ -954,6 +1064,9 @@ function createCliStreamParser(
     },
     getAssembledText() {
       return assembledText
+    },
+    getPermissionRequest() {
+      return permissionRequest
     },
   }
 }

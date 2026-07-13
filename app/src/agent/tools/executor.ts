@@ -3,7 +3,7 @@
  */
 
 import type { ToolName } from './registry'
-import type { LlmSettings } from '../types'
+import type { LlmSettings, PermissionPolicy, PermissionProjection } from '../types'
 import { memoryStore } from '../hermes/memory'
 import { skillsStore } from '../hermes/skills'
 import { listAllMcpTools, mcpCallTool } from '../hermes/mcp'
@@ -17,6 +17,8 @@ import {
   scanDesignSystems,
   DESIGN_SYSTEM_ROOT,
 } from '../subdesign/designSystem'
+import { resolveEffectiveProjectRoot } from './runContext'
+import { isMcpServerAllowedForAgent, mcpServersForAgent } from '../opencode/mcpAccess'
 
 export interface ToolResult {
   ok: boolean
@@ -29,6 +31,11 @@ const memory = new Map<string, string>()
 export async function executeTool(
   tool: ToolName,
   input: Record<string, unknown>,
+  context?: {
+    permissionPolicy?: PermissionPolicy
+    permissionProjection?: PermissionProjection
+    mcpAgentId?: string
+  },
 ): Promise<ToolResult> {
   const api = window.subagents?.tools
   // Per-run pin first (scheduler A while UI shows B)
@@ -262,7 +269,7 @@ export async function executeTool(
         if (!settings.mcpEnabled) {
           return { ok: false, output: 'MCP 未啟用（請至設定開啟）' }
         }
-        const servers = settings.mcpServers || []
+        const servers = mcpServersForAgent(settings, context?.mcpAgentId)
         const filterId = input.serverId ? String(input.serverId) : ''
         const list = await listAllMcpTools(
           filterId ? servers.filter((s) => s.id === filterId) : servers,
@@ -293,6 +300,9 @@ export async function executeTool(
             : {}
         const server = (settings.mcpServers || []).find((s) => s.id === serverId)
         if (!server) return { ok: false, output: `找不到 MCP 伺服器：${serverId}` }
+        if (!isMcpServerAllowedForAgent(settings, context?.mcpAgentId, serverId)) {
+          return { ok: false, output: `MCP 伺服器未授權給 agent：${serverId}` }
+        }
         const r = await mcpCallTool(server, toolName, args, settings)
         return {
           ok: r.ok,
@@ -302,6 +312,9 @@ export async function executeTool(
       }
       case 'delegate_task': {
         const settings = useSettingsStore.getState().settings
+        if (settings.subAgentsEnabled !== true) {
+          return { ok: false, output: 'Sub Agent 功能目前已關閉，請到設定 → 角色模型開啟。' }
+        }
         const goal = String(input.goal || '').trim()
         if (!goal) return { ok: false, output: 'goal is required' }
         const background =
@@ -331,6 +344,8 @@ export async function executeTool(
           projectRoot: getRunProjectRoot(),
           sourceKind: 'delegate' as const,
           inheritCapabilities,
+          parentPermissionPolicy: context?.permissionPolicy,
+          parentPermissionProjection: context?.permissionProjection,
         }
 
         if (background) {
@@ -366,6 +381,9 @@ export async function executeTool(
         }
       }
       case 'delegate_status': {
+        if (useSettingsStore.getState().settings.subAgentsEnabled !== true) {
+          return { ok: false, output: 'Sub Agent 功能目前已關閉，沒有可用的 delegate job。' }
+        }
         const { listBackgroundJobs, getBackgroundJob } = await import('../hermes/backgroundJobs')
         const jobId = input.jobId ? String(input.jobId) : ''
         if (jobId) {

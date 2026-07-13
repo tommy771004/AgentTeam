@@ -2,11 +2,13 @@
  * Renderer helper: run prompt via local CLI and synthesize AgentState-like result
  */
 
-import type { AgentState, ApprovalMode } from './types'
+import type { AgentState, ApprovalMode, CliConfigSnapshot, ExternalRunRef } from './types'
 import { emptyKnowledge } from './knowledge'
 import { resolveCliApproval } from './cliApproval'
 
 export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
+export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
+export type LocalCliConfigSnapshot = CliConfigSnapshot
 
 export type LocalCliAttachmentPayload = {
   name: string
@@ -27,10 +29,18 @@ export async function runPromptViaLocalCli(opts: {
   approvalMode?: ApprovalMode
   unattended?: boolean
   runId?: string
+  configSnapshot?: LocalCliConfigSnapshot
   /** Materialized on disk by Electron for CLI vision/file tools */
   attachments?: LocalCliAttachmentPayload[]
   onLog?: (line: string) => void
-}): Promise<{ ok: boolean; output: string; command: string; error?: string }> {
+}): Promise<{
+  ok: boolean
+  output: string
+  command: string
+  error?: string
+  runId?: string
+  externalRun?: ExternalRunRef
+}> {
   if (!window.subagents?.cli?.runAgent) {
     return {
       ok: false,
@@ -73,6 +83,7 @@ export async function runPromptViaLocalCli(opts: {
     timeoutMs: 300_000,
     runId: opts.runId,
     attachments: opts.attachments,
+    configSnapshot: opts.configSnapshot,
   })
   if (r.cancelled) {
     opts.onLog?.('■ CLI 已取消')
@@ -85,6 +96,8 @@ export async function runPromptViaLocalCli(opts: {
     output: r.output,
     command: r.command,
     error: r.error,
+    runId: r.runId,
+    externalRun: r.externalRun as ExternalRunRef | undefined,
   }
 }
 

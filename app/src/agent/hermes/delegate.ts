@@ -5,7 +5,7 @@
  */
 
 import { v4 as uuid } from 'uuid'
-import type { LlmSettings, ToolCallRecord } from '../types'
+import type { LlmSettings, PermissionPolicy, PermissionProjection, ToolCallRecord } from '../types'
 import { withRoleModel } from '../llm'
 import { runFunctionCallingLoop } from '../tools/toolLoop'
 import { executeTool } from '../tools/executor'
@@ -35,6 +35,11 @@ export interface DelegateTaskInput {
   sourceKind?: string
   /** Per-run project pin (must not use UI store alone) */
   projectRoot?: string
+  /** Parent policy is inherited only restrictively by the child. */
+  parentPermissionPolicy?: PermissionPolicy
+  parentPermissionProjection?: PermissionProjection
+  /** Restrictive MCP allowlist inherited from the parent OpenCode agent. */
+  parentMcpAgentId?: string
 }
 
 export interface DelegateTaskResult {
@@ -103,9 +108,22 @@ export async function runDelegatedTask(
     parentDepth?: number
   },
 ): Promise<DelegateTaskResult> {
-  const budget = opts?.budget || globalDelegationBudget
-  const role: DelegateRole = input.role || 'leaf'
   const id = `dlg_${uuid().slice(0, 8)}`
+  const role: DelegateRole = input.role || 'leaf'
+  if (settings.subAgentsEnabled !== true) {
+    return {
+      id,
+      role,
+      goal: input.goal,
+      ok: false,
+      summary: 'Sub Agent 功能目前已關閉，委派未啟動。請到設定 → 角色模型開啟。',
+      tokensUsed: 0,
+      toolCalls: [],
+      durationMs: 0,
+      depth: opts?.parentDepth ?? 0,
+    }
+  }
+  const budget = opts?.budget || globalDelegationBudget
   const t0 = Date.now()
   const parentDepth = opts?.parentDepth ?? 0
 
@@ -208,6 +226,9 @@ export async function runDelegatedTask(
               ? `LEAF 限制：只讀 brief/artifact evidence；禁止寫 workspace、bash、skill_save、message_send、MCP write、再次 delegate_task / run_code。獨立上下文。preload caps=[${preloadCapabilityIds.join(', ')}]`
               : '子 orchestrator：本層禁止再 delegate 以控制深度。',
           blockedTools,
+          permissionPolicy: input.parentPermissionPolicy,
+          permissionProjection: input.parentPermissionProjection,
+          mcpAgentId: input.parentMcpAgentId,
           preloadCapabilityIds,
           includeMcpTools: role === 'leaf' ? false : settings.mcpEnabled,
           unattended: true,

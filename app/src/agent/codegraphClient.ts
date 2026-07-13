@@ -4,6 +4,22 @@
  */
 
 import type { EntityKind, KnowledgeEdge, KnowledgeEntity, KnowledgeGraph } from './types'
+import { mapOpenCodeLspToKnowledgeGraph, type OpenCodeLspOperation } from './opencode/codeIntelligenceAdapter'
+
+/** Translate an OpenCode experimental LSP result into the existing CodeGraph view. */
+export function parseOpenCodeLspToGraph(
+  operation: OpenCodeLspOperation,
+  symbol: string,
+  payload: unknown,
+): KnowledgeGraph {
+  const mapped = mapOpenCodeLspToKnowledgeGraph(operation, symbol, payload)
+  return {
+    entities: mapped.entities.slice(0, 50),
+    edges: mapped.edges.slice(0, 80),
+    phase: `OpenCode LSP · ${operation}`,
+    source: 'codegraph',
+  }
+}
 
 export type CodegraphUiStatus = {
   installed: boolean
