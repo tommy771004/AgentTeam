@@ -18,7 +18,7 @@ import {
 import { resolveCliApproval } from '../src/agent/cliApproval'
 import { materializeAttachments } from './attachmentStore'
 
-export type LocalCliKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
+export type LocalCliKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
 export type CliApprovalMode = 'always' | 'auto' | 'full'
 
 /** Serializable chat attachment from renderer (images as data URL) */
@@ -118,6 +118,8 @@ export function resolveBinary(kind: LocalCliKind, binary?: string): string {
       return 'grok'
     case 'opencode':
       return 'opencode'
+    case 'gemini':
+      return 'gemini'
     case 'cursor':
       // Never default to IDE `cursor` — opens GUI and hangs headless runs
       return 'cursor-agent'
@@ -271,6 +273,11 @@ export function buildLocalCliArgv(input: LocalCliRunInput): {
       args = ['run']
       if (model) args.push('--model', model)
       args.push(prompt)
+      break
+    }
+    case 'gemini': {
+      args = ['-p', prompt, '--output-format', 'json']
+      if (model) args.push('--model', model)
       break
     }
     case 'cursor': {
@@ -449,7 +456,7 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
       : cancelled
         ? '使用者取消'
         : r.timedOut
-          ? '逾時（CLI 未在時限內結束；請確認使用 headless：codex exec / claude -p / grok -p / cursor -p / opencode run）'
+          ? '逾時（CLI 未在時限內結束；請確認使用 headless：codex exec / claude -p / grok -p / gemini -p / cursor -p / opencode run）'
           : cleanErr || `exit ${r.code}`,
     runId,
   }
@@ -503,7 +510,7 @@ function createCliStreamParser(
   let assembledText = ''
   let lastPlainEmit = 0
   let plainLineCount = 0
-  const jsonStreaming = kind === 'grok' || kind === 'claude' || kind === 'codex' || kind === 'cursor'
+  const jsonStreaming = kind === 'grok' || kind === 'claude' || kind === 'codex' || kind === 'gemini' || kind === 'cursor'
 
   const appendText = (data: string) => {
     if (!data) return ''
@@ -544,6 +551,12 @@ function createCliStreamParser(
         }
         if (type === 'text' || type === 'content') {
           return { textDelta: appendText(String(j.data ?? j.content ?? j.delta ?? j.text ?? '')) }
+        }
+
+        // Gemini CLI provider-json: the one-shot response is commonly exposed
+        // as `response` or `text` without a Claude-style message envelope.
+        if (kind === 'gemini' && (j.response || j.text || j.output)) {
+          return { textDelta: appendText(String(j.response ?? j.text ?? j.output ?? '')) }
         }
 
         // ── Claude / Cursor: assistant message ──

@@ -4,8 +4,10 @@ import type {
   SubDesignBriefPatch,
   SubDesignDirection,
   SubDesignStage,
+  SubDesignReference,
 } from './types'
 import { isSubDesignStage } from './types'
+import type { OpenDesignProvenance } from '../openDesign/catalog'
 
 const MAX_TEXT = 4000
 const MAX_LIST_ITEMS = 20
@@ -52,6 +54,40 @@ function cleanDirections(value: unknown): SubDesignDirection[] {
     .slice(0, MAX_DIRECTIONS)
 }
 
+function cleanProvenance(value: unknown): OpenDesignProvenance[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((item) => ({
+      source: 'open-design' as const,
+      recordId: cleanText(item.recordId, 180) || undefined,
+      title: cleanText(item.title, 180) || undefined,
+      sourcePath: cleanText(item.sourcePath, 500) || undefined,
+      sourceUrl: cleanText(item.sourceUrl, 500),
+      upstreamCommit: cleanText(item.upstreamCommit, 80),
+      digest: cleanText(item.digest, 128),
+      licensePaths: cleanList(item.licensePaths),
+      indexedAt: cleanText(item.indexedAt, 40),
+    }))
+    .filter((item) => item.sourceUrl && item.digest)
+    .slice(0, 8)
+}
+
+function cleanReferences(value: unknown): SubDesignReference[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item): SubDesignReference | null => {
+    if (!item || typeof item !== 'object') return null
+    const raw = item as Record<string, unknown>
+    const id = cleanText(raw.id, 100)
+    const kind = raw.kind === 'screenshot' || raw.kind === 'url' ? raw.kind : null
+    const source = cleanText(raw.source, 2000)
+    const storedPath = cleanText(raw.storedPath, 1000).replaceAll('\\', '/')
+    const sha256 = cleanText(raw.sha256, 128)
+    if (!id || !kind || !source || !storedPath || !sha256) return null
+    return { id, kind, source, storedPath, sha256, title: cleanText(raw.title, 240) || undefined, importedAt: cleanText(raw.importedAt, 40) || new Date().toISOString(), designSystemId: cleanText(raw.designSystemId, 120) || undefined }
+  }).filter((item): item is SubDesignReference => Boolean(item)).slice(0, 12)
+}
+
 export function createSubDesignBrief(input: {
   threadId: string
   surface: SubDesignBrief['surface']
@@ -60,6 +96,10 @@ export function createSubDesignBrief(input: {
   platform?: SubDesignBrief['platform']
   fidelity?: SubDesignBrief['fidelity']
   designSystemId?: string
+  templateId?: string
+  skillIds?: string[]
+  provenance?: OpenDesignProvenance[]
+  references?: SubDesignReference[]
   constraints?: string[]
   acceptanceCriteria?: string[]
 }): SubDesignBrief {
@@ -73,6 +113,10 @@ export function createSubDesignBrief(input: {
     platform: input.platform,
     fidelity: input.fidelity,
     designSystemId: cleanText(input.designSystemId, 120) || undefined,
+    templateId: cleanText(input.templateId, 120) || undefined,
+    skillIds: cleanList(input.skillIds).slice(0, 12),
+    provenance: cleanProvenance(input.provenance),
+    references: cleanReferences(input.references),
     constraints: cleanList(input.constraints),
     acceptanceCriteria: cleanList(input.acceptanceCriteria),
     directions: [],
@@ -112,6 +156,10 @@ export function normalizeBrief(raw: unknown): SubDesignBrief | null {
         : undefined,
     fidelity: value.fidelity === 'wireframe' || value.fidelity === 'high-fidelity' ? value.fidelity : undefined,
     designSystemId: cleanText(value.designSystemId, 120) || undefined,
+    templateId: cleanText(value.templateId, 120) || undefined,
+    skillIds: cleanList(value.skillIds).slice(0, 12),
+    provenance: cleanProvenance(value.provenance),
+    references: cleanReferences(value.references),
     constraints: cleanList(value.constraints),
     acceptanceCriteria: cleanList(value.acceptanceCriteria),
     directions: cleanDirections(value.directions),
@@ -134,6 +182,10 @@ export function updateSubDesignBrief(
     fidelity: patch.fidelity ?? brief.fidelity,
     designSystemId:
       patch.designSystemId == null ? brief.designSystemId : cleanText(patch.designSystemId, 120) || undefined,
+    templateId: patch.templateId == null ? brief.templateId : cleanText(patch.templateId, 120) || undefined,
+    skillIds: patch.skillIds == null ? brief.skillIds : cleanList(patch.skillIds).slice(0, 12),
+    provenance: patch.provenance == null ? brief.provenance : cleanProvenance(patch.provenance),
+    references: patch.references == null ? brief.references : cleanReferences(patch.references),
     constraints: patch.constraints == null ? brief.constraints : cleanList(patch.constraints),
     acceptanceCriteria:
       patch.acceptanceCriteria == null ? brief.acceptanceCriteria : cleanList(patch.acceptanceCriteria),
@@ -199,4 +251,3 @@ export function stageFromPlan(
   if (/direction|方向|比較|選擇/.test(hay)) return 'direction'
   return 'brief'
 }
-

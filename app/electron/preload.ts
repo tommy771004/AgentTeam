@@ -177,9 +177,83 @@ const api = {
         content: string
         error?: string
       }>,
+    patchArtifact: (input: { artifact: unknown; operations: unknown; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:patchArtifact', input) as Promise<{
+        ok: boolean
+        artifact?: unknown
+        paths?: string[]
+        operationCount?: number
+        error?: string
+      }>,
+    applyTweak: (input: { artifact: unknown; tweakId: string; value: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:applyTweak', input) as Promise<{
+        ok: boolean
+        artifact?: unknown
+        paths?: string[]
+        operationCount?: number
+        error?: string
+      }>,
+    verifyEvidence: (input: { artifact: unknown; evidence: unknown; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:verifyEvidence', input) as Promise<{
+        ok: boolean
+        validKinds?: string[]
+        errors?: string[]
+      }>,
+    captureEvidence: (input: {
+      artifact: unknown
+      kind: 'screenshot' | 'dom'
+      viewport?: { width: number; height: number }
+      projectRoot?: string
+    }) => ipcRenderer.invoke('subdesign:captureEvidence', input) as Promise<{
+      ok: boolean
+      path?: string
+      capturedAt?: string
+      evidenceId?: string
+      sha256?: string
+      source?: string
+      artifactId?: string
+      revision?: number
+      createdAt?: string
+      error?: string
+    }>,
+    lintEvidence: (input: { artifact: unknown; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:lintEvidence', input) as Promise<{
+        ok: boolean
+        evidence?: unknown
+        findings?: unknown[]
+        error?: string
+      }>,
+    importReference: (input: { briefId: string; kind: 'screenshot' | 'url'; source: string; suggestedTitle?: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:importReference', input) as Promise<{
+        ok: boolean
+        reference?: unknown
+        designSystem?: { id: string; path: string; content: string }
+        error?: string
+      }>,
+    exportCapabilities: () => ipcRenderer.invoke('subdesign:exportCapabilities') as Promise<{
+      ok: boolean
+      pptx: boolean
+      mp4: boolean
+      mp4Error?: string
+    }>,
+    copyVendorPack: (input: {
+      sourcePath: string
+      assetPaths: string[]
+      targetId: string
+      digest: string
+      kind?: 'template' | 'skill' | 'design-system' | 'prompt' | 'craft' | 'media'
+      projectRoot?: string
+    }) => ipcRenderer.invoke('subdesign:copyVendorPack', input) as Promise<{
+      ok: boolean
+      path?: string
+      files?: number
+      bytes?: number
+      error?: string
+    }>,
     exportArtifact: (input: {
       artifact: unknown
-      format: 'html' | 'zip' | 'pdf'
+      critique?: unknown
+      format: 'html' | 'zip' | 'pdf' | 'pptx' | 'mp4'
       projectRoot?: string
       suggestedName?: string
     }) =>
@@ -191,7 +265,7 @@ const api = {
         sha256?: string
         artifactId?: string
         revision?: number
-        format?: 'html' | 'zip' | 'pdf'
+        format?: 'html' | 'zip' | 'pdf' | 'pptx' | 'mp4'
         error?: string
       }>,
   },
@@ -462,7 +536,7 @@ const api = {
         suggestedDepth?: string
       }>,
     runAgent: (input: {
-      kind: 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
+      kind: 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
       binary?: string
       prompt: string
       cwd?: string

@@ -360,8 +360,31 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
           title: { type: 'string' },
           entry: { type: 'string' },
           renderer: { type: 'string', enum: ['html', 'deck-html', 'markdown', 'svg', 'code', 'design-system'] },
-          exports: { type: 'array', items: { type: 'string', enum: ['html', 'pdf', 'zip', 'jsx', 'md', 'svg', 'txt'] } },
+          exports: { type: 'array', items: { type: 'string', enum: ['html', 'pdf', 'zip', 'pptx', 'mp4', 'jsx', 'md', 'svg', 'txt'] } },
           supportingFiles: { type: 'array', items: { type: 'string' } },
+          tweaks: {
+            type: 'array',
+            maxItems: 32,
+            description: 'Structured live controls. replaceTemplate must contain literal {{value}}.',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                label: { type: 'string' },
+                kind: { type: 'string', enum: ['color', 'text', 'number', 'select', 'boolean'] },
+                path: { type: 'string' },
+                find: { type: 'string' },
+                replaceTemplate: { type: 'string' },
+                value: { type: 'string' },
+                defaultValue: { type: 'string' },
+                min: { type: 'number' },
+                max: { type: 'number' },
+                step: { type: 'number' },
+                options: { type: 'array', items: { type: 'string' } },
+              },
+              required: ['id', 'label', 'kind', 'path', 'find', 'replaceTemplate'],
+            },
+          },
           designSystemId: { type: 'string' },
           status: { type: 'string', enum: ['streaming', 'complete', 'error'] },
           revision: { type: 'integer' },
@@ -371,6 +394,59 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
       briefId: { type: 'string', description: 'Optional when the thread is linked to a brief.' },
     },
     required: ['manifest'],
+  },
+  design_artifact_patch: {
+    type: 'object',
+    properties: {
+      artifactId: { type: 'string', description: 'Registered SubDesign artifact id' },
+      operations: {
+        type: 'array',
+        maxItems: 12,
+        description: 'Exact bounded replacements. Paths must already belong to the artifact.',
+        items: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Existing artifact entry or supporting file' },
+            find: { type: 'string', description: 'Exact text to replace' },
+            replace: { type: 'string', description: 'Replacement text' },
+            expectedMatches: { type: 'integer', minimum: 1, maximum: 12, default: 1 },
+          },
+          required: ['path', 'find', 'replace'],
+        },
+      },
+    },
+    required: ['artifactId', 'operations'],
+  },
+  design_artifact_tweak: {
+    type: 'object',
+    properties: {
+      artifactId: { type: 'string', description: 'Registered SubDesign artifact id' },
+      tweakId: { type: 'string', description: 'Declared structured tweak id' },
+      value: { type: 'string', description: 'New value; validated against the tweak kind and bounds' },
+    },
+    required: ['artifactId', 'tweakId', 'value'],
+  },
+  design_artifact_capture: {
+    type: 'object',
+    properties: {
+      artifactId: { type: 'string', description: 'Registered SubDesign artifact id' },
+      kind: { type: 'string', enum: ['screenshot', 'dom'] },
+      viewport: {
+        type: 'object',
+        properties: {
+          width: { type: 'integer', minimum: 320, maximum: 2400, default: 1440 },
+          height: { type: 'integer', minimum: 240, maximum: 1800, default: 900 },
+        },
+      },
+    },
+    required: ['artifactId', 'kind'],
+  },
+  design_artifact_lint: {
+    type: 'object',
+    properties: {
+      artifactId: { type: 'string', description: 'Registered SubDesign artifact id' },
+    },
+    required: ['artifactId'],
   },
   design_critique: {
     type: 'object',
@@ -391,7 +467,7 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
             items: {
               type: 'object',
               properties: {
-                kind: { type: 'string', enum: ['screenshot', 'dom', 'lint', 'build', 'manual'] },
+                kind: { type: 'string', enum: ['screenshot', 'dom', 'lint', 'build', 'manual', 'template-attribution', 'design-system', 'asset-license'] },
                 summary: { type: 'string' },
                 path: { type: 'string' },
                 capturedAt: { type: 'string' },
@@ -423,7 +499,7 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
     type: 'object',
     properties: {
       artifactId: { type: 'string', description: 'Registered SubDesign artifact id' },
-      format: { type: 'string', enum: ['html', 'pdf', 'zip'] },
+      format: { type: 'string', enum: ['html', 'pdf', 'zip', 'pptx', 'mp4'] },
       briefId: { type: 'string' },
     },
     required: ['artifactId', 'format'],

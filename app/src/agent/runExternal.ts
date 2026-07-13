@@ -689,7 +689,7 @@ export async function runExternalObjective(
         ? useSubDesignArtifactStore.getState().findByBriefId(subDesignBrief.id)[0]
         : null
       const subDesignCritique = subDesignArtifact
-        ? useSubDesignCritiqueStore.getState().latestForArtifact(subDesignArtifact.id)
+        ? useSubDesignCritiqueStore.getState().latestForArtifact(subDesignArtifact.id, subDesignArtifact.revision)
         : null
       const subDesignExports = subDesignArtifact
         ? useSubDesignExportStore.getState().findByArtifactId(subDesignArtifact.id)

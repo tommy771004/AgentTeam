@@ -512,6 +512,7 @@ export async function executeTool(
           'constraints',
           'acceptanceCriteria',
           'directions',
+          'references',
         ]) {
           if (Object.prototype.hasOwnProperty.call(input, key)) patch[key] = input[key]
         }
@@ -623,6 +624,92 @@ export async function executeTool(
           data: result.artifact,
         }
       }
+      case 'design_artifact_patch': {
+        const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
+        const { useSubDesignStore } = await import('../../store/subDesignStore')
+        const artifactId = String(input.artifactId || '').trim()
+        const artifact = useSubDesignArtifactStore.getState().findById(artifactId)
+        if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }
+        const patchApi = window.subagents?.subdesign?.patchArtifact
+        if (!patchApi) return { ok: false, output: 'artifact patch 需要 Electron workspace API。' }
+        const operations = Array.isArray(input.operations) ? input.operations.slice(0, 12) : []
+        if (!operations.length) return { ok: false, output: 'operations 必須至少包含一個 exact replacement。' }
+        const result = await patchApi({ artifact, operations, projectRoot })
+        if (!result.ok || !result.artifact) return { ok: false, output: result.error || 'artifact patch 失敗。', data: result }
+        const updated = useSubDesignArtifactStore.getState().register(result.artifact, {
+          briefId: artifact.briefId,
+          designSystemId: artifact.designSystemId,
+        }, projectRoot)
+        if (!updated.ok) return { ok: false, output: `patch revision invalid：${updated.errors.join('；')}` }
+        const linkedBrief = useSubDesignStore.getState().findById(artifact.briefId)
+        if (linkedBrief && linkedBrief.stage !== 'critique') useSubDesignStore.getState().setStage(linkedBrief.id, 'critique', projectRoot)
+        return {
+          ok: true,
+          output: `Artifact「${artifact.title}」已原地調整（revision ${updated.artifact.revision}）→ ${(result.paths || []).join(', ')}`,
+          data: { artifact: updated.artifact, paths: result.paths || [], operationCount: result.operationCount || operations.length },
+        }
+      }
+      case 'design_artifact_tweak': {
+        const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
+        const { useSubDesignStore } = await import('../../store/subDesignStore')
+        const artifactId = String(input.artifactId || '').trim()
+        const artifact = useSubDesignArtifactStore.getState().findById(artifactId)
+        if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }
+        const applyTweak = window.subagents?.subdesign?.applyTweak
+        if (!applyTweak) return { ok: false, output: 'structured artifact tweak 需要 Electron workspace API。' }
+        const result = await applyTweak({ artifact, tweakId: String(input.tweakId || ''), value: String(input.value ?? ''), projectRoot })
+        if (!result.ok || !result.artifact) return { ok: false, output: result.error || 'structured tweak 失敗。', data: result }
+        const updated = useSubDesignArtifactStore.getState().register(result.artifact, { briefId: artifact.briefId, designSystemId: artifact.designSystemId }, projectRoot)
+        if (!updated.ok) return { ok: false, output: `tweak revision invalid：${updated.errors.join('；')}` }
+        const brief = useSubDesignStore.getState().findById(artifact.briefId)
+        if (brief && brief.stage !== 'critique') useSubDesignStore.getState().setStage(brief.id, 'critique', projectRoot)
+        return { ok: true, output: `Artifact「${artifact.title}」已套用 structured tweak（revision ${updated.artifact.revision}）。`, data: { artifact: updated.artifact, paths: result.paths || [], operationCount: result.operationCount || 1 } }
+      }
+      case 'design_artifact_capture': {
+        const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
+        const artifactId = String(input.artifactId || '').trim()
+        const kind = input.kind === 'dom' ? 'dom' : input.kind === 'screenshot' ? 'screenshot' : ''
+        const artifact = useSubDesignArtifactStore.getState().findById(artifactId)
+        if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }
+        if (!kind) return { ok: false, output: 'capture kind 必須是 screenshot 或 dom。' }
+        const capture = window.subagents?.subdesign?.captureEvidence
+        if (!capture) return { ok: false, output: 'artifact evidence capture 需要 Electron desktop。' }
+        const rawViewport = input.viewport && typeof input.viewport === 'object' ? input.viewport as Record<string, unknown> : {}
+        const result = await capture({
+          artifact,
+          kind,
+          viewport: {
+            width: Math.max(320, Math.min(2400, Math.floor(Number(rawViewport.width) || 1440))),
+            height: Math.max(240, Math.min(1800, Math.floor(Number(rawViewport.height) || 900))),
+          },
+          projectRoot,
+        })
+        if (!result.ok || !result.path) return { ok: false, output: result.error || 'artifact evidence capture 失敗。', data: result }
+        const evidence = {
+          kind,
+          summary: kind === 'screenshot' ? 'Electron sandbox capture of the registered artifact.' : 'Electron sandbox DOM snapshot of the registered artifact.',
+          path: result.path,
+          capturedAt: result.capturedAt || new Date().toISOString(),
+          evidenceId: result.evidenceId,
+          sha256: result.sha256,
+          source: result.source,
+          artifactId: result.artifactId,
+          revision: result.revision,
+        }
+        return { ok: true, output: `已產生 ${kind} evidence：${result.path}`, data: { ...result, evidence } }
+      }
+      case 'design_artifact_lint': {
+        const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
+        const artifactId = String(input.artifactId || '').trim()
+        const artifact = useSubDesignArtifactStore.getState().findById(artifactId)
+        if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }
+        const lint = window.subagents?.subdesign?.lintEvidence
+        if (!lint) return { ok: false, output: 'artifact semantic lint 需要 Electron desktop。' }
+        const result = await lint({ artifact, projectRoot })
+        if (!result.ok || !result.evidence) return { ok: false, output: result.error || 'artifact semantic lint 失敗。', data: result }
+        const evidence = result.evidence as Record<string, unknown>
+        return { ok: true, output: `已產生 lint evidence：${String(evidence.path || '')}`, data: { ...result, evidence } }
+      }
       case 'design_critique': {
         const { critiqueAllowsDeliver } = await import('../subdesign/critique')
         const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
@@ -640,11 +727,38 @@ export async function executeTool(
         const briefId = String(rawCritique.briefId || linked?.id || artifact.briefId).trim()
         if (linked && briefId !== linked.id) return { ok: false, output: 'critique briefId 與目前 thread 不一致。' }
         rawCritique.briefId = briefId
+        const verifyEvidence = window.subagents?.subdesign?.verifyEvidence
+        if (verifyEvidence) {
+          const evidenceCheck = await verifyEvidence({ artifact, evidence: rawCritique.evidence, projectRoot })
+          if (!evidenceCheck.ok) {
+            const findings = Array.isArray(rawCritique.findings) ? [...rawCritique.findings] : []
+            findings.push({
+              severity: 'blocker',
+              message: `Evidence 未通過 main process 驗證：${evidenceCheck.errors?.join('；') || '檔案不存在、路徑不被允許或已過期。'}`,
+              path: '.subagents/subdesign/critiques',
+            })
+            rawCritique.findings = findings
+            rawCritique.verdict = 'needs-revision'
+          }
+        }
         const result = useSubDesignCritiqueStore.getState().record(rawCritique, { briefId }, projectRoot)
         if (!result.ok) return { ok: false, output: `critique invalid：${result.errors.join('；')}` }
         const nextStage = critiqueAllowsDeliver(result.critique) ? 'deliver' : 'critique'
         const brief = useSubDesignStore.getState().findById(briefId)
         const stageResult = brief ? useSubDesignStore.getState().setStage(brief.id, nextStage, projectRoot) : null
+        if (result.critique.verdict === 'pass' && brief) {
+          const { learningLoop } = await import('../hermes/learning')
+          learningLoop.onSubDesignPass({
+            projectRoot,
+            surface: brief.surface,
+            platform: brief.platform,
+            designSystemId: brief.designSystemId,
+            templateId: brief.templateId,
+            selectedDirectionId: brief.selectedDirectionId,
+            memoryEnabled: useSettingsStore.getState().settings.memoryEnabled,
+            memoryWriteEnabled: useSettingsStore.getState().settings.memoryWriteEnabled,
+          })
+        }
         return {
           ok: true,
           output: `Critique ${result.critique.verdict}（revision ${result.critique.revision}） · stage=${stageResult?.ok ? stageResult.brief.stage : nextStage}`,
@@ -656,21 +770,27 @@ export async function executeTool(
         const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
         const { useSubDesignCritiqueStore } = await import('../../store/subDesignCritiqueStore')
         const artifactId = String(input.artifactId || '').trim()
-        const format = String(input.format || '').trim() as 'html' | 'zip' | 'pdf'
-        if (!artifactId || !['html', 'zip', 'pdf'].includes(format)) {
+        const format = String(input.format || '').trim() as 'html' | 'zip' | 'pdf' | 'pptx' | 'mp4'
+        if (!artifactId || !['html', 'zip', 'pdf', 'pptx', 'mp4'].includes(format)) {
           return { ok: false, output: 'artifactId / format 不合法。' }
         }
         const artifact = useSubDesignArtifactStore.getState().findById(artifactId)
         if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }
         if (!artifact.exports.includes(format)) return { ok: false, output: `artifact 不支援 ${format} export。` }
-        const critique = useSubDesignCritiqueStore.getState().latestForArtifact(artifact.id)
+        const critique = useSubDesignCritiqueStore.getState().latestForArtifact(artifact.id, artifact.revision)
         if (!critique || !critiqueAllowsDeliver(critique)) {
           return { ok: false, output: 'Artifact 尚未通過 critique；請先修正 blocker / needs-revision findings。' }
+        }
+        const verifyEvidence = window.subagents?.subdesign?.verifyEvidence
+        if (verifyEvidence) {
+          const evidenceCheck = await verifyEvidence({ artifact, evidence: critique.evidence, projectRoot })
+          if (!evidenceCheck.ok) return { ok: false, output: `Evidence 未通過 main process 驗證：${evidenceCheck.errors?.join('；') || '請重新 capture screenshot / DOM / lint evidence。'}` }
         }
         const exportApi = window.subagents?.subdesign
         if (!exportApi?.exportArtifact) return { ok: false, output: 'artifact export 需要 Electron desktop。' }
         const result = await exportApi.exportArtifact({
           artifact,
+          critique,
           format,
           projectRoot,
           suggestedName: artifact.title,

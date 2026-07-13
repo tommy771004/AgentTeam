@@ -212,6 +212,7 @@ function SchedulerSection() {
             <option value="claude">Claude CLI</option>
             <option value="grok">Grok CLI</option>
             <option value="opencode">OpenCode CLI</option>
+            <option value="gemini">Gemini CLI</option>
             <option value="cursor">Cursor CLI</option>
           </select>
           <p className="text-[11px] text-outline mt-1">

@@ -23,6 +23,10 @@ const SIDE_EFFECT_TOOLS = new Set([
   'design_system_create',
   'design_system_update',
   'design_artifact_export',
+  'design_artifact_patch',
+  'design_artifact_tweak',
+  'design_artifact_capture',
+  'design_artifact_lint',
   'workspace_download',
   'workspace_mkdir',
   'workspace_move',
@@ -47,17 +51,29 @@ const SUBDESIGN_WRITE_TOOLS = new Set([
   'design_system_create',
   'design_system_update',
   'design_artifact_export',
+  'design_artifact_patch',
+  'design_artifact_tweak',
+  'design_artifact_capture',
+  'design_artifact_lint',
 ])
+
+/**
+ * Conservative read-only shell allowlist for the SubDesign direction gate.
+ * Anything not explicitly recognized is treated as potentially writable.
+ */
+export function isSubDesignReadonlyBashCommand(command: string): boolean {
+  const value = command.trim()
+  if (!value || /[`$()<>]/.test(value)) return false
+  if (/\b(?:curl|wget|nc|ssh|scp|sftp|npm|pnpm|yarn|bun|cargo|pip|python(?:3)?|node|ruby|perl|php|make|docker)\b/i.test(value)) return false
+  if (/\bgit\s+(?:apply|add|commit|clean|checkout|mv|rm|reset|restore|rebase|merge|cherry-pick|stash|switch|branch\s+(?!--show-current)|tag|push|pull|fetch|clone)\b/i.test(value)) return false
+  const commands = value.split(/\s*(?:&&|\|\||;|\|)\s*/).map((part) => part.trim()).filter(Boolean)
+  if (!commands.length) return false
+  return commands.every((part) => /^(?:pwd|ls|cat|head|tail|grep|rg|find|fd|sort|uniq|wc|echo|printf|which|type|command\s+-v|env|printenv|git\s+(?:status|diff|log|show|branch\s+--show-current|rev-parse|ls-files)|sed\s+(?!.*(?:^|\s)-i\b)|awk)\b/i.test(part))
+}
 
 /** Bash commands that can mutate the linked SubDesign workspace. */
 export function isSubDesignWritableBashCommand(command: string): boolean {
-  const value = command.trim()
-  if (!value) return false
-  return /(?:^|[;&|]\s*)(?:rm|mv|cp|mkdir|touch|install|chmod|chown|ln|tee)\b/i.test(value)
-    || /\b(?:sed|perl)\s+-[^\n]*i\b/i.test(value)
-    || /(?:^|\s)(?:>>?|<<-?)\s*\S+/.test(value)
-    || /\bgit\s+(?:apply|add|commit|clean|checkout|mv|rm|reset|restore)\b/i.test(value)
-    || /\b(?:node|python(?:3)?|ruby)\b[^\n]*(?:writeFile|appendFile|unlink|mkdirSync|renameSync)\b/i.test(value)
+  return !isSubDesignReadonlyBashCommand(command)
 }
 
 /** Side-effect classification (dynamic MCP tools count as network). */

@@ -16,6 +16,7 @@ import {
 import { useSettingsStore } from '../store/settingsStore'
 import { useLearningStore } from '../store/learningStore'
 import { modelsGroupedByCliProvider } from '../agent/cliProviders'
+import { CLI_ADAPTERS, DISCOVERY_ONLY_AGENT_ADAPTERS } from '../agent/cliAdapters'
 import type {
   McpServerConfig,
   PersonalityPreset,
@@ -1144,6 +1145,33 @@ export function SettingsPage() {
                 }
               />
             </SettingsGroup>
+            <SettingsGroup title="Adapter capability matrix">
+              <div className="grid gap-2 px-4 py-3 sm:grid-cols-2">
+                {CLI_ADAPTERS.map((adapter) => {
+                  const providerId = adapter.id === 'claude' ? 'anthropic' : adapter.id === 'gemini' ? 'google' : adapter.id
+                  const provider = (settings.cliProviders || []).find((item) => item.id === providerId || item.id === adapter.id)
+                  return (
+                    <div key={adapter.id} className="rounded-xl border border-white/[0.08] bg-white/[0.025] px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[12px] font-semibold text-on-surface">{adapter.displayName}</span>
+                        <span className={`text-[10px] ${provider?.enabled && provider.authorized ? 'text-primary' : 'text-outline'}`}>
+                          {provider?.enabled && provider.authorized ? '已授權' : '未授權'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[10px] leading-relaxed text-outline">
+                        resume {adapter.supports.resume ? '✓' : '—'} · image {adapter.supports.images ? '✓' : '—'} · MCP {adapter.supports.mcp ? '✓' : '—'} · sandbox {adapter.supports.sandbox}
+                      </p>
+                      <p className="mt-1 truncate text-[10px] text-outline/70">
+                        probe {provider?.lastProbeAt ? new Date(provider.lastProbeAt).toLocaleString() : '尚未掃描'} · {provider?.diagnostic?.binaryPath || adapter.binaryCandidates[0]}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="px-4 pb-3 text-[11px] leading-relaxed text-outline">
+                未安裝或未授權只會顯示診斷，不會自動安裝 binary 或複製 token。其他 agent 目前維持 discovery-only：{DISCOVERY_ONLY_AGENT_ADAPTERS.slice(0, 6).map((item) => item.displayName).join('、')} 等。
+              </p>
+            </SettingsGroup>
             <SettingsGroup title="廠商">
               {(settings.cliProviders || []).map((p, idx) => (
                 <div key={p.id} className="px-4 py-3 space-y-2 border-b border-white/[0.07] last:border-0">
@@ -1205,7 +1233,8 @@ export function SettingsPage() {
                   {(p.kind === 'opencode' ||
                     p.kind === 'cursor' ||
                     p.kind === 'codex' ||
-                    p.kind === 'anthropic') && (
+                    p.kind === 'anthropic' ||
+                    p.kind === 'google') && (
                     <div className="flex flex-wrap gap-2 items-center">
                       <input
                         className={settingsInputCls + ' flex-1 min-w-[140px]'}

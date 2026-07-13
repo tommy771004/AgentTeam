@@ -6,6 +6,7 @@
 import { v4 as uuid } from 'uuid'
 import { memoryStore } from './memory'
 import { skillsStore } from './skills'
+import { subDesignProjectMemoryKey } from '../subdesign/preference'
 import type { LearningEvent } from './types'
 
 type Listener = (events: LearningEvent[]) => void
@@ -53,6 +54,42 @@ class LearningLoop {
         at: new Date().toISOString(),
       })
     }
+  }
+
+  /**
+   * Persist a successful SubDesign choice as a reusable project-scoped preference.
+   * The path itself is never written to memory; only a stable short fingerprint is.
+   */
+  onSubDesignPass(input: {
+    projectRoot?: string
+    surface: string
+    platform?: string
+    designSystemId?: string
+    templateId?: string
+    selectedDirectionId?: string
+    memoryEnabled?: boolean
+    memoryWriteEnabled?: boolean
+  }) {
+    if (input.memoryEnabled === false || input.memoryWriteEnabled === false) return
+    const projectKey = subDesignProjectMemoryKey(input.projectRoot)
+    const details = [
+      `surface=${input.surface}`,
+      input.platform ? `platform=${input.platform}` : '',
+      input.designSystemId ? `designSystem=${input.designSystemId}` : '',
+      input.templateId ? `template=${input.templateId}` : '',
+      input.selectedDirectionId ? `direction=${input.selectedDirectionId}` : '',
+    ].filter(Boolean).join(', ')
+    memoryStore.appendMemory(
+      `SubDesign 偏好（${projectKey}）：${details || '未指定偏好'}。這是一次已通過 critique 的設計選擇，下次建立設計可優先預填。`,
+      ['success', 'subdesign', 'subdesign-preference', projectKey],
+    )
+    this.emit({
+      id: uuid(),
+      type: 'memory_saved',
+      message: '已將通過 critique 的 SubDesign 選擇寫入專案偏好記憶。',
+      at: new Date().toISOString(),
+      payload: { kind: 'subdesign-preference', projectKey },
+    })
   }
 
   /**

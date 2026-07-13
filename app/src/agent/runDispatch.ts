@@ -38,14 +38,14 @@ export type DispatchResult = {
 
 function resolveCliBinary(kind: LocalRunnerKind): string | undefined {
   const settings = useSettingsStore.getState().settings
-  const mapId = kind === 'claude' ? 'anthropic' : kind
+  const mapId = kind === 'claude' ? 'anthropic' : kind === 'gemini' ? 'google' : kind
   const p = (settings.cliProviders || []).find((x) => x.id === mapId || x.id === kind)
   return p?.cliBinary || undefined
 }
 
 function isRunnerAuthorized(kind: LocalRunnerKind): boolean {
   const settings = useSettingsStore.getState().settings
-  const mapId = kind === 'claude' ? 'anthropic' : kind
+  const mapId = kind === 'claude' ? 'anthropic' : kind === 'gemini' ? 'google' : kind
   return (settings.cliProviders || []).some(
     (p) =>
       (p.id === mapId || p.id === kind) && p.enabled !== false && p.authorized,

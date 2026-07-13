@@ -30,7 +30,10 @@ function normalizeFindings(value: unknown): SubDesignCritiqueFinding[] {
 
 function normalizeEvidence(value: unknown): SubDesignCritiqueEvidence[] {
   if (!Array.isArray(value)) return []
-  const allowed = new Set<SubDesignCritiqueEvidence['kind']>(['screenshot', 'dom', 'lint', 'build', 'manual'])
+  const allowed = new Set<SubDesignCritiqueEvidence['kind']>([
+    'screenshot', 'dom', 'lint', 'build', 'manual',
+    'template-attribution', 'design-system', 'asset-license',
+  ])
   return value
     .map((item): SubDesignCritiqueEvidence | null => {
       if (!item || typeof item !== 'object') return null
@@ -44,6 +47,11 @@ function normalizeEvidence(value: unknown): SubDesignCritiqueEvidence[] {
         summary,
         path: path && isProjectRelativePath(path) ? path.slice(0, 600) : undefined,
         capturedAt: String(raw.capturedAt || '').trim().slice(0, 40) || undefined,
+        evidenceId: /^evidence_[a-zA-Z0-9]{12,64}$/.test(String(raw.evidenceId || '')) ? String(raw.evidenceId) : undefined,
+        sha256: /^[a-f0-9]{64}$/i.test(String(raw.sha256 || '')) ? String(raw.sha256).toLowerCase() : undefined,
+        source: String(raw.source || '').trim().slice(0, 120) || undefined,
+        artifactId: String(raw.artifactId || '').trim().slice(0, 120) || undefined,
+        revision: Number.isFinite(Number(raw.revision)) ? Math.max(1, Math.floor(Number(raw.revision))) : undefined,
       }
     })
     .filter((item): item is SubDesignCritiqueEvidence => item !== null)

@@ -8,7 +8,7 @@ import type { ContinueGoalSnapshot } from '../agent/continueGoal'
 const KEY = 'subagents.threads.v5'
 
 /** builtin = 內建 engine；其餘 = 本機 CLI 訂閱 */
-export type ThreadRunner = 'builtin' | 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
+export type ThreadRunner = 'builtin' | 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
 const MAX_THREADS = 40
 const MAX_BUBBLES = 100
 const MAX_BUBBLE_CONTENT_CHARS = 32_000
@@ -63,7 +63,7 @@ export type ThreadRunSummary = {
       }
     }
     exports?: Array<{
-      format: 'html' | 'zip' | 'pdf'
+      format: 'html' | 'zip' | 'pdf' | 'pptx' | 'mp4'
       revision: number
       path: string
       sha256: string
@@ -164,7 +164,7 @@ interface ThreadStore {
   ) => void
   pushRunSummary: (threadId: string, summary: ThreadRunSummary) => void
   appendSubDesignExport: (threadId: string, item: {
-    format: 'html' | 'zip' | 'pdf'
+    format: 'html' | 'zip' | 'pdf' | 'pptx' | 'mp4'
     revision: number
     path: string
     sha256: string
@@ -208,7 +208,7 @@ function migrateThread(raw: Record<string, unknown>): Thread {
   const speed = (raw.speed as SpeedMode) || 'standard'
   const agentMode = (raw.agentMode as AgentMode) || 'build'
   const runnerRaw = String(raw.runner || 'builtin') as ThreadRunner
-  const runners: ThreadRunner[] = ['builtin', 'codex', 'claude', 'grok', 'opencode', 'cursor']
+  const runners: ThreadRunner[] = ['builtin', 'codex', 'claude', 'grok', 'opencode', 'gemini', 'cursor']
   const depthOk = ['fast', 'standard', 'deep', 'max', 'ultra'].includes(depth)
   const rawPlan = Array.isArray(raw.runPlan) ? raw.runPlan : []
   const runPlan = rawPlan

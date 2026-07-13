@@ -155,6 +155,12 @@ export function ProtocolsPage() {
       blurb: '本機 CLI：agents/commands 另見設定；此路徑不跑內建工具',
     },
     {
+      id: 'gemini',
+      label: 'Gemini',
+      ready: authorizedRunners.some((p) => p.id === 'google' || p.id === 'gemini'),
+      blurb: '本機 Gemini CLI：登入狀態由 CLI 管理；圖片可用性依本機版本診斷',
+    },
+    {
       id: 'cursor',
       label: 'Cursor',
       ready: authorizedRunners.some((p) => p.id === 'cursor'),

@@ -636,6 +636,29 @@ export async function discoverLocalClis(): Promise<{
     })
   }
 
+  // Gemini CLI — binary/config diagnostic only; never read auth tokens.
+  {
+    const binaryPath = await which('gemini')
+    const configPaths = [home('.gemini'), home('.config', 'gemini')].filter(exists)
+    clis.push({
+      id: 'google',
+      kind: 'google',
+      name: 'Gemini CLI',
+      foundBinary: Boolean(binaryPath),
+      binaryPath,
+      configPaths,
+      hasAuth: Boolean(binaryPath || configPaths.length),
+      authNote: binaryPath
+        ? '偵測到 Gemini CLI；登入與 token 由 CLI 管理，本 App 不讀取 secret。'
+        : '未偵測到 Gemini CLI',
+      models: [],
+      notes: [
+        binaryPath ? `binary: ${binaryPath}` : 'PATH 無 gemini',
+        'headless: gemini -p --output-format json',
+      ],
+    })
+  }
+
   // Cursor Agent CLI only — never IDE `cursor.exe` (would open editor, hang headless)
   {
     const binaryPath = await whichCursorAgent()
@@ -695,6 +718,12 @@ export function applyDiscoveryToProviders(
       name: d.name,
       kind: d.kind,
       cliBinary: d.binaryPath || existing.cliBinary || d.id,
+      lastProbeAt: new Date().toISOString(),
+      diagnostic: {
+        foundBinary: d.foundBinary,
+        binaryPath: d.binaryPath,
+        authNote: d.authNote,
+      },
       enabled: Boolean(existing.enabled) || d.foundBinary || d.hasAuth,
       authorized: Boolean(existing.authorized) || d.hasAuth || d.foundBinary,
       models,
