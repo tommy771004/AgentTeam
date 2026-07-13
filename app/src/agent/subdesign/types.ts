@@ -93,6 +93,13 @@ export type SubDesignCritiqueFinding = {
   path?: string
 }
 
+export type SubDesignCritiqueEvidence = {
+  kind: 'screenshot' | 'dom' | 'lint' | 'build' | 'manual'
+  summary: string
+  path?: string
+  capturedAt?: string
+}
+
 export type SubDesignCritique = {
   artifactId: string
   briefId?: string
@@ -103,6 +110,7 @@ export type SubDesignCritique = {
   accessibility: number
   implementationReadiness: number
   findings: SubDesignCritiqueFinding[]
+  evidence: SubDesignCritiqueEvidence[]
   verdict: 'pass' | 'needs-revision'
 }
 

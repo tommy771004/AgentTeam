@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { SubDesignExportRecord } from '../agent/subdesign/types'
+import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
 
 const STORAGE_KEY = 'subagents.subdesign.exports.v1'
 
@@ -26,25 +27,38 @@ function persist(records: SubDesignExportRecord[]) {
 
 interface SubDesignExportStore {
   records: SubDesignExportRecord[]
-  record: (input: Omit<SubDesignExportRecord, 'id' | 'createdAt'>) => SubDesignExportRecord
+  projectRoot: string
+  setProjectRoot: (root: string) => void
+  hydrateCanonical: (items: unknown[]) => void
+  record: (input: Omit<SubDesignExportRecord, 'id' | 'createdAt'> & { projectRoot?: string }) => SubDesignExportRecord
   findByArtifactId: (artifactId: string) => SubDesignExportRecord[]
 }
 
 export const useSubDesignExportStore = create<SubDesignExportStore>((set, get) => ({
   records: loadRecords(),
+  projectRoot: '',
+
+  setProjectRoot: (root) => set({ projectRoot: root }),
+
+  hydrateCanonical: (items) => {
+    const records = items.filter((item): item is SubDesignExportRecord => Boolean(item && typeof item === 'object' && (item as SubDesignExportRecord).artifactId && (item as SubDesignExportRecord).format && (item as SubDesignExportRecord).path)).slice(0, 120)
+    set({ records })
+    persist(records)
+  },
 
   record: (input) => {
+    const { projectRoot, ...recordInput } = input
     const record: SubDesignExportRecord = {
-      ...input,
+      ...recordInput,
       id: `export_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
       createdAt: new Date().toISOString(),
     }
     const records = [record, ...get().records].slice(0, 120)
     set({ records })
     persist(records)
+    persistSubDesignMetadata('export', record, projectRoot || get().projectRoot)
     return record
   },
 
   findByArtifactId: (artifactId) => get().records.filter((record) => record.artifactId === artifactId),
 }))
-

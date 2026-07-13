@@ -82,7 +82,10 @@ export function Layout() {
   const navigate = useNavigate()
   const isRunning = useAgentStore((s) => s.isRunning)
   const agentStatus = useAgentStore((s) => s.agent.status)
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.innerWidth < 760
+  })
   const floatOpen = useWorkspaceUiStore((s) => s.floatOpen)
   const setFloatOpen = useWorkspaceUiStore((s) => s.setFloatOpen)
   const setLayoutMode = useWorkspaceUiStore((s) => s.setLayoutMode)
@@ -249,7 +252,7 @@ export function Layout() {
         {/* 首頁（新任務）隱藏頂欄，更接近 Codex 沉浸式 */}
         {!isHome && (
           <header className="h-11 shrink-0 border-b border-white/8 bg-surface/30 backdrop-blur-sm flex items-center justify-between px-4 drag-region">
-            <div className="no-drag text-xs text-on-surface-variant pl-2 md:pl-0 truncate">
+            <div className="no-drag text-xs text-on-surface-variant pl-2 md:pl-0 truncate max-[760px]:hidden">
               本機多代理 · {primaryKey}/ 指令 · {primaryKey}. 小視窗
             </div>
             <div className="no-drag flex items-center gap-2">
@@ -257,7 +260,7 @@ export function Layout() {
                 type="button"
                 title={`開啟指令選單（${primaryKey}/）`}
                 onClick={() => requestFocusComposer({ openSlash: true })}
-                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30 font-[family-name:var(--font-mono)]"
+                className="shrink-0 whitespace-nowrap text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30 font-[family-name:var(--font-mono)]"
               >
                 /
               </button>
@@ -273,7 +276,7 @@ export function Layout() {
                     setFloatOpen(true)
                   }
                 }}
-                className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1 ${
+                className={`shrink-0 whitespace-nowrap text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1 ${
                   floatOpen
                     ? 'border-primary/40 text-primary bg-primary/10'
                     : 'border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30'
@@ -284,7 +287,7 @@ export function Layout() {
               </button>
               <NavLink
                 to="/settings"
-                className="text-xs font-semibold tracking-wide px-3 py-1.5 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30"
+                className="shrink-0 whitespace-nowrap text-xs font-semibold tracking-wide px-3 py-1.5 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30"
               >
                 設定
               </NavLink>

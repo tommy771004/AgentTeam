@@ -1,5 +1,5 @@
 import { isProjectRelativePath } from './artifactManifest'
-import type { SubDesignCritique, SubDesignCritiqueFinding } from './types'
+import type { SubDesignCritique, SubDesignCritiqueEvidence, SubDesignCritiqueFinding } from './types'
 
 function clampScore(value: unknown): number {
   const score = Number(value)
@@ -28,6 +28,33 @@ function normalizeFindings(value: unknown): SubDesignCritiqueFinding[] {
     .slice(0, 40)
 }
 
+function normalizeEvidence(value: unknown): SubDesignCritiqueEvidence[] {
+  if (!Array.isArray(value)) return []
+  const allowed = new Set<SubDesignCritiqueEvidence['kind']>(['screenshot', 'dom', 'lint', 'build', 'manual'])
+  return value
+    .map((item): SubDesignCritiqueEvidence | null => {
+      if (!item || typeof item !== 'object') return null
+      const raw = item as Record<string, unknown>
+      const kind = raw.kind as SubDesignCritiqueEvidence['kind']
+      const summary = String(raw.summary || raw.description || '').trim().slice(0, 1000)
+      if (!allowed.has(kind) || !summary) return null
+      const path = raw.path ? String(raw.path).trim().replaceAll('\\', '/') : undefined
+      return {
+        kind,
+        summary,
+        path: path && isProjectRelativePath(path) ? path.slice(0, 600) : undefined,
+        capturedAt: String(raw.capturedAt || '').trim().slice(0, 40) || undefined,
+      }
+    })
+    .filter((item): item is SubDesignCritiqueEvidence => item !== null)
+    .slice(0, 30)
+}
+
+export function critiqueHasRequiredEvidence(critique: Pick<SubDesignCritique, 'evidence'>): boolean {
+  const kinds = new Set(critique.evidence.map((item) => item.kind))
+  return kinds.has('screenshot') && kinds.has('dom') && kinds.has('lint')
+}
+
 export function normalizeSubDesignCritique(
   input: unknown,
   defaults?: { briefId?: string },
@@ -40,8 +67,17 @@ export function normalizeSubDesignCritique(
     errors.push('artifactId 不合法。')
   }
   const findings = normalizeFindings(raw.findings)
+  const evidence = normalizeEvidence(raw.evidence)
   const hasBlocker = findings.some((finding) => finding.severity === 'blocker')
-  const verdict = raw.verdict === 'pass' && !hasBlocker ? 'pass' : 'needs-revision'
+  const missingEvidence = !critiqueHasRequiredEvidence({ evidence })
+  const verdict = raw.verdict === 'pass' && !hasBlocker && !missingEvidence ? 'pass' : 'needs-revision'
+  if (missingEvidence && !findings.some((finding) => finding.path === '.subagents/subdesign/evidence')) {
+    findings.push({
+      severity: 'blocker',
+      message: 'Critique 必須包含 screenshot、DOM 與 lint evidence，才能通過 Deliver gate。',
+      path: '.subagents/subdesign/evidence',
+    })
+  }
   if (errors.length) return { ok: false, errors }
   return {
     ok: true,
@@ -55,11 +91,12 @@ export function normalizeSubDesignCritique(
       accessibility: clampScore(raw.accessibility ?? raw.a11y),
       implementationReadiness: clampScore(raw.implementationReadiness ?? raw.readiness),
       findings,
+      evidence,
       verdict,
     },
   }
 }
 
 export function critiqueAllowsDeliver(critique: SubDesignCritique): boolean {
-  return critique.verdict === 'pass' && !critique.findings.some((finding) => finding.severity === 'blocker')
+  return critique.verdict === 'pass' && critiqueHasRequiredEvidence(critique) && !critique.findings.some((finding) => finding.severity === 'blocker')
 }

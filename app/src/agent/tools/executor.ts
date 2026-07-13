@@ -480,7 +480,7 @@ export async function executeTool(
           const linked = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
           const inferred = stageFromPlan(todos)
           if (linked && inferred && (inferred !== 'build' || linked.selectedDirectionId)) {
-            const stageResult = useSubDesignStore.getState().setStage(linked.id, inferred)
+            const stageResult = useSubDesignStore.getState().setStage(linked.id, inferred, projectRoot)
             if (stageResult.ok) subDesignStage = stageResult.brief.stage
           }
         } catch {
@@ -515,11 +515,11 @@ export async function executeTool(
         ]) {
           if (Object.prototype.hasOwnProperty.call(input, key)) patch[key] = input[key]
         }
-        const updated = useSubDesignStore.getState().updateBrief(linked.id, patch)
+        const updated = useSubDesignStore.getState().updateBrief(linked.id, patch, projectRoot)
         if (!updated) return { ok: false, output: 'brief 更新失敗。' }
         let finalBrief = updated
         if (input.stage) {
-          const stageResult = useSubDesignStore.getState().setStage(linked.id, String(input.stage) as never)
+          const stageResult = useSubDesignStore.getState().setStage(linked.id, String(input.stage) as never, projectRoot)
           if (!stageResult.ok) return { ok: false, output: stageResult.error, data: updated }
           finalBrief = stageResult.brief
         }
@@ -544,7 +544,7 @@ export async function executeTool(
           summary: input.summary ? String(input.summary) : undefined,
           rationale: input.rationale ? String(input.rationale) : undefined,
           risk: input.risk ? String(input.risk) : undefined,
-        })
+        }, projectRoot)
         if (!result.ok) return { ok: false, output: result.error, data: linked }
         return {
           ok: true,
@@ -615,7 +615,7 @@ export async function executeTool(
         const result = useSubDesignArtifactStore.getState().register(rawManifest, {
           briefId,
           designSystemId: linked?.designSystemId,
-        })
+        }, projectRoot)
         if (!result.ok) return { ok: false, output: `artifact manifest invalid：${result.errors.join('；')}` }
         return {
           ok: true,
@@ -640,11 +640,11 @@ export async function executeTool(
         const briefId = String(rawCritique.briefId || linked?.id || artifact.briefId).trim()
         if (linked && briefId !== linked.id) return { ok: false, output: 'critique briefId 與目前 thread 不一致。' }
         rawCritique.briefId = briefId
-        const result = useSubDesignCritiqueStore.getState().record(rawCritique, { briefId })
+        const result = useSubDesignCritiqueStore.getState().record(rawCritique, { briefId }, projectRoot)
         if (!result.ok) return { ok: false, output: `critique invalid：${result.errors.join('；')}` }
         const nextStage = critiqueAllowsDeliver(result.critique) ? 'deliver' : 'critique'
         const brief = useSubDesignStore.getState().findById(briefId)
-        const stageResult = brief ? useSubDesignStore.getState().setStage(brief.id, nextStage) : null
+        const stageResult = brief ? useSubDesignStore.getState().setStage(brief.id, nextStage, projectRoot) : null
         return {
           ok: true,
           output: `Critique ${result.critique.verdict}（revision ${result.critique.revision}） · stage=${stageResult?.ok ? stageResult.brief.stage : nextStage}`,
@@ -690,6 +690,7 @@ export async function executeTool(
           path: result.path || '',
           bytes: result.bytes || 0,
           sha256: result.sha256 || '',
+          projectRoot: projectRoot || undefined,
         })
         return {
           ok: true,

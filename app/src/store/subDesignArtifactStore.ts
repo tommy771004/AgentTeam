@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { validateSubDesignArtifactManifest } from '../agent/subdesign/artifactManifest'
+import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
 import type { SubDesignArtifact } from '../agent/subdesign/types'
 
 const STORAGE_KEY = 'subagents.subdesign.artifacts.v1'
@@ -31,7 +32,10 @@ function persist(artifacts: SubDesignArtifact[]) {
 
 interface SubDesignArtifactStore {
   artifacts: SubDesignArtifact[]
-  register: (input: unknown, defaults?: { briefId?: string; designSystemId?: string }) =>
+  projectRoot: string
+  setProjectRoot: (root: string) => void
+  hydrateCanonical: (items: unknown[]) => void
+  register: (input: unknown, defaults?: { briefId?: string; designSystemId?: string }, projectRoot?: string) =>
     | { ok: true; artifact: SubDesignArtifact }
     | { ok: false; errors: string[] }
   remove: (id: string) => void
@@ -41,8 +45,23 @@ interface SubDesignArtifactStore {
 
 export const useSubDesignArtifactStore = create<SubDesignArtifactStore>((set, get) => ({
   artifacts: loadArtifacts(),
+  projectRoot: '',
 
-  register: (input, defaults) => {
+  setProjectRoot: (root) => set({ projectRoot: root }),
+
+  hydrateCanonical: (items) => {
+    const artifacts = items
+      .map((item) => {
+        const result = validateSubDesignArtifactManifest(item)
+        return result.ok ? result.manifest : null
+      })
+      .filter((item): item is SubDesignArtifact => Boolean(item))
+      .slice(0, 80)
+    set({ artifacts })
+    persist(artifacts)
+  },
+
+  register: (input, defaults, projectRoot) => {
     const result = validateSubDesignArtifactManifest(input, defaults)
     if (!result.ok) return result
     const existing = get().artifacts.find((item) => item.id === result.manifest.id)
@@ -52,6 +71,7 @@ export const useSubDesignArtifactStore = create<SubDesignArtifactStore>((set, ge
     const artifacts = [artifact, ...get().artifacts].slice(0, 80)
     set({ artifacts })
     persist(artifacts)
+    persistSubDesignMetadata('artifact', artifact, projectRoot || get().projectRoot)
     return { ok: true, artifact }
   },
 

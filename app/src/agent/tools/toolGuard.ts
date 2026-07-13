@@ -49,6 +49,17 @@ const SUBDESIGN_WRITE_TOOLS = new Set([
   'design_artifact_export',
 ])
 
+/** Bash commands that can mutate the linked SubDesign workspace. */
+export function isSubDesignWritableBashCommand(command: string): boolean {
+  const value = command.trim()
+  if (!value) return false
+  return /(?:^|[;&|]\s*)(?:rm|mv|cp|mkdir|touch|install|chmod|chown|ln|tee)\b/i.test(value)
+    || /\b(?:sed|perl)\s+-[^\n]*i\b/i.test(value)
+    || /(?:^|\s)(?:>>?|<<-?)\s*\S+/.test(value)
+    || /\bgit\s+(?:apply|add|commit|clean|checkout|mv|rm|reset|restore)\b/i.test(value)
+    || /\b(?:node|python(?:3)?|ruby)\b[^\n]*(?:writeFile|appendFile|unlink|mkdirSync|renameSync)\b/i.test(value)
+}
+
 /** Side-effect classification (dynamic MCP tools count as network). */
 export function isSideEffectTool(tool: string): boolean {
   return SIDE_EFFECT_TOOLS.has(tool) || tool.startsWith('mcp_')
@@ -120,13 +131,14 @@ export async function authorizeTool(opts: {
 
   // SubDesign direction gate is evaluated at tool time so a direction selected
   // after ask_user can unlock Build during the same run.
-  if (SUBDESIGN_WRITE_TOOLS.has(tool)) {
+  if (SUBDESIGN_WRITE_TOOLS.has(tool) || tool === 'bash') {
     try {
       const { getRunThreadId } = await import('./runContext')
       const { useSubDesignStore } = await import('../../store/subDesignStore')
       const threadId = getRunThreadId()
       const brief = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
-      if (brief && !brief.selectedDirectionId) {
+      const subDesignWriteBlocked = tool !== 'bash' || isSubDesignWritableBashCommand(String(input.command || ''))
+      if (brief && !brief.selectedDirectionId && subDesignWriteBlocked) {
         const msg = `SubDesign direction gate：請先選定 direction，再使用 ${tool}。`
         onLog?.('WARN', msg)
         return { allowed: false, output: msg }
