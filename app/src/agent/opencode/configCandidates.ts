@@ -18,6 +18,7 @@ export type MergedConfigView = {
   default_agent?: string
   permission?: Record<string, unknown>
   mcp?: Record<string, unknown>
+  plugin?: string[]
   instructions?: string[]
   compaction?: Record<string, unknown> | undefined
 }
@@ -48,12 +49,15 @@ const KNOWN_KEYS = new Set([
   'agent',
   'command',
   'mcp',
+  'plugin',
   'instructions',
   'compaction',
 ])
 
 function trustOf(path: string): 'project' | 'global' {
-  return /\.config|home|~|users\/[^/]+\/\.opencode/i.test(path) &&
+  // Global = app-owned userData/opencode dir (AppData/Roaming, Library/Application Support, ~/.config)
+  // or the external opencode CLI's own home-level config, never a project checkout.
+  return /\.config|home|~|appdata|application support|users\/[^/]+\/\.opencode/i.test(path) &&
     !/\/(src|app|repo|project)s?\//i.test(path)
     ? 'global'
     : 'project'
@@ -147,6 +151,18 @@ export function buildConfigCandidates(
       trust,
       applyMode: 'review',
       note: '採用後加入 MCP 伺服器清單（secrets 不自動帶入）',
+    })
+  }
+
+  if (merged.plugin?.length) {
+    out.push({
+      id: 'plugin',
+      field: 'plugin',
+      value: merged.plugin.join(', ').slice(0, 400),
+      source: srcAll,
+      trust,
+      applyMode: 'unsupported',
+      note: '只列出 OpenCode plugin manifest reference；不自動安裝、不執行 plugin code，permission 需人工審核。',
     })
   }
 

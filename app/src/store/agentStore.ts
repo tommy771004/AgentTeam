@@ -1,5 +1,12 @@
 import { create } from 'zustand'
-import type { AgentState, ApprovalMode, ArchiveRecord, LoopType, RuntimeOverrides } from '../agent/types'
+import type {
+  AgentState,
+  ApprovalMode,
+  ArchiveRecord,
+  CliConfigSnapshot,
+  LoopType,
+  RuntimeOverrides,
+} from '../agent/types'
 import { agentEngine } from '../agent/engine'
 import { emptyKnowledge, extractKnowledge } from '../agent/knowledge'
 import { learningLoop } from '../agent/hermes/learning'
@@ -51,6 +58,8 @@ interface AgentStore {
     unattended?: boolean
     /** Correlate with runTask trace */
     runId?: string
+    /** Safe OpenCode config lineage captured before dispatch */
+    configSnapshot?: CliConfigSnapshot
     /** Preserve loop type in agent state (not always Goal-based) */
     loopType?: LoopType
     /** Chat attachments for CLI (written to disk in Electron) */
@@ -484,6 +493,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             executionMs: Date.now() - t0,
           },
           haltReason: r.ok ? undefined : r.error,
+          cliConfigSnapshot: opts.configSnapshot,
+          externalRun: r.externalRun,
         })
         final.finishedAt = new Date().toISOString()
 
@@ -566,6 +577,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             },
           ],
           finishedAt: new Date().toISOString(),
+          cliConfigSnapshot: opts.configSnapshot,
         })
         set({ agent: final, isRunning: false })
         try {
@@ -668,6 +680,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           : undefined,
         tokensUsed: agent.tokensUsed || undefined,
         hitl,
+        cliConfigSnapshot: agent.cliConfigSnapshot,
+        externalRun: agent.externalRun,
       }
       if (window.subagents?.archive) {
         await window.subagents.archive.save(record)

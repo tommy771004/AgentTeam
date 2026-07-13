@@ -6,7 +6,7 @@
  */
 
 import { v4 as uuid } from 'uuid'
-import type { LlmSettings, ToolCallRecord } from '../types'
+import type { LlmSettings, PermissionProjection, ToolCallRecord } from '../types'
 import { chatCompletionWithTools, type ChatMessageExt, type ToolCallRequest } from '../llm'
 import { executeTool } from './executor'
 import type { ToolName } from './registry'
@@ -21,6 +21,7 @@ import {
 import { listAllMcpTools, mcpCallTool } from '../hermes/mcp'
 import { resolveMcpSecretOwnerId } from '../hermes/mcpSecrets'
 import { checkToolPermission, type PermissionPolicy } from '../opencode/permissions'
+import { mcpServersForAgent, isMcpServerAllowedForAgent } from '../opencode/mcpAccess'
 import { authorizeTool } from './toolGuard'
 import {
   activeModelSettings,
@@ -98,6 +99,9 @@ export interface ToolLoopOptions {
   blockedTools?: string[]
   /** OpenCode-style permission policy */
   permissionPolicy?: PermissionPolicy
+  permissionProjection?: PermissionProjection
+  /** OpenCode agent id used for per-agent MCP allowlists. */
+  mcpAgentId?: string
   extraToolsNote?: string
   /** Inject dynamic MCP tools into FC schema */
   includeMcpTools?: boolean
@@ -145,7 +149,7 @@ function parseInheritCapabilities(args: Record<string, unknown>): string[] {
 /** Map FC name → { serverId, toolName } */
 type McpNameMap = Map<string, { serverId: string; toolName: string }>
 
-async function buildDynamicMcpTools(settings: LlmSettings): Promise<{
+async function buildDynamicMcpTools(settings: LlmSettings, mcpAgentId?: string): Promise<{
   defs: OpenAiToolDef[]
   map: McpNameMap
   errors: string[]
@@ -158,7 +162,7 @@ async function buildDynamicMcpTools(settings: LlmSettings): Promise<{
   }
   try {
     const tools = await listAllMcpTools(
-      settings.mcpServers.filter((s) => s.enabled),
+      mcpServersForAgent(settings, mcpAgentId),
       settings,
     )
     for (const t of tools) {
@@ -233,6 +237,7 @@ export async function runFunctionCallingLoop(
     includeMcpCaps: opts?.includeMcpTools !== false && settings.mcpEnabled,
     projectRoot,
     blockedTools: opts?.blockedTools,
+    agentId: opts?.mcpAgentId,
   })
   cb?.onLog?.('INFO', summarizeCapabilityState(capState))
   const emitLoadedCaps = () => {
@@ -246,6 +251,7 @@ export async function runFunctionCallingLoop(
   const allBuiltin = buildOpenAiTools({
     webSearchEnabled: settings.webSearchEnabled !== false,
   }).filter((t) => {
+    if (settings.subAgentsEnabled !== true && (t.function.name === 'delegate_task' || t.function.name === 'delegate_status')) return false
     if (blocked.has(t.function.name)) return false
     if (policy && checkToolPermission(policy, t.function.name) === 'deny') return false
     return true
@@ -256,7 +262,7 @@ export async function runFunctionCallingLoop(
   const allMcpDefs: OpenAiToolDef[] = []
   let mcpProbeErrors: string[] = []
   if (opts?.includeMcpTools !== false && settings.mcpEnabled) {
-    const dyn = await buildDynamicMcpTools(settings)
+    const dyn = await buildDynamicMcpTools(settings, opts?.mcpAgentId)
     mcpMap = dyn.map
     mcpProbeErrors = dyn.errors
     for (const d of dyn.defs) {
@@ -273,7 +279,7 @@ export async function runFunctionCallingLoop(
     }
   }
 
-  // Always include delegate_task schema in full pool for orchestrator roles
+  // Include delegate_task only when Sub Agent mode is explicitly enabled.
   const delegateDef: OpenAiToolDef = {
     type: 'function',
     function: {
@@ -306,7 +312,7 @@ export async function runFunctionCallingLoop(
     },
   }
   const fullPool: OpenAiToolDef[] = [...allBuiltin]
-  if (!blocked.has('delegate_task') && !fullPool.some((t) => t.function.name === 'delegate_task')) {
+  if (settings.subAgentsEnabled === true && !blocked.has('delegate_task') && !fullPool.some((t) => t.function.name === 'delegate_task')) {
     fullPool.push(delegateDef)
   }
   {
@@ -351,7 +357,7 @@ export async function runFunctionCallingLoop(
   // MCP probe failed → auto-load matching connector HTTP packs (user:*)
   if (mcpProbeErrors.length && settings.mcpEnabled) {
     const fallbackIds = new Set<string>()
-    for (const server of (settings.mcpServers || []).filter((s) => s.enabled)) {
+    for (const server of mcpServersForAgent(settings, opts?.mcpAgentId)) {
       const hasTools = [...mcpMap.values()].some((m) => m.serverId === server.id)
       const errHit = mcpProbeErrors.some(
         (e) => e.includes(server.id) || e.includes(server.name),
@@ -549,6 +555,8 @@ ${systemExtra}`,
         customMap,
         settings,
         permissionPolicy: policy,
+        permissionProjection: opts?.permissionProjection,
+        mcpAgentId: opts?.mcpAgentId,
         capState,
         fullPool,
         onLoadedCaps: emitLoadedCaps,
@@ -598,6 +606,8 @@ async function executeOneToolCall(
     customMap: Map<string, ResolvedCustomTool>
     settings: LlmSettings
     permissionPolicy?: PermissionPolicy
+    permissionProjection?: PermissionProjection
+    mcpAgentId?: string
     capState?: CapabilityRuntimeState
     /** Complete tool def pool (for tool_search + load_capability unlock) */
     fullPool?: OpenAiToolDef[]
@@ -700,6 +710,7 @@ async function executeOneToolCall(
     input: args,
     settings: ctx.settings,
     permissionPolicy: ctx.permissionPolicy,
+    permissionProjection: ctx.permissionProjection,
     blockedTools: Array.from(ctx.blocked),
     forceAsk,
     // Custom http/bash templates are network/exec — approvalMode 'always' must see them
@@ -742,6 +753,7 @@ async function executeOneToolCall(
           input: innerArgs,
           settings: ctx.settings,
           permissionPolicy: ctx.permissionPolicy,
+          permissionProjection: ctx.permissionProjection,
           blockedTools: Array.from(ctx.blocked),
           forceAsk: (ctx.capState ? approvalRequiredFor(ctx.capState, name) : false) ||
             (ctx.customMap.get(name) ? isCustomToolApprovalRequired(ctx.customMap.get(name)!) : false),
@@ -781,7 +793,7 @@ async function executeOneToolCall(
           innerOut = `Unknown tool: ${name}`
         } else {
           try {
-            const er = await executeTool(name as ToolName, innerArgs)
+            const er = await executeTool(name as ToolName, innerArgs, { mcpAgentId: ctx.mcpAgentId })
             innerOk = er.ok
             innerOut = er.output
           } catch (e) {
@@ -837,6 +849,9 @@ async function executeOneToolCall(
     if (!server) {
       output = `MCP server not found: ${mcpRef.serverId}`
       ok = false
+    } else if (!isMcpServerAllowedForAgent(ctx.settings, ctx.mcpAgentId, mcpRef.serverId)) {
+      output = `MCP server blocked for agent: ${mcpRef.serverId}`
+      ok = false
     } else {
       const r = await mcpCallTool(server, mcpRef.toolName, args, ctx.settings)
       output = r.ok ? r.content : r.error || 'MCP failed'
@@ -861,6 +876,9 @@ async function executeOneToolCall(
           background: true,
           notifyOnComplete,
           inheritCapabilities,
+          parentPermissionPolicy: ctx.permissionPolicy,
+          parentPermissionProjection: ctx.permissionProjection,
+          parentMcpAgentId: ctx.mcpAgentId,
         },
         {
           onLog: (m) => ctx.cb?.onLog?.('INFO', m),
@@ -897,6 +915,9 @@ async function executeOneToolCall(
           context: args.context ? String(args.context) : undefined,
           role: args.role === 'orchestrator' ? 'orchestrator' : 'leaf',
           inheritCapabilities,
+          parentPermissionPolicy: ctx.permissionPolicy,
+          parentPermissionProjection: ctx.permissionProjection,
+          parentMcpAgentId: ctx.mcpAgentId,
         },
         {
           onLog: (m) => {
@@ -938,7 +959,7 @@ async function executeOneToolCall(
     ok = false
   } else {
     try {
-      const result = await executeTool(tc.name as ToolName, args)
+      const result = await executeTool(tc.name as ToolName, args, { mcpAgentId: ctx.mcpAgentId })
       output = result.output
       ok = result.ok
     } catch (e) {

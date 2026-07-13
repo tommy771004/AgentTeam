@@ -171,7 +171,7 @@ export function DashboardPage() {
         />
         <SettingsRow
           title="背景委派"
-          description="delegate_task background"
+          description={settings.subAgentsEnabled === true ? 'delegate_task background' : 'Sub Agent 已關閉'}
           control={
             <span className="text-[13px] font-semibold tabular-nums">
               {bgJobs.filter((j) => j.status === 'running' || j.status === 'queued').length}
@@ -296,20 +296,24 @@ export function DashboardPage() {
         <>
           <SettingsGroup title="角色模型">
             <SettingsRow
+              title="Sub Agent"
+              control={<Mono>{settings.subAgentsEnabled === true ? '啟用' : '關閉（預設）'}</Mono>}
+            />
+            <SettingsRow
               title="Manager"
-              control={<Mono>{settings.roleModels?.orchestrator || settings.model || '—'}</Mono>}
+              control={<Mono>{settings.subAgentsEnabled === true ? (settings.roleModels?.orchestrator || settings.model || '—') : '未套用'}</Mono>}
             />
             <SettingsRow
               title="Analyzer-1"
-              control={<Mono>{settings.roleModels?.analyst || settings.model || '—'}</Mono>}
+              control={<Mono>{settings.subAgentsEnabled === true ? (settings.roleModels?.analyst || settings.model || '—') : '未套用'}</Mono>}
             />
             <SettingsRow
               title="Writer"
-              control={<Mono>{settings.roleModels?.synthesizer || settings.model || '—'}</Mono>}
+              control={<Mono>{settings.subAgentsEnabled === true ? (settings.roleModels?.synthesizer || settings.model || '—') : '未套用'}</Mono>}
             />
             <SettingsRow
               title="Core"
-              control={<Mono>{settings.roleModels?.executor || settings.model || '—'}</Mono>}
+              control={<Mono>{settings.subAgentsEnabled === true ? (settings.roleModels?.executor || settings.model || '—') : '未套用'}</Mono>}
             />
           </SettingsGroup>
           {agent.subAgents.length > 0 && (

@@ -7,7 +7,8 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
+import crypto from 'node:crypto'
+import { app } from 'electron'
 import { runBash } from './shellBridge'
 import {
   executableLookupCommand,
@@ -42,6 +43,11 @@ export type OpenCodeCommandFile = {
   agent?: string
   model?: string
   source: 'global' | 'project'
+}
+
+/** App-owned OpenCode-format storage, under Electron's userData (not the external opencode CLI's ~/.config/opencode). */
+function openCodeUserDataDir(): string {
+  return path.join(app.getPath('userData'), 'opencode')
 }
 
 function stripJsonc(text: string): string {
@@ -235,11 +241,8 @@ export function scanOpenCodeAgents(projectRoot?: string): {
   dirs: string[]
   configHint?: string | null
 } {
-  const home = os.homedir()
-  const globalDirs = [
-    path.join(home, '.config', 'opencode', 'agents'),
-    path.join(home, '.opencode', 'agents'),
-  ]
+  const userDataDir = openCodeUserDataDir()
+  const globalDirs = [path.join(userDataDir, 'agents')]
   const projectDirs = projectRoot
     ? [
         path.join(projectRoot, '.opencode', 'agents'),
@@ -252,8 +255,8 @@ export function scanOpenCodeAgents(projectRoot?: string): {
 
   let configHint: string | null = null
   for (const cfg of [
-    path.join(home, '.config', 'opencode', 'opencode.json'),
-    path.join(home, '.config', 'opencode', 'opencode.jsonc'),
+    path.join(userDataDir, 'opencode.json'),
+    path.join(userDataDir, 'opencode.jsonc'),
   ]) {
     if (fs.existsSync(cfg)) {
       configHint = cfg
@@ -275,13 +278,11 @@ export function loadOpenCodeBundle(projectRoot?: string): {
   commands: OpenCodeCommandFile[]
   sources: string[]
 } {
-  const home = os.homedir()
+  const userDataDir = openCodeUserDataDir()
   const root = (projectRoot || '').trim()
   const layerPaths = [
-    path.join(home, '.config', 'opencode', 'opencode.json'),
-    path.join(home, '.config', 'opencode', 'opencode.jsonc'),
-    path.join(home, '.opencode', 'opencode.json'),
-    path.join(home, '.opencode', 'opencode.jsonc'),
+    path.join(userDataDir, 'opencode.json'),
+    path.join(userDataDir, 'opencode.jsonc'),
   ]
   if (root) {
     layerPaths.push(
@@ -305,10 +306,7 @@ export function loadOpenCodeBundle(projectRoot?: string): {
   const agentScan = scanOpenCodeAgents(root || undefined)
   const agents = [...agentScan.global, ...agentScan.project]
 
-  const cmdDirsGlobal = [
-    path.join(home, '.config', 'opencode', 'commands'),
-    path.join(home, '.opencode', 'commands'),
-  ]
+  const cmdDirsGlobal = [path.join(userDataDir, 'commands')]
   const cmdDirsProject = root
     ? [path.join(root, '.opencode', 'commands'), path.join(root, 'opencode', 'commands')]
     : []
@@ -318,6 +316,97 @@ export function loadOpenCodeBundle(projectRoot?: string): {
   ]
 
   return { layers, agents, commands, sources }
+}
+
+export type ResolvedOpenCodeInstruction = {
+  entry: string
+  path?: string
+  text: string
+  bytes: number
+  sha256: string
+}
+
+function pathInsideRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate))
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+}
+
+function globRegex(pattern: string): RegExp {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '§§')
+    .replace(/\*/g, '[^/]*')
+    .replace(/§§/g, '.*')
+  return new RegExp(`^${escaped}$`, 'i')
+}
+
+function walkFiles(root: string, dir = root, out: string[] = []): string[] {
+  if (out.length >= 2000) return out
+  let names: string[] = []
+  try {
+    names = fs.readdirSync(dir)
+  } catch {
+    return out
+  }
+  for (const name of names) {
+    if (name === 'node_modules' || name === '.git' || name === '.subagents') continue
+    const full = path.join(dir, name)
+    try {
+      const stat = fs.statSync(full)
+      if (stat.isDirectory()) walkFiles(root, full, out)
+      else if (stat.isFile()) out.push(full)
+    } catch {
+      /* skip inaccessible paths */
+    }
+  }
+  return out
+}
+
+/** Resolve OpenCode instruction paths/globs under projectRoot only. */
+export function resolveOpenCodeInstructions(
+  projectRoot: string,
+  entries: string[] | undefined,
+): ResolvedOpenCodeInstruction[] {
+  const root = path.resolve(projectRoot || process.cwd())
+  const files = walkFiles(root)
+  const out: ResolvedOpenCodeInstruction[] = []
+  for (const raw of entries || []) {
+    const entry = String(raw || '').trim()
+    if (!entry) continue
+    const fileEntry = /^\{file:(.+)\}$/i.exec(entry)?.[1]?.trim() || entry
+    const normalized = fileEntry.replace(/^[./\\]+/, '').replace(/\\/g, '/')
+    const candidates = normalized.includes('*')
+      ? files.filter((full) => globRegex(normalized).test(path.relative(root, full).replace(/\\/g, '/')))
+      : [path.resolve(root, fileEntry)]
+    let matched = false
+    for (const candidate of candidates.slice(0, 50)) {
+      if (!pathInsideRoot(root, candidate)) continue
+      try {
+        const stat = fs.statSync(candidate)
+        if (!stat.isFile() || stat.size > 200_000) continue
+        const text = fs.readFileSync(candidate, 'utf8')
+        out.push({
+          entry,
+          path: candidate,
+          text,
+          bytes: Buffer.byteLength(text, 'utf8'),
+          sha256: crypto.createHash('sha256').update(text).digest('hex'),
+        })
+        matched = true
+      } catch {
+        /* treat missing entries as inline text below */
+      }
+    }
+    if (!matched && !normalized.includes('*') && !path.extname(normalized)) {
+      out.push({
+        entry,
+        text: entry.slice(0, 20_000),
+        bytes: Buffer.byteLength(entry, 'utf8'),
+        sha256: crypto.createHash('sha256').update(entry).digest('hex'),
+      })
+    }
+  }
+  return out.slice(0, 100)
 }
 
 export async function detectOpenCodeCli(): Promise<{

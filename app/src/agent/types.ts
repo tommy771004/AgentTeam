@@ -47,7 +47,7 @@ export type LogLevel =
   | 'System'
 
 /** Where the model id on a step/sub-agent came from */
-export type ModelSource = 'role' | 'fallback' | 'cli' | 'sim' | 'none'
+export type ModelSource = 'role' | 'fallback' | 'primary' | 'cli' | 'sim' | 'none'
 
 export interface ExecutionStep {
   step: number
@@ -139,11 +139,20 @@ export interface InterventionState {
 /** OpenCode-style permission action */
 export type PermissionAction = 'allow' | 'ask' | 'deny'
 
+/** A raw OpenCode permission value, including its fine-grained glob map. */
+export type PermissionRuleValue = PermissionAction | Record<string, PermissionAction>
+
+/** Lossless permission projection used by builtin and external adapters. */
+export interface PermissionProjection {
+  rules: Record<string, PermissionRuleValue>
+  unsupported: string[]
+}
+
 /** ChatGPT-style「動作應如何核准」三段模式 */
 export type ApprovalMode = 'always' | 'auto' | 'full'
 
 /** P1-B: how a model capability claim was established */
-export type ModelCapabilitySource = 'verified' | 'assumed' | 'unknown'
+export type ModelCapabilitySource = 'verified' | 'assumed' | 'unknown' | 'discovered'
 
 export interface ModelProfile {
   modelId: string
@@ -201,10 +210,14 @@ export interface RuntimeOverrides {
   extraSystemContext?: string
   /** OpenCode-style primary agent */
   agentMode?: AgentMode
+  /** Inherited OpenCode agent id for per-agent MCP restrictions. */
+  mcpAgentId?: string
   /** OpenCode-style subagent */
   subagentId?: SubagentId
   /** Permission policy for tools */
   permissionPolicy?: PermissionPolicy
+  /** Lossless OpenCode permission rules; deny/ask is evaluated before coarse policy. */
+  permissionProjection?: PermissionProjection
   /** Hard-blocked tool names (merged with policy deny) */
   blockedTools?: string[]
   /**
@@ -304,6 +317,9 @@ export interface AgentState {
   /** tool_search unlocked tool names (for cross-step / cross-run restore) */
   unlockedToolNames: string[]
   violation: SupervisorViolationState | null
+  /** External runner/session/config lineage. */
+  externalRun?: ExternalRunRef
+  cliConfigSnapshot?: CliConfigSnapshot
   metrics: {
     vramLabel: string
     apiCredits: number
@@ -347,6 +363,39 @@ export interface ArchiveRecord {
     timedOut: number
     toolsTimedOut?: string[]
   }
+  /** External runner/session/config lineage; secrets are never included. */
+  externalRun?: ExternalRunRef
+  cliConfigSnapshot?: CliConfigSnapshot
+}
+
+export type ExternalRunStatus = 'starting' | 'running' | 'success' | 'failed' | 'aborted'
+
+export interface ExternalRunRef {
+  provider: 'opencode'
+  serverUrl?: string
+  sessionId?: string
+  parentSessionId?: string
+  /** Child sessions observed from OpenCode /session/:id/children. */
+  childSessionIds?: string[]
+  lastTodoAt?: string
+  lastChildrenAt?: string
+  version?: string
+  configFingerprint?: string
+  status?: ExternalRunStatus
+  completionReason?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+/** Safe, renderer-visible OpenCode config lineage; never contains secret values. */
+export interface CliConfigSnapshot {
+  provider: 'opencode'
+  sources: string[]
+  agent: string
+  model?: string
+  permission: PermissionProjection
+  instructions?: Array<{ entry: string; path?: string; bytes: number; sha256: string }>
+  capturedAt: string
 }
 
 export interface ParseResult {
@@ -424,6 +473,8 @@ export interface LlmSettings {
   discoveredModels: string[]
   /** Per-role model overrides (empty string = fall back to `model`) */
   roleModels: RoleModelConfig
+  /** Enable role-based / delegated sub-agent execution. Default is off. */
+  subAgentsEnabled: boolean
   authLevel: number
   minConfidence: number
   maxIterationsDefault: number
@@ -459,6 +510,8 @@ export interface LlmSettings {
   /** MCP servers (minimal client) */
   mcpServers: McpServerConfig[]
   mcpEnabled: boolean
+  /** Optional per-OpenCode-agent allowlist; missing key keeps global behavior. */
+  mcpAgentServers: Record<string, string[]>
   /** Messaging gateway (Phase 5 — Telegram etc.) */
   telegramEnabled: boolean
   telegramBotToken: string

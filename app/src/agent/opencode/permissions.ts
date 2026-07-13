@@ -2,7 +2,13 @@
  * OpenCode-inspired permission model: allow | ask | deny
  */
 
-import type { PermissionAction, PermissionKey, PermissionPolicy } from '../types'
+import type {
+  PermissionAction,
+  PermissionKey,
+  PermissionPolicy,
+  PermissionProjection,
+} from '../types'
+import { resolvePatternPermission, matchGlob } from './configTypes'
 
 export type { PermissionAction, PermissionKey, PermissionPolicy }
 
@@ -72,6 +78,30 @@ export function checkToolPermission(
   toolName: string,
 ): PermissionAction {
   return resolvePermission(policy, toolPermissionKey(toolName), 'allow')
+}
+
+/** Resolve exact OpenCode tool/MCP rules before the coarse builtin policy. */
+export function checkProjectedToolPermission(
+  projection: PermissionProjection | undefined,
+  toolName: string,
+  input: Record<string, unknown> = {},
+): PermissionAction | undefined {
+  if (!projection) return undefined
+  const key = toolPermissionKey(toolName)
+  const command = String(input.command ?? input.cmd ?? '').trim()
+  let result: PermissionAction | undefined
+  for (const [pattern, rule] of Object.entries(projection.rules)) {
+    const targets = pattern === 'bash' ? ['bash', key, toolName] : [pattern]
+    const matchesTool = targets.some((target) => target === key || target === toolName || matchGlob(target, toolName))
+    if (!matchesTool) continue
+    if (typeof rule === 'string') {
+      result = rule
+      continue
+    }
+    const value = resolvePatternPermission(rule, pattern === 'bash' ? command : toolName, result || 'allow')
+    if (value !== 'allow' || Object.keys(rule).length > 0) result = value
+  }
+  return result
 }
 
 /** Tools blocked when action is deny */

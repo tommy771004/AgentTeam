@@ -3,7 +3,7 @@
  * Used by ProtocolsPage and slash commands so runner selection always applies.
  */
 
-import type { AgentMode, LoopType, RuntimeOverrides } from './types'
+import type { AgentMode, CliConfigSnapshot, LoopType, RuntimeOverrides } from './types'
 import type { ThinkingDepth } from './thinking'
 import type { LocalRunnerKind } from './localCliRun'
 import { useSettingsStore } from '../store/settingsStore'
@@ -13,6 +13,7 @@ import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { parseSubagentMentions } from './opencode/agents'
 import {
   openCodeRuntimeOverrides,
+  getRegistryAgent,
   parseRegistryMentions,
 } from './opencode/agentRegistry'
 import { buildIntentPreloadIds } from './intentPreload'
@@ -50,6 +51,49 @@ function isRunnerAuthorized(kind: LocalRunnerKind): boolean {
     (p) =>
       (p.id === mapId || p.id === kind) && p.enabled !== false && p.authorized,
   )
+}
+
+async function captureOpenCodeConfigSnapshot(
+  projectRoot: string,
+  agentMode: AgentMode,
+  model: string,
+): Promise<CliConfigSnapshot> {
+  const { useOpenCodeConfigStore } = await import('../store/opencodeConfigStore')
+  const store = useOpenCodeConfigStore.getState()
+  if (!store.loaded || store.lastProjectRoot !== projectRoot) {
+    await store.hydrate(projectRoot)
+  }
+  const current = useOpenCodeConfigStore.getState()
+  const agent = getRegistryAgent(agentMode)
+  let instructions: CliConfigSnapshot['instructions']
+  if (window.subagents?.opencode?.resolveInstructions) {
+    try {
+      const resolved = await window.subagents.opencode.resolveInstructions(
+        projectRoot,
+        current.instructionsByRoot[projectRoot] || current.instructionsEntries,
+      )
+      instructions = resolved.map((item) => ({
+        entry: item.entry,
+        path: item.path,
+        bytes: item.bytes,
+        sha256: item.sha256,
+      }))
+    } catch {
+      instructions = undefined
+    }
+  }
+  return {
+    provider: 'opencode',
+    sources: [...(current.sources || [])].slice(0, 12),
+    agent: agent?.id || agentMode,
+    model: model || current.model || undefined,
+    permission: agent?.permissionProjection || {
+      rules: {},
+      unsupported: [],
+    },
+    instructions,
+    capturedAt: new Date().toISOString(),
+  }
 }
 
 /**
@@ -112,7 +156,7 @@ export async function dispatchThreadTask(
   const legacy = parseSubagentMentions(raw)
   const subId = mentioned.subagents[0] || legacy.subagents[0]
   let text = mentioned.cleaned || legacy.cleaned || raw
-  const depth = (thread?.thinkingDepth || 'deep') as ThinkingDepth
+    const depth = (thread?.thinkingDepth || 'deep') as ThinkingDepth
   const agentMode = (thread?.agentMode || 'build') as AgentMode
   const model = thread?.model || settings.model
   const speed = thread?.speed || 'standard'
@@ -130,9 +174,14 @@ export async function dispatchThreadTask(
     preloadCandidates.unshift('subdesign-workflow')
     if (subDesignBrief.stage === 'critique') preloadCandidates.unshift('design-critique')
   }
+    const preloadCandidates = buildIntentPreloadIds(text, settings, projectRoot, { max: 8 })
 
   if (runner !== 'builtin') {
     const kind = runner as LocalRunnerKind
+    const configSnapshot =
+      kind === 'opencode'
+        ? await captureOpenCodeConfigSnapshot(projectRoot, agentMode, model)
+        : undefined
     if (!isRunnerAuthorized(kind)) {
       // P0: explicit failed result — do not leave thread on stale agent state
       return {
@@ -190,9 +239,13 @@ export async function dispatchThreadTask(
       unattended: opts?.overrides?.unattended === true,
       attachments: cliAttachments.length ? cliAttachments : undefined,
       runId: opts?.overrides?.runId,
+      configSnapshot,
       loopType: opts?.forceLoopType,
     })
     const a = useAgentStore.getState().agent
+    if (tid && a.externalRun) {
+      useThreadStore.getState().setExternalRun(tid, a.externalRun)
+    }
     return {
       path: 'cli',
       kind,

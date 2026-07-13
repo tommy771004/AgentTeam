@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { SpeedMode, ThinkingDepth } from '../agent/thinking'
-import type { AgentMode, ExecutionStatus, LoopType } from '../agent/types'
+import type { AgentMode, ExecutionStatus, ExternalRunRef, LoopType } from '../agent/types'
 import type { ChatAttachment } from '../agent/types'
 import { sanitizeAttachmentsForStorage } from '../lib/chatAttachments'
 import type { ContinueGoalSnapshot } from '../agent/continueGoal'
@@ -128,6 +128,8 @@ export type Thread = {
    * Cleared on Goal success.
    */
   continueGoal?: ContinueGoalSnapshot | null
+  /** Last external OpenCode session attached to this thread. */
+  externalRun?: ExternalRunRef
 }
 
 interface ThreadStore {
@@ -187,6 +189,7 @@ interface ThreadStore {
   ) => void
   setSubDesignBriefId: (id: string, briefId: string | null) => void
   setContinueGoal: (id: string, snap: ContinueGoalSnapshot | null) => void
+  setExternalRun: (id: string, externalRun?: ExternalRunRef) => void
   activeThread: () => Thread | null
 }
 
@@ -255,6 +258,10 @@ function migrateThread(raw: Record<string, unknown>): Thread {
     continueGoal:
       raw.continueGoal && typeof raw.continueGoal === 'object'
         ? (raw.continueGoal as ContinueGoalSnapshot)
+        : undefined,
+    externalRun:
+      raw.externalRun && typeof raw.externalRun === 'object'
+        ? (raw.externalRun as ExternalRunRef)
         : undefined,
   }
 }
@@ -349,6 +356,19 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
         id: `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
       })),
       runPlan: source.runPlan?.map((item) => ({ ...item })),
+      // A fork must never silently keep pointing at the source session. The
+      // sidebar completes this pending lineage through OpenCode's fork API.
+      externalRun: source.externalRun
+        ? {
+            ...source.externalRun,
+            sessionId: undefined,
+            parentSessionId: source.externalRun.sessionId,
+            childSessionIds: undefined,
+            status: 'starting',
+            completionReason: 'fork-pending',
+            finishedAt: undefined,
+          }
+        : undefined,
       createdAt: now,
       updatedAt: now,
       lastStatus: 'idle',
@@ -677,6 +697,16 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
             updatedAt: new Date().toISOString(),
           }
         : t,
+    )
+    set({ threads })
+    persist(threads, get().activeId)
+  },
+
+  setExternalRun: (id, externalRun) => {
+    const threads = get().threads.map((thread) =>
+      thread.id === id
+        ? { ...thread, externalRun, updatedAt: new Date().toISOString() }
+        : thread,
     )
     set({ threads })
     persist(threads, get().activeId)

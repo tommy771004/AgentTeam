@@ -22,6 +22,7 @@ import type {
   CapabilityModelSettings,
   CapabilityRuntimeState,
 } from './types'
+import { mcpServersForAgent } from '../opencode/mcpAccess'
 
 export { LOAD_CAPABILITY_TOOL, RUN_CODE_TOOL, TOOL_SEARCH_TOOL }
 
@@ -52,6 +53,8 @@ export type AssembleOpts = {
   blockedTools?: string[]
   /** Restore tool_search unlock set (cross-step / cross-run) */
   preloadUnlockedTools?: string[]
+  /** OpenCode agent id used to filter per-agent MCP access. */
+  agentId?: string
 }
 
 function skillCaps(): AgentCapability[] {
@@ -70,10 +73,9 @@ function skillCaps(): AgentCapability[] {
   }
 }
 
-function mcpCaps(settings: LlmSettings): AgentCapability[] {
+function mcpCaps(settings: LlmSettings, agentId?: string): AgentCapability[] {
   if (!settings.mcpEnabled || !settings.mcpServers?.length) return []
-  return settings.mcpServers
-    .filter((s) => s.enabled)
+  return mcpServersForAgent(settings, agentId)
     .map((s) => ({
       id: `mcp:${s.id}`,
       description: `MCP server「${s.name}」tools (load to expose schemas).`,
@@ -119,6 +121,12 @@ export function assembleCapabilities(
 
   let all: AgentCapability[] = [...BUILTIN_CAPABILITIES.map((c) => ({ ...c }))]
 
+  // Delegation is a separate opt-in feature. Keep its schemas/runbook out of
+  // progressive disclosure when the user has disabled Sub Agent mode.
+  if (settings.subAgentsEnabled !== true) {
+    all = all.filter((capability) => capability.id !== 'delegate')
+  }
+
   if (opts?.projectRoot === '') {
     all = all.filter((c) => c.id !== 'codegraph')
   }
@@ -137,7 +145,7 @@ export function assembleCapabilities(
     all.push(...skillCaps())
   }
   if (opts?.includeMcpCaps !== false) {
-    all.push(...mcpCaps(settings))
+    all.push(...mcpCaps(settings, opts?.agentId))
   }
   all.push(...userCaps(settings))
 

@@ -51,6 +51,12 @@ import {
 import { listPluginSecretMeta, secretNeedsRefresh } from '../agent/hermes/pluginSecrets'
 import { customToolsForSettings, listPendingToolPackages } from '../agent/tools/customTools'
 import { pluginRegistry } from '../agent/hermes/plugins'
+import { mapOpenCodeProviderCatalog } from '../agent/opencode/providerAdapter'
+import {
+  getOpenCodeProviderCatalog,
+  inspectOpenCodeServer,
+  unwrapOpenCodeServerValue,
+} from '../agent/opencode/serverClient'
 
 const SECTION_GROUPS = [
   { id: 'personal', label: '個人' },
@@ -159,6 +165,8 @@ export function SettingsPage() {
   const [webhookStatus, setWebhookStatus] = useState<string | null>(null)
   const [mcpProbe, setMcpProbe] = useState<string | null>(null)
   const [mcpSessions, setMcpSessions] = useState<string | null>(null)
+  const [mcpHealthById, setMcpHealthById] = useState<Record<string, string>>({})
+  const [ocProviderMsg, setOcProviderMsg] = useState<string | null>(null)
   const [gatewayMsg, setGatewayMsg] = useState<string | null>(null)
   const [cliMsg, setCliMsg] = useState<string | null>(null)
   const [dataMsg, setDataMsg] = useState<string | null>(null)
@@ -1360,19 +1368,53 @@ export function SettingsPage() {
             <SettingsGroup
               title="狀態"
               action={
-                <button
-                  type="button"
-                  disabled={oc.loading}
-                  onClick={() => void oc.hydrate(projectRoot)}
-                  className={settingsBtnCls + ' disabled:opacity-40'}
-                >
-                  {oc.loading ? '載入中…' : '重新整理'}
-                </button>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    disabled={oc.loading}
+                    onClick={() => void oc.hydrate(projectRoot)}
+                    className={settingsBtnCls + ' disabled:opacity-40'}
+                  >
+                    {oc.loading ? '載入中…' : '重新整理'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setOcProviderMsg('讀取 OpenCode provider catalog…')
+                      const health = await inspectOpenCodeServer()
+                      if (!health.ok || !health.baseUrl) {
+                        setOcProviderMsg(health.error || '找不到 localhost OpenCode server；先啟動 server。')
+                        return
+                      }
+                      const raw = await getOpenCodeProviderCatalog(health.baseUrl)
+                      const mapped = mapOpenCodeProviderCatalog(
+                        unwrapOpenCodeServerValue(raw) as Parameters<typeof mapOpenCodeProviderCatalog>[0],
+                      )
+                      if (!mapped.modelIds.length) {
+                        setOcProviderMsg('server 沒有回傳可採用的 model candidate。')
+                        return
+                      }
+                      const existing = settings.modelProfiles || {}
+                      const profiles = { ...existing }
+                      for (const id of mapped.modelIds) {
+                        if (!profiles[id]) profiles[id] = mapped.profiles[id]
+                      }
+                      set({
+                        discoveredModels: [...new Set([...(settings.discoveredModels || []), ...mapped.modelIds])],
+                        modelProfiles: profiles,
+                      })
+                      setOcProviderMsg(`已採用 ${mapped.modelIds.length} 個 server model candidate（不覆蓋既有模型設定）。`)
+                    }}
+                    className={settingsBtnCls}
+                  >
+                    採用 Provider candidates
+                  </button>
+                </div>
               }
             >
               <div className="px-4 py-3 text-[11px] text-outline leading-relaxed">
                 合併{' '}
-                <code className="text-primary/80 font-mono">~/.config/opencode/opencode.json</code>
+                <code className="text-primary/80 font-mono">使用者資料目錄/opencode/opencode.json</code>
                 、專案 <code className="text-primary/80 font-mono">opencode.json</code> 與{' '}
                 <code className="text-primary/80 font-mono">.opencode/agents|commands</code>
                 。Commands 會自動匯入為 slash（/cmd）。
@@ -1391,6 +1433,9 @@ export function SettingsPage() {
               {oc.default_agent && <Row k="default_agent" v={oc.default_agent} mono />}
               {oc.error && (
                 <p className="text-[11px] text-amber-200/90 px-4 pb-3">{oc.error}</p>
+              )}
+              {ocProviderMsg && (
+                <p className="text-[11px] text-primary/90 px-4 pb-3">{ocProviderMsg}</p>
               )}
             </SettingsGroup>
 
@@ -1508,6 +1553,16 @@ export function SettingsPage() {
                 </div>
               }
             >
+              <SettingsRow
+                title="啟用 Sub Agent"
+                description="開啟後才會使用 Manager／Analyzer-1／Writer 角色模型與 delegate_task；預設關閉，關閉時所有步驟使用全域模型。"
+                control={
+                  <SettingsToggle
+                    checked={settings.subAgentsEnabled === true}
+                    onChange={(v) => set({ subAgentsEnabled: v })}
+                  />
+                }
+              />
               {(
                 [
                   ['orchestrator', 'Manager／協調者'],
@@ -2202,6 +2257,93 @@ export function SettingsPage() {
               />
             </SettingsGroup>
 
+            <SettingsGroup title="Plugin permission summary">
+              {oc.plugins.length === 0 ? (
+                <p className="px-4 py-3 text-[12px] text-outline">目前 config 沒有 npm plugin reference；`.opencode/plugins` 本地檔案仍維持 OpenCode 自己的載入範圍。</p>
+              ) : (
+                <div className="divide-y divide-white/10">
+                  {oc.plugins.map((plugin) => (
+                    <div key={plugin} className="px-4 py-2.5">
+                      <div className="text-[12px] font-mono text-on-surface">{plugin}</div>
+                      <div className="text-[10px] text-amber-300/90 mt-0.5">permission：未知（manifest reference only） · 不自動安裝／不執行 plugin code</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SettingsGroup>
+
+            <SettingsGroup title="Per-agent MCP 存取">
+              <div className="px-4 py-2 text-[11px] text-outline leading-relaxed">
+                未設定 agent 會沿用全域 MCP；一旦切換成自訂清單，空清單代表該 agent 完全不能使用 MCP。這是 allowlist，不會放寬 OpenCode permission deny。
+              </div>
+              {(() => {
+                const servers = (settings.mcpServers || []).filter((server) => server.enabled)
+                const configured = settings.mcpAgentServers || {}
+                const agentRows = [
+                  { id: 'build', label: 'Build（內建）' },
+                  { id: 'plan', label: 'Plan（內建）' },
+                  ...oc.agents
+                    .filter((agent) => !agent.hidden && agent.id !== 'build' && agent.id !== 'plan')
+                    .map((agent) => ({ id: agent.id, label: `${agent.label}（${agent.id}）` })),
+                ].filter((agent, index, rows) => rows.findIndex((x) => x.id === agent.id) === index)
+                if (!agentRows.length) {
+                  return <p className="px-4 py-3 text-[12px] text-outline">尚未載入 OpenCode agent；先到 OpenCode 分頁重新整理。</p>
+                }
+                return (
+                  <div className="divide-y divide-white/10">
+                    {agentRows.map((agent) => {
+                      const custom = Object.prototype.hasOwnProperty.call(configured, agent.id)
+                      const selected = new Set(custom ? configured[agent.id] || [] : servers.map((server) => server.id))
+                      return (
+                        <div key={agent.id} className="px-4 py-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[12px] font-semibold text-on-surface">{agent.label}</span>
+                            <label className="flex items-center gap-1 text-[10px] text-outline">
+                              <input
+                                type="checkbox"
+                                checked={!custom}
+                                onChange={(event) => {
+                                  const next = { ...configured }
+                                  if (event.target.checked) delete next[agent.id]
+                                  else next[agent.id] = servers.map((server) => server.id)
+                                  set({ mcpAgentServers: next })
+                                }}
+                                className="accent-primary-container"
+                              />
+                              沿用全域
+                            </label>
+                          </div>
+                          {custom && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                              {servers.length === 0 ? (
+                                <span className="text-[11px] text-outline">尚無啟用中的 MCP server</span>
+                              ) : servers.map((server) => (
+                                <label key={server.id} className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1.5 text-[11px]">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected.has(server.id)}
+                                    onChange={(event) => {
+                                      const ids = new Set(configured[agent.id] || [])
+                                      if (event.target.checked) ids.add(server.id)
+                                      else ids.delete(server.id)
+                                      set({ mcpAgentServers: { ...configured, [agent.id]: [...ids] } })
+                                    }}
+                                    className="accent-primary-container"
+                                  />
+                                  <span className="truncate">{server.name}</span>
+                                  <span className="ml-auto text-[9px] text-outline">{mcpHealthById[server.id] || '未探測'}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+            </SettingsGroup>
+
             <SettingsGroup title="宣告式自訂工具">
               {/* P1-C: tool packages awaiting privilege review */}
               {(() => {
@@ -2314,7 +2456,16 @@ export function SettingsPage() {
                       type="button"
                       className="text-xs text-error shrink-0"
                       onClick={() => {
-                        set({ mcpServers: (settings.mcpServers || []).filter((_, i) => i !== idx),
+                        const removedId = s.id
+                        const nextAccess = Object.fromEntries(
+                          Object.entries(settings.mcpAgentServers || {}).map(([agent, ids]) => [
+                            agent,
+                            ids.filter((id) => id !== removedId),
+                          ]),
+                        )
+                        set({
+                          mcpServers: (settings.mcpServers || []).filter((_, i) => i !== idx),
+                          mcpAgentServers: nextAccess,
                         })
                       }}
                     >
@@ -2336,6 +2487,10 @@ export function SettingsPage() {
                     <option value="http">HTTP JSON-RPC</option>
                     <option value="stdio">stdio（僅 Electron）</option>
                   </select>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-outline font-[family-name:var(--font-mono)]">
+                    <span>health: {mcpHealthById[s.id] || '未探測'}</span>
+                    <span>secret owner: {s.secretPluginId || s.pluginId || 'manual'}</span>
+                  </div>
                   {s.transport === 'http' ? (
                     <>
                       <input
@@ -2431,10 +2586,19 @@ export function SettingsPage() {
                   /* already live */ await Promise.resolve()
                   setMcpProbe('探測中…')
                   try {
-                    const tools = await listAllMcpTools(
-                      (settings.mcpServers || []).filter((s) => s.enabled),
-                      settings,
-                    )
+                    const nextHealth: Record<string, string> = {}
+                    const tools = [] as Awaited<ReturnType<typeof listAllMcpTools>>
+                    for (const server of (settings.mcpServers || []).filter((s) => s.enabled)) {
+                      try {
+                        const serverTools = await listAllMcpTools([server], settings)
+                        const error = serverTools.find((tool) => tool.name === '__error__')
+                        nextHealth[server.id] = error ? `error` : `${serverTools.length} tools`
+                        tools.push(...serverTools)
+                      } catch {
+                        nextHealth[server.id] = 'error'
+                      }
+                    }
+                    setMcpHealthById(nextHealth)
                     setMcpProbe(
                       tools.length
                         ? tools
@@ -2459,6 +2623,10 @@ export function SettingsPage() {
                     (x) => x.enabled && x.transport === 'stdio',
                   )) {
                     const r = await mcpEnsureSession(s, settings)
+                    setMcpHealthById((prev) => ({
+                      ...prev,
+                      [s.id]: r.ok ? `stdio alive=${r.status?.alive ? 'yes' : 'no'}` : 'error',
+                    }))
                     lines.push(
                       r.ok
                         ? `✓ ${s.name} pid=${r.status?.pid} alive=${r.status?.alive}`
