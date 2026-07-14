@@ -435,6 +435,16 @@ export function SettingsPage() {
                   />
                 }
               />
+              <div
+                role="status"
+                className="mx-4 mb-3 flex items-start gap-2 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-[11px] leading-relaxed text-amber-200/90"
+              >
+                <Icon name="warning" size={15} className="mt-0.5 shrink-0 text-amber-300" />
+                <p>
+                  <span className="font-semibold text-amber-200">實驗性：</span>
+                  多 run 呈現尚未完成。開啟後，活動、停止與介入畫面可能仍有跨 run 混線；建議暫時保持關閉。
+                </p>
+              </div>
               {settings.concurrentRunsEnabled === true && (
                 <SettingsRow
                   title="並行上限"
@@ -2165,6 +2175,19 @@ export function SettingsPage() {
                   onChange={(e) => set({ webhookToken: e.target.value })}
                   autoComplete="off"
                 />
+              </SettingsStack>
+              <SettingsStack title="Post-state Webhook target（選填）">
+                <input
+                  type="url"
+                  className={settingsInputCls}
+                  value={settings.webhookTarget || ''}
+                  onChange={(e) => set({ webhookTarget: e.target.value })}
+                  placeholder="https://example.com/hooks/subagents"
+                  autoComplete="off"
+                />
+                <p className="text-[11px] text-outline mt-1">
+                  只有 Next_State=Dispatch Webhook 才會送出；未設定或非 http/https 會留下失敗 audit。
+                </p>
               </SettingsStack>
             </SettingsGroup>
             <pre className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-[11px] font-[family-name:var(--font-mono)] text-on-surface-variant overflow-x-auto whitespace-pre-wrap mb-4">

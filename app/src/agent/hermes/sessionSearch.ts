@@ -9,18 +9,10 @@ import { chatCompletion, withRoleModel } from '../llm'
 import { memoryStore } from './memory'
 import { skillsStore } from './skills'
 import type { SessionSearchHit } from './types'
+import { scoreQueryText } from './textSimilarity'
 
 function scoreText(query: string, text: string): number {
-  const q = query.toLowerCase().trim()
-  if (!q) return 0
-  const hay = text.toLowerCase()
-  let score = 0
-  for (const w of q.split(/\s+/)) {
-    if (w.length < 2) continue
-    if (hay.includes(w)) score += w.length > 3 ? 2 : 1
-  }
-  if (hay.includes(q)) score += 5
-  return score
+  return scoreQueryText(query, text)
 }
 
 function snippet(text: string, query: string, len = 160): string {
@@ -54,13 +46,15 @@ export function searchSessions(
   }
 
   for (const e of memoryStore.search(query, 10)) {
+    const failBoost = e.tags?.includes('failure') ? 4 : 0
     hits.push({
       id: e.id,
       source: 'memory',
-      title: '記憶條目',
+      title: e.tags?.includes('failure') ? '失敗教訓' : '記憶條目',
       snippet: e.text.slice(0, 160),
-      score: scoreText(query, e.text) + 1,
+      score: scoreText(query, `${e.text} ${(e.tags || []).join(' ')}`) + 1 + failBoost,
       timestamp: e.createdAt,
+      tags: e.tags,
     })
   }
 

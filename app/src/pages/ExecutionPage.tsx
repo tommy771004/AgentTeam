@@ -9,7 +9,15 @@ import { loopTypeZh } from '../i18n/zh'
 
 export function ExecutionPage() {
   const navigate = useNavigate()
-  const { agent, isRunning, stopExecution, continueTurn, resolveIntervention } = useAgentStore()
+  const {
+    agent,
+    isRunning,
+    activeRunIds,
+    stopExecution,
+    continueTurn,
+    resolveIntervention,
+  } = useAgentStore()
+  const runId = activeRunIds[0] || null
 
   useEffect(() => {
     if (agent.status === 'success') {
@@ -43,7 +51,7 @@ export function ExecutionPage() {
             <button
               type="button"
               onClick={() => {
-                stopExecution()
+                if (runId) stopExecution(runId)
                 navigate('/')
               }}
               className="no-drag w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/5 text-on-surface-variant transition-colors group"
@@ -89,7 +97,7 @@ export function ExecutionPage() {
             </button>
             <button
               type="button"
-              onClick={() => stopExecution()}
+              onClick={() => runId && stopExecution(runId)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg border border-error/30 bg-error/10 text-error hover:bg-error/20 hover:border-error/50 transition-all font-semibold text-xs tracking-wider uppercase shadow-[0_0_15px_rgba(255,180,171,0.1)]"
             >
               <Icon name="stop_circle" size={16} />
@@ -321,7 +329,7 @@ export function ExecutionPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => continueTurn()}
+                  onClick={() => runId && continueTurn(runId)}
                   className="bg-primary-container text-on-primary-container px-4 py-2 rounded font-semibold text-xs tracking-wider uppercase hover:brightness-110 shrink-0"
                 >
                   確認 / ACK
@@ -335,9 +343,9 @@ export function ExecutionPage() {
       <InterventionPanel
         intervention={agent.intervention}
         onApprove={(payloadJson) =>
-          resolveIntervention({ action: 'approve', payloadJson })
+          runId && resolveIntervention({ action: 'approve', payloadJson }, runId)
         }
-        onReject={() => resolveIntervention({ action: 'reject' })}
+        onReject={() => runId && resolveIntervention({ action: 'reject' }, runId)}
       />
     </div>
   )

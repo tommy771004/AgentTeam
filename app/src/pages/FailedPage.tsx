@@ -25,8 +25,8 @@ export function FailedPage() {
       return
     }
     navigate('/')
-    const { runExternalObjective } = await import('../agent/runExternal')
-    await runExternalObjective({
+    const { runTask } = await import('../agent/taskRunCoordinator')
+    await runTask({
       sourceKind: 'retry',
       objective: input,
       title: '重試',
@@ -37,6 +37,7 @@ export function FailedPage() {
         maxIterations: maxIter,
         minConfidence: minConf,
         timeoutMs,
+        eventTrigger: agent.eventTrigger,
       },
     })
   }

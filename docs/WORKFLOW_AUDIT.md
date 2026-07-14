@@ -13,25 +13,26 @@
 ─────────────                ─────────────                      ─────────────
 UI 對話 (ProtocolsPage) ─┐
 斜線指令 (useSlashExecutor)─┤
-排程到期 (SchedulerBootstrap)┤→ runExternalObjective → dispatchThreadTask
-Webhook (WebhookBootstrap) ─┤   (建 thread+bubbles)    ├→ builtin: agentEngine ──┐
-Telegram (GatewayBootstrap)─┤                          └→ cli: localCliRun      │
-背景委派 (backgroundJobs) ──┘                                                   │
-                                                                                ▼
-                              AgentLoopEngine(單例,全域單一執行鎖)
+排程到期 (SchedulerBootstrap)┤→ taskRunCoordinator.runTask
+Webhook (WebhookBootstrap) ─┤   capacity/attachments/thread/beforeRun
+Telegram (GatewayBootstrap)─┤   → dispatchThreadTask(snapshot)
+背景委派 (backgroundJobs) ──┘        ├→ builtin: agentEngine (loop)
+                                     └→ cli: localCliRun (external)
+                                                ▼
+                              finalizeTaskRun（summary→afterRun→Archive→onSettled→release→drain）
                               4 patterns: Turn / Goal / Time / Proactive
+                                （Time/Proactive 僅 automation trigger）
                               每步 executeStepWithAgent:
-                                ├─ FC 路徑: runFunctionCallingLoop(capability 系統)
+                                ├─ FC 路徑: toolLoop + ContextPacket + capability
                                 ├─ heuristic 路徑: 關鍵字選工具 + capability runbook/審批
                                 └─ 模擬路徑: 無 LLM
-                                                                                ▼
-                              產出: state.result → Archive(含 toolCalls/caps/tokens)
-                              回饋: learningLoop → 技能草稿/記憶 → 下次執行的 skill capability
+                                                ▼
+                              產出: state.result → Archive(一次)
+                              回饋: learningLoop → 技能草稿/記憶
                               通知: 桌面 notify / Telegram 回覆 / 排程狀態回寫
 ```
 
-**單一執行鎖語意**:`agentStore.isRunning` 為全域 mutex;排程/webhook/Telegram 觸發時若忙碌
-→ 跳過並通知(不排隊),排程任務標記 `skipped`。
+**並行語意（2026-07 更新）**: 預設單 run（`concurrentRunsEnabled=false`）；opt-in 後以 `runId` registry + `maxConcurrentRuns` 上限並行。忙碌時 automation **queue**、互動 **steer/queue**（非永久跳過）。詳見 ADR-0003 與 `TASK_AGENT_WORKFLOW_INTEGRATION_PLAN_2026-07-14.md`。
 
 ---
 

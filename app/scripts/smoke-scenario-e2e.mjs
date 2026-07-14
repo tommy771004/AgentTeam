@@ -249,6 +249,8 @@ function createFakeRunController({
   const queue = createFakeQueue()
   const archive = []
   const threads = new Map()
+  const runByThread = new Map()
+  const cancelledRuns = new Set()
   const notifications = []
   const jobResults = new Map()
   let projectContext = { root: null, agentsHash: null, guidance: '' }
@@ -406,6 +408,7 @@ function createFakeRunController({
       }
     }
     activeRuns.set(runId, { runId, threadId })
+    runByThread.set(threadId, runId)
     const logs = []
     if (!threads.has(threadId)) {
       threads.set(threadId, {
@@ -466,6 +469,32 @@ function createFakeRunController({
       appendTexts: before.appendTexts,
     }
 
+    const finalizeCancelled = async () => {
+      if (!cancelledRuns.has(runId)) return null
+      const result = {
+        status: 'halted',
+        cancelled: true,
+        runId,
+        threadId,
+        result: '使用者停止',
+        toolRecords,
+        logs: ctx.logs,
+        projectRoot: thread.projectRoot,
+        agentsHash: thread.agentsHash,
+      }
+      cancelledRuns.delete(runId)
+      activeRuns.delete(runId)
+      thread.bubbles.push({ role: 'system', content: result.result, runId })
+      archive.push(result)
+      try {
+        await input.onSettled?.(result)
+      } catch {
+        /* ignore */
+      }
+      await drain()
+      return result
+    }
+
     // Fake LLM tool loop (1–2 rounds)
     const toolRecords = []
     const llmResult = await llm.chat(
@@ -478,6 +507,8 @@ function createFakeRunController({
     for (const tc of llmResult.toolCalls || []) {
       const r = await executeTool(tc.name, tc.arguments || {}, ctx)
       toolRecords.push({ tool: tc.name, ...r, runId })
+      const cancelled = await finalizeCancelled()
+      if (cancelled) return cancelled
     }
 
     const status =
@@ -567,6 +598,14 @@ function createFakeRunController({
     },
     get activeRunIds() {
       return [...activeRuns.keys()]
+    },
+    getRunIdForThread(threadId) {
+      return runByThread.get(threadId) || null
+    },
+    cancelRun(runId) {
+      if (!runId || !activeRuns.has(runId)) return false
+      cancelledRuns.add(runId)
+      return true
     },
     clock,
     llm,
@@ -699,6 +738,83 @@ await test('ADR3: opt-in concurrent runs share capacity, isolate HITL identity, 
     'HITL asks must retain the originating run and thread',
   )
   assert.equal(ctrl.isRunning, false)
+})
+
+await test('Phase 0: switching active threads keeps cancel and completion run-scoped', async () => {
+  const hitl = createFakeHitl({ auto: 'approve', delayMs: 30 })
+  const ctrl = createFakeRunController({
+    concurrentRunsEnabled: true,
+    maxConcurrentRuns: 2,
+    hitl,
+    hooks: [
+      {
+        id: 'ask-bash',
+        point: 'beforeTool',
+        match: { tool: 'bash' },
+        action: 'require-approval',
+      },
+    ],
+    llm: createFakeLlm([
+      { toolCalls: [{ name: 'bash', arguments: { command: 'thread-a' } }], content: '' },
+      { toolCalls: [{ name: 'bash', arguments: { command: 'thread-b' } }], content: 'thread B completed' },
+    ]),
+  })
+  const threadA = 'thread-a'
+  const threadB = 'thread-b'
+  const runA = ctrl.runTask({
+    sourceKind: 'composer',
+    objective: 'cancel thread A',
+    runId: 'run-a',
+    reuseThreadId: threadA,
+  })
+  await new Promise((r) => setTimeout(r, 5))
+  const runB = ctrl.runTask({
+    sourceKind: 'composer',
+    objective: 'complete thread B',
+    runId: 'run-b',
+    reuseThreadId: threadB,
+  })
+  await new Promise((r) => setTimeout(r, 5))
+
+  const presentation = {
+    activeThreadId: null,
+    selectThread(id) {
+      this.activeThreadId = id
+    },
+    activeRunId() {
+      return this.activeThreadId ? ctrl.getRunIdForThread(this.activeThreadId) : null
+    },
+    stopThread(id) {
+      return ctrl.cancelRun(ctrl.getRunIdForThread(id))
+    },
+  }
+
+  presentation.selectThread(threadA)
+  assert.equal(presentation.activeRunId(), 'run-a')
+  presentation.selectThread(threadB)
+  assert.equal(presentation.activeRunId(), 'run-b')
+  assert.deepEqual(ctrl.activeRunIds.sort(), ['run-a', 'run-b'])
+
+  // Cancel A after the UI has switched to B; B must remain untouched.
+  assert.equal(presentation.stopThread(threadA), true)
+  const [cancelled, completed] = await Promise.all([runA, runB])
+  assert.equal(cancelled.status, 'halted')
+  assert.equal(cancelled.cancelled, true)
+  assert.equal(completed.status, 'success')
+  assert.match(completed.result, /thread B completed/)
+  assert.equal(ctrl.isRunning, false)
+
+  const archiveA = ctrl.archive.filter((item) => item.runId === 'run-a')
+  const archiveB = ctrl.archive.filter((item) => item.runId === 'run-b')
+  assert.equal(archiveA.length, 1)
+  assert.equal(archiveB.length, 1)
+  assert.ok(ctrl.threads.get(threadA).bubbles.every((bubble) => bubble.runId === 'run-a'))
+  assert.ok(ctrl.threads.get(threadB).bubbles.every((bubble) => bubble.runId === 'run-b'))
+
+  presentation.selectThread(threadA)
+  assert.equal(presentation.activeRunId(), 'run-a')
+  presentation.selectThread(threadB)
+  assert.equal(presentation.activeRunId(), 'run-b')
 })
 
 await test('§7 queue persists attachment filePath only (no dataUrl leak)', () => {

@@ -11,6 +11,7 @@ import { TerminalPanel } from '../components/TerminalPanel'
 import { ComposerQuickActions } from '../components/ComposerQuickActions'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import { useAgentStore } from '../store/agentStore'
+import { useRunActivityStore } from '../store/runActivityStore'
 import { useSlashExecutor } from '../hooks/useSlashExecutor'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -20,6 +21,7 @@ import type { ThinkingDepth } from '../agent/thinking'
 import { getThinkingDepth } from '../agent/thinking'
 import { nextPrimaryAgent, parseSubagentMentions } from '../agent/opencode/agents'
 import type { ChatAttachment } from '../agent/types'
+import { detectAutomationSuggestion } from '../agent/automationSuggestion'
 import {
   defaultGoalForAttachments,
   materializeAttachmentsOnDisk,
@@ -40,6 +42,8 @@ export function ProtocolsPage() {
     setSelectedLoopType,
     isRunning,
     agent,
+    getRunIdForThread,
+    selectRun,
   } = useAgentStore()
   const [busy, setBusy] = useState(false)
   const [showTerminal, setShowTerminal] = useState(false)
@@ -68,15 +72,25 @@ export function ProtocolsPage() {
     createThread,
     clearBubbles,
   } = useThreadStore()
+  const selectActivityRun = useRunActivityStore((s) => s.selectRun)
   const sessionAllow = usePermissionAskStore((s) => s.sessionAllow)
   const setSessionAllow = usePermissionAskStore((s) => s.setSessionAllow)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const thread = activeThread()
+  const presentationRunId = activeId ? getRunIdForThread(activeId) : null
 
   useEffect(() => {
     hydrate()
   }, [hydrate])
+
+  // Phase 1: thread selection is the UI seam for run presentation selection.
+  // Keep the run identity explicit so a late update from another thread does
+  // not become the visible state merely because it published last.
+  useEffect(() => {
+    selectRun(presentationRunId)
+    selectActivityRun(presentationRunId)
+  }, [presentationRunId, selectActivityRun, selectRun])
 
 
   // Auto-open right task panel while running (Codex-style split)
@@ -181,6 +195,10 @@ export function ProtocolsPage() {
     if (!raw) return
     if (!activeId) return
 
+    const conversationSuggestion =
+      !pinnedLoopType && detectAutomationSuggestion(raw)
+    let suggestionOnly = false
+
     // Persist attachments to disk early (bubble + queue + vision share filePath)
     if (attachments.length) {
       attachments = await materializeAttachmentsOnDisk(attachments, {
@@ -204,7 +222,13 @@ export function ProtocolsPage() {
       pushBubble(activeId, 'system', '臨時對話：本次不讀寫跨對話記憶')
     }
     if (!thread?.loopType) {
-      pushBubble(activeId, 'system', 'Loop：自動分類（短訊息→回合 · 複雜目標→目標迴圈）')
+      pushBubble(
+        activeId,
+        'system',
+        conversationSuggestion
+          ? 'Loop：偵測到自動化語意 → 僅提出建議，不啟動 Time/Proactive'
+          : 'Loop：自動分類（短訊息→回合 · 複雜目標→目標迴圈）',
+      )
     }
     if (runner !== 'builtin') {
       pushBubble(
@@ -220,7 +244,7 @@ export function ProtocolsPage() {
       // Single lifecycle controller: busy policy (steer/queue), thread status,
       // user/assistant bubbles, trace runId, drain — all owned by runTask.
       // Omit loopType when unpinned → engine auto-classifies (Chat-lite / Goal).
-      const { runTask } = await import('../agent/runExternal')
+      const { runTask } = await import('../agent/taskRunCoordinator')
       const r = await runTask({
         objective: raw,
         sourceKind: 'composer',
@@ -232,6 +256,7 @@ export function ProtocolsPage() {
         // silently re-resolve to whatever project the UI switches to mid-flight.
         projectRoot: projectRoot || undefined,
       })
+      suggestionOnly = Boolean(r.suggestion)
       if (r.queued) {
         const n = queueLength()
         const pos =
@@ -256,7 +281,7 @@ export function ProtocolsPage() {
       )
     } finally {
       setBusy(false)
-      setShowRunPanel(true)
+      setShowRunPanel(!suggestionOnly)
     }
   }
 
@@ -372,10 +397,13 @@ export function ProtocolsPage() {
                         {head.map(renderBubble)}
                         {midSystems.map(renderBubble)}
                         {/* Live process sits ABOVE the final answer (Codex order) */}
-                        <RunProcessFeed
-                          depthLabel={depthDef.label}
-                          onOpenPanel={() => setShowRunPanel(true)}
-                        />
+                        {presentationRunId ? (
+                          <RunProcessFeed
+                            runId={presentationRunId}
+                            depthLabel={depthDef.label}
+                            onOpenPanel={() => setShowRunPanel(true)}
+                          />
+                        ) : null}
                         {midAssistants.map(renderBubble)}
                       </>
                     )
@@ -486,9 +514,13 @@ export function ProtocolsPage() {
         </div>
       </div>
 
-      {showRunPanel && (
+      {showRunPanel && presentationRunId && activeId && (
         <aside className="w-full sm:w-[320px] lg:w-[360px] shrink-0 max-w-[100vw] absolute sm:relative inset-0 sm:inset-auto z-30 sm:z-0 bg-background sm:bg-transparent">
-          <InlineRunPanel onClose={() => setShowRunPanel(false)} />
+          <InlineRunPanel
+            runId={presentationRunId}
+            threadId={activeId}
+            onClose={() => setShowRunPanel(false)}
+          />
         </aside>
       )}
       {showTerminal && (

@@ -4,6 +4,7 @@
 
 import { v4 as uuid } from 'uuid'
 import type { MemoryBundle, MemoryEntry } from './types'
+import { scoreQueryText } from './textSimilarity'
 
 const MAX_MEMORY_CHARS = 12_000
 const MAX_USER_CHARS = 4_000
@@ -57,20 +58,56 @@ export class MemoryStore {
   }
 
   search(query: string, limit = 8): MemoryEntry[] {
-    const q = query.toLowerCase().trim()
+    const q = query.trim()
     if (!q) return this.entries.slice(0, limit)
     const scored = this.entries
       .map((e) => {
-        const hay = e.text.toLowerCase()
-        let score = 0
-        for (const w of q.split(/\s+/)) {
-          if (w.length > 1 && hay.includes(w)) score += 1
+        // ASCII tokens + CJK bigrams; tags boost tool:/strategy: hits for packet recall
+        let score = scoreQueryText(q, e.text)
+        for (const tag of e.tags || []) {
+          if (scoreQueryText(q, tag) > 0) score += 1.5
+          // Explicit tool/strategy tags from failure lessons
+          if (tag.startsWith('tool:') && q.toLowerCase().includes(tag.slice(5).toLowerCase())) {
+            score += 3
+          }
+          if (tag.startsWith('strategy:') && q.toLowerCase().includes(tag.slice(9).toLowerCase())) {
+            score += 2
+          }
         }
         return { e, score }
       })
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score)
     return scored.slice(0, limit).map((x) => x.e)
+  }
+
+  /**
+   * Compact failure-lesson block for ContextPacket (tool/strategy tags preserved).
+   */
+  buildFailureLessonsBlock(objective?: string, limit = 3): string {
+    const failures = this.entries.filter((entry) => entry.tags?.includes('failure'))
+    if (!failures.length) return ''
+    let ranked = failures
+    if (objective?.trim()) {
+      ranked = failures
+        .map((entry) => ({
+          entry,
+          score: scoreQueryText(objective, `${entry.text} ${(entry.tags || []).join(' ')}`),
+        }))
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map((x) => x.entry)
+      if (!ranked.length) ranked = failures.slice(0, limit)
+    }
+    return ranked
+      .slice(0, limit)
+      .map((entry) => {
+        const tags = (entry.tags || [])
+          .filter((t) => t.startsWith('tool:') || t.startsWith('strategy:'))
+          .join(' ')
+        return `- ${entry.text.slice(0, 220)}${tags ? ` 〔${tags}〕` : ''}`
+      })
+      .join('\n')
   }
 
   deleteEntry(id: string) {
@@ -124,21 +161,13 @@ export class MemoryStore {
             !related.some((r) => r.id === entry.id),
         )
         .slice(0, 3)
-      // Prefer failures that share tokens with the objective
-      const objLower = objective.toLowerCase()
+      // Prefer failures that share ASCII/CJK tokens + tool/strategy tags
       const scoredFailures = this.entries
         .filter((entry) => entry.tags?.includes('failure'))
-        .map((entry) => {
-          let score = 0
-          const hay = entry.text.toLowerCase()
-          for (const w of objLower.split(/\s+/)) {
-            if (w.length > 1 && hay.includes(w)) score += 1
-          }
-          for (const m of objective.match(/[一-鿿]{2,}/g) || []) {
-            if (entry.text.includes(m)) score += 2
-          }
-          return { entry, score }
-        })
+        .map((entry) => ({
+          entry,
+          score: scoreQueryText(objective, `${entry.text} ${(entry.tags || []).join(' ')}`),
+        }))
         .filter((x) => x.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, 3)
@@ -148,7 +177,12 @@ export class MemoryStore {
         parts.push(
           '### 失敗教訓（同類 — 必須避開）',
           '下列為過去失敗記錄；執行前先讀，勿重蹈相同工具或策略錯誤。',
-          ...lessons.map((entry) => `- ${entry.text.slice(0, 200)}`),
+          ...lessons.map((entry) => {
+            const tags = (entry.tags || [])
+              .filter((t) => t.startsWith('tool:') || t.startsWith('strategy:'))
+              .join(' ')
+            return `- ${entry.text.slice(0, 200)}${tags ? ` 〔${tags}〕` : ''}`
+          }),
         )
       }
     }

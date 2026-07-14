@@ -3,8 +3,13 @@
  * Persists serializable fields to localStorage so restart does not drop once-jobs.
  */
 
-import type { LoopType, RuntimeOverrides } from './types'
-import type { ExternalRunOpts, ExternalRunResult } from './runExternal'
+import type {
+  EventTriggerSnapshot,
+  LoopType,
+  RuntimeOverrides,
+  ScheduleKind,
+} from './types'
+import type { ExternalRunOpts, ExternalRunResult } from './taskRunCoordinator'
 import type { ThreadRunner } from '../store/threadStore'
 
 export type QueuedExternalRun = ExternalRunOpts & {
@@ -42,6 +47,11 @@ export type PersistedQueueItem = {
   unattended?: boolean
   /** Re-bind markJobResult after hydrate */
   scheduleJobId?: string
+  /** Canonical claim time carried through queue/restart. */
+  scheduleTriggeredAt?: string
+  scheduleKind?: ScheduleKind
+  /** Canonical Proactive matcher evidence carried through queue/restart. */
+  eventTrigger?: EventTriggerSnapshot
   projectRoot?: string
   extraContext?: string
   reuseThreadId?: string
@@ -62,6 +72,11 @@ export type PersistedQueueItem = {
     | 'maxToolRounds'
     | 'projectRoot'
     | 'extraSystemContext'
+    | 'eventTrigger'
+    | 'triggerSource'
+    | 'classificationReason'
+    | 'nextState'
+    | 'webhookTarget'
   >
 }
 
@@ -92,6 +107,13 @@ function dedupeKey(opts: ExternalRunOpts): string {
     opts.sourceLabel || '',
     (opts.attachedSkills || []).join(','),
     opts.meta?.scheduleJobId || '',
+    opts.meta?.scheduleTriggeredAt || '',
+    opts.meta?.eventTrigger?.eventId || '',
+    opts.meta?.eventTrigger?.matchedAt || '',
+    opts.overrides?.nextState || '',
+    opts.overrides?.webhookTarget || '',
+    opts.overrides?.triggerSource || '',
+    opts.overrides?.classificationReason || '',
     opts.reuseThreadId || '',
   ].join('|')
 }
@@ -129,6 +151,9 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
     sourceLabel: item.sourceLabel,
     unattended: item.unattended,
     scheduleJobId: item.meta?.scheduleJobId,
+    scheduleTriggeredAt: item.meta?.scheduleTriggeredAt,
+    scheduleKind: item.meta?.scheduleKind,
+    eventTrigger: item.meta?.eventTrigger,
     projectRoot: item.projectRoot,
     extraContext: item.extraContext?.slice(0, 8000),
     reuseThreadId: item.reuseThreadId,
@@ -148,6 +173,11 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
           maxToolRounds: o.maxToolRounds,
           projectRoot: o.projectRoot,
           extraSystemContext: o.extraSystemContext?.slice(0, 8000),
+          eventTrigger: o.eventTrigger,
+          triggerSource: o.triggerSource,
+          classificationReason: o.classificationReason,
+          nextState: o.nextState,
+          webhookTarget: o.webhookTarget,
         }
       : undefined,
   }
@@ -175,7 +205,15 @@ function fromPersisted(p: PersistedQueueItem): QueuedExternalRun {
     enqueueWhenBusy: p.enqueueWhenBusy,
     attachments: p.attachments,
     overrides: p.overrides,
-    meta: p.scheduleJobId ? { scheduleJobId: p.scheduleJobId } : undefined,
+    meta:
+      p.scheduleJobId || p.scheduleTriggeredAt || p.scheduleKind || p.eventTrigger
+        ? {
+            scheduleJobId: p.scheduleJobId,
+            scheduleTriggeredAt: p.scheduleTriggeredAt,
+            scheduleKind: p.scheduleKind,
+            eventTrigger: p.eventTrigger,
+          }
+        : undefined,
   }
   // Re-attach schedule onSettled after hydrate
   if (p.scheduleJobId) {

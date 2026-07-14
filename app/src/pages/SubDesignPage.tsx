@@ -22,7 +22,7 @@ import { CritiqueTheater } from '../components/subdesign/CritiqueTheater'
 import { ArtifactTweakPanel } from '../components/subdesign/ArtifactTweakPanel'
 import { ReferenceImportPanel } from '../components/subdesign/ReferenceImportPanel'
 import { RunProcessFeed } from '../components/RunProcessFeed'
-import { runTask } from '../agent/runExternal'
+import { runTask } from '../agent/taskRunCoordinator'
 import { useAgentStore } from '../store/agentStore'
 import { useLearningStore } from '../store/learningStore'
 import { useProjectStore } from '../store/projectStore'
@@ -75,8 +75,7 @@ export function SubDesignPage() {
   const createThread = useThreadStore((state) => state.createThread)
   const setSubDesignBriefId = useThreadStore((state) => state.setSubDesignBriefId)
   const hydrateThreads = useThreadStore((state) => state.hydrate)
-  const agent = useAgentStore((state) => state.agent)
-  const isRunning = useAgentStore((state) => state.isRunning)
+  const getRunIdForThread = useAgentStore((state) => state.getRunIdForThread)
   const projectRoot = useProjectStore((state) => state.root)
   const briefs = useSubDesignStore((state) => state.briefs)
   const selectedBriefId = useSubDesignStore((state) => state.selectedBriefId)
@@ -104,7 +103,13 @@ export function SubDesignPage() {
   const linkedThread = useThreadStore((state) =>
     routeBriefId ? state.threads.find((thread) => thread.subDesignBriefId === routeBriefId) : null,
   )
-  const activityActive = useRunActivityStore((state) => state.active)
+  const linkedThreadRunId = linkedThread?.id ? getRunIdForThread(linkedThread.id) : null
+  const linkedAgent = useAgentStore((state) =>
+    linkedThreadRunId ? state.runStates[linkedThreadRunId] : null,
+  )
+  const activityActive = useRunActivityStore((state) =>
+    linkedThreadRunId ? state.getPresentation(linkedThreadRunId)?.active || false : false,
+  )
 
   const [surfaceId, setSurfaceId] = useState<DesignSurface['id']>('prototype')
   const [platform, setPlatform] = useState<SubDesignPlatform>('responsive')
@@ -179,9 +184,14 @@ export function SubDesignPage() {
   )
 
   const runIsLive = Boolean(
-    activeBrief &&
+      activeBrief &&
       (startingRun || runningThreadIds.includes(activeBrief.threadId)) &&
-      (startingRun || isRunning || activityActive || ['running', 'parsing', 'manual_intervention', 'awaiting_user'].includes(agent.status)),
+      (startingRun ||
+        Boolean(linkedThreadRunId) ||
+        activityActive ||
+        ['running', 'parsing', 'manual_intervention', 'awaiting_user'].includes(
+          linkedAgent?.status || 'idle',
+        )),
   )
 
   useEffect(() => {
@@ -325,7 +335,7 @@ export function SubDesignPage() {
               </div>
               {runIsLive ? <span className="rounded-full border border-primary/25 px-2 py-1 text-[10px] font-semibold text-primary">LIVE</span> : <button type="button" onClick={() => void startBriefRun()} disabled={startingRun} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[11px] font-semibold text-on-primary disabled:opacity-50"><Icon name="play_arrow" size={14} />{startingRun ? '啟動中…' : '在此頁開始執行'}</button>}
             </div>
-            {runIsLive ? <div className="border-t border-primary/15 px-4 pb-3"><RunProcessFeed depthLabel="SubDesign" onOpenPanel={openTranscript} /></div> : null}
+            {runIsLive && linkedThreadRunId ? <div className="border-t border-primary/15 px-4 pb-3"><RunProcessFeed runId={linkedThreadRunId} depthLabel="SubDesign" onOpenPanel={openTranscript} /></div> : null}
           </section>
         ) : null}
         <section className="mx-auto max-w-[820px] text-center">

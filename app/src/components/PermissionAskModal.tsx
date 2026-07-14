@@ -31,6 +31,7 @@ export function PermissionAskModal() {
               逾時 {remainSec}s 自動拒絕
               {pendingBehind > 0 ? ` · 佇列尚有 ${pendingBehind} 筆` : ''}
               {current.threadId ? ` · thread=${current.threadId.slice(0, 18)}` : ''}
+              {current.runId ? ` · run=${current.runId.slice(0, 18)}` : ''}
             </p>
           </div>
         </div>
@@ -66,14 +67,14 @@ export function PermissionAskModal() {
         <div className="px-5 py-4 border-t border-white/10 flex justify-end gap-2 bg-surface/40">
           <button
             type="button"
-            onClick={() => resolve('deny')}
+            onClick={() => resolve(current.id, 'deny')}
             className="px-4 py-2 rounded-xl border border-white/15 text-sm font-semibold text-on-surface-variant hover:bg-white/5"
           >
             拒絕
           </button>
           <button
             type="button"
-            onClick={() => resolve('allow')}
+            onClick={() => resolve(current.id, 'allow')}
             className="px-4 py-2 rounded-xl bg-primary-container text-on-primary-container text-sm font-semibold hover:brightness-110"
           >
             核准執行

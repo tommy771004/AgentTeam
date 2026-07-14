@@ -28,6 +28,7 @@ import {
 import { PermissionAskModal } from './components/PermissionAskModal'
 import { QuestionAskModal } from './components/QuestionAskModal'
 import type { ScheduledJob } from './agent/types'
+import { createScheduleTriggerSnapshot } from './agent/scheduler'
 import { scheduleSkillCurator } from './agent/hermes/curator'
 
 /** Restore automation queue from disk and drain when capacity is available */
@@ -49,9 +50,9 @@ function RunQueueBootstrap() {
       await new Promise((r) => setTimeout(r, 900))
       if (cancelled) return
       if (queueLength() === 0 || !useAgentStore.getState().canStartRun().allowed) return
-      const { runExternalObjective } = await import('./agent/runExternal')
+      const { runTask } = await import('./agent/taskRunCoordinator')
       await drainExternalRunQueue((o) =>
-        runExternalObjective({ ...o, _fromQueue: true }),
+        runTask({ ...o, _fromQueue: true }),
       )
     })()
     return () => {
@@ -87,10 +88,11 @@ function SchedulerBootstrap() {
   useEffect(() => {
     const onDue = (job: ScheduledJob) => {
       void (async () => {
+        const scheduleTrigger = createScheduleTriggerSnapshot(job)
         await markJobResult(job.id, 'running')
         void window.subagents?.notify?.('SubAgents AI · 排程', `執行任務：${job.name}`)
         navigate('/')
-        const { runExternalObjective } = await import('./agent/runExternal')
+        const { runTask } = await import('./agent/taskRunCoordinator')
         const settleJob = async (r: {
           status: string
           skipped?: boolean
@@ -114,7 +116,7 @@ function SchedulerBootstrap() {
             `任務 ${job.name}：${ok ? '成功' : '失敗'}`,
           )
         }
-        const r = await runExternalObjective({
+        const r = await runTask({
           sourceKind: 'schedule',
           objective: job.objective,
           title: job.name || '排程',
@@ -125,7 +127,11 @@ function SchedulerBootstrap() {
           sourceLabel: `定時任務：${job.name}`,
           unattended: true,
           // Durable across app restart (queue persistence rebinds via scheduleJobId)
-          meta: { scheduleJobId: job.id },
+          meta: {
+            scheduleJobId: scheduleTrigger.jobId,
+            scheduleTriggeredAt: scheduleTrigger.triggeredAt,
+            scheduleKind: scheduleTrigger.scheduleKind,
+          },
           // In-memory path while app stays open
           onSettled: (result) => settleJob(result),
         })
@@ -158,7 +164,7 @@ function SchedulerBootstrap() {
 /** Bridge Electron webhook HTTP hits → Proactive event matching → agent run */
 function WebhookBootstrap() {
   const navigate = useNavigate()
-  const matchEvent = useScheduleStore((s) => s.matchEvent)
+  const matchEventEvidence = useScheduleStore((s) => s.matchEventEvidence)
   const recordEventTrigger = useScheduleStore((s) => s.recordEventTrigger)
   const load = useScheduleStore((s) => s.load)
   const settings = useSettingsStore((s) => s.settings)
@@ -194,11 +200,12 @@ function WebhookBootstrap() {
   useEffect(() => {
     if (!window.subagents?.webhook?.onEvent) return
     const unsub = window.subagents.webhook.onEvent((payload) => {
-      const matched = matchEvent({
+      const matched = matchEventEvidence({
         source: payload.source || 'webhook.http',
         subject: payload.subject,
         hasAttachment: payload.hasAttachment,
         body: payload.body,
+        receivedAt: payload.receivedAt,
       })
       if (!matched) {
         void window.subagents?.notify?.(
@@ -208,13 +215,14 @@ function WebhookBootstrap() {
         return
       }
       void (async () => {
-        await recordEventTrigger(matched.id)
+        const event = matched.event
+        await recordEventTrigger(event.id, matched.trigger)
         void window.subagents?.notify?.(
           'SubAgents AI · Webhook',
-          `已匹配 rule: ${matched.name}`,
+          `已匹配 rule: ${event.name}`,
         )
         navigate('/')
-        const { runExternalObjective } = await import('./agent/runExternal')
+        const { runTask } = await import('./agent/taskRunCoordinator')
         const body = (payload.body || '').trim()
         const subject = (payload.subject || '').trim()
         const extraParts = [
@@ -222,24 +230,25 @@ function WebhookBootstrap() {
           payload.source ? `Source: ${payload.source}` : '',
           body ? body : '',
         ].filter(Boolean)
-        const r = await runExternalObjective({
+        const r = await runTask({
           sourceKind: 'webhook',
-          objective: matched.objective,
-          title: matched.name,
+          objective: event.objective,
+          title: event.name,
           loopType: 'Proactive',
           eventPreMatched: true,
-          sourceLabel: `Webhook 事件：${matched.name}`,
+          sourceLabel: `Webhook 事件：${event.name}`,
           unattended: true,
+          meta: { eventTrigger: matched.trigger },
           extraContext: extraParts.length
             ? extraParts.join('\n\n').slice(0, 12_000)
             : undefined,
         })
         if (r.skipped) {
           void window.subagents?.notify?.(
-            'SubAgents AI · Webhook',
+              'SubAgents AI · Webhook',
             r.queued
-              ? `已匹配 ${matched.name}：忙碌，已加入待跑佇列`
-              : `已匹配 ${matched.name}，但代理忙碌 — 已略過`,
+              ? `已匹配 ${event.name}：忙碌，已加入待跑佇列`
+              : `已匹配 ${event.name}，但代理忙碌 — 已略過`,
           )
         }
       })()
@@ -247,7 +256,7 @@ function WebhookBootstrap() {
     return () => {
       unsub()
     }
-  }, [matchEvent, recordEventTrigger, navigate])
+  }, [matchEventEvidence, recordEventTrigger, navigate])
 
   return null
 }
@@ -330,7 +339,7 @@ function GatewayBootstrap() {
           `${msg.from || msg.chatId}: ${(text || '（附件）').slice(0, 80)}`,
         )
         navigate('/')
-        const { runExternalObjective } = await import('./agent/runExternal')
+        const { runTask } = await import('./agent/taskRunCoordinator')
         const attachments = (rawAtts || [])
           .filter((a) => a.dataUrl || a.kind === 'text')
           .map((a, i) => ({
@@ -351,7 +360,7 @@ function GatewayBootstrap() {
             token: s.telegramBotToken || undefined,
           })
         }
-        const r = await runExternalObjective({
+        const r = await runTask({
           sourceKind: 'telegram',
           objective: text || (attachments.length ? '請分析我附上的圖片或檔案。' : ''),
           title: `TG ${msg.chatId}`,

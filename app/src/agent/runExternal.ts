@@ -1,28 +1,53 @@
 /**
- * runTask — the single task lifecycle controller (W1 / P0-A).
- * Every entry (composer / slash / retry / schedule / webhook / telegram / queue drain)
- * goes through here: one runId, one capacity policy table, one thread/bubble/archive semantic.
+ * Legacy lifecycle implementation behind taskRunCoordinator (W1 / P0-A / Phase 3).
+ * Every entry still funnels here via `coordinateTaskRun`. Capacity, attachments,
+ * thread bind, beforeRun, dispatch snapshot, and finalization are owned by
+ * coordinator helpers — each run does them once.
  *
  * When busy: policy decides queue / steer / reject — no caller re-implements lifecycle.
  */
 
 import { v4 as uuid } from 'uuid'
-import type { AgentState, ChatAttachment, ExternalRunRef, LoopType, RuntimeOverrides } from './types'
+import type {
+  AgentState,
+  ChatAttachment,
+  ExternalRunRef,
+  LoopType,
+  RuntimeOverrides,
+  EventTriggerSnapshot,
+  ScheduleKind,
+  ScheduleTriggerSnapshot,
+} from './types'
 import { dispatchThreadTask, type DispatchResult } from './runDispatch'
+import {
+  bindRunThread,
+  buildRunDispatchSnapshot,
+  checkRunCapacity,
+  evaluateBeforeRunHooks,
+  finalizeTaskRun,
+  prepareRunAttachments,
+  reserveRunCapacity,
+} from './taskRunCoordinator'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
-import { useSubDesignStore } from '../store/subDesignStore'
-import { useSubDesignArtifactStore } from '../store/subDesignArtifactStore'
-import { useSubDesignCritiqueStore } from '../store/subDesignCritiqueStore'
-import { useSubDesignExportStore } from '../store/subDesignExportStore'
 import { useSettingsStore } from '../store/settingsStore'
 import {
-  drainExternalRunQueue,
   enqueueExternalRun,
   listQueuedRuns,
   queueLength,
 } from './runQueue'
 import { isContinueGoalPhrase } from './chatHistory'
+import {
+  detectAutomationSuggestion,
+  formatAutomationSuggestion,
+  type AutomationSuggestion,
+} from './automationSuggestion.ts'
+import { resolvePlanBubbleMetadata } from './parser'
+import { validateEventTriggerSnapshot } from './eventMatcher'
+import {
+  isClaimedScheduleTrigger,
+  validateScheduleTriggerSnapshot,
+} from './scheduler'
 
 /** Compact partial result when steer aborts a running task. */
 function buildSteerPartialDigest(agent: AgentState): string {
@@ -125,6 +150,11 @@ export type ExternalRunOpts = {
    * When set, does not create a new thread.
    */
   reuseThreadId?: string
+  /**
+   * Phase 3 item 7: background worker — creates a hidden thread that does not
+   * appear in the sidebar or steal active selection.
+   */
+  workerThread?: boolean
   /** User bubble already shown — skip duplicate on drain */
   skipUserBubble?: boolean
   /** Interactive: enqueue when busy even if not unattended automation */
@@ -146,6 +176,9 @@ export type ExternalRunOpts = {
   /** Serializable metadata for queue persistence */
   meta?: {
     scheduleJobId?: string
+    scheduleTriggeredAt?: string
+    scheduleKind?: ScheduleKind
+    eventTrigger?: EventTriggerSnapshot
   }
   /** Internal: skip re-enqueue when draining queue */
   _fromQueue?: boolean
@@ -167,6 +200,8 @@ export type ExternalRunResult = DispatchResult & {
   skipReason?: string
   queued?: boolean
   queueId?: string
+  /** Conversation automation was recognised but awaits explicit consent. */
+  suggestion?: AutomationSuggestion
 }
 
 /**
@@ -174,7 +209,8 @@ export type ExternalRunResult = DispatchResult & {
  * server run. Failures are intentionally non-fatal: the completed session and
  * local transcript remain authoritative when an older server lacks an endpoint.
  */
-async function syncOpenCodeSessionMapping(
+/** Exported for coordinator finalization (Phase 3 item 4). */
+export async function syncOpenCodeSessionMapping(
   threadId: string,
   externalRun?: ExternalRunRef,
 ): Promise<void> {
@@ -275,22 +311,154 @@ function shouldEnqueueWhenBusy(opts: ExternalRunOpts): boolean {
   )
 }
 
+function explicitLoopTypeForConversation(opts: ExternalRunOpts): LoopType | undefined {
+  if (opts.loopType) return opts.loopType
+  if (opts.overrides?.loopTypeMode === 'force') {
+    return opts.overrides.forceLoopType
+  }
+  if (opts.reuseThreadId) {
+    return useThreadStore
+      .getState()
+      .threads.find((thread) => thread.id === opts.reuseThreadId)?.loopType || undefined
+  }
+  return undefined
+}
+
+function isInteractiveConversationSource(opts: ExternalRunOpts): boolean {
+  return opts.sourceKind === 'composer' || opts.sourceKind === 'slash'
+}
+
+type ScheduleTriggerResolution =
+  | { snapshot: ScheduleTriggerSnapshot }
+  | { error: string }
+  | null
+
+type ProactiveTriggerResolution =
+  | { snapshot: EventTriggerSnapshot }
+  | { error: string }
+  | null
+
+/**
+ * Time-based is an execution mode, not a conversational keyword. It can only
+ * enter through a schedule source carrying the proof minted by claimDueJobs.
+ */
+function resolveScheduleTrigger(opts: ExternalRunOpts): ScheduleTriggerResolution {
+  if (explicitLoopTypeForConversation(opts) !== 'Time-based') return null
+  if (opts.sourceKind !== 'schedule') {
+    return {
+      error: 'Time-based 僅能由有效 ScheduledJob 到期 trigger 進入。',
+    }
+  }
+
+  const candidate = opts.overrides?.scheduleTrigger || {
+    source: 'schedule' as const,
+    jobId: opts.meta?.scheduleJobId,
+    scheduleKind: opts.meta?.scheduleKind,
+    triggeredAt: opts.meta?.scheduleTriggeredAt,
+  }
+  const validation = validateScheduleTriggerSnapshot(candidate)
+  return validation.ok
+    ? { snapshot: validation.snapshot }
+    : { error: `Time-based trigger 無效：${validation.reason}` }
+}
+
+/** Proactive is entered only with matcher-produced boolean predicate evidence. */
+function resolveProactiveTrigger(opts: ExternalRunOpts): ProactiveTriggerResolution {
+  if (explicitLoopTypeForConversation(opts) !== 'Proactive') return null
+  const candidate = opts.overrides?.eventTrigger || opts.meta?.eventTrigger
+  const validation = validateEventTriggerSnapshot(candidate)
+  return validation.ok
+    ? { snapshot: validation.snapshot }
+    : { error: `Proactive trigger 無效：${validation.reason}` }
+}
+
+async function verifyClaimedScheduleTrigger(
+  snapshot: ScheduleTriggerSnapshot,
+): Promise<string | null> {
+  try {
+    const { useScheduleStore } = await import('../store/scheduleStore')
+    const store = useScheduleStore.getState()
+    if (!store.loaded) await store.load()
+    const job = useScheduleStore
+      .getState()
+      .jobs.find((candidate) => candidate.id === snapshot.jobId)
+    return isClaimedScheduleTrigger(job, snapshot)
+      ? null
+      : '找不到與 trigger snapshot 一致的已 claim ScheduledJob'
+  } catch {
+    return '無法載入 schedule store 驗證 trigger snapshot'
+  }
+}
+
+/**
+ * Present a consent-first suggestion without reserving a run or entering the
+ * engine. This is the lifecycle seam that keeps conversational trigger words
+ * from becoming executable Time/Proactive runs.
+ */
+function presentConversationAutomationSuggestion(
+  opts: ExternalRunOpts,
+  objective: string,
+  suggestion: AutomationSuggestion,
+): ExternalRunResult {
+  let thr = useThreadStore.getState()
+  if (!thr.activeId && thr.threads.length === 0) {
+    thr.hydrate()
+    thr = useThreadStore.getState()
+  }
+
+  let tid = opts.reuseThreadId || thr.activeId || ''
+  if (!tid || !thr.threads.some((thread) => thread.id === tid)) {
+    tid = thr.createThread({
+      title: (opts.title || objective).slice(0, 48),
+      loopType: null,
+      runner: opts.runner || 'builtin',
+    })
+    thr = useThreadStore.getState()
+  }
+
+  thr.selectThread(tid)
+  const threadIsRunning = Boolean(
+    thr.runningRunIds[tid] ||
+      thr.threads.find((thread) => thread.id === tid)?.lastStatus === 'running',
+  )
+  if (!opts.skipUserBubble) {
+    thr.pushBubble(tid, 'user', objective, opts.attachments)
+  }
+  if (opts.sourceLabel && !opts.skipUserBubble) {
+    thr.pushBubble(tid, 'system', opts.sourceLabel)
+  }
+  thr.pushBubble(tid, 'system', formatAutomationSuggestion(suggestion))
+  if (!threadIsRunning) {
+    thr.setThreadStatus(tid, 'idle')
+    thr.setAwaitingReply(tid, false)
+  }
+
+  return {
+    path: 'builtin',
+    status: 'suggested',
+    threadId: tid,
+    suggestion,
+  }
+}
+
 /** Canonical input name for the lifecycle controller. */
 export type RunTaskInput = ExternalRunOpts
 
 /**
- * runTask — the ONLY entry to start a run. UI / slash / automation callers
- * provide input + sourceKind; lifecycle (queue, steer, thread, bubbles,
- * trace, drain, settle callbacks) is owned here.
+ * runTask — compatibility adapter for the canonical taskRunCoordinator seam.
+ * New callers must import `runTask` from `taskRunCoordinator` instead.
  */
 export async function runTask(input: RunTaskInput): Promise<ExternalRunResult> {
-  return runExternalObjective(input)
+  const { coordinateTaskRun } = await import('./taskRunCoordinator')
+  return coordinateTaskRun(input)
 }
 
 /**
+ * Legacy implementation retained behind taskRunCoordinator.
+ *
  * Run an objective from automation/external source with full thread UX.
  * Also used for interactive follow-ups (reuseThreadId + enqueueWhenBusy).
- * (Legacy name — prefer `runTask`.)
+ * @deprecated New callers must use `taskRunCoordinator.runTask`.
  */
 export async function runExternalObjective(
   opts: ExternalRunOpts,
@@ -325,27 +493,80 @@ export async function runExternalObjective(
 
   const runId = opts.runId || `run_${uuid().slice(0, 12)}`
 
-  // Materialize attachments early so queue persistence keeps filePath
-  let attachments = opts.attachments
-  if (attachments?.length) {
+  const scheduleTriggerResolution = resolveScheduleTrigger(opts)
+  const proactiveTriggerResolution = resolveProactiveTrigger(opts)
+  const rejectBeforeStart = async (error: string): Promise<ExternalRunResult> => {
+    const threadId = opts.reuseThreadId || useThreadStore.getState().activeId || null
+    if (threadId && (opts.reuseThreadId || isInteractiveConversationSource(opts))) {
+      useThreadStore.getState().pushBubble(threadId, 'system', error)
+    }
+    const rejected: ExternalRunResult = {
+      path: 'builtin',
+      status: 'failed',
+      error,
+      threadId,
+      runId,
+    }
     try {
-      const {
-        materializeAttachmentsOnDisk,
-        normalizeImageAttachmentsForVision,
-      } = await import('../lib/chatAttachments')
-      const { useProjectStore } = await import('../store/projectStore')
-      attachments = await normalizeImageAttachmentsForVision(attachments)
-      attachments = await materializeAttachmentsOnDisk(attachments, {
-        projectRoot: opts.projectRoot || useProjectStore.getState().root || undefined,
-        sessionId: opts.reuseThreadId || opts.meta?.scheduleJobId,
-      })
+      await opts.onSettled?.(rejected)
     } catch {
-      /* keep original */
+      /* caller errors are non-fatal */
+    }
+    return rejected
+  }
+  if (scheduleTriggerResolution && 'error' in scheduleTriggerResolution) {
+    return rejectBeforeStart(scheduleTriggerResolution.error)
+  }
+  if (proactiveTriggerResolution && 'error' in proactiveTriggerResolution) {
+    return rejectBeforeStart(proactiveTriggerResolution.error)
+  }
+  const scheduleTrigger =
+    scheduleTriggerResolution && 'snapshot' in scheduleTriggerResolution
+      ? scheduleTriggerResolution.snapshot
+      : undefined
+  const eventTrigger =
+    proactiveTriggerResolution && 'snapshot' in proactiveTriggerResolution
+      ? proactiveTriggerResolution.snapshot
+      : undefined
+  if (scheduleTrigger) {
+    const claimError = await verifyClaimedScheduleTrigger(scheduleTrigger)
+    if (claimError) {
+      return rejectBeforeStart(`Time-based trigger 無效：${claimError}`)
     }
   }
 
+  // Coordinator owns attachment I/O: materialize once early so queue keeps filePath.
+  // Hydrate happens once after capacity is reserved (below).
+  const { useProjectStore } = await import('../store/projectStore')
+  const attachmentProjectRoot =
+    opts.projectRoot || useProjectStore.getState().root || undefined
+  const attachmentSessionId = opts.reuseThreadId || opts.meta?.scheduleJobId
+  let attachments = await prepareRunAttachments(opts.attachments, {
+    projectRoot: attachmentProjectRoot,
+    sessionId: attachmentSessionId,
+    phase: 'persist',
+  })
+
+  // Conversation text can mention a schedule or event, but that is not a
+  // validated trigger. Keep the request in the chat as an advisory proposal;
+  // no capacity reservation, engine start, or tool call is allowed here.
+  const conversationSuggestion =
+    !opts._fromQueue &&
+    isInteractiveConversationSource(opts) &&
+    !explicitLoopTypeForConversation(opts)
+      ? detectAutomationSuggestion(objective)
+      : null
+  if (conversationSuggestion) {
+    return presentConversationAutomationSuggestion(
+      opts,
+      objective,
+      conversationSuggestion,
+    )
+  }
+
+  // Coordinator owns capacity: check once, then reserve once.
   const agent = useAgentStore.getState()
-  let capacity = agent.canStartRun(runId, opts.reuseThreadId)
+  let capacity = await checkRunCapacity(runId, opts.reuseThreadId)
   if (!capacity.allowed) {
     const policy: BusyPolicy = opts.sourceKind
       ? resolveBusyPolicy(
@@ -376,10 +597,10 @@ export async function runExternalObjective(
         if (partial) lines.push('', '### 中止前摘要', partial)
         thrBusy.pushBubble(tid0, 'system', lines.join('\n'))
       }
-      useAgentStore.getState().stopExecution(busyRunId || undefined)
+      if (busyRunId) useAgentStore.getState().stopExecution(busyRunId)
       for (let i = 0; i < 20; i += 1) {
         await new Promise((r) => setTimeout(r, 50))
-        capacity = useAgentStore.getState().canStartRun(runId, opts.reuseThreadId)
+        capacity = await checkRunCapacity(runId, opts.reuseThreadId)
         if (capacity.allowed) break
       }
     } else if (policy === 'queue' && !opts._fromQueue) {
@@ -427,8 +648,10 @@ export async function runExternalObjective(
     }
   }
 
-  if (!useAgentStore.getState().reserveRun(runId, opts.reuseThreadId, opts.runner && opts.runner !== 'builtin' ? 'cli' : 'builtin')) {
-    const retryCapacity = useAgentStore.getState().canStartRun(runId, opts.reuseThreadId)
+  const reserveKind: 'builtin' | 'cli' =
+    opts.runner && opts.runner !== 'builtin' ? 'cli' : 'builtin'
+  if (!(await reserveRunCapacity(runId, opts.reuseThreadId, reserveKind))) {
+    const retryCapacity = await checkRunCapacity(runId, opts.reuseThreadId)
     if (!opts._fromQueue && (opts.sourceKind ? resolveBusyPolicy(opts.sourceKind, useSettingsStore.getState().settings.followUpMode) : 'queue') === 'queue') {
       const item = enqueueExternalRun({ ...opts, runId, attachments, unattended: opts.unattended ?? isAutomationSource(opts) })
       if (item) return { path: 'builtin', status: 'skipped', error: `並行執行上限 ${retryCapacity.limit}，已加入佇列`, threadId: opts.reuseThreadId || null, runId, skipped: true, skipReason: 'queued', queued: true, queueId: item.id }
@@ -436,21 +659,29 @@ export async function runExternalObjective(
     return { path: 'builtin', status: 'skipped', error: `並行執行上限 ${retryCapacity.limit}，請稍候`, threadId: opts.reuseThreadId || null, runId, skipped: true, skipReason: 'busy' }
   }
 
-  const thr = useThreadStore.getState()
-  if (!thr.activeId && thr.threads.length === 0) thr.hydrate()
-
   const settings = useSettingsStore.getState().settings
+  const thr = useThreadStore.getState()
 
-  // Reuse existing thread (interactive follow-up) or create new
-  let tid = opts.reuseThreadId || ''
-  const existing = tid ? thr.threads.find((t) => t.id === tid) : null
-
-  // P3: continueGoal — resume same DoD when flag set or user says 繼續/補齊
+  // continueGoal needs the existing thread snapshot before bind creates/reuses.
+  const preBindId = opts.reuseThreadId || ''
+  const existing = preBindId ? thr.threads.find((t) => t.id === preBindId) : null
   const existingSnap = existing?.continueGoal || undefined
-  const wantContinue = Boolean(
+  let wantContinue = Boolean(
     existingSnap &&
       (opts.continueGoal === true || isContinueGoalPhrase(objective)),
   )
+  // Phase 5: only runners that declare continueGoal may resume DoD/missing.
+  // External CLI must not silently ignore gaps.
+  const intendedRunner = opts.runner || existing?.runner || 'builtin'
+  let continueBlockedNote: string | undefined
+  if (wantContinue) {
+    const { capabilitiesForRunner } = await import('./runners')
+    if (!capabilitiesForRunner(intendedRunner).continueGoal) {
+      wantContinue = false
+      continueBlockedNote =
+        '目前 runner 為外部 CLI（或不支援 continueGoal）。「補齊缺口繼續」僅適用內建引擎；已改為一般任務執行。請切換 runner 為 builtin 後再試，或重新描述任務。'
+    }
+  }
   const continueSnap = wantContinue ? existingSnap : undefined
 
   // Conversation default: omit loopType → auto classify (Chat-lite / Goal).
@@ -460,24 +691,21 @@ export async function runExternalObjective(
     : opts.loopType
   const loopTypeMode: 'force' | 'auto' = forcedLoopType ? 'force' : 'auto'
 
-  if (!existing) {
-    tid = thr.createThread({
-      title: (opts.title || objective).slice(0, 48),
-      // null = auto until user pins a loop type
-      loopType: forcedLoopType || null,
-      thinkingDepth: 'standard',
-      runner: opts.runner || 'builtin',
-    })
-  }
-  thr.selectThread(tid)
-  if (opts.runner) thr.setRunner(tid, opts.runner)
-  thr.clearRunPlan(tid)
-  thr.setShowRunPanel(true)
-  useAgentStore.getState().bindRun(runId, tid)
-  thr.setThreadRunning(tid, true, runId)
-  thr.setAwaitingReply(tid, false)
+  // Coordinator owns thread bind once after capacity is reserved.
+  const { threadId: tid } = await bindRunThread({
+    runId,
+    objective,
+    title: opts.title,
+    reuseThreadId: opts.reuseThreadId,
+    runner: opts.runner,
+    loopType: forcedLoopType || null,
+    hidden: opts.workerThread === true,
+  })
   if (!opts.skipUserBubble) {
     thr.pushBubble(tid, 'user', objective, attachments)
+  }
+  if (continueBlockedNote) {
+    thr.pushBubble(tid, 'system', continueBlockedNote)
   }
   if (continueSnap) {
     thr.pushBubble(
@@ -501,7 +729,6 @@ export async function runExternalObjective(
   if (opts.projectRoot?.trim() && !opts.skipUserBubble) {
     thr.pushBubble(tid, 'system', `專案綁定：${opts.projectRoot.trim()}`)
   }
-  thr.setThreadStatus(tid, 'running')
 
   if (forcedLoopType) {
     agent.setSelectedLoopType(forcedLoopType)
@@ -516,15 +743,22 @@ export async function runExternalObjective(
 
   const sourceIsAutomation = isAutomationSource(opts)
 
-  // Hydrate image dataUrls from disk for builtin vision
-  if (attachments?.length) {
-    try {
-      const { hydrateAttachmentsFromDisk } = await import('../lib/chatAttachments')
-      attachments = await hydrateAttachmentsFromDisk(attachments)
-    } catch {
-      /* ignore */
-    }
-  }
+  const planBubbleMetadata = resolvePlanBubbleMetadata({
+    mode: loopTypeMode,
+    sourceKind: opts.sourceKind || opts.overrides?.sourceKind,
+    triggerSource: opts.overrides?.triggerSource,
+    sourceLabel: opts.sourceLabel,
+    classificationReason: opts.overrides?.classificationReason,
+    loopType: forcedLoopType,
+    continueGoal: Boolean(continueSnap),
+  })
+
+  // Hydrate once under coordinator ownership for vision / CLI (after admit).
+  attachments = await prepareRunAttachments(attachments, {
+    projectRoot: attachmentProjectRoot,
+    sessionId: attachmentSessionId || tid,
+    phase: 'hydrate',
+  })
 
   const extraSystem = [
     opts.overrides?.extraSystemContext,
@@ -553,11 +787,15 @@ export async function runExternalObjective(
     ...(opts.overrides || {}),
     runId,
     sourceKind: opts.sourceKind || opts.overrides?.sourceKind,
+    triggerSource: planBubbleMetadata.triggerSource,
+    classificationReason: planBubbleMetadata.classificationReason,
+    scheduleTrigger,
+    eventTrigger,
     agentMode:
       opts.overrides?.agentMode ||
       thr.threads.find((thread) => thread.id === tid)?.agentMode ||
       'build',
-    eventPreMatched: opts.eventPreMatched ?? opts.overrides?.eventPreMatched,
+    eventPreMatched: Boolean(eventTrigger),
     attachedSkills:
       opts.attachedSkills || opts.overrides?.attachedSkills || undefined,
     temporary,
@@ -584,343 +822,94 @@ export async function runExternalObjective(
       : opts.overrides?.continueGoal,
   }
 
-  // P1-D lifecycle hooks (beforeRun): deny / append-context / log / notify
-  try {
-    const { collectHookRules, evaluateHooks } = await import('./hooks')
-    const ev = evaluateHooks(collectHookRules(settings), {
-      point: 'beforeRun',
-      sourceKind: opts.sourceKind,
+  // Coordinator owns beforeRun once: deny / append-context / log / notify
+  const beforeRun = await evaluateBeforeRunHooks({
+    settings,
+    sourceKind: opts.sourceKind,
+    objective,
+    threadId: tid,
+    runId,
+  })
+  if (!beforeRun.ok) {
+    // Finalization owns afterRun / Archive / onSettled / release / drain once.
+    return finalizeTaskRun({
+      runId,
+      threadId: tid,
       objective,
+      sourceKind: opts.sourceKind,
+      projectRoot: opts.projectRoot,
+      settings,
+      onSettled: opts.onSettled,
+      early: {
+        error: `執行被 hook 政策拒絕：${beforeRun.denyReason}`,
+      },
     })
-    for (const line of ev.audits) thr.pushBubble(tid, 'system', line)
-    for (const n of ev.notifications) {
-      void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
-    }
-    if (ev.deny) {
-      // P0: still complete lifecycle — onSettled / afterRun / drain / archive path
-      thr.setThreadStatus(tid, 'failed')
-      useAgentStore.getState().releaseRun(runId)
-      thr.setThreadRunning(tid, false, runId)
-      thr.pushBubble(tid, 'system', `執行被 hook 政策拒絕：${ev.deny.reason}`)
-      const denyResult: ExternalRunResult = {
-        path: 'builtin',
-        status: 'failed',
-        error: `hook deny：${ev.deny.reason}`,
-        threadId: tid,
-        runId,
-      }
-      try {
-        const after = evaluateHooks(collectHookRules(settings), {
-          point: 'afterRun',
-          sourceKind: opts.sourceKind,
-          objective,
-        })
-        for (const line of after.audits) thr.pushBubble(tid, 'system', line)
-        for (const n of after.notifications) {
-          void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
-        }
-      } catch {
-        /* non-fatal */
-      }
-      try {
-        await opts.onSettled?.(denyResult)
-      } catch {
-        /* ignore */
-      }
-      void drainExternalRunQueue((o) =>
-        runExternalObjective({
-          ...o,
-          _fromQueue: true,
-          sourceKind: o.sourceKind || 'queue-drain',
-        }),
-      )
-      return denyResult
-    }
-    if (ev.appendTexts.length) {
-      overrides.extraSystemContext = [
-        overrides.extraSystemContext,
-        ...ev.appendTexts.map((t) => `## Hook context\n${t}`),
-      ]
-        .filter(Boolean)
-        .join('\n\n')
-    }
-  } catch {
-    /* hook infra must never break runs */
+  }
+  if (beforeRun.appendTexts.length) {
+    overrides.extraSystemContext = [
+      overrides.extraSystemContext,
+      ...beforeRun.appendTexts.map((t) => `## Hook context\n${t}`),
+    ]
+      .filter(Boolean)
+      .join('\n\n')
   }
 
-  try {
-    const result = await dispatchThreadTask(dispatchObjective, {
-      threadId: tid,
-      runner: opts.runner,
-      overrides,
-      // Only pin loop when user/automation explicitly chose one
-      forceLoopType: forcedLoopType,
-      attachments,
-    })
-    // P0 CLI/dispatch: prefer the run-scoped state over any selected-run UI state.
-    const finalAgent = useAgentStore.getState().getRunState(runId) || useAgentStore.getState().agent
-    await syncOpenCodeSessionMapping(tid, finalAgent.externalRun)
-    if (finalAgent.steps.length > 0) {
-      thr.setRunPlan(
-        tid,
-        finalAgent.steps.map((step) => ({
-          id: `step_${step.step}`,
-          text: step.description || step.action || `步驟 ${step.step}`,
-          status:
-            step.status === 'COMPLETED'
-              ? 'done'
-              : step.status === 'FAILED'
-                ? 'failed'
-                : step.status === 'IN_PROGRESS'
-                  ? 'active'
-                  : 'pending',
-        })),
-      )
-    }
-    const status =
-      result.status === 'failed' || result.error
-        ? result.status === 'failed'
-          ? 'failed'
-          : finalAgent.status
-        : finalAgent.status || result.status
-    thr.setThreadStatus(
-      tid,
-      (status === 'success' ||
-      status === 'failed' ||
-      status === 'halted' ||
-      status === 'idle'
-        ? status
-        : finalAgent.status) as 'success' | 'failed' | 'halted' | 'idle' | 'running',
-    )
-    const stepsTail = finalAgent.steps
-      .filter((step) => step.result)
-      .slice(-3)
-      .map((step) => step.result)
-      .join('\n\n')
-    const finalAnswer =
-      finalAgent.result ||
-      stepsTail ||
-      result.result ||
-      `狀態：${status}`
-    const hasFinalAnswer = !(result.error && result.status === 'failed' && !result.result)
-    if (!hasFinalAnswer) {
-      thr.pushBubble(tid, 'system', result.error || finalAgent.haltReason || '執行失敗')
-    }
-    // Persist a compact process record *before* the answer. This mirrors
-    // OpenCode's part order: context/tools → final text, both live and after reload.
+  // Phase 4 / R7: count user-initiated chat turns only (not success, not automation).
+  // Queued items keep their original sourceKind; count once when the run actually admits.
+  const userChatTurn =
+    opts.sourceKind === 'composer' ||
+    opts.sourceKind === 'slash' ||
+    opts.sourceKind === 'retry'
+  if (userChatTurn && !temporary) {
     try {
-      const { useRunActivityStore } = await import('../store/runActivityStore')
-      const activity = useRunActivityStore.getState()
-      const activityOperations = activity.events
-        .filter((event) => event.kind !== 'thought' && event.kind !== 'text')
-        .map((event) => ({
-          id: event.id,
-          kind: event.kind,
-          title: event.title || event.kind,
-          detail: event.detail,
-          path: event.path,
-          ok: event.ok,
-        }))
-      const fallbackOperations = finalAgent.toolCalls.map((tool) => ({
-        id: tool.id,
-        kind: /write|edit|create|patch/i.test(tool.tool) ? 'file' : 'tool',
-        title: /bash|shell/i.test(tool.tool) ? '已執行指令' : `已執行 ${tool.tool}`,
-        detail:
-          typeof tool.input?.command === 'string'
-            ? tool.input.command
-            : tool.output?.slice(0, 400),
-        path: String(tool.input?.path ?? tool.input?.file ?? tool.input?.filePath ?? '') || undefined,
-        ok: tool.ok,
-      }))
-      const fileMap = new Map<string, { path: string; action: string; added?: number; removed?: number }>()
-      for (const file of activity.fileChanges) {
-        fileMap.set(file.path, file)
-      }
-      for (const tool of finalAgent.toolCalls) {
-        if (!/write|edit|create|patch/i.test(tool.tool)) continue
-        const path = String(tool.input?.path ?? tool.input?.file ?? tool.input?.filePath ?? '')
-        if (path && !fileMap.has(path)) {
-          fileMap.set(path, { path, action: /write|create/i.test(tool.tool) ? 'create' : 'edit' })
-        }
-      }
-      const stepOps = (finalAgent.steps || []).map((step, index) => ({
-        id: `step_${step.step}_${index}`,
-        kind: step.status === 'FAILED' ? 'error' : 'status',
-        title: step.description || step.action || `步驟 ${step.step}`,
-        detail:
-          step.status === 'COMPLETED'
-            ? '完成'
-            : step.status === 'FAILED'
-              ? (step.result || '失敗').slice(0, 400)
-              : step.status,
-        ok: step.status !== 'FAILED',
-      }))
-      const logOps = (finalAgent.logs || [])
-        .filter((line) => {
-          const m = line.message || ''
-          return m && !m.startsWith('$ ') && m.length < 240
-        })
-        .slice(-16)
-        .map((line) => ({
-          id: line.id,
-          kind: line.level === 'ERROR' ? 'error' : line.level === 'SUCCESS' ? 'done' : 'status',
-          title: line.message.slice(0, 200),
-          detail: line.message.slice(0, 400),
-          ok: line.level !== 'ERROR',
-        }))
-      // Prefer structured stream ops → tools → steps → logs (never empty if run ran)
-      const operations =
-        activityOperations.length > 0
-          ? activityOperations
-          : fallbackOperations.length > 0
-            ? fallbackOperations
-            : stepOps.length > 0
-              ? [...stepOps, ...logOps].slice(-40)
-              : logOps
-      let diff: string | undefined
-      if (fileMap.size > 0) {
-        try {
-          const { useProjectStore } = await import('../store/projectStore')
-          const projectRoot = opts.projectRoot || useProjectStore.getState().root || undefined
-          const result = await window.subagents?.tools?.workspaceDiff?.(
-            [...fileMap.keys()],
-            projectRoot,
-          )
-          if (result?.ok && result.diff.trim()) diff = result.diff.slice(0, 200_000)
-        } catch {
-          /* Diff is an optional review aid; never fail the run summary. */
-        }
-      }
-      const plan = (thr.threads.find((thread) => thread.id === tid)?.runPlan || []).slice(0, 40)
-      const subDesignBrief = useSubDesignStore.getState().findByThreadId(tid)
-      const subDesignArtifact = subDesignBrief
-        ? useSubDesignArtifactStore.getState().findByBriefId(subDesignBrief.id)[0]
-        : null
-      const subDesignCritique = subDesignArtifact
-        ? useSubDesignCritiqueStore.getState().latestForArtifact(subDesignArtifact.id, subDesignArtifact.revision)
-        : null
-      const subDesignExports = subDesignArtifact
-        ? useSubDesignExportStore.getState().findByArtifactId(subDesignArtifact.id)
-        : []
-      // Always persist a process card so chat shows more than the bare answer
-      thr.pushRunSummary(tid, {
-        durationMs: finalAgent.metrics?.executionMs,
-        subDesign: subDesignBrief
-          ? {
-              briefId: subDesignBrief.id,
-              stage: subDesignBrief.stage,
-              selectedDirectionId: subDesignBrief.selectedDirectionId,
-              designSystemId: subDesignBrief.designSystemId,
-              artifactId: subDesignArtifact?.id,
-              artifactRevision: subDesignArtifact?.revision,
-              critique: subDesignCritique
-                ? {
-                    revision: subDesignCritique.revision || 1,
-                    verdict: subDesignCritique.verdict,
-                    blockerCount: subDesignCritique.findings.filter((finding) => finding.severity === 'blocker').length,
-                    scores: {
-                      briefCoverage: subDesignCritique.briefCoverage,
-                      brandConformance: subDesignCritique.brandConformance,
-                      accessibility: subDesignCritique.accessibility,
-                      implementationReadiness: subDesignCritique.implementationReadiness,
-                    },
-                  }
-                : undefined,
-              exports: subDesignExports.map((item) => ({
-                format: item.format,
-                revision: item.revision,
-                path: item.path,
-                sha256: item.sha256,
-              })),
-            }
-          : undefined,
-        diff,
-        plan,
-        agents: (finalAgent.subAgents || []).map((agent) => ({
-          id: agent.id,
-          name: agent.name,
-          role: agent.role,
-          status: agent.status,
-          lastMessage: agent.lastMessage,
-          model: agent.model,
-        })),
-        operations:
-          operations.length > 0
-            ? operations
-            : [
-                {
-                  id: 'run_done',
-                  kind: status === 'success' ? 'done' : 'status',
-                  title:
-                    result.path === 'cli'
-                      ? `本機 CLI 完成（${result.kind || 'cli'}）`
-                      : `執行完成 · ${status}`,
-                  detail: (finalAgent.result || '').slice(0, 200),
-                  ok: status === 'success',
-                },
-              ],
-        files: [...fileMap.values()],
-      })
-    } catch {
-      /* execution summary must not break the task lifecycle */
-    }
-    if (hasFinalAnswer) {
-      thr.pushBubble(tid, 'assistant', finalAnswer)
-    }
-    thr.setThreadRunning(tid, false, runId)
-    thr.setAwaitingReply(tid, finalAgent.loopConfig?.nextState === 'Await User Input')
-    const finalResult: ExternalRunResult = {
-      ...result,
-      threadId: tid,
-      runId,
-      status: result.status || finalAgent.status,
-      error: result.error || finalAgent.haltReason,
-    }
-    // P1-D lifecycle hooks (afterRun): observe / notify
-    try {
-      const { collectHookRules, evaluateHooks } = await import('./hooks')
-      const ev = evaluateHooks(collectHookRules(settings), {
-        point: 'afterRun',
-        sourceKind: opts.sourceKind,
-        objective,
-      })
-      for (const line of ev.audits) thr.pushBubble(tid, 'system', line)
-      for (const n of ev.notifications) {
-        void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
-      }
+      const { learningLoop } = await import('./hermes/learning')
+      learningLoop.onUserTurn()
     } catch {
       /* non-fatal */
     }
-    try {
-      await opts.onSettled?.(finalResult)
-    } catch {
-      /* caller errors non-fatal */
-    }
-    void drainExternalRunQueue((o) =>
-      runExternalObjective({ ...o, _fromQueue: true, sourceKind: o.sourceKind || 'queue-drain' }),
-    )
-    return finalResult
-  } catch (e) {
-    thr.setThreadStatus(tid, 'failed')
-    useAgentStore.getState().releaseRun(runId)
-    thr.setThreadRunning(tid, false, runId)
-    const msg = e instanceof Error ? e.message : String(e)
-    thr.pushBubble(tid, 'system', `執行失敗：${msg}`)
-    const failResult: ExternalRunResult = {
-      path: 'builtin',
-      status: 'failed',
-      error: msg,
-      threadId: tid,
+  }
+
+  // Phase 3 item 3: freeze dispatch fields once; runDispatch only selects runner.
+  // Pin project root on the snapshot so later UI project switches cannot leak in.
+  if (!overrides.projectRoot) {
+    overrides.projectRoot =
+      opts.projectRoot?.trim() ||
+      (await import('../store/projectStore')).useProjectStore.getState().root ||
+      undefined
+  }
+  const snapshot = buildRunDispatchSnapshot({
+    runId,
+    threadId: tid,
+    objective: dispatchObjective,
+    runner: opts.runner,
+    forceLoopType: forcedLoopType,
+    attachments,
+    overrides,
+  })
+
+  try {
+    const result = await dispatchThreadTask(snapshot)
+    return finalizeTaskRun({
       runId,
-    }
-    try {
-      await opts.onSettled?.(failResult)
-    } catch {
-      /* ignore */
-    }
-    void drainExternalRunQueue((o) =>
-      runExternalObjective({ ...o, _fromQueue: true, sourceKind: o.sourceKind || 'queue-drain' }),
-    )
-    return failResult
+      threadId: tid,
+      objective,
+      sourceKind: opts.sourceKind,
+      projectRoot: snapshot.overrides.projectRoot || opts.projectRoot,
+      settings,
+      dispatchResult: result,
+      onSettled: opts.onSettled,
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return finalizeTaskRun({
+      runId,
+      threadId: tid,
+      objective,
+      sourceKind: opts.sourceKind,
+      projectRoot: snapshot.overrides.projectRoot || opts.projectRoot,
+      settings,
+      onSettled: opts.onSettled,
+      early: { error: `執行失敗：${msg}` },
+    })
   }
 }

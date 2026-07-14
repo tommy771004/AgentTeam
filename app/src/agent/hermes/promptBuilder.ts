@@ -1,18 +1,31 @@
 /**
  * Hermes-style prompt assembly:
- * stable (identity + skills) → context (AGENTS.md) → volatile (memory + time)
+ * stable (identity + skills index) → ContextPacket slots (project / recall / memory) → volatile meta
+ *
+ * Phase 4: variable context goes through ContextPacket per-slot budgets instead of
+ * a final whole-blob hard cut that could drop session recall entirely.
  */
 
 import type { LlmSettings, PersonalityPreset } from '../types'
 import { memoryStore } from './memory'
 import { skillsStore } from './skills'
 import { pluginRegistry } from './plugins'
+import {
+  buildContextPacket,
+  formatPacketDiagnostics,
+  type ContextPacket,
+  type ContextPacketDiagnostics,
+  type ContextPacketSource,
+} from './contextPacket'
 
 export interface PromptLayers {
   stable: string
   context: string
   volatile: string
   full: string
+  /** Phase 4: slot inclusion diagnostics for engine logs / tests */
+  packetDiagnostics?: ContextPacketDiagnostics
+  packet?: ContextPacket
 }
 
 const DEFAULT_SOUL = `你是 SubAgents AI 多代理團隊中的執行核心，風格精準、可審計、遵守安全規則。
@@ -90,25 +103,39 @@ export function getAgentsDoc() {
   return agentsDoc
 }
 
-export function buildPromptLayers(opts?: {
+export type BuildPromptLayersOpts = {
   role?: string
   objective?: string
-  extraContext?: string
-  /** When set, injects ChatGPT-style personalization + memory toggles */
-  settings?: Partial<LlmSettings> | null
-  /** Temporary chat: skip memory entirely */
-  temporary?: boolean
   /**
-   * W2: persistent project guidance from real AGENTS.md/CLAUDE.md files
-   * (projectContextResolver). Layered ABOVE Hermes user guidance.
+   * @deprecated Prefer structured packet fields (sessionRecall / stepEvidence / …).
+   * When provided without structured fields, mapped into the extraSystem slot
+   * (per-slot budget — never a final whole-blob 2000-char hard cut of everything).
    */
+  extraContext?: string
+  settings?: Partial<LlmSettings> | null
+  temporary?: boolean
   projectGuidance?: string
-}): PromptLayers {
+  /** Intra-thread chat history block (from chatHistory.ts). */
+  recentChat?: string
+  /** Cross-session recall block (from sessionSearch / formatSessionRecallBlock). */
+  sessionRecall?: string
+  /** Compressed step outputs / tool evidence. */
+  stepEvidence?: string
+  /** Attached skill bodies and similar mount content. */
+  skillsContext?: string
+  /** Catch-all system context (webhook body, hooks, …). */
+  extraSystem?: string
+}
+
+export function buildPromptLayers(opts?: BuildPromptLayersOpts): PromptLayers {
   const skillsIndex = skillsStore.buildIndexPrompt()
   const matched = opts?.objective
     ? skillsStore.matchForObjective(opts.objective)
     : []
   const personalization = buildPersonalizationBlock(opts?.settings)
+  const temporary = opts?.temporary === true
+  const memoryOn =
+    !temporary && opts?.settings?.memoryEnabled !== false
 
   const stable = [
     '# 身份（stable）',
@@ -119,7 +146,7 @@ export function buildPromptLayers(opts?: {
     '# 工具指引',
     '- 優先使用工具取得證據，再下結論。',
     '- 可用 skill_load 載入匹配技能並嚴格遵循流程。',
-    opts?.settings?.memoryEnabled !== false && !opts?.temporary
+    memoryOn
       ? '- memory_append 保存跨 session 重要偏好與教訓。'
       : '- 目前為臨時／記憶關閉模式：不要依賴跨對話記憶。',
     '',
@@ -131,7 +158,6 @@ export function buildPromptLayers(opts?: {
     .filter(Boolean)
     .join('\n')
 
-  // Hint agents to use CodeGraph tools when available
   const codegraphHint = [
     '# 程式碼圖譜（CodeGraph）',
     '- 結構性問題優先使用工具 codegraph_explore / codegraph_impact / codegraph_callers（需專案已 codegraph init）。',
@@ -139,32 +165,76 @@ export function buildPromptLayers(opts?: {
     '- 狀態可用 codegraph_status 檢查是否已索引。',
   ].join('\n')
 
-  const context = [
-    '# 專案上下文（context）',
-    codegraphHint,
-    // Precedence: project-local AGENTS.md (real files) wins over user/Hermes guidance
-    opts?.projectGuidance ? opts.projectGuidance.slice(0, 16_000) : '',
-    agentsDoc.slice(0, 4000),
-    opts?.extraContext ? `\n## 額外上下文\n${opts.extraContext.slice(0, 2000)}` : '',
-  ]
+  // Hermes user guidance (agentsDoc) is separate from project-local AGENTS.md
+  // and sits in a stable-ish context header; project guidance is a packet slot.
+  const contextHeader = ['# 專案上下文（context）', codegraphHint, agentsDoc.slice(0, 4000)]
     .filter(Boolean)
     .join('\n')
 
   const pluginBits = pluginRegistry.apply().promptFragments
-  const memoryOn =
-    !opts?.temporary && opts?.settings?.memoryEnabled !== false
+  const failureLessons = memoryOn
+    ? memoryStore.buildFailureLessonsBlock(opts?.objective, 3)
+    : ''
+  // General memory block without duplicating the failure section (already a slot).
+  const memoryBlock = memoryOn
+    ? memoryStore.buildPromptBlock(true, opts?.objective)
+    : ''
+
+  const packetSource: ContextPacketSource = {
+    objective: opts?.objective,
+    projectGuidance: opts?.projectGuidance,
+    recentChat: opts?.recentChat,
+    sessionRecall: opts?.sessionRecall,
+    stepEvidence: opts?.stepEvidence,
+    failureLessons: failureLessons || undefined,
+    // Avoid double-injecting failure lessons: strip that subsection if we have a slot
+    memory: memoryBlock
+      ? memoryBlock
+          .replace(/### 失敗教訓[\s\S]*?(?=###|$)/, '')
+          .trim()
+      : undefined,
+    skillsContext: opts?.skillsContext,
+    pluginFragments: pluginBits.length ? pluginBits.join('\n\n') : undefined,
+    extraSystem: opts?.extraSystem || opts?.extraContext,
+    temporary,
+    skipSessionRecall: temporary || opts?.settings?.sessionRecallEnabled === false,
+    skipMemory: !memoryOn,
+    sessionRecallSkipReason: temporary
+      ? 'temporary chat: session recall disabled'
+      : opts?.settings?.sessionRecallEnabled === false
+        ? 'settings.sessionRecallEnabled=false'
+        : undefined,
+    memorySkipReason: temporary
+      ? 'temporary chat: memory disabled'
+      : opts?.settings?.memoryEnabled === false
+        ? 'settings.memoryEnabled=false'
+        : undefined,
+  }
+
+  const packet = buildContextPacket(packetSource)
 
   const volatile = [
     '# 動態層（volatile）',
     `時間：${new Date().toISOString()}`,
     opts?.objective ? `當前目標：${opts.objective}` : '',
-    '',
-    memoryStore.buildPromptBlock(memoryOn, opts?.objective),
-    pluginBits.length ? `\n## 外掛片段\n${pluginBits.join('\n\n')}` : '',
+    temporary ? '模式：臨時對話（不讀寫跨會話記憶）' : '',
   ]
     .filter(Boolean)
     .join('\n')
 
+  // Packet carries project guidance, recall, memory, steps, plugins — no final slice(0,2000).
+  const context = [contextHeader, packet.assembled].filter(Boolean).join('\n\n')
   const full = [stable, context, volatile].join('\n\n---\n\n')
-  return { stable, context, volatile, full }
+
+  return {
+    stable,
+    context,
+    volatile,
+    full,
+    packet,
+    packetDiagnostics: packet.diagnostics,
+  }
 }
+
+export { formatPacketDiagnostics, buildContextPacket }
+export type { ContextPacket, ContextPacketDiagnostics, ContextPacketSource }

@@ -28,6 +28,7 @@ import {
 } from './secretsVault'
 import {
   getWebhookStatus,
+  dispatchWebhook,
   setWebhookHandler,
   startWebhookServer,
   stopWebhookServer,
@@ -867,6 +868,12 @@ ipcMain.handle(
 ipcMain.handle('webhook:stop', async () => stopWebhookServer())
 
 ipcMain.handle('webhook:status', async () => getWebhookStatus())
+
+ipcMain.handle(
+  'webhook:dispatch',
+  async (_evt, request: { target: string; payload: Record<string, unknown> }) =>
+    dispatchWebhook(request),
+)
 
 // ── Bundle export path helper ───────────────────────────────────
 

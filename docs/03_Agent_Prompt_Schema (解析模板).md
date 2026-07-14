@@ -19,7 +19,7 @@ When the AI Agent receives a raw request from the user, it MUST parse and struct
 \- \*\*Fallback\_Protocol\*\*: \<Action if DoD cannot be met after max iterations\>
 
 \#\#\# \[Post-Execution\]  
-\- \*\*Next\_State\*\*: \<Halt | Await User Input | Trigger Webhook\>
+\- \*\*Next\_State\*\*: \<Halt | Await User Input | Dispatch Webhook\>
 
 ## **Example Parsing (Goal-based Scenario)**
 

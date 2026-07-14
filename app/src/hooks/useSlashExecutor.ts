@@ -28,6 +28,7 @@ export function useSlashExecutor() {
     setDraftInput,
     setSelectedLoopType,
     stopExecution,
+    getRunIdForThread,
     draftInput,
     isRunning,
     agent,
@@ -68,7 +69,7 @@ export function useSlashExecutor() {
     }
     setDraftInput(goal)
     // Single lifecycle controller (thread status / bubbles / busy policy / trace)
-    const { runTask } = await import('../agent/runExternal')
+    const { runTask } = await import('../agent/taskRunCoordinator')
     const thrState = useThreadStore.getState()
     const active = thrState.threads.find((t) => t.id === tid)
     // Only force loop when thread/UI explicitly pinned; else auto-classify
@@ -324,8 +325,14 @@ export function useSlashExecutor() {
       case 'stop':
       case 'abort':
       case 'cancel': {
-        stopExecution()
-        log('已送出停止')
+        const threadId = useThreadStore.getState().activeId
+        const runId = threadId ? getRunIdForThread(threadId) : null
+        if (runId) {
+          stopExecution(runId)
+          log('已送出停止')
+        } else {
+          log('目前沒有可停止的 run')
+        }
         return
       }
       case 'mode':

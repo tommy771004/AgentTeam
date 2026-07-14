@@ -5,6 +5,7 @@ import type {
   ArchiveRecord,
   CliConfigSnapshot,
   LoopType,
+  PostStateOutcome,
   RuntimeOverrides,
 } from '../agent/types'
 import { agentEngine } from '../agent/engine'
@@ -13,20 +14,25 @@ import { emptyKnowledge, extractKnowledge } from '../agent/knowledge'
 import { learningLoop } from '../agent/hermes/learning'
 import { useSettingsStore } from './settingsStore'
 import { useLearningStore } from './learningStore'
+import { consumeNextState } from '../agent/outcomeDispatcher'
 import {
   emptyAgentLike,
   runPromptViaLocalCli,
   type LocalRunnerKind,
 } from '../agent/localCliRun'
+import {
+  EXTERNAL_CLI_DOD_LABEL,
+  EXTERNAL_CLI_RUNNER_CAPABILITIES,
+} from '../agent/runners'
 
 /** Drain unified run queue after any path frees a run-capacity slot. */
 function drainQueueAfterRun() {
   void (async () => {
     try {
       const { drainExternalRunQueue } = await import('../agent/runQueue')
-      const { runExternalObjective } = await import('../agent/runExternal')
+      const { runTask } = await import('../agent/taskRunCoordinator')
       await drainExternalRunQueue((o) =>
-        runExternalObjective({ ...o, _fromQueue: true }),
+        runTask({ ...o, _fromQueue: true }),
       )
     } catch {
       /* non-fatal */
@@ -56,6 +62,8 @@ interface AgentStore {
   getRunState: (runId?: string) => AgentState | null
   getRunIdForThread: (threadId: string) => string | null
   selectRun: (runId: string | null) => void
+  /** Attach the single post-state outcome before finalization/archive. */
+  applyPostState: (runId: string, outcome: PostStateOutcome) => void
   startExecution: (input?: string, overrides?: RuntimeOverrides) => Promise<void>
   /** 透過本機 CLI（Codex/Claude/Grok…）執行，使用其既有登入 */
   startLocalCliExecution: (opts: {
@@ -75,6 +83,14 @@ interface AgentStore {
     configSnapshot?: CliConfigSnapshot
     /** Preserve loop type in agent state (not always Goal-based) */
     loopType?: LoopType
+    /** Preserve schedule trigger lineage for scheduled CLI runs. */
+    scheduleTrigger?: RuntimeOverrides['scheduleTrigger']
+    /** Preserve Proactive matcher lineage for scheduled CLI runs. */
+    eventTrigger?: RuntimeOverrides['eventTrigger']
+    /** Preserve the requested post-execution state for CLI finalization. */
+    nextState?: RuntimeOverrides['nextState']
+    /** Per-run outbound target; falls back to settings.webhookTarget. */
+    webhookTarget?: RuntimeOverrides['webhookTarget']
     /** Chat attachments for CLI (written to disk in Electron) */
     attachments?: Array<{
       name: string
@@ -84,13 +100,18 @@ interface AgentStore {
       textContent?: string
       filePath?: string
     }>
+    /**
+     * When true, skip Archive / release / drain — TaskRunCoordinator finalization
+     * owns that sequence once (Phase 3 item 4/5).
+     */
+    deferFinalization?: boolean
   }) => Promise<void>
   stopExecution: (runId?: string) => void
   continueTurn: (runId?: string) => void
   resolveIntervention: (decision: {
     action: 'approve' | 'reject' | 'abort'
     payloadJson?: string
-  }) => void
+  }, runId?: string) => void
   reset: () => void
   loadArchive: () => Promise<void>
   saveToArchive: (agentOverride?: AgentState, runId?: string) => Promise<void>
@@ -147,6 +168,39 @@ function toArchiveStatus(s: AgentState['status']): ArchiveRecord['status'] {
 const liveEngines = new Map<string, ReturnType<typeof agentEngine.create>>()
 const runAgentStates = new Map<string, AgentState>()
 const reservedRuns = new Map<string, { threadId?: string; kind: 'builtin' | 'cli' }>()
+const lastRunIdByThread = new Map<string, string>()
+const MAX_RUN_AGENT_STATES = 100
+
+function pruneRunAgentStates(selectedRunId: string | null) {
+  if (runAgentStates.size <= MAX_RUN_AGENT_STATES) return
+  const activeRunIds = new Set(reservedRuns.keys())
+  const evictable = [...runAgentStates.keys()]
+    .filter((runId) => runId !== selectedRunId && !activeRunIds.has(runId))
+    .sort((left, right) => {
+      const a = runAgentStates.get(left)
+      const b = runAgentStates.get(right)
+      const aAt = Date.parse(a?.finishedAt || a?.startedAt || '') || 0
+      const bAt = Date.parse(b?.finishedAt || b?.startedAt || '') || 0
+      return aAt - bAt
+    })
+  for (const runId of evictable) {
+    if (runAgentStates.size <= MAX_RUN_AGENT_STATES) break
+    runAgentStates.delete(runId)
+  }
+}
+
+function rememberRunThread(threadId: string | undefined, runId: string) {
+  if (!threadId) return
+  lastRunIdByThread.set(threadId, runId)
+  if (lastRunIdByThread.size <= MAX_RUN_AGENT_STATES) return
+  const activeThreadIds = new Set(
+    [...reservedRuns.values()].map((entry) => entry.threadId).filter(Boolean) as string[],
+  )
+  for (const [id] of lastRunIdByThread) {
+    if (lastRunIdByThread.size <= MAX_RUN_AGENT_STATES) break
+    if (!activeThreadIds.has(id)) lastRunIdByThread.delete(id)
+  }
+}
 
 function stateSnapshot(): Record<string, AgentState> {
   return Object.fromEntries([...runAgentStates.entries()].map(([id, state]) => [id, state]))
@@ -157,6 +211,7 @@ function publishRun(set: (partial: Partial<AgentStore>) => void, get: () => Agen
   const activeRunIds = [...reservedRuns.keys()]
   let selectedRunId = get().selectedRunId
   if (!selectedRunId || (!activeRunIds.includes(selectedRunId) && activeRunIds.length)) selectedRunId = activeRunIds.at(-1) || runId
+  pruneRunAgentStates(selectedRunId)
   const visible = (selectedRunId && runAgentStates.get(selectedRunId)) || state
   set({
     agent: visible,
@@ -200,6 +255,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       const check = get().canStartRun(runId, threadId)
       if (!check.allowed) return false
       reservedRuns.set(runId, { threadId, kind })
+      rememberRunThread(threadId, runId)
       runAgentStates.set(runId, emptyAgentLike({ id: runId, objective: '', status: 'idle' }))
       publishRun(set, get, runId, runAgentStates.get(runId)!)
       return true
@@ -209,6 +265,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       const entry = reservedRuns.get(runId)
       if (!entry) return
       entry.threadId = threadId
+      rememberRunThread(threadId, runId)
       publishRun(set, get, runId, runAgentStates.get(runId) || emptyAgent())
     },
 
@@ -226,13 +283,36 @@ export const useAgentStore = create<AgentStore>((set, get) => {
 
     getRunIdForThread: (threadId) => {
       for (const [runId, entry] of reservedRuns) if (entry.threadId === threadId) return runId
-      return null
+      return lastRunIdByThread.get(threadId) || null
     },
 
     selectRun: (runId) => {
       const state = runId ? runAgentStates.get(runId) : undefined
-      if (runId && !state) return
-      set({ selectedRunId: runId, agent: state || get().agent })
+      // Clearing the selection must not leave the previous thread's live
+      // state visible. The thread bubble / terminal digest is the fallback
+      // until a run-scoped presentation is selected again.
+      set({ selectedRunId: state ? runId || null : null, agent: state || emptyAgent() })
+    },
+
+    applyPostState: (runId, outcome) => {
+      const current = runAgentStates.get(runId)
+      if (!current) return
+      const next = { ...current, postState: outcome }
+      if (outcome.status === 'failed' && current.status === 'success') {
+        next.status = 'failed'
+        next.haltReason = outcome.error || 'Post-state dispatch failed'
+        next.logs = [
+          ...current.logs,
+          {
+            id: `post_state_${runId}`,
+            timestamp: new Date().toISOString(),
+            level: 'ERROR' as const,
+            message: next.haltReason,
+          },
+        ]
+      }
+      runAgentStates.set(runId, next)
+      publishRun(set, get, runId, next)
     },
 
     startExecution: async (input, overrides) => {
@@ -275,10 +355,26 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         const final = await engine.start(text, forceFromOverrides, { ...overrides, runId })
         unsub()
         publishRun(set, get, runId, final)
+        const postState = await consumeNextState(
+          final.loopConfig.nextState,
+          {
+            runId,
+            objective: final.objective || text,
+            status: final.status,
+            loopType: final.loopConfig.loopType,
+            result: final.result,
+            finishedAt: final.finishedAt,
+            webhookTarget: overrides?.webhookTarget || settings.webhookTarget,
+            scheduleTrigger: final.scheduleTrigger,
+            eventTrigger: final.eventTrigger,
+          },
+        )
+        get().applyPostState(runId, postState)
+        const settled = get().getRunState(runId) || { ...final, postState }
         try {
           const { useRunActivityStore } = await import('./runActivityStore')
           useRunActivityStore.getState().setStatus(
-            final.status === 'success' ? '完成' : final.status,
+            settled.status === 'success' ? '完成' : settled.status,
             runId,
           )
           useRunActivityStore.getState().end(runId)
@@ -293,8 +389,12 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           /* ignore */
         }
 
-        if (['success', 'failed', 'halted'].includes(final.status)) {
-          await get().saveToArchive(final, runId)
+        // Phase 3 item 4/5: coordinator owns Archive → release → drain once.
+        if (overrides?.deferFinalization) {
+          return
+        }
+        if (['success', 'failed', 'halted'].includes(settled.status)) {
+          await get().saveToArchive(settled, runId)
         }
         get().releaseRun(runId)
         // Unified queue drain (automation + interactive follow-ups)
@@ -314,8 +414,10 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         } catch {
           /* ignore */
         }
-        get().releaseRun(runId)
-        void drainQueueAfterRun()
+        if (!overrides?.deferFinalization) {
+          get().releaseRun(runId)
+          void drainQueueAfterRun()
+        }
         throw e
       }
     },
@@ -338,10 +440,11 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         loopType: opts.loopType || ('Goal-based' as const),
         trigger: 'local-cli' as const,
         executionSequence: ['local-cli'],
-        definitionOfDone: 'CLI returned',
+        // Phase 5: never claim "CLI returned" as DoD met
+        definitionOfDone: EXTERNAL_CLI_DOD_LABEL,
         maxIterations: 1,
         fallbackProtocol: '',
-        nextState: 'Halt' as const,
+        nextState: opts.nextState || ('Halt' as const),
       }
 
       const pushLiveAgent = (progress: number, extra?: { result?: string }) => {
@@ -354,6 +457,9 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             toolCalls: [...toolCalls],
             result: extra?.result,
             loopConfig: baseLoop,
+            executionKind: 'external',
+            runnerCapabilities: { ...EXTERNAL_CLI_RUNNER_CAPABILITIES },
+            externalRunnerKind: opts.kind,
             steps: [
               {
                 step: 1,
@@ -380,6 +486,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
               apiCredits: 0,
               executionMs: Date.now() - t0,
             },
+            scheduleTrigger: opts.scheduleTrigger,
+            eventTrigger: opts.eventTrigger,
             startedAt: new Date(t0).toISOString(),
             finishedAt: null,
           }))
@@ -455,9 +563,10 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           const now = Date.now()
           if (now - lastUiPush > 120) {
             lastUiPush = now
-            const act = useRunActivityStore.getState()
-            const p = 20 + Math.min(70, Math.floor(draftChars / 40) + act.events.length)
-            pushLiveAgent(p, { result: act.draftText || undefined })
+            const activity = useRunActivityStore.getState().getPresentation(runId)
+            const progress =
+              20 + Math.min(70, Math.floor(draftChars / 40) + (activity?.events.length || 0))
+            pushLiveAgent(progress, { result: activity?.draftText || undefined })
             if (ev.title || ev.kind === 'status') {
               pushLog(
                 [ev.title, ev.detail].filter(Boolean).join(' · ').slice(0, 240),
@@ -504,7 +613,9 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             act.push({ kind: 'done', title: 'CLI 完成', ok: true, runId })
             act.setStatus('完成', runId)
           }
-          useRunActivityStore.setState({ draftText: '', active: false })
+          // Keep the final answer in the assistant bubble, while retaining
+          // the bounded thought/process digest for this run.
+          act.clearDraft(runId)
         } catch {
           /* ignore */
         }
@@ -530,11 +641,14 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             loopType: opts.loopType || 'Goal-based',
             trigger: 'local-cli',
             executionSequence: ['local-cli'],
-            definitionOfDone: 'CLI returned',
+            definitionOfDone: EXTERNAL_CLI_DOD_LABEL,
             maxIterations: 1,
             fallbackProtocol: '',
-            nextState: 'Halt',
+            nextState: opts.nextState || 'Halt',
           },
+          executionKind: 'external',
+          runnerCapabilities: { ...EXTERNAL_CLI_RUNNER_CAPABILITIES },
+          externalRunnerKind: opts.kind,
           subAgents: [
             {
               id: `cli-${opts.kind}`,
@@ -552,20 +666,22 @@ export const useAgentStore = create<AgentStore>((set, get) => {
               id: `l_${logs.length}`,
               timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
               level: r.ok ? 'SUCCESS' : 'ERROR',
-              message: r.ok ? 'CLI finished' : r.error || 'failed',
+              message: r.ok
+                ? '外部 CLI 結束（未驗證內建 DoD）'
+                : r.error || 'failed',
             },
           ],
           steps: [
             {
               step: 1,
               action: 'local-cli',
-              description: `本機 ${opts.kind} CLI`,
+              description: `外部 CLI · ${opts.kind}`,
               status: r.ok ? 'COMPLETED' : 'FAILED',
               // 完整輸出放主對話 assistant 泡泡；右側面板只留摘要
               result: r.ok
                 ? r.output.trim()
-                  ? `輸出 ${r.output.length.toLocaleString()} 字 · 完整內容見主對話`
-                  : '完成（無輸出）'
+                  ? `輸出 ${r.output.length.toLocaleString()} 字 · 完整內容見主對話（非 DoD 判定）`
+                  : 'CLI 結束（無輸出 · 非 DoD 判定）'
                 : (r.error || r.output || 'failed').slice(0, 400),
               durationMs: Date.now() - t0,
               assignedAgent: opts.kind,
@@ -581,8 +697,36 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           haltReason: r.ok ? undefined : r.error,
           cliConfigSnapshot: opts.configSnapshot,
           externalRun: r.externalRun,
+          scheduleTrigger: opts.scheduleTrigger,
+          eventTrigger: opts.eventTrigger,
+          postState: undefined,
         })
         final.finishedAt = new Date().toISOString()
+        publishRun(set, get, runId, final)
+        const postState = await consumeNextState(
+          final.loopConfig.nextState,
+          {
+            runId,
+            objective: prompt,
+            status: final.status,
+            loopType: final.loopConfig.loopType,
+            result: final.result,
+            finishedAt: final.finishedAt,
+            webhookTarget: opts.webhookTarget || useSettingsStore.getState().settings.webhookTarget,
+            scheduleTrigger: final.scheduleTrigger,
+            eventTrigger: final.eventTrigger,
+          },
+        )
+        get().applyPostState(runId, postState)
+        const settled = get().getRunState(runId) || { ...final, postState }
+        try {
+          const { useRunActivityStore } = await import('./runActivityStore')
+          useRunActivityStore
+            .getState()
+            .end(runId, r.ok && settled.status === 'success' ? '完成' : settled.status === 'halted' ? '已停止' : '失敗')
+        } catch {
+          /* ignore */
+        }
 
         // Learning loop on CLI success (same as builtin finalizeSuccess)
         if (r.ok) {
@@ -608,15 +752,18 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           }
         }
 
-        publishRun(set, get, runId, final)
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
           usePermissionAskStore.getState().setSessionAllow(false, opts.threadId)
         } catch {
           /* ignore */
         }
-        if (['success', 'failed', 'halted'].includes(final.status)) {
-          await get().saveToArchive(final, runId)
+        // Phase 3 item 4/5: coordinator owns Archive → release → drain once.
+        if (opts.deferFinalization) {
+          return
+        }
+        if (['success', 'failed', 'halted'].includes(settled.status)) {
+          await get().saveToArchive(settled, runId)
         }
         get().releaseRun(runId)
         void drainQueueAfterRun()
@@ -666,6 +813,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           ],
           finishedAt: new Date().toISOString(),
           cliConfigSnapshot: opts.configSnapshot,
+          scheduleTrigger: opts.scheduleTrigger,
+          eventTrigger: opts.eventTrigger,
         })
         publishRun(set, get, runId, final)
         try {
@@ -674,13 +823,16 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         } catch {
           /* ignore */
         }
-        get().releaseRun(runId)
-        void drainQueueAfterRun()
+        if (!opts.deferFinalization) {
+          get().releaseRun(runId)
+          void drainQueueAfterRun()
+        }
       }
     },
 
     stopExecution: (runId) => {
-      const target = runId || get().selectedRunId || undefined
+      const target = runId
+      if (!target) return
       agentEngine.stop(target)
       // Cancel only the selected run's CLI / bash processes.
       void window.subagents?.cli?.cancel?.(target)
@@ -705,15 +857,18 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       } catch {
         /* ignore */
       }
-      void drainQueueAfterRun()
+      // Phase 3 item 5: stop only terminates the run. Capacity release + queue drain
+      // wait for coordinator finalization (or the non-deferred adapter path).
     },
 
     continueTurn: (runId) => {
-      agentEngine.continueTurn(runId || get().selectedRunId || undefined)
+      if (!runId) return
+      agentEngine.continueTurn(runId)
     },
 
-    resolveIntervention: (decision) => {
-      agentEngine.resolveIntervention(decision, get().selectedRunId || undefined)
+    resolveIntervention: (decision, runId) => {
+      if (!runId) return
+      agentEngine.resolveIntervention(decision, runId)
     },
 
     reset: () => {
@@ -721,6 +876,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       for (const runId of reservedRuns.keys()) agentEngine.release(runId)
       reservedRuns.clear()
       liveEngines.clear()
+      runAgentStates.clear()
+      lastRunIdByThread.clear()
       set({
         agent: emptyAgent(),
         isRunning: false,
@@ -782,6 +939,9 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         hitl,
         cliConfigSnapshot: agent.cliConfigSnapshot,
         externalRun: agent.externalRun,
+        scheduleTrigger: agent.scheduleTrigger,
+        eventTrigger: agent.eventTrigger,
+        postState: agent.postState,
       }
       if (window.subagents?.archive) {
         await window.subagents.archive.save(record)

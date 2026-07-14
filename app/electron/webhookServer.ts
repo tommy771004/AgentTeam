@@ -28,6 +28,17 @@ export type WebhookStatus = {
   hitCount: number
 }
 
+export type WebhookDispatchRequest = {
+  target: string
+  payload: Record<string, unknown>
+}
+
+export type WebhookDispatchResult = {
+  ok: boolean
+  status?: number
+  error?: string
+}
+
 type Handler = (payload: WebhookPayload) => void
 
 let server: http.Server | null = null
@@ -93,6 +104,41 @@ export function setWebhookHandler(handler: Handler | null) {
 
 export function getWebhookStatus(): WebhookStatus {
   return { ...status }
+}
+
+/** Outbound post-state adapter; receiver lifecycle is independent of delivery. */
+export async function dispatchWebhook(
+  request: WebhookDispatchRequest,
+): Promise<WebhookDispatchResult> {
+  let target: URL
+  try {
+    target = new URL(request.target)
+  } catch {
+    return { ok: false, error: 'webhook target 不是有效 URL' }
+  }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    return { ok: false, error: 'webhook target 僅允許 http/https' }
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15_000)
+  try {
+    const response = await fetch(target, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request.payload),
+      signal: controller.signal,
+    })
+    return {
+      ok: response.ok,
+      status: response.status,
+      error: response.ok ? undefined : `Webhook delivery 失敗（HTTP ${response.status}）`,
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export async function startWebhookServer(opts: {

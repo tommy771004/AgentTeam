@@ -136,6 +136,11 @@ export type Thread = {
    * cleared on the next dispatch for this thread. See engine.ts resultAwaitsReply.
    */
   awaitingReply?: boolean
+  /**
+   * Phase 3 item 7: background worker threads stay out of the sidebar.
+   * Parent conversation sees completion via injectBackgroundResult only.
+   */
+  hidden?: boolean
 }
 
 interface ThreadStore {
@@ -154,7 +159,14 @@ interface ThreadStore {
     opts?: Partial<
       Pick<
         Thread,
-        'title' | 'model' | 'thinkingDepth' | 'speed' | 'loopType' | 'agentMode' | 'runner'
+        | 'title'
+        | 'model'
+        | 'thinkingDepth'
+        | 'speed'
+        | 'loopType'
+        | 'agentMode'
+        | 'runner'
+        | 'hidden'
       >
     >,
   ) => string
@@ -275,6 +287,7 @@ function migrateThread(raw: Record<string, unknown>): Thread {
       raw.externalRun && typeof raw.externalRun === 'object'
         ? (raw.externalRun as ExternalRunRef)
         : undefined,
+    hidden: raw.hidden === true ? true : undefined,
   }
 }
 
@@ -319,6 +332,7 @@ function emptyThread(partial?: Partial<Thread>): Thread {
     updatedAt: now,
     lastStatus: 'idle',
     subDesignBriefId: partial?.subDesignBriefId,
+    hidden: partial?.hidden === true ? true : undefined,
   }
 }
 
@@ -339,21 +353,28 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       persist([t], t.id)
       return
     }
+    const visible = threads.filter((t) => !t.hidden)
+    const fallbackId = (visible[0] || threads[0]).id
+    const nextActive =
+      activeId && threads.some((t) => t.id === activeId && !t.hidden) ? activeId : fallbackId
     set({
       threads,
-      activeId: activeId && threads.some((t) => t.id === activeId) ? activeId : threads[0].id,
+      activeId: nextActive,
     })
-    persist(
-      threads,
-      activeId && threads.some((t) => t.id === activeId) ? activeId : threads[0].id,
-    )
+    persist(threads, nextActive)
   },
 
   createThread: (opts) => {
     const t = emptyThread(opts)
     const threads = [t, ...get().threads].slice(0, MAX_THREADS)
-    set({ threads, activeId: t.id, showRunPanel: false })
-    persist(threads, t.id)
+    // Hidden worker threads (background delegate) must not steal UI focus.
+    if (t.hidden) {
+      set({ threads })
+      persist(threads, get().activeId)
+    } else {
+      set({ threads, activeId: t.id, showRunPanel: false })
+      persist(threads, t.id)
+    }
     return t.id
   },
 

@@ -228,6 +228,12 @@ await test('permissionAskStore tracks timedOut + runStats for archive', async ()
   assert.match(src, /beginRunAudit/)
   assert.match(src, /getRunHitlSnapshot/)
   assert.match(src, /runStats/)
+  assert.match(src, /MAX_RUN_HITL_AUDITS = 100/)
+  assert.match(src, /resolve: \(requestId, decision\)/)
+  const modal = fs.readFileSync(path.join(appRoot, 'src/components/PermissionAskModal.tsx'), 'utf8')
+  assert.match(modal, /current\.runId/)
+  assert.match(modal, /resolve\(current\.id, 'allow'\)/)
+  assert.match(modal, /resolve\(current\.id, 'deny'\)/)
 })
 
 // ── codeMode worker source must disable fetch ──
@@ -545,6 +551,149 @@ await test('W1: entry drift guard — no dispatchThreadTask outside controller',
   assert.match(controller, /runId/)
 })
 
+await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async () => {
+  const fs = await import('node:fs')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const callers = [
+    'src/App.tsx',
+    'src/store/agentStore.ts',
+    'src/hooks/useSlashExecutor.ts',
+    'src/pages/ProtocolsPage.tsx',
+    'src/pages/AutomationPage.tsx',
+    'src/pages/EventsPage.tsx',
+    'src/pages/FailedPage.tsx',
+    'src/pages/LogsPage.tsx',
+    'src/pages/RecordsPage.tsx',
+    'src/pages/SuccessPage.tsx',
+    'src/pages/SubDesignPage.tsx',
+    'src/components/InlineRunPanel.tsx',
+    'src/components/subdesign/CritiqueTheater.tsx',
+    'src/agent/hermes/backgroundJobs.ts',
+  ]
+  assert.match(coordinator, /export async function coordinateTaskRun/)
+  assert.match(coordinator, /export async function runTask/)
+  assert.match(coordinator, /normalizeTaskRunInput/)
+  assert.match(coordinator, /await import\('\.\/runExternal'\)/)
+  assert.match(legacy, /compatibility adapter for the canonical taskRunCoordinator seam/)
+  assert.match(legacy, /coordinateTaskRun/)
+  assert.match(legacy, /@deprecated New callers must use `taskRunCoordinator\.runTask`/)
+  for (const file of callers) {
+    const source = fs.readFileSync(path.join(appRoot, file), 'utf8')
+    assert.doesNotMatch(
+      source,
+      /runExternalObjective\s*\(/,
+      `${file} 不可直接呼叫 runExternalObjective`,
+    )
+    assert.match(source, /taskRunCoordinator/)
+  }
+})
+
+await test('Phase 3 item 6/7: background delegate links Archive once + hidden worker thread', async () => {
+  const fs = await import('node:fs')
+  const bg = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
+  const thread = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
+  const sidebar = fs.readFileSync(path.join(appRoot, 'src/components/ThreadSidebar.tsx'), 'utf8')
+  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  assert.match(bg, /archiveRunId/)
+  assert.match(bg, /workerThread: true/)
+  assert.match(bg, /job\.archiveRunId/)
+  assert.match(bg, /Link-only|coordinator finalization already archived/i)
+  assert.match(thread, /hidden\?: boolean/)
+  assert.match(thread, /t\.hidden/)
+  assert.match(sidebar, /threads\.filter\(\(t\) => !t\.hidden\)/)
+  assert.match(legacy, /workerThread\?: boolean/)
+  assert.match(coordinator, /hidden: opts\.hidden/)
+})
+
+await test('Phase 3 item 3: runDispatch consumes RunDispatchSnapshot only', async () => {
+  const fs = await import('node:fs')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  assert.match(coordinator, /export type RunDispatchSnapshot/)
+  assert.match(coordinator, /export function buildRunDispatchSnapshot/)
+  assert.match(coordinator, /deferFinalization: true/)
+  assert.match(dispatch, /RunDispatchSnapshot/)
+  assert.match(dispatch, /isRunDispatchSnapshot|snapshot\.runId|snapshot\.overrides/)
+  assert.doesNotMatch(dispatch, /canStartRun/)
+  assert.doesNotMatch(dispatch, /materializeAttachmentsOnDisk/)
+  assert.doesNotMatch(dispatch, /hydrateAttachmentsFromDisk/)
+  assert.doesNotMatch(dispatch, /normalizeImageAttachmentsForVision/)
+  assert.match(legacy, /buildRunDispatchSnapshot/)
+  assert.match(legacy, /dispatchThreadTask\(snapshot\)/)
+})
+
+await test('Phase 3 item 4/5: unique finalization order; stop does not drain', async () => {
+  const fs = await import('node:fs')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
+  const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
+  assert.match(coordinator, /export async function finalizeTaskRun/)
+  // Ordered step comments encode the unique finalization sequence
+  assert.match(coordinator, /\/\/ 2\) afterRun hooks/)
+  assert.match(coordinator, /\/\/ 3\) Archive/)
+  assert.match(coordinator, /\/\/ 4\) onSettled/)
+  assert.match(coordinator, /\/\/ 5\) release capacity/)
+  assert.match(coordinator, /\/\/ 6\) queue drain/)
+  const a2 = coordinator.indexOf('// 2) afterRun hooks')
+  const a3 = coordinator.indexOf('// 3) Archive')
+  const a4 = coordinator.indexOf('// 4) onSettled')
+  const a5 = coordinator.indexOf('// 5) release capacity')
+  const a6 = coordinator.indexOf('// 6) queue drain')
+  assert.ok(a2 < a3 && a3 < a4 && a4 < a5 && a5 < a6, 'finalization step comments stay ordered')
+  assert.match(types, /deferFinalization\?: boolean/)
+  assert.match(agent, /deferFinalization/)
+  assert.match(agent, /Phase 3 item 5: stop only terminates/)
+  assert.doesNotMatch(
+    agent.slice(agent.indexOf('stopExecution:'), agent.indexOf('continueTurn:')),
+    /drainQueueAfterRun/,
+  )
+  assert.match(legacy, /finalizeTaskRun/)
+  // Lifecycle implementation must not drain outside finalize
+  assert.doesNotMatch(legacy, /drainExternalRunQueue/)
+})
+
+await test('Phase 3 item 2: coordinator owns capacity / attachments / thread / beforeRun once', async () => {
+  const fs = await import('node:fs')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+
+  // Coordinator exports the single-owner prep APIs
+  assert.match(coordinator, /export async function prepareRunAttachments/)
+  assert.match(coordinator, /export async function checkRunCapacity/)
+  assert.match(coordinator, /export async function reserveRunCapacity/)
+  assert.match(coordinator, /export async function bindRunThread/)
+  assert.match(coordinator, /export async function evaluateBeforeRunHooks/)
+  assert.match(coordinator, /phase === 'persist'/)
+  assert.match(coordinator, /phase === 'hydrate'/)
+  assert.match(coordinator, /point: 'beforeRun'/)
+
+  // Lifecycle implementation uses coordinator helpers (not local reimplementation)
+  assert.match(legacy, /prepareRunAttachments/)
+  assert.match(legacy, /checkRunCapacity/)
+  assert.match(legacy, /reserveRunCapacity/)
+  assert.match(legacy, /bindRunThread/)
+  assert.match(legacy, /evaluateBeforeRunHooks/)
+  assert.doesNotMatch(legacy, /materializeAttachmentsOnDisk/)
+  assert.doesNotMatch(legacy, /hydrateAttachmentsFromDisk/)
+  assert.doesNotMatch(legacy, /normalizeImageAttachmentsForVision/)
+  assert.doesNotMatch(legacy, /\.canStartRun\(/)
+  assert.doesNotMatch(legacy, /\.reserveRun\(/)
+  assert.doesNotMatch(legacy, /\.bindRun\(/)
+
+  // runDispatch must not re-own capacity or attachment I/O
+  assert.doesNotMatch(dispatch, /canStartRun/)
+  assert.doesNotMatch(dispatch, /materializeAttachmentsOnDisk/)
+  assert.doesNotMatch(dispatch, /hydrateAttachmentsFromDisk/)
+  assert.doesNotMatch(dispatch, /normalizeImageAttachmentsForVision/)
+  assert.doesNotMatch(dispatch, /prepareRunAttachments/)
+  assert.match(dispatch, /already-prepared|must not re-check capacity|must not re-run/i)
+})
+
 await test('ADR3: concurrent-run registry, targeted HITL, and CLI cancellation stay wired', async () => {
   const fs = await import('node:fs')
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
@@ -553,6 +702,7 @@ await test('ADR3: concurrent-run registry, targeted HITL, and CLI cancellation s
   const permission = fs.readFileSync(path.join(appRoot, 'src/store/permissionAskStore.ts'), 'utf8')
   const controller = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
+  const settingsPage = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
   const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   const scenario = fs.readFileSync(path.join(appRoot, 'scripts/smoke-scenario-e2e.mjs'), 'utf8')
@@ -566,14 +716,104 @@ await test('ADR3: concurrent-run registry, targeted HITL, and CLI cancellation s
   assert.match(permission, /threadId\?: string/)
   assert.match(permission, /runId\?: string/)
   assert.match(permission, /sessionAllowByThread/)
-  assert.match(controller, /canStartRun/)
-  assert.match(controller, /reserveRun/)
+  // Phase 3 item 2: capacity check/reserve owned by coordinator, used by controller
+  assert.match(controller, /checkRunCapacity|reserveRunCapacity/)
+  assert.match(
+    fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8'),
+    /export async function (checkRunCapacity|reserveRunCapacity)/,
+  )
   assert.doesNotMatch(controller, /agent\.isRunning/)
   assert.match(settings, /concurrentRunsEnabled: false/)
   assert.match(settings, /maxConcurrentRuns: 4/)
+  assert.match(settingsPage, /實驗性：[\s\S]*多 run 呈現尚未完成/)
   assert.match(preload, /cancel: \(runId\?: string\)/)
   assert.match(main, /ipcMain\.handle\('cli:cancel', async \(_evt, runId\?: string\)/)
   assert.match(scenario, /ADR3: opt-in concurrent runs/)
+})
+
+await test('Phase 1: run presentation components use explicit run selectors', async () => {
+  const fs = await import('node:fs')
+  const feed = fs.readFileSync(path.join(appRoot, 'src/components/RunProcessFeed.tsx'), 'utf8')
+  const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
+  const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
+  assert.match(feed, /runId/)
+  assert.match(panel, /runId/)
+  assert.doesNotMatch(feed, /useAgentStore\(\(s\) => s\.agent\)/)
+  assert.doesNotMatch(feed, /useRunActivityStore\(\)/)
+  assert.doesNotMatch(panel, /useAgentStore\(\)/)
+  assert.doesNotMatch(panel, /useRunActivityStore\(\)/)
+  assert.match(panel, /stopExecution\(runId\)/)
+  assert.match(panel, /continueTurn\(runId\)/)
+  assert.match(panel, /resolveIntervention\([\s\S]*runId\)/)
+  assert.match(agent, /MAX_RUN_AGENT_STATES = 100/)
+  assert.match(agent, /pruneRunAgentStates/)
+  assert.match(agent, /lastRunIdByThread/)
+  assert.match(agent, /resolveIntervention: \(decision, runId\)/)
+  assert.doesNotMatch(agent, /const target = runId \|\| get\(\)\.selectedRunId/)
+})
+
+await test('Phase 0: workflow baseline matrix stays recorded', async () => {
+  const fs = await import('node:fs')
+  const scenario = fs.readFileSync(path.join(appRoot, 'scripts/smoke-scenario-e2e.mjs'), 'utf8')
+  const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  const background = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
+  const baseline = {
+    twoBuiltInRuns:
+      /ADR3: opt-in concurrent runs/.test(scenario) &&
+      /parallel-1/.test(scenario) &&
+      /parallel-2/.test(scenario),
+    builtInAndCli:
+      /startLocalCliExecution/.test(dispatch) &&
+      /path: 'cli'/.test(dispatch),
+    twoHitlAsks: /HITL asks must retain the originating run and thread/.test(scenario),
+    queueOverflow: /overflow should drain after a slot frees/.test(scenario),
+    backgroundDelegate:
+      /sourceKind: 'delegate'/.test(background) &&
+      /runTask\(\{/.test(background) &&
+      /archiveBackgroundJob\(/.test(background),
+  }
+  assert.deepEqual(
+    Object.entries(baseline).filter(([, present]) => !present).map(([name]) => name),
+    [],
+    'Phase 0 baseline evidence is incomplete',
+  )
+})
+
+await test('Phase 1: active thread selects its run state through the UI seam', async () => {
+  const fs = await import('node:fs')
+  const protocols = fs.readFileSync(path.join(appRoot, 'src/pages/ProtocolsPage.tsx'), 'utf8')
+  const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
+  assert.match(protocols, /getRunIdForThread/)
+  assert.match(protocols, /selectRun/)
+  assert.match(protocols, /selectActivityRun/)
+  assert.match(protocols, /Phase 1: thread selection is the UI seam/)
+  assert.match(protocols, /const presentationRunId = activeId \? getRunIdForThread\(activeId\) : null/)
+  assert.match(protocols, /selectRun\(presentationRunId\)/)
+  assert.match(protocols, /selectActivityRun\(presentationRunId\)/)
+  assert.match(agent, /selectRun: \(runId\)/)
+  assert.match(agent, /agent: state \|\| emptyAgent\(\)/)
+})
+
+await test('Phase 1: run activity is run-scoped with bounded terminal retention', async () => {
+  const fs = await import('node:fs')
+  const activity = fs.readFileSync(path.join(appRoot, 'src/store/runActivityStore.ts'), 'utf8')
+  assert.match(activity, /presentations: Record<string, RunPresentation>/)
+  assert.match(activity, /MAX_PRESENTATIONS = 100/)
+  assert.match(activity, /getPresentation: \(runId\)/)
+  assert.match(activity, /terminalizePresentation/)
+  assert.match(activity, /get\(\)\.end\(streamRunId/)
+  assert.match(activity, /clearDraft: \(runId\)/)
+})
+
+await test('Phase 1: finalization summary consumes the explicit run presentation', async () => {
+  const fs = await import('node:fs')
+  // Phase 3 item 4: process summary moved into coordinator finalizeTaskRun
+  const controller = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  assert.match(controller, /getState\(\)\.getPresentation\(runId\)/)
+  assert.match(controller, /const presentation = useRunActivityStore\.getState\(\)\.getPresentation\(runId\)/)
+  assert.match(controller, /presentation\?\.events/)
+  assert.match(controller, /presentation\?\.fileChanges/)
+  assert.doesNotMatch(controller, /const activity = useRunActivityStore\.getState\(\)[\s\S]{0,120}activity\.events/)
 })
 
 // ── W3: config candidates — every field temporary / review / unsupported ──
@@ -656,7 +896,8 @@ await test('SubDesign Phase 4/5: critique gate + Electron export contract', asyn
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
   const capability = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/subDesign.ts'), 'utf8')
   const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  // Phase 3 item 4: subDesign export digest lives in coordinator finalization summary
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(critique, /critiqueAllowsDeliver/)
   assert.match(guard, /design_artifact_export/)
   assert.match(capability, /design_artifact_export/)
@@ -667,7 +908,8 @@ await test('SubDesign Phase 4/5: critique gate + Electron export contract', asyn
   assert.match(preload, /exportArtifact:/)
   assert.match(page, /CritiquePanel/)
   assert.match(page, /ArtifactDeliveryPanel/)
-  assert.match(runExternal, /sha256/)
+  assert.match(coordinator, /sha256/)
+  assert.match(coordinator, /pushRunSummary/)
 })
 
 await test('SubDesign Phase 6: canonical metadata, artifact IPC, bash gate, and critique evidence', async () => {
@@ -986,8 +1228,12 @@ await test('P1-D: wiring contract — hooks evaluated at all four points; saniti
   assert.match(guard, /point: 'beforeTool'/)
   assert.match(guard, /sourceKind: opts\.sourceKind/)
   const runX = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
-  assert.match(runX, /point: 'beforeRun'/)
-  assert.match(runX, /point: 'afterRun'/)
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  // Phase 3: beforeRun + afterRun owned by coordinator (admit + finalize)
+  assert.match(coordinator, /point: 'beforeRun'/)
+  assert.match(coordinator, /point: 'afterRun'/)
+  assert.match(runX, /evaluateBeforeRunHooks/)
+  assert.match(runX, /finalizeTaskRun/)
   assert.match(runX, /sourceKind: opts\.sourceKind/)
   const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
   assert.match(loop, /point: 'afterTool'/)
@@ -1027,11 +1273,13 @@ await test('Loop plan: DoD verdict parses and constrains semantic evaluator outp
 
 function parseLlmPlanMirror(raw, forceLoopType) {
   const loopTypes = ['Turn-based', 'Goal-based', 'Time-based', 'Proactive']
+  const autoLoopTypes = ['Turn-based', 'Goal-based']
   const match = (raw || '').match(/\{[\s\S]*\}/)
   if (!match) return null
   try {
     const obj = JSON.parse(match[0])
-    const loopType = forceLoopType || (loopTypes.includes(obj.loopType) ? obj.loopType : 'Goal-based')
+    const allowed = forceLoopType ? loopTypes : autoLoopTypes
+    const loopType = forceLoopType || (allowed.includes(obj.loopType) ? obj.loopType : 'Goal-based')
     const steps = Array.isArray(obj.steps)
       ? obj.steps.filter((s) => typeof s === 'string' && s.trim()).slice(0, 7)
       : []
@@ -1051,6 +1299,133 @@ await test('Loop plan: LLM plan validation falls back for malformed plans', () =
   assert.equal(plan.loopType, 'Goal-based')
   assert.equal(plan.maxIterations, 3)
   assert.equal(parseLlmPlanMirror('{"steps":["only one"],"definitionOfDone":"x"}'), null)
+})
+
+await test('Phase 2a: conversational automation is suggestion-only and auto loops stay Turn/Goal', async () => {
+  const fs = await import('node:fs')
+  const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
+  const automation = fs.readFileSync(path.join(appRoot, 'src/agent/automationSuggestion.ts'), 'utf8')
+  const llm = fs.readFileSync(path.join(appRoot, 'src/agent/llmParser.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const scheduleText = '每天 08:00 寄摘要'
+  assert.equal(/每日|每天|定時|排程/.test(scheduleText), true)
+  assert.equal(parseLlmPlanMirror('{"loopType":"Time-based","steps":["a","b"],"definitionOfDone":"ok"}').loopType, 'Goal-based')
+  assert.match(parser, /detectAutomationSuggestion/)
+  assert.match(automation, /source: 'conversation'/)
+  assert.match(automation, /尚未執行/)
+  assert.match(llm, /AUTO_LOOP_TYPES/)
+  assert.match(llm, /不得輸出 Time-based 或 Proactive/)
+  assert.match(runExternal, /presentConversationAutomationSuggestion/)
+  assert.match(runExternal, /status: 'suggested'/)
+  assert.match(runExternal, /no capacity reservation, engine start, or tool call/i)
+})
+
+await test('Phase 2b: Time-based runs require a claimed ScheduledJob trigger snapshot', async () => {
+  const fs = await import('node:fs')
+  const scheduler = fs.readFileSync(path.join(appRoot, 'src/agent/scheduler.ts'), 'utf8')
+  const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
+  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+  const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
+  const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
+  const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  assert.match(scheduler, /createScheduleTriggerSnapshot/)
+  assert.match(scheduler, /job\.lastRunAt \|\| ''/)
+  assert.match(scheduler, /validateScheduleTriggerSnapshot/)
+  assert.match(scheduler, /isClaimedScheduleTrigger/)
+  assert.match(app, /scheduleTriggeredAt: scheduleTrigger\.triggeredAt/)
+  assert.match(app, /scheduleKind: scheduleTrigger\.scheduleKind/)
+  assert.match(runExternal, /resolveScheduleTrigger/)
+  assert.match(runExternal, /verifyClaimedScheduleTrigger/)
+  assert.match(runExternal, /Time-based 僅能由有效 ScheduledJob 到期 trigger 進入/)
+  assert.ok(
+    runExternal.indexOf('const scheduleTriggerResolution') <
+      runExternal.indexOf('await checkRunCapacity(runId'),
+    'trigger validation must precede capacity reservation',
+  )
+  assert.match(queue, /scheduleTriggeredAt/)
+  assert.match(queue, /scheduleKind/)
+  assert.match(engine, /validateScheduleTriggerSnapshot/)
+  assert.match(engine, /isClaimedScheduleTrigger/)
+  assert.match(engine, /private async validateTimeBasedTrigger\(\)/)
+  assert.match(engine, /this\.state\.scheduleTrigger = validation\.snapshot/)
+  assert.match(types, /interface ScheduleTriggerSnapshot/)
+  assert.match(agent, /scheduleTrigger: agent\.scheduleTrigger/)
+  assert.match(agent, /scheduleTrigger\?: RuntimeOverrides\['scheduleTrigger'\]/)
+  assert.match(dispatch, /scheduleTrigger: snapshot\.overrides\.scheduleTrigger/)
+})
+
+await test('Phase 2c: Proactive runs require matcher-produced event evidence', async () => {
+  const fs = await import('node:fs')
+  const matcher = fs.readFileSync(path.join(appRoot, 'src/agent/eventMatcher.ts'), 'utf8')
+  const store = fs.readFileSync(path.join(appRoot, 'src/store/scheduleStore.ts'), 'utf8')
+  const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
+  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+  const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
+  const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
+  const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  assert.match(matcher, /export function matchProactiveEvent/)
+  assert.match(matcher, /matched: true/)
+  assert.match(matcher, /validateEventTriggerSnapshot/)
+  assert.match(store, /matchEventEvidence/)
+  assert.match(store, /lastTriggerEvidence: evidence/)
+  assert.match(app, /matchEventEvidence/)
+  assert.match(app, /meta: \{ eventTrigger: matched\.trigger \}/)
+  assert.match(runExternal, /resolveProactiveTrigger/)
+  assert.match(runExternal, /Proactive trigger 無效/)
+  assert.ok(
+    runExternal.indexOf('const proactiveTriggerResolution') <
+      runExternal.indexOf('await checkRunCapacity(runId'),
+    'event evidence validation must precede capacity reservation',
+  )
+  assert.match(queue, /eventTrigger/)
+  assert.match(engine, /validateEventTriggerSnapshot/)
+  assert.match(engine, /this\.state\.eventTrigger = validation\.snapshot/)
+  assert.doesNotMatch(engine, /predicate has_trigger|Event criteria not met|when\/if/)
+  assert.match(types, /interface EventTriggerSnapshot/)
+  assert.match(agent, /eventTrigger: agent\.eventTrigger/)
+  assert.match(dispatch, /eventTrigger: snapshot\.overrides\.eventTrigger/)
+})
+
+await test('Phase 2d: Next_State is consumed once with explicit webhook delivery audit', async () => {
+  const fs = await import('node:fs')
+  const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
+  const outcome = fs.readFileSync(path.join(appRoot, 'src/agent/outcomeDispatcher.ts'), 'utf8')
+  const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
+  const llmParser = fs.readFileSync(path.join(appRoot, 'src/agent/llmParser.ts'), 'utf8')
+  const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
+  const settings = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
+  const settingsPage = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
+  const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
+  const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
+  const server = fs.readFileSync(path.join(appRoot, 'electron/webhookServer.ts'), 'utf8')
+  assert.match(types, /type NextState = 'Halt' \| 'Await User Input' \| 'Dispatch Webhook'/)
+  assert.match(types, /interface PostStateOutcome/)
+  assert.match(outcome, /export async function consumeNextState/)
+  assert.match(outcome, /未設定有效 webhook target/)
+  assert.match(outcome, /window\.subagents\?\.webhook\?\.dispatch/)
+  assert.match(parser, /nextState\?: NextState/)
+  assert.match(llmParser, /Dispatch Webhook/)
+  assert.match(agent, /await consumeNextState/)
+  assert.match(agent, /applyPostState/)
+  assert.match(agent, /saveToArchive\(settled/)
+  // Phase 3 item 4: postState audit bubbles live in coordinator finalization
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  assert.match(coordinator, /postState\?\.status === 'failed'/)
+  assert.match(coordinator, /finalizeTaskRun/)
+  assert.match(dispatch, /nextState: snapshot\.overrides\.nextState/)
+  assert.match(queue, /\| 'nextState'/)
+  assert.match(settings, /webhookTarget: ''/)
+  assert.match(settingsPage, /settings\.webhookTarget/)
+  assert.match(preload, /webhook:dispatch/)
+  assert.match(main, /webhook:dispatch/)
+  assert.match(server, /export async function dispatchWebhook/)
 })
 
 await test('Loop plan: parser/evaluator/iteration contracts are wired', async () => {
@@ -1074,6 +1449,28 @@ await test('Loop plan: parser/evaluator/iteration contracts are wired', async ()
   assert.match(parser, /export function formatPlanBubble/)
   assert.match(parser, /個\|項\|款\|種/)
   assert.match(replan, /export function replanCorrectiveSteps/)
+})
+
+await test('Phase 2e: plan bubble preserves source and classification reason', async () => {
+  const fs = await import('node:fs')
+  const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
+  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
+  assert.match(parser, /export function resolvePlanBubbleMetadata/)
+  assert.match(parser, /Trigger source：\$\{meta\.triggerSource\}/)
+  assert.match(parser, /分類原因：\$\{meta\.classificationReason\}/)
+  assert.match(parser, /ScheduledJob trigger/)
+  assert.match(parser, /Webhook matcher evidence/)
+  assert.match(parser, /由使用者手動指定/)
+  assert.match(runExternal, /resolvePlanBubbleMetadata\(/)
+  assert.match(runExternal, /sourceLabel: opts\.sourceLabel/)
+  assert.match(engine, /sourceKind: this\.overrides\.sourceKind/)
+  assert.match(engine, /classificationReason: this\.overrides\.classificationReason/)
+  assert.match(queue, /\| 'triggerSource'/)
+  assert.match(queue, /\| 'classificationReason'/)
+  assert.match(queue, /triggerSource: o\.triggerSource/)
+  assert.match(queue, /classificationReason: o\.classificationReason/)
 })
 
 // Mirror of replan.ts + chat-lite classify (conversation loop engineering)
@@ -1122,15 +1519,23 @@ await test('Loop plan: memory relevance, failure learning, unattended turn, and 
   const skills = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/skills.ts'), 'utf8')
   const intent = fs.readFileSync(path.join(appRoot, 'src/agent/intentPreload.ts'), 'utf8')
   const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const textSim = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/textSimilarity.ts'), 'utf8')
   assert.match(memory, /buildPromptBlock\(enabled = true, objective\?: string\)/)
   assert.match(memory, /失敗教訓/)
-  assert.match(prompt, /buildPromptBlock\(memoryOn, opts\?\.objective\)/)
+  assert.match(memory, /scoreQueryText/)
+  assert.match(memory, /buildFailureLessonsBlock/)
+  assert.match(prompt, /buildContextPacket/)
+  assert.match(prompt, /buildPromptBlock/)
   assert.match(learning, /onGoalFailure/)
   assert.match(learning, /toolCalls/)
+  assert.match(learning, /tool:\$\{/)
+  assert.match(learning, /strategy:\$\{/)
   assert.match(engine, /noteLearningFailure/)
   assert.match(engine, /sessionRecallEnabled|searchSessions/)
+  assert.match(engine, /formatSessionRecallBlock|sessionRecallBlock/)
   assert.match(runExternal, /loopTypeMode/)
   assert.match(runExternal, /forcedLoopType|forceLoopType/)
+  assert.match(textSim, /export function scoreQueryText/)
   const turn = engine.slice(engine.indexOf('private async runTurnBased'), engine.indexOf('private async runGoalBased'))
   assert.match(turn, /overrides\.unattended/)
   assert.match(turn, /waitForUser/)
@@ -1139,14 +1544,141 @@ await test('Loop plan: memory relevance, failure learning, unattended turn, and 
   assert.match(intent, /[一-鿿]|\\u4e00/)
 })
 
+await test('Phase 6: docs align concurrency, triggers, runners, no in-repo RTK.md', async () => {
+  const fs = await import('node:fs')
+  const agents = fs.readFileSync(path.join(appRoot, '../AGENTS.md'), 'utf8')
+  const claude = fs.readFileSync(path.join(appRoot, '../CLAUDE.md'), 'utf8')
+  const context = fs.readFileSync(path.join(appRoot, '../CONTEXT.md'), 'utf8')
+  const flow = fs.readFileSync(path.join(appRoot, '../docs/CONVERSATION_LOOP_HERMES_FLOW.md'), 'utf8')
+  const adr = fs.readFileSync(path.join(appRoot, '../docs/adr/0003-concurrent-run-lock-removal.md'), 'utf8')
+  const plan = fs.readFileSync(
+    path.join(appRoot, '../docs/TASK_AGENT_WORKFLOW_INTEGRATION_PLAN_2026-07-14.md'),
+    'utf8',
+  )
+
+  // No in-repo RTK.md; guidance points elsewhere
+  assert.equal(fs.existsSync(path.join(appRoot, '../RTK.md')), false)
+  assert.match(agents, /no in-repo `RTK\.md`|No in-repo `RTK\.md`|There is \*\*no in-repo `RTK\.md`\*\*/i)
+  assert.match(claude, /No in-repo `RTK\.md`/i)
+
+  // Concurrency language: default single, opt-in cap — not "always global mutex only"
+  assert.match(agents, /default single run|預設單 run|concurrentRunsEnabled/i)
+  assert.match(claude, /default single run|concurrentRunsEnabled|maxConcurrentRuns/i)
+  assert.match(context, /concurrentRunsEnabled|opt-in|maxConcurrentRuns/i)
+  assert.match(adr, /Default.*single-run|concurrentRunsEnabled/i)
+  assert.doesNotMatch(agents, /isRunning` is a global mutex/)
+  assert.doesNotMatch(claude, /isRunning` is a global mutex/)
+
+  // Time/Proactive triggers
+  assert.match(agents, /Time-based.*ScheduledJob|ScheduledJob trigger/i)
+  assert.match(agents, /Proactive.*matcher|event matcher/i)
+  assert.match(claude, /Time-based.*ScheduledJob|ScheduledJob/i)
+  assert.match(flow, /Time-based.*ScheduledJob|claimed `ScheduledJob`/i)
+
+  // Runner matrix + plan backlink
+  assert.match(agents, /Runner capability matrix|executionKind/i)
+  assert.match(claude, /executionKind: 'loop'|runners\//)
+  assert.match(flow, /TASK_AGENT_WORKFLOW_INTEGRATION_PLAN_2026-07-14/)
+  assert.match(flow, /taskRunCoordinator/)
+  assert.match(plan, /Phase 6 實作記錄/)
+})
+
+await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal gated', async () => {
+  const fs = await import('node:fs')
+  const types = fs.readFileSync(path.join(appRoot, 'src/agent/runners/types.ts'), 'utf8')
+  const index = fs.readFileSync(path.join(appRoot, 'src/agent/runners/index.ts'), 'utf8')
+  const localCli = fs.readFileSync(path.join(appRoot, 'src/agent/localCliRun.ts'), 'utf8')
+  const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
+  const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
+  const runX = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+
+  assert.match(types, /export type RunnerCapabilities/)
+  assert.match(types, /export type ExecutionKind/)
+  assert.match(types, /BUILTIN_RUNNER_CAPABILITIES/)
+  assert.match(types, /EXTERNAL_CLI_RUNNER_CAPABILITIES/)
+  assert.match(types, /continueGoal: false/)
+  assert.match(types, /validateDoD: false/)
+  assert.match(types, /EXTERNAL_CLI_DOD_LABEL/)
+  assert.match(types, /formatCliContinueGoalPrompt/)
+  assert.match(types, /isCompleteCliContinueGoalContract/)
+  assert.match(index, /from '\.\/types'/)
+
+  // Honest CLI DoD — never "CLI returned" as met
+  assert.doesNotMatch(localCli, /definitionOfDone: 'CLI returned'/)
+  assert.doesNotMatch(agent, /definitionOfDone: 'CLI returned'/)
+  assert.match(localCli, /EXTERNAL_CLI_DOD_LABEL/)
+  assert.match(agent, /EXTERNAL_CLI_DOD_LABEL/)
+  assert.match(agent, /executionKind: 'external'/)
+  assert.match(engine, /executionKind: 'loop'/)
+  assert.match(dispatch, /executionKind: 'external'/)
+  assert.match(dispatch, /executionKind: 'loop'/)
+
+  // continueGoal UI gated; contract documented but capability stays false
+  assert.match(panel, /canContinueGoal/)
+  assert.match(panel, /EXTERNAL_CLI_UI_LABEL/)
+  assert.match(panel, /外部 CLI 不支援/)
+  assert.match(panel, /formatRunnerCapabilitiesSummary/)
+  assert.match(runX, /capabilitiesForRunner/)
+  assert.match(runX, /continueBlockedNote|不支援 continueGoal/)
+
+  // Prompt contract fixture completeness (capability still false)
+  assert.match(types, /## Definition of Done/)
+  assert.match(types, /## Missing gaps/)
+  assert.match(types, /## Prior digest/)
+  assert.match(types, /## Project root/)
+  assert.match(types, /## Approval mode/)
+})
+
+await test('Phase 4: ContextPacket slots, no final 2000-slice, onUserTurn ownership', async () => {
+  const fs = await import('node:fs')
+  const packet = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/contextPacket.ts'), 'utf8')
+  const prompt = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/promptBuilder.ts'), 'utf8')
+  const learning = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
+  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const session = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/sessionSearch.ts'), 'utf8')
+
+  assert.match(packet, /export function buildContextPacket/)
+  assert.match(packet, /export function formatSessionRecallBlock/)
+  assert.match(packet, /failureLessons/)
+  assert.match(packet, /sessionRecall/)
+  assert.match(packet, /includedChars/)
+  assert.match(packet, /CONTEXT_PACKET_TOTAL_BUDGET/)
+  assert.match(packet, /temporary chat/)
+
+  // No whole-blob final extraContext.slice(0, 2000) in prompt builder
+  assert.doesNotMatch(prompt, /extraContext\.slice\(\s*0\s*,\s*2000\s*\)/)
+  assert.match(prompt, /buildContextPacket/)
+  assert.match(prompt, /packetDiagnostics/)
+
+  // onUserTurn only from coordinator user chat; onGoalSuccess must not call it
+  assert.match(runExternal, /learningLoop\.onUserTurn/)
+  assert.match(runExternal, /sourceKind === 'composer'/)
+  const successBody = learning.slice(
+    learning.indexOf('onGoalSuccess(input'),
+    learning.indexOf('onGoalFailure(input'),
+  )
+  assert.doesNotMatch(successBody, /this\.onUserTurn\(/)
+  assert.doesNotMatch(engine, /learningLoop\.onUserTurn\(/)
+
+  assert.match(session, /scoreQueryText/)
+  assert.match(learning, /getUserTurnCount/)
+})
+
 await test('attachments: tiny vision images are upscaled above provider minimum', async () => {
   const fs = await import('node:fs')
   const attachments = fs.readFileSync(path.join(appRoot, 'src/lib/chatAttachments.ts'), 'utf8')
   assert.match(attachments, /MIN_VISION_IMAGE_PIXELS = 512/)
   assert.match(attachments, /visionImageDimensions/)
   assert.match(attachments, /normalizeImageAttachmentsForVision/)
+  // Phase 3 item 2: attachment normalize owned by coordinator prepareRunAttachments
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  assert.match(coordinator, /normalizeImageAttachmentsForVision/)
+  assert.match(coordinator, /prepareRunAttachments/)
   const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
-  assert.match(runExternal, /normalizeImageAttachmentsForVision/)
+  assert.match(runExternal, /prepareRunAttachments/)
 })
 
 // ── Slice D: continueGoal + chat history + busy UX ───────────────
@@ -1276,7 +1808,7 @@ await test('ADR3 follow-up: interactive entry points snapshot projectRoot at dis
   // switches to mid-flight. See docs/adr/0003-concurrent-run-lock-removal.md.
   assert.match(protocols, /runTask\(\{[\s\S]{0,400}projectRoot: projectRoot \|\| undefined/)
   assert.match(slash, /runTask\(\{[\s\S]{0,400}projectRoot: projectRoot\(\) \|\| undefined/)
-  assert.match(inlinePanel, /runTask\(\{[\s\S]{0,400}projectRoot: useProjectStore\.getState\(\)\.root \|\| undefined/)
+  assert.match(inlinePanel, /runTask\(\{[\s\S]{0,600}projectRoot: useProjectStore\.getState\(\)\.root \|\| undefined/)
   assert.match(runContext, /should therefore be unreachable during a real run/)
 })
 

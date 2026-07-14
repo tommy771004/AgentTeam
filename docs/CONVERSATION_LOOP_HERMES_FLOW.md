@@ -2,14 +2,14 @@
 
 > **視角**：以 **Hermes Agent**（穩定 loop、skills、memory、prompt 分層、學習閉環）與 **Loop Engineering**（規格 `docs/01~03`：Parse → Pattern → Validate → Iterate/Terminate）審視「使用者在對話介面送出一則任務」時的實際管線。  
 > **範圍**：互動對話入口（Protocols 對話 composer / 斜線指令），不展開排程／Webhook／Telegram 的差異細節（它們共用同一 `runTask`，但政策不同）。  
-> **對照基準**：程式現況（2026-07 已含 DoD 語意驗收、`llmParser`、失敗學習、CJK 技能匹配等）+ 規格 01/02/03 + 既有 `LOOP_HERMES_GAP_PLAN.md` / `WORKFLOW_AUDIT.md`。  
+> **對照基準**：程式現況（2026-07-14：`taskRunCoordinator` + ContextPacket + runner capability matrix 已落地）+ 規格 01/02/03 + **`docs/TASK_AGENT_WORKFLOW_INTEGRATION_PLAN_2026-07-14.md`（Phases 0–5 完成）** + `LOOP_HERMES_GAP_PLAN.md` / `WORKFLOW_AUDIT.md`。  
 > **產物用途**：給實作者與稽核者共用的「對話路徑現況圖 + 仍須補的流程 + 優先改善清單」。
 
 ---
 
 ## 0. 一句話結論
 
-對話送出後，**lifecycle 已收斂到單一控制器**（`runTask` → `dispatchThreadTask` → `agentEngine`），Hermes 的 prompt／技能／記憶／學習也有掛線；但從 **Loop Engineering** 看，對話路徑仍把多數訊息 **強制塞進 Goal-based 多步迴圈**，且 **Parse／Iterate／Post-State** 尚未完全符合規格 03 的「先結構化再執行、未達標就修正、結束後有明確 Next_State」。Hermes 側則是 **「有寫入、有注入，但對話語境下的召回與軌跡品質仍偏薄」**。
+對話送出後，**lifecycle 已收斂到 `taskRunCoordinator.runTask`**（capacity／附件／thread／beforeRun 一次；`dispatchThreadTask(snapshot)` 只選 runner；`finalizeTaskRun` 唯一收尾），Hermes 的 **ContextPacket**／技能／記憶／學習已掛線；Time/Proactive **不可**由對話純文字觸發。從 **Loop Engineering** 看，builtin 路徑已有 Parse／DoD／iterate／Next_State consumer；**外部 CLI** 誠實宣告無 DoD/continueGoal。對話預設仍偏 Goal-based 多步（可 chat-lite Turn）；並行為 **預設關、可設定上限**（ADR-0003）。
 
 ---
 
@@ -37,7 +37,20 @@
 | **Memory** | 跨對話偏好／教訓；volatile 注入 + 工具讀寫 |
 | **Learning** | 成功草稿技能、失敗寫教訓、週期 nudge |
 | **Delegate** | 隔離 leaf；對話主 run 可 `delegate_task` |
-| **Session 召回** | 跨 thread 的「上次怎麼做」— 本專案仍偏 Archive/學習中心，未進對話主路徑 |
+| **Session 召回** | 跨 session top-k（failure-first）→ ContextPacket `sessionRecall` slot（temporary 跳過） |
+| **ContextPacket** | 固定 slot／優先序／`includedChars` diagnostics（取代整段 extraContext 最後裁切） |
+
+### 1.3 Trigger 與 runner 約束（2026-07-14）
+
+| 規則 | 說明 |
+|------|------|
+| 對話 auto loop | 僅 Turn-based / Goal-based；cron/event 語意 → `AutomationSuggestion`，不進 tools |
+| Time-based | 僅 claimed `ScheduledJob` + `scheduleTrigger` snapshot |
+| Proactive | 僅 `eventMatcher` 布林 evidence；不可從 objective 猜 when/if |
+| 並行 | 預設 `concurrentRunsEnabled=false`；opt-in 後 `maxConcurrentRuns` 上限 |
+| Builtin vs CLI | 見 `agent/runners/` matrix；CLI 無 parse/DoD/iterate/continueGoal |
+
+詳見 **`docs/TASK_AGENT_WORKFLOW_INTEGRATION_PLAN_2026-07-14.md`**。
 
 ---
 
@@ -50,24 +63,24 @@
         │  onSubmitLine(line, attachments)
         ▼
  runEmbedded()  ─── sourceKind: 'composer'
-        │  • materialize attachments
-        │  • subagent mention bubble
-        │  • temporaryChat 提示
+        │  • subagent mention bubble / temporary 提示
         ▼
- runTask() / runExternalObjective()     ← 唯一 lifecycle 控制器
-        │
+ taskRunCoordinator.runTask()     ← 唯一 canonical ingress
+        │  (runExternalObjective 僅為 implementation)
         ├─ empty objective？→ fail
-        ├─ isRunning？
-        │     composer/slash：followUpMode = steer（預設）| queue
-        │     steer → stopExecution + 短延遲後接跑
-        │     queue → enqueueExternalRun（max 24, dedupe, localStorage）
-        ├─ reuseThreadId = active thread（對話追問）
-        ├─ push user bubble / sourceLabel
-        ├─ beforeRun hooks（deny / append-context / log / notify）
-        └─ dispatchThreadTask(objective, { forceLoopType, overrides, … })
+        ├─ automation suggestion？（composer/slash 排程語意）→ bubble only
+        ├─ capacity check/reserve（opt-in concurrent cap）
+        │     busy → steer / queue / reject（resolveBusyPolicy）
+        ├─ attachments persist → hydrate（各一次）
+        ├─ bindRunThread + user bubble
+        ├─ beforeRun hooks
+        ├─ buildRunDispatchSnapshot（deferFinalization）
+        └─ dispatchThreadTask(snapshot)   ← 只選 runner、組 context
                  │
-                 ├─ runner !== builtin → localCliRun（授權檢查 + 歷史拼接）
-                 └─ builtin → agentStore.startExecution → agentEngine.start()
+                 ├─ external → localCliRun（executionKind=external）
+                 └─ builtin → startExecution → agentEngine.start()
+        ▼
+ finalizeTaskRun：summary → afterRun → Archive → onSettled → release → drain
 ```
 
 斜線指令（`useSlashExecutor` → `runEmbedded`）路徑相同，差異僅 `sourceKind: 'slash'` 與部分指令預先寫 bubble。
@@ -79,11 +92,13 @@
 | UI 送出 | `app/src/pages/ProtocolsPage.tsx` `runEmbedded` |
 | Composer | `app/src/components/CommandComposer.tsx` |
 | Slash | `app/src/hooks/useSlashExecutor.ts` |
-| Lifecycle | `app/src/agent/runExternal.ts` `runTask` |
+| Lifecycle | `app/src/agent/taskRunCoordinator.ts` `runTask` / `finalizeTaskRun` |
+| Legacy impl | `app/src/agent/runExternal.ts`（勿直接從 UI 呼叫） |
 | Busy 政策 | `resolveBusyPolicy`（composer/slash → steer/queue） |
-| 分派 | `app/src/agent/runDispatch.ts` `dispatchThreadTask` |
+| 分派 | `app/src/agent/runDispatch.ts` `dispatchThreadTask(snapshot)` |
+| Runner matrix | `app/src/agent/runners/types.ts` |
 | 引擎 | `app/src/agent/engine.ts` `start` / `executeStepWithAgent` |
-| 結束寫回 | `runExternal` 推 assistant bubble + activity 摘要；`agentStore` archive + learning |
+| 結束寫回 | `finalizeTaskRun`；Archive／onSettled／drain 各一次 |
 
 ### 2.2 對話送出時的「準備層」（dispatch 前半）
 
@@ -109,9 +124,10 @@ objective text
 |------|------|------|
 | `sourceKind` | `composer` / `slash` | 忙碌時 **steer 或 queue**（非 automation 的強制 queue） |
 | `unattended` | false | HITL 較長逾時；Turn-based 會等人 ACK |
-| `loopType` | thread 或 **Goal-based** | 幾乎永遠 `forceLoopType`，自動分類失效 |
-| `temporary` | settings.temporaryChatDefault | 跳過 memory 讀寫 |
-| Project pin | UI 專案 root | `AGENTS.md` 階層 + codegraph/workspace preload |
+| `loopType` | auto Turn/Goal 或 thread pin | 明確 force 或 automation trigger 才可 Time/Proactive |
+| `temporary` | settings.temporaryChatDefault | ContextPacket 跳過 memory／session recall |
+| Project pin | dispatch 時 snapshot 的 root | `AGENTS.md` 階層 + codegraph/workspace preload |
+| `executionKind` | `loop` \| `external` | CLI 不顯示 DoD iterate／continueGoal |
 
 ### 2.3 Engine 內：Parse → Pattern → Step → Validate
 
@@ -125,7 +141,8 @@ agentEngine.start(rawInput, forceLoopType, overrides)
     │
     ├─ parseUserRequest(raw, forceLoopType)     ← 啟發式 schema（parser.ts）
     ├─ [LLM ON + llmParseEnabled] parseWithLlm  ← 規格 03 精煉；失敗回退啟發式
-    ├─ spawnSubAgents / logs / learningLoop.onUserTurn()
+    ├─ spawnSubAgents / logs
+    │     （onUserTurn 已在 coordinator 對 composer/slash/retry 計數，此處不再呼叫）
     │
     └─ switch(loopType)
           Turn-based  → 單步 → waitForUser(ACK) → success
@@ -135,7 +152,7 @@ agentEngine.start(rawInput, forceLoopType, overrides)
                           met → finalizeSuccess + learning success
                           !met → missing 注入 stepOutputs；步驟重設 PENDING
                           max  → failed + learning failure
-          Time/Proactive → 單輪步驟 + finalizePatternRun（工具成功率信心）
+          Time/Proactive → 僅當 trigger snapshot 有效；單輪步驟 + finalizePatternRun
 ```
 
 ### 2.4 每一步 `executeStepWithAgent`（Hermes + Capability 主戰場）
@@ -147,10 +164,11 @@ executeStepWithAgent(stepIndex, iteration)
     ├─ modelProfile：tools/vision 能力降級
     │
     ├─ [主路徑] functionCalling
-    │     buildPromptLayers({ objective, projectGuidance, temporary, stepOutputs… })
+    │     buildPromptLayers → ContextPacket slots
     │       stable: soul + personality + skills 索引 + matchForObjective
-    │       context: Hermes AGENTS + 專案指引
-    │       volatile: memory（含 objective 相關條目）+ 時間
+    │       packet: projectGuidance / failureLessons / recentChat /
+    │               sessionRecall / stepEvidence / memory / plugins…
+    │       volatile: 時間 + temporary 標記
     │     runFunctionCallingLoop
     │       progressive disclosure / tool_search / run_code / load_capability
     │       authorizeTool + approvalMode + hooks beforeTool/afterTool
@@ -163,16 +181,16 @@ executeStepWithAgent(stepIndex, iteration)
 ### 2.5 結束與回饋（對話 UX 閉環）
 
 ```
-engine 結束
-    → agentStore 訂閱更新 isRunning / agent
-    → runExternal：thread status、assistant bubble（result 或 steps 尾）
-    → runActivity 精簡操作記錄（可選）
-    → afterRun hooks
-    → onSettled（若有）
-    → drainExternalRunQueue（補跑佇列中的追問／自動化）
-    → Archive（toolCalls / caps / tokens）
-    → learningLoop：技能草稿 / 成功或失敗記憶
-    → thread.setLastCapabilities（下輪 preload）
+adapter terminal（builtin or CLI, deferFinalization）
+    → finalizeTaskRun（唯一順序）
+         thread summary / assistant bubble
+         afterRun hooks
+         Archive（一次）
+         onSettled
+         release capacity
+         queue drain（僅 finalization）
+    → learningLoop 技能/失敗教訓（adapter 內 success/failure 路徑）
+    → thread.setLastCapabilities（builtin 下輪 preload）
 ```
 
 ### 2.6 序列圖（對話 Happy Path）
@@ -180,20 +198,20 @@ engine 結束
 ```mermaid
 sequenceDiagram
   participant U as User/Composer
-  participant RT as runTask
+  participant RT as taskRunCoordinator
   participant D as dispatchThreadTask
   participant E as agentEngine
-  participant H as Hermes layers
+  participant H as ContextPacket/Hermes
   participant FC as toolLoop/FC
   participant T as Thread UI
 
   U->>RT: objective + attachments + reuseThreadId
-  RT->>RT: busy policy / bubbles / beforeRun hooks
-  RT->>D: forceLoopType + overrides
+  RT->>RT: capacity / attachments / bind / beforeRun / snapshot
+  RT->>D: RunDispatchSnapshot
   D->>D: intent preload + chat history + OpenCode
-  D->>E: startExecution
+  D->>E: startExecution (deferFinalization)
   E->>E: heuristic parse + optional LLM plan
-  E->>H: buildPromptLayers / memory / skills
+  E->>H: buildPromptLayers / ContextPacket
   loop Goal iterations
     E->>FC: executeStepWithAgent
     FC-->>E: step output + tools + caps
@@ -201,8 +219,9 @@ sequenceDiagram
   end
   E-->>D: success/failed + result
   D-->>RT: DispatchResult
-  RT->>T: assistant bubble + drain queue
-  E->>H: learning success/failure
+  RT->>RT: finalizeTaskRun (summary/afterRun/Archive/onSettled/release/drain)
+  RT->>T: assistant bubble
+  E->>H: learning success/failure (adapter path)
 ```
 
 ---

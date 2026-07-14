@@ -376,14 +376,15 @@ function LogsSection() {
                 return
               }
               navigate('/')
-              const { runExternalObjective } = await import('../agent/runExternal')
-              await runExternalObjective({
+              const { runTask } = await import('../agent/taskRunCoordinator')
+              await runTask({
                 sourceKind: 'retry',
                 objective: input,
                 title: '日誌重啟',
                 loopType: agent.loopConfig.loopType || 'Goal-based',
                 eventPreMatched: agent.loopConfig.loopType === 'Proactive',
                 sourceLabel: '自日誌重新啟動',
+                meta: { eventTrigger: agent.eventTrigger },
               })
             }}
             className="w-full py-2 rounded-lg border border-white/15 text-xs font-semibold hover:border-primary/40 hover:text-primary flex items-center justify-center gap-1"

@@ -12,44 +12,59 @@ import {
   globalDelegationBudget,
 } from './delegate'
 
-/** Persist finished bg job into archive store (best-effort). */
+/**
+ * Phase 3 item 6: durable background job completion.
+ * - Coordinator path: execution Archive already written under job.archiveRunId;
+ *   only inject parent completion + keep job metadata (no second Archive).
+ * - Nested FC path (preferRunTask=false): write a single synthetic execution Archive.
+ */
 async function archiveBackgroundJob(
   job: BackgroundJob,
   toolCalls?: ToolCallRecord[],
 ): Promise<void> {
   try {
-    const record: ArchiveRecord = {
-      id: `bg_${job.id}`,
-      status: job.ok ? 'success' : 'failed',
-      objective: `[background-delegate] ${job.goal}`,
-      loopType: 'Goal-based',
-      confidence: job.ok ? 0.85 : 0.3,
-      timestamp: job.finishedAt || new Date().toISOString(),
-      iterations: 1,
-      maxIterations: 1,
-      steps: [
-        {
-          step: 1,
-          action: 'delegate_task',
-          description: 'Background leaf delegate',
-          status: job.ok ? 'COMPLETED' : 'FAILED',
-          result: (job.summary || job.error || '').slice(0, 4000),
-          durationMs: job.durationMs,
-        },
-      ],
-      logs: [],
-      result: job.summary || job.error,
-      toolCalls: toolCalls?.length ? toolCalls : undefined,
-      tokensUsed: job.tokensUsed,
-    }
-    if (window.subagents?.archive?.save) {
-      await window.subagents.archive.save(record)
-      // Refresh in-memory archive list so Records page sees bg jobs without restart
+    if (job.archiveRunId) {
+      // Link-only: coordinator finalization already archived the execution.
+      // Optionally refresh list so Records shows the linked run id promptly.
       try {
         const { useAgentStore } = await import('../../store/agentStore')
         await useAgentStore.getState().loadArchive()
       } catch {
         /* ignore */
+      }
+    } else {
+      const record: ArchiveRecord = {
+        id: `bg_${job.id}`,
+        status: job.ok ? 'success' : 'failed',
+        objective: `[background-delegate] ${job.goal}`,
+        loopType: 'Goal-based',
+        confidence: job.ok ? 0.85 : 0.3,
+        timestamp: job.finishedAt || new Date().toISOString(),
+        iterations: 1,
+        maxIterations: 1,
+        steps: [
+          {
+            step: 1,
+            action: 'delegate_task',
+            description: 'Background leaf delegate',
+            status: job.ok ? 'COMPLETED' : 'FAILED',
+            result: (job.summary || job.error || '').slice(0, 4000),
+            durationMs: job.durationMs,
+          },
+        ],
+        logs: [],
+        result: job.summary || job.error,
+        toolCalls: toolCalls?.length ? toolCalls : undefined,
+        tokensUsed: job.tokensUsed,
+      }
+      if (window.subagents?.archive?.save) {
+        await window.subagents.archive.save(record)
+        try {
+          const { useAgentStore } = await import('../../store/agentStore')
+          await useAgentStore.getState().loadArchive()
+        } catch {
+          /* ignore */
+        }
       }
     }
   } catch {
@@ -108,6 +123,11 @@ export interface BackgroundJob {
   error?: string
   /** Original conversation that requested this background delegate. */
   parentThreadId?: string
+  /**
+   * Phase 3 item 6: when the job ran through coordinator/runTask, this is the
+   * execution Archive id — synthetic job record must not write a second Archive.
+   */
+  archiveRunId?: string
 }
 
 type JobListener = (job: BackgroundJob) => void
@@ -231,8 +251,9 @@ export function enqueueBackgroundDelegate(
       }
 
       if (preferRunTask) {
-        // Unified runTask: queue when busy, same hooks/project pin/settle semantics
-        const { runTask } = await import('../runExternal')
+        // Unified runTask: queue when busy, same hooks/project pin/settle semantics.
+        // Phase 3 item 6/7: hidden worker thread + single coordinator Archive.
+        const { runTask } = await import('../taskRunCoordinator')
         type ExternalRunResult = Awaited<ReturnType<typeof runTask>>
         const settled = await new Promise<ExternalRunResult>((resolve) => {
           void runTask({
@@ -244,6 +265,8 @@ export function enqueueBackgroundDelegate(
             projectRoot: input.projectRoot,
             unattended: true,
             enqueueWhenBusy: true,
+            workerThread: true,
+            skipUserBubble: true,
             overrides: {
               runId: childRunId,
               sourceKind: 'delegate',
@@ -269,6 +292,8 @@ export function enqueueBackgroundDelegate(
             }
           })
         })
+        // Link job metadata to the coordinator execution archive (no second write).
+        job.archiveRunId = settled.runId || childRunId
         result = {
           id: settled.runId || childRunId,
           role: inherited.role,

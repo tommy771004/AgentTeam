@@ -43,6 +43,8 @@ export interface SessionSearchHit {
   snippet: string
   score: number
   timestamp?: string
+  /** Memory tags (e.g. failure, tool:bash, strategy:Goal-based) for packet ranking. */
+  tags?: string[]
 }
 
 export interface LearningEvent {

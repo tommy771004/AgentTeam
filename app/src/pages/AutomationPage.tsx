@@ -481,7 +481,7 @@ function EventsSection() {
     addEvent,
     removeEvent,
     toggleEvent,
-    matchEvent,
+    matchEventEvidence,
     recordEventTrigger,
   } = useScheduleStore()
   const isRunning = useAgentStore((s) => s.isRunning)
@@ -518,7 +518,7 @@ function EventsSection() {
   }
 
   const onSimulate = async () => {
-    const matched = matchEvent({
+    const matched = matchEventEvidence({
       source: simSource,
       subject: simSubject,
       hasAttachment: simAttach,
@@ -528,26 +528,28 @@ function EventsSection() {
       setSimResult('未匹配 — 布林條件為假，不執行任何動作。')
       return
     }
-    setSimResult(`匹配 → ${matched.name}。正在觸發主動循環（新任務 + Run 面板）…`)
-    await recordEventTrigger(matched.id)
+    const event = matched.event
+    setSimResult(`匹配 → ${event.name}。正在觸發主動循環（新任務 + Run 面板）…`)
+    await recordEventTrigger(event.id, matched.trigger)
     if (isRunning) {
-      setSimResult(`匹配 → ${matched.name}，但代理正在執行中。`)
+      setSimResult(`匹配 → ${event.name}，但代理正在執行中。`)
       return
     }
     navigate('/')
-    const { runExternalObjective } = await import('../agent/runExternal')
-    const r = await runExternalObjective({
+    const { runTask } = await import('../agent/taskRunCoordinator')
+    const r = await runTask({
       sourceKind: 'event',
-      objective: matched.objective,
-      title: matched.name,
+      objective: event.objective,
+      title: event.name,
       loopType: 'Proactive',
       eventPreMatched: true,
-      sourceLabel: `事件模擬：${matched.name}`,
+      sourceLabel: `事件模擬：${event.name}`,
+      meta: { eventTrigger: matched.trigger },
     })
     setSimResult(
       r.skipped
-        ? `匹配 → ${matched.name}，忙碌略過`
-        : `匹配 → ${matched.name} · 狀態 ${r.status}`,
+        ? `匹配 → ${event.name}，忙碌略過`
+        : `匹配 → ${event.name} · 狀態 ${r.status}`,
     )
   }
 

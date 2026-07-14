@@ -16,7 +16,7 @@ export function EventsPage() {
     addEvent,
     removeEvent,
     toggleEvent,
-    matchEvent,
+    matchEventEvidence,
     recordEventTrigger,
   } = useScheduleStore()
   const { isRunning } = useAgentStore()
@@ -54,7 +54,7 @@ export function EventsPage() {
   }
 
   const onSimulate = async () => {
-    const matched = matchEvent({
+    const matched = matchEventEvidence({
       source: simSource,
       subject: simSubject,
       hasAttachment: simAttach,
@@ -64,26 +64,28 @@ export function EventsPage() {
       setSimResult('NO MATCH — predicates false (strict boolean). No action taken.')
       return
     }
-    setSimResult(`MATCH → ${matched.name}. Firing Proactive loop…`)
-    await recordEventTrigger(matched.id)
+    const event = matched.event
+    setSimResult(`MATCH → ${event.name}. Firing Proactive loop…`)
+    await recordEventTrigger(event.id, matched.trigger)
     if (isRunning) {
-      setSimResult(`MATCH → ${matched.name}, but an agent is already running.`)
+      setSimResult(`MATCH → ${event.name}, but an agent is already running.`)
       return
     }
     navigate('/')
-    const { runExternalObjective } = await import('../agent/runExternal')
-    const r = await runExternalObjective({
+    const { runTask } = await import('../agent/taskRunCoordinator')
+    const r = await runTask({
       sourceKind: 'event',
-      objective: matched.objective,
-      title: matched.name,
+      objective: event.objective,
+      title: event.name,
       loopType: 'Proactive',
       eventPreMatched: true,
-      sourceLabel: `事件模擬：${matched.name}`,
+      sourceLabel: `事件模擬：${event.name}`,
+      meta: { eventTrigger: matched.trigger },
     })
     if (r.skipped) {
-      setSimResult(`MATCH → ${matched.name}, but ${r.skipReason || r.error || 'skipped'}.`)
+      setSimResult(`MATCH → ${event.name}, but ${r.skipReason || r.error || 'skipped'}.`)
     } else {
-      setSimResult(`MATCH → ${matched.name}. Run finished: ${r.status}`)
+      setSimResult(`MATCH → ${event.name}. Run finished: ${r.status}`)
     }
   }
 

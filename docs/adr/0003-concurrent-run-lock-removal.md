@@ -1,10 +1,15 @@
 # Break the global single-run lock for full N-thread concurrency, capped and flagged
 
-**Status**: accepted
+**Status**: accepted · **implemented** (2026-07-14; docs aligned in Phase 6 of `TASK_AGENT_WORKFLOW_INTEGRATION_PLAN_2026-07-14.md`)
 
-Every run in this product has gone through one `agentEngine` singleton gated by `agentStore.isRunning`, a flat global boolean — documented in `CLAUDE.md` as a load-bearing invariant with an automated smoke drift guard (`W1: entry drift guard`). Busy interactive sources steer or queue; automation sources always queue. We're removing that constraint: any thread — interactive or automated — will be able to run concurrently with any other, not just queue behind or steer the one active run.
+## Product rule (current)
 
-This is deliberately the largest architectural change available in this codebase, not an incremental fix, and it directly reverses a documented, smoke-tested invariant. It is being recorded because a future reader of `CLAUDE.md`'s "one global run at a time" language would otherwise have no idea this was superseded deliberately, and because reversing it later (once threads and users depend on concurrent-run semantics) is expensive.
+- **Default**: single-run behavior (`settings.concurrentRunsEnabled: false`) — users keep the historical UX.
+- **Opt-in**: capped per-app concurrency (`maxConcurrentRuns`, default 4, typically 2–8). Capacity is owned by `taskRunCoordinator` / `agentStore` run registry (`runId`), not a sole global boolean.
+- **Overflow**: queue/steer via existing `resolveBusyPolicy` + `runQueue` (not hard-fail).
+- Presentation, HITL, cancel, and activity are **run-scoped** (Phase 1 of the task-agent plan).
+
+Historical note: every run once went through one `agentEngine` singleton gated by flat `agentStore.isRunning`. Busy interactive sources steered or queued; automation always queued. That constraint is now **opt-out single-run by default, concurrent when flagged** — recorded so readers of older "one global run" language know it was superseded deliberately.
 
 ## Decision
 
@@ -27,4 +32,5 @@ Per a pre-implementation architecture inventory, this touches at minimum: `Agent
 
 - [Ｘ] 已實作並驗證：`AgentEngineRegistry` 為每個 `runId` 建立獨立 engine；`agentStore` 以 active run registry 實作預設關閉、上限 2–8（預設 4）的並行容量；queue drain 會填滿可用 slot；thread / activity / project / custom shell context 均以 run identity 傳遞。
 - [Ｘ] 已實作並驗證：HITL request 帶有 `threadId` / `runId`，single FIFO modal 依 thread scope 保存 session-allow、依 run scope 保存 audit / cancel；CLI / bash / OpenCode cancel 皆可 targeted；`runningThreadIds` 與 W1 smoke harness 已改為 concurrent-aware。
-- [Ｘ] 驗證結果：`npm run smoke`（含 15 項 scenario、52 項 capability、production modules、marketplace）、`npm run build`、`npx oxlint src` 均通過（lint 僅保留既有 warning）。
+- [Ｘ] 已與 lifecycle plan 對齊：`taskRunCoordinator` 擁有 capacity／finalization；`AGENTS.md` / `CLAUDE.md` / `CONTEXT.md` 改為「預設單 run、可設定上限的 per-run concurrency」（Phase 6）。
+- [Ｘ] 驗證結果：`npm run smoke`（scenario E2E、capability smoke、production modules、marketplace）、`npm run build`、`npx oxlint src` 均通過（lint 僅保留既有 warning）。

@@ -38,6 +38,7 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   webhookEnabled: false,
   webhookPort: 8787,
   webhookToken: '',
+  webhookTarget: '',
   customTools: [],
   customToolSecrets: {},
   pluginOAuthClients: {},

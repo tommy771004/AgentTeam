@@ -7,7 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The product is **`app/`** — an Electron desktop app "SubAgents AI" (React 19 + TypeScript + Vite + zustand). Everything else at the root is design input, not code:
 
 - `docs/01_…` / `02_…` / `03_…` `.md` — the loop spec (system definition, four loop patterns, request-parsing schema) the engine implements
-- `docs/` — integration plans and audits; `docs/PYDANTIC_AI_V2_CAPABILITIES.md` maps capability concepts to files, and `docs/WORKFLOW_AUDIT.md` is the living audit ledger
+- `docs/` — integration plans and audits; `docs/TASK_AGENT_WORKFLOW_INTEGRATION_PLAN_2026-07-14.md` is the task lifecycle plan (Phases 0–5 done); `docs/PYDANTIC_AI_V2_CAPABILITIES.md` maps capability concepts; `docs/WORKFLOW_AUDIT.md` is the older audit ledger
+- `CONTEXT.md` — product domain language
+- **No in-repo `RTK.md`.** Product agent guidance is `AGENTS.md` / `CLAUDE.md` / `CONTEXT.md` / `docs/*` only.
 
 UI copy, log messages, and some comments are Traditional Chinese mixed with English — keep that style.
 
@@ -28,13 +30,17 @@ There is no unit-test runner; smoke scripts cover scheduler math, event matching
 
 ## Architecture
 
-### Execution flow (one global run at a time)
+### Execution flow (default single run; optional capped concurrency)
 
-All entry points go through ONE lifecycle controller — **`agent/runExternal.ts` `runTask`** (alias `runExternalObjective`). Callers pass `sourceKind` (`composer`/`slash`/`retry`/`schedule`/`webhook`/`telegram`/`event`); the controller owns thread/bubbles, busy policy, trace `runId` (adopted as engine `state.id`, persisted through the queue), and completion callbacks. It then calls `agent/runDispatch.ts` `dispatchThreadTask` — picks `builtin` engine vs external CLI (`codex`/`claude`/… via `agent/localCliRun.ts`) → `store/agentStore.ts` `startExecution` → **`agent/engine.ts` `agentEngine`** (singleton). **Never call `dispatchThreadTask` or `startExecution` from UI code** — a smoke drift guard fails the build if a page does.
+All entry points go through ONE lifecycle controller — **`agent/taskRunCoordinator.ts` `runTask`**. Callers pass `sourceKind` (`composer`/`slash`/`retry`/`schedule`/`webhook`/`telegram`/`event`/`delegate`); the coordinator owns capacity, attachments, thread bind, beforeRun, dispatch snapshot, and **unique finalization** (summary → afterRun → Archive → onSettled → release → drain). `runExternal.ts` is the legacy implementation behind the coordinator; **never call `dispatchThreadTask` or `startExecution` from UI code** — a smoke drift guard fails the build if a page does.
 
-`agentStore.isRunning` is a global mutex. On busy, `resolveBusyPolicy` decides: automation sources **queue** (`agent/runQueue.ts`, FIFO + dedupe + localStorage persist, max 24, drained when free); interactive sources **steer** (abort current run) or queue per `settings.followUpMode`. Use `onSettled` so once-jobs still get `markJobResult` after 補跑. Event sources pass `eventPreMatched: true` so the Proactive pattern skips its when/if predicate re-check.
+On busy, `resolveBusyPolicy` decides: automation sources **queue** (`agent/runQueue.ts`, FIFO + dedupe + localStorage persist, max 24); interactive sources **steer** or queue per `settings.followUpMode`. With `concurrentRunsEnabled` (default **false**), a capped registry (`maxConcurrentRuns`) allows multiple `runId`s (ADR-0003). `agentStore.isRunning` is derived from the registry, not a sole global mutex.
 
-Per run, the engine resolves **project context** (`agent/projectContext.ts` → `project:agentsDocs` IPC): real `AGENTS.md`/`CLAUDE.md` files from the project root (walking up ≤3 levels, stopping at `.git`), injected into prompts ABOVE Hermes user guidance, with path/hash/bytes logged for audit. OpenCode `instructions` are temporary-applied the same way; other discovered opencode fields surface as candidates in Settings →「OpenCode 匯入報告」(temporary / review / unsupported — `agent/opencode/configCandidates.ts`), never silently written to Settings.
+**Time-based** only via claimed ScheduledJob trigger; **Proactive** only via verified event matcher evidence. Conversation text with cron/event intent yields an automation **suggestion**, not execution.
+
+**Runners** (`agent/runners/`): builtin `executionKind: 'loop'` has full Parse/DoD/iterate/continueGoal/capabilities; external CLI is `executionKind: 'external'` with only run-scoped progress until a continueGoal prompt contract is enabled. CLI must not present as DoD met.
+
+Per run, the engine resolves **project context** (`agent/projectContext.ts` → `project:agentsDocs` IPC): real `AGENTS.md`/`CLAUDE.md` files from the project root (walking up ≤3 levels, stopping at `.git`), injected into prompts ABOVE Hermes user guidance via **ContextPacket** slots, with path/hash/bytes logged for audit. OpenCode `instructions` are temporary-applied the same way; other discovered opencode fields surface as candidates in Settings →「OpenCode 匯入報告」(temporary / review / unsupported — `agent/opencode/configCandidates.ts`), never silently written to Settings.
 
 ### Engine (`agent/engine.ts`)
 
@@ -75,7 +81,7 @@ Adding a tool touches: `registry.ts` (name + catalog entry), `schemas.ts` (param
 
 ### Supporting layers
 
-- **Hermes** (`agent/hermes/`): skills (SKILL.md playbooks; `learning.ts` drafts new skills/memory from successful runs → surfaces in Learning page), durable memory, prompt layering (`promptBuilder.ts`), `delegate.ts` (leaf/orchestrator isolation with `DelegationBudget` depth+concurrency caps; leaves get `blockedTools` and no parent transcript), `backgroundJobs.ts` (fire-and-forget delegates + desktop notify), minimal MCP client.
+- **Hermes** (`agent/hermes/`): skills (SKILL.md playbooks; `learning.ts` drafts new skills/memory from successful runs → surfaces in Learning page; `onUserTurn` only on coordinator-accepted composer/slash/retry), durable memory, **ContextPacket** (`contextPacket.ts` + `promptBuilder.ts`), `delegate.ts` (leaf/orchestrator isolation with `DelegationBudget` depth+concurrency caps; leaves get `blockedTools` and no parent transcript), `backgroundJobs.ts` (fire-and-forget; single Archive when via coordinator; hidden worker threads), minimal MCP client.
 - **OpenCode** (`agent/opencode/`): permission policies per agent mode (build/plan), bash pattern allow/ask/deny (`agentRegistry.ts`), transcript compaction.
 - **Electron** (`electron/`): main-process bridges (webhook server, Telegram gateway, MCP stdio/http, shell, pty, project/codegraph). Exposed via preload as `window.subagents.*`. Renderer code must always feature-detect (`window.subagents?.x`) because the app also runs in a plain browser.
 

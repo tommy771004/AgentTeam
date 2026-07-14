@@ -14,7 +14,7 @@
  */
 
 import type { LlmSettings } from './types'
-import type { RunSourceKind } from './runExternal'
+import type { RunSourceKind } from './taskRunCoordinator'
 import { pluginRegistry } from './hermes/plugins'
 
 export type HookPoint = 'beforeRun' | 'beforeTool' | 'afterTool' | 'afterRun'

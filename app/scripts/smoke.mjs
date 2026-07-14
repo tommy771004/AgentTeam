@@ -48,10 +48,22 @@ function enforceToolPayload(tool, output, maxBytes, mode = 'truncate') {
 
 function classifyLoopType(input) {
   const lower = input.toLowerCase()
-  if (lower.includes('daily') || lower.includes('every day')) return 'Time-based'
-  if (lower.startsWith('when ') || lower.includes('when email')) return 'Proactive'
+  if (
+    /\bcron\b|\bschedule(?:d)?\b|\bdaily\b|\bevery\s+(?:day|hour|week|\d+)\b|\bweekly\b|每(?:天|日|週|星期|小時)|每日|定時|排程/i.test(input) ||
+    /\bwhen\b|\bon\s+event\b|\bwebhook\b|\bmonitor\b|\btrigger(?:\s+when)?\b|當|如果|若|一旦|每當|事件/i.test(input)
+  ) return 'Goal-based'
   if (input.length > 40 || /find|analyze|research/i.test(input)) return 'Goal-based'
   return 'Turn-based'
+}
+
+function detectAutomationSuggestion(input) {
+  if (/\bcron\b|\bschedule(?:d)?\b|\bdaily\b|\bevery\s+(?:day|hour|week|\d+)\b|\bweekly\b|每(?:天|日|週|星期|小時)|每日|定時|排程/i.test(input)) {
+    return { kind: 'schedule' }
+  }
+  if (/\bwhen\b|\bon\s+event\b|\bwebhook\b|\bmonitor\b|\btrigger(?:\s+when)?\b|當|如果|若|一旦|每當|事件/i.test(input)) {
+    return { kind: 'event' }
+  }
+  return null
 }
 
 // ── Tests ───────────────────────────────────────────────────────
@@ -90,18 +102,22 @@ await test('classifyLoopType goal', () => {
   )
 })
 
-await test('classifyLoopType time', () => {
+await test('conversation schedule becomes a suggestion, not Time-based', () => {
+  const input = 'Every day at 08:00 fetch sales metrics'
   assert.equal(
-    classifyLoopType('Every day at 08:00 fetch sales metrics'),
-    'Time-based',
+    classifyLoopType(input),
+    'Goal-based',
   )
+  assert.equal(detectAutomationSuggestion(input)?.kind, 'schedule')
 })
 
-await test('classifyLoopType proactive', () => {
+await test('conversation event becomes a suggestion, not Proactive', () => {
+  const input = 'When email received WITH attachment AND subject CONTAINS Invoice'
   assert.equal(
-    classifyLoopType('When email received WITH attachment AND subject CONTAINS Invoice'),
-    'Proactive',
+    classifyLoopType(input),
+    'Goal-based',
   )
+  assert.equal(detectAutomationSuggestion(input)?.kind, 'event')
 })
 
 await test('schedule next interval', () => {

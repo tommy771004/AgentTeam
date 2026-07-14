@@ -5,9 +5,10 @@
 
 import { chatCompletion } from './llm'
 import { buildParseResult } from './parser'
-import type { LlmSettings, LoopType, ParseResult } from './types'
+import type { LlmSettings, LoopType, NextState, ParseResult } from './types'
 
 const LOOP_TYPES: LoopType[] = ['Turn-based', 'Goal-based', 'Time-based', 'Proactive']
+const AUTO_LOOP_TYPES: LoopType[] = ['Turn-based', 'Goal-based']
 
 /** Pure: validate a model-produced plan; invalid output returns null. */
 export function parseLlmPlan(
@@ -23,10 +24,12 @@ export function parseLlmPlan(
       steps?: unknown
       definitionOfDone?: unknown
       maxIterations?: unknown
+      nextState?: unknown
     }
+    const allowedLoopTypes = forceLoopType ? LOOP_TYPES : AUTO_LOOP_TYPES
     const loopType =
       forceLoopType ||
-      (LOOP_TYPES.includes(obj.loopType as LoopType)
+      (allowedLoopTypes.includes(obj.loopType as LoopType)
         ? (obj.loopType as LoopType)
         : 'Goal-based')
     const steps = Array.isArray(obj.steps)
@@ -48,7 +51,15 @@ export function parseLlmPlan(
         : loopType === 'Goal-based'
           ? 5
           : 1
-    return buildParseResult(objective, loopType, steps, definitionOfDone, maxIterations)
+    const nextState: NextState =
+      obj.nextState === 'Await User Input'
+        ? 'Await User Input'
+        : obj.nextState === 'Dispatch Webhook'
+          ? 'Dispatch Webhook'
+          : loopType === 'Turn-based'
+            ? 'Await User Input'
+            : 'Halt'
+    return buildParseResult(objective, loopType, steps, definitionOfDone, maxIterations, nextState)
   } catch {
     return null
   }
@@ -59,6 +70,7 @@ export async function parseWithLlm(
   rawInput: string,
   forceLoopType?: LoopType,
 ): Promise<ParseResult | null> {
+  const loopTypeSchema = forceLoopType || 'Turn-based|Goal-based'
   const result = await chatCompletion(
     settings,
     [
@@ -67,8 +79,11 @@ export async function parseWithLlm(
         content:
           '你是任務解析器（Agent Prompt Schema）。把使用者請求解析為具體可執行的 2~7 步計畫，' +
           '不要使用空泛模板。DoD 必須可量測。只輸出 JSON：' +
-          '{"loopType":"Turn-based|Goal-based|Time-based|Proactive",' +
-          '"steps":["步驟1"],"definitionOfDone":"可量測驗收條件","maxIterations":1~8}',
+          (forceLoopType
+            ? `Loop type 已由有效 trigger 明確指定為 ${forceLoopType}。`
+            : '對話自動分類只允許 Turn-based 或 Goal-based；若文字含 cron/event 語意，請保留為 Goal-based 建議，不得輸出 Time-based 或 Proactive。') +
+          `{"loopType":"${loopTypeSchema}",` +
+          '"steps":["步驟1"],"definitionOfDone":"可量測驗收條件","maxIterations":1~8,"nextState":"Halt|Await User Input|Dispatch Webhook"}',
       },
       { role: 'user', content: rawInput.slice(0, 4_000) },
     ],

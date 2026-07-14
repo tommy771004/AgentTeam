@@ -5,8 +5,14 @@
  */
 
 import { useMemo, useState } from 'react'
+import { emptyAgentLike } from '../agent/localCliRun'
+import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
 import { useAgentStore } from '../store/agentStore'
-import { useRunActivityStore } from '../store/runActivityStore'
+import {
+  useRunActivityStore,
+  type FileChangeRecord,
+  type RunActivityEvent,
+} from '../store/runActivityStore'
 import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
 import {
@@ -52,23 +58,28 @@ function phaseLabel(input: {
   return input.objective ? '正在準備任務' : '正在啟動'
 }
 
+const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 })
+const EMPTY_EVENTS: RunActivityEvent[] = []
+const EMPTY_FILES: FileChangeRecord[] = []
+
 export function RunProcessFeed({
+  runId,
   depthLabel,
   onOpenPanel,
 }: {
+  runId: string
   depthLabel: string
   onOpenPanel?: () => void
 }) {
-  const agent = useAgentStore((s) => s.agent)
-  const isRunning = useAgentStore((s) => s.isRunning)
-  const {
-    active: activityActive,
-    events,
-    thought,
-    draftText,
-    statusLine,
-    fileChanges,
-  } = useRunActivityStore()
+  const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
+  const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
+  const activity = useRunActivityStore((s) => s.presentations[runId])
+  const activityActive = activity?.active || false
+  const events = activity?.events ?? EMPTY_EVENTS
+  const thought = activity?.thought || ''
+  const draftText = activity?.draftText || ''
+  const statusLine = activity?.statusLine || ''
+  const fileChanges = activity?.fileChanges ?? EMPTY_FILES
 
   // OpenCode keeps reasoning compact by default; raw streamed thought remains
   // available for inspection without pushing the answer below the fold.
@@ -216,8 +227,8 @@ export function RunProcessFeed({
         <Icon name="progress_activity" size={15} className="shrink-0 animate-spin text-primary" />
         <span className="text-on-surface-variant min-w-0 truncate">
           {phase ||
-            (agent.loopConfig?.trigger === 'local-cli'
-              ? `本機 ${agent.steps[0]?.assignedAgent || 'CLI'} 執行中…`
+            (agent.executionKind === 'external' || agent.loopConfig?.trigger === 'local-cli'
+              ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind || agent.steps[0]?.assignedAgent ? ` · ${agent.externalRunnerKind || agent.steps[0]?.assignedAgent}` : ''}…`
               : `思考中（${depthLabel}）…`)}
         </span>
         <span className="ml-auto shrink-0 font-[family-name:var(--font-mono)] text-[10px]">

@@ -25,5 +25,18 @@ One message the user sends from the composer. Owns busy policy (steer/queue), th
 _Avoid_: using "turn" interchangeably with "Loop run" — a single chat turn can dispatch a Turn-based, Goal-based, Time-based, or Proactive loop run underneath it; they are different layers (see `docs/CONVERSATION_LOOP_HERMES_FLOW.md` §5.2).
 
 **Loop run**:
-One `agentEngine.start()` invocation — the unit that actually Parses the request, picks a Loop Pattern (Turn/Goal/Time/Proactive per `docs/02_Execution_Rules`), executes steps, and evaluates DoD. Historically one loop run == one chat turn == the one globally-locked execution slot; as of the concurrent-runs decision (see ADR-0003) multiple loop runs can now be in flight at once, each still 1:1 with the chat turn that started it.
+One `agentEngine.start()` invocation (or one external CLI execution) — the unit that actually Parses (builtin only), picks a Loop Pattern (Turn/Goal/Time/Proactive per `docs/02_Execution_Rules`), executes steps, and evaluates DoD (builtin only). Default product behavior is **one run at a time**; with `concurrentRunsEnabled` (opt-in, ADR-0003) multiple loop runs may be in flight up to `maxConcurrentRuns`, each still 1:1 with the chat turn / automation tick that started it and isolated by `runId`.
 _Avoid_: "run" alone when the distinction from "chat turn" matters — spell out which layer.
+_Avoid_: describing concurrency as always-on global multi-run — default remains single-run until the user opts in.
+
+**Task run (coordinator)**:
+One `taskRunCoordinator.runTask` admission — capacity reserve, attachment prepare, thread bind, beforeRun, dispatch snapshot, and single finalization. Every product entry (composer, slash, schedule, webhook, telegram, delegate) must enter here.
+_Avoid_: calling `dispatchThreadTask` or `startExecution` from UI pages.
+
+**Time-based / Proactive trigger**:
+Time-based requires a claimed ScheduledJob snapshot; Proactive requires event-matcher evidence. Conversation keywords alone never execute these modes (consent-first automation suggestion only).
+_Avoid_: treating "每天 08:00 …" in chat as an automatic scheduled run.
+
+**External CLI run**:
+`executionKind: 'external'` via local CLI providers. Declares no parse/DoD/iterate/continueGoal/progressive capabilities until a verified prompt contract is enabled (`agent/runners/`).
+_Avoid_: treating CLI success as Definition of Done met.

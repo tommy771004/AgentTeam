@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { runTask } from '../../agent/runExternal'
+import { runTask } from '../../agent/taskRunCoordinator'
 import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignCritiquePanelist, SubDesignCritiqueRound } from '../../agent/subdesign/types'
 import { Icon } from '../Icon'
 import { useAgentStore } from '../../store/agentStore'
@@ -93,7 +93,10 @@ export function CritiqueTheater({
   const canStartRun = useAgentStore((state) => state.canStartRun)
   const getRunIdForThread = useAgentStore((state) => state.getRunIdForThread)
   const stopExecution = useAgentStore((state) => state.stopExecution)
-  const activity = useRunActivityStore((state) => state)
+  const threadRunId = brief?.threadId ? getRunIdForThread(brief.threadId) : null
+  const activity = useRunActivityStore((state) =>
+    threadRunId ? state.presentations[threadRunId] : null,
+  )
   const session = useSubDesignCritiqueSessionStore((state) => state.current)
   const startSession = useSubDesignCritiqueSessionStore((state) => state.start)
   const startRound = useSubDesignCritiqueSessionStore((state) => state.startRound)
@@ -103,14 +106,13 @@ export function CritiqueTheater({
   const latestForArtifact = useSubDesignCritiqueStore((state) => state.latestForArtifact)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const threadRunId = brief?.threadId ? getRunIdForThread(brief.threadId) : null
   const capacity = canStartRun(undefined, brief?.threadId || undefined)
   const isRunning = Boolean(threadRunId) || !capacity.allowed
 
   const latestActivity = useMemo(() => {
-    const event = activity.events[activity.events.length - 1]
-    return activity.statusLine || event?.title || event?.detail || ''
-  }, [activity.events, activity.statusLine])
+    const event = activity?.events[activity.events.length - 1]
+    return activity?.statusLine || event?.title || event?.detail || ''
+  }, [activity])
 
   const runCritique = async () => {
     if (!brief || !artifact || busy || isRunning) return
@@ -189,7 +191,7 @@ export function CritiqueTheater({
   }
 
   const interrupt = () => {
-    stopExecution()
+    if (threadRunId) stopExecution(threadRunId)
     interruptSession('使用者中止 Critique Theater')
     setBusy(false)
     setMessage('Critique 已中止；尚未完成的 round 不會進入 Deliver gate。')

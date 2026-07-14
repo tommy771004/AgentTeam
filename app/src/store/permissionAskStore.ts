@@ -58,7 +58,7 @@ interface PermissionAskStore {
     reason?: string
     timeoutMs?: number
   }) => Promise<'allow' | 'deny'>
-  resolve: (decision: 'allow' | 'deny') => void
+  resolve: (requestId: string, decision: 'allow' | 'deny') => void
   cancelRun: (runId: string) => void
 }
 
@@ -90,6 +90,13 @@ function promote(get: () => PermissionAskStore, set: (p: Partial<PermissionAskSt
 }
 
 const GLOBAL_SCOPE = '__global__'
+export const MAX_RUN_HITL_AUDITS = 100
+
+function trimRecord<T>(record: Record<string, T>, max: number): Record<string, T> {
+  const keys = Object.keys(record)
+  if (keys.length <= max) return record
+  return Object.fromEntries(keys.slice(-max).map((key) => [key, record[key]]))
+}
 
 function updateRunStats(
   current: PermissionAskStore,
@@ -99,9 +106,12 @@ function updateRunStats(
   const runStatsByRun = { ...current.runStatsByRun }
   const runId = request?.runId?.trim()
   if (runId) runStatsByRun[runId] = update(runStatsByRun[runId] || emptyStats())
+  const boundedRunStatsByRun = trimRecord(runStatsByRun, MAX_RUN_HITL_AUDITS)
   return {
-    runStats: runId ? runStatsByRun[runId] : update(current.runStats),
-    runStatsByRun,
+    runStats: runId
+      ? boundedRunStatsByRun[runId] || emptyStats()
+      : update(current.runStats),
+    runStatsByRun: boundedRunStatsByRun,
   }
 }
 
@@ -155,7 +165,10 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
     const key = threadId?.trim() || GLOBAL_SCOPE
     set({
       sessionAllow: threadId ? get().sessionAllow : v,
-      sessionAllowByThread: { ...get().sessionAllowByThread, [key]: v },
+      sessionAllowByThread: trimRecord(
+        { ...get().sessionAllowByThread, [key]: v },
+        MAX_RUN_HITL_AUDITS,
+      ),
     })
   },
   getSessionAllow: (threadId) => {
@@ -166,7 +179,7 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
   beginRunAudit: (runId) => set({
     runStats: emptyStats(),
     runStatsByRun: runId?.trim()
-      ? { ...get().runStatsByRun, [runId.trim()]: emptyStats() }
+      ? trimRecord({ ...get().runStatsByRun, [runId.trim()]: emptyStats() }, MAX_RUN_HITL_AUDITS)
       : get().runStatsByRun,
   }),
   getRunHitlSnapshot: (runId) => {
@@ -232,12 +245,12 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
     })
   },
 
-  resolve: (decision) => {
+  resolve: (requestId, decision) => {
     const cur = get().current
-    if (!cur) return
-    const r = resolvers.get(cur.id)
-    resolvers.delete(cur.id)
-    clearTimer(cur.id)
+    if (!cur || cur.id !== requestId) return
+    const r = resolvers.get(requestId)
+    resolvers.delete(requestId)
+    clearTimer(requestId)
     set({ current: null })
     promote(get, set)
     if (decision === 'allow') bumpAllow(get, set, cur)

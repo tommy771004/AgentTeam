@@ -69,6 +69,21 @@ export interface LogEntry {
   message: string
 }
 
+export type NextState = 'Halt' | 'Await User Input' | 'Dispatch Webhook'
+
+export type PostStateOutcomeStatus = 'halted' | 'awaiting_user' | 'delivered' | 'failed'
+
+/** Serializable result of consuming a loop's post-execution state. */
+export interface PostStateOutcome {
+  nextState: NextState
+  status: PostStateOutcomeStatus
+  attemptedAt: string
+  target?: string
+  deliveredAt?: string
+  responseStatus?: number
+  error?: string
+}
+
 export interface LoopConfiguration {
   loopType: LoopType
   trigger: string
@@ -76,7 +91,7 @@ export interface LoopConfiguration {
   definitionOfDone: string
   maxIterations: number
   fallbackProtocol: string
-  nextState: 'Halt' | 'Await User Input' | 'Trigger Webhook'
+  nextState: NextState
 }
 
 export type EntityKind =
@@ -196,6 +211,18 @@ export interface RuntimeOverrides {
    * Set by runTask; tools forward it into beforeTool/afterTool evaluation.
    */
   sourceKind?: string
+  /** Human-readable trigger source shown in the plan bubble / audit trail. */
+  triggerSource?: string
+  /** Why this loop type was selected (auto vs explicit trigger/manual pin). */
+  classificationReason?: string
+  /** Canonical trigger proof for a Time-based run. */
+  scheduleTrigger?: ScheduleTriggerSnapshot
+  /** Canonical matcher evidence for a Proactive run. */
+  eventTrigger?: EventTriggerSnapshot
+  /** Explicit post-execution override for automation / integration callers. */
+  nextState?: NextState
+  /** Per-run webhook target; falls back to LlmSettings.webhookTarget. */
+  webhookTarget?: string
   maxIterations?: number
   /** Override FC tool rounds for this run */
   maxToolRounds?: number
@@ -254,13 +281,19 @@ export interface RuntimeOverrides {
   /**
    * Loop type selection mode for this run:
    * - force: use forceLoopType / selectedLoopType (automation / user pin)
-   * - auto: classify + optional LLM plan may pick Turn/Goal/… (conversation default)
+   * - auto: classify + optional LLM plan may pick Turn/Goal (conversation default)
    */
   loopTypeMode?: 'force' | 'auto'
   /** When loopTypeMode=force, re-derive plan for this loop type. */
   forceLoopType?: LoopType
   /** Thread id for plan bubble / UI correlation (optional). */
   threadId?: string
+  /**
+   * When true, the adapter (startExecution / local CLI) skips Archive,
+   * capacity release, and queue drain. TaskRunCoordinator finalization owns
+   * that sequence once: summary → afterRun → Archive → onSettled → release → drain.
+   */
+  deferFinalization?: boolean
   /**
    * Resume a previous Goal on this thread: keep DoD / missing / steps.
    * Skips auto-classify re-parse; forces Goal-based corrective plan.
@@ -320,6 +353,31 @@ export interface AgentState {
   /** External runner/session/config lineage. */
   externalRun?: ExternalRunRef
   cliConfigSnapshot?: CliConfigSnapshot
+  /**
+   * Phase 5: how this run was executed — builtin Goal/Hermes loop vs external CLI.
+   * UI must not show DoD iteration chrome for `external`.
+   */
+  executionKind?: 'loop' | 'external'
+  /**
+   * Declared adapter capabilities for this run (honest matrix).
+   * continueGoal / validateDoD only when true.
+   */
+  runnerCapabilities?: {
+    parse: boolean
+    validateDoD: boolean
+    iterate: boolean
+    continueGoal: boolean
+    progressiveCapabilities: boolean
+    runScopedProgress: boolean
+  }
+  /** External CLI kind when executionKind=external (codex / claude / …). */
+  externalRunnerKind?: string
+  /** Canonical trigger snapshot retained for audit/archive. */
+  scheduleTrigger?: ScheduleTriggerSnapshot
+  /** Canonical matcher evidence retained for audit/archive. */
+  eventTrigger?: EventTriggerSnapshot
+  /** Consumed post-execution state and delivery audit. */
+  postState?: PostStateOutcome
   metrics: {
     vramLabel: string
     apiCredits: number
@@ -366,6 +424,12 @@ export interface ArchiveRecord {
   /** External runner/session/config lineage; secrets are never included. */
   externalRun?: ExternalRunRef
   cliConfigSnapshot?: CliConfigSnapshot
+  /** Canonical trigger snapshot retained for audit/archive. */
+  scheduleTrigger?: ScheduleTriggerSnapshot
+  /** Canonical matcher evidence retained for audit/archive. */
+  eventTrigger?: EventTriggerSnapshot
+  /** Consumed post-execution state and delivery audit. */
+  postState?: PostStateOutcome
 }
 
 export type ExternalRunStatus = 'starting' | 'running' | 'success' | 'failed' | 'aborted'
@@ -504,6 +568,8 @@ export interface LlmSettings {
   webhookEnabled: boolean
   webhookPort: number
   webhookToken: string
+  /** Optional outbound target for Next_State=Dispatch Webhook. */
+  webhookTarget: string
   /** Declarative edge tools. Secrets are referenced by key, never embedded here. */
   customTools: CustomToolDefinition[]
   /** Values used by {{secret:key}} template references; redacted on export. */
@@ -633,6 +699,37 @@ export interface SupervisorViolationState {
 /** Time-based / cron-style scheduled job */
 export type ScheduleKind = 'interval' | 'daily' | 'once'
 
+/** Proof that a Time-based run came from a claimed ScheduledJob. */
+export interface ScheduleTriggerSnapshot {
+  source: 'schedule'
+  jobId: string
+  scheduleKind: ScheduleKind
+  /** Actual claim/trigger time, not the next scheduled time. */
+  triggeredAt: string
+}
+
+/** One predicate that the event matcher evaluated as true. */
+export interface EventPredicateEvidence {
+  expected: string | boolean
+  actual: string | boolean
+  matched: true
+}
+
+/** Proof that a Proactive run came from a matched event payload. */
+export interface EventTriggerSnapshot {
+  source: 'event'
+  eventId: string
+  eventName: string
+  /** Payload arrival/match time. */
+  matchedAt: string
+  predicates: {
+    source: EventPredicateEvidence
+    subjectContains?: EventPredicateEvidence
+    hasAttachment?: EventPredicateEvidence
+    keyword?: EventPredicateEvidence
+  }
+}
+
 /** Runner id stored on jobs (mirrors thread runners; avoid importing threadStore here) */
 export type JobRunner = 'builtin' | 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
 
@@ -736,6 +833,8 @@ export interface ProactiveEvent {
   enabled: boolean
   lastTriggeredAt: string | null
   triggerCount: number
+  /** Latest matcher evidence, retained for event audit and retry lineage. */
+  lastTriggerEvidence?: EventTriggerSnapshot
 }
 
 export interface ChatMessage {

@@ -1,9 +1,18 @@
 /**
  * Unified task dispatch: builtin engine vs local CLI specialist.
- * Used by ProtocolsPage and slash commands so runner selection always applies.
+ *
+ * Phase 3 item 3: this module only selects a runner and builds runner context
+ * from a frozen `RunDispatchSnapshot`. Capacity, attachments, thread bind, and
+ * beforeRun are owned by taskRunCoordinator — never re-done here.
  */
 
-import type { AgentMode, CliConfigSnapshot, LoopType, RuntimeOverrides } from './types'
+import type {
+  AgentMode,
+  CliConfigSnapshot,
+  LoopType,
+  PostStateOutcome,
+  RuntimeOverrides,
+} from './types'
 import type { ThinkingDepth } from './thinking'
 import type { LocalRunnerKind } from './localCliRun'
 import { useSettingsStore } from '../store/settingsStore'
@@ -24,17 +33,18 @@ import {
   attachmentsToTextAppendix,
   attachmentsPathAppendix,
   defaultGoalForAttachments,
-  hydrateAttachmentsFromDisk,
-  materializeAttachmentsOnDisk,
-  normalizeImageAttachmentsForVision,
 } from '../lib/chatAttachments'
+import type { RunDispatchSnapshot } from './taskRunCoordinator'
 
 export type DispatchResult = {
   path: 'builtin' | 'cli'
+  /** Phase 5: same outcome shape, different execution semantics. */
+  executionKind?: 'loop' | 'external'
   kind?: LocalRunnerKind
   status: string
   result?: string
   error?: string
+  postState?: PostStateOutcome
 }
 
 function resolveCliBinary(kind: LocalRunnerKind): string | undefined {
@@ -96,27 +106,75 @@ async function captureOpenCodeConfigSnapshot(
   }
 }
 
+function isRunDispatchSnapshot(value: unknown): value is RunDispatchSnapshot {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Partial<RunDispatchSnapshot>
+  return (
+    typeof v.runId === 'string' &&
+    typeof v.threadId === 'string' &&
+    typeof v.objective === 'string' &&
+    typeof v.runner === 'string' &&
+    Array.isArray(v.attachments) &&
+    Boolean(v.overrides && typeof v.overrides === 'object')
+  )
+}
+
 /**
- * Run current thread's goal via selected runner (builtin | codex | claude | …).
- * Guards against concurrent runs at the store layer.
+ * Dispatch from a coordinator-built snapshot.
+ * Capacity and attachments must already be prepared — never re-check / re-I/O.
+ */
+export async function dispatchThreadTask(
+  snapshot: RunDispatchSnapshot,
+): Promise<DispatchResult>
+/**
+ * @deprecated Prefer `RunDispatchSnapshot`. Kept only for transitional typing;
+ * production ingress always builds a snapshot via `buildRunDispatchSnapshot`.
  */
 export async function dispatchThreadTask(
   goal: string,
   opts?: {
     threadId?: string
-    /** Force runner (else thread.runner) */
     runner?: ThreadRunner
-    /** Force loop type for this run (automation / external) */
     forceLoopType?: LoopType
-    /** Merged into OpenCode + history overrides */
     overrides?: RuntimeOverrides
-    /** Chat composer attachments for this turn */
+    attachments?: ChatAttachment[]
+  },
+): Promise<DispatchResult>
+export async function dispatchThreadTask(
+  snapshotOrGoal: RunDispatchSnapshot | string,
+  legacyOpts?: {
+    threadId?: string
+    runner?: ThreadRunner
+    forceLoopType?: LoopType
+    overrides?: RuntimeOverrides
     attachments?: ChatAttachment[]
   },
 ): Promise<DispatchResult> {
-  let attachments =
-    opts?.attachments || opts?.overrides?.userAttachments || ([] as ChatAttachment[])
-  let raw = goal.trim()
+  const snapshot: RunDispatchSnapshot = isRunDispatchSnapshot(snapshotOrGoal)
+    ? snapshotOrGoal
+    : {
+        runId: legacyOpts?.overrides?.runId || `run_legacy_${Date.now().toString(36)}`,
+        threadId: legacyOpts?.threadId || useThreadStore.getState().activeId || '',
+        objective: String(snapshotOrGoal || '').trim(),
+        runner: legacyOpts?.runner || 'builtin',
+        forceLoopType: legacyOpts?.forceLoopType,
+        attachments:
+          legacyOpts?.attachments ||
+          legacyOpts?.overrides?.userAttachments ||
+          ([] as ChatAttachment[]),
+        overrides: {
+          ...(legacyOpts?.overrides || {}),
+          runId: legacyOpts?.overrides?.runId,
+          threadId: legacyOpts?.threadId,
+          forceLoopType: legacyOpts?.forceLoopType || legacyOpts?.overrides?.forceLoopType,
+        },
+      }
+
+  // Trust snapshot attachments; never re-run normalize/materialize/hydrate.
+  const attachments = snapshot.attachments.length
+    ? snapshot.attachments
+    : snapshot.overrides.userAttachments || ([] as ChatAttachment[])
+  let raw = snapshot.objective.trim()
   if (!raw && attachments.length) {
     raw = defaultGoalForAttachments(attachments)
   }
@@ -125,41 +183,24 @@ export async function dispatchThreadTask(
   }
 
   const thr = useThreadStore.getState()
-  const tid = opts?.threadId || thr.activeId
+  const tid = snapshot.threadId || thr.activeId
   const thread = thr.threads.find((t) => t.id === tid)
   const settings = useSettingsStore.getState().settings
-  // Per-run project pin (scheduler) overrides UI project for this dispatch only
+  // Snapshot project pin wins; UI project is only a last-resort for unpinned runs.
   const projectRoot =
-    (opts?.overrides?.projectRoot || '').trim() || useProjectStore.getState().root
+    (snapshot.overrides.projectRoot || '').trim() || useProjectStore.getState().root
   const agent = useAgentStore.getState()
 
-  const runId = opts?.overrides?.runId
-  const capacity = agent.canStartRun(runId, tid || undefined)
-  if (!capacity.allowed) {
-    return {
-      path: 'builtin',
-      status: 'failed',
-      error: `目前已有 ${capacity.active}/${capacity.limit} 個 run 執行中，請稍候或使用佇列。`,
-    }
-  }
-
-  // Materialize + hydrate for vision / CLI shared paths
-  if (attachments.length) {
-    attachments = await normalizeImageAttachmentsForVision(attachments)
-    attachments = await materializeAttachmentsOnDisk(attachments, {
-      projectRoot: projectRoot || undefined,
-      sessionId: tid || undefined,
-    })
-    attachments = await hydrateAttachmentsFromDisk(attachments)
-  }
-
-  const runner: ThreadRunner = opts?.runner || thread?.runner || 'builtin'
+  // Runner is fixed on the snapshot (thread.runner only as legacy fallback).
+  const runner: ThreadRunner = snapshot.runner || thread?.runner || 'builtin'
   const mentioned = parseRegistryMentions(raw)
   const legacy = parseSubagentMentions(raw)
   const subId = mentioned.subagents[0] || legacy.subagents[0]
   let text = mentioned.cleaned || legacy.cleaned || raw
-    const depth = (thread?.thinkingDepth || 'deep') as ThinkingDepth
-  const agentMode = (thread?.agentMode || 'build') as AgentMode
+  const depth = (thread?.thinkingDepth || 'deep') as ThinkingDepth
+  const agentMode = (thread?.agentMode ||
+    snapshot.overrides.agentMode ||
+    'build') as AgentMode
   const model = thread?.model || settings.model
   const speed = thread?.speed || 'standard'
   const subDesignBrief = tid ? getSubDesignBriefForThread(tid) : null
@@ -170,7 +211,6 @@ export async function dispatchThreadTask(
     ? buildSubDesignRuntimeContext(subDesignBrief, subDesignSystem)
     : ''
   // Intent preload v2: builtins + skills + enabled plugins/MCP + project packs
-  // (use raw goal text for intent; attachment paths added later)
   const preloadCandidates = buildIntentPreloadIds(text, settings, projectRoot, { max: 8 })
   if (subDesignBrief) {
     preloadCandidates.unshift('subdesign-workflow')
@@ -184,7 +224,6 @@ export async function dispatchThreadTask(
         ? await captureOpenCodeConfigSnapshot(projectRoot, agentMode, model)
         : undefined
     if (!isRunnerAuthorized(kind)) {
-      // P0: explicit failed result — do not leave thread on stale agent state
       return {
         path: 'cli',
         kind,
@@ -193,7 +232,7 @@ export async function dispatchThreadTask(
         result: undefined,
       }
     }
-    // CLI path: materialize attachments to disk in Electron; pass serializable payloads
+    // CLI path: pass already-prepared serializable attachment payloads
     const cliAttachments = attachments.map((a) => ({
       name: a.name,
       mimeType: a.mimeType,
@@ -237,23 +276,31 @@ export async function dispatchThreadTask(
       depth,
       agentMode,
       approvalMode: settings.approvalMode,
-      unattended: opts?.overrides?.unattended === true,
+      unattended: snapshot.overrides.unattended === true,
       attachments: cliAttachments.length ? cliAttachments : undefined,
-      runId: opts?.overrides?.runId,
+      runId: snapshot.runId,
       threadId: tid || undefined,
       configSnapshot,
-      loopType: opts?.forceLoopType,
+      loopType: snapshot.forceLoopType,
+      scheduleTrigger: snapshot.overrides.scheduleTrigger,
+      eventTrigger: snapshot.overrides.eventTrigger,
+      nextState: snapshot.overrides.nextState,
+      webhookTarget: snapshot.overrides.webhookTarget,
+      deferFinalization: snapshot.overrides.deferFinalization === true,
     })
-    const a = useAgentStore.getState().getRunState(opts?.overrides?.runId) || useAgentStore.getState().agent
+    const a =
+      useAgentStore.getState().getRunState(snapshot.runId) || useAgentStore.getState().agent
     if (tid && a.externalRun) {
       useThreadStore.getState().setExternalRun(tid, a.externalRun)
     }
     return {
       path: 'cli',
+      executionKind: 'external',
       kind,
       status: a.status || 'failed',
       result: a.result,
       error: a.haltReason || (a.status === 'failed' ? a.result : undefined),
+      postState: a.postState,
     }
   }
 
@@ -277,8 +324,6 @@ export async function dispatchThreadTask(
   })
 
   // Chat history: recent verbatim + older condensed (budget-friendly).
-  // maxChars is chatHistory's share of the shared reference-context budget it
-  // splits with hermes/sessionSearch.ts's cross-session recall — see chatHistory.ts.
   let extra = baseOverrides.extraSystemContext || ''
   if (settings.referenceChatHistory !== false && thread?.bubbles?.length) {
     const { buildChatHistoryContext, CHAT_HISTORY_CONTEXT_CHARS } = await import('./chatHistory')
@@ -290,8 +335,8 @@ export async function dispatchThreadTask(
       extra = [extra, hist].filter(Boolean).join('\n\n').slice(0, CHAT_HISTORY_CONTEXT_CHARS)
     }
   }
-  if (opts?.overrides?.extraSystemContext) {
-    extra = [extra, opts.overrides.extraSystemContext].filter(Boolean).join('\n\n')
+  if (snapshot.overrides.extraSystemContext) {
+    extra = [extra, snapshot.overrides.extraSystemContext].filter(Boolean).join('\n\n')
   }
   if (subDesignContext) {
     extra = [extra, subDesignContext].filter(Boolean).join('\n\n').slice(0, 16_000)
@@ -302,31 +347,33 @@ export async function dispatchThreadTask(
   const threadUnlocks = thread?.lastUnlockedTools || []
   const overrides: RuntimeOverrides = {
     ...baseOverrides,
-    ...(opts?.overrides || {}),
+    ...snapshot.overrides,
     extraSystemContext: extra || undefined,
     temporary:
-      opts?.overrides?.temporary ??
+      snapshot.overrides.temporary ??
       (settings.temporaryChatDefault === true ? true : undefined),
     preloadCapabilityIds: [
       ...preloadCandidates,
-      ...(opts?.overrides?.preloadCapabilityIds || []),
+      ...(snapshot.overrides.preloadCapabilityIds || []),
       ...threadCaps,
     ],
     preloadUnlockedTools: [
-      ...(opts?.overrides?.preloadUnlockedTools || []),
+      ...(snapshot.overrides.preloadUnlockedTools || []),
       ...threadUnlocks,
     ],
     userAttachments: attachments.length
       ? attachments
-      : opts?.overrides?.userAttachments,
+      : snapshot.overrides.userAttachments,
+    runId: snapshot.runId,
+    threadId: tid || snapshot.threadId,
+    deferFinalization: snapshot.overrides.deferFinalization === true,
   }
 
-  // Pin loop only when this dispatch (or thread) explicitly set one.
-  // Conversation default leaves thread.loopType null → auto classify.
+  // Pin loop only when the snapshot (or thread) explicitly set one.
   const forceLoop =
-    opts?.forceLoopType ||
-    (opts?.overrides?.loopTypeMode === 'force'
-      ? opts?.overrides?.forceLoopType
+    snapshot.forceLoopType ||
+    (snapshot.overrides.loopTypeMode === 'force'
+      ? snapshot.overrides.forceLoopType
       : undefined) ||
     thread?.loopType ||
     undefined
@@ -338,9 +385,9 @@ export async function dispatchThreadTask(
     if (!settings.concurrentRunsEnabled) agent.setSelectedLoopType(null)
     overrides.loopTypeMode = overrides.loopTypeMode || 'auto'
   }
-  overrides.threadId = overrides.threadId || tid || undefined
   await agent.startExecution(text, overrides)
-  const a = useAgentStore.getState().getRunState(overrides.runId) || useAgentStore.getState().agent
+  const a =
+    useAgentStore.getState().getRunState(overrides.runId) || useAgentStore.getState().agent
   // Persist loaded caps for next turn on this thread
   if (tid && (a.loadedCapabilityIds?.length || a.unlockedToolNames?.length)) {
     useThreadStore
@@ -349,8 +396,10 @@ export async function dispatchThreadTask(
   }
   return {
     path: 'builtin',
+    executionKind: 'loop',
     status: a.status,
     result: a.result,
     error: a.haltReason,
+    postState: a.postState,
   }
 }

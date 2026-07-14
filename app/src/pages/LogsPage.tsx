@@ -24,14 +24,15 @@ export function LogsPage() {
       return
     }
     navigate('/')
-    const { runExternalObjective } = await import('../agent/runExternal')
-    await runExternalObjective({
+    const { runTask } = await import('../agent/taskRunCoordinator')
+    await runTask({
       sourceKind: 'retry',
       objective: input,
       title: '重啟',
       loopType,
       eventPreMatched: loopType === 'Proactive',
       sourceLabel: '日誌頁重啟',
+      meta: { eventTrigger: agent.eventTrigger },
     })
   }
 

@@ -49,6 +49,37 @@ export type RunTaskItem = {
   at: number
 }
 
+/**
+ * Bounded terminal snapshot kept after a run leaves the live execution path.
+ * The snapshot is intentionally smaller than the live buffers so a completed
+ * run can still render a useful digest without retaining an unbounded stream.
+ */
+export type TerminalRunDigest = {
+  runId: string
+  finishedAt: number
+  statusLine: string
+  events: RunActivityEvent[]
+  thought: string
+  draftText: string
+  fileChanges: FileChangeRecord[]
+  tasks: RunTaskItem[]
+}
+
+/** One run's isolated live presentation or bounded terminal digest. */
+export type RunPresentation = {
+  runId: string
+  active: boolean
+  startedAt: number
+  updatedAt: number
+  events: RunActivityEvent[]
+  thought: string
+  draftText: string
+  statusLine: string
+  fileChanges: FileChangeRecord[]
+  tasks: RunTaskItem[]
+  terminal: TerminalRunDigest | null
+}
+
 /** IPC payload from main → renderer during CLI stream */
 export type CliStreamPayload = {
   runId?: string
@@ -68,7 +99,7 @@ export type CliStreamPayload = {
   todos?: Array<{ text: string; status?: string }>
 }
 
-interface RunActivityStore {
+export interface RunActivityStore {
   runId: string | null
   active: boolean
   events: RunActivityEvent[]
@@ -79,19 +110,24 @@ interface RunActivityStore {
   fileChanges: FileChangeRecord[]
   /** 分析出的須執行任務項 — 右側面板即時同步 */
   tasks: RunTaskItem[]
+  /** Run-scoped source of truth; flat fields above are a selected-run projection. */
+  presentations: Record<string, RunPresentation>
 
   begin: (runId?: string) => void
-  end: (runId?: string) => void
-  clear: () => void
+  end: (runId?: string, statusLine?: string) => void
+  clear: (runId?: string) => void
+  selectRun: (runId?: string | null) => void
+  getPresentation: (runId?: string | null) => RunPresentation | null
   push: (ev: Omit<RunActivityEvent, 'id' | 'at'> & { id?: string }) => void
-  appendThought: (delta: string) => void
-  appendText: (delta: string) => void
+  appendThought: (delta: string, runId?: string) => void
+  appendText: (delta: string, runId?: string) => void
   setStatus: (line: string, runId?: string) => void
-  recordFileChange: (f: Omit<FileChangeRecord, 'at'> & { at?: number }) => void
+  recordFileChange: (f: Omit<FileChangeRecord, 'at'> & { at?: number }, runId?: string) => void
   /** 以完整快照取代任務清單（結構化 plan 事件） */
   setTasks: (todos: Array<{ text: string; status?: string }>, runId?: string) => void
   /** 文字流 checkbox 解析 → 新增或更新單項 */
-  upsertTask: (text: string, status: RunTaskStatus) => void
+  upsertTask: (text: string, status: RunTaskStatus, runId?: string) => void
+  clearDraft: (runId?: string) => void
   handleCliStream: (payload: CliStreamPayload) => void
 }
 
@@ -106,6 +142,137 @@ const MAX_THOUGHT = 12_000
 const MAX_DRAFT = 40_000
 const MAX_FILES = 80
 const MAX_TASKS = 40
+export const MAX_PRESENTATIONS = 100
+const MAX_TERMINAL_EVENTS = 40
+const MAX_TERMINAL_THOUGHT = 2_000
+const MAX_TERMINAL_DRAFT = 8_000
+const MAX_TERMINAL_FILES = 40
+const MAX_TERMINAL_TASKS = 40
+
+type RunActivityProjection = Pick<
+  RunActivityStore,
+  'runId' | 'active' | 'events' | 'thought' | 'draftText' | 'statusLine' | 'fileChanges' | 'tasks'
+>
+
+function emptyPresentation(runId: string, now = Date.now()): RunPresentation {
+  return {
+    runId,
+    active: false,
+    startedAt: now,
+    updatedAt: now,
+    events: [],
+    thought: '',
+    draftText: '',
+    statusLine: '',
+    fileChanges: [],
+    tasks: [],
+    terminal: null,
+  }
+}
+
+function projectPresentation(p: RunPresentation | undefined): RunActivityProjection {
+  return {
+    runId: p?.runId || null,
+    active: p?.active || false,
+    events: p?.events || [],
+    thought: p?.thought || '',
+    draftText: p?.draftText || '',
+    statusLine: p?.statusLine || '',
+    fileChanges: p?.fileChanges || [],
+    tasks: p?.tasks || [],
+  }
+}
+
+function clonePresentation(p: RunPresentation): RunPresentation {
+  return {
+    ...p,
+    events: [...p.events],
+    fileChanges: [...p.fileChanges],
+    tasks: [...p.tasks],
+    terminal: p.terminal
+      ? {
+          ...p.terminal,
+          events: [...p.terminal.events],
+          fileChanges: [...p.terminal.fileChanges],
+          tasks: [...p.terminal.tasks],
+        }
+      : null,
+  }
+}
+
+function trimPresentations(
+  presentations: Record<string, RunPresentation>,
+  selectedRunId: string | null,
+) {
+  const ids = Object.keys(presentations)
+  if (ids.length <= MAX_PRESENTATIONS) return presentations
+
+  const evictable = ids
+    .filter((id) => id !== selectedRunId && !presentations[id].active)
+    .sort((a, b) => {
+      const left = presentations[a].terminal?.finishedAt || presentations[a].updatedAt
+      const right = presentations[b].terminal?.finishedAt || presentations[b].updatedAt
+      return left - right
+    })
+  const next = { ...presentations }
+  for (const id of evictable) {
+    if (Object.keys(next).length <= MAX_PRESENTATIONS) break
+    delete next[id]
+  }
+  return next
+}
+
+function applyRunUpdate(
+  state: Pick<RunActivityStore, 'presentations' | 'runId'>,
+  runId: string,
+  update: (presentation: RunPresentation) => RunPresentation,
+) {
+  const current = state.presentations[runId] || emptyPresentation(runId)
+  // Once a run has a terminal digest, late stream events must not reopen or
+  // mutate it. A new begin(runId) explicitly starts a fresh presentation.
+  if (current.terminal && !current.active) {
+    return {
+      presentations: state.presentations,
+      ...projectPresentation(state.runId ? state.presentations[state.runId] : undefined),
+    }
+  }
+  const nextPresentation = update(current)
+  const presentations = trimPresentations(
+    { ...state.presentations, [runId]: nextPresentation },
+    state.runId,
+  )
+  const selected = state.runId === runId ? nextPresentation : presentations[state.runId || '']
+  return { presentations, ...projectPresentation(selected) }
+}
+
+function terminalizePresentation(
+  presentation: RunPresentation,
+  statusLine: string | undefined,
+  finishedAt: number,
+): RunPresentation {
+  const digest: TerminalRunDigest = {
+    runId: presentation.runId,
+    finishedAt,
+    statusLine: (statusLine || presentation.statusLine || '完成').slice(0, 200),
+    events: presentation.events.slice(-MAX_TERMINAL_EVENTS),
+    thought: presentation.thought.slice(-MAX_TERMINAL_THOUGHT),
+    draftText: presentation.draftText.slice(-MAX_TERMINAL_DRAFT),
+    fileChanges: presentation.fileChanges.slice(-MAX_TERMINAL_FILES),
+    tasks: presentation.tasks.slice(-MAX_TERMINAL_TASKS),
+  }
+  return {
+    ...presentation,
+    active: false,
+    updatedAt: finishedAt,
+    statusLine: digest.statusLine,
+    events: digest.events,
+    thought: digest.thought,
+    draftText: digest.draftText,
+    fileChanges: digest.fileChanges,
+    tasks: digest.tasks,
+    terminal: digest,
+  }
+}
 
 function basen(p: string) {
   return p.replace(/\\/g, '/').split('/').filter(Boolean).pop() || p
@@ -123,22 +290,30 @@ function taskKey(text: string) {
   return text.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-/** 逐行掃描文字流的 markdown checkbox（- [ ] / - [x]）*/
-const taskLineBuf: Record<'thought' | 'text', string> = { thought: '', text: '' }
+/** 逐行掃描文字流的 markdown checkbox（- [ ] / - [x]），每個 run 各自保留尾端 buffer。 */
+const taskLineBuf = new Map<string, Record<'thought' | 'text', string>>()
+const FALLBACK_RUN_ID = '__selected__'
 
-function resetTaskLineBuf() {
-  taskLineBuf.thought = ''
-  taskLineBuf.text = ''
+function resetTaskLineBuf(runId?: string) {
+  if (runId) {
+    taskLineBuf.delete(runId)
+    return
+  }
+  taskLineBuf.clear()
 }
 
 function scanTaskLines(
+  runId: string | undefined,
   channel: 'thought' | 'text',
   delta: string,
   upsert: (text: string, status: RunTaskStatus) => void,
 ) {
-  taskLineBuf[channel] = (taskLineBuf[channel] + delta).slice(-4000)
-  const parts = taskLineBuf[channel].split('\n')
-  taskLineBuf[channel] = parts.pop() || ''
+  const key = runId || FALLBACK_RUN_ID
+  const buffer = taskLineBuf.get(key) || { thought: '', text: '' }
+  buffer[channel] = (buffer[channel] + delta).slice(-4000)
+  const parts = buffer[channel].split('\n')
+  buffer[channel] = parts.pop() || ''
+  taskLineBuf.set(key, buffer)
   for (const raw of parts) {
     const m = raw.trim().match(/^[-*]\s*\[([ xX])\]\s+(.+)$/)
     if (m?.[2]?.trim()) {
@@ -156,48 +331,81 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
   statusLine: '',
   fileChanges: [],
   tasks: [],
+  presentations: {},
 
   begin: (runId) => {
-    resetTaskLineBuf()
-    set({
-      runId: runId || nid('run'),
-      active: true,
-      events: [],
-      thought: '',
-      draftText: '',
-      statusLine: '啟動中…',
-      fileChanges: [],
-      tasks: [],
+    const target = runId || nid('run')
+    const now = Date.now()
+    resetTaskLineBuf(target)
+    set((s) => {
+      const presentation: RunPresentation = {
+        ...emptyPresentation(target, now),
+        active: true,
+        statusLine: '啟動中…',
+      }
+      const presentations = trimPresentations(
+        { ...s.presentations, [target]: presentation },
+        s.runId || target,
+      )
+      // Starting a background run must not steal the visible feed from the
+      // thread the user selected. The first run still becomes selected when
+      // there is no existing selection.
+      const selected = s.runId ? presentations[s.runId] : presentation
+      return { presentations, ...projectPresentation(selected) }
     })
   },
 
-  end: (runId) => {
-    const current = get()
-    if (runId && current.runId && current.runId !== runId) return
-    set({ active: false, statusLine: current.statusLine || '完成' })
+  end: (runId, statusLine) => {
+    const target = runId || get().runId
+    if (!target) return
+    resetTaskLineBuf(target)
+    set((s) => {
+      const current = s.presentations[target]
+      if (!current || (current.terminal && !current.active)) return s
+      const completed = terminalizePresentation(current, statusLine, Date.now())
+      const presentations = trimPresentations({ ...s.presentations, [target]: completed }, s.runId)
+      const selected = s.runId === target ? completed : presentations[s.runId || '']
+      return { presentations, ...projectPresentation(selected) }
+    })
   },
 
-  clear: () => {
-    resetTaskLineBuf()
-    set({
-      runId: null,
-      active: false,
-      events: [],
-      thought: '',
-      draftText: '',
-      statusLine: '',
-      fileChanges: [],
-      tasks: [],
+  clear: (runId) => {
+    resetTaskLineBuf(runId)
+    set((s) => {
+      if (!runId) return { presentations: {}, ...projectPresentation(undefined) }
+      const presentations = { ...s.presentations }
+      delete presentations[runId]
+      const selectedRunId = s.runId === runId ? null : s.runId
+      return {
+        presentations,
+        ...projectPresentation(selectedRunId ? presentations[selectedRunId] : undefined),
+      }
     })
+  },
+
+  selectRun: (runId) => {
+    set((s) => {
+      const selectedRunId = runId && s.presentations[runId] ? runId : null
+      return {
+        ...projectPresentation(selectedRunId ? s.presentations[selectedRunId] : undefined),
+      }
+    })
+  },
+
+  getPresentation: (runId) => {
+    const target = runId || get().runId
+    const presentation = target ? get().presentations[target] : undefined
+    return presentation ? clonePresentation(presentation) : null
   },
 
   push: (ev) => {
     const current = get()
-    if (ev.runId && current.runId && ev.runId !== current.runId) return
+    const target = ev.runId || current.runId
+    if (!target) return
     const item: RunActivityEvent = {
       id: ev.id || nid(),
       at: Date.now(),
-      runId: ev.runId || current.runId || undefined,
+      runId: target,
       kind: ev.kind,
       title: ev.title,
       detail: ev.detail?.slice(0, 2000),
@@ -207,42 +415,66 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       added: ev.added,
       removed: ev.removed,
     }
-    set((s) => ({
-      events: [...s.events, item].slice(-MAX_EVENTS),
-      statusLine:
-        ev.kind === 'status' || ev.kind === 'tool' || ev.kind === 'file' || ev.kind === 'error'
-          ? (ev.title || ev.detail || s.statusLine).slice(0, 200)
-          : s.statusLine,
-    }))
+    set((s) =>
+      applyRunUpdate(s, target, (presentation) => ({
+        ...presentation,
+        updatedAt: item.at,
+        events: [...presentation.events, item].slice(-MAX_EVENTS),
+        statusLine:
+          ev.kind === 'status' || ev.kind === 'tool' || ev.kind === 'file' || ev.kind === 'error'
+            ? (ev.title || ev.detail || presentation.statusLine).slice(0, 200)
+            : presentation.statusLine,
+      })),
+    )
   },
 
-  appendThought: (delta) => {
+  appendThought: (delta, runId) => {
     if (!delta) return
-    set((s) => ({
-      thought: (s.thought + delta).slice(-MAX_THOUGHT),
-      active: true,
-    }))
+    const target = runId || get().runId
+    if (!target) return
+    set((s) =>
+      applyRunUpdate(s, target, (presentation) => ({
+        ...presentation,
+        thought: (presentation.thought + delta).slice(-MAX_THOUGHT),
+        updatedAt: Date.now(),
+        active: true,
+      })),
+    )
   },
 
-  appendText: (delta) => {
+  appendText: (delta, runId) => {
     if (!delta) return
-    set((s) => ({
-      draftText: (s.draftText + delta).slice(-MAX_DRAFT),
-      active: true,
-    }))
+    const target = runId || get().runId
+    if (!target) return
+    set((s) =>
+      applyRunUpdate(s, target, (presentation) => ({
+        ...presentation,
+        draftText: (presentation.draftText + delta).slice(-MAX_DRAFT),
+        updatedAt: Date.now(),
+        active: true,
+      })),
+    )
   },
 
   setStatus: (line, runId) => {
-    const current = get()
-    if (runId && current.runId && current.runId !== runId) return
-    set({ statusLine: line.slice(0, 200) })
+    const target = runId || get().runId
+    if (!target) return
+    const statusLine = line.slice(0, 200)
+    set((s) =>
+      applyRunUpdate(s, target, (presentation) => ({
+        ...presentation,
+        statusLine,
+        updatedAt: Date.now(),
+      })),
+    )
   },
 
   setTasks: (todos, runId) => {
-    const current = get()
-    if (runId && current.runId && current.runId !== runId) return
+    const target = runId || get().runId
+    if (!target) return
     const now = Date.now()
     const seen = new Set<string>()
+    const source = get().presentations[target] || emptyPresentation(target)
     const tasks: RunTaskItem[] = []
     for (const t of todos.slice(0, MAX_TASKS)) {
       const text = (t.text || '').trim()
@@ -250,7 +482,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       const key = taskKey(text)
       if (seen.has(key)) continue
       seen.add(key)
-      const prev = get().tasks.find((x) => taskKey(x.text) === key)
+      const prev = source.tasks.find((x) => taskKey(x.text) === key)
       tasks.push({
         id: prev?.id || nid('task'),
         text: text.slice(0, 200),
@@ -259,75 +491,106 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       })
     }
     if (tasks.length) {
-      set({ tasks })
+      set((s) =>
+        applyRunUpdate(s, target, (presentation) => ({
+          ...presentation,
+          tasks,
+          updatedAt: now,
+        })),
+      )
       // Persist the latest snapshot on the run's thread. The explicit runId
       // prevents a late concurrent stream from writing into another thread.
       void import('./threadStore').then(({ useThreadStore }) => {
         const threadState = useThreadStore.getState()
-        const threadId = runId
-          ? threadState.threads.find((thread) => threadState.runningRunIds[thread.id] === runId)?.id
-          : threadState.runningThreadId
+        const threadId = threadState.threads.find(
+          (thread) => threadState.runningRunIds[thread.id] === target,
+        )?.id
         if (threadId) useThreadStore.getState().setRunPlan(threadId, tasks)
       })
     }
   },
 
-  upsertTask: (text, status) => {
+  upsertTask: (text, status, runId) => {
     const clean = text.trim()
-    if (!clean) return
+    const target = runId || get().runId
+    if (!clean || !target) return
     const key = taskKey(clean)
-    set((s) => {
-      const idx = s.tasks.findIndex((x) => taskKey(x.text) === key)
-      if (idx >= 0) {
-        if (s.tasks[idx].status === status) return s
-        const tasks = [...s.tasks]
-        tasks[idx] = { ...tasks[idx], status }
-        return { tasks }
-      }
-      if (s.tasks.length >= MAX_TASKS) return s
-      return {
-        tasks: [...s.tasks, { id: nid('task'), text: clean.slice(0, 200), status, at: Date.now() }],
-      }
-    })
+    set((s) =>
+      applyRunUpdate(s, target, (presentation) => {
+        const idx = presentation.tasks.findIndex((x) => taskKey(x.text) === key)
+        if (idx >= 0) {
+          if (presentation.tasks[idx].status === status) return presentation
+          const tasks = [...presentation.tasks]
+          tasks[idx] = { ...tasks[idx], status, at: Date.now() }
+          return { ...presentation, tasks, updatedAt: Date.now() }
+        }
+        if (presentation.tasks.length >= MAX_TASKS) return presentation
+        return {
+          ...presentation,
+          updatedAt: Date.now(),
+          tasks: [
+            ...presentation.tasks,
+            { id: nid('task'), text: clean.slice(0, 200), status, at: Date.now() },
+          ],
+        }
+      }),
+    )
   },
 
-  recordFileChange: (f) => {
+  recordFileChange: (f, runId) => {
     const path = (f.path || '').trim()
-    if (!path) return
-    set((s) => {
-      const prev = s.fileChanges.findIndex((x) => x.path === path)
-      const next: FileChangeRecord = {
-        path,
-        action: f.action || 'edit',
-        added: f.added,
-        removed: f.removed,
-        at: f.at || Date.now(),
-      }
-      let list: FileChangeRecord[]
-      if (prev >= 0) {
-        list = [...s.fileChanges]
-        const old = list[prev]
-        list[prev] = {
-          ...old,
-          ...next,
-          added: f.added ?? old.added,
-          removed: f.removed ?? old.removed,
-          action: f.action || old.action,
+    const target = runId || get().runId
+    if (!path || !target) return
+    set((s) =>
+      applyRunUpdate(s, target, (presentation) => {
+        const prev = presentation.fileChanges.findIndex((x) => x.path === path)
+        const next: FileChangeRecord = {
+          path,
+          action: f.action || 'edit',
+          added: f.added,
+          removed: f.removed,
+          at: f.at || Date.now(),
         }
-      } else {
-        list = [...s.fileChanges, next].slice(-MAX_FILES)
-      }
-      return { fileChanges: list }
-    })
+        let list: FileChangeRecord[]
+        if (prev >= 0) {
+          list = [...presentation.fileChanges]
+          const old = list[prev]
+          list[prev] = {
+            ...old,
+            ...next,
+            added: f.added ?? old.added,
+            removed: f.removed ?? old.removed,
+            action: f.action || old.action,
+          }
+        } else {
+          list = [...presentation.fileChanges, next].slice(-MAX_FILES)
+        }
+        return { ...presentation, fileChanges: list, updatedAt: Date.now() }
+      }),
+    )
+  },
+
+  clearDraft: (runId) => {
+    const target = runId || get().runId
+    if (!target) return
+    set((s) =>
+      applyRunUpdate(s, target, (presentation) => ({
+        ...presentation,
+        draftText: '',
+        updatedAt: Date.now(),
+      })),
+    )
   },
 
   handleCliStream: (payload) => {
     const s = get()
-    // Streams are tagged at the Electron boundary. A late event from another
-    // concurrent run must never mutate the currently visible feed.
-    if (s.runId && payload.runId && payload.runId !== s.runId) return
-    if (s.active && s.runId && !payload.runId) return
+    // A tagged stream always routes to its own presentation. Untagged legacy
+    // streams may use the selected run, but can never overwrite another run's
+    // record once a run identity is available.
     const streamRunId = payload.runId || s.runId || undefined
+    if (!streamRunId) return
+    const existing = s.presentations[streamRunId]
+    if (existing?.terminal && !existing.active) return
 
     // 結構化任務清單（TodoWrite / update_plan / todo_list）→ 完整快照取代
     if (payload.kind === 'plan') {
@@ -346,24 +609,30 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     if (payload.channel === 'thought' || payload.kind === 'thought') {
       const delta = payload.delta || payload.detail || ''
       if (delta) {
-        if (!s.thought) {
-          get().push({ kind: 'status', title: '開始思考' })
+        const presentation = get().presentations[streamRunId]
+        if (!presentation?.thought) {
+          get().push({ kind: 'status', runId: streamRunId, title: '開始思考' })
           get().setStatus('思考中…', streamRunId)
         }
-        get().appendThought(delta)
-        scanTaskLines('thought', delta, get().upsertTask)
+        get().appendThought(delta, streamRunId)
+        scanTaskLines(streamRunId, 'thought', delta, (text, status) =>
+          get().upsertTask(text, status, streamRunId),
+        )
       }
       return
     }
     if (payload.channel === 'text' || payload.kind === 'text') {
       const delta = payload.delta || payload.detail || ''
       if (delta) {
-        if (!s.draftText) {
-          get().push({ kind: 'status', title: '產生回答' })
+        const presentation = get().presentations[streamRunId]
+        if (!presentation?.draftText) {
+          get().push({ kind: 'status', runId: streamRunId, title: '產生回答' })
           get().setStatus('產生回答…', streamRunId)
         }
-        get().appendText(delta)
-        scanTaskLines('text', delta, get().upsertTask)
+        get().appendText(delta, streamRunId)
+        scanTaskLines(streamRunId, 'text', delta, (text, status) =>
+          get().upsertTask(text, status, streamRunId),
+        )
       }
       return
     }
@@ -371,6 +640,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       if (payload.detail?.trim()) {
         get().push({
           kind: 'log',
+          runId: streamRunId,
           title: payload.channel === 'stderr' ? 'stderr' : 'stdout',
           detail: payload.detail.slice(0, 400),
         })
@@ -385,17 +655,18 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         detail: payload.detail,
         ok: payload.ok !== false,
       })
-      set({ active: false })
+      get().end(streamRunId, payload.title || 'CLI 完成')
       return
     }
 
     // Multi-path file events (Codex batch)
-    const paths = [...new Set([
+    const paths = [
       ...(payload.path ? [payload.path] : []),
       ...(payload.paths || []),
     ]
       .map((p) => String(p).trim())
-      .filter(Boolean))]
+      .filter(Boolean)
+      .filter((p, index, all) => all.indexOf(p) === index)
 
     if (payload.kind === 'file' || paths.length > 0) {
       for (const p of paths.length ? paths : [payload.detail || '']) {
@@ -408,15 +679,18 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
             : action === 'delete'
               ? `已刪除 ${basen(path)}`
               : `已編輯 ${basen(path)}`
-        get().recordFileChange({
-          path,
-          action,
-          added: payload.added,
-          removed: payload.removed,
-        })
-      get().push({
-        kind: 'file',
-        runId: streamRunId,
+        get().recordFileChange(
+          {
+            path,
+            action,
+            added: payload.added,
+            removed: payload.removed,
+          },
+          streamRunId,
+        )
+        get().push({
+          kind: 'file',
+          runId: streamRunId,
           title: payload.title || label,
           detail: path,
           path,
@@ -430,9 +704,9 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     }
 
     if (payload.kind === 'tool') {
-        get().push({
-          kind: 'tool',
-          runId: streamRunId,
+      get().push({
+        kind: 'tool',
+        runId: streamRunId,
         title: payload.title || (payload.tool ? `已執行 ${payload.tool}` : '已執行指令'),
         detail: payload.detail || payload.delta,
         tool: payload.tool,
@@ -444,7 +718,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         detail.match(/(?:path|file|filename)["']?\s*[:=]\s*["']([^"']+)["']/i) ||
         detail.match(/((?:[A-Za-z]:)?(?:[\\/][\w.\-@]+)+\.\w{1,12})/)
       if (m?.[1] && /write|edit|create|patch|apply/i.test(payload.tool || payload.title || '')) {
-        get().recordFileChange({ path: m[1], action: 'edit' })
+        get().recordFileChange({ path: m[1], action: 'edit' }, streamRunId)
         get().push({
           kind: 'file',
           runId: streamRunId,

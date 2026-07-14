@@ -42,7 +42,7 @@ export function ThreadSidebar() {
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-1.5 space-y-0.5">
-        {threads.map((t) => {
+        {threads.filter((t) => !t.hidden).map((t) => {
           const active = t.id === activeId
           const depth = getThinkingDepth(t.thinkingDepth)
           const agent = getPrimaryAgent(t.agentMode)

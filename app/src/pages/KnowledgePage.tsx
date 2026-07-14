@@ -43,7 +43,8 @@ const kindIcon: Record<EntityKind, string> = {
 
 export function KnowledgePage() {
   const navigate = useNavigate()
-  const { agent, isRunning, stopExecution } = useAgentStore()
+  const { agent, isRunning, activeRunIds, stopExecution } = useAgentStore()
+  const runId = activeRunIds[0] || null
   const projectRoot = useProjectStore((s) => s.root)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -215,7 +216,7 @@ export function KnowledgePage() {
                 : '未索引'}
         </span>
         {isRunning && (
-          <button type="button" onClick={() => stopExecution()} className={settingsBtnCls}>
+          <button type="button" onClick={() => runId && stopExecution(runId)} className={settingsBtnCls}>
             暫停循環
           </button>
         )}

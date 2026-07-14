@@ -6,9 +6,10 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 The product is **`app/`** — an Electron desktop app "SubAgents AI" (React 19 + TypeScript + Vite + zustand). Everything else at the root is design input, not code:
 
-- `01_…` / `02_…` / `03_…` `.md` — the loop spec (system definition, four loop patterns, request-parsing schema) the engine implements
-- `ai_agent_loop_*/code.html`, `synthetic_intelligence_interface/DESIGN.md` — Stitch UI mocks / design tokens
-- `docs/` — integration plans; `docs/PYDANTIC_AI_V2_CAPABILITIES.md` maps the capability system concepts to files
+- `docs/01_…` / `02_…` / `03_…` `.md` — the loop spec (system definition, four loop patterns, request-parsing schema) the engine implements
+- `docs/` — integration plans and audits (`TASK_AGENT_WORKFLOW_INTEGRATION_PLAN_2026-07-14.md` is the lifecycle plan; `PYDANTIC_AI_V2_CAPABILITIES.md` maps capability concepts)
+- `CONTEXT.md` — product domain language
+- There is **no in-repo `RTK.md`**. Agent operating guidance for this product is `AGENTS.md` / `CLAUDE.md` / `CONTEXT.md` / `docs/*` only (any host-level `@RTK.md` is unrelated tooling).
 
 UI copy, log messages, and some comments are Traditional Chinese mixed with English — keep that style.
 
@@ -29,13 +30,26 @@ There is no unit-test runner; smoke scripts cover scheduler math, event matching
 
 ## Architecture
 
-### Execution flow (one global run at a time)
+### Execution flow (default single run; optional capped concurrency)
 
-All entry points funnel into the same pipeline:
+All entry points go through **`agent/taskRunCoordinator.ts` `runTask`** (canonical ingress). Legacy `runExternal.ts` is an implementation detail behind the coordinator — new code must not call `runExternalObjective` or `dispatchThreadTask` from UI.
 
-- UI composer / slash commands (`hooks/useSlashExecutor.ts`), scheduler ticks, webhook events, Telegram inbound — the latter three are wired in `App.tsx` bootstrap components → `agent/runExternal.ts` (creates a thread, adds bubbles) → **`agent/runDispatch.ts` `dispatchThreadTask`** — picks the runner: `builtin` engine vs external CLI (`codex`/`Codex`/… via `agent/localCliRun.ts`, gated by `settings.cliProviders` authorization) → `store/agentStore.ts` `startExecution` → **`agent/engine.ts` `agentEngine`** (singleton `AgentLoopEngine`).
+Pipeline:
 
-`agentStore.isRunning` is a global mutex. Automation (scheduler / webhook / Telegram) that hits a busy lock is **enqueued** (`agent/runQueue.ts`, FIFO + dedupe, max 24) and drained when free — not permanently missed. Use `onSettled` on `runExternalObjective` so once-jobs still get `markJobResult` after 補跑. Event sources pass `eventPreMatched: true` so the Proactive pattern skips its when/if predicate re-check.
+- UI composer / slash / retry, scheduler ticks, webhook, Telegram, background delegate → **`taskRunCoordinator.runTask`** → capacity / attachments / thread bind / beforeRun (once) → **`runDispatch.dispatchThreadTask(snapshot)`** (runner select only) → builtin `agentEngine` **or** external CLI (`localCliRun`, gated by `settings.cliProviders`) → **`finalizeTaskRun`** (summary → afterRun → Archive → onSettled → release → drain).
+
+**Concurrency** (ADR-0003): default is still single-run behavior (`concurrentRunsEnabled: false`). When opted in, a small per-app cap (`maxConcurrentRuns`, default 4, range 2–8) allows multiple `runId`s. Capacity is reserved in the coordinator; overflow uses `runQueue` (FIFO + dedupe, max 24). `agentStore.isRunning` is a derived convenience, not the sole lock — active runs live in a registry keyed by `runId`. Use `onSettled` so once-jobs still get `markJobResult` after 補跑.
+
+**Time-based / Proactive triggers**: conversation auto-classifier only emits Turn-based / Goal-based. Cron/event wording becomes an `AutomationSuggestion`, never a direct Time/Proactive tool run. **Time-based** requires a claimed `ScheduledJob` trigger snapshot; **Proactive** requires matcher-produced event evidence (`eventMatcher.ts`). Invalid triggers fail before capacity reservation.
+
+### Runner capability matrix (`agent/runners/`)
+
+| Capability | Builtin (`loop`) | External CLI (`external`) |
+|---|:---:|:---:|
+| parse / validateDoD / iterate / continueGoal / progressiveCapabilities | yes | **no** |
+| runScopedProgress (cancel / activity by `runId`) | yes | yes |
+
+CLI success is **not** DoD met (`EXTERNAL_CLI_DOD_LABEL`). UI shows「外部 CLI 執行」and disables continueGoal until a prompt contract + fixture enable those flags.
 
 ### Engine (`agent/engine.ts`)
 
@@ -69,7 +83,7 @@ Adding a tool touches: `registry.ts` (name + catalog entry), `schemas.ts` (param
 
 ### Supporting layers
 
-- **Hermes** (`agent/hermes/`): skills (SKILL.md playbooks; `learning.ts` drafts new skills/memory from successful runs → surfaces in Learning page), durable memory, prompt layering (`promptBuilder.ts`), `delegate.ts` (leaf/orchestrator isolation with `DelegationBudget` depth+concurrency caps; leaves get `blockedTools` and no parent transcript), `backgroundJobs.ts` (fire-and-forget delegates + desktop notify), minimal MCP client.
+- **Hermes** (`agent/hermes/`): skills (SKILL.md playbooks; `learning.ts` drafts new skills/memory from successful runs → surfaces in Learning page), durable memory, **ContextPacket** budgets (`contextPacket.ts` + `promptBuilder.ts`), `delegate.ts` (leaf/orchestrator isolation with `DelegationBudget` depth+concurrency caps; leaves get `blockedTools` and no parent transcript), `backgroundJobs.ts` (fire-and-forget delegates; coordinator Archive link-only when `preferRunTask`, hidden worker threads), minimal MCP client.
 - **OpenCode** (`agent/opencode/`): permission policies per agent mode (build/plan), bash pattern allow/ask/deny (`agentRegistry.ts`), transcript compaction.
 - **Electron** (`electron/`): main-process bridges (webhook server, Telegram gateway, MCP stdio/http, shell, pty, project/codegraph). Exposed via preload as `window.subagents.*`. Renderer code must always feature-detect (`window.subagents?.x`) because the app also runs in a plain browser.
 

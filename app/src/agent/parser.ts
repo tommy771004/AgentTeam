@@ -3,7 +3,17 @@
  * Converts raw user input into a structured Loop Configuration.
  */
 
-import type { LoopConfiguration, LoopType, ParseResult, ExecutionStep } from './types'
+import type { LoopConfiguration, LoopType, NextState, ParseResult, ExecutionStep } from './types'
+import { detectAutomationSuggestion } from './automationSuggestion.ts'
+export type {
+  AutomationScheduleHint,
+  AutomationSuggestion,
+  AutomationSuggestionKind,
+} from './automationSuggestion.ts'
+export {
+  detectAutomationSuggestion,
+  formatAutomationSuggestion,
+} from './automationSuggestion.ts'
 
 const GOAL_KEYWORDS = [
   'find',
@@ -98,11 +108,14 @@ export function classifyLoopType(input: string): LoopType {
   const text = input.trim()
   const lower = text.toLowerCase()
 
+  // Conversational automation intent is advisory only.  Time-based and
+  // Proactive remain valid for explicit trigger adapters, never for text auto
+  // classification.
+  if (detectAutomationSuggestion(text)) return 'Goal-based'
+
   // Chat-lite first: short Q&A must not become a Goal pipeline
   if (isChatLiteObjective(text)) return 'Turn-based'
 
-  if (TIME_KEYWORDS.some((k) => lower.includes(k) || text.includes(k))) return 'Time-based'
-  if (PROACTIVE_KEYWORDS.some((k) => lower.includes(k) || text.includes(k))) return 'Proactive'
   if (
     GOAL_KEYWORDS.some((k) => lower.includes(k) || text.includes(k)) ||
     COMPLEX_MARKERS.test(text) ||
@@ -290,6 +303,7 @@ export function buildParseResult(
   sequence: string[],
   definitionOfDone: string,
   maxIterations: number,
+  nextState?: NextState,
 ): ParseResult {
   const config: LoopConfiguration = {
     loopType,
@@ -308,7 +322,7 @@ export function buildParseResult(
       loopType === 'Goal-based'
         ? 'Halt and route to human-in-the-loop queue after max iterations'
         : 'Log error and halt',
-    nextState: loopType === 'Turn-based' ? 'Await User Input' : 'Halt',
+    nextState: nextState || (loopType === 'Turn-based' ? 'Await User Input' : 'Halt'),
   }
 
   const steps: ExecutionStep[] = sequence.map((action, i) => ({
@@ -321,22 +335,143 @@ export function buildParseResult(
   return { config, objective, steps }
 }
 
+export type PlanBubbleMode = 'auto' | 'force'
+
+export interface PlanBubbleOptions {
+  mode?: PlanBubbleMode
+  /** Lifecycle source kind, e.g. schedule / webhook / composer. */
+  sourceKind?: string
+  /** Explicit source text supplied by an integration or restored run. */
+  triggerSource?: string
+  /** Human-readable label supplied by the entry adapter. */
+  sourceLabel?: string
+  /** Explicit caller reason takes precedence over the derived reason. */
+  classificationReason?: string
+  loopType?: LoopType
+  continueGoal?: boolean
+}
+
+export interface PlanBubbleMetadata {
+  mode: PlanBubbleMode
+  modeLabel: '自動分類' | '手動指定'
+  triggerSource: string
+  classificationReason: string
+}
+
+const PLAN_TRIGGER_SOURCE_LABELS: Readonly<Record<string, string>> = {
+  composer: '對話文字',
+  slash: 'Slash command',
+  retry: '手動重試',
+  schedule: 'ScheduledJob trigger',
+  webhook: 'Webhook event payload',
+  event: 'Event matcher',
+  telegram: 'Telegram inbound',
+  delegate: 'Delegate task',
+  'queue-drain': 'Queue drain',
+}
+
+const AUTOMATION_TRIGGER_KINDS = new Set([
+  'schedule',
+  'webhook',
+  'event',
+  'telegram',
+  'delegate',
+  'queue-drain',
+])
+
+function sourceDescriptor(sourceKind?: string): string {
+  return sourceKind ? PLAN_TRIGGER_SOURCE_LABELS[sourceKind] || sourceKind : ''
+}
+
+function resolvePlanTriggerSource(opts: PlanBubbleOptions): string {
+  const explicit = opts.triggerSource?.trim()
+  if (explicit) return explicit
+
+  const descriptor = sourceDescriptor(opts.sourceKind)
+  const label = opts.sourceLabel?.trim()
+  if (label) {
+    if (!descriptor || label.includes(descriptor)) return label
+    return `${descriptor} · ${label}`
+  }
+  return descriptor || '對話文字'
+}
+
+function resolvePlanClassificationReason(
+  opts: PlanBubbleOptions,
+): string {
+  const explicit = opts.classificationReason?.trim()
+  if (explicit) return explicit
+
+  if (opts.continueGoal) {
+    return '沿用既有 Goal-based DoD，依使用者指示繼續／補齊缺口'
+  }
+
+  const loopLabel = opts.loopType || 'Turn-based / Goal-based'
+  if (opts.mode !== 'force') {
+    if (!opts.sourceKind || opts.sourceKind === 'composer' || opts.sourceKind === 'slash') {
+      return '由對話自動分類（僅允許 Turn-based / Goal-based）'
+    }
+    return `由 ${sourceDescriptor(opts.sourceKind)} 自動分類（僅允許 Turn-based / Goal-based）`
+  }
+
+  if (opts.sourceKind === 'schedule') {
+    return `由已驗證 ScheduledJob trigger 明確指定 ${loopLabel}`
+  }
+  if (opts.sourceKind === 'webhook') {
+    return `由已驗證 Webhook matcher evidence 明確指定 ${loopLabel}`
+  }
+  if (opts.sourceKind === 'event') {
+    return `由已驗證 event matcher evidence 明確指定 ${loopLabel}`
+  }
+  if (opts.sourceKind === 'telegram') {
+    return `由 Telegram inbound adapter 明確指定 ${loopLabel}`
+  }
+  if (opts.sourceKind === 'delegate') {
+    return `由 Delegate task adapter 明確指定 ${loopLabel}`
+  }
+  if (opts.sourceKind === 'queue-drain') {
+    return `由佇列補跑保留的來源明確指定 ${loopLabel}`
+  }
+  if (AUTOMATION_TRIGGER_KINDS.has(opts.sourceKind || '')) {
+    return `由已驗證自動化 trigger 明確指定 ${loopLabel}`
+  }
+  return `由使用者手動指定 ${loopLabel}`
+}
+
+/** Resolve source and classification copy for every plan bubble entry point. */
+export function resolvePlanBubbleMetadata(
+  opts: PlanBubbleOptions = {},
+): PlanBubbleMetadata {
+  const mode: PlanBubbleMode = opts.mode === 'force' ? 'force' : 'auto'
+  return {
+    mode,
+    modeLabel: mode === 'force' ? '手動指定' : '自動分類',
+    triggerSource: resolvePlanTriggerSource(opts),
+    classificationReason: resolvePlanClassificationReason({ ...opts, mode }),
+  }
+}
+
 /** Compact plan bubble for chat UI after parse. */
 export function formatPlanBubble(
   config: LoopConfiguration,
-  opts?: { mode?: 'auto' | 'force' },
+  opts?: PlanBubbleOptions,
 ): string {
-  const modeLabel = opts?.mode === 'force' ? '手動指定' : '自動分類'
+  const meta = resolvePlanBubbleMetadata({
+    ...opts,
+    loopType: opts?.loopType || config.loopType,
+  })
   const steps = config.executionSequence
     .slice(0, 7)
     .map((step, index) => `${index + 1}. ${step}`)
     .join('\n')
   return [
-    `📋 執行計畫（${modeLabel} · ${config.loopType}）`,
+    `📋 執行計畫（${meta.modeLabel} · ${config.loopType}）`,
+    `Trigger source：${meta.triggerSource}`,
+    `分類原因：${meta.classificationReason}`,
     `DoD：${config.definitionOfDone.slice(0, 160)}`,
     `步驟 ${config.executionSequence.length} · 最多 ${config.maxIterations} 輪`,
     steps,
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 /** Render loop config as the markdown schema from the docs. */

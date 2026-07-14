@@ -35,12 +35,19 @@ import {
   synthesizeReport,
   withRoleModel,
 } from './llm'
-import { buildPromptLayers } from './hermes/promptBuilder'
+import { buildPromptLayers, formatPacketDiagnostics } from './hermes/promptBuilder'
 import { learningLoop } from './hermes/learning'
+import { BUILTIN_RUNNER_CAPABILITIES } from './runners'
 import { compressStepOutputs } from './hermes/sessionSearch'
 import { skillsStore } from './hermes/skills'
 import { buildToolInput, selectToolsForStep } from './tools/registry'
 import { authorizeTool, guardAndExecuteTool } from './tools/toolGuard'
+import {
+  isClaimedScheduleTrigger,
+  validateScheduleTriggerSnapshot,
+  type ScheduleTriggerValidation,
+} from './scheduler'
+import { validateEventTriggerSnapshot } from './eventMatcher'
 import {
   buildCustomToolInput,
   executeCustomTool,
@@ -88,6 +95,8 @@ export class AgentLoopEngine {
   private overrides: RuntimeOverrides = {}
   private stepOutputs: string[] = []
   private attachedSkillContext = ''
+  /** Phase 4: session recall kept separate for ContextPacket (not mashed into skills blob). */
+  private sessionRecallBlock = ''
   /** Last DoD missing[] for continueGoal snapshot */
   private lastDodMissing: string[] = []
   /** W2: persistent project guidance (AGENTS.md) resolved per run */
@@ -129,6 +138,8 @@ export class AgentLoopEngine {
       loadedCapabilityIds: [],
       unlockedToolNames: [],
       violation: null,
+      executionKind: 'loop',
+      runnerCapabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
       metrics: {
         vramLabel: '—',
         apiCredits: 0,
@@ -208,6 +219,27 @@ export class AgentLoopEngine {
       this.state.loopConfig.maxIterations ??
       this.settings.maxIterationsDefault
     )
+  }
+
+  private async validateTimeBasedTrigger(): Promise<ScheduleTriggerValidation> {
+    if (this.overrides.sourceKind !== 'schedule') {
+      return { ok: false, reason: 'source 不是 schedule' }
+    }
+    const validation = validateScheduleTriggerSnapshot(this.overrides.scheduleTrigger)
+    if (!validation.ok) return validation
+    try {
+      const { useScheduleStore } = await import('../store/scheduleStore')
+      const store = useScheduleStore.getState()
+      if (!store.loaded) await store.load()
+      const job = useScheduleStore
+        .getState()
+        .jobs.find((candidate) => candidate.id === validation.snapshot.jobId)
+      return isClaimedScheduleTrigger(job, validation.snapshot)
+        ? validation
+        : { ok: false, reason: '找不到與 trigger snapshot 一致的已 claim ScheduledJob' }
+    } catch {
+      return { ok: false, reason: '無法載入 schedule store 驗證 trigger snapshot' }
+    }
   }
 
   private useLlm(): boolean {
@@ -314,6 +346,7 @@ export class AgentLoopEngine {
     this.stepOutputs = []
     this.lastDodMissing = []
     this.attachedSkillContext = ''
+    this.sessionRecallBlock = ''
     this.userAttachments = this.overrides.userAttachments || []
     // Tool calls receive this run's identity explicitly. The old module-level
     // runContext was safe only while a single engine could run at once.
@@ -343,6 +376,8 @@ export class AgentLoopEngine {
         .join('\n\n')
     }
     this.state = this.emptyState()
+    this.state.scheduleTrigger = this.overrides.scheduleTrigger
+    this.state.eventTrigger = this.overrides.eventTrigger
     this.state.status = 'parsing'
     this.state.startedAt = new Date().toISOString()
     this.state.minConfidence = this.minConfidence()
@@ -507,35 +542,74 @@ export class AgentLoopEngine {
         }
       }
 
-      // P2: session recall into extra context (Hermes cross-session)
+      // Defense in depth: taskRunCoordinator validates before reservation,
+      // while the engine protects direct callers from bypassing that seam.
+      if (this.state.loopConfig.loopType === 'Time-based') {
+        const validation = await this.validateTimeBasedTrigger()
+        if (!validation.ok) {
+          this.state.status = 'failed'
+          this.state.haltReason = `Time-based trigger 無效：${validation.reason}`
+          this.log('ERROR', this.state.haltReason)
+          this.state.metrics.executionMs = Date.now() - t0
+          this.state.finishedAt = new Date().toISOString()
+          this.emit()
+          return this.getState()
+        }
+        this.state.scheduleTrigger = validation.snapshot
+        this.log(
+          'INFO',
+          `Schedule trigger 已驗證：${validation.snapshot.jobId} · ${validation.snapshot.triggeredAt}`,
+        )
+      }
+
+      // Proactive may only consume matcher-produced boolean evidence. The
+      // objective is never a substitute for an event payload anymore.
+      if (this.state.loopConfig.loopType === 'Proactive') {
+        const validation = validateEventTriggerSnapshot(this.overrides.eventTrigger)
+        if (!validation.ok) {
+          this.state.status = 'failed'
+          this.state.haltReason = `Proactive trigger 無效：${validation.reason}`
+          this.log('ERROR', this.state.haltReason)
+          this.state.metrics.executionMs = Date.now() - t0
+          this.state.finishedAt = new Date().toISOString()
+          this.emit()
+          return this.getState()
+        }
+        this.state.eventTrigger = validation.snapshot
+        this.log(
+          'INFO',
+          `Event matcher evidence 已驗證：${validation.snapshot.eventId} · ${validation.snapshot.matchedAt}`,
+        )
+      }
+
+      // Phase 4: session recall as a ContextPacket slot (top-k, failure-first)
+      const temporaryRun =
+        this.overrides.temporary === true || this.settings.temporaryChatDefault === true
       if (
         this.settings.sessionRecallEnabled !== false &&
-        this.overrides.temporary !== true &&
-        this.settings.temporaryChatDefault !== true
+        !temporaryRun
       ) {
         try {
           const { searchSessions } = await import('./hermes/sessionSearch')
+          const { formatSessionRecallBlock } = await import('./hermes/contextPacket')
           const { SESSION_RECALL_CONTEXT_CHARS } = await import('./chatHistory')
           const { useAgentStore } = await import('../store/agentStore')
-          const hits = searchSessions(rawInput, useAgentStore.getState().archive || [], 3)
+          const hits = searchSessions(rawInput, useAgentStore.getState().archive || [], 8)
           if (hits.length) {
-            // Reserved slice of the shared reference-context budget — see chatHistory.ts.
-            const block = [
-              '## 跨 session 召回（同類任務參考）',
-              ...hits.map(
-                (h) =>
-                  `- [${h.source}] ${h.title}: ${h.snippet.slice(0, 160)}`,
-              ),
-              '若適用請沿用成功做法；若召回為失敗教訓請避開。',
-            ].join('\n').slice(0, SESSION_RECALL_CONTEXT_CHARS)
-            this.attachedSkillContext = [this.attachedSkillContext, block]
-              .filter(Boolean)
-              .join('\n\n')
-            this.log('INFO', `Session 召回：${hits.length} 筆`)
+            this.sessionRecallBlock = formatSessionRecallBlock(hits, {
+              maxHits: 3,
+              maxChars: SESSION_RECALL_CONTEXT_CHARS,
+            })
+            this.log(
+              'INFO',
+              `Session 召回：${hits.length} 命中 → packet top-k（failure-first）`,
+            )
           }
         } catch {
           /* non-fatal */
         }
+      } else if (temporaryRun) {
+        this.log('INFO', 'Temporary chat：略過 session recall（ContextPacket diagnostics）')
       }
 
       this.state.subAgents = this.spawnSubAgents(this.state.loopConfig.loopType)
@@ -563,6 +637,10 @@ export class AgentLoopEngine {
             'system',
             formatPlanBubble(this.state.loopConfig, {
               mode: effectiveForce ? 'force' : 'auto',
+              sourceKind: this.overrides.sourceKind,
+              triggerSource: this.overrides.triggerSource,
+              classificationReason: this.overrides.classificationReason,
+              continueGoal: Boolean(this.overrides.continueGoal),
             }),
           )
         }
@@ -601,7 +679,7 @@ export class AgentLoopEngine {
           `掛載 Skills: ${this.overrides.attachedSkills.join(', ')}`,
         )
       }
-      learningLoop.onUserTurn()
+      // Phase 4 / R7: onUserTurn is owned by the coordinator for user chat turns only.
 
       // Must use refined loop type (not the pre-LLM heuristic only)
       switch (this.state.loopConfig.loopType) {
@@ -617,6 +695,16 @@ export class AgentLoopEngine {
         case 'Proactive':
           await this.runProactive()
           break
+      }
+
+      // The controller may explicitly choose a post-state for an automation
+      // or integration run; apply it after pattern finalization so Goal/Turn
+      // success helpers cannot silently overwrite the requested outcome.
+      if (this.overrides.nextState) {
+        this.state.loopConfig = {
+          ...this.state.loopConfig,
+          nextState: this.overrides.nextState,
+        }
       }
 
       if (this.aborted && (this.state.status === 'running' || this.state.status === 'manual_intervention')) {
@@ -832,13 +920,13 @@ export class AgentLoopEngine {
           temporary:
             this.overrides.temporary === true ||
             this.settings.temporaryChatDefault === true,
-          extraContext: [
-            compressStepOutputs(this.stepOutputs, 4000),
-            this.attachedSkillContext,
-          ]
-            .filter(Boolean)
-            .join('\n\n'),
+          stepEvidence: compressStepOutputs(this.stepOutputs, 4000),
+          sessionRecall: this.sessionRecallBlock || undefined,
+          skillsContext: this.attachedSkillContext || undefined,
         })
+        if (layers.packetDiagnostics) {
+          this.log('INFO', formatPacketDiagnostics(layers.packet!))
+        }
         // Cross-step + cross-run resume: skills + loaded caps + tool_search unlocks
         const preloadCaps = [
           ...(this.overrides.attachedSkills || []).map((n) => `skill:${n}`),
@@ -1251,7 +1339,9 @@ export class AgentLoopEngine {
               temporary:
                 this.overrides.temporary === true ||
                 this.settings.temporaryChatDefault === true,
-              extraContext: [context, this.attachedSkillContext].filter(Boolean).join('\n\n'),
+              stepEvidence: context,
+              sessionRecall: this.sessionRecallBlock || undefined,
+              skillsContext: this.attachedSkillContext || undefined,
             })
             // Heuristic path: still support vision when attachments present
             let userContent: import('./llm').ChatMessageContent | undefined
@@ -1428,6 +1518,7 @@ export class AgentLoopEngine {
     this.state.confidence = Math.max(this.state.confidence, 0.92)
     this.state.result = output
     this.state.reportTitle = 'Turn Result'
+    const configuredNextState = this.overrides.nextState || this.state.loopConfig.nextState
     // Chat-lite / composer / automation: do not block a run slot on ACK.
     // Explicit Turn on Execution page (no sourceKind) still waits for user validation.
     const chatLiteAck =
@@ -1435,10 +1526,12 @@ export class AgentLoopEngine {
       this.overrides.sourceKind === 'composer' ||
       this.overrides.sourceKind === 'slash' ||
       this.overrides.sourceKind === 'retry'
-    if (chatLiteAck) {
+    if (chatLiteAck || configuredNextState === 'Dispatch Webhook') {
       this.log(
         'INFO',
-        this.overrides.unattended === true
+        configuredNextState === 'Dispatch Webhook'
+          ? 'Turn post-state：完成後 Dispatch Webhook'
+          : this.overrides.unattended === true
           ? '無人值守 Turn-based：跳過人工 ACK，自動確認'
           : '對話 Turn/Chat-lite：自動確認，不等待 ACK',
       )
@@ -1456,7 +1549,9 @@ export class AgentLoopEngine {
     this.state.progress = 100
     this.state.loopConfig = {
       ...this.state.loopConfig,
-      nextState: chatLiteAck ? 'Halt' : 'Halt',
+      nextState:
+        this.overrides.nextState ||
+        (configuredNextState === 'Dispatch Webhook' ? 'Dispatch Webhook' : 'Halt'),
     }
     this.setSubAgent('Core', 'done')
     this.log('SUCCESS', chatLiteAck ? 'Turn complete (auto-ACK).' : 'User ACK received. Turn complete.')
@@ -1648,7 +1743,13 @@ export class AgentLoopEngine {
     // docs/CONVERSATION_LOOP_HERMES_FLOW.md.
     this.state.loopConfig = {
       ...this.state.loopConfig,
-      nextState: this.resultAwaitsReply(report) ? 'Await User Input' : 'Halt',
+      nextState:
+        this.overrides.nextState ||
+        (this.state.loopConfig.nextState === 'Dispatch Webhook'
+          ? 'Dispatch Webhook'
+          : this.resultAwaitsReply(report)
+            ? 'Await User Input'
+            : 'Halt'),
     }
     this.refreshKnowledge()
     this.log('SUCCESS', 'Definition of Done met. Terminating loop.')
@@ -1731,7 +1832,13 @@ export class AgentLoopEngine {
 
   private async runTimeBased() {
     this.log('INFO', 'Pattern: Time-based — Cron-job style execution')
-    this.log('INFO', `Trigger window validated at ${nowTime()}`)
+    const trigger = this.state.scheduleTrigger
+    this.log(
+      'INFO',
+      trigger
+        ? `Trigger window validated：${trigger.jobId} @ ${trigger.triggeredAt}`
+        : `Trigger window validated at ${nowTime()}`,
+    )
     this.setSubAgent('Manager', 'active')
 
     for (let i = 0; i < this.state.steps.length; i++) {
@@ -1798,31 +1905,13 @@ export class AgentLoopEngine {
 
   private async runProactive() {
     this.log('INFO', 'Pattern: Proactive — Event-driven execution')
-
-    // External layers (webhook / telegram / event match) already validated → skip re-check
-    if (this.overrides.eventPreMatched) {
-      this.log(
-        'SUCCESS',
-        'Event pre-matched upstream (schedule/webhook/telegram) — skip objective when/if re-check',
-      )
-    } else {
-      this.log('INFO', 'Evaluating event predicates on objective text…')
-      const lower = this.state.objective.toLowerCase()
-      // EN: when/if · ZH: 當/如果/若/一旦
-      const hasTrigger =
-        /\b(when|if)\b/.test(lower) || /當|如果|若|一旦|每當/.test(this.state.objective)
-      const hasAnd = /\band\b/.test(lower) || /且|並且|同時/.test(this.state.objective)
-      this.log('INFO', `predicate has_trigger=${hasTrigger} has_and=${hasAnd}`)
-      if (!hasTrigger) {
-        this.state.status = 'halted'
-        this.state.haltReason =
-          'Event criteria not met — objective 需含 when/if 或「當／如果／若」，或由已匹配事件以 eventPreMatched 觸發'
-        this.log('WARN', 'Predicate false — no action taken (anti fuzzy-match).')
-        this.emit()
-        return
-      }
-      this.log('SUCCESS', 'Objective trigger language OK')
-    }
+    const trigger = this.state.eventTrigger
+    this.log(
+      'SUCCESS',
+      trigger
+        ? `Event matcher predicates verified：${trigger.eventName} · ${trigger.matchedAt}`
+        : 'Event matcher evidence missing — no action taken.',
+    )
 
     for (let i = 0; i < this.state.steps.length; i++) {
       if (this.aborted) return

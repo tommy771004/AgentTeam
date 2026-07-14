@@ -1,5 +1,14 @@
 import { create } from 'zustand'
-import type { ProactiveEvent, ScheduledJob } from '../agent/types'
+import type {
+  EventTriggerSnapshot,
+  ProactiveEvent,
+  ScheduledJob,
+} from '../agent/types'
+import {
+  matchProactiveEvent,
+  type EventMatchResult,
+  type ProactiveEventPayload,
+} from '../agent/eventMatcher'
 import {
   advanceJobAfterRun,
   createJob,
@@ -37,13 +46,9 @@ interface ScheduleStore {
   addEvent: (input: Omit<ProactiveEvent, 'id' | 'lastTriggeredAt' | 'triggerCount'>) => Promise<void>
   removeEvent: (id: string) => Promise<void>
   toggleEvent: (id: string) => Promise<void>
-  matchEvent: (payload: {
-    source: string
-    subject?: string
-    hasAttachment?: boolean
-    body?: string
-  }) => ProactiveEvent | null
-  recordEventTrigger: (id: string) => Promise<void>
+  matchEventEvidence: (payload: ProactiveEventPayload) => EventMatchResult | null
+  matchEvent: (payload: ProactiveEventPayload) => ProactiveEvent | null
+  recordEventTrigger: (id: string, evidence?: EventTriggerSnapshot) => Promise<void>
   startTicker: (onDue: (job: ScheduledJob) => void) => () => void
 }
 
@@ -190,26 +195,18 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
     await get().persistEvents()
   },
 
-  matchEvent: (payload) => {
+  matchEventEvidence: (payload) => {
     // Strict boolean matching ONLY (02_Execution_Rules Pattern 4)
     for (const e of get().events) {
-      if (!e.enabled) continue
-      if (e.source !== payload.source) continue
-      if (e.hasAttachment != null && e.hasAttachment !== Boolean(payload.hasAttachment)) continue
-      if (e.subjectContains) {
-        const sub = (payload.subject || '').toLowerCase()
-        if (!sub.includes(e.subjectContains.toLowerCase())) continue
-      }
-      if (e.keyword) {
-        const body = `${payload.subject || ''} ${payload.body || ''}`.toLowerCase()
-        if (!body.includes(e.keyword.toLowerCase())) continue
-      }
-      return e
+      const matched = matchProactiveEvent(e, payload)
+      if (matched) return matched
     }
     return null
   },
 
-  recordEventTrigger: async (id) => {
+  matchEvent: (payload) => get().matchEventEvidence(payload)?.event || null,
+
+  recordEventTrigger: async (id, evidence) => {
     set({
       events: get().events.map((e) =>
         e.id === id
@@ -217,6 +214,7 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
               ...e,
               lastTriggeredAt: new Date().toISOString(),
               triggerCount: e.triggerCount + 1,
+              lastTriggerEvidence: evidence || e.lastTriggerEvidence,
             }
           : e,
       ),

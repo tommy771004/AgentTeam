@@ -28,14 +28,15 @@ export function SuccessPage() {
       return
     }
     navigate('/')
-    const { runExternalObjective } = await import('../agent/runExternal')
-    await runExternalObjective({
+    const { runTask } = await import('../agent/taskRunCoordinator')
+    await runTask({
       sourceKind: 'retry',
       objective: input,
       title: '重新開始',
       loopType,
       eventPreMatched: loopType === 'Proactive',
       sourceLabel: '成功頁重新開始',
+      meta: { eventTrigger: agent.eventTrigger },
     })
   }
 

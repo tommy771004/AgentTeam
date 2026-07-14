@@ -42,6 +42,12 @@ const api = {
         lastError: string | null
         hitCount: number
       }>,
+    dispatch: (request: { target: string; payload: Record<string, unknown> }) =>
+      ipcRenderer.invoke('webhook:dispatch', request) as Promise<{
+        ok: boolean
+        status?: number
+        error?: string
+      }>,
     onEvent: (cb: (payload: {
       receivedAt: string
       path: string

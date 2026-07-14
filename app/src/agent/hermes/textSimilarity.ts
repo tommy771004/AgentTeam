@@ -22,6 +22,34 @@ export function textTokens(text: string): Set<string> {
   return tokens
 }
 
+/**
+ * Query→document relevance with ASCII tokens + CJK bigrams.
+ * Shared by memory search, session recall, and ContextPacket ranking.
+ */
+export function scoreQueryText(query: string, text: string): number {
+  const q = query.toLowerCase().trim()
+  if (!q || !text) return 0
+  const hay = text.toLowerCase()
+  let score = 0
+  for (const w of q.split(/\s+/)) {
+    if (w.length < 2) continue
+    if (hay.includes(w)) score += w.length > 3 ? 2 : 1
+  }
+  // CJK: single chars (weak) + bigrams (strong) so 繁中 objectives match lessons.
+  for (const sequence of q.match(/[一-鿿]{2,}/g) || []) {
+    for (let i = 0; i + 2 <= sequence.length; i += 1) {
+      const bigram = sequence.slice(i, i + 2)
+      if (hay.includes(bigram)) score += 2
+    }
+    if (sequence.length === 1 && hay.includes(sequence)) score += 1
+  }
+  for (const ch of q.match(/[一-鿿]/g) || []) {
+    if (ch.length === 1 && hay.includes(ch)) score += 0.25
+  }
+  if (hay.includes(q)) score += 5
+  return score
+}
+
 export function textSimilarity(a: string, b: string): number {
   const left = textTokens(a)
   const right = textTokens(b)

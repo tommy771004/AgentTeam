@@ -5,6 +5,10 @@
 import type { AgentState, ApprovalMode, CliConfigSnapshot, ExternalRunRef } from './types'
 import { emptyKnowledge } from './knowledge'
 import { resolveCliApproval } from './cliApproval'
+import {
+  EXTERNAL_CLI_DOD_LABEL,
+  EXTERNAL_CLI_RUNNER_CAPABILITIES,
+} from './runners'
 
 export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
 export type LocalCliConfigSnapshot = CliConfigSnapshot
@@ -107,6 +111,10 @@ export async function cancelLocalCliAgent(runId?: string): Promise<{ ok: boolean
 }
 
 export function emptyAgentLike(partial: Partial<AgentState> & { objective: string }): AgentState {
+  const isExternal =
+    partial.executionKind === 'external' ||
+    partial.loopConfig?.trigger === 'local-cli' ||
+    Boolean(partial.externalRunnerKind)
   return {
     id: partial.id || `cli_${Date.now().toString(36)}`,
     objective: partial.objective,
@@ -114,7 +122,8 @@ export function emptyAgentLike(partial: Partial<AgentState> & { objective: strin
       loopType: 'Goal-based',
       trigger: 'local-cli',
       executionSequence: ['local-cli'],
-      definitionOfDone: 'CLI returned',
+      // Honest label: external exit is not builtin DoD met
+      definitionOfDone: EXTERNAL_CLI_DOD_LABEL,
       maxIterations: 1,
       fallbackProtocol: '',
       nextState: 'Halt',
@@ -146,6 +155,16 @@ export function emptyAgentLike(partial: Partial<AgentState> & { objective: strin
     result: partial.result,
     reportTitle: partial.reportTitle,
     haltReason: partial.haltReason,
+    executionKind: partial.executionKind ?? (isExternal ? 'external' : 'loop'),
+    runnerCapabilities:
+      partial.runnerCapabilities ??
+      (isExternal ? { ...EXTERNAL_CLI_RUNNER_CAPABILITIES } : undefined),
+    externalRunnerKind: partial.externalRunnerKind,
+    externalRun: partial.externalRun,
+    cliConfigSnapshot: partial.cliConfigSnapshot,
+    scheduleTrigger: partial.scheduleTrigger,
+    eventTrigger: partial.eventTrigger,
+    postState: partial.postState,
   }
 }
 

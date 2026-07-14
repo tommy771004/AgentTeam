@@ -2,6 +2,12 @@ import { Icon } from './Icon'
 import { StepTimeline } from './StepTimeline'
 import { LogViewer } from './LogViewer'
 import { InterventionPanel } from './InterventionPanel'
+import { emptyAgentLike } from '../agent/localCliRun'
+import {
+  EXTERNAL_CLI_UI_LABEL,
+  capabilitiesForRunner,
+  formatRunnerCapabilitiesSummary,
+} from '../agent/runners'
 import { useAgentStore } from '../store/agentStore'
 import { useProjectStore } from '../store/projectStore'
 import { useRunActivityStore } from '../store/runActivityStore'
@@ -11,18 +17,37 @@ import { loopTypeZh } from '../i18n/zh'
 /**
  * CloudCLI-style embedded run progress — no page navigation
  */
-export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
-  const { agent, isRunning, stopExecution, continueTurn, resolveIntervention } = useAgentStore()
-  const activity = useRunActivityStore()
-  const continueGoal = useThreadStore((s) => {
-    const tid = s.activeId
-    return tid ? s.threads.find((t) => t.id === tid)?.continueGoal : undefined
+const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 })
+
+export function InlineRunPanel({
+  runId,
+  threadId,
+  onClose,
+}: {
+  runId: string
+  threadId: string
+  onClose?: () => void
+}) {
+  const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
+  const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
+  const stopExecution = useAgentStore((s) => s.stopExecution)
+  const continueTurn = useAgentStore((s) => s.continueTurn)
+  const resolveIntervention = useAgentStore((s) => s.resolveIntervention)
+  const activity =
+    useRunActivityStore((s) => s.presentations[runId]) ||
+    ({ active: false, tasks: [], statusLine: '', thought: '' } as const)
+  const threadMeta = useThreadStore((s) => {
+    const thread = s.threads.find((t) => t.id === threadId)
+    return {
+      continueGoal: thread?.continueGoal,
+      runner: thread?.runner || 'builtin',
+      runPlan: thread?.runPlan || [],
+    }
   })
-  const activeId = useThreadStore((s) => s.activeId)
-  const persistedPlan = useThreadStore((s) => {
-    const thread = s.threads.find((item) => item.id === s.activeId)
-    return thread?.runPlan || []
-  })
+  const continueGoal = threadMeta.continueGoal
+  const activeId = threadId
+  const threadRunner = threadMeta.runner
+  const persistedPlan = threadMeta.runPlan
   const tasks = activity.tasks.length
     ? activity.tasks
     : persistedPlan.map((item) => ({
@@ -41,15 +66,24 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
     agent.status === 'awaiting_user'
 
   const done = ['success', 'failed', 'halted'].includes(agent.status)
+  const isExternal =
+    agent.executionKind === 'external' ||
+    agent.loopConfig.trigger === 'local-cli' ||
+    threadRunner !== 'builtin'
+  const runnerCaps =
+    agent.runnerCapabilities || capabilitiesForRunner(isExternal ? threadRunner : 'builtin')
+  const canContinueGoal = Boolean(continueGoal && runnerCaps.continueGoal)
 
   const onContinueGoal = async () => {
-    if (!continueGoal || !activeId || isRunning) return
-    const { runTask } = await import('../agent/runExternal')
+    if (!canContinueGoal || !continueGoal || !activeId || isRunning) return
+    const { runTask } = await import('../agent/taskRunCoordinator')
     await runTask({
       objective: continueGoal.objective,
       sourceKind: 'retry',
       reuseThreadId: activeId,
       continueGoal: true,
+      // Force builtin — only loop adapter can honor DoD/missing.
+      runner: 'builtin',
       loopType: 'Goal-based',
       skipUserBubble: false,
       // Snapshot the project pinned at dispatch time — a concurrent run must not
@@ -84,7 +118,7 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
           {live && (
             <button
               type="button"
-              onClick={() => stopExecution()}
+              onClick={() => stopExecution(runId)}
               className="px-2 py-1 rounded text-[10px] font-semibold border border-error/30 text-error hover:bg-error/10"
             >
               停止
@@ -106,10 +140,25 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3 space-y-3">
         <div className="rounded-xl border border-white/10 bg-surface-container/60 p-3 space-y-2">
           <div className="text-[10px] uppercase tracking-wider text-outline font-semibold">
-            {loopTypeZh(agent.loopConfig.loopType)} · 迭代 {agent.currentIteration}/
-            {agent.loopConfig.maxIterations}
-            {agent.loopConfig.trigger === 'local-cli' ? ' · CLI' : ''}
+            {isExternal
+              ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind ? ` · ${agent.externalRunnerKind}` : ''}`
+              : `${loopTypeZh(agent.loopConfig.loopType)} · 迭代 ${agent.currentIteration}/${agent.loopConfig.maxIterations}`}
           </div>
+          {isExternal && (
+            <p className="text-[10px] text-outline leading-snug">
+              {formatRunnerCapabilitiesSummary(runnerCaps)}
+            </p>
+          )}
+          {!isExternal && (
+            <p className="text-[10px] text-outline">
+              DoD：{agent.loopConfig.definitionOfDone?.slice(0, 80) || '—'}
+            </p>
+          )}
+          {isExternal && (
+            <p className="text-[10px] text-amber-400/90 leading-snug">
+              外部執行結束 ≠ 內建 DoD 已滿足；不顯示 iterate／能力包進度。
+            </p>
+          )}
           <p className="text-xs text-on-surface leading-relaxed line-clamp-3">
             {agent.objective || '—'}
           </p>
@@ -143,7 +192,7 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
           <div className="text-[10px] text-outline font-[family-name:var(--font-mono)]">
             tokens {agent.tokensUsed} · {agent.metrics?.executionMs || 0}ms
           </div>
-          {(agent.loadedCapabilityIds?.length ?? 0) > 0 && (
+          {!isExternal && (agent.loadedCapabilityIds?.length ?? 0) > 0 && (
             <div className="pt-1">
               <div className="text-[10px] uppercase tracking-wider text-outline font-semibold mb-1.5">
                 Capabilities
@@ -254,23 +303,23 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
           <InterventionPanel
             intervention={agent.intervention}
             onApprove={(payloadJson) =>
-              resolveIntervention({ action: 'approve', payloadJson })
+              resolveIntervention({ action: 'approve', payloadJson }, runId)
             }
-            onReject={() => resolveIntervention({ action: 'reject' })}
+            onReject={() => resolveIntervention({ action: 'reject' }, runId)}
           />
         )}
 
         {agent.status === 'awaiting_user' && (
           <button
             type="button"
-            onClick={() => continueTurn()}
+            onClick={() => continueTurn(runId)}
             className="w-full py-2 rounded-lg border border-primary/40 text-primary text-xs font-semibold hover:bg-primary/10"
           >
             繼續下一回合
           </button>
         )}
 
-        {continueGoal && !live && (
+        {continueGoal && !live && canContinueGoal && (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
             <p className="text-[11px] text-on-surface font-medium">
               未完成 Goal 可保留 DoD 繼續
@@ -292,6 +341,24 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
             >
               補齊缺口繼續
             </button>
+          </div>
+        )}
+        {continueGoal && !live && !canContinueGoal && (
+          <div className="rounded-xl border border-white/15 bg-surface-container/50 p-3 space-y-1.5">
+            <p className="text-[11px] text-on-surface font-medium">
+              外部 CLI 不支援「補齊缺口繼續」
+            </p>
+            <p className="text-[10px] text-outline leading-snug">
+              已保留原 Goal 快照（DoD／缺口），但目前 runner 未宣告 continueGoal。
+              請切換至內建引擎後再繼續，或重新開啟外部任務。
+            </p>
+            {continueGoal.missing.length > 0 && (
+              <ul className="text-[10px] text-on-surface-variant space-y-0.5">
+                {continueGoal.missing.slice(0, 4).map((m) => (
+                  <li key={m}>· {m}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 

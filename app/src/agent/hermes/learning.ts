@@ -42,7 +42,11 @@ class LearningLoop {
     this.pendingSkillDrafts = this.pendingSkillDrafts.filter((d) => d.name !== name)
   }
 
-  /** Call after each user-initiated run */
+  /**
+   * Phase 4 / R7: count only user-initiated chat turns accepted by the
+   * coordinator (composer / slash / retry). Must NOT be called from
+   * onGoalSuccess or automation sources.
+   */
   onUserTurn() {
     this.turnCounter += 1
     // Hermes-like: every N turns nudge memory
@@ -55,6 +59,11 @@ class LearningLoop {
         at: new Date().toISOString(),
       })
     }
+  }
+
+  /** Test / diagnostics — number of user turns counted since process start. */
+  getUserTurnCount() {
+    return this.turnCounter
   }
 
   /**
@@ -106,7 +115,7 @@ class LearningLoop {
     memoryEnabled?: boolean
     memoryWriteEnabled?: boolean
   }) {
-    this.onUserTurn()
+    // Phase 4: do not increment turn counter here — success is not a user turn.
     // Skip skill drafts for trivial chat-lite turns (no tools / single generic step)
     const tools = input.toolCalls || []
     if (
@@ -215,9 +224,16 @@ ${toolsMd ? `\n## 成功工具序列\n${toolsMd}\n` : ''}
     const toolNote = input.failedTools?.length
       ? `；失敗工具：${input.failedTools.slice(0, 5).join(', ')}`
       : ''
+    // Phase 4: explicit tool:/strategy: tags for ContextPacket recall
+    const tags = [
+      'failure',
+      'auto',
+      `strategy:${input.loopType}`,
+      ...(input.failedTools || []).slice(0, 5).map((t) => `tool:${t}`),
+    ]
     memoryStore.appendMemory(
       `目標失敗：${input.objective.slice(0, 100)}（${input.loopType}）原因：${input.haltReason.slice(0, 120)}${toolNote}`,
-      ['failure', 'auto'],
+      tags,
     )
     this.emit({
       id: uuid(),
