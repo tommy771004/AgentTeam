@@ -690,6 +690,14 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         const prev = get().archive.filter((a) => a.id !== record.id)
         set({ archive: [record, ...prev] })
       }
+      // Usage-based automation suggestions are generated from the same
+      // successful archive source; decisions are kept separately by the UI.
+      try {
+        const { useAutomationSuggestionStore } = await import('./automationSuggestionStore')
+        useAutomationSuggestionStore.getState().refreshFromArchive(get().archive)
+      } catch {
+        /* suggestions are advisory and never change run outcome */
+      }
       // ChatGPT-style data control: auto-archive prune by age
       await pruneArchiveByAge(useSettingsStore.getState().settings.autoArchiveDays || 0)
     },

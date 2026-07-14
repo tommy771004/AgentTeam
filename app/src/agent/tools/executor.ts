@@ -17,7 +17,6 @@ import {
   scanDesignSystems,
   DESIGN_SYSTEM_ROOT,
 } from '../subdesign/designSystem'
-import { resolveEffectiveProjectRoot } from './runContext'
 import { isMcpServerAllowedForAgent, mcpServersForAgent } from '../opencode/mcpAccess'
 
 export interface ToolResult {
@@ -341,6 +340,7 @@ export async function executeTool(
             : []
         const parentCtx = {
           parentRunId: getRunId(),
+          parentThreadId: getRunThreadId(),
           projectRoot: getRunProjectRoot(),
           sourceKind: 'delegate' as const,
           inheritCapabilities,

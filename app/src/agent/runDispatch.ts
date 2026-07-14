@@ -174,7 +174,6 @@ export async function dispatchThreadTask(
     preloadCandidates.unshift('subdesign-workflow')
     if (subDesignBrief.stage === 'critique') preloadCandidates.unshift('design-critique')
   }
-    const preloadCandidates = buildIntentPreloadIds(text, settings, projectRoot, { max: 8 })
 
   if (runner !== 'builtin') {
     const kind = runner as LocalRunnerKind

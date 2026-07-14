@@ -55,6 +55,7 @@ import {
   buildMultimodalUserContent,
   contentPartsToPlainText,
 } from '../../lib/chatAttachments'
+import { getRunId, getRunThreadId } from './runContext'
 
 export interface ToolLoopCallbacks {
   onLog?: (
@@ -876,6 +877,8 @@ async function executeOneToolCall(
           background: true,
           notifyOnComplete,
           inheritCapabilities,
+          parentRunId: getRunId(),
+          parentThreadId: getRunThreadId(),
           parentPermissionPolicy: ctx.permissionPolicy,
           parentPermissionProjection: ctx.permissionProjection,
           parentMcpAgentId: ctx.mcpAgentId,

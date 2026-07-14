@@ -31,6 +31,8 @@ export interface DelegateTaskInput {
   inheritCapabilities?: string[]
   /** Parent run trace (audit / hooks) */
   parentRunId?: string
+  /** Source thread for background completion injection. */
+  parentThreadId?: string
   /** Parent entry source for hooks (delegate / schedule / …) */
   sourceKind?: string
   /** Per-run project pin (must not use UI store alone) */

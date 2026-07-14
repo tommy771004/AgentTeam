@@ -93,6 +93,10 @@ export function parseSkillMarkdown(raw: string, path: string): Skill {
     author: meta.author ? String(meta.author) : undefined,
     tags: Array.isArray(meta.tags) ? (meta.tags as string[]) : undefined,
     createdBy: meta.createdBy === 'agent' ? 'agent' : 'user',
+    status:
+      meta.status === 'pinned' || meta.status === 'archived'
+        ? meta.status
+        : 'active',
     createdAt: meta.createdAt ? String(meta.createdAt) : undefined,
     updatedAt: meta.updatedAt ? String(meta.updatedAt) : undefined,
   }
@@ -111,6 +115,7 @@ export function serializeSkill(meta: SkillMeta, body: string): string {
     meta.version ? `version: ${meta.version}` : null,
     meta.author ? `author: ${meta.author}` : null,
     meta.createdBy ? `createdBy: ${meta.createdBy}` : null,
+    `status: ${meta.status || 'active'}`,
     tags ? `tags: ${tags}` : null,
     meta.createdAt ? `createdAt: ${meta.createdAt}` : null,
     `updatedAt: ${meta.updatedAt || new Date().toISOString()}`,
@@ -161,7 +166,7 @@ export class SkillsStore {
 
   /** Compact index for system prompt (Hermes-style skills index) */
   buildIndexPrompt(): string {
-    const items = this.list()
+    const items = this.list().filter((s) => s.meta.status !== 'archived')
     if (!items.length) return ''
     const lines = items.map(
       (s) => `- **${s.meta.name}**: ${s.meta.description || '(無描述)'}`,
@@ -179,6 +184,7 @@ export class SkillsStore {
     const raw = serializeSkill(
       {
         ...meta,
+        status: meta.status || 'active',
         updatedAt: new Date().toISOString(),
         createdAt: meta.createdAt || new Date().toISOString(),
       },
@@ -191,6 +197,32 @@ export class SkillsStore {
 
   remove(name: string): boolean {
     return this.skills.delete(name)
+  }
+
+  /** Curator may archive agent-created skills, never delete them. */
+  archive(name: string): boolean {
+    const skill = this.skills.get(name)
+    if (!skill || skill.meta.createdBy !== 'agent' || skill.meta.status === 'archived') {
+      return false
+    }
+    const raw = serializeSkill(
+      { ...skill.meta, status: 'archived', updatedAt: new Date().toISOString() },
+      skill.body,
+    )
+    this.skills.set(name, parseSkillMarkdown(raw, skill.path))
+    return true
+  }
+
+  /** Archived skills are recoverable by the user. */
+  restore(name: string): boolean {
+    const skill = this.skills.get(name)
+    if (!skill || skill.meta.status !== 'archived') return false
+    const raw = serializeSkill(
+      { ...skill.meta, status: 'active', updatedAt: new Date().toISOString() },
+      skill.body,
+    )
+    this.skills.set(name, parseSkillMarkdown(raw, skill.path))
+    return true
   }
 
   /** Hydrate from persisted list */
@@ -210,7 +242,7 @@ export class SkillsStore {
   }
 
   matchForObjective(objective: string): Skill[] {
-    return this.list().filter((skill) =>
+    return this.list().filter((skill) => skill.meta.status !== 'archived').filter((skill) =>
       cjkAwareHit(
         `${skill.meta.name} ${skill.meta.description} ${(skill.meta.tags || []).join(' ')}`,
         objective,

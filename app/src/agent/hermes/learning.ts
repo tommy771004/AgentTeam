@@ -210,6 +210,30 @@ ${toolsMd ? `\n## 成功工具序列\n${toolsMd}\n` : ''}
     })
   }
 
+  /** Record an idle Skill Curator pass without mixing it into the main run. */
+  onCuratorReview(input: {
+    candidates: number
+    archived: string[]
+    usedModel: boolean
+    reason?: string
+  }) {
+    const archived = input.archived.length
+      ? `已封存：${input.archived.join('、')}`
+      : '沒有需要封存的重複技能'
+    this.emit({
+      id: uuid(),
+      type: 'curator_review',
+      message: `Skill Curator 完成審查（${input.candidates} 個代理技能）。${archived}`,
+      at: new Date().toISOString(),
+      payload: {
+        candidates: input.candidates,
+        archived: input.archived,
+        usedModel: input.usedModel,
+        reason: input.reason,
+      },
+    })
+  }
+
   approveSkillDraft(name: string): boolean {
     const draft = this.pendingSkillDrafts.find((d) => d.name === name)
     if (!draft) return false

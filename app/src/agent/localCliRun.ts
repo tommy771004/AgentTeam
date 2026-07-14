@@ -7,7 +7,6 @@ import { emptyKnowledge } from './knowledge'
 import { resolveCliApproval } from './cliApproval'
 
 export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
-export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
 export type LocalCliConfigSnapshot = CliConfigSnapshot
 
 export type LocalCliAttachmentPayload = {

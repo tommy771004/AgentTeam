@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { memoryStore } from '../agent/hermes/memory'
 import { skillsStore } from '../agent/hermes/skills'
 import { learningLoop } from '../agent/hermes/learning'
-import { searchSessions } from '../agent/hermes/sessionSearch'
+import { searchSessions, summarizeSessionHits } from '../agent/hermes/sessionSearch'
 import { getAgentsDoc, getSoulDoc, setAgentsDoc, setSoulDoc } from '../agent/hermes/promptBuilder'
 import { pluginRegistry, type PluginManifest } from '../agent/hermes/plugins'
 import { PLUGIN_CATALOG, catalogItem, type PluginCatalogItem } from '../agent/hermes/pluginCatalog'
@@ -66,6 +66,7 @@ interface LearningStore {
   soul: string
   agents: string
   searchHits: SessionSearchHit[]
+  searchSummary: string | null
   plugins: PluginManifest[]
   catalog: PluginCatalogItem[]
   installingPluginId: string | null
@@ -84,8 +85,9 @@ interface LearningStore {
   setAgents: (text: string) => Promise<void>
   approveDraft: (name: string) => Promise<void>
   rejectDraft: (name: string) => void
-  search: (query: string, archive: ArchiveRecord[]) => void
+  search: (query: string, archive: ArchiveRecord[]) => Promise<void>
   saveSkill: (name: string, description: string, body: string) => Promise<void>
+  restoreSkill: (name: string) => Promise<void>
   removeSkill: (name: string) => Promise<void>
   setPluginEnabled: (id: string, enabled: boolean) => Promise<void>
   importPlugin: (manifest: PluginManifest) => Promise<void>
@@ -371,6 +373,8 @@ function buildTokenRefreshDeps(getStore: () => LearningStore) {
 }
 
 export const useLearningStore = create<LearningStore>((set, get) => {
+  let searchRequest = 0
+
   learningLoop.subscribe((events) => {
     set({
       events,
@@ -390,6 +394,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     soul: getSoulDoc(),
     agents: getAgentsDoc(),
     searchHits: [],
+    searchSummary: null,
     plugins: pluginRegistry.list(),
     catalog: PLUGIN_CATALOG,
     installingPluginId: null,
@@ -487,8 +492,16 @@ export const useLearningStore = create<LearningStore>((set, get) => {
       get().refresh()
     },
 
-    search: (query, archive) => {
-      set({ searchHits: searchSessions(query, archive) })
+    search: async (query, archive) => {
+      const request = ++searchRequest
+      const hits = searchSessions(query, archive)
+      set({ searchHits: hits, searchSummary: null })
+      const summary = await summarizeSessionHits(
+        hits,
+        query,
+        useSettingsStore.getState().settings,
+      )
+      if (request === searchRequest) set({ searchSummary: summary })
     },
 
     saveSkill: async (name, description, body) => {
@@ -502,6 +515,12 @@ export const useLearningStore = create<LearningStore>((set, get) => {
         },
         body,
       )
+      get().refresh()
+      await get().persist()
+    },
+
+    restoreSkill: async (name) => {
+      if (!skillsStore.restore(name)) return
       get().refresh()
       await get().persist()
     },

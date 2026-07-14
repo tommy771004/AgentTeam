@@ -4,6 +4,8 @@
  */
 
 import type { ArchiveRecord } from '../types'
+import type { LlmSettings } from '../types'
+import { chatCompletion, withRoleModel } from '../llm'
 import { memoryStore } from './memory'
 import { skillsStore } from './skills'
 import type { SessionSearchHit } from './types'
@@ -77,6 +79,66 @@ export function searchSessions(
   }
 
   return hits.sort((a, b) => b.score - a.score).slice(0, limit)
+}
+
+/**
+ * Optional LLM layer over deterministic search. Token-scored hits remain the
+ * source of truth; a failed/unconfigured model simply returns null and callers
+ * continue rendering the original snippets.
+ */
+export async function summarizeSessionHits(
+  hits: SessionSearchHit[],
+  query: string,
+  providedSettings?: LlmSettings,
+): Promise<string | null> {
+  const selected = hits.slice(0, 5)
+  if (!query.trim() || !selected.length) return null
+
+  let settings = providedSettings
+  if (!settings) {
+    try {
+      const { useSettingsStore } = await import('../../store/settingsStore')
+      settings = useSettingsStore.getState().settings
+    } catch {
+      return null
+    }
+  }
+  if (
+    !settings.enabled ||
+    !settings.apiKey.trim() ||
+    settings.sessionRecallEnabled === false
+  ) {
+    return null
+  }
+
+  const helper = withRoleModel(settings, 'Analyzer-1')
+  if (!helper.model) return null
+  const evidence = selected
+    .map(
+      (hit, index) =>
+        `${index + 1}. [${hit.source}] ${hit.title}\n${hit.snippet.slice(0, 600)}`,
+    )
+    .join('\n\n')
+  try {
+    const result = await chatCompletion(
+      helper,
+      [
+        {
+          role: 'system',
+          content:
+            '你是跨會話記憶摘要助手。根據提供的搜尋命中，簡短說明它們和查詢的關聯；不可添加證據中沒有的事實。使用繁體中文，最多 3 句。',
+        },
+        {
+          role: 'user',
+          content: `查詢：${query.slice(0, 300)}\n\n搜尋命中：\n${evidence}`,
+        },
+      ],
+      { temperature: 0.2, maxTokens: 360 },
+    )
+    return result.content.trim() || null
+  } catch {
+    return null
+  }
 }
 
 /** Compress long step outputs (Hermes context compressor lite) */

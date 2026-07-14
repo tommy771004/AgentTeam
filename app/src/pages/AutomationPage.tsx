@@ -4,9 +4,6 @@ import { Icon } from '../components/Icon'
 import { ThemePage } from '../components/SectionNav'
 import {
   SettingsHeader,
-  SettingsToggle,
-  settingsBtnCls,
-  settingsBtnPrimaryCls,
   settingsInputCls,
 } from '../components/settings/SettingsChrome'
 import { useScheduleStore } from '../store/scheduleStore'
@@ -14,6 +11,7 @@ import { useAgentStore } from '../store/agentStore'
 import { useLearningStore } from '../store/learningStore'
 import { useGatewayStore } from '../store/gatewayStore'
 import { useProjectStore } from '../store/projectStore'
+import { useAutomationSuggestionStore } from '../store/automationSuggestionStore'
 import type { ScheduleKind, ScheduledJob } from '../agent/types'
 import { JOB_STATUS_ZH, SCHEDULE_KIND_ZH } from '../i18n/zh'
 import { RunQueueStrip } from '../components/RunQueueStrip'
@@ -60,6 +58,8 @@ export function AutomationPage() {
 
 function SchedulerSection() {
   const { jobs, load, addJob, toggleJob, removeJob } = useScheduleStore()
+  const archive = useAgentStore((s) => s.archive)
+  const loadArchive = useAgentStore((s) => s.loadArchive)
   const skills = useLearningStore((s) => s.skills)
   const loadLearning = useLearningStore((s) => s.load)
   const projectRoot = useProjectStore((s) => s.root)
@@ -79,7 +79,17 @@ function SchedulerSection() {
   useEffect(() => {
     void load()
     void loadLearning()
-  }, [load, loadLearning])
+    void loadArchive()
+  }, [load, loadLearning, loadArchive])
+
+  const hydrateSuggestions = useAutomationSuggestionStore((s) => s.hydrate)
+  const refreshSuggestions = useAutomationSuggestionStore((s) => s.refreshFromArchive)
+  useEffect(() => {
+    hydrateSuggestions()
+  }, [hydrateSuggestions])
+  useEffect(() => {
+    refreshSuggestions(archive)
+  }, [archive, refreshSuggestions])
 
   useEffect(() => {
     if (projectRoot && !projectRootInput) setProjectRootInput(projectRoot)
@@ -110,6 +120,7 @@ function SchedulerSection() {
 
   return (
     <div className="flex flex-col gap-5">
+      <AutomationSuggestionsPanel />
       <AutomationRuntimePanel />
       <div className="app-panel p-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
         <p className="lg:col-span-2 text-sm text-on-surface-variant">
@@ -320,6 +331,74 @@ function SchedulerSection() {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+/** Usage suggestions are proposals only; accepting creates a normal schedule. */
+function AutomationSuggestionsPanel() {
+  const suggestions = useAutomationSuggestionStore((s) => s.suggestions)
+  const decide = useAutomationSuggestionStore((s) => s.decide)
+  const addJob = useScheduleStore((s) => s.addJob)
+
+  if (!suggestions.length) return null
+
+  const accept = async (suggestion: (typeof suggestions)[number]) => {
+    await addJob({
+      name: suggestion.title.replace(/^建議自動化：/, '').slice(0, 40) || '使用習慣自動化',
+      objective: suggestion.objective,
+      kind: suggestion.recommended.kind,
+      dailyAt: suggestion.recommended.dailyAt,
+    })
+    decide(suggestion.dedupKey, 'accepted')
+  }
+
+  return (
+    <div className="app-panel border border-secondary/30 bg-secondary/5 p-4 space-y-3">
+      <div className="flex items-start gap-3">
+        <Icon name="lightbulb" size={20} className="text-secondary mt-0.5" />
+        <div>
+          <h2 className="font-semibold text-sm">建議的自動化</h2>
+          <p className="text-xs text-on-surface-variant mt-1">
+            根據近期成功執行的重複工作提出建議；不會自動建立排程，請由你同意。
+          </p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {suggestions.map((suggestion) => (
+          <div
+            key={suggestion.dedupKey}
+            className="rounded-lg border border-white/10 bg-surface/50 p-3 flex flex-col md:flex-row md:items-center gap-3"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium">{suggestion.title}</span>
+                <span className="text-[10px] rounded bg-secondary/15 text-secondary px-1.5 py-0.5">
+                  usage · {suggestion.occurrenceCount} 次
+                </span>
+              </div>
+              <p className="text-xs text-on-surface-variant mt-1 truncate">{suggestion.objective}</p>
+              <p className="text-[11px] text-outline mt-1">{suggestion.reason} 建議每日 08:00。</p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => void accept(suggestion)}
+                className="px-3 py-1.5 rounded bg-secondary-container text-on-secondary-container text-xs font-semibold"
+              >
+                接受並建立排程
+              </button>
+              <button
+                type="button"
+                onClick={() => decide(suggestion.dedupKey, 'dismissed')}
+                className="px-3 py-1.5 rounded border border-white/10 text-xs text-on-surface-variant"
+              >
+                暫不需要
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )

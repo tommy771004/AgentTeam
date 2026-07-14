@@ -54,6 +54,39 @@ async function archiveBackgroundJob(
     }
   } catch {
     /* non-fatal */
+  } finally {
+    await injectBackgroundResult(job)
+  }
+}
+
+/**
+ * Hermes-style completion queue handoff: when the originating thread is
+ * genuinely idle, append a fresh system turn instead of hiding the result in
+ * Records. Busy threads are left alone so an active conversation is never
+ * interrupted; the archive and desktop notification remain the fallback.
+ */
+async function injectBackgroundResult(job: BackgroundJob): Promise<void> {
+  if (!job.parentThreadId) return
+  try {
+    const [{ useAgentStore }, { useThreadStore }, { queueLength }] = await Promise.all([
+      import('../../store/agentStore'),
+      import('../../store/threadStore'),
+      import('../runQueue'),
+    ])
+    const agent = useAgentStore.getState()
+    const threads = useThreadStore.getState()
+    if (agent.isRunning || threads.runningThreadId || queueLength() > 0) return
+    if (!threads.threads.some((thread) => thread.id === job.parentThreadId)) return
+
+    const title = job.ok ? '背景委派完成' : '背景委派失敗'
+    const detail = (job.summary || job.error || '沒有摘要').trim().slice(0, 6000)
+    useThreadStore.getState().pushBubble(
+      job.parentThreadId,
+      'system',
+      `${title} · ${job.id}\n目標：${job.goal.slice(0, 240)}\n\n結果摘要：\n${detail}`,
+    )
+  } catch {
+    /* Thread injection is additive; archive persistence must still succeed. */
   }
 }
 
@@ -72,6 +105,8 @@ export interface BackgroundJob {
   tokensUsed?: number
   depth?: number
   error?: string
+  /** Original conversation that requested this background delegate. */
+  parentThreadId?: string
 }
 
 type JobListener = (job: BackgroundJob) => void
@@ -158,6 +193,7 @@ export function enqueueBackgroundDelegate(
     status: 'queued',
     notifyOnComplete,
     startedAt: new Date().toISOString(),
+    parentThreadId: input.parentThreadId,
   }
   jobs.set(job.id, job)
   trimJobs()
@@ -185,6 +221,7 @@ export function enqueueBackgroundDelegate(
         maxRounds: input.maxRounds,
         inheritCapabilities: input.inheritCapabilities,
         parentRunId: input.parentRunId,
+        parentThreadId: input.parentThreadId,
         sourceKind: input.sourceKind || 'delegate',
         projectRoot: input.projectRoot,
         parentPermissionPolicy: input.parentPermissionPolicy,
@@ -263,6 +300,7 @@ export function enqueueBackgroundDelegate(
       job.durationMs = result.durationMs
       job.tokensUsed = result.tokensUsed
       job.depth = result.depth
+      job.parentThreadId = input.parentThreadId
       job.finishedAt = new Date().toISOString()
       if (!result.ok) job.error = result.summary
 

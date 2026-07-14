@@ -28,6 +28,7 @@ import {
 import { PermissionAskModal } from './components/PermissionAskModal'
 import { QuestionAskModal } from './components/QuestionAskModal'
 import type { ScheduledJob } from './agent/types'
+import { scheduleSkillCurator } from './agent/hermes/curator'
 
 /** Restore automation queue from disk and drain when idle */
 function RunQueueBootstrap() {
@@ -57,6 +58,19 @@ function RunQueueBootstrap() {
       cancelled = true
     }
   }, [])
+  return null
+}
+
+/** Trigger Hermes Skill Curator from idle transitions, never from a second cron. */
+function SkillCuratorBootstrap() {
+  const isRunning = useAgentStore((s) => s.isRunning)
+  const skillCount = useLearningStore((s) => s.skills.length)
+  const settings = useSettingsStore((s) => s.settings)
+
+  useEffect(() => {
+    if (!isRunning) scheduleSkillCurator(settings)
+  }, [isRunning, skillCount, settings])
+
   return null
 }
 
@@ -539,6 +553,7 @@ export default function App() {
     <HashRouter>
       <PreferencesBootstrap />
       <RunQueueBootstrap />
+      <SkillCuratorBootstrap />
       <SchedulerBootstrap />
       <WebhookBootstrap />
       <GatewayBootstrap />

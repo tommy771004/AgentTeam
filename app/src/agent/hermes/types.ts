@@ -7,6 +7,8 @@ export interface SkillMeta {
   author?: string
   tags?: string[]
   createdBy?: 'user' | 'agent'
+  /** Curator lifecycle; archived skills remain recoverable but are not injected. */
+  status?: 'active' | 'pinned' | 'archived'
   createdAt?: string
   updatedAt?: string
 }
@@ -45,7 +47,12 @@ export interface SessionSearchHit {
 
 export interface LearningEvent {
   id: string
-  type: 'skill_draft' | 'memory_nudge' | 'skill_saved' | 'memory_saved'
+  type:
+    | 'skill_draft'
+    | 'memory_nudge'
+    | 'skill_saved'
+    | 'memory_saved'
+    | 'curator_review'
   message: string
   at: string
   payload?: unknown

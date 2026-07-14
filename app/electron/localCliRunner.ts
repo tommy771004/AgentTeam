@@ -474,17 +474,12 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
     cancelled,
     error: r.ok
       ? undefined
-      : cancelled
-        ? '使用者取消'
-        : r.timedOut
-          ? '逾時（CLI 未在時限內結束；請確認使用 headless：codex exec / claude -p / grok -p / gemini -p / cursor -p / opencode run）'
-          : cleanErr || `exit ${r.code}`,
       : permissionError
         ? permissionError
         : cancelled
           ? '使用者取消'
           : r.timedOut
-            ? '逾時（CLI 未在時限內結束；請確認使用 headless：codex exec / claude -p / grok -p / cursor -p / opencode run）'
+            ? '逾時（CLI 未在時限內結束；請確認使用 headless：codex exec / claude -p / grok -p / gemini -p / cursor -p / opencode run）'
             : cleanErr || `exit ${r.code}`,
     runId,
     configSnapshot: input.configSnapshot,
@@ -604,9 +599,14 @@ function createCliStreamParser(
   let assembledText = ''
   let lastPlainEmit = 0
   let plainLineCount = 0
-  const jsonStreaming = kind === 'grok' || kind === 'claude' || kind === 'codex' || kind === 'gemini' || kind === 'cursor'
+  const jsonStreaming =
+    kind === 'grok' ||
+    kind === 'claude' ||
+    kind === 'codex' ||
+    kind === 'gemini' ||
+    kind === 'cursor' ||
+    kind === 'opencode'
   let permissionRequest = ''
-  const jsonStreaming = kind === 'grok' || kind === 'claude' || kind === 'codex' || kind === 'cursor' || kind === 'opencode'
 
   const appendText = (data: string) => {
     if (!data) return ''

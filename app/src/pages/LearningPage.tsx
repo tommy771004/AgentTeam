@@ -46,6 +46,7 @@ export function LearningPage() {
     soul,
     agents,
     searchHits,
+    searchSummary,
     setUserProfile,
     setMemoryDoc,
     appendMemory,
@@ -55,6 +56,7 @@ export function LearningPage() {
     rejectDraft,
     search,
     saveSkill,
+    restoreSkill,
     removeSkill,
     refresh,
   } = useLearningStore()
@@ -205,17 +207,27 @@ export function LearningPage() {
                 <>
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold">{selected.meta.name}</h3>
-                    <button
-                      type="button"
-                      onClick={() => void removeSkill(selected.meta.name)}
-                      className="text-xs text-error"
-                    >
-                      刪除
-                    </button>
+                    {selected.meta.status === 'archived' ? (
+                      <button
+                        type="button"
+                        onClick={() => void restoreSkill(selected.meta.name)}
+                        className="text-xs text-primary"
+                      >
+                        復原技能
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void removeSkill(selected.meta.name)}
+                        className="text-xs text-error"
+                      >
+                        刪除
+                      </button>
+                    )}
                   </div>
                   <p className="text-xs text-outline">
                     {selected.meta.createdBy === 'agent' ? '代理建立' : '使用者'} · v
-                    {selected.meta.version || '—'}
+                    {selected.meta.version || '—'} · {selected.meta.status || 'active'}
                   </p>
                   <pre className="bg-surface border border-white/10 rounded-lg p-3 text-[12px] font-[family-name:var(--font-mono)] text-on-surface-variant max-h-96 overflow-y-auto custom-scrollbar whitespace-pre-wrap">
                     {selected.raw}
@@ -347,6 +359,12 @@ export function LearningPage() {
                 搜尋
               </button>
             </div>
+            {searchSummary && (
+              <div className="rounded-lg border border-secondary/30 bg-secondary/5 p-3 text-sm text-on-surface-variant">
+                <div className="text-xs font-semibold text-secondary mb-1">LLM 關聯摘要</div>
+                {searchSummary}
+              </div>
+            )}
             <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
               {searchHits.length === 0 ? (
                 <p className="text-sm text-outline">輸入關鍵字搜尋歷史與記憶。</p>
