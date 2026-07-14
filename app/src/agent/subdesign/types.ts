@@ -170,6 +170,8 @@ export type SubDesignCritiquePanelist = {
   status: 'pending' | 'active' | 'complete' | 'interrupted'
   score?: number
   summary?: string
+  findings?: SubDesignCritiqueFinding[]
+  evidence?: SubDesignCritiqueEvidence[]
 }
 
 export type SubDesignCritiqueRound = {
@@ -204,6 +206,8 @@ export type SubDesignCritiqueSession = {
   rounds: SubDesignCritiqueRound[]
   scoreHistory: number[]
   compositeScore?: number
+  /** Claimed synchronously when the one-and-only final design_critique call starts. */
+  finalCritiqueClaimed?: boolean
   events: SubDesignCritiqueSessionEvent[]
   startedAt: string
   finishedAt?: string
@@ -252,15 +256,6 @@ export const SUBDESIGN_STAGES: readonly SubDesignStage[] = [
 
 export function isSubDesignStage(value: unknown): value is SubDesignStage {
   return typeof value === 'string' && SUBDESIGN_STAGES.includes(value as SubDesignStage)
-}
-
-export function isSubDesignSurface(value: unknown): value is SubDesignSurface {
-  return (
-    value === 'prototype' ||
-    value === 'dashboard' ||
-    value === 'design-system' ||
-    value === 'deck'
-  )
 }
 
 export function stageLabel(stage: SubDesignStage): string {

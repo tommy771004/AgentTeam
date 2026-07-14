@@ -1,0 +1,9 @@
+{
+  "title": "GitHub 看板",
+  "summary": "以 PR、issue 與交付節奏為主的團隊視圖。",
+  "icon": "code",
+  "suggestedObjective": "設計一個讓團隊追蹤 GitHub 交付狀態的看板。",
+  "category": "dashboard",
+  "surface": "dashboard",
+  "status": "ready"
+}

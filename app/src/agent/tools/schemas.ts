@@ -448,6 +448,45 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
     },
     required: ['artifactId'],
   },
+  design_critique_note: {
+    type: 'object',
+    properties: {
+      artifactId: { type: 'string', description: 'Registered SubDesign artifact id' },
+      panelistId: { type: 'string', enum: ['visual', 'accessibility', 'implementation'], description: 'Which panelist focus this note represents' },
+      round: { type: 'integer', enum: [1, 2], description: '1 = independent review, 2 = cross-check of round-1 blockers' },
+      score: { type: 'integer', minimum: 0, maximum: 100, description: "This panelist's focused 0-100 score for this round" },
+      summary: { type: 'string', description: 'One or two sentence assessment specific to this panelist focus; must differ in reasoning from the other panelists, not restate the same text' },
+      findings: {
+        type: 'array',
+        maxItems: 20,
+        items: {
+          type: 'object',
+          properties: {
+            severity: { type: 'string', enum: ['blocker', 'warning', 'note'] },
+            message: { type: 'string' },
+            path: { type: 'string' },
+          },
+          required: ['severity', 'message'],
+        },
+      },
+      evidence: {
+        type: 'array',
+        maxItems: 10,
+        description: 'Evidence this panelist relied on (screenshot/dom/lint); round 2 or the final design_critique call may reuse the same entries.',
+        items: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: ['screenshot', 'dom', 'lint', 'build', 'manual', 'template-attribution', 'design-system', 'asset-license'] },
+            summary: { type: 'string' },
+            path: { type: 'string' },
+            capturedAt: { type: 'string' },
+          },
+          required: ['kind', 'summary'],
+        },
+      },
+    },
+    required: ['artifactId', 'panelistId', 'round', 'score', 'summary'],
+  },
   design_critique: {
     type: 'object',
     properties: {

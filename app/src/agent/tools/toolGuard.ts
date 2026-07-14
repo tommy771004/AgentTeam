@@ -128,10 +128,12 @@ export async function authorizeTool(opts: {
   sideEffect?: boolean
   /**
    * HITL timeout ms. When set (or unattended), unresolved asks auto-deny
-   * so scheduler/webhook cannot hang the global run lock overnight.
+   * so scheduler/webhook cannot hang an unattended run overnight.
    */
   hitlTimeoutMs?: number
   unattended?: boolean
+  runId?: string
+  threadId?: string
   /** Lifecycle hook context (P1-D) */
   sourceKind?: string
   objective?: string
@@ -159,10 +161,9 @@ export async function authorizeTool(opts: {
   // after ask_user can unlock Build during the same run.
   if (SUBDESIGN_WRITE_TOOLS.has(tool) || tool === 'bash') {
     try {
-      const { getRunThreadId } = await import('./runContext')
       const { useSubDesignStore } = await import('../../store/subDesignStore')
-      const threadId = getRunThreadId()
-      const brief = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
+      const runThreadId = opts.threadId
+      const brief = runThreadId ? useSubDesignStore.getState().findByThreadId(runThreadId) : null
       const subDesignWriteBlocked = tool !== 'bash' || isSubDesignWritableBashCommand(String(input.command || ''))
       if (brief && !brief.selectedDirectionId && subDesignWriteBlocked) {
         const msg = `SubDesign direction gate：請先選定 direction，再使用 ${tool}。`
@@ -199,10 +200,9 @@ export async function authorizeTool(opts: {
     const cmd = String(input.command || '')
     let agentId: string | undefined
     try {
-      const { getRunThreadId } = await import('./runContext')
       const { useThreadStore } = await import('../../store/threadStore')
       const thr = useThreadStore.getState()
-      const runThreadId = getRunThreadId()
+      const runThreadId = opts.threadId
       const t = thr.threads.find((x) => x.id === (runThreadId || thr.activeId))
       agentId = t?.agentMode
     } catch {
@@ -289,6 +289,8 @@ export async function authorizeTool(opts: {
     try {
       const { usePermissionAskStore } = await import('../../store/permissionAskStore')
       const decision = await usePermissionAskStore.getState().requestAsk({
+        threadId: opts.threadId,
+        runId: opts.runId,
         tool,
         args: input,
         reason: opts.unattended
@@ -326,8 +328,11 @@ export async function guardAndExecuteTool(opts: {
   blockedTools?: string[]
   forceAsk?: boolean
   sideEffect?: boolean
-  hitlTimeoutMs?: number
+    hitlTimeoutMs?: number
   unattended?: boolean
+  runId?: string
+  threadId?: string
+  projectRoot?: string
   sourceKind?: string
   objective?: string
   onLog?: (level: string, message: string) => void
@@ -347,6 +352,9 @@ export async function guardAndExecuteTool(opts: {
       permissionPolicy: opts.permissionPolicy,
       permissionProjection: opts.permissionProjection,
       mcpAgentId: opts.mcpAgentId,
+      runId: opts.runId,
+      threadId: opts.threadId,
+      projectRoot: opts.projectRoot,
     },
   )
   return { allowed: true, result }

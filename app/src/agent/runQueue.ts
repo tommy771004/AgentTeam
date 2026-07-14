@@ -1,5 +1,5 @@
 /**
- * Lightweight FIFO queue for automation runs that hit the global isRunning lock.
+ * Lightweight FIFO queue for runs that hit the per-app capacity policy.
  * Persists serializable fields to localStorage so restart does not drop once-jobs.
  */
 
@@ -354,8 +354,21 @@ export function enqueueExternalRun(opts: ExternalRunOpts): QueuedExternalRun | n
   return item
 }
 
+async function availableDrainSlots(): Promise<number> {
+  try {
+    const { useAgentStore } = await import('../store/agentStore')
+    const capacity = useAgentStore.getState().canStartRun()
+    return capacity.allowed ? Math.max(1, capacity.limit - capacity.active) : 0
+  } catch {
+    // Keep the legacy one-at-a-time fallback if the store is not ready yet.
+    return 1
+  }
+}
+
 /**
- * Drain queue one-by-one when idle. Safe to call after every external run finishes.
+ * Drain queued work into every currently available run slot. Safe to call
+ * after every external run finishes; the guard prevents nested drains from
+ * starting the same queue item twice.
  */
 export async function drainExternalRunQueue(
   runner: (opts: ExternalRunOpts) => Promise<ExternalRunResult>,
@@ -366,18 +379,39 @@ export async function drainExternalRunQueue(
   emit()
   try {
     while (queue.length) {
-      const next = queue.shift()
-      emit()
-      if (!next) break
-      const { id: _id, enqueuedAt: _at, dedupeKey: _k, ...opts } = next
-      const r = await runner({
-        ...opts,
-        sourceLabel: opts.sourceLabel
-          ? `${opts.sourceLabel}（佇列補跑）`
-          : '佇列補跑',
-      })
-      if (r.skipped && r.skipReason === 'busy') {
-        queue.unshift(next)
+      const slots = await availableDrainSlots()
+      if (slots <= 0) break
+
+      const batch: Array<{
+        item: QueuedExternalRun
+        promise: Promise<ExternalRunResult>
+      }> = []
+      for (let i = 0; i < slots && queue.length; i += 1) {
+        const next = queue.shift()
+        if (!next) break
+        emit()
+        const { id: _id, enqueuedAt: _at, dedupeKey: _k, ...opts } = next
+        batch.push({
+          item: next,
+          promise: runner({
+            ...opts,
+            sourceLabel: opts.sourceLabel
+              ? `${opts.sourceLabel}（佇列補跑）`
+              : '佇列補跑',
+          }),
+        })
+      }
+      if (!batch.length) break
+
+      const results = await Promise.all(batch.map((entry) => entry.promise))
+      const busyItems = batch
+        .filter((_entry, index) => {
+          const result = results[index]
+          return result.skipped && result.skipReason === 'busy'
+        })
+        .map((entry) => entry.item)
+      if (busyItems.length) {
+        queue.unshift(...busyItems.reverse())
         emit()
         break
       }

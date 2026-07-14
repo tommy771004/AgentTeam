@@ -1,0 +1,9 @@
+{
+  "title": "行動 App",
+  "summary": "以行動裝置情境呈現的產品介面。",
+  "icon": "phone_iphone",
+  "suggestedObjective": "設計一個行動 App 的核心任務流程。",
+  "category": "prototype",
+  "surface": "prototype",
+  "status": "ready"
+}

@@ -1,0 +1,9 @@
+{
+  "title": "營運儀表板",
+  "summary": "帶側欄、KPI 與分析圖表的操作介面。",
+  "icon": "dashboard",
+  "suggestedObjective": "設計一個供團隊日常決策使用的營運儀表板。",
+  "category": "prototype",
+  "surface": "dashboard",
+  "status": "ready"
+}

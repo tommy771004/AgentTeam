@@ -1,12 +1,27 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { runTask } from '../../agent/runExternal'
-import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignCritiqueRound } from '../../agent/subdesign/types'
+import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignCritiquePanelist, SubDesignCritiqueRound } from '../../agent/subdesign/types'
 import { Icon } from '../Icon'
 import { useAgentStore } from '../../store/agentStore'
 import { useProjectStore } from '../../store/projectStore'
 import { useRunActivityStore } from '../../store/runActivityStore'
 import { useSubDesignCritiqueStore } from '../../store/subDesignCritiqueStore'
 import { useSubDesignCritiqueSessionStore } from '../../store/subDesignCritiqueSessionStore'
+
+/** Tools blocked in both Critique Theater rounds: it's read-only against the artifact. */
+const CRITIQUE_BLOCKED_TOOLS = [
+  'bash',
+  'workspace_write',
+  'workspace_mkdir',
+  'workspace_move',
+  'workspace_delete',
+  'design_system_create',
+  'design_system_update',
+  'design_artifact_register',
+  'design_artifact_patch',
+  'design_artifact_tweak',
+  'design_artifact_export',
+]
 
 function roundTone(round: SubDesignCritiqueRound): string {
   if (round.status === 'complete') return 'border-primary/20 bg-primary/[0.05]'
@@ -29,15 +44,39 @@ function statusLabel(status: string): string {
   return '等待'
 }
 
-function buildCritiqueObjective(brief: SubDesignBrief, artifact: SubDesignArtifact): string {
+function buildRound1Objective(brief: SubDesignBrief, artifact: SubDesignArtifact): string {
   return [
-    `請執行 SubDesign Critique Theater，針對 brief ${brief.id} 的 artifact ${artifact.id} revision ${artifact.revision} 做 evidence-based review。`,
+    `請執行 SubDesign Critique Theater 第一輪（獨立審查），針對 brief ${brief.id} 的 artifact ${artifact.id} revision ${artifact.revision} 做 evidence-based review。`,
     `Brief objective：${brief.objective}`,
     `Artifact entry：${artifact.entry}；renderer=${artifact.renderer}；kind=${artifact.kind}。`,
     '這是一個 read-only review：不可修改 DESIGN.md、不可 patch/tweak/export，也不可寫入 workspace。',
-    '請依序完成兩輪、三個 panelist focus：視覺與品牌（brief coverage / brand conformance）、可及性審查（accessibility / screenshot / DOM）、實作就緒（lint / implementation readiness）。',
-    '每輪都先使用 design_artifact_capture 取得 screenshot 與 DOM，再使用 design_artifact_lint；最後只用 design_critique 寫入一份結構化 critique，包含四項 0–100 分數、evidence、findings 與 verdict。',
-    '若 evidence 或 blocker 不足，請明確回報 needs-revision，不得猜測 pass。',
+    '先使用 design_artifact_capture 取得 screenshot 與 DOM，再使用 design_artifact_lint 取得語意證據。',
+    '接著呼叫 design_critique_note 三次（round=1），分別代表 panelistId=visual（brief coverage／brand conformance）、accessibility（a11y／evidence integrity）、implementation（readiness／artifact boundary）。三次的 score 與 summary 必須反映該 panelist 自己的判斷 —— 不可三次寫相同的分數或文字，那是三個獨立觀點，不是一個分數拆三份。',
+    '這一輪不要呼叫 design_critique；那是第二輪交叉核對之後才寫的最終結果。',
+  ].join('\n')
+}
+
+function buildRound2Objective(brief: SubDesignBrief, artifact: SubDesignArtifact, round1Notes: SubDesignCritiquePanelist[]): string {
+  const notesText = round1Notes
+    .map((panelist) => {
+      const findings = (panelist.findings || [])
+        .map((item) => `  - [${item.severity}] ${item.message}${item.path ? `（${item.path}）` : ''}`)
+        .join('\n')
+      return [
+        `- ${panelist.label}（${panelist.id}）· score ${panelist.score ?? '—'}`,
+        `  summary：${panelist.summary || '（無）'}`,
+        findings || '  findings：無',
+      ].join('\n')
+    })
+    .join('\n')
+  return [
+    `請執行 SubDesign Critique Theater 第二輪（交叉核對），針對 brief ${brief.id} 的 artifact ${artifact.id} revision ${artifact.revision}。`,
+    '以下是第一輪三位 panelist 各自的獨立審查結果：',
+    notesText,
+    '請針對上面列出的每一個 blocker 具體重新查核 —— 不是照抄第一輪的文字；需要的話重新使用 design_artifact_capture／design_artifact_lint 取得最新證據。',
+    '接著呼叫 design_critique_note 三次（round=2），分別代表 visual、accessibility、implementation，反映交叉核對後的結論。',
+    '最後呼叫 design_critique 恰好一次，寫入四項 0–100 綜合分數、evidence（可重用你在 note 中用過的 screenshot／dom／lint entry，或重新擷取）、findings 與 verdict。',
+    '若 evidence 或 blocker 仍不足，請明確回報 needs-revision，不得猜測 pass。',
   ].join('\n')
 }
 
@@ -51,40 +90,38 @@ export function CritiqueTheater({
   critique: SubDesignCritique | null
 }) {
   const projectRoot = useProjectStore((state) => state.root)
-  const isRunning = useAgentStore((state) => state.isRunning)
+  const canStartRun = useAgentStore((state) => state.canStartRun)
+  const getRunIdForThread = useAgentStore((state) => state.getRunIdForThread)
   const stopExecution = useAgentStore((state) => state.stopExecution)
   const activity = useRunActivityStore((state) => state)
   const session = useSubDesignCritiqueSessionStore((state) => state.current)
   const startSession = useSubDesignCritiqueSessionStore((state) => state.start)
-  const advancePreview = useSubDesignCritiqueSessionStore((state) => state.advancePreview)
+  const startRound = useSubDesignCritiqueSessionStore((state) => state.startRound)
   const finishSession = useSubDesignCritiqueSessionStore((state) => state.finish)
   const interruptSession = useSubDesignCritiqueSessionStore((state) => state.interrupt)
   const failSession = useSubDesignCritiqueSessionStore((state) => state.fail)
   const latestForArtifact = useSubDesignCritiqueStore((state) => state.latestForArtifact)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const threadRunId = brief?.threadId ? getRunIdForThread(brief.threadId) : null
+  const capacity = canStartRun(undefined, brief?.threadId || undefined)
+  const isRunning = Boolean(threadRunId) || !capacity.allowed
 
   const latestActivity = useMemo(() => {
     const event = activity.events[activity.events.length - 1]
     return activity.statusLine || event?.title || event?.detail || ''
   }, [activity.events, activity.statusLine])
-  const sessionStatus = session?.status
-
-  useEffect(() => {
-    if (sessionStatus !== 'running') return undefined
-    const timer = window.setInterval(() => advancePreview(latestActivity), 900)
-    return () => window.clearInterval(timer)
-  }, [advancePreview, latestActivity, sessionStatus])
 
   const runCritique = async () => {
     if (!brief || !artifact || busy || isRunning) return
     setBusy(true)
-    setMessage('正在啟動 evidence capture…')
+    setMessage('正在啟動第一輪獨立審查…')
     const baselineRevision = latestForArtifact(artifact.id, artifact.revision)?.revision || 0
     startSession({ briefId: brief.id, artifactId: artifact.id, artifactRevision: artifact.revision })
     try {
-      const result = await runTask({
-        objective: buildCritiqueObjective(brief, artifact),
+      startRound(1)
+      const round1 = await runTask({
+        objective: buildRound1Objective(brief, artifact),
         sourceKind: 'composer',
         reuseThreadId: brief.threadId,
         runner: 'builtin',
@@ -93,26 +130,44 @@ export function CritiqueTheater({
         overrides: {
           agentMode: 'plan',
           maxIterations: 3,
-          maxToolRounds: 18,
-          blockedTools: [
-            'bash',
-            'workspace_write',
-            'workspace_mkdir',
-            'workspace_move',
-            'workspace_delete',
-            'design_system_create',
-            'design_system_update',
-            'design_artifact_register',
-            'design_artifact_patch',
-            'design_artifact_tweak',
-            'design_artifact_export',
-          ],
-          extraSystemContext: 'Critique Theater is an evidence-only review. Keep all workspace mutation and export tools blocked.',
+          maxToolRounds: 10,
+          blockedTools: [...CRITIQUE_BLOCKED_TOOLS, 'design_critique'],
+          extraSystemContext: 'Critique Theater round 1: independent review. Write exactly three design_critique_note calls (round=1), one per panelist, each with its own reasoning. Do not call design_critique yet — that only happens after round 2.',
         },
       })
-      if (result.queued || result.skipped) {
-        failSession(result.error || '目前已有執行中的任務，critique 未啟動。')
-        setMessage(result.error || 'Critique 未啟動。')
+      if (round1.queued || round1.skipped) {
+        failSession(round1.error || '目前已有執行中的任務，critique 未啟動。')
+        setMessage(round1.error || 'Critique 未啟動。')
+        return
+      }
+      if (useSubDesignCritiqueSessionStore.getState().current?.status !== 'running') return
+      const round1Notes = useSubDesignCritiqueSessionStore.getState().current?.rounds[0]?.panelists || []
+      if (!round1Notes.every((panelist) => panelist.status === 'complete')) {
+        failSession('第一輪未完成三位 panelist 的獨立審查，Critique Theater 中止。')
+        setMessage('第一輪未完成三位 panelist 的獨立審查。')
+        return
+      }
+
+      setMessage('正在啟動第二輪交叉核對…')
+      startRound(2)
+      const round2 = await runTask({
+        objective: buildRound2Objective(brief, artifact, round1Notes),
+        sourceKind: 'composer',
+        reuseThreadId: brief.threadId,
+        runner: 'builtin',
+        loopType: 'Goal-based',
+        projectRoot: projectRoot || undefined,
+        overrides: {
+          agentMode: 'plan',
+          maxIterations: 4,
+          maxToolRounds: 14,
+          blockedTools: CRITIQUE_BLOCKED_TOOLS,
+          extraSystemContext: 'Critique Theater round 2: cross-check round 1 blockers specifically (do not just restate them), write three design_critique_note calls (round=2), then call design_critique exactly once with the final synthesis.',
+        },
+      })
+      if (round2.queued || round2.skipped) {
+        failSession(round2.error || '第二輪未啟動。')
+        setMessage(round2.error || '第二輪未啟動。')
         return
       }
       if (useSubDesignCritiqueSessionStore.getState().current?.status !== 'running') return

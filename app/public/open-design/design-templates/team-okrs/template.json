@@ -1,0 +1,9 @@
+{
+  "title": "團隊 OKR",
+  "summary": "以目標、關鍵成果與進度呈現的 scorecard。",
+  "icon": "track_changes",
+  "suggestedObjective": "設計一個讓團隊檢視 OKR 進度的工作台。",
+  "category": "prototype",
+  "surface": "dashboard",
+  "status": "ready"
+}

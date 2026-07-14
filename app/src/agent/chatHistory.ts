@@ -3,6 +3,19 @@
  * instead of dumping 12 full messages (Hermes-style context budget).
  */
 
+/**
+ * Combined budget for "reference" context that lands in the same prompt slot:
+ * intra-thread chat history (this module, built in runDispatch.ts) plus
+ * cross-session recall (hermes/sessionSearch.ts, built later in engine.ts).
+ * The two used to cap independently at ~6000 chars each with no shared
+ * accounting — see docs/CONVERSATION_LOOP_HERMES_FLOW.md gap H6.
+ */
+export const REFERENCE_CONTEXT_BUDGET_CHARS = 6000
+/** Fixed slice reserved for hermes/sessionSearch.ts's cross-session recall block. */
+export const SESSION_RECALL_CONTEXT_CHARS = 1200
+/** What chat history gets once session recall's reserved slice is set aside. */
+export const CHAT_HISTORY_CONTEXT_CHARS = REFERENCE_CONTEXT_BUDGET_CHARS - SESSION_RECALL_CONTEXT_CHARS
+
 export type ChatHistoryBubble = {
   role: string
   content: string
@@ -27,7 +40,7 @@ export function buildChatHistoryContext(
   },
 ): string {
   const keepRecent = opts?.keepRecent ?? 3
-  const maxChars = opts?.maxChars ?? 6000
+  const maxChars = opts?.maxChars ?? CHAT_HISTORY_CONTEXT_CHARS
   const perMessage = opts?.perMessageChars ?? 600
 
   const chat = bubbles.filter((b) => b.role === 'user' || b.role === 'assistant')

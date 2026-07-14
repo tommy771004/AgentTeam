@@ -1,7 +1,7 @@
 /**
  * runTask — the single task lifecycle controller (W1 / P0-A).
  * Every entry (composer / slash / retry / schedule / webhook / telegram / queue drain)
- * goes through here: one runId, one busy policy table, one thread/bubble/archive semantic.
+ * goes through here: one runId, one capacity policy table, one thread/bubble/archive semantic.
  *
  * When busy: policy decides queue / steer / reject — no caller re-implements lifecycle.
  */
@@ -323,6 +323,8 @@ export async function runExternalObjective(
     }
   }
 
+  const runId = opts.runId || `run_${uuid().slice(0, 12)}`
+
   // Materialize attachments early so queue persistence keeps filePath
   let attachments = opts.attachments
   if (attachments?.length) {
@@ -342,10 +344,9 @@ export async function runExternalObjective(
     }
   }
 
-  const runId = opts.runId || `run_${uuid().slice(0, 12)}`
-
   const agent = useAgentStore.getState()
-  if (agent.isRunning) {
+  let capacity = agent.canStartRun(runId, opts.reuseThreadId)
+  if (!capacity.allowed) {
     const policy: BusyPolicy = opts.sourceKind
       ? resolveBusyPolicy(
           opts.sourceKind,
@@ -355,15 +356,19 @@ export async function runExternalObjective(
         ? 'queue'
         : 'reject'
 
+    const thrBusy = useThreadStore.getState()
+    const busyThreadId = opts.reuseThreadId || thrBusy.runningThreadId || thrBusy.runningThreadIds[0]
+    const busyRunId = opts.reuseThreadId
+      ? agent.getRunIdForThread(opts.reuseThreadId)
+      : agent.selectedRunId || agent.activeRunIds[0]
+    const runningTitle = busyThreadId
+      ? thrBusy.threads.find((t) => t.id === busyThreadId)?.title?.slice(0, 32)
+      : undefined
+
     if (policy === 'steer' && !opts._fromQueue) {
       // Interactive steer: capture partial digest, abort, then proceed
-      const thrBusy = useThreadStore.getState()
       const tid0 = opts.reuseThreadId || thrBusy.activeId
-      const runningId = thrBusy.runningThreadId
-      const runningTitle = runningId
-        ? thrBusy.threads.find((t) => t.id === runningId)?.title
-        : undefined
-      const partial = buildSteerPartialDigest(useAgentStore.getState().agent)
+      const partial = buildSteerPartialDigest(agent.getRunState(busyRunId || undefined) || agent.agent)
       if (tid0) {
         const lines = [
           `轉向目前執行：已中止前一個任務${runningTitle ? `（${runningTitle.slice(0, 32)}）` : ''}`,
@@ -371,14 +376,13 @@ export async function runExternalObjective(
         if (partial) lines.push('', '### 中止前摘要', partial)
         thrBusy.pushBubble(tid0, 'system', lines.join('\n'))
       }
-      useAgentStore.getState().stopExecution()
-      await new Promise((r) => setTimeout(r, 100))
+      useAgentStore.getState().stopExecution(busyRunId || undefined)
+      for (let i = 0; i < 20; i += 1) {
+        await new Promise((r) => setTimeout(r, 50))
+        capacity = useAgentStore.getState().canStartRun(runId, opts.reuseThreadId)
+        if (capacity.allowed) break
+      }
     } else if (policy === 'queue' && !opts._fromQueue) {
-      const thrBusy = useThreadStore.getState()
-      const runningId = thrBusy.runningThreadId
-      const runningTitle = runningId
-        ? thrBusy.threads.find((t) => t.id === runningId)?.title?.slice(0, 32)
-        : undefined
       const item = enqueueExternalRun({
         ...opts,
         runId,
@@ -391,7 +395,7 @@ export async function runExternalObjective(
         return {
           path: 'builtin',
           status: 'skipped',
-          error: `全域執行中${runningTitle ? `（${runningTitle}）` : ''} — 已加入佇列第 ${posLabel} 位（${queueLength()}/24）`,
+          error: `並行執行上限 ${capacity.limit}${runningTitle ? `（${runningTitle}）` : ''} — 已加入佇列第 ${posLabel} 位（${queueLength()}/24）`,
           threadId: opts.reuseThreadId || thrBusy.activeId,
           runId,
           skipped: true,
@@ -403,28 +407,33 @@ export async function runExternalObjective(
       return {
         path: 'builtin',
         status: 'skipped',
-        error: `全域執行中${runningTitle ? `（${runningTitle}）` : ''} — 佇列已滿或重複`,
+        error: `並行執行上限 ${capacity.limit}${runningTitle ? `（${runningTitle}）` : ''} — 佇列已滿或重複`,
         threadId: opts.reuseThreadId || thrBusy.activeId,
         runId,
         skipped: true,
         skipReason: 'busy',
       }
-    } else if (policy !== 'steer') {
-      const thrBusy = useThreadStore.getState()
-      const runningId = thrBusy.runningThreadId
-      const runningTitle = runningId
-        ? thrBusy.threads.find((t) => t.id === runningId)?.title?.slice(0, 32)
-        : undefined
+    }
+    if (!capacity.allowed) {
       return {
         path: 'builtin',
         status: 'skipped',
-        error: `全域執行中${runningTitle ? `（${runningTitle}）` : ''}，請稍候或改用佇列模式`,
+        error: `並行執行上限 ${capacity.limit}${runningTitle ? `（${runningTitle}）` : ''}，請稍候或改用佇列模式`,
         threadId: thrBusy.activeId,
         runId,
         skipped: true,
         skipReason: 'busy',
       }
     }
+  }
+
+  if (!useAgentStore.getState().reserveRun(runId, opts.reuseThreadId, opts.runner && opts.runner !== 'builtin' ? 'cli' : 'builtin')) {
+    const retryCapacity = useAgentStore.getState().canStartRun(runId, opts.reuseThreadId)
+    if (!opts._fromQueue && (opts.sourceKind ? resolveBusyPolicy(opts.sourceKind, useSettingsStore.getState().settings.followUpMode) : 'queue') === 'queue') {
+      const item = enqueueExternalRun({ ...opts, runId, attachments, unattended: opts.unattended ?? isAutomationSource(opts) })
+      if (item) return { path: 'builtin', status: 'skipped', error: `並行執行上限 ${retryCapacity.limit}，已加入佇列`, threadId: opts.reuseThreadId || null, runId, skipped: true, skipReason: 'queued', queued: true, queueId: item.id }
+    }
+    return { path: 'builtin', status: 'skipped', error: `並行執行上限 ${retryCapacity.limit}，請稍候`, threadId: opts.reuseThreadId || null, runId, skipped: true, skipReason: 'busy' }
   }
 
   const thr = useThreadStore.getState()
@@ -464,7 +473,9 @@ export async function runExternalObjective(
   if (opts.runner) thr.setRunner(tid, opts.runner)
   thr.clearRunPlan(tid)
   thr.setShowRunPanel(true)
-  thr.setRunningThreadId(tid)
+  useAgentStore.getState().bindRun(runId, tid)
+  thr.setThreadRunning(tid, true, runId)
+  thr.setAwaitingReply(tid, false)
   if (!opts.skipUserBubble) {
     thr.pushBubble(tid, 'user', objective, attachments)
   }
@@ -588,7 +599,8 @@ export async function runExternalObjective(
     if (ev.deny) {
       // P0: still complete lifecycle — onSettled / afterRun / drain / archive path
       thr.setThreadStatus(tid, 'failed')
-      thr.setRunningThreadId(null)
+      useAgentStore.getState().releaseRun(runId)
+      thr.setThreadRunning(tid, false, runId)
       thr.pushBubble(tid, 'system', `執行被 hook 政策拒絕：${ev.deny.reason}`)
       const denyResult: ExternalRunResult = {
         path: 'builtin',
@@ -645,8 +657,8 @@ export async function runExternalObjective(
       forceLoopType: forcedLoopType,
       attachments,
     })
-    // P0 CLI/dispatch: prefer dispatch result over stale global agent state
-    const finalAgent = useAgentStore.getState().agent
+    // P0 CLI/dispatch: prefer the run-scoped state over any selected-run UI state.
+    const finalAgent = useAgentStore.getState().getRunState(runId) || useAgentStore.getState().agent
     await syncOpenCodeSessionMapping(tid, finalAgent.externalRun)
     if (finalAgent.steps.length > 0) {
       thr.setRunPlan(
@@ -855,7 +867,8 @@ export async function runExternalObjective(
     if (hasFinalAnswer) {
       thr.pushBubble(tid, 'assistant', finalAnswer)
     }
-    thr.setRunningThreadId(null)
+    thr.setThreadRunning(tid, false, runId)
+    thr.setAwaitingReply(tid, finalAgent.loopConfig?.nextState === 'Await User Input')
     const finalResult: ExternalRunResult = {
       ...result,
       threadId: tid,
@@ -889,7 +902,8 @@ export async function runExternalObjective(
     return finalResult
   } catch (e) {
     thr.setThreadStatus(tid, 'failed')
-    thr.setRunningThreadId(null)
+    useAgentStore.getState().releaseRun(runId)
+    thr.setThreadRunning(tid, false, runId)
     const msg = e instanceof Error ? e.message : String(e)
     thr.pushBubble(tid, 'system', `執行失敗：${msg}`)
     const failResult: ExternalRunResult = {

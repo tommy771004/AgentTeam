@@ -18,6 +18,8 @@ export type RunActivityKind =
 export type RunActivityEvent = {
   id: string
   at: number
+  /** Run identity used to keep concurrent streams isolated. */
+  runId?: string
   kind: RunActivityKind
   title?: string
   detail?: string
@@ -79,15 +81,15 @@ interface RunActivityStore {
   tasks: RunTaskItem[]
 
   begin: (runId?: string) => void
-  end: () => void
+  end: (runId?: string) => void
   clear: () => void
   push: (ev: Omit<RunActivityEvent, 'id' | 'at'> & { id?: string }) => void
   appendThought: (delta: string) => void
   appendText: (delta: string) => void
-  setStatus: (line: string) => void
+  setStatus: (line: string, runId?: string) => void
   recordFileChange: (f: Omit<FileChangeRecord, 'at'> & { at?: number }) => void
   /** 以完整快照取代任務清單（結構化 plan 事件） */
-  setTasks: (todos: Array<{ text: string; status?: string }>) => void
+  setTasks: (todos: Array<{ text: string; status?: string }>, runId?: string) => void
   /** 文字流 checkbox 解析 → 新增或更新單項 */
   upsertTask: (text: string, status: RunTaskStatus) => void
   handleCliStream: (payload: CliStreamPayload) => void
@@ -169,7 +171,11 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     })
   },
 
-  end: () => set({ active: false, statusLine: get().statusLine || '完成' }),
+  end: (runId) => {
+    const current = get()
+    if (runId && current.runId && current.runId !== runId) return
+    set({ active: false, statusLine: current.statusLine || '完成' })
+  },
 
   clear: () => {
     resetTaskLineBuf()
@@ -186,9 +192,12 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
   },
 
   push: (ev) => {
+    const current = get()
+    if (ev.runId && current.runId && ev.runId !== current.runId) return
     const item: RunActivityEvent = {
       id: ev.id || nid(),
       at: Date.now(),
+      runId: ev.runId || current.runId || undefined,
       kind: ev.kind,
       title: ev.title,
       detail: ev.detail?.slice(0, 2000),
@@ -223,9 +232,15 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     }))
   },
 
-  setStatus: (line) => set({ statusLine: line.slice(0, 200) }),
+  setStatus: (line, runId) => {
+    const current = get()
+    if (runId && current.runId && current.runId !== runId) return
+    set({ statusLine: line.slice(0, 200) })
+  },
 
-  setTasks: (todos) => {
+  setTasks: (todos, runId) => {
+    const current = get()
+    if (runId && current.runId && current.runId !== runId) return
     const now = Date.now()
     const seen = new Set<string>()
     const tasks: RunTaskItem[] = []
@@ -245,10 +260,13 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     }
     if (tasks.length) {
       set({ tasks })
-      // Persist the latest snapshot on the run's thread. Use runningThreadId
-      // so scheduled runs do not write into the selected UI conversation.
+      // Persist the latest snapshot on the run's thread. The explicit runId
+      // prevents a late concurrent stream from writing into another thread.
       void import('./threadStore').then(({ useThreadStore }) => {
-        const threadId = useThreadStore.getState().runningThreadId
+        const threadState = useThreadStore.getState()
+        const threadId = runId
+          ? threadState.threads.find((thread) => threadState.runningRunIds[thread.id] === runId)?.id
+          : threadState.runningThreadId
         if (threadId) useThreadStore.getState().setRunPlan(threadId, tasks)
       })
     }
@@ -305,16 +323,19 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
 
   handleCliStream: (payload) => {
     const s = get()
-    // Global mutex = one run; accept streams while active even if runId skews
-    // (dispatch runId vs CLI-generated id). Only drop when idle / different completed run.
-    if (!s.active && s.runId && payload.runId && payload.runId !== s.runId) return
+    // Streams are tagged at the Electron boundary. A late event from another
+    // concurrent run must never mutate the currently visible feed.
+    if (s.runId && payload.runId && payload.runId !== s.runId) return
+    if (s.active && s.runId && !payload.runId) return
+    const streamRunId = payload.runId || s.runId || undefined
 
     // 結構化任務清單（TodoWrite / update_plan / todo_list）→ 完整快照取代
     if (payload.kind === 'plan') {
       if (payload.todos?.length) {
-        get().setTasks(payload.todos)
+        get().setTasks(payload.todos, streamRunId)
         get().push({
           kind: 'status',
+          runId: streamRunId,
           title: payload.title || '任務清單更新',
           detail: `${payload.todos.length} 項`,
         })
@@ -327,7 +348,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       if (delta) {
         if (!s.thought) {
           get().push({ kind: 'status', title: '開始思考' })
-          get().setStatus('思考中…')
+          get().setStatus('思考中…', streamRunId)
         }
         get().appendThought(delta)
         scanTaskLines('thought', delta, get().upsertTask)
@@ -339,7 +360,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       if (delta) {
         if (!s.draftText) {
           get().push({ kind: 'status', title: '產生回答' })
-          get().setStatus('產生回答…')
+          get().setStatus('產生回答…', streamRunId)
         }
         get().appendText(delta)
         scanTaskLines('text', delta, get().upsertTask)
@@ -359,6 +380,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     if (payload.kind === 'done') {
       get().push({
         kind: 'done',
+        runId: streamRunId,
         title: payload.title || 'CLI 完成',
         detail: payload.detail,
         ok: payload.ok !== false,
@@ -392,8 +414,9 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
           added: payload.added,
           removed: payload.removed,
         })
-        get().push({
-          kind: 'file',
+      get().push({
+        kind: 'file',
+        runId: streamRunId,
           title: payload.title || label,
           detail: path,
           path,
@@ -407,8 +430,9 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     }
 
     if (payload.kind === 'tool') {
-      get().push({
-        kind: 'tool',
+        get().push({
+          kind: 'tool',
+          runId: streamRunId,
         title: payload.title || (payload.tool ? `已執行 ${payload.tool}` : '已執行指令'),
         detail: payload.detail || payload.delta,
         tool: payload.tool,
@@ -423,6 +447,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         get().recordFileChange({ path: m[1], action: 'edit' })
         get().push({
           kind: 'file',
+          runId: streamRunId,
           title: `已編輯 ${basen(m[1])}`,
           path: m[1],
           detail: m[1],
@@ -433,6 +458,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     }
 
     get().push({
+      runId: streamRunId,
       kind:
         payload.kind === 'error'
           ? 'error'

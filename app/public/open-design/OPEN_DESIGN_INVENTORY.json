@@ -1,66 +1,45 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-13T07:32:40.025Z",
+  "generatedAt": "2026-07-14T04:37:17.643Z",
   "upstreamCommit": "4567a0d",
   "sourceUrl": "https://open-design.ai/zh/plugins/",
   "records": [
     {
-      "id": "design-templates:AGENTS.md",
-      "kind": "template",
-      "category": "prototype",
-      "title": "AGENTS.Md",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
-      "sourcePath": "design-templates/AGENTS.md",
-      "assetPaths": [
-        "design-templates/AGENTS.md"
-      ],
-      "entryPaths": [],
-      "tags": [],
-      "executionStatus": "content-only",
-      "parseWarnings": [],
-      "source": "open-design",
-      "sourceUrl": "https://open-design.ai/zh/plugins/",
-      "upstreamCommit": "4567a0d",
-      "digest": "dbb8f956f2c0cb58d1540e0a2595a371401d6f32484378e69f6aa0d2eb197c4d",
-      "licensePaths": [
-        "LICENSE",
-        "NOTICE.md"
-      ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
-    },
-    {
       "id": "design-templates:audio-jingle",
       "kind": "template",
-      "category": "prototype",
-      "title": "Audio Jingle",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "category": "audio",
+      "title": "品牌 Jingle",
+      "summary": "為短片或產品體驗設定短篇品牌聲音。",
       "sourcePath": "design-templates/audio-jingle",
       "assetPaths": [
         "design-templates/audio-jingle/SKILL.md",
-        "design-templates/audio-jingle/example.html"
+        "design-templates/audio-jingle/example.html",
+        "design-templates/audio-jingle/template.json"
       ],
       "entryPaths": [
         "design-templates/audio-jingle/SKILL.md",
         "design-templates/audio-jingle/example.html"
       ],
       "tags": [],
-      "executionStatus": "ready",
+      "icon": "graphic_eq",
+      "suggestedObjective": "規劃一段用於品牌識別的短篇音訊。",
+      "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "df1459c9c5115a69e7c49ec0f44a378f947d53b82b5ffaec855a9dc8f8b5f831",
+      "digest": "316274831dad47bce67e794c1f5aefc393928e21680a69c2a42362c5bce65a57",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:audio-jingle:skill",
       "kind": "skill",
-      "category": "prototype",
-      "title": "Audio Jingle Skill",
+      "category": "audio",
+      "title": "品牌 Jingle Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/audio-jingle",
       "assetPaths": [
@@ -70,51 +49,57 @@
         "design-templates/audio-jingle/SKILL.md"
       ],
       "tags": [],
+      "icon": "graphic_eq",
+      "suggestedObjective": "規劃一段用於品牌識別的短篇音訊。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "df1459c9c5115a69e7c49ec0f44a378f947d53b82b5ffaec855a9dc8f8b5f831",
+      "digest": "316274831dad47bce67e794c1f5aefc393928e21680a69c2a42362c5bce65a57",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:blog-post",
       "kind": "template",
       "category": "prototype",
-      "title": "Blog Post",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "文章頁面",
+      "summary": "支援長文閱讀、摘要與延伸內容的版型。",
       "sourcePath": "design-templates/blog-post",
       "assetPaths": [
         "design-templates/blog-post/SKILL.md",
-        "design-templates/blog-post/example.html"
+        "design-templates/blog-post/example.html",
+        "design-templates/blog-post/template.json"
       ],
       "entryPaths": [
         "design-templates/blog-post/SKILL.md",
         "design-templates/blog-post/example.html"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "article",
+      "suggestedObjective": "設計一個兼顧閱讀節奏與轉換的文章頁。",
       "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "b425c59faa21e0cdfd3798a7f9ea5dc64bdbca9350eb3dc67b7ac324dc63d055",
+      "digest": "6ae29d161878b84bc3d9a88e9b78e1738556d7597ba31ee7d328ae9ff6cc000e",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:blog-post:skill",
       "kind": "skill",
       "category": "prototype",
-      "title": "Blog Post Skill",
+      "title": "文章頁面 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/blog-post",
       "assetPaths": [
@@ -124,17 +109,20 @@
         "design-templates/blog-post/SKILL.md"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "article",
+      "suggestedObjective": "設計一個兼顧閱讀節奏與轉換的文章頁。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "b425c59faa21e0cdfd3798a7f9ea5dc64bdbca9350eb3dc67b7ac324dc63d055",
+      "digest": "6ae29d161878b84bc3d9a88e9b78e1738556d7597ba31ee7d328ae9ff6cc000e",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:clinical-case-report",
@@ -165,7 +153,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:clinical-case-report:skill",
@@ -191,7 +179,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:contact-widget",
@@ -219,7 +207,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:contact-widget:skill",
@@ -245,7 +233,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:critique",
@@ -273,7 +261,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:critique:skill",
@@ -299,41 +287,45 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:dashboard",
       "kind": "template",
-      "category": "dashboard",
-      "title": "Dashboard",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "category": "prototype",
+      "title": "營運儀表板",
+      "summary": "帶側欄、KPI 與分析圖表的操作介面。",
       "sourcePath": "design-templates/dashboard",
       "assetPaths": [
         "design-templates/dashboard/SKILL.md",
-        "design-templates/dashboard/example.html"
+        "design-templates/dashboard/example.html",
+        "design-templates/dashboard/template.json"
       ],
       "entryPaths": [
         "design-templates/dashboard/SKILL.md",
         "design-templates/dashboard/example.html"
       ],
       "tags": [],
-      "executionStatus": "content-only",
+      "surface": "dashboard",
+      "icon": "dashboard",
+      "suggestedObjective": "設計一個供團隊日常決策使用的營運儀表板。",
+      "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "79f0728e60f814af85a971bc2ca70841af33da982703c39e6df3224b934290e5",
+      "digest": "b0343e2b11ce3df8e1510bb4c0db81105dfa1084545242f15e7542d21834a063",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:dashboard:skill",
       "kind": "skill",
-      "category": "dashboard",
-      "title": "Dashboard Skill",
+      "category": "prototype",
+      "title": "營運儀表板 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/dashboard",
       "assetPaths": [
@@ -343,17 +335,20 @@
         "design-templates/dashboard/SKILL.md"
       ],
       "tags": [],
+      "surface": "dashboard",
+      "icon": "dashboard",
+      "suggestedObjective": "設計一個供團隊日常決策使用的營運儀表板。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "79f0728e60f814af85a971bc2ca70841af33da982703c39e6df3224b934290e5",
+      "digest": "b0343e2b11ce3df8e1510bb4c0db81105dfa1084545242f15e7542d21834a063",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:dating-web",
@@ -381,7 +376,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:dating-web:skill",
@@ -407,7 +402,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:dcf-valuation",
@@ -434,7 +429,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:dcf-valuation:skill",
@@ -460,7 +455,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:digital-eguide",
@@ -488,7 +483,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:digital-eguide:skill",
@@ -514,41 +509,45 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:docs-page",
       "kind": "template",
       "category": "prototype",
-      "title": "Docs Page",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "文件頁面",
+      "summary": "有清楚導覽與內容節奏的產品文件。",
       "sourcePath": "design-templates/docs-page",
       "assetPaths": [
         "design-templates/docs-page/SKILL.md",
-        "design-templates/docs-page/example.html"
+        "design-templates/docs-page/example.html",
+        "design-templates/docs-page/template.json"
       ],
       "entryPaths": [
         "design-templates/docs-page/SKILL.md",
         "design-templates/docs-page/example.html"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "description",
+      "suggestedObjective": "設計一個易於閱讀與搜尋的產品文件頁。",
       "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "c70c9b454809b4d30268109e5de1ccf4a37f07f257ca1d464d406303459aecda",
+      "digest": "795ff3cd3c99f8a10d882ca287278fe003fa227c69b36a8a9b760286b738df44",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:docs-page:skill",
       "kind": "skill",
       "category": "prototype",
-      "title": "Docs Page Skill",
+      "title": "文件頁面 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/docs-page",
       "assetPaths": [
@@ -558,51 +557,58 @@
         "design-templates/docs-page/SKILL.md"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "description",
+      "suggestedObjective": "設計一個易於閱讀與搜尋的產品文件頁。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "c70c9b454809b4d30268109e5de1ccf4a37f07f257ca1d464d406303459aecda",
+      "digest": "795ff3cd3c99f8a10d882ca287278fe003fa227c69b36a8a9b760286b738df44",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:email-marketing",
       "kind": "template",
       "category": "prototype",
-      "title": "Email Marketing",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "行銷 Email",
+      "summary": "兼顧品牌表現與 table fallback 的信件版型。",
       "sourcePath": "design-templates/email-marketing",
       "assetPaths": [
         "design-templates/email-marketing/SKILL.md",
-        "design-templates/email-marketing/example.html"
+        "design-templates/email-marketing/example.html",
+        "design-templates/email-marketing/template.json"
       ],
       "entryPaths": [
         "design-templates/email-marketing/SKILL.md",
         "design-templates/email-marketing/example.html"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "mail",
+      "suggestedObjective": "設計一封可交付開發的產品行銷 Email。",
       "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "076855b13fb0ce90a0a83915ac06d2da0a3074f3f49c6220f505da64e12646da",
+      "digest": "273c33c7794f7042f30e28701f51b2a58f5b38b0865ab470e3c098c6918c3754",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:email-marketing:skill",
       "kind": "skill",
       "category": "prototype",
-      "title": "Email Marketing Skill",
+      "title": "行銷 Email Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/email-marketing",
       "assetPaths": [
@@ -612,51 +618,58 @@
         "design-templates/email-marketing/SKILL.md"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "mail",
+      "suggestedObjective": "設計一封可交付開發的產品行銷 Email。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "076855b13fb0ce90a0a83915ac06d2da0a3074f3f49c6220f505da64e12646da",
+      "digest": "273c33c7794f7042f30e28701f51b2a58f5b38b0865ab470e3c098c6918c3754",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:eng-runbook",
       "kind": "template",
       "category": "prototype",
-      "title": "Eng Runbook",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "工程 Runbook",
+      "summary": "事件應變步驟、責任與狀態的操作文件。",
       "sourcePath": "design-templates/eng-runbook",
       "assetPaths": [
         "design-templates/eng-runbook/SKILL.md",
-        "design-templates/eng-runbook/example.html"
+        "design-templates/eng-runbook/example.html",
+        "design-templates/eng-runbook/template.json"
       ],
       "entryPaths": [
         "design-templates/eng-runbook/SKILL.md",
         "design-templates/eng-runbook/example.html"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "engineering",
+      "suggestedObjective": "設計一份工程事故應變 runbook。",
       "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "779a2209ffcd63b5a5d10dfeb4e111637f1809948721afe0ee31f89faa59aca6",
+      "digest": "35d122dea66565926e408ff25909bf0d94ef314226b2ba1d55d13fa037043e23",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:eng-runbook:skill",
       "kind": "skill",
       "category": "prototype",
-      "title": "Eng Runbook Skill",
+      "title": "工程 Runbook Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/eng-runbook",
       "assetPaths": [
@@ -666,51 +679,58 @@
         "design-templates/eng-runbook/SKILL.md"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "engineering",
+      "suggestedObjective": "設計一份工程事故應變 runbook。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "779a2209ffcd63b5a5d10dfeb4e111637f1809948721afe0ee31f89faa59aca6",
+      "digest": "35d122dea66565926e408ff25909bf0d94ef314226b2ba1d55d13fa037043e23",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:finance-report",
       "kind": "template",
-      "category": "dashboard",
-      "title": "Finance Report",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "category": "prototype",
+      "title": "財務摘要",
+      "summary": "讓管理者快速掌握核心數字與趨勢。",
       "sourcePath": "design-templates/finance-report",
       "assetPaths": [
         "design-templates/finance-report/SKILL.md",
-        "design-templates/finance-report/example.html"
+        "design-templates/finance-report/example.html",
+        "design-templates/finance-report/template.json"
       ],
       "entryPaths": [
         "design-templates/finance-report/SKILL.md",
         "design-templates/finance-report/example.html"
       ],
       "tags": [],
-      "executionStatus": "content-only",
+      "surface": "dashboard",
+      "icon": "query_stats",
+      "suggestedObjective": "設計一份供管理階層閱讀的財務摘要。",
+      "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "7f19b2f4677bf104d5bf827e4a6b20e78039db938bbe263a6a5e41fd2ac23e76",
+      "digest": "c079dad0b5916fac27f5a484a0c387dbf67b0b35cf443bcf666add02015a120f",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:finance-report:skill",
       "kind": "skill",
-      "category": "dashboard",
-      "title": "Finance Report Skill",
+      "category": "prototype",
+      "title": "財務摘要 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/finance-report",
       "assetPaths": [
@@ -720,53 +740,60 @@
         "design-templates/finance-report/SKILL.md"
       ],
       "tags": [],
+      "surface": "dashboard",
+      "icon": "query_stats",
+      "suggestedObjective": "設計一份供管理階層閱讀的財務摘要。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "7f19b2f4677bf104d5bf827e4a6b20e78039db938bbe263a6a5e41fd2ac23e76",
+      "digest": "c079dad0b5916fac27f5a484a0c387dbf67b0b35cf443bcf666add02015a120f",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:flowai-live-dashboard-template",
       "kind": "template",
       "category": "dashboard",
-      "title": "Flowai Live Dashboard Template",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "Flow 資料看板",
+      "summary": "著重工作流、狀態與資料流的即時可視化。",
       "sourcePath": "design-templates/flowai-live-dashboard-template",
       "assetPaths": [
         "design-templates/flowai-live-dashboard-template/SKILL.md",
         "design-templates/flowai-live-dashboard-template/assets/template.html",
         "design-templates/flowai-live-dashboard-template/example.html",
-        "design-templates/flowai-live-dashboard-template/references/checklist.md"
+        "design-templates/flowai-live-dashboard-template/references/checklist.md",
+        "design-templates/flowai-live-dashboard-template/template.json"
       ],
       "entryPaths": [
         "design-templates/flowai-live-dashboard-template/SKILL.md",
         "design-templates/flowai-live-dashboard-template/example.html"
       ],
       "tags": [],
-      "executionStatus": "content-only",
+      "surface": "dashboard",
+      "icon": "account_tree",
+      "suggestedObjective": "設計一個呈現工作流狀態與瓶頸的即時看板。",
+      "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "8729a659b3c0e7cb1891325b4fd183344e30b8c157ada772d45f1d4f0faaa9a8",
+      "digest": "379a30a6bb01ba1f19dcba19c3e789bea389431aa6e803b7012f675cde3da29c",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:flowai-live-dashboard-template:skill",
       "kind": "skill",
       "category": "dashboard",
-      "title": "Flowai Live Dashboard Template Skill",
+      "title": "Flow 資料看板 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/flowai-live-dashboard-template",
       "assetPaths": [
@@ -776,17 +803,20 @@
         "design-templates/flowai-live-dashboard-template/SKILL.md"
       ],
       "tags": [],
+      "surface": "dashboard",
+      "icon": "account_tree",
+      "suggestedObjective": "設計一個呈現工作流狀態與瓶頸的即時看板。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "8729a659b3c0e7cb1891325b4fd183344e30b8c157ada772d45f1d4f0faaa9a8",
+      "digest": "379a30a6bb01ba1f19dcba19c3e789bea389431aa6e803b7012f675cde3da29c",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:gamified-app",
@@ -814,7 +844,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:gamified-app:skill",
@@ -840,14 +870,14 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:github-dashboard",
       "kind": "template",
       "category": "dashboard",
-      "title": "Github Dashboard",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "GitHub 看板",
+      "summary": "以 PR、issue 與交付節奏為主的團隊視圖。",
       "sourcePath": "design-templates/github-dashboard",
       "assetPaths": [
         "design-templates/github-dashboard/SKILL.md",
@@ -856,30 +886,34 @@
         "design-templates/github-dashboard/references/artifact-example.json",
         "design-templates/github-dashboard/references/example-data.json",
         "design-templates/github-dashboard/references/provenance-example.json",
-        "design-templates/github-dashboard/references/template.html"
+        "design-templates/github-dashboard/references/template.html",
+        "design-templates/github-dashboard/template.json"
       ],
       "entryPaths": [
         "design-templates/github-dashboard/SKILL.md",
         "design-templates/github-dashboard/example.html"
       ],
       "tags": [],
-      "executionStatus": "content-only",
+      "surface": "dashboard",
+      "icon": "code",
+      "suggestedObjective": "設計一個讓團隊追蹤 GitHub 交付狀態的看板。",
+      "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "ea7e2facfa31ddc71c440878d604d07ee22dedc5b4ec80720484572e2f6d9d05",
+      "digest": "90131b9ac124373a0c31eba08a47787db449640b732f6b7072b2cdec0d50a7bc",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:github-dashboard:skill",
       "kind": "skill",
       "category": "dashboard",
-      "title": "Github Dashboard Skill",
+      "title": "GitHub 看板 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/github-dashboard",
       "assetPaths": [
@@ -889,24 +923,27 @@
         "design-templates/github-dashboard/SKILL.md"
       ],
       "tags": [],
+      "surface": "dashboard",
+      "icon": "code",
+      "suggestedObjective": "設計一個讓團隊追蹤 GitHub 交付狀態的看板。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "ea7e2facfa31ddc71c440878d604d07ee22dedc5b4ec80720484572e2f6d9d05",
+      "digest": "90131b9ac124373a0c31eba08a47787db449640b732f6b7072b2cdec0d50a7bc",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:guizang-ppt",
       "kind": "template",
       "category": "deck",
-      "title": "Guizang Ppt",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "雜誌式簡報",
+      "summary": "以編輯節奏與橫向瀏覽呈現有個性的敘事。",
       "sourcePath": "design-templates/guizang-ppt",
       "assetPaths": [
         "design-templates/guizang-ppt/LICENSE",
@@ -920,30 +957,34 @@
         "design-templates/guizang-ppt/references/components.md",
         "design-templates/guizang-ppt/references/layouts.md",
         "design-templates/guizang-ppt/references/styles.md",
-        "design-templates/guizang-ppt/references/themes.md"
+        "design-templates/guizang-ppt/references/themes.md",
+        "design-templates/guizang-ppt/template.json"
       ],
       "entryPaths": [
         "design-templates/guizang-ppt/SKILL.md"
       ],
       "tags": [],
-      "executionStatus": "content-only",
+      "surface": "deck",
+      "icon": "auto_stories",
+      "suggestedObjective": "製作一份具有鮮明觀點的品牌或產品簡報。",
+      "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "2dcca6f0590e44784f585fc5dfdf3b7b05f98e66adb74bfd550a52277001c49a",
+      "digest": "33c60343d3e794e5c9a3afff2f7945d6f1ff165566958a57ffe316fcc96a847c",
       "licensePaths": [
         "design-templates/guizang-ppt/LICENSE",
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:guizang-ppt:skill",
       "kind": "skill",
       "category": "deck",
-      "title": "Guizang Ppt Skill",
+      "title": "雜誌式簡報 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/guizang-ppt",
       "assetPaths": [
@@ -953,18 +994,21 @@
         "design-templates/guizang-ppt/SKILL.md"
       ],
       "tags": [],
+      "surface": "deck",
+      "icon": "auto_stories",
+      "suggestedObjective": "製作一份具有鮮明觀點的品牌或產品簡報。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "2dcca6f0590e44784f585fc5dfdf3b7b05f98e66adb74bfd550a52277001c49a",
+      "digest": "33c60343d3e794e5c9a3afff2f7945d6f1ff165566958a57ffe316fcc96a847c",
       "licensePaths": [
         "design-templates/guizang-ppt/LICENSE",
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:hr-onboarding",
@@ -992,7 +1036,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:hr-onboarding:skill",
@@ -1018,7 +1062,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-course-module",
@@ -1046,7 +1090,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-course-module:skill",
@@ -1072,7 +1116,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-graphify-dark-graph",
@@ -1100,7 +1144,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-graphify-dark-graph:skill",
@@ -1126,7 +1170,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-hermes-cyber-terminal",
@@ -1154,7 +1198,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-hermes-cyber-terminal:skill",
@@ -1180,7 +1224,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-knowledge-arch-blueprint",
@@ -1208,7 +1252,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-knowledge-arch-blueprint:skill",
@@ -1234,7 +1278,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-obsidian-claude-gradient",
@@ -1262,7 +1306,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-obsidian-claude-gradient:skill",
@@ -1288,41 +1332,45 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-pitch-deck",
       "kind": "template",
       "category": "deck",
-      "title": "Html Ppt Pitch Deck",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "Pitch Deck",
+      "summary": "將問題、方案、成果與下一步整理成提案敘事。",
       "sourcePath": "design-templates/html-ppt-pitch-deck",
       "assetPaths": [
         "design-templates/html-ppt-pitch-deck/SKILL.md",
-        "design-templates/html-ppt-pitch-deck/example.html"
+        "design-templates/html-ppt-pitch-deck/example.html",
+        "design-templates/html-ppt-pitch-deck/template.json"
       ],
       "entryPaths": [
         "design-templates/html-ppt-pitch-deck/SKILL.md",
         "design-templates/html-ppt-pitch-deck/example.html"
       ],
       "tags": [],
-      "executionStatus": "content-only",
+      "surface": "deck",
+      "icon": "slideshow",
+      "suggestedObjective": "製作一份清楚說明產品價值與商業機會的 pitch deck。",
+      "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "ff64153d673cbaa491f008e44c42843e3d841bcfa7a722b920b64732350580d2",
+      "digest": "33db21696fa210b55ab77c61cced4f0a7ea9fa5b96598b19a8125e4fbf340208",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-pitch-deck:skill",
       "kind": "skill",
       "category": "deck",
-      "title": "Html Ppt Pitch Deck Skill",
+      "title": "Pitch Deck Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/html-ppt-pitch-deck",
       "assetPaths": [
@@ -1332,17 +1380,20 @@
         "design-templates/html-ppt-pitch-deck/SKILL.md"
       ],
       "tags": [],
+      "surface": "deck",
+      "icon": "slideshow",
+      "suggestedObjective": "製作一份清楚說明產品價值與商業機會的 pitch deck。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "ff64153d673cbaa491f008e44c42843e3d841bcfa7a722b920b64732350580d2",
+      "digest": "33db21696fa210b55ab77c61cced4f0a7ea9fa5b96598b19a8125e4fbf340208",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-presenter-mode-reveal",
@@ -1370,7 +1421,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-presenter-mode-reveal:skill",
@@ -1396,7 +1447,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-product-launch",
@@ -1424,7 +1475,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-product-launch:skill",
@@ -1450,7 +1501,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-taste-brutalist",
@@ -1478,7 +1529,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-taste-brutalist:skill",
@@ -1504,7 +1555,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-taste-editorial",
@@ -1532,7 +1583,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-taste-editorial:skill",
@@ -1558,7 +1609,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-tech-sharing",
@@ -1586,7 +1637,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-tech-sharing:skill",
@@ -1612,7 +1663,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-testing-safety-alert",
@@ -1640,7 +1691,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-testing-safety-alert:skill",
@@ -1666,7 +1717,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-weekly-report",
@@ -1694,7 +1745,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-weekly-report:skill",
@@ -1720,7 +1771,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-pastel-card",
@@ -1748,7 +1799,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-pastel-card:skill",
@@ -1774,7 +1825,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-white-editorial",
@@ -1802,7 +1853,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-white-editorial:skill",
@@ -1828,7 +1879,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-8-bit-orbit",
@@ -1859,7 +1910,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-8-bit-orbit:skill",
@@ -1886,7 +1937,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-biennale-yellow",
@@ -1917,7 +1968,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-biennale-yellow:skill",
@@ -1944,7 +1995,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-block-frame",
@@ -1975,7 +2026,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-block-frame:skill",
@@ -2002,7 +2053,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-blue-professional",
@@ -2033,7 +2084,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-blue-professional:skill",
@@ -2060,7 +2111,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-bold-poster",
@@ -2091,7 +2142,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-bold-poster:skill",
@@ -2118,7 +2169,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-broadside",
@@ -2149,7 +2200,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-broadside:skill",
@@ -2176,7 +2227,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-capsule",
@@ -2207,7 +2258,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-capsule:skill",
@@ -2234,7 +2285,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cartesian",
@@ -2265,7 +2316,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cartesian:skill",
@@ -2292,7 +2343,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cobalt-grid",
@@ -2323,7 +2374,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cobalt-grid:skill",
@@ -2350,7 +2401,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-coral",
@@ -2381,7 +2432,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-coral:skill",
@@ -2408,7 +2459,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-creative-mode",
@@ -2440,7 +2491,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-creative-mode:skill",
@@ -2467,7 +2518,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-daisy-days",
@@ -2498,7 +2549,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-daisy-days:skill",
@@ -2525,7 +2576,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-editorial-tri-tone",
@@ -2557,7 +2608,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-editorial-tri-tone:skill",
@@ -2584,7 +2635,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-grove",
@@ -2615,7 +2666,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-grove:skill",
@@ -2642,7 +2693,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-long-table",
@@ -2673,7 +2724,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-long-table:skill",
@@ -2700,7 +2751,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-mat",
@@ -2731,7 +2782,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-mat:skill",
@@ -2758,7 +2809,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-monochrome",
@@ -2789,7 +2840,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-monochrome:skill",
@@ -2816,7 +2867,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-neo-grid-bold",
@@ -2848,7 +2899,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-neo-grid-bold:skill",
@@ -2875,7 +2926,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-peoples-platform",
@@ -2907,7 +2958,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-peoples-platform:skill",
@@ -2934,7 +2985,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pin-and-paper",
@@ -2967,7 +3018,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pin-and-paper:skill",
@@ -2994,7 +3045,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pink-script",
@@ -3026,7 +3077,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pink-script:skill",
@@ -3053,7 +3104,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-playful",
@@ -3084,7 +3135,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-playful:skill",
@@ -3111,7 +3162,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-raw-grid",
@@ -3142,7 +3193,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-raw-grid:skill",
@@ -3169,7 +3220,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-windows",
@@ -3200,7 +3251,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-windows:skill",
@@ -3227,7 +3278,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-zine",
@@ -3258,7 +3309,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-zine:skill",
@@ -3285,7 +3336,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-sakura-chroma",
@@ -3316,7 +3367,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-sakura-chroma:skill",
@@ -3343,7 +3394,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-scatterbrain",
@@ -3374,7 +3425,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-scatterbrain:skill",
@@ -3401,7 +3452,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-signal",
@@ -3432,7 +3483,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-signal:skill",
@@ -3459,7 +3510,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-soft-editorial",
@@ -3491,7 +3542,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-soft-editorial:skill",
@@ -3518,7 +3569,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-stencil-tablet",
@@ -3550,7 +3601,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-stencil-tablet:skill",
@@ -3577,7 +3628,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-studio",
@@ -3608,7 +3659,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-studio:skill",
@@ -3635,7 +3686,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-vellum",
@@ -3666,7 +3717,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-vellum:skill",
@@ -3693,7 +3744,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt",
@@ -3960,7 +4011,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:html-ppt:skill",
@@ -3987,14 +4038,14 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:hyperframes",
       "kind": "template",
       "category": "hyperframes",
-      "title": "Hyperframes",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "HyperFrames 動態圖像",
+      "summary": "以 HTML、CSS 與動畫組成可渲染的 motion graphic。",
       "sourcePath": "design-templates/hyperframes",
       "assetPaths": [
         "design-templates/hyperframes/SKILL.md",
@@ -4037,29 +4088,32 @@
         "design-templates/hyperframes/scripts/animation-map.mjs",
         "design-templates/hyperframes/scripts/contrast-report.mjs",
         "design-templates/hyperframes/scripts/package-loader.mjs",
+        "design-templates/hyperframes/template.json",
         "design-templates/hyperframes/visual-styles.md"
       ],
       "entryPaths": [
         "design-templates/hyperframes/SKILL.md"
       ],
       "tags": [],
+      "icon": "animation",
+      "suggestedObjective": "規劃一段產品功能的動態圖像。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "9a60a61bdc719fcfa2ee8ce8096da0007c086b7faad7848350632270e3d1290c",
+      "digest": "665a3ad2778826ac0450a161aa4d865076d764230f0732632bd31109c8f2ad6a",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:hyperframes:skill",
       "kind": "skill",
       "category": "hyperframes",
-      "title": "Hyperframes Skill",
+      "title": "HyperFrames 動態圖像 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/hyperframes",
       "assetPaths": [
@@ -4069,17 +4123,19 @@
         "design-templates/hyperframes/SKILL.md"
       ],
       "tags": [],
+      "icon": "animation",
+      "suggestedObjective": "規劃一段產品功能的動態圖像。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "9a60a61bdc719fcfa2ee8ce8096da0007c086b7faad7848350632270e3d1290c",
+      "digest": "665a3ad2778826ac0450a161aa4d865076d764230f0732632bd31109c8f2ad6a",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:ib-pitch-book",
@@ -4113,7 +4169,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:ib-pitch-book:skill",
@@ -4140,41 +4196,44 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:image-poster",
       "kind": "template",
-      "category": "prototype",
-      "title": "Image Poster",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "category": "image",
+      "title": "海報圖像",
+      "summary": "單張視覺主導的宣傳或活動素材。",
       "sourcePath": "design-templates/image-poster",
       "assetPaths": [
         "design-templates/image-poster/SKILL.md",
-        "design-templates/image-poster/example.html"
+        "design-templates/image-poster/example.html",
+        "design-templates/image-poster/template.json"
       ],
       "entryPaths": [
         "design-templates/image-poster/SKILL.md",
         "design-templates/image-poster/example.html"
       ],
       "tags": [],
-      "executionStatus": "ready",
+      "icon": "image",
+      "suggestedObjective": "建立一張用於活動宣傳的主視覺海報。",
+      "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "ee70a28ac21d6ff097bae4ec49c141f01c9c88d5a88973864b39bdd068f9c454",
+      "digest": "be0eb6f381b4b91b92a17abf181dea918d07aba9b05b92811b54354d3776c4c1",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:image-poster:skill",
       "kind": "skill",
-      "category": "prototype",
-      "title": "Image Poster Skill",
+      "category": "image",
+      "title": "海報圖像 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/image-poster",
       "assetPaths": [
@@ -4184,17 +4243,19 @@
         "design-templates/image-poster/SKILL.md"
       ],
       "tags": [],
+      "icon": "image",
+      "suggestedObjective": "建立一張用於活動宣傳的主視覺海報。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "ee70a28ac21d6ff097bae4ec49c141f01c9c88d5a88973864b39bdd068f9c454",
+      "digest": "be0eb6f381b4b91b92a17abf181dea918d07aba9b05b92811b54354d3776c4c1",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:invoice",
@@ -4222,7 +4283,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:invoice:skill",
@@ -4248,36 +4309,40 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:kami-deck",
       "kind": "template",
       "category": "deck",
       "title": "Kami Deck",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "summary": "紙感排版與墨藍色調的專業敘事簡報。",
       "sourcePath": "design-templates/kami-deck",
       "assetPaths": [
         "design-templates/kami-deck/README.md",
         "design-templates/kami-deck/SKILL.md",
-        "design-templates/kami-deck/example.html"
+        "design-templates/kami-deck/example.html",
+        "design-templates/kami-deck/template.json"
       ],
       "entryPaths": [
         "design-templates/kami-deck/SKILL.md",
         "design-templates/kami-deck/example.html"
       ],
       "tags": [],
-      "executionStatus": "content-only",
+      "surface": "deck",
+      "icon": "menu_book",
+      "suggestedObjective": "製作一份帶有紙本閱讀節奏的專業簡報。",
+      "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "359296e8f235493fc544f285dd8151b380f2b67099da67d418a18c1fbfbcfa01",
+      "digest": "9807e55c5a301a0952ed3325c7880ccb61dbed5c3c29bca690c76743ac9f835f",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:kami-deck:skill",
@@ -4293,17 +4358,20 @@
         "design-templates/kami-deck/SKILL.md"
       ],
       "tags": [],
+      "surface": "deck",
+      "icon": "menu_book",
+      "suggestedObjective": "製作一份帶有紙本閱讀節奏的專業簡報。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "359296e8f235493fc544f285dd8151b380f2b67099da67d418a18c1fbfbcfa01",
+      "digest": "9807e55c5a301a0952ed3325c7880ccb61dbed5c3c29bca690c76743ac9f835f",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:kami-landing",
@@ -4332,7 +4400,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:kami-landing:skill",
@@ -4358,7 +4426,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:kanban-board",
@@ -4386,7 +4454,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:kanban-board:skill",
@@ -4412,7 +4480,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:last30days",
@@ -4514,7 +4582,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:last30days:skill",
@@ -4542,14 +4610,14 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:live-artifact",
       "kind": "template",
-      "category": "prototype",
-      "title": "Live Artifact",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "category": "dashboard",
+      "title": "互動 Artifact",
+      "summary": "將資訊、控制與即時回饋整合成單一介面。",
       "sourcePath": "design-templates/live-artifact",
       "assetPaths": [
         "design-templates/live-artifact/SKILL.md",
@@ -4568,29 +4636,33 @@
         "design-templates/live-artifact/examples/stock-portfolio-live/template.html",
         "design-templates/live-artifact/references/artifact-schema.md",
         "design-templates/live-artifact/references/connector-policy.md",
-        "design-templates/live-artifact/references/refresh-contract.md"
+        "design-templates/live-artifact/references/refresh-contract.md",
+        "design-templates/live-artifact/template.json"
       ],
       "entryPaths": [
         "design-templates/live-artifact/SKILL.md"
       ],
       "tags": [],
-      "executionStatus": "content-only",
+      "surface": "dashboard",
+      "icon": "bolt",
+      "suggestedObjective": "設計一個讓使用者操作並即時取得回饋的 artifact。",
+      "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "27e935bc50f968792010ea23f75233e0a52289a3343d3bd94aaf637865c759f8",
+      "digest": "628f484337df365e51c386faee1a574f7033b70cbe5149e0ab6426537c219732",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:live-artifact:skill",
       "kind": "skill",
-      "category": "prototype",
-      "title": "Live Artifact Skill",
+      "category": "dashboard",
+      "title": "互動 Artifact Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/live-artifact",
       "assetPaths": [
@@ -4600,24 +4672,27 @@
         "design-templates/live-artifact/SKILL.md"
       ],
       "tags": [],
+      "surface": "dashboard",
+      "icon": "bolt",
+      "suggestedObjective": "設計一個讓使用者操作並即時取得回饋的 artifact。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "27e935bc50f968792010ea23f75233e0a52289a3343d3bd94aaf637865c759f8",
+      "digest": "628f484337df365e51c386faee1a574f7033b70cbe5149e0ab6426537c219732",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:live-dashboard",
       "kind": "template",
       "category": "dashboard",
-      "title": "Live Dashboard",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "即時儀表板",
+      "summary": "以持續更新的資料與狀態為核心的工作台。",
       "sourcePath": "design-templates/live-dashboard",
       "assetPaths": [
         "design-templates/live-dashboard/SKILL.md",
@@ -4626,30 +4701,34 @@
         "design-templates/live-dashboard/references/checklist.md",
         "design-templates/live-dashboard/references/components.md",
         "design-templates/live-dashboard/references/connectors.md",
-        "design-templates/live-dashboard/references/layouts.md"
+        "design-templates/live-dashboard/references/layouts.md",
+        "design-templates/live-dashboard/template.json"
       ],
       "entryPaths": [
         "design-templates/live-dashboard/SKILL.md",
         "design-templates/live-dashboard/example.html"
       ],
       "tags": [],
-      "executionStatus": "content-only",
+      "surface": "dashboard",
+      "icon": "monitoring",
+      "suggestedObjective": "設計一個即時更新、能協助決策的資料儀表板。",
+      "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "ec2bf7b77d019d968e1a3610335de83f9d16e3f2bcd8e6eeea9e586baeadedde",
+      "digest": "f26035e4f60da8f374712cdeac4eaebb6e2481824b7b4b2e03f9b83ddafda4f9",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:live-dashboard:skill",
       "kind": "skill",
       "category": "dashboard",
-      "title": "Live Dashboard Skill",
+      "title": "即時儀表板 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/live-dashboard",
       "assetPaths": [
@@ -4659,17 +4738,20 @@
         "design-templates/live-dashboard/SKILL.md"
       ],
       "tags": [],
+      "surface": "dashboard",
+      "icon": "monitoring",
+      "suggestedObjective": "設計一個即時更新、能協助決策的資料儀表板。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "ec2bf7b77d019d968e1a3610335de83f9d16e3f2bcd8e6eeea9e586baeadedde",
+      "digest": "f26035e4f60da8f374712cdeac4eaebb6e2481824b7b4b2e03f9b83ddafda4f9",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:magazine-poster",
@@ -4697,7 +4779,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:magazine-poster:skill",
@@ -4723,7 +4805,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:meeting-notes",
@@ -4751,7 +4833,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:meeting-notes:skill",
@@ -4777,44 +4859,48 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:mobile-app",
       "kind": "template",
       "category": "prototype",
-      "title": "Mobile App",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "行動 App",
+      "summary": "以行動裝置情境呈現的產品介面。",
       "sourcePath": "design-templates/mobile-app",
       "assetPaths": [
         "design-templates/mobile-app/SKILL.md",
         "design-templates/mobile-app/assets/template.html",
         "design-templates/mobile-app/example.html",
         "design-templates/mobile-app/references/checklist.md",
-        "design-templates/mobile-app/references/layouts.md"
+        "design-templates/mobile-app/references/layouts.md",
+        "design-templates/mobile-app/template.json"
       ],
       "entryPaths": [
         "design-templates/mobile-app/SKILL.md",
         "design-templates/mobile-app/example.html"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "phone_iphone",
+      "suggestedObjective": "設計一個行動 App 的核心任務流程。",
       "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "51e4359f26343d19e16404220deeb1c45d9462497a0f429cb8e85c4912e23708",
+      "digest": "704cd7da1521fe1535635e238ddaefd35605c7c2ef410f562149d0404f7ae6b5",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:mobile-app:skill",
       "kind": "skill",
       "category": "prototype",
-      "title": "Mobile App Skill",
+      "title": "行動 App Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/mobile-app",
       "assetPaths": [
@@ -4824,51 +4910,58 @@
         "design-templates/mobile-app/SKILL.md"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "phone_iphone",
+      "suggestedObjective": "設計一個行動 App 的核心任務流程。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "51e4359f26343d19e16404220deeb1c45d9462497a0f429cb8e85c4912e23708",
+      "digest": "704cd7da1521fe1535635e238ddaefd35605c7c2ef410f562149d0404f7ae6b5",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:mobile-onboarding",
       "kind": "template",
       "category": "prototype",
-      "title": "Mobile Onboarding",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "行動 Onboarding",
+      "summary": "啟動、價值主張與登入的引導流程。",
       "sourcePath": "design-templates/mobile-onboarding",
       "assetPaths": [
         "design-templates/mobile-onboarding/SKILL.md",
-        "design-templates/mobile-onboarding/example.html"
+        "design-templates/mobile-onboarding/example.html",
+        "design-templates/mobile-onboarding/template.json"
       ],
       "entryPaths": [
         "design-templates/mobile-onboarding/SKILL.md",
         "design-templates/mobile-onboarding/example.html"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "rocket_launch",
+      "suggestedObjective": "設計一個讓新使用者快速理解價值的行動 onboarding。",
       "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "27c59974b530cc7166e1eec69210d5cd4338a5d7c75392ba0284d21346749b28",
+      "digest": "583bafa0c4b3334b475542013f4e57d55ff936da9abe1532428d2d0fff4308fb",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:mobile-onboarding:skill",
       "kind": "skill",
       "category": "prototype",
-      "title": "Mobile Onboarding Skill",
+      "title": "行動 Onboarding Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/mobile-onboarding",
       "assetPaths": [
@@ -4878,17 +4971,20 @@
         "design-templates/mobile-onboarding/SKILL.md"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "rocket_launch",
+      "suggestedObjective": "設計一個讓新使用者快速理解價值的行動 onboarding。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "27c59974b530cc7166e1eec69210d5cd4338a5d7c75392ba0284d21346749b28",
+      "digest": "583bafa0c4b3334b475542013f4e57d55ff936da9abe1532428d2d0fff4308fb",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:motion-frames",
@@ -4916,7 +5012,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:motion-frames:skill",
@@ -4942,7 +5038,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:open-design-landing-deck",
@@ -4974,7 +5070,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:open-design-landing-deck:skill",
@@ -5000,7 +5096,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:open-design-landing",
@@ -5063,7 +5159,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:open-design-landing:skill",
@@ -5089,7 +5185,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:orbit-general",
@@ -5117,7 +5213,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:orbit-general:skill",
@@ -5143,7 +5239,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:orbit-github",
@@ -5171,7 +5267,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:orbit-github:skill",
@@ -5197,7 +5293,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:orbit-gmail",
@@ -5225,7 +5321,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:orbit-gmail:skill",
@@ -5251,7 +5347,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:orbit-linear",
@@ -5279,7 +5375,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:orbit-linear:skill",
@@ -5305,7 +5401,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:orbit-notion",
@@ -5333,7 +5429,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:orbit-notion:skill",
@@ -5359,41 +5455,45 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:pm-spec",
       "kind": "template",
       "category": "prototype",
-      "title": "Pm Spec",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "PM Spec",
+      "summary": "含目錄、決策紀錄與交付條件的規格頁。",
       "sourcePath": "design-templates/pm-spec",
       "assetPaths": [
         "design-templates/pm-spec/SKILL.md",
-        "design-templates/pm-spec/example.html"
+        "design-templates/pm-spec/example.html",
+        "design-templates/pm-spec/template.json"
       ],
       "entryPaths": [
         "design-templates/pm-spec/SKILL.md",
         "design-templates/pm-spec/example.html"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "assignment",
+      "suggestedObjective": "整理一份可供產品與工程協作的功能規格。",
       "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "1fb2d697cd86c3064a95f6466423888c43a241138f83af3dd259d5b3f2a61519",
+      "digest": "8227de51adb5f966ec8ee727b9e9a7c41560340cf26137ea09313bd78f2f8144",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:pm-spec:skill",
       "kind": "skill",
       "category": "prototype",
-      "title": "Pm Spec Skill",
+      "title": "PM Spec Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/pm-spec",
       "assetPaths": [
@@ -5403,17 +5503,20 @@
         "design-templates/pm-spec/SKILL.md"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "assignment",
+      "suggestedObjective": "整理一份可供產品與工程協作的功能規格。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "1fb2d697cd86c3064a95f6466423888c43a241138f83af3dd259d5b3f2a61519",
+      "digest": "8227de51adb5f966ec8ee727b9e9a7c41560340cf26137ea09313bd78f2f8144",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:pricing-page",
@@ -5441,7 +5544,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:pricing-page:skill",
@@ -5467,7 +5570,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:replit-deck",
@@ -5503,7 +5606,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:replit-deck:skill",
@@ -5529,41 +5632,45 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:saas-landing",
       "kind": "template",
       "category": "prototype",
-      "title": "Saas Landing",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "SaaS Landing",
+      "summary": "主視覺、功能、方案與 CTA 的行銷頁。",
       "sourcePath": "design-templates/saas-landing",
       "assetPaths": [
         "design-templates/saas-landing/SKILL.md",
-        "design-templates/saas-landing/example.html"
+        "design-templates/saas-landing/example.html",
+        "design-templates/saas-landing/template.json"
       ],
       "entryPaths": [
         "design-templates/saas-landing/SKILL.md",
         "design-templates/saas-landing/example.html"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "campaign",
+      "suggestedObjective": "設計一個 SaaS 產品的行銷首頁。",
       "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "82708c6eee63912f6222476de57712398976a39d6a7dacab3d26181e0e47711d",
+      "digest": "6c9c292a4c75467c596cd9cd9c1c7f564304de3a98a9d5d508bda9a444549c54",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:saas-landing:skill",
       "kind": "skill",
       "category": "prototype",
-      "title": "Saas Landing Skill",
+      "title": "SaaS Landing Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/saas-landing",
       "assetPaths": [
@@ -5573,54 +5680,61 @@
         "design-templates/saas-landing/SKILL.md"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "campaign",
+      "suggestedObjective": "設計一個 SaaS 產品的行銷首頁。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "82708c6eee63912f6222476de57712398976a39d6a7dacab3d26181e0e47711d",
+      "digest": "6c9c292a4c75467c596cd9cd9c1c7f564304de3a98a9d5d508bda9a444549c54",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:simple-deck",
       "kind": "template",
       "category": "deck",
-      "title": "Simple Deck",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "簡潔簡報",
+      "summary": "以清楚層級承載報告、教學或產品說明。",
       "sourcePath": "design-templates/simple-deck",
       "assetPaths": [
         "design-templates/simple-deck/SKILL.md",
         "design-templates/simple-deck/assets/template.html",
         "design-templates/simple-deck/example.html",
         "design-templates/simple-deck/references/checklist.md",
-        "design-templates/simple-deck/references/layouts.md"
+        "design-templates/simple-deck/references/layouts.md",
+        "design-templates/simple-deck/template.json"
       ],
       "entryPaths": [
         "design-templates/simple-deck/SKILL.md",
         "design-templates/simple-deck/example.html"
       ],
       "tags": [],
-      "executionStatus": "content-only",
+      "surface": "deck",
+      "icon": "view_carousel",
+      "suggestedObjective": "製作一份內容清楚、可直接交付的簡潔簡報。",
+      "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "e374f8148e3609af4907a6b07bef68af9f08086fe747f929f79bd62d06c66b03",
+      "digest": "f04e0916d6f33222437dec7b45fbcd2ef7fcd690d56edfa2a4e3d864099675e1",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:simple-deck:skill",
       "kind": "skill",
       "category": "deck",
-      "title": "Simple Deck Skill",
+      "title": "簡潔簡報 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/simple-deck",
       "assetPaths": [
@@ -5630,51 +5744,57 @@
         "design-templates/simple-deck/SKILL.md"
       ],
       "tags": [],
+      "surface": "deck",
+      "icon": "view_carousel",
+      "suggestedObjective": "製作一份內容清楚、可直接交付的簡潔簡報。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "e374f8148e3609af4907a6b07bef68af9f08086fe747f929f79bd62d06c66b03",
+      "digest": "f04e0916d6f33222437dec7b45fbcd2ef7fcd690d56edfa2a4e3d864099675e1",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:social-carousel",
       "kind": "template",
-      "category": "prototype",
-      "title": "Social Carousel",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "category": "image",
+      "title": "社群輪播圖",
+      "summary": "以多張 1:1 卡片組成可滑動的內容敘事。",
       "sourcePath": "design-templates/social-carousel",
       "assetPaths": [
         "design-templates/social-carousel/SKILL.md",
-        "design-templates/social-carousel/example.html"
+        "design-templates/social-carousel/example.html",
+        "design-templates/social-carousel/template.json"
       ],
       "entryPaths": [
         "design-templates/social-carousel/SKILL.md",
         "design-templates/social-carousel/example.html"
       ],
       "tags": [],
-      "executionStatus": "ready",
+      "icon": "collections",
+      "suggestedObjective": "建立一組適合社群發布的輪播圖。",
+      "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "2103ada524a061f01ba973ef7dacd635bd205c31e0cd9d12be029c479408d0ef",
+      "digest": "929f7ce615078df5696c90607dbb214c193011890dafd6253b68818b8ed409fc",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:social-carousel:skill",
       "kind": "skill",
-      "category": "prototype",
-      "title": "Social Carousel Skill",
+      "category": "image",
+      "title": "社群輪播圖 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/social-carousel",
       "assetPaths": [
@@ -5684,17 +5804,19 @@
         "design-templates/social-carousel/SKILL.md"
       ],
       "tags": [],
+      "icon": "collections",
+      "suggestedObjective": "建立一組適合社群發布的輪播圖。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "2103ada524a061f01ba973ef7dacd635bd205c31e0cd9d12be029c479408d0ef",
+      "digest": "929f7ce615078df5696c90607dbb214c193011890dafd6253b68818b8ed409fc",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:social-media-dashboard",
@@ -5722,7 +5844,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:social-media-dashboard:skill",
@@ -5748,7 +5870,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:social-media-matrix-tracker-template",
@@ -5778,7 +5900,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:social-media-matrix-tracker-template:skill",
@@ -5804,7 +5926,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:sprite-animation",
@@ -5832,7 +5954,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:sprite-animation:skill",
@@ -5858,41 +5980,45 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:team-okrs",
       "kind": "template",
-      "category": "dashboard",
-      "title": "Team Okrs",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "category": "prototype",
+      "title": "團隊 OKR",
+      "summary": "以目標、關鍵成果與進度呈現的 scorecard。",
       "sourcePath": "design-templates/team-okrs",
       "assetPaths": [
         "design-templates/team-okrs/SKILL.md",
-        "design-templates/team-okrs/example.html"
+        "design-templates/team-okrs/example.html",
+        "design-templates/team-okrs/template.json"
       ],
       "entryPaths": [
         "design-templates/team-okrs/SKILL.md",
         "design-templates/team-okrs/example.html"
       ],
       "tags": [],
-      "executionStatus": "content-only",
+      "surface": "dashboard",
+      "icon": "track_changes",
+      "suggestedObjective": "設計一個讓團隊檢視 OKR 進度的工作台。",
+      "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "dc4816892b9e6ed44825186a63894948ae8c5832de2af508734c96a66b767fd8",
+      "digest": "3a7c74786ac4bd316cf9374139f92f8495082f1dc2858a4f6d156dc5364dae69",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:team-okrs:skill",
       "kind": "skill",
-      "category": "dashboard",
-      "title": "Team Okrs Skill",
+      "category": "prototype",
+      "title": "團隊 OKR Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/team-okrs",
       "assetPaths": [
@@ -5902,17 +6028,20 @@
         "design-templates/team-okrs/SKILL.md"
       ],
       "tags": [],
+      "surface": "dashboard",
+      "icon": "track_changes",
+      "suggestedObjective": "設計一個讓團隊檢視 OKR 進度的工作台。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "dc4816892b9e6ed44825186a63894948ae8c5832de2af508734c96a66b767fd8",
+      "digest": "3a7c74786ac4bd316cf9374139f92f8495082f1dc2858a4f6d156dc5364dae69",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:trading-analysis-dashboard-template",
@@ -5942,7 +6071,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:trading-analysis-dashboard-template:skill",
@@ -5968,7 +6097,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:tweaks",
@@ -5997,7 +6126,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:tweaks:skill",
@@ -6023,41 +6152,44 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:video-shortform",
       "kind": "template",
-      "category": "prototype",
-      "title": "Video Shortform",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "category": "video",
+      "title": "短影音",
+      "summary": "為短篇內容預先安排節奏、字幕與畫面段落。",
       "sourcePath": "design-templates/video-shortform",
       "assetPaths": [
         "design-templates/video-shortform/SKILL.md",
-        "design-templates/video-shortform/example.html"
+        "design-templates/video-shortform/example.html",
+        "design-templates/video-shortform/template.json"
       ],
       "entryPaths": [
         "design-templates/video-shortform/SKILL.md",
         "design-templates/video-shortform/example.html"
       ],
       "tags": [],
-      "executionStatus": "ready",
+      "icon": "movie",
+      "suggestedObjective": "規劃一支用於社群發布的短影音。",
+      "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "d641c8012064b225c0b32b6cfa5330800af7602c46a560ea0dbe746bed986117",
+      "digest": "3d700bbaf4f8ae426e5b7395e18334be5f042661c7ef4564b5d73ba07e578e45",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:video-shortform:skill",
       "kind": "skill",
-      "category": "prototype",
-      "title": "Video Shortform Skill",
+      "category": "video",
+      "title": "短影音 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/video-shortform",
       "assetPaths": [
@@ -6067,17 +6199,19 @@
         "design-templates/video-shortform/SKILL.md"
       ],
       "tags": [],
+      "icon": "movie",
+      "suggestedObjective": "規劃一支用於社群發布的短影音。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "d641c8012064b225c0b32b6cfa5330800af7602c46a560ea0dbe746bed986117",
+      "digest": "3d700bbaf4f8ae426e5b7395e18334be5f042661c7ef4564b5d73ba07e578e45",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:waitlist-page",
@@ -6107,7 +6241,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:waitlist-page:skill",
@@ -6133,7 +6267,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:web-prototype-taste-brutalist",
@@ -6161,7 +6295,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:web-prototype-taste-brutalist:skill",
@@ -6187,7 +6321,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:web-prototype-taste-editorial",
@@ -6215,7 +6349,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:web-prototype-taste-editorial:skill",
@@ -6241,7 +6375,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:web-prototype-taste-soft",
@@ -6269,7 +6403,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:web-prototype-taste-soft:skill",
@@ -6295,44 +6429,48 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:web-prototype",
       "kind": "template",
       "category": "prototype",
-      "title": "Web Prototype",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "title": "網站原型",
+      "summary": "從首頁與主視覺開始建立可回應的介面。",
       "sourcePath": "design-templates/web-prototype",
       "assetPaths": [
         "design-templates/web-prototype/SKILL.md",
         "design-templates/web-prototype/assets/template.html",
         "design-templates/web-prototype/example.html",
         "design-templates/web-prototype/references/checklist.md",
-        "design-templates/web-prototype/references/layouts.md"
+        "design-templates/web-prototype/references/layouts.md",
+        "design-templates/web-prototype/template.json"
       ],
       "entryPaths": [
         "design-templates/web-prototype/SKILL.md",
         "design-templates/web-prototype/example.html"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "web",
+      "suggestedObjective": "設計一個產品首頁與核心使用流程。",
       "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "54c81a11c838a75bba1eb4d63dd8053f4724cf030ed7557861572ab98e221154",
+      "digest": "b718e961d17984dc773f2b63cc2d196bf9d4902573da3d43f5ddcaa97946b59a",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:web-prototype:skill",
       "kind": "skill",
       "category": "prototype",
-      "title": "Web Prototype Skill",
+      "title": "網站原型 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/web-prototype",
       "assetPaths": [
@@ -6342,17 +6480,20 @@
         "design-templates/web-prototype/SKILL.md"
       ],
       "tags": [],
+      "surface": "prototype",
+      "icon": "web",
+      "suggestedObjective": "設計一個產品首頁與核心使用流程。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "54c81a11c838a75bba1eb4d63dd8053f4724cf030ed7557861572ab98e221154",
+      "digest": "b718e961d17984dc773f2b63cc2d196bf9d4902573da3d43f5ddcaa97946b59a",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:webgl-experience",
@@ -6380,7 +6521,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:webgl-experience:skill",
@@ -6406,41 +6547,45 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:weekly-update",
       "kind": "template",
-      "category": "prototype",
-      "title": "Weekly Update",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "category": "deck",
+      "title": "週報更新",
+      "summary": "用進度、風險、數字和下一步快速對齊團隊。",
       "sourcePath": "design-templates/weekly-update",
       "assetPaths": [
         "design-templates/weekly-update/SKILL.md",
-        "design-templates/weekly-update/example.html"
+        "design-templates/weekly-update/example.html",
+        "design-templates/weekly-update/template.json"
       ],
       "entryPaths": [
         "design-templates/weekly-update/SKILL.md",
         "design-templates/weekly-update/example.html"
       ],
       "tags": [],
+      "surface": "deck",
+      "icon": "calendar_view_week",
+      "suggestedObjective": "製作一份供團隊同步使用的每週進度簡報。",
       "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "297a1b55639f1f9d5b6e21f9981a64f14a7964ff4e32824f10c3232a143dcaee",
+      "digest": "9d842c133fd4308e5597695fb69ec47ce0af1774fe57ae448af95c499ed81592",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:weekly-update:skill",
       "kind": "skill",
-      "category": "prototype",
-      "title": "Weekly Update Skill",
+      "category": "deck",
+      "title": "週報更新 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/weekly-update",
       "assetPaths": [
@@ -6450,17 +6595,20 @@
         "design-templates/weekly-update/SKILL.md"
       ],
       "tags": [],
+      "surface": "deck",
+      "icon": "calendar_view_week",
+      "suggestedObjective": "製作一份供團隊同步使用的每週進度簡報。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "297a1b55639f1f9d5b6e21f9981a64f14a7964ff4e32824f10c3232a143dcaee",
+      "digest": "9d842c133fd4308e5597695fb69ec47ce0af1774fe57ae448af95c499ed81592",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:wireframe-annotated",
@@ -6488,7 +6636,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:wireframe-annotated:skill",
@@ -6514,7 +6662,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:wireframe-greybox",
@@ -6542,7 +6690,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:wireframe-greybox:skill",
@@ -6568,7 +6716,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:wireframe-mobile-flow",
@@ -6596,7 +6744,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:wireframe-mobile-flow:skill",
@@ -6622,7 +6770,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:wireframe-sketch",
@@ -6650,7 +6798,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:wireframe-sketch:skill",
@@ -6676,41 +6824,45 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:worker-visualizer",
       "kind": "template",
-      "category": "prototype",
-      "title": "Worker Visualizer",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
+      "category": "dashboard",
+      "title": "Worker 視覺化",
+      "summary": "將背景任務、佇列與處理狀態轉成可理解的圖像。",
       "sourcePath": "design-templates/worker-visualizer",
       "assetPaths": [
         "design-templates/worker-visualizer/SKILL.md",
-        "design-templates/worker-visualizer/example.html"
+        "design-templates/worker-visualizer/example.html",
+        "design-templates/worker-visualizer/template.json"
       ],
       "entryPaths": [
         "design-templates/worker-visualizer/SKILL.md",
         "design-templates/worker-visualizer/example.html"
       ],
       "tags": [],
+      "surface": "dashboard",
+      "icon": "hub",
+      "suggestedObjective": "設計一個可視化背景任務與佇列健康度的看板。",
       "executionStatus": "ready",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "b11a7d979e8df5a6ebc7b07cdf23119cbfbdbbe1a633865becc802eb6f4a25be",
+      "digest": "41e3b0c42c9edae720bfdd20a579bcfa7472f594652a42accea6dfb107850316",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:worker-visualizer:skill",
       "kind": "skill",
-      "category": "prototype",
-      "title": "Worker Visualizer Skill",
+      "category": "dashboard",
+      "title": "Worker 視覺化 Skill",
       "summary": "Open Design SKILL.md；只會以 deferred capability runbook 載入，不包含可執行 hook。",
       "sourcePath": "design-templates/worker-visualizer",
       "assetPaths": [
@@ -6720,17 +6872,20 @@
         "design-templates/worker-visualizer/SKILL.md"
       ],
       "tags": [],
+      "surface": "dashboard",
+      "icon": "hub",
+      "suggestedObjective": "設計一個可視化背景任務與佇列健康度的看板。",
       "executionStatus": "content-only",
       "parseWarnings": [],
       "source": "open-design",
       "sourceUrl": "https://open-design.ai/zh/plugins/",
       "upstreamCommit": "4567a0d",
-      "digest": "b11a7d979e8df5a6ebc7b07cdf23119cbfbdbbe1a633865becc802eb6f4a25be",
+      "digest": "41e3b0c42c9edae720bfdd20a579bcfa7472f594652a42accea6dfb107850316",
       "licensePaths": [
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:x-research",
@@ -6756,7 +6911,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "design-templates:x-research:skill",
@@ -6782,7 +6937,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:3d-stone-staircase-evolution-infographic",
@@ -6813,7 +6968,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:anime-martial-arts-battle-illustration",
@@ -6845,7 +7000,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:e-commerce-live-stream-ui-mockup",
@@ -6878,7 +7033,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-anime-fighting-game-captain-ryuuga-vs-kaze-renshin",
@@ -6916,7 +7071,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-three-kingdoms-guanyu-slaying-yanliang",
@@ -6954,7 +7109,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-three-kingdoms-lyubu-yuanmen-archery",
@@ -6991,7 +7146,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-three-kingdoms-zhaoyun-cradle-escape",
@@ -7018,7 +7173,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:game-ui-ancient-china-open-world-mmo-hud",
@@ -7045,7 +7200,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:illustrated-city-food-map",
@@ -7077,7 +7232,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:illustration-crayon-kid-drawing-rework",
@@ -7114,7 +7269,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:infographic-otaku-dance-choreography-breakdown-gokurakujodo-16-panels",
@@ -7141,7 +7296,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:momotaro-explainer-slide-in-hybrid-style",
@@ -7171,7 +7326,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:notion-team-dashboard-live-artifact",
@@ -7198,7 +7353,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-anime-girl-to-cinematic-photo",
@@ -7231,7 +7386,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-casual-fashion-grid-photoshoot",
@@ -7264,7 +7419,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-cinematic-south-asian-male-portrait-with-vultures",
@@ -7297,7 +7452,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-cyberpunk-anime-portrait-with-neon-face-text",
@@ -7331,7 +7486,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-elegant-fantasy-girl-in-violet-garden",
@@ -7365,7 +7520,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-ethereal-blue-haired-fantasy-portrait",
@@ -7399,7 +7554,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-glamorous-woman-in-black-portrait",
@@ -7431,7 +7586,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-hyper-realistic-selfie-texture-prompts",
@@ -7463,7 +7618,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-lavender-fantasy-mage-portrait",
@@ -7497,7 +7652,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-monochrome-studio-portrait",
@@ -7529,7 +7684,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-old-photo-restoration-to-dslr-portrait",
@@ -7561,7 +7716,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-poetic-woman-in-garden-portrait",
@@ -7593,7 +7748,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-professional-identity-portrait-wallpaper",
@@ -7627,7 +7782,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-realistically-imperfect-ai-selfie",
@@ -7659,7 +7814,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-signed-marker-portrait-on-shikishi",
@@ -7692,7 +7847,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snow-rabbit-empress-portrait",
@@ -7726,7 +7881,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snow-rabbit-mask-hanfu-portrait",
@@ -7760,7 +7915,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snowy-rabbit-hanfu-portrait",
@@ -7793,7 +7948,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snowy-rabbit-spirit-portrait",
@@ -7826,7 +7981,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-song-dynasty-hanfu-portrait",
@@ -7857,7 +8012,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-anime-pokemon-shop-outfit-teaser-poster",
@@ -7891,7 +8046,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-cinematic-elevator-scene",
@@ -7922,7 +8077,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-confused-elf-girl-at-pastel-desk",
@@ -7954,7 +8109,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-editorial-fashion-photography",
@@ -7984,7 +8139,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-fashion-editorial-collage",
@@ -8011,7 +8166,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-psg-transfer-announcement-poster",
@@ -8043,7 +8198,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-sensational-girl-dance-storyboard-8-shots",
@@ -8070,7 +8225,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-showa-day-retro-culture-magazine-cover",
@@ -8103,7 +8258,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-social-media-fashion-outfit-generation",
@@ -8134,7 +8289,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-travel-snapshot-collage-prompt",
@@ -8166,7 +8321,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-vintage-sign-painter-sketch",
@@ -8197,7 +8352,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:image-templates:vr-headset-exploded-view-poster",
@@ -8230,7 +8385,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:3d-animated-boy-building-lego",
@@ -8260,32 +8415,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
-    },
-    {
-      "id": "plugins:_official:video-templates:HYPERFRAMES-ATTRIBUTIONS.md",
-      "kind": "template",
-      "category": "video",
-      "title": "HYPERFRAMES ATTRIBUTIONS.Md",
-      "summary": "Open Design vendor content：需由現有 capability runtime 受治理載入。",
-      "sourcePath": "plugins/_official/video-templates/HYPERFRAMES-ATTRIBUTIONS.md",
-      "assetPaths": [
-        "plugins/_official/video-templates/HYPERFRAMES-ATTRIBUTIONS.md"
-      ],
-      "entryPaths": [],
-      "tags": [],
-      "executionStatus": "content-only",
-      "parseWarnings": [],
-      "source": "open-design",
-      "sourceUrl": "https://open-design.ai/zh/plugins/",
-      "upstreamCommit": "4567a0d",
-      "digest": "bfe95384024f0a07f84db2c1e3ef5a1d313fcde82920ef0a7b8666ed8ba25d98",
-      "licensePaths": [
-        "plugins/_official/video-templates/HYPERFRAMES-ATTRIBUTIONS.md",
-        "LICENSE",
-        "NOTICE.md"
-      ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:a-decade-of-refinement-glow-up",
@@ -8318,7 +8448,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:ancient-guardian-dragon-rescue",
@@ -8350,7 +8480,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:ancient-indian-kingdom-fpv-video",
@@ -8382,7 +8512,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:animation-transfer-and-camera-tracking-prompt",
@@ -8412,7 +8542,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:beat-synced-outfit-transformation-dance",
@@ -8443,7 +8573,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:character-intro-motion-graphics-sequence",
@@ -8476,7 +8606,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-birthday-celebration-sequence",
@@ -8508,7 +8638,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-dragon-interaction-flight",
@@ -8540,7 +8670,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-east-asian-woman-hand-dance",
@@ -8567,7 +8697,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-emotional-face-close-up",
@@ -8599,7 +8729,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-marine-biologist-exploration",
@@ -8629,7 +8759,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-music-podcast-and-guitar-technique",
@@ -8661,7 +8791,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-route-navigation-guide",
@@ -8693,7 +8823,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-street-racing-sequence-for-seedance-2",
@@ -8725,7 +8855,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-vampire-alley-fight-sequence",
@@ -8756,7 +8886,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:crimson-horizon-sci-fi-cinematic-sequence",
@@ -8786,7 +8916,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:cyberpunk-game-trailer-script",
@@ -8819,7 +8949,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:forbidden-city-cat-satire",
@@ -8850,7 +8980,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-poster",
@@ -8907,7 +9037,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-poster:skill",
@@ -8950,7 +9080,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-signal",
@@ -9002,7 +9132,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-signal:skill",
@@ -9043,7 +9173,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-build-minimal",
@@ -9093,7 +9223,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-build-minimal:skill",
@@ -9134,7 +9264,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-creative-voltage",
@@ -9189,7 +9319,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-creative-voltage:skill",
@@ -9229,7 +9359,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-chart-nyt",
@@ -9289,7 +9419,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-chart-nyt:skill",
@@ -9329,7 +9459,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-rollup",
@@ -9379,7 +9509,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-rollup:skill",
@@ -9421,7 +9551,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-decision-tree",
@@ -9469,7 +9599,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-decision-tree:skill",
@@ -9507,7 +9637,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-electric-studio",
@@ -9556,7 +9686,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-electric-studio:skill",
@@ -9596,7 +9726,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-glitch-title",
@@ -9648,7 +9778,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-glitch-title:skill",
@@ -9688,7 +9818,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-kinetic-type",
@@ -9743,7 +9873,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-kinetic-type:skill",
@@ -9782,7 +9912,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-light-leak-cinema",
@@ -9842,7 +9972,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-light-leak-cinema:skill",
@@ -9882,7 +10012,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-liquid-bg-hero",
@@ -9936,7 +10066,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-liquid-bg-hero:skill",
@@ -9976,7 +10106,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-logo-outro",
@@ -10028,7 +10158,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-logo-outro:skill",
@@ -10068,7 +10198,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-nyt-graph",
@@ -10119,7 +10249,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-nyt-graph:skill",
@@ -10158,7 +10288,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-pentagram-stat",
@@ -10208,7 +10338,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-pentagram-stat:skill",
@@ -10249,7 +10379,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-play-mode",
@@ -10300,7 +10430,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-play-mode:skill",
@@ -10339,7 +10469,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo-30s",
@@ -10420,7 +10550,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo-30s:skill",
@@ -10461,7 +10591,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo",
@@ -10515,7 +10645,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo:skill",
@@ -10554,7 +10684,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-swiss-grid",
@@ -10603,7 +10733,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-swiss-grid:skill",
@@ -10642,7 +10772,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-takram-organic",
@@ -10692,7 +10822,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-takram-organic:skill",
@@ -10733,7 +10863,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-vignelli",
@@ -10780,7 +10910,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-vignelli:skill",
@@ -10819,7 +10949,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-warm-grain",
@@ -10871,7 +11001,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-warm-grain:skill",
@@ -10910,7 +11040,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:hollywood-haute-couture-fantasy-video-prompt",
@@ -10943,7 +11073,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:hunched-character-animation",
@@ -10973,7 +11103,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:live-action-anime-adaptation-water-vs-thunder-breathing-duel",
@@ -11005,7 +11135,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:luxury-supercar-cinematic-narrative",
@@ -11037,7 +11167,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:magical-academy-storyboard-sequence",
@@ -11068,7 +11198,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:modern-rural-aesthetics-healing-short-film-video-prompt",
@@ -11100,7 +11230,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:nightclub-flyer-atmospheric-animation",
@@ -11132,7 +11262,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:retro-hk-wuxia-film-aesthetic",
@@ -11163,7 +11293,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:seedance-2-0-15-second-cinematic-japanese-romance-short-film",
@@ -11194,7 +11324,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:seedance-2-0-80-year-old-rapper-mv",
@@ -11226,7 +11356,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:sequence-and-movement-instruction-for-martial-arts-video",
@@ -11258,7 +11388,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:soul-switching-mirror-magic-sequence",
@@ -11289,7 +11419,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:toaster-rocket-jumpscare",
@@ -11320,7 +11450,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:traditional-dance-performance",
@@ -11353,7 +11483,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:vfx-text-cursor",
@@ -11405,7 +11535,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:vfx-text-cursor:skill",
@@ -11445,7 +11575,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-desk-hologram-ar-realdesk",
@@ -11485,7 +11615,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-three-kingdoms-guanyu-slaying-yanliang",
@@ -11512,7 +11642,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-three-kingdoms-lyubu-yuanmen-archery",
@@ -11539,7 +11669,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-three-kingdoms-zhaoyun-cradle-escape",
@@ -11566,7 +11696,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:vintage-disney-style-pirate-crocodile-animation",
@@ -11596,7 +11726,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:viral-k-pop-dance-choreography",
@@ -11628,7 +11758,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "plugins:_official:video-templates:wasteland-factory-chase",
@@ -11659,7 +11789,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "prompt-templates:image",
@@ -11731,7 +11861,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     },
     {
       "id": "prompt-templates:video",
@@ -11812,7 +11942,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-07-13T07:32:40.025Z"
+      "indexedAt": "2026-07-14T04:37:17.643Z"
     }
   ],
   "warnings": []

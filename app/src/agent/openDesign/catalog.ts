@@ -35,6 +35,8 @@ export type OpenDesignCatalogRecord = OpenDesignProvenance & {
   entryPaths: string[]
   tags: string[]
   surface?: 'prototype' | 'dashboard' | 'design-system' | 'deck'
+  icon?: string
+  suggestedObjective?: string
   executionStatus: OpenDesignExecutionStatus
   parseWarnings: string[]
 }
@@ -78,7 +80,11 @@ function normalizeRecord(value: unknown, _index: number): OpenDesignCatalogRecor
   if (!id || !sourcePath || !['template', 'skill', 'design-system', 'prompt', 'craft', 'media'].includes(String(kind))) {
     return null
   }
-  const status = ['ready', 'content-only', 'invalid'].includes(String(raw.executionStatus))
+  const assetPaths = Array.isArray(raw.assetPaths) ? raw.assetPaths.map(cleanPath).filter(Boolean).slice(0, 240) : []
+  const hasDesignSystemDocument = kind !== 'design-system' || assetPaths.some((item) => /(^|\/)DESIGN\.md$/i.test(item))
+  const status = !hasDesignSystemDocument
+    ? 'invalid'
+    : ['ready', 'content-only', 'invalid'].includes(String(raw.executionStatus))
     ? (String(raw.executionStatus) as OpenDesignExecutionStatus)
     : 'content-only'
   const surface = ['prototype', 'dashboard', 'design-system', 'deck'].includes(String(raw.surface))
@@ -97,14 +103,17 @@ function normalizeRecord(value: unknown, _index: number): OpenDesignCatalogRecor
     title: cleanText(raw.title, 180) || id,
     summary: cleanText(raw.summary, 1000) || 'Open Design vendor content；目前僅可作為受治理的內容參考。',
     sourcePath,
-    assetPaths: Array.isArray(raw.assetPaths) ? raw.assetPaths.map(cleanPath).filter(Boolean).slice(0, 240) : [],
+    assetPaths,
     entryPaths: Array.isArray(raw.entryPaths) ? raw.entryPaths.map(cleanPath).filter(Boolean).slice(0, 32) : [],
     tags: cleanTags(raw.tags),
     surface,
+    icon: cleanText(raw.icon, 64) || undefined,
+    suggestedObjective: cleanText(raw.suggestedObjective, 400) || undefined,
     executionStatus: status,
-    parseWarnings: Array.isArray(raw.parseWarnings)
-      ? raw.parseWarnings.map((item) => cleanText(item, 300)).filter(Boolean).slice(0, 16)
-      : [],
+    parseWarnings: [
+      ...(Array.isArray(raw.parseWarnings) ? raw.parseWarnings.map((item) => cleanText(item, 300)).filter(Boolean) : []),
+      ...(!hasDesignSystemDocument ? ['design-system pack 缺少 DESIGN.md，已標記 invalid。'] : []),
+    ].slice(0, 16),
   }
 }
 
@@ -152,11 +161,6 @@ export async function loadOpenDesignCatalog(): Promise<OpenDesignCatalogIndex> {
     })
     .catch((error) => emptyOpenDesignCatalog(error instanceof Error ? error.message : String(error)))
   return catalogPromise
-}
-
-export function findOpenDesignRecord(records: OpenDesignCatalogRecord[], id: string | undefined): OpenDesignCatalogRecord | null {
-  const target = cleanText(id, 160)
-  return records.find((record) => record.id === target) || null
 }
 
 export function openDesignAssetUrl(assetPath: string): string | null {

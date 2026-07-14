@@ -1,0 +1,9 @@
+{
+  "title": "文章頁面",
+  "summary": "支援長文閱讀、摘要與延伸內容的版型。",
+  "icon": "article",
+  "suggestedObjective": "設計一個兼顧閱讀節奏與轉換的文章頁。",
+  "category": "prototype",
+  "surface": "prototype",
+  "status": "ready"
+}

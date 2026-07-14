@@ -1,0 +1,9 @@
+{
+  "title": "工程 Runbook",
+  "summary": "事件應變步驟、責任與狀態的操作文件。",
+  "icon": "engineering",
+  "suggestedObjective": "設計一份工程事故應變 runbook。",
+  "category": "prototype",
+  "surface": "prototype",
+  "status": "ready"
+}

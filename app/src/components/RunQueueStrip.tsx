@@ -29,11 +29,11 @@ export function RunQueueStrip({
   const [draining, setDraining] = useState(() => isRunQueueDraining())
   const [open, setOpen] = useState(!compact)
   const isRunning = useAgentStore((s) => s.isRunning)
-  const runningThreadId = useThreadStore((s) => s.runningThreadId)
-  const runningTitle = useThreadStore((s) => {
-    const id = s.runningThreadId
-    return id ? s.threads.find((t) => t.id === id)?.title : undefined
-  })
+  const runningTitles = useThreadStore((s) =>
+    s.runningThreadIds
+      .map((id) => s.threads.find((t) => t.id === id)?.title)
+      .filter((title): title is string => Boolean(title)),
+  )
 
   useEffect(() => {
     return subscribeRunQueue(() => {
@@ -71,7 +71,11 @@ export function RunQueueStrip({
           {isRunning && (
             <p className="text-[11px] text-primary/90 rounded-lg bg-primary/10 px-2 py-1.5">
               目前執行
-              {runningTitle ? `：${runningTitle.slice(0, 40)}` : runningThreadId ? '中' : '中'}
+              {runningTitles.length > 1
+                ? `：${runningTitles.length} 個任務（${runningTitles[0].slice(0, 28)} 等）`
+                : runningTitles[0]
+                  ? `：${runningTitles[0].slice(0, 40)}`
+                  : '中'}
               {n > 0 ? ` · 其後 ${n} 則排隊` : ''}
             </p>
           )}

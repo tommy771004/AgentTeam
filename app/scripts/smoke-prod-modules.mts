@@ -7,11 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import {
-  clearRunContext,
-  getRunId,
-  getRunProjectRoot,
-  setRunId,
-  setRunProjectRoot,
+  resolveEffectiveProjectRoot,
 } from '../src/agent/tools/runContext.ts'
 import {
   compileToolPackage,
@@ -54,17 +50,8 @@ async function test(name: string, fn: () => void | Promise<void>) {
 
 console.log('Production modules (real TS imports)\n')
 
-await test('runContext pin overrides clear', () => {
-  clearRunContext()
-  assert.equal(getRunProjectRoot(), undefined)
-  setRunProjectRoot('  D:/proj/A  ')
-  setRunId('run_abc')
-  assert.equal(getRunProjectRoot(), 'D:/proj/A')
-  assert.equal(getRunId(), 'run_abc')
-  setRunProjectRoot('')
-  assert.equal(getRunProjectRoot(), undefined)
-  clearRunContext()
-  assert.equal(getRunId(), undefined)
+await test('runContext resolves explicit project pins without mutable global identity', async () => {
+  assert.equal(await resolveEffectiveProjectRoot('  D:/proj/A  '), 'D:/proj/A')
 })
 
 await test('toolPackage rejects read+POST', () => {

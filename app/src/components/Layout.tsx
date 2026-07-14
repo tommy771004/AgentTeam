@@ -92,7 +92,7 @@ export function Layout() {
   const setLayoutMode = useWorkspaceUiStore((s) => s.setLayoutMode)
   const setShowRunPanel = useThreadStore((s) => s.setShowRunPanel)
   const selectThread = useThreadStore((s) => s.selectThread)
-  const runningThreadId = useThreadStore((s) => s.runningThreadId)
+  const runningThreadIds = useThreadStore((s) => s.runningThreadIds)
   useGlobalShortcuts()
   const bridge = useMemo(() => getElectronBridgeStatus(), [])
   const isMac = useIsMacDesktop()
@@ -101,7 +101,7 @@ export function Layout() {
 
   const openLiveRun = () => {
     navigate('/')
-    if (runningThreadId) selectThread(runningThreadId)
+    if (runningThreadIds[0]) selectThread(runningThreadIds[0])
     setShowRunPanel(true)
   }
 

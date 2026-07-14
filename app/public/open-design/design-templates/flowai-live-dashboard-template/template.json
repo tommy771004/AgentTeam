@@ -1,0 +1,9 @@
+{
+  "title": "Flow 資料看板",
+  "summary": "著重工作流、狀態與資料流的即時可視化。",
+  "icon": "account_tree",
+  "suggestedObjective": "設計一個呈現工作流狀態與瓶頸的即時看板。",
+  "category": "dashboard",
+  "surface": "dashboard",
+  "status": "ready"
+}

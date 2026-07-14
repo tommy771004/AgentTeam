@@ -10,6 +10,7 @@ import {
   type OpenDesignPackAuditEvent,
 } from '../agent/openDesign/packs'
 import { readOpenDesignText, type OpenDesignCatalogRecord } from '../agent/openDesign/catalog'
+import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
 
 const PACKS_KEY = 'subagents.open-design.packs.v1'
 const AUDIT_KEY = 'subagents.open-design.audit.v1'
@@ -40,6 +41,9 @@ type OpenDesignPackStore = {
   audit: OpenDesignPackAuditEvent[]
   busyId: string | null
   error: string | null
+  projectRoot: string
+  setProjectRoot: (root: string) => void
+  hydrateCanonical: (items: unknown[]) => void
   install: (record: OpenDesignCatalogRecord, projectRoot?: string) => Promise<OpenDesignContentPackManifest | null>
   setEnabled: (record: OpenDesignCatalogRecord, enabled: boolean) => Promise<boolean>
   uninstall: (id: string) => Promise<boolean>
@@ -59,6 +63,22 @@ export const useOpenDesignPackStore = create<OpenDesignPackStore>((set, get) => 
   audit: readJson<OpenDesignPackAuditEvent[]>(AUDIT_KEY, []),
   busyId: null,
   error: null,
+  projectRoot: '',
+
+  setProjectRoot: (root) => set({ projectRoot: root }),
+
+  hydrateCanonical: (items) => {
+    const canonical = items
+      .map(normalizeOpenDesignContentPack)
+      .filter((item): item is OpenDesignContentPackManifest => Boolean(item))
+    if (!canonical.length) return
+    // Canonical (project-file) packs are authoritative for portability; keep any
+    // pack this project's files don't know about yet (e.g. install in flight).
+    const byId = new Map(canonical.map((pack) => [pack.id, pack]))
+    const packs = [...canonical, ...get().packs.filter((pack) => !byId.has(pack.id))].slice(0, 500)
+    persist(PACKS_KEY, packs)
+    set({ packs })
+  },
 
   install: async (record, projectRoot) => {
     const id = openDesignPackId(record)
@@ -80,12 +100,13 @@ export const useOpenDesignPackStore = create<OpenDesignPackStore>((set, get) => 
           projectRoot,
         })
         if (!copied.ok) throw new Error(copied.error || '無法複製 Open Design project-owned pack')
-        pack = { ...pack, projectPath: copied.path }
+        pack = { ...pack, projectPath: record.kind === 'design-system' ? (copied.designSystemPath || copied.path) : copied.path }
       }
 
       const packs = [pack, ...get().packs.filter((item) => item.id !== id)].slice(0, 500)
       persist(PACKS_KEY, packs)
       set({ packs, busyId: null })
+      persistSubDesignMetadata('open-design-pack', pack, projectRoot || get().projectRoot)
       addAudit(set, { at: new Date().toISOString(), action: 'install', packId: id, digest: pack.digest })
       return pack
     } catch (error) {
@@ -126,6 +147,7 @@ export const useOpenDesignPackStore = create<OpenDesignPackStore>((set, get) => 
     const packs = get().packs.map((item) => item.id === id ? next : item)
     persist(PACKS_KEY, packs)
     set({ packs, error: null })
+    persistSubDesignMetadata('open-design-pack', next, get().projectRoot)
     if (current.kind === 'skill') {
       if (enabled) {
         pluginRegistry.add(openDesignSkillPlugin(next, selectedSkillPath!, skillRaw!))
@@ -152,14 +174,17 @@ export const useOpenDesignPackStore = create<OpenDesignPackStore>((set, get) => 
 
   reindex: (records) => {
     const byId = new Map(records.map((record) => [openDesignPackId(record), record]))
+    const changed: OpenDesignContentPackManifest[] = []
     const packs = get().packs.map((pack) => {
       const record = byId.get(pack.id)
-      return record && record.digest !== pack.digest
-        ? { ...pack, enabled: false, digest: record.digest, sourcePath: record.sourcePath, assetPaths: record.assetPaths, licensePaths: record.licensePaths }
-        : pack
+      if (!record || record.digest === pack.digest) return pack
+      const next = { ...pack, enabled: false, digest: record.digest, sourcePath: record.sourcePath, assetPaths: record.assetPaths, licensePaths: record.licensePaths }
+      changed.push(next)
+      return next
     })
     persist(PACKS_KEY, packs)
     set({ packs })
+    for (const pack of changed) persistSubDesignMetadata('open-design-pack', pack, get().projectRoot)
     addAudit(set, { at: new Date().toISOString(), action: 'reindex', packId: 'open-design:index' })
   },
 

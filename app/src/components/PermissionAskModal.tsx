@@ -8,13 +8,14 @@ export function PermissionAskModal() {
   const current = usePermissionAskStore((s) => s.current)
   const queue = usePermissionAskStore((s) => s.queue)
   const resolve = usePermissionAskStore((s) => s.resolve)
-  const sessionAllow = usePermissionAskStore((s) => s.sessionAllow)
+  const getSessionAllow = usePermissionAskStore((s) => s.getSessionAllow)
   const setSessionAllow = usePermissionAskStore((s) => s.setSessionAllow)
 
   if (!current) return null
 
   const pendingBehind = queue.length
   const remainSec = Math.max(0, Math.ceil((current.expiresAt - Date.now()) / 1000))
+  const sessionAllow = getSessionAllow(current.threadId)
 
   return (
     <div className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-xl flex items-center justify-center p-4 animate-macos-fade">
@@ -29,6 +30,7 @@ export function PermissionAskModal() {
             <p className="text-[11px] text-outline mt-1 font-[family-name:var(--font-mono)]">
               逾時 {remainSec}s 自動拒絕
               {pendingBehind > 0 ? ` · 佇列尚有 ${pendingBehind} 筆` : ''}
+              {current.threadId ? ` · thread=${current.threadId.slice(0, 18)}` : ''}
             </p>
           </div>
         </div>
@@ -54,7 +56,7 @@ export function PermissionAskModal() {
             <input
               type="checkbox"
               checked={sessionAllow}
-              onChange={(e) => setSessionAllow(e.target.checked)}
+              onChange={(e) => setSessionAllow(e.target.checked, current.threadId)}
               className="accent-primary-container"
             />
             本次 session 其餘 ask 一律允許（代我核准）

@@ -11,6 +11,7 @@ import type { LlmSettings } from '../types'
 import { chatCompletion, withRoleModel } from '../llm'
 import { learningLoop } from './learning'
 import { skillsStore } from './skills'
+import { SKILL_SIMILARITY_THRESHOLD, textSimilarity } from './textSimilarity'
 import type { Skill } from './types'
 
 export const SKILL_CURATOR_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -58,27 +59,12 @@ function curatableSkills(): Skill[] {
     )
 }
 
-function skillTokens(skill: Skill): Set<string> {
-  const text = `${skill.meta.name} ${skill.meta.description} ${skill.body}`.toLowerCase()
-  const tokens = new Set(
-    (text.match(/[a-z0-9][a-z0-9_-]{2,}/g) || []).slice(0, 80),
-  )
-  for (const sequence of text.match(/[一-鿿]{2,}/g) || []) {
-    for (let i = 0; i + 2 <= sequence.length; i += 1) {
-      tokens.add(sequence.slice(i, i + 2))
-    }
-  }
-  return tokens
+function skillText(skill: Skill): string {
+  return `${skill.meta.name} ${skill.meta.description} ${skill.body}`
 }
 
 function similarity(a: Skill, b: Skill): number {
-  const left = skillTokens(a)
-  const right = skillTokens(b)
-  const union = new Set([...left, ...right])
-  if (!union.size) return 0
-  let overlap = 0
-  for (const token of left) if (right.has(token)) overlap += 1
-  return overlap / union.size
+  return textSimilarity(skillText(a), skillText(b))
 }
 
 /** Deterministic fallback for offline/simulation mode. */
@@ -86,7 +72,7 @@ function heuristicArchiveNames(skills: Skill[]): string[] {
   const archived: string[] = []
   for (let i = 0; i < skills.length; i += 1) {
     for (let j = i + 1; j < skills.length; j += 1) {
-      if (similarity(skills[i], skills[j]) < 0.42) continue
+      if (similarity(skills[i], skills[j]) < SKILL_SIMILARITY_THRESHOLD) continue
       // Keep the older skill as the canonical one; archive only the duplicate.
       const leftAt = Date.parse(skills[i].meta.createdAt || '') || 0
       const rightAt = Date.parse(skills[j].meta.createdAt || '') || 0
@@ -246,7 +232,7 @@ export function scheduleSkillCurator(
         import('../../store/agentStore'),
         import('../runQueue'),
       ])
-      if (useAgentStore.getState().isRunning || queueLength() > 0) return
+      if (!useAgentStore.getState().canStartRun().allowed || queueLength() > 0) return
       await runSkillCurator(settings)
     })()
   }, Math.max(0, idleDelayMs))

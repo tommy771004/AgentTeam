@@ -242,8 +242,10 @@ function createFakeRunController({
   hitl = createFakeHitl(),
   hooks = [],
   followUpMode = 'steer',
+  concurrentRunsEnabled = false,
+  maxConcurrentRuns = 4,
 } = {}) {
-  let isRunning = false
+  const activeRuns = new Map()
   const queue = createFakeQueue()
   const archive = []
   const threads = new Map()
@@ -251,6 +253,7 @@ function createFakeRunController({
   const jobResults = new Map()
   let projectContext = { root: null, agentsHash: null, guidance: '' }
   const rules = sanitizeHookRules(hooks)
+  const limit = () => (concurrentRunsEnabled ? Math.max(2, maxConcurrentRuns) : 1)
 
   async function authorize(tool, ctx) {
     const ev = evaluateHooks(rules, {
@@ -265,7 +268,12 @@ function createFakeRunController({
     }
     if (ev.forceAsk || ctx.forceAsk) {
       try {
-        const d = await hitl.requestAsk({ tool, unattended: ctx.unattended })
+        const d = await hitl.requestAsk({
+          tool,
+          unattended: ctx.unattended,
+          runId: ctx.runId,
+          threadId: ctx.threadId,
+        })
         if (d.action !== 'allow') {
           return { allowed: false, output: `HITL ${d.action || 'deny'}: ${tool}` }
         }
@@ -330,7 +338,11 @@ function createFakeRunController({
       'queue-drain',
     ].includes(sourceKind)
 
-    if (isRunning && !input._fromQueue) {
+    const threadId = input.reuseThreadId || `th_${runId}`
+    const sameThreadRun = [...activeRuns.entries()].find(([, active]) => active.threadId === threadId)
+    const blockedByCapacity = activeRuns.size >= limit()
+
+    if ((sameThreadRun || blockedByCapacity) && !input._fromQueue) {
       const policy = resolveBusyPolicy(sourceKind, followUpMode)
       if (policy === 'queue') {
         const item = queue.enqueue({
@@ -358,8 +370,9 @@ function createFakeRunController({
         }
       }
       if (policy === 'steer') {
-        // stop current (simulated) and fall through as new run
-        isRunning = false
+        // Stop only the run occupying this thread/capacity slot.
+        const target = sameThreadRun || activeRuns.entries().next().value
+        if (target) activeRuns.delete(target[0])
       } else {
         return {
           status: 'skipped',
@@ -372,11 +385,28 @@ function createFakeRunController({
       }
     }
 
-    isRunning = true
+    if (activeRuns.size >= limit()) {
+      return {
+        status: 'skipped',
+        skipped: true,
+        skipReason: 'busy',
+        error: 'capacity full',
+        runId,
+        threadId,
+      }
+    }
+    if (activeRuns.has(runId) || [...activeRuns.values()].some((active) => active.threadId === threadId)) {
+      return {
+        status: 'skipped',
+        skipped: true,
+        skipReason: 'busy',
+        error: 'thread busy',
+        runId,
+        threadId,
+      }
+    }
+    activeRuns.set(runId, { runId, threadId })
     const logs = []
-    const threadId =
-      input.reuseThreadId ||
-      `th_${runId}`
     if (!threads.has(threadId)) {
       threads.set(threadId, {
         id: threadId,
@@ -399,7 +429,7 @@ function createFakeRunController({
     logs.push(...before.audits)
     for (const n of before.notifications) notifications.push(n)
     if (before.deny) {
-      isRunning = false
+      activeRuns.delete(runId)
       thread.bubbles.push({
         role: 'system',
         content: `hook deny: ${before.deny.reason}`,
@@ -425,6 +455,8 @@ function createFakeRunController({
     // Apply project guidance (snapshot for this run)
     const guidance = projectContext.guidance
     const ctx = {
+      runId,
+      threadId,
       sourceKind,
       objective,
       unattended,
@@ -480,7 +512,7 @@ function createFakeRunController({
     logs.push(...after.audits)
     for (const n of after.notifications) notifications.push(n)
 
-    isRunning = false
+    activeRuns.delete(runId)
     try {
       await input.onSettled?.(result)
     } catch {
@@ -493,17 +525,30 @@ function createFakeRunController({
     return result
   }
 
+  let draining = false
   async function drain() {
-    while (queue.items.length && !isRunning) {
-      const next = queue.shift()
-      if (!next) break
-      await runTask({
-        ...next,
-        _fromQueue: true,
-        sourceKind: next.sourceKind || 'queue-drain',
-        // restore attachments from path-only persist
-        attachments: next.attachments,
-      })
+    if (draining) return
+    draining = true
+    try {
+      while (queue.items.length && activeRuns.size < limit()) {
+        const slots = Math.max(1, limit() - activeRuns.size)
+        const batch = []
+        for (let i = 0; i < slots && queue.items.length; i += 1) {
+          const next = queue.shift()
+          if (!next) break
+          batch.push(runTask({
+            ...next,
+            _fromQueue: true,
+            sourceKind: next.sourceKind || 'queue-drain',
+            // restore attachments from path-only persist
+            attachments: next.attachments,
+          }))
+        }
+        const results = await Promise.all(batch)
+        if (results.some((result) => result.skipped && result.skipReason === 'busy')) break
+      }
+    } finally {
+      draining = false
     }
   }
 
@@ -518,7 +563,10 @@ function createFakeRunController({
       projectContext = { root, guidance, agentsHash: hash }
     },
     get isRunning() {
-      return isRunning
+      return activeRuns.size > 0
+    },
+    get activeRunIds() {
+      return [...activeRuns.keys()]
     },
     clock,
     llm,
@@ -559,8 +607,8 @@ await test('§7 busy follow-up: composer queue → FIFO drain with same run sema
   })
   // While "running" is only true mid-await; use sequential busy by enqueueing while synthetic busy
   // Simulate: complete first, but enqueue while busy via overlapping pattern:
-  // Start schedule while composer is conceptually busy by using isRunning check:
-  // runTask sets isRunning true only after busy check — so we enqueue by calling with concurrent busy:
+  // Start schedule while composer is conceptually busy by using the active-run registry:
+  // runTask reserves its run before the first awaited HITL call.
   const settled = []
   // Force busy: start first without awaiting drain of second
   // Easier approach: call schedule while first is mid-flight by using a deferred HITL
@@ -609,6 +657,48 @@ await test('§7 busy follow-up: composer queue → FIFO drain with same run sema
   assert.ok(followDone || stillQueued || second.status === 'success', 'follow-up must queue or complete')
   void settled
   void p1
+})
+
+await test('ADR3: opt-in concurrent runs share capacity, isolate HITL identity, and drain overflow', async () => {
+  const hitl = createFakeHitl({ auto: 'approve', delayMs: 30 })
+  const ctrl = createFakeRunController({
+    concurrentRunsEnabled: true,
+    maxConcurrentRuns: 2,
+    hitl,
+    hooks: [
+      {
+        id: 'ask-bash',
+        point: 'beforeTool',
+        match: { tool: 'bash' },
+        action: 'require-approval',
+      },
+    ],
+    llm: createFakeLlm([
+      { toolCalls: [{ name: 'bash', arguments: { command: 'one' } }], content: '' },
+      { toolCalls: [{ name: 'bash', arguments: { command: 'two' } }], content: '' },
+      { content: 'three drained' },
+    ]),
+  })
+
+  const first = ctrl.runTask({ sourceKind: 'composer', objective: 'parallel one', runId: 'parallel-1' })
+  await new Promise((r) => setTimeout(r, 5))
+  const second = ctrl.runTask({ sourceKind: 'schedule', objective: 'parallel two', runId: 'parallel-2' })
+  await new Promise((r) => setTimeout(r, 5))
+  const overflow = await ctrl.runTask({ sourceKind: 'schedule', objective: 'parallel three', runId: 'parallel-3' })
+
+  assert.equal(overflow.queued, true)
+  assert.deepEqual(ctrl.activeRunIds.sort(), ['parallel-1', 'parallel-2'])
+  const [firstResult, secondResult] = await Promise.all([first, second])
+  assert.equal(firstResult.status, 'success')
+  assert.equal(secondResult.status, 'success')
+  await new Promise((r) => setTimeout(r, 50))
+  assert.ok(ctrl.archive.some((item) => item.runId === 'parallel-3'), 'overflow should drain after a slot frees')
+  assert.ok(
+    hitl.asks.some((ask) => ask.runId === 'parallel-1' && ask.threadId === 'th_parallel-1') &&
+      hitl.asks.some((ask) => ask.runId === 'parallel-2' && ask.threadId === 'th_parallel-2'),
+    'HITL asks must retain the originating run and thread',
+  )
+  assert.equal(ctrl.isRunning, false)
 })
 
 await test('§7 queue persists attachment filePath only (no dataUrl leak)', () => {

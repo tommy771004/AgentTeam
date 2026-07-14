@@ -5,8 +5,8 @@ import { buildSubDesignPrompt } from '../agent/subdesign/prompt'
 import {
   OPEN_DESIGN_TEMPLATE_SOURCE,
   SUBDESIGN_TEMPLATE_CATEGORIES,
-  SUBDESIGN_TEMPLATES,
   openDesignRecordToTemplate,
+  setSubDesignTemplateCache,
   type SubDesignTemplateCategory,
 } from '../agent/subdesign/templateCatalog'
 import { loadOpenDesignCatalog, type OpenDesignCatalogRecord } from '../agent/openDesign/catalog'
@@ -98,7 +98,8 @@ export function SubDesignPage() {
   const openDesignPackError = useOpenDesignPackStore((state) => state.error)
   const rehydrateOpenDesignPacks = useOpenDesignPackStore((state) => state.rehydrateEnabled)
   const reindexOpenDesignPacks = useOpenDesignPackStore((state) => state.reindex)
-  const runningThreadId = useThreadStore((state) => state.runningThreadId)
+  const setOpenDesignPackProjectRoot = useOpenDesignPackStore((state) => state.setProjectRoot)
+  const runningThreadIds = useThreadStore((state) => state.runningThreadIds)
   const setShowRunPanel = useThreadStore((state) => state.setShowRunPanel)
   const linkedThread = useThreadStore((state) =>
     routeBriefId ? state.threads.find((thread) => thread.subDesignBriefId === routeBriefId) : null,
@@ -112,6 +113,7 @@ export function SubDesignPage() {
   const [templateCategory, setTemplateCategory] = useState<SubDesignTemplateCategory>('all')
   const [templateId, setTemplateId] = useState<string | undefined>()
   const [templateQuery, setTemplateQuery] = useState('')
+  const [designSystemPackId, setDesignSystemPackId] = useState<string | undefined>()
   const [catalogRecords, setCatalogRecords] = useState<OpenDesignCatalogRecord[]>([])
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogWarning, setCatalogWarning] = useState('')
@@ -129,15 +131,13 @@ export function SubDesignPage() {
   const activeBriefDesignSystemId = activeBrief?.designSystemId
   const activeBriefTemplateId = activeBrief?.templateId
   const selectedSystem = systems.find((system) => system.id === designSystemId)
-  const catalogTemplates = useMemo(
+  const allTemplates = useMemo(
     () => catalogRecords.filter((record) => record.kind === 'template').map(openDesignRecordToTemplate),
     [catalogRecords],
   )
-  const allTemplates = useMemo(() => {
-    if (!catalogTemplates.length) return SUBDESIGN_TEMPLATES
-    const bySource = new Set(catalogTemplates.map((template) => template.sourcePath))
-    return [...catalogTemplates, ...SUBDESIGN_TEMPLATES.filter((template) => !bySource.has(template.sourcePath))]
-  }, [catalogTemplates])
+  useEffect(() => {
+    setSubDesignTemplateCache(allTemplates)
+  }, [allTemplates])
   const visibleTemplates = allTemplates.filter((template) =>
     (templateCategory === 'all' || template.category === templateCategory) &&
     `${template.title} ${template.summary}`.toLowerCase().includes(templateQuery.trim().toLowerCase()),
@@ -165,10 +165,22 @@ export function SubDesignPage() {
   const installedOpenDesignPack = useOpenDesignPackStore((state) =>
     selectedCatalogRecord ? state.installed(selectedCatalogRecord) : null,
   )
+  // Design System Packs are vendor DESIGN.md content (kind:'design-system'), distinct from the
+  // project-owned Design Systems scanned by refreshSystems() — see CONTEXT.md and
+  // docs/adr/0001-opendesign-catalog-is-source-of-truth.md. Installing one copies it into
+  // .subagents/subdesign/design-systems/<id>/ via the same copyVendorPack IPC templates use.
+  const designSystemPackRecords = useMemo(
+    () => catalogRecords.filter((record) => record.kind === 'design-system'),
+    [catalogRecords],
+  )
+  const selectedDesignSystemPackRecord = designSystemPackRecords.find((record) => record.id === designSystemPackId) || null
+  const installedDesignSystemPack = useOpenDesignPackStore((state) =>
+    selectedDesignSystemPackRecord ? state.installed(selectedDesignSystemPackRecord) : null,
+  )
 
   const runIsLive = Boolean(
     activeBrief &&
-      (startingRun || runningThreadId === activeBrief.threadId) &&
+      (startingRun || runningThreadIds.includes(activeBrief.threadId)) &&
       (startingRun || isRunning || activityActive || ['running', 'parsing', 'manual_intervention', 'awaiting_user'].includes(agent.status)),
   )
 
@@ -189,6 +201,7 @@ export function SubDesignPage() {
     setArtifactProjectRoot(projectRoot || '')
     setCritiqueProjectRoot(projectRoot || '')
     setExportProjectRoot(projectRoot || '')
+    setOpenDesignPackProjectRoot(projectRoot || '')
     void hydrateSubDesignStores(projectRoot || undefined)
     void refreshSystems(projectRoot || undefined)
   }, [
@@ -197,6 +210,7 @@ export function SubDesignPage() {
     setArtifactProjectRoot,
     setCritiqueProjectRoot,
     setExportProjectRoot,
+    setOpenDesignPackProjectRoot,
     setProjectRoot,
   ])
 
@@ -391,6 +405,65 @@ export function SubDesignPage() {
             </button>
           </div>
         </section>
+
+        {surfaceId === 'design-system' ? (
+          <section className="mx-auto mt-8 max-w-[820px]">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-[13px] font-semibold text-outline">或從 Design System Pack 安裝</h2>
+              <span className="text-[11px] text-outline">{designSystemPackRecords.length} 個本機收錄的 pack</span>
+            </div>
+            {designSystemPackRecords.length ? (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {designSystemPackRecords.map((record) => {
+                  const selected = record.id === designSystemPackId
+                  return (
+                    <button
+                      key={record.id}
+                      type="button"
+                      onClick={() => setDesignSystemPackId(record.id)}
+                      className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                        selected
+                          ? 'border-primary/45 bg-primary/[0.08]'
+                          : 'border-white/10 bg-surface-container-low hover:border-primary/30 hover:bg-white/[0.04]'
+                      }`}
+                    >
+                      <span className="block text-[13px] font-medium text-on-surface">{record.title}</span>
+                      <span className="mt-0.5 block text-[11px] text-outline">{record.summary}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="mt-3 rounded-xl border border-dashed border-white/12 bg-white/[0.02] px-4 py-3 text-[11px] text-outline">
+                目前本機 Open Design vendor 目錄尚未收錄任何 design-system pack（沒有 DESIGN.md）。可直接在下方建立全新 brief，或先到「管理」建立第一份 Design System。
+              </p>
+            )}
+            {selectedDesignSystemPackRecord ? (
+              <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/[0.05] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-[12px] font-semibold text-on-surface">{installedDesignSystemPack ? '已安裝為專案 Design System' : '安裝這個 pack 到目前專案？'}</p>
+                  <p className="mt-1 truncate text-[11px] text-outline">{selectedDesignSystemPackRecord.sourcePath} · digest {selectedDesignSystemPackRecord.digest.slice(0, 12)}… · {selectedDesignSystemPackRecord.licensePaths.length ? '已找到授權檔' : '未找到授權檔'}</p>
+                </div>
+                <button
+                  type="button"
+                  disabled={openDesignPackBusyId === `open-design:${selectedDesignSystemPackRecord.id}` || !projectRoot}
+                  onClick={async () => {
+                    if (installedDesignSystemPack) {
+                      await setOpenDesignPackEnabled(selectedDesignSystemPackRecord, !installedDesignSystemPack.enabled)
+                      return
+                    }
+                    const installed = await installOpenDesignPack(selectedDesignSystemPackRecord, projectRoot || undefined)
+                    if (installed) void refreshSystems(projectRoot || undefined)
+                  }}
+                  className="shrink-0 rounded-lg border border-primary/35 px-3 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/10 disabled:opacity-50"
+                >
+                  {openDesignPackBusyId === `open-design:${selectedDesignSystemPackRecord.id}` ? '處理中…' : installedDesignSystemPack?.enabled ? '停用 pack' : installedDesignSystemPack ? '啟用 pack' : '安裝為 Design System'}
+                </button>
+              </div>
+            ) : null}
+            {!projectRoot ? <p className="mt-2 text-[11px] text-secondary">安裝需要先選擇工作目錄。</p> : null}
+          </section>
+        ) : null}
 
         <section className="mx-auto mt-10 max-w-[1120px]">
           <div className="flex flex-col items-center gap-3">

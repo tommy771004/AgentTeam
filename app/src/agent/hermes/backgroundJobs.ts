@@ -75,7 +75,8 @@ async function injectBackgroundResult(job: BackgroundJob): Promise<void> {
     ])
     const agent = useAgentStore.getState()
     const threads = useThreadStore.getState()
-    if (agent.isRunning || threads.runningThreadId || queueLength() > 0) return
+    if (!agent.canStartRun().allowed || queueLength() > 0) return
+    if (threads.runningThreadIds.includes(job.parentThreadId)) return
     if (!threads.threads.some((thread) => thread.id === job.parentThreadId)) return
 
     const title = job.ok ? '背景委派完成' : '背景委派失敗'

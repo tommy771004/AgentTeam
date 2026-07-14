@@ -8,7 +8,7 @@ import { memoryStore } from '../hermes/memory'
 import { skillsStore } from '../hermes/skills'
 import { listAllMcpTools, mcpCallTool } from '../hermes/mcp'
 import { useSettingsStore } from '../../store/settingsStore'
-import { getRunThreadId, resolveEffectiveProjectRoot } from './runContext'
+import { resolveEffectiveProjectRoot } from './runContext'
 import {
   defaultDesignSystemMarkdown,
   designSystemPath,
@@ -25,20 +25,27 @@ export interface ToolResult {
   data?: unknown
 }
 
+export type ToolExecutionContext = {
+  permissionPolicy?: PermissionPolicy
+  permissionProjection?: PermissionProjection
+  mcpAgentId?: string
+  runId?: string
+  threadId?: string
+  projectRoot?: string
+}
+
 const memory = new Map<string, string>()
 
 export async function executeTool(
   tool: ToolName,
   input: Record<string, unknown>,
-  context?: {
-    permissionPolicy?: PermissionPolicy
-    permissionProjection?: PermissionProjection
-    mcpAgentId?: string
-  },
+  context?: ToolExecutionContext,
 ): Promise<ToolResult> {
   const api = window.subagents?.tools
   // Per-run pin first (scheduler A while UI shows B)
-  const projectRoot = await resolveEffectiveProjectRoot()
+  const projectRoot = await resolveEffectiveProjectRoot(context?.projectRoot)
+  const runId = context?.runId
+  const threadId = context?.threadId
 
   try {
     switch (tool) {
@@ -104,6 +111,7 @@ export async function executeTool(
           command,
           timeoutMs: Number(input.timeoutMs) || 60_000,
           cwd,
+          runId,
         })
         const out = [
           cwd && `cwd: ${cwd}`,
@@ -326,7 +334,6 @@ export async function executeTool(
           input.notify_on_complete !== 'false'
 
         // Inherit parent run pin + explicit capabilities (audit: must not drop inherit)
-        const { getRunProjectRoot, getRunId } = await import('./runContext')
         const inheritRaw =
           input.inherit_capabilities ?? input.inheritCapabilities ?? input.capabilities
         const inheritCapabilities = Array.isArray(inheritRaw)
@@ -339,9 +346,9 @@ export async function executeTool(
                 .slice(0, 12)
             : []
         const parentCtx = {
-          parentRunId: getRunId(),
-          parentThreadId: getRunThreadId(),
-          projectRoot: getRunProjectRoot(),
+          parentRunId: runId,
+          parentThreadId: threadId,
+          projectRoot: projectRoot || context?.projectRoot,
           sourceKind: 'delegate' as const,
           inheritCapabilities,
           parentPermissionPolicy: context?.permissionPolicy,
@@ -477,13 +484,14 @@ export async function executeTool(
         if (!todos.length) return { ok: false, output: 'update_plan 需要至少一個有效的 todos 項目' }
         try {
           const { useRunActivityStore } = await import('../../store/runActivityStore')
-          useRunActivityStore.getState().setTasks(todos)
+          useRunActivityStore.getState().setTasks(todos, runId)
           useRunActivityStore.getState().push({
             kind: 'status',
+            runId,
             title: '任務清單更新',
             detail: `${todos.length} 項 · ${todos.filter((item) => item.status === 'done').length} 項完成`,
           })
-          useRunActivityStore.getState().setStatus(`任務清單已更新 · ${todos.length} 項`)
+          useRunActivityStore.getState().setStatus(`任務清單已更新 · ${todos.length} 項`, runId)
         } catch {
           /* UI store is optional in browser / pure execution contexts */
         }
@@ -494,7 +502,6 @@ export async function executeTool(
         try {
           const { stageFromPlan } = await import('../subdesign/brief')
           const { useSubDesignStore } = await import('../../store/subDesignStore')
-          const threadId = getRunThreadId()
           const linked = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
           const inferred = stageFromPlan(todos)
           if (linked && inferred && (inferred !== 'build' || linked.selectedDirectionId)) {
@@ -512,7 +519,6 @@ export async function executeTool(
       }
       case 'design_brief_update': {
         const { useSubDesignStore } = await import('../../store/subDesignStore')
-        const threadId = getRunThreadId()
         const briefId = String(input.briefId || '').trim()
         const linked = briefId
           ? useSubDesignStore.getState().findById(briefId)
@@ -550,7 +556,6 @@ export async function executeTool(
       }
       case 'design_direction_select': {
         const { useSubDesignStore } = await import('../../store/subDesignStore')
-        const threadId = getRunThreadId()
         const briefId = String(input.briefId || '').trim()
         const linked = briefId
           ? useSubDesignStore.getState().findById(briefId)
@@ -618,7 +623,6 @@ export async function executeTool(
       case 'design_artifact_register': {
         const { useSubDesignStore } = await import('../../store/subDesignStore')
         const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
-        const threadId = getRunThreadId()
         const linked = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
         const rawManifest = input.manifest && typeof input.manifest === 'object'
           ? { ...(input.manifest as Record<string, unknown>) }
@@ -728,10 +732,31 @@ export async function executeTool(
         const evidence = result.evidence as Record<string, unknown>
         return { ok: true, output: `已產生 lint evidence：${String(evidence.path || '')}`, data: { ...result, evidence } }
       }
+      case 'design_critique_note': {
+        const { useSubDesignCritiqueSessionStore } = await import('../../store/subDesignCritiqueSessionStore')
+        const artifactId = String(input.artifactId || '').trim()
+        const panelistId = input.panelistId
+        if (!['visual', 'accessibility', 'implementation'].includes(String(panelistId))) {
+          return { ok: false, output: 'panelistId 必須是 visual、accessibility 或 implementation。' }
+        }
+        const round = Number(input.round) === 2 ? 2 : Number(input.round) === 1 ? 1 : 0
+        if (!round) return { ok: false, output: 'round 必須是 1 或 2。' }
+        const recorded = useSubDesignCritiqueSessionStore.getState().recordPanelistNote(artifactId, {
+          round,
+          panelistId: panelistId as 'visual' | 'accessibility' | 'implementation',
+          score: input.score,
+          summary: input.summary,
+          findings: input.findings,
+          evidence: input.evidence,
+        })
+        if (!recorded) return { ok: false, output: '沒有進行中的 Critique Theater session 符合這個 artifactId，或 summary 為空。' }
+        return { ok: true, output: `已記錄 ${panelistId} panelist round ${round} 的獨立審查結果。` }
+      }
       case 'design_critique': {
         const { critiqueAllowsDeliver } = await import('../subdesign/critique')
         const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
         const { useSubDesignCritiqueStore } = await import('../../store/subDesignCritiqueStore')
+        const { useSubDesignCritiqueSessionStore } = await import('../../store/subDesignCritiqueSessionStore')
         const { useSubDesignStore } = await import('../../store/subDesignStore')
         const rawCritique = input.critique && typeof input.critique === 'object'
           ? { ...(input.critique as Record<string, unknown>) }
@@ -740,7 +765,6 @@ export async function executeTool(
         const artifactId = String(rawCritique.artifactId || '').trim()
         const artifact = useSubDesignArtifactStore.getState().findById(artifactId)
         if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }
-        const threadId = getRunThreadId()
         const linked = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
         const briefId = String(rawCritique.briefId || linked?.id || artifact.briefId).trim()
         if (linked && briefId !== linked.id) return { ok: false, output: 'critique briefId 與目前 thread 不一致。' }
@@ -759,8 +783,17 @@ export async function executeTool(
             rawCritique.verdict = 'needs-revision'
           }
         }
+        const theaterStore = useSubDesignCritiqueSessionStore.getState()
+        const theaterSession = theaterStore.current
+        const isTheaterFinal = theaterSession?.status === 'running' && theaterSession.artifactId === artifactId
+        if (isTheaterFinal && !theaterStore.claimFinalCritique(artifactId)) {
+          return { ok: false, output: 'Critique Theater 尚未完成兩輪六個 panelist notes，或 final design_critique 已經被另一個 call 鎖定。' }
+        }
         const result = useSubDesignCritiqueStore.getState().record(rawCritique, { briefId }, projectRoot)
-        if (!result.ok) return { ok: false, output: `critique invalid：${result.errors.join('；')}` }
+        if (!result.ok) {
+          if (isTheaterFinal) useSubDesignCritiqueSessionStore.getState().releaseFinalCritique(artifactId)
+          return { ok: false, output: `critique invalid：${result.errors.join('；')}` }
+        }
         const nextStage = critiqueAllowsDeliver(result.critique) ? 'deliver' : 'critique'
         const brief = useSubDesignStore.getState().findById(briefId)
         const stageResult = brief ? useSubDesignStore.getState().setStage(brief.id, nextStage, projectRoot) : null

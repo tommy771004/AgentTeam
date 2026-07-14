@@ -1,0 +1,9 @@
+{
+  "title": "即時儀表板",
+  "summary": "以持續更新的資料與狀態為核心的工作台。",
+  "icon": "monitoring",
+  "suggestedObjective": "設計一個即時更新、能協助決策的資料儀表板。",
+  "category": "dashboard",
+  "surface": "dashboard",
+  "status": "ready"
+}

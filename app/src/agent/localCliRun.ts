@@ -101,9 +101,9 @@ export async function runPromptViaLocalCli(opts: {
 }
 
 /** Cancel active local CLI agent process (Electron) */
-export async function cancelLocalCliAgent(): Promise<{ ok: boolean; killed: number }> {
+export async function cancelLocalCliAgent(runId?: string): Promise<{ ok: boolean; killed: number }> {
   if (!window.subagents?.cli?.cancel) return { ok: false, killed: 0 }
-  return window.subagents.cli.cancel()
+  return window.subagents.cli.cancel(runId)
 }
 
 export function emptyAgentLike(partial: Partial<AgentState> & { objective: string }): AgentState {

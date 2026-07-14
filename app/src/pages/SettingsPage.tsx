@@ -425,6 +425,34 @@ export function SettingsPage() {
                   </PillSelect>
                 }
               />
+              <SettingsRow
+                title="允許並行執行"
+                description="讓不同 thread 同時執行；預設關閉，達到上限時仍會排隊／轉向"
+                control={
+                  <SettingsToggle
+                    checked={settings.concurrentRunsEnabled === true}
+                    onChange={(v) => set({ concurrentRunsEnabled: v })}
+                  />
+                }
+              />
+              {settings.concurrentRunsEnabled === true && (
+                <SettingsRow
+                  title="並行上限"
+                  description="小型固定 ceiling，避免同時啟動過多本機或 LLM 工作"
+                  control={
+                    <PillSelect
+                      value={String(settings.maxConcurrentRuns || 4)}
+                      onChange={(v) => set({ maxConcurrentRuns: Number(v) })}
+                    >
+                      <option value="2">2 runs</option>
+                      <option value="3">3 runs</option>
+                      <option value="4">4 runs</option>
+                      <option value="6">6 runs</option>
+                      <option value="8">8 runs</option>
+                    </PillSelect>
+                  }
+                />
+              )}
             </SettingsGroup>
             <SettingsGroup title="通知">
               <SettingsRow

@@ -133,11 +133,13 @@ export async function dispatchThreadTask(
     (opts?.overrides?.projectRoot || '').trim() || useProjectStore.getState().root
   const agent = useAgentStore.getState()
 
-  if (agent.isRunning) {
+  const runId = opts?.overrides?.runId
+  const capacity = agent.canStartRun(runId, tid || undefined)
+  if (!capacity.allowed) {
     return {
       path: 'builtin',
       status: 'failed',
-      error: '已有任務執行中（全域單一執行，避免 CLI 併發踩踏）。請先停止再發。',
+      error: `目前已有 ${capacity.active}/${capacity.limit} 個 run 執行中，請稍候或使用佇列。`,
     }
   }
 
@@ -238,10 +240,11 @@ export async function dispatchThreadTask(
       unattended: opts?.overrides?.unattended === true,
       attachments: cliAttachments.length ? cliAttachments : undefined,
       runId: opts?.overrides?.runId,
+      threadId: tid || undefined,
       configSnapshot,
       loopType: opts?.forceLoopType,
     })
-    const a = useAgentStore.getState().agent
+    const a = useAgentStore.getState().getRunState(opts?.overrides?.runId) || useAgentStore.getState().agent
     if (tid && a.externalRun) {
       useThreadStore.getState().setExternalRun(tid, a.externalRun)
     }
@@ -273,16 +276,18 @@ export async function dispatchThreadTask(
     subagent: subId,
   })
 
-  // Chat history: recent verbatim + older condensed (budget-friendly)
+  // Chat history: recent verbatim + older condensed (budget-friendly).
+  // maxChars is chatHistory's share of the shared reference-context budget it
+  // splits with hermes/sessionSearch.ts's cross-session recall — see chatHistory.ts.
   let extra = baseOverrides.extraSystemContext || ''
   if (settings.referenceChatHistory !== false && thread?.bubbles?.length) {
-    const { buildChatHistoryContext } = await import('./chatHistory')
+    const { buildChatHistoryContext, CHAT_HISTORY_CONTEXT_CHARS } = await import('./chatHistory')
     const hist = buildChatHistoryContext(
       thread.bubbles.map((b) => ({ role: b.role, content: b.content })),
-      { keepRecent: 3, maxChars: 6000, perMessageChars: 600 },
+      { keepRecent: 3, maxChars: CHAT_HISTORY_CONTEXT_CHARS, perMessageChars: 600 },
     )
     if (hist.trim()) {
-      extra = [extra, hist].filter(Boolean).join('\n\n').slice(0, 6000)
+      extra = [extra, hist].filter(Boolean).join('\n\n').slice(0, CHAT_HISTORY_CONTEXT_CHARS)
     }
   }
   if (opts?.overrides?.extraSystemContext) {
@@ -326,16 +331,16 @@ export async function dispatchThreadTask(
     thread?.loopType ||
     undefined
   if (forceLoop) {
-    agent.setSelectedLoopType(forceLoop)
+    if (!settings.concurrentRunsEnabled) agent.setSelectedLoopType(forceLoop)
     overrides.loopTypeMode = 'force'
     overrides.forceLoopType = forceLoop
   } else {
-    agent.setSelectedLoopType(null)
+    if (!settings.concurrentRunsEnabled) agent.setSelectedLoopType(null)
     overrides.loopTypeMode = overrides.loopTypeMode || 'auto'
   }
   overrides.threadId = overrides.threadId || tid || undefined
   await agent.startExecution(text, overrides)
-  const a = useAgentStore.getState().agent
+  const a = useAgentStore.getState().getRunState(overrides.runId) || useAgentStore.getState().agent
   // Persist loaded caps for next turn on this thread
   if (tid && (a.loadedCapabilityIds?.length || a.unlockedToolNames?.length)) {
     useThreadStore

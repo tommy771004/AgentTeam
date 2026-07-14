@@ -130,6 +130,12 @@ export type Thread = {
   continueGoal?: ContinueGoalSnapshot | null
   /** Last external OpenCode session attached to this thread. */
   externalRun?: ExternalRunRef
+  /**
+   * Last run ended with loopConfig.nextState='Await User Input' (the result
+   * itself poses a follow-up question). Drives the composer placeholder hint;
+   * cleared on the next dispatch for this thread. See engine.ts resultAwaitsReply.
+   */
+  awaitingReply?: boolean
 }
 
 interface ThreadStore {
@@ -138,6 +144,10 @@ interface ThreadStore {
   showRunPanel: boolean
   showThreadList: boolean
   runningThreadId: string | null
+  /** All threads with an active/reserved run. The scalar is retained for legacy UI consumers. */
+  runningThreadIds: string[]
+  /** Ephemeral thread → run identity map used by concurrent activity updates. */
+  runningRunIds: Record<string, string>
 
   hydrate: () => void
   createThread: (
@@ -175,6 +185,7 @@ interface ThreadStore {
   setShowRunPanel: (v: boolean) => void
   setShowThreadList: (v: boolean) => void
   setRunningThreadId: (id: string | null) => void
+  setThreadRunning: (id: string, running: boolean, runId?: string) => void
   setThreadStatus: (id: string, status: ExecutionStatus | 'idle') => void
   setRunPlan: (
     id: string,
@@ -190,6 +201,7 @@ interface ThreadStore {
   setSubDesignBriefId: (id: string, briefId: string | null) => void
   setContinueGoal: (id: string, snap: ContinueGoalSnapshot | null) => void
   setExternalRun: (id: string, externalRun?: ExternalRunRef) => void
+  setAwaitingReply: (id: string, value: boolean) => void
   activeThread: () => Thread | null
 }
 
@@ -316,6 +328,8 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   showRunPanel: false,
   showThreadList: true,
   runningThreadId: null,
+  runningThreadIds: [],
+  runningRunIds: {},
 
   hydrate: () => {
     const { threads, activeId } = load()
@@ -607,7 +621,31 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
 
   setShowRunPanel: (v) => set({ showRunPanel: v }),
   setShowThreadList: (v) => set({ showThreadList: v }),
-  setRunningThreadId: (id) => set({ runningThreadId: id }),
+  setRunningThreadId: (id) => {
+    // Compatibility shim for older callers; new run lifecycle code uses the
+    // additive setThreadRunning API so one run cannot clear another run.
+    set({
+      runningThreadId: id,
+      runningThreadIds: id ? [id] : [],
+      runningRunIds: id ? { [id]: '' } : {},
+    })
+  },
+  setThreadRunning: (id, running, runId) => {
+    const current = get()
+    const runningRunIds = { ...current.runningRunIds }
+    if (running) {
+      runningRunIds[id] = runId || runningRunIds[id] || ''
+    } else if (!runId || runningRunIds[id] === runId) {
+      delete runningRunIds[id]
+    }
+    const ids = Object.keys(runningRunIds)
+    const scalar = running
+      ? id
+      : current.runningThreadId && ids.includes(current.runningThreadId)
+        ? current.runningThreadId
+        : ids.at(-1) || null
+    set({ runningThreadIds: ids, runningThreadId: scalar, runningRunIds })
+  },
   setThreadStatus: (id, status) => {
     const threads = get().threads.map((t) =>
       t.id === id ? { ...t, lastStatus: status, updatedAt: new Date().toISOString() } : t,
@@ -669,6 +707,14 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
             updatedAt: new Date().toISOString(),
           }
         : t,
+    )
+    set({ threads })
+    persist(threads, get().activeId)
+  },
+
+  setAwaitingReply: (id, value) => {
+    const threads = get().threads.map((t) =>
+      t.id === id ? { ...t, awaitingReply: value || undefined } : t,
     )
     set({ threads })
     persist(threads, get().activeId)

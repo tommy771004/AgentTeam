@@ -1,0 +1,9 @@
+{
+  "title": "財務摘要",
+  "summary": "讓管理者快速掌握核心數字與趨勢。",
+  "icon": "query_stats",
+  "suggestedObjective": "設計一份供管理階層閱讀的財務摘要。",
+  "category": "prototype",
+  "surface": "dashboard",
+  "status": "ready"
+}

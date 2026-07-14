@@ -2,6 +2,8 @@ import { create } from 'zustand'
 
 export type PermissionAskRequest = {
   id: string
+  threadId?: string
+  runId?: string
   tool: string
   argsPreview: string
   reason: string
@@ -28,16 +30,20 @@ interface PermissionAskStore {
   queue: PermissionAskRequest[]
   /** session auto-approve until end of run */
   sessionAllow: boolean
+  /** Session approval is isolated by thread; sessionAllow remains for legacy UI. */
+  sessionAllowByThread: Record<string, boolean>
   /** Session counters (app lifetime until reset) */
   stats: PermissionAskStats
   /** Per-run counters — reset via beginRunAudit() */
   runStats: PermissionAskStats
-  setSessionAllow: (v: boolean) => void
+  runStatsByRun: Record<string, PermissionAskStats>
+  setSessionAllow: (v: boolean, threadId?: string) => void
+  getSessionAllow: (threadId?: string) => boolean
   resetStats: () => void
   /** Call at start of each agent run for archive snapshot */
-  beginRunAudit: () => void
+  beginRunAudit: (runId?: string, threadId?: string) => void
   /** Snapshot for ArchiveRecord.hitl */
-  getRunHitlSnapshot: () => {
+  getRunHitlSnapshot: (runId?: string) => {
     allowed: number
     denied: number
     timedOut: number
@@ -45,12 +51,15 @@ interface PermissionAskStore {
   }
   /** Promise that resolves when user decides or timeout */
   requestAsk: (input: {
+    threadId?: string
+    runId?: string
     tool: string
     args: Record<string, unknown>
     reason?: string
     timeoutMs?: number
   }) => Promise<'allow' | 'deny'>
   resolve: (decision: 'allow' | 'deny') => void
+  cancelRun: (runId: string) => void
 }
 
 const resolvers = new Map<string, Resolver>()
@@ -80,19 +89,35 @@ function promote(get: () => PermissionAskStore, set: (p: Partial<PermissionAskSt
   set({ current: head, queue: rest })
 }
 
-function bumpAllow(get: () => PermissionAskStore, set: (p: Partial<PermissionAskStore>) => void) {
-  const { stats, runStats } = get()
+const GLOBAL_SCOPE = '__global__'
+
+function updateRunStats(
+  current: PermissionAskStore,
+  request: Pick<PermissionAskRequest, 'runId'> | undefined,
+  update: (stats: PermissionAskStats) => PermissionAskStats,
+): Pick<PermissionAskStore, 'runStats' | 'runStatsByRun'> {
+  const runStatsByRun = { ...current.runStatsByRun }
+  const runId = request?.runId?.trim()
+  if (runId) runStatsByRun[runId] = update(runStatsByRun[runId] || emptyStats())
+  return {
+    runStats: runId ? runStatsByRun[runId] : update(current.runStats),
+    runStatsByRun,
+  }
+}
+
+function bumpAllow(get: () => PermissionAskStore, set: (p: Partial<PermissionAskStore>) => void, request?: Pick<PermissionAskRequest, 'runId'>) {
+  const { stats } = get()
   set({
     stats: { ...stats, allowed: stats.allowed + 1 },
-    runStats: { ...runStats, allowed: runStats.allowed + 1 },
+    ...updateRunStats(get(), request, (value) => ({ ...value, allowed: value.allowed + 1 })),
   })
 }
 
-function bumpDeny(get: () => PermissionAskStore, set: (p: Partial<PermissionAskStore>) => void) {
-  const { stats, runStats } = get()
+function bumpDeny(get: () => PermissionAskStore, set: (p: Partial<PermissionAskStore>) => void, request?: Pick<PermissionAskRequest, 'runId'>) {
+  const { stats } = get()
   set({
     stats: { ...stats, denied: stats.denied + 1 },
-    runStats: { ...runStats, denied: runStats.denied + 1 },
+    ...updateRunStats(get(), request, (value) => ({ ...value, denied: value.denied + 1 })),
   })
 }
 
@@ -100,8 +125,9 @@ function bumpTimeout(
   get: () => PermissionAskStore,
   set: (p: Partial<PermissionAskStore>) => void,
   tool: string,
+  request?: Pick<PermissionAskRequest, 'runId'>,
 ) {
-  const { stats, runStats } = get()
+  const { stats } = get()
   const entry = { tool, at: new Date().toISOString() }
   set({
     stats: {
@@ -109,11 +135,11 @@ function bumpTimeout(
       timedOut: stats.timedOut + 1,
       recentTimeouts: [entry, ...stats.recentTimeouts].slice(0, 12),
     },
-    runStats: {
-      ...runStats,
-      timedOut: runStats.timedOut + 1,
-      recentTimeouts: [entry, ...runStats.recentTimeouts].slice(0, 12),
-    },
+    ...updateRunStats(get(), request, (value) => ({
+      ...value,
+      timedOut: value.timedOut + 1,
+      recentTimeouts: [entry, ...value.recentTimeouts].slice(0, 12),
+    })),
   })
 }
 
@@ -121,13 +147,32 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
   current: null,
   queue: [],
   sessionAllow: false,
+  sessionAllowByThread: {},
   stats: emptyStats(),
   runStats: emptyStats(),
-  setSessionAllow: (v) => set({ sessionAllow: v }),
-  resetStats: () => set({ stats: emptyStats(), runStats: emptyStats() }),
-  beginRunAudit: () => set({ runStats: emptyStats() }),
-  getRunHitlSnapshot: () => {
-    const r = get().runStats
+  runStatsByRun: {},
+  setSessionAllow: (v, threadId) => {
+    const key = threadId?.trim() || GLOBAL_SCOPE
+    set({
+      sessionAllow: threadId ? get().sessionAllow : v,
+      sessionAllowByThread: { ...get().sessionAllowByThread, [key]: v },
+    })
+  },
+  getSessionAllow: (threadId) => {
+    if (!threadId?.trim()) return get().sessionAllowByThread[GLOBAL_SCOPE] === true || get().sessionAllow
+    return get().sessionAllowByThread[threadId.trim()] === true
+  },
+  resetStats: () => set({ stats: emptyStats(), runStats: emptyStats(), runStatsByRun: {} }),
+  beginRunAudit: (runId) => set({
+    runStats: emptyStats(),
+    runStatsByRun: runId?.trim()
+      ? { ...get().runStatsByRun, [runId.trim()]: emptyStats() }
+      : get().runStatsByRun,
+  }),
+  getRunHitlSnapshot: (runId) => {
+    const r = runId?.trim()
+      ? (get().runStatsByRun[runId.trim()] || emptyStats())
+      : get().runStats
     const toolsTimedOut = r.recentTimeouts.map((t) => t.tool)
     return {
       allowed: r.allowed,
@@ -137,9 +182,9 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
     }
   },
 
-  requestAsk: ({ tool, args, reason, timeoutMs }) => {
-    if (get().sessionAllow) {
-      bumpAllow(get, set)
+  requestAsk: ({ threadId, runId, tool, args, reason, timeoutMs }) => {
+    if (get().getSessionAllow(threadId)) {
+      bumpAllow(get, set, { runId })
       return Promise.resolve('allow')
     }
 
@@ -147,6 +192,8 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
     const ms = Math.max(5_000, timeoutMs ?? 90_000)
     const req: PermissionAskRequest = {
       id,
+      threadId: threadId?.trim() || undefined,
+      runId: runId?.trim() || undefined,
       tool,
       argsPreview: JSON.stringify(args, null, 2).slice(0, 1200),
       reason: reason || `工具「${tool}」需要核准後才能執行`,
@@ -171,7 +218,7 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
           } else {
             set({ queue: state.queue.filter((q) => q.id !== id) })
           }
-          bumpTimeout(get, set, tool)
+          bumpTimeout(get, set, tool, req)
           r('deny')
         }, ms),
       )
@@ -193,8 +240,28 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
     clearTimer(cur.id)
     set({ current: null })
     promote(get, set)
-    if (decision === 'allow') bumpAllow(get, set)
-    else bumpDeny(get, set)
+    if (decision === 'allow') bumpAllow(get, set, cur)
+    else bumpDeny(get, set, cur)
     r?.(decision)
+  },
+
+  cancelRun: (runId) => {
+    const current = get().current
+    const matching = [current, ...get().queue].filter(
+      (item): item is PermissionAskRequest => Boolean(item && item.runId === runId),
+    )
+    if (!matching.length) return
+    for (const item of matching) {
+      const resolver = resolvers.get(item.id)
+      resolvers.delete(item.id)
+      clearTimer(item.id)
+      resolver?.('deny')
+      bumpDeny(get, set, item)
+    }
+    set({
+      current: current?.runId === runId ? null : current,
+      queue: get().queue.filter((item) => item.runId !== runId),
+    })
+    promote(get, set)
   },
 }))

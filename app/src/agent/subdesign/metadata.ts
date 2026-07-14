@@ -1,15 +1,17 @@
 import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignExportRecord } from './types'
+import type { OpenDesignContentPackManifest } from '../openDesign/packs'
 
-export type SubDesignMetadataKind = 'brief' | 'artifact' | 'critique' | 'export'
+export type SubDesignMetadataKind = 'brief' | 'artifact' | 'critique' | 'export' | 'open-design-pack'
 
 export type SubDesignMetadataSnapshot = {
   briefs: unknown[]
   artifacts: unknown[]
   critiques: unknown[]
   exports: unknown[]
+  openDesignPacks: unknown[]
 }
 
-type MetadataPayload = SubDesignBrief | SubDesignArtifact | SubDesignCritique | SubDesignExportRecord
+type MetadataPayload = SubDesignBrief | SubDesignArtifact | SubDesignCritique | SubDesignExportRecord | OpenDesignContentPackManifest
 
 export async function readSubDesignMetadata(projectRoot?: string): Promise<SubDesignMetadataSnapshot | null> {
   const api = typeof window === 'undefined' ? undefined : window.subagents?.subdesign
@@ -21,6 +23,7 @@ export async function readSubDesignMetadata(projectRoot?: string): Promise<SubDe
     artifacts: Array.isArray(result.artifacts) ? result.artifacts : [],
     critiques: Array.isArray(result.critiques) ? result.critiques : [],
     exports: Array.isArray(result.exports) ? result.exports : [],
+    openDesignPacks: Array.isArray(result.openDesignPacks) ? result.openDesignPacks : [],
   }
 }
 

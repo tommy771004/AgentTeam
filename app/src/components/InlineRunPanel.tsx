@@ -3,6 +3,7 @@ import { StepTimeline } from './StepTimeline'
 import { LogViewer } from './LogViewer'
 import { InterventionPanel } from './InterventionPanel'
 import { useAgentStore } from '../store/agentStore'
+import { useProjectStore } from '../store/projectStore'
 import { useRunActivityStore } from '../store/runActivityStore'
 import { useThreadStore } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
@@ -51,6 +52,9 @@ export function InlineRunPanel({ onClose }: { onClose?: () => void }) {
       continueGoal: true,
       loopType: 'Goal-based',
       skipUserBubble: false,
+      // Snapshot the project pinned at dispatch time — a concurrent run must not
+      // silently re-resolve to whatever project the UI switches to mid-flight.
+      projectRoot: useProjectStore.getState().root || undefined,
     })
   }
 

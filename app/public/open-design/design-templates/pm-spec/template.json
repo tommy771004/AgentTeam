@@ -1,0 +1,9 @@
+{
+  "title": "PM Spec",
+  "summary": "含目錄、決策紀錄與交付條件的規格頁。",
+  "icon": "assignment",
+  "suggestedObjective": "整理一份可供產品與工程協作的功能規格。",
+  "category": "prototype",
+  "surface": "prototype",
+  "status": "ready"
+}

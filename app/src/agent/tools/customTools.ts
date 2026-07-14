@@ -253,6 +253,7 @@ export async function executeCustomTool(
   tool: ResolvedCustomTool,
   input: Record<string, unknown>,
   settings: LlmSettings,
+  context?: { runId?: string; projectRoot?: string },
 ): Promise<{ ok: boolean; output: string; data?: unknown }> {
   const missingSecrets: string[] = []
   if (tool.kind === 'bash_template') {
@@ -264,7 +265,12 @@ export async function executeCustomTool(
       }
     }
     if (!command.trim()) return { ok: false, output: 'bash template resolved to an empty command' }
-    const r = await window.subagents?.shell?.bash({ command, timeoutMs: 60_000 })
+    const r = await window.subagents?.shell?.bash({
+      command,
+      cwd: context?.projectRoot,
+      timeoutMs: 60_000,
+      runId: context?.runId,
+    })
     if (!r) return { ok: false, output: 'bash_template requires Electron' }
     return {
       ok: r.ok,

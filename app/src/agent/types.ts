@@ -229,7 +229,7 @@ export interface RuntimeOverrides {
   temporary?: boolean
   /**
    * Unattended run (scheduler / webhook / telegram).
-   * HITL ask & safety intervention auto-deny on timeout so the global run lock cannot hang overnight.
+   * HITL ask & safety intervention auto-deny on timeout so an unattended run cannot hang overnight.
    */
   unattended?: boolean
   /** Override HITL timeout (ms). Default: interactive 90s · unattended 45s */
@@ -582,6 +582,10 @@ export interface LlmSettings {
   enterBehavior: EnterBehavior
   /** General · Follow-up while running */
   followUpMode: FollowUpMode
+  /** Opt-in full N-thread concurrency; disabled preserves the legacy single-run rollout. */
+  concurrentRunsEnabled: boolean
+  /** Concurrent-run ceiling, clamped to a small fixed range by runtime. */
+  maxConcurrentRuns: number
   /** General · Desktop notification when a run finishes */
   notifyOnComplete: boolean
   /** General · Soft sound on complete (where supported) */

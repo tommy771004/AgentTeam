@@ -156,9 +156,10 @@ const api = {
         artifacts: unknown[]
         critiques: unknown[]
         exports: unknown[]
+        openDesignPacks: unknown[]
         error?: string
       }>,
-    writeMetadata: (input: { kind: 'brief' | 'artifact' | 'critique' | 'export'; payload: unknown; projectRoot?: string }) =>
+    writeMetadata: (input: { kind: 'brief' | 'artifact' | 'critique' | 'export' | 'open-design-pack'; payload: unknown; projectRoot?: string }) =>
       ipcRenderer.invoke('subdesign:writeMetadata', input) as Promise<{
         ok: boolean
         path?: string
@@ -246,6 +247,7 @@ const api = {
     }) => ipcRenderer.invoke('subdesign:copyVendorPack', input) as Promise<{
       ok: boolean
       path?: string
+      designSystemPath?: string
       files?: number
       bytes?: number
       error?: string
@@ -346,13 +348,14 @@ const api = {
       >,
   },
   shell: {
-    bash: (input: { command: string; cwd?: string; timeoutMs?: number }) =>
+    bash: (input: { command: string; cwd?: string; timeoutMs?: number; runId?: string }) =>
       ipcRenderer.invoke('shell:bash', input) as Promise<{
         ok: boolean
         code: number | null
         stdout: string
         stderr: string
         timedOut?: boolean
+        runId?: string
       }>,
     openExternal: (url: string) =>
       ipcRenderer.invoke('shell:openExternal', url) as Promise<{ ok: boolean }>,
@@ -597,8 +600,8 @@ const api = {
       }
     },
     /** Stop in-flight CLI agent (and tagged cli-agent bash) */
-    cancel: () =>
-      ipcRenderer.invoke('cli:cancel') as Promise<{ ok: boolean; killed: number }>,
+    cancel: (runId?: string) =>
+      ipcRenderer.invoke('cli:cancel', runId) as Promise<{ ok: boolean; killed: number }>,
   },
   /** Persist / reload chat attachments on disk */
   attachments: {

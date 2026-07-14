@@ -30,7 +30,7 @@ import { QuestionAskModal } from './components/QuestionAskModal'
 import type { ScheduledJob } from './agent/types'
 import { scheduleSkillCurator } from './agent/hermes/curator'
 
-/** Restore automation queue from disk and drain when idle */
+/** Restore automation queue from disk and drain when capacity is available */
 function RunQueueBootstrap() {
   useEffect(() => {
     let cancelled = false
@@ -48,7 +48,7 @@ function RunQueueBootstrap() {
       // Let schedule/settings hydrate first
       await new Promise((r) => setTimeout(r, 900))
       if (cancelled) return
-      if (useAgentStore.getState().isRunning || queueLength() === 0) return
+      if (queueLength() === 0 || !useAgentStore.getState().canStartRun().allowed) return
       const { runExternalObjective } = await import('./agent/runExternal')
       await drainExternalRunQueue((o) =>
         runExternalObjective({ ...o, _fromQueue: true }),

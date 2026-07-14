@@ -55,7 +55,6 @@ import {
   buildMultimodalUserContent,
   contentPartsToPlainText,
 } from '../../lib/chatAttachments'
-import { getRunId, getRunThreadId } from './runContext'
 
 export interface ToolLoopCallbacks {
   onLog?: (
@@ -120,6 +119,9 @@ export interface ToolLoopOptions {
   objective?: string
   /** Per-run project pin (scheduler) — overrides UI project store for tools/MCP */
   projectRoot?: string
+  /** Explicit identity used for HITL routing, shell cancellation and thread-bound tools. */
+  runId?: string
+  threadId?: string
 }
 
 function nowTime(): string {
@@ -218,13 +220,6 @@ export async function runFunctionCallingLoop(
       /* browser/unit-test fallback */
     }
   }
-  try {
-    const { setRunProjectRoot } = await import('./runContext')
-    setRunProjectRoot(projectRoot || undefined)
-  } catch {
-    /* ignore */
-  }
-
   // ── Capability progressive disclosure (Pydantic AI 2.0–style) ──
   const hitlTimeoutMs =
     opts?.hitlTimeoutMs ??
@@ -565,6 +560,9 @@ ${systemExtra}`,
         unattended: opts?.unattended,
         sourceKind: opts?.sourceKind,
         objective: opts?.objective || args.objective,
+        runId: opts?.runId,
+        threadId: opts?.threadId,
+        projectRoot,
       })
     }
   }
@@ -617,6 +615,9 @@ async function executeOneToolCall(
     unattended?: boolean
     sourceKind?: string
     objective?: string
+    runId?: string
+    threadId?: string
+    projectRoot?: string
     onQuestionAsked?: () => void
     onQuestionResolved?: () => void
   },
@@ -720,6 +721,8 @@ async function executeOneToolCall(
     unattended: ctx.unattended,
     sourceKind: ctx.sourceKind,
     objective: ctx.objective,
+    runId: ctx.runId,
+    threadId: ctx.threadId,
     onLog: (level, message) => {
       ctx.cb?.onLog?.(level as Parameters<NonNullable<ToolLoopCallbacks['onLog']>>[0], message)
     },
@@ -763,6 +766,8 @@ async function executeOneToolCall(
           unattended: ctx.unattended,
           sourceKind: ctx.sourceKind,
           objective: ctx.objective,
+          runId: ctx.runId,
+          threadId: ctx.threadId,
           onLog: (level, message) => {
             ctx.cb?.onLog?.(
               level as Parameters<NonNullable<ToolLoopCallbacks['onLog']>>[0],
@@ -787,14 +792,22 @@ async function executeOneToolCall(
             innerOut = mr.ok ? mr.content : mr.error || 'MCP failed'
           }
         } else if (innerCustom) {
-          const cr = await executeCustomTool(innerCustom, innerArgs, ctx.settings)
+          const cr = await executeCustomTool(innerCustom, innerArgs, ctx.settings, {
+            runId: ctx.runId,
+            projectRoot: ctx.projectRoot,
+          })
           innerOk = cr.ok
           innerOut = cr.output
         } else if (!isToolName(name)) {
           innerOut = `Unknown tool: ${name}`
         } else {
           try {
-            const er = await executeTool(name as ToolName, innerArgs, { mcpAgentId: ctx.mcpAgentId })
+            const er = await executeTool(name as ToolName, innerArgs, {
+              mcpAgentId: ctx.mcpAgentId,
+              runId: ctx.runId,
+              threadId: ctx.threadId,
+              projectRoot: ctx.projectRoot,
+            })
             innerOk = er.ok
             innerOut = er.output
           } catch (e) {
@@ -859,7 +872,10 @@ async function executeOneToolCall(
       ok = r.ok
     }
   } else if (custom) {
-    const r = await executeCustomTool(custom, args, ctx.settings)
+    const r = await executeCustomTool(custom, args, ctx.settings, {
+      runId: ctx.runId,
+      projectRoot: ctx.projectRoot,
+    })
     output = r.output
     ok = r.ok
   } else if (tc.name === 'delegate_task') {
@@ -877,8 +893,8 @@ async function executeOneToolCall(
           background: true,
           notifyOnComplete,
           inheritCapabilities,
-          parentRunId: getRunId(),
-          parentThreadId: getRunThreadId(),
+          parentRunId: ctx.runId,
+          parentThreadId: ctx.threadId,
           parentPermissionPolicy: ctx.permissionPolicy,
           parentPermissionProjection: ctx.permissionProjection,
           parentMcpAgentId: ctx.mcpAgentId,
@@ -962,7 +978,12 @@ async function executeOneToolCall(
     ok = false
   } else {
     try {
-      const result = await executeTool(tc.name as ToolName, args, { mcpAgentId: ctx.mcpAgentId })
+      const result = await executeTool(tc.name as ToolName, args, {
+        mcpAgentId: ctx.mcpAgentId,
+        runId: ctx.runId,
+        threadId: ctx.threadId,
+        projectRoot: ctx.projectRoot,
+      })
       output = result.output
       ok = result.ok
     } catch (e) {

@@ -1,0 +1,9 @@
+{
+  "title": "Worker 視覺化",
+  "summary": "將背景任務、佇列與處理狀態轉成可理解的圖像。",
+  "icon": "hub",
+  "suggestedObjective": "設計一個可視化背景任務與佇列健康度的看板。",
+  "category": "dashboard",
+  "surface": "dashboard",
+  "status": "ready"
+}

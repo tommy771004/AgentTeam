@@ -271,7 +271,7 @@ export class AgentLoopEngine {
   private waitForIntervention(): Promise<InterventionDecision> {
     this.state.status = 'manual_intervention'
     const unattended = this.overrides.unattended === true
-    // Unattended (cron/webhook/telegram): short timeout so global lock cannot hang overnight
+    // Unattended (cron/webhook/telegram): short timeout so a run cannot hang overnight
     const timeoutSec = unattended
       ? Math.max(15, Math.min(120, Math.round((this.overrides.hitlTimeoutMs || 45_000) / 1000)))
       : this.state.intervention.timeoutSec || 900
@@ -315,16 +315,8 @@ export class AgentLoopEngine {
     this.lastDodMissing = []
     this.attachedSkillContext = ''
     this.userAttachments = this.overrides.userAttachments || []
-    // Per-run project pin for tools/bash (must not use wrong UI project)
-    try {
-      const { setRunProjectRoot, setRunId, setRunThreadId, clearRunContext } = await import('./tools/runContext')
-      clearRunContext()
-      setRunProjectRoot(this.overrides.projectRoot)
-      setRunId(this.overrides.runId)
-      setRunThreadId(this.overrides.threadId)
-    } catch {
-      /* ignore */
-    }
+    // Tool calls receive this run's identity explicitly. The old module-level
+    // runContext was safe only while a single engine could run at once.
     // Per-conversation model override (thread settings)
     if (this.overrides.model?.trim()) {
       this.settings = { ...this.settings, model: this.overrides.model.trim() }
@@ -523,9 +515,11 @@ export class AgentLoopEngine {
       ) {
         try {
           const { searchSessions } = await import('./hermes/sessionSearch')
+          const { SESSION_RECALL_CONTEXT_CHARS } = await import('./chatHistory')
           const { useAgentStore } = await import('../store/agentStore')
           const hits = searchSessions(rawInput, useAgentStore.getState().archive || [], 3)
           if (hits.length) {
+            // Reserved slice of the shared reference-context budget — see chatHistory.ts.
             const block = [
               '## 跨 session 召回（同類任務參考）',
               ...hits.map(
@@ -533,7 +527,7 @@ export class AgentLoopEngine {
                   `- [${h.source}] ${h.title}: ${h.snippet.slice(0, 160)}`,
               ),
               '若適用請沿用成功做法；若召回為失敗教訓請避開。',
-            ].join('\n')
+            ].join('\n').slice(0, SESSION_RECALL_CONTEXT_CHARS)
             this.attachedSkillContext = [this.attachedSkillContext, block]
               .filter(Boolean)
               .join('\n\n')
@@ -646,12 +640,7 @@ export class AgentLoopEngine {
       this.emit()
       return this.getState()
     } finally {
-      try {
-        const { clearRunContext } = await import('./tools/runContext')
-        clearRunContext()
-      } catch {
-        /* ignore */
-      }
+      /* Run identity is carried by the per-run engine/tool context. */
     }
   }
 
@@ -886,6 +875,8 @@ export class AgentLoopEngine {
             sourceKind: this.overrides.sourceKind,
             objective: this.state.objective,
             projectRoot: this.overrides.projectRoot,
+            runId: this.overrides.runId,
+            threadId: this.overrides.threadId,
             // OpenCode policy deny + role isolation
             blockedTools: [
               ...(this.overrides.blockedTools || []),
@@ -1085,6 +1076,9 @@ export class AgentLoopEngine {
               forceAsk,
               hitlTimeoutMs,
               unattended: this.overrides.unattended,
+              runId: this.overrides.runId,
+              threadId: this.overrides.threadId,
+              projectRoot: this.overrides.projectRoot,
               sourceKind: this.overrides.sourceKind,
               objective: this.state.objective,
               onLog: (level, message) =>
@@ -1181,6 +1175,8 @@ export class AgentLoopEngine {
               sideEffect: true,
               hitlTimeoutMs,
               unattended: this.overrides.unattended,
+              runId: this.overrides.runId,
+              threadId: this.overrides.threadId,
               sourceKind: this.overrides.sourceKind,
               objective: this.state.objective,
               onLog: (level, message) => this.log(level as LogLevel, message),
@@ -1204,7 +1200,10 @@ export class AgentLoopEngine {
               this.emit()
               continue
             }
-            const result = await executeCustomTool(custom, input, this.settings)
+            const result = await executeCustomTool(custom, input, this.settings, {
+              runId: this.overrides.runId,
+              projectRoot: this.overrides.projectRoot,
+            })
             let out = result.output
             try {
               const enforced = enforceToolPayload(
@@ -1429,7 +1428,7 @@ export class AgentLoopEngine {
     this.state.confidence = Math.max(this.state.confidence, 0.92)
     this.state.result = output
     this.state.reportTitle = 'Turn Result'
-    // Chat-lite / composer / automation: do not block the global run lock on ACK.
+    // Chat-lite / composer / automation: do not block a run slot on ACK.
     // Explicit Turn on Execution page (no sourceKind) still waits for user validation.
     const chatLiteAck =
       this.overrides.unattended === true ||
@@ -1643,11 +1642,28 @@ export class AgentLoopEngine {
     this.state.reportTitle = this.deriveReportTitle()
     this.state.status = 'success'
     this.state.progress = 100
+    // Goal-based stays autonomous (spec 02: no per-step ACK) — this does not block
+    // completion. It only lets the UI surface a "reply to continue" hint when the
+    // synthesized result itself poses a follow-up question. See L6/P1-4 in
+    // docs/CONVERSATION_LOOP_HERMES_FLOW.md.
+    this.state.loopConfig = {
+      ...this.state.loopConfig,
+      nextState: this.resultAwaitsReply(report) ? 'Await User Input' : 'Halt',
+    }
     this.refreshKnowledge()
     this.log('SUCCESS', 'Definition of Done met. Terminating loop.')
     this.noteLearningSuccess(this.state.loopConfig.loopType)
     this.clearContinueGoal()
     this.emit()
+  }
+
+  /** Heuristic: does the synthesized result end by asking the user something? */
+  private resultAwaitsReply(text: string): boolean {
+    const trimmed = (text || '').trim()
+    if (!trimmed) return false
+    const tail = trimmed.slice(-240)
+    if (/[?？]\s*$/.test(tail)) return true
+    return /(是否|要不要|需要我|想要我|你希望|你想|would you like|do you want|should i|shall i|let me know)/i.test(tail)
   }
 
   /** Persist unfinished Goal so chat can resume same DoD. */
@@ -1930,4 +1946,81 @@ ${findings || '_No intermediate findings captured._'}
   }
 }
 
-export const agentEngine = new AgentLoopEngine()
+/**
+ * Engine factory/registry. Runtime state (abort flags, pauses, HITL
+ * continuation promises and AgentState) belongs to each run instance; this
+ * object only owns shared settings and targeted lifecycle helpers.
+ */
+class AgentEngineRegistry {
+  private settings: LlmSettings = { ...DEFAULT_LLM_SETTINGS }
+  private engines = new Map<string, { engine: AgentLoopEngine; unsubscribe: () => void }>()
+  private listeners = new Set<Listener>()
+
+  configure(settings: LlmSettings) {
+    this.settings = { ...settings }
+    for (const { engine } of this.engines.values()) engine.configure(this.settings)
+  }
+
+  create(runId?: string): AgentLoopEngine {
+    const id = runId?.trim()
+    if (id) {
+      const existing = this.engines.get(id)
+      if (existing) return existing.engine
+    }
+    const engine = new AgentLoopEngine()
+    engine.configure(this.settings)
+    if (id) {
+      const unsubscribe = engine.subscribe((state) => {
+        for (const listener of this.listeners) listener(state)
+      })
+      this.engines.set(id, { engine, unsubscribe })
+    }
+    return engine
+  }
+
+  get(runId: string): AgentLoopEngine | undefined {
+    return this.engines.get(runId)?.engine
+  }
+
+  release(runId: string) {
+    const entry = this.engines.get(runId)
+    entry?.unsubscribe()
+    this.engines.delete(runId)
+  }
+
+  getState(runId?: string): AgentState {
+    return runId ? this.engines.get(runId)?.engine.getState() || new AgentLoopEngine().getState() : new AgentLoopEngine().getState()
+  }
+
+  subscribe(listener: Listener): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  async start(rawInput: string, forceLoopType?: LoopType, overrides?: RuntimeOverrides): Promise<AgentState> {
+    const runId = overrides?.runId?.trim() || `legacy_${uuid().slice(0, 12)}`
+    const engine = this.create(runId)
+    try {
+      return await engine.start(rawInput, forceLoopType, { ...overrides, runId })
+    } finally {
+      this.release(runId)
+    }
+  }
+
+  stop(runId?: string) {
+    if (runId) this.engines.get(runId)?.engine.stop()
+    else for (const { engine } of this.engines.values()) engine.stop()
+  }
+
+  continueTurn(runId?: string) {
+    if (runId) this.engines.get(runId)?.engine.continueTurn()
+    else for (const { engine } of this.engines.values()) engine.continueTurn()
+  }
+
+  resolveIntervention(decision: InterventionDecision, runId?: string) {
+    if (runId) this.engines.get(runId)?.engine.resolveIntervention(decision)
+    else for (const { engine } of this.engines.values()) engine.resolveIntervention(decision)
+  }
+}
+
+export const agentEngine = new AgentEngineRegistry()

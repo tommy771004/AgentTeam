@@ -29,6 +29,8 @@ export const SUBDESIGN_CAPABILITY: AgentCapability = {
     'design_artifact_tweak',
     'design_artifact_capture',
     'design_artifact_lint',
+    'design_critique_note',
+    'design_critique',
     'design_artifact_export',
   ],
   approvalTools: ['design_system_create', 'design_system_update', 'design_artifact_patch', 'design_artifact_tweak', 'design_artifact_export'],
@@ -39,17 +41,21 @@ export const SUBDESIGN_CAPABILITY: AgentCapability = {
 
 export const SUBDESIGN_CRITIQUE_CAPABILITY: AgentCapability = {
   id: 'design-critique',
-  description: 'Evidence-backed design review against the linked brief, design system, and artifact manifest.',
-  instructions: `Design critique runbook:
+  description: 'Evidence-backed, two-round three-panelist design review against the linked brief, design system, and artifact manifest.',
+  instructions: `Design critique runbook — Critique Theater is a real two-round, three-panelist review, not a single score reused three ways:
 - Read only the supplied brief, design system summary, artifact manifest, and tool-generated screenshot/DOM evidence.
 - Use design_artifact_capture for screenshot/DOM evidence and design_artifact_lint for semantic evidence; do not invent evidence paths by hand.
 - Do not mutate DESIGN.md, export, delegate, or patch the artifact during critique.
-  - Return four integer scores from 0–100: briefCoverage, brandConformance, accessibility, implementationReadiness.
-  - Evidence must include screenshot, dom, and lint entries with concise summaries; without all three the verdict is needs-revision.
-- Return findings with severity blocker, warning, or note and a project-relative path when relevant.
-- Use verdict=pass only when no blocker remains; otherwise verdict=needs-revision.
+
+Round 1 (independent review): after capturing evidence, call design_critique_note three separate times — once each for panelistId visual (brief coverage + brand conformance), accessibility (a11y + evidence integrity), and implementation (readiness + artifact boundary). Each note's score and summary must reflect that panelist's own reasoning; do not repeat the same summary text or score across panelists — they are independent perspectives, not one aggregate opinion split three ways.
+
+Round 2 (cross-check): you will be given round 1's three notes, including any blocker findings. Re-verify each blocker specifically — do not just restate round 1. Call design_critique_note three more times (round 2) with your updated per-panelist conclusions, then call design_critique exactly once with the final synthesis:
+- Four integer scores from 0–100: briefCoverage, brandConformance, accessibility, implementationReadiness, informed by both rounds.
+- Evidence must include screenshot, dom, and lint entries (reuse the entries from your notes, or recapture if something changed); without all three the verdict is needs-revision.
+- Findings with severity blocker, warning, or note and a project-relative path when relevant.
+- verdict=pass only when no blocker remains; otherwise verdict=needs-revision.
 `,
-  tools: ['design_artifact_capture', 'design_critique'],
+  tools: ['design_artifact_capture', 'design_artifact_lint', 'design_critique_note', 'design_critique'],
   deferLoading: true,
   source: 'builtin',
   group: 'design',

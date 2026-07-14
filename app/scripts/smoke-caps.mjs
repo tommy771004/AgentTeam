@@ -459,6 +459,7 @@ await test('side-effect drift guard: every registry tool is read-only OR classif
     // SubDesign coordination mutates local metadata only; it never writes workspace files.
     'design_brief_update', 'design_direction_select', 'design_system_list', 'design_system_read',
     'design_artifact_register',
+    'design_critique_note',
     'design_critique',
   ])
   const sideEffectBlock = guard.slice(
@@ -488,7 +489,7 @@ await test('toolGuard source wires decideApprovalNeed + full-mode safety bypass 
   assert.match(engine, /approvalMode === 'full'/)
 })
 
-// ── W1: runTask busy policy (mirror of runExternal.resolveBusyPolicy) ──
+// ── W1: runTask capacity policy (mirror of runExternal.resolveBusyPolicy) ──
 function resolveBusyPolicy(sourceKind, followUpMode) {
   switch (sourceKind) {
     case 'schedule':
@@ -542,6 +543,37 @@ await test('W1: entry drift guard — no dispatchThreadTask outside controller',
   const controller = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
   assert.match(controller, /resolveBusyPolicy/)
   assert.match(controller, /runId/)
+})
+
+await test('ADR3: concurrent-run registry, targeted HITL, and CLI cancellation stay wired', async () => {
+  const fs = await import('node:fs')
+  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+  const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
+  const thread = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
+  const permission = fs.readFileSync(path.join(appRoot, 'src/store/permissionAskStore.ts'), 'utf8')
+  const controller = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const settings = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
+  const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
+  const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
+  const scenario = fs.readFileSync(path.join(appRoot, 'scripts/smoke-scenario-e2e.mjs'), 'utf8')
+  assert.match(engine, /class AgentEngineRegistry/)
+  assert.match(engine, /create\(runId\?/)
+  assert.match(agent, /activeRunIds/)
+  assert.match(agent, /reserveRun/)
+  assert.match(agent, /getRunState/)
+  assert.match(thread, /runningThreadIds/)
+  assert.match(thread, /runningRunIds/)
+  assert.match(permission, /threadId\?: string/)
+  assert.match(permission, /runId\?: string/)
+  assert.match(permission, /sessionAllowByThread/)
+  assert.match(controller, /canStartRun/)
+  assert.match(controller, /reserveRun/)
+  assert.doesNotMatch(controller, /agent\.isRunning/)
+  assert.match(settings, /concurrentRunsEnabled: false/)
+  assert.match(settings, /maxConcurrentRuns: 4/)
+  assert.match(preload, /cancel: \(runId\?: string\)/)
+  assert.match(main, /ipcMain\.handle\('cli:cancel', async \(_evt, runId\?: string\)/)
+  assert.match(scenario, /ADR3: opt-in concurrent runs/)
 })
 
 // ── W3: config candidates — every field temporary / review / unsupported ──
@@ -764,7 +796,11 @@ await test('SubDesign R3-P4/P5: critique theater and Design System resource rout
   assert.match(theater, /design_artifact_lint/)
   assert.match(theater, /design_critique/)
   assert.match(theater, /Live review trace/)
-  assert.match(session, /advancePreview/)
+  assert.match(session, /recordPanelistNote/)
+  assert.match(session, /isCritiqueSessionReadyForFinal/)
+  assert.match(session, /claimFinalCritique/)
+  assert.match(session, /finalCritiqueClaimed/)
+  assert.match(session, /isCritiqueRoundComplete\(current\.rounds\[0\]\)/)
   assert.match(session, /interrupt/)
   assert.match(session, /threshold: 70/)
   assert.match(session, /finish:/)
@@ -1185,6 +1221,10 @@ await test('Open Design Phase 0/1/2: inventory, safe pack boundary, project copy
   assert.ok(Array.isArray(inventory.records) && inventory.records.length > 0)
   assert.ok(inventory.records.every((r) => typeof r.digest === 'string' && r.digest.length >= 16))
   assert.ok(inventory.records.every((r) => (r.assetPaths || []).every((p) => !p.startsWith('/') && !p.includes('..'))))
+  assert.equal(inventory.records.some((r) => /(^|\/)AGENTS\.md$/i.test(r.sourcePath)), false, 'vendor guidance files must not become packs')
+  for (const record of inventory.records.filter((r) => r.kind === 'design-system')) {
+    assert.ok((record.assetPaths || []).some((asset) => /(^|\/)DESIGN\.md$/i.test(asset)), 'design-system packs must carry DESIGN.md')
+  }
   const catalog = fs.readFileSync(path.join(appRoot, 'src/agent/openDesign/catalog.ts'), 'utf8')
   const packs = fs.readFileSync(path.join(appRoot, 'src/agent/openDesign/packs.ts'), 'utf8')
   const packStore = fs.readFileSync(path.join(appRoot, 'src/store/openDesignPackStore.ts'), 'utf8')
@@ -1199,7 +1239,9 @@ await test('Open Design Phase 0/1/2: inventory, safe pack boundary, project copy
   assert.match(packs, /remote-unverified pack 預設停用/)
   assert.match(main, /subdesign:copyVendorPack/)
   assert.match(main, /Open Design pack 超過複製大小限制/)
+  assert.match(main, /design-system pack 必須包含 DESIGN\.md/)
   assert.match(preload, /copyVendorPack/)
+  assert.match(preload, /designSystemPath/)
   assert.match(page, /loadOpenDesignCatalog/)
   assert.match(page, /provenance: selectedCatalogRecord/)
 })
@@ -1221,6 +1263,21 @@ await test('Open Design Phase 3: shared adapter contract and Gemini diagnostic',
   assert.match(localMain, /kind === 'gemini'/)
   assert.match(discover, /name: 'Gemini CLI'/)
   assert.match(dispatch, /kind === 'gemini' \? 'google'/)
+})
+
+await test('ADR3 follow-up: interactive entry points snapshot projectRoot at dispatch (no implicit global fallback)', async () => {
+  const fs = await import('node:fs')
+  const protocols = fs.readFileSync(path.join(appRoot, 'src/pages/ProtocolsPage.tsx'), 'utf8')
+  const slash = fs.readFileSync(path.join(appRoot, 'src/hooks/useSlashExecutor.ts'), 'utf8')
+  const inlinePanel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
+  const runContext = fs.readFileSync(path.join(appRoot, 'src/agent/tools/runContext.ts'), 'utf8')
+  // Each interactive runTask() call must snapshot the active project explicitly —
+  // a concurrent run must not silently re-resolve to whatever project the UI
+  // switches to mid-flight. See docs/adr/0003-concurrent-run-lock-removal.md.
+  assert.match(protocols, /runTask\(\{[\s\S]{0,400}projectRoot: projectRoot \|\| undefined/)
+  assert.match(slash, /runTask\(\{[\s\S]{0,400}projectRoot: projectRoot\(\) \|\| undefined/)
+  assert.match(inlinePanel, /runTask\(\{[\s\S]{0,400}projectRoot: useProjectStore\.getState\(\)\.root \|\| undefined/)
+  assert.match(runContext, /should therefore be unreachable during a real run/)
 })
 
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)

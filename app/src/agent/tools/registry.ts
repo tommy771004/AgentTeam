@@ -47,6 +47,7 @@ export type ToolName =
   | 'design_artifact_tweak'
   | 'design_artifact_capture'
   | 'design_artifact_lint'
+  | 'design_critique_note'
   | 'design_critique'
   | 'design_artifact_export'
 
@@ -264,6 +265,11 @@ export const TOOL_CATALOG: ToolDef[] = [
     name: 'design_artifact_lint',
     description: 'Run deterministic semantic lint against the registered artifact and create attested lint evidence.',
     keywords: ['artifact lint', 'semantic lint', 'accessibility lint', 'evidence lint', '語意檢查'],
+  },
+  {
+    name: 'design_critique_note',
+    description: 'Record one panelist-focused critique note (visual/brand, accessibility, or implementation readiness) during a Critique Theater round.',
+    keywords: ['critique panelist', 'critique round', 'panelist note', 'visual review', 'accessibility review', 'implementation readiness', 'cross-check'],
   },
   {
     name: 'design_critique',

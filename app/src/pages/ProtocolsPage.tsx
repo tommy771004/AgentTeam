@@ -228,6 +228,9 @@ export function ProtocolsPage() {
         runner,
         loopType: pinnedLoopType || undefined,
         attachments,
+        // Snapshot the project pinned at dispatch time — a concurrent run must not
+        // silently re-resolve to whatever project the UI switches to mid-flight.
+        projectRoot: projectRoot || undefined,
       })
       if (r.queued) {
         const n = queueLength()
@@ -396,7 +399,9 @@ export function ProtocolsPage() {
                     ? settings.followUpMode === 'queue'
                       ? '輸入追問（將排隊）…'
                       : '輸入以轉向目前任務…'
-                    : '什麼都能做'
+                    : thread?.awaitingReply
+                      ? '回覆以繼續…'
+                      : '什麼都能做'
                 }
                 enterBehavior={settings.enterBehavior || 'enter'}
                 hideHints

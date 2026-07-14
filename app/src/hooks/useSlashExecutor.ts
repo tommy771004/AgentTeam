@@ -83,6 +83,9 @@ export function useSlashExecutor() {
       skipUserBubble: opts?.skipUserBubble,
       runner: active?.runner,
       loopType: loopType || undefined,
+      // Snapshot the project pinned at dispatch time — a concurrent run must not
+      // silently re-resolve to whatever project the UI switches to mid-flight.
+      projectRoot: projectRoot() || undefined,
     })
     if (r.skipped && !r.queued) {
       log(`✗ ${r.error || '忙碌中'}`)

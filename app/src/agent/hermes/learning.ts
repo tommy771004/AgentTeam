@@ -7,6 +7,7 @@ import { v4 as uuid } from 'uuid'
 import { memoryStore } from './memory'
 import { skillsStore } from './skills'
 import { subDesignProjectMemoryKey } from '../subdesign/preference'
+import { SKILL_SIMILARITY_THRESHOLD, textSimilarity } from './textSimilarity'
 import type { LearningEvent } from './types'
 
 type Listener = (events: LearningEvent[]) => void
@@ -157,6 +158,22 @@ ${toolsMd ? `\n## 成功工具序列\n${toolsMd}\n` : ''}
 `
 
     const description = `自動草稿：${input.objective.slice(0, 40)}`
+
+    // Draft-time dedup: skip near-duplicate objectives instead of relying solely
+    // on curator.ts's after-the-fact idle sweep — see docs/CONVERSATION_LOOP_HERMES_FLOW.md.
+    const draftText = `${name} ${description} ${body}`
+    const existingAgentSkillTexts = skillsStore
+      .list()
+      .filter((skill) => skill.meta.createdBy === 'agent' && skill.meta.status !== 'archived')
+      .map((skill) => `${skill.meta.name} ${skill.meta.description} ${skill.body}`)
+    const pendingDraftTexts = this.pendingSkillDrafts.map(
+      (draft) => `${draft.name} ${draft.description} ${draft.body}`,
+    )
+    const isNearDuplicate = [...existingAgentSkillTexts, ...pendingDraftTexts].some(
+      (text) => textSimilarity(draftText, text) >= SKILL_SIMILARITY_THRESHOLD,
+    )
+    if (isNearDuplicate) return
+
     this.pendingSkillDrafts.push({ name, description, body })
     this.emit({
       id: uuid(),

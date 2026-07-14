@@ -1,0 +1,9 @@
+{
+  "title": "互動 Artifact",
+  "summary": "將資訊、控制與即時回饋整合成單一介面。",
+  "icon": "bolt",
+  "suggestedObjective": "設計一個讓使用者操作並即時取得回饋的 artifact。",
+  "category": "dashboard",
+  "surface": "dashboard",
+  "status": "ready"
+}

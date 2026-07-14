@@ -68,6 +68,7 @@ function arrayStrings(value) {
 function recordKind(relative, files) {
   if (relative.startsWith('prompt-templates/')) return 'prompt'
   if (relative.startsWith('plugins/_official/video-templates/')) return 'template'
+  if (relative.startsWith('design-systems/')) return 'design-system'
   if (relative.startsWith('design-templates/')) return 'template'
   if (files.some((file) => file.endsWith('/DESIGN.md'))) return 'design-system'
   if (files.some((file) => file.endsWith('/SKILL.md'))) return 'skill'
@@ -75,6 +76,7 @@ function recordKind(relative, files) {
 }
 
 function categoryFor(relative, parsed) {
+  if (typeof parsed?.category === 'string' && parsed.category.trim()) return parsed.category.trim()
   const surface = parsed?.surface || parsed?.od?.surface || parsed?.od?.mode
   if (surface === 'prototype' || surface === 'dashboard' || surface === 'design-system' || surface === 'deck') return surface
   if (relative.startsWith('design-templates/')) {
@@ -107,8 +109,14 @@ function sourceDirectories(files) {
     let dir = parts.slice(0, -1).join('/')
     if (parts[0] === 'prompt-templates') dir = parts.slice(0, -1).join('/')
     else if (parts[0] === 'design-templates') dir = parts.slice(0, 2).join('/')
+    else if (parts[0] === 'design-systems') dir = parts.slice(0, 2).join('/')
     else if (parts[0] === 'plugins' && parts[1] === '_official') dir = parts.slice(0, 4).join('/')
     if (!dir) continue
+    // A root-level documentation file such as design-templates/AGENTS.md is
+    // vendor guidance, not an installable content pack. Never let a file path
+    // masquerade as a source directory in the catalog.
+    const dirPath = path.join(vendorRoot, dir)
+    if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) continue
     if (!dirs.has(dir)) dirs.set(dir, [])
     dirs.get(dir).push({ file, relative })
   }
@@ -135,9 +143,9 @@ function buildRecord(relative, entries, indexedAt, fallbackLicenses) {
   ])].slice(0, 32)
   const entryPaths = files.filter((file) => /(^|\/)(index|entry|root|example)\.(html?|tsx?|jsx?|md)$/i.test(file) || /SKILL\.md$/i.test(file)).slice(0, 32)
   const assetPaths = files.slice(0, 240)
-  const status = kind === 'template' && category === 'prototype' && entries.some((entry) => /example\.html$/i.test(entry.relative))
-    ? 'ready'
-    : 'content-only'
+  const statusOverride = parsed?.status === 'ready' || parsed?.status === 'content-only' ? parsed.status : null
+  const status = statusOverride
+    || (kind === 'template' && category === 'prototype' && entries.some((entry) => /example\.html$/i.test(entry.relative)) ? 'ready' : 'content-only')
   const id = relative.replace(/\//g, ':')
   return {
     id,
@@ -150,6 +158,8 @@ function buildRecord(relative, entries, indexedAt, fallbackLicenses) {
     entryPaths,
     tags: arrayStrings(parsed?.tags || parsed?.od?.tags),
     surface: ['prototype', 'dashboard', 'design-system', 'deck'].includes(String(parsed?.surface || parsed?.od?.surface)) ? String(parsed?.surface || parsed?.od?.surface) : undefined,
+    icon: text(parsed?.icon, undefined),
+    suggestedObjective: text(parsed?.suggestedObjective, undefined),
     executionStatus: status,
     parseWarnings: warnings,
     source: 'open-design',

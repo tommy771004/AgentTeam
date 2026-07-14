@@ -196,14 +196,9 @@ export async function runDelegatedTask(
         .filter(Boolean)
         .slice(0, 12)
       const preloadCapabilityIds = [...new Set([...baseline, ...inherited])]
-      // Pin child tools to parent project (scheduler A while UI shows B)
-      try {
-        const { setRunProjectRoot, setRunId } = await import('../tools/runContext')
-        if (input.projectRoot) setRunProjectRoot(input.projectRoot)
-        if (input.parentRunId) setRunId(`${input.parentRunId}>${id}`)
-      } catch {
-        /* ignore */
-      }
+      // Keep child identity explicit. A module-global run context would race
+      // when two parent runs delegate at the same time.
+      const childRunId = `${input.parentRunId || 'delegate'}>${id}`
       const loop = await runFunctionCallingLoop(
         childSettings,
         {
@@ -238,6 +233,8 @@ export async function runDelegatedTask(
           sourceKind: (input.sourceKind as import('../hooks').HookContext['sourceKind']) || 'delegate',
           objective: input.goal,
           projectRoot: input.projectRoot,
+          runId: childRunId,
+          threadId: input.parentThreadId,
         },
       )
 
@@ -257,7 +254,15 @@ export async function runDelegatedTask(
     // Simulation path without LLM
     const chunks: string[] = []
     for (const tool of ['datetime_now', 'memory_search'] as const) {
-      const r = await executeTool(tool, tool === 'memory_search' ? { query: input.goal } : {})
+      const r = await executeTool(
+        tool,
+        tool === 'memory_search' ? { query: input.goal } : {},
+        {
+          runId: `${input.parentRunId || 'delegate'}>${id}`,
+          threadId: input.parentThreadId,
+          projectRoot: input.projectRoot,
+        },
+      )
       chunks.push(`### ${tool}\n${r.output.slice(0, 500)}`)
     }
     const summary = [

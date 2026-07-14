@@ -1,13 +1,13 @@
 import { isProjectRelativePath } from './artifactManifest'
 import type { SubDesignCritique, SubDesignCritiqueEvidence, SubDesignCritiqueFinding } from './types'
 
-function clampScore(value: unknown): number {
+export function clampScore(value: unknown): number {
   const score = Number(value)
   if (!Number.isFinite(score)) return 0
   return Math.max(0, Math.min(100, Math.round(score)))
 }
 
-function normalizeFindings(value: unknown): SubDesignCritiqueFinding[] {
+export function normalizeFindings(value: unknown): SubDesignCritiqueFinding[] {
   if (!Array.isArray(value)) return []
   return value
     .map((item): SubDesignCritiqueFinding | null => {
@@ -28,7 +28,7 @@ function normalizeFindings(value: unknown): SubDesignCritiqueFinding[] {
     .slice(0, 40)
 }
 
-function normalizeEvidence(value: unknown): SubDesignCritiqueEvidence[] {
+export function normalizeEvidence(value: unknown): SubDesignCritiqueEvidence[] {
   if (!Array.isArray(value)) return []
   const allowed = new Set<SubDesignCritiqueEvidence['kind']>([
     'screenshot', 'dom', 'lint', 'build', 'manual',

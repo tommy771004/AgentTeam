@@ -1,4 +1,5 @@
 import { readSubDesignMetadata } from '../agent/subdesign/metadata'
+import { useOpenDesignPackStore } from './openDesignPackStore'
 import { useSubDesignArtifactStore } from './subDesignArtifactStore'
 import { useSubDesignCritiqueStore } from './subDesignCritiqueStore'
 import { useSubDesignExportStore } from './subDesignExportStore'
@@ -13,8 +14,10 @@ export async function hydrateSubDesignStores(projectRoot?: string): Promise<void
   useSubDesignArtifactStore.getState().setProjectRoot(projectRoot)
   useSubDesignCritiqueStore.getState().setProjectRoot(projectRoot)
   useSubDesignExportStore.getState().setProjectRoot(projectRoot)
+  useOpenDesignPackStore.getState().setProjectRoot(projectRoot)
   useSubDesignStore.getState().hydrateCanonical(snapshot.briefs)
   useSubDesignArtifactStore.getState().hydrateCanonical(snapshot.artifacts)
   useSubDesignCritiqueStore.getState().hydrateCanonical(snapshot.critiques)
   useSubDesignExportStore.getState().hydrateCanonical(snapshot.exports)
+  useOpenDesignPackStore.getState().hydrateCanonical(snapshot.openDesignPacks)
 }

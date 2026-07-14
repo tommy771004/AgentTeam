@@ -1083,7 +1083,7 @@ ipcMain.handle(
   'shell:bash',
   async (
     _evt,
-    input: { command: string; cwd?: string; timeoutMs?: number },
+    input: { command: string; cwd?: string; timeoutMs?: number; runId?: string },
   ) => {
     // Prefer explicit project cwd from renderer; else sandboxed workspace
     let cwd = input.cwd
@@ -1568,11 +1568,11 @@ ipcMain.handle(
   },
 )
 
-/** Cancel in-flight CLI specialist processes (tag: cli-agent) */
-ipcMain.handle('cli:cancel', async () => {
+/** Cancel one CLI specialist run; legacy no-arg calls still cancel the tagged group. */
+ipcMain.handle('cli:cancel', async (_evt, runId?: string) => {
   const [cli, server] = await Promise.all([
-    Promise.resolve(cancelBash({ tag: 'cli-agent' })),
-    abortOpenCodeRun(),
+    Promise.resolve(runId ? cancelBash({ runId }) : cancelBash({ tag: 'cli-agent' })),
+    abortOpenCodeRun(runId),
   ])
   return { ok: cli.ok || server.ok, killed: cli.killed + server.killed }
 })
@@ -1962,10 +1962,19 @@ function safeSubDesignMetadataId(value: unknown): string {
   return id
 }
 
-function subDesignMetadataFile(root: string, kind: 'brief' | 'artifact' | 'critique' | 'export', payload: Record<string, unknown>): string {
+function subDesignMetadataFile(root: string, kind: 'brief' | 'artifact' | 'critique' | 'export' | 'open-design-pack', payload: Record<string, unknown>): string {
   if (kind === 'brief') return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/briefs/${safeSubDesignMetadataId(payload.id)}.json`, root)
   if (kind === 'artifact') return resolveWorkspacePath(`${SUBDESIGN_ARTIFACT_ROOT}/${safeSubDesignMetadataId(payload.id)}/manifest.json`, root)
   if (kind === 'critique') return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/critiques/${safeSubDesignMetadataId(payload.artifactId)}-r${Math.max(1, Math.floor(Number(payload.revision) || 1))}.json`, root)
+  if (kind === 'open-design-pack') {
+    // Pack ids are "open-design:<catalog-id>" and the catalog id itself uses ':'
+    // as a path separator (e.g. "open-design:design-templates:web-prototype"),
+    // so they fail safeSubDesignMetadataId's stricter check. Slug instead of
+    // rejecting — this mirrors the targetId sanitization in copyOpenDesignVendorPack.
+    const slug = String(payload.id || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 160)
+    if (!slug) throw new Error('不安全的 SubDesign metadata id')
+    return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/open-design-packs/${slug}.json`, root)
+  }
   return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/exports/${safeSubDesignMetadataId(payload.id)}.json`, root)
 }
 
@@ -2050,6 +2059,13 @@ function copyOpenDesignVendorPack(input: {
   if (!/^[a-f0-9]{16,128}$/i.test(digest)) throw new Error('Open Design digest 不合法')
   const assets = Array.isArray(input.assetPaths) ? input.assetPaths.slice(0, 160).map(safeVendorRelative) : []
   if (!assets.length) throw new Error('Open Design pack 沒有可複製 assets')
+  if (input.kind === 'design-system') {
+    const hasDesignDocument = assets.some((asset) => {
+      const sourceFile = path.resolve(vendorRoot, asset)
+      return path.relative(sourceDir, sourceFile).replaceAll(path.sep, '/') === 'DESIGN.md'
+    })
+    if (!hasDesignDocument) throw new Error('design-system pack 必須包含 DESIGN.md')
+  }
   const targetRel = input.kind === 'design-system'
     ? `.subagents/subdesign/design-systems/${targetId}`
     : `.subagents/subdesign/vendor-packs/${targetId}`
@@ -2073,8 +2089,15 @@ function copyOpenDesignVendorPack(input: {
     fs.copyFileSync(realFile, destination)
   }
   if (!files) throw new Error('Open Design pack 沒有可複製的檔案')
-  fs.writeFileSync(path.join(targetDir, 'pack-manifest.json'), JSON.stringify({ sourcePath, digest, files, bytes, copiedAt: new Date().toISOString() }, null, 2), 'utf8')
-  return { ok: true as const, path: `${targetRel}/pack-manifest.json`, files, bytes }
+  const copiedAt = new Date().toISOString()
+  fs.writeFileSync(path.join(targetDir, 'pack-manifest.json'), JSON.stringify({ sourcePath, digest, kind: input.kind || 'media', files, bytes, copiedAt }, null, 2), 'utf8')
+  return {
+    ok: true as const,
+    path: `${targetRel}/pack-manifest.json`,
+    designSystemPath: input.kind === 'design-system' ? `${targetRel}/DESIGN.md` : undefined,
+    files,
+    bytes,
+  }
 }
 
 function crc32(input: Buffer): number {
@@ -2796,16 +2819,17 @@ ipcMain.handle('subdesign:readMetadata', async (_evt, projectRoot?: string) => {
       artifacts: readStoredSubDesignArtifacts(root),
       critiques: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/critiques`, 160),
       exports: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/exports`, 160),
+      openDesignPacks: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/open-design-packs`, 500),
     }
   } catch (error) {
-    return { ok: false, briefs: [], artifacts: [], critiques: [], exports: [], error: error instanceof Error ? error.message : String(error) }
+    return { ok: false, briefs: [], artifacts: [], critiques: [], exports: [], openDesignPacks: [], error: error instanceof Error ? error.message : String(error) }
   }
 })
 
 ipcMain.handle('subdesign:writeMetadata', async (_evt, input: { kind?: string; payload?: unknown; projectRoot?: string }) => {
   try {
     const kind = input?.kind
-    if (kind !== 'brief' && kind !== 'artifact' && kind !== 'critique' && kind !== 'export') throw new Error('不支援的 SubDesign metadata kind')
+    if (kind !== 'brief' && kind !== 'artifact' && kind !== 'critique' && kind !== 'export' && kind !== 'open-design-pack') throw new Error('不支援的 SubDesign metadata kind')
     if (!input.payload || typeof input.payload !== 'object' || Array.isArray(input.payload)) throw new Error('metadata payload 必須是 object')
     const payload = input.payload as Record<string, unknown>
     if (kind === 'artifact') {

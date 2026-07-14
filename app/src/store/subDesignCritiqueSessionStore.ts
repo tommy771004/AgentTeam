@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { clampScore, normalizeEvidence, normalizeFindings } from '../agent/subdesign/critique'
 import type {
   SubDesignCritique,
   SubDesignCritiquePanelist,
@@ -9,17 +10,29 @@ import type {
 } from '../agent/subdesign/types'
 
 const STORAGE_KEY = 'subagents.subdesign.critique-sessions.v1'
-const SCORE_FIELDS: Record<SubDesignCritiquePanelistId, Array<keyof Pick<SubDesignCritique, 'briefCoverage' | 'brandConformance' | 'accessibility' | 'implementationReadiness'>>> = {
-  visual: ['briefCoverage', 'brandConformance'],
-  accessibility: ['accessibility', 'briefCoverage'],
-  implementation: ['implementationReadiness'],
-}
 
 const PANELISTS: ReadonlyArray<Pick<SubDesignCritiquePanelist, 'id' | 'label' | 'focus'>> = [
   { id: 'visual', label: '視覺與品牌', focus: 'Brief coverage · brand conformance' },
   { id: 'accessibility', label: '可及性審查', focus: 'Accessibility · evidence integrity' },
   { id: 'implementation', label: '實作就緒', focus: 'Readiness · artifact boundary' },
 ]
+
+export const CRITIQUE_PANELIST_IDS: ReadonlyArray<SubDesignCritiquePanelistId> = PANELISTS.map((panelist) => panelist.id)
+
+export function isCritiqueRoundComplete(round: SubDesignCritiqueRound | undefined): boolean {
+  return Boolean(round && round.panelists.length === CRITIQUE_PANELIST_IDS.length && round.panelists.every((panelist) => panelist.status === 'complete'))
+}
+
+export function isCritiqueSessionReadyForFinal(session: SubDesignCritiqueSession | null, artifactId?: string): boolean {
+  return Boolean(
+    session &&
+    session.status === 'running' &&
+    (!artifactId || session.artifactId === artifactId) &&
+    isCritiqueRoundComplete(session.rounds[0]) &&
+    isCritiqueRoundComplete(session.rounds[1]) &&
+    !session.finalCritiqueClaimed,
+  )
+}
 
 function readHistory(): SubDesignCritiqueSession[] {
   try {
@@ -49,88 +62,42 @@ function event(message: string, kind: SubDesignCritiqueSessionEvent['kind'], ext
   }
 }
 
-function makePanelists(status: SubDesignCritiquePanelist['status'] = 'pending'): SubDesignCritiquePanelist[] {
-  return PANELISTS.map((panelist) => ({ ...panelist, status }))
+function makePanelists(): SubDesignCritiquePanelist[] {
+  return PANELISTS.map((panelist) => ({ ...panelist, status: 'pending' }))
 }
 
 function makeRounds(): SubDesignCritiqueRound[] {
   return [
-    {
-      id: 'round_1',
-      label: '第一輪 · 獨立審查',
-      status: 'active',
-      panelists: makePanelists('pending'),
-      startedAt: new Date().toISOString(),
-    },
-    {
-      id: 'round_2',
-      label: '第二輪 · 交叉核對',
-      status: 'pending',
-      panelists: makePanelists('pending'),
-    },
+    { id: 'round_1', label: '第一輪 · 獨立審查', status: 'pending', panelists: makePanelists() },
+    { id: 'round_2', label: '第二輪 · 交叉核對', status: 'pending', panelists: makePanelists() },
   ]
 }
 
-function panelistScore(panelistId: SubDesignCritiquePanelistId, critique: SubDesignCritique, roundIndex: number): number {
-  const fields = SCORE_FIELDS[panelistId]
-  const score = fields.reduce((total, field) => total + Number(critique[field] || 0), 0) / fields.length
-  const roundAdjustment = roundIndex === 0 ? 0 : Math.round((Number(critique.accessibility || 0) - Number(critique.briefCoverage || 0)) / 12)
-  return Math.max(0, Math.min(100, Math.round(score + roundAdjustment)))
+function roundCompositeScore(round: SubDesignCritiqueRound): number | undefined {
+  const scored = round.panelists.filter((panelist) => panelist.score != null)
+  if (!scored.length) return undefined
+  return Math.round(scored.reduce((total, panelist) => total + (panelist.score || 0), 0) / scored.length)
 }
 
-function panelistSummary(panelistId: SubDesignCritiquePanelistId, critique: SubDesignCritique): string {
-  const blockerCount = critique.findings.filter((finding) => finding.severity === 'blocker').length
-  const warningCount = critique.findings.filter((finding) => finding.severity === 'warning').length
-  if (panelistId === 'visual') return `${critique.evidence.some((item) => item.kind === 'screenshot') ? 'Screenshot 已驗證' : '缺少 screenshot'} · ${blockerCount} blocker`
-  if (panelistId === 'accessibility') return `${critique.evidence.some((item) => item.kind === 'dom') ? 'DOM evidence 已驗證' : '缺少 DOM evidence'} · ${warningCount} warning`
-  return `${critique.evidence.some((item) => item.kind === 'lint') ? 'Lint evidence 已驗證' : '缺少 lint evidence'} · ${critique.verdict}`
-}
-
-function completeRounds(session: SubDesignCritiqueSession, critique: SubDesignCritique): SubDesignCritiqueSession {
-  const rounds = session.rounds.map((round, roundIndex) => {
-    const panelists = round.panelists.map((panelist) => ({
-      ...panelist,
-      status: 'complete' as const,
-      score: panelistScore(panelist.id, critique, roundIndex),
-      summary: panelistSummary(panelist.id, critique),
-    }))
-    const compositeScore = Math.round(panelists.reduce((total, item) => total + (item.score || 0), 0) / panelists.length)
-    return {
-      ...round,
-      status: 'complete' as const,
-      panelists,
-      compositeScore,
-      completedAt: new Date().toISOString(),
-    }
-  })
-  const compositeScore = Math.round(
-    (Number(critique.briefCoverage || 0) +
-      Number(critique.brandConformance || 0) +
-      Number(critique.accessibility || 0) +
-      Number(critique.implementationReadiness || 0)) / 4,
-  )
-  return {
-    ...session,
-    status: 'completed',
-    currentRoundIndex: rounds.length - 1,
-    previewStep: rounds.reduce((total, round) => total + round.panelists.length, 0),
-    rounds,
-    compositeScore,
-    scoreHistory: [...session.scoreHistory, compositeScore].slice(-12),
-    events: [
-      ...session.events,
-      event(`Evidence consolidation 完成 · composite ${compositeScore}/${session.threshold}`, 'score', { score: compositeScore }),
-      event(`Critique ${critique.verdict} · revision ${critique.revision || 1}`, 'status'),
-    ].slice(-80),
-    finishedAt: new Date().toISOString(),
-  }
+/** Every panelist note is a real, independently-authored tool call — see docs/adr/0002-critique-theater-real-multipass.md. */
+export type SubDesignCritiquePanelistNote = {
+  round: 1 | 2
+  panelistId: SubDesignCritiquePanelistId
+  score: unknown
+  summary: unknown
+  findings?: unknown
+  evidence?: unknown
 }
 
 interface SubDesignCritiqueSessionStore {
   current: SubDesignCritiqueSession | null
   history: SubDesignCritiqueSession[]
   start: (input: { briefId: string; artifactId: string; artifactRevision: number }) => SubDesignCritiqueSession
-  advancePreview: (activityLabel?: string) => void
+  startRound: (round: 1 | 2) => void
+  recordPanelistNote: (artifactId: string, note: SubDesignCritiquePanelistNote) => boolean
+  canFinalize: (artifactId: string) => boolean
+  claimFinalCritique: (artifactId: string) => boolean
+  releaseFinalCritique: (artifactId: string) => void
   finish: (critique: SubDesignCritique | null) => void
   interrupt: (reason?: string) => void
   fail: (message: string) => void
@@ -160,37 +127,83 @@ export const useSubDesignCritiqueSessionStore = create<SubDesignCritiqueSessionS
     return session
   },
 
-  advancePreview: (activityLabel) => {
+  startRound: (round) => {
     const current = get().current
     if (!current || current.status !== 'running') return
-    const allPanelists = current.rounds.reduce((total, round) => total + round.panelists.length, 0)
-    const nextStep = Math.min(current.previewStep + 1, allPanelists)
-    const rounds = current.rounds.map((round, roundIndex) => {
-      const start = roundIndex * PANELISTS.length
-      const panelists = round.panelists.map((panelist, panelistIndex) => {
-        const step = start + panelistIndex
-        return {
-          ...panelist,
-          status: step < nextStep ? 'complete' as const : step === nextStep ? 'active' as const : 'pending' as const,
-        }
-      })
-      const roundStatus = nextStep >= start + PANELISTS.length
-        ? 'complete'
-        : nextStep > start
-          ? 'active'
-          : 'pending'
+    const roundIndex = round - 1
+    if (round === 2 && !isCritiqueRoundComplete(current.rounds[0])) return
+    if (current.rounds[roundIndex]?.status === 'complete') return
+    const rounds = current.rounds.map((item, index) => index === roundIndex ? { ...item, status: 'active' as const, startedAt: new Date().toISOString() } : item)
+    set({
+      current: {
+        ...current,
+        rounds,
+        currentRoundIndex: roundIndex,
+        events: [...current.events, event(`${rounds[roundIndex].label} 開始`, 'status')].slice(-80),
+      },
+    })
+  },
+
+  recordPanelistNote: (artifactId, note) => {
+    const current = get().current
+    if (!current || current.status !== 'running' || current.artifactId !== artifactId) return false
+    const roundIndex = note.round === 2 ? 1 : 0
+    const round = current.rounds[roundIndex]
+    if (!round || round.status !== 'active') return false
+    if (note.round === 2 && !isCritiqueRoundComplete(current.rounds[0])) return false
+    if (!CRITIQUE_PANELIST_IDS.includes(note.panelistId)) return false
+    if (round.panelists.find((panelist) => panelist.id === note.panelistId)?.status === 'complete') return false
+    const score = clampScore(note.score)
+    const summary = String(note.summary || '').trim().slice(0, 800)
+    if (!summary) return false
+    const findings = normalizeFindings(note.findings)
+    const evidence = normalizeEvidence(note.evidence)
+    const rounds = current.rounds.map((round, index) => {
+      if (index !== roundIndex) return round
+      const panelists = round.panelists.map((panelist) =>
+        panelist.id === note.panelistId ? { ...panelist, status: 'complete' as const, score, summary, findings, evidence } : panelist,
+      )
+      const allComplete = panelists.every((panelist) => panelist.status === 'complete')
       return {
         ...round,
-        status: roundStatus as SubDesignCritiqueRound['status'],
+        status: allComplete ? ('complete' as const) : ('active' as const),
         panelists,
+        compositeScore: roundCompositeScore({ ...round, panelists }),
+        completedAt: allComplete ? new Date().toISOString() : round.completedAt,
       }
     })
-    const activeRound = rounds.findIndex((round) => round.status === 'active')
-    const panelist = activeRound >= 0 ? rounds[activeRound].panelists.find((item) => item.status === 'active') : null
-    const nextEvent = panelist
-      ? event(activityLabel ? `${panelist.label} · ${activityLabel}` : `${panelist.label} 正在交叉核對`, 'panelist', { roundId: rounds[activeRound].id, panelistId: panelist.id })
-      : event('等待 evidence consolidation…', 'status')
-    set({ current: { ...current, rounds, currentRoundIndex: Math.max(0, activeRound), previewStep: nextStep, events: [...current.events, nextEvent].slice(-80) } })
+    const label = PANELISTS.find((item) => item.id === note.panelistId)?.label || note.panelistId
+    const previewStep = rounds.reduce((total, round) => total + round.panelists.filter((panelist) => panelist.status === 'complete').length, 0)
+    set({
+      current: {
+        ...current,
+        rounds,
+        previewStep,
+        events: [...current.events, event(`${label} · round ${note.round} · score ${score}`, 'panelist', { roundId: rounds[roundIndex].id, panelistId: note.panelistId, score })].slice(-80),
+      },
+    })
+    return true
+  },
+
+  canFinalize: (artifactId) => isCritiqueSessionReadyForFinal(get().current, artifactId),
+
+  claimFinalCritique: (artifactId) => {
+    const current = get().current
+    if (!isCritiqueSessionReadyForFinal(current, artifactId)) return false
+    set({
+      current: {
+        ...current!,
+        finalCritiqueClaimed: true,
+        events: [...current!.events, event('六個 panelist notes 已完成；final design_critique call 已鎖定', 'status')].slice(-80),
+      },
+    })
+    return true
+  },
+
+  releaseFinalCritique: (artifactId) => {
+    const current = get().current
+    if (!current || current.status !== 'running' || current.artifactId !== artifactId || !current.finalCritiqueClaimed) return
+    set({ current: { ...current, finalCritiqueClaimed: false, events: [...current.events, event('final critique validation 失敗；允許重試', 'error')].slice(-80) } })
   },
 
   finish: (critique) => {
@@ -200,7 +213,32 @@ export const useSubDesignCritiqueSessionStore = create<SubDesignCritiqueSessionS
       get().fail('Agent run 完成，但沒有寫入可驗證的 critique。')
       return
     }
-    const finished = completeRounds(current, critique)
+    if (
+      current.artifactId !== critique.artifactId ||
+      !isCritiqueRoundComplete(current.rounds[0]) ||
+      !isCritiqueRoundComplete(current.rounds[1]) ||
+      !current.finalCritiqueClaimed
+    ) {
+      get().fail('Critique Theater 必須完成兩輪、六個獨立 panelist notes，且只能寫入一次 final critique。')
+      return
+    }
+    const compositeScore = Math.round(
+      (Number(critique.briefCoverage || 0) +
+        Number(critique.brandConformance || 0) +
+        Number(critique.accessibility || 0) +
+        Number(critique.implementationReadiness || 0)) / 4,
+    )
+    const finished: SubDesignCritiqueSession = {
+      ...current,
+      status: 'completed',
+      compositeScore,
+      scoreHistory: [...current.scoreHistory, compositeScore].slice(-12),
+      events: [
+        ...current.events,
+        event(`Critique ${critique.verdict} · revision ${critique.revision || 1} · composite ${compositeScore}/${current.threshold}`, 'score', { score: compositeScore }),
+      ].slice(-80),
+      finishedAt: new Date().toISOString(),
+    }
     const history = [finished, ...get().history].slice(0, 8)
     persistHistory(history)
     set({ current: finished, history })

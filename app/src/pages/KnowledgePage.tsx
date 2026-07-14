@@ -227,7 +227,7 @@ export function KnowledgePage() {
             if (agent.status === 'running' || isRunning) {
               void import('../store/threadStore').then(({ useThreadStore }) => {
                 const thr = useThreadStore.getState()
-                if (thr.runningThreadId) thr.selectThread(thr.runningThreadId)
+                if (thr.runningThreadIds[0]) thr.selectThread(thr.runningThreadIds[0])
                 thr.setShowRunPanel(true)
               })
             }

@@ -8,6 +8,7 @@ import type {
   RuntimeOverrides,
 } from '../agent/types'
 import { agentEngine } from '../agent/engine'
+import { runCapacity } from '../agent/runConcurrency'
 import { emptyKnowledge, extractKnowledge } from '../agent/knowledge'
 import { learningLoop } from '../agent/hermes/learning'
 import { useSettingsStore } from './settingsStore'
@@ -18,7 +19,7 @@ import {
   type LocalRunnerKind,
 } from '../agent/localCliRun'
 
-/** Drain unified run queue after any path frees the global lock */
+/** Drain unified run queue after any path frees a run-capacity slot. */
 function drainQueueAfterRun() {
   void (async () => {
     try {
@@ -37,6 +38,10 @@ interface AgentStore {
   agent: AgentState
   selectedLoopType: LoopType | null
   isRunning: boolean
+  /** Concurrent run registry exposed to UI / lifecycle controllers. */
+  activeRunIds: string[]
+  runStates: Record<string, AgentState>
+  selectedRunId: string | null
   archive: ArchiveRecord[]
   draftInput: string
   showReport: boolean
@@ -44,6 +49,13 @@ interface AgentStore {
   setDraftInput: (v: string) => void
   setSelectedLoopType: (t: LoopType | null) => void
   setShowReport: (v: boolean) => void
+  canStartRun: (runId?: string, threadId?: string) => { allowed: boolean; active: number; limit: number; reason?: string }
+  reserveRun: (runId: string, threadId?: string, kind?: 'builtin' | 'cli') => boolean
+  bindRun: (runId: string, threadId: string) => void
+  releaseRun: (runId: string) => void
+  getRunState: (runId?: string) => AgentState | null
+  getRunIdForThread: (threadId: string) => string | null
+  selectRun: (runId: string | null) => void
   startExecution: (input?: string, overrides?: RuntimeOverrides) => Promise<void>
   /** 透過本機 CLI（Codex/Claude/Grok…）執行，使用其既有登入 */
   startLocalCliExecution: (opts: {
@@ -58,6 +70,7 @@ interface AgentStore {
     unattended?: boolean
     /** Correlate with runTask trace */
     runId?: string
+    threadId?: string
     /** Safe OpenCode config lineage captured before dispatch */
     configSnapshot?: CliConfigSnapshot
     /** Preserve loop type in agent state (not always Goal-based) */
@@ -72,15 +85,15 @@ interface AgentStore {
       filePath?: string
     }>
   }) => Promise<void>
-  stopExecution: () => void
-  continueTurn: () => void
+  stopExecution: (runId?: string) => void
+  continueTurn: (runId?: string) => void
   resolveIntervention: (decision: {
     action: 'approve' | 'reject' | 'abort'
     payloadJson?: string
   }) => void
   reset: () => void
   loadArchive: () => Promise<void>
-  saveToArchive: () => Promise<void>
+  saveToArchive: (agentOverride?: AgentState, runId?: string) => Promise<void>
 }
 
 function emptyAgent(): AgentState {
@@ -131,22 +144,37 @@ function toArchiveStatus(s: AgentState['status']): ArchiveRecord['status'] {
   return 'warning'
 }
 
-export const useAgentStore = create<AgentStore>((set, get) => {
-  agentEngine.subscribe((agent) => {
-    set({
-      agent,
-      isRunning:
-        agent.status === 'running' ||
-        agent.status === 'parsing' ||
-        agent.status === 'manual_intervention' ||
-        agent.status === 'awaiting_user',
-    })
-  })
+const liveEngines = new Map<string, ReturnType<typeof agentEngine.create>>()
+const runAgentStates = new Map<string, AgentState>()
+const reservedRuns = new Map<string, { threadId?: string; kind: 'builtin' | 'cli' }>()
 
+function stateSnapshot(): Record<string, AgentState> {
+  return Object.fromEntries([...runAgentStates.entries()].map(([id, state]) => [id, state]))
+}
+
+function publishRun(set: (partial: Partial<AgentStore>) => void, get: () => AgentStore, runId: string, state: AgentState) {
+  runAgentStates.set(runId, state)
+  const activeRunIds = [...reservedRuns.keys()]
+  let selectedRunId = get().selectedRunId
+  if (!selectedRunId || (!activeRunIds.includes(selectedRunId) && activeRunIds.length)) selectedRunId = activeRunIds.at(-1) || runId
+  const visible = (selectedRunId && runAgentStates.get(selectedRunId)) || state
+  set({
+    agent: visible,
+    runStates: stateSnapshot(),
+    selectedRunId,
+    activeRunIds,
+    isRunning: activeRunIds.length > 0,
+  })
+}
+
+export const useAgentStore = create<AgentStore>((set, get) => {
   return {
     agent: agentEngine.getState(),
     selectedLoopType: null,
     isRunning: false,
+    activeRunIds: [],
+    runStates: {},
+    selectedRunId: null,
     archive: [],
     draftInput: '',
     showReport: false,
@@ -155,31 +183,85 @@ export const useAgentStore = create<AgentStore>((set, get) => {
     setSelectedLoopType: (t) => set({ selectedLoopType: t }),
     setShowReport: (v) => set({ showReport: v }),
 
+    canStartRun: (runId, threadId) => {
+      if (runId && reservedRuns.has(runId)) return { allowed: true, active: reservedRuns.size, limit: useSettingsStore.getState().settings.maxConcurrentRuns || 1 }
+      if (threadId) {
+        const sameThread = [...reservedRuns.values()].some((entry) => entry.threadId === threadId)
+        if (sameThread) return { allowed: false, active: reservedRuns.size, limit: 1, reason: 'thread-busy' }
+      }
+      const capacity = runCapacity(useSettingsStore.getState().settings, reservedRuns.size)
+      return capacity.allowed
+        ? capacity
+        : { ...capacity, reason: 'capacity' }
+    },
+
+    reserveRun: (runId, threadId, kind = 'builtin') => {
+      if (!runId || reservedRuns.has(runId)) return Boolean(runId)
+      const check = get().canStartRun(runId, threadId)
+      if (!check.allowed) return false
+      reservedRuns.set(runId, { threadId, kind })
+      runAgentStates.set(runId, emptyAgentLike({ id: runId, objective: '', status: 'idle' }))
+      publishRun(set, get, runId, runAgentStates.get(runId)!)
+      return true
+    },
+
+    bindRun: (runId, threadId) => {
+      const entry = reservedRuns.get(runId)
+      if (!entry) return
+      entry.threadId = threadId
+      publishRun(set, get, runId, runAgentStates.get(runId) || emptyAgent())
+    },
+
+    releaseRun: (runId) => {
+      reservedRuns.delete(runId)
+      liveEngines.delete(runId)
+      agentEngine.release(runId)
+      publishRun(set, get, runId, runAgentStates.get(runId) || emptyAgent())
+    },
+
+    getRunState: (runId) => {
+      if (runId) return runAgentStates.get(runId) || null
+      return get().selectedRunId ? runAgentStates.get(get().selectedRunId!) || get().agent : get().agent
+    },
+
+    getRunIdForThread: (threadId) => {
+      for (const [runId, entry] of reservedRuns) if (entry.threadId === threadId) return runId
+      return null
+    },
+
+    selectRun: (runId) => {
+      const state = runId ? runAgentStates.get(runId) : undefined
+      if (runId && !state) return
+      set({ selectedRunId: runId, agent: state || get().agent })
+    },
+
     startExecution: async (input, overrides) => {
       const text = (input ?? get().draftInput).trim()
       if (!text) return
-      if (get().isRunning) {
-        console.warn('[agentStore] startExecution blocked: already running')
+      const runId = overrides?.runId || `run_${Date.now().toString(36)}`
+      if (!get().reserveRun(runId, overrides?.threadId, 'builtin')) {
+        console.warn('[agentStore] startExecution blocked: concurrent cap reached')
         return
       }
-
       const settings = useSettingsStore.getState().settings
       agentEngine.configure(settings)
-
-      set({ isRunning: true, showReport: false })
+      const engine = agentEngine.create(runId)
+      liveEngines.set(runId, engine)
+      const unsub = engine.subscribe((state) => publishRun(set, get, runId, state))
+      set({ showReport: false })
       try {
         // Center process feed (Codex-style)
         try {
           const { useRunActivityStore } = await import('./runActivityStore')
-          useRunActivityStore.getState().begin(overrides?.runId)
-          useRunActivityStore.getState().setStatus('內建引擎執行中…')
+          useRunActivityStore.getState().begin(runId)
+          useRunActivityStore.getState().setStatus('內建引擎執行中…', runId)
         } catch {
           /* ignore */
         }
         // Per-run HITL counters for Archive
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
-          usePermissionAskStore.getState().beginRunAudit()
+          usePermissionAskStore.getState().beginRunAudit(runId, overrides?.threadId)
         } catch {
           /* ignore */
         }
@@ -190,44 +272,49 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             : overrides?.loopTypeMode === 'auto'
               ? undefined
               : get().selectedLoopType ?? undefined
-        const final = await agentEngine.start(text, forceFromOverrides, overrides)
-        set({ agent: final, isRunning: false })
+        const final = await engine.start(text, forceFromOverrides, { ...overrides, runId })
+        unsub()
+        publishRun(set, get, runId, final)
         try {
           const { useRunActivityStore } = await import('./runActivityStore')
           useRunActivityStore.getState().setStatus(
             final.status === 'success' ? '完成' : final.status,
+            runId,
           )
-          useRunActivityStore.getState().end()
+          useRunActivityStore.getState().end(runId)
         } catch {
           /* ignore */
         }
         // End of run: clear sticky "代我核准" unless user wants multi-run (opt-in later)
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
-          usePermissionAskStore.getState().setSessionAllow(false)
+          usePermissionAskStore.getState().setSessionAllow(false, overrides?.threadId)
         } catch {
           /* ignore */
         }
 
         if (['success', 'failed', 'halted'].includes(final.status)) {
-          await get().saveToArchive()
+          await get().saveToArchive(final, runId)
         }
+        get().releaseRun(runId)
         // Unified queue drain (automation + interactive follow-ups)
         void drainQueueAfterRun()
       } catch (e) {
-        set({ isRunning: false })
+        unsub()
+        publishRun(set, get, runId, runAgentStates.get(runId) || emptyAgent())
         try {
           const { useRunActivityStore } = await import('./runActivityStore')
-          useRunActivityStore.getState().end()
+          useRunActivityStore.getState().end(runId)
         } catch {
           /* ignore */
         }
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
-          usePermissionAskStore.getState().setSessionAllow(false)
+          usePermissionAskStore.getState().setSessionAllow(false, overrides?.threadId)
         } catch {
           /* ignore */
         }
+        get().releaseRun(runId)
         void drainQueueAfterRun()
         throw e
       }
@@ -236,12 +323,12 @@ export const useAgentStore = create<AgentStore>((set, get) => {
     startLocalCliExecution: async (opts) => {
       const prompt = opts.prompt.trim()
       if (!prompt) return
-      if (get().isRunning) {
-        console.warn('[agentStore] startLocalCliExecution blocked: already running')
-        return
-      }
       const t0 = Date.now()
       const runId = opts.runId || `cli_${Date.now().toString(36)}`
+      if (!get().reserveRun(runId, opts.threadId, 'cli')) {
+        console.warn('[agentStore] startLocalCliExecution blocked: concurrent cap reached')
+        return
+      }
       const logs: AgentState['logs'] = []
       let toolCalls: AgentState['toolCalls'] = []
       let draftChars = 0
@@ -258,8 +345,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       }
 
       const pushLiveAgent = (progress: number, extra?: { result?: string }) => {
-        set({
-          agent: emptyAgentLike({
+        publishRun(set, get, runId, emptyAgentLike({
             id: runId,
             objective: prompt,
             status: 'running',
@@ -296,8 +382,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             },
             startedAt: new Date(t0).toISOString(),
             finishedAt: null,
-          }),
-        })
+          }))
       }
 
       const pushLog = (message: string, level: AgentState['logs'][0]['level'] = 'INFO') => {
@@ -314,11 +399,12 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             if (!short || short.startsWith('$ ')) return
             useRunActivityStore.getState().push({
               kind: level === 'ERROR' ? 'error' : level === 'SUCCESS' ? 'done' : 'status',
+              runId,
               title: short,
               detail: message.slice(0, 500),
               ok: level !== 'ERROR',
             })
-            useRunActivityStore.getState().setStatus(short)
+            useRunActivityStore.getState().setStatus(short, runId)
           })
         } catch {
           /* ignore */
@@ -333,7 +419,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       try {
         const { useRunActivityStore } = await import('./runActivityStore')
         useRunActivityStore.getState().begin(runId)
-        useRunActivityStore.getState().setStatus(`本機 ${opts.kind} CLI · 啟動中`)
+        useRunActivityStore.getState().setStatus(`本機 ${opts.kind} CLI · 啟動中`, runId)
         unsubStream = window.subagents?.cli?.onStream?.((ev) => {
           useRunActivityStore.getState().handleCliStream({
             ...ev,
@@ -384,7 +470,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         /* browser / missing API */
       }
 
-      set({ isRunning: true, showReport: false })
+      set({ showReport: false })
       const modelLabel = opts.model?.trim() || opts.kind
       pushLog(`Local CLI runner: ${opts.kind}${opts.runId ? ` · runId=${opts.runId}` : ''}`)
       if (opts.loopType) pushLog(`loopType: ${opts.loopType}`)
@@ -395,7 +481,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       try {
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
-          usePermissionAskStore.getState().beginRunAudit()
+          usePermissionAskStore.getState().beginRunAudit(runId, opts.threadId)
         } catch {
           /* ignore */
         }
@@ -415,8 +501,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           // Keep thought / process events for center timeline; clear draft so
           // final answer is only the markdown assistant bubble (no duplicate).
           if (r.ok) {
-            act.push({ kind: 'done', title: 'CLI 完成', ok: true })
-            act.setStatus('完成')
+            act.push({ kind: 'done', title: 'CLI 完成', ok: true, runId })
+            act.setStatus('完成', runId)
           }
           useRunActivityStore.setState({ draftText: '', active: false })
         } catch {
@@ -522,16 +608,17 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           }
         }
 
-        set({ agent: final, isRunning: false })
+        publishRun(set, get, runId, final)
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
-          usePermissionAskStore.getState().setSessionAllow(false)
+          usePermissionAskStore.getState().setSessionAllow(false, opts.threadId)
         } catch {
           /* ignore */
         }
         if (['success', 'failed', 'halted'].includes(final.status)) {
-          await get().saveToArchive()
+          await get().saveToArchive(final, runId)
         }
+        get().releaseRun(runId)
         void drainQueueAfterRun()
       } catch (e) {
         try {
@@ -543,10 +630,11 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           const { useRunActivityStore } = await import('./runActivityStore')
           useRunActivityStore.getState().push({
             kind: 'error',
+            runId,
             title: 'CLI 例外',
             detail: e instanceof Error ? e.message : String(e),
           })
-          useRunActivityStore.getState().end()
+          useRunActivityStore.getState().end(runId)
         } catch {
           /* ignore */
         }
@@ -579,34 +667,40 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           finishedAt: new Date().toISOString(),
           cliConfigSnapshot: opts.configSnapshot,
         })
-        set({ agent: final, isRunning: false })
+        publishRun(set, get, runId, final)
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
-          usePermissionAskStore.getState().setSessionAllow(false)
+          usePermissionAskStore.getState().setSessionAllow(false, opts.threadId)
         } catch {
           /* ignore */
         }
+        get().releaseRun(runId)
         void drainQueueAfterRun()
       }
     },
 
-    stopExecution: () => {
-      agentEngine.stop()
-      // Cancel in-flight local CLI / bash tagged cli-agent
-      void window.subagents?.cli?.cancel?.()
+    stopExecution: (runId) => {
+      const target = runId || get().selectedRunId || undefined
+      agentEngine.stop(target)
+      // Cancel only the selected run's CLI / bash processes.
+      void window.subagents?.cli?.cancel?.(target)
       try {
         void import('./runActivityStore').then(({ useRunActivityStore }) => {
-          useRunActivityStore.getState().push({ kind: 'status', title: '使用者停止' })
-          useRunActivityStore.getState().end()
+          useRunActivityStore.getState().push({ kind: 'status', title: '使用者停止', runId: target })
+          useRunActivityStore.getState().end(target)
         })
       } catch {
         /* ignore */
       }
-      set({ isRunning: false })
       // Clear sticky "代我核准" so a stopped run cannot auto-allow the next one
       try {
         void import('./permissionAskStore').then(({ usePermissionAskStore }) => {
-          usePermissionAskStore.getState().setSessionAllow(false)
+          if (target) {
+            usePermissionAskStore.getState().cancelRun(target)
+            usePermissionAskStore.getState().setSessionAllow(false, reservedRuns.get(target)?.threadId)
+          } else {
+            usePermissionAskStore.getState().setSessionAllow(false)
+          }
         })
       } catch {
         /* ignore */
@@ -614,19 +708,25 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       void drainQueueAfterRun()
     },
 
-    continueTurn: () => {
-      agentEngine.continueTurn()
+    continueTurn: (runId) => {
+      agentEngine.continueTurn(runId || get().selectedRunId || undefined)
     },
 
     resolveIntervention: (decision) => {
-      agentEngine.resolveIntervention(decision)
+      agentEngine.resolveIntervention(decision, get().selectedRunId || undefined)
     },
 
     reset: () => {
       agentEngine.stop()
+      for (const runId of reservedRuns.keys()) agentEngine.release(runId)
+      reservedRuns.clear()
+      liveEngines.clear()
       set({
         agent: emptyAgent(),
         isRunning: false,
+        activeRunIds: [],
+        selectedRunId: null,
+        runStates: {},
         draftInput: get().draftInput,
         showReport: false,
       })
@@ -648,13 +748,13 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       await pruneArchiveByAge(useSettingsStore.getState().settings.autoArchiveDays || 0)
     },
 
-    saveToArchive: async () => {
-      const { agent } = get()
+    saveToArchive: async (agentOverride, runId) => {
+      const agent = agentOverride || get().getRunState(runId) || get().agent
       if (!agent.id) return
       let hitl: ArchiveRecord['hitl']
       try {
         const { usePermissionAskStore } = await import('./permissionAskStore')
-        const snap = usePermissionAskStore.getState().getRunHitlSnapshot()
+        const snap = usePermissionAskStore.getState().getRunHitlSnapshot(runId)
         if (snap.allowed || snap.denied || snap.timedOut) {
           hitl = snap
         }

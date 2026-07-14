@@ -72,6 +72,8 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   translucentSidebar: true,
   enterBehavior: 'enter',
   followUpMode: 'steer',
+  concurrentRunsEnabled: false,
+  maxConcurrentRuns: 4,
   notifyOnComplete: true,
   soundOnComplete: false,
   preventSleepWhileRunning: false,
