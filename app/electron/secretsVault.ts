@@ -16,6 +16,9 @@ import path from 'node:path'
 export type VaultRecord = {
   token: string
   refreshToken?: string
+  /** OAuth client credentials stay in the same encrypted main-process vault. */
+  clientId?: string
+  clientSecret?: string
   expiresAt?: number
   tokenType?: string
   updatedAt: string
@@ -28,6 +31,7 @@ export type VaultMeta = {
   tokenType?: string
   updatedAt: string
   hasRefreshToken: boolean
+  hasClientCredentials: boolean
   /** encrypted-at-rest? false only when OS keychain unavailable */
   encrypted: boolean
 }
@@ -133,6 +137,47 @@ export function setVaultSecret(
   return metaOf(id, map[id])
 }
 
+export function isVaultEncryptionAvailable(): boolean {
+  return canEncrypt()
+}
+
+/** Store an OAuth credential set without exposing client secrets to the renderer. */
+export function setVaultOAuthSecret(
+  id: string,
+  token: string,
+  extra: {
+    clientId: string
+    clientSecret?: string
+    refreshToken?: string
+    expiresIn?: number
+    expiresAt?: number
+    tokenType?: string
+  },
+): VaultMeta {
+  if (!canEncrypt()) {
+    throw new Error('OS secure storage unavailable; OAuth token was not saved')
+  }
+  const map = { ...readVault() }
+  const prev = map[id]
+  const expiresAt =
+    extra.expiresAt ??
+    (typeof extra.expiresIn === 'number' && extra.expiresIn > 0
+      ? Date.now() + extra.expiresIn * 1000
+      : prev?.expiresAt)
+  map[id] = {
+    token: token.trim(),
+    refreshToken: extra.refreshToken ?? prev?.refreshToken,
+    clientId: extra.clientId.trim() || prev?.clientId,
+    clientSecret:
+      extra.clientSecret !== undefined ? extra.clientSecret : prev?.clientSecret,
+    expiresAt,
+    tokenType: extra.tokenType || prev?.tokenType,
+    updatedAt: new Date().toISOString(),
+  }
+  writeVault(map)
+  return metaOf(id, map[id])
+}
+
 export function clearVaultSecret(id: string) {
   const map = { ...readVault() }
   delete map[id]
@@ -147,6 +192,7 @@ function metaOf(id: string, rec: VaultRecord): VaultMeta {
     tokenType: rec.tokenType,
     updatedAt: rec.updatedAt,
     hasRefreshToken: Boolean(rec.refreshToken),
+    hasClientCredentials: Boolean(rec.clientId),
     encrypted: canEncrypt(),
   }
 }

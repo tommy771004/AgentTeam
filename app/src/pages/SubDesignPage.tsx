@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { critiqueAllowsDeliver } from '../agent/subdesign/critique'
 import { buildSubDesignPrompt } from '../agent/subdesign/prompt'
 import {
@@ -21,19 +21,27 @@ import { CritiquePanel } from '../components/subdesign/CritiquePanel'
 import { CritiqueTheater } from '../components/subdesign/CritiqueTheater'
 import { ArtifactTweakPanel } from '../components/subdesign/ArtifactTweakPanel'
 import { ReferenceImportPanel } from '../components/subdesign/ReferenceImportPanel'
-import { RunProcessFeed } from '../components/RunProcessFeed'
+import { SubDesignFlowPrototype } from '../components/subdesign/SubDesignFlow.prototype'
+import { SubDesignWorkspaceHeader } from '../components/subdesign/SubDesignWorkspaceHeader'
+import { SubDesignRunInspector } from '../components/subdesign/SubDesignRunInspector'
+import { SubDesignProjectStudio } from '../components/subdesign/SubDesignProjectStudio'
+import { SubDesignStudioNav } from '../components/subdesign/SubDesignStudioNav'
+import { deriveSubDesignWorkspace } from '../agent/subdesign/workspace'
 import { runTask } from '../agent/taskRunCoordinator'
 import { useAgentStore } from '../store/agentStore'
 import { useLearningStore } from '../store/learningStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSubDesignArtifactStore } from '../store/subDesignArtifactStore'
 import { useSubDesignCritiqueStore } from '../store/subDesignCritiqueStore'
+import { useSubDesignCritiqueSessionStore } from '../store/subDesignCritiqueSessionStore'
 import { useSubDesignExportStore } from '../store/subDesignExportStore'
 import { hydrateSubDesignStores } from '../store/subDesignPersistence'
 import { useSubDesignStore } from '../store/subDesignStore'
 import { useThreadStore } from '../store/threadStore'
 import { useRunActivityStore } from '../store/runActivityStore'
 import { useOpenDesignPackStore } from '../store/openDesignPackStore'
+import { useSettingsStore } from '../store/settingsStore'
+import type { ThreadRunner } from '../store/threadStore'
 
 type DesignSurface = {
   id: 'prototype' | 'dashboard' | 'design-system' | 'deck'
@@ -56,6 +64,16 @@ const PLATFORMS: ReadonlyArray<{ id: SubDesignPlatform; label: string }> = [
   { id: 'desktop-app', label: 'Desktop app' },
 ]
 
+const RUNNER_LABELS: Partial<Record<ThreadRunner, string>> = {
+  builtin: 'Built-in Agent',
+  codex: 'Codex CLI',
+  claude: 'Claude CLI',
+  grok: 'Grok CLI',
+  opencode: 'OpenCode CLI',
+  gemini: 'Gemini CLI',
+  cursor: 'Cursor CLI',
+}
+
 function formatRelativeTime(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '最近'
@@ -71,12 +89,15 @@ function SelectChevron() {
 
 export function SubDesignPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { briefId: routeBriefId } = useParams<{ briefId?: string }>()
   const createThread = useThreadStore((state) => state.createThread)
   const setSubDesignBriefId = useThreadStore((state) => state.setSubDesignBriefId)
   const hydrateThreads = useThreadStore((state) => state.hydrate)
+  const threads = useThreadStore((state) => state.threads)
   const getRunIdForThread = useAgentStore((state) => state.getRunIdForThread)
   const projectRoot = useProjectStore((state) => state.root)
+  const cliProviders = useSettingsStore((state) => state.settings.cliProviders)
   const briefs = useSubDesignStore((state) => state.briefs)
   const selectedBriefId = useSubDesignStore((state) => state.selectedBriefId)
   const selectBrief = useSubDesignStore((state) => state.selectBrief)
@@ -85,8 +106,11 @@ export function SubDesignPage() {
   const systemsLoading = useSubDesignStore((state) => state.systemsLoading)
   const refreshSystems = useSubDesignStore((state) => state.refreshSystems)
   const createBrief = useSubDesignStore((state) => state.createBrief)
+  const updateBrief = useSubDesignStore((state) => state.updateBrief)
+  const selectDirection = useSubDesignStore((state) => state.selectDirection)
   const artifacts = useSubDesignArtifactStore((state) => state.artifacts)
   const critiques = useSubDesignCritiqueStore((state) => state.critiques)
+  const critiqueSession = useSubDesignCritiqueSessionStore((state) => state.current)
   const memoryEntries = useLearningStore((state) => state.memory.entries)
   const setArtifactProjectRoot = useSubDesignArtifactStore((state) => state.setProjectRoot)
   const setCritiqueProjectRoot = useSubDesignCritiqueStore((state) => state.setProjectRoot)
@@ -115,6 +139,7 @@ export function SubDesignPage() {
   const [platform, setPlatform] = useState<SubDesignPlatform>('responsive')
   const [brief, setBrief] = useState('')
   const [designSystemId, setDesignSystemId] = useState('')
+  const [runner, setRunner] = useState<ThreadRunner>('builtin')
   const [templateCategory, setTemplateCategory] = useState<SubDesignTemplateCategory>('all')
   const [templateId, setTemplateId] = useState<string | undefined>()
   const [templateQuery, setTemplateQuery] = useState('')
@@ -130,7 +155,7 @@ export function SubDesignPage() {
     [surfaceId],
   )
   const routeBrief = routeBriefId ? briefs.find((item) => item.id === routeBriefId) || null : null
-  const activeBrief = routeBriefId ? routeBrief : briefs.find((item) => item.id === selectedBriefId) || briefs[0] || null
+  const activeBrief = routeBriefId ? routeBrief : null
   const activeBriefId = activeBrief?.id
   const activeBriefSurface = activeBrief?.surface
   const activeBriefDesignSystemId = activeBrief?.designSystemId
@@ -162,6 +187,31 @@ export function SubDesignPage() {
   const latestCritique = useSubDesignCritiqueStore((state) =>
     selectedArtifact ? state.latestForArtifact(selectedArtifact.id, selectedArtifact.revision) : null,
   )
+  const availableRunners = useMemo(() => {
+    const values: ThreadRunner[] = ['builtin']
+    for (const provider of cliProviders || []) {
+      if (!provider.enabled || !provider.authorized) continue
+      const candidate: ThreadRunner | null = provider.kind === 'anthropic'
+        ? 'claude'
+        : provider.kind === 'google'
+          ? 'gemini'
+          : provider.kind === 'opencode' || provider.kind === 'cursor' || provider.kind === 'codex' || provider.kind === 'grok'
+            ? provider.kind
+            : null
+      if (candidate && !values.includes(candidate)) values.push(candidate)
+    }
+    return values
+  }, [cliProviders])
+  const workspace = activeBrief
+    ? deriveSubDesignWorkspace({
+        brief: activeBrief,
+        artifacts: visibleArtifacts,
+        selectedArtifact,
+        critique: latestCritique,
+        critiqueSession,
+        runStatus: startingRun ? 'running' : linkedAgent?.status,
+      })
+    : null
   const selectedCatalogRecord = catalogRecords.find((record) => record.id === templateId) || null
   const latestPassedPreference = useMemo(
     () => findLatestPassedSubDesignPreference(briefs, artifacts, critiques, { projectRoot, memoryEntries }),
@@ -248,6 +298,15 @@ export function SubDesignPage() {
   }, [activeBriefDesignSystemId, activeBriefId, activeBriefSurface, activeBriefTemplateId])
 
   useEffect(() => {
+    const requestedDesignSystemId = new URLSearchParams(location.search).get('designSystemId')
+    if (!requestedDesignSystemId || !systems.some((system) => system.id === requestedDesignSystemId)) return
+    setDesignSystemId(requestedDesignSystemId)
+    if (activeBrief && activeBrief.designSystemId !== requestedDesignSystemId) {
+      updateBrief(activeBrief.id, { designSystemId: requestedDesignSystemId }, projectRoot || undefined)
+    }
+  }, [activeBrief, location.search, projectRoot, systems, updateBrief])
+
+  useEffect(() => {
     if (!latestPassedPreference) return
     if (!designSystemId && latestPassedPreference.designSystemId) setDesignSystemId(latestPassedPreference.designSystemId)
     if (!templateId && latestPassedPreference.templateId) setTemplateId(latestPassedPreference.templateId)
@@ -260,6 +319,7 @@ export function SubDesignPage() {
       title: `SubDesign · ${activeSurface.title}`,
       agentMode: 'plan',
       thinkingDepth: 'deep',
+      runner,
     })
     const created = createBrief({
       threadId,
@@ -315,34 +375,73 @@ export function SubDesignPage() {
     navigate(`/?thread=${encodeURIComponent(activeBrief.threadId)}`)
   }
 
+  // PROTOTYPE only: compare three read-only project-flow layouts on this real route.
+  if (import.meta.env.DEV && new URLSearchParams(location.search).get('prototype') === 'subdesign-flow') {
+    return <SubDesignFlowPrototype />
+  }
+
+  if (routeBriefId && activeBrief && workspace) {
+    const activeSystem = systems.find((system) => system.id === activeBrief.designSystemId) || null
+    return (
+      <SubDesignProjectStudio
+        brief={activeBrief}
+        workspace={workspace}
+        designSystem={activeSystem}
+        artifacts={visibleArtifacts}
+        selectedArtifact={selectedArtifact}
+        critique={latestCritique}
+        critiquePassed={Boolean(latestCritique && critiqueAllowsDeliver(latestCritique))}
+        runIsLive={runIsLive}
+        runId={linkedThreadRunId}
+        executionKind={linkedAgent?.executionKind}
+        startingRun={startingRun}
+        onBack={() => navigate('/subdesign')}
+        onOpenDesignSystems={() => navigate(`/design-systems?returnTo=${encodeURIComponent(`/subdesign/${activeBrief.id}`)}&briefId=${encodeURIComponent(activeBrief.id)}`)}
+        onStartRun={() => void startBriefRun()}
+        onOpenTranscript={openTranscript}
+        onSelectArtifact={(artifact) => setSelectedArtifactKey(`${artifact.id}:${artifact.revision}`)}
+        onSelectDirection={(directionId) => { selectDirection(activeBrief.id, directionId, undefined, projectRoot || undefined) }}
+      />
+    )
+  }
+
   return (
     <div className="h-full min-w-0 overflow-auto bg-background text-on-background">
       <main className="mx-auto w-full max-w-[1240px] px-5 pb-16 pt-8 md:px-8 lg:pt-12">
+        <SubDesignStudioNav
+          active="studio"
+          studioHref={activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign'}
+          systemsHref={`/design-systems?returnTo=${encodeURIComponent(activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign')}${activeBrief ? `&briefId=${encodeURIComponent(activeBrief.id)}` : ''}`}
+          contextLabel={activeBrief ? activeBrief.objective : '從 brief 選擇品牌契約，再生成與驗證產物'}
+          onNavigate={navigate}
+        />
         {routeBriefId && briefs.length > 0 && !activeBrief ? (
           <section className="mx-auto mb-6 max-w-[820px] rounded-2xl border border-error/25 bg-error/10 px-4 py-3 text-[12px] text-error">
             找不到這個 SubDesign brief：<span className="font-mono">{routeBriefId}</span>。請回到 SubDesign 首頁選擇既有設計。
           </section>
         ) : null}
-        {activeBrief ? (
-          <section className="mx-auto mb-7 max-w-[820px] overflow-hidden rounded-2xl border border-primary/20 bg-primary/[0.04]">
-            <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-              <span className={`grid h-8 w-8 place-items-center rounded-xl ${runIsLive ? 'bg-primary/15 text-primary' : 'bg-white/[0.06] text-outline'}`}>
-                <Icon name={runIsLive ? 'progress_activity' : 'palette'} size={17} className={runIsLive ? 'animate-spin' : ''} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[12px] font-semibold text-on-surface">{runIsLive ? 'SubDesign 正在執行' : `目前設計 · ${stageLabel(activeBrief.stage)}`}</p>
-                <p className="truncate text-[11px] text-outline">{activeBrief.objective} · brief {activeBrief.id}</p>
-              </div>
-              {runIsLive ? <span className="rounded-full border border-primary/25 px-2 py-1 text-[10px] font-semibold text-primary">LIVE</span> : <button type="button" onClick={() => void startBriefRun()} disabled={startingRun} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[11px] font-semibold text-on-primary disabled:opacity-50"><Icon name="play_arrow" size={14} />{startingRun ? '啟動中…' : '在此頁開始執行'}</button>}
-            </div>
-            {runIsLive && linkedThreadRunId ? <div className="border-t border-primary/15 px-4 pb-3"><RunProcessFeed runId={linkedThreadRunId} depthLabel="SubDesign" onOpenPanel={openTranscript} /></div> : null}
-          </section>
+        {workspace ? (
+          <SubDesignWorkspaceHeader
+            workspace={workspace}
+            designSystem={systems.find((system) => system.id === activeBrief?.designSystemId) || null}
+            onOpenDesignSystem={() => navigate(`/design-systems?returnTo=${encodeURIComponent(activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign')}${activeBrief ? `&briefId=${encodeURIComponent(activeBrief.id)}` : ''}`)}
+            onPrimaryAction={workspace.nextGate.action === 'start-build' && !runIsLive ? () => void startBriefRun() : undefined}
+            primaryActionLabel={startingRun ? '啟動中…' : '在此頁開始 Build'}
+          />
+        ) : null}
+        {activeBrief && runIsLive && linkedThreadRunId ? (
+          <SubDesignRunInspector
+            workspace={workspace!}
+            runId={linkedThreadRunId}
+            executionKind={linkedAgent?.executionKind}
+            onOpenTranscript={openTranscript}
+          />
         ) : null}
         <section className="mx-auto max-w-[820px] text-center">
           <h1 className="font-[family-name:var(--font-sora)] text-[34px] font-semibold tracking-tight text-on-surface md:text-[42px]">
-            你今天想設計什麼？
+            {activeBrief ? '建立另一個設計' : '你今天想設計什麼？'}
           </h1>
-          <p className="mt-3 text-[14px] text-outline">從一個 brief 開始，交給 SubAgents 完成設計流程。</p>
+          <p className="mt-3 text-[14px] text-outline">{activeBrief ? '目前專案狀態保留在上方；你可以從新的 brief 開始另一個設計。' : '從一個 brief 開始，交給 SubAgents 完成設計流程。'}</p>
         </section>
 
         <section className="mx-auto mt-7 max-w-[820px]">
@@ -355,8 +454,8 @@ export function SubDesignPage() {
               placeholder="例如：設計一個商品詳情頁"
               className="min-h-[172px] w-full resize-y bg-transparent px-6 py-5 text-[17px] leading-relaxed text-on-surface outline-none placeholder:text-outline/70"
             />
-            <div className="flex flex-col gap-3 border-t border-white/[0.08] px-4 py-4 sm:flex-row sm:items-center">
-              <div className="relative sm:w-[190px]">
+            <div className="flex flex-col gap-3 border-t border-white/[0.08] px-4 py-4 sm:flex-row sm:flex-wrap sm:items-center">
+              <div className="relative sm:w-[160px]">
                 <select
                   value={surfaceId}
                   onChange={(event) => setSurfaceId(event.target.value as DesignSurface['id'])}
@@ -367,7 +466,7 @@ export function SubDesignPage() {
                 </select>
                 <SelectChevron />
               </div>
-              <div className="relative sm:w-[174px]">
+              <div className="relative sm:w-[145px]">
                 <select
                   value={platform}
                   onChange={(event) => setPlatform(event.target.value as SubDesignPlatform)}
@@ -378,11 +477,39 @@ export function SubDesignPage() {
                 </select>
                 <SelectChevron />
               </div>
+              <div className="relative sm:w-[170px]">
+                <select
+                  value={designSystemId}
+                  onChange={(event) => {
+                    const nextId = event.target.value
+                    setDesignSystemId(nextId)
+                    if (activeBrief) updateBrief(activeBrief.id, { designSystemId: nextId || undefined }, projectRoot || undefined)
+                  }}
+                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
+                  aria-label="Design system"
+                >
+                  <option value="">Neutral / project default</option>
+                  {systems.map((system) => <option key={system.id} value={system.id}>{system.title}</option>)}
+                </select>
+                <SelectChevron />
+              </div>
+              <div className="relative sm:w-[145px]">
+                <select
+                  value={runner}
+                  onChange={(event) => setRunner(event.target.value as ThreadRunner)}
+                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
+                  aria-label="Design agent"
+                >
+                  {availableRunners.map((item) => <option key={item} value={item}>{RUNNER_LABELS[item] || item}</option>)}
+                </select>
+                <SelectChevron />
+              </div>
               <span className="hidden flex-1 sm:block" />
               <button
                 type="button"
                 onClick={startSubDesign}
-                className="macos-btn inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-[13px] font-semibold text-on-primary shadow-[0_8px_22px_rgba(43,184,217,0.18)] hover:bg-primary-container focus:outline-none focus:ring-2 focus:ring-primary/50"
+                disabled={!brief.trim()}
+                className="macos-btn inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-[13px] font-semibold text-on-primary shadow-[0_8px_22px_rgba(43,184,217,0.18)] hover:bg-primary-container focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Icon name="send" size={17} />建立設計
               </button>
@@ -390,20 +517,8 @@ export function SubDesignPage() {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-[12px] text-outline">
-            <label className="relative inline-flex items-center gap-1.5">
-              <Icon name="palette" size={15} className="text-primary" />
-              <select
-                value={designSystemId}
-                onChange={(event) => setDesignSystemId(event.target.value)}
-                className="appearance-none bg-transparent pr-5 text-[12px] text-outline outline-none hover:text-on-surface"
-                aria-label="Design system"
-              >
-                <option value="">使用專案 Design system</option>
-                {systems.map((system) => <option key={system.id} value={system.id}>{system.title}</option>)}
-              </select>
-              <Icon name="expand_more" size={14} className="pointer-events-none absolute right-0 text-outline" />
-            </label>
-            <button type="button" onClick={() => navigate('/design-systems')} className="inline-flex items-center gap-1 text-[11px] text-outline hover:text-primary" aria-label="管理 Design system"><Icon name="open_in_new" size={13} />管理</button>
+            <span className="inline-flex items-center gap-1.5"><Icon name="palette" size={15} className="text-primary" /><strong className="font-semibold text-on-surface-variant">{selectedSystem?.title || 'Project default'}</strong><span className="text-outline">將套用到下一次生成</span></span>
+            <button type="button" onClick={() => navigate(`/design-systems?returnTo=${encodeURIComponent(activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign')}${activeBrief ? `&briefId=${encodeURIComponent(activeBrief.id)}` : ''}`)} className="inline-flex items-center gap-1 text-[11px] text-outline hover:text-primary" aria-label="瀏覽與套用 Design system"><Icon name="tune" size={13} />瀏覽與套用</button>
             <span className="h-4 w-px bg-white/10" aria-hidden />
             <span className="inline-flex items-center gap-1.5 truncate"><Icon name="folder" size={15} />{projectRoot ? projectRoot.split(/[\\/]/).filter(Boolean).pop() : '尚未選擇工作目錄'}</span>
             <button
@@ -585,6 +700,25 @@ export function SubDesignPage() {
             <div className="mt-3 divide-y divide-white/[0.08] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
               {briefs.slice(0, 4).map((item) => {
                 const surface = SURFACES.find((candidate) => candidate.id === item.surface) || SURFACES[0]
+                const itemArtifacts = artifacts.filter((artifact) => artifact.briefId === item.id)
+                const itemLatestArtifact = [...itemArtifacts].sort((left, right) => {
+                  if (right.revision !== left.revision) return right.revision - left.revision
+                  return right.updatedAt.localeCompare(left.updatedAt)
+                })[0]
+                const itemCritique = itemLatestArtifact
+                  ? critiques
+                      .filter((critique) => critique.artifactId === itemLatestArtifact.id && critique.revision === itemLatestArtifact.revision)
+                      .sort((left, right) => (right.createdAt || '').localeCompare(left.createdAt || ''))[0]
+                  : null
+                const itemThread = threads.find((thread) => thread.id === item.threadId)
+                const itemRunStatus = runningThreadIds.includes(item.threadId) ? 'running' : itemThread?.lastStatus
+                const itemWorkspace = deriveSubDesignWorkspace({
+                  brief: item,
+                  artifacts: itemArtifacts,
+                  selectedArtifact: itemLatestArtifact,
+                  critique: itemCritique,
+                  runStatus: itemRunStatus,
+                })
                 return (
                   <button
                     key={item.id}
@@ -593,7 +727,7 @@ export function SubDesignPage() {
                     className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-white/[0.04]"
                   >
                     <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary"><Icon name={surface.icon} size={16} /></span>
-                    <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium text-on-surface">{item.objective}</span><span className="mt-1 block text-[11px] text-outline">{surface.title} · {stageLabel(item.stage)}</span></span>
+                    <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium text-on-surface">{item.objective}</span><span className="mt-1 block truncate text-[11px] text-outline">{surface.title} · {stageLabel(itemWorkspace.currentStage)} · {itemWorkspace.nextGate.title}</span>{itemWorkspace.latestArtifact ? <span className="mt-1 block truncate text-[10px] text-outline/75">artifact · {itemWorkspace.latestArtifact.title} · revision {itemWorkspace.latestArtifact.revision}</span> : null}</span>
                     <span className="text-[11px] text-outline">{formatRelativeTime(item.updatedAt)}</span>
                     <Icon name="chevron_right" size={16} className="text-outline" />
                   </button>

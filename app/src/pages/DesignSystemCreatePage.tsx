@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { SubDesignReference } from '../agent/subdesign/types'
 import { Icon } from '../components/Icon'
+import { SubDesignStudioNav } from '../components/subdesign/SubDesignStudioNav'
 import { useProjectStore } from '../store/projectStore'
 import { useSubDesignStore } from '../store/subDesignStore'
 import { useThreadStore } from '../store/threadStore'
@@ -20,6 +21,13 @@ function buildObjective(title: string, category: string, context: string, source
 
 export function DesignSystemCreatePage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const returnToValue = searchParams.get('returnTo')
+  const returnTo = returnToValue?.startsWith('/subdesign') ? returnToValue : '/subdesign'
+  const briefId = searchParams.get('briefId') || ''
+  const libraryParams = new URLSearchParams({ returnTo })
+  if (briefId) libraryParams.set('briefId', briefId)
+  const systemsHref = `/design-systems?${libraryParams.toString()}`
   const projectRoot = useProjectStore((state) => state.root)
   const createThread = useThreadStore((state) => state.createThread)
   const setSubDesignBriefId = useThreadStore((state) => state.setSubDesignBriefId)
@@ -111,7 +119,7 @@ export function DesignSystemCreatePage() {
   return (
     <div className="h-full min-w-0 overflow-auto bg-background text-on-background">
       <main className="mx-auto w-full max-w-[980px] px-5 pb-16 pt-8 md:px-8 lg:pt-10">
-        <button type="button" onClick={() => navigate('/design-systems')} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-outline hover:text-primary"><Icon name="arrow_back" size={15} />回到 Design Systems</button>
+        <SubDesignStudioNav active="systems" studioHref={returnTo} systemsHref={systemsHref} contextLabel="從品牌來源建立契約，再回到 Studio 套用" onNavigate={navigate} />
         <section className="mt-5 max-w-[760px]">
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary"><Icon name="account_tree" size={16} />Brand → Studio</div>
           <h1 className="mt-3 font-[family-name:var(--font-sora)] text-[30px] font-semibold tracking-tight text-on-surface">從品牌來源建立 Design System</h1>

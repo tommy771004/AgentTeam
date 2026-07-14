@@ -88,3 +88,17 @@ Adding a tool touches: `registry.ts` (name + catalog entry), `schemas.ts` (param
 ### Settings
 
 One flat `LlmSettings` object. Adding a field requires three edits: the interface in `agent/types.ts`, the default in `DEFAULT_LLM_SETTINGS` (`agent/llm.ts`), and UI in `pages/SettingsPage.tsx`. Persisted to localStorage + Electron `settings` IPC; merged in `store/settingsStore.ts` (array/object fields need explicit merge handling there). Settings updates live-apply to the running engine via `agentEngine.configure`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked as local Markdown under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Local issue `Status:` fields use the repository's Traditional Chinese status vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository using the root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.

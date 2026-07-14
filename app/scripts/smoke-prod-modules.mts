@@ -58,16 +58,103 @@ import {
   validateScheduleTriggerSnapshot,
 } from '../src/agent/scheduler.ts'
 import {
+  createPublishScheduleLedger,
+  createPersistentPublishScheduleLedger,
+} from '../src/agent/contentPublishing.ts'
+import { useContentItemStore } from '../src/store/contentItemStore.ts'
+import { useContentPublishStore } from '../src/store/contentPublishStore.ts'
+import { createContentPublishAdapterRegistry } from '../src/agent/contentPublishAdapters.ts'
+import {
+  CONTENT_PUBLISH_PROVIDERS,
+  composePublishText,
+  contentPublishProvider,
+} from '../src/agent/contentPublishPlatforms.ts'
+import {
   matchProactiveEvent,
   validateEventTriggerSnapshot,
 } from '../src/agent/eventMatcher.ts'
 import { consumeNextState } from '../src/agent/outcomeDispatcher.ts'
+import { deriveSubDesignWorkspace } from '../src/agent/subdesign/workspace.ts'
+import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignCritiqueSession } from '../src/agent/subdesign/types.ts'
 import type { ProactiveEvent, ScheduledJob } from '../src/agent/types.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+function makeWorkspaceBrief(overrides: Partial<SubDesignBrief> = {}): SubDesignBrief {
+  return {
+    id: 'brief_workspace_01',
+    threadId: 'thread_workspace_01',
+    surface: 'prototype',
+    objective: '設計商品詳情頁',
+    platform: 'responsive',
+    fidelity: 'high-fidelity',
+    constraints: [],
+    acceptanceCriteria: [],
+    directions: [{ id: 'direction_01', title: 'Calm commerce', summary: '清楚且安靜的商品決策流程' }],
+    stage: 'brief',
+    createdAt: '2026-07-14T00:00:00.000Z',
+    updatedAt: '2026-07-14T00:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function makeWorkspaceArtifact(briefId: string, overrides: Partial<SubDesignArtifact> = {}): SubDesignArtifact {
+  return {
+    id: 'artifact_workspace_01',
+    briefId,
+    kind: 'html',
+    title: 'product-detail.html',
+    entry: 'artifacts/product-detail.html',
+    renderer: 'html',
+    exports: ['html'],
+    supportingFiles: [],
+    status: 'complete',
+    revision: 1,
+    createdAt: '2026-07-14T00:01:00.000Z',
+    updatedAt: '2026-07-14T00:01:00.000Z',
+    ...overrides,
+  }
+}
+
+function makeWorkspaceCritique(artifactId: string, briefId: string): SubDesignCritique {
+  return {
+    artifactId,
+    briefId,
+    revision: 1,
+    createdAt: '2026-07-14T00:02:00.000Z',
+    briefCoverage: 90,
+    brandConformance: 90,
+    accessibility: 90,
+    implementationReadiness: 90,
+    findings: [],
+    evidence: [
+      { kind: 'screenshot', summary: '視覺截圖', path: 'evidence/screenshot.png' },
+      { kind: 'dom', summary: 'DOM snapshot', path: 'evidence/dom.json' },
+      { kind: 'lint', summary: 'Lint evidence', path: 'evidence/lint.json' },
+    ],
+    verdict: 'pass',
+  }
+}
+
+function makeWorkspaceSession(briefId: string, artifactId: string, status: SubDesignCritiqueSession['status']): SubDesignCritiqueSession {
+  return {
+    id: 'crit_session_workspace_01',
+    briefId,
+    artifactId,
+    artifactRevision: 1,
+    status,
+    threshold: 70,
+    currentRoundIndex: 0,
+    previewStep: 2,
+    rounds: [],
+    scoreHistory: [],
+    events: [],
+    startedAt: '2026-07-14T00:02:00.000Z',
+  }
+}
 
 let passed = 0
 
@@ -150,6 +237,75 @@ await test('taskRunCoordinator normalizes ingress without mutating caller input'
 
   const clean = { objective: 'already clean', sourceKind: 'composer' as const }
   assert.equal(normalizeTaskRunInput(clean), clean)
+})
+
+await test('SubDesign workspace derives stage and gate presentation from canonical state', () => {
+  const brief = makeWorkspaceBrief()
+  const initial = deriveSubDesignWorkspace({ brief })
+  assert.equal(initial.currentStage, 'brief')
+  assert.equal(initial.nextGate.id, 'direction')
+  assert.equal(initial.nextGate.status, 'blocked')
+  assert.equal(initial.nextGate.action, 'choose-direction')
+  assert.equal(initial.stages.find((stage) => stage.id === 'brief')?.state, 'active')
+  assert.equal(initial.stages.find((stage) => stage.id === 'build')?.state, 'locked')
+
+  const buildingBrief = makeWorkspaceBrief({ stage: 'build', selectedDirectionId: 'direction_01' })
+  const running = deriveSubDesignWorkspace({ brief: buildingBrief, runStatus: 'running' })
+  assert.equal(running.runStatus, 'active')
+  assert.equal(running.nextGate.id, 'build')
+  assert.equal(running.nextGate.action, 'inspect')
+  assert.equal(running.nextGate.title, 'Build 正在執行')
+
+  const artifact = makeWorkspaceArtifact(buildingBrief.id)
+  const completed = deriveSubDesignWorkspace({ brief: buildingBrief, artifacts: [artifact], runStatus: 'success' })
+  assert.equal(completed.hasCompleteArtifact, true)
+  assert.equal(completed.nextGate.id, 'critique')
+  assert.equal(completed.nextGate.action, 'review-critique')
+  assert.equal(completed.latestArtifact?.id, artifact.id)
+
+  const deliveredBrief = makeWorkspaceBrief({ stage: 'deliver', selectedDirectionId: 'direction_01' })
+  const passed = deriveSubDesignWorkspace({
+    brief: deliveredBrief,
+    artifacts: [artifact],
+    selectedArtifact: artifact,
+    critique: makeWorkspaceCritique(artifact.id, deliveredBrief.id),
+  })
+  assert.equal(passed.critiqueStatus, 'passed')
+  assert.equal(passed.nextGate.status, 'ready')
+  assert.equal(passed.nextGate.action, 'deliver')
+
+  const reviewBrief = makeWorkspaceBrief({ stage: 'critique', selectedDirectionId: 'direction_01' })
+  const runningReview = deriveSubDesignWorkspace({
+    brief: reviewBrief,
+    artifacts: [artifact],
+    selectedArtifact: artifact,
+    critiqueSession: makeWorkspaceSession(reviewBrief.id, artifact.id, 'running'),
+  })
+  assert.equal(runningReview.critiqueStatus, 'running')
+  assert.equal(runningReview.nextGate.action, 'inspect')
+
+  const needsRevision = deriveSubDesignWorkspace({
+    brief: reviewBrief,
+    artifacts: [artifact],
+    selectedArtifact: artifact,
+    critique: { ...makeWorkspaceCritique(artifact.id, reviewBrief.id), verdict: 'needs-revision' },
+    critiqueSession: makeWorkspaceSession(reviewBrief.id, artifact.id, 'interrupted'),
+  })
+  assert.equal(needsRevision.critiqueStatus, 'interrupted')
+  assert.equal(needsRevision.nextGate.status, 'ready')
+  assert.equal(needsRevision.nextGate.action, 'review-critique')
+
+  const passWithoutArtifact = deriveSubDesignWorkspace({
+    brief: deliveredBrief,
+    critique: makeWorkspaceCritique('missing_artifact', deliveredBrief.id),
+  })
+  assert.equal(passWithoutArtifact.nextGate.status, 'blocked')
+  assert.equal(passWithoutArtifact.nextGate.action, 'review-critique')
+
+  const staleSuccess = deriveSubDesignWorkspace({ brief: buildingBrief, runStatus: 'success' })
+  assert.equal(staleSuccess.hasCompleteArtifact, false)
+  assert.equal(staleSuccess.nextGate.status, 'blocked')
+  assert.equal(staleSuccess.nextGate.action, 'start-build')
 })
 
 await test('Phase 5 runner capabilities stay honest for external CLI', () => {
@@ -261,6 +417,295 @@ await test('claimed ScheduledJob produces a durable validated trigger snapshot',
     ).ok,
     false,
   )
+})
+
+await test('ContentItem cannot be scheduled twice for the same platform within 24 hours', () => {
+  const existing = {
+    id: 'publish_schedule_existing',
+    contentItemId: 'content_item_launch',
+    platform: 'linkedin',
+    scheduledAt: '2026-07-14T10:00:00.000Z',
+  }
+  const result = createPublishScheduleLedger([existing]).create(
+    {
+      contentItemId: 'content_item_launch',
+      platform: 'linkedin',
+      scheduledAt: '2026-07-15T09:59:59.000Z',
+    },
+    { now: new Date('2026-07-14T09:00:00.000Z'), id: 'publish_schedule_duplicate' },
+  )
+
+  assert.equal(result.ok, false)
+  if (!result.ok) {
+    assert.equal(result.error.code, 'CONTENT_PLATFORM_ALREADY_SCHEDULED')
+    assert.equal(result.error.message, '此 ContentItem 已在 24 小時內排程發布至此平台')
+  }
+})
+
+await test('retriggering a ContentItem schedule cannot duplicate publish after a stale snapshot', () => {
+  const staleSchedules: Array<{
+    id: string
+    contentItemId: string
+    platform: string
+    scheduledAt: string
+  }> = []
+  const input = {
+    contentItemId: 'content_item_launch',
+    platform: 'linkedin',
+    scheduledAt: '2026-07-14T10:00:00.000Z',
+  }
+
+  const ledger = createPublishScheduleLedger(staleSchedules)
+  const first = ledger.create(input, {
+    id: 'publish_schedule_first',
+  })
+  const retriggered = ledger.create(input, {
+    id: 'publish_schedule_retriggered',
+  })
+
+  assert.equal(first.ok, true)
+  assert.equal(retriggered.ok, false)
+  if (!retriggered.ok) {
+    assert.equal(retriggered.error.code, 'CONTENT_PLATFORM_ALREADY_SCHEDULED')
+  }
+})
+
+await test('retriggering after schedule state reload cannot duplicate publish', () => {
+  let persisted: unknown = []
+  const storage = {
+    read: () => persisted,
+    write: (schedules: unknown[]) => {
+      persisted = schedules
+    },
+  }
+  const input = {
+    contentItemId: 'content_item_restart',
+    platform: 'x',
+    scheduledAt: '2026-07-14T10:00:00.000Z',
+  }
+
+  const firstLedger = createPersistentPublishScheduleLedger(storage)
+  const first = firstLedger.create(input, { id: 'publish_schedule_first' })
+  const reloadedLedger = createPersistentPublishScheduleLedger(storage)
+  const retriggered = reloadedLedger.create(input, {
+    id: 'publish_schedule_retriggered',
+  })
+
+  assert.equal(first.ok, true)
+  assert.equal(retriggered.ok, false)
+  if (!retriggered.ok) {
+    assert.equal(retriggered.error.code, 'CONTENT_PLATFORM_ALREADY_SCHEDULED')
+  }
+})
+
+await test('a stale persistent ledger refreshes before a retrigger', () => {
+  let persisted: unknown = []
+  const storage = {
+    read: () => persisted,
+    write: (schedules: unknown[]) => {
+      persisted = schedules
+    },
+  }
+  const firstLedger = createPersistentPublishScheduleLedger(storage)
+  const staleLedger = createPersistentPublishScheduleLedger(storage)
+  const input = {
+    contentItemId: 'content_item_concurrent',
+    platform: 'x',
+    scheduledAt: '2026-07-14T10:00:00.000Z',
+  }
+
+  assert.equal(firstLedger.create(input, { id: 'publish_schedule_first' }).ok, true)
+  const retriggered = staleLedger.create(input, { id: 'publish_schedule_retriggered' })
+
+  assert.equal(retriggered.ok, false)
+  if (!retriggered.ok) {
+    assert.equal(retriggered.error.code, 'CONTENT_PLATFORM_ALREADY_SCHEDULED')
+  }
+})
+
+await test('invalid persisted publish schedules are ignored during hydration', () => {
+  const ledger = createPersistentPublishScheduleLedger({
+    read: () => [
+      { id: 'valid', contentItemId: 'item-valid', platform: 'x', scheduledAt: '2026-07-14T10:00:00.000Z' },
+      { id: 'invalid', contentItemId: 'item-invalid', platform: 'x', scheduledAt: 'not-a-date' },
+    ],
+    write: () => undefined,
+  })
+
+  assert.deepEqual(ledger.list().map((schedule) => schedule.id), ['valid'])
+})
+
+await test('publish schedule is not accepted when persistence fails', () => {
+  const ledger = createPersistentPublishScheduleLedger({
+    read: () => [],
+    write: () => {
+      throw new Error('storage unavailable')
+    },
+  })
+
+  const result = ledger.create(
+    {
+      contentItemId: 'content_item_persistence',
+      platform: 'x',
+      scheduledAt: '2026-07-14T10:00:00.000Z',
+    },
+    { id: 'publish_schedule_not_saved' },
+  )
+
+  assert.equal(result.ok, false)
+  if (!result.ok) {
+    assert.equal(result.error.code, 'CONTENT_SCHEDULE_PERSISTENCE_FAILED')
+  }
+  assert.deepEqual(ledger.list(), [])
+})
+
+await test('ContentItem schedule creation uses the canonical store owner', () => {
+  const store = useContentPublishStore
+  store.getState().reload()
+  const input = {
+    contentItemId: 'content_item_store',
+    platform: 'instagram',
+    scheduledAt: '2026-07-14T10:00:00.000Z',
+  }
+
+  const first = store.getState().createSchedule(input, { id: 'store_first' })
+  const retriggered = store.getState().createSchedule(input, { id: 'store_retry' })
+
+  assert.equal(first.ok, true)
+  assert.equal(retriggered.ok, false)
+  assert.equal(store.getState().schedules.length, 1)
+})
+
+await test('ContentItem creation rejects duplicate IDs before scheduling', () => {
+  const store = useContentItemStore
+  store.getState().reload()
+  const input = { id: 'content_item_unique', title: '唯一內容', body: '正文' }
+  const first = store.getState().createItem(input)
+  const duplicate = store.getState().createItem(input)
+
+  assert.equal(first.ok, true)
+  assert.equal(duplicate.ok, false)
+  if (!duplicate.ok) {
+    assert.equal(duplicate.error.code, 'CONTENT_ITEM_ALREADY_EXISTS')
+  }
+  assert.equal(store.getState().items.length, 1)
+})
+
+await test('content publishing provider contract covers OAuth/API requirements', () => {
+  assert.deepEqual(
+    CONTENT_PUBLISH_PROVIDERS.map((provider) => provider.id),
+    ['instagram', 'linkedin', 'x', 'facebook', 'youtube'],
+  )
+  assert.equal(contentPublishProvider(' LINKEDIN ')?.scopes.includes('w_member_social'), true)
+  assert.equal(contentPublishProvider('instagram')?.requiresMedia, true)
+  assert.equal(contentPublishProvider('youtube')?.mediaKind, 'video')
+  assert.equal(contentPublishProvider('x')?.requiresMedia, false)
+  assert.equal(composePublishText('標題', '正文'), '標題\n\n正文')
+})
+
+await test('content publishing OAuth boundary keeps raw tokens out of renderer IPC', () => {
+  const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
+  const bridge = fs.readFileSync(path.join(appRoot, 'electron/contentPublishBridge.ts'), 'utf8')
+  const oauthBlock = preload.slice(preload.indexOf('contentPublishing:'), preload.indexOf('project:', preload.indexOf('contentPublishing:')))
+
+  assert.doesNotMatch(oauthBlock, /accessToken\??:\s*string|refreshToken\??:\s*string/i)
+  assert.match(bridge, /setVaultOAuthSecret\(/)
+  assert.match(bridge, /runPluginOAuth\(/)
+  assert.match(bridge, /Authorization.*Bearer/)
+})
+
+await test('scheduled ContentItem is not reported as published without a platform adapter', async () => {
+  const registry = createContentPublishAdapterRegistry()
+  const result = await registry.publish(
+    {
+      id: 'schedule_no_adapter',
+      contentItemId: 'content_item_no_adapter',
+      platform: 'instagram',
+      scheduledAt: '2026-07-14T10:00:00.000Z',
+    },
+    { title: '內容', body: '正文' },
+  )
+
+  assert.deepEqual(registry.platforms(), [])
+  assert.equal(result.ok, false)
+  assert.equal(result.status, 'not-published')
+  if (!result.ok) assert.equal(result.code, 'PLATFORM_ADAPTER_UNAVAILABLE')
+})
+
+await test('platform adapter success is the only path that reports published', async () => {
+  let receivedPlatform = ''
+  const registry = createContentPublishAdapterRegistry([
+    {
+      platform: 'LINKEDIN',
+      publish: async (payload) => {
+        receivedPlatform = payload.platform
+        return { ok: true, status: 'published', externalId: 'post_123' }
+      },
+    },
+  ])
+  const result = await registry.publish(
+    {
+      id: 'schedule_adapter',
+      contentItemId: 'content_item_adapter',
+      platform: 'linkedin',
+      scheduledAt: '2026-07-14T10:00:00.000Z',
+    },
+    { title: '內容', body: '正文' },
+  )
+
+  assert.deepEqual(registry.platforms(), ['linkedin'])
+  assert.equal(receivedPlatform, 'linkedin')
+  assert.equal(result.ok, true)
+  if (result.ok) assert.equal(result.status, 'published')
+})
+
+await test('publish execution persists failed status when no adapter is configured', async () => {
+  const store = useContentPublishStore
+  store.getState().reload()
+  const created = store.getState().createSchedule(
+    {
+      contentItemId: 'content_item_execution_status',
+      platform: 'instagram',
+      scheduledAt: '2026-07-14T10:00:00.000Z',
+    },
+    { id: 'schedule_execution_status' },
+  )
+  assert.equal(created.ok, true)
+
+  const result = await store.getState().publishSchedule('schedule_execution_status', {
+    title: '內容',
+    body: '正文',
+  })
+  const schedule = store.getState().schedules.find((item) => item.id === 'schedule_execution_status')
+
+  assert.equal(result.ok, false)
+  assert.equal(result.status, 'not-published')
+  assert.equal(schedule?.status, 'failed')
+  assert.match(schedule?.lastError || '', /adapter/)
+})
+
+await test('adapter exceptions become an explicit not-published result', async () => {
+  const registry = createContentPublishAdapterRegistry([
+    {
+      platform: 'x',
+      publish: async () => {
+        throw new Error('network unavailable')
+      },
+    },
+  ])
+  const result = await registry.publish(
+    {
+      id: 'schedule_adapter_error',
+      contentItemId: 'content_item_adapter_error',
+      platform: 'x',
+      scheduledAt: '2026-07-14T10:00:00.000Z',
+    },
+    { title: '內容', body: '正文' },
+  )
+
+  assert.equal(result.ok, false)
+  assert.equal(result.status, 'not-published')
+  if (!result.ok) assert.equal(result.code, 'PLATFORM_PUBLISH_FAILED')
 })
 
 await test('event matcher returns strict boolean evidence and rejects predicate misses', () => {

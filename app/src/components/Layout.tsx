@@ -28,6 +28,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: '自動化',
     items: [
       { to: '/automation', label: '定時與事件', icon: 'schedule' },
+      { to: '/content-publishing', label: '內容發布', icon: 'campaign' },
     ],
   },
   {
@@ -46,7 +47,6 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: '系統',
     items: [
-      { to: '/design-systems', label: 'Design Systems', icon: 'palette' },
       { to: '/docs', label: '文件說明', icon: 'menu_book' },
       { to: '/settings', label: '設定', icon: 'settings' },
     ],
@@ -63,6 +63,9 @@ function navItemActive(to: string, pathname: string, search: string, end?: boole
     // 學習中心：plugins 分頁時改亮「擴充」
     if (pathname !== '/learning') return false
     return new URLSearchParams(search).get('tab') !== 'plugins'
+  }
+  if (path === '/subdesign') {
+    return pathname === '/subdesign' || pathname.startsWith('/subdesign/') || pathname === '/design-systems' || pathname.startsWith('/design-systems/')
   }
   return pathname === path || pathname.startsWith(`${path}/`)
 }

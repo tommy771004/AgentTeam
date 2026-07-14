@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
 
 const api = {
   platform: () => ipcRenderer.invoke('app:platform') as Promise<string>,
@@ -451,6 +452,54 @@ const api = {
         ipcRenderer.removeListener('oauth:status', handler)
       }
     },
+  },
+  contentPublishing: {
+    oauth: (input: { platform: 'instagram' | 'linkedin' | 'x' | 'facebook' | 'youtube'; clientId?: string; clientSecret?: string }) =>
+      ipcRenderer.invoke('contentPublishing:oauth', input) as Promise<{
+        ok: true
+        platform: 'instagram' | 'linkedin' | 'x' | 'facebook' | 'youtube'
+        status: {
+          platform: 'instagram' | 'linkedin' | 'x' | 'facebook' | 'youtube'
+          label: string
+          connected: boolean
+          expiresAt?: number
+          hasRefreshToken: boolean
+          encrypted: boolean
+          accountLabel?: string
+          accountId?: string
+          error?: string
+        }
+      } | {
+        ok: false
+        platform: string
+        error: string
+      }>,
+    status: () => ipcRenderer.invoke('contentPublishing:status') as Promise<Array<{
+      platform: 'instagram' | 'linkedin' | 'x' | 'facebook' | 'youtube'
+      label: string
+      connected: boolean
+      expiresAt?: number
+      hasRefreshToken: boolean
+      encrypted: boolean
+      accountLabel?: string
+      accountId?: string
+      error?: string
+    }>>,
+    disconnect: (platform: string) =>
+      ipcRenderer.invoke('contentPublishing:disconnect', platform) as Promise<{ ok: boolean; error?: string }>,
+    publish: (input: {
+      scheduleId: string
+      contentItemId: string
+      platform: string
+      scheduledAt: string
+      title: string
+      body: string
+      mediaUrl?: string
+      mediaPath?: string
+      mediaMimeType?: string
+      targetId?: string
+      privacyStatus?: 'private' | 'public' | 'unlisted'
+    }) => ipcRenderer.invoke('contentPublishing:publish', input) as Promise<PublishAdapterResult>,
   },
   project: {
     pick: (opts?: { defaultPath?: string }) =>

@@ -110,6 +110,14 @@ import {
 import { cancelOAuth, refreshOAuthToken, runPluginOAuth } from './oauthBridge'
 import { oauthProviderForPlugin } from '../src/agent/hermes/pluginOAuth'
 import {
+  disconnectContentPublish,
+  listContentPublishStatus,
+  publishContent,
+  runContentPublishOAuth,
+  type ContentPublishBridgeInput,
+  type ContentPublishOAuthInput,
+} from './contentPublishBridge'
+import {
   isProjectRelativePath,
   validateSubDesignArtifactManifest,
 } from '../src/agent/subdesign/artifactManifest'
@@ -999,6 +1007,25 @@ ipcMain.handle(
       tokenAuth: input?.tokenAuth,
     })
   },
+)
+
+// ── Content publishing OAuth/API (tokens stay in main vault) ─────
+
+ipcMain.handle(
+  'contentPublishing:oauth',
+  async (evt, input: ContentPublishOAuthInput) =>
+    runContentPublishOAuth(input, evt.sender),
+)
+
+ipcMain.handle('contentPublishing:status', async () => listContentPublishStatus())
+
+ipcMain.handle('contentPublishing:disconnect', async (_evt, platform: string) =>
+  disconnectContentPublish(platform),
+)
+
+ipcMain.handle(
+  'contentPublishing:publish',
+  async (_evt, input: ContentPublishBridgeInput) => publishContent(input),
 )
 
 ipcMain.handle('shell:openExternal', async (_evt, url: string) => {

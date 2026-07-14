@@ -1,5 +1,5 @@
-import { isProjectRelativePath } from './artifactManifest'
-import type { SubDesignCritique, SubDesignCritiqueEvidence, SubDesignCritiqueFinding } from './types'
+import { isProjectRelativePath } from './artifactManifest.ts'
+import type { SubDesignCritique, SubDesignCritiqueEvidence, SubDesignCritiqueFinding } from './types.ts'
 
 export function clampScore(value: unknown): number {
   const score = Number(value)

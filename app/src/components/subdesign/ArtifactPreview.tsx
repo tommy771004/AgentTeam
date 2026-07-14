@@ -9,7 +9,7 @@ function withPreviewCsp(content: string): string {
   return `<!doctype html><html><head>${csp}</head><body>${content}</body></html>`
 }
 
-export function ArtifactPreview({ artifact }: { artifact: SubDesignArtifact | null }) {
+export function ArtifactPreview({ artifact, mode = 'preview' }: { artifact: SubDesignArtifact | null; mode?: 'preview' | 'source' }) {
   const projectRoot = useProjectStore((state) => state.root)
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(false)
@@ -53,7 +53,9 @@ export function ArtifactPreview({ artifact }: { artifact: SubDesignArtifact | nu
       {loading ? <div className="grid min-h-[220px] place-items-center text-[12px] text-outline">讀取 artifact…</div> : null}
       {error ? <div className="m-4 rounded-xl border border-error/30 bg-error/10 px-3 py-3 text-[12px] text-error">{error}</div> : null}
       {!loading && !error && artifact && content ? (
-        artifact.renderer === 'html' || artifact.renderer === 'deck-html' ? (
+        mode === 'source' ? (
+          <pre className="max-h-[620px] min-h-[360px] overflow-auto whitespace-pre-wrap break-words bg-surface-container-lowest p-4 font-mono text-[11px] leading-relaxed text-on-surface-variant custom-scrollbar">{content}</pre>
+        ) : artifact.renderer === 'html' || artifact.renderer === 'deck-html' ? (
           <iframe title={`${artifact.title} preview`} sandbox="allow-scripts" srcDoc={withPreviewCsp(content)} className="h-[360px] w-full border-0 bg-white" />
         ) : (
           <pre className="m-4 max-h-[340px] overflow-auto whitespace-pre-wrap rounded-xl bg-surface-container-lowest p-3 text-[12px] leading-relaxed text-on-surface-variant">{content}</pre>

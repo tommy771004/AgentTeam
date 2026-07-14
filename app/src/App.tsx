@@ -16,6 +16,7 @@ import { SubDesignPage } from './pages/SubDesignPage'
 import { DesignSystemsPage } from './pages/DesignSystemsPage'
 import { DesignSystemCreatePage } from './pages/DesignSystemCreatePage'
 import { DesignSystemDetailPage } from './pages/DesignSystemDetailPage'
+import { ContentPublishingPage } from './pages/ContentPublishingPage'
 import { useSettingsStore } from './store/settingsStore'
 import { useLearningStore } from './store/learningStore'
 import { useScheduleStore } from './store/scheduleStore'
@@ -579,6 +580,7 @@ export default function App() {
           <Route path="design-systems" element={<DesignSystemsPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="automation" element={<AutomationPage />} />
+          <Route path="content-publishing" element={<ContentPublishingPage />} />
           <Route path="docs" element={<DocsPage />} />
           <Route path="records" element={<RecordsPage />} />
           <Route path="settings" element={<SettingsPage />} />
