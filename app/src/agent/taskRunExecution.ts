@@ -1,8 +1,7 @@
 /**
- * Legacy lifecycle implementation behind taskRunCoordinator (W1 / P0-A / Phase 3).
- * Every entry still funnels here via `coordinateTaskRun`. Capacity, attachments,
- * thread bind, beforeRun, dispatch snapshot, and finalization are owned by
- * coordinator helpers — each run does them once.
+ * Internal Task run execution owner behind the canonical coordinator seam.
+ * Every entry funnels through `runTask`. Capacity, attachments, thread bind,
+ * beforeRun, dispatch snapshot, and finalization each execute once.
  *
  * When busy: policy decides queue / steer / reject — no caller re-implements lifecycle.
  */
@@ -11,23 +10,21 @@ import { v4 as uuid } from 'uuid'
 import type {
   AgentState,
   ChatAttachment,
+  EventTriggerSnapshot,
   ExternalRunRef,
   LoopType,
   RuntimeOverrides,
-  EventTriggerSnapshot,
-  ScheduleKind,
   ScheduleTriggerSnapshot,
 } from './types'
-import { dispatchThreadTask, type DispatchResult } from './runDispatch'
+import { dispatchThreadTask } from './runDispatch'
 import {
   bindRunThread,
-  buildRunDispatchSnapshot,
   checkRunCapacity,
   evaluateBeforeRunHooks,
   finalizeTaskRun,
   prepareRunAttachments,
   reserveRunCapacity,
-} from './taskRunCoordinator'
+} from './taskRunLifecycleSupport'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -48,6 +45,53 @@ import {
   isClaimedScheduleTrigger,
   validateScheduleTriggerSnapshot,
 } from './scheduler'
+import { normalizeTaskObjective } from './taskRunInput'
+import type {
+  ExternalRunOpts,
+  ExternalRunResult,
+  RunDispatchSnapshot,
+  RunSourceKind,
+  TaskRunInput,
+  TaskRunResult,
+} from './taskRunContracts'
+
+function buildRunDispatchSnapshot(parts: {
+  runId: string
+  threadId: string
+  objective: string
+  runner?: ThreadRunner
+  forceLoopType?: LoopType
+  attachments?: ChatAttachment[]
+  overrides: RuntimeOverrides
+}): RunDispatchSnapshot {
+  const attachments = parts.attachments || parts.overrides.userAttachments || []
+  const forceLoopType =
+    parts.forceLoopType ||
+    (parts.overrides.loopTypeMode === 'force'
+      ? parts.overrides.forceLoopType
+      : undefined)
+  return {
+    runId: parts.runId,
+    threadId: parts.threadId,
+    objective: parts.objective.trim(),
+    runner: parts.runner || 'builtin',
+    forceLoopType,
+    attachments: attachments.slice(),
+    overrides: {
+      ...parts.overrides,
+      runId: parts.runId,
+      threadId: parts.threadId,
+      userAttachments: attachments.length
+        ? attachments
+        : parts.overrides.userAttachments,
+      forceLoopType: forceLoopType || parts.overrides.forceLoopType,
+      loopTypeMode: forceLoopType
+        ? 'force'
+        : parts.overrides.loopTypeMode || 'auto',
+      deferFinalization: true,
+    },
+  }
+}
 
 /** Compact partial result when steer aborts a running task. */
 function buildSteerPartialDigest(agent: AgentState): string {
@@ -83,18 +127,6 @@ function buildSteerPartialDigest(agent: AgentState): string {
   return bits.join('\n').slice(0, 1200)
 }
 
-/** Where a run request came from — the ONLY thing entries may vary. */
-export type RunSourceKind =
-  | 'composer'
-  | 'slash'
-  | 'retry'
-  | 'schedule'
-  | 'webhook'
-  | 'telegram'
-  | 'event'
-  | 'delegate'
-  | 'queue-drain'
-
 export type BusyPolicy = 'queue' | 'steer' | 'reject'
 
 /**
@@ -122,86 +154,9 @@ export function resolveBusyPolicy(
   }
 }
 
-export type ExternalRunOpts = {
-  objective: string
-  /** Entry source — drives busy policy / unattended / trace. Legacy callers may omit. */
-  sourceKind?: RunSourceKind
-  /** Stable run id for trace correlation (assigned here; survives queue). */
-  runId?: string
-  /** Thread title */
-  title?: string
-  loopType?: LoopType
-  runner?: ThreadRunner
-  /** Webhook/event already boolean-matched */
-  eventPreMatched?: boolean
-  attachedSkills?: string[]
-  /** Shown as system bubble */
-  sourceLabel?: string
-  /** Extra overrides merged into dispatch */
-  overrides?: RuntimeOverrides
-  /** Pin project for this run (scheduler multi-project) */
-  projectRoot?: string
-  /** Chat attachments (Telegram images, etc.) */
-  attachments?: ChatAttachment[]
-  /** Extra context folded into system (webhook body, TG meta) */
-  extraContext?: string
-  /**
-   * Continue an existing thread (interactive follow-up queue).
-   * When set, does not create a new thread.
-   */
-  reuseThreadId?: string
-  /**
-   * Phase 3 item 7: background worker — creates a hidden thread that does not
-   * appear in the sidebar or steal active selection.
-   */
-  workerThread?: boolean
-  /** User bubble already shown — skip duplicate on drain */
-  skipUserBubble?: boolean
-  /** Interactive: enqueue when busy even if not unattended automation */
-  enqueueWhenBusy?: boolean
-  /** Navigate to home (caller may also navigate) */
-  preferHome?: boolean
-  /**
-   * Force unattended HITL policy (auto-timeout deny).
-   * Auto-inferred from sourceLabel for scheduler/webhook/telegram when omitted.
-   */
-  unattended?: boolean
-  /**
-   * Called when the run actually finishes (success/fail/halted).
-   * Survives enqueue → drain so schedule once-jobs can markJobResult after 補跑.
-   * Not called when only enqueued or dropped as busy.
-   * (Not persisted across app restart — use meta.scheduleJobId for durable rebind.)
-   */
-  onSettled?: (result: ExternalRunResult) => void | Promise<void>
-  /** Serializable metadata for queue persistence */
-  meta?: {
-    scheduleJobId?: string
-    scheduleTriggeredAt?: string
-    scheduleKind?: ScheduleKind
-    eventTrigger?: EventTriggerSnapshot
-  }
-  /** Internal: skip re-enqueue when draining queue */
-  _fromQueue?: boolean
-  /**
-   * Resume thread.continueGoal (same DoD / missing).
-   * When true, forces Goal-based corrective run.
-   */
-  continueGoal?: boolean
-  /** Extra user hint when continuing (appended to corrective context) */
-  continueHint?: string
-}
-
-export type ExternalRunResult = DispatchResult & {
-  threadId: string | null
-  /** Trace id — correlates thread / archive / queue / HITL */
-  runId?: string
-  skipped?: boolean
-  /** busy | queued | cancelled */
-  skipReason?: string
-  queued?: boolean
-  queueId?: string
-  /** Conversation automation was recognised but awaits explicit consent. */
-  suggestion?: AutomationSuggestion
+/** Normalize ingress without mutating the caller-owned request. */
+function normalizeTaskRunInput(input: TaskRunInput): TaskRunInput {
+  return normalizeTaskObjective(input)
 }
 
 /**
@@ -441,28 +396,18 @@ function presentConversationAutomationSuggestion(
   }
 }
 
-/** Canonical input name for the lifecycle controller. */
-export type RunTaskInput = ExternalRunOpts
-
 /**
- * runTask — compatibility adapter for the canonical taskRunCoordinator seam.
- * New callers must import `runTask` from `taskRunCoordinator` instead.
+ * Run an objective through the complete Task run lifecycle.
  */
-export async function runTask(input: RunTaskInput): Promise<ExternalRunResult> {
-  const { coordinateTaskRun } = await import('./taskRunCoordinator')
-  return coordinateTaskRun(input)
+export type TaskRunExecutionDeps = {
+  reenterTask: (input: TaskRunInput) => Promise<TaskRunResult>
 }
 
-/**
- * Legacy implementation retained behind taskRunCoordinator.
- *
- * Run an objective from automation/external source with full thread UX.
- * Also used for interactive follow-ups (reuseThreadId + enqueueWhenBusy).
- * @deprecated New callers must use `taskRunCoordinator.runTask`.
- */
-export async function runExternalObjective(
-  opts: ExternalRunOpts,
-): Promise<ExternalRunResult> {
+export async function executeTaskRun(
+  input: TaskRunInput,
+  deps: TaskRunExecutionDeps,
+): Promise<TaskRunResult> {
+  const opts = normalizeTaskRunInput(input)
   let objective = opts.objective.trim()
   if (!objective && opts.attachments?.length) {
     objective = '請分析我附上的圖片或檔案。'
@@ -840,6 +785,8 @@ export async function runExternalObjective(
       projectRoot: opts.projectRoot,
       settings,
       onSettled: opts.onSettled,
+      reenterTask: deps.reenterTask,
+      syncExternalSession: syncOpenCodeSessionMapping,
       early: {
         error: `執行被 hook 政策拒絕：${beforeRun.denyReason}`,
       },
@@ -898,6 +845,8 @@ export async function runExternalObjective(
       settings,
       dispatchResult: result,
       onSettled: opts.onSettled,
+      reenterTask: deps.reenterTask,
+      syncExternalSession: syncOpenCodeSessionMapping,
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
@@ -909,6 +858,8 @@ export async function runExternalObjective(
       projectRoot: snapshot.overrides.projectRoot || opts.projectRoot,
       settings,
       onSettled: opts.onSettled,
+      reenterTask: deps.reenterTask,
+      syncExternalSession: syncOpenCodeSessionMapping,
       early: { error: `執行失敗：${msg}` },
     })
   }

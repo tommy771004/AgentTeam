@@ -28,7 +28,7 @@ export function createScheduleTriggerSnapshot(
   }
 }
 
-/** Validate the small serializable proof carried into runExternal / the queue. */
+/** Validate the small serializable proof carried into the Task run coordinator / queue. */
 export function validateScheduleTriggerSnapshot(
   input: unknown,
   now = new Date(),

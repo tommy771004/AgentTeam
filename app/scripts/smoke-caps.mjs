@@ -372,7 +372,7 @@ await test('Phase 1: OpenCode server adapter is localhost-only and has safe fall
 await test('Phase 2: OpenCode session todo/children/fork map into Thread state', async () => {
   const fs = await import('node:fs')
   const mapping = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/sessionMapping.ts'), 'utf8')
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const serverClient = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/serverClient.ts'), 'utf8')
   const thread = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
   assert.match(mapping, /normalizeOpenCodeTodo/)
@@ -402,7 +402,7 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
   const llm = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const runtime = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/runtime.ts'), 'utf8')
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
@@ -546,7 +546,7 @@ await test('W1: entry drift guard — no dispatchThreadTask outside controller',
       `${f} 不可直呼 dispatchThreadTask — 必須走 runTask/runExternalObjective`,
     )
   }
-  const controller = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const controller = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   assert.match(controller, /resolveBusyPolicy/)
   assert.match(controller, /runId/)
 })
@@ -554,7 +554,9 @@ await test('W1: entry drift guard — no dispatchThreadTask outside controller',
 await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async () => {
   const fs = await import('node:fs')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
-  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const execution = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
+  const support = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunLifecycleSupport.ts'), 'utf8')
+  const contracts = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunContracts.ts'), 'utf8')
   const callers = [
     'src/App.tsx',
     'src/store/agentStore.ts',
@@ -571,19 +573,20 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
     'src/components/subdesign/CritiqueTheater.tsx',
     'src/agent/hermes/backgroundJobs.ts',
   ]
-  assert.match(coordinator, /export async function coordinateTaskRun/)
   assert.match(coordinator, /export async function runTask/)
   assert.match(coordinator, /normalizeTaskRunInput/)
-  assert.match(coordinator, /await import\('\.\/runExternal'\)/)
-  assert.match(legacy, /compatibility adapter for the canonical taskRunCoordinator seam/)
-  assert.match(legacy, /coordinateTaskRun/)
-  assert.match(legacy, /@deprecated New callers must use `taskRunCoordinator\.runTask`/)
+  assert.match(coordinator, /await import\('\.\/taskRunExecution'\)/)
+  assert.match(execution, /dispatchThreadTask\(snapshot\)/)
+  assert.match(execution, /from '\.\/taskRunLifecycleSupport'/)
+  assert.doesNotMatch(support, /import\('\.\/taskRunExecution'\)|from '\.\/taskRunExecution'|from '\.\/taskRunCoordinator'/)
+  assert.doesNotMatch(contracts, /taskRunExecution|taskRunLifecycleSupport|taskRunCoordinator/)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/runExternal.ts')), false)
   for (const file of callers) {
     const source = fs.readFileSync(path.join(appRoot, file), 'utf8')
     assert.doesNotMatch(
       source,
-      /runExternalObjective\s*\(/,
-      `${file} 不可直接呼叫 runExternalObjective`,
+      /runExternalObjective\s*\(|taskRunExecution|taskRunLifecycleSupport/,
+      `${file} 只能匯入 canonical taskRunCoordinator`,
     )
     assert.match(source, /taskRunCoordinator/)
   }
@@ -594,8 +597,8 @@ await test('Phase 3 item 6/7: background delegate links Archive once + hidden wo
   const bg = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
   const thread = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
   const sidebar = fs.readFileSync(path.join(appRoot, 'src/components/ThreadSidebar.tsx'), 'utf8')
-  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
-  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunContracts.ts'), 'utf8')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunLifecycleSupport.ts'), 'utf8')
   assert.match(bg, /archiveRunId/)
   assert.match(bg, /workerThread: true/)
   assert.match(bg, /job\.archiveRunId/)
@@ -609,14 +612,17 @@ await test('Phase 3 item 6/7: background delegate links Archive once + hidden wo
 
 await test('Phase 3 item 3: runDispatch consumes RunDispatchSnapshot only', async () => {
   const fs = await import('node:fs')
-  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const contracts = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunContracts.ts'), 'utf8')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
-  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
-  assert.match(coordinator, /export type RunDispatchSnapshot/)
-  assert.match(coordinator, /export function buildRunDispatchSnapshot/)
+  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
+  assert.match(contracts, /export type RunDispatchSnapshot/)
+  assert.match(coordinator, /function buildRunDispatchSnapshot/)
   assert.match(coordinator, /deferFinalization: true/)
   assert.match(dispatch, /RunDispatchSnapshot/)
-  assert.match(dispatch, /isRunDispatchSnapshot|snapshot\.runId|snapshot\.overrides/)
+  assert.match(dispatch, /snapshot\.runId|snapshot\.overrides/)
+  assert.doesNotMatch(dispatch, /snapshotOrGoal|legacyOpts|run_legacy_/)
+  assert.doesNotMatch(dispatch, /goal: string/)
   assert.doesNotMatch(dispatch, /canStartRun/)
   assert.doesNotMatch(dispatch, /materializeAttachmentsOnDisk/)
   assert.doesNotMatch(dispatch, /hydrateAttachmentsFromDisk/)
@@ -627,8 +633,8 @@ await test('Phase 3 item 3: runDispatch consumes RunDispatchSnapshot only', asyn
 
 await test('Phase 3 item 4/5: unique finalization order; stop does not drain', async () => {
   const fs = await import('node:fs')
-  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
-  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunLifecycleSupport.ts'), 'utf8')
+  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
   assert.match(coordinator, /export async function finalizeTaskRun/)
@@ -658,8 +664,8 @@ await test('Phase 3 item 4/5: unique finalization order; stop does not drain', a
 
 await test('Phase 3 item 2: coordinator owns capacity / attachments / thread / beforeRun once', async () => {
   const fs = await import('node:fs')
-  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
-  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunLifecycleSupport.ts'), 'utf8')
+  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
 
   // Coordinator exports the single-owner prep APIs
@@ -700,7 +706,7 @@ await test('ADR3: concurrent-run registry, targeted HITL, and CLI cancellation s
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const thread = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
   const permission = fs.readFileSync(path.join(appRoot, 'src/store/permissionAskStore.ts'), 'utf8')
-  const controller = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const controller = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
   const settingsPage = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
   const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
@@ -719,7 +725,7 @@ await test('ADR3: concurrent-run registry, targeted HITL, and CLI cancellation s
   // Phase 3 item 2: capacity check/reserve owned by coordinator, used by controller
   assert.match(controller, /checkRunCapacity|reserveRunCapacity/)
   assert.match(
-    fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8'),
+    fs.readFileSync(path.join(appRoot, 'src/agent/taskRunLifecycleSupport.ts'), 'utf8'),
     /export async function (checkRunCapacity|reserveRunCapacity)/,
   )
   assert.doesNotMatch(controller, /agent\.isRunning/)
@@ -808,7 +814,7 @@ await test('Phase 1: run activity is run-scoped with bounded terminal retention'
 await test('Phase 1: finalization summary consumes the explicit run presentation', async () => {
   const fs = await import('node:fs')
   // Phase 3 item 4: process summary moved into coordinator finalizeTaskRun
-  const controller = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const controller = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunLifecycleSupport.ts'), 'utf8')
   assert.match(controller, /getState\(\)\.getPresentation\(runId\)/)
   assert.match(controller, /const presentation = useRunActivityStore\.getState\(\)\.getPresentation\(runId\)/)
   assert.match(controller, /presentation\?\.events/)
@@ -897,7 +903,7 @@ await test('SubDesign Phase 4/5: critique gate + Electron export contract', asyn
   const capability = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/subDesign.ts'), 'utf8')
   const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
   // Phase 3 item 4: subDesign export digest lives in coordinator finalization summary
-  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunLifecycleSupport.ts'), 'utf8')
   assert.match(critique, /critiqueAllowsDeliver/)
   assert.match(guard, /design_artifact_export/)
   assert.match(capability, /design_artifact_export/)
@@ -1256,8 +1262,8 @@ await test('P1-D: wiring contract — hooks evaluated at all four points; saniti
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
   assert.match(guard, /point: 'beforeTool'/)
   assert.match(guard, /sourceKind: opts\.sourceKind/)
-  const runX = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
-  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const runX = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunLifecycleSupport.ts'), 'utf8')
   // Phase 3: beforeRun + afterRun owned by coordinator (admit + finalize)
   assert.match(coordinator, /point: 'beforeRun'/)
   assert.match(coordinator, /point: 'afterRun'/)
@@ -1335,7 +1341,7 @@ await test('Phase 2a: conversational automation is suggestion-only and auto loop
   const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
   const automation = fs.readFileSync(path.join(appRoot, 'src/agent/automationSuggestion.ts'), 'utf8')
   const llm = fs.readFileSync(path.join(appRoot, 'src/agent/llmParser.ts'), 'utf8')
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const scheduleText = '每天 08:00 寄摘要'
   assert.equal(/每日|每天|定時|排程/.test(scheduleText), true)
   assert.equal(parseLlmPlanMirror('{"loopType":"Time-based","steps":["a","b"],"definitionOfDone":"ok"}').loopType, 'Goal-based')
@@ -1353,7 +1359,7 @@ await test('Phase 2b: Time-based runs require a claimed ScheduledJob trigger sna
   const fs = await import('node:fs')
   const scheduler = fs.readFileSync(path.join(appRoot, 'src/agent/scheduler.ts'), 'utf8')
   const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
@@ -1390,7 +1396,7 @@ await test('Phase 2c: Proactive runs require matcher-produced event evidence', a
   const matcher = fs.readFileSync(path.join(appRoot, 'src/agent/eventMatcher.ts'), 'utf8')
   const store = fs.readFileSync(path.join(appRoot, 'src/store/scheduleStore.ts'), 'utf8')
   const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
@@ -1426,7 +1432,7 @@ await test('Phase 2d: Next_State is consumed once with explicit webhook delivery
   const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
   const llmParser = fs.readFileSync(path.join(appRoot, 'src/agent/llmParser.ts'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
   const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
@@ -1445,7 +1451,7 @@ await test('Phase 2d: Next_State is consumed once with explicit webhook delivery
   assert.match(agent, /applyPostState/)
   assert.match(agent, /saveToArchive\(settled/)
   // Phase 3 item 4: postState audit bubbles live in coordinator finalization
-  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunLifecycleSupport.ts'), 'utf8')
   assert.match(coordinator, /postState\?\.status === 'failed'/)
   assert.match(coordinator, /finalizeTaskRun/)
   assert.match(dispatch, /nextState: snapshot\.overrides\.nextState/)
@@ -1484,7 +1490,7 @@ await test('Phase 2e: plan bubble preserves source and classification reason', a
   const fs = await import('node:fs')
   const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
   assert.match(parser, /export function resolvePlanBubbleMetadata/)
   assert.match(parser, /Trigger source：\$\{meta\.triggerSource\}/)
@@ -1547,7 +1553,7 @@ await test('Loop plan: memory relevance, failure learning, unattended turn, and 
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const skills = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/skills.ts'), 'utf8')
   const intent = fs.readFileSync(path.join(appRoot, 'src/agent/intentPreload.ts'), 'utf8')
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const textSim = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/textSimilarity.ts'), 'utf8')
   assert.match(memory, /buildPromptBlock\(enabled = true, objective\?: string\)/)
   assert.match(memory, /失敗教訓/)
@@ -1619,7 +1625,7 @@ await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal gate
   const localCli = fs.readFileSync(path.join(appRoot, 'src/agent/localCliRun.ts'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
-  const runX = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runX = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
 
@@ -1666,7 +1672,7 @@ await test('Phase 4: ContextPacket slots, no final 2000-slice, onUserTurn owners
   const prompt = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/promptBuilder.ts'), 'utf8')
   const learning = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const session = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/sessionSearch.ts'), 'utf8')
 
   assert.match(packet, /export function buildContextPacket/)
@@ -1703,10 +1709,10 @@ await test('attachments: tiny vision images are upscaled above provider minimum'
   assert.match(attachments, /visionImageDimensions/)
   assert.match(attachments, /normalizeImageAttachmentsForVision/)
   // Phase 3 item 2: attachment normalize owned by coordinator prepareRunAttachments
-  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunLifecycleSupport.ts'), 'utf8')
   assert.match(coordinator, /normalizeImageAttachmentsForVision/)
   assert.match(coordinator, /prepareRunAttachments/)
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   assert.match(runExternal, /prepareRunAttachments/)
 })
 
@@ -1753,7 +1759,7 @@ await test('P3: continue goal phrase detection', () => {
 await test('P3: continueGoal + steer digest + chatHistory wiring', async () => {
   const fs = await import('node:fs')
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
-  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunExecution.ts'), 'utf8')
   const runDispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
   const continueGoal = fs.readFileSync(path.join(appRoot, 'src/agent/continueGoal.ts'), 'utf8')
   const chatHistory = fs.readFileSync(path.join(appRoot, 'src/agent/chatHistory.ts'), 'utf8')

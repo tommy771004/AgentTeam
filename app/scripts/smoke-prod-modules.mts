@@ -36,7 +36,10 @@ import {
   parseUserRequest,
   resolvePlanBubbleMetadata,
 } from '../src/agent/parser.ts'
-import { normalizeTaskRunInput } from '../src/agent/taskRunCoordinator.ts'
+import {
+  normalizeTaskRunInput,
+  runTask,
+} from '../src/agent/taskRunCoordinator.ts'
 import {
   buildContextPacket,
   formatSessionRecallBlock,
@@ -237,6 +240,20 @@ await test('taskRunCoordinator normalizes ingress without mutating caller input'
 
   const clean = { objective: 'already clean', sourceKind: 'composer' as const }
   assert.equal(normalizeTaskRunInput(clean), clean)
+})
+
+await test('runTask rejects an invalid empty request before loading runtime admission', async () => {
+  const result = await runTask({
+    objective: '   ',
+    sourceKind: 'composer',
+    runId: 'run_empty_public_seam',
+  })
+  assert.deepEqual(result, {
+    path: 'builtin',
+    status: 'failed',
+    error: 'empty objective',
+    threadId: null,
+  })
 })
 
 await test('SubDesign workspace derives stage and gate presentation from canonical state', () => {

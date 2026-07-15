@@ -8,9 +8,8 @@
 
 import type {
   AgentMode,
+  ChatAttachment,
   CliConfigSnapshot,
-  LoopType,
-  PostStateOutcome,
   RuntimeOverrides,
 } from './types'
 import type { ThinkingDepth } from './thinking'
@@ -28,24 +27,13 @@ import {
 import { buildIntentPreloadIds } from './intentPreload'
 import { buildSubDesignRuntimeContext } from './subdesign/prompt'
 import { getSubDesignBriefForThread, useSubDesignStore } from '../store/subDesignStore'
-import type { ChatAttachment } from './types'
 import {
   attachmentsToTextAppendix,
   attachmentsPathAppendix,
   defaultGoalForAttachments,
 } from '../lib/chatAttachments'
-import type { RunDispatchSnapshot } from './taskRunCoordinator'
-
-export type DispatchResult = {
-  path: 'builtin' | 'cli'
-  /** Phase 5: same outcome shape, different execution semantics. */
-  executionKind?: 'loop' | 'external'
-  kind?: LocalRunnerKind
-  status: string
-  result?: string
-  error?: string
-  postState?: PostStateOutcome
-}
+import type { DispatchResult, RunDispatchSnapshot } from './taskRunContracts'
+export type { DispatchResult } from './taskRunContracts'
 
 function resolveCliBinary(kind: LocalRunnerKind): string | undefined {
   const settings = useSettingsStore.getState().settings
@@ -106,70 +94,13 @@ async function captureOpenCodeConfigSnapshot(
   }
 }
 
-function isRunDispatchSnapshot(value: unknown): value is RunDispatchSnapshot {
-  if (!value || typeof value !== 'object') return false
-  const v = value as Partial<RunDispatchSnapshot>
-  return (
-    typeof v.runId === 'string' &&
-    typeof v.threadId === 'string' &&
-    typeof v.objective === 'string' &&
-    typeof v.runner === 'string' &&
-    Array.isArray(v.attachments) &&
-    Boolean(v.overrides && typeof v.overrides === 'object')
-  )
-}
-
 /**
  * Dispatch from a coordinator-built snapshot.
  * Capacity and attachments must already be prepared — never re-check / re-I/O.
  */
 export async function dispatchThreadTask(
   snapshot: RunDispatchSnapshot,
-): Promise<DispatchResult>
-/**
- * @deprecated Prefer `RunDispatchSnapshot`. Kept only for transitional typing;
- * production ingress always builds a snapshot via `buildRunDispatchSnapshot`.
- */
-export async function dispatchThreadTask(
-  goal: string,
-  opts?: {
-    threadId?: string
-    runner?: ThreadRunner
-    forceLoopType?: LoopType
-    overrides?: RuntimeOverrides
-    attachments?: ChatAttachment[]
-  },
-): Promise<DispatchResult>
-export async function dispatchThreadTask(
-  snapshotOrGoal: RunDispatchSnapshot | string,
-  legacyOpts?: {
-    threadId?: string
-    runner?: ThreadRunner
-    forceLoopType?: LoopType
-    overrides?: RuntimeOverrides
-    attachments?: ChatAttachment[]
-  },
 ): Promise<DispatchResult> {
-  const snapshot: RunDispatchSnapshot = isRunDispatchSnapshot(snapshotOrGoal)
-    ? snapshotOrGoal
-    : {
-        runId: legacyOpts?.overrides?.runId || `run_legacy_${Date.now().toString(36)}`,
-        threadId: legacyOpts?.threadId || useThreadStore.getState().activeId || '',
-        objective: String(snapshotOrGoal || '').trim(),
-        runner: legacyOpts?.runner || 'builtin',
-        forceLoopType: legacyOpts?.forceLoopType,
-        attachments:
-          legacyOpts?.attachments ||
-          legacyOpts?.overrides?.userAttachments ||
-          ([] as ChatAttachment[]),
-        overrides: {
-          ...(legacyOpts?.overrides || {}),
-          runId: legacyOpts?.overrides?.runId,
-          threadId: legacyOpts?.threadId,
-          forceLoopType: legacyOpts?.forceLoopType || legacyOpts?.overrides?.forceLoopType,
-        },
-      }
-
   // Trust snapshot attachments; never re-run normalize/materialize/hydrate.
   const attachments = snapshot.attachments.length
     ? snapshot.attachments

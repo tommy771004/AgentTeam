@@ -9,7 +9,7 @@ import type {
   RuntimeOverrides,
   ScheduleKind,
 } from './types'
-import type { ExternalRunOpts, ExternalRunResult } from './taskRunCoordinator'
+import type { ExternalRunOpts, ExternalRunResult } from './taskRunContracts'
 import type { ThreadRunner } from '../store/threadStore'
 
 export type QueuedExternalRun = ExternalRunOpts & {

@@ -272,6 +272,8 @@ interface TaskRunnerAdapter {
 
 **Phase 3 item 6/7 實作記錄（2026-07-14）：** 背景委派 `preferRunTask` 路徑寫入 `job.archiveRunId` 並跳過第二筆 synthetic Archive（link-only + parent inject）。`workerThread: true` 建立 `Thread.hidden` worker，sidebar 過濾、`createThread`／`bindRunThread` 不搶 active。Nested FC 路徑（`preferRunTask: false`）仍可寫單一 synthetic Archive。回歸證據：typecheck、capability smoke 68/68（含 item 3–7 contracts）、scenario E2E 16/16、production modules 16/16、完整 smoke（marketplace E2E）、build、oxlint 0 errors。
 
+**Phase 3 migration completion（2026-07-15）：** 移除 `runExternal.ts`、`runExternalObjective` 與 unsnapshotted runner overload。`taskRunCoordinator.runTask` 成為唯一 public seam，空白 request 在載入 renderer/store runtime 前拒絕；共享 contract 由 `taskRunContracts.ts` 擁有並由 coordinator re-export。內部依賴固定單向為 coordinator → execution → lifecycle support / runner adapter；queue re-entry 與 OpenCode session sync 以由上往下傳入的 callback 保持 finalization locality，不再有 support → execution reverse import。
+
 **驗收：**
 
 - 每個 run 只有一次 reservation、一次附件寫入、一次 Archive、一次 onSettled、一次 queue drain。

@@ -32,7 +32,7 @@ There is no unit-test runner; smoke scripts cover scheduler math, event matching
 
 ### Execution flow (default single run; optional capped concurrency)
 
-All entry points go through **`agent/taskRunCoordinator.ts` `runTask`** (canonical ingress). Legacy `runExternal.ts` is an implementation detail behind the coordinator — new code must not call `runExternalObjective` or `dispatchThreadTask` from UI.
+All entry points go through **`agent/taskRunCoordinator.ts` `runTask`** (canonical ingress). Its dependency graph is one-way: shared `taskRunContracts.ts` → `taskRunExecution.ts` orchestration → `taskRunLifecycleSupport.ts` / `runDispatch.ts`. Product code imports only the coordinator and must not call `dispatchThreadTask` from UI.
 
 Pipeline:
 

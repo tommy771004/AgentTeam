@@ -88,7 +88,7 @@ export function matchProactiveEvent(
   }
 }
 
-/** Validate the serializable evidence carried into runExternal / the queue. */
+/** Validate the serializable evidence carried into the Task run coordinator / queue. */
 export function validateEventTriggerSnapshot(
   input: unknown,
   now = new Date(),

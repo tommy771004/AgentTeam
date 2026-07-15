@@ -40,7 +40,7 @@ Telegram (GatewayBootstrap)─┤   → dispatchThreadTask(snapshot)
 
 | # | 功能 A → 功能 B | 驗證錨點 |
 |---|---|---|
-| 1 | 排程 job 的 `skillNames` → 引擎 `attachedSkills` → FC preload `skill:*` capability | `App.tsx:47` → `runExternal.ts` → `engine.ts:559` |
+| 1 | 排程 job 的 `skillNames` → Task run `attachedSkills` → FC preload `skill:*` capability | `App.tsx` → `taskRunExecution.ts` → `engine.ts` |
 | 2 | 事件源(webhook/排程/TG)→ `eventPreMatched` → Proactive 跳過謂詞重查 | `App.tsx:131` → `engine.ts` `runProactive` |
 | 3 | 無人值守來源 → `unattended: true` → HITL 45s 逾時自動拒絕(工具 ask + safety intervention 皆有計時器) | `App.tsx:49,134,225` → `toolGuard.ts:87` / `engine.ts:234-254` |
 | 4 | Capability 載入狀態跨步驟延續(step N 載入 → step N+1 preload 還原) | `engine.ts:559-562` `preloadCaps` 併入 `state.loadedCapabilityIds` |
@@ -215,7 +215,7 @@ customTools 契約 3 個測試)。
   佇列 dedupe、compaction 對齊等 25 個 smoke 測試把守 `npm run dist`。
 - 後續新增功能時的**三個自檢問題**(取代再開一輪全面稽核):
   1. 新工具:進了唯讀白名單 / `SIDE_EFFECT_TOOLS` / `approvalTools` 哪一個?(drift guard 會擋)
-  2. 新觸發入口:有沒有走 `runExternalObjective`(佇列+unattended+eventPreMatched 才齊)?
+  2. 新觸發入口：是否一律走 `taskRunCoordinator.runTask`，並攜帶正確的 queue／unattended／trigger evidence？
   3. 新設定欄位:types + DEFAULT + SettingsPage 三處齊了嗎?機密欄位有沒有進 export 遮蔽清單?
 
 ---

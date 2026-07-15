@@ -66,7 +66,7 @@
         │  • subagent mention bubble / temporary 提示
         ▼
  taskRunCoordinator.runTask()     ← 唯一 canonical ingress
-        │  (runExternalObjective 僅為 implementation)
+        │  (唯一 ingress 與 lifecycle owner)
         ├─ empty objective？→ fail
         ├─ automation suggestion？（composer/slash 排程語意）→ bubble only
         ├─ capacity check/reserve（opt-in concurrent cap）
@@ -92,8 +92,8 @@
 | UI 送出 | `app/src/pages/ProtocolsPage.tsx` `runEmbedded` |
 | Composer | `app/src/components/CommandComposer.tsx` |
 | Slash | `app/src/hooks/useSlashExecutor.ts` |
-| Lifecycle | `app/src/agent/taskRunCoordinator.ts` `runTask` / `finalizeTaskRun` |
-| Legacy impl | `app/src/agent/runExternal.ts`（勿直接從 UI 呼叫） |
+| Lifecycle | `taskRunCoordinator.ts` `runTask` → `taskRunExecution.ts` → `taskRunLifecycleSupport.ts` `finalizeTaskRun` |
+| Task run internals | `taskRunContracts.ts` → `taskRunExecution.ts` → `taskRunLifecycleSupport.ts`（產品 caller 不得匯入） |
 | Busy 政策 | `resolveBusyPolicy`（composer/slash → steer/queue） |
 | 分派 | `app/src/agent/runDispatch.ts` `dispatchThreadTask(snapshot)` |
 | Runner matrix | `app/src/agent/runners/types.ts` |
@@ -434,7 +434,7 @@ Slice D (P3): continueGoal + 佇列 UX；長期 multi-run
 | 概念 | 路徑 |
 |------|------|
 | 對話送出 | `app/src/pages/ProtocolsPage.tsx` → `runTask` |
-| Lifecycle | `app/src/agent/runExternal.ts` |
+| Lifecycle | `app/src/agent/taskRunCoordinator.ts` |
 | 分派 / preload / 歷史 | `app/src/agent/runDispatch.ts` |
 | 四模式 + DoD + 學習 hook | `app/src/agent/engine.ts` |
 | 規格 03 LLM 解析 | `app/src/agent/llmParser.ts` / `parser.ts` |
@@ -473,5 +473,5 @@ Slice D (P3): continueGoal + 佇列 UX；長期 multi-run
 | **D (P3)** | `continueGoal`（DoD/missing 跨 run）；steer 部分摘要；佇列「第 k 位 + 執行中 thread」；長對話摘要 history | ✅ |
 | **E** | per-thread 並行 worker（打破全域單鎖） | ⏳ 長線未做 |
 
-關鍵檔案：`parser.ts` · `replan.ts` · `continueGoal.ts` · `chatHistory.ts` · `engine.ts` · `runExternal.ts` · `runDispatch.ts` · `learning.ts` · `memory.ts` · `threadStore.ts` · `InlineRunPanel.tsx` · `ProtocolsPage.tsx` · `ComposerQuickActions.tsx` · `RunQueueStrip.tsx`
+關鍵檔案：`parser.ts` · `replan.ts` · `continueGoal.ts` · `chatHistory.ts` · `engine.ts` · `taskRunCoordinator.ts` · `runDispatch.ts` · `learning.ts` · `memory.ts` · `threadStore.ts` · `InlineRunPanel.tsx` · `ProtocolsPage.tsx` · `ComposerQuickActions.tsx` · `RunQueueStrip.tsx`
 `)

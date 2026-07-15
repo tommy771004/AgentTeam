@@ -1,7 +1,7 @@
 /**
  * Live in-chat process feed (OpenCode-style parts).
  * Always visible while a run is active; completed work is also written into
- * ThreadRunSummary bubbles via runExternal (RunSummaryCard).
+ * ThreadRunSummary bubbles via taskRunCoordinator (RunSummaryCard).
  */
 
 import { useMemo, useState } from 'react'
