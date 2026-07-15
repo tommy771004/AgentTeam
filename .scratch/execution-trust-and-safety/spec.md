@@ -1,5 +1,6 @@
 # 執行可信度與安全邊界
 
+Category: bug
 Status: 可交給代理
 
 ## Problem Statement

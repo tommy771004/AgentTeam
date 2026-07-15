@@ -1,5 +1,6 @@
 # 03 — 封住 generic MCP 與唯讀 workspace 的副作用漏洞
 
+Category: bug
 Status: 可交給代理
 
 **What to build:** 讓 generic MCP 呼叫依真正目標工具判斷副作用與核准需求，而不是因 wrapper 名稱被誤判為安全；同時讓 workspace list 在任何模式下都保持真正唯讀。使用者在預設或無人值守情境下，不會因隱藏寫入而修改外部系統或專案工作區。

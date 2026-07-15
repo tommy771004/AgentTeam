@@ -4,7 +4,9 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Category:** enhancement
+
+**Status:** 可交給代理
 
 - [x] 新 brief、無 artifact、已完成 build、critique pending、critique passed 與 delivery locked 都能顯示正確階段狀態。
 - [x] Stage rail 對 completed、active、pending、locked 有明確視覺差異，並在窄版畫面保持可讀。

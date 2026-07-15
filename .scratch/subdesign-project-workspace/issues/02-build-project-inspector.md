@@ -4,7 +4,9 @@
 
 **Blocked by:** 01 — SubDesign 階段與下一關卡
 
-**Status:** ready-for-agent
+**Category:** enhancement
+
+**Status:** 可交給代理
 
 - [x] live activity 只顯示目前 brief linked task run 的 run-scoped 狀態，不會混入其他 thread 或 concurrent run。
 - [x] 執行中狀態明確說明 agent 正在產生什麼，以及完成後會開放哪個 gate。

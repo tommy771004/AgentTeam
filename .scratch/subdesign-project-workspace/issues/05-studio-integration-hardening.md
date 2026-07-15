@@ -4,7 +4,9 @@
 
 **Blocked by:** 02 — Build 執行中的專案 Inspector; 03 — Critique 與 Delivery 工作區整合; 04 — 可恢復的最近設計清單
 
-**Status:** ready-for-agent
+**Category:** enhancement
+
+**Status:** 可交給代理
 
 - [x] 正式 `/subdesign/:briefId` 使用 Variant A 的 project-oriented hierarchy，且所有既有 brief、reference、artifact、critique、tweak、delivery 功能仍可操作。
 - [x] desktop 與窄版寬度下，current stage、next gate、selected artifact、critique status 與 delivery lock 都保持可發現。

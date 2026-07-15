@@ -1,5 +1,6 @@
 # 04 — 讓 LLM 降級結果保持誠實
 
+Category: bug
 Status: 可交給代理
 
 **What to build:** 當模型、傳輸或 Definition of Done 驗證失敗時，使用者能明確看到失敗、降級或 simulation，而不是被 synthetic output 或隨機 confidence 告知任務成功。只有具可信執行證據的 Loop run 才可宣稱完成並觸發 success-only 後續行為。

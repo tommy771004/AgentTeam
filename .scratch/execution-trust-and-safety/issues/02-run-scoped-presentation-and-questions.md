@@ -1,5 +1,6 @@
 # 02 — 讓並行 Loop run 的操作與提問精準綁定
 
+Category: bug
 Status: 可交給代理
 
 **What to build:** 讓使用者在 opt-in 並行執行時，看到的執行內容與其停止、繼續、介入、日誌操作永遠是同一個 Loop run。每一個人工提問保留自己的 run 與 thread 身分，並以單一 FIFO 決策介面依序呈現；回答或逾時只影響原本的工作。
