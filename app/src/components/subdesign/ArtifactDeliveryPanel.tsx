@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { SubDesignArtifact, SubDesignCritique, SubDesignExportFormat } from '../../agent/subdesign/types'
+import type { SubDesignArtifact, SubDesignExportFormat } from '../../agent/subdesign/types'
 import { usePermissionAskStore } from '../../store/permissionAskStore'
 import { useProjectStore } from '../../store/projectStore'
 import { useSubDesignExportStore } from '../../store/subDesignExportStore'
@@ -15,7 +15,7 @@ const FORMATS: ReadonlyArray<{ id: SubDesignExportFormat; label: string; descrip
   { id: 'mp4', label: 'MP4', description: '3 秒靜態縮圖，需要 ffmpeg' },
 ]
 
-export function ArtifactDeliveryPanel({ artifact, critique, critiquePassed }: { artifact: SubDesignArtifact | null; critique: SubDesignCritique | null; critiquePassed: boolean }) {
+export function ArtifactDeliveryPanel({ artifact, critiquePassed, runId, threadId }: { artifact: SubDesignArtifact | null; critiquePassed: boolean; runId?: string | null; threadId?: string }) {
   const projectRoot = useProjectStore((state) => state.root)
   const requestAsk = usePermissionAskStore((state) => state.requestAsk)
   const records = useSubDesignExportStore((state) => state.records)
@@ -46,13 +46,16 @@ export function ArtifactDeliveryPanel({ artifact, critique, critiquePassed }: { 
         setMessage('Export 已取消或未獲核准。')
         return
       }
-      const result = await window.subagents!.subdesign!.exportArtifact({ artifact, critique, format, projectRoot: projectRoot || undefined, suggestedName: artifact.title })
+      const result = await window.subagents!.subdesign!.exportArtifact({ artifact, runId: runId || undefined, threadId, format, projectRoot: projectRoot || undefined, suggestedName: artifact.title })
       if (!result.ok) {
         if (result.cancelled) setMessage('使用者取消輸出位置選擇.')
         else setError(result.error || 'Export 失敗。')
         return
       }
-      const record = recordExport({ artifactId: artifact.id, revision: result.revision || artifact.revision, format, path: result.path || '', bytes: result.bytes || 0, sha256: result.sha256 || '', projectRoot: projectRoot || undefined })
+      const canonicalRecord = result.record && typeof result.record === 'object' ? result.record as Parameters<typeof recordExport>[0] & { id?: string; createdAt?: string } : null
+      const record = canonicalRecord?.id
+        ? (useSubDesignExportStore.getState().hydrateCanonical([canonicalRecord, ...records.filter((item) => item.id !== canonicalRecord.id)]), canonicalRecord)
+        : recordExport({ artifactId: artifact.id, revision: result.revision || artifact.revision, format, path: result.path || '', bytes: result.bytes || 0, sha256: result.sha256 || '', projectRoot: projectRoot || undefined })
       if (brief?.threadId) appendSubDesignExport(brief.threadId, { format: record.format, revision: record.revision, path: record.path, sha256: record.sha256 })
       setMessage(`${format.toUpperCase()} 已輸出：${record.path} · sha256 ${record.sha256.slice(0, 16)}…`)
     } catch (cause) {

@@ -18,6 +18,7 @@ import {
   DESIGN_SYSTEM_ROOT,
 } from '../subdesign/designSystem'
 import { isMcpServerAllowedForAgent, mcpServersForAgent } from '../opencode/mcpAccess'
+import type { SubDesignArtifact, SubDesignCritique, SubDesignExportRecord } from '../subdesign/types'
 
 export interface ToolResult {
   ok: boolean
@@ -35,6 +36,13 @@ export type ToolExecutionContext = {
 }
 
 const memory = new Map<string, string>()
+
+async function hydrateCanonicalArtifact(artifact: SubDesignArtifact): Promise<SubDesignArtifact | null> {
+  const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
+  const current = useSubDesignArtifactStore.getState().artifacts
+  useSubDesignArtifactStore.getState().hydrateCanonical([artifact, ...current.filter((item) => item.id !== artifact.id)])
+  return useSubDesignArtifactStore.getState().findById(artifact.id)
+}
 
 export async function executeTool(
   tool: ToolName,
@@ -540,6 +548,23 @@ export async function executeTool(
         ]) {
           if (Object.prototype.hasOwnProperty.call(input, key)) patch[key] = input[key]
         }
+        const canonicalBriefApi = window.subagents?.subdesign
+        if (canonicalBriefApi?.updateBrief) {
+          const canonical = await canonicalBriefApi.updateBrief({ briefId: linked.id, patch, runId, threadId, projectRoot })
+          if (!canonical.ok || !canonical.brief || typeof canonical.brief !== 'object') return { ok: false, output: canonical.error || 'brief canonical 更新失敗。', data: canonical }
+          let finalBrief = canonical.brief as Record<string, unknown>
+          if (input.stage && canonicalBriefApi.setBriefStage) {
+            const stageResult = await canonicalBriefApi.setBriefStage({ briefId: linked.id, stage: String(input.stage), runId, threadId, projectRoot })
+            if (!stageResult.ok || !stageResult.brief || typeof stageResult.brief !== 'object') return { ok: false, output: stageResult.error || 'brief stage canonical 更新失敗。', data: stageResult }
+            finalBrief = stageResult.brief as Record<string, unknown>
+          }
+          useSubDesignStore.getState().hydrateCanonical([finalBrief, ...useSubDesignStore.getState().briefs.filter((item) => item.id !== linked.id)])
+          return {
+            ok: true,
+            output: `SubDesign brief 已更新：stage=${String(finalBrief.stage || linked.stage)} · direction=${String(finalBrief.selectedDirectionId || '未選定')}`,
+            data: finalBrief,
+          }
+        }
         const updated = useSubDesignStore.getState().updateBrief(linked.id, patch, projectRoot)
         if (!updated) return { ok: false, output: 'brief 更新失敗。' }
         let finalBrief = updated
@@ -563,6 +588,26 @@ export async function executeTool(
             ? useSubDesignStore.getState().findByThreadId(threadId)
             : null
         if (!linked) return { ok: false, output: '找不到與目前 thread 關聯的 SubDesign brief。' }
+        const canonicalDirectionApi = window.subagents?.subdesign
+        if (canonicalDirectionApi?.selectDirection) {
+          const result = await canonicalDirectionApi.selectDirection({
+            briefId: linked.id,
+            directionId: String(input.directionId || ''),
+            fallback: {
+              title: input.title ? String(input.title) : undefined,
+              summary: input.summary ? String(input.summary) : undefined,
+              rationale: input.rationale ? String(input.rationale) : undefined,
+              risk: input.risk ? String(input.risk) : undefined,
+            },
+            runId,
+            threadId,
+            projectRoot,
+          })
+          if (!result.ok || !result.brief || typeof result.brief !== 'object') return { ok: false, output: result.error || 'direction canonical 更新失敗。', data: result }
+          const finalBrief = result.brief as Record<string, unknown>
+          useSubDesignStore.getState().hydrateCanonical([finalBrief, ...useSubDesignStore.getState().briefs.filter((item) => item.id !== linked.id)])
+          return { ok: true, output: `Direction「${String(finalBrief.selectedDirectionId || input.directionId)}」已選定；Build stage 已解鎖。`, data: finalBrief }
+        }
         const result = useSubDesignStore.getState().selectDirection(linked.id, String(input.directionId || ''), {
           title: input.title ? String(input.title) : undefined,
           summary: input.summary ? String(input.summary) : undefined,
@@ -598,10 +643,18 @@ export async function executeTool(
         return { ok: true, output: system.content.slice(0, 20_000), data: system }
       }
       case 'design_system_create': {
+        const { useSubDesignStore } = await import('../../store/subDesignStore')
+        const linked = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
         const id = String(input.id || '').trim()
         const title = String(input.title || '').trim()
         if (!projectRoot) return { ok: false, output: '請先選擇 project root，才能建立 design system。' }
         if (!isSafeDesignSystemId(id) || !title) return { ok: false, output: 'id / title 不合法。' }
+        const canonicalDesignSystemApi = window.subagents?.subdesign
+        if (canonicalDesignSystemApi?.createDesignSystem) {
+          const canonical = await canonicalDesignSystemApi.createDesignSystem({ id, title, category: String(input.category || 'custom'), content: input.content ? String(input.content) : undefined, briefId: linked?.id, runId, threadId, projectRoot })
+          if (!canonical.ok) return { ok: false, output: canonical.error || 'design system canonical 建立失敗。', data: canonical }
+          return { ok: true, output: `已建立 design system ${id} → ${canonical.path || ''}`, data: canonical }
+        }
         if (!api?.workspaceMkdir || !api.workspaceWrite) return { ok: false, output: 'design system 寫入需要 Electron workspace API。' }
         const dir = await api.workspaceMkdir(`${DESIGN_SYSTEM_ROOT}/${id}`, projectRoot)
         if (!dir.ok && !/exist/i.test(dir.error || '')) return { ok: false, output: dir.error || '建立資料夾失敗。' }
@@ -611,10 +664,18 @@ export async function executeTool(
         return { ok: true, output: `已建立 design system ${id} → ${result.path}`, data: { id, path: result.path } }
       }
       case 'design_system_update': {
+        const { useSubDesignStore } = await import('../../store/subDesignStore')
+        const linked = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
         const id = String(input.id || '').trim()
         const content = String(input.content || '').trim()
         if (!projectRoot) return { ok: false, output: '請先選擇 project root，才能更新 design system。' }
         if (!isSafeDesignSystemId(id) || !content) return { ok: false, output: 'id / content 不合法。' }
+        const canonicalDesignSystemApi = window.subagents?.subdesign
+        if (canonicalDesignSystemApi?.updateDesignSystem) {
+          const canonical = await canonicalDesignSystemApi.updateDesignSystem({ id, content, briefId: linked?.id, runId, threadId, projectRoot })
+          if (!canonical.ok) return { ok: false, output: canonical.error || 'design system canonical 更新失敗。', data: canonical }
+          return { ok: true, output: `已更新 design system ${id} → ${canonical.path || ''}`, data: canonical }
+        }
         if (!api?.workspaceWrite) return { ok: false, output: 'design system 寫入需要 Electron workspace API。' }
         const result = await api.workspaceWrite(designSystemPath(id), content, projectRoot)
         if (!result.ok) return { ok: false, output: result.error || '更新 DESIGN.md 失敗。' }
@@ -635,6 +696,20 @@ export async function executeTool(
         }
         rawManifest.briefId = briefId
         if (!rawManifest.designSystemId && linked?.designSystemId) rawManifest.designSystemId = linked.designSystemId
+        const canonicalRegister = window.subagents?.subdesign?.registerArtifact
+        if (canonicalRegister) {
+          const canonical = await canonicalRegister({ artifact: rawManifest, briefId, designSystemId: linked?.designSystemId, runId, threadId, projectRoot })
+          if (!canonical.ok || !canonical.artifact || typeof canonical.artifact !== 'object') return { ok: false, output: canonical.error || 'artifact canonical register 失敗。', data: canonical }
+          const current = useSubDesignArtifactStore.getState().artifacts
+          useSubDesignArtifactStore.getState().hydrateCanonical([canonical.artifact, ...current.filter((item) => item.id !== (canonical.artifact as { id?: unknown }).id)])
+          const registered = useSubDesignArtifactStore.getState().findById(String((canonical.artifact as { id?: unknown }).id || ''))
+          if (!registered) return { ok: false, output: 'artifact canonical register 回傳無效 manifest。' }
+          return {
+            ok: true,
+            output: `Artifact「${registered.title}」已登記（revision ${registered.revision}）→ ${registered.entry}`,
+            data: registered,
+          }
+        }
         const result = useSubDesignArtifactStore.getState().register(rawManifest, {
           briefId,
           designSystemId: linked?.designSystemId,
@@ -656,19 +731,17 @@ export async function executeTool(
         if (!patchApi) return { ok: false, output: 'artifact patch 需要 Electron workspace API。' }
         const operations = Array.isArray(input.operations) ? input.operations.slice(0, 12) : []
         if (!operations.length) return { ok: false, output: 'operations 必須至少包含一個 exact replacement。' }
-        const result = await patchApi({ artifact, operations, projectRoot })
+        const result = await patchApi({ artifact, operations, runId, threadId, projectRoot })
         if (!result.ok || !result.artifact) return { ok: false, output: result.error || 'artifact patch 失敗。', data: result }
-        const updated = useSubDesignArtifactStore.getState().register(result.artifact, {
-          briefId: artifact.briefId,
-          designSystemId: artifact.designSystemId,
-        }, projectRoot)
-        if (!updated.ok) return { ok: false, output: `patch revision invalid：${updated.errors.join('；')}` }
+        const resultArtifact = result.artifact as SubDesignArtifact
+        const updatedArtifact = await hydrateCanonicalArtifact(resultArtifact)
+        if (!updatedArtifact) return { ok: false, output: 'patch canonical result invalid。' }
         const linkedBrief = useSubDesignStore.getState().findById(artifact.briefId)
         if (linkedBrief && linkedBrief.stage !== 'critique') useSubDesignStore.getState().setStage(linkedBrief.id, 'critique', projectRoot)
         return {
           ok: true,
-          output: `Artifact「${artifact.title}」已原地調整（revision ${updated.artifact.revision}）→ ${(result.paths || []).join(', ')}`,
-          data: { artifact: updated.artifact, paths: result.paths || [], operationCount: result.operationCount || operations.length },
+          output: `Artifact「${artifact.title}」已原地調整（revision ${updatedArtifact.revision}）→ ${(result.paths || []).join(', ')}`,
+          data: { artifact: updatedArtifact, paths: result.paths || [], operationCount: result.operationCount || operations.length },
         }
       }
       case 'design_artifact_tweak': {
@@ -679,13 +752,14 @@ export async function executeTool(
         if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }
         const applyTweak = window.subagents?.subdesign?.applyTweak
         if (!applyTweak) return { ok: false, output: 'structured artifact tweak 需要 Electron workspace API。' }
-        const result = await applyTweak({ artifact, tweakId: String(input.tweakId || ''), value: String(input.value ?? ''), projectRoot })
+        const result = await applyTweak({ artifact, tweakId: String(input.tweakId || ''), value: String(input.value ?? ''), runId, threadId, projectRoot })
         if (!result.ok || !result.artifact) return { ok: false, output: result.error || 'structured tweak 失敗。', data: result }
-        const updated = useSubDesignArtifactStore.getState().register(result.artifact, { briefId: artifact.briefId, designSystemId: artifact.designSystemId }, projectRoot)
-        if (!updated.ok) return { ok: false, output: `tweak revision invalid：${updated.errors.join('；')}` }
+        const resultArtifact = result.artifact as SubDesignArtifact
+        const updatedArtifact = await hydrateCanonicalArtifact(resultArtifact)
+        if (!updatedArtifact) return { ok: false, output: 'tweak canonical result invalid。' }
         const brief = useSubDesignStore.getState().findById(artifact.briefId)
         if (brief && brief.stage !== 'critique') useSubDesignStore.getState().setStage(brief.id, 'critique', projectRoot)
-        return { ok: true, output: `Artifact「${artifact.title}」已套用 structured tweak（revision ${updated.artifact.revision}）。`, data: { artifact: updated.artifact, paths: result.paths || [], operationCount: result.operationCount || 1 } }
+        return { ok: true, output: `Artifact「${artifact.title}」已套用 structured tweak（revision ${updatedArtifact.revision}）。`, data: { artifact: updatedArtifact, paths: result.paths || [], operationCount: result.operationCount || 1 } }
       }
       case 'design_artifact_capture': {
         const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
@@ -704,6 +778,8 @@ export async function executeTool(
             width: Math.max(320, Math.min(2400, Math.floor(Number(rawViewport.width) || 1440))),
             height: Math.max(240, Math.min(1800, Math.floor(Number(rawViewport.height) || 900))),
           },
+          runId,
+          threadId,
           projectRoot,
         })
         if (!result.ok || !result.path) return { ok: false, output: result.error || 'artifact evidence capture 失敗。', data: result }
@@ -727,7 +803,7 @@ export async function executeTool(
         if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }
         const lint = window.subagents?.subdesign?.lintEvidence
         if (!lint) return { ok: false, output: 'artifact semantic lint 需要 Electron desktop。' }
-        const result = await lint({ artifact, projectRoot })
+        const result = await lint({ artifact, runId, threadId, projectRoot })
         if (!result.ok || !result.evidence) return { ok: false, output: result.error || 'artifact semantic lint 失敗。', data: result }
         const evidence = result.evidence as Record<string, unknown>
         return { ok: true, output: `已產生 lint evidence：${String(evidence.path || '')}`, data: { ...result, evidence } }
@@ -771,7 +847,7 @@ export async function executeTool(
         rawCritique.briefId = briefId
         const verifyEvidence = window.subagents?.subdesign?.verifyEvidence
         if (verifyEvidence) {
-          const evidenceCheck = await verifyEvidence({ artifact, evidence: rawCritique.evidence, projectRoot })
+          const evidenceCheck = await verifyEvidence({ artifact, evidence: rawCritique.evidence, runId, threadId, projectRoot })
           if (!evidenceCheck.ok) {
             const findings = Array.isArray(rawCritique.findings) ? [...rawCritique.findings] : []
             findings.push({
@@ -789,15 +865,33 @@ export async function executeTool(
         if (isTheaterFinal && !theaterStore.claimFinalCritique(artifactId)) {
           return { ok: false, output: 'Critique Theater 尚未完成兩輪六個 panelist notes，或 final design_critique 已經被另一個 call 鎖定。' }
         }
-        const result = useSubDesignCritiqueStore.getState().record(rawCritique, { briefId }, projectRoot)
-        if (!result.ok) {
-          if (isTheaterFinal) useSubDesignCritiqueSessionStore.getState().releaseFinalCritique(artifactId)
-          return { ok: false, output: `critique invalid：${result.errors.join('；')}` }
+        const canonicalCritiqueApi = window.subagents?.subdesign
+        let storedCritique: SubDesignCritique
+        if (canonicalCritiqueApi?.recordCritique) {
+          const canonical = await canonicalCritiqueApi.recordCritique({ artifact, critique: rawCritique, critiqueSession: theaterSession, runId, threadId, projectRoot })
+          if (!canonical.ok || !canonical.critique || typeof canonical.critique !== 'object') {
+            if (isTheaterFinal) useSubDesignCritiqueSessionStore.getState().releaseFinalCritique(artifactId)
+            return { ok: false, output: canonical.error || 'critique canonical 寫入失敗。', data: canonical }
+          }
+          storedCritique = canonical.critique as SubDesignCritique
+          const current = useSubDesignCritiqueStore.getState().critiques
+          useSubDesignCritiqueStore.getState().hydrateCanonical([storedCritique, ...current.filter((item) => !(item.artifactId === storedCritique.artifactId && item.revision === storedCritique.revision))])
+        } else {
+          const result = useSubDesignCritiqueStore.getState().record(rawCritique, { briefId }, projectRoot)
+          if (!result.ok) {
+            if (isTheaterFinal) useSubDesignCritiqueSessionStore.getState().releaseFinalCritique(artifactId)
+            return { ok: false, output: `critique invalid：${result.errors.join('；')}` }
+          }
+          storedCritique = result.critique
         }
-        const nextStage = critiqueAllowsDeliver(result.critique) ? 'deliver' : 'critique'
+        const nextStage = critiqueAllowsDeliver(storedCritique) ? 'deliver' : 'critique'
         const brief = useSubDesignStore.getState().findById(briefId)
-        const stageResult = brief ? useSubDesignStore.getState().setStage(brief.id, nextStage, projectRoot) : null
-        if (result.critique.verdict === 'pass' && brief) {
+        const stageResult = brief
+          ? canonicalCritiqueApi?.setBriefStage
+            ? await canonicalCritiqueApi.setBriefStage({ briefId: brief.id, stage: nextStage, runId, threadId, projectRoot })
+            : useSubDesignStore.getState().setStage(brief.id, nextStage, projectRoot)
+          : null
+        if (storedCritique.verdict === 'pass' && brief) {
           const { learningLoop } = await import('../hermes/learning')
           learningLoop.onSubDesignPass({
             projectRoot,
@@ -812,14 +906,12 @@ export async function executeTool(
         }
         return {
           ok: true,
-          output: `Critique ${result.critique.verdict}（revision ${result.critique.revision}） · stage=${stageResult?.ok ? stageResult.brief.stage : nextStage}`,
-          data: result.critique,
+          output: `Critique ${storedCritique.verdict}（revision ${storedCritique.revision}） · stage=${stageResult?.ok ? (stageResult.brief as { stage?: string }).stage : nextStage}`,
+          data: storedCritique,
         }
       }
       case 'design_artifact_export': {
-        const { critiqueAllowsDeliver } = await import('../subdesign/critique')
         const { useSubDesignArtifactStore } = await import('../../store/subDesignArtifactStore')
-        const { useSubDesignCritiqueStore } = await import('../../store/subDesignCritiqueStore')
         const artifactId = String(input.artifactId || '').trim()
         const format = String(input.format || '').trim() as 'html' | 'zip' | 'pdf' | 'pptx' | 'mp4'
         if (!artifactId || !['html', 'zip', 'pdf', 'pptx', 'mp4'].includes(format)) {
@@ -827,21 +919,12 @@ export async function executeTool(
         }
         const artifact = useSubDesignArtifactStore.getState().findById(artifactId)
         if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }
-        if (!artifact.exports.includes(format)) return { ok: false, output: `artifact 不支援 ${format} export。` }
-        const critique = useSubDesignCritiqueStore.getState().latestForArtifact(artifact.id, artifact.revision)
-        if (!critique || !critiqueAllowsDeliver(critique)) {
-          return { ok: false, output: 'Artifact 尚未通過 critique；請先修正 blocker / needs-revision findings。' }
-        }
-        const verifyEvidence = window.subagents?.subdesign?.verifyEvidence
-        if (verifyEvidence) {
-          const evidenceCheck = await verifyEvidence({ artifact, evidence: critique.evidence, projectRoot })
-          if (!evidenceCheck.ok) return { ok: false, output: `Evidence 未通過 main process 驗證：${evidenceCheck.errors?.join('；') || '請重新 capture screenshot / DOM / lint evidence。'}` }
-        }
         const exportApi = window.subagents?.subdesign
         if (!exportApi?.exportArtifact) return { ok: false, output: 'artifact export 需要 Electron desktop。' }
         const result = await exportApi.exportArtifact({
           artifact,
-          critique,
+          runId,
+          threadId,
           format,
           projectRoot,
           suggestedName: artifact.title,
@@ -854,15 +937,23 @@ export async function executeTool(
           }
         }
         const { useSubDesignExportStore } = await import('../../store/subDesignExportStore')
-        const record = useSubDesignExportStore.getState().record({
-          artifactId: artifact.id,
-          revision: result.revision || artifact.revision,
-          format,
-          path: result.path || '',
-          bytes: result.bytes || 0,
-          sha256: result.sha256 || '',
-          projectRoot: projectRoot || undefined,
-        })
+        const canonicalRecord = result.record && typeof result.record === 'object' ? result.record as SubDesignExportRecord : null
+        let record: SubDesignExportRecord
+        if (canonicalRecord) {
+          const current = useSubDesignExportStore.getState().records
+          useSubDesignExportStore.getState().hydrateCanonical([canonicalRecord, ...current.filter((item) => item.id !== canonicalRecord.id)])
+          record = canonicalRecord
+        } else {
+          record = useSubDesignExportStore.getState().record({
+            artifactId: artifact.id,
+            revision: result.revision || artifact.revision,
+            format,
+            path: result.path || '',
+            bytes: result.bytes || 0,
+            sha256: result.sha256 || '',
+            projectRoot: projectRoot || undefined,
+          })
+        }
         return {
           ok: true,
           output: `Artifact 已 export：${format} · revision ${record.revision} · ${record.path} · sha256 ${record.sha256}`,

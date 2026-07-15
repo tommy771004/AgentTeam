@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import type { SubDesignExportRecord } from '../agent/subdesign/types'
-import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
 
 const STORAGE_KEY = 'subagents.subdesign.exports.v1'
 
@@ -47,7 +46,7 @@ export const useSubDesignExportStore = create<SubDesignExportStore>((set, get) =
   },
 
   record: (input) => {
-    const { projectRoot, ...recordInput } = input
+    const { projectRoot: _projectRoot, ...recordInput } = input
     const record: SubDesignExportRecord = {
       ...recordInput,
       id: `export_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
@@ -56,7 +55,6 @@ export const useSubDesignExportStore = create<SubDesignExportStore>((set, get) =
     const records = [record, ...get().records].slice(0, 120)
     set({ records })
     persist(records)
-    persistSubDesignMetadata('export', record, projectRoot || get().projectRoot)
     return record
   },
 

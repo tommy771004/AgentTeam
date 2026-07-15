@@ -5,8 +5,8 @@ import type {
   SubDesignDirection,
   SubDesignStage,
   SubDesignReference,
-} from './types'
-import { isSubDesignStage } from './types'
+} from './types.ts'
+import { isSubDesignStage } from './types.ts'
 import type { OpenDesignProvenance } from '../openDesign/catalog'
 
 const MAX_TEXT = 4000

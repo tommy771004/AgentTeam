@@ -111,6 +111,7 @@ export function SubDesignPage() {
   const artifacts = useSubDesignArtifactStore((state) => state.artifacts)
   const critiques = useSubDesignCritiqueStore((state) => state.critiques)
   const critiqueSession = useSubDesignCritiqueSessionStore((state) => state.current)
+  const critiqueSessionHistory = useSubDesignCritiqueSessionStore((state) => state.history)
   const memoryEntries = useLearningStore((state) => state.memory.entries)
   const setArtifactProjectRoot = useSubDesignArtifactStore((state) => state.setProjectRoot)
   const setCritiqueProjectRoot = useSubDesignCritiqueStore((state) => state.setProjectRoot)
@@ -187,6 +188,10 @@ export function SubDesignPage() {
   const latestCritique = useSubDesignCritiqueStore((state) =>
     selectedArtifact ? state.latestForArtifact(selectedArtifact.id, selectedArtifact.revision) : null,
   )
+  const deliveryCritiqueSession = critiqueSession || (selectedArtifact
+    ? critiqueSessionHistory.find((session) => session.status === 'completed' && session.artifactId === selectedArtifact.id && session.artifactRevision === selectedArtifact.revision) || null
+    : null)
+  const deliveryCritiquePassed = Boolean(latestCritique && critiqueAllowsDeliver(latestCritique) && deliveryCritiqueSession?.status === 'completed' && deliveryCritiqueSession.finalCritiqueClaimed)
   const availableRunners = useMemo(() => {
     const values: ThreadRunner[] = ['builtin']
     for (const provider of cliProviders || []) {
@@ -390,7 +395,7 @@ export function SubDesignPage() {
         artifacts={visibleArtifacts}
         selectedArtifact={selectedArtifact}
         critique={latestCritique}
-        critiquePassed={Boolean(latestCritique && critiqueAllowsDeliver(latestCritique))}
+        critiquePassed={deliveryCritiquePassed}
         runIsLive={runIsLive}
         runId={linkedThreadRunId}
         executionKind={linkedAgent?.executionKind}
@@ -755,12 +760,13 @@ export function SubDesignPage() {
               <div className="xl:col-span-3">
                 <CritiqueTheater brief={activeBrief} artifact={selectedArtifact} critique={latestCritique} />
               </div>
-              <ArtifactTweakPanel artifact={selectedArtifact} />
+              <ArtifactTweakPanel artifact={selectedArtifact} runId={linkedThreadRunId} threadId={activeBrief?.threadId} />
               <CritiquePanel critique={latestCritique} />
               <ArtifactDeliveryPanel
                 artifact={selectedArtifact}
-                critique={latestCritique}
-                critiquePassed={Boolean(latestCritique && critiqueAllowsDeliver(latestCritique))}
+                critiquePassed={deliveryCritiquePassed}
+                runId={linkedThreadRunId}
+                threadId={activeBrief?.threadId}
               />
             </div>
           </section>

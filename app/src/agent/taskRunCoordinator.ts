@@ -25,6 +25,7 @@ import type {
 import type { DispatchResult } from './runDispatch'
 import type { HookEvaluation } from './hooks'
 import type { ThreadRunner } from '../store/threadStore'
+import { summarizeSubDesignWorkspace, type SubDesignWorkspaceMetadataSnapshot } from './subdesign/projectWorkspace.ts'
 
 export type { ExternalRunOpts, ExternalRunResult, RunSourceKind }
 export type TaskRunInput = ExternalRunOpts
@@ -665,18 +666,30 @@ async function pushRunProcessSummary(args: {
     }
   }
   const plan = (thr.threads.find((thread) => thread.id === tid)?.runPlan || []).slice(0, 40)
-  const subDesignBrief = useSubDesignStore.getState().findByThreadId(tid)
-  const subDesignArtifact = subDesignBrief
-    ? useSubDesignArtifactStore.getState().findByBriefId(subDesignBrief.id)[0]
+  let subDesignBrief = useSubDesignStore.getState().findByThreadId(tid)
+  let subDesignArtifact = subDesignBrief
+    ? useSubDesignArtifactStore.getState().findByBriefId(subDesignBrief.id).sort((a, b) => b.revision - a.revision || b.updatedAt.localeCompare(a.updatedAt))[0]
     : null
-  const subDesignCritique = subDesignArtifact
-    ? useSubDesignCritiqueStore
-        .getState()
-        .latestForArtifact(subDesignArtifact.id, subDesignArtifact.revision)
+  let subDesignCritique = subDesignArtifact
+    ? useSubDesignCritiqueStore.getState().latestForArtifact(subDesignArtifact.id, subDesignArtifact.revision)
     : null
-  const subDesignExports = subDesignArtifact
+  let subDesignExports = subDesignArtifact
     ? useSubDesignExportStore.getState().findByArtifactId(subDesignArtifact.id)
     : []
+  try {
+    const canonical = window.subagents?.subdesign?.readMetadata
+      ? await window.subagents.subdesign.readMetadata(args.projectRoot)
+      : null
+    if (canonical?.ok) {
+      const summary = summarizeSubDesignWorkspace(canonical as SubDesignWorkspaceMetadataSnapshot, tid)
+      subDesignBrief = summary.brief as typeof subDesignBrief
+      subDesignArtifact = summary.artifact as typeof subDesignArtifact
+      subDesignCritique = summary.critique as typeof subDesignCritique
+      subDesignExports = summary.exports as typeof subDesignExports
+    }
+  } catch {
+    /* Renderer-only preview may not expose the canonical workspace adapter. */
+  }
   thr.pushRunSummary(tid, {
     durationMs: finalAgent.metrics?.executionMs,
     subDesign: subDesignBrief

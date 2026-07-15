@@ -166,11 +166,27 @@ const api = {
         openDesignPacks: unknown[]
         error?: string
       }>,
-    writeMetadata: (input: { kind: 'brief' | 'artifact' | 'critique' | 'export' | 'open-design-pack'; payload: unknown; projectRoot?: string }) =>
-      ipcRenderer.invoke('subdesign:writeMetadata', input) as Promise<{
+    createBrief: (input: { brief: unknown; runId?: string; threadId?: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:createBrief', input) as Promise<{ ok: boolean; brief?: unknown; error?: string }>,
+    updateBrief: (input: { briefId: string; patch: unknown; runId?: string; threadId?: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:updateBrief', input) as Promise<{ ok: boolean; brief?: unknown; error?: string }>,
+    selectDirection: (input: { briefId: string; directionId: string; fallback?: Record<string, unknown>; runId?: string; threadId?: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:selectDirection', input) as Promise<{ ok: boolean; brief?: unknown; error?: string }>,
+    setBriefStage: (input: { briefId: string; stage: string; runId?: string; threadId?: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:setBriefStage', input) as Promise<{ ok: boolean; brief?: unknown; error?: string }>,
+    recordCritique: (input: { artifact: unknown; critique: unknown; critiqueSession?: unknown; runId?: string; threadId?: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:recordCritique', input) as Promise<{ ok: boolean; critique?: unknown; error?: string }>,
+    createDesignSystem: (input: { id: string; title: string; category?: string; content?: string; briefId?: string; runId?: string; threadId?: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:createDesignSystem', input) as Promise<{ ok: boolean; id?: string; path?: string; error?: string }>,
+    updateDesignSystem: (input: { id: string; content: string; briefId?: string; runId?: string; threadId?: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:updateDesignSystem', input) as Promise<{ ok: boolean; id?: string; path?: string; error?: string }>,
+    recordOpenDesignPack: (input: { pack: unknown; runId?: string; threadId?: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:recordOpenDesignPack', input) as Promise<{ ok: boolean; pack?: unknown; path?: string; error?: string }>,
+    registerArtifact: (input: { artifact: unknown; briefId?: string; designSystemId?: string; runId?: string; threadId?: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:registerArtifact', input) as Promise<{
         ok: boolean
+        artifact?: unknown
         path?: string
-        bytes?: number
         error?: string
       }>,
     listArtifacts: (projectRoot?: string) =>
@@ -185,7 +201,7 @@ const api = {
         content: string
         error?: string
       }>,
-    patchArtifact: (input: { artifact: unknown; operations: unknown; projectRoot?: string }) =>
+    patchArtifact: (input: { artifact: unknown; operations: unknown; runId?: string; threadId?: string; projectRoot?: string }) =>
       ipcRenderer.invoke('subdesign:patchArtifact', input) as Promise<{
         ok: boolean
         artifact?: unknown
@@ -193,7 +209,7 @@ const api = {
         operationCount?: number
         error?: string
       }>,
-    applyTweak: (input: { artifact: unknown; tweakId: string; value: string; projectRoot?: string }) =>
+    applyTweak: (input: { artifact: unknown; tweakId: string; value: string; runId?: string; threadId?: string; projectRoot?: string }) =>
       ipcRenderer.invoke('subdesign:applyTweak', input) as Promise<{
         ok: boolean
         artifact?: unknown
@@ -201,7 +217,7 @@ const api = {
         operationCount?: number
         error?: string
       }>,
-    verifyEvidence: (input: { artifact: unknown; evidence: unknown; projectRoot?: string }) =>
+    verifyEvidence: (input: { artifact: unknown; evidence: unknown; runId?: string; threadId?: string; projectRoot?: string }) =>
       ipcRenderer.invoke('subdesign:verifyEvidence', input) as Promise<{
         ok: boolean
         validKinds?: string[]
@@ -211,6 +227,8 @@ const api = {
       artifact: unknown
       kind: 'screenshot' | 'dom'
       viewport?: { width: number; height: number }
+      runId?: string
+      threadId?: string
       projectRoot?: string
     }) => ipcRenderer.invoke('subdesign:captureEvidence', input) as Promise<{
       ok: boolean
@@ -224,14 +242,14 @@ const api = {
       createdAt?: string
       error?: string
     }>,
-    lintEvidence: (input: { artifact: unknown; projectRoot?: string }) =>
+    lintEvidence: (input: { artifact: unknown; runId?: string; threadId?: string; projectRoot?: string }) =>
       ipcRenderer.invoke('subdesign:lintEvidence', input) as Promise<{
         ok: boolean
         evidence?: unknown
         findings?: unknown[]
         error?: string
       }>,
-    importReference: (input: { briefId: string; kind: 'screenshot' | 'url'; source: string; suggestedTitle?: string; projectRoot?: string }) =>
+    importReference: (input: { briefId: string; kind: 'screenshot' | 'url'; source: string; suggestedTitle?: string; runId?: string; threadId?: string; projectRoot?: string }) =>
       ipcRenderer.invoke('subdesign:importReference', input) as Promise<{
         ok: boolean
         reference?: unknown
@@ -262,7 +280,10 @@ const api = {
     exportArtifact: (input: {
       artifact: unknown
       critique?: unknown
+      critiqueSession?: unknown
       format: 'html' | 'zip' | 'pdf' | 'pptx' | 'mp4'
+      runId?: string
+      threadId?: string
       projectRoot?: string
       suggestedName?: string
     }) =>
@@ -275,6 +296,7 @@ const api = {
         artifactId?: string
         revision?: number
         format?: 'html' | 'zip' | 'pdf' | 'pptx' | 'mp4'
+        record?: unknown
         error?: string
       }>,
   },

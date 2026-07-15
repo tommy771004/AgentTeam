@@ -93,7 +93,7 @@ export function normalizeSubDesignCritique(
       artifactId,
       briefId: String(raw.briefId || '').trim() || defaults?.briefId,
       revision: Math.max(1, Math.floor(Number(raw.revision) || 1)),
-      createdAt: new Date().toISOString(),
+      createdAt: String(raw.createdAt || '').trim() || new Date().toISOString(),
       briefCoverage: clampScore(raw.briefCoverage),
       brandConformance: clampScore(raw.brandConformance),
       accessibility: clampScore(raw.accessibility ?? raw.a11y),

@@ -7,7 +7,12 @@ import {
   updateSubDesignBrief,
 } from '../agent/subdesign/brief'
 import { scanDesignSystems } from '../agent/subdesign/designSystem'
-import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
+import {
+  persistSubDesignBriefCreate,
+  persistSubDesignBriefDirection,
+  persistSubDesignBriefPatch,
+  persistSubDesignBriefStage,
+} from '../agent/subdesign/metadata'
 import type {
   DesignSystemSummary,
   SubDesignBrief,
@@ -103,7 +108,7 @@ export const useSubDesignStore = create<SubDesignStore>((set, get) => ({
     const briefs = [brief, ...get().briefs].slice(0, 40)
     set({ briefs, selectedBriefId: brief.id })
     persistBriefs(briefs)
-    persistSubDesignMetadata('brief', brief, projectRoot || get().projectRoot)
+    persistSubDesignBriefCreate(brief, projectRoot || get().projectRoot)
     return brief
   },
 
@@ -112,7 +117,7 @@ export const useSubDesignStore = create<SubDesignStore>((set, get) => ({
     if (!brief) return null
     const next = updateSubDesignBrief(brief, patch)
     replaceBrief(set, get().briefs, next)
-    persistSubDesignMetadata('brief', next, projectRoot || get().projectRoot)
+    persistSubDesignBriefPatch(id, patch, next.threadId, projectRoot || get().projectRoot)
     return next
   },
 
@@ -122,7 +127,7 @@ export const useSubDesignStore = create<SubDesignStore>((set, get) => ({
     const result = transitionSubDesignStage(brief, stage)
     if (!result.ok) return { ok: false, error: result.error, brief }
     replaceBrief(set, get().briefs, result.brief)
-    persistSubDesignMetadata('brief', result.brief, projectRoot || get().projectRoot)
+    persistSubDesignBriefStage(id, stage, brief.threadId, projectRoot || get().projectRoot)
     return result
   },
 
@@ -132,7 +137,7 @@ export const useSubDesignStore = create<SubDesignStore>((set, get) => ({
     const result = selectSubDesignDirection(brief, directionId, fallback)
     if (!result.ok) return { ok: false, error: result.error, brief }
     replaceBrief(set, get().briefs, result.brief)
-    persistSubDesignMetadata('brief', result.brief, projectRoot || get().projectRoot)
+    persistSubDesignBriefDirection(id, directionId, fallback, brief.threadId, projectRoot || get().projectRoot)
     return result
   },
 

@@ -10,7 +10,7 @@ import {
   type OpenDesignPackAuditEvent,
 } from '../agent/openDesign/packs'
 import { readOpenDesignText, type OpenDesignCatalogRecord } from '../agent/openDesign/catalog'
-import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
+import { persistOpenDesignPack } from '../agent/subdesign/metadata'
 
 const PACKS_KEY = 'subagents.open-design.packs.v1'
 const AUDIT_KEY = 'subagents.open-design.audit.v1'
@@ -106,7 +106,7 @@ export const useOpenDesignPackStore = create<OpenDesignPackStore>((set, get) => 
       const packs = [pack, ...get().packs.filter((item) => item.id !== id)].slice(0, 500)
       persist(PACKS_KEY, packs)
       set({ packs, busyId: null })
-      persistSubDesignMetadata('open-design-pack', pack, projectRoot || get().projectRoot)
+      persistOpenDesignPack(pack, projectRoot || get().projectRoot)
       addAudit(set, { at: new Date().toISOString(), action: 'install', packId: id, digest: pack.digest })
       return pack
     } catch (error) {
@@ -147,7 +147,7 @@ export const useOpenDesignPackStore = create<OpenDesignPackStore>((set, get) => 
     const packs = get().packs.map((item) => item.id === id ? next : item)
     persist(PACKS_KEY, packs)
     set({ packs, error: null })
-    persistSubDesignMetadata('open-design-pack', next, get().projectRoot)
+    persistOpenDesignPack(next, get().projectRoot)
     if (current.kind === 'skill') {
       if (enabled) {
         pluginRegistry.add(openDesignSkillPlugin(next, selectedSkillPath!, skillRaw!))
@@ -184,7 +184,7 @@ export const useOpenDesignPackStore = create<OpenDesignPackStore>((set, get) => 
     })
     persist(PACKS_KEY, packs)
     set({ packs })
-    for (const pack of changed) persistSubDesignMetadata('open-design-pack', pack, get().projectRoot)
+    for (const pack of changed) persistOpenDesignPack(pack, get().projectRoot)
     addAudit(set, { at: new Date().toISOString(), action: 'reindex', packId: 'open-design:index' })
   },
 

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { validateSubDesignArtifactManifest } from '../agent/subdesign/artifactManifest'
-import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
+import { persistSubDesignArtifact } from '../agent/subdesign/metadata'
 import type { SubDesignArtifact } from '../agent/subdesign/types'
 
 const STORAGE_KEY = 'subagents.subdesign.artifacts.v1'
@@ -71,7 +71,7 @@ export const useSubDesignArtifactStore = create<SubDesignArtifactStore>((set, ge
     const artifacts = [artifact, ...get().artifacts].slice(0, 80)
     set({ artifacts })
     persist(artifacts)
-    persistSubDesignMetadata('artifact', artifact, projectRoot || get().projectRoot)
+    persistSubDesignArtifact(artifact, projectRoot || get().projectRoot)
     return { ok: true, artifact }
   },
 

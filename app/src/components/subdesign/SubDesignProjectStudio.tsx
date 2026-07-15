@@ -117,7 +117,7 @@ export function SubDesignProjectStudio({
           <div className="min-h-0 flex-1 overflow-auto p-4 custom-scrollbar">
             {tab === 'files' ? <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]"><ArtifactRail artifacts={artifacts} selectedKey={selectedArtifact ? `${selectedArtifact.id}:${selectedArtifact.revision}` : null} onSelect={onSelectArtifact} /><ArtifactPreview artifact={selectedArtifact} mode={previewMode} /></div> : null}
             {tab === 'critique' ? <div className="space-y-4"><CritiqueTheater brief={brief} artifact={selectedArtifact} critique={critique} /><CritiquePanel critique={critique} /></div> : null}
-            {tab === 'deliver' ? <ArtifactDeliveryPanel artifact={selectedArtifact} critique={critique} critiquePassed={critiquePassed} /> : null}
+            {tab === 'deliver' ? <ArtifactDeliveryPanel artifact={selectedArtifact} critiquePassed={critiquePassed} runId={runId} threadId={brief.threadId} /> : null}
           </div>
         </main>
       </div>

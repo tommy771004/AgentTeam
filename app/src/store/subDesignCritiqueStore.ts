@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import { normalizeSubDesignCritique } from '../agent/subdesign/critique'
-import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
 import type { SubDesignCritique } from '../agent/subdesign/types'
 
 const STORAGE_KEY = 'subagents.subdesign.critiques.v1'
@@ -60,7 +59,7 @@ export const useSubDesignCritiqueStore = create<SubDesignCritiqueStore>((set, ge
     persist(critiques)
   },
 
-  record: (input, defaults, projectRoot) => {
+  record: (input, defaults, _projectRoot) => {
     const result = normalizeSubDesignCritique(input, defaults)
     if (!result.ok) return result
     const history = get().critiques.filter((item) => item.artifactId === result.critique.artifactId)
@@ -71,7 +70,6 @@ export const useSubDesignCritiqueStore = create<SubDesignCritiqueStore>((set, ge
     const critiques = [critique, ...get().critiques].slice(0, 120)
     set({ critiques })
     persist(critiques)
-    persistSubDesignMetadata('critique', critique, projectRoot || get().projectRoot)
     return { ok: true, critique }
   },
 

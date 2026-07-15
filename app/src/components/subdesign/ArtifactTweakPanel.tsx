@@ -55,10 +55,10 @@ function controlValue(tweak: PanelTweak, value: string, setValue: (value: string
   return <div className="flex gap-2">{tweak.kind === 'color' && /^#[0-9a-f]{6}$/i.test(value) ? <input aria-label={`${tweak.label} color`} type="color" value={value} onChange={(event) => setValue(event.target.value)} className="h-9 w-10 shrink-0 rounded-lg border border-white/10 bg-transparent p-1" /> : null}<input value={value} onChange={(event) => setValue(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/10 px-2 text-[12px] text-on-surface outline-none focus:border-primary/45" /></div>
 }
 
-export function ArtifactTweakPanel({ artifact }: { artifact: SubDesignArtifact | null }) {
+export function ArtifactTweakPanel({ artifact, runId, threadId }: { artifact: SubDesignArtifact | null; runId?: string | null; threadId?: string }) {
   const projectRoot = useProjectStore((state) => state.root)
   const requestAsk = usePermissionAskStore((state) => state.requestAsk)
-  const registerArtifact = useSubDesignArtifactStore((state) => state.register)
+  const hydrateArtifacts = useSubDesignArtifactStore((state) => state.hydrateCanonical)
   const setStage = useSubDesignStore((state) => state.setStage)
   const [controls, setControls] = useState<PanelTweak[]>([])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -106,13 +106,13 @@ export function ArtifactTweakPanel({ artifact }: { artifact: SubDesignArtifact |
       const api = window.subagents?.subdesign
       if (!api) throw new Error('artifact tweak 需要 Electron desktop。')
       const result = tweak.inferred
-        ? await api.patchArtifact({ artifact, operations: [{ path: tweak.path, find: tweak.find, replace: tweak.replaceTemplate.replaceAll('{{value}}', value), expectedMatches: 1 }], projectRoot: projectRoot || undefined })
-        : await api.applyTweak?.({ artifact, tweakId: tweak.id, value, projectRoot: projectRoot || undefined })
+        ? await api.patchArtifact({ artifact, operations: [{ path: tweak.path, find: tweak.find, replace: tweak.replaceTemplate.replaceAll('{{value}}', value), expectedMatches: 1 }], runId: runId || undefined, threadId, projectRoot: projectRoot || undefined })
+        : await api.applyTweak?.({ artifact, tweakId: tweak.id, value, runId: runId || undefined, threadId, projectRoot: projectRoot || undefined })
       if (!result?.ok || !result.artifact) throw new Error(result?.error || 'structured tweak 失敗。')
-      const stored = registerArtifact(result.artifact, { briefId: artifact.briefId, designSystemId: artifact.designSystemId }, projectRoot || undefined)
-      if (!stored.ok) throw new Error(`patch revision invalid：${stored.errors.join('；')}`)
+      const nextArtifact = result.artifact as SubDesignArtifact
+      hydrateArtifacts([nextArtifact, ...useSubDesignArtifactStore.getState().artifacts.filter((item) => item.id !== nextArtifact.id)])
       setStage(artifact.briefId, 'critique', projectRoot || undefined)
-      setMessage(`已套用「${tweak.label}」：revision ${stored.artifact.revision}。Preview 已刷新，舊 critique 需重新驗證。`)
+      setMessage(`已套用「${tweak.label}」：revision ${nextArtifact.revision}。Preview 已刷新，舊 critique 需重新驗證。`)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -128,12 +128,12 @@ export function ArtifactTweakPanel({ artifact }: { artifact: SubDesignArtifact |
     try {
       const decision = await requestAsk({ tool: 'design_artifact_patch', args: { artifactId: artifact.id, path: advancedPath, expectedMatches }, reason: `對 artifact「${artifact.title}」做一次 exact in-place patch。` })
       if (decision !== 'allow') { setMessage('Patch 已取消或未獲核准。'); return }
-      const result = await window.subagents?.subdesign?.patchArtifact?.({ artifact, operations: [{ path: advancedPath, find, replace, expectedMatches: Math.max(1, Math.min(12, Number(expectedMatches) || 1)) }], projectRoot: projectRoot || undefined })
+      const result = await window.subagents?.subdesign?.patchArtifact?.({ artifact, operations: [{ path: advancedPath, find, replace, expectedMatches: Math.max(1, Math.min(12, Number(expectedMatches) || 1)) }], runId: runId || undefined, threadId, projectRoot: projectRoot || undefined })
       if (!result?.ok || !result.artifact) throw new Error(result?.error || 'artifact patch 失敗。')
-      const stored = registerArtifact(result.artifact, { briefId: artifact.briefId, designSystemId: artifact.designSystemId }, projectRoot || undefined)
-      if (!stored.ok) throw new Error(`patch revision invalid：${stored.errors.join('；')}`)
+      const nextArtifact = result.artifact as SubDesignArtifact
+      hydrateArtifacts([nextArtifact, ...useSubDesignArtifactStore.getState().artifacts.filter((item) => item.id !== nextArtifact.id)])
       setStage(artifact.briefId, 'critique', projectRoot || undefined)
-      setMessage(`已完成 exact patch：revision ${stored.artifact.revision}。`)
+      setMessage(`已完成 exact patch：revision ${nextArtifact.revision}。`)
       setFind(''); setReplace('')
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
     finally { setBusyId(null) }
