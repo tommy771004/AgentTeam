@@ -6,6 +6,7 @@
  *   beforeTool → deny / require-approval / log / notify
  *   afterTool  → log / notify
  *   afterRun   → log / notify
+ *   permissionDenied → log / notify（任何 deny 定案後的被動觀察事件）
  *
  * Trust model: rules can only RESTRICT or OBSERVE — there is no 'allow' action,
  * so a plugin hook can never loosen approval policy. `require-approval` from a
@@ -17,7 +18,12 @@ import type { LlmSettings } from './types'
 import type { RunSourceKind } from './taskRunCoordinator'
 import { pluginRegistry } from './hermes/plugins'
 
-export type HookPoint = 'beforeRun' | 'beforeTool' | 'afterTool' | 'afterRun'
+export type HookPoint =
+  | 'beforeRun'
+  | 'beforeTool'
+  | 'afterTool'
+  | 'afterRun'
+  | 'permissionDenied'
 
 export type HookAction = 'deny' | 'require-approval' | 'append-context' | 'log' | 'notify'
 
@@ -48,6 +54,8 @@ const POINT_ACTIONS: Record<HookPoint, HookAction[]> = {
   beforeTool: ['deny', 'require-approval', 'log', 'notify'],
   afterTool: ['log', 'notify'],
   afterRun: ['log', 'notify'],
+  // 被動觀察:拒絕已定案,只能記錄/通知,不得改變結果
+  permissionDenied: ['log', 'notify'],
 }
 
 const ID = /^[A-Za-z0-9_.:-]{1,64}$/
@@ -96,6 +104,8 @@ export type HookContext = {
   toolOk?: boolean
   sourceKind?: RunSourceKind
   objective?: string
+  /** permissionDenied:拒絕原因(pattern/policy/hook/使用者) */
+  reason?: string
 }
 
 function ruleMatches(rule: HookRule, ctx: HookContext): boolean {
