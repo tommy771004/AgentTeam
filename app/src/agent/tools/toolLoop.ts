@@ -79,6 +79,8 @@ export interface ToolLoopCallbacks {
   onToolCall?: (record: ToolCallRecord) => void
   /** Fired when load_capability activates a bundle (or preload snapshot) */
   onCapabilityLoad?: (ids: string[]) => void
+  /** 每輪 context 用量估算（tokenEstimate 單一來源），供 UI meter。 */
+  onContextUsage?: (usage: { tokens: number; contextWindow: number; ratio: number }) => void
   /** Structured ask_user lifecycle for the live run status. */
   onQuestionAsked?: () => void
   onQuestionResolved?: () => void
@@ -407,6 +409,8 @@ export async function runFunctionCallingLoop(
 
   let tokensUsed = 0
   let rounds = 0
+  // context meter:只在使用率跨越 50/75/90% 門檻時各記一行
+  let lastUsageBucket = 0
 
   const catalog = formatDeferredCatalog(capState)
   const alwaysInstr = formatAlwaysOnInstructions(capState)
@@ -463,6 +467,16 @@ ${systemExtra}`,
       estimateTranscriptTokens(messages) +
       estimateTokensFromText(JSON.stringify(tools))
     const overflowRisk = shouldPreflightCompact(estTokens, contextWindow)
+    const usageRatio = estTokens / Math.max(1, contextWindow)
+    cb?.onContextUsage?.({ tokens: estTokens, contextWindow, ratio: usageRatio })
+    const usageBucket = usageRatio >= 0.9 ? 3 : usageRatio >= 0.75 ? 2 : usageRatio >= 0.5 ? 1 : 0
+    if (usageBucket > lastUsageBucket) {
+      lastUsageBucket = usageBucket
+      cb?.onLog?.(
+        'INFO',
+        `context 使用率 ${Math.round(usageRatio * 100)}%（${estTokens}/${contextWindow} tokens）`,
+      )
+    }
 
     // OpenCode-style compaction — preserve tool_calls / tool_call_id chain.
     // Skip while vision images are still in the transcript (data URLs + compaction would drop them).
@@ -509,6 +523,32 @@ ${systemExtra}`,
               `preflight:context 估算 ${estTokens}/${contextWindow} tokens,已先壓縮再呼叫`,
             )
           }
+          // 壓縮前 checkpoint(原始 transcript 可回放)+ memory flush
+          // (grok [compaction.memory_flush] 語意:脈絡被丟棄前先入庫)
+          try {
+            const { saveCompactionCheckpoint } = await import('../compactionCheckpoint')
+            saveCompactionCheckpoint(opts?.runId || opts?.threadId || 'adhoc', {
+              summary: c.summary || '',
+              messages: flat,
+            })
+          } catch {
+            /* non-fatal */
+          }
+          try {
+            const { learningLoop } = await import('../hermes/learning')
+            const flushed = learningLoop.onPreCompactionFlush({
+              objective: opts?.objective || args.objective,
+              summary: c.summary || '',
+              runId: opts?.runId,
+              memoryEnabled: settings.memoryEnabled,
+              memoryWriteEnabled: settings.memoryWriteEnabled,
+            })
+            if (flushed) cb?.onLog?.('INFO', '壓縮前已將重要脈絡 flush 進持久記憶')
+          } catch {
+            /* non-fatal */
+          }
+        }
+        if (c.compacted || c.pruneStats?.changed) {
           messages.length = 0
           for (const m of c.messages) {
             messages.push({
@@ -518,6 +558,39 @@ ${systemExtra}`,
               tool_call_id: m.tool_call_id,
               name: m.name,
             })
+          }
+        }
+        if (c.pruneStats?.changed) {
+          cb?.onLog?.(
+            'INFO',
+            `pruning:soft-trim ${c.pruneStats.softTrimmed} 筆、hard-clear ${c.pruneStats.hardCleared} 筆,省下 ${c.pruneStats.savedChars} chars`,
+          )
+        }
+        if (c.compacted) {
+          // 壓縮後記憶召回:把可能被摘要丟掉的相關脈絡補回 compaction 訊息
+          if (settings.memoryEnabled !== false) {
+            try {
+              const { memoryStore } = await import('../hermes/memory')
+              const related = memoryStore.search(opts?.objective || args.objective, 3)
+              if (related.length) {
+                const idx = messages.findIndex(
+                  (m) =>
+                    m.role === 'system' &&
+                    typeof m.content === 'string' &&
+                    m.content.startsWith('## Context compaction'),
+                )
+                if (idx >= 0) {
+                  messages[idx] = {
+                    ...messages[idx],
+                    content: `${messages[idx].content}\n\n### 壓縮後記憶召回\n${related
+                      .map((e) => `- ${e.text.slice(0, 200)}`)
+                      .join('\n')}`,
+                  }
+                }
+              }
+            } catch {
+              /* non-fatal */
+            }
           }
           cb?.onLog?.('INFO', 'Context compacted (OpenCode-style)')
         }

@@ -2016,6 +2016,127 @@ await test('drift guard: toolLoop preflights context overflow via tokenEstimate'
   assert.match(loop, /force: true/)
 })
 
+// ── Phase 1 (grok-build plan G2): tool-result pruning + compaction flush ──
+// Mirrors agent/contextPruning.ts. Keep in sync with the TS source.
+
+const HARD_CLEAR_MARKER = '〔工具結果已由 pruning 清除'
+const SOFT_TRIM_MARKER = '…〔pruning 截斷 '
+
+function pruneToolResults(messages, cfg) {
+  cfg = {
+    enabled: true, keepLastNRounds: 3, softTrimThresholdChars: 4000,
+    softTrimHeadChars: 1500, softTrimTailChars: 1500, hardClearAgeRounds: 10, ...cfg,
+  }
+  const stats = { changed: false, softTrimmed: 0, hardCleared: 0, savedChars: 0 }
+  if (!cfg.enabled) return { messages, stats }
+  const totalRounds = messages.filter((m) => m.role === 'assistant' && m.tool_calls?.length).length
+  if (totalRounds === 0) return { messages, stats }
+  let roundIdx = 0
+  const next = messages.map((m) => {
+    if (m.role === 'assistant' && m.tool_calls?.length) { roundIdx += 1; return m }
+    if (m.role !== 'tool' || typeof m.content !== 'string') return m
+    const age = totalRounds - roundIdx
+    if (age < cfg.keepLastNRounds) return m
+    const content = m.content
+    if (content.includes(HARD_CLEAR_MARKER) || content.includes(SOFT_TRIM_MARKER)) return m
+    if (age >= cfg.hardClearAgeRounds) {
+      const replaced = `${HARD_CLEAR_MARKER}（${age} 輪前，原 ${content.length} chars）— 需要此結果時請重新呼叫工具〕`
+      if (replaced.length >= content.length) return m
+      stats.changed = true
+      stats.hardCleared += 1
+      stats.savedChars += content.length - replaced.length
+      return { ...m, content: replaced }
+    }
+    if (content.length > cfg.softTrimThresholdChars) {
+      const head = content.slice(0, cfg.softTrimHeadChars)
+      const tail = content.slice(-cfg.softTrimTailChars)
+      const cut = content.length - head.length - tail.length
+      const trimmed = `${head}\n${SOFT_TRIM_MARKER}${cut} chars（${age} 輪前）〕\n${tail}`
+      if (trimmed.length >= content.length) return m
+      stats.changed = true
+      stats.softTrimmed += 1
+      stats.savedChars += content.length - trimmed.length
+      return { ...m, content: trimmed }
+    }
+    return m
+  })
+  return { messages: stats.changed ? next : messages, stats }
+}
+
+function fcRound(id, toolContent) {
+  return [
+    { role: 'assistant', content: null, tool_calls: [{ id, type: 'function', function: { name: 'bash', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: id, content: toolContent },
+  ]
+}
+
+await test('pruning: recent keepLastNRounds tool results stay untouched', () => {
+  const big = 'x'.repeat(6000)
+  const messages = [
+    { role: 'user', content: 'go' },
+    ...fcRound('a', big), ...fcRound('b', big), ...fcRound('c', big),
+  ]
+  const { messages: out, stats } = pruneToolResults(messages, { keepLastNRounds: 3 })
+  assert.equal(stats.changed, false)
+  assert.equal(out, messages, 'unchanged input returns same reference')
+})
+
+await test('pruning: old oversized tool result gets head/tail soft-trim', () => {
+  const big = 'H'.repeat(2000) + 'M'.repeat(3000) + 'T'.repeat(2000)
+  const messages = [
+    ...fcRound('a', big),
+    ...fcRound('b', 'ok'), ...fcRound('c', 'ok'), ...fcRound('d', 'ok'),
+  ]
+  const { messages: out, stats } = pruneToolResults(messages)
+  assert.equal(stats.softTrimmed, 1)
+  const pruned = out[1].content
+  assert.ok(pruned.startsWith('H'.repeat(1500)), 'head preserved')
+  assert.ok(pruned.endsWith('T'.repeat(1500)), 'tail preserved')
+  assert.ok(pruned.includes(SOFT_TRIM_MARKER))
+  assert.ok(pruned.length < big.length)
+})
+
+await test('pruning: tool results older than hardClearAgeRounds become placeholders', () => {
+  const rounds = []
+  for (let i = 0; i < 12; i++) rounds.push(...fcRound(`r${i}`, `result-${i} ` + 'z'.repeat(300)))
+  const { messages: out, stats } = pruneToolResults(rounds)
+  assert.ok(stats.hardCleared >= 1)
+  assert.ok(out[1].content.includes(HARD_CLEAR_MARKER), 'oldest round cleared')
+  // FC chain intact: every tool message still has its tool_call_id
+  for (const m of out) {
+    if (m.role === 'tool') assert.ok(m.tool_call_id, 'tool_call_id preserved')
+  }
+  assert.equal(out.filter((m) => m.role === 'assistant').length, 12, 'no messages removed')
+})
+
+await test('pruning: idempotent — second pass changes nothing', () => {
+  const rounds = []
+  for (let i = 0; i < 12; i++) rounds.push(...fcRound(`r${i}`, 'y'.repeat(5000)))
+  const first = pruneToolResults(rounds)
+  assert.equal(first.stats.changed, true)
+  const second = pruneToolResults(first.messages)
+  assert.equal(second.stats.changed, false, 'already-pruned content is skipped')
+})
+
+await test('drift guard: compaction applies pruning and returns pruneStats', async () => {
+  const fs = await import('node:fs')
+  const src = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/compaction.ts'), 'utf8')
+  assert.match(src, /pruneToolResults\(messages, DEFAULT_PRUNING_CONFIG\)/)
+  assert.match(src, /pruneStats\?: PruneStats/)
+})
+
+await test('drift guard: toolLoop wires checkpoint + memory flush + post-compaction recall', async () => {
+  const fs = await import('node:fs')
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /saveCompactionCheckpoint\(/)
+  assert.match(loop, /onPreCompactionFlush\(/)
+  assert.match(loop, /壓縮後記憶召回/)
+  assert.match(loop, /onContextUsage\?\.\(\{ tokens: estTokens, contextWindow, ratio: usageRatio \}\)/)
+  const learning = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
+  assert.match(learning, /onPreCompactionFlush\(input/)
+  assert.match(learning, /textSimilarity\(flushText, prev\.text\) >= 0\.85/)
+})
+
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)
 if (process.exitCode) {
   console.error('Capability smoke failed')
