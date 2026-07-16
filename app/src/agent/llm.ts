@@ -68,6 +68,7 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   codeModeEnabled: true,
   modelProfiles: {},
   hookRules: [],
+  trustedHookProjects: [],
 
   // ChatGPT-style prefs
   theme: 'dark',

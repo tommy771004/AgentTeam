@@ -313,5 +313,98 @@ await test('rewind: newly created file is removed; deleted file is brought back'
   assert.equal(clearRewindEntries(base, 't3'), true)
 })
 
+// ── Phase 4 (grok-build plan G8): plan mode — real-source tests ──
+
+const {
+  setPlanMode,
+  isPlanModeActive,
+  clearPlanMode,
+  resetPlanMode,
+  planModeToolDecision,
+} = await import('../src/agent/planMode.ts')
+
+await test('plan mode: run-scoped state with coordinator-owned release', () => {
+  resetPlanMode()
+  assert.equal(isPlanModeActive('r1'), false)
+  setPlanMode('r1', true)
+  assert.equal(isPlanModeActive('r1'), true)
+  assert.equal(isPlanModeActive('r2'), false, '不同 run 互不影響')
+  clearPlanMode('r1')
+  assert.equal(isPlanModeActive('r1'), false)
+})
+
+await test('plan mode: only .scratch/ plan files writable; side-effect tools denied', () => {
+  // plan 檔可寫
+  assert.equal(
+    planModeToolDecision('workspace_write', { path: '.scratch/feat-x/plan.md' }).allowed,
+    true,
+  )
+  assert.equal(
+    planModeToolDecision('workspace_mkdir', { path: '.scratch/feat-x' }).allowed,
+    true,
+  )
+  // 其他路徑寫入拒絕;路徑跳脫拒絕
+  assert.equal(planModeToolDecision('workspace_write', { path: 'src/app.ts' }).allowed, false)
+  assert.equal(
+    planModeToolDecision('workspace_write', { path: '.scratch/../src/x.ts' }).allowed,
+    false,
+  )
+  // bash / 副作用 / MCP 拒絕(比 grok 嚴:bash 也擋)
+  assert.equal(planModeToolDecision('bash', { command: 'ls' }).allowed, false)
+  assert.equal(planModeToolDecision('workspace_delete', { path: 'x' }).allowed, false)
+  assert.equal(planModeToolDecision('mcp_github_create_issue', {}).allowed, false)
+  assert.equal(planModeToolDecision('custom_tool', {}, true).allowed, false, 'sideEffect hint')
+  // 唯讀研究工具放行
+  assert.equal(planModeToolDecision('workspace_read', { path: 'src/app.ts' }).allowed, true)
+  assert.equal(planModeToolDecision('web_search', { query: 'x' }).allowed, true)
+  assert.equal(planModeToolDecision('ask_user', {}).allowed, true)
+})
+
+// ── Phase 5 (grok-build plan G9/G11): capability mode + metrics — real source ──
+
+const { parseCapabilityMode, blockedToolsForCapabilityMode } = await import(
+  '../src/agent/hermes/capabilityMode.ts'
+)
+
+await test('capability mode: coarse tool filter matrix (read/write/execute)', () => {
+  assert.equal(parseCapabilityMode('read-only'), 'read-only')
+  assert.equal(parseCapabilityMode('READ_WRITE'), 'read-write')
+  assert.equal(parseCapabilityMode('bogus'), undefined)
+  const ro = blockedToolsForCapabilityMode('read-only')
+  assert.ok(ro.includes('workspace_write') && ro.includes('bash') && ro.includes('run_code'))
+  const rw = blockedToolsForCapabilityMode('read-write')
+  assert.ok(!rw.includes('workspace_write'), 'read-write keeps file writes')
+  assert.ok(rw.includes('bash') && rw.includes('mcp_call'), 'read-write blocks execute')
+  const ex = blockedToolsForCapabilityMode('execute')
+  assert.ok(ex.includes('workspace_write') && !ex.includes('bash'), 'execute keeps shell, blocks writes')
+  assert.deepEqual(blockedToolsForCapabilityMode('all'), [])
+  assert.deepEqual(blockedToolsForCapabilityMode(undefined), [])
+})
+
+const { bumpRunMetric, finalizeRunMetric, metricsSummary } = await import(
+  '../src/agent/metrics.ts'
+)
+
+await test('metrics: per-run counters fold into one record; denial ratio math', () => {
+  bumpRunMetric('run-a', 'toolAsks')
+  bumpRunMetric('run-a', 'toolAsks')
+  bumpRunMetric('run-a', 'toolDenials')
+  bumpRunMetric('run-a', 'compactions')
+  bumpRunMetric(undefined, 'toolDenials') // 無 runId 靜默忽略
+  const rec = finalizeRunMetric('run-a', { sourceKind: 'composer', ok: true })
+  assert.equal(rec.counters.toolAsks, 2)
+  assert.equal(rec.counters.toolDenials, 1)
+  assert.equal(rec.counters.compactions, 1)
+  assert.equal(rec.ok, true)
+  // finalize 後 live counters 清空:同 runId 再 finalize 是空計數
+  const rec2 = finalizeRunMetric('run-a', { ok: false })
+  assert.equal(rec2.counters.toolAsks, 0)
+
+  const sum = metricsSummary([rec, rec2])
+  assert.equal(sum.runs, 2)
+  assert.equal(sum.okRuns, 1)
+  assert.equal(sum.denialRatio.toFixed(3), (1 / 3).toFixed(3))
+})
+
 console.log(`\n${passed} platform process smoke tests passed`)
 if (process.exitCode) console.error('Platform process smoke failed')

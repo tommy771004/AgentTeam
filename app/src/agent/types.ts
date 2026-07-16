@@ -643,6 +643,11 @@ export interface LlmSettings {
    * Plugin hooks 由 manifest 提供並經 sanitize；此欄僅存 user 規則。
    */
   hookRules: unknown[]
+  /**
+   * G7 folder trust:允許載入 `<root>/.subagents/hooks.json` 專案 hooks
+   * 的專案根路徑清單。未信任的專案 hooks 靜默跳過(防供應鏈攻擊)。
+   */
+  trustedHookProjects: string[]
 
   /* ── ChatGPT app–style preferences (exclude account/login) ── */
 

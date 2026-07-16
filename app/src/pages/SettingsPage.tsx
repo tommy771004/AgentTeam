@@ -2183,6 +2183,61 @@ export function SettingsPage() {
                 }
               />
             </SettingsGroup>
+            <SettingsGroup title="專案 Hooks 信任">
+              <SettingsRow
+                title="信任目前專案"
+                description={
+                  projectRoot
+                    ? `允許載入 ${projectRoot} 下的 .subagents/hooks.json（僅能限制/觀察，不能放寬權限）`
+                    : '尚未綁定專案；未信任的專案 hooks 一律靜默跳過'
+                }
+                control={
+                  <SettingsToggle
+                    checked={Boolean(
+                      projectRoot &&
+                        (settings.trustedHookProjects || []).includes(projectRoot),
+                    )}
+                    onChange={(v) => {
+                      if (!projectRoot) return
+                      const current = settings.trustedHookProjects || []
+                      set({
+                        trustedHookProjects: v
+                          ? [...new Set([...current, projectRoot])]
+                          : current.filter((r) => r !== projectRoot),
+                      })
+                      void import('../agent/projectHooks').then((m) =>
+                        m.invalidateProjectHooks(projectRoot),
+                      )
+                    }}
+                  />
+                }
+              />
+              {(settings.trustedHookProjects || []).map((root) => (
+                <SettingsRow
+                  key={root}
+                  title={root.split('/').pop() || root}
+                  description={root}
+                  control={
+                    <button
+                      type="button"
+                      className="text-[11px] text-error hover:underline"
+                      onClick={() => {
+                        set({
+                          trustedHookProjects: (
+                            settings.trustedHookProjects || []
+                          ).filter((r) => r !== root),
+                        })
+                        void import('../agent/projectHooks').then((m) =>
+                          m.invalidateProjectHooks(root),
+                        )
+                      }}
+                    >
+                      移除信任
+                    </button>
+                  }
+                />
+              ))}
+            </SettingsGroup>
             <p className="text-[11px] text-outline px-1">
               人工介入示範：目標含敏感匯出且授權等級 &lt; 4 時會暫停等待核准。
             </p>

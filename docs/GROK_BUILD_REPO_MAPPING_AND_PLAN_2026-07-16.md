@@ -1,6 +1,20 @@
 # Grok Build (xai-org/grok-build) 原始碼分析與參考整合計畫
 
-> **狀態:** 草案(分析完成,待排入 Phase 執行)
+> **狀態:** Phase 0–5 核心已落地(2026-07-16;見下方進度表)。
+>
+> | Phase | 內容 | 狀態 |
+> |---|---|---|
+> | 0 | G1 LLM retry/breaker + G3 token 估算/preflight | ✅ 完成 |
+> | 1 | G2 三層 pruning + memory flush + checkpoint + context meter | ✅ 完成 |
+> | 2 | G4 bash 段級權限 + 危險清單 + permissionDenied hook | ✅ 完成 |
+> | 3 | G5 rewind 快照回捲 + G6 memory decay/staleness/dream | ✅ 完成 |
+> | 4 | G8 plan mode + G7 hook 事件擴充/專案 hooks folder trust | ✅ 完成 |
+> | 5 | G9 capability_mode + G10 wait 原語 + G11 本地指標 | ✅ 核心完成 |
+>
+> **Phase 5 遞延項(獨立可交付,依原計畫優先序排後):**
+> G9 persona overlay / `resume_from` / worktree 隔離 IPC、
+> G10 `monitor` 事件流工具(餵 eventMatcher)、
+> G11 Settings 匯出 UI(`agent/metrics.ts` 的 `exportRunMetricsJsonl()` 已就緒)。
 > **基準:** 2026-07-16;grok-build commit `c68e39f`(Publish harness and TUI open-source);本專案 branch `claude/grok-repo-analysis-2bafr8`。
 > **範圍:** 比對 grok-build 的 agent runtime 設計與本專案(SubAgents AI, `app/`)的差距,列出值得移植的機制與分階段計畫。
 > **不在本計畫內:** 移植 Rust 程式碼本身、TUI/終端渲染層、ACP editor 整合、行動端。

@@ -170,6 +170,21 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
     type: 'object',
     properties: {
       jobId: { type: 'string', description: 'Optional job id; omit to list recent jobs' },
+      jobIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Job ids to wait on (max 20); used with wait',
+      },
+      wait: {
+        type: 'string',
+        enum: ['none', 'any', 'all'],
+        description:
+          'Block until jobs finish: any = first terminal job returns; all = every job terminal. Default none (snapshot only). Never poll in a loop — use this instead.',
+      },
+      timeoutMs: {
+        type: 'number',
+        description: 'Max wait in ms (default 30000, cap 120000)',
+      },
     },
   },
   message_send: {

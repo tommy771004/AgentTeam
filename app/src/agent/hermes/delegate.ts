@@ -11,6 +11,10 @@ import { runFunctionCallingLoop } from '../tools/toolLoop'
 import { executeTool } from '../tools/executor'
 import { buildPromptLayers } from './promptBuilder'
 import { compressStepOutputs } from './sessionSearch'
+import {
+  blockedToolsForCapabilityMode,
+  type DelegateCapabilityMode,
+} from './capabilityMode'
 
 export type DelegateRole = 'leaf' | 'orchestrator'
 
@@ -29,6 +33,11 @@ export interface DelegateTaskInput {
    * Isolation by default; only listed packs are inherited (G4).
    */
   inheritCapabilities?: string[]
+  /**
+   * G9 粗粒度工具篩選(grok capability_mode):read-only / read-write /
+   * execute / all。疊加在角色 blockedTools 之上,只會更嚴不會放寬。
+   */
+  capabilityMode?: DelegateCapabilityMode
   /** Parent run trace (audit / hooks) */
   parentRunId?: string
   /** Source thread for background completion injection. */
@@ -146,6 +155,30 @@ export async function runDelegatedTask(
 
   opts?.onLog?.(`[delegate ${id}] 啟動 ${role} depth=${depth} goal=${input.goal.slice(0, 80)}`)
 
+  // G7 delegateStart hook 事件(被動:log / notify)
+  const emitDelegateHook = async (point: 'delegateStart' | 'delegateEnd', ok?: boolean) => {
+    try {
+      const { collectHookRules, evaluateHooks } = await import('../hooks')
+      const ev = evaluateHooks(collectHookRules(settings), {
+        point,
+        tool: 'delegate_task',
+        toolOk: ok,
+        objective: input.goal,
+      })
+      for (const line of ev.audits) opts?.onLog?.(line)
+      for (const n of ev.notifications) {
+        void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }
+  await emitDelegateHook('delegateStart')
+  const finish = async (r: DelegateTaskResult): Promise<DelegateTaskResult> => {
+    await emitDelegateHook('delegateEnd', r.ok)
+    return r
+  }
+
   try {
     // Isolated prompt: NO parent full transcript
     const layers = buildPromptLayers({
@@ -169,7 +202,7 @@ export async function runDelegatedTask(
     )
 
     if (settings.enabled && settings.apiKey) {
-      const blockedTools =
+      const roleBlocked =
         role === 'leaf'
           ? [
               'skill_save',
@@ -189,6 +222,13 @@ export async function runDelegatedTask(
               'mcp_call',
             ]
           : ['delegate_task']
+      // G9 capability_mode 疊加(只更嚴,不放寬 role 既有封鎖)
+      const blockedTools = [
+        ...new Set([
+          ...roleBlocked,
+          ...blockedToolsForCapabilityMode(input.capabilityMode),
+        ]),
+      ]
       // Baseline + optional parent-chosen inherit_capabilities (G4)
       const baseline = ['core-utils', 'web-research', 'memory']
       const inherited = (input.inheritCapabilities || [])
@@ -238,7 +278,7 @@ export async function runDelegatedTask(
         },
       )
 
-      return {
+      return finish({
         id,
         role,
         goal: input.goal,
@@ -248,7 +288,7 @@ export async function runDelegatedTask(
         toolCalls: loop.toolCalls,
         durationMs: Date.now() - t0,
         depth,
-      }
+      })
     }
 
     // Simulation path without LLM
@@ -272,7 +312,7 @@ export async function runDelegatedTask(
       '（模擬模式：未呼叫 LLM）',
     ].join('\n\n')
 
-    return {
+    return finish({
       id,
       role,
       goal: input.goal,
@@ -282,9 +322,9 @@ export async function runDelegatedTask(
       toolCalls: [],
       durationMs: Date.now() - t0,
       depth,
-    }
+    })
   } catch (e) {
-    return {
+    return finish({
       id,
       role,
       goal: input.goal,
@@ -294,7 +334,7 @@ export async function runDelegatedTask(
       toolCalls: [],
       durationMs: Date.now() - t0,
       depth,
-    }
+    })
   } finally {
     budget.leave()
   }

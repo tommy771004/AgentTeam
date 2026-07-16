@@ -829,6 +829,7 @@ export async function runExternalObjective(
     objective,
     threadId: tid,
     runId,
+    projectRoot: opts.projectRoot?.trim() || opts.overrides?.projectRoot,
   })
   if (!beforeRun.ok) {
     // Finalization owns afterRun / Archive / onSettled / release / drain once.
@@ -864,6 +865,21 @@ export async function runExternalObjective(
     try {
       const { learningLoop } = await import('./hermes/learning')
       learningLoop.onUserTurn()
+    } catch {
+      /* non-fatal */
+    }
+    // G7 userTurn hook 事件(被動:log / notify)
+    try {
+      const { collectHookRules, evaluateHooks } = await import('./hooks')
+      const ev = evaluateHooks(collectHookRules(settings), {
+        point: 'userTurn',
+        sourceKind: opts.sourceKind,
+        objective,
+      })
+      for (const line of ev.audits) thr.pushBubble(tid, 'system', line)
+      for (const n of ev.notifications) {
+        void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+      }
     } catch {
       /* non-fatal */
     }

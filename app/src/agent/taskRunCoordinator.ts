@@ -195,6 +195,8 @@ export type BeforeRunHookOpts = {
   objective: string
   threadId: string
   runId: string
+  /** G7:hydrate 專案級 hooks(.subagents/hooks.json,需 folder trust) */
+  projectRoot?: string
 }
 
 export type BeforeRunHookResult =
@@ -221,6 +223,18 @@ export async function evaluateBeforeRunHooks(
       import('./hooks'),
       import('../store/threadStore'),
     ])
+    // G7:先 hydrate 專案級 hooks(未信任專案靜默跳過),collect 才收得到
+    try {
+      const { hydrateProjectHooks } = await import('./projectHooks')
+      const hydrated = await hydrateProjectHooks(opts.settings, opts.projectRoot)
+      if (hydrated.loaded > 0) {
+        useThreadStore
+          .getState()
+          .pushBubble(opts.threadId, 'system', `專案 hooks 已載入 ${hydrated.loaded} 條（.subagents/hooks.json）`)
+      }
+    } catch {
+      /* project hooks must never break runs */
+    }
     const rules = collectHookRules(opts.settings)
     const thr = useThreadStore.getState()
     const ev: HookEvaluation = evaluateHooks(rules, {
@@ -356,6 +370,14 @@ export async function finalizeTaskRun(
   const thr = useThreadStore.getState()
   const { runId, threadId: tid, objective, settings } = input
 
+  // G8:plan mode 是 run-scoped 狀態,finalization 唯一出口負責釋放
+  try {
+    const { clearPlanMode } = await import('./planMode')
+    clearPlanMode(runId)
+  } catch {
+    /* non-fatal */
+  }
+
   const drainOnce = () => {
     void drainExternalRunQueue((o) =>
       runTask({
@@ -367,6 +389,18 @@ export async function finalizeTaskRun(
   }
 
   const settle = async (result: ExternalRunResult) => {
+    // G11:每 run 一筆指標(finalization 唯一出口保證恰好一次)
+    try {
+      const { finalizeRunMetric } = await import('./metrics')
+      finalizeRunMetric(runId, {
+        sourceKind: input.sourceKind,
+        path: result.path,
+        status: result.status,
+        ok: !result.error && !result.skipped,
+      })
+    } catch {
+      /* metrics must never block finalization */
+    }
     try {
       await input.onSettled?.(result)
     } catch {

@@ -447,7 +447,37 @@ export async function executeTool(
         if (useSettingsStore.getState().settings.subAgentsEnabled !== true) {
           return { ok: false, output: 'Sub Agent 功能目前已關閉，沒有可用的 delegate job。' }
         }
-        const { listBackgroundJobs, getBackgroundJob } = await import('../hermes/backgroundJobs')
+        const { listBackgroundJobs, getBackgroundJob, waitBackgroundJobs } = await import(
+          '../hermes/backgroundJobs'
+        )
+        // G10:wait=any/all 阻塞等待多個 job 終態(取代模型自行輪詢)
+        const waitMode = String(input.wait || 'none')
+        if (waitMode === 'any' || waitMode === 'all') {
+          const ids = Array.isArray(input.jobIds)
+            ? input.jobIds.map(String)
+            : input.jobId
+              ? [String(input.jobId)]
+              : listBackgroundJobs()
+                  .filter((j) => j.status === 'queued' || j.status === 'running')
+                  .map((j) => j.id)
+          if (!ids.length) return { ok: true, output: '（沒有進行中的背景委派可等待）' }
+          const r = await waitBackgroundJobs(
+            ids,
+            waitMode === 'any' ? 'wait_any' : 'wait_all',
+            Number(input.timeoutMs) || 30_000,
+          )
+          return {
+            ok: true,
+            output: [
+              r.timedOut ? `等待逾時（${ids.length} 個 job 未全部完成）` : '等待完成',
+              ...r.jobs.map(
+                (j) =>
+                  `· ${j.id} [${j.status}] ${j.goal.slice(0, 60)}${j.summary ? ` — ${j.summary.slice(0, 120)}` : ''}`,
+              ),
+            ].join('\n'),
+            data: r,
+          }
+        }
         const jobId = input.jobId ? String(input.jobId) : ''
         if (jobId) {
           const j = getBackgroundJob(jobId)

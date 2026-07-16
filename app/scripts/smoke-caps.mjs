@@ -2199,6 +2199,77 @@ await test('drift guard: rewind snapshots wired into write tools + thread rewind
   assert.match(preload, /rewind:restore/)
 })
 
+// ── Phase 4 (grok-build plan G7+G8): hooks expansion + plan mode wiring ──
+
+await test('drift guard: plan mode enforced in toolGuard before approvalMode; cleared at finalize', async () => {
+  const fs = await import('node:fs')
+  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  assert.match(guard, /isPlanModeActive\(opts\.runId\)/)
+  assert.match(guard, /planModeToolDecision\(/)
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  assert.match(coordinator, /clearPlanMode\(runId\)/)
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /ENTER_PLAN_MODE_TOOL \|\| tc\.name === EXIT_PLAN_MODE_TOOL/)
+  assert.match(loop, /unattended/, 'plan tools gated for unattended runs')
+})
+
+await test('drift guard: new hook points are passive-only and wired', async () => {
+  const fs = await import('node:fs')
+  const hooks = fs.readFileSync(path.join(appRoot, 'src/agent/hooks.ts'), 'utf8')
+  for (const point of ['permissionDenied', 'beforeCompaction', 'afterCompaction', 'delegateStart', 'delegateEnd', 'userTurn']) {
+    assert.match(hooks, new RegExp(`${point}: \\['log', 'notify'\\]`), `${point} passive-only`)
+  }
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /point: 'beforeCompaction'/)
+  assert.match(loop, /point: 'afterCompaction'/)
+  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
+  assert.match(delegate, /'delegateStart'/)
+  assert.match(delegate, /emitDelegateHook\('delegateEnd', r\.ok\)/)
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  assert.match(runExternal, /point: 'userTurn'/)
+})
+
+await test('drift guard: project hooks require folder trust and stay sanitized', async () => {
+  const fs = await import('node:fs')
+  const project = fs.readFileSync(path.join(appRoot, 'src/agent/projectHooks.ts'), 'utf8')
+  assert.match(project, /isProjectHooksTrusted\(settings, root\)/)
+  assert.match(project, /skipped: 'untrusted'/)
+  assert.match(project, /sanitizeHookRules\(raw, 'project'\)/)
+  const hooks = fs.readFileSync(path.join(appRoot, 'src/agent/hooks.ts'), 'utf8')
+  assert.match(hooks, /activeProjectHookRules\(\)/)
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  assert.match(coordinator, /hydrateProjectHooks\(opts\.settings, opts\.projectRoot\)/)
+})
+
+// ── Phase 5 (grok-build plan G9/G10/G11): wiring drift guards ──
+
+await test('drift guard: delegate capability_mode stacks on role blocks; wait primitives wired', async () => {
+  const fs = await import('node:fs')
+  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
+  assert.match(delegate, /blockedToolsForCapabilityMode\(input\.capabilityMode\)/)
+  assert.match(delegate, /roleBlocked/)
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /capability_mode/)
+  assert.match(loop, /parseCapabilityMode\(/)
+  const jobs = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
+  assert.match(jobs, /export async function waitBackgroundJobs/)
+  assert.match(jobs, /wait_any/)
+  const executor = fs.readFileSync(path.join(appRoot, 'src/agent/tools/executor.ts'), 'utf8')
+  assert.match(executor, /waitBackgroundJobs\(/)
+})
+
+await test('drift guard: metrics recorded at coordinator settle + guard/loop bumps', async () => {
+  const fs = await import('node:fs')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  assert.match(coordinator, /finalizeRunMetric\(runId/)
+  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  assert.match(guard, /bumpRunMetric\(opts\.runId, 'toolAsks'\)/)
+  assert.match(guard, /'toolDenials'\)/)
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /'compactions'\)/)
+  assert.match(loop, /'llmRetries'\)/)
+})
+
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)
 if (process.exitCode) {
   console.error('Capability smoke failed')

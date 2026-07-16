@@ -50,6 +50,13 @@ import {
   shouldPreflightCompact,
 } from '../tokenEstimate'
 import {
+  ENTER_PLAN_MODE_TOOL,
+  EXIT_PLAN_MODE_TOOL,
+  isPlanModeActive,
+  PLAN_FILE_PREFIX,
+  setPlanMode,
+} from '../planMode'
+import {
   customToolDefs,
   customToolsForSettings,
   executeCustomTool,
@@ -310,6 +317,12 @@ export async function runFunctionCallingLoop(
             description:
               'Optional capability ids to preload in the child (e.g. codegraph, workspace). Isolation by default; only listed packs inherit.',
           },
+          capability_mode: {
+            type: 'string',
+            enum: ['read-only', 'read-write', 'execute', 'all'],
+            description:
+              'Coarse tool filter for the child (grok-style): read-only = no writes/shell; read-write = files but no shell; execute = shell but no writes. Stacks on role restrictions (never loosens).',
+          },
         },
         required: ['goal'],
       },
@@ -340,6 +353,46 @@ export async function runFunctionCallingLoop(
     )
   }
 
+  // G8 plan mode:僅互動式 run(有人可審批)提供;enter/exit 依狀態輪替
+  const planToolsAvailable = !opts?.unattended && Boolean(opts?.runId)
+  const enterPlanDef: OpenAiToolDef = {
+    type: 'function',
+    function: {
+      name: ENTER_PLAN_MODE_TOOL,
+      description:
+        '進入 Plan mode:任務有多種合理作法或架構歧義時,先探索並寫計畫再實作。需使用者核准;核准後只有 .scratch/ 計畫檔可寫,副作用工具被凍結。',
+      parameters: {
+        type: 'object',
+        properties: {
+          reason: { type: 'string', description: '為何需要先規劃(一句話)' },
+        },
+        required: ['reason'],
+      },
+    },
+  }
+  const exitPlanDef: OpenAiToolDef = {
+    type: 'function',
+    function: {
+      name: EXIT_PLAN_MODE_TOOL,
+      description:
+        '完成計畫後請使用者審批。核准即離開 Plan mode 開始實作;退回則留在 Plan mode 依回饋修訂。',
+      parameters: {
+        type: 'object',
+        properties: {
+          plan: {
+            type: 'string',
+            description: '計畫摘要(Markdown,會呈給使用者審批)',
+          },
+          plan_path: {
+            type: 'string',
+            description: `計畫檔路徑(${PLAN_FILE_PREFIX} 下,選填)`,
+          },
+        },
+        required: ['plan'],
+      },
+    },
+  }
+
   const rebuildVisibleTools = (): OpenAiToolDef[] => {
     let visible = filterToolDefs(capState, fullPool)
     // Tool Search: over threshold, hide non-core schemas behind tool_search
@@ -352,6 +405,12 @@ export async function runFunctionCallingLoop(
     const loadDef = loadCapabilityToolDef(capState)
     if (loadDef && !visible.some((t) => t.function.name === LOAD_CAPABILITY_TOOL)) {
       visible = [...visible, loadDef]
+    }
+    if (planToolsAvailable) {
+      const planDef = isPlanModeActive(opts?.runId) ? exitPlanDef : enterPlanDef
+      if (!visible.some((t) => t.function.name === planDef.function.name)) {
+        visible = [...visible, planDef]
+      }
     }
     return visible
   }
@@ -422,6 +481,9 @@ export async function runFunctionCallingLoop(
       : '',
     alwaysInstr ? `\n## Active capability runbooks\n${alwaysInstr}` : '',
     catalog ? `\n## Deferred capabilities\n${catalog}` : '',
+    planToolsAvailable
+      ? `\n## Plan mode\nFor tasks with genuine architectural ambiguity (multiple reasonable approaches), call enter_plan_mode first: explore read-only, write the plan under ${PLAN_FILE_PREFIX}, then exit_plan_mode for user approval before implementing. Skip planning for clear-path tasks.`
+      : '',
   ]
     .filter(Boolean)
     .join('\n')
@@ -523,6 +585,18 @@ ${systemExtra}`,
               `preflight:context 估算 ${estTokens}/${contextWindow} tokens,已先壓縮再呼叫`,
             )
           }
+          // G7 beforeCompaction hook 事件(被動)
+          try {
+            const { collectHookRules, evaluateHooks } = await import('../hooks')
+            const ev = evaluateHooks(collectHookRules(settings), {
+              point: 'beforeCompaction',
+              sourceKind: opts?.sourceKind as import('../hooks').HookContext['sourceKind'],
+              objective: opts?.objective || args.objective,
+            })
+            for (const line of ev.audits) cb?.onLog?.('INFO', line)
+          } catch {
+            /* non-fatal */
+          }
           // 壓縮前 checkpoint(原始 transcript 可回放)+ memory flush
           // (grok [compaction.memory_flush] 語意:脈絡被丟棄前先入庫)
           try {
@@ -593,6 +667,27 @@ ${systemExtra}`,
             }
           }
           cb?.onLog?.('INFO', 'Context compacted (OpenCode-style)')
+          try {
+            const { bumpRunMetric } = await import('../metrics')
+            bumpRunMetric(opts?.runId, 'compactions')
+          } catch {
+            /* metrics must never block */
+          }
+          // G7 afterCompaction hook 事件(被動)
+          try {
+            const { collectHookRules, evaluateHooks } = await import('../hooks')
+            const ev = evaluateHooks(collectHookRules(settings), {
+              point: 'afterCompaction',
+              sourceKind: opts?.sourceKind as import('../hooks').HookContext['sourceKind'],
+              objective: opts?.objective || args.objective,
+            })
+            for (const line of ev.audits) cb?.onLog?.('INFO', line)
+            for (const n of ev.notifications) {
+              void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+            }
+          } catch {
+            /* non-fatal */
+          }
         }
       } catch {
         /* non-fatal */
@@ -611,7 +706,12 @@ ${systemExtra}`,
       temperature: capModel.temperature ?? 0.3,
       maxTokens: capModel.maxTokens ?? 1400,
       toolChoice: 'auto',
-      onResilienceEvent: (m) => cb?.onLog?.('WARN', m),
+      onResilienceEvent: (m) => {
+        cb?.onLog?.('WARN', m)
+        void import('../metrics').then(({ bumpRunMetric }) =>
+          bumpRunMetric(opts?.runId, 'llmRetries'),
+        )
+      },
     })
     tokensUsed += result.tokensUsed
 
@@ -739,6 +839,65 @@ async function executeOneToolCall(
     args = tc.arguments ? JSON.parse(tc.arguments) : {}
   } catch {
     args = { raw: tc.arguments }
+  }
+
+  // ── Framework tools: enter/exit plan mode(自帶 HITL 審批)──
+  if (tc.name === ENTER_PLAN_MODE_TOOL || tc.name === EXIT_PLAN_MODE_TOOL) {
+    const started = Date.now()
+    const entering = tc.name === ENTER_PLAN_MODE_TOOL
+    let output = ''
+    let ok = true
+    if (!ctx.runId || ctx.unattended) {
+      output = 'Plan mode 僅供互動式 run(unattended 無人可審批)。請以一般流程直接執行。'
+    } else {
+      try {
+        const { usePermissionAskStore } = await import('../../store/permissionAskStore')
+        ctx.cb?.onLog?.(
+          'AWAIT',
+          entering ? 'Plan mode:等待使用者核准進入…' : 'Plan mode:計畫審批中…',
+        )
+        const decision = await usePermissionAskStore.getState().requestAsk({
+          threadId: ctx.threadId,
+          runId: ctx.runId,
+          tool: tc.name,
+          args,
+          reason: entering
+            ? `Agent 請求進入 Plan mode(規劃階段只寫 ${PLAN_FILE_PREFIX} 計畫檔):${String(args.reason || '').slice(0, 200)}`
+            : `計畫審批 — 核准即開始實作,拒絕則退回修訂:\n\n${String(args.plan || '').slice(0, 1500)}`,
+          timeoutMs: 90_000,
+        })
+        if (decision === 'deny') {
+          output = entering
+            ? '使用者未核准進入 Plan mode,請以一般流程直接執行。'
+            : '使用者退回計畫 — 留在 Plan mode,請依對話回饋修訂後再次呼叫 exit_plan_mode。'
+        } else {
+          setPlanMode(ctx.runId, entering)
+          output = entering
+            ? `已進入 Plan mode。限制:只有 ${PLAN_FILE_PREFIX} 下的計畫檔可寫(建議 ${PLAN_FILE_PREFIX}<feature-slug>/plan.md),bash 與副作用工具會被拒。完成後呼叫 exit_plan_mode 附計畫摘要送審。`
+            : '計畫已核准,Plan mode 已解除 — 依計畫開始實作。'
+        }
+        ctx.cb?.onLog?.(
+          decision === 'deny' ? 'WARN' : 'SUCCESS',
+          `${tc.name}:${decision === 'deny' ? '未核准' : '已核准'}`,
+        )
+      } catch (e) {
+        ok = false
+        output = `plan mode 審批失敗:${e instanceof Error ? e.message : String(e)}`
+      }
+    }
+    const record: ToolCallRecord = {
+      id: uuid(),
+      tool: tc.name,
+      input: args,
+      output: output.slice(0, 4000),
+      ok,
+      durationMs: Date.now() - started,
+      timestamp: nowTime(),
+    }
+    ctx.toolCalls.push(record)
+    ctx.cb?.onToolCall?.(record)
+    ctx.messages.push({ role: 'tool', tool_call_id: tc.id, content: output })
+    return
   }
 
   // ── Framework tool: tool_search (no HITL) ──
@@ -994,6 +1153,8 @@ async function executeOneToolCall(
     const background = args.background === true
     const notifyOnComplete = args.notify_on_complete !== false && args.notifyOnComplete !== false
     const inheritCapabilities = parseInheritCapabilities(args)
+    const { parseCapabilityMode } = await import('../hermes/capabilityMode')
+    const capabilityMode = parseCapabilityMode(args.capability_mode ?? args.capabilityMode)
     if (background) {
       const { enqueueBackgroundDelegate } = await import('../hermes/backgroundJobs')
       const job = enqueueBackgroundDelegate(
@@ -1005,6 +1166,7 @@ async function executeOneToolCall(
           background: true,
           notifyOnComplete,
           inheritCapabilities,
+          capabilityMode,
           parentRunId: ctx.runId,
           parentThreadId: ctx.threadId,
           parentPermissionPolicy: ctx.permissionPolicy,
@@ -1046,6 +1208,7 @@ async function executeOneToolCall(
           context: args.context ? String(args.context) : undefined,
           role: args.role === 'orchestrator' ? 'orchestrator' : 'leaf',
           inheritCapabilities,
+          capabilityMode,
           parentPermissionPolicy: ctx.permissionPolicy,
           parentPermissionProjection: ctx.permissionProjection,
           parentMcpAgentId: ctx.mcpAgentId,

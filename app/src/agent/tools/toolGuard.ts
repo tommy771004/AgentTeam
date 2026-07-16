@@ -140,6 +140,13 @@ async function emitPermissionDenied(
   } catch {
     /* hooks unavailable — never block on hook infra */
   }
+  // G11 denial 記帳(denial ratio 是 approvalMode / allowlist 的調整回饋)
+  try {
+    const { bumpRunMetric } = await import('../metrics')
+    bumpRunMetric((ctx as { runId?: string }).runId, 'toolDenials')
+  } catch {
+    /* metrics must never block */
+  }
 }
 
 /**
@@ -185,6 +192,29 @@ export async function authorizeTool(opts: {
     const msg = `工具被隔離策略封鎖：${tool}`
     onLog?.('WARN', msg)
     return { allowed: false, output: msg }
+  }
+
+  // G8 plan mode:Active 時只有 .scratch/ 計畫檔可寫;在 approvalMode
+  // 之前強制執行,連「完整存取權」也不可越過(grok 同款語意)。
+  if (opts.runId) {
+    try {
+      const { isPlanModeActive, planModeToolDecision } = await import('../planMode')
+      if (isPlanModeActive(opts.runId)) {
+        const d = planModeToolDecision(
+          tool,
+          input,
+          opts.sideEffect === true,
+        )
+        if (!d.allowed) {
+          const msg = d.reason || `Plan mode 拒絕：${tool}`
+          onLog?.('WARN', msg)
+          await emitPermissionDenied(settings, opts, tool, msg, onLog)
+          return { allowed: false, output: msg }
+        }
+      }
+    } catch {
+      /* plan mode module unavailable — never block on infra */
+    }
   }
 
   // SubDesign direction gate is evaluated at tool time so a direction selected
@@ -325,6 +355,12 @@ export async function authorizeTool(opts: {
   }
 
   if (needAsk) {
+    try {
+      const { bumpRunMetric } = await import('../metrics')
+      bumpRunMetric(opts.runId, 'toolAsks')
+    } catch {
+      /* metrics must never block */
+    }
     const timeoutMs =
       opts.hitlTimeoutMs ??
       (opts.unattended ? 45_000 : 90_000)
