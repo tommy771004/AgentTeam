@@ -118,9 +118,12 @@ const api = {
       ipcRenderer.invoke('tools:httpRequest', input) as Promise<{ ok: boolean; text: string; status?: number }>,
     workspaceList: (path?: string, projectRoot?: string) =>
       ipcRenderer.invoke('tools:workspaceList', path, projectRoot) as Promise<{
+        ok: boolean
         path: string
         entries: Array<{ name: string; dir: boolean }>
         projectRoot?: string | null
+        error?: 'not-found' | string
+        message?: string
       }>,
     workspaceRead: (path: string, projectRoot?: string) =>
       ipcRenderer.invoke('tools:workspaceRead', path, projectRoot) as Promise<{
