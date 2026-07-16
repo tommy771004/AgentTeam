@@ -67,6 +67,59 @@ class LearningLoop {
   }
 
   /**
+   * Pre-compaction memory flush（grok-build `[compaction.memory_flush]` 語意）：
+   * 舊訊息被摘要丟棄前，把 compaction 摘要寫進持久記憶，之後的 run 可召回。
+   * 與近期 flush 條目高度相似（textSimilarity ≥ 0.85，近似 grok 的
+   * semantic_dedup_threshold）時跳過，避免長 run 反覆壓縮灌爆記憶。
+   */
+  onPreCompactionFlush(input: {
+    objective: string
+    summary: string
+    runId?: string
+    memoryEnabled?: boolean
+    memoryWriteEnabled?: boolean
+  }): boolean {
+    if (input.memoryEnabled === false || input.memoryWriteEnabled === false) return false
+    const text = input.summary.trim()
+    if (text.length < 80) return false
+
+    const flushText = `Run 上下文 flush（${input.objective.slice(0, 80)}）：${text.slice(0, 1600)}`
+    const recentFlushes = memoryStore
+      .getBundle()
+      .entries.filter((e) => e.tags?.includes('flush'))
+      .slice(0, 8)
+    for (const prev of recentFlushes) {
+      if (textSimilarity(flushText, prev.text) >= 0.85) return false
+    }
+
+    memoryStore.appendMemory(flushText, [
+      'flush',
+      'auto',
+      'compaction',
+      ...(input.runId ? [`run:${input.runId}`] : []),
+    ])
+    this.emit({
+      id: uuid(),
+      type: 'memory_saved',
+      message: '壓縮前已將重要脈絡 flush 進記憶（compaction memory flush）。',
+      at: new Date().toISOString(),
+      payload: { kind: 'compaction-flush', runId: input.runId },
+    })
+    return true
+  }
+
+  /** Dream 整併完成 → 學習事件(訂閱者會觸發 learningStore persist)。 */
+  onDreamConsolidation(input: { deduped: number; merged: number }) {
+    this.emit({
+      id: uuid(),
+      type: 'memory_saved',
+      message: `記憶整併完成：去重 ${input.deduped} 筆、合併 ${input.merged} 筆（dream）。`,
+      at: new Date().toISOString(),
+      payload: { kind: 'dream', ...input },
+    })
+  }
+
+  /**
    * Persist a successful SubDesign choice as a reusable project-scoped preference.
    * The path itself is never written to memory; only a stable short fingerprint is.
    */

@@ -1841,6 +1841,472 @@ await test('ADR3 follow-up: interactive entry points snapshot projectRoot at dis
   assert.match(runContext, /should therefore be unreachable during a real run/)
 })
 
+// ── Phase 0 (grok-build plan G1/G3): LLM resilience + token estimation ──
+// Mirrors agent/llmResilience.ts CircuitBreaker / backoff and
+// agent/tokenEstimate.ts math. Keep in sync with the TS source.
+
+class MirrorBreaker {
+  constructor(cfg, now) {
+    this.cfg = { windowMs: 60_000, minSamples: 5, errorRateThreshold: 0.5, cooldownMs: 30_000, ...cfg }
+    this.now = now
+    this.samples = []
+    this.state = 'closed'
+    this.openedAt = 0
+    this.probing = false
+  }
+  allowRequest() {
+    const at = this.now()
+    if (this.state === 'closed') return true
+    if (this.state === 'open') {
+      if (at - this.openedAt >= this.cfg.cooldownMs) {
+        this.state = 'half-open'
+        this.probing = true
+        return true
+      }
+      return false
+    }
+    if (this.probing) return false
+    this.probing = true
+    return true
+  }
+  record(ok) {
+    const at = this.now()
+    if (this.state === 'half-open') {
+      this.probing = false
+      if (ok) {
+        this.state = 'closed'
+        this.samples = []
+      } else {
+        this.state = 'open'
+        this.openedAt = at
+      }
+      return
+    }
+    this.samples.push({ at, ok })
+    const cutoff = at - this.cfg.windowMs
+    while (this.samples.length && this.samples[0].at < cutoff) this.samples.shift()
+    if (this.state === 'closed') {
+      const n = this.samples.length
+      if (n >= this.cfg.minSamples) {
+        const errors = this.samples.filter((s) => !s.ok).length
+        if (errors / n >= this.cfg.errorRateThreshold) {
+          this.state = 'open'
+          this.openedAt = at
+        }
+      }
+    }
+  }
+}
+
+await test('circuit breaker: needs minSamples before tripping', () => {
+  let t = 0
+  const b = new MirrorBreaker({ minSamples: 5 }, () => t)
+  // 4 straight failures — below minSamples, must stay closed
+  for (let i = 0; i < 4; i++) { assert.equal(b.allowRequest(), true); b.record(false); t += 100 }
+  assert.equal(b.state, 'closed')
+  // 5th failure crosses minSamples at 100% error rate → open
+  b.record(false)
+  assert.equal(b.state, 'open')
+  assert.equal(b.allowRequest(), false)
+})
+
+await test('circuit breaker: error rate below threshold stays closed', () => {
+  let t = 0
+  const b = new MirrorBreaker({ minSamples: 5, errorRateThreshold: 0.5 }, () => t)
+  // 6 ok + 2 fail = 25% error rate < 50%
+  for (let i = 0; i < 6; i++) { b.record(true); t += 10 }
+  b.record(false); b.record(false)
+  assert.equal(b.state, 'closed')
+})
+
+await test('circuit breaker: cooldown → half-open probe; success closes, failure reopens', () => {
+  let t = 0
+  const b = new MirrorBreaker({ minSamples: 3, cooldownMs: 30_000 }, () => t)
+  b.record(false); b.record(false); b.record(false)
+  assert.equal(b.state, 'open')
+  t += 10_000
+  assert.equal(b.allowRequest(), false, 'still cooling down')
+  t += 25_000
+  assert.equal(b.allowRequest(), true, 'half-open probe allowed')
+  assert.equal(b.allowRequest(), false, 'only one probe at a time')
+  b.record(false)
+  assert.equal(b.state, 'open', 'failed probe reopens')
+  t += 30_000
+  assert.equal(b.allowRequest(), true)
+  b.record(true)
+  assert.equal(b.state, 'closed', 'successful probe closes')
+  assert.equal(b.samples.length, 0, 'window cleared on close')
+})
+
+await test('circuit breaker: old samples evicted from sliding window', () => {
+  let t = 0
+  const b = new MirrorBreaker({ windowMs: 60_000, minSamples: 5 }, () => t)
+  for (let i = 0; i < 4; i++) { b.record(false); t += 100 }
+  // 4 failures age out of the window → later failures start fresh
+  t += 61_000
+  b.record(false)
+  assert.equal(b.state, 'closed', 'evicted samples must not count toward trip')
+  assert.equal(b.samples.length, 1)
+})
+
+await test('llm retry: error classification + backoff math', () => {
+  const isRetryable = (message) => {
+    const m = /HTTP (\d{3})/.exec(message)
+    if (m) {
+      const status = Number(m[1])
+      return status === 429 || status === 408 || status >= 500
+    }
+    return /network|failed to fetch|fetch failed|timeout|timed out|econn|enotfound|eai_again|socket|und_err|aborted/i.test(message)
+  }
+  assert.equal(isRetryable('LLM HTTP 429 (retry-after:7s): rate limit'), true)
+  assert.equal(isRetryable('LLM HTTP 503: upstream'), true)
+  assert.equal(isRetryable('LLM HTTP 401: bad key'), false)
+  assert.equal(isRetryable('LLM HTTP 400: bad request'), false)
+  assert.equal(isRetryable('TypeError: Failed to fetch'), true)
+
+  const backoff = (attempt, retryAfterMs, jitter = () => 0) => {
+    if (retryAfterMs && retryAfterMs > 0) return Math.min(retryAfterMs, 30_000)
+    return Math.min(2000 * 2 ** Math.max(0, attempt), 16_000) + Math.floor(jitter() * 250)
+  }
+  assert.equal(backoff(0), 2000)
+  assert.equal(backoff(1), 4000)
+  assert.equal(backoff(2), 8000)
+  assert.equal(backoff(5), 16_000, 'exponential capped at 16s')
+  assert.equal(backoff(0, 7000), 7000, 'server retry-after wins')
+  assert.equal(backoff(0, 90_000), 30_000, 'retry-after capped at 30s')
+
+  const parseRetryAfter = (message) => {
+    const m = /retry-after:(\d+)s/.exec(message)
+    if (!m) return undefined
+    const s = Number(m[1])
+    return s > 0 ? s * 1000 : undefined
+  }
+  assert.equal(parseRetryAfter('LLM HTTP 429 (retry-after:7s): x'), 7000)
+  assert.equal(parseRetryAfter('LLM HTTP 500: x'), undefined)
+})
+
+await test('token estimate: bytes/4 heuristic + preflight gate', () => {
+  const estimate = (text) => (text ? Math.ceil(new TextEncoder().encode(text).length / 4) : 0)
+  assert.equal(estimate(''), 0)
+  assert.equal(estimate('abcd'), 1)
+  assert.equal(estimate('abcde'), 2)
+  // CJK: 3 bytes/char → 4 chars = 12 bytes = 3 tokens
+  assert.equal(estimate('中文字元'), 3)
+
+  const shouldCompact = (tokens, cw, reserve = 2500) => tokens > Math.max(1024, cw - reserve)
+  assert.equal(shouldCompact(61_000, 64_000), false)
+  assert.equal(shouldCompact(61_501, 64_000), true)
+  assert.equal(shouldCompact(1_025, 2_000), true, 'tiny window floors at 1024')
+  assert.equal(shouldCompact(1_000, 2_000), false)
+})
+
+await test('drift guard: llm.ts routes calls through callWithResilience', async () => {
+  const fs = await import('node:fs')
+  const llm = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
+  assert.match(llm, /callWithResilience\(/)
+  assert.match(llm, /breakerKey\(settings\.baseUrl/)
+  assert.match(llm, /maxAttempts: settings\.llmRetryMaxAttempts/)
+})
+
+await test('drift guard: toolLoop preflights context overflow via tokenEstimate', async () => {
+  const fs = await import('node:fs')
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /resolveContextWindow\(settings, settings\.model\)/)
+  assert.match(loop, /shouldPreflightCompact\(estTokens, contextWindow\)/)
+  assert.match(loop, /force: true/)
+})
+
+// ── Phase 1 (grok-build plan G2): tool-result pruning + compaction flush ──
+// Mirrors agent/contextPruning.ts. Keep in sync with the TS source.
+
+const HARD_CLEAR_MARKER = '〔工具結果已由 pruning 清除'
+const SOFT_TRIM_MARKER = '…〔pruning 截斷 '
+
+function pruneToolResults(messages, cfg) {
+  cfg = {
+    enabled: true, keepLastNRounds: 3, softTrimThresholdChars: 4000,
+    softTrimHeadChars: 1500, softTrimTailChars: 1500, hardClearAgeRounds: 10, ...cfg,
+  }
+  const stats = { changed: false, softTrimmed: 0, hardCleared: 0, savedChars: 0 }
+  if (!cfg.enabled) return { messages, stats }
+  const totalRounds = messages.filter((m) => m.role === 'assistant' && m.tool_calls?.length).length
+  if (totalRounds === 0) return { messages, stats }
+  let roundIdx = 0
+  const next = messages.map((m) => {
+    if (m.role === 'assistant' && m.tool_calls?.length) { roundIdx += 1; return m }
+    if (m.role !== 'tool' || typeof m.content !== 'string') return m
+    const age = totalRounds - roundIdx
+    if (age < cfg.keepLastNRounds) return m
+    const content = m.content
+    if (content.includes(HARD_CLEAR_MARKER) || content.includes(SOFT_TRIM_MARKER)) return m
+    if (age >= cfg.hardClearAgeRounds) {
+      const replaced = `${HARD_CLEAR_MARKER}（${age} 輪前，原 ${content.length} chars）— 需要此結果時請重新呼叫工具〕`
+      if (replaced.length >= content.length) return m
+      stats.changed = true
+      stats.hardCleared += 1
+      stats.savedChars += content.length - replaced.length
+      return { ...m, content: replaced }
+    }
+    if (content.length > cfg.softTrimThresholdChars) {
+      const head = content.slice(0, cfg.softTrimHeadChars)
+      const tail = content.slice(-cfg.softTrimTailChars)
+      const cut = content.length - head.length - tail.length
+      const trimmed = `${head}\n${SOFT_TRIM_MARKER}${cut} chars（${age} 輪前）〕\n${tail}`
+      if (trimmed.length >= content.length) return m
+      stats.changed = true
+      stats.softTrimmed += 1
+      stats.savedChars += content.length - trimmed.length
+      return { ...m, content: trimmed }
+    }
+    return m
+  })
+  return { messages: stats.changed ? next : messages, stats }
+}
+
+function fcRound(id, toolContent) {
+  return [
+    { role: 'assistant', content: null, tool_calls: [{ id, type: 'function', function: { name: 'bash', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: id, content: toolContent },
+  ]
+}
+
+await test('pruning: recent keepLastNRounds tool results stay untouched', () => {
+  const big = 'x'.repeat(6000)
+  const messages = [
+    { role: 'user', content: 'go' },
+    ...fcRound('a', big), ...fcRound('b', big), ...fcRound('c', big),
+  ]
+  const { messages: out, stats } = pruneToolResults(messages, { keepLastNRounds: 3 })
+  assert.equal(stats.changed, false)
+  assert.equal(out, messages, 'unchanged input returns same reference')
+})
+
+await test('pruning: old oversized tool result gets head/tail soft-trim', () => {
+  const big = 'H'.repeat(2000) + 'M'.repeat(3000) + 'T'.repeat(2000)
+  const messages = [
+    ...fcRound('a', big),
+    ...fcRound('b', 'ok'), ...fcRound('c', 'ok'), ...fcRound('d', 'ok'),
+  ]
+  const { messages: out, stats } = pruneToolResults(messages)
+  assert.equal(stats.softTrimmed, 1)
+  const pruned = out[1].content
+  assert.ok(pruned.startsWith('H'.repeat(1500)), 'head preserved')
+  assert.ok(pruned.endsWith('T'.repeat(1500)), 'tail preserved')
+  assert.ok(pruned.includes(SOFT_TRIM_MARKER))
+  assert.ok(pruned.length < big.length)
+})
+
+await test('pruning: tool results older than hardClearAgeRounds become placeholders', () => {
+  const rounds = []
+  for (let i = 0; i < 12; i++) rounds.push(...fcRound(`r${i}`, `result-${i} ` + 'z'.repeat(300)))
+  const { messages: out, stats } = pruneToolResults(rounds)
+  assert.ok(stats.hardCleared >= 1)
+  assert.ok(out[1].content.includes(HARD_CLEAR_MARKER), 'oldest round cleared')
+  // FC chain intact: every tool message still has its tool_call_id
+  for (const m of out) {
+    if (m.role === 'tool') assert.ok(m.tool_call_id, 'tool_call_id preserved')
+  }
+  assert.equal(out.filter((m) => m.role === 'assistant').length, 12, 'no messages removed')
+})
+
+await test('pruning: idempotent — second pass changes nothing', () => {
+  const rounds = []
+  for (let i = 0; i < 12; i++) rounds.push(...fcRound(`r${i}`, 'y'.repeat(5000)))
+  const first = pruneToolResults(rounds)
+  assert.equal(first.stats.changed, true)
+  const second = pruneToolResults(first.messages)
+  assert.equal(second.stats.changed, false, 'already-pruned content is skipped')
+})
+
+await test('drift guard: compaction applies pruning and returns pruneStats', async () => {
+  const fs = await import('node:fs')
+  const src = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/compaction.ts'), 'utf8')
+  assert.match(src, /pruneToolResults\(messages, DEFAULT_PRUNING_CONFIG\)/)
+  assert.match(src, /pruneStats\?: PruneStats/)
+})
+
+await test('drift guard: toolLoop wires checkpoint + memory flush + post-compaction recall', async () => {
+  const fs = await import('node:fs')
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /saveCompactionCheckpoint\(/)
+  assert.match(loop, /onPreCompactionFlush\(/)
+  assert.match(loop, /壓縮後記憶召回/)
+  assert.match(loop, /onContextUsage\?\.\(\{ tokens: estTokens, contextWindow, ratio: usageRatio \}\)/)
+  const learning = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
+  assert.match(learning, /onPreCompactionFlush\(input/)
+  assert.match(learning, /textSimilarity\(flushText, prev\.text\) >= 0\.85/)
+})
+
+// ── Phase 3 (grok-build plan G6): memory temporal decay + dream gates ──
+// Mirrors agent/hermes/memory.ts decay math and hermes/dream.ts gates.
+
+await test('memory decay: auto/flush half-life 7d; manual entries exempt', () => {
+  const HALF_LIFE_DAYS = 7
+  const DAY = 86_400_000
+  const decayFactor = (entry, nowMs) => {
+    if (!(entry.tags || []).some((t) => t === 'auto' || t === 'flush')) return 1
+    const created = Date.parse(entry.createdAt || '')
+    if (!Number.isFinite(created)) return 1
+    const age = nowMs - created
+    if (age <= 0) return 1
+    return 0.5 ** (age / (HALF_LIFE_DAYS * DAY))
+  }
+  const now = Date.parse('2026-07-16T00:00:00Z')
+  const at = (daysAgo) => new Date(now - daysAgo * DAY).toISOString()
+  assert.equal(decayFactor({ createdAt: at(7), tags: ['auto'] }, now).toFixed(3), '0.500')
+  assert.equal(decayFactor({ createdAt: at(14), tags: ['flush'] }, now).toFixed(3), '0.250')
+  assert.equal(decayFactor({ createdAt: at(0), tags: ['auto'] }, now), 1)
+  assert.equal(decayFactor({ createdAt: at(30), tags: ['success'] }, now), 1, '手寫/curated 不衰減')
+})
+
+await test('dream gates: ≥4h since last run AND ≥3 new machine entries', () => {
+  const dreamDue = (nowMs, lastRunAtIso, newEntries) => {
+    const last = Date.parse(lastRunAtIso || '')
+    const hoursOk = !Number.isFinite(last) || nowMs - last >= 4 * 3_600_000
+    return hoursOk && newEntries >= 3
+  }
+  const now = Date.parse('2026-07-16T12:00:00Z')
+  assert.equal(dreamDue(now, undefined, 3), true, '從未跑過且量夠 → due')
+  assert.equal(dreamDue(now, undefined, 2), false, '量不夠')
+  assert.equal(dreamDue(now, '2026-07-16T10:00:00Z', 5), false, '2h 前跑過 → 未到')
+  assert.equal(dreamDue(now, '2026-07-16T07:59:00Z', 5), true, '4h 已過且量夠')
+})
+
+await test('drift guard: memory decay + staleness + dream wiring', async () => {
+  const fs = await import('node:fs')
+  const memory = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/memory.ts'), 'utf8')
+  assert.match(memory, /MEMORY_DECAY_HALF_LIFE_DAYS = 7/)
+  assert.match(memory, /score \*= memoryDecayFactor\(e\)/)
+  assert.match(memory, /memoryStalenessNote\(entry\)/)
+  const dream = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/dream.ts'), 'utf8')
+  assert.match(dream, /DREAM_MIN_HOURS = 4/)
+  assert.match(dream, /DREAM_MIN_NEW_ENTRIES = 3/)
+  assert.match(dream, /memoryEnabled === false \|\| settings\.memoryWriteEnabled === false/)
+  const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
+  assert.match(app, /scheduleDreamConsolidation\(settings\)/)
+})
+
+await test('drift guard: rewind snapshots wired into write tools + thread rewind', async () => {
+  const fs = await import('node:fs')
+  const executor = fs.readFileSync(path.join(appRoot, 'src/agent/tools/executor.ts'), 'utf8')
+  for (const kind of ["kind: 'write'", "kind: 'delete'", "kind: 'move'"]) {
+    assert.ok(executor.includes(kind), `executor records rewind ${kind}`)
+  }
+  const store = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
+  assert.match(store, /rewindToBubble/)
+  assert.match(store, /lastCapabilityIds: undefined/)
+  const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
+  assert.match(preload, /rewind:restore/)
+})
+
+// ── Phase 4 (grok-build plan G7+G8): hooks expansion + plan mode wiring ──
+
+await test('drift guard: plan mode enforced in toolGuard before approvalMode; cleared at finalize', async () => {
+  const fs = await import('node:fs')
+  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  assert.match(guard, /isPlanModeActive\(opts\.runId\)/)
+  assert.match(guard, /planModeToolDecision\(/)
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  assert.match(coordinator, /clearPlanMode\(runId\)/)
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /ENTER_PLAN_MODE_TOOL \|\| tc\.name === EXIT_PLAN_MODE_TOOL/)
+  assert.match(loop, /unattended/, 'plan tools gated for unattended runs')
+})
+
+await test('drift guard: new hook points are passive-only and wired', async () => {
+  const fs = await import('node:fs')
+  const hooks = fs.readFileSync(path.join(appRoot, 'src/agent/hooks.ts'), 'utf8')
+  for (const point of ['permissionDenied', 'beforeCompaction', 'afterCompaction', 'delegateStart', 'delegateEnd', 'userTurn']) {
+    assert.match(hooks, new RegExp(`${point}: \\['log', 'notify'\\]`), `${point} passive-only`)
+  }
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /point: 'beforeCompaction'/)
+  assert.match(loop, /point: 'afterCompaction'/)
+  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
+  assert.match(delegate, /'delegateStart'/)
+  assert.match(delegate, /emitDelegateHook\('delegateEnd', r\.ok\)/)
+  const runExternal = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  assert.match(runExternal, /point: 'userTurn'/)
+})
+
+await test('drift guard: project hooks require folder trust and stay sanitized', async () => {
+  const fs = await import('node:fs')
+  const project = fs.readFileSync(path.join(appRoot, 'src/agent/projectHooks.ts'), 'utf8')
+  assert.match(project, /isProjectHooksTrusted\(settings, root\)/)
+  assert.match(project, /skipped: 'untrusted'/)
+  assert.match(project, /sanitizeHookRules\(raw, 'project'\)/)
+  const hooks = fs.readFileSync(path.join(appRoot, 'src/agent/hooks.ts'), 'utf8')
+  assert.match(hooks, /activeProjectHookRules\(\)/)
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  assert.match(coordinator, /hydrateProjectHooks\(opts\.settings, opts\.projectRoot\)/)
+})
+
+// ── Phase 5 (grok-build plan G9/G10/G11): wiring drift guards ──
+
+await test('drift guard: delegate capability_mode stacks on role blocks; wait primitives wired', async () => {
+  const fs = await import('node:fs')
+  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
+  assert.match(delegate, /blockedToolsForCapabilityMode\(input\.capabilityMode\)/)
+  assert.match(delegate, /roleBlocked/)
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /capability_mode/)
+  assert.match(loop, /parseCapabilityMode\(/)
+  const jobs = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
+  assert.match(jobs, /export async function waitBackgroundJobs/)
+  assert.match(jobs, /wait_any/)
+  const executor = fs.readFileSync(path.join(appRoot, 'src/agent/tools/executor.ts'), 'utf8')
+  assert.match(executor, /waitBackgroundJobs\(/)
+})
+
+await test('drift guard: metrics recorded at coordinator settle + guard/loop bumps', async () => {
+  const fs = await import('node:fs')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  assert.match(coordinator, /finalizeRunMetric\(runId/)
+  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  assert.match(guard, /bumpRunMetric\(opts\.runId, 'toolAsks'\)/)
+  assert.match(guard, /'toolDenials'\)/)
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /'compactions'\)/)
+  assert.match(loop, /'llmRetries'\)/)
+})
+
+// ── Phase 5 遞延項 (G9b/c/d + G10 monitor): wiring drift guards ──
+
+await test('drift guard: persona resolution — role > persona > parent; unknown persona fails spawn', async () => {
+  const fs = await import('node:fs')
+  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
+  assert.match(delegate, /settings\.delegatePersonas\?\.\[input\.persona\]/)
+  assert.match(delegate, /persona「\$\{input\.persona\}」不存在/)
+  assert.match(delegate, /roleResolved\.source === 'role'\s*\?\s*roleResolved\.model\s*:\s*persona\?\.model/)
+})
+
+await test('drift guard: resume_from requires finished job; worktree isolation falls back safely', async () => {
+  const fs = await import('node:fs')
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /resume_from 失敗:找不到背景委派/)
+  assert.match(loop, /尚未完成/)
+  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
+  assert.match(delegate, /worktreeCreate\?\.\(/)
+  assert.match(delegate, /回退共用 workspace/)
+  const bridge = fs.readFileSync(path.join(appRoot, 'electron/projectBridge.ts'), 'utf8')
+  assert.match(bridge, /git worktree add -b/)
+  assert.match(bridge, /git apply --3way/, 'apply 衝突失敗而非覆蓋')
+  assert.match(bridge, /git worktree remove --force/)
+})
+
+await test('drift guard: monitor tool gated like bash and feeds eventMatcher', async () => {
+  const fs = await import('node:fs')
+  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  assert.match(guard, /tool === 'monitor' && String\(input\.action \|\| ''\) === 'start'/)
+  const builtins = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/builtins.ts'), 'utf8')
+  assert.match(builtins, /approvalTools: \['monitor'\]/)
+  const bridge = fs.readFileSync(path.join(appRoot, 'electron/monitorBridge.ts'), 'utf8')
+  assert.match(bridge, /MAX_LINES_PER_WINDOW/, 'volume control present')
+  const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
+  assert.match(app, /source: 'monitor'/)
+  assert.match(app, /eventPreMatched: true/)
+})
+
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)
 if (process.exitCode) {
   console.error('Capability smoke failed')

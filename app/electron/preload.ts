@@ -4,6 +4,46 @@ import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
 const api = {
   platform: () => ipcRenderer.invoke('app:platform') as Promise<string>,
   version: () => ipcRenderer.invoke('app:version') as Promise<string>,
+  /** 檔案回捲(G5):寫入前快照 + 依時點還原(外部改動保護) */
+  rewind: {
+    record: (payload: {
+      threadId: string
+      runId?: string
+      kind: 'write' | 'delete' | 'move'
+      relPath: string
+      toPath?: string
+      before: string | null
+      after?: string | null
+    }) =>
+      ipcRenderer.invoke('rewind:record', payload) as Promise<{
+        ok: boolean
+        id?: string
+        skipped?: string
+      }>,
+    list: (threadId: string) =>
+      ipcRenderer.invoke('rewind:list', threadId) as Promise<
+        Array<{
+          id: string
+          threadId: string
+          runId?: string
+          kind: 'write' | 'delete' | 'move'
+          at: string
+          relPath: string
+          toPath?: string
+          beforeBytes: number
+          existedBefore: boolean
+        }>
+      >,
+    restore: (threadId: string, toEntryId: string, projectRoot?: string, force?: boolean) =>
+      ipcRenderer.invoke('rewind:restore', threadId, toEntryId, projectRoot, force) as Promise<{
+        ok: boolean
+        restored: string[]
+        conflicts: string[]
+        errors: string[]
+      }>,
+    clear: (threadId: string) =>
+      ipcRenderer.invoke('rewind:clear', threadId) as Promise<boolean>,
+  },
   notify: (title: string, body: string) =>
     ipcRenderer.invoke('app:notify', title, body) as Promise<{ ok: boolean }>,
   showWindow: () => ipcRenderer.invoke('app:showWindow') as Promise<{ ok: boolean }>,
@@ -64,6 +104,51 @@ const api = {
       ipcRenderer.on('webhook:event', handler)
       return () => {
         ipcRenderer.removeListener('webhook:event', handler)
+      }
+    },
+  },
+  /** G10 monitor 事件流:長命令輸出逐行 → Proactive 事件 */
+  monitor: {
+    start: (input: { command: string; description: string; cwd?: string }) =>
+      ipcRenderer.invoke('monitor:start', input) as Promise<{
+        ok: boolean
+        id?: string
+        error?: string
+      }>,
+    stop: (id: string) => ipcRenderer.invoke('monitor:stop', id) as Promise<boolean>,
+    list: () =>
+      ipcRenderer.invoke('monitor:list') as Promise<
+        Array<{
+          id: string
+          description: string
+          command: string
+          startedAt: string
+          lineCount: number
+        }>
+      >,
+    onEvent: (
+      cb: (payload: { id: string; description: string; line: string; at: string }) => void,
+    ) => {
+      const handler = (_: unknown, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('monitor:event', handler)
+      return () => {
+        ipcRenderer.removeListener('monitor:event', handler)
+      }
+    },
+    onStopped: (
+      cb: (payload: {
+        id: string
+        description: string
+        reason: 'exit' | 'volume' | 'stopped' | 'error'
+        detail?: string
+        code?: number | null
+        at: string
+      }) => void,
+    ) => {
+      const handler = (_: unknown, payload: Parameters<typeof cb>[0]) => cb(payload)
+      ipcRenderer.on('monitor:stopped', handler)
+      return () => {
+        ipcRenderer.removeListener('monitor:stopped', handler)
       }
     },
   },
@@ -528,6 +613,24 @@ const api = {
       }>,
     branches: (root: string) =>
       ipcRenderer.invoke('project:branches', root) as Promise<string[]>,
+    /** G9 worktree 隔離:建立/套用/移除(delegate isolation=worktree 用) */
+    worktreeCreate: (root: string, branchPrefix?: string) =>
+      ipcRenderer.invoke('project:worktreeCreate', root, branchPrefix) as Promise<{
+        ok: boolean
+        path?: string
+        branch?: string
+        error?: string
+      }>,
+    worktreeApply: (root: string, worktreePath: string) =>
+      ipcRenderer.invoke('project:worktreeApply', root, worktreePath) as Promise<{
+        ok: boolean
+        error?: string
+      }>,
+    worktreeRemove: (root: string, worktreePath: string) =>
+      ipcRenderer.invoke('project:worktreeRemove', root, worktreePath) as Promise<{
+        ok: boolean
+        error?: string
+      }>,
     /** W2: persistent project guidance (AGENTS.md / CLAUDE.md hierarchy, read-only).
      *  workPath: optional file/dir under root for subdirectory AGENTS layers. */
     agentsDocs: (root: string, workPath?: string) =>

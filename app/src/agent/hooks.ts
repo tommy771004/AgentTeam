@@ -6,6 +6,10 @@
  *   beforeTool → deny / require-approval / log / notify
  *   afterTool  → log / notify
  *   afterRun   → log / notify
+ *   permissionDenied → log / notify（任何 deny 定案後的被動觀察事件）
+ *   beforeCompaction / afterCompaction → log / notify（G7,上下文壓縮前後）
+ *   delegateStart / delegateEnd → log / notify（G7,委派子代理生命週期）
+ *   userTurn → log / notify（G7,coordinator 接受的使用者回合）
  *
  * Trust model: rules can only RESTRICT or OBSERVE — there is no 'allow' action,
  * so a plugin hook can never loosen approval policy. `require-approval` from a
@@ -16,8 +20,19 @@
 import type { LlmSettings } from './types'
 import type { RunSourceKind } from './taskRunCoordinator'
 import { pluginRegistry } from './hermes/plugins'
+import { activeProjectHookRules } from './projectHooks'
 
-export type HookPoint = 'beforeRun' | 'beforeTool' | 'afterTool' | 'afterRun'
+export type HookPoint =
+  | 'beforeRun'
+  | 'beforeTool'
+  | 'afterTool'
+  | 'afterRun'
+  | 'permissionDenied'
+  | 'beforeCompaction'
+  | 'afterCompaction'
+  | 'delegateStart'
+  | 'delegateEnd'
+  | 'userTurn'
 
 export type HookAction = 'deny' | 'require-approval' | 'append-context' | 'log' | 'notify'
 
@@ -37,7 +52,7 @@ export type HookRule = {
   reason?: string
   /** append-context payload (capped) */
   text?: string
-  source: 'user' | 'plugin'
+  source: 'user' | 'plugin' | 'project'
   pluginId?: string
   enabled?: boolean
 }
@@ -48,13 +63,21 @@ const POINT_ACTIONS: Record<HookPoint, HookAction[]> = {
   beforeTool: ['deny', 'require-approval', 'log', 'notify'],
   afterTool: ['log', 'notify'],
   afterRun: ['log', 'notify'],
+  // 被動觀察:拒絕已定案,只能記錄/通知,不得改變結果
+  permissionDenied: ['log', 'notify'],
+  // G7 被動事件:僅觀察,不得影響流程
+  beforeCompaction: ['log', 'notify'],
+  afterCompaction: ['log', 'notify'],
+  delegateStart: ['log', 'notify'],
+  delegateEnd: ['log', 'notify'],
+  userTurn: ['log', 'notify'],
 }
 
 const ID = /^[A-Za-z0-9_.:-]{1,64}$/
 
 export function sanitizeHookRules(
   raw: unknown,
-  source: 'user' | 'plugin',
+  source: 'user' | 'plugin' | 'project',
   pluginId?: string,
 ): HookRule[] {
   if (!Array.isArray(raw)) return []
@@ -96,6 +119,8 @@ export type HookContext = {
   toolOk?: boolean
   sourceKind?: RunSourceKind
   objective?: string
+  /** permissionDenied:拒絕原因(pattern/policy/hook/使用者) */
+  reason?: string
 }
 
 function ruleMatches(rule: HookRule, ctx: HookContext): boolean {
@@ -172,7 +197,11 @@ export function evaluateHooks(rules: HookRule[], ctx: HookContext): HookEvaluati
   return out
 }
 
-/** Collect active rules: user settings + enabled plugins (both sanitized). */
+/**
+ * Collect active rules: user settings + enabled plugins + trusted project
+ * hooks (all sanitized). Project rules來自 run 開始時 hydrate 的 cache
+ * (projectHooks.ts);未信任專案的規則永遠不會進來。
+ */
 export function collectHookRules(settings: Pick<LlmSettings, 'hookRules'>): HookRule[] {
   const rules: HookRule[] = sanitizeHookRules(settings.hookRules || [], 'user')
   try {
@@ -182,6 +211,11 @@ export function collectHookRules(settings: Pick<LlmSettings, 'hookRules'>): Hook
     }
   } catch {
     /* plugins unavailable (tests) */
+  }
+  try {
+    rules.push(...activeProjectHookRules())
+  } catch {
+    /* project hooks cache unavailable (tests) */
   }
   return rules
 }

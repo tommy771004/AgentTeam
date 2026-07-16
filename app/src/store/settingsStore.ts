@@ -60,6 +60,14 @@ function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>)
           ? { ...out.modelProfiles, ...p.modelProfiles }
           : out.modelProfiles,
       hookRules: p.hookRules != null ? [...p.hookRules] : out.hookRules,
+      trustedHookProjects:
+        p.trustedHookProjects != null
+          ? [...new Set(p.trustedHookProjects.filter(Boolean))]
+          : out.trustedHookProjects,
+      delegatePersonas:
+        p.delegatePersonas != null
+          ? { ...out.delegatePersonas, ...p.delegatePersonas }
+          : out.delegatePersonas,
     }
   }
   return out

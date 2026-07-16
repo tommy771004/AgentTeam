@@ -31,6 +31,7 @@ import { QuestionAskModal } from './components/QuestionAskModal'
 import type { ScheduledJob } from './agent/types'
 import { createScheduleTriggerSnapshot } from './agent/scheduler'
 import { scheduleSkillCurator } from './agent/hermes/curator'
+import { scheduleDreamConsolidation } from './agent/hermes/dream'
 
 /** Restore automation queue from disk and drain when capacity is available */
 function RunQueueBootstrap() {
@@ -70,7 +71,11 @@ function SkillCuratorBootstrap() {
   const settings = useSettingsStore((s) => s.settings)
 
   useEffect(() => {
-    if (!isRunning) scheduleSkillCurator(settings)
+    if (!isRunning) {
+      scheduleSkillCurator(settings)
+      // G6 dream:閒置時整併機器寫入記憶(gate:≥4h 且新條目 ≥3)
+      scheduleDreamConsolidation(settings)
+    }
   }, [isRunning, skillCount, settings])
 
   return null
@@ -263,6 +268,59 @@ function WebhookBootstrap() {
 }
 
 /** Telegram messaging gateway + background job notifications */
+/** G10:monitor 事件流 → Proactive event matching(與 webhook 同紀律) */
+function MonitorBootstrap() {
+  const navigate = useNavigate()
+  const matchEventEvidence = useScheduleStore((s) => s.matchEventEvidence)
+  const recordEventTrigger = useScheduleStore((s) => s.recordEventTrigger)
+
+  useEffect(() => {
+    const monitorApi = window.subagents?.monitor
+    if (!monitorApi?.onEvent) return
+    const unsubEvent = monitorApi.onEvent((payload) => {
+      const matched = matchEventEvidence({
+        source: 'monitor',
+        subject: payload.description,
+        body: payload.line,
+        receivedAt: payload.at,
+      })
+      // monitor 行數多,未匹配的行靜默略過(不像 webhook 逐則通知)
+      if (!matched) return
+      void (async () => {
+        const event = matched.event
+        await recordEventTrigger(event.id, matched.trigger)
+        navigate('/')
+        const { runTask } = await import('./agent/taskRunCoordinator')
+        await runTask({
+          sourceKind: 'event',
+          objective: event.objective,
+          title: event.name,
+          loopType: 'Proactive',
+          eventPreMatched: true,
+          sourceLabel: `Monitor 事件：${event.name}（${payload.description}）`,
+          unattended: true,
+          meta: { eventTrigger: matched.trigger },
+          extraContext: `Monitor: ${payload.description}\nLine: ${payload.line}`.slice(0, 4000),
+        })
+      })()
+    })
+    const unsubStopped = monitorApi.onStopped?.((payload) => {
+      if (payload.reason === 'volume' || payload.reason === 'error') {
+        void window.subagents?.notify?.(
+          'SubAgents AI · Monitor',
+          `monitor ${payload.description} 已停止（${payload.reason}）${payload.detail ? `：${payload.detail.slice(0, 100)}` : ''}`,
+        )
+      }
+    })
+    return () => {
+      unsubEvent()
+      unsubStopped?.()
+    }
+  }, [matchEventEvidence, recordEventTrigger, navigate])
+
+  return null
+}
+
 function GatewayBootstrap() {
   const navigate = useNavigate()
   const settings = useSettingsStore((s) => s.settings)
@@ -566,6 +624,7 @@ export default function App() {
       <SkillCuratorBootstrap />
       <SchedulerBootstrap />
       <WebhookBootstrap />
+      <MonitorBootstrap />
       <GatewayBootstrap />
       <PluginTokenRefreshBootstrap />
       <PluginProjectRebindBootstrap />

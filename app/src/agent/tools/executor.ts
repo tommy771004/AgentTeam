@@ -36,6 +36,39 @@ export type ToolExecutionContext = {
 
 const memory = new Map<string, string>()
 
+/**
+ * G5 rewind:寫入類工具執行前把目標檔原始內容快照到 Electron main
+ * (userData/rewind/<threadId>.jsonl)。best-effort — 快照失敗絕不
+ * 阻擋工具本身;無 threadId(純瀏覽器/單元測試)時靜默跳過。
+ */
+async function recordRewindSnapshot(opts: {
+  threadId?: string
+  runId?: string
+  kind: 'write' | 'delete' | 'move'
+  relPath: string
+  toPath?: string
+  after?: string | null
+  projectRoot?: string
+}): Promise<void> {
+  const rewind = window.subagents?.rewind
+  const read = window.subagents?.tools?.workspaceRead
+  if (!rewind?.record || !read || !opts.threadId || !opts.relPath) return
+  try {
+    const prev = await read(opts.relPath, opts.projectRoot)
+    await rewind.record({
+      threadId: opts.threadId,
+      runId: opts.runId,
+      kind: opts.kind,
+      relPath: opts.relPath,
+      toPath: opts.toPath,
+      before: prev.ok ? prev.content : null,
+      after: opts.after,
+    })
+  } catch {
+    /* best-effort */
+  }
+}
+
 export async function executeTool(
   tool: ToolName,
   input: Record<string, unknown>,
@@ -127,6 +160,14 @@ export async function executeTool(
       }
       case 'workspace_write': {
         if (api?.workspaceWrite) {
+          await recordRewindSnapshot({
+            threadId,
+            runId,
+            kind: 'write',
+            relPath: String(input.path || ''),
+            after: String(input.content || ''),
+            projectRoot,
+          })
           const r = await api.workspaceWrite(
             String(input.path || ''),
             String(input.content || ''),
@@ -156,6 +197,14 @@ export async function executeTool(
       }
       case 'workspace_move': {
         if (!api?.workspaceMove) return { ok: false, output: 'workspace_move requires Electron' }
+        await recordRewindSnapshot({
+          threadId,
+          runId,
+          kind: 'move',
+          relPath: String(input.from || ''),
+          toPath: String(input.to || ''),
+          projectRoot,
+        })
         const r = await api.workspaceMove(
           String(input.from || ''),
           String(input.to || ''),
@@ -165,6 +214,13 @@ export async function executeTool(
       }
       case 'workspace_delete': {
         if (!api?.workspaceDelete) return { ok: false, output: 'workspace_delete requires Electron' }
+        await recordRewindSnapshot({
+          threadId,
+          runId,
+          kind: 'delete',
+          relPath: String(input.path || ''),
+          projectRoot,
+        })
         const r = await api.workspaceDelete(
           String(input.path || ''),
           input.recursive === true,
@@ -391,7 +447,37 @@ export async function executeTool(
         if (useSettingsStore.getState().settings.subAgentsEnabled !== true) {
           return { ok: false, output: 'Sub Agent 功能目前已關閉，沒有可用的 delegate job。' }
         }
-        const { listBackgroundJobs, getBackgroundJob } = await import('../hermes/backgroundJobs')
+        const { listBackgroundJobs, getBackgroundJob, waitBackgroundJobs } = await import(
+          '../hermes/backgroundJobs'
+        )
+        // G10:wait=any/all 阻塞等待多個 job 終態(取代模型自行輪詢)
+        const waitMode = String(input.wait || 'none')
+        if (waitMode === 'any' || waitMode === 'all') {
+          const ids = Array.isArray(input.jobIds)
+            ? input.jobIds.map(String)
+            : input.jobId
+              ? [String(input.jobId)]
+              : listBackgroundJobs()
+                  .filter((j) => j.status === 'queued' || j.status === 'running')
+                  .map((j) => j.id)
+          if (!ids.length) return { ok: true, output: '（沒有進行中的背景委派可等待）' }
+          const r = await waitBackgroundJobs(
+            ids,
+            waitMode === 'any' ? 'wait_any' : 'wait_all',
+            Number(input.timeoutMs) || 30_000,
+          )
+          return {
+            ok: true,
+            output: [
+              r.timedOut ? `等待逾時（${ids.length} 個 job 未全部完成）` : '等待完成',
+              ...r.jobs.map(
+                (j) =>
+                  `· ${j.id} [${j.status}] ${j.goal.slice(0, 60)}${j.summary ? ` — ${j.summary.slice(0, 120)}` : ''}`,
+              ),
+            ].join('\n'),
+            data: r,
+          }
+        }
         const jobId = input.jobId ? String(input.jobId) : ''
         if (jobId) {
           const j = getBackgroundJob(jobId)
@@ -412,6 +498,42 @@ export async function executeTool(
                 `· ${j.id} [${j.status}] ${j.goal.slice(0, 60)}${j.summary ? ` — ${j.summary.slice(0, 80)}` : ''}`,
             )
             .join('\n'),
+          data: list,
+        }
+      }
+      case 'monitor': {
+        const monitorApi = window.subagents?.monitor
+        if (!monitorApi) return { ok: false, output: 'monitor 僅支援 Electron 環境' }
+        const action = String(input.action || 'list')
+        if (action === 'start') {
+          const command = String(input.command || '').trim()
+          const description = String(input.description || '').trim()
+          if (!command || !description) {
+            return { ok: false, output: 'monitor start 需要 command 與 description' }
+          }
+          const r = await monitorApi.start({ command, description, cwd: projectRoot })
+          return {
+            ok: r.ok,
+            output: r.ok
+              ? `monitor 已啟動:${r.id}(${description})\n每行輸出會成為 source=monitor 的 Proactive 事件;事件太多會自動停止 — filter 請用 grep --line-buffered。用 monitor action=stop id=${r.id} 停止。`
+              : r.error || 'monitor 啟動失敗',
+            data: r,
+          }
+        }
+        if (action === 'stop') {
+          const id = String(input.id || '').trim()
+          if (!id) return { ok: false, output: 'monitor stop 需要 id' }
+          const stopped = await monitorApi.stop(id)
+          return { ok: stopped, output: stopped ? `monitor 已停止:${id}` : `找不到 monitor:${id}` }
+        }
+        const list = await monitorApi.list()
+        return {
+          ok: true,
+          output: list.length
+            ? list
+                .map((m) => `· ${m.id}(${m.description})lines=${m.lineCount} since ${m.startedAt}\n  $ ${m.command}`)
+                .join('\n')
+            : '(無進行中的 monitor)',
           data: list,
         }
       }

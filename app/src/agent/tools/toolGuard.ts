@@ -19,6 +19,7 @@ export type GuardResult =
  */
 const SIDE_EFFECT_TOOLS = new Set([
   'bash',
+  'monitor',
   'workspace_write',
   'design_system_create',
   'design_system_update',
@@ -113,6 +114,43 @@ export function effectiveApprovalMode(
 }
 
 /**
+ * permissionDenied hook 事件(G7 部分):任何 deny(pattern／policy／
+ * hook／使用者拒絕)都廣播給宣告式 hooks,僅 log / notify(被動觀察,
+ * 供稽核與 denial-ratio 統計),不影響已定案的拒絕。
+ */
+async function emitPermissionDenied(
+  settings: LlmSettings,
+  ctx: { sourceKind?: string; objective?: string },
+  tool: string,
+  reason: string,
+  onLog?: (level: string, message: string) => void,
+): Promise<void> {
+  try {
+    const { collectHookRules, evaluateHooks } = await import('../hooks')
+    const ev = evaluateHooks(collectHookRules(settings), {
+      point: 'permissionDenied',
+      tool,
+      sourceKind: ctx.sourceKind as import('../hooks').HookContext['sourceKind'],
+      objective: ctx.objective,
+      reason,
+    })
+    for (const line of ev.audits) onLog?.('INFO', line)
+    for (const n of ev.notifications) {
+      void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+    }
+  } catch {
+    /* hooks unavailable — never block on hook infra */
+  }
+  // G11 denial 記帳(denial ratio 是 approvalMode / allowlist 的調整回饋)
+  try {
+    const { bumpRunMetric } = await import('../metrics')
+    bumpRunMetric((ctx as { runId?: string }).runId, 'toolDenials')
+  } catch {
+    /* metrics must never block */
+  }
+}
+
+/**
  * Deny / ask only — no execute. Shared by FC (MCP/delegate after) and heuristic.
  */
 export async function authorizeTool(opts: {
@@ -157,6 +195,29 @@ export async function authorizeTool(opts: {
     return { allowed: false, output: msg }
   }
 
+  // G8 plan mode:Active 時只有 .scratch/ 計畫檔可寫;在 approvalMode
+  // 之前強制執行,連「完整存取權」也不可越過(grok 同款語意)。
+  if (opts.runId) {
+    try {
+      const { isPlanModeActive, planModeToolDecision } = await import('../planMode')
+      if (isPlanModeActive(opts.runId)) {
+        const d = planModeToolDecision(
+          tool,
+          input,
+          opts.sideEffect === true,
+        )
+        if (!d.allowed) {
+          const msg = d.reason || `Plan mode 拒絕：${tool}`
+          onLog?.('WARN', msg)
+          await emitPermissionDenied(settings, opts, tool, msg, onLog)
+          return { allowed: false, output: msg }
+        }
+      }
+    } catch {
+      /* plan mode module unavailable — never block on infra */
+    }
+  }
+
   // SubDesign direction gate is evaluated at tool time so a direction selected
   // after ask_user can unlock Build during the same run.
   if (SUBDESIGN_WRITE_TOOLS.has(tool) || tool === 'bash') {
@@ -183,6 +244,7 @@ export async function authorizeTool(opts: {
   if (projected === 'deny') {
     const msg = `OpenCode permission deny：${tool}`
     onLog?.('WARN', msg)
+    await emitPermissionDenied(settings, opts, tool, msg, onLog)
     return { allowed: false, output: msg }
   }
   if (projected === 'ask') needAsk = true
@@ -191,12 +253,14 @@ export async function authorizeTool(opts: {
     if (act === 'deny') {
       const msg = `權限 deny：${tool}（目前 Agent 模式禁止此工具，可切換 Build）`
       onLog?.('WARN', msg)
+      await emitPermissionDenied(settings, opts, tool, msg, onLog)
       return { allowed: false, output: msg }
     }
     if (act === 'ask') needAsk = true
   }
 
-  if (tool === 'bash') {
+  // monitor 執行任意命令(action=start)— 與 bash 走同一套段級檢查
+  if (tool === 'bash' || (tool === 'monitor' && String(input.action || '') === 'start')) {
     const cmd = String(input.command || '')
     let agentId: string | undefined
     try {
@@ -210,15 +274,28 @@ export async function authorizeTool(opts: {
     }
     try {
       const { resolveBashAction } = await import('../opencode/agentRegistry')
+      const { decideBashAction } = await import('./shellCommandParser')
       const fallback =
         settings.bashRequireAsk !== false || needAsk ? 'ask' : 'allow'
-      const bashAct = resolveBashAction(agentId, cmd, fallback)
-      if (bashAct === 'deny') {
-        const msg = `bash 權限 deny（pattern）：${cmd.slice(0, 120)}`
+      // grok-style 段級檢查:deny 看整串+每段(含 wrapper 剝除後),
+      // 危險命令強制 ask,allow 需每一段命中(比 grok 的整串 allow 嚴)。
+      const decision = decideBashAction(
+        cmd,
+        (candidate, fb) => resolveBashAction(agentId, candidate, fb),
+        fallback,
+      )
+      if (decision.action === 'deny') {
+        const msg = `bash 權限 deny（${decision.reason}）：${cmd.slice(0, 120)}`
         onLog?.('WARN', msg)
+        await emitPermissionDenied(settings, opts, tool, msg, onLog)
         return { allowed: false, output: msg }
       }
-      needAsk = bashAct === 'ask'
+      if (decision.action === 'ask') {
+        needAsk = true
+        onLog?.('INFO', `bash 需核准：${decision.reason}`)
+      } else {
+        needAsk = false
+      }
     } catch {
       if (settings.bashRequireAsk !== false) needAsk = true
     }
@@ -271,6 +348,7 @@ export async function authorizeTool(opts: {
     for (const line of hookEval.audits) onLog?.('INFO', line)
     if (hookEval.deny) {
       onLog?.('WARN', `hook deny：${tool} — ${hookEval.deny.reason}`)
+      await emitPermissionDenied(settings, opts, tool, `hook deny：${hookEval.deny.reason}`, onLog)
       return { allowed: false, output: `工具被 hook 政策拒絕：${hookEval.deny.reason}` }
     }
     if (hookEval.forceAsk) needAsk = true
@@ -279,6 +357,12 @@ export async function authorizeTool(opts: {
   }
 
   if (needAsk) {
+    try {
+      const { bumpRunMetric } = await import('../metrics')
+      bumpRunMetric(opts.runId, 'toolAsks')
+    } catch {
+      /* metrics must never block */
+    }
     const timeoutMs =
       opts.hitlTimeoutMs ??
       (opts.unattended ? 45_000 : 90_000)
@@ -301,6 +385,7 @@ export async function authorizeTool(opts: {
       if (decision === 'deny') {
         const msg = `使用者拒絕或逾時拒絕工具：${tool}`
         onLog?.('WARN', msg)
+        await emitPermissionDenied(settings, opts, tool, msg, onLog)
         return { allowed: false, output: msg }
       }
       onLog?.('SUCCESS', `使用者核准：${tool}`)

@@ -166,6 +166,16 @@ export interface PermissionProjection {
 /** ChatGPT-style「動作應如何核准」三段模式 */
 export type ApprovalMode = 'always' | 'auto' | 'full'
 
+/** G9 delegate persona:行為疊層(指示 + 模型覆寫)。 */
+export interface DelegatePersona {
+  /** 注入子代理 prompt 的行為指示 */
+  instructions: string
+  /** 模型覆寫;優先序 role 覆寫 > persona > 父 run 模型 */
+  model?: string
+  /** 目錄顯示用 */
+  description?: string
+}
+
 /** P1-B: how a model capability claim was established */
 export type ModelCapabilitySource = 'verified' | 'assumed' | 'unknown' | 'discovered'
 
@@ -564,6 +574,18 @@ export interface LlmSettings {
   haltOnPayloadOverflow: boolean
   maxToolPayloadKb: number
   maxToolRounds: number
+  /** LLM 韌性:429/5xx/網路錯誤的最大嘗試次數(含首次;1 = 不重試) */
+  llmRetryMaxAttempts: number
+  /**
+   * LLM 韌性:provider 級 circuit breaker(滑動視窗錯誤率)。
+   * open 時 fail-fast,engine 走 simulation 降級而不是持續重試卡住。
+   */
+  llmCircuitBreakerEnabled: boolean
+  /**
+   * modelProfiles 沒有 contextWindow 時的預設 token 上限;
+   * 供 auto-compact gate 與呼叫前 preflight overflow check(tokenEstimate.ts)。
+   */
+  defaultContextWindowTokens: number
   /** Local webhook receiver for Proactive events */
   webhookEnabled: boolean
   webhookPort: number
@@ -631,6 +653,17 @@ export interface LlmSettings {
    * Plugin hooks 由 manifest 提供並經 sanitize；此欄僅存 user 規則。
    */
   hookRules: unknown[]
+  /**
+   * G7 folder trust:允許載入 `<root>/.subagents/hooks.json` 專案 hooks
+   * 的專案根路徑清單。未信任的專案 hooks 靜默跳過(防供應鏈攻擊)。
+   */
+  trustedHookProjects: string[]
+  /**
+   * G9 persona overlay(grok subagents.personas):具名行為疊層,
+   * delegate_task 以 persona=<name> 套用;只影響指示與模型,
+   * 不改變工具面(capability_mode / blockedTools 另管)。
+   */
+  delegatePersonas: Record<string, DelegatePersona>
 
   /* ── ChatGPT app–style preferences (exclude account/login) ── */
 

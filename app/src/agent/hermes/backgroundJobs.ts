@@ -358,6 +358,49 @@ export function enqueueBackgroundDelegate(
   return { ...job }
 }
 
+/**
+ * G10(grok `wait_commands_or_subagents`):一次等多個背景 job。
+ * `wait_any` 第一個到達終態即返回;`wait_all` 全部終態才返回。
+ * 逾時回 timedOut=true 並附當下快照 —— 呼叫端不阻塞、不輪詢。
+ */
+export async function waitBackgroundJobs(
+  ids: string[],
+  mode: 'wait_any' | 'wait_all' = 'wait_all',
+  timeoutMs = 30_000,
+): Promise<{ timedOut: boolean; jobs: BackgroundJob[] }> {
+  const wanted = [...new Set(ids.map((s) => String(s || '').trim()).filter(Boolean))].slice(0, 20)
+  const isTerminal = (j?: BackgroundJob) =>
+    Boolean(j && (j.status === 'success' || j.status === 'failed' || j.status === 'cancelled'))
+  const snapshot = () =>
+    wanted
+      .map((id) => jobs.get(id))
+      .filter((j): j is BackgroundJob => Boolean(j))
+      .map((j) => ({ ...j }))
+  const done = () => {
+    if (!wanted.length) return true
+    const list = wanted.map((id) => jobs.get(id))
+    return mode === 'wait_any' ? list.some(isTerminal) : list.every(isTerminal)
+  }
+  if (done()) return { timedOut: false, jobs: snapshot() }
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (timedOut: boolean) => {
+      if (settled) return
+      settled = true
+      unsubscribe()
+      clearTimeout(timer)
+      resolve({ timedOut, jobs: snapshot() })
+    }
+    const unsubscribe = subscribeBackgroundJobs(() => {
+      if (done()) finish(false)
+    })
+    const timer = setTimeout(
+      () => finish(true),
+      Math.max(1_000, Math.min(timeoutMs, 120_000)),
+    )
+  })
+}
+
 export function listBackgroundJobs(): BackgroundJob[] {
   return [...jobs.values()].sort(
     (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),

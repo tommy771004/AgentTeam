@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { APPROVAL_MODE_DEFS } from '../agent/approvalModes'
+import { exportRunMetricsJsonl, metricsSummary, resetRunMetrics } from '../agent/metrics'
 import { ThemePage } from '../components/SectionNav'
 import {
   PillSelect,
@@ -171,6 +172,8 @@ export function SettingsPage() {
   const [gatewayMsg, setGatewayMsg] = useState<string | null>(null)
   const [cliMsg, setCliMsg] = useState<string | null>(null)
   const [dataMsg, setDataMsg] = useState<string | null>(null)
+  // G9 persona 疊層新增表單
+  const [personaDraft, setPersonaDraft] = useState({ name: '', instructions: '', model: '' })
   const gatewayInbound = useGatewayStore((s) => s.inbound)
   const bgJobs = useGatewayStore((s) => s.jobs)
   const projectRoot = useProjectStore((s) => s.root)
@@ -756,6 +759,52 @@ export function SettingsPage() {
 
         {section === 'data' && (
           <>
+            <SettingsGroup title="運行指標（G11）">
+              <SettingsRow
+                title="本地指標"
+                description={(() => {
+                  const s = metricsSummary()
+                  return s.runs
+                    ? `${s.runs} runs · ask ${s.toolAsks} / deny ${s.toolDenials}（denial ratio ${(s.denialRatio * 100).toFixed(1)}%）· 壓縮 ${s.compactions} 次 · LLM 重試 ${s.llmRetries} 次`
+                    : '尚無紀錄；每個 run 結束時自動記一筆（只記數字，不含 prompt 內容）'
+                })()}
+                control={
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className={settingsBtnCls}
+                      onClick={() => {
+                        const jsonl = exportRunMetricsJsonl()
+                        if (!jsonl) {
+                          setDataMsg('沒有可匯出的指標')
+                          return
+                        }
+                        const blob = new Blob([jsonl], { type: 'application/jsonl' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `subagents-metrics-${new Date().toISOString().slice(0, 10)}.jsonl`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                        setDataMsg('指標已匯出（JSONL）')
+                      }}
+                    >
+                      匯出 JSONL
+                    </button>
+                    <button
+                      type="button"
+                      className="text-[11px] text-error hover:underline"
+                      onClick={() => {
+                        resetRunMetrics()
+                        setDataMsg('指標已清除')
+                      }}
+                    >
+                      清除
+                    </button>
+                  </div>
+                }
+              />
+            </SettingsGroup>
             <SettingsGroup title="對話">
               <SettingsRow
                 title="預設臨時對話"
@@ -1704,6 +1753,78 @@ export function SettingsPage() {
                 啟用並「一鍵偵測本機 CLI 並匯入模型」，或到語言模型填寫預設 model。
               </p>
             )}
+            <SettingsGroup title="Delegate Personas（G9 行為疊層）">
+              {Object.entries(settings.delegatePersonas || {}).map(([name, p]) => (
+                <SettingsRow
+                  key={name}
+                  title={name}
+                  description={`${p.model ? `model=${p.model} · ` : ''}${(p.description || p.instructions || '').slice(0, 80)}`}
+                  control={
+                    <button
+                      type="button"
+                      className="text-[11px] text-error hover:underline"
+                      onClick={() => {
+                        const next = { ...(settings.delegatePersonas || {}) }
+                        delete next[name]
+                        set({ delegatePersonas: next })
+                      }}
+                    >
+                      刪除
+                    </button>
+                  }
+                />
+              ))}
+              <SettingsStack title="新增 persona">
+                <div className="space-y-1.5">
+                  <input
+                    value={personaDraft.name}
+                    onChange={(e) => setPersonaDraft({ ...personaDraft, name: e.target.value })}
+                    placeholder="名稱（如 researcher / concise）"
+                    className={settingsInputCls + ' w-full'}
+                  />
+                  <textarea
+                    value={personaDraft.instructions}
+                    onChange={(e) =>
+                      setPersonaDraft({ ...personaDraft, instructions: e.target.value })
+                    }
+                    placeholder="行為指示（注入子代理 prompt；如「務必引用具體檔案路徑」）"
+                    rows={3}
+                    className={settingsInputCls + ' w-full'}
+                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={personaDraft.model}
+                      onChange={(e) => setPersonaDraft({ ...personaDraft, model: e.target.value })}
+                      placeholder="模型覆寫（選填；role 覆寫優先）"
+                      className={settingsInputCls + ' flex-1'}
+                    />
+                    <button
+                      type="button"
+                      className={settingsBtnCls}
+                      disabled={!personaDraft.name.trim() || !personaDraft.instructions.trim()}
+                      onClick={() => {
+                        const name = personaDraft.name.trim().slice(0, 40)
+                        set({
+                          delegatePersonas: {
+                            ...(settings.delegatePersonas || {}),
+                            [name]: {
+                              instructions: personaDraft.instructions.trim().slice(0, 2000),
+                              model: personaDraft.model.trim() || undefined,
+                            },
+                          },
+                        })
+                        setPersonaDraft({ name: '', instructions: '', model: '' })
+                      }}
+                    >
+                      新增
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-outline">
+                    delegate_task 以 persona=&lt;名稱&gt; 套用；只影響指示與模型，不放寬工具權限（capability_mode 另管）。
+                  </p>
+                </div>
+              </SettingsStack>
+            </SettingsGroup>
           </>
         )}
 
@@ -2127,6 +2248,116 @@ export function SettingsPage() {
                   />
                 }
               />
+            </SettingsGroup>
+            <SettingsGroup title="LLM 韌性">
+              <SettingsRow
+                title="重試次數"
+                description="429/5xx/網路錯誤自動退避重試（含首次呼叫；1 = 不重試）"
+                control={
+                  <input
+                    type="number"
+                    min={1}
+                    max={6}
+                    value={settings.llmRetryMaxAttempts ?? 3}
+                    onChange={(e) =>
+                      set({
+                        llmRetryMaxAttempts: Math.min(
+                          6,
+                          Math.max(1, Number(e.target.value) || 3),
+                        ),
+                      })
+                    }
+                    className={settingsInputCls + ' w-20 text-right'}
+                  />
+                }
+              />
+              <SettingsRow
+                title="Circuit breaker"
+                description="provider 錯誤率過高時暫停呼叫並降級（冷卻後自動探測恢復）"
+                control={
+                  <SettingsToggle
+                    checked={settings.llmCircuitBreakerEnabled !== false}
+                    onChange={(v) => set({ llmCircuitBreakerEnabled: v })}
+                  />
+                }
+              />
+              <SettingsRow
+                title="預設 context window"
+                description={`模型 profile 未知時的 token 上限（目前 ${settings.defaultContextWindowTokens ?? 64000}）；供壓縮門檻與溢位預檢`}
+                control={
+                  <input
+                    type="number"
+                    min={4000}
+                    max={2000000}
+                    step={1000}
+                    value={settings.defaultContextWindowTokens ?? 64000}
+                    onChange={(e) =>
+                      set({
+                        defaultContextWindowTokens: Math.max(
+                          4000,
+                          Number(e.target.value) || 64000,
+                        ),
+                      })
+                    }
+                    className={settingsInputCls + ' w-28 text-right'}
+                  />
+                }
+              />
+            </SettingsGroup>
+            <SettingsGroup title="專案 Hooks 信任">
+              <SettingsRow
+                title="信任目前專案"
+                description={
+                  projectRoot
+                    ? `允許載入 ${projectRoot} 下的 .subagents/hooks.json（僅能限制/觀察，不能放寬權限）`
+                    : '尚未綁定專案；未信任的專案 hooks 一律靜默跳過'
+                }
+                control={
+                  <SettingsToggle
+                    checked={Boolean(
+                      projectRoot &&
+                        (settings.trustedHookProjects || []).includes(projectRoot),
+                    )}
+                    onChange={(v) => {
+                      if (!projectRoot) return
+                      const current = settings.trustedHookProjects || []
+                      set({
+                        trustedHookProjects: v
+                          ? [...new Set([...current, projectRoot])]
+                          : current.filter((r) => r !== projectRoot),
+                      })
+                      void import('../agent/projectHooks').then((m) =>
+                        m.invalidateProjectHooks(projectRoot),
+                      )
+                    }}
+                  />
+                }
+              />
+              {(settings.trustedHookProjects || []).map((root) => (
+                <SettingsRow
+                  key={root}
+                  title={root.split('/').pop() || root}
+                  description={root}
+                  control={
+                    <button
+                      type="button"
+                      className="text-[11px] text-error hover:underline"
+                      onClick={() => {
+                        set({
+                          trustedHookProjects: (
+                            settings.trustedHookProjects || []
+                          ).filter((r) => r !== root),
+                        })
+                        void import('../agent/projectHooks').then((m) =>
+                          m.invalidateProjectHooks(root),
+                        )
+                      }}
+                    >
+                      移除信任
+                    </button>
+                  }
+                />
+              ))}
             </SettingsGroup>
             <p className="text-[11px] text-outline px-1">
               人工介入示範：目標含敏感匯出且授權等級 &lt; 4 時會暫停等待核准。

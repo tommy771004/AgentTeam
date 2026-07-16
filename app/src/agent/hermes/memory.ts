@@ -9,6 +9,44 @@ import { scoreQueryText } from './textSimilarity'
 const MAX_MEMORY_CHARS = 12_000
 const MAX_USER_CHARS = 4_000
 
+/**
+ * G6(grok memory 語意):機器寫入的記憶(auto/flush)隨時間衰減,
+ * 讓近期經驗優先;使用者手寫與 curated 記憶不衰減。
+ * 舊的機器記憶在檢索結果附 staleness 提示,提醒先驗證再信。
+ */
+export const MEMORY_DECAY_HALF_LIFE_DAYS = 7
+export const MEMORY_STALE_AFTER_DAYS = 14
+const DECAYING_TAGS = ['auto', 'flush']
+const DAY_MS = 86_400_000
+
+function isDecayingEntry(entry: Pick<MemoryEntry, 'tags'>): boolean {
+  return (entry.tags || []).some((t) => DECAYING_TAGS.includes(t))
+}
+
+export function memoryDecayFactor(
+  entry: Pick<MemoryEntry, 'createdAt' | 'tags'>,
+  nowMs = Date.now(),
+): number {
+  if (!isDecayingEntry(entry)) return 1
+  const created = Date.parse(entry.createdAt || '')
+  if (!Number.isFinite(created)) return 1
+  const ageMs = nowMs - created
+  if (ageMs <= 0) return 1
+  return 0.5 ** (ageMs / (MEMORY_DECAY_HALF_LIFE_DAYS * DAY_MS))
+}
+
+export function memoryStalenessNote(
+  entry: Pick<MemoryEntry, 'createdAt' | 'tags'>,
+  nowMs = Date.now(),
+): string {
+  if (!isDecayingEntry(entry)) return ''
+  const created = Date.parse(entry.createdAt || '')
+  if (!Number.isFinite(created)) return ''
+  const days = Math.floor((nowMs - created) / DAY_MS)
+  if (days < MEMORY_STALE_AFTER_DAYS) return ''
+  return `（${days} 天前的自動記憶，使用前請先驗證現況）`
+}
+
 function now() {
   return new Date().toISOString()
 }
@@ -74,6 +112,8 @@ export class MemoryStore {
             score += 2
           }
         }
+        // temporal decay:auto/flush 記憶 half-life 7 天;手寫/curated 不衰減
+        score *= memoryDecayFactor(e)
         return { e, score }
       })
       .filter((x) => x.score > 0)
@@ -149,7 +189,9 @@ export class MemoryStore {
       if (related.length) {
         parts.push(
           '### 與本目標相關記憶',
-          ...related.map((entry) => `- ${entry.text.slice(0, 200)}`),
+          ...related.map(
+            (entry) => `- ${entry.text.slice(0, 200)}${memoryStalenessNote(entry)}`,
+          ),
         )
       }
       // P2: hard-surface failure lessons so the model avoids repeating mistakes

@@ -10,6 +10,11 @@
 import type { LlmSettings } from '../types'
 import { chatCompletion } from '../llm'
 import { getCompactionConfig, getSmallModel } from './agentRegistry'
+import {
+  DEFAULT_PRUNING_CONFIG,
+  pruneToolResults,
+  type PruneStats,
+} from '../contextPruning'
 
 export type CompactableMessage = {
   role: string
@@ -62,27 +67,47 @@ function alignKeepStart(body: CompactableMessage[], keepRecent: number): number 
 export async function maybeCompactMessages(
   settings: LlmSettings,
   messages: CompactableMessage[],
-  opts?: { maxChars?: number; keepRecent?: number; force?: boolean },
-): Promise<{ messages: CompactableMessage[]; compacted: boolean; summary?: string }> {
+  opts?: {
+    maxChars?: number
+    keepRecent?: number
+    force?: boolean
+    /** 三層 tool-result pruning(預設開;LLM 摘要前先做便宜截斷) */
+    prune?: boolean
+  },
+): Promise<{
+  messages: CompactableMessage[]
+  compacted: boolean
+  summary?: string
+  pruneStats?: PruneStats
+}> {
   const cfg = getCompactionConfig()
   if (cfg.auto === false && !opts?.force) {
     return { messages, compacted: false }
+  }
+
+  // Grok-style pruning:只截舊 tool result 的 content,不動訊息結構,
+  // 所以 tool_calls / tool_call_id 鏈與 alignKeepStart 都不受影響。
+  let pruneStats: PruneStats | undefined
+  if (opts?.prune !== false) {
+    const pruned = pruneToolResults(messages, DEFAULT_PRUNING_CONFIG)
+    pruneStats = pruned.stats
+    messages = pruned.messages
   }
 
   const maxChars = opts?.maxChars ?? Math.max(12_000, 80_000 - (cfg.reserved || 8000))
   const keepRecent = opts?.keepRecent ?? 6
   const total = messages.reduce((n, m) => n + messageWeight(m), 0)
   if (total <= maxChars || messages.length <= keepRecent + 2) {
-    return { messages, compacted: false }
+    return { messages, compacted: false, pruneStats }
   }
 
   const head = messages[0]?.role === 'system' ? [messages[0]] : []
   const startIdx = head.length
   const body = messages.slice(startIdx)
-  if (body.length <= keepRecent) return { messages, compacted: false }
+  if (body.length <= keepRecent) return { messages, compacted: false, pruneStats }
 
   const keepStart = alignKeepStart(body, keepRecent)
-  if (keepStart <= 0) return { messages, compacted: false }
+  if (keepStart <= 0) return { messages, compacted: false, pruneStats }
 
   const old = body.slice(0, keepStart)
   const recent = body.slice(keepStart)
@@ -142,5 +167,5 @@ export async function maybeCompactMessages(
     },
     ...recent,
   ]
-  return { messages: next, compacted: true, summary }
+  return { messages: next, compacted: true, summary, pruneStats }
 }

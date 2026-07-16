@@ -194,6 +194,20 @@ interface ThreadStore {
     sha256: string
   }) => void
   clearBubbles: (threadId: string) => void
+  /**
+   * G5 rewind:還原 agent 寫入的檔案到該氣泡時點,並截斷之後的對話。
+   * 外部改動過的檔案會跳過(conflicts);run 延續狀態一併清除。
+   */
+  rewindToBubble: (
+    threadId: string,
+    bubbleId: string,
+  ) => Promise<{
+    ok: boolean
+    restored: string[]
+    conflicts: string[]
+    errors: string[]
+    removedBubbles: number
+  }>
   setShowRunPanel: (v: boolean) => void
   setShowThreadList: (v: boolean) => void
   setRunningThreadId: (id: string | null) => void
@@ -638,6 +652,84 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     )
     set({ threads })
     persist(threads, get().activeId)
+  },
+
+  rewindToBubble: async (threadId, bubbleId) => {
+    const fail = (msg: string) => ({
+      ok: false,
+      restored: [] as string[],
+      conflicts: [] as string[],
+      errors: [msg],
+      removedBubbles: 0,
+    })
+    const thread = get().threads.find((t) => t.id === threadId)
+    if (!thread) return fail('thread not found')
+    const idx = thread.bubbles.findIndex((b) => b.id === bubbleId)
+    if (idx < 0) return fail('bubble not found')
+    if (get().runningThreadId === threadId) return fail('run 進行中,請先停止再回捲')
+
+    const cutoffAt = thread.bubbles[idx].at
+    let restored: string[] = []
+    let conflicts: string[] = []
+    const errors: string[] = []
+    const rewind = window.subagents?.rewind
+    if (rewind?.list) {
+      try {
+        const entries = await rewind.list(threadId)
+        // 該氣泡之後的第一筆快照 = 還原到氣泡當下狀態的起點
+        const target = entries.find((e) => e.at >= cutoffAt)
+        if (target) {
+          let projectRoot: string | undefined
+          try {
+            const { useProjectStore } = await import('./projectStore')
+            projectRoot = useProjectStore.getState().root || undefined
+          } catch {
+            /* browser fallback */
+          }
+          const report = await rewind.restore(threadId, target.id, projectRoot)
+          restored = report.restored
+          conflicts = report.conflicts
+          errors.push(...report.errors)
+        }
+      } catch (e) {
+        errors.push(e instanceof Error ? e.message : String(e))
+      }
+    }
+
+    const removedBubbles = thread.bubbles.length - (idx + 1)
+    const note = [
+      `已回捲到此訊息（截斷 ${removedBubbles} 則之後的對話）。`,
+      restored.length ? `還原檔案 ${restored.length} 個：${restored.slice(0, 8).join('、')}` : '無檔案需要還原。',
+      conflicts.length ? `外部改動已跳過 ${conflicts.length} 個：${conflicts.slice(0, 5).join('、')}` : '',
+      errors.length ? `錯誤：${errors.slice(0, 3).join('、')}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n')
+    const at = new Date().toISOString()
+    const threads = get().threads.map((t) =>
+      t.id === threadId
+        ? {
+            ...t,
+            bubbles: [
+              ...t.bubbles.slice(0, idx + 1),
+              {
+                id: crypto.randomUUID(),
+                role: 'system' as const,
+                content: note,
+                at,
+              },
+            ],
+            // run 延續狀態跟著時點作廢
+            lastCapabilityIds: undefined,
+            lastUnlockedTools: undefined,
+            continueGoal: null,
+            updatedAt: at,
+          }
+        : t,
+    )
+    set({ threads })
+    persist(threads, get().activeId)
+    return { ok: errors.length === 0, restored, conflicts, errors, removedBubbles }
   },
 
   setShowRunPanel: (v) => set({ showRunPanel: v }),

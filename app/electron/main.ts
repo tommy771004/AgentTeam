@@ -53,6 +53,20 @@ import {
 } from './messagingGateway'
 import { cancelBash, runBash } from './shellBridge'
 import {
+  clearRewindEntries,
+  listRewindEntries,
+  recordRewindEntry,
+  restoreRewindEntries,
+  sha1 as rewindSha1,
+} from './rewindBridge'
+import {
+  listMonitors,
+  startMonitor,
+  stopAllMonitors,
+  stopMonitor,
+  type MonitorEmit,
+} from './monitorBridge'
+import {
   detectOpenCodeCli,
   loadOpenCodeBundle,
   runOpenCodePrompt,
@@ -61,9 +75,12 @@ import {
   spawnOpenCodeInteractive,
 } from './opencodeBridge'
 import {
+  applyWorktree,
+  createWorktree,
   inspectProject,
   listBranches,
   pickProjectFolder,
+  removeWorktree,
 } from './projectBridge'
 import {
   applyDiscoveryToProviders,
@@ -1270,6 +1287,17 @@ ipcMain.handle('project:branches', async (_evt, root: string) =>
 )
 
 /** Sync tools/bash workspace root with ProjectContextBar selection */
+// G9 worktree 隔離
+ipcMain.handle('project:worktreeCreate', async (_evt, root: string, branchPrefix?: string) =>
+  createWorktree(String(root || ''), branchPrefix),
+)
+ipcMain.handle('project:worktreeApply', async (_evt, root: string, worktreePath: string) =>
+  applyWorktree(String(root || ''), String(worktreePath || '')),
+)
+ipcMain.handle('project:worktreeRemove', async (_evt, root: string, worktreePath: string) =>
+  removeWorktree(String(root || ''), String(worktreePath || '')),
+)
+
 ipcMain.handle('project:setActiveRoot', async (_evt, root: string | null) =>
   setActiveProjectRoot(root),
 )
@@ -3087,6 +3115,79 @@ ipcMain.handle('tools:workspaceDelete', async (_evt, relPath: string, recursive 
     return { ok: true, path: relPath }
   } catch (e) { return { ok: false, path: relPath, error: e instanceof Error ? e.message : String(e) } }
 })
+
+// ── Rewind 檔案快照(G5,grok rewind_points 輕量版)──────────────
+
+const rewindBaseDir = () => path.join(app.getPath('userData'), 'rewind')
+
+ipcMain.handle(
+  'rewind:record',
+  (
+    _evt,
+    payload: {
+      threadId: string
+      runId?: string
+      kind: 'write' | 'delete' | 'move'
+      relPath: string
+      toPath?: string
+      before: string | null
+      after?: string | null
+    },
+  ) =>
+    recordRewindEntry(rewindBaseDir(), {
+      threadId: String(payload?.threadId || ''),
+      runId: payload?.runId,
+      kind: payload?.kind || 'write',
+      relPath: String(payload?.relPath || ''),
+      toPath: payload?.toPath,
+      before: payload?.before ?? null,
+      afterSha1: payload?.after == null ? null : rewindSha1(String(payload.after)),
+    }),
+)
+
+ipcMain.handle('rewind:list', (_evt, threadId: string) =>
+  listRewindEntries(rewindBaseDir(), String(threadId || '')),
+)
+
+ipcMain.handle(
+  'rewind:restore',
+  (_evt, threadId: string, toEntryId: string, projectRoot?: string, force?: boolean) =>
+    restoreRewindEntries(
+      rewindBaseDir(),
+      String(threadId || ''),
+      String(toEntryId || ''),
+      (rel) => resolveWorkspacePath(rel, projectRoot),
+      { force: force === true },
+    ),
+)
+
+ipcMain.handle('rewind:clear', (_evt, threadId: string) =>
+  clearRewindEntries(rewindBaseDir(), String(threadId || '')),
+)
+
+// ── Monitor 事件流(G10)──────────────────────────────────────────
+
+const emitMonitor: MonitorEmit = (channel, payload) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload)
+  }
+}
+
+ipcMain.handle(
+  'monitor:start',
+  (_evt, input: { command: string; description: string; cwd?: string }) =>
+    startMonitor(
+      {
+        command: String(input?.command || ''),
+        description: String(input?.description || ''),
+        cwd: input?.cwd ? String(input.cwd) : undefined,
+      },
+      emitMonitor,
+    ),
+)
+ipcMain.handle('monitor:stop', (_evt, id: string) => stopMonitor(String(id || ''), emitMonitor))
+ipcMain.handle('monitor:list', () => listMonitors())
+app.on('before-quit', () => stopAllMonitors(emitMonitor))
 
 ipcMain.handle('tools:workspaceRoot', () => workspaceRoot())
 ipcMain.handle('tools:workspaceMode', () => ({

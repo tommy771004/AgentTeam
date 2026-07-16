@@ -44,6 +44,19 @@ import {
 } from '../capabilities'
 import { runCodeMode, runCodeToolDef } from './codeMode'
 import {
+  estimateTokensFromText,
+  estimateTranscriptTokens,
+  resolveContextWindow,
+  shouldPreflightCompact,
+} from '../tokenEstimate'
+import {
+  ENTER_PLAN_MODE_TOOL,
+  EXIT_PLAN_MODE_TOOL,
+  isPlanModeActive,
+  PLAN_FILE_PREFIX,
+  setPlanMode,
+} from '../planMode'
+import {
   customToolDefs,
   customToolsForSettings,
   executeCustomTool,
@@ -73,6 +86,8 @@ export interface ToolLoopCallbacks {
   onToolCall?: (record: ToolCallRecord) => void
   /** Fired when load_capability activates a bundle (or preload snapshot) */
   onCapabilityLoad?: (ids: string[]) => void
+  /** 每輪 context 用量估算（tokenEstimate 單一來源），供 UI meter。 */
+  onContextUsage?: (usage: { tokens: number; contextWindow: number; ratio: number }) => void
   /** Structured ask_user lifecycle for the live run status. */
   onQuestionAsked?: () => void
   onQuestionResolved?: () => void
@@ -302,6 +317,28 @@ export async function runFunctionCallingLoop(
             description:
               'Optional capability ids to preload in the child (e.g. codegraph, workspace). Isolation by default; only listed packs inherit.',
           },
+          capability_mode: {
+            type: 'string',
+            enum: ['read-only', 'read-write', 'execute', 'all'],
+            description:
+              'Coarse tool filter for the child (grok-style): read-only = no writes/shell; read-write = files but no shell; execute = shell but no writes. Stacks on role restrictions (never loosens).',
+          },
+          persona: {
+            type: 'string',
+            description:
+              'Named behavioral overlay from Settings (instructions + optional model). Unknown persona fails the spawn.',
+          },
+          resume_from: {
+            type: 'string',
+            description:
+              'Background delegate job id whose result becomes read-only context for this child (multi-stage workflows). Job must be finished.',
+          },
+          isolation: {
+            type: 'string',
+            enum: ['none', 'worktree'],
+            description:
+              'worktree = child works in an isolated git worktree (Electron + git project only); changes stay out of the main workspace until applied.',
+          },
         },
         required: ['goal'],
       },
@@ -332,6 +369,46 @@ export async function runFunctionCallingLoop(
     )
   }
 
+  // G8 plan mode:僅互動式 run(有人可審批)提供;enter/exit 依狀態輪替
+  const planToolsAvailable = !opts?.unattended && Boolean(opts?.runId)
+  const enterPlanDef: OpenAiToolDef = {
+    type: 'function',
+    function: {
+      name: ENTER_PLAN_MODE_TOOL,
+      description:
+        '進入 Plan mode:任務有多種合理作法或架構歧義時,先探索並寫計畫再實作。需使用者核准;核准後只有 .scratch/ 計畫檔可寫,副作用工具被凍結。',
+      parameters: {
+        type: 'object',
+        properties: {
+          reason: { type: 'string', description: '為何需要先規劃(一句話)' },
+        },
+        required: ['reason'],
+      },
+    },
+  }
+  const exitPlanDef: OpenAiToolDef = {
+    type: 'function',
+    function: {
+      name: EXIT_PLAN_MODE_TOOL,
+      description:
+        '完成計畫後請使用者審批。核准即離開 Plan mode 開始實作;退回則留在 Plan mode 依回饋修訂。',
+      parameters: {
+        type: 'object',
+        properties: {
+          plan: {
+            type: 'string',
+            description: '計畫摘要(Markdown,會呈給使用者審批)',
+          },
+          plan_path: {
+            type: 'string',
+            description: `計畫檔路徑(${PLAN_FILE_PREFIX} 下,選填)`,
+          },
+        },
+        required: ['plan'],
+      },
+    },
+  }
+
   const rebuildVisibleTools = (): OpenAiToolDef[] => {
     let visible = filterToolDefs(capState, fullPool)
     // Tool Search: over threshold, hide non-core schemas behind tool_search
@@ -344,6 +421,12 @@ export async function runFunctionCallingLoop(
     const loadDef = loadCapabilityToolDef(capState)
     if (loadDef && !visible.some((t) => t.function.name === LOAD_CAPABILITY_TOOL)) {
       visible = [...visible, loadDef]
+    }
+    if (planToolsAvailable) {
+      const planDef = isPlanModeActive(opts?.runId) ? exitPlanDef : enterPlanDef
+      if (!visible.some((t) => t.function.name === planDef.function.name)) {
+        visible = [...visible, planDef]
+      }
     }
     return visible
   }
@@ -401,6 +484,8 @@ export async function runFunctionCallingLoop(
 
   let tokensUsed = 0
   let rounds = 0
+  // context meter:只在使用率跨越 50/75/90% 門檻時各記一行
+  let lastUsageBucket = 0
 
   const catalog = formatDeferredCatalog(capState)
   const alwaysInstr = formatAlwaysOnInstructions(capState)
@@ -412,6 +497,9 @@ export async function runFunctionCallingLoop(
       : '',
     alwaysInstr ? `\n## Active capability runbooks\n${alwaysInstr}` : '',
     catalog ? `\n## Deferred capabilities\n${catalog}` : '',
+    planToolsAvailable
+      ? `\n## Plan mode\nFor tasks with genuine architectural ambiguity (multiple reasonable approaches), call enter_plan_mode first: explore read-only, write the plan under ${PLAN_FILE_PREFIX}, then exit_plan_mode for user approval before implementing. Skip planning for clear-path tasks.`
+      : '',
   ]
     .filter(Boolean)
     .join('\n')
@@ -450,6 +538,24 @@ ${systemExtra}`,
     // Refresh tools each round (capability loads expand the set)
     tools = rebuildVisibleTools()
 
+    // Preflight overflow check(tokenEstimate 單一來源):估算已逼近
+    // contextWindow 就強制壓縮再送,避免 API 直接 400。
+    const contextWindow = resolveContextWindow(settings, settings.model)
+    const estTokens =
+      estimateTranscriptTokens(messages) +
+      estimateTokensFromText(JSON.stringify(tools))
+    const overflowRisk = shouldPreflightCompact(estTokens, contextWindow)
+    const usageRatio = estTokens / Math.max(1, contextWindow)
+    cb?.onContextUsage?.({ tokens: estTokens, contextWindow, ratio: usageRatio })
+    const usageBucket = usageRatio >= 0.9 ? 3 : usageRatio >= 0.75 ? 2 : usageRatio >= 0.5 ? 1 : 0
+    if (usageBucket > lastUsageBucket) {
+      lastUsageBucket = usageBucket
+      cb?.onLog?.(
+        'INFO',
+        `context 使用率 ${Math.round(usageRatio * 100)}%（${estTokens}/${contextWindow} tokens）`,
+      )
+    }
+
     // OpenCode-style compaction — preserve tool_calls / tool_call_id chain.
     // Skip while vision images are still in the transcript (data URLs + compaction would drop them).
     const hasVisionParts = messages.some(
@@ -457,7 +563,13 @@ ${systemExtra}`,
         Array.isArray(m.content) &&
         m.content.some((p) => p.type === 'image_url'),
     )
-    if (!hasVisionParts && (rounds === 1 || rounds % 2 === 0)) {
+    if (hasVisionParts && overflowRisk) {
+      cb?.onLog?.(
+        'WARN',
+        `context 估算 ${estTokens}/${contextWindow} tokens 已逼近上限,但 transcript 含影像無法壓縮`,
+      )
+    }
+    if (!hasVisionParts && (overflowRisk || rounds === 1 || rounds % 2 === 0)) {
       try {
         const { maybeCompactMessages } = await import('../opencode/compaction')
         const flat = messages.map((m) => ({
@@ -470,8 +582,63 @@ ${systemExtra}`,
           tool_call_id: m.tool_call_id,
           name: m.name,
         }))
-        const c = await maybeCompactMessages(settings, flat)
+        const c = await maybeCompactMessages(
+          settings,
+          flat,
+          overflowRisk
+            ? {
+                force: true,
+                // token gate 觸發時把 char 門檻同步壓到 window 對應量
+                // (bytes/4 ⇒ 1 token ≈ 4 chars 上限),讓壓縮真的發生
+                maxChars: Math.max(12_000, (contextWindow - 2_500) * 3),
+              }
+            : undefined,
+        )
         if (c.compacted) {
+          if (overflowRisk) {
+            cb?.onLog?.(
+              'WARN',
+              `preflight:context 估算 ${estTokens}/${contextWindow} tokens,已先壓縮再呼叫`,
+            )
+          }
+          // G7 beforeCompaction hook 事件(被動)
+          try {
+            const { collectHookRules, evaluateHooks } = await import('../hooks')
+            const ev = evaluateHooks(collectHookRules(settings), {
+              point: 'beforeCompaction',
+              sourceKind: opts?.sourceKind as import('../hooks').HookContext['sourceKind'],
+              objective: opts?.objective || args.objective,
+            })
+            for (const line of ev.audits) cb?.onLog?.('INFO', line)
+          } catch {
+            /* non-fatal */
+          }
+          // 壓縮前 checkpoint(原始 transcript 可回放)+ memory flush
+          // (grok [compaction.memory_flush] 語意:脈絡被丟棄前先入庫)
+          try {
+            const { saveCompactionCheckpoint } = await import('../compactionCheckpoint')
+            saveCompactionCheckpoint(opts?.runId || opts?.threadId || 'adhoc', {
+              summary: c.summary || '',
+              messages: flat,
+            })
+          } catch {
+            /* non-fatal */
+          }
+          try {
+            const { learningLoop } = await import('../hermes/learning')
+            const flushed = learningLoop.onPreCompactionFlush({
+              objective: opts?.objective || args.objective,
+              summary: c.summary || '',
+              runId: opts?.runId,
+              memoryEnabled: settings.memoryEnabled,
+              memoryWriteEnabled: settings.memoryWriteEnabled,
+            })
+            if (flushed) cb?.onLog?.('INFO', '壓縮前已將重要脈絡 flush 進持久記憶')
+          } catch {
+            /* non-fatal */
+          }
+        }
+        if (c.compacted || c.pruneStats?.changed) {
           messages.length = 0
           for (const m of c.messages) {
             messages.push({
@@ -482,7 +649,61 @@ ${systemExtra}`,
               name: m.name,
             })
           }
+        }
+        if (c.pruneStats?.changed) {
+          cb?.onLog?.(
+            'INFO',
+            `pruning:soft-trim ${c.pruneStats.softTrimmed} 筆、hard-clear ${c.pruneStats.hardCleared} 筆,省下 ${c.pruneStats.savedChars} chars`,
+          )
+        }
+        if (c.compacted) {
+          // 壓縮後記憶召回:把可能被摘要丟掉的相關脈絡補回 compaction 訊息
+          if (settings.memoryEnabled !== false) {
+            try {
+              const { memoryStore } = await import('../hermes/memory')
+              const related = memoryStore.search(opts?.objective || args.objective, 3)
+              if (related.length) {
+                const idx = messages.findIndex(
+                  (m) =>
+                    m.role === 'system' &&
+                    typeof m.content === 'string' &&
+                    m.content.startsWith('## Context compaction'),
+                )
+                if (idx >= 0) {
+                  messages[idx] = {
+                    ...messages[idx],
+                    content: `${messages[idx].content}\n\n### 壓縮後記憶召回\n${related
+                      .map((e) => `- ${e.text.slice(0, 200)}`)
+                      .join('\n')}`,
+                  }
+                }
+              }
+            } catch {
+              /* non-fatal */
+            }
+          }
           cb?.onLog?.('INFO', 'Context compacted (OpenCode-style)')
+          try {
+            const { bumpRunMetric } = await import('../metrics')
+            bumpRunMetric(opts?.runId, 'compactions')
+          } catch {
+            /* metrics must never block */
+          }
+          // G7 afterCompaction hook 事件(被動)
+          try {
+            const { collectHookRules, evaluateHooks } = await import('../hooks')
+            const ev = evaluateHooks(collectHookRules(settings), {
+              point: 'afterCompaction',
+              sourceKind: opts?.sourceKind as import('../hooks').HookContext['sourceKind'],
+              objective: opts?.objective || args.objective,
+            })
+            for (const line of ev.audits) cb?.onLog?.('INFO', line)
+            for (const n of ev.notifications) {
+              void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+            }
+          } catch {
+            /* non-fatal */
+          }
         }
       } catch {
         /* non-fatal */
@@ -501,6 +722,12 @@ ${systemExtra}`,
       temperature: capModel.temperature ?? 0.3,
       maxTokens: capModel.maxTokens ?? 1400,
       toolChoice: 'auto',
+      onResilienceEvent: (m) => {
+        cb?.onLog?.('WARN', m)
+        void import('../metrics').then(({ bumpRunMetric }) =>
+          bumpRunMetric(opts?.runId, 'llmRetries'),
+        )
+      },
     })
     tokensUsed += result.tokensUsed
 
@@ -576,6 +803,7 @@ ${systemExtra}`,
     temperature: 0.3,
     maxTokens: 1400,
     toolChoice: 'none',
+    onResilienceEvent: (m) => cb?.onLog?.('WARN', m),
   })
   tokensUsed += final.tokensUsed
   const budget = enforceStepContextBudget(toolChunks, limits)
@@ -627,6 +855,65 @@ async function executeOneToolCall(
     args = tc.arguments ? JSON.parse(tc.arguments) : {}
   } catch {
     args = { raw: tc.arguments }
+  }
+
+  // ── Framework tools: enter/exit plan mode(自帶 HITL 審批)──
+  if (tc.name === ENTER_PLAN_MODE_TOOL || tc.name === EXIT_PLAN_MODE_TOOL) {
+    const started = Date.now()
+    const entering = tc.name === ENTER_PLAN_MODE_TOOL
+    let output = ''
+    let ok = true
+    if (!ctx.runId || ctx.unattended) {
+      output = 'Plan mode 僅供互動式 run(unattended 無人可審批)。請以一般流程直接執行。'
+    } else {
+      try {
+        const { usePermissionAskStore } = await import('../../store/permissionAskStore')
+        ctx.cb?.onLog?.(
+          'AWAIT',
+          entering ? 'Plan mode:等待使用者核准進入…' : 'Plan mode:計畫審批中…',
+        )
+        const decision = await usePermissionAskStore.getState().requestAsk({
+          threadId: ctx.threadId,
+          runId: ctx.runId,
+          tool: tc.name,
+          args,
+          reason: entering
+            ? `Agent 請求進入 Plan mode(規劃階段只寫 ${PLAN_FILE_PREFIX} 計畫檔):${String(args.reason || '').slice(0, 200)}`
+            : `計畫審批 — 核准即開始實作,拒絕則退回修訂:\n\n${String(args.plan || '').slice(0, 1500)}`,
+          timeoutMs: 90_000,
+        })
+        if (decision === 'deny') {
+          output = entering
+            ? '使用者未核准進入 Plan mode,請以一般流程直接執行。'
+            : '使用者退回計畫 — 留在 Plan mode,請依對話回饋修訂後再次呼叫 exit_plan_mode。'
+        } else {
+          setPlanMode(ctx.runId, entering)
+          output = entering
+            ? `已進入 Plan mode。限制:只有 ${PLAN_FILE_PREFIX} 下的計畫檔可寫(建議 ${PLAN_FILE_PREFIX}<feature-slug>/plan.md),bash 與副作用工具會被拒。完成後呼叫 exit_plan_mode 附計畫摘要送審。`
+            : '計畫已核准,Plan mode 已解除 — 依計畫開始實作。'
+        }
+        ctx.cb?.onLog?.(
+          decision === 'deny' ? 'WARN' : 'SUCCESS',
+          `${tc.name}:${decision === 'deny' ? '未核准' : '已核准'}`,
+        )
+      } catch (e) {
+        ok = false
+        output = `plan mode 審批失敗:${e instanceof Error ? e.message : String(e)}`
+      }
+    }
+    const record: ToolCallRecord = {
+      id: uuid(),
+      tool: tc.name,
+      input: args,
+      output: output.slice(0, 4000),
+      ok,
+      durationMs: Date.now() - started,
+      timestamp: nowTime(),
+    }
+    ctx.toolCalls.push(record)
+    ctx.cb?.onToolCall?.(record)
+    ctx.messages.push({ role: 'tool', tool_call_id: tc.id, content: output })
+    return
   }
 
   // ── Framework tool: tool_search (no HITL) ──
@@ -882,17 +1169,50 @@ async function executeOneToolCall(
     const background = args.background === true
     const notifyOnComplete = args.notify_on_complete !== false && args.notifyOnComplete !== false
     const inheritCapabilities = parseInheritCapabilities(args)
+    const { parseCapabilityMode } = await import('../hermes/capabilityMode')
+    const capabilityMode = parseCapabilityMode(args.capability_mode ?? args.capabilityMode)
+    const persona = String(args.persona || '').trim() || undefined
+    const isolation = args.isolation === 'worktree' ? ('worktree' as const) : undefined
+    // G9 resume_from:引用已完成背景委派的結果作為唯讀上下文
+    let resumeContext = ''
+    const resumeFrom = String(args.resume_from || args.resumeFrom || '').trim()
+    if (resumeFrom) {
+      const { getBackgroundJob } = await import('../hermes/backgroundJobs')
+      const prev = getBackgroundJob(resumeFrom)
+      if (!prev) {
+        const msg = `resume_from 失敗:找不到背景委派 ${resumeFrom}(用 delegate_status 查可用 id)。`
+        ctx.messages.push({ role: 'tool', tool_call_id: tc.id, content: msg })
+        return
+      }
+      if (prev.status === 'queued' || prev.status === 'running') {
+        const msg = `resume_from 失敗:${resumeFrom} 尚未完成(${prev.status})。可先 delegate_status wait=all 等待。`
+        ctx.messages.push({ role: 'tool', tool_call_id: tc.id, content: msg })
+        return
+      }
+      resumeContext = [
+        `## 前次委派結果(resume_from ${prev.id} · ${prev.status})`,
+        `目標:${prev.goal.slice(0, 200)}`,
+        prev.summary ? `結果摘要:\n${prev.summary.slice(0, 2400)}` : '(無摘要)',
+      ].join('\n')
+    }
+    const childContext = [resumeContext, args.context ? String(args.context) : '']
+      .filter(Boolean)
+      .join('\n\n') || undefined
     if (background) {
       const { enqueueBackgroundDelegate } = await import('../hermes/backgroundJobs')
       const job = enqueueBackgroundDelegate(
         ctx.settings,
         {
           goal: String(args.goal || ''),
-          context: args.context ? String(args.context) : undefined,
+          context: childContext,
           role: args.role === 'orchestrator' ? 'orchestrator' : 'leaf',
           background: true,
           notifyOnComplete,
           inheritCapabilities,
+          capabilityMode,
+          persona,
+          isolation,
+          projectRoot: ctx.projectRoot,
           parentRunId: ctx.runId,
           parentThreadId: ctx.threadId,
           parentPermissionPolicy: ctx.permissionPolicy,
@@ -931,9 +1251,13 @@ async function executeOneToolCall(
         ctx.settings,
         {
           goal: String(args.goal || ''),
-          context: args.context ? String(args.context) : undefined,
+          context: childContext,
           role: args.role === 'orchestrator' ? 'orchestrator' : 'leaf',
           inheritCapabilities,
+          capabilityMode,
+          persona,
+          isolation,
+          projectRoot: ctx.projectRoot,
           parentPermissionPolicy: ctx.permissionPolicy,
           parentPermissionProjection: ctx.permissionProjection,
           parentMcpAgentId: ctx.mcpAgentId,

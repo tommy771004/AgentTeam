@@ -170,7 +170,43 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
     type: 'object',
     properties: {
       jobId: { type: 'string', description: 'Optional job id; omit to list recent jobs' },
+      jobIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Job ids to wait on (max 20); used with wait',
+      },
+      wait: {
+        type: 'string',
+        enum: ['none', 'any', 'all'],
+        description:
+          'Block until jobs finish: any = first terminal job returns; all = every job terminal. Default none (snapshot only). Never poll in a loop — use this instead.',
+      },
+      timeoutMs: {
+        type: 'number',
+        description: 'Max wait in ms (default 30000, cap 120000)',
+      },
     },
+  },
+  monitor: {
+    type: 'object',
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['start', 'stop', 'list'],
+        description: 'start a stream, stop one by id, or list active monitors',
+      },
+      command: {
+        type: 'string',
+        description:
+          "start: shell command whose output lines become events. ALWAYS use line-buffered filters (grep --line-buffered) — raw log streams get auto-stopped for volume.",
+      },
+      description: {
+        type: 'string',
+        description: 'start: short label shown on every event (3-6 words)',
+      },
+      id: { type: 'string', description: 'stop: monitor id' },
+    },
+    required: ['action'],
   },
   message_send: {
     type: 'object',
