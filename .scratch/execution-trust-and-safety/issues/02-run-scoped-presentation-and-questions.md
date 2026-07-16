@@ -6,7 +6,17 @@ Status: 可交給代理
 
 **Blocked by:** None — can start immediately.
 
-- [ ] 執行畫面以明確的 `runId` 讀取狀態，且進度、日誌、停止、繼續與人工介入共用該身分。
-- [ ] 問題請求帶有來源 run 與 thread 身分，並在單一 FIFO 介面中以 request-specific resolver 處理。
-- [ ] 兩個並行 Loop run 同時提問時，回答其中一個或讓其中一個逾時，不會改變另一個 run 的狀態。
-- [ ] 維持 ADR-0003 的 capped opt-in concurrency 與單一人工介入 UI，不新增平行 dialog surface。
+- [x] 執行畫面以明確的 `runId` 讀取狀態，且進度、日誌、停止、繼續與人工介入共用該身分。
+- [x] 問題請求帶有來源 run 與 thread 身分，並在單一 FIFO 介面中以 request-specific resolver 處理。
+- [x] 兩個並行 Loop run 同時提問時，回答其中一個或讓其中一個逾時，不會改變另一個 run 的狀態。
+- [x] 維持 ADR-0003 的 capped opt-in concurrency 與單一人工介入 UI，不新增平行 dialog surface。
+
+## Comments
+
+### 2026-07-16 — TDD slice (question FIFO + run identity)
+
+- Prior art already covered: permission asks FIFO, stop/continue/intervention require `runId`, scenario Phase 0 cancel isolation.
+- Gap fixed: `questionAskStore` overwrote `current` (no queue) and lacked `runId`/`threadId`.
+- Seam: production `useQuestionAskStore` — FIFO queue, request-id resolve, `cancelRun(runId)`, timeout via same settle path.
+- Wired: `executor.ask_user` passes context `runId`/`threadId`; modal resolves by `current.id`; `stopExecution` cancels that run's questions only.
+- Test: `smoke-prod-modules` «question asks keep FIFO run identity; resolve/cancel only settle own request».
