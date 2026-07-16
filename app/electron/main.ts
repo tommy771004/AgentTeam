@@ -2966,14 +2966,11 @@ function parseWorkspaceArgs(
 ipcMain.handle('tools:workspaceList', async (_evt, a?: unknown, b?: unknown) => {
   const { relPath, projectRoot } = parseWorkspaceArgs(a ?? '.', b)
   const dir = resolveWorkspacePath(relPath, projectRoot)
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-  const entries = fs.readdirSync(dir, { withFileTypes: true }).map((d) => ({
-    name: d.name,
-    dir: d.isDirectory(),
-  }))
-  return { path: relPath, entries, projectRoot: projectRoot || activeProjectRoot }
+  // Read-only: never mkdir missing paths (trust-03). Explicit create → workspace_mkdir.
+  const { listWorkspaceDirectory } = await import('./workspaceFs')
+  return listWorkspaceDirectory(dir, relPath, {
+    projectRoot: projectRoot || activeProjectRoot,
+  })
 })
 
 ipcMain.handle('tools:workspaceRead', async (_evt, a: unknown, b?: unknown) => {
