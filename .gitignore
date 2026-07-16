@@ -48,3 +48,6 @@ Desktop.ini
 # ── Local test artifacts ────────────────────────────────────────
 playwright-report/
 test-results/
+
+.agents/*
+.claude/*
