@@ -6,7 +6,7 @@
 import type { ArchiveRecord } from '../types'
 import type { LlmSettings } from '../types'
 import { chatCompletion, withRoleModel } from '../llm'
-import { memoryStore } from './memory'
+import { memoryDecayFactor, memoryStalenessNote, memoryStore } from './memory'
 import { skillsStore } from './skills'
 import type { SessionSearchHit } from './types'
 import { scoreQueryText } from './textSimilarity'
@@ -51,8 +51,11 @@ export function searchSessions(
       id: e.id,
       source: 'memory',
       title: e.tags?.includes('failure') ? '失敗教訓' : '記憶條目',
-      snippet: e.text.slice(0, 160),
-      score: scoreText(query, `${e.text} ${(e.tags || []).join(' ')}`) + 1 + failBoost,
+      snippet: `${e.text.slice(0, 160)}${memoryStalenessNote(e)}`,
+      // temporal decay:舊的機器記憶讓位給近期經驗(手寫記憶不衰減)
+      score:
+        (scoreText(query, `${e.text} ${(e.tags || []).join(' ')}`) + 1 + failBoost) *
+        memoryDecayFactor(e),
       timestamp: e.createdAt,
       tags: e.tags,
     })

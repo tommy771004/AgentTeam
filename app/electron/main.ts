@@ -53,6 +53,13 @@ import {
 } from './messagingGateway'
 import { cancelBash, runBash } from './shellBridge'
 import {
+  clearRewindEntries,
+  listRewindEntries,
+  recordRewindEntry,
+  restoreRewindEntries,
+  sha1 as rewindSha1,
+} from './rewindBridge'
+import {
   detectOpenCodeCli,
   loadOpenCodeBundle,
   runOpenCodePrompt,
@@ -3087,6 +3094,55 @@ ipcMain.handle('tools:workspaceDelete', async (_evt, relPath: string, recursive 
     return { ok: true, path: relPath }
   } catch (e) { return { ok: false, path: relPath, error: e instanceof Error ? e.message : String(e) } }
 })
+
+// ── Rewind 檔案快照(G5,grok rewind_points 輕量版)──────────────
+
+const rewindBaseDir = () => path.join(app.getPath('userData'), 'rewind')
+
+ipcMain.handle(
+  'rewind:record',
+  (
+    _evt,
+    payload: {
+      threadId: string
+      runId?: string
+      kind: 'write' | 'delete' | 'move'
+      relPath: string
+      toPath?: string
+      before: string | null
+      after?: string | null
+    },
+  ) =>
+    recordRewindEntry(rewindBaseDir(), {
+      threadId: String(payload?.threadId || ''),
+      runId: payload?.runId,
+      kind: payload?.kind || 'write',
+      relPath: String(payload?.relPath || ''),
+      toPath: payload?.toPath,
+      before: payload?.before ?? null,
+      afterSha1: payload?.after == null ? null : rewindSha1(String(payload.after)),
+    }),
+)
+
+ipcMain.handle('rewind:list', (_evt, threadId: string) =>
+  listRewindEntries(rewindBaseDir(), String(threadId || '')),
+)
+
+ipcMain.handle(
+  'rewind:restore',
+  (_evt, threadId: string, toEntryId: string, projectRoot?: string, force?: boolean) =>
+    restoreRewindEntries(
+      rewindBaseDir(),
+      String(threadId || ''),
+      String(toEntryId || ''),
+      (rel) => resolveWorkspacePath(rel, projectRoot),
+      { force: force === true },
+    ),
+)
+
+ipcMain.handle('rewind:clear', (_evt, threadId: string) =>
+  clearRewindEntries(rewindBaseDir(), String(threadId || '')),
+)
 
 ipcMain.handle('tools:workspaceRoot', () => workspaceRoot())
 ipcMain.handle('tools:workspaceMode', () => ({

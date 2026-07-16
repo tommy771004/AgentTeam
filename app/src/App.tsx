@@ -31,6 +31,7 @@ import { QuestionAskModal } from './components/QuestionAskModal'
 import type { ScheduledJob } from './agent/types'
 import { createScheduleTriggerSnapshot } from './agent/scheduler'
 import { scheduleSkillCurator } from './agent/hermes/curator'
+import { scheduleDreamConsolidation } from './agent/hermes/dream'
 
 /** Restore automation queue from disk and drain when capacity is available */
 function RunQueueBootstrap() {
@@ -70,7 +71,11 @@ function SkillCuratorBootstrap() {
   const settings = useSettingsStore((s) => s.settings)
 
   useEffect(() => {
-    if (!isRunning) scheduleSkillCurator(settings)
+    if (!isRunning) {
+      scheduleSkillCurator(settings)
+      // G6 dream:閒置時整併機器寫入記憶(gate:≥4h 且新條目 ≥3)
+      scheduleDreamConsolidation(settings)
+    }
   }, [isRunning, skillCount, settings])
 
   return null

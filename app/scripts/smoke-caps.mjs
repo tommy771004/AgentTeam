@@ -2137,6 +2137,68 @@ await test('drift guard: toolLoop wires checkpoint + memory flush + post-compact
   assert.match(learning, /textSimilarity\(flushText, prev\.text\) >= 0\.85/)
 })
 
+// ── Phase 3 (grok-build plan G6): memory temporal decay + dream gates ──
+// Mirrors agent/hermes/memory.ts decay math and hermes/dream.ts gates.
+
+await test('memory decay: auto/flush half-life 7d; manual entries exempt', () => {
+  const HALF_LIFE_DAYS = 7
+  const DAY = 86_400_000
+  const decayFactor = (entry, nowMs) => {
+    if (!(entry.tags || []).some((t) => t === 'auto' || t === 'flush')) return 1
+    const created = Date.parse(entry.createdAt || '')
+    if (!Number.isFinite(created)) return 1
+    const age = nowMs - created
+    if (age <= 0) return 1
+    return 0.5 ** (age / (HALF_LIFE_DAYS * DAY))
+  }
+  const now = Date.parse('2026-07-16T00:00:00Z')
+  const at = (daysAgo) => new Date(now - daysAgo * DAY).toISOString()
+  assert.equal(decayFactor({ createdAt: at(7), tags: ['auto'] }, now).toFixed(3), '0.500')
+  assert.equal(decayFactor({ createdAt: at(14), tags: ['flush'] }, now).toFixed(3), '0.250')
+  assert.equal(decayFactor({ createdAt: at(0), tags: ['auto'] }, now), 1)
+  assert.equal(decayFactor({ createdAt: at(30), tags: ['success'] }, now), 1, '手寫/curated 不衰減')
+})
+
+await test('dream gates: ≥4h since last run AND ≥3 new machine entries', () => {
+  const dreamDue = (nowMs, lastRunAtIso, newEntries) => {
+    const last = Date.parse(lastRunAtIso || '')
+    const hoursOk = !Number.isFinite(last) || nowMs - last >= 4 * 3_600_000
+    return hoursOk && newEntries >= 3
+  }
+  const now = Date.parse('2026-07-16T12:00:00Z')
+  assert.equal(dreamDue(now, undefined, 3), true, '從未跑過且量夠 → due')
+  assert.equal(dreamDue(now, undefined, 2), false, '量不夠')
+  assert.equal(dreamDue(now, '2026-07-16T10:00:00Z', 5), false, '2h 前跑過 → 未到')
+  assert.equal(dreamDue(now, '2026-07-16T07:59:00Z', 5), true, '4h 已過且量夠')
+})
+
+await test('drift guard: memory decay + staleness + dream wiring', async () => {
+  const fs = await import('node:fs')
+  const memory = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/memory.ts'), 'utf8')
+  assert.match(memory, /MEMORY_DECAY_HALF_LIFE_DAYS = 7/)
+  assert.match(memory, /score \*= memoryDecayFactor\(e\)/)
+  assert.match(memory, /memoryStalenessNote\(entry\)/)
+  const dream = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/dream.ts'), 'utf8')
+  assert.match(dream, /DREAM_MIN_HOURS = 4/)
+  assert.match(dream, /DREAM_MIN_NEW_ENTRIES = 3/)
+  assert.match(dream, /memoryEnabled === false \|\| settings\.memoryWriteEnabled === false/)
+  const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
+  assert.match(app, /scheduleDreamConsolidation\(settings\)/)
+})
+
+await test('drift guard: rewind snapshots wired into write tools + thread rewind', async () => {
+  const fs = await import('node:fs')
+  const executor = fs.readFileSync(path.join(appRoot, 'src/agent/tools/executor.ts'), 'utf8')
+  for (const kind of ["kind: 'write'", "kind: 'delete'", "kind: 'move'"]) {
+    assert.ok(executor.includes(kind), `executor records rewind ${kind}`)
+  }
+  const store = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
+  assert.match(store, /rewindToBubble/)
+  assert.match(store, /lastCapabilityIds: undefined/)
+  const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
+  assert.match(preload, /rewind:restore/)
+})
+
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)
 if (process.exitCode) {
   console.error('Capability smoke failed')

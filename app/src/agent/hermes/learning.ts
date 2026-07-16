@@ -108,6 +108,17 @@ class LearningLoop {
     return true
   }
 
+  /** Dream 整併完成 → 學習事件(訂閱者會觸發 learningStore persist)。 */
+  onDreamConsolidation(input: { deduped: number; merged: number }) {
+    this.emit({
+      id: uuid(),
+      type: 'memory_saved',
+      message: `記憶整併完成：去重 ${input.deduped} 筆、合併 ${input.merged} 筆（dream）。`,
+      at: new Date().toISOString(),
+      payload: { kind: 'dream', ...input },
+    })
+  }
+
   /**
    * Persist a successful SubDesign choice as a reusable project-scoped preference.
    * The path itself is never written to memory; only a stable short fingerprint is.

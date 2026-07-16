@@ -36,6 +36,39 @@ export type ToolExecutionContext = {
 
 const memory = new Map<string, string>()
 
+/**
+ * G5 rewind:寫入類工具執行前把目標檔原始內容快照到 Electron main
+ * (userData/rewind/<threadId>.jsonl)。best-effort — 快照失敗絕不
+ * 阻擋工具本身;無 threadId(純瀏覽器/單元測試)時靜默跳過。
+ */
+async function recordRewindSnapshot(opts: {
+  threadId?: string
+  runId?: string
+  kind: 'write' | 'delete' | 'move'
+  relPath: string
+  toPath?: string
+  after?: string | null
+  projectRoot?: string
+}): Promise<void> {
+  const rewind = window.subagents?.rewind
+  const read = window.subagents?.tools?.workspaceRead
+  if (!rewind?.record || !read || !opts.threadId || !opts.relPath) return
+  try {
+    const prev = await read(opts.relPath, opts.projectRoot)
+    await rewind.record({
+      threadId: opts.threadId,
+      runId: opts.runId,
+      kind: opts.kind,
+      relPath: opts.relPath,
+      toPath: opts.toPath,
+      before: prev.ok ? prev.content : null,
+      after: opts.after,
+    })
+  } catch {
+    /* best-effort */
+  }
+}
+
 export async function executeTool(
   tool: ToolName,
   input: Record<string, unknown>,
@@ -127,6 +160,14 @@ export async function executeTool(
       }
       case 'workspace_write': {
         if (api?.workspaceWrite) {
+          await recordRewindSnapshot({
+            threadId,
+            runId,
+            kind: 'write',
+            relPath: String(input.path || ''),
+            after: String(input.content || ''),
+            projectRoot,
+          })
           const r = await api.workspaceWrite(
             String(input.path || ''),
             String(input.content || ''),
@@ -156,6 +197,14 @@ export async function executeTool(
       }
       case 'workspace_move': {
         if (!api?.workspaceMove) return { ok: false, output: 'workspace_move requires Electron' }
+        await recordRewindSnapshot({
+          threadId,
+          runId,
+          kind: 'move',
+          relPath: String(input.from || ''),
+          toPath: String(input.to || ''),
+          projectRoot,
+        })
         const r = await api.workspaceMove(
           String(input.from || ''),
           String(input.to || ''),
@@ -165,6 +214,13 @@ export async function executeTool(
       }
       case 'workspace_delete': {
         if (!api?.workspaceDelete) return { ok: false, output: 'workspace_delete requires Electron' }
+        await recordRewindSnapshot({
+          threadId,
+          runId,
+          kind: 'delete',
+          relPath: String(input.path || ''),
+          projectRoot,
+        })
         const r = await api.workspaceDelete(
           String(input.path || ''),
           input.recursive === true,

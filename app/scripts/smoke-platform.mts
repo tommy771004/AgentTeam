@@ -199,5 +199,119 @@ await test('bash -c 內嵌 script 展開檢查(deny/危險清單掃得到)', () 
   assert.equal(r.action, 'deny')
 })
 
+// ── Phase 3 (grok-build plan G5): rewind 檔案快照與回捲 ──
+// Real-source tests: electron/rewindBridge.ts is pure node (fs + crypto).
+
+import fs2 from 'node:fs'
+import os from 'node:os'
+import path2 from 'node:path'
+
+const {
+  recordRewindEntry,
+  listRewindEntries,
+  restoreRewindEntries,
+  clearRewindEntries,
+  sha1,
+} = await import('../electron/rewindBridge.ts')
+
+await test('rewind: write snapshot restores original content and truncates log', () => {
+  const tmp = fs2.mkdtempSync(path2.join(os.tmpdir(), 'rewind-'))
+  const base = path2.join(tmp, 'log')
+  const ws = path2.join(tmp, 'ws')
+  fs2.mkdirSync(ws, { recursive: true })
+  const resolveAbs = (rel: string) => path2.join(ws, rel)
+
+  fs2.writeFileSync(resolveAbs('a.txt'), 'original')
+  const after = 'agent wrote this'
+  const rec = recordRewindEntry(base, {
+    threadId: 't1',
+    runId: 'r1',
+    kind: 'write',
+    relPath: 'a.txt',
+    before: 'original',
+    afterSha1: sha1(after),
+  })
+  assert.equal(rec.ok, true)
+  fs2.writeFileSync(resolveAbs('a.txt'), after) // agent 的寫入
+
+  const entries = listRewindEntries(base, 't1')
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].existedBefore, true)
+
+  const report = restoreRewindEntries(base, 't1', entries[0].id, resolveAbs)
+  assert.equal(report.ok, true, JSON.stringify(report))
+  assert.deepEqual(report.restored, ['a.txt'])
+  assert.equal(fs2.readFileSync(resolveAbs('a.txt'), 'utf8'), 'original')
+  assert.equal(listRewindEntries(base, 't1').length, 0, 'consumed entries removed from log')
+})
+
+await test('rewind: externally modified file is skipped as conflict (hash guard)', () => {
+  const tmp = fs2.mkdtempSync(path2.join(os.tmpdir(), 'rewind-'))
+  const base = path2.join(tmp, 'log')
+  const ws = path2.join(tmp, 'ws')
+  fs2.mkdirSync(ws, { recursive: true })
+  const resolveAbs = (rel: string) => path2.join(ws, rel)
+
+  fs2.writeFileSync(resolveAbs('b.txt'), 'original')
+  recordRewindEntry(base, {
+    threadId: 't2',
+    kind: 'write',
+    relPath: 'b.txt',
+    before: 'original',
+    afterSha1: sha1('agent content'),
+  })
+  fs2.writeFileSync(resolveAbs('b.txt'), 'agent content')
+  fs2.writeFileSync(resolveAbs('b.txt'), 'USER EDITED AFTERWARDS') // 外部改動
+
+  const entries = listRewindEntries(base, 't2')
+  const report = restoreRewindEntries(base, 't2', entries[0].id, resolveAbs)
+  assert.equal(report.restored.length, 0)
+  assert.equal(report.conflicts.length, 1)
+  assert.equal(
+    fs2.readFileSync(resolveAbs('b.txt'), 'utf8'),
+    'USER EDITED AFTERWARDS',
+    '外部編輯不可被覆蓋',
+  )
+  // force 才覆蓋
+  const entries2 = listRewindEntries(base, 't2')
+  assert.equal(entries2.length, 1, 'conflicted entry stays consumable')
+})
+
+await test('rewind: newly created file is removed; deleted file is brought back', () => {
+  const tmp = fs2.mkdtempSync(path2.join(os.tmpdir(), 'rewind-'))
+  const base = path2.join(tmp, 'log')
+  const ws = path2.join(tmp, 'ws')
+  fs2.mkdirSync(ws, { recursive: true })
+  const resolveAbs = (rel: string) => path2.join(ws, rel)
+
+  // 新建檔:before=null
+  recordRewindEntry(base, {
+    threadId: 't3',
+    kind: 'write',
+    relPath: 'new.txt',
+    before: null,
+    afterSha1: sha1('created'),
+  })
+  fs2.writeFileSync(resolveAbs('new.txt'), 'created')
+  // 刪除檔:before=舊內容
+  fs2.writeFileSync(resolveAbs('gone.txt'), 'precious')
+  recordRewindEntry(base, {
+    threadId: 't3',
+    kind: 'delete',
+    relPath: 'gone.txt',
+    before: 'precious',
+    afterSha1: null,
+  })
+  fs2.rmSync(resolveAbs('gone.txt'))
+
+  const entries = listRewindEntries(base, 't3')
+  assert.equal(entries.length, 2)
+  const report = restoreRewindEntries(base, 't3', entries[0].id, resolveAbs)
+  assert.equal(report.ok, true, JSON.stringify(report))
+  assert.equal(fs2.existsSync(resolveAbs('new.txt')), false, '新建檔已移除')
+  assert.equal(fs2.readFileSync(resolveAbs('gone.txt'), 'utf8'), 'precious', '刪除檔已還原')
+  assert.equal(clearRewindEntries(base, 't3'), true)
+})
+
 console.log(`\n${passed} platform process smoke tests passed`)
 if (process.exitCode) console.error('Platform process smoke failed')

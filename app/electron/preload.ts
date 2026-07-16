@@ -4,6 +4,46 @@ import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
 const api = {
   platform: () => ipcRenderer.invoke('app:platform') as Promise<string>,
   version: () => ipcRenderer.invoke('app:version') as Promise<string>,
+  /** 檔案回捲(G5):寫入前快照 + 依時點還原(外部改動保護) */
+  rewind: {
+    record: (payload: {
+      threadId: string
+      runId?: string
+      kind: 'write' | 'delete' | 'move'
+      relPath: string
+      toPath?: string
+      before: string | null
+      after?: string | null
+    }) =>
+      ipcRenderer.invoke('rewind:record', payload) as Promise<{
+        ok: boolean
+        id?: string
+        skipped?: string
+      }>,
+    list: (threadId: string) =>
+      ipcRenderer.invoke('rewind:list', threadId) as Promise<
+        Array<{
+          id: string
+          threadId: string
+          runId?: string
+          kind: 'write' | 'delete' | 'move'
+          at: string
+          relPath: string
+          toPath?: string
+          beforeBytes: number
+          existedBefore: boolean
+        }>
+      >,
+    restore: (threadId: string, toEntryId: string, projectRoot?: string, force?: boolean) =>
+      ipcRenderer.invoke('rewind:restore', threadId, toEntryId, projectRoot, force) as Promise<{
+        ok: boolean
+        restored: string[]
+        conflicts: string[]
+        errors: string[]
+      }>,
+    clear: (threadId: string) =>
+      ipcRenderer.invoke('rewind:clear', threadId) as Promise<boolean>,
+  },
   notify: (title: string, body: string) =>
     ipcRenderer.invoke('app:notify', title, body) as Promise<{ ok: boolean }>,
   showWindow: () => ipcRenderer.invoke('app:showWindow') as Promise<{ ok: boolean }>,
