@@ -6,6 +6,16 @@ Status: 可交給代理
 
 **Blocked by:** None — can start immediately.
 
-- [ ] 重複 `runId` 以明確的非成功結果結束，且不會啟動第二個 Loop run。
-- [ ] 對同一 `runId`，對話輸出、Archive、`onSettled`、容量釋放與 queue drain 各只發生一次。
-- [ ] 互動與自動化來源皆有外部行為回歸測試，驗證 duplicate admission 不會留下 running 狀態或重複副作用。
+- [x] 重複 `runId` 以明確的非成功結果結束，且不會啟動第二個 Loop run。
+- [x] 對同一 `runId`，對話輸出、Archive、`onSettled`、容量釋放與 queue drain 各只發生一次。
+- [x] 互動與自動化來源皆有外部行為回歸測試，驗證 duplicate admission 不會留下 running 狀態或重複副作用。
+
+## Comments
+
+### 2026-07-16 — TDD slice 1–2 (exactly-once admission)
+
+- Seam: scenario E2E `runTask` + pure `taskRunAdmission` (production import).
+- Interactive: `trust-01` composer → retry same `runId` → `skipReason: 'duplicate'`; single LLM / Archive / `onSettled` / user bubble; post-success re-admit also blocked.
+- Automation: `trust-01` schedule concurrent path same contract + job result once.
+- Production: `app/src/agent/taskRunAdmission.ts`; pre-capacity reject in `runExternal`; `markTaskRunFinalized` in `finalizeTaskRun`.
+- Status: checklist complete for 01; ready for review / close after full `npm run smoke` on a machine with complete toolchain.
