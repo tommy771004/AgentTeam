@@ -187,6 +187,27 @@ const PARAMS: Record<ToolName, Record<string, unknown>> = {
       },
     },
   },
+  monitor: {
+    type: 'object',
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['start', 'stop', 'list'],
+        description: 'start a stream, stop one by id, or list active monitors',
+      },
+      command: {
+        type: 'string',
+        description:
+          "start: shell command whose output lines become events. ALWAYS use line-buffered filters (grep --line-buffered) — raw log streams get auto-stopped for volume.",
+      },
+      description: {
+        type: 'string',
+        description: 'start: short label shown on every event (3-6 words)',
+      },
+      id: { type: 'string', description: 'stop: monitor id' },
+    },
+    required: ['action'],
+  },
   message_send: {
     type: 'object',
     properties: {

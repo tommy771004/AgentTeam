@@ -28,6 +28,7 @@ export type ToolName =
   | 'mcp_call'
   | 'delegate_task'
   | 'delegate_status'
+  | 'monitor'
   | 'message_send'
   | 'json_extract_lite'
   | 'update_plan'
@@ -190,6 +191,11 @@ export const TOOL_CATALOG: ToolDef[] = [
     name: 'delegate_status',
     description: 'List or query background delegate jobs',
     keywords: ['delegate', 'status', 'background', 'job', 'notify'],
+  },
+  {
+    name: 'monitor',
+    description: 'Stream a long-running command; each output line becomes a Proactive event',
+    keywords: ['monitor', 'watch', 'tail', 'stream', 'log', 'ci', 'poll'],
   },
   {
     name: 'message_send',
@@ -398,6 +404,8 @@ export function buildToolInput(
       }
     case 'delegate_status':
       return {}
+    case 'monitor':
+      return { action: 'list' }
     case 'message_send':
       return {
         channel: 'telegram',

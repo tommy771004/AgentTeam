@@ -323,6 +323,22 @@ export async function runFunctionCallingLoop(
             description:
               'Coarse tool filter for the child (grok-style): read-only = no writes/shell; read-write = files but no shell; execute = shell but no writes. Stacks on role restrictions (never loosens).',
           },
+          persona: {
+            type: 'string',
+            description:
+              'Named behavioral overlay from Settings (instructions + optional model). Unknown persona fails the spawn.',
+          },
+          resume_from: {
+            type: 'string',
+            description:
+              'Background delegate job id whose result becomes read-only context for this child (multi-stage workflows). Job must be finished.',
+          },
+          isolation: {
+            type: 'string',
+            enum: ['none', 'worktree'],
+            description:
+              'worktree = child works in an isolated git worktree (Electron + git project only); changes stay out of the main workspace until applied.',
+          },
         },
         required: ['goal'],
       },
@@ -1155,18 +1171,48 @@ async function executeOneToolCall(
     const inheritCapabilities = parseInheritCapabilities(args)
     const { parseCapabilityMode } = await import('../hermes/capabilityMode')
     const capabilityMode = parseCapabilityMode(args.capability_mode ?? args.capabilityMode)
+    const persona = String(args.persona || '').trim() || undefined
+    const isolation = args.isolation === 'worktree' ? ('worktree' as const) : undefined
+    // G9 resume_from:引用已完成背景委派的結果作為唯讀上下文
+    let resumeContext = ''
+    const resumeFrom = String(args.resume_from || args.resumeFrom || '').trim()
+    if (resumeFrom) {
+      const { getBackgroundJob } = await import('../hermes/backgroundJobs')
+      const prev = getBackgroundJob(resumeFrom)
+      if (!prev) {
+        const msg = `resume_from 失敗:找不到背景委派 ${resumeFrom}(用 delegate_status 查可用 id)。`
+        ctx.messages.push({ role: 'tool', tool_call_id: tc.id, content: msg })
+        return
+      }
+      if (prev.status === 'queued' || prev.status === 'running') {
+        const msg = `resume_from 失敗:${resumeFrom} 尚未完成(${prev.status})。可先 delegate_status wait=all 等待。`
+        ctx.messages.push({ role: 'tool', tool_call_id: tc.id, content: msg })
+        return
+      }
+      resumeContext = [
+        `## 前次委派結果(resume_from ${prev.id} · ${prev.status})`,
+        `目標:${prev.goal.slice(0, 200)}`,
+        prev.summary ? `結果摘要:\n${prev.summary.slice(0, 2400)}` : '(無摘要)',
+      ].join('\n')
+    }
+    const childContext = [resumeContext, args.context ? String(args.context) : '']
+      .filter(Boolean)
+      .join('\n\n') || undefined
     if (background) {
       const { enqueueBackgroundDelegate } = await import('../hermes/backgroundJobs')
       const job = enqueueBackgroundDelegate(
         ctx.settings,
         {
           goal: String(args.goal || ''),
-          context: args.context ? String(args.context) : undefined,
+          context: childContext,
           role: args.role === 'orchestrator' ? 'orchestrator' : 'leaf',
           background: true,
           notifyOnComplete,
           inheritCapabilities,
           capabilityMode,
+          persona,
+          isolation,
+          projectRoot: ctx.projectRoot,
           parentRunId: ctx.runId,
           parentThreadId: ctx.threadId,
           parentPermissionPolicy: ctx.permissionPolicy,
@@ -1205,10 +1251,13 @@ async function executeOneToolCall(
         ctx.settings,
         {
           goal: String(args.goal || ''),
-          context: args.context ? String(args.context) : undefined,
+          context: childContext,
           role: args.role === 'orchestrator' ? 'orchestrator' : 'leaf',
           inheritCapabilities,
           capabilityMode,
+          persona,
+          isolation,
+          projectRoot: ctx.projectRoot,
           parentPermissionPolicy: ctx.permissionPolicy,
           parentPermissionProjection: ctx.permissionProjection,
           parentMcpAgentId: ctx.mcpAgentId,

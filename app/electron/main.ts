@@ -60,6 +60,13 @@ import {
   sha1 as rewindSha1,
 } from './rewindBridge'
 import {
+  listMonitors,
+  startMonitor,
+  stopAllMonitors,
+  stopMonitor,
+  type MonitorEmit,
+} from './monitorBridge'
+import {
   detectOpenCodeCli,
   loadOpenCodeBundle,
   runOpenCodePrompt,
@@ -68,9 +75,12 @@ import {
   spawnOpenCodeInteractive,
 } from './opencodeBridge'
 import {
+  applyWorktree,
+  createWorktree,
   inspectProject,
   listBranches,
   pickProjectFolder,
+  removeWorktree,
 } from './projectBridge'
 import {
   applyDiscoveryToProviders,
@@ -1277,6 +1287,17 @@ ipcMain.handle('project:branches', async (_evt, root: string) =>
 )
 
 /** Sync tools/bash workspace root with ProjectContextBar selection */
+// G9 worktree 隔離
+ipcMain.handle('project:worktreeCreate', async (_evt, root: string, branchPrefix?: string) =>
+  createWorktree(String(root || ''), branchPrefix),
+)
+ipcMain.handle('project:worktreeApply', async (_evt, root: string, worktreePath: string) =>
+  applyWorktree(String(root || ''), String(worktreePath || '')),
+)
+ipcMain.handle('project:worktreeRemove', async (_evt, root: string, worktreePath: string) =>
+  removeWorktree(String(root || ''), String(worktreePath || '')),
+)
+
 ipcMain.handle('project:setActiveRoot', async (_evt, root: string | null) =>
   setActiveProjectRoot(root),
 )
@@ -3143,6 +3164,30 @@ ipcMain.handle(
 ipcMain.handle('rewind:clear', (_evt, threadId: string) =>
   clearRewindEntries(rewindBaseDir(), String(threadId || '')),
 )
+
+// ── Monitor 事件流(G10)──────────────────────────────────────────
+
+const emitMonitor: MonitorEmit = (channel, payload) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload)
+  }
+}
+
+ipcMain.handle(
+  'monitor:start',
+  (_evt, input: { command: string; description: string; cwd?: string }) =>
+    startMonitor(
+      {
+        command: String(input?.command || ''),
+        description: String(input?.description || ''),
+        cwd: input?.cwd ? String(input.cwd) : undefined,
+      },
+      emitMonitor,
+    ),
+)
+ipcMain.handle('monitor:stop', (_evt, id: string) => stopMonitor(String(id || ''), emitMonitor))
+ipcMain.handle('monitor:list', () => listMonitors())
+app.on('before-quit', () => stopAllMonitors(emitMonitor))
 
 ipcMain.handle('tools:workspaceRoot', () => workspaceRoot())
 ipcMain.handle('tools:workspaceMode', () => ({

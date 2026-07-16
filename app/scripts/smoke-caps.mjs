@@ -2270,6 +2270,43 @@ await test('drift guard: metrics recorded at coordinator settle + guard/loop bum
   assert.match(loop, /'llmRetries'\)/)
 })
 
+// ── Phase 5 遞延項 (G9b/c/d + G10 monitor): wiring drift guards ──
+
+await test('drift guard: persona resolution — role > persona > parent; unknown persona fails spawn', async () => {
+  const fs = await import('node:fs')
+  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
+  assert.match(delegate, /settings\.delegatePersonas\?\.\[input\.persona\]/)
+  assert.match(delegate, /persona「\$\{input\.persona\}」不存在/)
+  assert.match(delegate, /roleResolved\.source === 'role'\s*\?\s*roleResolved\.model\s*:\s*persona\?\.model/)
+})
+
+await test('drift guard: resume_from requires finished job; worktree isolation falls back safely', async () => {
+  const fs = await import('node:fs')
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /resume_from 失敗:找不到背景委派/)
+  assert.match(loop, /尚未完成/)
+  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
+  assert.match(delegate, /worktreeCreate\?\.\(/)
+  assert.match(delegate, /回退共用 workspace/)
+  const bridge = fs.readFileSync(path.join(appRoot, 'electron/projectBridge.ts'), 'utf8')
+  assert.match(bridge, /git worktree add -b/)
+  assert.match(bridge, /git apply --3way/, 'apply 衝突失敗而非覆蓋')
+  assert.match(bridge, /git worktree remove --force/)
+})
+
+await test('drift guard: monitor tool gated like bash and feeds eventMatcher', async () => {
+  const fs = await import('node:fs')
+  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  assert.match(guard, /tool === 'monitor' && String\(input\.action \|\| ''\) === 'start'/)
+  const builtins = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/builtins.ts'), 'utf8')
+  assert.match(builtins, /approvalTools: \['monitor'\]/)
+  const bridge = fs.readFileSync(path.join(appRoot, 'electron/monitorBridge.ts'), 'utf8')
+  assert.match(bridge, /MAX_LINES_PER_WINDOW/, 'volume control present')
+  const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
+  assert.match(app, /source: 'monitor'/)
+  assert.match(app, /eventPreMatched: true/)
+})
+
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)
 if (process.exitCode) {
   console.error('Capability smoke failed')

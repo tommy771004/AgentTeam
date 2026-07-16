@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { APPROVAL_MODE_DEFS } from '../agent/approvalModes'
+import { exportRunMetricsJsonl, metricsSummary, resetRunMetrics } from '../agent/metrics'
 import { ThemePage } from '../components/SectionNav'
 import {
   PillSelect,
@@ -171,6 +172,8 @@ export function SettingsPage() {
   const [gatewayMsg, setGatewayMsg] = useState<string | null>(null)
   const [cliMsg, setCliMsg] = useState<string | null>(null)
   const [dataMsg, setDataMsg] = useState<string | null>(null)
+  // G9 persona 疊層新增表單
+  const [personaDraft, setPersonaDraft] = useState({ name: '', instructions: '', model: '' })
   const gatewayInbound = useGatewayStore((s) => s.inbound)
   const bgJobs = useGatewayStore((s) => s.jobs)
   const projectRoot = useProjectStore((s) => s.root)
@@ -756,6 +759,52 @@ export function SettingsPage() {
 
         {section === 'data' && (
           <>
+            <SettingsGroup title="運行指標（G11）">
+              <SettingsRow
+                title="本地指標"
+                description={(() => {
+                  const s = metricsSummary()
+                  return s.runs
+                    ? `${s.runs} runs · ask ${s.toolAsks} / deny ${s.toolDenials}（denial ratio ${(s.denialRatio * 100).toFixed(1)}%）· 壓縮 ${s.compactions} 次 · LLM 重試 ${s.llmRetries} 次`
+                    : '尚無紀錄；每個 run 結束時自動記一筆（只記數字，不含 prompt 內容）'
+                })()}
+                control={
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className={settingsBtnCls}
+                      onClick={() => {
+                        const jsonl = exportRunMetricsJsonl()
+                        if (!jsonl) {
+                          setDataMsg('沒有可匯出的指標')
+                          return
+                        }
+                        const blob = new Blob([jsonl], { type: 'application/jsonl' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `subagents-metrics-${new Date().toISOString().slice(0, 10)}.jsonl`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                        setDataMsg('指標已匯出（JSONL）')
+                      }}
+                    >
+                      匯出 JSONL
+                    </button>
+                    <button
+                      type="button"
+                      className="text-[11px] text-error hover:underline"
+                      onClick={() => {
+                        resetRunMetrics()
+                        setDataMsg('指標已清除')
+                      }}
+                    >
+                      清除
+                    </button>
+                  </div>
+                }
+              />
+            </SettingsGroup>
             <SettingsGroup title="對話">
               <SettingsRow
                 title="預設臨時對話"
@@ -1704,6 +1753,78 @@ export function SettingsPage() {
                 啟用並「一鍵偵測本機 CLI 並匯入模型」，或到語言模型填寫預設 model。
               </p>
             )}
+            <SettingsGroup title="Delegate Personas（G9 行為疊層）">
+              {Object.entries(settings.delegatePersonas || {}).map(([name, p]) => (
+                <SettingsRow
+                  key={name}
+                  title={name}
+                  description={`${p.model ? `model=${p.model} · ` : ''}${(p.description || p.instructions || '').slice(0, 80)}`}
+                  control={
+                    <button
+                      type="button"
+                      className="text-[11px] text-error hover:underline"
+                      onClick={() => {
+                        const next = { ...(settings.delegatePersonas || {}) }
+                        delete next[name]
+                        set({ delegatePersonas: next })
+                      }}
+                    >
+                      刪除
+                    </button>
+                  }
+                />
+              ))}
+              <SettingsStack title="新增 persona">
+                <div className="space-y-1.5">
+                  <input
+                    value={personaDraft.name}
+                    onChange={(e) => setPersonaDraft({ ...personaDraft, name: e.target.value })}
+                    placeholder="名稱（如 researcher / concise）"
+                    className={settingsInputCls + ' w-full'}
+                  />
+                  <textarea
+                    value={personaDraft.instructions}
+                    onChange={(e) =>
+                      setPersonaDraft({ ...personaDraft, instructions: e.target.value })
+                    }
+                    placeholder="行為指示（注入子代理 prompt；如「務必引用具體檔案路徑」）"
+                    rows={3}
+                    className={settingsInputCls + ' w-full'}
+                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={personaDraft.model}
+                      onChange={(e) => setPersonaDraft({ ...personaDraft, model: e.target.value })}
+                      placeholder="模型覆寫（選填；role 覆寫優先）"
+                      className={settingsInputCls + ' flex-1'}
+                    />
+                    <button
+                      type="button"
+                      className={settingsBtnCls}
+                      disabled={!personaDraft.name.trim() || !personaDraft.instructions.trim()}
+                      onClick={() => {
+                        const name = personaDraft.name.trim().slice(0, 40)
+                        set({
+                          delegatePersonas: {
+                            ...(settings.delegatePersonas || {}),
+                            [name]: {
+                              instructions: personaDraft.instructions.trim().slice(0, 2000),
+                              model: personaDraft.model.trim() || undefined,
+                            },
+                          },
+                        })
+                        setPersonaDraft({ name: '', instructions: '', model: '' })
+                      }}
+                    >
+                      新增
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-outline">
+                    delegate_task 以 persona=&lt;名稱&gt; 套用；只影響指示與模型，不放寬工具權限（capability_mode 另管）。
+                  </p>
+                </div>
+              </SettingsStack>
+            </SettingsGroup>
           </>
         )}
 

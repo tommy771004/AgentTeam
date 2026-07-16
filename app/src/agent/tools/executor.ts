@@ -501,6 +501,42 @@ export async function executeTool(
           data: list,
         }
       }
+      case 'monitor': {
+        const monitorApi = window.subagents?.monitor
+        if (!monitorApi) return { ok: false, output: 'monitor 僅支援 Electron 環境' }
+        const action = String(input.action || 'list')
+        if (action === 'start') {
+          const command = String(input.command || '').trim()
+          const description = String(input.description || '').trim()
+          if (!command || !description) {
+            return { ok: false, output: 'monitor start 需要 command 與 description' }
+          }
+          const r = await monitorApi.start({ command, description, cwd: projectRoot })
+          return {
+            ok: r.ok,
+            output: r.ok
+              ? `monitor 已啟動:${r.id}(${description})\n每行輸出會成為 source=monitor 的 Proactive 事件;事件太多會自動停止 — filter 請用 grep --line-buffered。用 monitor action=stop id=${r.id} 停止。`
+              : r.error || 'monitor 啟動失敗',
+            data: r,
+          }
+        }
+        if (action === 'stop') {
+          const id = String(input.id || '').trim()
+          if (!id) return { ok: false, output: 'monitor stop 需要 id' }
+          const stopped = await monitorApi.stop(id)
+          return { ok: stopped, output: stopped ? `monitor 已停止:${id}` : `找不到 monitor:${id}` }
+        }
+        const list = await monitorApi.list()
+        return {
+          ok: true,
+          output: list.length
+            ? list
+                .map((m) => `· ${m.id}(${m.description})lines=${m.lineCount} since ${m.startedAt}\n  $ ${m.command}`)
+                .join('\n')
+            : '(無進行中的 monitor)',
+          data: list,
+        }
+      }
       case 'message_send': {
         const channel = (String(input.channel || 'telegram') as 'telegram') || 'telegram'
         const chatId = String(input.chatId || '').trim()

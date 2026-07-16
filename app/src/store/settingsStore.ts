@@ -64,6 +64,10 @@ function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>)
         p.trustedHookProjects != null
           ? [...new Set(p.trustedHookProjects.filter(Boolean))]
           : out.trustedHookProjects,
+      delegatePersonas:
+        p.delegatePersonas != null
+          ? { ...out.delegatePersonas, ...p.delegatePersonas }
+          : out.delegatePersonas,
     }
   }
   return out

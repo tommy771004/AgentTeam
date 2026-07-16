@@ -19,6 +19,7 @@ export type GuardResult =
  */
 const SIDE_EFFECT_TOOLS = new Set([
   'bash',
+  'monitor',
   'workspace_write',
   'design_system_create',
   'design_system_update',
@@ -258,7 +259,8 @@ export async function authorizeTool(opts: {
     if (act === 'ask') needAsk = true
   }
 
-  if (tool === 'bash') {
+  // monitor 執行任意命令(action=start)— 與 bash 走同一套段級檢查
+  if (tool === 'bash' || (tool === 'monitor' && String(input.action || '') === 'start')) {
     const cmd = String(input.command || '')
     let agentId: string | undefined
     try {

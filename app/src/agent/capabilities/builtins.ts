@@ -85,6 +85,23 @@ export const BUILTIN_CAPABILITIES: AgentCapability[] = [
     group: 'system',
   },
   {
+    id: 'monitoring',
+    description:
+      'Stream long-running commands as Proactive events (monitor). For CI/log/PR watching.',
+    instructions: `Monitor rules (G10):
+- Each output line becomes one Proactive event — NEVER stream raw logs.
+- Always pipe through a line-buffered filter: tail -f x.log | grep --line-buffered ERROR.
+- Poll loops must sleep ≥30s for remote APIs; handle transient failures (|| true).
+- Too many lines auto-stops the monitor; restart with a tighter filter.
+- Events fire rules with source=monitor (Events page). Stop with action=stop when done.`,
+    tools: ['monitor'],
+    /** monitor 執行任意命令 — 與 bash 同級,一律 HITL */
+    approvalTools: ['monitor'],
+    deferLoading: true,
+    source: 'builtin',
+    group: 'system',
+  },
+  {
     id: 'memory',
     description: 'Session and durable memory read/write/search.',
     instructions: `Memory rules:
