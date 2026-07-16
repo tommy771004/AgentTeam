@@ -2128,6 +2128,61 @@ export function SettingsPage() {
                 }
               />
             </SettingsGroup>
+            <SettingsGroup title="LLM 韌性">
+              <SettingsRow
+                title="重試次數"
+                description="429/5xx/網路錯誤自動退避重試（含首次呼叫；1 = 不重試）"
+                control={
+                  <input
+                    type="number"
+                    min={1}
+                    max={6}
+                    value={settings.llmRetryMaxAttempts ?? 3}
+                    onChange={(e) =>
+                      set({
+                        llmRetryMaxAttempts: Math.min(
+                          6,
+                          Math.max(1, Number(e.target.value) || 3),
+                        ),
+                      })
+                    }
+                    className={settingsInputCls + ' w-20 text-right'}
+                  />
+                }
+              />
+              <SettingsRow
+                title="Circuit breaker"
+                description="provider 錯誤率過高時暫停呼叫並降級（冷卻後自動探測恢復）"
+                control={
+                  <SettingsToggle
+                    checked={settings.llmCircuitBreakerEnabled !== false}
+                    onChange={(v) => set({ llmCircuitBreakerEnabled: v })}
+                  />
+                }
+              />
+              <SettingsRow
+                title="預設 context window"
+                description={`模型 profile 未知時的 token 上限（目前 ${settings.defaultContextWindowTokens ?? 64000}）；供壓縮門檻與溢位預檢`}
+                control={
+                  <input
+                    type="number"
+                    min={4000}
+                    max={2000000}
+                    step={1000}
+                    value={settings.defaultContextWindowTokens ?? 64000}
+                    onChange={(e) =>
+                      set({
+                        defaultContextWindowTokens: Math.max(
+                          4000,
+                          Number(e.target.value) || 64000,
+                        ),
+                      })
+                    }
+                    className={settingsInputCls + ' w-28 text-right'}
+                  />
+                }
+              />
+            </SettingsGroup>
             <p className="text-[11px] text-outline px-1">
               人工介入示範：目標含敏感匯出且授權等級 &lt; 4 時會暫停等待核准。
             </p>

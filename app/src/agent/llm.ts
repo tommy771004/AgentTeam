@@ -4,6 +4,7 @@
 
 import type { LlmSettings, ModelSource } from './types'
 import { DEFAULT_CLI_PROVIDERS } from './cliProviders'
+import { breakerKey, callWithResilience } from './llmResilience'
 
 export type { LlmSettings }
 
@@ -29,6 +30,9 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   safetyEnabled: true,
   toolsEnabled: true,
   webSearchEnabled: true,
+  llmRetryMaxAttempts: 3,
+  llmCircuitBreakerEnabled: true,
+  defaultContextWindowTokens: 64_000,
   functionCalling: true,
   llmParseEnabled: true,
   sessionRecallEnabled: true,
@@ -202,6 +206,8 @@ export async function chatCompletionWithTools(
     temperature?: number
     maxTokens?: number
     toolChoice?: 'auto' | 'none' | 'required'
+    /** retry / breaker 事件回報(進 run log) */
+    onResilienceEvent?: (message: string) => void
   },
 ): Promise<LlmToolsResult> {
   if (!settings.enabled) {
@@ -224,33 +230,48 @@ export async function chatCompletionWithTools(
       : {}),
   }
 
-  if (window.subagents?.llm?.chat) {
-    const r = await window.subagents.llm.chat({
-      baseUrl: settings.baseUrl,
-      apiKey: settings.apiKey,
-      fallbackModels: settings.fallbackModels,
-      ...body,
-    })
-    return normalizeChatResult(r, settings.model)
-  }
+  return callWithResilience(
+    breakerKey(settings.baseUrl, settings.apiProvider),
+    async () => {
+      if (window.subagents?.llm?.chat) {
+        const r = await window.subagents.llm.chat({
+          baseUrl: settings.baseUrl,
+          apiKey: settings.apiKey,
+          fallbackModels: settings.fallbackModels,
+          ...body,
+        })
+        return normalizeChatResult(r, settings.model)
+      }
 
-  const base = settings.baseUrl.replace(/\/$/, '')
-  const res = await fetch(`${base}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${settings.apiKey}`,
+      const base = settings.baseUrl.replace(/\/$/, '')
+      const res = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${settings.apiKey}`,
+        },
+        body: JSON.stringify(body),
+      })
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => res.statusText)
+        const retryAfter = Number(res.headers.get('retry-after') || '')
+        const hint =
+          Number.isFinite(retryAfter) && retryAfter > 0
+            ? ` (retry-after:${Math.ceil(retryAfter)}s)`
+            : ''
+        throw new Error(`LLM HTTP ${res.status}${hint}: ${errText.slice(0, 200)}`)
+      }
+
+      const data = await res.json()
+      return normalizeChatResult(data, settings.model)
     },
-    body: JSON.stringify(body),
-  })
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => res.statusText)
-    throw new Error(`LLM HTTP ${res.status}: ${errText.slice(0, 200)}`)
-  }
-
-  const data = await res.json()
-  return normalizeChatResult(data, settings.model)
+    {
+      maxAttempts: settings.llmRetryMaxAttempts,
+      breakerEnabled: settings.llmCircuitBreakerEnabled !== false,
+      onEvent: opts?.onResilienceEvent,
+    },
+  )
 }
 
 function normalizeChatResult(data: unknown, fallbackModel: string): LlmToolsResult {

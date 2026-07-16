@@ -44,6 +44,12 @@ import {
 } from '../capabilities'
 import { runCodeMode, runCodeToolDef } from './codeMode'
 import {
+  estimateTokensFromText,
+  estimateTranscriptTokens,
+  resolveContextWindow,
+  shouldPreflightCompact,
+} from '../tokenEstimate'
+import {
   customToolDefs,
   customToolsForSettings,
   executeCustomTool,
@@ -450,6 +456,14 @@ ${systemExtra}`,
     // Refresh tools each round (capability loads expand the set)
     tools = rebuildVisibleTools()
 
+    // Preflight overflow check(tokenEstimate 單一來源):估算已逼近
+    // contextWindow 就強制壓縮再送,避免 API 直接 400。
+    const contextWindow = resolveContextWindow(settings, settings.model)
+    const estTokens =
+      estimateTranscriptTokens(messages) +
+      estimateTokensFromText(JSON.stringify(tools))
+    const overflowRisk = shouldPreflightCompact(estTokens, contextWindow)
+
     // OpenCode-style compaction — preserve tool_calls / tool_call_id chain.
     // Skip while vision images are still in the transcript (data URLs + compaction would drop them).
     const hasVisionParts = messages.some(
@@ -457,7 +471,13 @@ ${systemExtra}`,
         Array.isArray(m.content) &&
         m.content.some((p) => p.type === 'image_url'),
     )
-    if (!hasVisionParts && (rounds === 1 || rounds % 2 === 0)) {
+    if (hasVisionParts && overflowRisk) {
+      cb?.onLog?.(
+        'WARN',
+        `context 估算 ${estTokens}/${contextWindow} tokens 已逼近上限,但 transcript 含影像無法壓縮`,
+      )
+    }
+    if (!hasVisionParts && (overflowRisk || rounds === 1 || rounds % 2 === 0)) {
       try {
         const { maybeCompactMessages } = await import('../opencode/compaction')
         const flat = messages.map((m) => ({
@@ -470,8 +490,25 @@ ${systemExtra}`,
           tool_call_id: m.tool_call_id,
           name: m.name,
         }))
-        const c = await maybeCompactMessages(settings, flat)
+        const c = await maybeCompactMessages(
+          settings,
+          flat,
+          overflowRisk
+            ? {
+                force: true,
+                // token gate 觸發時把 char 門檻同步壓到 window 對應量
+                // (bytes/4 ⇒ 1 token ≈ 4 chars 上限),讓壓縮真的發生
+                maxChars: Math.max(12_000, (contextWindow - 2_500) * 3),
+              }
+            : undefined,
+        )
         if (c.compacted) {
+          if (overflowRisk) {
+            cb?.onLog?.(
+              'WARN',
+              `preflight:context 估算 ${estTokens}/${contextWindow} tokens,已先壓縮再呼叫`,
+            )
+          }
           messages.length = 0
           for (const m of c.messages) {
             messages.push({
@@ -501,6 +538,7 @@ ${systemExtra}`,
       temperature: capModel.temperature ?? 0.3,
       maxTokens: capModel.maxTokens ?? 1400,
       toolChoice: 'auto',
+      onResilienceEvent: (m) => cb?.onLog?.('WARN', m),
     })
     tokensUsed += result.tokensUsed
 
@@ -576,6 +614,7 @@ ${systemExtra}`,
     temperature: 0.3,
     maxTokens: 1400,
     toolChoice: 'none',
+    onResilienceEvent: (m) => cb?.onLog?.('WARN', m),
   })
   tokensUsed += final.tokensUsed
   const budget = enforceStepContextBudget(toolChunks, limits)

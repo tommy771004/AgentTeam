@@ -1841,6 +1841,181 @@ await test('ADR3 follow-up: interactive entry points snapshot projectRoot at dis
   assert.match(runContext, /should therefore be unreachable during a real run/)
 })
 
+// ── Phase 0 (grok-build plan G1/G3): LLM resilience + token estimation ──
+// Mirrors agent/llmResilience.ts CircuitBreaker / backoff and
+// agent/tokenEstimate.ts math. Keep in sync with the TS source.
+
+class MirrorBreaker {
+  constructor(cfg, now) {
+    this.cfg = { windowMs: 60_000, minSamples: 5, errorRateThreshold: 0.5, cooldownMs: 30_000, ...cfg }
+    this.now = now
+    this.samples = []
+    this.state = 'closed'
+    this.openedAt = 0
+    this.probing = false
+  }
+  allowRequest() {
+    const at = this.now()
+    if (this.state === 'closed') return true
+    if (this.state === 'open') {
+      if (at - this.openedAt >= this.cfg.cooldownMs) {
+        this.state = 'half-open'
+        this.probing = true
+        return true
+      }
+      return false
+    }
+    if (this.probing) return false
+    this.probing = true
+    return true
+  }
+  record(ok) {
+    const at = this.now()
+    if (this.state === 'half-open') {
+      this.probing = false
+      if (ok) {
+        this.state = 'closed'
+        this.samples = []
+      } else {
+        this.state = 'open'
+        this.openedAt = at
+      }
+      return
+    }
+    this.samples.push({ at, ok })
+    const cutoff = at - this.cfg.windowMs
+    while (this.samples.length && this.samples[0].at < cutoff) this.samples.shift()
+    if (this.state === 'closed') {
+      const n = this.samples.length
+      if (n >= this.cfg.minSamples) {
+        const errors = this.samples.filter((s) => !s.ok).length
+        if (errors / n >= this.cfg.errorRateThreshold) {
+          this.state = 'open'
+          this.openedAt = at
+        }
+      }
+    }
+  }
+}
+
+await test('circuit breaker: needs minSamples before tripping', () => {
+  let t = 0
+  const b = new MirrorBreaker({ minSamples: 5 }, () => t)
+  // 4 straight failures — below minSamples, must stay closed
+  for (let i = 0; i < 4; i++) { assert.equal(b.allowRequest(), true); b.record(false); t += 100 }
+  assert.equal(b.state, 'closed')
+  // 5th failure crosses minSamples at 100% error rate → open
+  b.record(false)
+  assert.equal(b.state, 'open')
+  assert.equal(b.allowRequest(), false)
+})
+
+await test('circuit breaker: error rate below threshold stays closed', () => {
+  let t = 0
+  const b = new MirrorBreaker({ minSamples: 5, errorRateThreshold: 0.5 }, () => t)
+  // 6 ok + 2 fail = 25% error rate < 50%
+  for (let i = 0; i < 6; i++) { b.record(true); t += 10 }
+  b.record(false); b.record(false)
+  assert.equal(b.state, 'closed')
+})
+
+await test('circuit breaker: cooldown → half-open probe; success closes, failure reopens', () => {
+  let t = 0
+  const b = new MirrorBreaker({ minSamples: 3, cooldownMs: 30_000 }, () => t)
+  b.record(false); b.record(false); b.record(false)
+  assert.equal(b.state, 'open')
+  t += 10_000
+  assert.equal(b.allowRequest(), false, 'still cooling down')
+  t += 25_000
+  assert.equal(b.allowRequest(), true, 'half-open probe allowed')
+  assert.equal(b.allowRequest(), false, 'only one probe at a time')
+  b.record(false)
+  assert.equal(b.state, 'open', 'failed probe reopens')
+  t += 30_000
+  assert.equal(b.allowRequest(), true)
+  b.record(true)
+  assert.equal(b.state, 'closed', 'successful probe closes')
+  assert.equal(b.samples.length, 0, 'window cleared on close')
+})
+
+await test('circuit breaker: old samples evicted from sliding window', () => {
+  let t = 0
+  const b = new MirrorBreaker({ windowMs: 60_000, minSamples: 5 }, () => t)
+  for (let i = 0; i < 4; i++) { b.record(false); t += 100 }
+  // 4 failures age out of the window → later failures start fresh
+  t += 61_000
+  b.record(false)
+  assert.equal(b.state, 'closed', 'evicted samples must not count toward trip')
+  assert.equal(b.samples.length, 1)
+})
+
+await test('llm retry: error classification + backoff math', () => {
+  const isRetryable = (message) => {
+    const m = /HTTP (\d{3})/.exec(message)
+    if (m) {
+      const status = Number(m[1])
+      return status === 429 || status === 408 || status >= 500
+    }
+    return /network|failed to fetch|fetch failed|timeout|timed out|econn|enotfound|eai_again|socket|und_err|aborted/i.test(message)
+  }
+  assert.equal(isRetryable('LLM HTTP 429 (retry-after:7s): rate limit'), true)
+  assert.equal(isRetryable('LLM HTTP 503: upstream'), true)
+  assert.equal(isRetryable('LLM HTTP 401: bad key'), false)
+  assert.equal(isRetryable('LLM HTTP 400: bad request'), false)
+  assert.equal(isRetryable('TypeError: Failed to fetch'), true)
+
+  const backoff = (attempt, retryAfterMs, jitter = () => 0) => {
+    if (retryAfterMs && retryAfterMs > 0) return Math.min(retryAfterMs, 30_000)
+    return Math.min(2000 * 2 ** Math.max(0, attempt), 16_000) + Math.floor(jitter() * 250)
+  }
+  assert.equal(backoff(0), 2000)
+  assert.equal(backoff(1), 4000)
+  assert.equal(backoff(2), 8000)
+  assert.equal(backoff(5), 16_000, 'exponential capped at 16s')
+  assert.equal(backoff(0, 7000), 7000, 'server retry-after wins')
+  assert.equal(backoff(0, 90_000), 30_000, 'retry-after capped at 30s')
+
+  const parseRetryAfter = (message) => {
+    const m = /retry-after:(\d+)s/.exec(message)
+    if (!m) return undefined
+    const s = Number(m[1])
+    return s > 0 ? s * 1000 : undefined
+  }
+  assert.equal(parseRetryAfter('LLM HTTP 429 (retry-after:7s): x'), 7000)
+  assert.equal(parseRetryAfter('LLM HTTP 500: x'), undefined)
+})
+
+await test('token estimate: bytes/4 heuristic + preflight gate', () => {
+  const estimate = (text) => (text ? Math.ceil(new TextEncoder().encode(text).length / 4) : 0)
+  assert.equal(estimate(''), 0)
+  assert.equal(estimate('abcd'), 1)
+  assert.equal(estimate('abcde'), 2)
+  // CJK: 3 bytes/char → 4 chars = 12 bytes = 3 tokens
+  assert.equal(estimate('中文字元'), 3)
+
+  const shouldCompact = (tokens, cw, reserve = 2500) => tokens > Math.max(1024, cw - reserve)
+  assert.equal(shouldCompact(61_000, 64_000), false)
+  assert.equal(shouldCompact(61_501, 64_000), true)
+  assert.equal(shouldCompact(1_025, 2_000), true, 'tiny window floors at 1024')
+  assert.equal(shouldCompact(1_000, 2_000), false)
+})
+
+await test('drift guard: llm.ts routes calls through callWithResilience', async () => {
+  const fs = await import('node:fs')
+  const llm = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
+  assert.match(llm, /callWithResilience\(/)
+  assert.match(llm, /breakerKey\(settings\.baseUrl/)
+  assert.match(llm, /maxAttempts: settings\.llmRetryMaxAttempts/)
+})
+
+await test('drift guard: toolLoop preflights context overflow via tokenEstimate', async () => {
+  const fs = await import('node:fs')
+  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
+  assert.match(loop, /resolveContextWindow\(settings, settings\.model\)/)
+  assert.match(loop, /shouldPreflightCompact\(estTokens, contextWindow\)/)
+  assert.match(loop, /force: true/)
+})
+
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)
 if (process.exitCode) {
   console.error('Capability smoke failed')

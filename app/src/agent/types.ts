@@ -564,6 +564,18 @@ export interface LlmSettings {
   haltOnPayloadOverflow: boolean
   maxToolPayloadKb: number
   maxToolRounds: number
+  /** LLM 韌性:429/5xx/網路錯誤的最大嘗試次數(含首次;1 = 不重試) */
+  llmRetryMaxAttempts: number
+  /**
+   * LLM 韌性:provider 級 circuit breaker(滑動視窗錯誤率)。
+   * open 時 fail-fast,engine 走 simulation 降級而不是持續重試卡住。
+   */
+  llmCircuitBreakerEnabled: boolean
+  /**
+   * modelProfiles 沒有 contextWindow 時的預設 token 上限;
+   * 供 auto-compact gate 與呼叫前 preflight overflow check(tokenEstimate.ts)。
+   */
+  defaultContextWindowTokens: number
   /** Local webhook receiver for Proactive events */
   webhookEnabled: boolean
   webhookPort: number
