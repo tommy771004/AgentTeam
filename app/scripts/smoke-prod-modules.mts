@@ -36,7 +36,10 @@ import {
   parseUserRequest,
   resolvePlanBubbleMetadata,
 } from '../src/agent/parser.ts'
-import { normalizeTaskRunInput } from '../src/agent/taskRunCoordinator.ts'
+import {
+  normalizeTaskRunInput,
+  runTask,
+} from '../src/agent/taskRunCoordinator.ts'
 import {
   buildContextPacket,
   formatSessionRecallBlock,
@@ -69,6 +72,20 @@ import {
   composePublishText,
   contentPublishProvider,
 } from '../src/agent/contentPublishPlatforms.ts'
+
+// Node 25 exposes experimental Web Storage without getItem/setItem unless a
+// --localstorage-file is supplied. Keep this production-module smoke isolated
+// and deterministic without changing renderer storage behavior.
+const smokeStorage = new Map<string, string>()
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: {
+    getItem: (key: string) => smokeStorage.get(key) ?? null,
+    setItem: (key: string, value: string) => smokeStorage.set(key, value),
+    removeItem: (key: string) => smokeStorage.delete(key),
+    clear: () => smokeStorage.clear(),
+  },
+})
 import {
   matchProactiveEvent,
   validateEventTriggerSnapshot,
@@ -237,6 +254,31 @@ await test('taskRunCoordinator normalizes ingress without mutating caller input'
 
   const clean = { objective: 'already clean', sourceKind: 'composer' as const }
   assert.equal(normalizeTaskRunInput(clean), clean)
+})
+
+await test('runTask rejects an empty objective before lifecycle admission', async () => {
+  let settled = 0
+  const result = await runTask({
+    objective: '   ',
+    onSettled: () => {
+      settled += 1
+    },
+  })
+  assert.equal(result.status, 'failed')
+  assert.equal(result.error, 'empty objective')
+  assert.equal(result.threadId, null)
+  assert.equal(settled, 0)
+})
+
+await test('runTask rejects a re-entrant runId before a second dispatch', async () => {
+  const first = runTask({ objective: 'duplicate run smoke', runId: 'prod-duplicate-run' })
+  const duplicate = await runTask({ objective: 'duplicate run smoke', runId: 'prod-duplicate-run' })
+  assert.equal(duplicate.status, 'skipped')
+  assert.equal(duplicate.skipReason, 'duplicate')
+  // The renderer graph uses extensionless imports that this direct Node smoke
+  // intentionally does not resolve; the assertion above is synchronous at the
+  // public seam and does not need the first run's browser-only execution.
+  await first.catch(() => undefined)
 })
 
 await test('SubDesign workspace derives stage and gate presentation from canonical state', () => {

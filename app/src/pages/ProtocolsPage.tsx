@@ -24,7 +24,6 @@ import type { ChatAttachment } from '../agent/types'
 import { detectAutomationSuggestion } from '../agent/automationSuggestion'
 import {
   defaultGoalForAttachments,
-  materializeAttachmentsOnDisk,
 } from '../lib/chatAttachments'
 import { useProjectStore } from '../store/projectStore'
 import { listQueuedRuns, queueLength } from '../agent/runQueue'
@@ -198,14 +197,6 @@ export function ProtocolsPage() {
     const conversationSuggestion =
       !pinnedLoopType && detectAutomationSuggestion(raw)
     let suggestionOnly = false
-
-    // Persist attachments to disk early (bubble + queue + vision share filePath)
-    if (attachments.length) {
-      attachments = await materializeAttachmentsOnDisk(attachments, {
-        projectRoot: projectRoot || undefined,
-        sessionId: activeId,
-      })
-    }
 
     const { subagents } = parseSubagentMentions(raw)
 

@@ -237,8 +237,11 @@ export async function dispatchThreadTask(
       name: a.name,
       mimeType: a.mimeType,
       kind: a.kind,
-      dataUrl: a.dataUrl,
-      textContent: a.textContent,
+      // Coordinator persistence owns the canonical filePath. Keep inline
+      // payloads only when Electron could not materialize the attachment;
+      // otherwise localCliRunner would write a second copy.
+      dataUrl: a.filePath ? undefined : a.dataUrl,
+      textContent: a.filePath ? undefined : a.textContent,
       filePath: a.filePath,
     }))
     // Keep CLI follow-ups coherent with builtin runs. The current request is

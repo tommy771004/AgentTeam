@@ -1097,7 +1097,7 @@ await test('§7 wiring contract: production sources pass sourceKind into hooks',
   assert.match(loop, /objective: ctx\.objective/)
   const eng = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   assert.match(eng, /sourceKind: this\.overrides\.sourceKind/)
-  const runX = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const runX = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(runX, /sourceKind: opts\.sourceKind/)
   // put into RuntimeOverrides for tool layer
   assert.match(runX, /sourceKind: opts\.sourceKind \|\| opts\.overrides/)

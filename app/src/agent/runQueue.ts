@@ -101,6 +101,7 @@ function emit() {
 }
 
 function dedupeKey(opts: ExternalRunOpts): string {
+  if (opts.runId) return `runId:${opts.runId}`
   return [
     (opts.objective || '').trim().slice(0, 200),
     opts.loopType || '',

@@ -12,6 +12,7 @@
  */
 
 import type {
+  AgentState,
   ChatAttachment,
   LlmSettings,
   LoopType,
@@ -22,13 +23,19 @@ import type {
   ExternalRunResult,
   RunSourceKind,
 } from './runExternal'
+import type { BusyPolicy } from './taskRunPolicy'
 import type { DispatchResult } from './runDispatch'
 import type { HookEvaluation } from './hooks'
 import type { ThreadRunner } from '../store/threadStore'
 
+import { v4 as uuid } from 'uuid'
+
 export type { ExternalRunOpts, ExternalRunResult, RunSourceKind }
 export type TaskRunInput = ExternalRunOpts
 export type TaskRunResult = ExternalRunResult
+
+/** Prevent re-entrant callers from starting the same lifecycle twice. */
+const coordinatingRunIds = new Set<string>()
 
 /**
  * Normalize only the canonical ingress field; preserve the caller object and
@@ -329,7 +336,7 @@ export function buildRunDispatchSnapshot(parts: {
   }
 }
 
-// ── Phase 3 item 4/5: unique finalization + single drain ──────────
+  // ── Phase 3 item 4/5: unique finalization + single drain ──────────
 
 export type FinalizeTaskRunInput = {
   runId: string
@@ -345,7 +352,7 @@ export type FinalizeTaskRunInput = {
    * Early terminal without adapter execution (hook deny / exception).
    * Skips thread process summary derived from agent state.
    */
-  early?: { error: string; path?: 'builtin' | 'cli' }
+  early?: { error: string; path?: 'builtin' | 'cli'; agent?: AgentState }
 }
 
 /**
@@ -427,6 +434,32 @@ export async function finalizeTaskRun(
     } catch {
       /* non-fatal */
     }
+    const agent = useAgentStore.getState()
+    const currentAgent = input.early.agent || agent.getRunState(runId)
+    const failureAgent = currentAgent
+      ? {
+          ...currentAgent,
+          id: currentAgent.id || runId,
+          objective: currentAgent.objective || objective,
+          status: 'failed' as const,
+          progress: 100,
+          result: input.early.error,
+          haltReason: input.early.error,
+          finishedAt: new Date().toISOString(),
+          steps:
+            currentAgent.steps.length > 0
+              ? currentAgent.steps
+              : [
+                  {
+                    step: 1,
+                    action: 'task-run',
+                    description: 'Task run lifecycle',
+                    status: 'FAILED' as const,
+                    result: input.early.error,
+                  },
+                ],
+        }
+      : undefined
     const failResult: ExternalRunResult = {
       path: input.early.path || 'builtin',
       status: 'failed',
@@ -436,7 +469,7 @@ export async function finalizeTaskRun(
     }
     try {
       const agent = useAgentStore.getState()
-      await agent.saveToArchive(agent.getRunState(runId) || undefined, runId)
+      await agent.saveToArchive(failureAgent, runId)
     } catch {
       /* archive optional on early fail */
     }
@@ -452,8 +485,43 @@ export async function finalizeTaskRun(
     status: 'failed',
     error: 'missing dispatch result',
   }
-  const finalAgent =
+  const storedAgent =
     useAgentStore.getState().getRunState(runId) || useAgentStore.getState().agent
+  const returnedStatus = result.status || storedAgent.status
+  const runnerReturnedTerminal = ['success', 'failed', 'halted'].includes(
+    String(returnedStatus),
+  )
+  const storedTerminal = ['success', 'failed', 'halted'].includes(
+    String(storedAgent.status),
+  )
+  const nonTerminalReason = `runner returned non-terminal status: ${returnedStatus}`
+  const needsFailureEvidence =
+    (!runnerReturnedTerminal && !storedTerminal) ||
+    ((result.status === 'failed' || result.error) &&
+      storedAgent.status === 'idle' &&
+      !storedAgent.objective)
+  const finalAgent =
+    needsFailureEvidence
+      ? {
+          ...storedAgent,
+          id: storedAgent.id || runId,
+          objective,
+          status: 'failed' as const,
+          progress: 100,
+          result: result.error || nonTerminalReason,
+          haltReason: result.error || nonTerminalReason,
+          finishedAt: new Date().toISOString(),
+          steps: [
+            {
+              step: 1,
+              action: result.path === 'cli' ? 'local-cli' : 'task-run',
+              description: result.path === 'cli' ? '外部 CLI 執行' : 'Task run lifecycle',
+              status: 'FAILED' as const,
+              result: result.error || nonTerminalReason,
+            },
+          ],
+        }
+      : storedAgent
   const postState = finalAgent.postState
 
   // 1) Thread summary / bubbles / plan
@@ -472,7 +540,7 @@ export async function finalizeTaskRun(
   }
 
   try {
-    const { syncOpenCodeSessionMapping } = await import('./runExternal')
+    const { syncOpenCodeSessionMapping } = await import('./runExternal.ts')
     await syncOpenCodeSessionMapping(tid, finalAgent.externalRun)
   } catch {
     /* OpenCode mapping is optional; keep finalization resilient. */
@@ -548,7 +616,7 @@ export async function finalizeTaskRun(
     ...result,
     threadId: tid,
     runId,
-    status: result.status || finalAgent.status,
+    status: status as ExternalRunResult['status'],
     error: result.error || finalAgent.haltReason,
     postState,
   }
@@ -774,19 +842,577 @@ async function pushRunProcessSummary(args: {
 }
 
 /**
- * Coordinate one task run through the existing lifecycle implementation.
- * The dynamic import is intentional: it keeps the legacy compatibility module
- * from creating a runtime import cycle while the implementation is migrated.
+ * Coordinate one Task run: admission → immutable dispatch snapshot → adapter → finalization.
+ * This is the only lifecycle implementation behind the public runTask seam.
  */
-export async function coordinateTaskRun(
-  input: TaskRunInput,
-): Promise<TaskRunResult> {
-  const normalized = normalizeTaskRunInput(input)
-  const { runExternalObjective } = await import('./runExternal')
-  return runExternalObjective(normalized)
+async function coordinateTaskRun(
+  opts: ExternalRunOpts,
+): Promise<ExternalRunResult> {
+  opts = normalizeTaskRunInput(opts)
+  const runId = opts.runId || `run_${uuid().slice(0, 12)}`
+  let objective = opts.objective.trim()
+  if (!objective && opts.attachments?.length) {
+    objective = '請分析我附上的圖片或檔案。'
+  }
+  if (!objective) {
+    return {
+      path: 'builtin',
+      status: 'failed',
+      error: 'empty objective',
+      threadId: null,
+    }
+  }
+
+  const [
+    { useAgentStore },
+    { useThreadStore },
+    { useSettingsStore },
+    { dispatchThreadTask },
+    { enqueueExternalRun, listQueuedRuns, queueLength },
+    { isContinueGoalPhrase },
+    { detectAutomationSuggestion },
+    { resolvePlanBubbleMetadata },
+    lifecycleHelpers,
+  ] = await Promise.all([
+    import('../store/agentStore.ts'),
+    import('../store/threadStore.ts'),
+    import('../store/settingsStore.ts'),
+    import('./runDispatch.ts'),
+    import('./runQueue.ts'),
+    import('./chatHistory.ts'),
+    import('./automationSuggestion.ts'),
+    import('./parser.ts'),
+    import('./taskRunPolicy.ts'),
+  ])
+  const {
+    buildSteerPartialDigest,
+    explicitLoopTypeForConversation,
+    isAutomationSource,
+    isInteractiveConversationSource,
+    presentConversationAutomationSuggestion,
+    resolveBusyPolicy,
+    resolveProactiveTrigger,
+    resolveScheduleTrigger,
+    shouldEnqueueWhenBusy,
+    verifyClaimedScheduleTrigger,
+  } = lifecycleHelpers
+
+  const queuedDuplicate = listQueuedRuns().find((queued) => queued.runId === runId)
+  if (queuedDuplicate) {
+    return {
+      path: 'builtin',
+      status: 'skipped',
+      error: `runId ${runId} 已在佇列中，略過重入。`,
+      threadId: opts.reuseThreadId || null,
+      runId,
+      skipped: true,
+      skipReason: 'duplicate',
+      queued: true,
+      queueId: queuedDuplicate.id,
+    }
+  }
+
+  // Background delegates can sit in the queue while Settings changes. Recheck
+  // the opt-in at drain time so disabling Sub Agent cannot start a stale child run.
+  if (
+    opts.sourceKind === 'delegate' &&
+    useSettingsStore.getState().settings.subAgentsEnabled !== true
+  ) {
+    return {
+      path: 'builtin',
+      status: 'failed',
+      error: 'Sub Agent 功能目前已關閉，委派未啟動。',
+      threadId: null,
+      runId: opts.runId,
+    }
+  }
+
+  if (opts.runId && useAgentStore.getState().activeRunIds.includes(runId)) {
+    return {
+      path: 'builtin',
+      status: 'skipped',
+      error: `runId ${runId} 已在執行中，略過重入。`,
+      threadId: opts.reuseThreadId || null,
+      runId,
+      skipped: true,
+      skipReason: 'duplicate',
+    }
+  }
+
+  const scheduleTriggerResolution = resolveScheduleTrigger(opts)
+  const proactiveTriggerResolution = resolveProactiveTrigger(opts)
+  const rejectBeforeStart = async (error: string): Promise<ExternalRunResult> => {
+    const threadId = opts.reuseThreadId || useThreadStore.getState().activeId || null
+    if (threadId && (opts.reuseThreadId || isInteractiveConversationSource(opts))) {
+      useThreadStore.getState().pushBubble(threadId, 'system', error)
+    }
+    const rejected: ExternalRunResult = {
+      path: 'builtin',
+      status: 'failed',
+      error,
+      threadId,
+      runId,
+    }
+    // Trigger validation happens before execution admission, so this never
+    // archives or releases a run. The callback still closes scheduler/gateway
+    // bookkeeping that marked the external trigger as running.
+    try {
+      await opts.onSettled?.(rejected)
+    } catch {
+      /* caller notification is non-fatal */
+    }
+    return rejected
+  }
+  if (scheduleTriggerResolution && 'error' in scheduleTriggerResolution) {
+    return rejectBeforeStart(scheduleTriggerResolution.error)
+  }
+  if (proactiveTriggerResolution && 'error' in proactiveTriggerResolution) {
+    return rejectBeforeStart(proactiveTriggerResolution.error)
+  }
+  const scheduleTrigger =
+    scheduleTriggerResolution && 'snapshot' in scheduleTriggerResolution
+      ? scheduleTriggerResolution.snapshot
+      : undefined
+  const eventTrigger =
+    proactiveTriggerResolution && 'snapshot' in proactiveTriggerResolution
+      ? proactiveTriggerResolution.snapshot
+      : undefined
+  if (scheduleTrigger) {
+    const claimError = await verifyClaimedScheduleTrigger(scheduleTrigger)
+    if (claimError) {
+      return rejectBeforeStart(`Time-based trigger 無效：${claimError}`)
+    }
+  }
+
+  // Coordinator owns attachment I/O: materialize once early so queue keeps filePath.
+  // Hydrate happens once after capacity is reserved (below).
+  const { useProjectStore } = await import('../store/projectStore')
+  const attachmentProjectRoot =
+    opts.projectRoot || useProjectStore.getState().root || undefined
+  const attachmentSessionId = opts.reuseThreadId || opts.meta?.scheduleJobId
+  let attachments = await prepareRunAttachments(opts.attachments, {
+    projectRoot: attachmentProjectRoot,
+    sessionId: attachmentSessionId,
+    phase: 'persist',
+  })
+
+  // Conversation text can mention a schedule or event, but that is not a
+  // validated trigger. Keep the request in the chat as an advisory proposal;
+  // no capacity reservation, engine start, or tool call is allowed here.
+  const conversationSuggestion =
+    !opts._fromQueue &&
+    isInteractiveConversationSource(opts) &&
+    !explicitLoopTypeForConversation(opts)
+      ? detectAutomationSuggestion(objective)
+      : null
+  if (conversationSuggestion) {
+    return presentConversationAutomationSuggestion(
+      opts,
+      objective,
+      conversationSuggestion,
+    )
+  }
+
+  // Coordinator owns capacity: check once, then reserve once.
+  const agent = useAgentStore.getState()
+  let capacity = await checkRunCapacity(runId, opts.reuseThreadId)
+  if (!capacity.allowed) {
+    const policy: BusyPolicy = opts.sourceKind
+      ? resolveBusyPolicy(
+          opts.sourceKind,
+          useSettingsStore.getState().settings.followUpMode,
+        )
+      : shouldEnqueueWhenBusy(opts)
+        ? 'queue'
+        : 'reject'
+
+    const thrBusy = useThreadStore.getState()
+    const busyThreadId = opts.reuseThreadId || thrBusy.runningThreadId || thrBusy.runningThreadIds[0]
+    const busyRunId = opts.reuseThreadId
+      ? agent.getRunIdForThread(opts.reuseThreadId)
+      : agent.selectedRunId || agent.activeRunIds[0]
+    const runningTitle = busyThreadId
+      ? thrBusy.threads.find((t) => t.id === busyThreadId)?.title?.slice(0, 32)
+      : undefined
+
+    if (policy === 'steer' && !opts._fromQueue) {
+      // Interactive steer: capture partial digest, abort, then proceed
+      const tid0 = opts.reuseThreadId || thrBusy.activeId
+      const partial = buildSteerPartialDigest(agent.getRunState(busyRunId || undefined) || agent.agent)
+      if (tid0) {
+        const lines = [
+          `轉向目前執行：已中止前一個任務${runningTitle ? `（${runningTitle.slice(0, 32)}）` : ''}`,
+        ]
+        if (partial) lines.push('', '### 中止前摘要', partial)
+        thrBusy.pushBubble(tid0, 'system', lines.join('\n'))
+      }
+      if (busyRunId) useAgentStore.getState().stopExecution(busyRunId)
+      for (let i = 0; i < 20; i += 1) {
+        await new Promise((r) => setTimeout(r, 50))
+        capacity = await checkRunCapacity(runId, opts.reuseThreadId)
+        if (capacity.allowed) break
+      }
+    } else if (policy === 'queue' && !opts._fromQueue) {
+      const item = enqueueExternalRun({
+        ...opts,
+        runId,
+        attachments,
+        unattended: opts.unattended ?? isAutomationSource(opts),
+      })
+      if (item) {
+        const pos = listQueuedRuns().findIndex((q) => q.id === item.id) + 1
+        const posLabel = pos > 0 ? pos : queueLength()
+        return {
+          path: 'builtin',
+          status: 'skipped',
+          error: `並行執行上限 ${capacity.limit}${runningTitle ? `（${runningTitle}）` : ''} — 已加入佇列第 ${posLabel} 位（${queueLength()}/24）`,
+          threadId: opts.reuseThreadId || thrBusy.activeId,
+          runId,
+          skipped: true,
+          skipReason: 'queued',
+          queued: true,
+          queueId: item.id,
+        }
+      }
+      return {
+        path: 'builtin',
+        status: 'skipped',
+        error: `並行執行上限 ${capacity.limit}${runningTitle ? `（${runningTitle}）` : ''} — 佇列已滿或重複`,
+        threadId: opts.reuseThreadId || thrBusy.activeId,
+        runId,
+        skipped: true,
+        skipReason: 'busy',
+      }
+    }
+    if (!capacity.allowed) {
+      return {
+        path: 'builtin',
+        status: 'skipped',
+        error: `並行執行上限 ${capacity.limit}${runningTitle ? `（${runningTitle}）` : ''}，請稍候或改用佇列模式`,
+        threadId: thrBusy.activeId,
+        runId,
+        skipped: true,
+        skipReason: 'busy',
+      }
+    }
+  }
+
+  const reserveKind: 'builtin' | 'cli' =
+    opts.runner && opts.runner !== 'builtin' ? 'cli' : 'builtin'
+  if (!(await reserveRunCapacity(runId, opts.reuseThreadId, reserveKind))) {
+    const retryCapacity = await checkRunCapacity(runId, opts.reuseThreadId)
+    if (!opts._fromQueue && (opts.sourceKind ? resolveBusyPolicy(opts.sourceKind, useSettingsStore.getState().settings.followUpMode) : 'queue') === 'queue') {
+      const item = enqueueExternalRun({ ...opts, runId, attachments, unattended: opts.unattended ?? isAutomationSource(opts) })
+      if (item) return { path: 'builtin', status: 'skipped', error: `並行執行上限 ${retryCapacity.limit}，已加入佇列`, threadId: opts.reuseThreadId || null, runId, skipped: true, skipReason: 'queued', queued: true, queueId: item.id }
+    }
+    return { path: 'builtin', status: 'skipped', error: `並行執行上限 ${retryCapacity.limit}，請稍候`, threadId: opts.reuseThreadId || null, runId, skipped: true, skipReason: 'busy' }
+  }
+
+  const settings = useSettingsStore.getState().settings
+  const thr = useThreadStore.getState()
+  let boundThreadId = opts.reuseThreadId || ''
+
+  try {
+
+  // continueGoal needs the existing thread snapshot before bind creates/reuses.
+  const preBindId = opts.reuseThreadId || ''
+  const existing = preBindId ? thr.threads.find((t) => t.id === preBindId) : null
+  const existingSnap = existing?.continueGoal || undefined
+  let wantContinue = Boolean(
+    existingSnap &&
+      (opts.continueGoal === true || isContinueGoalPhrase(objective)),
+  )
+  // Phase 5: only runners that declare continueGoal may resume DoD/missing.
+  // External CLI must not silently ignore gaps.
+  const intendedRunner = opts.runner || existing?.runner || 'builtin'
+  let continueBlockedNote: string | undefined
+  if (wantContinue) {
+    const { capabilitiesForRunner } = await import('./runners')
+    if (!capabilitiesForRunner(intendedRunner).continueGoal) {
+      wantContinue = false
+      continueBlockedNote =
+        '目前 runner 為外部 CLI（或不支援 continueGoal）。「補齊缺口繼續」僅適用內建引擎；已改為一般任務執行。請切換 runner 為 builtin 後再試，或重新描述任務。'
+    }
+  }
+  const continueSnap = wantContinue ? existingSnap : undefined
+
+  // Conversation default: omit loopType → auto classify (Chat-lite / Goal).
+  // Continue-goal forces Goal-based; automation / UI pin still force.
+  const forcedLoopType = continueSnap
+    ? ('Goal-based' as LoopType)
+    : opts.loopType
+  const loopTypeMode: 'force' | 'auto' = forcedLoopType ? 'force' : 'auto'
+
+  // Coordinator owns thread bind once after capacity is reserved.
+  const { threadId: tid } = await bindRunThread({
+    runId,
+    objective,
+    title: opts.title,
+    reuseThreadId: opts.reuseThreadId,
+    runner: opts.runner,
+    loopType: forcedLoopType || null,
+    hidden: opts.workerThread === true,
+  })
+  boundThreadId = tid
+  if (!opts.skipUserBubble) {
+    thr.pushBubble(tid, 'user', objective, attachments)
+  }
+  if (continueBlockedNote) {
+    thr.pushBubble(tid, 'system', continueBlockedNote)
+  }
+  if (continueSnap) {
+    thr.pushBubble(
+      tid,
+      'system',
+      `▶ 補齊缺口繼續 · DoD 保留 · 缺口 ${continueSnap.missing.length || 0} 項`,
+    )
+  }
+  if (opts.sourceLabel && !opts.skipUserBubble) {
+    thr.pushBubble(tid, 'system', opts.sourceLabel)
+  } else if (opts.sourceLabel && opts._fromQueue) {
+    thr.pushBubble(tid, 'system', opts.sourceLabel)
+  }
+  if (opts.extraContext?.trim() && !opts.skipUserBubble) {
+    thr.pushBubble(
+      tid,
+      'system',
+      `事件內容（節錄）\n${opts.extraContext.trim().slice(0, 2000)}`,
+    )
+  }
+  if (opts.projectRoot?.trim() && !opts.skipUserBubble) {
+    thr.pushBubble(tid, 'system', `專案綁定：${opts.projectRoot.trim()}`)
+  }
+
+  if (forcedLoopType) {
+    agent.setSelectedLoopType(forcedLoopType)
+  } else {
+    // Clear sticky force from previous run so auto classification works
+    agent.setSelectedLoopType(null)
+  }
+
+  const temporary =
+    opts.overrides?.temporary ??
+    settings.temporaryChatDefault === true
+
+  const sourceIsAutomation = isAutomationSource(opts)
+
+  const planBubbleMetadata = resolvePlanBubbleMetadata({
+    mode: loopTypeMode,
+    sourceKind: opts.sourceKind || opts.overrides?.sourceKind,
+    triggerSource: opts.overrides?.triggerSource,
+    sourceLabel: opts.sourceLabel,
+    classificationReason: opts.overrides?.classificationReason,
+    loopType: forcedLoopType,
+    continueGoal: Boolean(continueSnap),
+  })
+
+  // Builtin vision needs dataUrls; CLI receives the persisted filePath and
+  // must not be hydrated back into dataUrl before its own file-path adapter.
+  const boundRunner =
+    opts.runner || thr.threads.find((thread) => thread.id === tid)?.runner || 'builtin'
+  if (boundRunner === 'builtin') {
+    attachments = await prepareRunAttachments(attachments, {
+      projectRoot: attachmentProjectRoot,
+      sessionId: attachmentSessionId || tid,
+      phase: 'hydrate',
+    })
+  }
+
+  const extraSystem = [
+    opts.overrides?.extraSystemContext,
+    opts.extraContext?.trim()
+      ? `## External event / channel context\n${opts.extraContext.trim().slice(0, 12_000)}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
+  // Pure "繼續" has no extra hint; "補齊價格欄" keeps the phrase as corrective hint.
+  const pureContinue =
+    /^(繼續|接著做?|再試|重試|continue|retry|keep going)\s*[!！.。…]*$/i.test(
+      objective.trim(),
+    )
+  const continueHint =
+    opts.continueHint ||
+    (continueSnap && !pureContinue && objective.trim() !== continueSnap.objective.trim()
+      ? objective.trim()
+      : undefined)
+
+  // When resuming, engine objective is the original goal (not the "繼續" phrase)
+  const dispatchObjective = continueSnap ? continueSnap.objective : objective
+
+  const overrides: RuntimeOverrides = {
+    ...(opts.overrides || {}),
+    runId,
+    sourceKind: opts.sourceKind || opts.overrides?.sourceKind,
+    triggerSource: planBubbleMetadata.triggerSource,
+    classificationReason: planBubbleMetadata.classificationReason,
+    scheduleTrigger,
+    eventTrigger,
+    agentMode:
+      opts.overrides?.agentMode ||
+      thr.threads.find((thread) => thread.id === tid)?.agentMode ||
+      'build',
+    eventPreMatched: Boolean(eventTrigger),
+    attachedSkills:
+      opts.attachedSkills || opts.overrides?.attachedSkills || undefined,
+    temporary,
+    unattended: opts.overrides?.unattended ?? sourceIsAutomation,
+    hitlTimeoutMs: opts.overrides?.hitlTimeoutMs,
+    projectRoot: opts.projectRoot?.trim() || opts.overrides?.projectRoot,
+    extraSystemContext: extraSystem || undefined,
+    userAttachments: attachments?.length
+      ? attachments
+      : opts.overrides?.userAttachments,
+    loopTypeMode,
+    forceLoopType: forcedLoopType,
+    threadId: tid,
+    continueGoal: continueSnap
+      ? {
+          objective: continueSnap.objective,
+          definitionOfDone: continueSnap.definitionOfDone,
+          loopType: continueSnap.loopType || 'Goal-based',
+          steps: continueSnap.steps,
+          missing: continueSnap.missing,
+          priorDigest: continueSnap.priorDigest,
+          userHint: continueHint,
+        }
+      : opts.overrides?.continueGoal,
+  }
+
+  // Coordinator owns beforeRun once: deny / append-context / log / notify
+  const beforeRun = await evaluateBeforeRunHooks({
+    settings,
+    sourceKind: opts.sourceKind,
+    objective,
+    threadId: tid,
+    runId,
+    projectRoot: opts.projectRoot?.trim() || opts.overrides?.projectRoot,
+  })
+  if (!beforeRun.ok) {
+    // Finalization owns afterRun / Archive / onSettled / release / drain once.
+    return finalizeTaskRun({
+      runId,
+      threadId: tid,
+      objective,
+      sourceKind: opts.sourceKind,
+      projectRoot: opts.projectRoot,
+      settings,
+      onSettled: opts.onSettled,
+      early: {
+        error: `執行被 hook 政策拒絕：${beforeRun.denyReason}`,
+      },
+    })
+  }
+  if (beforeRun.appendTexts.length) {
+    overrides.extraSystemContext = [
+      overrides.extraSystemContext,
+      ...beforeRun.appendTexts.map((t) => `## Hook context\n${t}`),
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+  }
+
+  // Phase 4 / R7: count user-initiated chat turns only (not success, not automation).
+  // Queued items keep their original sourceKind; count once when the run actually admits.
+  const userChatTurn =
+    opts.sourceKind === 'composer' ||
+    opts.sourceKind === 'slash' ||
+    opts.sourceKind === 'retry'
+  if (userChatTurn && !temporary) {
+    try {
+      const { learningLoop } = await import('./hermes/learning')
+      learningLoop.onUserTurn()
+    } catch {
+      /* non-fatal */
+    }
+    // G7 userTurn hook 事件(被動:log / notify)
+    try {
+      const { collectHookRules, evaluateHooks } = await import('./hooks')
+      const ev = evaluateHooks(collectHookRules(settings), {
+        point: 'userTurn',
+        sourceKind: opts.sourceKind,
+        objective,
+      })
+      for (const line of ev.audits) thr.pushBubble(tid, 'system', line)
+      for (const n of ev.notifications) {
+        void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  // Phase 3 item 3: freeze dispatch fields once; runDispatch only selects runner.
+  // Pin project root on the snapshot so later UI project switches cannot leak in.
+  if (!overrides.projectRoot) {
+    overrides.projectRoot =
+      opts.projectRoot?.trim() ||
+      (await import('../store/projectStore')).useProjectStore.getState().root ||
+      undefined
+  }
+  const snapshot = buildRunDispatchSnapshot({
+    runId,
+    threadId: tid,
+    objective: dispatchObjective,
+    runner: opts.runner,
+    forceLoopType: forcedLoopType,
+    attachments,
+    overrides,
+  })
+
+  const result = await dispatchThreadTask(snapshot)
+  return finalizeTaskRun({
+    runId,
+    threadId: tid,
+    objective,
+    sourceKind: opts.sourceKind,
+    projectRoot: snapshot.overrides.projectRoot || opts.projectRoot,
+    settings,
+    dispatchResult: result,
+    onSettled: opts.onSettled,
+  })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    const earlyAgent = useAgentStore.getState().getRunState(runId) || undefined
+    return finalizeTaskRun({
+      runId,
+      // A failed bind has no thread to mutate; the runId is a harmless
+      // sentinel while Archive/onSettled/release/drain still complete.
+      threadId: boundThreadId || runId,
+      objective,
+      sourceKind: opts.sourceKind,
+      projectRoot: opts.projectRoot,
+      settings,
+      onSettled: opts.onSettled,
+      early: {
+        error: `執行失敗：${msg}`,
+        path: reserveKind,
+        agent: earlyAgent,
+      },
+    })
+  }
 }
 
 /** Canonical API for new code. */
 export async function runTask(input: TaskRunInput): Promise<TaskRunResult> {
-  return coordinateTaskRun(input)
+  const normalized = normalizeTaskRunInput(input)
+  const runId = normalized.runId || `run_${uuid().slice(0, 12)}`
+  if (coordinatingRunIds.has(runId)) {
+    return {
+      path: 'builtin',
+      status: 'skipped',
+      error: `runId ${runId} 已在執行中，略過重入。`,
+      threadId: normalized.reuseThreadId || null,
+      runId,
+      skipped: true,
+      skipReason: 'duplicate',
+    }
+  }
+  coordinatingRunIds.add(runId)
+  try {
+    return await coordinateTaskRun({ ...normalized, runId })
+  } finally {
+    coordinatingRunIds.delete(runId)
+  }
 }
