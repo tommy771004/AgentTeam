@@ -50,6 +50,13 @@ export interface AgentCapability {
    * regardless of permission policy. Capability-declared, Pydantic v2 style.
    */
   approvalTools?: string[]
+  /**
+   * Issue 07 — Free Core entitlement boundary. When set, this capability is
+   * only assembled if `isCapabilityEntitled` (src/agent/entitlement.ts)
+   * grants this feature id. Omitted (the default) means Free Core: always
+   * available, no entitlement check at all.
+   */
+  requiresEntitlement?: string
 }
 
 export interface CapabilityCatalogEntry {

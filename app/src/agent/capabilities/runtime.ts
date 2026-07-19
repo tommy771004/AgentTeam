@@ -23,6 +23,7 @@ import type {
   CapabilityRuntimeState,
 } from './types'
 import { mcpServersForAgent } from '../opencode/mcpAccess'
+import { resolveEntitlement, isCapabilityEntitled, type EntitlementSnapshot } from '../entitlement'
 
 export { LOAD_CAPABILITY_TOOL, RUN_CODE_TOOL, TOOL_SEARCH_TOOL }
 
@@ -55,6 +56,13 @@ export type AssembleOpts = {
   preloadUnlockedTools?: string[]
   /** OpenCode agent id used to filter per-agent MCP access. */
   agentId?: string
+  /**
+   * Issue 07 — the one entitlement decision point. Defaults to a bare Free
+   * Core snapshot (`resolveEntitlement(undefined)`) when omitted, so callers
+   * that never pass one still get correct fail-closed behavior for any
+   * capability that declares `requiresEntitlement`.
+   */
+  entitlement?: EntitlementSnapshot
 }
 
 function skillCaps(): AgentCapability[] {
@@ -148,6 +156,12 @@ export function assembleCapabilities(
     all.push(...mcpCaps(settings, opts?.agentId))
   }
   all.push(...userCaps(settings))
+
+  // Issue 07 — single entitlement boundary: capabilities requiring a paid
+  // feature that isn't granted are stripped before anything else sees them.
+  // Free Core capabilities (no requiresEntitlement) are never checked here.
+  const entitlement = opts?.entitlement ?? resolveEntitlement(undefined)
+  all = all.filter((c) => isCapabilityEntitled(entitlement, c.requiresEntitlement))
 
   // User override: force some deferred caps always-on
   const always = new Set(settings.alwaysOnCapabilities || [])
