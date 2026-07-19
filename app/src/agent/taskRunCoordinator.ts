@@ -472,6 +472,16 @@ export async function finalizeTaskRun(
       threadId: tid,
       runId,
     }
+    await persistArtifactIndexForRun({
+      threadId: tid,
+      runId,
+      objective,
+      status: 'failed',
+      result: input.early.error,
+      blockers: [input.early.error],
+      evidenceOperations: [],
+      plan: [],
+    })
     try {
       const agent = useAgentStore.getState()
       await agent.saveToArchive(failureAgent, runId)
@@ -602,6 +612,7 @@ export async function finalizeTaskRun(
       thr,
       tid,
       runId,
+      objective,
       finalAgent,
       result,
       status: String(status),
@@ -673,6 +684,7 @@ async function pushRunProcessSummary(args: {
   thr: ReturnType<typeof import('../store/threadStore').useThreadStore.getState>
   tid: string
   runId: string
+  objective: string
   finalAgent: import('./types').AgentState
   result: DispatchResult
   status: string
@@ -850,6 +862,84 @@ async function pushRunProcessSummary(args: {
           ],
     files: [...fileMap.values()],
   })
+
+  await persistArtifactIndexForRun({
+    threadId: tid,
+    runId,
+    objective: args.objective,
+    status,
+    result: finalAgent.result || result.result || result.error,
+    blockers: [
+      ...(finalAgent.haltReason ? [finalAgent.haltReason] : []),
+      ...operations
+        .filter((operation) => operation.ok === false)
+        .map((operation) => operation.title),
+    ],
+    decisions: plan.length ? [`執行計畫已保留為引用（${plan.length} 項）`] : [],
+    suggestedNextSkills:
+      status === 'success' ? ['code-review'] : ['tdd', 'code-review'],
+    evidenceOperations: operations,
+    plan,
+    diff,
+    projectRoot: args.projectRoot,
+    review: subDesignCritique
+      ? {
+          source: `subdesign:${subDesignCritique.artifactId || 'artifact'}/critique`,
+          status: subDesignCritique.verdict === 'pass' ? 'complete' : 'stale',
+          detail: `${subDesignCritique.verdict}; ${subDesignCritique.findings.length} findings`,
+        }
+      : undefined,
+  })
+}
+
+async function persistArtifactIndexForRun(args: {
+  threadId: string
+  runId: string
+  objective: string
+  status: string
+  result?: string
+  blockers?: string[]
+  decisions?: string[]
+  suggestedNextSkills?: string[]
+  evidenceOperations: Array<{ id: string; kind: string; title: string; ok?: boolean }>
+  plan: Array<{ id: string; text: string; status: string }>
+  diff?: string
+  projectRoot?: string
+  review?: { source: string; status: 'complete' | 'failed' | 'stale' | 'missing'; detail?: string }
+}): Promise<void> {
+  try {
+    const {
+      buildArtifactEvidenceFromRun,
+      recordArtifactRun,
+    } = await import('./artifactIndex.ts')
+    const storage = typeof window === 'undefined' ? undefined : window.localStorage
+    if (!storage) return
+    const evidence = buildArtifactEvidenceFromRun({
+      threadId: args.threadId,
+      runId: args.runId,
+      objective: args.objective,
+      status: args.status,
+      result: args.result,
+      diff: args.diff,
+      projectRoot: args.projectRoot,
+      operations: args.evidenceOperations,
+      plan: args.plan,
+      review: args.review,
+    })
+    recordArtifactRun(storage, {
+      threadId: args.threadId,
+      runId: args.runId,
+      objective: args.objective,
+      status: args.status,
+      result: args.result,
+      blockers: args.blockers,
+      decisions: args.decisions,
+      suggestedNextSkills: args.suggestedNextSkills,
+      evidence,
+    })
+  } catch {
+    /* Artifact indexing is best-effort and never changes run outcome. */
+  }
 }
 
 /**

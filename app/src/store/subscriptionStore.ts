@@ -13,37 +13,44 @@ import {
   type SubscriptionFailureKind,
 } from '../agent/subscription'
 import type { EntitlementSnapshot } from '../agent/entitlement'
+import { readJson, writeJson } from './persist'
 
-const STORAGE_KEY = 'subagents:subscription'
-const RAW_ENTITLEMENT_KEY = 'subagents:entitlement'
+const STORAGE_KEY = 'subscription'
+const RAW_ENTITLEMENT_KEY = 'entitlement'
 
 function readSubscriptionState(): SubscriptionState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return DEFAULT_SUBSCRIPTION_STATE
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return DEFAULT_SUBSCRIPTION_STATE
-    return { ...DEFAULT_SUBSCRIPTION_STATE, ...parsed }
-  } catch {
-    return DEFAULT_SUBSCRIPTION_STATE
-  }
+  return readJson<SubscriptionState>(STORAGE_KEY, {
+    fallback: DEFAULT_SUBSCRIPTION_STATE,
+  })
 }
 
 function writeSubscriptionState(state: SubscriptionState) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  } catch {
-    /* unavailable localStorage: state stays in-memory only, entitlement still fails closed */
-  }
+  writeJson(STORAGE_KEY, state)
 }
 
 function readRawEntitlement(): unknown {
-  try {
-    const raw = localStorage.getItem(RAW_ENTITLEMENT_KEY)
-    return raw ? JSON.parse(raw) : undefined
-  } catch {
-    return undefined
+  return readJson(RAW_ENTITLEMENT_KEY, {
+    fallback: undefined,
+    migrateFrom: 'subagents:entitlement',
+    migrate: (raw) => raw,
+  })
+}
+
+/** Generate a simple device signature from deviceId + timestamp. */
+function generateDeviceSignature(deviceId: string): string {
+  const input = `${deviceId}:${Date.now()}`
+  let hash = 0
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) - hash) + input.charCodeAt(i)
+    hash |= 0
   }
+  return Math.abs(hash).toString(36)
+}
+
+/** Get app version from environment or fallback. */
+function getAppVersion(): string {
+  if (typeof process !== 'undefined' && process.env?.APP_VERSION) return process.env.APP_VERSION
+  return 'unknown'
 }
 
 interface SubscriptionStore {
@@ -74,7 +81,12 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => {
     lastError: null,
 
     activate: (device) => {
-      const result = activateDevice(get().state, device)
+      const enriched: DeviceActivation = {
+        ...device,
+        deviceSignature: generateDeviceSignature(device.deviceId),
+        appVersion: getAppVersion(),
+      }
+      const result = activateDevice(get().state, enriched)
       if (!result.ok) {
         set({ lastError: result.error })
         return { ok: false, error: result.error }
@@ -103,12 +115,13 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => {
 
     refresh: async (fetcher) => {
       const current = get().state
+      const primaryDevice = current.devices[0]
       try {
         const req = buildEntitlementRefreshRequest({
           licenseId: current.plan || '',
-          deviceId: current.devices[0]?.deviceId || '',
-          deviceSignature: '',
-          appVersion: '',
+          deviceId: primaryDevice?.deviceId || '',
+          deviceSignature: primaryDevice?.deviceSignature || '',
+          appVersion: primaryDevice?.appVersion || getAppVersion(),
         })
         await fetcher(req)
         const verifiedState = { ...current, lastVerifiedAt: new Date().toISOString() }

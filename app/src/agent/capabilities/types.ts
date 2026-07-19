@@ -7,6 +7,7 @@
  */
 
 import type { ToolName } from '../tools/registry'
+import type { FeatureId } from '../entitlement'
 
 export type CapabilityId = string
 
@@ -40,7 +41,7 @@ export interface AgentCapability {
    */
   deferLoading?: boolean
   /** Source for UI / debugging */
-  source?: 'builtin' | 'skill' | 'mcp' | 'user'
+  source?: 'builtin' | 'skill' | 'mcp' | 'user' | 'feature-pack'
   /** Optional group label */
   group?: string
   /** Model settings applied while this capability is active (last active wins) */
@@ -56,7 +57,7 @@ export interface AgentCapability {
    * grants this feature id. Omitted (the default) means Free Core: always
    * available, no entitlement check at all.
    */
-  requiresEntitlement?: string
+  requiresEntitlement?: FeatureId
 }
 
 export interface CapabilityCatalogEntry {

@@ -173,14 +173,19 @@ export function featurePackCapability(
   ownerId: string,
   review?: PackageReview | null,
 ): AgentCapability | null {
-  if (record.status === 'uninstalled') return null
+  if (
+    record.status === 'uninstalled' ||
+    record.status === 'incompatible' ||
+    record.status === 'entitlement-denied' ||
+    record.status === 'disabled'
+  ) return null
   const compiled = compileToolPackage(record.manifest.toolPackage, ownerId, review)
   return {
     id: `feature-pack:${record.id}`,
     description: record.manifest.name,
     toolNames: compiled.tools.map((t) => t.name),
     deferLoading: true,
-    source: 'user',
+    source: 'feature-pack',
     group: 'feature-pack',
     requiresEntitlement: record.manifest.requiredEntitlement,
   }

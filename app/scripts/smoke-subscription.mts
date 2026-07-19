@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { resolveEntitlement, isCapabilityEntitled } from '../src/agent/entitlement.ts'
+import { resolveEntitlement, isCapabilityEntitled, isFailClosed } from '../src/agent/entitlement.ts'
 import { redactSettingsForExport } from '../src/agent/settingsExport.ts'
 import {
   SUBSCRIPTION_PRICING,
@@ -95,7 +95,7 @@ assert.equal(SUBSCRIPTION_PRICING.annual.interval, 'year')
 
   const graceExpired = resolveEntitlementWithGrace({ raw: paidRaw, lastVerifiedAt: beyondGrace, now })
   assert.equal(graceExpired.tier, 'free', 'exceeding the offline grace window must fail closed to free')
-  assert.equal(graceExpired.failClosed, true)
+  assert.equal(isFailClosed(graceExpired), true)
 
   // Free Core is never affected either way.
   assert.equal(isCapabilityEntitled(stillGraced, undefined), true)

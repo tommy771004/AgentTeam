@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMode, LoopType } from '../agent/types'
+import type { HandoffAvailability } from '../agent/composerRunControls'
 import type { ThreadRunner } from '../store/threadStore'
 import { Icon } from './Icon'
 
@@ -27,6 +28,8 @@ type ComposerQuickActionsProps = {
   onToggleRunPanel: () => void
   onToggleTerminal: () => void
   onCreateThread: () => void
+  handoff: HandoffAvailability
+  onCreateHandoff: () => void
 }
 
 const LOOPS: Array<{ type: LoopType | null; label: string; icon: string }> = [
@@ -54,6 +57,8 @@ export function ComposerQuickActions({
   onToggleRunPanel,
   onToggleTerminal,
   onCreateThread,
+  handoff,
+  onCreateHandoff,
 }: ComposerQuickActionsProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -105,6 +110,19 @@ export function ComposerQuickActions({
             title="新增對話"
             description="保留目前對話，另開新任務"
             onClick={() => choose(onCreateThread)}
+          />
+
+          <MenuLabel>交接</MenuLabel>
+          <MenuButton
+            icon="assignment_turned_in"
+            title="建立 Handoff"
+            description={
+              handoff.available
+                ? '建立本機 Markdown；不會自動傳送或上傳'
+                : handoff.reason
+            }
+            disabled={!handoff.available}
+            onClick={() => choose(onCreateHandoff)}
           />
 
           <MenuLabel>工作方式</MenuLabel>

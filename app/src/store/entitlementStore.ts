@@ -1,34 +1,48 @@
 import { create } from 'zustand'
 import {
-  resolveEntitlement,
   isFeatureEntitled,
+  resolveEntitlement,
   type EntitlementSnapshot,
+  type FeatureId,
 } from '../agent/entitlement'
-
-const STORAGE_KEY = 'subagents:entitlement'
-
-/** Read the raw local entitlement blob if present. Never throws. */
-function readRawEntitlement(): unknown {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return undefined
-    return JSON.parse(raw)
-  } catch {
-    // Unavailable localStorage or malformed JSON both fail closed via resolveEntitlement(undefined-ish).
-    return undefined
-  }
-}
+import { useSubscriptionStore } from './subscriptionStore'
+import { readJson, writeJson } from './persist'
 
 interface EntitlementStore {
   snapshot: EntitlementSnapshot
-  /** Issue 07 — the single check every paid feature (UI or runtime) must call through. */
-  isEntitled: (featureId: string) => boolean
-  /** Re-resolve from a fresh raw payload (e.g. after a subscription refresh in a later issue). */
-  refresh: (raw: unknown) => void
+  isEntitled: (featureId: FeatureId) => boolean
 }
 
-export const useEntitlementStore = create<EntitlementStore>((set, get) => ({
-  snapshot: resolveEntitlement(readRawEntitlement()),
-  isEntitled: (featureId) => isFeatureEntitled(get().snapshot, featureId),
-  refresh: (raw) => set({ snapshot: resolveEntitlement(raw) }),
+function initialSnapshot(): EntitlementSnapshot {
+  try {
+    if (useSubscriptionStore.getState().state.lastVerifiedAt !== undefined) {
+      return useSubscriptionStore.getState().entitlement
+    }
+    // Legacy migration from old key
+    const legacy = readJson('entitlement', {
+      fallback: undefined,
+      migrateFrom: 'subagents:entitlement',
+      migrate: (raw) => raw,
+    })
+    if (legacy !== undefined) {
+      return resolveEntitlement(legacy)
+    }
+    return resolveEntitlement(undefined)
+  } catch {
+    return resolveEntitlement(undefined)
+  }
+}
+
+export const useEntitlementStore = create<EntitlementStore>((_set, get) => ({
+  snapshot: initialSnapshot(),
+  isEntitled: (featureId) => {
+    const snap = useSubscriptionStore.getState().entitlement
+    return isFeatureEntitled(snap, featureId)
+  },
 }))
+
+useSubscriptionStore.subscribe((next, prev) => {
+  if (next.entitlement !== prev.entitlement) {
+    useEntitlementStore.setState({ snapshot: next.entitlement })
+  }
+})

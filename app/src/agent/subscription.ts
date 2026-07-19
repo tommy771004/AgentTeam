@@ -26,6 +26,10 @@ export interface DeviceActivation {
   deviceId: string
   label: string
   activatedAt: string
+  /** HMAC/signature of the device ID for refresh verification. */
+  deviceSignature?: string
+  /** Client app version at activation time. */
+  appVersion?: string
 }
 
 export type SubscriptionStatus = 'active' | 'canceled' | 'expired' | 'refunded'
@@ -37,6 +41,8 @@ export interface SubscriptionState {
   maxDevices: number
   /** Last time the client successfully refreshed entitlement from the service. */
   lastVerifiedAt?: string
+  /** Current app version for refresh requests. */
+  appVersion?: string
 }
 
 export const DEFAULT_SUBSCRIPTION_STATE: SubscriptionState = {
@@ -141,7 +147,6 @@ export function resolveEntitlementWithGrace(input: {
     tier: 'free',
     grantedFeatures: new Set(),
     source: 'expired',
-    failClosed: true,
     reason: '已超過離線寬限期，需重新連線以刷新 Pro 授權。',
   }
 }

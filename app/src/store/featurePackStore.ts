@@ -11,26 +11,10 @@ import {
 } from '../agent/featurePacks'
 import { validateFeaturePackManifest, type FeaturePackManifest } from '../agent/featurePackContracts'
 import type { EntitlementSnapshot } from '../agent/entitlement'
+import { readJson, writeJson } from './persist'
 
-const PACKS_KEY = 'subagents.feature-packs.v1'
-const AUDIT_KEY = 'subagents.feature-packs.audit.v1'
-
-function readJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T) : fallback
-  } catch {
-    return fallback
-  }
-}
-
-function persist(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    /* Browser preview may disable localStorage; state stays in-memory only. */
-  }
-}
+const PACKS_KEY = 'feature-packs.v1'
+const AUDIT_KEY = 'feature-packs.audit.v1'
 
 /** Injected verifier keeps this store decoupled from Electron's node:crypto specifics. */
 export type FeaturePackVerifier = (manifest: FeaturePackManifest, bytes: Uint8Array) => Promise<boolean>
@@ -55,13 +39,13 @@ interface FeaturePackStore {
 
 function addAudit(set: (partial: Partial<FeaturePackStore>) => void, get: () => FeaturePackStore, event: FeaturePackAuditEvent) {
   const audit = [...get().audit, event].slice(-300)
-  persist(AUDIT_KEY, audit)
+  writeJson(AUDIT_KEY, audit)
   set({ audit })
 }
 
 export const useFeaturePackStore = create<FeaturePackStore>((set, get) => ({
-  packs: readJson<FeaturePackRecord[]>(PACKS_KEY, []),
-  audit: readJson<FeaturePackAuditEvent[]>(AUDIT_KEY, []),
+  packs: readJson<FeaturePackRecord[]>(PACKS_KEY, { fallback: [] }),
+  audit: readJson<FeaturePackAuditEvent[]>(AUDIT_KEY, { fallback: [] }),
   busyId: null,
   error: null,
 
@@ -83,7 +67,7 @@ export const useFeaturePackStore = create<FeaturePackStore>((set, get) => ({
         return null
       }
       const packs = [result.record, ...get().packs.filter((p) => p.id !== manifest.id)].slice(0, 200)
-      persist(PACKS_KEY, packs)
+      writeJson(PACKS_KEY, packs)
       set({ packs, busyId: null, error: null })
       addAudit(set, get, featurePackAuditEvent(existing ? 'update' : 'install', manifest))
       return result.record
@@ -100,7 +84,7 @@ export const useFeaturePackStore = create<FeaturePackStore>((set, get) => ({
     if (!current) return
     const next = disableFeaturePack(current)
     const packs = get().packs.map((p) => (p.id === id ? next : p))
-    persist(PACKS_KEY, packs)
+    writeJson(PACKS_KEY, packs)
     set({ packs })
     addAudit(set, get, featurePackAuditEvent('disable', current.manifest))
   },
@@ -110,7 +94,7 @@ export const useFeaturePackStore = create<FeaturePackStore>((set, get) => ({
     if (!current) return
     const next = enableFeaturePack(current, entitlement, appVersion)
     const packs = get().packs.map((p) => (p.id === id ? next : p))
-    persist(PACKS_KEY, packs)
+    writeJson(PACKS_KEY, packs)
     set({ packs })
     addAudit(set, get, featurePackAuditEvent('enable', current.manifest))
   },
@@ -120,7 +104,7 @@ export const useFeaturePackStore = create<FeaturePackStore>((set, get) => ({
     if (!current) return
     const next = uninstallFeaturePack(current)
     const packs = get().packs.map((p) => (p.id === id ? next : p))
-    persist(PACKS_KEY, packs)
+    writeJson(PACKS_KEY, packs)
     set({ packs })
     addAudit(set, get, featurePackAuditEvent('uninstall', current.manifest))
   },
@@ -134,7 +118,7 @@ export const useFeaturePackStore = create<FeaturePackStore>((set, get) => ({
       return false
     }
     const packs = get().packs.map((p) => (p.id === id ? result.record : p))
-    persist(PACKS_KEY, packs)
+    writeJson(PACKS_KEY, packs)
     set({ packs, error: null })
     addAudit(set, get, featurePackAuditEvent('rollback', result.record.manifest))
     return true

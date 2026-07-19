@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { resolveEntitlement, isFeatureEntitled, isCapabilityEntitled } from '../src/agent/entitlement.ts'
+import { resolveEntitlement, isFeatureEntitled, isCapabilityEntitled, isFailClosed } from '../src/agent/entitlement.ts'
 import { redactSettingsForExport } from '../src/agent/settingsExport.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -35,7 +35,7 @@ const read = (rel: string) => fs.readFileSync(path.join(appRoot, rel), 'utf8')
   const snap = resolveEntitlement({ tier: 'paid', grantedFeatures: ['pro-x'] })
   assert.equal(snap.tier, 'paid')
   assert.equal(snap.source, 'valid')
-  assert.equal(snap.failClosed, false)
+  assert.equal(isFailClosed(snap), false)
   assert.equal(isFeatureEntitled(snap, 'pro-x'), true)
   assert.equal(isFeatureEntitled(snap, 'pro-y'), false)
 }
@@ -44,7 +44,7 @@ const read = (rel: string) => fs.readFileSync(path.join(appRoot, rel), 'utf8')
 for (const malformed of ['not-an-object', 42, { tier: 'paid' }, { tier: 'paid', grantedFeatures: 'nope' }, { tier: 'paid', grantedFeatures: [1, 2] }]) {
   const snap = resolveEntitlement(malformed)
   assert.equal(snap.tier, 'free', `malformed payload must fail closed to free: ${JSON.stringify(malformed)}`)
-  assert.equal(snap.failClosed, true)
+  assert.equal(isFailClosed(snap), true)
   assert.ok(snap.reason && snap.reason.length > 0, 'fail-closed snapshot should explain why')
   assert.equal(isFeatureEntitled(snap, 'pro-x'), false)
 }
@@ -112,4 +112,24 @@ const storeSrc = read('src/store/entitlementStore.ts')
 assert.ok(storeSrc.includes('resolveEntitlement'), 'entitlementStore must resolve through the shared boundary, not reimplement logic')
 assert.ok(storeSrc.includes('isEntitled'), 'entitlementStore must expose a single isEntitled(featureId) check')
 
-console.log('Entitlement boundary smoke: 7 groups passed')
+// ── 8. Issue 11 — subscription store is the only entitlement writer; entitlement store is derived ──
+const subscriptionStoreSrc = read('src/store/subscriptionStore.ts')
+assert.ok(
+  subscriptionStoreSrc.includes('recomputeEntitlement'),
+  'subscriptionStore must own entitlement projection (recomputeEntitlement)',
+)
+assert.ok(
+  !/localStorage\.(setItem|getItem)\(['"]subagents:entitlement['"]\)/.test(storeSrc)
+    || /legacyMigrated|legacy|readLegacyRawEntitlement/.test(storeSrc),
+  'entitlementStore must not write to subagents:entitlement; only legacy migration read is allowed',
+)
+assert.ok(
+  !/\brefresh:\s*\(raw\)/.test(storeSrc),
+  'entitlementStore must not own a refresh(raw) writer — subscriptionStore owns lifecycle',
+)
+assert.ok(
+  /useSubscriptionStore\.subscribe|useSubscriptionStore\.getState/.test(storeSrc),
+  'entitlementStore must derive from subscriptionStore (subscribe or getState), not maintain its own snapshot',
+)
+
+console.log('Entitlement boundary smoke: 8 groups passed')

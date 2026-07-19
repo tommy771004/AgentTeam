@@ -4,6 +4,7 @@
  */
 
 import type { LlmSettings } from './types'
+import type { EntitlementSnapshot } from './entitlement'
 import { assembleCapabilities, capabilityOwnsTool } from './capabilities'
 import { selectToolsForStep } from './tools/registry'
 import { skillsStore } from './hermes/skills'
@@ -41,11 +42,12 @@ export function buildIntentPreloadIds(
   objective: string,
   settings: LlmSettings,
   projectRoot?: string | null,
-  opts?: { max?: number },
+  opts?: { max?: number; entitlement?: EntitlementSnapshot },
 ): string[] {
   const max = opts?.max ?? 8
   const text = objective.trim()
   const lower = text.toLowerCase()
+  const entitlement = opts?.entitlement
   const scored: Array<{ id: string; score: number }> = []
   const seen = new Set<string>()
   const push = (id: string, score: number) => {
@@ -61,6 +63,7 @@ export function buildIntentPreloadIds(
   const assembled = assembleCapabilities(settings, {
     includeMcpCaps: settings.mcpEnabled,
     projectRoot: projectRoot || undefined,
+    entitlement,
   })
   for (const cap of assembled.all) {
     if (cap.id === 'core-utils') continue

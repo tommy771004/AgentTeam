@@ -354,10 +354,52 @@ jobs:
           fi
           echo "All release evidence packaging jobs passed"
 
-  release-ready:
-    name: release ready
+  release-qualification:
+    name: Paid Beta Go/No-Go qualification
     if: needs.release-gate.result == 'success'
     needs: [package, release-gate]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Download all platform evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: subagents-ai-*-evidence
+          path: app/release-evidence-bundles
+          merge-multiple: false
+
+      - name: Install dependencies
+        shell: bash
+        run: npm ci
+
+      - name: Run aggregate Paid Beta qualification
+        shell: bash
+        run: npm run release:qualification -- --evidence-root release-evidence-bundles --report release-evidence-bundles/paid-beta-qualification.md
+
+      - name: Upload aggregate qualification
+        uses: actions/upload-artifact@v4
+        with:
+          name: subagents-ai-paid-beta-qualification
+          path: app/release-evidence-bundles/paid-beta-qualification.*
+          if-no-files-found: error
+          retention-days: 90
+
+  release-ready:
+    name: release ready
+    if: needs.release-gate.result == 'success' && needs.release-qualification.result == 'success'
+    needs: [package, release-gate, release-qualification]
     runs-on: ubuntu-latest
     outputs:
       verified: ${{ steps.verify.outputs.verified }}

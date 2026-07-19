@@ -11,14 +11,16 @@
  * never throws, never silently grants paid access.
  */
 
+/** Branded type for feature identifiers — prevents accidental string mixing. */
+export type FeatureId = string & { readonly __brand: unique symbol }
+
 export type EntitlementTier = 'free' | 'paid'
 export type EntitlementSource = 'none' | 'malformed' | 'expired' | 'valid'
 
 export interface EntitlementSnapshot {
   tier: EntitlementTier
-  grantedFeatures: ReadonlySet<string>
+  grantedFeatures: ReadonlySet<FeatureId>
   source: EntitlementSource
-  failClosed: boolean
   reason?: string
 }
 
@@ -31,11 +33,18 @@ interface RawEntitlementShape {
 function freeSnapshot(source: EntitlementSource, reason?: string): EntitlementSnapshot {
   return {
     tier: 'free',
-    grantedFeatures: new Set<string>(),
+    grantedFeatures: new Set<FeatureId>(),
     source,
-    failClosed: source !== 'none',
     reason,
   }
+}
+
+/**
+ * Returns true when the snapshot represents a fail-closed state (i.e., not a valid paid grant).
+ * Derived from source — 'none', 'malformed', 'expired' all mean fail-closed.
+ */
+export function isFailClosed(snapshot: EntitlementSnapshot): boolean {
+  return snapshot.source !== 'valid'
 }
 
 /**
@@ -74,14 +83,13 @@ export function resolveEntitlement(raw: unknown): EntitlementSnapshot {
 
   return {
     tier: 'paid',
-    grantedFeatures: new Set(shape.grantedFeatures),
+    grantedFeatures: new Set(shape.grantedFeatures as FeatureId[]),
     source: 'valid',
-    failClosed: false,
   }
 }
 
 /** Single check point. Free Core call sites never call this at all. */
-export function isFeatureEntitled(snapshot: EntitlementSnapshot, featureId: string): boolean {
+export function isFeatureEntitled(snapshot: EntitlementSnapshot, featureId: FeatureId): boolean {
   if (snapshot.tier !== 'paid') return false
   return snapshot.grantedFeatures.has(featureId)
 }
@@ -93,7 +101,7 @@ export function isFeatureEntitled(snapshot: EntitlementSnapshot, featureId: stri
  */
 export function isCapabilityEntitled(
   snapshot: EntitlementSnapshot,
-  requiresEntitlement?: string,
+  requiresEntitlement?: FeatureId,
 ): boolean {
   if (!requiresEntitlement) return true
   return isFeatureEntitled(snapshot, requiresEntitlement)

@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] The composer exposes `要求核准`, `代我核准`, and `完整存取權` with clear descriptions.
-- [ ] The selected composer mode overrides the Settings default for only the submitted task run.
-- [ ] Plan mode, deny rules, capability-required approval, and unattended downgrade remain stronger constraints.
-- [ ] The composer `+` menu exposes a Handoff creation action without auto-sending or uploading.
-- [ ] The UI shows whether a Handoff is unavailable because no Artifact Index exists.
-- [ ] Per-run approval and Handoff choices remain associated with the correct run and thread.
+- [x] The composer exposes `要求核准`, `代我核准`, and `完整存取權` with clear descriptions.
+- [x] The selected composer mode overrides the Settings default for only the submitted task run.
+- [x] Plan mode, deny rules, capability-required approval, and unattended downgrade remain stronger constraints.
+- [x] The composer `+` menu exposes a Handoff creation action without auto-sending or uploading.
+- [x] The UI shows whether a Handoff is unavailable because no Artifact Index exists.
+- [x] Per-run approval and Handoff choices remain associated with the correct run and thread.

@@ -9,6 +9,7 @@
 
 import { canonicalJson, compareVersions, type UpdateArtifactDescriptor } from './updateContracts.ts'
 import { validateToolPackage, type ToolPackageManifest } from './tools/toolPackage.ts'
+import type { FeatureId } from './entitlement'
 
 export interface FeaturePackManifest {
   schemaVersion: 1
@@ -18,7 +19,7 @@ export interface FeaturePackManifest {
   minAppVersion: string
   maxAppVersion?: string
   /** Feature id checked via issue 07's isFeatureEntitled — the only gate. */
-  requiredEntitlement: string
+  requiredEntitlement: FeatureId
   toolPackage: ToolPackageManifest
   artifact: UpdateArtifactDescriptor
   publishedAt: string

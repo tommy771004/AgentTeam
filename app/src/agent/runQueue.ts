@@ -69,6 +69,7 @@ export type PersistedQueueItem = {
   overrides?: Pick<
     RuntimeOverrides,
     | 'eventPreMatched'
+    | 'approvalMode'
     | 'attachedSkills'
     | 'unattended'
     | 'hitlTimeoutMs'
@@ -172,6 +173,7 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
     overrides: o
       ? {
           eventPreMatched: o.eventPreMatched,
+          approvalMode: o.approvalMode,
           attachedSkills: o.attachedSkills,
           unattended: o.unattended,
           hitlTimeoutMs: o.hitlTimeoutMs,

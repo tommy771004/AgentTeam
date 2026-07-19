@@ -354,6 +354,11 @@ export class AgentLoopEngine {
     if (this.overrides.model?.trim()) {
       this.settings = { ...this.settings, model: this.overrides.model.trim() }
     }
+    // Composer approval is a run-scoped snapshot. It must not write back to
+    // Settings, while plan/deny/capability guards remain enforced downstream.
+    if (this.overrides.approvalMode) {
+      this.settings = { ...this.settings, approvalMode: this.overrides.approvalMode }
+    }
     if (this.overrides.maxToolRounds != null && this.overrides.maxToolRounds > 0) {
       this.settings = {
         ...this.settings,
@@ -1077,6 +1082,7 @@ export class AgentLoopEngine {
               ...(this.overrides.blockedTools || []),
               ...(agentName === 'Core' || role === 'executor' ? ['delegate_task'] : []),
             ],
+            entitlement: (await import('../store/subscriptionStore')).useSubscriptionStore.getState().entitlement,
           })
 
           const tools = selectToolsForStep(step.description, this.state.objective, step.action, {

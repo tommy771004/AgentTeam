@@ -31,6 +31,13 @@ import { ChatBubble } from '../components/ChatBubble'
 import { RunSummaryCard } from '../components/RunSummaryCard'
 import { CliDoctorCard } from '../components/CliDoctorCard'
 import { requestFocusComposer } from '../store/commandHistoryStore'
+import type { ApprovalMode } from '../agent/types'
+import {
+  buildComposerRunOverrides,
+  buildHandoffAvailability,
+  buildHandoffDocument,
+  readArtifactIndex,
+} from '../agent/composerRunControls'
 
 /**
  * OpenCode 風格：Build/Plan + 模型/深度 + Threads + 內嵌執行
@@ -48,9 +55,9 @@ export function ProtocolsPage() {
   } = useAgentStore()
   const [busy, setBusy] = useState(false)
   const [showTerminal, setShowTerminal] = useState(false)
+  const [composerApprovalModes, setComposerApprovalModes] = useState<Record<string, ApprovalMode>>({})
   const { run: runSlash } = useSlashExecutor()
   const settings = useSettingsStore((s) => s.settings)
-  const updateSettings = useSettingsStore((s) => s.update)
   const projectRoot = useProjectStore((s) => s.root)
   const pickProjectFolder = useProjectStore((s) => s.pickFolder)
 
@@ -80,6 +87,11 @@ export function ProtocolsPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const thread = activeThread()
   const presentationRunId = activeId ? getRunIdForThread(activeId) : null
+  const composerApprovalMode = activeId ? composerApprovalModes[activeId] : undefined
+  const handoff = buildHandoffAvailability(
+    readArtifactIndex(typeof window === 'undefined' ? undefined : window.localStorage, activeId || ''),
+    activeId || '',
+  )
 
   useEffect(() => {
     hydrate()
@@ -201,6 +213,10 @@ export function ProtocolsPage() {
     let suggestionOnly = false
 
     const { subagents } = parseSubagentMentions(raw)
+    const approvalMode = buildComposerRunOverrides(
+      settings.approvalMode || 'auto',
+      composerApprovalMode,
+    )
 
     setBusy(true)
     setDraftInput('')
@@ -248,6 +264,7 @@ export function ProtocolsPage() {
         // Snapshot the project pinned at dispatch time — a concurrent run must not
         // silently re-resolve to whatever project the UI switches to mid-flight.
         projectRoot: projectRoot || undefined,
+        overrides: approvalMode,
       })
       suggestionOnly = Boolean(r.suggestion)
       if (r.queued) {
@@ -309,6 +326,37 @@ export function ProtocolsPage() {
     if (activeId) setLoopType(activeId, t)
     // Time / Proactive 真正規則在「自動化」；此處僅標記語意
     // null = 自動分類
+  }
+
+  const createHandoff = () => {
+    if (!handoff.available || !activeId) return
+    const runId = handoff.index.runId
+    const content = buildHandoffDocument({
+      threadId: activeId,
+      runId,
+      index: handoff.index,
+    })
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `handoff-${activeId}.md`
+    link.click()
+    URL.revokeObjectURL(url)
+    const hasStaleReference = handoff.index.entries.some(
+      (entry) => entry.status === 'stale' || entry.status === 'missing',
+    )
+    pushBubble(
+      activeId,
+      'system',
+      hasStaleReference
+        ? 'Handoff 已建立為本機 Markdown 檔案，但含 stale/missing references；未傳送或上傳，請先檢查。'
+        : 'Handoff 已建立為本機 Markdown 檔案；不會自動傳送或上傳。',
+    )
+  }
+
+  const chooseComposerApprovalMode = (mode: ApprovalMode) => {
+    if (!activeId) return
+    setComposerApprovalModes((current) => ({ ...current, [activeId]: mode }))
   }
 
   return (
@@ -463,6 +511,8 @@ export function ProtocolsPage() {
                         agentMode,
                       })
                     }
+                    handoff={handoff}
+                    onCreateHandoff={createHandoff}
                   />
                 )}
                 onSubmitLine={(line, atts) => void runEmbedded(line, atts)}
@@ -474,8 +524,8 @@ export function ProtocolsPage() {
                 footerLeft={
                   <div className="flex items-center gap-2">
                     <ApprovalModeMenu
-                      mode={settings.approvalMode || 'auto'}
-                      onChange={(m) => void updateSettings({ approvalMode: m })}
+                      mode={composerApprovalMode || settings.approvalMode || 'auto'}
+                      onChange={chooseComposerApprovalMode}
                     />
                     {sessionAllow && (
                       <button

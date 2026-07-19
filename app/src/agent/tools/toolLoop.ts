@@ -249,6 +249,7 @@ export async function runFunctionCallingLoop(
     projectRoot,
     blockedTools: opts?.blockedTools,
     agentId: opts?.mcpAgentId,
+    entitlement: (await import('../../store/subscriptionStore')).useSubscriptionStore.getState().entitlement,
   })
   cb?.onLog?.('INFO', summarizeCapabilityState(capState))
   const emitLoadedCaps = () => {

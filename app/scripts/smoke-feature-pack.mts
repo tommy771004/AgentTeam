@@ -195,4 +195,4 @@ assert.ok(storeSrc.includes('installFeaturePack') && storeSrc.includes('featureP
 const settingsPageSrc = read('src/pages/SettingsPage.tsx')
 assert.ok(settingsPageSrc.includes('useFeaturePackStore'), 'SettingsPage must surface feature pack lifecycle state')
 
-console.log('Feature pack smoke: 8 groups passed')
+console.log('Feature pack smoke: 9 groups passed')

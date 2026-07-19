@@ -329,7 +329,9 @@ export async function authorizeTool(opts: {
   if (needAsk && !decided && mode === 'full') {
     onLog?.('INFO', `完整存取權：自動核准 ${tool}`)
   }
-  needAsk = decided
+  // Capability-declared approval is a stronger constraint than the coarse
+  // composer mode. Keep it after the mode decision so `full` cannot bypass it.
+  needAsk = opts.forceAsk === true ? true : decided
   // Unattended + side-effect (incl. MCP write): never skip ask even if auto would
   if (opts.unattended && (mcpWrite || (isSideEffectTool(tool) && needAsk))) {
     needAsk = true

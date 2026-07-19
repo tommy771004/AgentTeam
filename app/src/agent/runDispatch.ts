@@ -148,7 +148,10 @@ export async function dispatchThreadTask(
     ? buildSubDesignRuntimeContext(subDesignBrief, subDesignSystem)
     : ''
   // Intent preload v2: builtins + skills + enabled plugins/MCP + project packs
-  const preloadCandidates = buildIntentPreloadIds(text, settings, projectRoot, { max: 8 })
+  const preloadCandidates = buildIntentPreloadIds(text, settings, projectRoot, {
+    max: 8,
+    entitlement: (await import('../store/subscriptionStore')).useSubscriptionStore.getState().entitlement,
+  })
   if (subDesignBrief) {
     preloadCandidates.unshift('subdesign-workflow')
     if (subDesignBrief.stage === 'critique') preloadCandidates.unshift('design-critique')
@@ -215,7 +218,7 @@ export async function dispatchThreadTask(
       model,
       depth,
       agentMode,
-      approvalMode: settings.approvalMode,
+      approvalMode: snapshot.overrides.approvalMode || settings.approvalMode,
       unattended: snapshot.overrides.unattended === true,
       attachments: cliAttachments.length ? cliAttachments : undefined,
       runId: snapshot.runId,

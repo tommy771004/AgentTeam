@@ -6,10 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] A task creates and updates a local Artifact Index without duplicating full transcripts or large artifacts.
-- [ ] Index entries retain stable identity, type, status, source reference, digest or revision, and timestamp.
-- [ ] Spec, ticket, test, diff, review, decision, and final-output evidence can be referenced.
-- [ ] Handoff generation produces a local portable document with current status, decisions, blockers, references, and suggested next skills.
-- [ ] Existing specs and artifacts are linked rather than copied into conflicting second versions.
-- [ ] Handoff generation is explicit, local-only, repeatable, and does not call an external delivery service.
-- [ ] Missing or stale references are reported without silently claiming delivery success.
+- [x] A task creates and updates a local Artifact Index without duplicating full transcripts or large artifacts.
+- [x] Index entries retain stable identity, type, status, source reference, digest or revision, and timestamp.
+- [x] Spec, ticket, test, diff, review, decision, and final-output evidence can be referenced.
+- [x] Handoff generation produces a local portable document with current status, decisions, blockers, references, and suggested next skills.
+- [x] Existing specs and artifacts are linked rather than copied into conflicting second versions.
+- [x] Handoff generation is explicit, local-only, repeatable, and does not call an external delivery service.
+- [x] Missing or stale references are reported without silently claiming delivery success.

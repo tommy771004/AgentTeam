@@ -248,6 +248,8 @@ export interface RuntimeOverrides {
   extraSystemContext?: string
   /** OpenCode-style primary agent */
   agentMode?: AgentMode
+  /** Per-run composer override; Settings remains the default for other runs. */
+  approvalMode?: ApprovalMode
   /** Inherited OpenCode agent id for per-agent MCP restrictions. */
   mcpAgentId?: string
   /** OpenCode-style subagent */

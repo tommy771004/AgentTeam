@@ -6,10 +6,10 @@
 
 **Status:** ready-for-agent
 
-- [ ] The website explains the cross-provider control-center positioning and Local-first boundary.
-- [ ] Windows and macOS downloads point only to signed, supported artifacts and show version/checksum information.
-- [ ] Free Core and Pro Beta capabilities, limits, pricing, cancellation, and offline grace are clear.
-- [ ] Checkout and activation entry points are connected to the subscription lifecycle.
-- [ ] Security whitepaper, data-flow description, privacy, telemetry, retention, deletion, EULA, terms, and refund documents are published.
-- [ ] The site provides support, release notes, known limitations, and a way to report product issues.
-- [ ] Website copy does not claim Codex/Claude parity where the feature matrix marks a gap.
+- [x] The website explains the cross-provider control-center positioning and Local-first boundary.
+- [x] Windows and macOS downloads point only to signed, supported artifacts and show version/checksum information.
+- [x] Free Core and Pro Beta capabilities, limits, pricing, cancellation, and offline grace are clear.
+- [x] Checkout and activation entry points are connected to the subscription lifecycle.
+- [x] Security whitepaper, data-flow description, privacy, telemetry, retention, deletion, EULA, terms, and refund documents are published.
+- [x] The site provides support, release notes, known limitations, and a way to report product issues.
+- [x] Website copy does not claim Codex/Claude parity where the feature matrix marks a gap.

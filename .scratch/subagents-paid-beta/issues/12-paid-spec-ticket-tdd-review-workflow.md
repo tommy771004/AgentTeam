@@ -6,11 +6,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] A Goal-based objective produces a reviewable Spec before autonomous implementation begins.
-- [ ] The approved Spec becomes traceable Tickets with explicit acceptance criteria and blocking edges.
-- [ ] Each Ticket enters a TDD loop with failing-first or tightened tests at the highest available seam.
-- [ ] Codex, Claude Code, and OpenCode runners can be selected per task without hiding capability differences.
-- [ ] Tests and review findings are collected into the Artifact Index.
-- [ ] Failed tests or review findings can trigger bounded corrective work with a visible retry budget.
-- [ ] Final changes, evidence, remaining risks, and Handoff availability are shown before user approval.
-- [ ] Merge, push, and deploy remain user-approved actions.
+- [x] A Goal-based objective produces a reviewable Spec before autonomous implementation begins.
+- [x] The approved Spec becomes traceable Tickets with explicit acceptance criteria and blocking edges.
+- [x] Each Ticket enters a TDD loop with failing-first or tightened tests at the highest available seam.
+- [x] Codex, Claude Code, and OpenCode runners can be selected per task without hiding capability differences.
+- [x] Tests and review findings are collected into the Artifact Index.
+- [x] Failed tests or review findings can trigger bounded corrective work with a visible retry budget.
+- [x] Final changes, evidence, remaining risks, and Handoff availability are shown before user approval.
+- [x] Merge, push, and deploy remain user-approved actions.
