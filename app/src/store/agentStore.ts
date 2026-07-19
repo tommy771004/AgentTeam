@@ -25,21 +25,6 @@ import {
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
 } from '../agent/runners'
 
-/** Drain unified run queue after any path frees a run-capacity slot. */
-function drainQueueAfterRun() {
-  void (async () => {
-    try {
-      const { drainExternalRunQueue } = await import('../agent/runQueue')
-      const { runTask } = await import('../agent/taskRunCoordinator')
-      await drainExternalRunQueue((o) =>
-        runTask({ ...o, _fromQueue: true }),
-      )
-    } catch {
-      /* non-fatal */
-    }
-  })()
-}
-
 interface AgentStore {
   agent: AgentState
   selectedLoopType: LoopType | null
@@ -100,11 +85,6 @@ interface AgentStore {
       textContent?: string
       filePath?: string
     }>
-    /**
-     * When true, skip Archive / release / drain — TaskRunCoordinator finalization
-     * owns that sequence once (Phase 3 item 4/5).
-     */
-    deferFinalization?: boolean
   }) => Promise<void>
   stopExecution: (runId?: string) => void
   continueTurn: (runId?: string) => void
@@ -319,10 +299,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       const text = (input ?? get().draftInput).trim()
       if (!text) return
       const runId = overrides?.runId || `run_${Date.now().toString(36)}`
-      if (!get().reserveRun(runId, overrides?.threadId, 'builtin')) {
-        console.warn('[agentStore] startExecution blocked: concurrent cap reached')
-        return
-      }
       const settings = useSettingsStore.getState().settings
       agentEngine.configure(settings)
       const engine = agentEngine.create(runId)
@@ -389,16 +365,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           /* ignore */
         }
 
-        // Phase 3 item 4/5: coordinator owns Archive → release → drain once.
-        if (overrides?.deferFinalization) {
-          return
-        }
-        if (['success', 'failed', 'halted'].includes(settled.status)) {
-          await get().saveToArchive(settled, runId)
-        }
-        get().releaseRun(runId)
-        // Unified queue drain (automation + interactive follow-ups)
-        void drainQueueAfterRun()
       } catch (e) {
         unsub()
         publishRun(set, get, runId, runAgentStates.get(runId) || emptyAgent())
@@ -414,10 +380,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         } catch {
           /* ignore */
         }
-        if (!overrides?.deferFinalization) {
-          get().releaseRun(runId)
-          void drainQueueAfterRun()
-        }
         throw e
       }
     },
@@ -427,10 +389,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       if (!prompt) return
       const t0 = Date.now()
       const runId = opts.runId || `cli_${Date.now().toString(36)}`
-      if (!get().reserveRun(runId, opts.threadId, 'cli')) {
-        console.warn('[agentStore] startLocalCliExecution blocked: concurrent cap reached')
-        return
-      }
       const logs: AgentState['logs'] = []
       let toolCalls: AgentState['toolCalls'] = []
       let draftChars = 0
@@ -627,6 +585,32 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         )
         knowledge.phase = r.ok ? 'CLI Synthesis' : 'CLI Failed'
 
+        // Learning loop on CLI success (same as builtin finalizeSuccess).
+        // Keep this before the terminal publish so the adapter cannot regress
+        // a completed run back to `running` while appending its learning log.
+        if (r.ok) {
+          try {
+            const mem = useSettingsStore.getState().settings
+            learningLoop.onGoalSuccess({
+              objective: prompt,
+              steps: [
+                {
+                  description: `本機 ${opts.kind} CLI`,
+                  result: r.output.slice(0, 500),
+                },
+              ],
+              loopType: `local-cli:${opts.kind}`,
+              memoryEnabled: mem.memoryEnabled,
+              memoryWriteEnabled: mem.memoryWriteEnabled,
+            })
+            pushLog('學習迴圈：已寫入技能草稿／記憶摘要（見學習中心）')
+            void useLearningStore.getState().refresh()
+            void useLearningStore.getState().persist()
+          } catch {
+            /* non-fatal */
+          }
+        }
+
         // If user hit stop mid-run, still finalize state
         const final = emptyAgentLike({
           id: runId,
@@ -728,45 +712,12 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           /* ignore */
         }
 
-        // Learning loop on CLI success (same as builtin finalizeSuccess)
-        if (r.ok) {
-          try {
-            const mem = useSettingsStore.getState().settings
-            learningLoop.onGoalSuccess({
-              objective: prompt,
-              steps: [
-                {
-                  description: `本機 ${opts.kind} CLI`,
-                  result: r.output.slice(0, 500),
-                },
-              ],
-              loopType: `local-cli:${opts.kind}`,
-              memoryEnabled: mem.memoryEnabled,
-              memoryWriteEnabled: mem.memoryWriteEnabled,
-            })
-            pushLog('學習迴圈：已寫入技能草稿／記憶摘要（見學習中心）')
-            void useLearningStore.getState().refresh()
-            void useLearningStore.getState().persist()
-          } catch {
-            /* non-fatal */
-          }
-        }
-
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
           usePermissionAskStore.getState().setSessionAllow(false, opts.threadId)
         } catch {
           /* ignore */
         }
-        // Phase 3 item 4/5: coordinator owns Archive → release → drain once.
-        if (opts.deferFinalization) {
-          return
-        }
-        if (['success', 'failed', 'halted'].includes(settled.status)) {
-          await get().saveToArchive(settled, runId)
-        }
-        get().releaseRun(runId)
-        void drainQueueAfterRun()
       } catch (e) {
         try {
           unsubStream?.()
@@ -823,10 +774,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         } catch {
           /* ignore */
         }
-        if (!opts.deferFinalization) {
-          get().releaseRun(runId)
-          void drainQueueAfterRun()
-        }
       }
     },
 
@@ -858,7 +805,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         /* ignore */
       }
       // Phase 3 item 5: stop only terminates the run. Capacity release + queue drain
-      // wait for coordinator finalization (or the non-deferred adapter path).
+      // wait for coordinator finalization.
     },
 
     continueTurn: (runId) => {

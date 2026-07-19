@@ -1,0 +1,27 @@
+{
+  "platform": "windows",
+  "installer": "D:\\Project\\github\\AgentTeam\\app\\release\\SubAgents AI Setup 1.0.0.exe",
+  "executable": "C:\\Users\\Tommy\\AppData\\Local\\Temp\\subagents-ai-install-27044\\SubAgents AI.exe",
+  "launches": [
+    {
+      "attempt": 1
+    },
+    {
+      "attempt": 2
+    }
+  ],
+  "firstTask": {
+    "objective": "Smoke first task: write a report file.",
+    "resultVisible": true,
+    "diffVisible": true,
+    "diffPreview": "diff --git a/reports/smoke_first_task_write_a_report_file.md b/reports/smoke_first_task_write_a_report_file.md\nindex 0e5ef69..620fa62 100644\n--- a/reports/smoke_first_task_write_a_report_file.md\n+++ b/reports/smoke_first_task_write_a_report_file.md\n@@ -1 +1,38 @@\n-# Packaged install baseline\n+### 產出可交付結果\n+\n+Assigned under iteration 2.\n+Objective alignment: high.\n+Key findings: structured notes for \"Smoke first task: write a report file.\".\n+- Action `產出可交付結果` executed with tools.\n+- Artifacts staged for downstream synthesis.\n+\n+## Tool Evidence\n+### capability runbooks\n+### Capability: interact",
+    "firstTaskThreadBytes": 8986,
+    "settingsPersisted": true,
+    "restartedThreadBytes": 8986,
+    "platform": "windows"
+  },
+  "uninstall": {
+    "status": 0,
+    "removed": true
+  }
+}

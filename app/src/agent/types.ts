@@ -28,6 +28,7 @@ export type ExecutionStatus =
   | 'success'
   | 'failed'
   | 'halted'
+  | 'interrupted'
   | 'manual_intervention'
 
 export type LogLevel =
@@ -298,12 +299,6 @@ export interface RuntimeOverrides {
   forceLoopType?: LoopType
   /** Thread id for plan bubble / UI correlation (optional). */
   threadId?: string
-  /**
-   * When true, the adapter (startExecution / local CLI) skips Archive,
-   * capacity release, and queue drain. TaskRunCoordinator finalization owns
-   * that sequence once: summary → afterRun → Archive → onSettled → release → drain.
-   */
-  deferFinalization?: boolean
   /**
    * Resume a previous Goal on this thread: keep DoD / missing / steps.
    * Skips auto-classify re-parse; forces Goal-based corrective plan.
@@ -787,7 +782,7 @@ export interface ScheduledJob {
   projectRoot?: string
   lastRunAt: string | null
   nextRunAt: string | null
-  lastStatus: 'idle' | 'running' | 'success' | 'failed' | 'skipped'
+  lastStatus: 'idle' | 'running' | 'success' | 'failed' | 'skipped' | 'interrupted'
   createdAt: string
 }
 

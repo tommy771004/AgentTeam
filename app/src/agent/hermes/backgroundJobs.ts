@@ -11,6 +11,7 @@ import {
   type DelegationBudget,
   globalDelegationBudget,
 } from './delegate'
+import { recordBackgroundStatus } from '../runJournal.ts'
 
 /**
  * Phase 3 item 6: durable background job completion.
@@ -216,12 +217,23 @@ export function enqueueBackgroundDelegate(
     startedAt: new Date().toISOString(),
     parentThreadId: input.parentThreadId,
   }
+  const journalId = job.id
   jobs.set(job.id, job)
+  recordBackgroundStatus({
+    jobId: journalId,
+    objective: job.goal,
+    status: 'queued',
+  })
   trimJobs()
   emit(job)
 
   void (async () => {
     job.status = 'running'
+    recordBackgroundStatus({
+      jobId: journalId,
+      objective: job.goal,
+      status: 'running',
+    })
     emit(job)
     opts?.onLog?.(
       `[bg ${job.id}] 背景委派啟動：${input.goal.slice(0, 80)}` +
@@ -328,6 +340,13 @@ export function enqueueBackgroundDelegate(
       job.depth = result.depth
       job.parentThreadId = input.parentThreadId
       job.finishedAt = new Date().toISOString()
+      await archiveBackgroundJob(job, result.toolCalls)
+      recordBackgroundStatus({
+        jobId: journalId,
+        runId: job.archiveRunId,
+        objective: job.goal,
+        status: result.ok ? 'success' : 'failed',
+      })
       if (!result.ok) job.error = result.summary
 
       if (notifyOnComplete) {
@@ -339,14 +358,17 @@ export function enqueueBackgroundDelegate(
       opts?.onLog?.(
         `[bg ${job.id}] 完成 status=${job.status} ${result.durationMs}ms`,
       )
-      // G6: persist finished background jobs into Archive (survive app restart)
-      void archiveBackgroundJob(job, result.toolCalls)
     } catch (e) {
       job.status = 'failed'
       job.ok = false
       job.error = e instanceof Error ? e.message : String(e)
       job.summary = job.error
       job.finishedAt = new Date().toISOString()
+      recordBackgroundStatus({
+        jobId: journalId,
+        objective: job.goal,
+        status: 'failed',
+      })
       if (notifyOnComplete) {
         await notifyDesktop('SubAgents AI · 委派失敗', job.error.slice(0, 160))
       }

@@ -14,7 +14,17 @@
     "preview": "vite preview",
     "smoke": "npm run open-design:index && node scripts/smoke.mjs && node --experimental-strip-types scripts/smoke-platform.mts && node scripts/smoke-caps.mjs && node scripts/smoke-scenario-e2e.mjs && node --experimental-strip-types scripts/smoke-prod-modules.mts && npm run smoke:marketplace",
     "smoke:caps": "npm run open-design:index && node scripts/smoke-caps.mjs",
-    "smoke:ci": "npm run open-design:index && node scripts/smoke.mjs && node --experimental-strip-types scripts/smoke-platform.mts && node scripts/smoke-caps.mjs && node scripts/smoke-scenario-e2e.mjs && node --experimental-strip-types scripts/smoke-prod-modules.mts",
+    "smoke:ci": "npm run open-design:index && node scripts/smoke.mjs && node --experimental-strip-types scripts/smoke-platform.mts && node scripts/smoke-caps.mjs && node scripts/smoke-scenario-e2e.mjs && node --experimental-strip-types scripts/smoke-prod-modules.mts && node --experimental-strip-types scripts/smoke-cli-doctor.mts && node --experimental-strip-types scripts/smoke-run-journal.mts && node --experimental-strip-types scripts/smoke-update-migration.mts && node scripts/smoke-release-evidence.mjs && npm run smoke:security",
+    "smoke:doctor": "node --experimental-strip-types scripts/smoke-cli-doctor.mts",
+    "smoke:journal": "node --experimental-strip-types scripts/smoke-run-journal.mts",
+    "smoke:recovery": "node scripts/smoke-recovery-e2e.mjs",
+    "smoke:install": "node scripts/smoke-install-contract.mjs",
+    "smoke:release": "node scripts/smoke-release-evidence.mjs",
+    "smoke:update": "node --experimental-strip-types scripts/smoke-update-migration.mts",
+    "smoke:update:e2e": "node scripts/smoke-update-migration-e2e.mjs",
+    "release:evidence": "node scripts/release-evidence.mjs",
+    "security:gates": "node scripts/security-gates.mjs",
+    "smoke:security": "node --experimental-strip-types scripts/smoke-security.mts && node scripts/security-gates.mjs",
     "smoke:scenario": "node scripts/smoke-scenario-e2e.mjs",
     "smoke:prod": "node --experimental-strip-types scripts/smoke-prod-modules.mts",
     "smoke:coordinator": "node scripts/smoke-coordinator-browser.mjs",
@@ -90,6 +100,9 @@
     "mac": {
       "icon": "icons/icon.png",
       "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": true,
+      "notarize": true,
       "target": [
         {
           "target": "dmg",

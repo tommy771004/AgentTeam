@@ -12,6 +12,7 @@
 import { app, safeStorage } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import { decideSecretPersistence } from './securityPolicy'
 
 export type VaultRecord = {
   token: string
@@ -75,15 +76,29 @@ function readVault(): VaultMap {
   return cache
 }
 
-function writeVault(map: VaultMap) {
+/**
+ * Issue 06 — 無 OS 鑰匙圈時預設拒絕落地（PLAINTEXT_REQUIRED），
+ * 只有呼叫端帶使用者明確同意的 allowPlaintext 才寫 PLAIN 檔。
+ * 刪除（clear）永遠允許：移除資料不應被 gating 擋下。
+ */
+function writeVault(map: VaultMap, opts?: { allowPlaintext?: boolean }) {
+  const decision = decideSecretPersistence({
+    encryptionAvailable: canEncrypt(),
+    allowPlaintext: opts?.allowPlaintext,
+  })
+  if (decision.mode === 'refuse') {
+    const err = new Error(decision.reason) as Error & { code?: string }
+    err.code = decision.code
+    throw err
+  }
   cache = map
   try {
     const text = JSON.stringify(map)
     const p = vaultPath()
-    if (canEncrypt()) {
+    if (decision.mode === 'encrypted') {
       fs.writeFileSync(p, safeStorage.encryptString(text), { mode: 0o600 })
     } else {
-      // Degraded (no OS keychain): still main-only file, flagged in metadata
+      // Degraded（使用者已明確同意）：仍是 main-only 檔案，metadata 標示未加密
       fs.writeFileSync(p, Buffer.concat([Buffer.from('PLAIN'), Buffer.from(text)]), {
         mode: 0o600,
       })
@@ -112,6 +127,8 @@ export function setVaultSecret(
     expiresAt?: number
     tokenType?: string
     keepRefreshToken?: boolean
+    /** 使用者在 UI 明確同意後才可為 true（無 OS 鑰匙圈時的明文 fallback） */
+    allowPlaintext?: boolean
   },
 ): VaultMeta {
   const map = { ...readVault() }
@@ -133,7 +150,7 @@ export function setVaultSecret(
     tokenType: extra?.tokenType || prev?.tokenType,
     updatedAt: new Date().toISOString(),
   }
-  writeVault(map)
+  writeVault(map, { allowPlaintext: extra?.allowPlaintext })
   return metaOf(id, map[id])
 }
 
@@ -181,7 +198,7 @@ export function setVaultOAuthSecret(
 export function clearVaultSecret(id: string) {
   const map = { ...readVault() }
   delete map[id]
-  writeVault(map)
+  writeVault(map, { allowPlaintext: true })
 }
 
 function metaOf(id: string, rec: VaultRecord): VaultMeta {
@@ -203,8 +220,13 @@ export function listVaultMeta(): VaultMeta[] {
     .map(([id, rec]) => metaOf(id, rec))
 }
 
-/** One-time import from legacy renderer localStorage. */
+/**
+ * One-time import from legacy renderer localStorage.
+ * 無 OS 鑰匙圈時拒絕匯入（回傳 0）：不得把 legacy 明文轉寫成新的明文檔；
+ * 呼叫端（hydrate）此時必須保留 localStorage 原值。
+ */
 export function migrateIntoVault(map: Record<string, VaultRecord>): number {
+  if (!canEncrypt()) return 0
   let n = 0
   const cur = { ...readVault() }
   for (const [id, rec] of Object.entries(map || {})) {

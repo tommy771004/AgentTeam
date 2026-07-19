@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { DEFAULT_LLM_SETTINGS } from '../agent/llm'
 import { mergeCliProviders } from '../agent/cliProviders'
 import { recommendToolTuning } from '../agent/modelTuning'
+import { redactSettingsForExport } from '../agent/settingsExport'
 import type { LlmSettings } from '../agent/types'
 
 const STORAGE_KEY = 'subagents.settings.v1'
@@ -246,38 +247,20 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       hermes = null
     }
 
-    // Never write secrets in cleartext — restore can re-enter keys
-    const redactedSettings: LlmSettings = {
-      ...settings,
-      apiKey: settings.apiKey ? '***REDACTED***' : '',
-      telegramBotToken: settings.telegramBotToken ? '***REDACTED***' : '',
-      webhookToken: settings.webhookToken ? '***REDACTED***' : '',
-      customToolSecrets: Object.fromEntries(
-        Object.keys(settings.customToolSecrets || {}).map((key) => [key, '***REDACTED***']),
-      ),
-      pluginOAuthClients: Object.fromEntries(
-        Object.entries(settings.pluginOAuthClients || {}).map(([key, value]) => [
-          key,
-          {
-            clientId: value.clientId,
-            clientSecret: value.clientSecret ? '***REDACTED***' : undefined,
-          },
-        ]),
-      ),
-      cliProviders: (settings.cliProviders || []).map((p) => ({
-        ...p,
-        apiKey: p.apiKey ? '***REDACTED***' : p.apiKey,
-      })),
-    }
+    // Issue 06 — pattern-based 遮罩（settingsExport.ts）：新增祕密欄位不會漏
+    const { settings: redactedSettings, redactedFields } = redactSettingsForExport(
+      settings as unknown as Record<string, unknown>,
+    )
 
     return JSON.stringify(
       {
         version: 2,
         exportedAt: new Date().toISOString(),
-        settings: redactedSettings,
+        settings: redactedSettings as unknown as LlmSettings,
         jobs,
         events,
         hermes,
+        redactedFields,
         note: 'Secrets redacted (apiKey / tokens). Re-enter after import. Includes hermes skills/memory when present.',
       },
       null,

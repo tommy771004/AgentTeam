@@ -9,14 +9,12 @@
 import type {
   AgentMode,
   CliConfigSnapshot,
-  LoopType,
   PostStateOutcome,
   RuntimeOverrides,
 } from './types'
 import type { ThinkingDepth } from './thinking'
 import type { LocalRunnerKind } from './localCliRun'
 import { useSettingsStore } from '../store/settingsStore'
-import { useProjectStore } from '../store/projectStore'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { parseSubagentMentions } from './opencode/agents'
@@ -28,7 +26,6 @@ import {
 import { buildIntentPreloadIds } from './intentPreload'
 import { buildSubDesignRuntimeContext } from './subdesign/prompt'
 import { getSubDesignBriefForThread, useSubDesignStore } from '../store/subDesignStore'
-import type { ChatAttachment } from './types'
 import {
   attachmentsToTextAppendix,
   attachmentsPathAppendix,
@@ -106,74 +103,16 @@ async function captureOpenCodeConfigSnapshot(
   }
 }
 
-function isRunDispatchSnapshot(value: unknown): value is RunDispatchSnapshot {
-  if (!value || typeof value !== 'object') return false
-  const v = value as Partial<RunDispatchSnapshot>
-  return (
-    typeof v.runId === 'string' &&
-    typeof v.threadId === 'string' &&
-    typeof v.objective === 'string' &&
-    typeof v.runner === 'string' &&
-    Array.isArray(v.attachments) &&
-    Boolean(v.overrides && typeof v.overrides === 'object')
-  )
-}
-
 /**
  * Dispatch from a coordinator-built snapshot.
  * Capacity and attachments must already be prepared — never re-check / re-I/O.
  */
 export async function dispatchThreadTask(
   snapshot: RunDispatchSnapshot,
-): Promise<DispatchResult>
-/**
- * @deprecated Prefer `RunDispatchSnapshot`. Kept only for transitional typing;
- * production ingress always builds a snapshot via `buildRunDispatchSnapshot`.
- */
-export async function dispatchThreadTask(
-  goal: string,
-  opts?: {
-    threadId?: string
-    runner?: ThreadRunner
-    forceLoopType?: LoopType
-    overrides?: RuntimeOverrides
-    attachments?: ChatAttachment[]
-  },
-): Promise<DispatchResult>
-export async function dispatchThreadTask(
-  snapshotOrGoal: RunDispatchSnapshot | string,
-  legacyOpts?: {
-    threadId?: string
-    runner?: ThreadRunner
-    forceLoopType?: LoopType
-    overrides?: RuntimeOverrides
-    attachments?: ChatAttachment[]
-  },
 ): Promise<DispatchResult> {
-  const snapshot: RunDispatchSnapshot = isRunDispatchSnapshot(snapshotOrGoal)
-    ? snapshotOrGoal
-    : {
-        runId: legacyOpts?.overrides?.runId || `run_legacy_${Date.now().toString(36)}`,
-        threadId: legacyOpts?.threadId || useThreadStore.getState().activeId || '',
-        objective: String(snapshotOrGoal || '').trim(),
-        runner: legacyOpts?.runner || 'builtin',
-        forceLoopType: legacyOpts?.forceLoopType,
-        attachments:
-          legacyOpts?.attachments ||
-          legacyOpts?.overrides?.userAttachments ||
-          ([] as ChatAttachment[]),
-        overrides: {
-          ...(legacyOpts?.overrides || {}),
-          runId: legacyOpts?.overrides?.runId,
-          threadId: legacyOpts?.threadId,
-          forceLoopType: legacyOpts?.forceLoopType || legacyOpts?.overrides?.forceLoopType,
-        },
-      }
 
   // Trust snapshot attachments; never re-run normalize/materialize/hydrate.
-  const attachments = snapshot.attachments.length
-    ? snapshot.attachments
-    : snapshot.overrides.userAttachments || ([] as ChatAttachment[])
+  const attachments = snapshot.attachments
   let raw = snapshot.objective.trim()
   if (!raw && attachments.length) {
     raw = defaultGoalForAttachments(attachments)
@@ -183,16 +122,14 @@ export async function dispatchThreadTask(
   }
 
   const thr = useThreadStore.getState()
-  const tid = snapshot.threadId || thr.activeId
+  const tid = snapshot.threadId
   const thread = thr.threads.find((t) => t.id === tid)
   const settings = useSettingsStore.getState().settings
-  // Snapshot project pin wins; UI project is only a last-resort for unpinned runs.
-  const projectRoot =
-    (snapshot.overrides.projectRoot || '').trim() || useProjectStore.getState().root
+  // Coordinator snapshot is authoritative for project identity and runner selection.
+  const projectRoot = snapshot.overrides.projectRoot?.trim() || ''
   const agent = useAgentStore.getState()
 
-  // Runner is fixed on the snapshot (thread.runner only as legacy fallback).
-  const runner: ThreadRunner = snapshot.runner || thread?.runner || 'builtin'
+  const runner: ThreadRunner = snapshot.runner
   const mentioned = parseRegistryMentions(raw)
   const legacy = parseSubagentMentions(raw)
   const subId = mentioned.subagents[0] || legacy.subagents[0]
@@ -289,7 +226,6 @@ export async function dispatchThreadTask(
       eventTrigger: snapshot.overrides.eventTrigger,
       nextState: snapshot.overrides.nextState,
       webhookTarget: snapshot.overrides.webhookTarget,
-      deferFinalization: snapshot.overrides.deferFinalization === true,
     })
     const a =
       useAgentStore.getState().getRunState(snapshot.runId) || useAgentStore.getState().agent
@@ -369,7 +305,6 @@ export async function dispatchThreadTask(
       : snapshot.overrides.userAttachments,
     runId: snapshot.runId,
     threadId: tid || snapshot.threadId,
-    deferFinalization: snapshot.overrides.deferFinalization === true,
   }
 
   // Pin loop only when the snapshot (or thread) explicitly set one.

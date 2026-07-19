@@ -4,8 +4,10 @@ import type { AgentMode, ExecutionStatus, ExternalRunRef, LoopType } from '../ag
 import type { ChatAttachment } from '../agent/types'
 import { sanitizeAttachmentsForStorage } from '../lib/chatAttachments'
 import type { ContinueGoalSnapshot } from '../agent/continueGoal'
+import { recordRecoveryNotice } from '../agent/runJournal.ts'
 
 const KEY = 'subagents.threads.v5'
+const BACKUP_KEY = `${KEY}.backup`
 
 /** builtin = 內建 engine；其餘 = 本機 CLI 訂閱 */
 export type ThreadRunner = 'builtin' | 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
@@ -237,6 +239,8 @@ function uid() {
 
 function persist(threads: Thread[], activeId: string | null) {
   try {
+    const current = localStorage.getItem(KEY)
+    if (current) localStorage.setItem(BACKUP_KEY, current)
     localStorage.setItem(KEY, JSON.stringify({ threads, activeId }))
   } catch {
     /* ignore */
@@ -306,22 +310,53 @@ function migrateThread(raw: Record<string, unknown>): Thread {
 }
 
 function load(): { threads: Thread[]; activeId: string | null } {
-  try {
-    for (const k of [KEY, 'subagents.threads.v3', 'subagents.threads.v2']) {
-      const raw = localStorage.getItem(k)
-      if (!raw) continue
+  const parse = (raw: string | null) => {
+    if (!raw) return null
+    try {
       const data = JSON.parse(raw) as { threads?: unknown[]; activeId?: string | null }
-      if (!Array.isArray(data.threads)) continue
-      const threads = data.threads.map((t) => migrateThread(t as Record<string, unknown>))
+      if (!Array.isArray(data.threads)) return null
       return {
-        threads,
+        threads: data.threads.map((t) => migrateThread(t as Record<string, unknown>)),
         activeId: data.activeId ?? null,
       }
+    } catch {
+      return null
     }
-    return { threads: [], activeId: null }
-  } catch {
-    return { threads: [], activeId: null }
   }
+  try {
+    const primaryRaw = localStorage.getItem(KEY)
+    const primary = parse(primaryRaw)
+    if (primary) return primary
+    if (primaryRaw) {
+      const backupRaw = localStorage.getItem(BACKUP_KEY)
+      const backup = parse(backupRaw)
+      if (backup && backupRaw) {
+        localStorage.setItem(KEY, backupRaw)
+        recordRecoveryNotice({
+          kind: 'storage',
+          id: KEY,
+          action: 'restored',
+          detail: '對話狀態已從最後一份有效備份復原。',
+        })
+        return backup
+      }
+      localStorage.setItem(`${KEY}.corrupt.${Date.now()}`, primaryRaw.slice(0, 1_000_000))
+      localStorage.removeItem(KEY)
+      recordRecoveryNotice({
+        kind: 'storage',
+        id: KEY,
+        action: 'quarantined',
+        detail: '對話狀態損壞，已隔離損壞副本並保留目前可讀資料。',
+      })
+    }
+    for (const k of ['subagents.threads.v3', 'subagents.threads.v2']) {
+      const legacy = parse(localStorage.getItem(k))
+      if (legacy) return legacy
+    }
+  } catch {
+    /* localStorage may be unavailable in a restricted browser */
+  }
+  return { threads: [], activeId: null }
 }
 
 function titleFromText(text: string) {

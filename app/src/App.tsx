@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { ProtocolsPage } from './pages/ProtocolsPage'
@@ -32,15 +32,21 @@ import type { ScheduledJob } from './agent/types'
 import { createScheduleTriggerSnapshot } from './agent/scheduler'
 import { scheduleSkillCurator } from './agent/hermes/curator'
 import { scheduleDreamConsolidation } from './agent/hermes/dream'
+import {
+  completeStartupRecovery,
+  waitForStartupRecovery,
+} from './agent/runJournal.ts'
+import { applyRendererStorageSnapshot } from './agent/updateMigration'
+import { compareVersions } from './agent/updateContracts'
 
 /** Restore automation queue from disk and drain when capacity is available */
 function RunQueueBootstrap() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const { hydrateRunQueue, queueLength, drainExternalRunQueue } = await import(
-        './agent/runQueue'
-      )
+      await waitForStartupRecovery()
+      if (cancelled) return
+      const { hydrateRunQueue, queueLength, drainExternalRunQueue } = await import('./agent/runQueue')
       const n = hydrateRunQueue()
       if (n > 0) {
         void window.subagents?.notify?.(
@@ -48,20 +54,256 @@ function RunQueueBootstrap() {
           `已恢復 ${n} 筆待跑自動化任務`,
         )
       }
-      // Let schedule/settings hydrate first
-      await new Promise((r) => setTimeout(r, 900))
-      if (cancelled) return
-      if (queueLength() === 0 || !useAgentStore.getState().canStartRun().allowed) return
-      const { runTask } = await import('./agent/taskRunCoordinator')
-      await drainExternalRunQueue((o) =>
-        runTask({ ...o, _fromQueue: true }),
-      )
+      // Let schedule/settings hydrate first, then retry transient capacity
+      // reservations instead of abandoning a durable queued item forever.
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        await new Promise((r) => setTimeout(r, attempt === 0 ? 900 : 500))
+        if (cancelled || queueLength() === 0) return
+        if (!useAgentStore.getState().canStartRun().allowed) continue
+        const { runTask } = await import('./agent/taskRunCoordinator')
+        await drainExternalRunQueue((o) => runTask({ ...o, _fromQueue: true }))
+        return
+      }
     })()
     return () => {
       cancelled = true
     }
   }, [])
   return null
+}
+
+/** Reconcile durable run markers before schedulers/queues are allowed to drain. */
+function RecoveryBootstrap() {
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      let journal: typeof import('./agent/runJournal.ts') | undefined
+      try {
+        const loaded = await import('./agent/runJournal.ts')
+        journal = loaded
+      // A successful installer restart replays the bounded renderer snapshot
+      // before any store hydrates, then marks the transaction complete.
+      const migration = await window.subagents?.updates?.pendingMigration?.()
+      const migrationState = migration?.state as { manifest?: { version?: string } } | undefined
+      const runningVersion = await window.subagents?.version?.()
+      const targetVersion = migrationState?.manifest?.version
+      const installerDidNotAdvance = Boolean(targetVersion && runningVersion && compareVersions(runningVersion, targetVersion) < 0)
+      if (migration?.ok && migration.snapshot?.rendererStorage && !installerDidNotAdvance) {
+        replaceRendererStorage(migration.snapshot.rendererStorage)
+        const migratedRoot = migration.snapshot.rendererStorage['subagents.project.root.v1']
+        if (migratedRoot) {
+          await useProjectStore.getState().setRoot(migratedRoot)
+          await window.subagents?.project?.setActiveRoot?.(migratedRoot)
+        }
+        await window.subagents?.updates?.completeMigration?.(migration.snapshot)
+        journal.recordRecoveryNotice({ kind: 'storage', id: 'update-migration', action: 'resume-once', detail: '已套用 N-1→N migration snapshot，保留本機 threads/settings/queue/projects/Artifact Index。' })
+      } else if (migration?.ok && migration.snapshot && installerDidNotAdvance) {
+        const rollback = await window.subagents?.updates?.rollback?.()
+        if (rollback?.ok && rollback.snapshot?.rendererStorage) {
+          replaceRendererStorage(rollback.snapshot.rendererStorage)
+          const restoredRoot = rollback.snapshot.rendererStorage['subagents.project.root.v1']
+          if (restoredRoot) {
+            await useProjectStore.getState().setRoot(restoredRoot)
+            await window.subagents?.project?.setActiveRoot?.(restoredRoot)
+          }
+          await window.subagents?.updates?.completeMigration?.(rollback.snapshot)
+        }
+        journal.recordRecoveryNotice({ kind: 'storage', id: 'update-migration', action: rollback?.ok ? 'restored' : 'quarantined', detail: rollback?.ok ? '安裝程式未完成版本切換，已自動回復 N-1 migration snapshot。' : '安裝程式未完成版本切換，migration 回復失敗；目前版本仍可啟動。' })
+      }
+        const queue = await import('./agent/runQueue')
+      const { useThreadStore } = await import('./store/threadStore')
+      // Hydrate the visible thread before applying interrupted status so a
+      // crash cannot silently turn the user's history into a blank thread.
+      useThreadStore.getState().hydrate()
+      const journalReport = journal.reconcileStartup()
+      const hasRunRecovery = (journalReport?.items || []).some(
+        (item) => item.kind === 'run' && item.action === 'marked-interrupted',
+      )
+
+      // A legacy/partially-written journal may be absent while the persisted
+      // thread still says running; reconcile that visible state as a fallback.
+      const threadStore = useThreadStore.getState()
+      for (const thread of threadStore.threads) {
+        if (thread.lastStatus !== 'running') continue
+        threadStore.setThreadStatus(thread.id, 'interrupted')
+        if (!hasRunRecovery) {
+          journal.recordRecoveryNotice({
+            kind: 'run',
+            id: thread.id,
+            previousStatus: 'running',
+            action: 'marked-interrupted',
+            detail: '對話狀態顯示執行中，但沒有可用的 journal marker。',
+          })
+        }
+      }
+
+      const restoredQueue = queue.hydrateRunQueue()
+      if (restoredQueue > 0) {
+        journal.recordRecoveryNotice({
+          kind: 'queue',
+          id: 'startup',
+          action: 'resume-once',
+          detail: `已恢復 ${restoredQueue} 筆待跑工作；每筆 runId 只允許補跑一次。`,
+        })
+      }
+
+      // Scheduler storage is main-process backed in Electron. Mark jobs that
+      // were running during termination interrupted before the ticker starts.
+      const schedule = useScheduleStore.getState()
+      await schedule.load()
+      const loadedJobs = useScheduleStore.getState().jobs
+      const recoveredScheduleIds = new Set(
+        (journalReport?.items || [])
+          .filter((item) => item.kind === 'schedule' && item.action === 'marked-interrupted')
+          .map((item) => item.id),
+      )
+      const queuedScheduleItems = new Map(
+        queue
+          .listQueuedRuns()
+          .filter((item) => item.meta?.scheduleJobId)
+          .map((item) => [item.meta!.scheduleJobId!, item]),
+      )
+      for (const job of loadedJobs) {
+        const hadRecoveredMarker = recoveredScheduleIds.has(job.id)
+        if (job.lastStatus !== 'running' && !hadRecoveredMarker) continue
+        const queued = queuedScheduleItems.get(job.id)
+        try {
+          await schedule.markJobResult(job.id, 'interrupted')
+        } catch (error) {
+          journal.recordRecoveryNotice({
+            kind: 'storage',
+            id: job.id,
+            previousStatus: 'running',
+            action: 'quarantined',
+            detail: `排程復原寫入失敗，已停止自動補跑：${error instanceof Error ? error.message : String(error)}`.slice(0, 300),
+          })
+          continue
+        }
+        if (queued && queued.meta?.scheduleTriggeredAt === job.lastRunAt) {
+          // The queue still owns the claimed trigger. Re-bind the job to
+          // running so trigger validation accepts exactly one safe drain.
+          await schedule.markJobResult(job.id, 'running')
+          journal.recordRecoveryNotice({
+            kind: 'schedule',
+            id: job.id,
+            previousStatus: 'interrupted',
+            action: 'resume-once',
+            detail: `排程「${job.name.slice(0, 80)}」仍由佇列持有，啟動時只補跑一次。`,
+          })
+        } else if (queued) {
+          queue.removeQueuedRun(queued.id)
+          journal.recordRecoveryNotice({
+            kind: 'queue',
+            id: queued.id,
+            action: 'quarantined',
+            detail: '排程 trigger 與已儲存 job 不一致，已停止不安全補跑。',
+          })
+        } else if (!hadRecoveredMarker) {
+          journal.recordRecoveryNotice({
+            kind: 'schedule',
+            id: job.id,
+            previousStatus: 'running',
+            action: 'marked-interrupted',
+            detail: `排程「${job.name.slice(0, 80)}」在程序中斷時仍為 running。`,
+          })
+        }
+      }
+      const loadedJobIds = new Set(loadedJobs.map((job) => job.id))
+      for (const [jobId, queued] of queuedScheduleItems) {
+        if (loadedJobIds.has(jobId)) continue
+        queue.removeQueuedRun(queued.id)
+        journal.recordRecoveryNotice({
+          kind: 'queue',
+          id: queued.id,
+          action: 'quarantined',
+          detail: `找不到排程 ${jobId}，已停止不安全補跑並等待使用者處理。`,
+        })
+      }
+
+      if (cancelled) return
+      const reports = journal.consumeRecoveryReports()
+      const items = reports.flatMap((report) => report.items)
+      if (!items.length) return
+      const activeId = useThreadStore.getState().activeId
+      if (activeId) {
+        const detail = items
+          .slice(-12)
+          .map((item) => `${item.action} · ${item.kind}/${item.id}${item.detail ? ` · ${item.detail}` : ''}`)
+          .join('\n')
+        useThreadStore.getState().pushBubble(
+          activeId,
+          'system',
+          `啟動復原報告（${items.length} 項）\n${detail}`,
+        )
+      }
+      void window.subagents?.notify?.(
+        'SubAgents AI · 啟動復原',
+        `${items.length} 項本機狀態已標記為中斷或安全補跑。`,
+      )
+      } catch (error) {
+        const detail = `啟動復原未完整完成，已停止隱性重跑：${error instanceof Error ? error.message : String(error)}`.slice(0, 300)
+        journal?.recordRecoveryNotice({
+          kind: 'storage',
+          id: 'startup-recovery',
+          action: 'quarantined',
+          detail,
+        })
+        const { useThreadStore } = await import('./store/threadStore')
+        const activeId = useThreadStore.getState().activeId
+        if (activeId) {
+          useThreadStore.getState().pushBubble(activeId, 'system', `啟動復原報告（失敗）\n${detail}`)
+        }
+        void window.subagents?.notify?.('SubAgents AI · 啟動復原', detail)
+      } finally {
+        completeStartupRecovery()
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return null
+}
+
+/** Keep route/store side effects out of the tree until recovery has settled. */
+function StartupGate({ children }: { children: ReactNode }) {
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void waitForStartupRecovery().then(() => {
+      if (!cancelled) setReady(true)
+    })
+    return () => { cancelled = true }
+  }, [])
+  return ready ? <>{children}</> : null
+}
+
+/** Replace app-owned storage with a recoverable write path on quota errors. */
+function replaceRendererStorage(snapshot: Record<string, string>) {
+  const current: Record<string, string> = {}
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i)
+    if (key) {
+      const value = localStorage.getItem(key)
+      if (value != null) current[key] = value
+    }
+  }
+  const restored = applyRendererStorageSnapshot(current, snapshot)
+  try {
+    for (const key of Object.keys(current)) localStorage.removeItem(key)
+    for (const [key, value] of Object.entries(restored)) localStorage.setItem(key, value)
+  } catch (error) {
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+        const key = localStorage.key(i)
+        if (key) localStorage.removeItem(key)
+      }
+      for (const [key, value] of Object.entries(current)) localStorage.setItem(key, value)
+    } catch {
+      /* The outer recovery handler records the failure; never hide it. */
+    }
+    throw error
+  }
 }
 
 /** Trigger Hermes Skill Curator from idle transitions, never from a second cron. */
@@ -71,11 +313,15 @@ function SkillCuratorBootstrap() {
   const settings = useSettingsStore((s) => s.settings)
 
   useEffect(() => {
-    if (!isRunning) {
+    let cancelled = false
+    void (async () => {
+      await waitForStartupRecovery()
+      if (cancelled || isRunning) return
       scheduleSkillCurator(settings)
       // G6 dream:閒置時整併機器寫入記憶(gate:≥4h 且新條目 ≥3)
       scheduleDreamConsolidation(settings)
-    }
+    })()
+    return () => { cancelled = true }
   }, [isRunning, skillCount, settings])
 
   return null
@@ -88,11 +334,22 @@ function SchedulerBootstrap() {
   const markJobResult = useScheduleStore((s) => s.markJobResult)
 
   useEffect(() => {
-    void load()
+    let cancelled = false
+    void (async () => {
+      await waitForStartupRecovery()
+      if (!cancelled) await load()
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [load])
 
   useEffect(() => {
-    const onDue = (job: ScheduledJob) => {
+    let cancelled = false
+    const start = async () => {
+      await waitForStartupRecovery()
+      if (cancelled) return undefined
+      const onDue = (job: ScheduledJob) => {
       void (async () => {
         const scheduleTrigger = createScheduleTriggerSnapshot(job)
         await markJobResult(job.id, 'running')
@@ -159,9 +416,16 @@ function SchedulerBootstrap() {
         // onSettled already called settleJob — do not double-mark
       })()
     }
-
-    const stop = startTicker(onDue)
-    return stop
+      return startTicker(onDue)
+    }
+    let stop: (() => void) | undefined
+    void start().then((cleanup) => {
+      stop = cleanup
+    })
+    return () => {
+      cancelled = true
+      stop?.()
+    }
   }, [startTicker, markJobResult, navigate])
 
   return null
@@ -176,13 +440,23 @@ function WebhookBootstrap() {
   const settings = useSettingsStore((s) => s.settings)
 
   useEffect(() => {
-    void load()
+    let cancelled = false
+    void (async () => {
+      await waitForStartupRecovery()
+      if (!cancelled) await load()
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [load])
 
   // Auto-start / stop webhook when settings say so (after load)
   useEffect(() => {
     if (!window.subagents?.webhook) return
+    let cancelled = false
     void (async () => {
+      await waitForStartupRecovery()
+      if (cancelled) return
       if (settings.webhookEnabled) {
         try {
           await window.subagents!.webhook!.start({
@@ -201,11 +475,17 @@ function WebhookBootstrap() {
         }
       }
     })()
+    return () => { cancelled = true }
   }, [settings.webhookEnabled, settings.webhookPort, settings.webhookToken])
 
   useEffect(() => {
     if (!window.subagents?.webhook?.onEvent) return
-    const unsub = window.subagents.webhook.onEvent((payload) => {
+    let cancelled = false
+    let unsub: (() => void) | undefined
+    void (async () => {
+      await waitForStartupRecovery()
+      if (cancelled) return
+      unsub = window.subagents?.webhook?.onEvent?.((payload) => {
       const matched = matchEventEvidence({
         source: payload.source || 'webhook.http',
         subject: payload.subject,
@@ -258,9 +538,11 @@ function WebhookBootstrap() {
           )
         }
       })()
-    })
+      })
+    })()
     return () => {
-      unsub()
+      cancelled = true
+      unsub?.()
     }
   }, [matchEventEvidence, recordEventTrigger, navigate])
 
@@ -277,7 +559,13 @@ function MonitorBootstrap() {
   useEffect(() => {
     const monitorApi = window.subagents?.monitor
     if (!monitorApi?.onEvent) return
-    const unsubEvent = monitorApi.onEvent((payload) => {
+    let cancelled = false
+    let unsubEvent: (() => void) | undefined
+    let unsubStopped: (() => void) | undefined
+    void (async () => {
+      await waitForStartupRecovery()
+      if (cancelled) return
+      unsubEvent = monitorApi.onEvent((payload) => {
       const matched = matchEventEvidence({
         source: 'monitor',
         subject: payload.description,
@@ -303,17 +591,19 @@ function MonitorBootstrap() {
           extraContext: `Monitor: ${payload.description}\nLine: ${payload.line}`.slice(0, 4000),
         })
       })()
-    })
-    const unsubStopped = monitorApi.onStopped?.((payload) => {
+      })
+      unsubStopped = monitorApi.onStopped?.((payload) => {
       if (payload.reason === 'volume' || payload.reason === 'error') {
         void window.subagents?.notify?.(
           'SubAgents AI · Monitor',
           `monitor ${payload.description} 已停止（${payload.reason}）${payload.detail ? `：${payload.detail.slice(0, 100)}` : ''}`,
         )
       }
-    })
+      })
+    })()
     return () => {
-      unsubEvent()
+      cancelled = true
+      unsubEvent?.()
       unsubStopped?.()
     }
   }, [matchEventEvidence, recordEventTrigger, navigate])
@@ -328,14 +618,26 @@ function GatewayBootstrap() {
   const refreshStatus = useGatewayStore((s) => s.refreshStatus)
 
   useEffect(() => {
-    return startBackgroundJobSubscription()
+    let cancelled = false
+    let cleanup: (() => void) | undefined
+    void (async () => {
+      await waitForStartupRecovery()
+      if (!cancelled) cleanup = startBackgroundJobSubscription()
+    })()
+    return () => {
+      cancelled = true
+      cleanup?.()
+    }
   }, [])
 
   // Auto-start telegram from settings
   useEffect(() => {
     const gw = window.subagents?.gateway
     if (!gw) return
+    let cancelled = false
     void (async () => {
+      await waitForStartupRecovery()
+      if (cancelled) return
       if (settings.telegramEnabled && settings.telegramBotToken) {
         try {
           await gw.telegramStart({
@@ -354,6 +656,7 @@ function GatewayBootstrap() {
       }
       await refreshStatus()
     })()
+    return () => { cancelled = true }
   }, [
     settings.telegramEnabled,
     settings.telegramBotToken,
@@ -363,7 +666,12 @@ function GatewayBootstrap() {
 
   useEffect(() => {
     if (!window.subagents?.gateway?.onInbound) return
-    const unsub = window.subagents.gateway.onInbound((msg) => {
+    let cancelled = false
+    let unsub: (() => void) | undefined
+    void (async () => {
+      await waitForStartupRecovery()
+      if (cancelled) return
+      unsub = window.subagents?.gateway?.onInbound?.((msg) => {
       pushInbound(msg)
 
       const text = (msg.text || '').trim()
@@ -454,9 +762,11 @@ function GatewayBootstrap() {
         }
         // Non-queued: onSettled already sent telegram reply when enabled
       })()
-    })
+      })
+    })()
     return () => {
-      unsub()
+      cancelled = true
+      unsub?.()
     }
   }, [pushInbound, navigate])
 
@@ -574,8 +884,15 @@ function PluginTokenRefreshBootstrap() {
 
   useEffect(() => {
     if (!loaded) return
-    start()
-    return () => stop()
+    let cancelled = false
+    void (async () => {
+      await waitForStartupRecovery()
+      if (!cancelled) start()
+    })()
+    return () => {
+      cancelled = true
+      stop()
+    }
   }, [loaded, start, stop])
 
   return null
@@ -585,11 +902,19 @@ function PluginTokenRefreshBootstrap() {
 function PluginProjectRebindBootstrap() {
   const rebind = useLearningStore((s) => s.rebindPluginProjectRoots)
   useEffect(() => {
-    return useProjectStore.subscribe((s, prev) => {
-      if (s.root && s.root !== prev.root) {
-        void rebind(s.root)
-      }
-    })
+    let cancelled = false
+    let unsubscribe: (() => void) | undefined
+    void (async () => {
+      await waitForStartupRecovery()
+      if (cancelled) return
+      unsubscribe = useProjectStore.subscribe((s, prev) => {
+        if (s.root && s.root !== prev.root) void rebind(s.root)
+      })
+    })()
+    return () => {
+      cancelled = true
+      unsubscribe?.()
+    }
   }, [rebind])
   return null
 }
@@ -599,63 +924,75 @@ export default function App() {
   const loadLearning = useLearningStore((s) => s.load)
 
   useEffect(() => {
-    void loadSettings()
-    void loadLearning()
-    // OpenCode config merge (opencode.json + agents/*.md)
-    void import('./store/opencodeConfigStore').then(({ useOpenCodeConfigStore }) => {
-      void useOpenCodeConfigStore.getState().hydrate()
-    })
-    void import('./store/projectStore').then(({ useProjectStore }) => {
-      // re-hydrate when project root changes
-      useProjectStore.subscribe((s, prev) => {
-        if (s.root !== prev.root) {
-          void import('./store/opencodeConfigStore').then(({ useOpenCodeConfigStore }) => {
-            void useOpenCodeConfigStore.getState().hydrate(s.root)
-          })
-        }
+    let cancelled = false
+    void (async () => {
+      // RecoveryBootstrap applies a pending N-1→N renderer snapshot first.
+      // Do not hydrate settings/learning from the pre-migration module cache.
+      await waitForStartupRecovery()
+      if (cancelled) return
+      await loadSettings()
+      await loadLearning()
+      if (cancelled) return
+      // OpenCode config merge (opencode.json + agents/*.md)
+      void import('./store/opencodeConfigStore').then(({ useOpenCodeConfigStore }) => {
+        void useOpenCodeConfigStore.getState().hydrate()
       })
-    })
+      void import('./store/projectStore').then(({ useProjectStore }) => {
+        // re-hydrate when project root changes
+        useProjectStore.subscribe((s, prev) => {
+          if (s.root !== prev.root) {
+            void import('./store/opencodeConfigStore').then(({ useOpenCodeConfigStore }) => {
+              void useOpenCodeConfigStore.getState().hydrate(s.root)
+            })
+          }
+        })
+      })
+    })()
+    return () => { cancelled = true }
   }, [loadSettings, loadLearning])
 
   return (
     <HashRouter>
-      <PreferencesBootstrap />
-      <RunQueueBootstrap />
-      <SkillCuratorBootstrap />
-      <SchedulerBootstrap />
-      <WebhookBootstrap />
-      <MonitorBootstrap />
-      <GatewayBootstrap />
-      <PluginTokenRefreshBootstrap />
-      <PluginProjectRebindBootstrap />
-      <PermissionAskModal />
-      <QuestionAskModal />
-      <Routes>
-        <Route element={<Layout />}>
-          <Route index element={<ProtocolsPage />} />
-          <Route path="subdesign/:briefId?" element={<SubDesignPage />} />
-          <Route path="design-systems/create" element={<DesignSystemCreatePage />} />
-          <Route path="design-systems/:id" element={<DesignSystemDetailPage />} />
-          <Route path="design-systems" element={<DesignSystemsPage />} />
-          <Route path="dashboard" element={<DashboardPage />} />
-          <Route path="automation" element={<AutomationPage />} />
-          <Route path="content-publishing" element={<ContentPublishingPage />} />
-          <Route path="docs" element={<DocsPage />} />
-          <Route path="records" element={<RecordsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="workspace" element={<Navigate to="/" replace />} />
-          <Route path="learning" element={<LearningPage />} />
-          <Route path="execution" element={<ExecutionPage />} />
-          <Route path="knowledge" element={<KnowledgePage />} />
-          <Route path="success" element={<SuccessPage />} />
-          <Route path="failed" element={<FailedPage />} />
-          <Route path="scheduler" element={<Navigate to="/automation" replace />} />
-          <Route path="events" element={<Navigate to="/automation?tab=events" replace />} />
-          <Route path="archive" element={<Navigate to="/records" replace />} />
-          <Route path="logs" element={<Navigate to="/records?tab=logs" replace />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
+      <RecoveryBootstrap />
+      <StartupGate>
+        <PreferencesBootstrap />
+        <RunQueueBootstrap />
+        <SkillCuratorBootstrap />
+        <SchedulerBootstrap />
+        <WebhookBootstrap />
+        <MonitorBootstrap />
+        <GatewayBootstrap />
+        <PluginTokenRefreshBootstrap />
+        <PluginProjectRebindBootstrap />
+        <PermissionAskModal />
+        <QuestionAskModal />
+        <Routes>
+          <Route element={<Layout />}>
+            <Route index element={<ProtocolsPage />} />
+            <Route path="subdesign/:briefId?" element={<SubDesignPage />} />
+            <Route path="design-systems/create" element={<DesignSystemCreatePage />} />
+            <Route path="design-systems/:id" element={<DesignSystemDetailPage />} />
+            <Route path="design-systems" element={<DesignSystemsPage />} />
+            <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="automation" element={<AutomationPage />} />
+            <Route path="content-publishing" element={<ContentPublishingPage />} />
+            <Route path="docs" element={<DocsPage />} />
+            <Route path="records" element={<RecordsPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="workspace" element={<Navigate to="/" replace />} />
+            <Route path="learning" element={<LearningPage />} />
+            <Route path="execution" element={<ExecutionPage />} />
+            <Route path="knowledge" element={<KnowledgePage />} />
+            <Route path="success" element={<SuccessPage />} />
+            <Route path="failed" element={<FailedPage />} />
+            <Route path="scheduler" element={<Navigate to="/automation" replace />} />
+            <Route path="events" element={<Navigate to="/automation?tab=events" replace />} />
+            <Route path="archive" element={<Navigate to="/records" replace />} />
+            <Route path="logs" element={<Navigate to="/records?tab=logs" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </StartupGate>
     </HashRouter>
   )
 }

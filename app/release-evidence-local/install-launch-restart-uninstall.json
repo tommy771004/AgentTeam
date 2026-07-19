@@ -1,0 +1,26 @@
+{
+  "platform": "windows",
+  "installer": "D:\\Project\\github\\AgentTeam\\app\\release\\SubAgents AI Setup 1.0.0.exe",
+  "executable": "C:\\Users\\Tommy\\AppData\\Local\\Temp\\subagents-ai-install-26964\\SubAgents AI.exe",
+  "launches": [
+    {
+      "attempt": 1
+    },
+    {
+      "attempt": 2
+    }
+  ],
+  "firstTask": {
+    "objective": "Smoke first task.",
+    "resultVisible": true,
+    "diffVisible": true,
+    "firstTaskThreadBytes": 2321,
+    "settingsPersisted": true,
+    "restartedThreadBytes": 2321,
+    "platform": "windows"
+  },
+  "uninstall": {
+    "status": 0,
+    "removed": true
+  }
+}

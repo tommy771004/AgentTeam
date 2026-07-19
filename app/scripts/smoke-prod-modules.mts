@@ -41,6 +41,12 @@ import {
   runTask,
 } from '../src/agent/taskRunCoordinator.ts'
 import {
+  clearRunQueue,
+  enqueueExternalRun,
+  listQueuedRuns,
+  removeQueuedRun,
+} from '../src/agent/runQueue.ts'
+import {
   buildContextPacket,
   formatSessionRecallBlock,
 } from '../src/agent/hermes/contextPacket.ts'
@@ -279,6 +285,61 @@ await test('runTask rejects a re-entrant runId before a second dispatch', async 
   // intentionally does not resolve; the assertion above is synchronous at the
   // public seam and does not need the first run's browser-only execution.
   await first.catch(() => undefined)
+})
+
+await test('run queue settles every cancelled item through one result contract', async () => {
+  clearRunQueue()
+  const settled: Array<{ runId?: string; skipped?: boolean; skipReason?: string }> = []
+  for (const runId of ['run_queue_clear_1', 'run_queue_clear_2']) {
+    enqueueExternalRun({
+      objective: `queued ${runId}`,
+      runId,
+      onSettled: async (result) => {
+        settled.push(result)
+      },
+    })
+  }
+
+  assert.equal(clearRunQueue(), 2)
+  await Promise.resolve()
+  assert.equal(listQueuedRuns().length, 0)
+  assert.deepEqual(
+    settled.map((result) => result.runId).sort(),
+    ['run_queue_clear_1', 'run_queue_clear_2'],
+  )
+  assert.ok(settled.every((result) => result.skipped === true))
+  assert.ok(settled.every((result) => result.skipReason === 'cancelled'))
+
+  let removedRunId: string | undefined
+  const removable = enqueueExternalRun({
+    objective: 'queued removal',
+    runId: 'run_queue_remove',
+    onSettled: (result) => {
+      removedRunId = result.runId
+    },
+  })
+  assert.ok(removable)
+  assert.equal(removeQueuedRun(removable.id), true)
+  await Promise.resolve()
+  assert.equal(removedRunId, 'run_queue_remove')
+
+  let unhandledRejection = false
+  const captureUnhandled = () => {
+    unhandledRejection = true
+  }
+  process.once('unhandledRejection', captureUnhandled)
+  const rejecting = enqueueExternalRun({
+    objective: 'queued rejecting callback',
+    runId: 'run_queue_rejecting_callback',
+    onSettled: async () => {
+      throw new Error('expected settlement callback failure')
+    },
+  })
+  assert.ok(rejecting)
+  assert.equal(removeQueuedRun(rejecting.id), true)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  process.removeListener('unhandledRejection', captureUnhandled)
+  assert.equal(unhandledRejection, false)
 })
 
 await test('SubDesign workspace derives stage and gate presentation from canonical state', () => {

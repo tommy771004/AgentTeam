@@ -37,6 +37,8 @@ import { useGatewayStore } from '../store/gatewayStore'
 import { useOpenCodeConfigStore } from '../store/opencodeConfigStore'
 import { useProjectStore } from '../store/projectStore'
 import { getLiveSlashCommands } from '../commands/registry'
+import { applyRendererStorageSnapshot } from '../agent/updateMigration'
+import { bundleSensitivityNotice } from '../agent/settingsExport'
 import {
   eventToChord,
   formatChord,
@@ -84,6 +86,7 @@ const SECTIONS = [
   { id: 'gateway', label: '訊息閘道', icon: 'forum', group: 'integrate' },
   { id: 'mcp', label: 'MCP 伺服器', icon: 'extension', group: 'integrate' },
   { id: 'oauth', label: '外掛 OAuth', icon: 'key', group: 'integrate' },
+  { id: 'updates', label: '安全更新', icon: 'system_update', group: 'system' },
   { id: 'bundle', label: '匯出匯入', icon: 'import_export', group: 'system' },
 ]
 
@@ -156,6 +159,10 @@ const SECTION_META: Record<string, { title: string; subtitle: string }> = {
     title: '匯出匯入',
     subtitle: '設定、排程與事件規則備份（含 API 金鑰，請妥善保管）。',
   },
+  updates: {
+    title: '安全更新',
+    subtitle: '只接受簽章 Beta manifest；下載後會先驗證雜湊與簽章，再建立可回復的資料 migration snapshot。',
+  },
 }
 
 export function SettingsPage() {
@@ -199,6 +206,16 @@ export function SettingsPage() {
   const [customToolsDraft, setCustomToolsDraft] = useState('')
   const [customToolsError, setCustomToolsError] = useState<string | null>(null)
   const [oauthRefreshMsg, setOauthRefreshMsg] = useState<string | null>(null)
+  const [updateState, setUpdateState] = useState<{
+    status: string
+    currentVersion: string
+    manifest?: { version: string; mandatory: boolean; releaseNotes: string }
+    progress: number
+    deferredUntil?: string
+    lastError?: string
+  } | null>(null)
+  const [updateMsg, setUpdateMsg] = useState<string | null>(null)
+  const [updateProgress, setUpdateProgress] = useState(0)
   const refreshPluginTokens = useLearningStore((s) => s.refreshPluginTokens)
   // Recompute secret key list when plugins change
   const pluginsTick = useLearningStore((s) => s.plugins)
@@ -381,6 +398,121 @@ export function SettingsPage() {
     [settings.model, settings.roleModels?.orchestrator],
   )
 
+  useEffect(() => {
+    const api = window.subagents?.updates
+    if (!api) return
+    let disposed = false
+    void api.state().then((state) => {
+      if (!disposed) setUpdateState(state)
+    })
+    const unsubscribe = api.onProgress?.(({ progress }) => {
+      if (!disposed) setUpdateProgress(progress)
+    })
+    return () => {
+      disposed = true
+      unsubscribe?.()
+    }
+  }, [section])
+
+  const checkForUpdate = async () => {
+    if (!window.subagents?.updates) {
+      setUpdateMsg('瀏覽器預覽沒有安全更新通道。')
+      return
+    }
+    setUpdateMsg('正在讀取簽章 Beta manifest…')
+    const result = await window.subagents.updates.check()
+    setUpdateState(result.state as typeof updateState)
+    setUpdateMsg(result.ok ? '已驗證更新 manifest。' : `更新檢查失敗：${result.error || '未知錯誤'}`)
+  }
+
+  const deferCurrentUpdate = async () => {
+    const version = updateState?.manifest?.version
+    if (!version || !window.subagents?.updates) return
+    const result = await window.subagents.updates.defer(version)
+    setUpdateState(result.state as typeof updateState)
+    setUpdateMsg(result.ok ? '已延後 7 天。' : `延後失敗：${result.error || '未知錯誤'}`)
+  }
+
+  const downloadCurrentUpdate = async () => {
+    if (!window.subagents?.updates) return
+    setUpdateProgress(0)
+    setUpdateMsg('下載中，完成後會驗證檔案簽章…')
+    const result = await window.subagents.updates.download()
+    setUpdateState(result.state as typeof updateState)
+    setUpdateMsg(result.ok ? '下載完成，檔案已通過雜湊與簽章驗證。' : `下載失敗：${result.error || '未知錯誤'}`)
+  }
+
+  const installCurrentUpdate = async () => {
+    const api = window.subagents?.updates
+    if (!api) return
+    const rendererStorage: Record<string, string> = {}
+    try {
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i)
+        if (key?.startsWith('subagents.')) {
+          const value = localStorage.getItem(key)
+          if (value != null) rendererStorage[key] = value
+        }
+      }
+    } catch {
+      /* localStorage is optional in browser preview */
+    }
+    const parseStorage = (key: string): unknown => {
+      try {
+        const value = JSON.parse(rendererStorage[key] || '[]')
+        return value
+      } catch {
+        return []
+      }
+    }
+    const snapshot = await api.captureMigration({
+      appVersion: updateState?.currentVersion,
+      rendererStorage,
+      projects: projectRoot ? [{ root: projectRoot }] : [],
+      queue: parseStorage('subagents.runQueue.v1'),
+      // Electron's main process replaces this with authoritative config/jobs.json.
+      schedules: [],
+      artifactIndex: (() => {
+        try { return JSON.parse(rendererStorage['subagents.artifactIndex.v1'] || 'null') } catch { return null }
+      })(),
+    })
+    const result = await api.install(snapshot)
+    setUpdateState(result.state as typeof updateState)
+    setUpdateMsg(result.ok ? '已建立 migration backup，請依安裝程式完成重啟。' : `安裝啟動失敗：${result.error || '未知錯誤'}`)
+  }
+
+  const rollbackCurrentUpdate = async () => {
+    const api = window.subagents?.updates
+    if (!api) return
+    let result: Awaited<ReturnType<typeof api.rollback>>
+    try {
+      result = await api.rollback()
+    } catch (error) {
+      setUpdateMsg(`回復失敗：${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
+    const storage = result.snapshot?.rendererStorage
+    if (result.ok && storage) {
+      try {
+        const current: Record<string, string> = {}
+        for (let i = 0; i < localStorage.length; i += 1) {
+          const key = localStorage.key(i)
+          if (key) {
+            const value = localStorage.getItem(key)
+            if (value != null) current[key] = value
+          }
+        }
+        for (const key of Object.keys(current)) localStorage.removeItem(key)
+        for (const [key, value] of Object.entries(applyRendererStorageSnapshot(current, storage))) localStorage.setItem(key, value)
+      } catch {
+        /* browser preview may not expose localStorage */
+      }
+    }
+    setUpdateState(result.state as typeof updateState)
+    setUpdateMsg(result.ok ? '已回復 migration snapshot；目前版本仍可啟動。' : '找不到可回復的 migration backup。')
+    if (result.ok) window.setTimeout(() => window.location.reload(), 250)
+  }
+
   const meta = SECTION_META[section] || { title: '設定', subtitle: '' }
 
   return (
@@ -511,6 +643,48 @@ export function SettingsPage() {
                 }
               />
             </SettingsGroup>
+          </>
+        )}
+
+        {section === 'updates' && (
+          <>
+            <SettingsGroup title="Beta 更新通道">
+              <SettingsRow
+                title="目前版本"
+                description="僅接受符合目前平台與架構、且版本較新的簽章 manifest。"
+                control={<span className="text-[12px] font-mono text-on-surface-variant">{updateState?.currentVersion || '讀取中…'}</span>}
+              />
+              <SettingsRow
+                title="檢查更新"
+                description="通道與 public key 由安裝環境提供；驗證失敗會 fail closed。"
+                control={<button type="button" className={settingsBtnPrimaryCls} onClick={() => void checkForUpdate()}>檢查</button>}
+              />
+              {updateState?.manifest && (
+                <>
+                  <SettingsStack title={`Beta ${updateState.manifest.version}`} description={updateState.manifest.mandatory ? '必要更新' : '可延後更新'}>
+                    <p className="text-[12px] leading-relaxed text-on-surface-variant whitespace-pre-wrap">{updateState.manifest.releaseNotes}</p>
+                  </SettingsStack>
+                  <SettingsRow
+                    title="下載更新"
+                    description={updateState.status === 'downloaded' ? '檔案已驗證，可開始安裝。' : '下載進度只反映已驗證的 HTTPS artifact。'}
+                    control={
+                      <div className="flex items-center gap-2">
+                        {updateState.status !== 'downloaded' && <button type="button" className={settingsBtnPrimaryCls} onClick={() => void downloadCurrentUpdate()}>下載</button>}
+                        {!updateState.manifest.mandatory && <button type="button" className={settingsBtnCls} onClick={() => void deferCurrentUpdate()}>延後</button>}
+                      </div>
+                    }
+                  />
+                  {updateState.status === 'downloaded' && (
+                    <SettingsRow title="開始安裝" description="會先建立 N-1→N migration backup；安裝失敗可回復。" control={<button type="button" className={settingsBtnPrimaryCls} onClick={() => void installCurrentUpdate()}>安裝並重啟</button>} />
+                  )}
+                  {(updateState.status === 'install-pending' || updateState.status === 'failed') && (
+                    <SettingsRow title="回復 migration" description="安裝器失敗或中斷時，保留目前版本並清除暫存更新檔。" control={<button type="button" className={settingsBtnCls} onClick={() => void rollbackCurrentUpdate()}>回復</button>} />
+                  )}
+                </>
+              )}
+            </SettingsGroup>
+            {(updateMsg || updateState?.lastError) && <p className="px-1 mb-3 text-[12px] text-on-surface-variant">{updateMsg || updateState?.lastError}</p>}
+            {(updateProgress > 0 || updateState?.status === 'downloaded') && <div className="mx-1 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-primary transition-all" style={{ width: `${Math.max(updateProgress, updateState?.status === 'downloaded' ? 100 : 0)}%` }} /></div>}
           </>
         )}
 
@@ -3192,12 +3366,17 @@ export function SettingsPage() {
           <SettingsGroup title="備份">
             <SettingsRow
               title="匯出設定包"
-              description="含設定、排程與事件（含 API 金鑰）"
+              description="含設定、排程與事件；API 金鑰與 token 會自動遮罩"
               control={
                 <button
                   type="button"
                   className={settingsBtnPrimaryCls}
                   onClick={async () => {
+                    // Issue 06 — 匯出前明確同意：說明遮罩範圍與仍包含的敏感 metadata
+                    if (!window.confirm(bundleSensitivityNotice())) {
+                      setBundleMsg('已取消匯出。')
+                      return
+                    }
                     const json = await exportBundle()
                     const blob = new Blob([json], { type: 'application/json' })
                     const url = URL.createObjectURL(blob)

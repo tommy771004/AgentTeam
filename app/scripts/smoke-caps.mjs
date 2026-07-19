@@ -566,7 +566,6 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
   const policy = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunPolicy.ts'), 'utf8')
   const callers = [
     'src/App.tsx',
-    'src/store/agentStore.ts',
     'src/hooks/useSlashExecutor.ts',
     'src/pages/ProtocolsPage.tsx',
     'src/pages/AutomationPage.tsx',
@@ -622,6 +621,52 @@ await test('Task run deepening: coordinator owns orchestration, legacy is compat
   )
 })
 
+await test('Ticket 03: lifecycle-control plumbing is contracted', async () => {
+  const fs = await import('node:fs')
+  const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
+  const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
+  assert.doesNotMatch(types, /deferFinalization/, 'RuntimeOverrides must not expose lifecycle switches')
+  assert.doesNotMatch(coordinator, /deferFinalization/, 'Coordinator snapshot must not carry lifecycle switches')
+  assert.doesNotMatch(dispatch, /deferFinalization/, 'Runner selection must not forward lifecycle switches')
+  assert.doesNotMatch(agent, /deferFinalization/, 'Execution adapters must not declare lifecycle switches')
+  assert.match(dispatch, /dispatchThreadTask\(\s*\n?\s*snapshot:\s*RunDispatchSnapshot/)
+  assert.doesNotMatch(dispatch, /snapshotOrGoal|legacyOpts|run_legacy_/, 'Runner dispatch must not synthesize legacy entry context')
+  assert.doesNotMatch(dispatch, /thr\.activeId|thread\?\.runner|useProjectStore\.getState\(\)\.root/, 'Dispatch must not fall back to mutable UI identity')
+  assert.match(dispatch, /const attachments = snapshot\.attachments/)
+})
+
+await test('Ticket 04: lifecycle ownership drift stays blocked at module seams', async () => {
+  const fs = await import('node:fs')
+  const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  const entryFiles = [
+    'src/App.tsx',
+    'src/hooks/useSlashExecutor.ts',
+    'src/pages/ProtocolsPage.tsx',
+    'src/pages/AutomationPage.tsx',
+    'src/pages/EventsPage.tsx',
+    'src/pages/FailedPage.tsx',
+    'src/pages/LogsPage.tsx',
+    'src/pages/RecordsPage.tsx',
+    'src/pages/SuccessPage.tsx',
+    'src/pages/SubDesignPage.tsx',
+    'src/components/InlineRunPanel.tsx',
+    'src/components/subdesign/CritiqueTheater.tsx',
+    'src/agent/hermes/backgroundJobs.ts',
+  ]
+  for (const file of entryFiles) {
+    const source = fs.readFileSync(path.join(appRoot, file), 'utf8')
+    assert.doesNotMatch(source, /dispatchThreadTask\s*\(/, `${file} must enter through runTask`)
+    assert.doesNotMatch(source, /startExecution\s*\(|startLocalCliExecution\s*\(/, `${file} must not enter a runner adapter directly`)
+  }
+  assert.doesNotMatch(
+    dispatch,
+    /reserveRun\s*\(|releaseRun\s*\(|saveToArchive\s*\(|drainExternalRunQueue|drainQueueAfterRun|deferFinalization/,
+    'runner selection must not own admitted-run lifecycle finalization',
+  )
+})
+
 await test('Phase 3 item 6/7: background delegate links Archive once + hidden worker thread', async () => {
   const fs = await import('node:fs')
   const bg = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
@@ -647,9 +692,10 @@ await test('Phase 3 item 3: runDispatch consumes RunDispatchSnapshot only', asyn
   const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
   assert.match(coordinator, /export type RunDispatchSnapshot/)
   assert.match(coordinator, /export function buildRunDispatchSnapshot/)
-  assert.match(coordinator, /deferFinalization: true/)
+  assert.doesNotMatch(coordinator, /deferFinalization/)
   assert.match(dispatch, /RunDispatchSnapshot/)
-  assert.match(dispatch, /isRunDispatchSnapshot|snapshot\.runId|snapshot\.overrides/)
+  assert.match(dispatch, /dispatchThreadTask\(\s*\n?\s*snapshot:\s*RunDispatchSnapshot/)
+  assert.doesNotMatch(dispatch, /snapshotOrGoal|legacyOpts|run_legacy_/)
   assert.doesNotMatch(dispatch, /canStartRun/)
   assert.doesNotMatch(dispatch, /materializeAttachmentsOnDisk/)
   assert.doesNotMatch(dispatch, /hydrateAttachmentsFromDisk/)
@@ -677,8 +723,8 @@ await test('Phase 3 item 4/5: unique finalization order; stop does not drain', a
   const a5 = coordinator.indexOf('// 5) release capacity')
   const a6 = coordinator.indexOf('// 6) queue drain')
   assert.ok(a2 < a3 && a3 < a4 && a4 < a5 && a5 < a6, 'finalization step comments stay ordered')
-  assert.match(types, /deferFinalization\?: boolean/)
-  assert.match(agent, /deferFinalization/)
+  assert.doesNotMatch(types, /deferFinalization/)
+  assert.doesNotMatch(agent, /deferFinalization/)
   assert.match(agent, /Phase 3 item 5: stop only terminates/)
   assert.doesNotMatch(
     agent.slice(agent.indexOf('stopExecution:'), agent.indexOf('continueTurn:')),
@@ -1476,11 +1522,12 @@ await test('Phase 2d: Next_State is consumed once with explicit webhook delivery
   assert.match(llmParser, /Dispatch Webhook/)
   assert.match(agent, /await consumeNextState/)
   assert.match(agent, /applyPostState/)
-  assert.match(agent, /saveToArchive\(settled/)
+  assert.doesNotMatch(agent, /saveToArchive\(settled/, 'execution adapters must not own Archive finalization')
   // Phase 3 item 4: postState audit bubbles live in coordinator finalization
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(coordinator, /postState\?\.status === 'failed'/)
   assert.match(coordinator, /finalizeTaskRun/)
+  assert.match(coordinator, /saveToArchive\(finalAgent/)
   assert.match(dispatch, /nextState: snapshot\.overrides\.nextState/)
   assert.match(queue, /\| 'nextState'/)
   assert.match(settings, /webhookTarget: ''/)

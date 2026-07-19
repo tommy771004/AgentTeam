@@ -26,7 +26,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
     : `執行過程 · ${summary.operations.length} 項`
 
   return (
-    <section className="w-full overflow-hidden rounded-xl border border-white/8 bg-surface-container/35">
+    <section data-testid="run-summary-card" className="w-full overflow-hidden rounded-xl border border-white/8 bg-surface-container/35">
       <button
         type="button"
         aria-expanded={open}
@@ -186,8 +186,8 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
               </div>
             ) : null}
 
-          {summary.diff ? (
-            <div className="overflow-hidden rounded-xl border border-primary/15 bg-black/10">
+          {summary.diff !== undefined ? (
+            <div data-testid="run-summary-diff" className="overflow-hidden rounded-xl border border-primary/15 bg-black/10">
               <button
                 type="button"
                 aria-expanded={diffOpen}
@@ -199,12 +199,20 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
                 <Icon name={diffOpen ? 'expand_less' : 'expand_more'} size={15} className="shrink-0 text-outline" />
               </button>
               {diffOpen ? (
-                <pre className="max-h-[360px] overflow-auto border-t border-white/8 px-2.5 py-2 text-[11px] leading-relaxed text-on-surface-variant font-[family-name:var(--font-mono)] custom-scrollbar">
-                  {summary.diff}
+                <pre data-testid="run-summary-diff-content" className="max-h-[360px] overflow-auto border-t border-white/8 px-2.5 py-2 text-[11px] leading-relaxed text-on-surface-variant font-[family-name:var(--font-mono)] custom-scrollbar">
+                  {summary.diff || '沒有偵測到工作樹變更。'}
                 </pre>
               ) : null}
             </div>
-          ) : null}
+          ) : (
+            <div data-testid="run-summary-diff-empty" className="overflow-hidden rounded-xl border border-primary/15 bg-black/10">
+              <div className="flex items-center gap-2 px-2.5 py-2 text-left text-[11px] font-medium text-on-surface-variant">
+                <Icon name="difference" size={15} className="shrink-0 text-primary" />
+                <span className="flex-1">檢視 Git Diff</span>
+                <span className="text-outline">沒有偵測到工作樹變更</span>
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
     </section>

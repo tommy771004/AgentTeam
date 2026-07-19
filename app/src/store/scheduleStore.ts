@@ -15,6 +15,7 @@ import {
   jobIsDue,
   parseScheduleFromText,
 } from '../agent/scheduler'
+import { recordScheduleStatus } from '../agent/runJournal.ts'
 
 interface ScheduleStore {
   jobs: ScheduledJob[]
@@ -150,9 +151,24 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
 
   markJobResult: async (id, status) => {
     set({
-      jobs: get().jobs.map((j) => (j.id === id ? { ...j, lastStatus: status } : j)),
+      jobs: get().jobs.map((j) =>
+        j.id === id
+          ? {
+              ...j,
+              lastStatus: status,
+              // An interrupted claim has crossed the trigger boundary; keep
+              // it disabled until the user or a queued trigger explicitly
+              // rebinds it, so restart cannot execute it twice.
+              ...(status === 'interrupted'
+                ? { enabled: false, ...(j.kind === 'once' ? { nextRunAt: null } : {}) }
+                : {}),
+              ...(status === 'running' && j.kind !== 'once' ? { enabled: true } : {}),
+            }
+          : j,
+      ),
       runningJobId: status === 'running' ? id : get().runningJobId === id ? null : get().runningJobId,
     })
+    recordScheduleStatus(id, status)
     await get().persistJobs()
   },
 
@@ -168,6 +184,7 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
       return advanced
     })
     set({ jobs: nextJobs, lastTickAt: now.toISOString() })
+    for (const job of claimed) recordScheduleStatus(job.id, 'running')
     void get().persistJobs()
     return claimed
   },

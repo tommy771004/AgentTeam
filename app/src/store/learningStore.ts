@@ -784,12 +784,30 @@ export const useLearningStore = create<LearningStore>((set, get) => {
         set({ pluginError: '請輸入有效的 token / API key' })
         return
       }
-      await setPluginSecret(id, trimmed, {
+      const secretExtra = {
         refreshToken: extra?.refreshToken,
         expiresIn: extra?.expiresIn,
         tokenType: extra?.tokenType,
         keepRefreshToken: extra?.refreshToken === undefined,
-      })
+      }
+      try {
+        await setPluginSecret(id, trimmed, secretExtra)
+      } catch (e) {
+        // Issue 06 — 無 OS 鑰匙圈：預設拒絕明文落地，明確確認後才重試
+        const err = e as Error & { code?: string }
+        const confirmFn = (globalThis as { confirm?: (msg: string) => boolean }).confirm
+        if (
+          err.code === 'PLAINTEXT_REQUIRED' &&
+          confirmFn?.(
+            '此裝置沒有可用的 OS 安全儲存（keychain / DPAPI），憑證將以「未加密明文」存在本機檔案。確定要繼續儲存嗎？',
+          )
+        ) {
+          await setPluginSecret(id, trimmed, { ...secretExtra, allowPlaintext: true })
+        } else {
+          set({ pluginError: `憑證未儲存：${err.message}` })
+          return
+        }
+      }
       // NOTE: no customToolSecrets mirror — {{secret:pluginId}} resolves from the
       // vault in main (http/mcp); browser fallback reads the local record directly.
       const mode: 'pat' | 'api_key' | 'oauth' =

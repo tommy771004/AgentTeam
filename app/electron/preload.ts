@@ -1,9 +1,37 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
+import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
 
 const api = {
   platform: () => ipcRenderer.invoke('app:platform') as Promise<string>,
   version: () => ipcRenderer.invoke('app:version') as Promise<string>,
+  updates: {
+    state: () => ipcRenderer.invoke('updates:state') as Promise<{
+      schemaVersion: 1
+      status: 'idle' | 'available' | 'deferred' | 'downloaded' | 'install-pending' | 'rolled-back' | 'failed'
+      currentVersion: string
+      manifest?: { version: string; mandatory: boolean; releaseNotes: string; platform: string; arch: string }
+      downloadedPath?: string
+      progress: number
+      deferredUntil?: string
+      transactionId?: string
+      lastError?: string
+      updatedAt: string
+    }>,
+    check: (input?: { url?: string }) => ipcRenderer.invoke('updates:check', input || {}) as Promise<{ ok: boolean; state: unknown; error?: string }>,
+    defer: (version: string) => ipcRenderer.invoke('updates:defer', version) as Promise<{ ok: boolean; state: unknown; error?: string }>,
+    download: () => ipcRenderer.invoke('updates:download') as Promise<{ ok: boolean; state: unknown; error?: string }>,
+    captureMigration: (input: { appVersion?: string; rendererStorage?: Record<string, string>; projects?: Array<{ root: string; name?: string; branch?: string | null }>; queue?: unknown; schedules?: unknown[]; artifactIndex?: unknown }) => ipcRenderer.invoke('updates:captureMigration', input) as Promise<unknown>,
+    install: (snapshot: unknown) => ipcRenderer.invoke('updates:install', snapshot) as Promise<{ ok: boolean; restartRequired: boolean; state: unknown; error?: string }>,
+    rollback: () => ipcRenderer.invoke('updates:rollback') as Promise<{ ok: boolean; launchable: boolean; state: unknown; rollbackPath?: string; snapshot?: { rendererStorage?: Record<string, string> } }>,
+    pendingMigration: () => ipcRenderer.invoke('updates:pendingMigration') as Promise<{ ok: boolean; state: unknown; snapshot?: { rendererStorage?: Record<string, string> }; error?: string }>,
+    completeMigration: (snapshot?: unknown) => ipcRenderer.invoke('updates:completeMigration', snapshot) as Promise<unknown>,
+    onProgress: (cb: (payload: { progress: number }) => void) => {
+      const handler = (_evt: unknown, payload: { progress: number }) => cb(payload)
+      ipcRenderer.on('updates:progress', handler)
+      return () => ipcRenderer.removeListener('updates:progress', handler)
+    },
+  },
   /** 檔案回捲(G5):寫入前快照 + 依時點還原(外部改動保護) */
   rewind: {
     record: (payload: {
@@ -477,13 +505,14 @@ const api = {
       expiresAt?: number
       tokenType?: string
       keepRefreshToken?: boolean
+      allowPlaintext?: boolean
     }) =>
       ipcRenderer.invoke('secrets:store', input) as Promise<
-        { ok: true; meta: { id: string; tokenHint: string; expiresAt?: number; tokenType?: string; updatedAt: string; hasRefreshToken: boolean; encrypted: boolean } } | { ok: false; error: string }
+        { ok: true; meta: { id: string; tokenHint: string; expiresAt?: number; tokenType?: string; updatedAt: string; hasRefreshToken: boolean; encrypted: boolean } } | { ok: false; error: string; code?: string }
       >,
     clear: (id: string) => ipcRenderer.invoke('secrets:clear', id) as Promise<{ ok: boolean }>,
     migrate: (map: Record<string, unknown>) =>
-      ipcRenderer.invoke('secrets:migrate', map) as Promise<{ ok: boolean; imported: number }>,
+      ipcRenderer.invoke('secrets:migrate', map) as Promise<{ ok: boolean; imported: number; error?: string }>,
     refresh: (input: {
       pluginId: string
       clientId: string
@@ -690,6 +719,21 @@ const api = {
           notes: string[]
         }>
         summary: string
+      }>,
+    doctor: (currentProviders: unknown[] = []) =>
+      ipcRenderer.invoke('cli:doctor', sanitizeCliDoctorProviders(currentProviders)) as Promise<{
+        platform: string
+        checkedAt: string
+        readyToRun: boolean
+        summary: string
+        checks: Array<{
+          id: string
+          label: string
+          status: 'ready' | 'missing' | 'needs-auth'
+          detail: string
+          remediation: string
+          retryable: true
+        }>
       }>,
     applyDiscovery: (currentProviders: unknown[]) =>
       ipcRenderer.invoke('cli:applyDiscovery', currentProviders) as Promise<{

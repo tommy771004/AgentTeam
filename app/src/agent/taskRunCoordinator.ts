@@ -29,6 +29,12 @@ import type { HookEvaluation } from './hooks'
 import type { ThreadRunner } from '../store/threadStore'
 
 import { v4 as uuid } from 'uuid'
+import {
+  recordRunAdmitted,
+  recordRunStarted,
+  recordRunTerminal,
+  waitForStartupRecovery,
+} from './runJournal.ts'
 
 export type { ExternalRunOpts, ExternalRunResult, RunSourceKind }
 export type TaskRunInput = ExternalRunOpts
@@ -291,7 +297,7 @@ export type RunDispatchSnapshot = {
   forceLoopType?: LoopType
   /** Coordinator-prepared attachments (persist + hydrate already done). */
   attachments: ChatAttachment[]
-  /** Full runtime overrides; always carries runId / threadId / deferFinalization. */
+  /** Full runtime overrides; always carries coordinator-owned run/thread identity. */
   overrides: RuntimeOverrides
 }
 
@@ -330,8 +336,6 @@ export function buildRunDispatchSnapshot(parts: {
       loopTypeMode: forceLoopType
         ? 'force'
         : parts.overrides.loopTypeMode || 'auto',
-      // Adapter must not archive / release / drain — finalization owns that once.
-      deferFinalization: true,
     },
   }
 }
@@ -417,6 +421,7 @@ export async function finalizeTaskRun(
 
   // ── Early terminal (hook deny / exception before or during dispatch) ──
   if (input.early) {
+    recordRunTerminal({ runId, threadId: tid, status: 'failed' })
     thr.setThreadStatus(tid, 'failed')
     thr.setThreadRunning(tid, false, runId)
     thr.pushBubble(tid, 'system', input.early.error)
@@ -637,7 +642,7 @@ export async function finalizeTaskRun(
     /* non-fatal */
   }
 
-  // 3) Archive (once; adapters with deferFinalization skipped their own write)
+  // 3) Archive (once; execution adapters never own this step)
   try {
     if (['success', 'failed', 'halted'].includes(String(finalResult.status))) {
       await useAgentStore.getState().saveToArchive(finalAgent, runId)
@@ -645,6 +650,12 @@ export async function finalizeTaskRun(
   } catch {
     /* archive must not block release/drain */
   }
+
+  // Persist the terminal marker only after the user-visible summary and
+  // archive evidence have been attempted. A crash before this point remains
+  // conservatively recoverable as interrupted instead of claiming a complete
+  // run without its evidence.
+  recordRunTerminal({ runId, threadId: tid, status: String(status) })
 
   // 4) onSettled
   await settle(finalResult)
@@ -1108,6 +1119,15 @@ async function coordinateTaskRun(
     return { path: 'builtin', status: 'skipped', error: `並行執行上限 ${retryCapacity.limit}，請稍候`, threadId: opts.reuseThreadId || null, runId, skipped: true, skipReason: 'busy' }
   }
 
+  // Journal admission before any async bind/dispatch work can yield. This
+  // lets startup reconciliation classify a renderer/main interruption.
+  recordRunAdmitted({
+    runId,
+    objective,
+    sourceKind: opts.sourceKind,
+    scheduleJobId: opts.meta?.scheduleJobId,
+  })
+
   const settings = useSettingsStore.getState().settings
   const thr = useThreadStore.getState()
   let boundThreadId = opts.reuseThreadId || ''
@@ -1154,6 +1174,7 @@ async function coordinateTaskRun(
     hidden: opts.workerThread === true,
   })
   boundThreadId = tid
+  recordRunStarted({ runId, threadId: tid })
   if (!opts.skipUserBubble) {
     thr.pushBubble(tid, 'user', objective, attachments)
   }
@@ -1396,6 +1417,10 @@ async function coordinateTaskRun(
 
 /** Canonical API for new code. */
 export async function runTask(input: TaskRunInput): Promise<TaskRunResult> {
+  // Every renderer ingress (composer, scheduler, gateway, webhook, and
+  // background delegates) waits behind the one-shot storage/journal recovery.
+  // Node-only contract smokes have no renderer lifecycle and continue directly.
+  if (typeof window !== 'undefined') await waitForStartupRecovery()
   const normalized = normalizeTaskRunInput(input)
   const runId = normalized.runId || `run_${uuid().slice(0, 12)}`
   if (coordinatingRunIds.has(runId)) {

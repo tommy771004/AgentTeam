@@ -1,0 +1,463 @@
+name: Release evidence
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to package (defaults to the tag or package version)
+        required: false
+        type: string
+      channel:
+        description: Release channel
+        required: true
+        default: beta
+        type: choice
+        options: [beta, stable]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package (${{ matrix.platform }}-${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            updatePlatform: win32
+            arch: x64
+            target: win
+          - os: macos-15-intel
+            platform: macos
+            updatePlatform: darwin
+            arch: x64
+            target: mac
+          - os: macos-15
+            platform: macos
+            updatePlatform: darwin
+            arch: arm64
+            target: mac
+    runs-on: ${{ matrix.os }}
+    environment: release-signing
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: app
+    env:
+      RELEASE_VERSION: ${{ inputs.version || '' }}
+      RELEASE_CHANNEL: ${{ inputs.channel || 'beta' }}
+      RELEASE_PLATFORM: ${{ matrix.platform }}
+      UPDATE_PLATFORM: ${{ matrix.updatePlatform }}
+      RELEASE_ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Resolve release version
+        shell: bash
+        run: echo "RELEASE_VERSION=$(node scripts/release-evidence.mjs --print-version)" >> "$GITHUB_ENV"
+
+      - name: Initialize verification logs
+        shell: bash
+        run: mkdir -p release-evidence
+
+      - name: Install dependencies
+        shell: bash
+        run: npm ci 2>&1 | tee release-evidence/npm-ci.log
+
+      - name: Lint
+        shell: bash
+        run: npx oxlint src electron 2>&1 | tee release-evidence/lint.log
+
+      - name: Build
+        shell: bash
+        run: npm run build 2>&1 | tee release-evidence/build.log
+
+      - name: Smoke matrix
+        shell: bash
+        run: npm run smoke:ci 2>&1 | tee release-evidence/smoke.log
+
+      - name: Security gates (dependency audit + secret scan + exceptions)
+        shell: bash
+        run: |
+          npm audit --json > release-evidence/npm-audit.json || true
+          node scripts/security-gates.mjs --audit-report release-evidence/npm-audit.json 2>&1 | tee release-evidence/security-gates.log
+
+      - name: CLI doctor contract
+        shell: bash
+        run: npm run smoke:doctor 2>&1 | tee release-evidence/cli-doctor.log
+
+      - name: Install and restart contract
+        shell: bash
+        run: npm run smoke:install 2>&1 | tee release-evidence/install-contract.log
+
+      - name: Durable recovery process E2E
+        shell: bash
+        run: npm run smoke:recovery 2>&1 | tee release-evidence/recovery-e2e.log
+
+      - name: Signed update and migration contract
+        shell: bash
+        run: UPDATE_EVIDENCE_OUTPUT=release-evidence/update-rollback-evidence.json npm run smoke:update 2>&1 | tee release-evidence/update-migration.log
+
+      - name: Marketplace smoke
+        shell: bash
+        run: npm run smoke:marketplace 2>&1 | tee release-evidence/marketplace.log
+
+      - name: Verify Windows signing configuration
+        if: matrix.target == 'win'
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+          WINDOWS_PUBLISHER_THUMBPRINT: ${{ secrets.WINDOWS_PUBLISHER_THUMBPRINT }}
+        shell: bash
+        run: |
+          test -n "$CSC_LINK" || { echo "CSC_LINK is required for $RELEASE_PLATFORM"; exit 1; }
+          test -n "$CSC_KEY_PASSWORD" || { echo "CSC_KEY_PASSWORD is required for $RELEASE_PLATFORM"; exit 1; }
+          test -n "$WINDOWS_PUBLISHER_THUMBPRINT" || { echo "WINDOWS_PUBLISHER_THUMBPRINT is required"; exit 1; }
+
+      - name: Verify macOS signing configuration
+        if: matrix.target == 'mac'
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          test -n "$CSC_LINK" || { echo "CSC_LINK is required for $RELEASE_PLATFORM"; exit 1; }
+          test -n "$CSC_KEY_PASSWORD" || { echo "CSC_KEY_PASSWORD is required for $RELEASE_PLATFORM"; exit 1; }
+          test -n "$APPLE_ID" || { echo "APPLE_ID is required for macOS notarization"; exit 1; }
+          test -n "$APPLE_APP_SPECIFIC_PASSWORD" || { echo "APPLE_APP_SPECIFIC_PASSWORD is required for macOS notarization"; exit 1; }
+          test -n "$APPLE_TEAM_ID" || { echo "APPLE_TEAM_ID is required for macOS notarization"; exit 1; }
+
+      - name: Built Electron contract
+        shell: bash
+        run: npm run smoke:built 2>&1 | tee release-evidence/smoke-built.log
+
+      - name: Build icons
+        shell: bash
+        run: npm run icons 2>&1 | tee release-evidence/icons.log
+
+      - name: Package Windows
+        if: matrix.target == 'win'
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'true'
+        shell: bash
+        run: npx electron-builder --win --x64 --publish never --config.forceCodeSigning=true --config.extraMetadata.version="$RELEASE_VERSION" 2>&1 | tee release-evidence/package.log
+
+      - name: Package macOS
+        if: matrix.target == 'mac'
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'true'
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: npx electron-builder --mac --${{ matrix.arch }} --publish never --config.forceCodeSigning=true --config.extraMetadata.version="$RELEASE_VERSION" 2>&1 | tee release-evidence/package.log
+
+      - name: Electron update migration and rollback E2E
+        shell: bash
+        run: npm run smoke:update:e2e 2>&1 | tee release-evidence/update-migration-e2e.log
+
+      - name: Verify Windows Authenticode signatures
+        if: matrix.target == 'win'
+        env:
+          WINDOWS_PUBLISHER_THUMBPRINT: ${{ secrets.WINDOWS_PUBLISHER_THUMBPRINT }}
+        shell: pwsh
+        run: |
+          $signTool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
+          if (-not $signTool) {
+            $signTool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $signTool) { throw 'signtool.exe was not found on the Windows runner' }
+
+          $installer = Get-ChildItem -Path release -File -Filter '*Setup*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'No Windows installer found to verify and install' }
+          $files = @($installer) + @(Get-ChildItem -Path release -Recurse -File -Filter *.exe) +
+            @()
+          $files = @($files | Sort-Object FullName -Unique)
+          if ($files.Count -eq 0) { throw 'No Windows executables found to verify' }
+          $verification = @()
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+            if ($signature.Status -ne 'Valid') { throw "Authenticode status for $($file.Name): $($signature.Status)" }
+            if (-not $signature.SignerCertificate) { throw "No signer certificate for $($file.Name)" }
+            $expectedThumbprint = ($env:WINDOWS_PUBLISHER_THUMBPRINT -replace '\s', '').ToUpperInvariant()
+            if (($signature.SignerCertificate.Thumbprint -replace '\s', '').ToUpperInvariant() -ne $expectedThumbprint) {
+              throw "Unexpected publisher certificate for $($file.Name)"
+            }
+            $report = & $signTool verify /pa /all /tw /v $file.FullName 2>&1
+            $report | Tee-Object -FilePath release-evidence/authenticode.log -Append
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($file.Name)" }
+            $reportText = $report -join "`n"
+            if ($reportText -notmatch '(?i)timestamp|time stamp|signing time' -or $reportText -match '(?i)not timestamped|no timestamp|timestamp.{0,30}(not found|missing)') {
+              throw "No trusted timestamp evidence for $($file.Name)"
+            }
+            $verification += [ordered]@{
+              path = $file.FullName
+              status = $signature.Status.ToString()
+              publisherThumbprint = $signature.SignerCertificate.Thumbprint
+              timestampEvidence = $true
+            }
+          }
+          $verification | ConvertTo-Json -Depth 4 | Set-Content -Path release-evidence/windows-signature-verification.json -Encoding utf8
+
+          # Never execute an installer until every packaged executable has
+          # passed Authenticode, publisher, and timestamp verification.
+          $installDir = Join-Path $env:RUNNER_TEMP "SubAgentsAI-$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Windows installer exited with $($install.ExitCode)" }
+          $installedFiles = @(Get-ChildItem -Path $installDir -Recurse -File -Filter *.exe | Where-Object { $_.Name -notmatch 'unins|uninstall' })
+          foreach ($file in $installedFiles) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+            if ($signature.Status -ne 'Valid') { throw "Installed Authenticode status for $($file.Name): $($signature.Status)" }
+            $expectedThumbprint = ($env:WINDOWS_PUBLISHER_THUMBPRINT -replace '\s', '').ToUpperInvariant()
+            if (-not $signature.SignerCertificate -or ($signature.SignerCertificate.Thumbprint -replace '\s', '').ToUpperInvariant() -ne $expectedThumbprint) {
+              throw "Unexpected installed publisher certificate for $($file.Name)"
+            }
+          }
+
+      - name: Verify macOS codesign, Gatekeeper, and notarization
+        if: matrix.target == 'mac'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$(find release -type d -name '*.app' -print -quit)"
+          dmg_path="$(find release -type f -name '*.dmg' -print -quit)"
+          test -n "$app_path" || { echo 'No macOS application found'; exit 1; }
+          test -n "$dmg_path" || { echo 'No macOS disk image found'; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$app_path" 2>&1 | tee release-evidence/codesign.log
+          spctl --assess --type execute --verbose=4 "$app_path" 2>&1 | tee release-evidence/gatekeeper.log
+          xcrun notarytool submit "$dmg_path" --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait 2>&1 | tee release-evidence/notarization-dmg.log
+          xcrun stapler staple "$dmg_path" 2>&1 | tee release-evidence/stapler-dmg.log
+          mount_point="$RUNNER_TEMP/subagents-ai-dmg"
+          mkdir -p "$mount_point"
+          hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_point" 2>&1 | tee release-evidence/dmg-mount.log
+          mounted_app="$(find "$mount_point" -type d -name '*.app' -print -quit)"
+          test -n "$mounted_app" || { echo 'No application found inside the stapled disk image'; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$mounted_app" 2>&1 | tee release-evidence/codesign-mounted.log
+          spctl --assess --type execute --verbose=4 "$mounted_app" 2>&1 | tee release-evidence/gatekeeper-mounted.log
+          spctl --assess --type open --verbose=4 "$dmg_path" 2>&1 | tee release-evidence/gatekeeper-dmg.log
+          xcrun stapler validate "$mounted_app" 2>&1 | tee release-evidence/stapler-app.log
+          xcrun stapler validate "$dmg_path" 2>&1 | tee release-evidence/stapler-dmg-validate.log
+          hdiutil detach "$mount_point" 2>&1 | tee release-evidence/dmg-unmount.log
+
+      - name: Verify packaged install lifecycle
+        shell: bash
+        run: node scripts/verify-packaged-install.mjs --platform "$RELEASE_PLATFORM" --artifact-dir release --evidence-dir release-evidence 2>&1 | tee release-evidence/install-lifecycle.log
+
+      - name: Verify update signing key matches packaged trust root
+        env:
+          UPDATE_PRIVATE_KEY: ${{ secrets.UPDATE_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          test -n "$UPDATE_PRIVATE_KEY" || { echo "UPDATE_PRIVATE_KEY is required"; exit 1; }
+          node --experimental-strip-types scripts/verify-update-signing-key.mts 2>&1 | tee release-evidence/update-key-verification.log
+
+      - name: Build signed Beta update manifest
+        env:
+          UPDATE_PRIVATE_KEY: ${{ secrets.UPDATE_PRIVATE_KEY }}
+          UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL }}
+        shell: bash
+        run: |
+          test -n "$UPDATE_BASE_URL" || { echo "UPDATE_BASE_URL is required"; exit 1; }
+          node scripts/build-update-manifest.mjs --artifact-dir release --output-dir release-evidence/update-channel --version "$RELEASE_VERSION" --platform "$UPDATE_PLATFORM" --arch "$RELEASE_ARCH" --base-url "${UPDATE_BASE_URL%/}/$UPDATE_PLATFORM/$RELEASE_ARCH" 2>&1 | tee release-evidence/update-manifest.log
+
+      - name: Publish signed Beta update channel
+        env:
+          UPDATE_PUBLISH_URL: ${{ vars.UPDATE_PUBLISH_URL }}
+          UPDATE_PUBLISH_TOKEN: ${{ secrets.UPDATE_PUBLISH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$UPDATE_PUBLISH_URL" || { echo "UPDATE_PUBLISH_URL is required"; exit 1; }
+          test -n "$UPDATE_PUBLISH_TOKEN" || { echo "UPDATE_PUBLISH_TOKEN is required"; exit 1; }
+          publish_root="${UPDATE_PUBLISH_URL%/}/$UPDATE_PLATFORM/$RELEASE_ARCH"
+          manifest_path="release-evidence/update-channel/manifest.json"
+          curl --fail --retry 3 --silent --show-error -H "Authorization: Bearer $UPDATE_PUBLISH_TOKEN" --upload-file "$manifest_path" "$publish_root/manifest.json"
+          while IFS= read -r artifact; do
+            name="$(basename "$artifact")"
+            encoded_name="$(node -e "console.log(encodeURIComponent(process.argv[1]))" "$name")"
+            curl --fail --retry 3 --silent --show-error -H "Authorization: Bearer $UPDATE_PUBLISH_TOKEN" --upload-file "$artifact" "$publish_root/$encoded_name"
+          done < <(find release -type f \( -iname '*.exe' -o -iname '*.dmg' -o -iname '*.pkg' -o -iname '*.zip' -o -iname '*.appimage' \) -print | sort)
+
+      - name: Generate release evidence
+        shell: bash
+        run: npm run release:evidence 2>&1 | tee release-evidence/evidence.log
+
+      - name: Write verification log
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "SubAgents AI release verification"
+            echo "platform=${RELEASE_PLATFORM}"
+            echo "arch=${RELEASE_ARCH}"
+            echo "attempt=${{ github.run_attempt }}"
+            echo "version=${RELEASE_VERSION}"
+            echo "channel=${RELEASE_CHANNEL}"
+            echo "status=${{ job.status }}"
+            echo "logs=npm-ci.log,lint.log,build.log,smoke.log,security-gates.log,npm-audit.json,cli-doctor.log,install-contract.log,install-lifecycle.log,install-launch-restart-uninstall.json,marketplace.log,smoke-built.log,icons.log,package.log,update-migration.log,update-migration-e2e.log,update-key-verification.log,update-manifest.log,update-channel/manifest.json,authenticode.log,windows-signature-verification.json,codesign.log,codesign-mounted.log,gatekeeper.log,gatekeeper-mounted.log,gatekeeper-dmg.log,notarization-dmg.log,dmg-mount.log,dmg-unmount.log,stapler-app.log,stapler-dmg.log,stapler-dmg-validate.log,evidence.log"
+          } > release-evidence/verification.log
+
+      - name: Upload verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subagents-ai-${{ env.RELEASE_VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}-run-${{ github.run_attempt }}-evidence
+          path: app/release-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload packaged artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subagents-ai-${{ env.RELEASE_VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}-run-${{ github.run_attempt }}-artifacts
+          path: app/release
+          if-no-files-found: error
+          retention-days: 90
+
+  release-gate:
+    name: release gate
+    if: always()
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every packaging matrix job to pass
+        run: |
+          if [ "${{ needs.package.result }}" != "success" ]; then
+            echo "Release evidence packaging failed: ${{ needs.package.result }}"
+            exit 1
+          fi
+          echo "All release evidence packaging jobs passed"
+
+  release-ready:
+    name: release ready
+    if: needs.release-gate.result == 'success'
+    needs: [package, release-gate]
+    runs-on: ubuntu-latest
+    outputs:
+      verified: ${{ steps.verify.outputs.verified }}
+    steps:
+      - name: Checkout verification tooling
+        uses: actions/checkout@v4
+
+      - name: Download verification evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: subagents-ai-*-evidence
+          path: release-inputs/evidence
+          merge-multiple: false
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: subagents-ai-*-artifacts
+          path: release-inputs/artifacts
+          merge-multiple: false
+
+      - name: Verify only signed artifacts are release-ready
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A best_attempt best_report best_artifact
+          while IFS= read -r report; do
+            evidence_dir="$(dirname "$report")"
+            platform="$(grep '^platform=' "$report" | cut -d= -f2)"
+            arch="$(grep '^arch=' "$report" | cut -d= -f2)"
+            attempt="$(grep '^attempt=' "$report" | cut -d= -f2)"
+            key="${platform}-${arch}"
+            if [ -z "${best_attempt[$key]:-}" ] || [ "$attempt" -gt "${best_attempt[$key]}" ]; then
+              best_attempt[$key]="$attempt"
+              best_report[$key]="$report"
+              best_artifact[$key]=""
+            fi
+          done < <(find release-inputs/evidence -name verification.log -type f -print)
+          test "${#best_report[@]}" -eq 3 || { echo "Expected Windows x64 plus macOS x64/arm64 verification reports, found ${#best_report[@]}"; exit 1; }
+          for key in "${!best_report[@]}"; do
+            report="${best_report[$key]}"
+            evidence_dir="$(dirname "$report")"
+            artifact_key="${key}-run-${best_attempt[$key]}-artifacts"
+            artifact_dir="$(find release-inputs/artifacts -mindepth 1 -maxdepth 1 -type d -name "*${artifact_key}" -print -quit)"
+            if [ -z "$artifact_dir" ]; then
+              artifact_dir="$(find release-inputs/artifacts -mindepth 1 -maxdepth 1 -type d -name "*${key}-run-*-artifacts" -print | sort -V | tail -n 1)"
+            fi
+            test -n "$artifact_dir" || { echo "Missing packaged artifact bundle for $key"; exit 1; }
+            best_artifact[$key]="$artifact_dir"
+            grep -q '^status=success$' "$report" || { echo "Verification did not pass: $report"; exit 1; }
+            evidence_dir="$(dirname "$report")"
+            test -f "$evidence_dir/release-manifest.json" || { echo "Missing release manifest beside $report"; exit 1; }
+            test -f "$evidence_dir/checksums.txt" || { echo "Missing checksums beside $report"; exit 1; }
+            test -f "$evidence_dir/sbom.cdx.json" || { echo "Missing SBOM beside $report"; exit 1; }
+            test -f "$evidence_dir/release-notes.md" || { echo "Missing release notes beside $report"; exit 1; }
+            test -s "$evidence_dir/install-launch-restart-uninstall.json" || { echo "Missing packaged lifecycle evidence beside $report"; exit 1; }
+            node - "$evidence_dir/install-launch-restart-uninstall.json" "$key" <<'NODE'
+            const fs = require('node:fs')
+            const [evidencePath, expectedKey] = process.argv.slice(2)
+            const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'))
+            const expectedPlatform = expectedKey.startsWith('windows-') ? 'windows' : 'macos'
+            if (evidence.platform !== expectedPlatform) throw new Error(`Lifecycle platform mismatch: ${evidence.platform}`)
+            if (!evidence.firstTask || evidence.firstTask.resultVisible !== true) throw new Error('Packaged first task result was not visible')
+            if (evidence.firstTask.diffVisible !== true || !/^(?:diff --git |--- |\+\+\+ |@@ )/m.test(evidence.firstTask.diffPreview || '')) {
+              throw new Error('Packaged first task did not show an actual Git diff')
+            }
+            if (evidence.firstTask.settingsPersisted !== true || !(evidence.firstTask.restartedThreadBytes > 0)) {
+              throw new Error('Packaged restart persistence evidence is incomplete')
+            }
+            if (!evidence.uninstall || evidence.uninstall.removed !== true) throw new Error('Packaged uninstall/removal evidence is missing')
+NODE
+            platform="$(node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSync(process.argv[1], 'utf8')).platform)" "$evidence_dir/release-manifest.json")"
+            manifest_arch="$(node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSync(process.argv[1], 'utf8')).arch)" "$evidence_dir/release-manifest.json")"
+            test "$platform-${manifest_arch}" = "$key" || { echo "Manifest platform/arch mismatch for $report"; exit 1; }
+            if [ "$platform" = "windows" ]; then
+              test -s "$evidence_dir/authenticode.log" || { echo "Missing Authenticode report beside $report"; exit 1; }
+              test -s "$evidence_dir/windows-signature-verification.json" || { echo "Missing Windows signature report beside $report"; exit 1; }
+              grep -q '"status": "Valid"' "$evidence_dir/windows-signature-verification.json" || { echo "Windows signature status missing beside $report"; exit 1; }
+              grep -q 'timestampEvidence' "$evidence_dir/windows-signature-verification.json" || { echo "Windows timestamp evidence missing beside $report"; exit 1; }
+            elif [ "$platform" = "macos" ]; then
+              for verification in codesign-mounted.log gatekeeper-mounted.log gatekeeper-dmg.log notarization-dmg.log stapler-app.log stapler-dmg-validate.log; do
+                test -s "$evidence_dir/$verification" || { echo "Missing macOS verification report $verification beside $report"; exit 1; }
+              done
+              grep -Eqi 'accepted|valid|staple|source=' "$evidence_dir/notarization-dmg.log" "$evidence_dir/stapler-app.log" "$evidence_dir/stapler-dmg-validate.log" || { echo "macOS notarization/stapling reports have no success evidence beside $report"; exit 1; }
+            else
+              echo "Unsupported release platform in $report: $platform"
+              exit 1
+            fi
+            node app/scripts/release-evidence.mjs --verify-manifest --manifest "$evidence_dir/release-manifest.json" --artifact-dir "$artifact_dir"
+          done
+          echo "verified=true" >> "$GITHUB_OUTPUT"
+          echo "Release evidence is ready for protected Beta download selection"
+
+  beta-download-selection:
+    name: beta download selection
+    if: needs.release-ready.outputs.verified == 'true'
+    needs: release-ready
+    environment: beta-download
+    runs-on: ubuntu-latest
+    steps:
+      - name: Expose verified release gate
+        run: echo "Only signed, notarized, and verified artifacts may be selected for Beta downloads"

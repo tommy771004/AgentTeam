@@ -69,6 +69,46 @@ try {
         },
       })
 
+      const originalFetch = window.fetch
+      window.fetch = async () => {
+        throw new Error('browser smoke forced web adapter failure')
+      }
+      let failedBuiltInSettled = 0
+      let failedBuiltIn
+      try {
+        failedBuiltIn = await runTask({
+          objective: 'search the web for a forced failure smoke',
+          sourceKind: 'composer',
+          runId: 'browser-built-in-failure-smoke',
+          onSettled: () => {
+            failedBuiltInSettled += 1
+          },
+        })
+      } finally {
+        window.fetch = originalFetch
+      }
+
+      const originalStartExecution = useAgentStore.getState().startExecution
+      useAgentStore.setState({
+        startExecution: async () => {
+          throw new Error('browser smoke forced dispatch exception')
+        },
+      })
+      let dispatchExceptionSettled = 0
+      let dispatchException
+      try {
+        dispatchException = await runTask({
+          objective: 'browser dispatch exception smoke',
+          sourceKind: 'composer',
+          runId: 'browser-dispatch-exception-smoke',
+          onSettled: () => {
+            dispatchExceptionSettled += 1
+          },
+        })
+      } finally {
+        useAgentStore.setState({ startExecution: originalStartExecution })
+      }
+
       const first = runTask({
         objective: 'browser duplicate coordinator smoke',
         sourceKind: 'composer',
@@ -81,11 +121,38 @@ try {
       })
       await first
 
+      useSettingsStore.setState({
+        settings: {
+          ...initialSettings,
+          concurrentRunsEnabled: true,
+          maxConcurrentRuns: 2,
+        },
+      })
       let cancelRequested = false
+      const survivorPromise = runTask({
+        objective: 'browser concurrent survivor smoke',
+        sourceKind: 'composer',
+        runId: 'browser-survivor-smoke',
+      })
+      let overflowSettledResult
+      let resolveOverflowSettled
+      const overflowSettled = new Promise((resolve) => {
+        resolveOverflowSettled = resolve
+      })
       const cancelPromise = runTask({
         objective: 'browser cancel coordinator smoke',
         sourceKind: 'composer',
         runId: 'browser-cancel-smoke',
+      })
+      const overflow = await runTask({
+        objective: 'browser concurrent overflow smoke',
+        sourceKind: 'schedule',
+        runId: 'browser-overflow-smoke',
+        loopType: 'Goal-based',
+        onSettled: (value) => {
+          overflowSettledResult = value
+          resolveOverflowSettled(value)
+        },
       })
       for (let i = 0; i < 100; i += 1) {
         const state = useAgentStore.getState().getRunState('browser-cancel-smoke')
@@ -96,7 +163,9 @@ try {
         }
         await new Promise((resolve) => setTimeout(resolve, 5))
       }
-      const cancelled = await cancelPromise
+      const [cancelled, survivor] = await Promise.all([cancelPromise, survivorPromise])
+      await Promise.race([overflowSettled, new Promise((resolve) => setTimeout(resolve, 3000))])
+      useSettingsStore.setState({ settings: initialSettings })
 
       let queuedSettledResult
       let resolveQueuedSettled
@@ -136,14 +205,40 @@ try {
         },
       })
       let deniedSettled = 0
-      const denied = await runTask({
+      const deniedLifecycle = []
+      const denied = runTask({
         objective: 'browser denied coordinator smoke',
         sourceKind: 'composer',
         runId: 'browser-denied-smoke',
         onSettled: () => {
           deniedSettled += 1
+          deniedLifecycle.push({
+            runId: 'browser-denied-smoke',
+            active: useAgentStore.getState().activeRunIds.includes('browser-denied-smoke'),
+          })
         },
       })
+      let deniedQueuedSettled
+      let resolveDeniedQueued
+      const deniedQueuedDone = new Promise((resolve) => {
+        resolveDeniedQueued = resolve
+      })
+      const deniedQueued = await runTask({
+        objective: 'browser denied queued coordinator smoke',
+        sourceKind: 'schedule',
+        runId: 'browser-denied-queued-smoke',
+        loopType: 'Goal-based',
+        onSettled: (value) => {
+          deniedQueuedSettled = value
+          deniedLifecycle.push({
+            runId: 'browser-denied-queued-smoke',
+            active: useAgentStore.getState().activeRunIds.includes('browser-denied-smoke'),
+          })
+          resolveDeniedQueued(value)
+        },
+      })
+      const deniedResult = await denied
+      await Promise.race([deniedQueuedDone, new Promise((resolve) => setTimeout(resolve, 3000))])
       useSettingsStore.setState({ settings: initialSettings })
 
       let cliSettled = 0
@@ -156,6 +251,294 @@ try {
           cliSettled += 1
         },
       })
+
+      const originalSubagents = window.subagents
+      const pendingCliRuns = new Map()
+      const resolvePendingCli = (runId, value) => {
+        const resolver = pendingCliRuns.get(runId)
+        if (typeof resolver !== 'function') return false
+        resolver(value)
+        pendingCliRuns.delete(runId)
+        return true
+      }
+      const waitForPendingCli = async (runIds, label) => {
+        for (let i = 0; i < 100; i += 1) {
+          if (runIds.every((runId) => pendingCliRuns.has(runId))) return
+          await new Promise((resolve) => setTimeout(resolve, 5))
+        }
+        throw new Error(`${label} did not register all pending CLI resolvers`)
+      }
+      let cliCancelRequested
+      useSettingsStore.setState({
+        settings: {
+          ...initialSettings,
+          cliProviders: [{ id: 'codex', enabled: true, authorized: true, cliBinary: 'codex' }],
+        },
+      })
+      window.subagents = {
+        ...(originalSubagents || {}),
+        cli: {
+          ...((originalSubagents && originalSubagents.cli) || {}),
+          runAgent: async (opts) => {
+            if (opts.runId === 'browser-cli-failure-smoke') {
+              return {
+                ok: false,
+                output: 'browser fake provider output',
+                error: 'browser fake provider failure',
+                command: 'fake codex',
+                runId: opts.runId,
+              }
+            }
+            if (opts.runId === 'browser-cli-failure-queue-smoke') {
+              return await new Promise((resolve) => {
+                pendingCliRuns.set(opts.runId, resolve)
+              })
+            }
+            if (opts.runId === 'browser-cli-failure-blocker-smoke') {
+              return await new Promise((resolve) => {
+                pendingCliRuns.set(opts.runId, resolve)
+              })
+            }
+            if (opts.runId === 'browser-cli-cancel-smoke') {
+              return await new Promise((resolve) => {
+                pendingCliRuns.set(opts.runId, resolve)
+              })
+            }
+            if (opts.runId === 'browser-cli-survivor-smoke') {
+              return await new Promise((resolve) => {
+                pendingCliRuns.set(opts.runId, resolve)
+              })
+            }
+            if (opts.runId === 'browser-cli-queued-smoke') {
+              cliQueueStartedAfterRelease = !useAgentStore
+                .getState()
+                .activeRunIds.includes('browser-cli-cancel-smoke')
+            }
+            if (opts.runId === 'browser-cli-failure-queued-smoke') {
+              cliFailureQueueStartedAfterRelease = !useAgentStore
+                .getState()
+                .activeRunIds.includes('browser-cli-failure-queue-smoke')
+            }
+            return {
+              ok: true,
+              output: 'browser fake cli output',
+              command: 'fake codex',
+              runId: opts.runId,
+            }
+          },
+          cancel: async (runId) => {
+            cliCancelRequested = runId
+            resolvePendingCli(runId, {
+              ok: false,
+              output: '',
+              error: '使用者取消',
+              cancelled: true,
+              command: 'fake codex',
+              runId,
+            })
+            return { ok: true, killed: 1 }
+          },
+        },
+      }
+      let cliSuccessSettled = 0
+      let cliFailureSettled = 0
+      let cliCancelledSettled = 0
+      let cliSurvivorSettled = 0
+      let cliCancelStopRequested = false
+      let cliQueuedSettled = 0
+      let cliQueuedSettledResult
+      let resolveCliQueuedSettled
+      let cliQueueStartedAfterRelease = false
+      let cliFailureQueueSettled = 0
+      let cliFailureQueueSettledResult
+      let resolveCliFailureQueueSettled
+      let cliFailureQueueStartedAfterRelease = false
+      const cliFailureQueueDone = new Promise((resolve) => {
+        resolveCliFailureQueueSettled = resolve
+      })
+      const cliQueuedDone = new Promise((resolve) => {
+        resolveCliQueuedSettled = resolve
+      })
+      let cliSuccess
+      let cliFailure
+      let cliCancelled
+      let cliSurvivor
+      try {
+        cliSuccess = await runTask({
+          objective: 'browser CLI adapter success smoke',
+          sourceKind: 'composer',
+          runner: 'codex',
+          runId: 'browser-cli-success-smoke',
+          onSettled: () => {
+            cliSuccessSettled += 1
+          },
+        })
+        cliFailure = await runTask({
+          objective: 'browser CLI adapter failure smoke',
+          sourceKind: 'composer',
+          runner: 'codex',
+          runId: 'browser-cli-failure-smoke',
+          onSettled: () => {
+            cliFailureSettled += 1
+          },
+        })
+        useSettingsStore.setState({
+          settings: {
+            ...initialSettings,
+            concurrentRunsEnabled: true,
+            maxConcurrentRuns: 2,
+            cliProviders: [{ id: 'codex', enabled: true, authorized: true, cliBinary: 'codex' }],
+          },
+        })
+        const cliFailureQueueRun = runTask({
+          objective: 'browser CLI provider failure queue smoke',
+          sourceKind: 'composer',
+          runner: 'codex',
+          runId: 'browser-cli-failure-queue-smoke',
+        })
+        const cliFailureBlockerRun = runTask({
+          objective: 'browser CLI provider failure blocker smoke',
+          sourceKind: 'composer',
+          runner: 'codex',
+          runId: 'browser-cli-failure-blocker-smoke',
+        })
+        for (let i = 0; i < 100; i += 1) {
+          const states = useAgentStore.getState()
+          if (
+            states.getRunState('browser-cli-failure-queue-smoke')?.status === 'running' &&
+            states.getRunState('browser-cli-failure-blocker-smoke')?.status === 'running'
+          ) break
+          await new Promise((resolve) => setTimeout(resolve, 5))
+        }
+        const failureQueueState = useAgentStore.getState()
+        if (
+          failureQueueState.getRunState('browser-cli-failure-queue-smoke')?.status !== 'running' ||
+          failureQueueState.getRunState('browser-cli-failure-blocker-smoke')?.status !== 'running'
+        ) {
+          throw new Error('CLI provider failure queue smoke must reach the running state')
+        }
+        if (
+          !useAgentStore.getState().activeRunIds.includes('browser-cli-failure-queue-smoke') ||
+          !useAgentStore.getState().activeRunIds.includes('browser-cli-failure-blocker-smoke')
+        ) {
+          throw new Error(
+            `CLI provider failure queue smoke lost capacity reservation: ${JSON.stringify(useAgentStore.getState().activeRunIds)}`,
+          )
+        }
+        await waitForPendingCli(
+          ['browser-cli-failure-queue-smoke', 'browser-cli-failure-blocker-smoke'],
+          'CLI provider failure queue smoke',
+        )
+        const cliFailureQueued = await runTask({
+          objective: 'browser CLI provider failure queued follower smoke',
+          sourceKind: 'schedule',
+          runner: 'codex',
+          runId: 'browser-cli-failure-queued-smoke',
+          loopType: 'Goal-based',
+          onSettled: (value) => {
+            cliFailureQueueSettled += 1
+            cliFailureQueueSettledResult = value
+            resolveCliFailureQueueSettled(value)
+          },
+        })
+        if (!cliFailureQueued.queued) {
+          throw new Error(`CLI provider failure follower must be admitted to the queue: ${JSON.stringify(cliFailureQueued)}`)
+        }
+        if (!resolvePendingCli('browser-cli-failure-queue-smoke', {
+          ok: false,
+          output: 'browser fake queued provider output',
+          error: 'browser fake queued provider failure',
+          command: 'fake codex',
+          runId: 'browser-cli-failure-queue-smoke',
+        })) {
+          throw new Error('CLI provider failure resolver disappeared before release')
+        }
+        await cliFailureQueueRun
+        await Promise.race([
+          cliFailureQueueDone,
+          new Promise((resolve) => setTimeout(resolve, 3000)),
+        ])
+        if (!resolvePendingCli('browser-cli-failure-blocker-smoke', {
+          ok: true,
+          output: 'browser fake failure blocker output',
+          command: 'fake codex',
+          runId: 'browser-cli-failure-blocker-smoke',
+        })) {
+          throw new Error('CLI provider blocker resolver disappeared before cleanup')
+        }
+        await cliFailureBlockerRun
+        useSettingsStore.setState({
+          settings: {
+            ...initialSettings,
+            concurrentRunsEnabled: true,
+            maxConcurrentRuns: 2,
+            cliProviders: [{ id: 'codex', enabled: true, authorized: true, cliBinary: 'codex' }],
+          },
+        })
+        const cliCancelledPromise = runTask({
+          objective: 'browser CLI adapter cancellation smoke',
+          sourceKind: 'composer',
+          runner: 'codex',
+          runId: 'browser-cli-cancel-smoke',
+          onSettled: () => {
+            cliCancelledSettled += 1
+          },
+        })
+        const cliSurvivorPromise = runTask({
+          objective: 'browser CLI adapter survivor smoke',
+          sourceKind: 'composer',
+          runner: 'codex',
+          runId: 'browser-cli-survivor-smoke',
+          onSettled: () => {
+            cliSurvivorSettled += 1
+          },
+        })
+        const cliQueued = await runTask({
+          objective: 'browser CLI queued follower smoke',
+          sourceKind: 'schedule',
+          runner: 'codex',
+          runId: 'browser-cli-queued-smoke',
+          loopType: 'Goal-based',
+          onSettled: (value) => {
+            cliQueuedSettled += 1
+            cliQueuedSettledResult = value
+            resolveCliQueuedSettled(value)
+          },
+        })
+        if (!cliQueued.queued) throw new Error('CLI queued follower must be admitted to the queue')
+        await waitForPendingCli(
+          ['browser-cli-cancel-smoke', 'browser-cli-survivor-smoke'],
+          'CLI cancellation smoke',
+        )
+        for (let i = 0; i < 100; i += 1) {
+          const state = useAgentStore.getState().getRunState('browser-cli-cancel-smoke')
+          if (state?.status === 'running') {
+            cliCancelStopRequested = true
+            useAgentStore.getState().stopExecution('browser-cli-cancel-smoke')
+            break
+          }
+          await new Promise((resolve) => setTimeout(resolve, 5))
+        }
+        if (!cliCancelStopRequested) {
+          throw new Error('CLI cancellation smoke must reach the targeted running state')
+        }
+        if (!resolvePendingCli('browser-cli-survivor-smoke', {
+          ok: true,
+          output: 'browser fake cli survivor output',
+          command: 'fake codex',
+          runId: 'browser-cli-survivor-smoke',
+        })) {
+          throw new Error('CLI survivor resolver disappeared before cleanup')
+        }
+        ;[cliCancelled, cliSurvivor] = await Promise.all([
+          cliCancelledPromise,
+          cliSurvivorPromise,
+        ])
+        await Promise.race([cliQueuedDone, new Promise((resolve) => setTimeout(resolve, 3000))])
+      } finally {
+        window.subagents = originalSubagents
+        useSettingsStore.setState({ settings: initialSettings })
+      }
 
       useSettingsStore.setState({
         settings: { ...initialSettings, subAgentsEnabled: true },
@@ -181,9 +564,43 @@ try {
           archiveCount: useAgentStore
             .getState()
             .archive.filter((record) => record.id === 'browser-built-in-smoke').length,
+          active: useAgentStore.getState().activeRunIds.includes('browser-built-in-smoke'),
+        },
+        builtInFailure: {
+          status: failedBuiltIn.status,
+          settled: failedBuiltInSettled,
+          archiveCount: useAgentStore
+            .getState()
+            .archive.filter((record) => record.id === 'browser-built-in-failure-smoke').length,
+          active: useAgentStore.getState().activeRunIds.includes('browser-built-in-failure-smoke'),
+        },
+        dispatchException: {
+          status: dispatchException.status,
+          error: dispatchException.error,
+          settled: dispatchExceptionSettled,
+          archiveCount: useAgentStore
+            .getState()
+            .archive.filter((record) => record.id === 'browser-dispatch-exception-smoke').length,
+          active: useAgentStore.getState().activeRunIds.includes('browser-dispatch-exception-smoke'),
         },
         duplicate: { status: duplicate.status, skipReason: duplicate.skipReason },
-        cancelled: { requested: cancelRequested, status: cancelled.status },
+        cancelled: {
+          requested: cancelRequested,
+          status: cancelled.status,
+          survivorStatus: survivor.status,
+          survivorArchiveCount: useAgentStore
+            .getState()
+            .archive.filter((record) => record.id === 'browser-survivor-smoke').length,
+        },
+        overflow: {
+          status: overflow.status,
+          queued: overflow.queued,
+          skipReason: overflow.skipReason,
+          settledStatus: overflowSettledResult?.status,
+          archiveCount: useAgentStore
+            .getState()
+            .archive.filter((record) => record.id === 'browser-overflow-smoke').length,
+        },
         queue: {
           status: queued.status,
           queued: queued.queued,
@@ -194,14 +611,68 @@ try {
             .archive.filter((record) => record.id === 'browser-queue-second').length,
         },
         denied: {
-          status: denied.status,
-          error: denied.error,
+          status: deniedResult.status,
+          error: deniedResult.error,
           settled: deniedSettled,
           archiveCount: archive.length,
           archiveStatus: archive[0]?.status,
           archiveObjective: archive[0]?.objective,
+          active: useAgentStore.getState().activeRunIds.includes('browser-denied-smoke'),
+          lifecycle: deniedLifecycle,
+        },
+        deniedQueued: {
+          status: deniedQueued.status,
+          queued: deniedQueued.queued,
+          skipReason: deniedQueued.skipReason,
+          settledStatus: deniedQueuedSettled?.status,
+          archiveCount: useAgentStore
+            .getState()
+            .archive.filter((record) => record.id === 'browser-denied-queued-smoke').length,
         },
         cli: { status: cli.status, settled: cliSettled },
+        cliSuccess: {
+          status: cliSuccess.status,
+          settled: cliSuccessSettled,
+          archiveCount: useAgentStore
+            .getState()
+            .archive.filter((record) => record.id === 'browser-cli-success-smoke').length,
+          active: useAgentStore.getState().activeRunIds.includes('browser-cli-success-smoke'),
+        },
+        cliFailure: {
+          status: cliFailure.status,
+          result: cliFailure.result,
+          error: cliFailure.error,
+          settled: cliFailureSettled,
+          archiveCount: useAgentStore
+            .getState()
+            .archive.filter((record) => record.id === 'browser-cli-failure-smoke').length,
+          active: useAgentStore.getState().activeRunIds.includes('browser-cli-failure-smoke'),
+        },
+        cliCancellation: {
+          requested: cliCancelRequested,
+          status: cliCancelled.status,
+          settled: cliCancelledSettled,
+          archiveCount: useAgentStore
+            .getState()
+            .archive.filter((record) => record.id === 'browser-cli-cancel-smoke').length,
+          survivorStatus: cliSurvivor.status,
+          survivorSettled: cliSurvivorSettled,
+          survivorArchiveCount: useAgentStore
+            .getState()
+            .archive.filter((record) => record.id === 'browser-cli-survivor-smoke').length,
+          queuedSettled: cliQueuedSettled,
+          queuedSettledStatus: cliQueuedSettledResult?.status,
+          queuedArchiveCount: useAgentStore
+            .getState()
+            .archive.filter((record) => record.id === 'browser-cli-queued-smoke').length,
+          queuedStartedAfterRelease: cliQueueStartedAfterRelease,
+          failureQueueSettled: cliFailureQueueSettled,
+          failureQueueSettledStatus: cliFailureQueueSettledResult?.status,
+          failureQueueArchiveCount: useAgentStore
+            .getState()
+            .archive.filter((record) => record.id === 'browser-cli-failure-queued-smoke').length,
+          failureQueueStartedAfterRelease: cliFailureQueueStartedAfterRelease,
+        },
         delegate: {
           status: delegate.status,
           archiveCount: useAgentStore
@@ -215,10 +686,26 @@ try {
     assert.equal(result.builtIn.status, 'success')
     assert.equal(result.builtIn.settled, 1)
     assert.equal(result.builtIn.archiveCount, 1)
+    assert.equal(result.builtIn.active, false)
+    assert.equal(result.builtInFailure.status, 'failed')
+    assert.equal(result.builtInFailure.settled, 1)
+    assert.equal(result.builtInFailure.archiveCount, 1)
+    assert.equal(result.builtInFailure.active, false)
+    assert.equal(result.dispatchException.status, 'failed')
+    assert.match(result.dispatchException.error, /browser smoke forced dispatch exception/)
+    assert.equal(result.dispatchException.settled, 1)
+    assert.equal(result.dispatchException.archiveCount, 1)
+    assert.equal(result.dispatchException.active, false)
     assert.equal(result.duplicate.status, 'skipped')
     assert.equal(result.duplicate.skipReason, 'duplicate')
     assert.equal(result.cancelled.requested, true)
     assert.ok(['halted', 'failed'].includes(result.cancelled.status))
+    assert.equal(result.cancelled.survivorStatus, 'success')
+    assert.equal(result.cancelled.survivorArchiveCount, 1)
+    assert.equal(result.overflow.queued, true)
+    assert.equal(result.overflow.skipReason, 'queued')
+    assert.ok(['success', 'failed', 'halted'].includes(result.overflow.settledStatus))
+    assert.equal(result.overflow.archiveCount, 1)
     assert.equal(result.queue.queued, true)
     assert.equal(result.queue.skipReason, 'queued')
     assert.ok(['success', 'failed', 'halted'].includes(result.queue.settledStatus))
@@ -229,8 +716,43 @@ try {
     assert.equal(result.denied.archiveCount, 1)
     assert.equal(result.denied.archiveStatus, 'failed')
     assert.equal(result.denied.archiveObjective, 'browser denied coordinator smoke')
+    assert.equal(result.denied.active, false)
+    assert.deepEqual(
+      result.denied.lifecycle.map((event) => event.runId),
+      ['browser-denied-smoke', 'browser-denied-queued-smoke'],
+    )
+    assert.equal(result.denied.lifecycle[0].active, true)
+    assert.equal(result.denied.lifecycle[1].active, false)
+    assert.equal(result.deniedQueued.queued, true)
+    assert.equal(result.deniedQueued.skipReason, 'queued')
+    assert.equal(result.deniedQueued.settledStatus, 'failed')
+    assert.equal(result.deniedQueued.archiveCount, 1)
     assert.equal(result.cli.status, 'failed')
     assert.equal(result.cli.settled, 1)
+    assert.equal(result.cliSuccess.status, 'success')
+    assert.equal(result.cliSuccess.settled, 1)
+    assert.equal(result.cliSuccess.archiveCount, 1)
+    assert.equal(result.cliSuccess.active, false)
+    assert.equal(result.cliFailure.status, 'failed')
+    assert.match(result.cliFailure.error, /browser fake provider failure/)
+    assert.equal(result.cliFailure.settled, 1)
+    assert.equal(result.cliFailure.archiveCount, 1)
+    assert.equal(result.cliFailure.active, false)
+    assert.equal(result.cliCancellation.requested, 'browser-cli-cancel-smoke')
+    assert.equal(result.cliCancellation.status, 'halted')
+    assert.equal(result.cliCancellation.settled, 1)
+    assert.equal(result.cliCancellation.archiveCount, 1)
+    assert.equal(result.cliCancellation.survivorStatus, 'success')
+    assert.equal(result.cliCancellation.survivorSettled, 1)
+    assert.equal(result.cliCancellation.survivorArchiveCount, 1)
+    assert.equal(result.cliCancellation.queuedSettled, 1)
+    assert.ok(['success', 'failed', 'halted'].includes(result.cliCancellation.queuedSettledStatus))
+    assert.equal(result.cliCancellation.queuedArchiveCount, 1)
+    assert.equal(result.cliCancellation.queuedStartedAfterRelease, true)
+    assert.equal(result.cliCancellation.failureQueueSettled, 1)
+    assert.ok(['success', 'failed', 'halted'].includes(result.cliCancellation.failureQueueSettledStatus))
+    assert.equal(result.cliCancellation.failureQueueArchiveCount, 1)
+    assert.equal(result.cliCancellation.failureQueueStartedAfterRelease, true)
     assert.equal(result.delegate.status, 'success')
     assert.equal(result.delegate.archiveCount, 1)
     assert.equal(result.delegate.hidden, true)

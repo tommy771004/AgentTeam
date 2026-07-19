@@ -11,6 +11,13 @@ import type {
 } from './types'
 import type { ExternalRunOpts, ExternalRunResult } from './taskRunCoordinator'
 import type { ThreadRunner } from '../store/threadStore'
+import {
+  getJournalEntry,
+  recordRecoveryNotice,
+  recordQueueDispatching,
+  recordQueueEnqueued,
+  recordQueueTerminal,
+} from './runJournal.ts'
 
 export type QueuedExternalRun = ExternalRunOpts & {
   id: string
@@ -81,6 +88,7 @@ export type PersistedQueueItem = {
 }
 
 const STORAGE_KEY = 'subagents.runQueue.v1'
+const BACKUP_KEY = `${STORAGE_KEY}.backup`
 const MAX_QUEUE = 24
 const queue: QueuedExternalRun[] = []
 let draining = false
@@ -185,23 +193,25 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
 }
 
 function fromPersisted(p: PersistedQueueItem): QueuedExternalRun {
+  const bounded = (value: unknown, max: number): string | undefined =>
+    typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : undefined
   const base: QueuedExternalRun = {
-    id: p.id,
-    enqueuedAt: p.enqueuedAt,
-    dedupeKey: p.dedupeKey,
-    runId: p.runId,
+    id: bounded(p.id, 160) || `q_recovered_${Date.now().toString(36)}`,
+    enqueuedAt: bounded(p.enqueuedAt, 40) || new Date().toISOString(),
+    dedupeKey: bounded(p.dedupeKey, 400) || `recovered:${p.id}`,
+    runId: bounded(p.runId, 160),
     sourceKind: p.sourceKind,
-    objective: p.objective,
-    title: p.title,
+    objective: bounded(p.objective, 240) || 'Recovered queued task',
+    title: bounded(p.title, 120),
     loopType: p.loopType,
     runner: p.runner,
     eventPreMatched: p.eventPreMatched,
     attachedSkills: p.attachedSkills,
-    sourceLabel: p.sourceLabel,
+    sourceLabel: bounded(p.sourceLabel, 160),
     unattended: p.unattended ?? true,
-    projectRoot: p.projectRoot,
-    extraContext: p.extraContext,
-    reuseThreadId: p.reuseThreadId,
+    projectRoot: bounded(p.projectRoot, 1_000),
+    extraContext: bounded(p.extraContext, 8_000),
+    reuseThreadId: bounded(p.reuseThreadId, 160),
     skipUserBubble: p.skipUserBubble,
     enqueueWhenBusy: p.enqueueWhenBusy,
     attachments: p.attachments,
@@ -249,6 +259,8 @@ function persist() {
       items: queue.map(toPersisted),
       savedAt: new Date().toISOString(),
     }
+    const current = localStorage.getItem(STORAGE_KEY)
+    if (current) localStorage.setItem(BACKUP_KEY, current)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch {
     /* quota / SSR */
@@ -265,11 +277,48 @@ export function hydrateRunQueue(): number {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return 0
-    const data = JSON.parse(raw) as { items?: PersistedQueueItem[] }
-    if (!Array.isArray(data.items)) return 0
+    let data: { items: PersistedQueueItem[] }
+    try {
+      data = parsePersistedQueue(raw)
+    } catch {
+      const backupRaw = localStorage.getItem(BACKUP_KEY)
+      try {
+        data = parsePersistedQueue(backupRaw)
+        localStorage.setItem(STORAGE_KEY, backupRaw!)
+        recordRecoveryNotice({
+          kind: 'storage',
+          id: STORAGE_KEY,
+          action: 'restored',
+          detail: '待跑佇列已從最後一份有效備份復原。',
+        })
+      } catch {
+        localStorage.setItem(`${STORAGE_KEY}.corrupt.${Date.now()}`, raw.slice(0, 1_000_000))
+        localStorage.removeItem(STORAGE_KEY)
+        recordRecoveryNotice({
+          kind: 'storage',
+          id: STORAGE_KEY,
+          action: 'quarantined',
+          detail: '待跑佇列損壞，已隔離損壞副本並停止自動重跑。',
+        })
+        return 0
+      }
+    }
     for (const p of data.items) {
-      if (!p?.id || !p.objective) continue
       if (queue.some((q) => q.id === p.id || q.dedupeKey === p.dedupeKey)) continue
+      const marker = getJournalEntry('queue', p.id)
+      // A dispatch marker means the item was removed from the in-memory queue
+      // before termination. Replaying it would duplicate an uncertain side
+      // effect, so discard the stale persisted copy and surface the decision.
+      if (marker && marker.status !== 'queued') {
+        recordRecoveryNotice({
+          kind: 'queue',
+          id: p.id,
+          previousStatus: marker.status,
+          action: marker.status === 'interrupted' ? 'marked-interrupted' : 'resume-once',
+          detail: '佇列項目已有 dispatch/終態 marker，啟動時不重複補跑。',
+        })
+        continue
+      }
       queue.push(fromPersisted(p))
     }
     while (queue.length > MAX_QUEUE) queue.shift()
@@ -298,12 +347,68 @@ export function isRunQueueDraining(): boolean {
   return draining
 }
 
+/** Test seam for simulating a fresh renderer without leaking queue state. */
+export function resetRunQueueForTests(): void {
+  queue.splice(0)
+  draining = false
+  hydrated = false
+}
+
+function parsePersistedQueue(raw: string | null): { items: PersistedQueueItem[] } {
+  if (!raw || raw.length > 1_000_000) throw new Error('queue payload too large')
+  const data = JSON.parse(raw) as { v?: unknown; items?: unknown }
+  if (data.v !== 1 || !Array.isArray(data.items) || data.items.length > MAX_QUEUE * 4) {
+    throw new Error('queue payload schema invalid')
+  }
+  for (const item of data.items) {
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      typeof (item as PersistedQueueItem).id !== 'string' ||
+      typeof (item as PersistedQueueItem).objective !== 'string' ||
+      typeof (item as PersistedQueueItem).dedupeKey !== 'string' ||
+      typeof (item as PersistedQueueItem).enqueuedAt !== 'string'
+    ) {
+      throw new Error('queue item schema invalid')
+    }
+  }
+  return { items: data.items as PersistedQueueItem[] }
+}
+
+/**
+ * Complete a queued run that will never be admitted.
+ *
+ * Queue mutations stay synchronous for UI callers, while settlement is safely
+ * detached so both synchronous throws and rejected callbacks remain non-fatal.
+ */
+function settleQueuedCancellation(item: QueuedExternalRun, error: string): void {
+  const onSettled = item.onSettled
+  if (!onSettled) return
+  const result: ExternalRunResult = {
+    path: 'builtin',
+    status: 'skipped',
+    error,
+    threadId: null,
+    runId: item.runId,
+    skipped: true,
+    skipReason: 'cancelled',
+  }
+  try {
+    void Promise.resolve(onSettled(result)).catch(() => undefined)
+  } catch {
+    /* settlement notification is non-fatal */
+  }
+}
+
 /** Drop all pending items (does not abort in-flight run). */
 export function clearRunQueue(): number {
-  const n = queue.length
-  queue.length = 0
+  const removed = queue.splice(0)
   emit()
-  return n
+  for (const item of removed) {
+    recordQueueTerminal({ queueId: item.id, status: 'cancelled' })
+    settleQueuedCancellation(item, '使用者清除佇列')
+  }
+  return removed.length
 }
 
 /** Remove one pending item by id. Returns true if removed. */
@@ -312,18 +417,8 @@ export function removeQueuedRun(id: string): boolean {
   if (idx < 0) return false
   const [removed] = queue.splice(idx, 1)
   emit()
-  try {
-    void removed.onSettled?.({
-      path: 'builtin',
-      status: 'skipped',
-      error: '使用者取消佇列項目',
-      threadId: null,
-      skipped: true,
-      skipReason: 'cancelled',
-    })
-  } catch {
-    /* ignore */
-  }
+  recordQueueTerminal({ queueId: removed.id, status: 'cancelled' })
+  settleQueuedCancellation(removed, '使用者取消佇列項目')
   return true
 }
 
@@ -369,24 +464,19 @@ export function enqueueExternalRun(opts: ExternalRunOpts): QueuedExternalRun | n
     enqueuedAt: new Date().toISOString(),
     dedupeKey: key,
   }
+  recordQueueEnqueued({
+    queueId: item.id,
+    runId: item.runId,
+    objective: item.objective,
+    sourceKind: item.sourceKind,
+  })
   queue.push(item)
   while (queue.length > MAX_QUEUE) {
     const dropped = queue.shift()
     // P0: never silent-drop schedule jobs — settle as cancelled
     if (dropped) {
-      try {
-        void dropped.onSettled?.({
-          path: 'builtin',
-          status: 'skipped',
-          error: '佇列已滿，最舊項目被丟棄',
-          threadId: null,
-          skipped: true,
-          skipReason: 'cancelled',
-          runId: dropped.runId,
-        })
-      } catch {
-        /* ignore */
-      }
+      recordQueueTerminal({ queueId: dropped.id, status: 'cancelled' })
+      settleQueuedCancellation(dropped, '佇列已滿，最舊項目被丟棄')
     }
   }
   emit()
@@ -428,6 +518,7 @@ export async function drainExternalRunQueue(
       for (let i = 0; i < slots && queue.length; i += 1) {
         const next = queue.shift()
         if (!next) break
+        recordQueueDispatching({ queueId: next.id, runId: next.runId })
         emit()
         const { id: _id, enqueuedAt: _at, dedupeKey: _k, ...opts } = next
         batch.push({
@@ -451,8 +542,19 @@ export async function drainExternalRunQueue(
         .map((entry) => entry.item)
       if (busyItems.length) {
         queue.unshift(...busyItems.reverse())
+        for (const item of busyItems) {
+          recordQueueEnqueued({
+            queueId: item.id,
+            runId: item.runId,
+            objective: item.objective,
+            sourceKind: item.sourceKind,
+          })
+        }
         emit()
         break
+      }
+      for (const [index, entry] of batch.entries()) {
+        recordQueueTerminal({ queueId: entry.item.id, status: results[index]?.status || 'failed' })
       }
     }
   } finally {

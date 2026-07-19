@@ -10,22 +10,29 @@ import {
   dialog,
   powerSaveBlocker,
   safeStorage,
+  session,
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { spawn } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   clearVaultSecret,
   getVaultSecret,
   hasSecretPlaceholder,
+  isVaultEncryptionAvailable,
   listVaultMeta,
   migrateIntoVault,
   resolveSecretPlaceholders,
   setVaultSecret,
 } from './secretsVault'
+import {
+  decidePermissionRequest,
+  isAllowedNavigationUrl,
+  isSafeExternalUrl,
+} from './securityPolicy'
 import {
   getWebhookStatus,
   dispatchWebhook,
@@ -86,6 +93,7 @@ import {
   applyDiscoveryToProviders,
   discoverLocalClis,
 } from './cliDiscover'
+import { runCliDoctor } from './cliDoctor'
 import { discoverMcpServers } from './mcpDiscover'
 import {
   bindTermWebContents,
@@ -145,6 +153,19 @@ import type {
   SubDesignExportFormat,
 } from '../src/agent/subdesign/types'
 import type { CliConfigSnapshot } from '../src/agent/types'
+import {
+  captureMigrationSnapshot,
+  deferUpdate,
+  discoverUpdate,
+  downloadUpdate,
+  markInstallFailure,
+  completeMigration,
+  pendingMigration,
+  prepareUpdateInstall,
+  readUpdateState,
+  rollbackUpdate,
+  updatePublicKeyFromEnv,
+} from './updateManager'
 import {
   abortOpenCodeRun,
   checkOpenCodeServer,
@@ -595,9 +616,27 @@ function createWindow() {
     }
   })
 
+  // Issue 06 — 視窗開啟/導覽 allowlist：新視窗一律拒絕，安全 scheme 才轉外部瀏覽器
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (isSafeExternalUrl(url)) shell.openExternal(url)
+    else console.warn('[security] blocked window.open →', url)
     return { action: 'deny' }
+  })
+  // 打包後 file: 只允許 app 自己的 index.html
+  const appIndexFileUrl = process.env.DIST
+    ? pathToFileURL(path.join(process.env.DIST, 'index.html')).href
+    : undefined
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (
+      !isAllowedNavigationUrl(url, {
+        devServerUrl: process.env.VITE_DEV_SERVER_URL,
+        appIndexFileUrl,
+      })
+    ) {
+      event.preventDefault()
+      console.warn('[security] blocked navigation →', url)
+      if (isSafeExternalUrl(url)) shell.openExternal(url)
+    }
   })
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -615,6 +654,15 @@ app.whenReady().then(() => {
   if (process.platform === 'win32') {
     app.setAppUserModelId('ai.subagents.desktop')
   }
+  // Issue 06 — 權限請求 deny-by-default（白名單見 securityPolicy.ts）
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    const allowed = decidePermissionRequest(permission)
+    if (!allowed) console.warn('[security] denied permission request →', permission)
+    callback(allowed)
+  })
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
+    decidePermissionRequest(permission),
+  )
   createAppMenu()
   createWindow()
   createTray()
@@ -1046,8 +1094,8 @@ ipcMain.handle(
 )
 
 ipcMain.handle('shell:openExternal', async (_evt, url: string) => {
-  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
-    throw new Error('無效的 URL')
+  if (!isSafeExternalUrl(url)) {
+    throw new Error('無效的 URL（僅允許 http/https/mailto）')
   }
   await shell.openExternal(url)
   return { ok: true }
@@ -1465,6 +1513,11 @@ ipcMain.handle('cli:which', async (_evt, binary: string) => {
 ipcMain.handle('cli:discover', async () => discoverLocalClis())
 
 ipcMain.handle(
+  'cli:doctor',
+  async (_evt, currentProviders: Array<Record<string, unknown>> = []) => runCliDoctor(currentProviders),
+)
+
+ipcMain.handle(
   'cli:applyDiscovery',
   async (_evt, currentProviders: Array<Record<string, unknown>>) => {
     const { clis, summary } = await discoverLocalClis()
@@ -1840,6 +1893,75 @@ ipcMain.handle('hermes:set', async (_evt, data: unknown) => {
 
 ipcMain.handle('app:platform', () => process.platform)
 ipcMain.handle('app:version', () => app.getVersion())
+
+// ── Signed Beta updates + N-1→N migration transaction ─────────
+// The channel is deliberately opt-in through SUBAGENTS_UPDATE_PUBLIC_KEY;
+// without a pinned key the app fails closed instead of accepting unsigned code.
+ipcMain.handle('updates:state', async () => readUpdateState())
+ipcMain.handle('updates:check', async (_evt, input?: { url?: string }) => {
+  try {
+    return { ok: true, state: await discoverUpdate({ url: input?.url, publicKeyPem: updatePublicKeyFromEnv() }) }
+  } catch (error) {
+    return { ok: false, state: readUpdateState(), error: error instanceof Error ? error.message : String(error) }
+  }
+})
+ipcMain.handle('updates:defer', async (_evt, version: string) => {
+  try { return { ok: true, state: deferUpdate(String(version || ''), 7) } }
+  catch (error) { return { ok: false, state: readUpdateState(), error: error instanceof Error ? error.message : String(error) } }
+})
+ipcMain.handle('updates:download', async (evt) => {
+  try {
+    const state = await downloadUpdate({
+      publicKeyPem: updatePublicKeyFromEnv(),
+      onProgress: (progress) => evt.sender.send('updates:progress', { progress }),
+    })
+    return { ok: true, state }
+  } catch (error) {
+    const state = markInstallFailure(error)
+    return { ok: false, state, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+ipcMain.handle('updates:captureMigration', async (_evt, input: {
+  appVersion?: string
+  rendererStorage?: Record<string, string>
+  projects?: Array<{ root: string; name?: string; branch?: string | null }>
+  queue?: unknown
+  schedules?: unknown[]
+  artifactIndex?: unknown
+}) => captureMigrationSnapshot({
+  appVersion: String(input?.appVersion || app.getVersion()),
+  rendererStorage: input?.rendererStorage || {},
+  vaultMetadata: listVaultMeta(),
+  projects: input?.projects || [],
+  queue: input?.queue || [],
+  schedules: (() => {
+    try {
+      const file = jobsPath()
+      if (!fs.existsSync(file)) return []
+      const jobs = JSON.parse(fs.readFileSync(file, 'utf8'))
+      return Array.isArray(jobs) ? jobs : []
+    } catch { return [] }
+  })(),
+  artifactIndex: input?.artifactIndex ?? null,
+}))
+ipcMain.handle('updates:install', async (_evt, snapshot: unknown) => {
+  try {
+    const state = prepareUpdateInstall(snapshot as Parameters<typeof prepareUpdateInstall>[0], updatePublicKeyFromEnv())
+    if (!state.downloadedPath) throw new Error('更新檔案路徑遺失')
+    const openError = await shell.openPath(state.downloadedPath)
+    if (openError) throw new Error(openError)
+    return { ok: true, restartRequired: true, state }
+  } catch (error) {
+    const state = markInstallFailure(error)
+    return { ok: false, restartRequired: false, state, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+ipcMain.handle('updates:rollback', async () => {
+  try { return rollbackUpdate() }
+  catch (error) { return { ok: false, launchable: true, state: readUpdateState(), error: error instanceof Error ? error.message : String(error) } }
+})
+ipcMain.handle('updates:pendingMigration', async () => pendingMigration())
+ipcMain.handle('updates:completeMigration', async (_evt, snapshot?: unknown) => completeMigration(snapshot))
 
 // ── Workspace: active project root OR sandboxed userData/workspace ──
 
@@ -3299,13 +3421,19 @@ ipcMain.handle(
       expiresAt?: number
       tokenType?: string
       keepRefreshToken?: boolean
+      allowPlaintext?: boolean
     },
   ) => {
     if (!input?.id || !input?.token?.trim()) {
       return { ok: false as const, error: 'id 與 token 必填' }
     }
-    const meta = setVaultSecret(input.id, input.token, input)
-    return { ok: true as const, meta }
+    try {
+      const meta = setVaultSecret(input.id, input.token, input)
+      return { ok: true as const, meta }
+    } catch (e) {
+      const err = e as Error & { code?: string }
+      return { ok: false as const, error: err.message, code: err.code }
+    }
   },
 )
 
@@ -3317,6 +3445,10 @@ ipcMain.handle('secrets:clear', async (_evt, id: string) => {
 ipcMain.handle(
   'secrets:migrate',
   async (_evt, map: Record<string, { token: string; refreshToken?: string; expiresAt?: number; tokenType?: string; updatedAt?: string }>) => {
+    // 無 OS 鑰匙圈：拒絕把 legacy 明文轉寫成新明文檔；renderer 需保留 localStorage
+    if (Object.keys(map || {}).length && !isVaultEncryptionAvailable()) {
+      return { ok: false, imported: 0, error: 'OS 安全儲存不可用，暫不匯入 legacy 憑證' }
+    }
     const imported = migrateIntoVault(
       (map || {}) as Record<string, import('./secretsVault').VaultRecord>,
     )

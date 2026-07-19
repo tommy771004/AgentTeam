@@ -29,6 +29,8 @@ import { useProjectStore } from '../store/projectStore'
 import { listQueuedRuns, queueLength } from '../agent/runQueue'
 import { ChatBubble } from '../components/ChatBubble'
 import { RunSummaryCard } from '../components/RunSummaryCard'
+import { CliDoctorCard } from '../components/CliDoctorCard'
+import { requestFocusComposer } from '../store/commandHistoryStore'
 
 /**
  * OpenCode 風格：Build/Plan + 模型/深度 + Threads + 內嵌執行
@@ -366,6 +368,12 @@ export function ProtocolsPage() {
                   <h1 className="font-[family-name:var(--font-sora)] text-xl md:text-2xl font-semibold">
                     今天要完成什麼？
                   </h1>
+                  <CliDoctorCard
+                    onStartTask={() => {
+                      setDraftInput('請檢查目前專案，完成一個小幅度安全修正並回報 Git diff。')
+                      requestFocusComposer({ openSlash: false })
+                    }}
+                  />
                 </div>
               ) : (
                 <div className="w-full space-y-3 pb-2">

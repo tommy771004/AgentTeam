@@ -44,9 +44,10 @@ type VaultApi = {
     expiresAt?: number
     tokenType?: string
     keepRefreshToken?: boolean
-  }) => Promise<{ ok: true; meta: PluginSecretMeta } | { ok: false; error: string }>
+    allowPlaintext?: boolean
+  }) => Promise<{ ok: true; meta: PluginSecretMeta } | { ok: false; error: string; code?: string }>
   clear: (id: string) => Promise<{ ok: boolean }>
-  migrate: (map: Record<string, unknown>) => Promise<{ ok: boolean; imported: number }>
+  migrate: (map: Record<string, unknown>) => Promise<{ ok: boolean; imported: number; error?: string }>
   refresh: (input: {
     pluginId: string
     clientId: string
@@ -133,20 +134,25 @@ export async function hydratePluginSecrets(): Promise<number> {
   const api = vaultApi()
   if (!api) return 0
   try {
-    // One-time migration of legacy renderer-persisted tokens
+    // One-time migration of legacy renderer-persisted tokens.
+    // Issue 06：migrate 被拒（無 OS 鑰匙圈）時保留 localStorage，不清資料。
     const store = storage()
     const legacyRaw = store?.getItem(STORAGE_KEY)
     if (legacyRaw) {
+      let migrated = true
       try {
         const legacy = JSON.parse(legacyRaw) as SecretMap
         if (legacy && typeof legacy === 'object' && Object.keys(legacy).length) {
-          await api.migrate(legacy)
+          const r = await api.migrate(legacy)
+          migrated = r.ok
         }
       } catch {
-        /* unparseable legacy blob — still remove below */
+        /* unparseable legacy blob — safe to remove */
       }
-      store?.removeItem(STORAGE_KEY)
-      memoryMap = {}
+      if (migrated) {
+        store?.removeItem(STORAGE_KEY)
+        memoryMap = {}
+      }
     }
     const metas = await api.list()
     metaMap = Object.fromEntries(metas.map((m) => [m.id, m]))
@@ -197,6 +203,8 @@ export async function setPluginSecret(
     expiresAt?: number
     tokenType?: string
     keepRefreshToken?: boolean
+    /** 無 OS 鑰匙圈時的明文 fallback — 僅在使用者於 UI 明確確認後帶入 */
+    allowPlaintext?: boolean
   },
 ): Promise<PluginSecretMeta> {
   const api = vaultApi()
@@ -206,7 +214,9 @@ export async function setPluginSecret(
       metaMap[id] = r.meta
       return r.meta
     }
-    throw new Error(r.error)
+    const err = new Error(r.error) as Error & { code?: string }
+    err.code = r.code
+    throw err
   }
   // Browser fallback (legacy behavior)
   const map = readMap()

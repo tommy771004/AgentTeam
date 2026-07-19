@@ -15,6 +15,7 @@ export const STATUS_ZH: Record<string, string> = {
   success: '成功',
   failed: '失敗',
   halted: '已中止',
+  interrupted: '執行中斷',
   manual_intervention: '人工介入',
   warning: '警告',
 }
@@ -25,6 +26,7 @@ export const JOB_STATUS_ZH: Record<string, string> = {
   success: '成功',
   failed: '失敗',
   skipped: '已略過',
+  interrupted: '執行中斷',
 }
 
 export const SCHEDULE_KIND_ZH: Record<string, string> = {

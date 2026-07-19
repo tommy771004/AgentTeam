@@ -40,3 +40,23 @@ _Avoid_: treating "每天 08:00 …" in chat as an automatic scheduled run.
 **External CLI run**:
 `executionKind: 'external'` via local CLI providers. Declares no parse/DoD/iterate/continueGoal/progressive capabilities until a verified prompt contract is enabled (`agent/runners/`).
 _Avoid_: treating CLI success as Definition of Done met.
+
+**Approval Mode（核准模式）**:
+The per-run authority posture selected as `要求核准` (`always`), `代我核准` (`auto`), or `完整存取權` (`full`). Settings owns the default; the composer may override it for one task run. It is independent from Loop Pattern: Goal-based controls iteration, while Approval Mode controls whether side effects require human approval. Plan mode, explicit deny rules, capability-required approval, and unattended downgrade remain stronger constraints.
+_Avoid_: calling this "control policy" in user-facing copy — that term also covers organization rules, unattended behavior, and release boundaries.
+
+**Free Core**:
+The no-cost, closed-source desktop product baseline. It includes a useful local coding-agent workspace comparable to the open-market baseline: local CLI/provider connections, projects/sessions, basic multi-agent use, permissions, Plan/Goal tasks, skills/MCP, diff/terminal/history, export, and Handoff. Free means no subscription entitlement is required; it does not mean open source.
+_Avoid_: gating basic provider access, MCP, diff, or all multi-agent use behind subscription — paid value is advanced orchestration and reliability.
+
+**Subscription Feature Pack**:
+A versioned, signed optional capability/workflow package downloaded only after a subscription entitlement is verified. The free core owns updates and security fixes; the pack owns paid orchestration such as Spec → Tickets → TDD → Review, unattended automation, advanced quality gates, and long-term artifact analytics. Losing entitlement must not make existing user data unreadable or unexportable.
+_Avoid_: shipping separate diverging Free and Pro application binaries.
+
+**Artifact Index**:
+A local index of the specs, tickets, diffs, test evidence, reviews, decisions, and output artifacts produced by a task. It records references and compact metadata rather than duplicating every artifact. It is the source used to assemble an optional Handoff Package.
+_Avoid_: treating the index as cloud sync or silently uploading indexed content.
+
+**Handoff Package**:
+A user-requested portable document generated from the Artifact Index for another session, agent, or person. The entry point belongs in the composer `+` menu. Generation and delivery are separate: the first product version creates a local file only and never sends or uploads it automatically.
+_Avoid_: generating a second copy of existing specs/plans/diffs; reference those artifacts by path or URL.
