@@ -11,13 +11,18 @@ import {
 import { useAgentStore } from '../store/agentStore'
 import { useProjectStore } from '../store/projectStore'
 import { useRunActivityStore } from '../store/runActivityStore'
-import { useThreadStore } from '../store/threadStore'
+import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
 
 /**
  * CloudCLI-style embedded run progress — no page navigation
  */
 const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 })
+// Stable references — a fresh object/array literal returned from a zustand
+// selector fallback breaks Object.is identity every render and triggers
+// "Maximum update depth exceeded" (React getSnapshot-must-be-cached loop).
+const EMPTY_ACTIVITY = { active: false, tasks: [], statusLine: '', thought: '' } as const
+const EMPTY_RUN_PLAN: ThreadPlanItem[] = []
 
 export function InlineRunPanel({
   runId,
@@ -33,21 +38,15 @@ export function InlineRunPanel({
   const stopExecution = useAgentStore((s) => s.stopExecution)
   const continueTurn = useAgentStore((s) => s.continueTurn)
   const resolveIntervention = useAgentStore((s) => s.resolveIntervention)
-  const activity =
-    useRunActivityStore((s) => s.presentations[runId]) ||
-    ({ active: false, tasks: [], statusLine: '', thought: '' } as const)
-  const threadMeta = useThreadStore((s) => {
-    const thread = s.threads.find((t) => t.id === threadId)
-    return {
-      continueGoal: thread?.continueGoal,
-      runner: thread?.runner || 'builtin',
-      runPlan: thread?.runPlan || [],
-    }
-  })
-  const continueGoal = threadMeta.continueGoal
+  const activity = useRunActivityStore((s) => s.presentations[runId]) || EMPTY_ACTIVITY
+  const continueGoal = useThreadStore((s) => s.threads.find((t) => t.id === threadId)?.continueGoal)
   const activeId = threadId
-  const threadRunner = threadMeta.runner
-  const persistedPlan = threadMeta.runPlan
+  const threadRunner = useThreadStore(
+    (s) => s.threads.find((t) => t.id === threadId)?.runner || 'builtin',
+  )
+  const persistedPlan = useThreadStore(
+    (s) => s.threads.find((t) => t.id === threadId)?.runPlan || EMPTY_RUN_PLAN,
+  )
   const tasks = activity.tasks.length
     ? activity.tasks
     : persistedPlan.map((item) => ({
