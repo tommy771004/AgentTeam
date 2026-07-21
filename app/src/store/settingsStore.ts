@@ -161,7 +161,27 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
               | 'invalid',
           })
           if (applied.ok) {
+            const prevDeploy = base.outboundGuardDeploy || 'off'
             base = mergeSettings(base, applied.patch)
+            // Ticket 04 residual: mode transition evidence (metadata only, main ledger)
+            if (
+              applied.patch.outboundGuardDeploy &&
+              applied.patch.outboundGuardDeploy !== prevDeploy
+            ) {
+              try {
+                const { buildGuardModeChangeEvidence } = await import(
+                  '../agent/outbound/evidenceLedger.ts'
+                )
+                const ev = buildGuardModeChangeEvidence({
+                  fromMode: prevDeploy,
+                  toMode: applied.patch.outboundGuardDeploy,
+                })
+                // Non-privileged type — may go via IPC; main also owns privileged path.
+                void window.subagents?.outbound?.appendEvidence?.(ev as never, false)
+              } catch {
+                /* non-fatal */
+              }
+            }
           }
         }
       }

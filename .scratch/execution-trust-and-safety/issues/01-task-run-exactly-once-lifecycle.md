@@ -1,7 +1,6 @@
 # 01 — 保證 Task run 的 exactly-once lifecycle
 
-Status: 可交給代理
-
+Status: resolved
 **What to build:** 讓每個 Task run 只能被接納、執行與完成一次。使用者無論從 Chat turn、重試或自動化來源送出重複 `runId`，都只會看到一個真實的 Loop run 與一個可追溯的終態，不會重複寫入對話、封存、排程結算或佇列排空。
 
 **Blocked by:** None — can start immediately.

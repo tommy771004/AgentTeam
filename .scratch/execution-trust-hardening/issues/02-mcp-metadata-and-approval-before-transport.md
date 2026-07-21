@@ -4,8 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** 可交給代理
-
+**Status:** resolved
 - [x] 目標工具帶 write／destructive／external 類 metadata 時，auto 模式在執行前要求核准。
 - [x] 無 metadata 時仍以保守名稱啟發式分類；read 類 metadata 的讀取目標不因誤報而強制寫入核准。
 - [x] 無人值守 run 無法靜默通過 MCP 寫入核准；full-access 降級與 deny 優先序維持不變。

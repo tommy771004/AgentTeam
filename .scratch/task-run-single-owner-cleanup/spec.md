@@ -1,6 +1,6 @@
 # Task run single-owner lifecycle cleanup
 
-Status: 可交給代理
+Status: resolved
 
 ## Problem Statement
 

@@ -4,8 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** 可交給代理
-
+**Status:** resolved
 - [x] 並行／重入下，同一 `runId` 在第一筆 admission 尚未完成前再提交，仍不得第二度 dispatch Loop run。
 - [x] 已 finalized 的 `runId` 再提交得到 deterministic 非成功 duplicate 結果，且不重寫對話／Archive。
 - [x] 同一 `runId` 的 finalization 副作用（Archive、`onSettled`、capacity release、queue drain）最多發生一次。

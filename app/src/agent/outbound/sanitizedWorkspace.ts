@@ -30,12 +30,20 @@ export function getSanitizedViewCapability(opts?: {
 
 export type WorkspaceExclusion = ProtectedExclusion & { relPath: string }
 
+export type SanitizedFileMapping = {
+  relPath: string
+  originalAbs: string
+  sanitizedAbs: string
+  /** Initial sanitized text for safe writeback (text files only). */
+  initialSanitizedText?: string
+}
+
 export type SanitizedWorkspace = {
   connectionId: string
   originalRoot: string
   viewRoot: string
   exclusions: WorkspaceExclusion[]
-  fileMappings: Array<{ relPath: string; originalAbs: string; sanitizedAbs: string }>
+  fileMappings: SanitizedFileMapping[]
   skipped: Array<{ relPath: string; reason: string }>
 }
 
@@ -205,7 +213,12 @@ export async function createSanitizedWorkspace(opts: {
 
     const sanitized = sanitizeTextWithProfile(raw, opts.profile, { source: relPath })
     fs.writeFileSync(dest, sanitized.text, 'utf8')
-    fileMappings.push({ relPath, originalAbs: abs, sanitizedAbs: dest })
+    fileMappings.push({
+      relPath,
+      originalAbs: abs,
+      sanitizedAbs: dest,
+      initialSanitizedText: sanitized.text,
+    })
     for (const e of sanitized.exclusions) {
       exclusions.push({ ...e, relPath, source: relPath })
     }
@@ -219,6 +232,47 @@ export async function createSanitizedWorkspace(opts: {
     fileMappings,
     skipped,
   }
+}
+
+/**
+ * Safe writeback from Restricted Project View to original (ADR-0008).
+ * Only text mappings with initialSanitizedText; protected lines never overwrite originals.
+ */
+export function writebackSanitizedWorkspace(ws: SanitizedWorkspace): {
+  filesWritten: number
+  filesSkipped: number
+  withheldRanges: number
+} {
+  let filesWritten = 0
+  let filesSkipped = 0
+  let withheldRanges = 0
+  for (const m of ws.fileMappings) {
+    if (m.initialSanitizedText == null) {
+      filesSkipped++
+      continue
+    }
+    if (!fs.existsSync(m.sanitizedAbs) || !fs.existsSync(m.originalAbs)) {
+      filesSkipped++
+      continue
+    }
+    try {
+      const excl = ws.exclusions
+        .filter((e) => e.relPath === m.relPath || e.source === m.relPath)
+        .map((e) => ({ startLine: e.startLine, endLine: e.endLine }))
+      const r = applySafeWritebackToOriginal({
+        originalAbs: m.originalAbs,
+        sanitizedAbs: m.sanitizedAbs,
+        sanitizedBeforeText: m.initialSanitizedText,
+        exclusions: excl,
+      })
+      if (r.wrote) filesWritten++
+      else filesSkipped++
+      withheldRanges += r.withheld.length
+    } catch {
+      filesSkipped++
+    }
+  }
+  return { filesWritten, filesSkipped, withheldRanges }
 }
 
 export async function disposeSanitizedWorkspace(ws: SanitizedWorkspace): Promise<void> {

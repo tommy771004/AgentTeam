@@ -206,6 +206,10 @@ const api = {
       max_tokens?: number
       tools?: unknown[]
       tool_choice?: unknown
+      runId?: string
+      effectiveMode?: 'off' | 'demo' | 'optional' | 'required'
+      providerConnectionId?: string
+      outboundProfileSource?: 'company' | 'baseline' | 'none'
     }) =>
       ipcRenderer.invoke('llm:chat', req) as Promise<{
         content: string
@@ -770,6 +774,8 @@ const api = {
         engine: 'seatbelt' | 'bwrap'
         viewRoot: string
       }
+      /** Effective outbound guard mode for main sandbox admission (ticket 20) */
+      effectiveMode?: 'off' | 'demo' | 'optional' | 'required'
     }) =>
       ipcRenderer.invoke('cli:runAgent', input) as Promise<{
         ok: boolean
@@ -1181,8 +1187,11 @@ const api = {
           }
         | { ok: false; reason: string }
       >,
-    disposeRunView: (runId: string) =>
-      ipcRenderer.invoke('outbound:disposeRunView', runId) as Promise<{ ok: boolean }>,
+    disposeRunView: (runId: string, opts?: { writeback?: boolean }) =>
+      ipcRenderer.invoke('outbound:disposeRunView', runId, opts || {}) as Promise<{
+        ok: boolean
+        writeback?: { filesWritten: number; filesSkipped: number; withheldRanges: number }
+      }>,
     viewRoot: (runId: string) =>
       ipcRenderer.invoke('outbound:viewRoot', runId) as Promise<string | null>,
     viewMeta: (runId: string) =>

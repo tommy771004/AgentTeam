@@ -7,10 +7,14 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   appendEvidenceRecord,
+  buildGuardModeChangeEvidence,
   createMemoryHmacKeyProvider,
+  decideSealedEvidenceWhenKeyMissing,
   isoWeekKeyTaipei,
+  previousIsoWeekKeyTaipei,
   verifyLedgerFile,
   type EvidenceRecord,
 } from '../src/agent/outbound/evidenceLedger.ts'
@@ -145,6 +149,165 @@ await test('reorder detection fails verify', async () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+await test('cross-week first record links previous week terminal MAC', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'odg-ev-xweek-'))
+  const key = createMemoryHmacKeyProvider(Buffer.from('cross-week-hmac-key-32bytes!!!!'))
+  try {
+    const weekA = new Date('2026-07-13T04:00:00.000Z') // prior week
+    const weekB = new Date('2026-07-20T04:00:00.000Z') // next week
+    assert.notEqual(isoWeekKeyTaipei(weekA), isoWeekKeyTaipei(weekB))
+    assert.equal(previousIsoWeekKeyTaipei(weekB), isoWeekKeyTaipei(weekA))
+
+    const a = await appendEvidenceRecord(
+      {
+        eventType: 'policy-change',
+        action: 'activate',
+        effectiveGuardMode: 'required',
+        policySource: 'local',
+        policyVersion: '2',
+        changeId: 'chg-a',
+      },
+      { ledgerDir: dir, keyProvider: key, sealed: true, now: weekA },
+    )
+    assert.equal(a.ok, true)
+    if (!a.ok) return
+    const terminalMac = a.record.recordMac
+    assert.ok(terminalMac)
+
+    const b = await appendEvidenceRecord(
+      {
+        eventType: 'outbound-decision',
+        action: 'allow',
+        effectiveGuardMode: 'required',
+        policySource: 'local',
+      },
+      { ledgerDir: dir, keyProvider: key, sealed: true, now: weekB },
+    )
+    assert.equal(b.ok, true)
+    if (!b.ok) return
+    assert.equal(b.record.sequence, 1)
+    assert.equal(b.record.previousMac, terminalMac)
+
+    const weekBFile = path.join(dir, `evidence-${isoWeekKeyTaipei(weekB)}.jsonl`)
+    const ok = await verifyLedgerFile(weekBFile, key)
+    assert.equal(ok.ok, true, ok.reason || 'week B should verify with cross-week previousMac')
+    assert.equal(b.record.previousMac, terminalMac)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+await test('onKeyUnavailable=block refuses sealed when key missing', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'odg-ev-key-'))
+  const noKey = { async getKey() { return null } }
+  try {
+    const blocked = decideSealedEvidenceWhenKeyMissing({
+      wantSealed: true,
+      keyAvailable: false,
+      onKeyUnavailable: 'block',
+    })
+    assert.equal(blocked.proceed, false)
+
+    const r = await appendEvidenceRecord(
+      { eventType: 'outbound-decision', action: 'allow' },
+      {
+        ledgerDir: dir,
+        keyProvider: noKey,
+        sealed: true,
+        onKeyUnavailable: 'block',
+      },
+    )
+    assert.equal(r.ok, false)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+await test('onKeyUnavailable=unsealed continues without MAC', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'odg-ev-unseal-'))
+  const noKey = { async getKey() { return null } }
+  try {
+    const d = decideSealedEvidenceWhenKeyMissing({
+      wantSealed: true,
+      keyAvailable: false,
+      onKeyUnavailable: 'unsealed',
+    })
+    assert.equal(d.proceed, true)
+    if (d.proceed) assert.equal(d.sealed, false)
+
+    const r = await appendEvidenceRecord(
+      { eventType: 'outbound-decision', action: 'allow', effectiveGuardMode: 'optional' },
+      {
+        ledgerDir: dir,
+        keyProvider: noKey,
+        sealed: true,
+        onKeyUnavailable: 'unsealed',
+      },
+    )
+    assert.equal(r.ok, true)
+    if (r.ok) {
+      assert.equal(r.record.sealed, false)
+      assert.equal(r.record.recordMac, undefined)
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+await test('eventTypes policy/device/workspace/guard-mode append on same ledger', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'odg-ev-types-'))
+  const key = createMemoryHmacKeyProvider(Buffer.from('types-hmac-key-32-bytes-long!!!'))
+  try {
+    const types = [
+      'policy-change',
+      'policy-rollback',
+      'guard-mode-change',
+      'workspace-sync',
+      'device-retired',
+      'device-replaced',
+      'evidence-verification',
+      'retention-checkpoint',
+    ] as const
+    for (const eventType of types) {
+      const r = await appendEvidenceRecord(
+        {
+          eventType,
+          action: 'smoke',
+          effectiveGuardMode: 'required',
+          policySource: 'local',
+        },
+        { ledgerDir: dir, keyProvider: key, sealed: true },
+      )
+      assert.equal(r.ok, true, eventType)
+    }
+    const filePath = path.join(dir, fs.readdirSync(dir)[0])
+    const v = await verifyLedgerFile(filePath, key)
+    assert.equal(v.ok, true)
+    const raw = fs.readFileSync(filePath, 'utf8')
+    for (const t of types) assert.match(raw, new RegExp(t))
+    // synthetic secrets must not appear (negative scan)
+    assert.doesNotMatch(raw, /sk-live|password=|BEGIN PRIVATE/i)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+await test('guard mode transition helper produces guard-mode-change', () => {
+  const e = buildGuardModeChangeEvidence({ fromMode: 'off', toMode: 'required' })
+  assert.equal(e.eventType, 'guard-mode-change')
+  assert.equal(e.action, 'off→required')
+  assert.equal(e.effectiveGuardMode, 'required')
+})
+
+await test('import extensions: localCliRun uses .ts outbound paths', () => {
+  const t = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/agent/localCliRun.ts'),
+    'utf8',
+  )
+  assert.match(t, /outbound\/outboundGate\.ts/)
+  assert.match(t, /outbound\/cliSandbox\.ts/)
 })
 
 console.log(`\n${passed} tests passed`)

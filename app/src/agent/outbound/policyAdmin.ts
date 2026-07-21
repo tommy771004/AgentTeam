@@ -1,9 +1,36 @@
 /**
  * Policy Admin local lifecycle — draft / validate / activate / rollback (ticket 13).
  * Does not bypass Outbound Data Gate; never exposes protected content.
+ * Ticket 22: writes only when build flavor is policy-admin.
  */
 
+import { parseBuildFlavor } from './outboundGate.ts'
 import type { CompanyBasePolicy, ProviderSupplementalPolicy } from './policySchema.ts'
+
+/**
+ * Main/hard gate for Policy Admin mutations (ADR-0016).
+ * Standard builds must not activate/save/rollback company policy.
+ */
+export function assertPolicyAdminWriteAllowed(
+  flavorRaw?: string | null,
+): { ok: true } | { ok: false; reason: string } {
+  try {
+    const flavor = parseBuildFlavor(flavorRaw)
+    if (flavor !== 'policy-admin') {
+      return {
+        ok: false,
+        reason:
+          'Policy Admin 寫入僅限 SUBAGENTS_BUILD_FLAVOR=policy-admin（standard 硬拒絕，非僅 UI 隱藏）。',
+      }
+    }
+    return { ok: true }
+  } catch (e) {
+    return {
+      ok: false,
+      reason: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
 import {
   validateCompanyBasePolicy,
   validateProviderSupplementalPolicy,

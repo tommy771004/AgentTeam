@@ -1,7 +1,6 @@
 # SubDesign 專案工作區與流程導向 Studio
 
-Status: 可交給代理
-
+Status: resolved
 ## Problem Statement
 
 使用者已能在 SubDesign 建立可 deep-link 的 brief、在同一頁啟動 task run、查看 artifact、執行多輪 Critique Theater 並交付結果；但這些能力以長頁面區塊分散呈現。當設計執行中、同一 brief 累積多個 artifact 或使用者從「繼續最近設計」回來時，使用者無法立即理解自己正處於 Brief、Direction、Build、Critique 或 Deliver 的哪個階段，也不容易知道下一個 gate、阻擋原因與應採取的動作。

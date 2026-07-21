@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Built-in Loop run becomes execution-only.
 
-**Status:** 已完成並驗證
+**Status:** resolved
 
 - [X] External CLI success produces one terminal outcome, one Archive, and one settlement through `runTask`.
 - [X] External CLI failure preserves provider evidence and releases capacity exactly once before queue replenishment.

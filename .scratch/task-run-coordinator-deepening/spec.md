@@ -1,6 +1,6 @@
 # Task run coordinator 接縫深化
 
-Status: 可交給代理
+Status: resolved
 
 ## Problem Statement
 

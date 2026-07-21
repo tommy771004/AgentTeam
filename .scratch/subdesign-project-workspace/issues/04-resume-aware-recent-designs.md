@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — SubDesign 階段與下一關卡
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] recent brief card 顯示 last stage、latest artifact（若存在）、active/terminal run state 與 next gate。
 - [x] 無 artifact、失敗、取消、critique pending 與已交付 brief 都有清楚且不誤導的摘要。

@@ -849,6 +849,11 @@ ipcMain.handle(
       max_tokens?: number
       tools?: unknown[]
       tool_choice?: unknown
+      /** Outbound metadata only — main records evidence (ticket 24); never logs content. */
+      runId?: string
+      effectiveMode?: OutboundGuardMode
+      providerConnectionId?: string
+      outboundProfileSource?: 'company' | 'baseline' | 'none'
     },
   ) => {
     const base = (req.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '')
@@ -901,6 +906,27 @@ ipcMain.handle(
       // transient gateway condition reported by AIHubMix-compatible routers.
       if (!errText.includes('no_available_channel')) break
     }
+
+    // Ticket 24: main-only egress evidence at true LLM transport (metadata only).
+    const mode = req.effectiveMode
+    if (mode && mode !== 'off') {
+      try {
+        const { buildLlmEgressEvidenceMeta } = await import(
+          '../src/agent/outbound/llmEgress.ts'
+        )
+        const meta = buildLlmEgressEvidenceMeta({
+          runId: req.runId,
+          connectionId: req.providerConnectionId,
+          effectiveMode: mode,
+          action: data ? 'llm-transport' : 'llm-block',
+          profileSource: req.outboundProfileSource || 'none',
+        })
+        void appendOutboundEvidence(meta)
+      } catch {
+        /* evidence must not break transport */
+      }
+    }
+
     if (!data) throw new Error(lastError || 'LLM request failed')
 
     const choice = data.choices?.[0]
@@ -1613,9 +1639,8 @@ ipcMain.handle(
     } catch {
       deployMode = 'required' // invalid deploy → fail closed for CLI
     }
-    const effectiveMode: OutboundGuardMode =
-      input.effectiveMode ||
-      (deployMode === 'required' || deployMode === 'demo' ? deployMode : deployMode)
+    // Prefer renderer effective mode (includes optional user toggle); fall back to deploy.
+    const effectiveMode: OutboundGuardMode = input.effectiveMode || deployMode
 
     const boundMeta = input.runId ? getOutboundRunViewMeta(String(input.runId)) : null
     const boundViewRoot = boundMeta?.viewRoot || input.sandboxWrap?.viewRoot || null
@@ -1651,6 +1676,16 @@ ipcMain.handle(
       isolationStatus,
     })
     if (!admission.allow) {
+      // Ticket 23: main records CLI sandbox deny (not renderer)
+      void appendOutboundEvidence({
+        eventType: 'outbound-decision',
+        runId: input.runId,
+        providerId: boundMeta?.connectionId,
+        effectiveGuardMode: effectiveMode,
+        policySource: 'local',
+        action: 'cli-sandbox-deny',
+        filesystemIsolation: admission.isolationStatus,
+      })
       return {
         ok: false,
         output: '',
@@ -3402,8 +3437,10 @@ ipcMain.handle(
     },
   ) => prepareOutboundRunView(opts || ({} as never)),
 )
-ipcMain.handle('outbound:disposeRunView', async (_evt, runId: string) =>
-  disposeOutboundRunView(String(runId || '')),
+ipcMain.handle(
+  'outbound:disposeRunView',
+  async (_evt, runId: string, opts?: { writeback?: boolean }) =>
+    disposeOutboundRunView(String(runId || ''), opts || {}),
 )
 ipcMain.handle('outbound:viewRoot', (_evt, runId: string) =>
   getOutboundRunViewRoot(String(runId || '')),
@@ -3427,7 +3464,10 @@ ipcMain.handle(
     },
     sealed?: boolean,
   ) =>
-    appendOutboundEvidence(input as never, sealed == null ? undefined : { sealed: Boolean(sealed) }),
+    appendOutboundEvidence(input as never, {
+      sealed: sealed == null ? undefined : Boolean(sealed),
+      fromIpc: true,
+    }),
 )
 ipcMain.handle(
   'outbound:sandboxProbe',

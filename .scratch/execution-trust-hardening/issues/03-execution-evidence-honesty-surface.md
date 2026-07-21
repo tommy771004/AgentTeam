@@ -4,8 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** 可交給代理
-
+**Status:** resolved
 - [x] Archive 映射在 evidence 為 simulation／degraded 時，即使瞬時 status 字串為 success 也不得寫成 archive success。
 - [x] 共享的 evidence→Archive／終態映射為 runtime 與測試的單一真相來源。
 - [x] 引擎／harness fixture 覆蓋：LLM transport 失敗、malformed DoD verdict、explicit simulation → 非 success 終態且不觸發 success Learning。

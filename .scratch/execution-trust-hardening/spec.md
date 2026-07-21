@@ -1,6 +1,6 @@
 # 執行信任邊界加固（post-review）
 
-Status: 可交給代理
+Status: resolved
 
 ## Problem Statement
 

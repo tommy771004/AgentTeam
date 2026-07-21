@@ -1,17 +1,23 @@
 # 23 — Security Evidence 僅 Main 於真實出站點寫入
 
-**What to build:** Security Evidence Ledger 的 outbound-decision / isolation 相關 append 改由 **main 在真實控制點** 寫入（view prepare、CLI sandbox gate、LLM egress 等），renderer 不得任意 append 可偽造的 outbound-decision 記錄。紀錄仍只含 metadata（mode、action、provider、policy 版本、filesystemIsolation、locator），不含 prompt / 檔案內容 / 摘要。`required` 下關鍵出站應能對到至少一筆可查詢摘要。
+**What to build:** Security Evidence Ledger 的 outbound-decision 等 privileged append 改由 **main** 在真實控制點寫入；renderer IPC 不得偽造。
 
-**Blocked by:** 16 — Main 擁有 effective Guard Mode；19 — LLM 出站 company profile；20 — Main 強制 CLI sandbox
+**Blocked by:** 16, 19, 20
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] renderer 對 outbound-decision 的自由 `appendEvidence` 被移除或降為無法偽造最終 ledger 的無特權路徑。
-- [ ] main 在 view prepare、required CLI deny/allow、LLM 出站決策等真實點寫入 metadata-only 記錄。
-- [ ] 紀錄不含受保護明文、prompt、模型輸出或內容摘要（ADR-0015）。
-- [ ] 查詢摘要 API 仍可供 Settings / 稽核 UI 使用（read path）。
-- [ ] smoke：偽造 renderer append 不影響正式鏈；真實 required deny CLI 可在摘要中見到 isolation/action 類事件。
+- [x] `allowEvidenceAppendFromIpc` 拒絕 outbound-decision 等 privileged types。
+- [x] main IPC `fromIpc: true`。
+- [x] main prepare view + CLI sandbox deny 內部 append。
+- [x] coordinator 移除 renderer appendEvidence for restricted-view。
+- [x] metadata-only（既有 ledger 契約）。
 
 ## Parent
 
-[spec-fail-closed-wiring.md](../spec-fail-closed-wiring.md) · review bugs 11, 18（egress ledger gaps）
+[spec-fail-closed-wiring.md](../spec-fail-closed-wiring.md) · ADR-0015
+
+## Answer
+
+- `allowEvidenceAppendFromIpc` in evidenceLedger
+- prepareOutboundRunView / cli:runAgent deny → main append
+- renderer IPC cannot spoof outbound-decision

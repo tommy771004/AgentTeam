@@ -4,8 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
-
+**Status:** resolved
 - [x] The composer exposes `要求核准`, `代我核准`, and `完整存取權` with clear descriptions.
 - [x] The selected composer mode overrides the Settings default for only the submitted task run.
 - [x] Plan mode, deny rules, capability-required approval, and unattended downgrade remain stronger constraints.

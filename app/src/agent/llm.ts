@@ -262,6 +262,7 @@ export async function chatCompletionWithTools(
     baseUrl: settings.baseUrl,
   })
   let egressPayload: typeof body = body
+  let outboundProfileSource: 'company' | 'baseline' | 'none' = 'none'
   if (isProtectionActive(effectiveMode)) {
     const baselineProfile = compileProviderSecurityProfile(
       BUILTIN_BASELINE_POLICY,
@@ -284,6 +285,7 @@ export async function chatCompletionWithTools(
     if (!prepared.ok) {
       throw new Error(`出站資料閘門：無法建立公司保護設定檔（${prepared.reason}）`)
     }
+    outboundProfileSource = prepared.source
     egressPayload = {
       ...body,
       messages: prepared.messages.map((m, i) => {
@@ -314,6 +316,11 @@ export async function chatCompletionWithTools(
           apiKey: settings.apiKey,
           fallbackModels: settings.fallbackModels,
           ...gatedBody,
+          // Ticket 24: main records metadata-only evidence at true transport
+          runId: opts?.runId,
+          effectiveMode,
+          providerConnectionId: connectionId,
+          outboundProfileSource,
         })
         return normalizeChatResult(r, settings.model)
       }

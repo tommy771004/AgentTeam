@@ -1,6 +1,6 @@
 # Outbound Data Gate — Fail-closed production wiring
 
-**Status:** 可交給代理  
+**Status:** resolved  
 **Parent effort:** [outbound-data-gate](./spec.md)（01–15 pure modules + 初版 platform 已 resolved）  
 **Source:** code review `grok-review-e0a55c86` Issues 1–11（bugs）
 

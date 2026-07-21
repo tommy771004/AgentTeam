@@ -4,8 +4,7 @@
 
 **Blocked by:** 10 — 在 Composer 加入核准模式與 Handoff 入口.
 
-**Status:** ready-for-agent
-
+**Status:** resolved
 - [x] A task creates and updates a local Artifact Index without duplicating full transcripts or large artifacts.
 - [x] Index entries retain stable identity, type, status, source reference, digest or revision, and timestamp.
 - [x] Spec, ticket, test, diff, review, decision, and final-output evidence can be referenced.

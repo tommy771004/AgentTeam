@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** 已完成並驗證
+**Status:** resolved
 
 - [X] Built-in success enters through `runTask` and produces one terminal outcome, one Archive, and one settlement.
 - [X] Built-in failure enters through `runTask` and releases capacity exactly once before queue replenishment.

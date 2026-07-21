@@ -31,6 +31,8 @@ async function test(name: string, fn: () => void | Promise<void>) {
 console.log('smoke-policy-admin-bridge')
 
 await test('seed → save → activate → rollback bumps version', async () => {
+  const prevFlavor = process.env.SUBAGENTS_BUILD_FLAVOR
+  process.env.SUBAGENTS_BUILD_FLAVOR = 'policy-admin'
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-pol-'))
   try {
     // seed needs active base first
@@ -79,6 +81,28 @@ await test('seed → save → activate → rollback bumps version', async () => 
     void draft
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
+    if (prevFlavor === undefined) delete process.env.SUBAGENTS_BUILD_FLAVOR
+    else process.env.SUBAGENTS_BUILD_FLAVOR = prevFlavor
+  }
+})
+
+await test('ticket22: standard flavor hard-denies policy writes', () => {
+  const prev = process.env.SUBAGENTS_BUILD_FLAVOR
+  process.env.SUBAGENTS_BUILD_FLAVOR = 'standard'
+  try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-deny-'))
+    const r = savePolicyDraft({
+      id: 'x',
+      kind: 'company-base',
+      body: BUILTIN_BASELINE_POLICY,
+      policyDir: dir,
+    })
+    assert.equal(r.ok, false)
+    if (!r.ok) assert.match(r.reason, /policy-admin|BUILD_FLAVOR/i)
+    fs.rmSync(dir, { recursive: true, force: true })
+  } finally {
+    if (prev === undefined) delete process.env.SUBAGENTS_BUILD_FLAVOR
+    else process.env.SUBAGENTS_BUILD_FLAVOR = prev
   }
 })
 
@@ -87,16 +111,24 @@ await test('platform wiring: policy admin IPC in main/preload/Settings', () => {
   const main = fs.readFileSync(path.join(root, 'electron/main.ts'), 'utf8')
   const preload = fs.readFileSync(path.join(root, 'electron/preload.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(root, 'src/pages/SettingsPage.tsx'), 'utf8')
+  const section = fs.readFileSync(
+    path.join(root, 'src/components/settings/PolicyAdminSection.tsx'),
+    'utf8',
+  )
   assert.match(main, /policyAdminBridge/)
   assert.match(main, /outbound:policyActivateDraft/)
   assert.match(preload, /policySeedDraft/)
   assert.match(settings, /policyAdmin/)
   assert.match(settings, /isPolicyAdminBuild/)
-  assert.match(settings, /policyActivateDraft/)
+  assert.match(settings, /PolicyAdminSection/)
+  assert.match(section, /policyActivateDraft/)
+  assert.match(section, /policySaveDraft/)
 })
 
 
 await test('provider-supplement seed → activate', async () => {
+  const prevFlavor = process.env.SUBAGENTS_BUILD_FLAVOR
+  process.env.SUBAGENTS_BUILD_FLAVOR = 'policy-admin'
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-sup-'))
   try {
     fs.mkdirSync(path.join(dir, 'providers'), { recursive: true })
@@ -122,6 +154,8 @@ await test('provider-supplement seed → activate', async () => {
     if (act.ok) assert.equal(act.active.connectionId, conn)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
+    if (prevFlavor === undefined) delete process.env.SUBAGENTS_BUILD_FLAVOR
+    else process.env.SUBAGENTS_BUILD_FLAVOR = prevFlavor
   }
 })
 

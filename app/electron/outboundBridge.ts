@@ -22,6 +22,7 @@ import {
 } from '../src/agent/outbound/sanitizedWorkspace.ts'
 import {
   appendEvidenceRecord,
+  allowEvidenceAppendFromIpc,
   type AppendEvidenceInput,
   type HmacKeyProvider,
 } from '../src/agent/outbound/evidenceLedger.ts'
@@ -214,6 +215,14 @@ export async function prepareOutboundRunView(opts: {
     ensureReason: ensured.ok ? undefined : ensured.reason,
   })
   if (profileDecision.action === 'block') {
+    void appendOutboundEvidence({
+      eventType: 'outbound-decision',
+      runId,
+      providerId: connectionId,
+      effectiveGuardMode: effectiveMode,
+      policySource: 'local',
+      action: 'view-prepare-block',
+    })
     return { ok: false, reason: profileDecision.reason }
   }
 
@@ -236,6 +245,15 @@ export async function prepareOutboundRunView(opts: {
       baseDir: path.join(app.getPath('temp'), 'subagents-sanitized'),
     })
     runViews.set(runId, ws)
+    // Ticket 23: main-only evidence at true view prepare
+    void appendOutboundEvidence({
+      eventType: 'outbound-decision',
+      runId,
+      providerId: connectionId,
+      effectiveGuardMode: effectiveMode,
+      policySource: 'local',
+      action: profileDegraded ? 'restricted-view-degraded' : 'restricted-view',
+    })
     return {
       ok: true,
       viewRoot: ws.viewRoot,
@@ -252,12 +270,38 @@ export async function prepareOutboundRunView(opts: {
   }
 }
 
-export async function disposeOutboundRunView(runId: string): Promise<{ ok: boolean }> {
+export async function disposeOutboundRunView(
+  runId: string,
+  opts?: { writeback?: boolean },
+): Promise<{
+  ok: boolean
+  writeback?: { filesWritten: number; filesSkipped: number; withheldRanges: number }
+}> {
   const ws = runViews.get(runId)
   if (!ws) return { ok: true }
+  let writeback:
+    | { filesWritten: number; filesSkipped: number; withheldRanges: number }
+    | undefined
+  if (opts?.writeback) {
+    try {
+      const { writebackSanitizedWorkspace } = await import(
+        '../src/agent/outbound/sanitizedWorkspace.ts'
+      )
+      writeback = writebackSanitizedWorkspace(ws)
+      void appendOutboundEvidence({
+        eventType: 'outbound-decision',
+        runId,
+        providerId: ws.connectionId,
+        policySource: 'local',
+        action: 'safe-writeback',
+      })
+    } catch {
+      writeback = { filesWritten: 0, filesSkipped: 0, withheldRanges: 0 }
+    }
+  }
   await disposeSanitizedWorkspace(ws)
   runViews.delete(runId)
-  return { ok: true }
+  return { ok: true, writeback }
 }
 
 export function getOutboundRunViewRoot(runId: string): string | null {
@@ -280,8 +324,18 @@ export function getOutboundRunViewMeta(runId: string): {
 
 export async function appendOutboundEvidence(
   input: AppendEvidenceInput,
-  opts?: { sealed?: boolean },
+  opts?: { sealed?: boolean; /** IPC from renderer — privileged types denied (ticket 23) */ fromIpc?: boolean },
 ): Promise<{ ok: boolean; reason?: string }> {
+  if (
+    opts?.fromIpc &&
+    !allowEvidenceAppendFromIpc(String((input as { eventType?: string }).eventType || ''))
+  ) {
+    return {
+      ok: false,
+      reason:
+        'Renderer 不得寫入 privileged outbound evidence；僅 main 於真實出站點記錄。',
+    }
+  }
   const mode = (() => {
     try {
       return parseDeployOutboundGuard(process.env.SUBAGENTS_OUTBOUND_GUARD)

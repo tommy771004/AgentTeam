@@ -4,10 +4,10 @@
 
 **Blocked by:** 01 — 建立 coordinator-owned Task run contract
 
-**Status:** 已實作並驗證；待使用者審閱
+**Status:** resolved
 
-- [ ] hook denial 在已 admission 的 run 上只產生一次 failed terminal result、afterRun audit、Archive、`onSettled`、release 與 drain。
-- [ ] dispatch exception 與 adapter rejected promise 走同一 finalization contract，不留下 running thread 或 reserved capacity。
-- [ ] cancel 只影響指定 `runId`，並在 terminal cleanup 後才允許 queue 補跑。
-- [ ] concurrent run 中一個 run 的 denial/exception/cancel 不會改變另一個 run 的 activity、thread status 或 HITL。
-- [ ] smoke contract 能驗證 terminal ordering 與 exactly-once observable counts。
+- [x] hook denial 在已 admission 的 run 上只產生一次 failed terminal result、afterRun audit、Archive、`onSettled`、release 與 drain。
+- [x] dispatch exception 與 adapter rejected promise 走同一 finalization contract，不留下 running thread 或 reserved capacity。
+- [x] cancel 只影響指定 `runId`，並在 terminal cleanup 後才允許 queue 補跑。
+- [x] concurrent run 中一個 run 的 denial/exception/cancel 不會改變另一個 run 的 activity、thread status 或 HITL。
+- [x] smoke contract 能驗證 terminal ordering 與 exactly-once observable counts。

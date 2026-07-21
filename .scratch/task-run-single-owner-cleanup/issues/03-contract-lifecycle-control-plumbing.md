@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Built-in Loop run becomes execution-only; 02 — External CLI run becomes execution-only.
 
-**Status:** 已完成並驗證
+**Status:** resolved
 
 - [X] No lifecycle-control flag crosses the Task run, runner-selection, or execution-adapter seam.
 - [X] Runner selection accepts only a coordinator-built immutable dispatch snapshot in production.

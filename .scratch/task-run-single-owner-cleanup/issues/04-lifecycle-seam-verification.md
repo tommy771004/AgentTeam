@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Contract the lifecycle-control plumbing.
 
-**Status:** 已完成並驗證
+**Status:** resolved
 
 - [X] Real-module/browser tests cover Built-in success/failure/cancellation through `runTask`.
 - [X] Real-module/browser tests cover External CLI success/failure/cancellation through `runTask`.

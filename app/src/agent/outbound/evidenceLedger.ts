@@ -58,6 +58,48 @@ export function createMemoryHmacKeyProvider(key: Buffer): HmacKeyProvider {
 }
 
 /** Asia/Taipei wall time → ISO week key YYYY-Www (Monday first). */
+/** Previous Asia/Taipei ISO week key (for cross-week chain link). */
+export function previousIsoWeekKeyTaipei(date: Date = new Date()): string {
+  return isoWeekKeyTaipei(new Date(date.getTime() - 7 * 86_400_000))
+}
+
+/**
+ * When sealed evidence is requested but the HMAC key is unavailable:
+ * - block: refuse append (required default)
+ * - unsealed: write clearly unsealed record (optional may choose this)
+ */
+export function decideSealedEvidenceWhenKeyMissing(opts: {
+  wantSealed: boolean
+  keyAvailable: boolean
+  onKeyUnavailable?: 'block' | 'unsealed'
+}):
+  | { proceed: true; sealed: boolean }
+  | { proceed: false; reason: string } {
+  if (!opts.wantSealed) return { proceed: true, sealed: false }
+  if (opts.keyAvailable) return { proceed: true, sealed: true }
+  const policy = opts.onKeyUnavailable || 'block'
+  if (policy === 'unsealed') return { proceed: true, sealed: false }
+  return {
+    proceed: false,
+    reason: 'HMAC key unavailable and evidence.onKeyUnavailable=block',
+  }
+}
+
+/** Metadata for guard mode transitions (off↔optional/required/demo). */
+export function buildGuardModeChangeEvidence(opts: {
+  fromMode: string
+  toMode: string
+  runId?: string
+}): AppendEvidenceInput {
+  return {
+    eventType: 'guard-mode-change',
+    runId: opts.runId,
+    effectiveGuardMode: opts.toMode,
+    action: `${opts.fromMode}→${opts.toMode}`,
+    exclusions: [],
+  }
+}
+
 export function isoWeekKeyTaipei(date: Date = new Date()): string {
   // Convert to Taipei civil date via formatToParts
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -139,6 +181,27 @@ export type AppendEvidenceInput = {
   exclusions?: EvidenceExclusionLocator[]
 }
 
+/** Event types that only main-internal control points may write (ticket 23 / ADR-0015). */
+const PRIVILEGED_EVIDENCE_TYPES = new Set([
+  'outbound-decision',
+  'restricted-view',
+  'restricted-view-degraded',
+  'cli-sandbox-deny',
+  'cli-sandbox-allow',
+  'cli-sandbox',
+])
+
+/**
+ * Renderer IPC must not append privileged outbound-decision records.
+ */
+export function allowEvidenceAppendFromIpc(eventType: string | undefined): boolean {
+  const t = String(eventType || '').trim()
+  if (!t) return false
+  if (PRIVILEGED_EVIDENCE_TYPES.has(t)) return false
+  // allow non-privileged diagnostics if any future types need renderer notes
+  return true
+}
+
 export async function appendEvidenceRecord(
   input: AppendEvidenceInput,
   opts: {
@@ -146,6 +209,8 @@ export async function appendEvidenceRecord(
     keyProvider: HmacKeyProvider
     sealed: boolean
     now?: Date
+    /** Company policy evidence.onKeyUnavailable; default block when sealed. */
+    onKeyUnavailable?: 'block' | 'unsealed'
   },
 ): Promise<{ ok: true; record: EvidenceRecord } | { ok: false; reason: string }> {
   fs.mkdirSync(opts.ledgerDir, { recursive: true })
@@ -157,9 +222,24 @@ export async function appendEvidenceRecord(
 
   let previousMac = prev?.recordMac
   if (!previousMac && sequence === 1) {
-    // Cross-week link: try previous week terminal MAC
-    // Simplified: walk one prior week key not required for v1 unit tests
-    previousMac = undefined
+    // Cross-week link: first record of a week chains to prior week's terminal MAC.
+    const prevWeekPath = weekFilePath(opts.ledgerDir, previousIsoWeekKeyTaipei(now))
+    const prevWeekLast = readLastRecord(prevWeekPath)
+    previousMac = prevWeekLast?.recordMac
+  }
+
+  let sealed = opts.sealed
+  if (sealed) {
+    const keyProbe = await opts.keyProvider.getKey()
+    const decision = decideSealedEvidenceWhenKeyMissing({
+      wantSealed: true,
+      keyAvailable: Boolean(keyProbe && keyProbe.length > 0),
+      onKeyUnavailable: opts.onKeyUnavailable,
+    })
+    if (!decision.proceed) {
+      return { ok: false, reason: decision.reason }
+    }
+    sealed = decision.sealed
   }
 
   const base: Omit<EvidenceRecord, 'recordMac'> = {
@@ -178,12 +258,12 @@ export async function appendEvidenceRecord(
     filesystemIsolation: input.filesystemIsolation,
     action: input.action,
     exclusions: input.exclusions || [],
-    sealed: opts.sealed,
+    sealed,
     previousMac,
   }
 
   let recordMac: string | undefined
-  if (opts.sealed) {
+  if (sealed) {
     const key = await opts.keyProvider.getKey()
     if (!key) {
       return { ok: false, reason: 'HMAC key unavailable for sealed evidence' }
@@ -218,7 +298,10 @@ export async function verifyLedgerFile(
     if (rec.sequence !== expectedSeq) {
       return { ok: false, reason: `sequence gap/reorder at ${expectedSeq}` }
     }
-    if ((rec.previousMac || undefined) !== (prevMac || undefined)) {
+    // Seq 1 may carry previousMac from the prior week's terminal MAC (cross-week link).
+    if (rec.sequence === 1) {
+      prevMac = rec.previousMac
+    } else if ((rec.previousMac || undefined) !== (prevMac || undefined)) {
       return { ok: false, reason: `previousMac mismatch at seq ${rec.sequence}` }
     }
     if (rec.sealed) {

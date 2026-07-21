@@ -4,8 +4,7 @@
 
 **Blocked by:** 09 — 交付簽章 Subscription Feature Pack; 11 — 建立 Artifact Index 與可攜式 Handoff Package.
 
-**Status:** ready-for-agent
-
+**Status:** resolved
 - [x] A Goal-based objective produces a reviewable Spec before autonomous implementation begins.
 - [x] The approved Spec becomes traceable Tickets with explicit acceptance criteria and blocking edges.
 - [x] Each Ticket enters a TDD loop with failing-first or tightened tests at the highest available seam.

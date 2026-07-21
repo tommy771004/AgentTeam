@@ -213,6 +213,62 @@ export type MainCliSpawnAdmission = {
  * trusted when paired with a matching sandboxWrap; required mode demands both
  * wrap and verified isolation, and cwd must sit inside the bound view.
  */
+/**
+ * Builtin shell (bash) under outbound protection (ticket 21).
+ * cwd pin alone is not isolation — required denies host shell without a verified
+ * filesystem sandbox; optional/demo may run degraded (explicit mark).
+ */
+export function decideBuiltinShellUnderProtection(opts: {
+  effectiveMode: OutboundGuardMode
+  command: string
+  viewRoot?: string | null
+  /** When main can wrap shell like CLI — not yet default. */
+  shellIsolationVerified?: boolean
+}): { allow: boolean; degraded?: boolean; reason?: string } {
+  if (opts.effectiveMode === 'off') {
+    return { allow: true }
+  }
+
+  const cmd = String(opts.command || '')
+  const view = (opts.viewRoot || '').trim()
+
+  // Absolute path that clearly targets outside the view (escape attempt).
+  if (view && cmd) {
+    const absHits = cmd.match(/(?:^|[\s"'=])(\/(?:Users|home|var|tmp|private)\/[^\s"']+)/g)
+    if (absHits) {
+      for (const raw of absHits) {
+        const p = raw.replace(/^[\s"'=]+/, '')
+        if (p && !isPathInsideRoot(p, view)) {
+          return {
+            allow: false,
+            reason:
+              '保護啟用：shell 不得以絕對路徑讀取 Restricted Project View 外的位置。',
+          }
+        }
+      }
+    }
+  }
+
+  if (opts.effectiveMode === 'required') {
+    if (opts.shellIsolationVerified === true && view) {
+      return { allow: true }
+    }
+    return {
+      allow: false,
+      reason:
+        'Required 模式拒絕未隔離的 builtin shell（cwd 變更不算 isolation）。請使用 sanitized LLM 或已 sandbox 的 external CLI。',
+    }
+  }
+
+  // optional / demo — allow but mark degraded
+  return {
+    allow: true,
+    degraded: true,
+    reason:
+      'Filesystem isolation unverified for builtin shell（demo/optional；不得宣稱企業邊界）。',
+  }
+}
+
 export function decideMainCliSpawnAdmission(opts: {
   effectiveMode: OutboundGuardMode
   cwd: string

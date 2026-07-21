@@ -671,9 +671,25 @@ export async function finalizeTaskRun(
   // 4) onSettled
   await settle(finalResult)
 
-  // 4b) dispose Restricted Project View (Outbound Data Gate) — never block release
+  // 4b) dispose Restricted Project View (Outbound Data Gate) — never block release.
+  // Ticket 25 / ADR-0008: on success, safe-writeback mapped text files before dispose.
   try {
-    await window.subagents?.outbound?.disposeRunView?.(runId)
+    const writeback = String(status) === 'success'
+    const disp = await window.subagents?.outbound?.disposeRunView?.(runId, { writeback })
+    if (
+      writeback &&
+      disp &&
+      typeof disp === 'object' &&
+      'writeback' in disp &&
+      disp.writeback &&
+      disp.writeback.filesWritten > 0
+    ) {
+      thr.pushBubble(
+        tid,
+        'system',
+        `出站資料閘門：安全回寫 ${disp.writeback.filesWritten} 檔（withheld ranges=${disp.writeback.withheldRanges}）`,
+      )
+    }
   } catch {
     /* non-fatal */
   }
@@ -1563,15 +1579,7 @@ async function coordinateTaskRun(
           'system',
           `出站資料閘門：Restricted Project View 已建立（exclusions=${prepare.exclusionCount} · skipped=${prepare.skippedCount} · connection=${prepare.connectionId}${deg}）`,
         )
-        void window.subagents?.outbound?.appendEvidence?.({
-          eventType: 'outbound-decision',
-          runId,
-          providerId: prepare.connectionId,
-          effectiveGuardMode: mode,
-          policySource: 'local',
-          action: prepare.profileDegraded ? 'restricted-view-degraded' : 'restricted-view',
-          exclusions: [],
-        })
+        // Evidence for restricted-view is appended in main prepareOutboundRunView (ticket 23).
       } else if (admission.action === 'continue-degraded') {
         thr.pushBubble(
           tid,

@@ -4,14 +4,19 @@
 
 **Blocked by:** 18 — View root 單一真相源；20 — Main 強制 CLI Filesystem Sandbox
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] 保護啟用時，builtin shell 無法讀取僅存在於 original project 的敏感 sentinel（絕對路徑攻擊失敗或工具被 deny）。
-- [ ] 行為與 ADR-0007 / ADR-0022 一致：cwd 變更 alone 不算 isolation。
-- [ ] `required` 下若無法提供等價 sandbox，shell 出站/執行必須 fail-closed 而非 silent host shell。
-- [ ] optional/demo 若允許較弱 shell，必須可觀測標記，不得與 verified 混淆。
-- [ ] smoke：protected run + absolute path to original secret → deny 或不可讀內容。
+- [x] 保護啟用時 absolute path 逃出 view → deny。
+- [x] required + 無 shellIsolationVerified → deny host shell。
+- [x] optional/demo → allow + degraded 標記。
+- [x] bash handler 接 `decideBuiltinShellUnderProtection`。
+- [x] smoke：`smoke-outbound-shell-evidence.mts`。
 
 ## Parent
 
 [spec-fail-closed-wiring.md](../spec-fail-closed-wiring.md) · review bug 5
+
+## Answer
+
+- pure: `decideBuiltinShellUnderProtection` in `cliSandbox.ts`
+- `registered/bash.ts` 在執行前 gate

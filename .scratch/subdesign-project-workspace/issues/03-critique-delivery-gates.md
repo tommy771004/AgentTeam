@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — SubDesign 階段與下一關卡
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Critique pending、running、interrupted、failed、passed 狀態在 stage rail、next gate 與 workspace inspector 中一致。
 - [x] Critique Theater 的 round、panelist、live trace 與中止行為維持既有真實 runtime 契約。

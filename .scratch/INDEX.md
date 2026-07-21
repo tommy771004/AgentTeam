@@ -5,67 +5,35 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 ## Active frontier (implement next)
 
-| Effort | Spec | Frontier ticket | Notes |
-|--------|------|-----------------|--------|
-| **outbound-data-gate** | [spec-fail-closed-wiring.md](outbound-data-gate/spec-fail-closed-wiring.md)（parent [spec.md](outbound-data-gate/spec.md) 01–15 resolved） | [20 main CLI sandbox](outbound-data-gate/issues/20-main-enforced-cli-filesystem-sandbox.md) **或** [22 Policy Admin flavor](outbound-data-gate/issues/22-policy-admin-writes-flavor-gated-in-main.md) | 16–19 resolved；frontier 20 ‖ 22（21 blocked by 20） |
-| **hermes-registry-executor-cleanup** | [spec.md](hermes-registry-executor-cleanup/spec.md) | [01 刪 runDelegatedTask](hermes-registry-executor-cleanup/issues/01-delete-runDelegatedTask-export.md) | C：刪 export + 拆 executor→registered |
-| **hermes-aligned-runtime** | [spec.md](hermes-aligned-runtime/spec.md) | — | **resolved**（P0–P5；見 Answer 殘差） |
+| Effort | Spec | Frontier | Notes |
+|--------|------|----------|--------|
+| **subagents-paid-beta** | [spec.md](subagents-paid-beta/spec.md) | [14 release qualification](subagents-paid-beta/issues/14-paid-beta-release-qualification.md) | **唯一未完成 P0** — 需真實 signed Win/mac 證據；本地 qualify 腳本 fail-closed No-Go |
+| 其餘 product efforts | — | — | **resolved**（見下表） |
 
-## This session chain (tool → Hermes)
+## Resolved this session chain
 
-| Order | Effort | Spec status | Tickets |
-|-------|--------|-------------|---------|
-| 1 | [tool-invocation-pipeline](tool-invocation-pipeline/spec.md) | **resolved** | 01–02 resolved（`invokeGatedTool` + heuristic） |
-| 2 | [tool-invocation-review-cleanup](tool-invocation-review-cleanup/spec.md) | **resolved** | 01–02 resolved（契約 + 單一組裝 + 死碼） |
-| 3 | [hermes-aligned-runtime](hermes-aligned-runtime/spec.md) | **resolved** | 01–07 resolved |
-| 4 | [hermes-registry-executor-cleanup](hermes-registry-executor-cleanup/spec.md) | **可交給代理** | 01–05 open（刪 delegate export + 拆 executor） |
+| Effort | Status |
+|--------|--------|
+| tool-invocation-pipeline / review-cleanup | resolved |
+| hermes-aligned-runtime + registry-executor-cleanup | resolved |
+| outbound-data-gate（01–25 + evidence residual + PolicyAdmin extract） | resolved |
+| execution-trust-and-safety / hardening | resolved |
+| task-run-coordinator-deepening / single-owner-cleanup | resolved |
+| subdesign-project-workspace（含 05 自動化 smoke） | resolved |
+| paid-beta 05, 10–13（composer/handoff/workflow/website 等） | resolved |
 
-## All efforts
+## Remaining blocked / non-agent
 
-| Effort | Spec | # issues | Spec Status |
-|--------|------|----------|-------------|
-| [agent-runtime-deepening](agent-runtime-deepening/spec.md) | yes | 6 | resolved（tickets all resolved；spec 見下） |
-| [execution-trust-and-safety](execution-trust-and-safety/spec.md) | yes | 4 | 可交給代理 |
-| [execution-trust-hardening](execution-trust-hardening/spec.md) | yes | 3 | 可交給代理 |
-| [hermes-aligned-runtime](hermes-aligned-runtime/spec.md) | yes | 7 | resolved |
-| [hermes-registry-executor-cleanup](hermes-registry-executor-cleanup/spec.md) | yes | 5 | 可交給代理 |
-| [outbound-data-gate](outbound-data-gate/spec.md) | yes | 15 resolved + **16–23 open** | [fail-closed wiring](outbound-data-gate/spec-fail-closed-wiring.md) 可交給代理 |
-| [subagents-paid-beta](subagents-paid-beta/spec.md) | yes | 17+ | approved |
-| [subdesign-project-workspace](subdesign-project-workspace/spec.md) | yes | 5 | 可交給代理 |
-| [task-run-coordinator-deepening](task-run-coordinator-deepening/spec.md) | yes | 5 | 可交給代理（票多為已實作待審） |
-| [task-run-single-owner-cleanup](task-run-single-owner-cleanup/spec.md) | yes | 4 | 可交給代理 |
-| [tool-invocation-pipeline](tool-invocation-pipeline/spec.md) | yes | 2 | resolved |
-| [tool-invocation-review-cleanup](tool-invocation-review-cleanup/spec.md) | yes | 2 | resolved |
+1. **paid-beta #14** — `blocked-pending-real-signed-platform-evidence`  
+   - 需 clean-machine 上 signed 安裝、CLI doctor、N-1→N、entitlement、workflow 實機證據。  
+   - 產物：`.scratch/subagents-paid-beta/evidence/14-paid-beta-release-qualification-no-go.md`  
+   - 工具：`npm` scripts / `qualify-release.mts`（無證據則 No-Go）。
 
-## outbound-data-gate fail-closed wiring DAG (16–23)
+2. **Optional polish（非 P0）**  
+   - `inspectOutbound` 將 sanitize 收進單一 egress API（行為已在 `prepareLlmEgressMessages` + call sites）。  
+   - seatbelt 擴真實 CLI adapter 網路/nvm 路徑。  
+   - Playwright 完整點擊 smoke（Chromium 可選）。
 
-```
-16 main-owned guard mode          22 policy-admin writes flavor-gated (parallel)
- └─ 17 required view prepare fail-closed
-     └─ 18 single restricted view-root truth
-         ├─ 19 LLM egress company Provider Security Profile
-         └─ 20 main-enforced CLI filesystem sandbox (+ canary off original)
-              └─ 21 builtin shell cannot escape view
-16 + 19 + 20 ─→ 23 main-only evidence at true egress
-```
+## Smoke added this pass
 
-Source: code review bugs 1–11 → [spec-fail-closed-wiring.md](outbound-data-gate/spec-fail-closed-wiring.md)
-
-## hermes-aligned-runtime ticket DAG
-
-```
-01 P0a intercept
- └─ 02 P0b FC+MCP → invokeGatedTool
-     └─ 03 P1 Registry big bang
-         └─ 04 P2 ContextEngine + compress
-             └─ 05 P3 single conversation loop
-                 └─ 06 P4 nested → runTask
-                     └─ 07 P5 parallel tool_calls
-```
-
-## Conventions
-
-- Spec: `.scratch/<slug>/spec.md`
-- Tickets: `.scratch/<slug>/issues/<NN>-<slug>.md`
-- One ticket per file; **Blocked by** near top; **Status** near top
-- Do not invent paths in acceptance criteria beyond durable names
+- `app/scripts/smoke-subdesign-studio.mts` — Studio 契約 + delivery gate + prototype guard（已掛 smoke chain）

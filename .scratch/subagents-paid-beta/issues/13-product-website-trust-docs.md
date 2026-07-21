@@ -4,8 +4,7 @@
 
 **Blocked by:** 02 — 交付 Windows 簽章與 macOS 公證版本; 06 — 完成 Electron、Secrets 與資料匯出安全加固; 08 — 完成訂閱、裝置啟用與離線寬限.
 
-**Status:** ready-for-agent
-
+**Status:** resolved
 - [x] The website explains the cross-provider control-center positioning and Local-first boundary.
 - [x] Windows and macOS downloads point only to signed, supported artifacts and show version/checksum information.
 - [x] Free Core and Pro Beta capabilities, limits, pricing, cancellation, and offline grace are clear.

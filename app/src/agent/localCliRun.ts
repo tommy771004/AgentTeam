@@ -13,14 +13,14 @@ import {
   effectiveOutboundGuardFromSettings,
   inspectOutbound,
   readBuildFlavorFromEnv,
-} from './outbound/outboundGate'
+} from './outbound/outboundGate.ts'
 import {
   detectFilesystemSandboxCapability,
   allocateForbiddenCanaryPath,
   evaluateCliSandboxGate,
   probeFilesystemSandbox,
   rewriteCliPromptForView,
-} from './outbound/cliSandbox'
+} from './outbound/cliSandbox.ts'
 
 export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
 export type LocalCliConfigSnapshot = CliConfigSnapshot

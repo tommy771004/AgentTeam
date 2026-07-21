@@ -15,7 +15,10 @@ import {
   type CompanyBasePolicy,
   type ProviderSupplementalPolicy,
 } from '../src/agent/outbound/policySchema.ts'
-import { PolicyAdminStore } from '../src/agent/outbound/policyAdmin.ts'
+import {
+  assertPolicyAdminWriteAllowed,
+  PolicyAdminStore,
+} from '../src/agent/outbound/policyAdmin.ts'
 import { compileProviderSecurityProfile } from '../src/agent/outbound/policyMerge.ts'
 import {
   appendEvidenceRecord,
@@ -188,6 +191,8 @@ export function savePolicyDraft(input: {
   body: unknown
   policyDir?: string
 }): { ok: true; draft: DraftSummary } | { ok: false; reason: string } {
+  const writeGate = assertPolicyAdminWriteAllowed(process.env.SUBAGENTS_BUILD_FLAVOR)
+  if (!writeGate.ok) return writeGate
   const policyDir = input.policyDir || outboundPolicyDir()
   const store = new PolicyAdminStore()
   const r = store.saveDraft({
@@ -219,6 +224,8 @@ export function activatePolicyDraft(input: {
   draftId: string
   policyDir?: string
 }): { ok: true; active: ActivePolicySummary } | { ok: false; reason: string } {
+  const writeGate = assertPolicyAdminWriteAllowed(process.env.SUBAGENTS_BUILD_FLAVOR)
+  if (!writeGate.ok) return writeGate
   const policyDir = input.policyDir || outboundPolicyDir()
   const loaded = readPolicyDraft(input.draftId, policyDir)
   if (!loaded.ok) return loaded
@@ -321,6 +328,8 @@ export function rollbackActivePolicy(input: {
   targetBody?: unknown
   policyDir?: string
 }): { ok: true; active: ActivePolicySummary } | { ok: false; reason: string } {
+  const writeGate = assertPolicyAdminWriteAllowed(process.env.SUBAGENTS_BUILD_FLAVOR)
+  if (!writeGate.ok) return writeGate
   const policyDir = input.policyDir || outboundPolicyDir()
   try {
     if (input.kind === 'company-base') {
@@ -401,6 +410,8 @@ export function seedDraftFromActive(input: {
   draftId: string
   policyDir?: string
 }): { ok: true; draft: DraftSummary } | { ok: false; reason: string } {
+  const writeGate = assertPolicyAdminWriteAllowed(process.env.SUBAGENTS_BUILD_FLAVOR)
+  if (!writeGate.ok) return writeGate
   const policyDir = input.policyDir || outboundPolicyDir()
   try {
     if (input.kind === 'company-base') {

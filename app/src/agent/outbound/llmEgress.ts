@@ -117,6 +117,37 @@ export async function prepareLlmEgressMessages(opts: {
  * Default company profile loader via Electron outbound.ensurePolicy.
  * Returns null when IPC is absent (browser / Node unit path without mock).
  */
+/**
+ * Metadata-only LLM egress evidence input for main (ticket 24).
+ * Never includes messages, content, or model output.
+ */
+export function buildLlmEgressEvidenceMeta(opts: {
+  runId?: string
+  connectionId?: string
+  effectiveMode: OutboundGuardMode
+  action: 'llm-allow' | 'llm-block' | 'llm-transport'
+  profileSource?: 'company' | 'baseline' | 'none'
+}): {
+  eventType: 'outbound-decision'
+  runId?: string
+  providerId?: string
+  effectiveGuardMode: string
+  policySource: 'local'
+  action: string
+} {
+  return {
+    eventType: 'outbound-decision',
+    runId: opts.runId,
+    providerId: opts.connectionId,
+    effectiveGuardMode: opts.effectiveMode,
+    policySource: 'local',
+    action:
+      opts.profileSource && opts.profileSource !== 'none'
+        ? `${opts.action}:${opts.profileSource}`
+        : opts.action,
+  }
+}
+
 export async function loadCompanyProfileViaOutboundIpc(
   connectionId: string,
 ): Promise<LlmProfileLoadResult | null> {

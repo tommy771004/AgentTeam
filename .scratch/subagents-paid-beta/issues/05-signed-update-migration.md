@@ -4,8 +4,7 @@
 
 **Blocked by:** 02 — 交付 Windows 簽章與 macOS 公證版本; 04 — 建立 Durable Run Journal 與啟動復原.
 
-**Status:** ready-for-agent
-
+**Status:** resolved
 - [x] The app discovers signed Beta update metadata over a documented channel.
 - [x] Users can defer a non-critical update and see version, release notes, and download progress.
 - [x] Downloaded update artifacts are signature/hash verified before installation.
