@@ -3,11 +3,22 @@ import { DEFAULT_LLM_SETTINGS } from '../agent/llm'
 import { mergeCliProviders } from '../agent/cliProviders'
 import { recommendToolTuning } from '../agent/modelTuning'
 import { redactSettingsForExport } from '../agent/settingsExport'
+import {
+  SETTINGS_CUSTOM_MERGE_KEYS,
+  type SettingsCustomMergeKey,
+} from '../agent/settingsMergeKeys.ts'
 import type { LlmSettings } from '../agent/types'
+
+export { SETTINGS_CUSTOM_MERGE_KEYS, type SettingsCustomMergeKey }
 
 const STORAGE_KEY = 'subagents.settings.v1'
 
-function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>): LlmSettings {
+/**
+ * Deep-merge settings patches. Fields in SETTINGS_CUSTOM_MERGE_KEYS must have
+ * explicit handling below — the completeness smoke fails if a new object/array
+ * default is added without a matching key + branch.
+ */
+export function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>): LlmSettings {
   let out: LlmSettings = {
     ...DEFAULT_LLM_SETTINGS,
     roleModels: { ...DEFAULT_LLM_SETTINGS.roleModels },
@@ -19,6 +30,11 @@ function mergeSettings(...parts: Array<Partial<LlmSettings> | null | undefined>)
     customToolSecrets: { ...(DEFAULT_LLM_SETTINGS.customToolSecrets || {}) },
     pluginOAuthClients: { ...(DEFAULT_LLM_SETTINGS.pluginOAuthClients || {}) },
     cliProviders: mergeCliProviders(DEFAULT_LLM_SETTINGS.cliProviders),
+    alwaysOnCapabilities: [...(DEFAULT_LLM_SETTINGS.alwaysOnCapabilities || [])],
+    modelProfiles: { ...(DEFAULT_LLM_SETTINGS.modelProfiles || {}) },
+    hookRules: [...(DEFAULT_LLM_SETTINGS.hookRules || [])],
+    trustedHookProjects: [...(DEFAULT_LLM_SETTINGS.trustedHookProjects || [])],
+    delegatePersonas: { ...(DEFAULT_LLM_SETTINGS.delegatePersonas || {}) },
   }
   for (const p of parts) {
     if (!p) continue
@@ -106,20 +122,55 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   loaded: false,
 
   load: async () => {
+    let base: LlmSettings
     if (window.subagents?.settings?.get) {
       try {
         const remote = (await window.subagents.settings.get()) as Partial<LlmSettings> | null
         if (remote) {
-          const merged = mergeSettings(loadLocal(), remote)
-          set({ settings: merged, loaded: true })
-          saveLocal(merged)
-          return
+          base = mergeSettings(loadLocal(), remote)
+        } else {
+          base = loadLocal()
         }
       } catch {
-        /* fall through */
+        base = loadLocal()
       }
+    } else {
+      base = loadLocal()
     }
-    set({ settings: loadLocal(), loaded: true })
+
+    // Ticket 16: deploy posture is main-owned. Hydrate outboundGuardDeploy from
+    // outbound:status so runtime effective mode matches host SUBAGENTS_OUTBOUND_GUARD
+    // even when the renderer process.env is empty.
+    try {
+      const statusFn = window.subagents?.outbound?.status
+      if (typeof statusFn === 'function') {
+        const status = await statusFn({
+          apiProvider: base.apiProvider,
+          baseUrl: base.baseUrl,
+        })
+        if (status && 'deployGuard' in status) {
+          const { applyMainOutboundStatusToSettings } = await import(
+            '../agent/outbound/outboundGate.ts'
+          )
+          const applied = applyMainOutboundStatusToSettings(base, {
+            deployGuard: status.deployGuard as
+              | 'off'
+              | 'demo'
+              | 'optional'
+              | 'required'
+              | 'invalid',
+          })
+          if (applied.ok) {
+            base = mergeSettings(base, applied.patch)
+          }
+        }
+      }
+    } catch {
+      /* browser / missing bridge — keep env/settings fallback */
+    }
+
+    set({ settings: base, loaded: true })
+    saveLocal(base)
   },
 
   update: async (patch) => {

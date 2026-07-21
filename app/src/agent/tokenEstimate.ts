@@ -7,7 +7,17 @@
  */
 
 import type { LlmSettings } from './types'
-import { getModelProfile } from './modelProfile'
+
+/** Leaf lookup — avoids importing modelProfile (which pulls llm). */
+function profileContextWindow(
+  settings: Pick<LlmSettings, 'modelProfiles'>,
+  modelId: string | undefined,
+): number | undefined {
+  const id = (modelId || '').trim()
+  if (!id) return undefined
+  const cw = settings.modelProfiles?.[id]?.contextWindow
+  return cw && cw > 0 ? cw : undefined
+}
 
 /** modelProfiles 無 contextWindow 且 settings 未覆寫時的保守預設。 */
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 64_000
@@ -58,8 +68,8 @@ export function resolveContextWindow(
   settings: Pick<LlmSettings, 'modelProfiles' | 'defaultContextWindowTokens'>,
   modelId?: string,
 ): number {
-  const profile = getModelProfile(settings, modelId)
-  if (profile?.contextWindow && profile.contextWindow > 0) return profile.contextWindow
+  const fromProfile = profileContextWindow(settings, modelId)
+  if (fromProfile) return fromProfile
   const fallback = settings.defaultContextWindowTokens
   if (typeof fallback === 'number' && fallback >= 1000) return fallback
   return DEFAULT_CONTEXT_WINDOW_TOKENS

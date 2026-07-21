@@ -1,9 +1,13 @@
 /**
  * Built-in capability bundles — tools + instructions as one unit.
  * Inspired by Pydantic AI 2.0 capabilities / progressive disclosure.
+ *
+ * tools[] for each pack are derived from toolDefinitions (single source).
  */
 
 import type { AgentCapability } from './types'
+import type { BuiltinCapabilityId } from './capabilityIds.ts'
+import { toolsForCapability } from '../tools/toolDefinitions.ts'
 import { SUBDESIGN_CAPABILITY, SUBDESIGN_CRITIQUE_CAPABILITY } from './subDesign'
 
 /** Framework-managed tool name (reserved). */
@@ -13,13 +17,17 @@ export const TOOL_SEARCH_TOOL = 'tool_search'
 /** CodeMode tool: run model-written JS that batches tool calls in one round. */
 export const RUN_CODE_TOOL = 'run_code'
 
+function owned(id: BuiltinCapabilityId) {
+  return toolsForCapability(id)
+}
+
 export const BUILTIN_CAPABILITIES: AgentCapability[] = [
   {
     id: 'interaction',
     description: 'Ask the user structured questions and resume the current run with the answer.',
     instructions:
       'Use ask_user when a missing user choice or clarification materially changes the result. Prefer concise options and include freeform input when useful.',
-    tools: ['ask_user'],
+    tools: owned('interaction'),
     deferLoading: false,
     source: 'builtin',
     group: 'core',
@@ -29,7 +37,7 @@ export const BUILTIN_CAPABILITIES: AgentCapability[] = [
     description: 'Structured task planning and progress tracking for multi-step runs.',
     instructions:
       'Use update_plan for multi-step tasks. Send the complete ordered list each time; use pending, active, done, or failed statuses. Keep items actionable and concise.',
-    tools: ['update_plan'],
+    tools: owned('planning'),
     deferLoading: false,
     source: 'builtin',
     group: 'core',
@@ -39,7 +47,7 @@ export const BUILTIN_CAPABILITIES: AgentCapability[] = [
     description: 'Lightweight utilities: current time and structured extraction.',
     instructions:
       'Use datetime_now for schedules/timestamps. json_extract_lite only derives simple title/items/summary, not arbitrary schema extraction.',
-    tools: ['datetime_now', 'json_extract_lite'],
+    tools: owned('core-utils'),
     deferLoading: false,
     source: 'builtin',
     group: 'core',
@@ -52,7 +60,7 @@ export const BUILTIN_CAPABILITIES: AgentCapability[] = [
 2. Use http_fetch only for specific URLs you need.
 3. Never invent prices, citations, or private data.
 4. Summarize with source attribution.`,
-    tools: ['web_search', 'http_fetch'],
+    tools: owned('web-research'),
     deferLoading: true,
     source: 'builtin',
     group: 'research',
@@ -64,7 +72,7 @@ export const BUILTIN_CAPABILITIES: AgentCapability[] = [
 - Paths are relative to the sandbox root.
 - Prefer workspace_list before write when unsure.
 - Write reports under reports/ when delivering deliverables.`,
-    tools: ['workspace_list', 'workspace_read', 'workspace_diff', 'workspace_write', 'workspace_download', 'workspace_mkdir', 'workspace_move', 'workspace_delete', 'table_parse'],
+    tools: owned('workspace'),
     approvalTools: ['workspace_move', 'workspace_delete'],
     deferLoading: true,
     source: 'builtin',
@@ -77,7 +85,7 @@ export const BUILTIN_CAPABILITIES: AgentCapability[] = [
 - Prefer non-destructive commands first (pwd, ls, git status).
 - Never exfiltrate secrets; avoid printing credentials.
 - Long-running commands: set a reasonable timeoutMs.`,
-    tools: ['bash'],
+    tools: owned('shell'),
     /** Surface capability-level approval (also gated by bashRequireAsk / patterns) */
     approvalTools: ['bash'],
     deferLoading: true,
@@ -94,7 +102,7 @@ export const BUILTIN_CAPABILITIES: AgentCapability[] = [
 - Poll loops must sleep ≥30s for remote APIs; handle transient failures (|| true).
 - Too many lines auto-stops the monitor; restart with a tighter filter.
 - Events fire rules with source=monitor (Events page). Stop with action=stop when done.`,
-    tools: ['monitor'],
+    tools: owned('monitoring'),
     /** monitor 執行任意命令 — 與 bash 同級,一律 HITL */
     approvalTools: ['monitor'],
     deferLoading: true,
@@ -108,7 +116,7 @@ export const BUILTIN_CAPABILITIES: AgentCapability[] = [
 - Store only durable preferences/facts the user would want recalled.
 - Do not store secrets (API keys, passwords).
 - Search before rewriting similar memories.`,
-    tools: ['memory_set', 'memory_get', 'memory_append', 'memory_search'],
+    tools: owned('memory'),
     deferLoading: true,
     source: 'builtin',
     group: 'memory',
@@ -118,7 +126,7 @@ export const BUILTIN_CAPABILITIES: AgentCapability[] = [
     description: 'List / load / save procedural SKILL.md playbooks.',
     instructions: `Skills are procedural memory. Load a skill before following a multi-step playbook.
 Prefer existing skills over inventing new procedures.`,
-    tools: ['skill_list', 'skill_load', 'skill_save'],
+    tools: owned('skills'),
     deferLoading: true,
     source: 'builtin',
     group: 'skills',
@@ -130,12 +138,7 @@ Prefer existing skills over inventing new procedures.`,
 - Prefer codegraph_status if unsure whether indexed.
 - Use explore for architecture questions; impact/callers for change risk.
 - Combine with workspace_read for full file content when needed.`,
-    tools: [
-      'codegraph_explore',
-      'codegraph_status',
-      'codegraph_impact',
-      'codegraph_callers',
-    ],
+    tools: owned('codegraph'),
     deferLoading: true,
     source: 'builtin',
     group: 'code',
@@ -147,7 +150,7 @@ Prefer existing skills over inventing new procedures.`,
 - Use for parallel isolated sub-goals with separate context.
 - Prefer leaf role unless nested orchestration is required.
 - Background jobs: check status with delegate_status.`,
-    tools: ['delegate_task', 'delegate_status'],
+    tools: owned('delegate'),
     deferLoading: true,
     source: 'builtin',
     group: 'multi-agent',
@@ -156,7 +159,7 @@ Prefer existing skills over inventing new procedures.`,
     id: 'messaging',
     description: 'Send messages via gateway (Telegram etc.).',
     instructions: 'Only send messages the user explicitly requested. Keep bodies concise.',
-    tools: ['message_send'],
+    tools: owned('messaging'),
     deferLoading: true,
     source: 'builtin',
     group: 'gateway',
@@ -184,7 +187,7 @@ Prefer existing skills over inventing new procedures.`,
     instructions: `Generic MCP bridge:
 - Prefer server-specific mcp_* capabilities when available (progressive load).
 - Otherwise mcp_list_tools then mcp_call with correct serverId/toolName.`,
-    tools: ['mcp_list_tools', 'mcp_call'],
+    tools: owned('mcp-bridge'),
     deferLoading: true,
     source: 'builtin',
     group: 'mcp',

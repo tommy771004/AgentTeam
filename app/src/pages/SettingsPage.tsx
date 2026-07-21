@@ -38,6 +38,12 @@ import { useEntitlementStore } from '../store/entitlementStore'
 import { useSubscriptionStore } from '../store/subscriptionStore'
 import { SUBSCRIPTION_PRICING } from '../agent/subscription'
 import { useFeaturePackStore } from '../store/featurePackStore'
+import {
+  parseDeployOutboundGuard,
+  type OutboundGuardMode,
+} from '../agent/outbound/outboundGate'
+import { connectionIdForBuiltinLlm } from '../agent/outbound/providerConnectionId'
+import { parsePolicySourceMode } from '../agent/outbound/policySourceMode'
 import { useOpenCodeConfigStore } from '../store/opencodeConfigStore'
 import { useProjectStore } from '../store/projectStore'
 import { getLiveSlashCommands } from '../commands/registry'
@@ -81,6 +87,7 @@ const SECTIONS = [
   { id: 'data', label: '資料控制', icon: 'database', group: 'personal' },
   { id: 'shortcuts', label: '鍵盤快捷鍵', icon: 'keyboard', group: 'personal' },
   { id: 'safety', label: '組態', icon: 'shield', group: 'agent' },
+  { id: 'policyAdmin', label: 'Policy Admin', icon: 'policy', group: 'agent' },
   { id: 'roles', label: '角色模型', icon: 'groups', group: 'agent' },
   { id: 'llm', label: '語言模型', icon: 'smart_toy', group: 'agent' },
   { id: 'cli', label: 'CLI 授權', icon: 'terminal', group: 'agent' },
@@ -122,6 +129,10 @@ const SECTION_META: Record<string, { title: string; subtitle: string }> = {
   safety: {
     title: '組態',
     subtitle: '設定核准政策、工具與安全循環門檻。',
+  },
+  policyAdmin: {
+    title: 'Policy Admin',
+    subtitle: '公司政策草稿、啟用與 rollback（僅 policy-admin build；不繞過出站閘門）。',
   },
   roles: {
     title: '角色模型',
@@ -228,6 +239,47 @@ export function SettingsPage() {
   const [customToolsDraft, setCustomToolsDraft] = useState('')
   const [customToolsError, setCustomToolsError] = useState<string | null>(null)
   const [oauthRefreshMsg, setOauthRefreshMsg] = useState<string | null>(null)
+  const [outboundStatus, setOutboundStatus] = useState<{
+    deployGuard: string
+    policySource: string
+    buildFlavor: string
+    policyDir?: string
+    ledgerDir?: string
+    encryptionAvailable?: boolean
+    connectionId?: string
+    activeViews?: number
+    deployGuardError?: string
+    policySourceError?: string
+  } | null>(null)
+  const [classifierTestMsg, setClassifierTestMsg] = useState<string | null>(null)
+  const [classifierTesting, setClassifierTesting] = useState(false)
+  const [policyAdminMsg, setPolicyAdminMsg] = useState<string | null>(null)
+  const [policyActive, setPolicyActive] = useState<
+    Array<{
+      kind: string
+      connectionId?: string
+      version: number
+      changeId: string
+      detectorCount: number
+    }>
+  >([])
+  const [policyDrafts, setPolicyDrafts] = useState<
+    Array<{
+      id: string
+      kind: string
+      connectionId?: string
+      updatedAtUtc: string
+      version?: number
+      changeId?: string
+    }>
+  >([])
+  const [policyDraftId, setPolicyDraftId] = useState('company-base-draft')
+  const [policyDraftKind, setPolicyDraftKind] = useState<'company-base' | 'provider-supplement'>(
+    'company-base',
+  )
+  const [policyDraftConn, setPolicyDraftConn] = useState('')
+  const [policyDraftJson, setPolicyDraftJson] = useState('')
+  const [policyBusy, setPolicyBusy] = useState(false)
   const [updateState, setUpdateState] = useState<{
     status: string
     currentVersion: string
@@ -275,10 +327,84 @@ export function SettingsPage() {
     void loadLearning()
   }, [load, loadLearning])
 
+  // Outbound Data Gate status (Electron main); browser shows null.
+  // Ticket 16: keep settings.outboundGuardDeploy in sync with main so runtime
+  // effective mode matches「公司強制」UI (renderer env is usually empty).
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const st = await window.subagents?.outbound?.status?.({
+          apiProvider: settings.apiProvider,
+          baseUrl: settings.baseUrl,
+        })
+        if (cancelled || !st) {
+          if (!cancelled) setOutboundStatus(null)
+          return
+        }
+        setOutboundStatus(st)
+        try {
+          const { applyMainOutboundStatusToSettings } = await import(
+            '../agent/outbound/outboundGate.ts'
+          )
+          const applied = applyMainOutboundStatusToSettings(
+            { outboundProtectionEnabled: settings.outboundProtectionEnabled },
+            {
+              deployGuard: st.deployGuard as
+                | 'off'
+                | 'demo'
+                | 'optional'
+                | 'required'
+                | 'invalid',
+            },
+          )
+          if (
+            applied.ok &&
+            applied.patch.outboundGuardDeploy !== settings.outboundGuardDeploy
+          ) {
+            await update(applied.patch)
+          }
+        } catch {
+          /* ignore hydrate failures */
+        }
+      } catch {
+        if (!cancelled) setOutboundStatus(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    settings.apiProvider,
+    settings.baseUrl,
+    settings.outboundProtectionEnabled,
+    settings.outboundGuardDeploy,
+    section,
+    update,
+  ])
+
   useEffect(() => {
     if (section === 'opencode') void oc.hydrate(projectRoot)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section, projectRoot])
+
+  const refreshPolicyAdmin = async () => {
+    try {
+      const [active, drafts] = await Promise.all([
+        window.subagents?.outbound?.policyListActive?.() ?? [],
+        window.subagents?.outbound?.policyListDrafts?.() ?? [],
+      ])
+      setPolicyActive(active || [])
+      setPolicyDrafts(drafts || [])
+    } catch (e) {
+      setPolicyAdminMsg(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  useEffect(() => {
+    if (section !== 'policyAdmin') return
+    void refreshPolicyAdmin()
+  }, [section])
 
   // Auto-apply webhook when related settings change
   useEffect(() => {
@@ -536,11 +662,20 @@ export function SettingsPage() {
   }
 
   const meta = SECTION_META[section] || { title: '設定', subtitle: '' }
+  const isPolicyAdminBuild =
+    outboundStatus?.buildFlavor === 'policy-admin' ||
+    (typeof process !== 'undefined' &&
+      (process as { env?: Record<string, string | undefined> }).env?.SUBAGENTS_BUILD_FLAVOR ===
+        'policy-admin')
+  const navSections = useMemo(
+    () => (isPolicyAdminBuild ? SECTIONS : SECTIONS.filter((s) => s.id !== 'policyAdmin')),
+    [isPolicyAdminBuild],
+  )
 
   return (
     <ThemePage
       title="設定"
-      sections={SECTIONS}
+      sections={navSections}
       groups={SECTION_GROUPS}
       activeId={section}
       onChange={setSection}
@@ -1990,6 +2125,196 @@ export function SettingsPage() {
                   />
                 }
               />
+              {(() => {
+                // Outbound Data Gate (deploy × user). Build flavor is orthogonal.
+                let deploy: OutboundGuardMode = settings.outboundGuardDeploy || 'off'
+                if (!settings.outboundGuardDeploy) {
+                  try {
+                    deploy = parseDeployOutboundGuard(
+                      typeof process !== 'undefined'
+                        ? (process as { env?: Record<string, string | undefined> }).env
+                            ?.SUBAGENTS_OUTBOUND_GUARD
+                        : undefined,
+                    )
+                  } catch {
+                    deploy = 'off'
+                  }
+                }
+                const connId = connectionIdForBuiltinLlm({
+                  apiProvider: settings.apiProvider,
+                  baseUrl: settings.baseUrl,
+                })
+                let policySourceLabel = 'local'
+                try {
+                  policySourceLabel = parsePolicySourceMode(
+                    typeof process !== 'undefined'
+                      ? (process as { env?: Record<string, string | undefined> }).env
+                          ?.SUBAGENTS_POLICY_SOURCE
+                      : undefined,
+                  )
+                } catch {
+                  policySourceLabel = 'invalid'
+                }
+                const deployLive = (outboundStatus?.deployGuard as OutboundGuardMode) || deploy
+                const sourceLive = outboundStatus?.policySource || policySourceLabel
+                const flavor = outboundStatus?.buildFlavor || 'standard'
+                const policyMeta = `provider ${outboundStatus?.connectionId || connId} · source ${sourceLive} · flavor ${flavor}${outboundStatus?.encryptionAvailable ? ' · sealed-capable' : ''}`
+                const extraStatus =
+                  outboundStatus?.deployGuardError ||
+                  outboundStatus?.policyDir
+                    ? ` · dir ${outboundStatus.policyDir || '—'}`
+                    : ''
+                if (deployLive === 'off') {
+                  return (
+                    <>
+                      <SettingsRow
+                        title="出站資料閘門"
+                        description={`部署模式 off：LLM／CLI 出站不經淨化（維持既有路徑）。${policyMeta}${extraStatus}`}
+                        control={<span className="text-[11px] text-outline">off</span>}
+                      />
+                      <SettingsRow
+                        title="Build flavor"
+                        description="與 guard mode 正交；policy-admin 僅增加管理面，不形成 bypass。"
+                        control={<span className="text-[11px] text-outline">{flavor}</span>}
+                      />
+                    </>
+                  )
+                }
+                if (deployLive === 'required') {
+                  return (
+                    <>
+                      <SettingsRow
+                        title="出站資料閘門（公司強制）"
+                        description={`required：公司部署強制保護，使用者無法關閉。所有 builtin LLM 與 external CLI 出站都會經過閘門。${policyMeta}${extraStatus}`}
+                        control={
+                          <span className="text-[11px] text-outline" title="公司強制 · 不可關閉">
+                            公司強制 · 開
+                          </span>
+                        }
+                      />
+                      <SettingsRow
+                        title="Build flavor"
+                        description="與 guard mode 正交；policy-admin 僅增加管理面，不形成 bypass。"
+                        control={<span className="text-[11px] text-outline">{flavor}</span>}
+                      />
+                    </>
+                  )
+                }
+                if (deployLive === 'demo') {
+                  return (
+                    <>
+                      <SettingsRow
+                        title="出站資料閘門（demo）"
+                        description={`⚠ demo 非企業保障：會跑淨化流程與暫時證據，不可當作公司合規驗證。${policyMeta}${extraStatus}`}
+                        control={<span className="text-[11px] text-amber-400">demo</span>}
+                      />
+                      <SettingsRow
+                        title="Build flavor"
+                        description="與 guard mode 正交；policy-admin 僅增加管理面，不形成 bypass。"
+                        control={<span className="text-[11px] text-outline">{flavor}</span>}
+                      />
+                    </>
+                  )
+                }
+                return (
+                  <>
+                    <SettingsRow
+                      title="出站資料閘門"
+                      description={`optional：可自行開啟保護。啟用後每次 LLM／CLI 出站都會經過閘門（可即時套用，無需重啟）。${policyMeta}${extraStatus}`}
+                      control={
+                        <SettingsToggle
+                          checked={settings.outboundProtectionEnabled === true}
+                          onChange={(v) => set({ outboundProtectionEnabled: v })}
+                        />
+                      }
+                    />
+                    <SettingsRow
+                      title="Build flavor"
+                      description="與 guard mode 正交；policy-admin 僅增加管理面，不形成 bypass。"
+                      control={<span className="text-[11px] text-outline">{flavor}</span>}
+                    />
+                  </>
+                )
+              })()}
+              {(outboundStatus?.buildFlavor === 'policy-admin' ||
+                (typeof process !== 'undefined' &&
+                  (process as { env?: Record<string, string | undefined> }).env
+                    ?.SUBAGENTS_BUILD_FLAVOR === 'policy-admin')) && (
+                <SettingsRow
+                  title="Policy Admin"
+                  description="此 build 含政策草稿／啟用／證據驗證管理面。Possession of this artifact is the management authority — 不會繞過 Outbound Data Gate。"
+                  control={<span className="text-[11px] text-primary">enabled</span>}
+                />
+              )}
+              <SettingsRow
+                title="Classification endpoint"
+                description="完整 URL（通常以 /v1 結尾）。連線測試只送 SYNTHETIC 內容，不讀專案／prompt。"
+                control={
+                  <input
+                    className={settingsInputCls + ' min-w-[14rem]'}
+                    value={settings.classificationEndpointUrl || ''}
+                    placeholder="https://classify.corp.example/v1"
+                    onChange={(e) => set({ classificationEndpointUrl: e.target.value })}
+                  />
+                }
+              />
+              <SettingsRow
+                title="允許 plaintext HTTP classifier"
+                description="僅在公司明確核准時開啟；evidence 會標示未加密。"
+                control={
+                  <SettingsToggle
+                    checked={settings.classificationAllowPlaintextHttp === true}
+                    onChange={(v) => set({ classificationAllowPlaintextHttp: v })}
+                  />
+                }
+              />
+              <SettingsRow
+                title="Classifier 連線測試"
+                description={classifierTestMsg || '使用 synthetic payload 探測 endpoint。'}
+                control={
+                  <button
+                    type="button"
+                    className={settingsBtnCls}
+                    disabled={classifierTesting || !(settings.classificationEndpointUrl || '').trim()}
+                    onClick={() => {
+                      void (async () => {
+                        setClassifierTesting(true)
+                        setClassifierTestMsg(null)
+                        try {
+                          const { callCompanyClassifier, syntheticClassifierTestRequest } =
+                            await import('../agent/outbound/companyClassifier')
+                          const { connectionIdForBuiltinLlm: connFn } = await import(
+                            '../agent/outbound/providerConnectionId'
+                          )
+                          const cid = connFn({
+                            apiProvider: settings.apiProvider,
+                            baseUrl: settings.baseUrl,
+                          })
+                          const url = (settings.classificationEndpointUrl || '').trim()
+                          const r = await callCompanyClassifier({
+                            endpointUrl: url,
+                            request: syntheticClassifierTestRequest(cid),
+                            allowPlaintextHttp: settings.classificationAllowPlaintextHttp === true,
+                          })
+                          if (r.ok) {
+                            setClassifierTestMsg(
+                              `OK · ${r.transport} · attempts=${r.attempts} · exclusions=${r.exclusions.length}`,
+                            )
+                          } else {
+                            setClassifierTestMsg(`${r.status}: ${r.reason}`)
+                          }
+                        } catch (e) {
+                          setClassifierTestMsg(e instanceof Error ? e.message : String(e))
+                        } finally {
+                          setClassifierTesting(false)
+                        }
+                      })()
+                    }}
+                  >
+                    {classifierTesting ? '測試中…' : '測試'}
+                  </button>
+                }
+              />
               {(
                 [
                   ['orchestrator', 'Manager／協調者'],
@@ -2136,6 +2461,313 @@ export function SettingsPage() {
                 </div>
               </SettingsStack>
             </SettingsGroup>
+          </>
+        )}
+
+        {section === 'policyAdmin' && (
+          <>
+            {!isPolicyAdminBuild ? (
+              <SettingsGroup title="不可用">
+                <SettingsRow
+                  title="需要 policy-admin build"
+                  description="請以 SUBAGENTS_BUILD_FLAVOR=policy-admin 打包。standard 不會暴露政策寫入面。"
+                  control={<span className="text-[11px] text-outline">standard</span>}
+                />
+              </SettingsGroup>
+            ) : (
+              <>
+                <SettingsGroup title="使用中政策（非敏感摘要）">
+                  <SettingsRow
+                    title="重新整理"
+                    description={policyAdminMsg || '列出 company-base 與 provider supplements。'}
+                    control={
+                      <button
+                        type="button"
+                        className={settingsBtnCls}
+                        disabled={policyBusy}
+                        onClick={() => void refreshPolicyAdmin()}
+                      >
+                        重新整理
+                      </button>
+                    }
+                  />
+                  {policyActive.length === 0 ? (
+                    <SettingsRow
+                      title="尚無 active 檔"
+                      description="啟用草稿後會寫入政策目錄。"
+                      control={<span className="text-[11px] text-outline">—</span>}
+                    />
+                  ) : (
+                    policyActive.map((p) => (
+                      <SettingsRow
+                        key={`${p.kind}:${p.connectionId || 'base'}`}
+                        title={
+                          p.kind === 'company-base'
+                            ? 'Company Base'
+                            : `Supplement · ${p.connectionId || '—'}`
+                        }
+                        description={`v${p.version} · ${p.changeId} · detectors ${p.detectorCount}`}
+                        control={
+                          p.kind === 'company-base' || p.connectionId ? (
+                            <button
+                              type="button"
+                              className={settingsBtnCls}
+                              disabled={policyBusy}
+                              onClick={() => {
+                                void (async () => {
+                                  setPolicyBusy(true)
+                                  setPolicyAdminMsg(null)
+                                  try {
+                                    const r = await window.subagents?.outbound?.policyRollback?.({
+                                      kind: p.kind as 'company-base' | 'provider-supplement',
+                                      connectionId: p.connectionId,
+                                      reason: 'settings-ui-rollback',
+                                    })
+                                    setPolicyAdminMsg(
+                                      r?.ok
+                                        ? `rollback OK → v${(r.active as { version?: number })?.version}`
+                                        : `rollback failed: ${(r as { reason?: string })?.reason}`,
+                                    )
+                                    await refreshPolicyAdmin()
+                                  } catch (e) {
+                                    setPolicyAdminMsg(
+                                      e instanceof Error ? e.message : String(e),
+                                    )
+                                  } finally {
+                                    setPolicyBusy(false)
+                                  }
+                                })()
+                              }}
+                            >
+                              Rollback+1
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-outline">—</span>
+                          )
+                        }
+                      />
+                    ))
+                  )}
+                </SettingsGroup>
+
+                <SettingsGroup title="草稿">
+                  <SettingsRow
+                    title="Draft kind"
+                    description="company-base 或 provider-supplement（後者需 connection id）。"
+                    control={
+                      <PillSelect
+                        value={policyDraftKind}
+                        onChange={(v) =>
+                          setPolicyDraftKind(
+                            v === 'provider-supplement' ? 'provider-supplement' : 'company-base',
+                          )
+                        }
+                        className="min-w-[11rem]"
+                      >
+                        <option value="company-base">company-base</option>
+                        <option value="provider-supplement">provider-supplement</option>
+                      </PillSelect>
+                    }
+                  />
+                  <SettingsRow
+                    title="Draft id"
+                    description="儲存草稿不會自動啟用。"
+                    control={
+                      <input
+                        className={settingsInputCls + ' min-w-[10rem]'}
+                        value={policyDraftId}
+                        onChange={(e) => setPolicyDraftId(e.target.value)}
+                      />
+                    }
+                  />
+                  {policyDraftKind === 'provider-supplement' && (
+                    <SettingsRow
+                      title="Connection id"
+                      description="例如 llm:openai:… 或從 active supplement 列表複製。"
+                      control={
+                        <input
+                          className={settingsInputCls + ' min-w-[12rem]'}
+                          value={policyDraftConn}
+                          onChange={(e) => setPolicyDraftConn(e.target.value)}
+                          placeholder="llm:…"
+                        />
+                      }
+                    />
+                  )}
+                  <SettingsRow
+                    title="從 active 種子草稿"
+                    description="複製目前 active 政策並將 version+1 寫入 drafts/。"
+                    control={
+                      <button
+                        type="button"
+                        className={settingsBtnCls}
+                        disabled={
+                          policyBusy ||
+                          !policyDraftId.trim() ||
+                          (policyDraftKind === 'provider-supplement' && !policyDraftConn.trim())
+                        }
+                        onClick={() => {
+                          void (async () => {
+                            setPolicyBusy(true)
+                            setPolicyAdminMsg(null)
+                            try {
+                              const r = await window.subagents?.outbound?.policySeedDraft?.({
+                                kind: policyDraftKind,
+                                connectionId:
+                                  policyDraftKind === 'provider-supplement'
+                                    ? policyDraftConn.trim()
+                                    : undefined,
+                                draftId: policyDraftId.trim(),
+                              })
+                              if (r?.ok) {
+                                const loaded =
+                                  await window.subagents?.outbound?.policyReadDraft?.(
+                                    policyDraftId.trim(),
+                                  )
+                                if (loaded && loaded.ok) {
+                                  setPolicyDraftJson(
+                                    JSON.stringify(
+                                      (loaded.draft as { body?: unknown })?.body ?? loaded.draft,
+                                      null,
+                                      2,
+                                    ),
+                                  )
+                                }
+                                setPolicyAdminMsg(`draft seeded (${policyDraftKind})`)
+                                await refreshPolicyAdmin()
+                              } else {
+                                setPolicyAdminMsg(
+                                  `seed failed: ${(r as { reason?: string })?.reason}`,
+                                )
+                              }
+                            } catch (e) {
+                              setPolicyAdminMsg(e instanceof Error ? e.message : String(e))
+                            } finally {
+                              setPolicyBusy(false)
+                            }
+                          })()
+                        }}
+                      >
+                        Seed
+                      </button>
+                    }
+                  />
+                  <SettingsStack title="Draft JSON（body）">
+                    <textarea
+                      className={settingsInputCls + ' w-full font-mono text-[11px]'}
+                      rows={12}
+                      value={policyDraftJson}
+                      onChange={(e) => setPolicyDraftJson(e.target.value)}
+                      placeholder='{ "schemaVersion": 1, "kind": "company-base" | "provider-supplement", ... }'
+                    />
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      <button
+                        type="button"
+                        className={settingsBtnCls}
+                        disabled={
+                          policyBusy ||
+                          !policyDraftId.trim() ||
+                          !policyDraftJson.trim() ||
+                          (policyDraftKind === 'provider-supplement' && !policyDraftConn.trim())
+                        }
+                        onClick={() => {
+                          void (async () => {
+                            setPolicyBusy(true)
+                            setPolicyAdminMsg(null)
+                            try {
+                              const body = JSON.parse(policyDraftJson) as unknown
+                              const r = await window.subagents?.outbound?.policySaveDraft?.({
+                                id: policyDraftId.trim(),
+                                kind: policyDraftKind,
+                                connectionId:
+                                  policyDraftKind === 'provider-supplement'
+                                    ? policyDraftConn.trim()
+                                    : undefined,
+                                body,
+                              })
+                              setPolicyAdminMsg(
+                                r?.ok ? 'draft saved' : `save failed: ${(r as { reason?: string })?.reason}`,
+                              )
+                              await refreshPolicyAdmin()
+                            } catch (e) {
+                              setPolicyAdminMsg(e instanceof Error ? e.message : String(e))
+                            } finally {
+                              setPolicyBusy(false)
+                            }
+                          })()
+                        }}
+                      >
+                        儲存草稿
+                      </button>
+                      <button
+                        type="button"
+                        className={settingsBtnPrimaryCls}
+                        disabled={policyBusy || !policyDraftId.trim()}
+                        onClick={() => {
+                          void (async () => {
+                            setPolicyBusy(true)
+                            setPolicyAdminMsg(null)
+                            try {
+                              const r = await window.subagents?.outbound?.policyActivateDraft?.(
+                                policyDraftId.trim(),
+                              )
+                              setPolicyAdminMsg(
+                                r?.ok
+                                  ? `activated v${(r.active as { version?: number })?.version}`
+                                  : `activate failed: ${(r as { reason?: string })?.reason}`,
+                              )
+                              await refreshPolicyAdmin()
+                            } catch (e) {
+                              setPolicyAdminMsg(e instanceof Error ? e.message : String(e))
+                            } finally {
+                              setPolicyBusy(false)
+                            }
+                          })()
+                        }}
+                      >
+                        啟用草稿
+                      </button>
+                    </div>
+                  </SettingsStack>
+                  {policyDrafts.length > 0 && (
+                    <SettingsStack title="既有草稿">
+                      {policyDrafts.map((d) => (
+                        <SettingsRow
+                          key={d.id}
+                          title={d.id}
+                          description={`${d.kind} · v${d.version ?? '—'} · ${d.changeId || '—'} · ${d.updatedAtUtc || ''}`}
+                          control={
+                            <button
+                              type="button"
+                              className={settingsBtnCls}
+                              onClick={() => {
+                                void (async () => {
+                                  setPolicyDraftId(d.id)
+                                  const loaded =
+                                    await window.subagents?.outbound?.policyReadDraft?.(d.id)
+                                  if (loaded?.ok) {
+                                    setPolicyDraftJson(
+                                      JSON.stringify(
+                                        (loaded.draft as { body?: unknown })?.body ??
+                                          loaded.draft,
+                                        null,
+                                        2,
+                                      ),
+                                    )
+                                  }
+                                })()
+                              }}
+                            >
+                              載入
+                            </button>
+                          }
+                        />
+                      ))}
+                    </SettingsStack>
+                  )}
+                </SettingsGroup>
+              </>
+            )}
           </>
         )}
 

@@ -12,10 +12,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.resolve(__dirname, '..')
 
 function readTaskRunRuntimeSource(fs) {
+  // runExternal.ts retired — policy + coordinator + types + OpenCode mapping/sync
   return [
-    fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8'),
+    fs.readFileSync(path.join(appRoot, 'src/agent/taskRunTypes.ts'), 'utf8'),
     fs.readFileSync(path.join(appRoot, 'src/agent/taskRunPolicy.ts'), 'utf8'),
     fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8'),
+    fs.readFileSync(path.join(appRoot, 'src/agent/opencode/sessionMapping.ts'), 'utf8'),
+    fs.readFileSync(path.join(appRoot, 'src/agent/opencode/sessionSync.ts'), 'utf8'),
   ].join('\n')
 }
 
@@ -252,57 +255,8 @@ await test('codeMode worker source disables fetch', async () => {
   assert.match(src, /self\.fetch\s*=\s*undefined/)
 })
 
-// ── approvalMode decision (mirror of toolGuard.decideApprovalNeed) ──
-const SIDE_EFFECT_TOOLS = new Set([
-  'bash',
-  'workspace_write',
-  'http_fetch',
-  'web_search',
-  'message_send',
-  'mcp_call',
-  'skill_save',
-  'memory_set',
-  'memory_append',
-  'run_code',
-  'delegate_task',
-])
-function isSideEffectTool(tool) {
-  return SIDE_EFFECT_TOOLS.has(tool) || tool.startsWith('mcp_')
-}
-function decideApprovalNeed(mode, tool, baseNeedAsk, sideEffectHint = false) {
-  if (mode === 'full') return false
-  if (mode === 'always') return baseNeedAsk || sideEffectHint || isSideEffectTool(tool)
-  return baseNeedAsk
-}
-function effectiveApprovalMode(mode, unattended) {
-  const m = mode || 'auto'
-  if (m === 'full' && unattended) return 'auto'
-  return m
-}
-
-await test('approvalMode: full skips asks, always asks side-effect tools, auto passes through', () => {
-  // full 模式：即使 capability/pattern 要求 ask 也放行
-  assert.equal(decideApprovalNeed('full', 'run_code', true), false)
-  assert.equal(decideApprovalNeed('full', 'bash', true), false)
-  // always 模式：副作用工具一律 ask（含動態 mcp_*），唯讀工具不 ask
-  assert.equal(decideApprovalNeed('always', 'workspace_write', false), true)
-  assert.equal(decideApprovalNeed('always', 'mcp_srv1_createIssue', false), true)
-  assert.equal(decideApprovalNeed('always', 'workspace_read', false), false)
-  assert.equal(decideApprovalNeed('always', 'datetime_now', false), false)
-  // always 模式：任意名稱的自訂 http/bash 工具靠 sideEffect hint 補網
-  assert.equal(decideApprovalNeed('always', 'jira_search', false, true), true)
-  assert.equal(decideApprovalNeed('auto', 'jira_search', false, true), false)
-  // auto 模式：只看 base 訊號（policy / bash pattern / capability approvalTools）
-  assert.equal(decideApprovalNeed('auto', 'bash', true), true)
-  assert.equal(decideApprovalNeed('auto', 'workspace_write', false), false)
-})
-
-await test('approvalMode: unattended downgrades full → auto (never unsupervised full access)', () => {
-  assert.equal(effectiveApprovalMode('full', true), 'auto')
-  assert.equal(effectiveApprovalMode('full', false), 'full')
-  assert.equal(effectiveApprovalMode('always', true), 'always')
-  assert.equal(effectiveApprovalMode(undefined, true), 'auto')
-})
+// ── approvalMode decision: mirrors removed — see smoke-approval-decision.mts ──
+// Real import of decide() / decideApprovalNeed / effectiveApprovalMode lives there.
 
 // ── external CLI approval mapping (from cliApproval.ts/localCliRunner.ts) ──
 function resolveCliApproval(kind, mode, unattended, agentMode) {
@@ -412,18 +366,23 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const runExternal = readTaskRunRuntimeSource(fs)
   const runtime = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/runtime.ts'), 'utf8')
-  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   const background = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
   assert.match(types, /subAgentsEnabled: boolean/)
   assert.match(llm, /subAgentsEnabled: false/)
   assert.match(engine, /private subAgentsEnabled\(\)/)
-  assert.match(engine, /runPrimaryAgentTask/)
+  // Primary/subagent LLM calls live on the heuristic step strategy (thin adapter)
+  const strategies = fs.readFileSync(path.join(appRoot, 'src/agent/stepStrategies.ts'), 'utf8')
+  assert.match(strategies, /runPrimaryAgentTask/)
+  assert.match(engine, /createStepStrategies/)
   assert.match(runExternal, /opts\.sourceKind === 'delegate'/)
   assert.match(runtime, /capability\.id !== 'delegate'/)
-  assert.match(guard, /Sub Agent 功能目前已關閉/)
+  assert.match(decision, /Sub Agent 功能目前已關閉/)
   assert.match(delegate, /settings\.subAgentsEnabled !== true/)
+  const regDelegate = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registered/delegate_task.ts'), 'utf8')
+  assert.match(regDelegate, /subAgentsEnabled !== true/)
   assert.match(background, /背景委派未排入/)
   assert.match(settings, /title="啟用 Sub Agent"/)
 })
@@ -454,12 +413,14 @@ await test('custom tools: bash_template always approval-gated; toolLoop passes s
 await test('side-effect drift guard: every registry tool is read-only OR classified', async () => {
   const fs = await import('node:fs')
   const registry = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registry.ts'), 'utf8')
-  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  // SIDE_EFFECT_TOOLS lives in toolGuardShared (leaf); toolGuard re-exports it.
+  const guardShared = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuardShared.ts'), 'utf8')
   const builtins = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/builtins.ts'), 'utf8')
 
-  // All ToolName union members
-  const names = [...registry.matchAll(/^\s*\|\s*'([a-z0-9_]+)'/gm)].map((m) => m[1])
-  assert.ok(names.length >= 20, `parsed ${names.length} tool names from registry`)
+  // ToolName is derived from TOOL_DEFINITIONS keys (single source)
+  const defs = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolDefinitions.ts'), 'utf8')
+  const names = [...defs.matchAll(/^  ([a-z0-9_]+): \{/gm)].map((m) => m[1])
+  assert.ok(names.length >= 20, `parsed ${names.length} tool names from toolDefinitions`)
 
   // 唯讀白名單：新工具必須加入這裡「或」進 SIDE_EFFECT_TOOLS / approvalTools，二選一
   const READ_ONLY = new Set([
@@ -476,9 +437,9 @@ await test('side-effect drift guard: every registry tool is read-only OR classif
     'design_critique_note',
     'design_critique',
   ])
-  const sideEffectBlock = guard.slice(
-    guard.indexOf('SIDE_EFFECT_TOOLS'),
-    guard.indexOf('])', guard.indexOf('SIDE_EFFECT_TOOLS')),
+  const sideEffectBlock = guardShared.slice(
+    guardShared.indexOf('SIDE_EFFECT_TOOLS'),
+    guardShared.indexOf('])', guardShared.indexOf('SIDE_EFFECT_TOOLS')),
   )
   const unclassified = names.filter(
     (n) =>
@@ -494,11 +455,14 @@ await test('side-effect drift guard: every registry tool is read-only OR classif
   )
 })
 
-await test('toolGuard source wires decideApprovalNeed + full-mode safety bypass exists in engine', async () => {
+await test('toolGuard adapter wires pure decide() + full-mode safety bypass exists in engine', async () => {
   const fs = await import('node:fs')
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
-  assert.match(guard, /decideApprovalNeed/)
-  assert.match(guard, /approvalMode/)
+  assert.match(guard, /from '\.\/approvalDecision'/)
+  assert.match(guard, /\bdecide\b/)
+  const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
+  assert.match(decision, /export function decide\b/)
+  assert.match(decision, /export function decideApprovalNeed\b/)
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   assert.match(engine, /approvalMode === 'full'/)
 })
@@ -562,8 +526,8 @@ await test('W1: entry drift guard — no dispatchThreadTask outside controller',
 await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async () => {
   const fs = await import('node:fs')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
-  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
   const policy = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunPolicy.ts'), 'utf8')
+  const types = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunTypes.ts'), 'utf8')
   const callers = [
     'src/App.tsx',
     'src/hooks/useSlashExecutor.ts',
@@ -583,13 +547,18 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
   assert.doesNotMatch(coordinator, /export async function coordinateTaskRun/)
   assert.match(coordinator, /export async function runTask/)
   assert.match(coordinator, /normalizeTaskRunInput/)
-  assert.doesNotMatch(coordinator, /await import\('\.\/runExternal'\)/)
+  // Extension-agnostic: must not dynamically import retired runExternal at all
+  assert.doesNotMatch(coordinator, /import\(['"]\.\/runExternal(?:\.ts)?['"]\)/)
   assert.match(coordinator, /dispatchThreadTask\(snapshot\)/)
-  assert.match(legacy, /compatibility adapter for the canonical taskRunCoordinator seam/)
-  assert.match(legacy, /const \{ runTask: canonicalRunTask \}/)
-  assert.match(legacy, /@deprecated New callers must use `taskRunCoordinator\.runTask`/)
+  assert.match(types, /export type ExternalRunOpts/)
+  assert.match(types, /export type RunSourceKind/)
   assert.match(policy, /export function resolveBusyPolicy/)
-  assert.doesNotMatch(legacy, /export function resolveBusyPolicy/)
+  // Legacy shell must not exist
+  assert.equal(
+    fs.existsSync(path.join(appRoot, 'src/agent/runExternal.ts')),
+    false,
+    'runExternal.ts must be deleted',
+  )
   for (const file of callers) {
     const source = fs.readFileSync(path.join(appRoot, file), 'utf8')
     assert.doesNotMatch(
@@ -601,24 +570,20 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
   }
 })
 
-await test('Task run deepening: coordinator owns orchestration, legacy is compatibility only', async () => {
+await test('Task run deepening: coordinator owns orchestration; runExternal shell gone', async () => {
   const fs = await import('node:fs')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
-  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  // Fixed: previous regex missed `./runExternal.ts` (with extension) and was a false pass
   assert.doesNotMatch(
     coordinator,
-    /await import\('\.\/runExternal'\)/,
-    'coordinator 不可把整個 lifecycle 轉回 legacy implementation',
+    /import\(['"]\.\/runExternal(?:\.ts)?['"]\)/,
+    'coordinator 不可動態 import 已退役的 runExternal',
   )
   assert.match(coordinator, /dispatchThreadTask\(snapshot\)/)
   assert.match(coordinator, /enqueueExternalRun/)
   assert.match(coordinator, /evaluateBeforeRunHooks/)
-  assert.match(legacy, /export async function runExternalObjective/)
-  assert.doesNotMatch(
-    legacy,
-    /runExternalObjective[\s\S]*dispatchThreadTask\(snapshot\)/,
-    'legacy export 不可再持有 Task run orchestration',
-  )
+  assert.match(coordinator, /opencode\/sessionSync/)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/runExternal.ts')), false)
 })
 
 await test('Ticket 03: lifecycle-control plumbing is contracted', async () => {
@@ -672,7 +637,7 @@ await test('Phase 3 item 6/7: background delegate links Archive once + hidden wo
   const bg = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
   const thread = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
   const sidebar = fs.readFileSync(path.join(appRoot, 'src/components/ThreadSidebar.tsx'), 'utf8')
-  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
+  const types = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunTypes.ts'), 'utf8')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(bg, /archiveRunId/)
   assert.match(bg, /workerThread: true/)
@@ -681,7 +646,7 @@ await test('Phase 3 item 6/7: background delegate links Archive once + hidden wo
   assert.match(thread, /hidden\?: boolean/)
   assert.match(thread, /t\.hidden/)
   assert.match(sidebar, /threads\.filter\(\(t\) => !t\.hidden\)/)
-  assert.match(legacy, /workerThread\?: boolean/)
+  assert.match(types, /workerThread\?: boolean/)
   assert.match(coordinator, /hidden: opts\.hidden/)
 })
 
@@ -689,7 +654,6 @@ await test('Phase 3 item 3: runDispatch consumes RunDispatchSnapshot only', asyn
   const fs = await import('node:fs')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
-  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
   assert.match(coordinator, /export type RunDispatchSnapshot/)
   assert.match(coordinator, /export function buildRunDispatchSnapshot/)
   assert.doesNotMatch(coordinator, /deferFinalization/)
@@ -707,7 +671,6 @@ await test('Phase 3 item 3: runDispatch consumes RunDispatchSnapshot only', asyn
 await test('Phase 3 item 4/5: unique finalization order; stop does not drain', async () => {
   const fs = await import('node:fs')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
-  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
   assert.match(coordinator, /export async function finalizeTaskRun/)
@@ -730,15 +693,13 @@ await test('Phase 3 item 4/5: unique finalization order; stop does not drain', a
     agent.slice(agent.indexOf('stopExecution:'), agent.indexOf('continueTurn:')),
     /drainQueueAfterRun/,
   )
-  assert.doesNotMatch(legacy, /finalizeTaskRun/)
-  // Legacy compatibility must not drain outside coordinator finalization.
-  assert.doesNotMatch(legacy, /drainExternalRunQueue/)
+  // File absence is stronger than checking dead code is gone
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/runExternal.ts')), false)
 })
 
 await test('Phase 3 item 2: coordinator owns capacity / attachments / thread / beforeRun once', async () => {
   const fs = await import('node:fs')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
-  const legacy = fs.readFileSync(path.join(appRoot, 'src/agent/runExternal.ts'), 'utf8')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
 
   // Coordinator exports the single-owner prep APIs
@@ -757,12 +718,7 @@ await test('Phase 3 item 2: coordinator owns capacity / attachments / thread / b
   assert.match(coordinator, /reserveRunCapacity/)
   assert.match(coordinator, /bindRunThread/)
   assert.match(coordinator, /evaluateBeforeRunHooks/)
-  assert.doesNotMatch(legacy, /materializeAttachmentsOnDisk/)
-  assert.doesNotMatch(legacy, /hydrateAttachmentsFromDisk/)
-  assert.doesNotMatch(legacy, /normalizeImageAttachmentsForVision/)
-  assert.doesNotMatch(legacy, /\.canStartRun\(/)
-  assert.doesNotMatch(legacy, /\.reserveRun\(/)
-  assert.doesNotMatch(legacy, /\.bindRun\(/)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/runExternal.ts')), false)
 
   // runDispatch must not re-own capacity or attachment I/O
   assert.doesNotMatch(dispatch, /canStartRun/)
@@ -917,13 +873,13 @@ await test('Phase 3: OpenCode permission projection preserves patterns and restr
   const config = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/configTypes.ts'), 'utf8')
   const permissions = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/permissions.ts'), 'utf8')
   const registry = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/agentRegistry.ts'), 'utf8')
-  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
   assert.match(config, /projectOpenCodePermissions/)
   assert.match(config, /mergePermissionProjectionsRestrictive/)
   assert.match(permissions, /checkProjectedToolPermission/)
   assert.match(permissions, /mcp_/)
   assert.match(registry, /restrictivePermission/)
-  assert.match(guard, /OpenCode permission deny/)
+  assert.match(decision, /OpenCode permission deny/)
 })
 
 await test('W3: mcp candidate mapping (url → http, command → stdio, no secrets)', () => {
@@ -972,13 +928,13 @@ await test('SubDesign Phase 4/5: critique gate + Electron export contract', asyn
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
   const critique = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/critique.ts'), 'utf8')
-  const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  const guardShared = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuardShared.ts'), 'utf8')
   const capability = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/subDesign.ts'), 'utf8')
   const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
   // Phase 3 item 4: subDesign export digest lives in coordinator finalization summary
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(critique, /critiqueAllowsDeliver/)
-  assert.match(guard, /design_artifact_export/)
+  assert.match(guardShared, /design_artifact_export/)
   assert.match(capability, /design_artifact_export/)
   assert.match(main, /subdesign:exportArtifact/)
   assert.match(main, /printToPDF/)
@@ -996,10 +952,12 @@ await test('SubDesign Phase 6: canonical metadata, artifact IPC, bash gate, and 
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
+  const guardShared = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuardShared.ts'), 'utf8')
+  const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
   const critique = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/critique.ts'), 'utf8')
   const preview = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/ArtifactPreview.tsx'), 'utf8')
   const executor = fs.readFileSync(path.join(appRoot, 'src/agent/tools/executor.ts'), 'utf8')
-  const registry = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registry.ts'), 'utf8')
+  const toolDefs = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolDefinitions.ts'), 'utf8')
   const schemas = fs.readFileSync(path.join(appRoot, 'src/agent/tools/schemas.ts'), 'utf8')
   const capability = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/subDesign.ts'), 'utf8')
   const learning = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
@@ -1037,20 +995,23 @@ await test('SubDesign Phase 6: canonical metadata, artifact IPC, bash gate, and 
   assert.match(preview, /readArtifact/)
   assert.match(guard, /isSubDesignWritableBashCommand/)
   assert.match(guard, /isSubDesignReadonlyBashCommand/)
-  assert.match(guard, /curl\|wget/)
-  assert.match(guard, /tool === 'bash'/)
+  assert.match(guardShared, /curl\|wget/)
+  assert.match(decision, /tool === 'bash'/)
   assert.match(critique, /critiqueHasRequiredEvidence/)
   assert.match(critique, /screenshot/)
   assert.match(critique, /dom/)
   assert.match(critique, /lint/)
-  assert.match(registry, /design_artifact_patch/)
-  assert.match(registry, /design_artifact_capture/)
-  assert.match(registry, /design_artifact_tweak/)
-  assert.match(registry, /design_artifact_lint/)
-  assert.match(schemas, /expectedMatches/)
-  assert.match(schemas, /exports:.*pptx.*mp4/)
-  assert.match(schemas, /format:.*pptx.*mp4/)
-  assert.match(executor, /'pptx' \| 'mp4'/)
+  assert.match(toolDefs, /design_artifact_patch:/)
+  assert.match(toolDefs, /design_artifact_capture:/)
+  assert.match(toolDefs, /design_artifact_tweak:/)
+  assert.match(toolDefs, /design_artifact_lint:/)
+  // parameters live in toolDefinitions; schemas re-exports PARAMS view
+  assert.match(toolDefs, /expectedMatches/)
+  assert.match(toolDefs, /"pptx"/)
+  assert.match(toolDefs, /"mp4"/)
+  assert.match(schemas, /toolParameters/)
+  const designExport = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registered/design_artifact_export.ts'), 'utf8')
+  assert.match(designExport, /'pptx' \| 'mp4'/)
   assert.match(tweak, /exact patch/)
   assert.match(tweak, /requestAsk/)
   assert.match(tweak, /Structured|structured|inferred/)
@@ -1061,7 +1022,8 @@ await test('SubDesign Phase 6: canonical metadata, artifact IPC, bash gate, and 
   assert.match(delivery, /ffmpeg/)
   assert.match(delivery, /單頁摘要/)
   assert.match(delivery, /靜態縮圖/)
-  assert.match(executor, /onSubDesignPass/)
+  const designCritique = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registered/design_critique.ts'), 'utf8')
+  assert.match(designCritique, /onSubDesignPass/)
   assert.match(capability, /design_artifact_capture/)
   assert.match(learning, /subdesign-preference/)
   assert.match(preference, /findLatestPassedSubDesignPreference/)
@@ -1333,7 +1295,10 @@ await test('P1-D: hook rules — deny wins, require-approval forces ask, prefix 
 await test('P1-D: wiring contract — hooks evaluated at all four points; sanitize caps plugin rules', async () => {
   const fs = await import('node:fs')
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
-  assert.match(guard, /point: 'beforeTool'/)
+  const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
+  // beforeTool evaluated inside pure decide(); adapter collects rules + forwards sourceKind
+  assert.match(decision, /point !== 'beforeTool'/)
+  assert.match(guard, /collectHookRules/)
   assert.match(guard, /sourceKind: opts\.sourceKind/)
   const runX = readTaskRunRuntimeSource(fs)
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
@@ -2091,9 +2056,13 @@ await test('drift guard: llm.ts routes calls through callWithResilience', async 
 await test('drift guard: toolLoop preflights context overflow via tokenEstimate', async () => {
   const fs = await import('node:fs')
   const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  assert.match(loop, /resolveContextWindow\(settings, settings\.model\)/)
-  assert.match(loop, /shouldPreflightCompact\(estTokens, contextWindow\)/)
-  assert.match(loop, /force: true/)
+  const gov = fs.readFileSync(path.join(appRoot, 'src/agent/tools/contextGovernor.ts'), 'utf8')
+  assert.match(loop, /createDefaultContextEngine/)
+  assert.match(loop, /contextEngine\.prepareRound/)
+  assert.match(gov, /createContextGovernor/)
+  assert.match(gov, /resolveContextWindow/)
+  assert.match(gov, /shouldPreflightCompact/)
+  assert.match(gov, /force: true/)
 })
 
 // ── Phase 1 (grok-build plan G2): tool-result pruning + compaction flush ──
@@ -2208,10 +2177,12 @@ await test('drift guard: compaction applies pruning and returns pruneStats', asy
 await test('drift guard: toolLoop wires checkpoint + memory flush + post-compaction recall', async () => {
   const fs = await import('node:fs')
   const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  assert.match(loop, /saveCompactionCheckpoint\(/)
-  assert.match(loop, /onPreCompactionFlush\(/)
-  assert.match(loop, /壓縮後記憶召回/)
-  assert.match(loop, /onContextUsage\?\.\(\{ tokens: estTokens, contextWindow, ratio: usageRatio \}\)/)
+  const gov = fs.readFileSync(path.join(appRoot, 'src/agent/tools/contextGovernor.ts'), 'utf8')
+  assert.match(loop, /saveCompactionCheckpoint/)
+  assert.match(loop, /onPreCompactionFlush/)
+  assert.match(gov, /壓縮後記憶召回/)
+  assert.match(gov, /onContextUsage/)
+  assert.match(loop, /onContextUsage/)
   const learning = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
   assert.match(learning, /onPreCompactionFlush\(input/)
   assert.match(learning, /textSimilarity\(flushText, prev\.text\) >= 0\.85/)
@@ -2268,9 +2239,13 @@ await test('drift guard: memory decay + staleness + dream wiring', async () => {
 
 await test('drift guard: rewind snapshots wired into write tools + thread rewind', async () => {
   const fs = await import('node:fs')
-  const executor = fs.readFileSync(path.join(appRoot, 'src/agent/tools/executor.ts'), 'utf8')
+  const helpers = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolIoHelpers.ts'), 'utf8')
+  assert.match(helpers, /recordRewindSnapshot/)
+  const writeTools = ['workspace_write', 'workspace_delete', 'workspace_move']
+    .map((n) => fs.readFileSync(path.join(appRoot, `src/agent/tools/registered/${n}.ts`), 'utf8'))
+    .join('\n')
   for (const kind of ["kind: 'write'", "kind: 'delete'", "kind: 'move'"]) {
-    assert.ok(executor.includes(kind), `executor records rewind ${kind}`)
+    assert.ok(writeTools.includes(kind), `registered write tools record rewind ${kind}`)
   }
   const store = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
   assert.match(store, /rewindToBubble/)
@@ -2300,8 +2275,10 @@ await test('drift guard: new hook points are passive-only and wired', async () =
     assert.match(hooks, new RegExp(`${point}: \\['log', 'notify'\\]`), `${point} passive-only`)
   }
   const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  assert.match(loop, /point: 'beforeCompaction'/)
-  assert.match(loop, /point: 'afterCompaction'/)
+  const gov = fs.readFileSync(path.join(appRoot, 'src/agent/tools/contextGovernor.ts'), 'utf8')
+  assert.match(gov, /beforeCompaction/)
+  assert.match(gov, /afterCompaction/)
+  assert.match(loop, /evaluateHook|beforeCompaction|afterCompaction/)
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   assert.match(delegate, /'delegateStart'/)
   assert.match(delegate, /emitDelegateHook\('delegateEnd', r\.ok\)/)
@@ -2334,8 +2311,8 @@ await test('drift guard: delegate capability_mode stacks on role blocks; wait pr
   const jobs = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
   assert.match(jobs, /export async function waitBackgroundJobs/)
   assert.match(jobs, /wait_any/)
-  const executor = fs.readFileSync(path.join(appRoot, 'src/agent/tools/executor.ts'), 'utf8')
-  assert.match(executor, /waitBackgroundJobs\(/)
+  const regStatus = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registered/delegate_status.ts'), 'utf8')
+  assert.match(regStatus, /waitBackgroundJobs\(/)
 })
 
 await test('drift guard: metrics recorded at coordinator settle + guard/loop bumps', async () => {
@@ -2346,7 +2323,9 @@ await test('drift guard: metrics recorded at coordinator settle + guard/loop bum
   assert.match(guard, /bumpRunMetric\(opts\.runId, 'toolAsks'\)/)
   assert.match(guard, /'toolDenials'\)/)
   const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  assert.match(loop, /'compactions'\)/)
+  const gov = fs.readFileSync(path.join(appRoot, 'src/agent/tools/contextGovernor.ts'), 'utf8')
+  assert.match(gov, /compactions/)
+  assert.match(loop, /bumpMetric|compactions/)
   assert.match(loop, /'llmRetries'\)/)
 })
 

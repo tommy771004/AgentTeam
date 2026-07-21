@@ -2,15 +2,15 @@
  * Delegate isolation — Hermes-inspired leaf / orchestrator
  * Leaf: isolated context, restricted tools, no re-delegate
  * Orchestrator: may spawn leaves (depth-limited)
+ *
+ * Nested admission is **only** via `runTask` (coordinator). G9 persona /
+ * worktree / capability_mode live in prepare helpers consumed by the
+ * `delegate_task` tool + background jobs.
  */
 
 import { v4 as uuid } from 'uuid'
 import type { LlmSettings, PermissionPolicy, PermissionProjection, ToolCallRecord } from '../types'
 import { resolveRoleModel } from '../llm'
-import { runFunctionCallingLoop } from '../tools/toolLoop'
-import { executeTool } from '../tools/executor'
-import { buildPromptLayers } from './promptBuilder'
-import { compressStepOutputs } from './sessionSearch'
 import {
   blockedToolsForCapabilityMode,
   type DelegateCapabilityMode,
@@ -114,33 +114,52 @@ export class DelegationBudget {
 
 export const globalDelegationBudget = new DelegationBudget(2, 3)
 
+export type PreparedDelegateSpawn = {
+  ok: true
+  id: string
+  role: DelegateRole
+  depth: number
+  childProjectRoot?: string
+  worktreeNote: string
+  childModel: string
+  blockedTools: string[]
+  preloadCapabilityIds: string[]
+  extraSystemContext: string
+  personaName?: string
+} | {
+  ok: false
+  result: DelegateTaskResult
+}
+
 /**
- * Run an isolated subagent for a single goal.
- * Does NOT share parent message history — only the goal + optional context string.
+ * G9 prepare: gate subAgents, budget, persona, worktree, role+capability blocks, model.
+ * Does **not** run a nested loop — callers pass overrides into `runTask`.
  */
-export async function runDelegatedTask(
+export async function prepareDelegateSpawn(
   settings: LlmSettings,
   input: DelegateTaskInput,
   opts?: {
     budget?: DelegationBudget
     onLog?: (msg: string) => void
-    shouldAbort?: () => boolean
     parentDepth?: number
   },
-): Promise<DelegateTaskResult> {
+): Promise<PreparedDelegateSpawn> {
   const id = `dlg_${uuid().slice(0, 8)}`
   const role: DelegateRole = input.role || 'leaf'
   if (settings.subAgentsEnabled !== true) {
     return {
-      id,
-      role,
-      goal: input.goal,
       ok: false,
-      summary: 'Sub Agent 功能目前已關閉，委派未啟動。請到設定 → 角色模型開啟。',
-      tokensUsed: 0,
-      toolCalls: [],
-      durationMs: 0,
-      depth: opts?.parentDepth ?? 0,
+      result: {
+        id,
+        role,
+        goal: input.goal,
+        ok: false,
+        summary: 'Sub Agent 功能目前已關閉，委派未啟動。請到設定 → 角色模型開啟。',
+        tokensUsed: 0,
+        toolCalls: [],
+        durationMs: 0,
+        depth: opts?.parentDepth ?? 0,
+      },
     }
   }
   const budget = opts?.budget || globalDelegationBudget
@@ -150,15 +169,18 @@ export async function runDelegatedTask(
   const depth = budget.tryEnter(parentDepth)
   if (depth == null) {
     return {
-      id,
-      role,
-      goal: input.goal,
       ok: false,
-      summary: `委派被拒：已達深度/並行上限 (depth≤${budget.maxDepth}, concurrent≤${budget.maxConcurrent})`,
-      tokensUsed: 0,
-      toolCalls: [],
-      durationMs: 0,
-      depth: parentDepth,
+      result: {
+        id,
+        role,
+        goal: input.goal,
+        ok: false,
+        summary: `委派被拒：已達深度/並行上限 (depth≤${budget.maxDepth}, concurrent≤${budget.maxConcurrent})`,
+        tokensUsed: 0,
+        toolCalls: [],
+        durationMs: 0,
+        depth: parentDepth,
+      },
     }
   }
 
@@ -169,19 +191,143 @@ export async function runDelegatedTask(
   if (input.persona && (!persona || !persona.instructions?.trim())) {
     budget.leave()
     return {
-      id,
-      role,
-      goal: input.goal,
       ok: false,
-      summary: `委派失敗:persona「${input.persona}」不存在或沒有 instructions(設定 → 角色模型管理)。`,
-      tokensUsed: 0,
-      toolCalls: [],
-      durationMs: Date.now() - t0,
-      depth,
+      result: {
+        id,
+        role,
+        goal: input.goal,
+        ok: false,
+        summary: `委派失敗:persona「${input.persona}」不存在或沒有 instructions(設定 → 角色模型管理)。`,
+        tokensUsed: 0,
+        toolCalls: [],
+        durationMs: Date.now() - t0,
+        depth,
+      },
     }
   }
 
-  opts?.onLog?.(`[delegate ${id}] 啟動 ${role} depth=${depth} goal=${input.goal.slice(0, 80)}${input.persona ? ` persona=${input.persona}` : ''}`)
+  opts?.onLog?.(
+    `[delegate ${id}] 啟動 ${role} depth=${depth} goal=${input.goal.slice(0, 80)}${input.persona ? ` persona=${input.persona}` : ''}`,
+  )
+
+  // G9 worktree 隔離(僅 Electron + git 專案;建立失敗回退共用 workspace)
+  let childProjectRoot = input.projectRoot
+  let worktreeNote = ''
+  if (input.isolation === 'worktree' && input.projectRoot) {
+    try {
+      const wt = await window.subagents?.project?.worktreeCreate?.(
+        input.projectRoot,
+        settings.gitBranchPrefix || 'agent/',
+      )
+      if (wt?.ok && wt.path) {
+        childProjectRoot = wt.path
+        worktreeNote = `${wt.path}（branch ${wt.branch || '—'}）`
+        opts?.onLog?.(`[delegate ${id}] worktree 隔離：${wt.path}`)
+      } else {
+        opts?.onLog?.(
+          `[delegate ${id}] worktree 建立失敗（${wt?.error || '環境不支援'}），回退共用 workspace`,
+        )
+      }
+    } catch (e) {
+      opts?.onLog?.(
+        `[delegate ${id}] worktree 建立異常（${e instanceof Error ? e.message : e}），回退共用 workspace`,
+      )
+    }
+  }
+
+  const roleBlocked =
+    role === 'leaf'
+      ? [
+          'skill_save',
+          'delegate_task',
+          'run_code',
+          'bash',
+          'workspace_write',
+          'workspace_download',
+          'workspace_mkdir',
+          'workspace_move',
+          'workspace_delete',
+          'design_system_create',
+          'design_system_update',
+          'design_artifact_register',
+          'design_artifact_export',
+          'message_send',
+          'mcp_call',
+        ]
+      : ['delegate_task']
+  // G9 capability_mode 疊加(只更嚴,不放寬 role 既有封鎖)
+  const blockedTools = [
+    ...new Set([
+      ...roleBlocked,
+      ...blockedToolsForCapabilityMode(input.capabilityMode),
+    ]),
+  ]
+
+  const baseline = ['core-utils', 'web-research', 'memory']
+  const inherited = (input.inheritCapabilities || [])
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .slice(0, 12)
+  const preloadCapabilityIds = [...new Set([...baseline, ...inherited])]
+
+  // G9 模型優先序:role 覆寫 > persona.model > 父 run 模型
+  const roleName = role === 'orchestrator' ? 'orchestrator' : 'analyst'
+  const roleResolved = resolveRoleModel(settings, roleName)
+  const childModel =
+    roleResolved.source === 'role'
+      ? roleResolved.model
+      : persona?.model?.trim() || roleResolved.model
+
+  const extraSystemContext = [
+    '## 隔離子代理（Delegate Isolation）',
+    role === 'leaf'
+      ? '你是 leaf worker：只能完成指派目標，不可再委派，不可寫入新技能。'
+      : '你是 orchestrator：可規劃後產出摘要；本實作中不再巢狀委派以控制成本。',
+    persona
+      ? `## Persona：${input.persona}\n${persona.instructions.trim().slice(0, 2000)}`
+      : '',
+    worktreeNote
+      ? `## Worktree 隔離\n你在獨立 git worktree 工作：${worktreeNote}。變更不會影響主工作區。`
+      : '',
+    input.context ? `## 父層提供的唯讀上下文\n${input.context.slice(0, 3000)}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  return {
+    ok: true,
+    id,
+    role,
+    depth,
+    childProjectRoot,
+    worktreeNote,
+    childModel,
+    blockedTools,
+    preloadCapabilityIds,
+    extraSystemContext,
+    personaName: input.persona,
+  }
+}
+
+/**
+ * Nested delegate via coordinator `runTask` only (no private FC loop).
+ * Emits G7 hooks; releases budget after settle.
+ */
+export async function spawnDelegateViaRunTask(
+  settings: LlmSettings,
+  input: DelegateTaskInput,
+  opts?: {
+    budget?: DelegationBudget
+    onLog?: (msg: string) => void
+    shouldAbort?: () => boolean
+    parentDepth?: number
+  },
+): Promise<DelegateTaskResult> {
+  const prepared = await prepareDelegateSpawn(settings, input, opts)
+  if (!prepared.ok) return prepared.result
+
+  const budget = opts?.budget || globalDelegationBudget
+  const t0 = Date.now()
 
   // G7 delegateStart hook 事件(被動:log / notify)
   const emitDelegateHook = async (point: 'delegateStart' | 'delegateEnd', ok?: boolean) => {
@@ -203,206 +349,67 @@ export async function runDelegatedTask(
   }
   await emitDelegateHook('delegateStart')
   const finish = async (r: DelegateTaskResult): Promise<DelegateTaskResult> => {
+    budget.leave()
     await emitDelegateHook('delegateEnd', r.ok)
     return r
   }
 
   try {
-    // Isolated prompt: NO parent full transcript
-    // G9 worktree 隔離(僅 Electron + git 專案;建立失敗回退共用 workspace)
-    let childProjectRoot = input.projectRoot
-    let worktreeNote = ''
-    if (input.isolation === 'worktree' && input.projectRoot) {
-      try {
-        const wt = await window.subagents?.project?.worktreeCreate?.(
-          input.projectRoot,
-          settings.gitBranchPrefix || 'agent/',
-        )
-        if (wt?.ok && wt.path) {
-          childProjectRoot = wt.path
-          worktreeNote = `${wt.path}（branch ${wt.branch || '—'}）`
-          opts?.onLog?.(`[delegate ${id}] worktree 隔離：${wt.path}`)
-        } else {
-          opts?.onLog?.(
-            `[delegate ${id}] worktree 建立失敗（${wt?.error || '環境不支援'}），回退共用 workspace`,
-          )
-        }
-      } catch (e) {
-        opts?.onLog?.(
-          `[delegate ${id}] worktree 建立異常（${e instanceof Error ? e.message : e}），回退共用 workspace`,
-        )
-      }
-    }
-
-    const layers = buildPromptLayers({
-      role: role === 'orchestrator' ? 'orchestrator' : 'analyst',
+    const { runTask } = await import('../taskRunCoordinator')
+    const childRunId = `${input.parentRunId || 'delegate'}>${prepared.id}`
+    const tr = await runTask({
+      sourceKind: 'delegate',
+      runId: childRunId,
       objective: input.goal,
-      settings,
-      extraContext: [
-        '## 隔離子代理（Delegate Isolation）',
-        role === 'leaf'
-          ? '你是 leaf worker：只能完成指派目標，不可再委派，不可寫入新技能。'
-          : '你是 orchestrator：可規劃後產出摘要；本實作中不再巢狀委派以控制成本。',
-        // G9 persona 疊層:只影響行為指示,不放寬工具面
-        persona
-          ? `## Persona：${input.persona}\n${persona.instructions.trim().slice(0, 2000)}`
-          : '',
-        worktreeNote
-          ? `## Worktree 隔離\n你在獨立 git worktree 工作：${worktreeNote}。變更不會影響主工作區。`
-          : '',
-        input.context ? `## 父層提供的唯讀上下文\n${input.context.slice(0, 3000)}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
+      extraContext: prepared.extraSystemContext,
+      unattended: true,
+      workerThread: true,
+      projectRoot: prepared.childProjectRoot,
+      attachedSkills: prepared.preloadCapabilityIds,
+      overrides: {
+        runId: childRunId,
+        sourceKind: 'delegate',
+        projectRoot: prepared.childProjectRoot,
+        preloadCapabilityIds: prepared.preloadCapabilityIds,
+        blockedTools: prepared.blockedTools,
+        maxToolRounds: input.maxRounds || Math.min(3, settings.maxToolRounds || 4),
+        extraSystemContext: prepared.extraSystemContext,
+        unattended: true,
+        hitlTimeoutMs: 45_000,
+        permissionPolicy: input.parentPermissionPolicy,
+        permissionProjection: input.parentPermissionProjection,
+        mcpAgentId: input.parentMcpAgentId,
+        model: prepared.childModel,
+      },
+      sourceLabel: `delegate:${prepared.id}`,
     })
-
-    // G9 模型優先序:role 覆寫 > persona.model > 父 run 模型
-    const roleName = role === 'orchestrator' ? 'orchestrator' : 'analyst'
-    const roleResolved = resolveRoleModel(settings, roleName)
-    const childModel =
-      roleResolved.source === 'role'
-        ? roleResolved.model
-        : persona?.model?.trim() || roleResolved.model
-    const childSettings: LlmSettings = { ...settings, model: childModel }
-
-    if (settings.enabled && settings.apiKey) {
-      const roleBlocked =
-        role === 'leaf'
-          ? [
-              'skill_save',
-              'delegate_task',
-              'run_code',
-              'bash',
-              'workspace_write',
-              'workspace_download',
-              'workspace_mkdir',
-              'workspace_move',
-              'workspace_delete',
-              'design_system_create',
-              'design_system_update',
-              'design_artifact_register',
-              'design_artifact_export',
-              'message_send',
-              'mcp_call',
-            ]
-          : ['delegate_task']
-      // G9 capability_mode 疊加(只更嚴,不放寬 role 既有封鎖)
-      const blockedTools = [
-        ...new Set([
-          ...roleBlocked,
-          ...blockedToolsForCapabilityMode(input.capabilityMode),
-        ]),
-      ]
-      // Baseline + optional parent-chosen inherit_capabilities (G4)
-      const baseline = ['core-utils', 'web-research', 'memory']
-      const inherited = (input.inheritCapabilities || [])
-        .map((s) => String(s || '').trim())
-        .filter(Boolean)
-        .slice(0, 12)
-      const preloadCapabilityIds = [...new Set([...baseline, ...inherited])]
-      // Keep child identity explicit. A module-global run context would race
-      // when two parent runs delegate at the same time.
-      const childRunId = `${input.parentRunId || 'delegate'}>${id}`
-      const loop = await runFunctionCallingLoop(
-        childSettings,
-        {
-          role: role === 'leaf' ? 'leaf-worker' : 'sub-orchestrator',
-          objective: input.goal,
-          step: `完成隔離任務：${input.goal}`,
-          context: layers.full.slice(0, 10_000),
-        },
-        {
-          limits: {
-            maxToolPayloadBytes: (settings.maxToolPayloadKb || 50) * 1024,
-            maxStepContextBytes: 150_000,
-            maxToolRounds: input.maxRounds || Math.min(3, settings.maxToolRounds || 4),
-          },
-          callbacks: {
-            shouldAbort: opts?.shouldAbort,
-            onLog: (level, message) => opts?.onLog?.(`[${id}] ${level} ${message}`),
-          },
-          haltOnPayloadOverflow: settings.haltOnPayloadOverflow,
-          extraToolsNote:
-            role === 'leaf'
-              ? `LEAF 限制：只讀 brief/artifact evidence；禁止寫 workspace、bash、skill_save、message_send、MCP write、再次 delegate_task / run_code。獨立上下文。preload caps=[${preloadCapabilityIds.join(', ')}]`
-              : '子 orchestrator：本層禁止再 delegate 以控制深度。',
-          blockedTools,
-          permissionPolicy: input.parentPermissionPolicy,
-          permissionProjection: input.parentPermissionProjection,
-          mcpAgentId: input.parentMcpAgentId,
-          preloadCapabilityIds,
-          includeMcpTools: role === 'leaf' ? false : settings.mcpEnabled,
-          unattended: true,
-          hitlTimeoutMs: 45_000,
-          sourceKind: (input.sourceKind as import('../hooks').HookContext['sourceKind']) || 'delegate',
-          objective: input.goal,
-          projectRoot: childProjectRoot,
-          runId: childRunId,
-          threadId: input.parentThreadId,
-        },
-      )
-
-      return finish({
-        id,
-        role,
-        goal: input.goal,
-        ok: loop.toolCalls.length === 0 || loop.toolCalls.some((t) => t.ok),
-        summary: worktreeNote
-          ? `${loop.content}\n\n〔worktree 隔離:變更在 ${worktreeNote},檢視後可套用回主工作區(project.worktreeApply)或移除〕`
-          : loop.content,
-        tokensUsed: loop.tokensUsed,
-        toolCalls: loop.toolCalls,
-        durationMs: Date.now() - t0,
-        depth,
-      })
-    }
-
-    // Simulation path without LLM
-    const chunks: string[] = []
-    for (const tool of ['datetime_now', 'memory_search'] as const) {
-      const r = await executeTool(
-        tool,
-        tool === 'memory_search' ? { query: input.goal } : {},
-        {
-          runId: `${input.parentRunId || 'delegate'}>${id}`,
-          threadId: input.parentThreadId,
-          projectRoot: input.projectRoot,
-        },
-      )
-      chunks.push(`### ${tool}\n${r.output.slice(0, 500)}`)
-    }
-    const summary = [
-      `### 隔離子代理摘要 (${role})`,
-      `目標：${input.goal}`,
-      compressStepOutputs(chunks, 2000),
-      '（模擬模式：未呼叫 LLM）',
-    ].join('\n\n')
-
+    const ok = !tr.error && tr.status !== 'failed' && tr.status !== 'skipped'
+    const summaryBase = String(tr.error || tr.result || tr.status || '')
     return finish({
-      id,
-      role,
+      id: prepared.id,
+      role: prepared.role,
       goal: input.goal,
-      ok: true,
-      summary,
+      ok,
+      summary: prepared.worktreeNote
+        ? `${summaryBase}\n\n〔worktree 隔離:變更在 ${prepared.worktreeNote},檢視後可套用回主工作區(project.worktreeApply)或移除〕`
+        : summaryBase,
       tokensUsed: 0,
       toolCalls: [],
       durationMs: Date.now() - t0,
-      depth,
+      depth: prepared.depth,
     })
   } catch (e) {
     return finish({
-      id,
-      role,
+      id: prepared.id,
+      role: prepared.role,
       goal: input.goal,
       ok: false,
       summary: e instanceof Error ? e.message : String(e),
       tokensUsed: 0,
       toolCalls: [],
       durationMs: Date.now() - t0,
-      depth,
+      depth: prepared.depth,
     })
-  } finally {
-    budget.leave()
   }
 }
 
@@ -416,12 +423,12 @@ export async function runDelegateBatch(
 ): Promise<DelegateTaskResult[]> {
   const max = globalDelegationBudget.maxConcurrent
   const results: DelegateTaskResult[] = []
-  // Simple pool
+  // Simple pool — each leaf via Task run admission (+ G9 prepare)
   for (let i = 0; i < tasks.length; i += max) {
     if (opts?.shouldAbort?.()) break
     const slice = tasks.slice(i, i + max)
     const batch = await Promise.all(
-      slice.map((t) => runDelegatedTask(settings, { ...t, role: t.role || 'leaf' }, opts)),
+      slice.map((t) => spawnDelegateViaRunTask(settings, t, { onLog: opts?.onLog })),
     )
     results.push(...batch)
   }

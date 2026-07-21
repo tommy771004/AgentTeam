@@ -1,8 +1,8 @@
 /**
  * Task-run admission policy and trigger validation.
  *
- * These decisions belong beside the coordinator, not beside the legacy
- * compatibility adapter. The adapter re-exports them for old integrations.
+ * These decisions belong beside the coordinator. Types live in taskRunTypes
+ * (neutral leaf) so this module never reaches backward into a legacy shell.
  */
 
 import type {
@@ -25,7 +25,7 @@ import type {
   ExternalRunOpts,
   ExternalRunResult,
   RunSourceKind,
-} from './runExternal'
+} from './taskRunTypes'
 
 export type BusyPolicy = 'queue' | 'steer' | 'reject'
 

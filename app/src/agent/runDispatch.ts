@@ -9,7 +9,6 @@
 import type {
   AgentMode,
   CliConfigSnapshot,
-  PostStateOutcome,
   RuntimeOverrides,
 } from './types'
 import type { ThinkingDepth } from './thinking'
@@ -33,16 +32,8 @@ import {
 } from '../lib/chatAttachments'
 import type { RunDispatchSnapshot } from './taskRunCoordinator'
 
-export type DispatchResult = {
-  path: 'builtin' | 'cli'
-  /** Phase 5: same outcome shape, different execution semantics. */
-  executionKind?: 'loop' | 'external'
-  kind?: LocalRunnerKind
-  status: string
-  result?: string
-  error?: string
-  postState?: PostStateOutcome
-}
+export type { DispatchResult } from './dispatchResult.ts'
+import type { DispatchResult } from './dispatchResult.ts'
 
 function resolveCliBinary(kind: LocalRunnerKind): string | undefined {
   const settings = useSettingsStore.getState().settings

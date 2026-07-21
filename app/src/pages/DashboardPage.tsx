@@ -22,6 +22,7 @@ import {
   subscribeRunQueue,
 } from '../agent/runQueue'
 import { usePermissionAskStore } from '../store/permissionAskStore'
+import { effectiveOutboundGuardFromSettings } from '../agent/outbound/outboundGate.ts'
 
 const SECTIONS = [
   { id: 'overview', label: '運行狀態', icon: 'monitoring' },
@@ -209,6 +210,34 @@ export function DashboardPage() {
             )}
             <SettingsRow title="平台" control={<Mono>{platform}</Mono>} />
             <SettingsRow title="應用版本" control={<Mono>{version}</Mono>} />
+            <SettingsRow
+              title="Build flavor"
+              control={
+                <Mono>
+                  {typeof process !== 'undefined' &&
+                  (process as { env?: Record<string, string | undefined> }).env
+                    ?.SUBAGENTS_BUILD_FLAVOR === 'policy-admin'
+                    ? 'policy-admin'
+                    : 'standard'}
+                </Mono>
+              }
+            />
+            <SettingsRow
+              title="出站閘門"
+              control={
+                <Mono>
+                  {(() => {
+                    // Ticket 16: posture from hydrated settings (main-owned deploy),
+                    // not empty renderer process env.
+                    const deploy = settings.outboundGuardDeploy || 'off'
+                    const effective = effectiveOutboundGuardFromSettings(settings)
+                    return deploy === effective
+                      ? deploy
+                      : `${deploy}→${effective}`
+                  })()}
+                </Mono>
+              }
+            />
             <SettingsRow
               title="LLM"
               control={

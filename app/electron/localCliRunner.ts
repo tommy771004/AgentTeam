@@ -17,6 +17,7 @@ import {
 } from './platformProcess'
 import { resolveCliApproval } from '../src/agent/cliApproval'
 import { materializeAttachments } from './attachmentStore'
+import { wrapCommandInSandbox } from './cliFilesystemSandbox'
 import type { CliConfigSnapshot, ExternalRunRef } from '../src/agent/types'
 
 export type LocalCliKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
@@ -86,6 +87,14 @@ export type LocalCliRunInput = {
   attachmentPaths?: string[]
   /** Live NDJSON / chunk callback for center process feed */
   onStream?: (ev: LocalCliStreamEvent) => void
+  /**
+   * When set, wrap the CLI process under a verified OS filesystem sandbox
+   * (seatbelt / bwrap) with viewRoot as the only writable project tree.
+   */
+  sandboxWrap?: {
+    engine: 'seatbelt' | 'bwrap'
+    viewRoot: string
+  }
 }
 
 export type LocalCliRunResult = {
@@ -404,7 +413,50 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
     binary: pre.path || bin,
     attachmentPaths: materialized.paths,
   })
-  const command = argv.displayCommand
+  let spawnFile = argv.file
+  let spawnArgs = argv.args
+  let command = argv.displayCommand
+  let profilePath: string | undefined
+
+  // Verified OS sandbox: wrap CLI under seatbelt (mac) / bwrap (linux).
+  if (
+    input.sandboxWrap &&
+    (input.sandboxWrap.engine === 'seatbelt' || input.sandboxWrap.engine === 'bwrap') &&
+    input.sandboxWrap.viewRoot
+  ) {
+    try {
+      const wrapped = wrapCommandInSandbox({
+        engine: input.sandboxWrap.engine,
+        viewRoot: input.sandboxWrap.viewRoot,
+        command: argv.file,
+        args: argv.args,
+      })
+      spawnFile = wrapped.command
+      spawnArgs = wrapped.args
+      profilePath = wrapped.profilePath
+      command = `${wrapped.command} ${wrapped.args.slice(0, 4).join(' ')} … (${argv.displayCommand})`
+      emit({
+        kind: 'status',
+        title: 'Filesystem sandbox',
+        detail: `engine=${input.sandboxWrap.engine} · view=${input.sandboxWrap.viewRoot}`,
+      })
+    } catch (e) {
+      emit({
+        kind: 'error',
+        title: 'Sandbox wrap failed',
+        detail: e instanceof Error ? e.message : String(e),
+      })
+      return {
+        ok: false,
+        output: '',
+        command: argv.displayCommand,
+        kind,
+        code: 1,
+        error: `無法在 filesystem sandbox 中啟動 CLI：${e instanceof Error ? e.message : e}`,
+        runId,
+      }
+    }
+  }
 
   emit({
     kind: 'status',
@@ -414,7 +466,7 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
   emit({
     kind: 'status',
     title: '啟動 CLI',
-    detail: `${argv.file} (${argv.args.length} args, direct spawn)`,
+    detail: `${spawnFile} (${spawnArgs.length} args${input.sandboxWrap ? ', sandboxed spawn' : ', direct spawn'})`,
   })
 
   // Parse NDJSON (Grok streaming-json) and plain lines into process events
@@ -422,21 +474,32 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
   let assembledText = ''
 
   // Direct argv spawn — do NOT wrap in cmd.exe (breaks CJK/multiline, can hang)
-  const r = await runArgv({
-    file: argv.file,
-    args: argv.args,
-    cwd,
-    timeoutMs,
-    runId,
-    tag: 'cli-agent',
-    onStdout: (chunk) => {
-      const parsed = streamState.push(chunk, 'stdout')
-      if (parsed.textDelta) assembledText += parsed.textDelta
-    },
-    onStderr: (chunk) => {
-      streamState.push(chunk, 'stderr')
-    },
-  })
+  let r
+  try {
+    r = await runArgv({
+      file: spawnFile,
+      args: spawnArgs,
+      cwd,
+      timeoutMs,
+      runId,
+      tag: 'cli-agent',
+      onStdout: (chunk) => {
+        const parsed = streamState.push(chunk, 'stdout')
+        if (parsed.textDelta) assembledText += parsed.textDelta
+      },
+      onStderr: (chunk) => {
+        streamState.push(chunk, 'stderr')
+      },
+    })
+  } finally {
+    if (profilePath) {
+      try {
+        fs.unlinkSync(profilePath)
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
 
   // Flush residual line buffer
   streamState.flush()

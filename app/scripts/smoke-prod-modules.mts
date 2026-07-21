@@ -78,6 +78,8 @@ import {
   composePublishText,
   contentPublishProvider,
 } from '../src/agent/contentPublishPlatforms.ts'
+import { DEFAULT_LLM_SETTINGS } from '../src/agent/llm.ts'
+import { SETTINGS_CUSTOM_MERGE_KEYS } from '../src/agent/settingsMergeKeys.ts'
 
 // Node 25 exposes experimental Web Storage without getItem/setItem unless a
 // --localstorage-file is supplied. Keep this production-module smoke isolated
@@ -965,6 +967,31 @@ await test('hooks source: deny wins + no allow action + require-approval', () =>
   assert.match(src, /POINT_ACTIONS/)
   // sanitize must drop unknown actions (allow never in POINT_ACTIONS values)
   assert.match(src, /if \(!POINT_ACTIONS\[point\]\.includes\(action\)\) continue/)
+})
+
+await test('settings merge completeness: every object/array default is in SETTINGS_CUSTOM_MERGE_KEYS', () => {
+  const keySet = new Set<string>(SETTINGS_CUSTOM_MERGE_KEYS as readonly string[])
+  const missing: string[] = []
+  for (const [key, value] of Object.entries(DEFAULT_LLM_SETTINGS)) {
+    if (value !== null && typeof value === 'object' && !keySet.has(key)) {
+      missing.push(key)
+    }
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    `object/array settings missing custom merge handling: ${missing.join(', ')}. ` +
+      'Add to SETTINGS_CUSTOM_MERGE_KEYS and mergeSettings.',
+  )
+  // Merge function must still handle every listed key (wiring check).
+  const storeSrc = fs.readFileSync(path.join(appRoot, 'src/store/settingsStore.ts'), 'utf8')
+  for (const key of SETTINGS_CUSTOM_MERGE_KEYS) {
+    assert.match(
+      storeSrc,
+      new RegExp(`\\b${key}\\b`),
+      `mergeSettings / store must reference merge key ${key}`,
+    )
+  }
 })
 
 await test('platformProcess path + shell helpers', () => {

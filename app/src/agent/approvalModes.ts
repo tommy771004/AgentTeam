@@ -1,6 +1,6 @@
 /**
  * ChatGPT-style「動作應如何核准？」三段模式定義。
- * 決策邏輯在 tools/toolGuard.ts `decideApprovalNeed`;此處僅 UI 用資料。
+ * 決策邏輯在 tools/approvalDecision.ts `decide()` / `decideApprovalNeed`;此處僅 UI 用資料。
  */
 import type { ApprovalMode } from './types'
 

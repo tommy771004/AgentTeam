@@ -3,8 +3,24 @@
  */
 
 import type { LlmSettings, ModelSource } from './types'
-import { DEFAULT_CLI_PROVIDERS } from './cliProviders'
-import { breakerKey, callWithResilience } from './llmResilience'
+import { DEFAULT_CLI_PROVIDERS } from './cliProviders.ts'
+import { breakerKey, callWithResilience } from './llmResilience.ts'
+import {
+  effectiveOutboundGuardFromSettings,
+  inspectOutbound,
+  isProtectionActive,
+  readBuildFlavorFromEnv,
+} from './outbound/outboundGate.ts'
+import { connectionIdForBuiltinLlm } from './outbound/providerConnectionId.ts'
+import {
+  BUILTIN_BASELINE_POLICY,
+  emptySupplementalPolicy,
+} from './outbound/policySchema.ts'
+import { compileProviderSecurityProfile } from './outbound/policyMerge.ts'
+import {
+  loadCompanyProfileViaOutboundIpc,
+  prepareLlmEgressMessages,
+} from './outbound/llmEgress.ts'
 
 export type { LlmSettings }
 
@@ -70,6 +86,9 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   hookRules: [],
   trustedHookProjects: [],
   delegatePersonas: {},
+  outboundProtectionEnabled: false,
+  classificationEndpointUrl: '',
+  classificationAllowPlaintextHttp: false,
 
   // ChatGPT-style prefs
   theme: 'dark',
@@ -210,6 +229,8 @@ export async function chatCompletionWithTools(
     toolChoice?: 'auto' | 'none' | 'required'
     /** retry / breaker 事件回報(進 run log) */
     onResilienceEvent?: (message: string) => void
+    /** Optional run id for outbound evidence correlation (later tickets). */
+    runId?: string
   },
 ): Promise<LlmToolsResult> {
   if (!settings.enabled) {
@@ -232,6 +253,58 @@ export async function chatCompletionWithTools(
       : {}),
   }
 
+  // Outbound Data Gate — every builtin LLM round, including FC follow-ups.
+  // Ticket 19: sanitize with company Provider Security Profile (main ensurePolicy),
+  // not baseline-only, so company detectors apply at true egress.
+  const effectiveMode = effectiveOutboundGuardFromSettings(settings)
+  const connectionId = connectionIdForBuiltinLlm({
+    apiProvider: settings.apiProvider,
+    baseUrl: settings.baseUrl,
+  })
+  let egressPayload: typeof body = body
+  if (isProtectionActive(effectiveMode)) {
+    const baselineProfile = compileProviderSecurityProfile(
+      BUILTIN_BASELINE_POLICY,
+      emptySupplementalPolicy(connectionId),
+    )
+    const lite = (body.messages || []).map((m) => ({
+      role: String(m.role || 'user'),
+      content:
+        typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? ''),
+    }))
+    const prepared = await prepareLlmEgressMessages({
+      effectiveMode,
+      messages: lite,
+      baselineProfile,
+      loadCompanyProfile: () => loadCompanyProfileViaOutboundIpc(connectionId),
+      cacheKey: opts?.runId
+        ? `${opts.runId}:${connectionId}`
+        : `norun:${connectionId}`,
+    })
+    if (!prepared.ok) {
+      throw new Error(`出站資料閘門：無法建立公司保護設定檔（${prepared.reason}）`)
+    }
+    egressPayload = {
+      ...body,
+      messages: prepared.messages.map((m, i) => {
+        const orig = body.messages[i] as (typeof body.messages)[number]
+        return { ...orig, role: m.role as typeof orig.role, content: m.content }
+      }) as typeof body.messages,
+    }
+  }
+  const gate = inspectOutbound({
+    channel: 'llm',
+    runId: opts?.runId,
+    payload: egressPayload,
+    effectiveMode,
+    buildFlavor: readBuildFlavorFromEnv(),
+    providerConnectionId: connectionId,
+  })
+  if (gate.action === 'block') {
+    throw new Error(gate.reason || '出站資料閘門已阻擋此 LLM 請求')
+  }
+  const gatedBody = gate.payload as typeof body
+
   return callWithResilience(
     breakerKey(settings.baseUrl, settings.apiProvider),
     async () => {
@@ -240,7 +313,7 @@ export async function chatCompletionWithTools(
           baseUrl: settings.baseUrl,
           apiKey: settings.apiKey,
           fallbackModels: settings.fallbackModels,
-          ...body,
+          ...gatedBody,
         })
         return normalizeChatResult(r, settings.model)
       }
@@ -252,7 +325,7 @@ export async function chatCompletionWithTools(
           'Content-Type': 'application/json',
           Authorization: `Bearer ${settings.apiKey}`,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(gatedBody),
       })
 
       if (!res.ok) {

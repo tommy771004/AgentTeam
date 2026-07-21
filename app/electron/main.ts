@@ -67,6 +67,31 @@ import {
   sha1 as rewindSha1,
 } from './rewindBridge'
 import {
+  appendOutboundEvidence,
+  disposeOutboundRunView,
+  ensureOutboundPolicy,
+  getOutboundRunViewMeta,
+  getOutboundRunViewRoot,
+  getOutboundStatus,
+  prepareOutboundRunView,
+} from './outboundBridge'
+import { verifyCliFilesystemSandbox } from './cliFilesystemSandbox'
+import {
+  decideMainCliSpawnAdmission,
+  allocateForbiddenCanaryPath,
+  type FilesystemIsolationStatus,
+} from '../src/agent/outbound/cliSandbox.ts'
+import { parseDeployOutboundGuard, type OutboundGuardMode } from '../src/agent/outbound/outboundGate.ts'
+import {
+  activatePolicyDraft,
+  listActivePolicies,
+  listPolicyDrafts,
+  readPolicyDraft,
+  rollbackActivePolicy,
+  savePolicyDraft,
+  seedDraftFromActive,
+} from './policyAdminBridge'
+import {
   listMonitors,
   startMonitor,
   stopAllMonitors,
@@ -178,6 +203,12 @@ import {
 } from './opencodeServerBridge'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// Policy Admin / outbound policy dir default (node-safe modules read this env).
+try {
+  process.env.SUBAGENTS_USER_DATA_DIR = app.getPath('userData')
+} catch {
+  /* app may not be ready in some test loaders */
+}
 
 process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged
@@ -1564,10 +1595,74 @@ ipcMain.handle(
         textContent?: string
         filePath?: string
       }>
+      sandboxWrap?: {
+        engine: 'seatbelt' | 'bwrap'
+        viewRoot: string
+      }
+      /** Renderer effective mode; main still re-enforces under required (ticket 20). */
+      effectiveMode?: OutboundGuardMode
     },
   ) => {
     const cwd =
       input.cwd && fs.existsSync(input.cwd) ? input.cwd : workspaceRoot()
+
+    // Ticket 20: main-enforced sandbox — do not trust renderer-only wrap omission.
+    let deployMode: OutboundGuardMode = 'off'
+    try {
+      deployMode = parseDeployOutboundGuard(process.env.SUBAGENTS_OUTBOUND_GUARD)
+    } catch {
+      deployMode = 'required' // invalid deploy → fail closed for CLI
+    }
+    const effectiveMode: OutboundGuardMode =
+      input.effectiveMode ||
+      (deployMode === 'required' || deployMode === 'demo' ? deployMode : deployMode)
+
+    const boundMeta = input.runId ? getOutboundRunViewMeta(String(input.runId)) : null
+    const boundViewRoot = boundMeta?.viewRoot || input.sandboxWrap?.viewRoot || null
+
+    let isolationStatus: FilesystemIsolationStatus = 'unavailable'
+    if (
+      input.sandboxWrap &&
+      (input.sandboxWrap.engine === 'seatbelt' || input.sandboxWrap.engine === 'bwrap') &&
+      input.sandboxWrap.viewRoot
+    ) {
+      try {
+        const canary = allocateForbiddenCanaryPath({
+          viewRoot: input.sandboxWrap.viewRoot,
+          originalRoot: boundMeta?.originalRoot,
+        })
+        const probe = verifyCliFilesystemSandbox({
+          viewRoot: input.sandboxWrap.viewRoot,
+          forbiddenCanaryPath: canary,
+        })
+        isolationStatus = probe.status
+      } catch {
+        isolationStatus = 'unavailable'
+      }
+    } else if (effectiveMode === 'optional' || effectiveMode === 'demo') {
+      isolationStatus = 'unverified'
+    }
+
+    const admission = decideMainCliSpawnAdmission({
+      effectiveMode,
+      cwd,
+      boundViewRoot,
+      sandboxWrap: input.sandboxWrap || null,
+      isolationStatus,
+    })
+    if (!admission.allow) {
+      return {
+        ok: false,
+        output: '',
+        command: '',
+        kind: input.kind,
+        code: 1,
+        error: admission.reason || 'Main 拒絕未通過 filesystem sandbox 的 CLI spawn',
+        runId: input.runId,
+        configSnapshot: input.configSnapshot,
+      }
+    }
+
     // Cap attachment payload size at IPC boundary (avoid huge hangs)
     const { isVisionImageTooSmall } = await import('./attachmentStore')
     const attachments = (input.attachments || []).slice(0, 4).map((a) => {
@@ -3286,6 +3381,109 @@ ipcMain.handle(
 ipcMain.handle('rewind:clear', (_evt, threadId: string) =>
   clearRewindEntries(rewindBaseDir(), String(threadId || '')),
 )
+
+// ── Outbound Data Gate (policy / evidence / sanitized views) ──
+ipcMain.handle('outbound:status', (_evt, opts?: { apiProvider?: string; baseUrl?: string }) =>
+  getOutboundStatus(opts || {}),
+)
+ipcMain.handle('outbound:ensurePolicy', async (_evt, connectionId: string) =>
+  ensureOutboundPolicy(String(connectionId || '')),
+)
+ipcMain.handle(
+  'outbound:prepareRunView',
+  async (
+    _evt,
+    opts: {
+      runId: string
+      projectRoot: string
+      apiProvider?: string
+      baseUrl?: string
+      connectionId?: string
+    },
+  ) => prepareOutboundRunView(opts || ({} as never)),
+)
+ipcMain.handle('outbound:disposeRunView', async (_evt, runId: string) =>
+  disposeOutboundRunView(String(runId || '')),
+)
+ipcMain.handle('outbound:viewRoot', (_evt, runId: string) =>
+  getOutboundRunViewRoot(String(runId || '')),
+)
+ipcMain.handle('outbound:viewMeta', (_evt, runId: string) =>
+  getOutboundRunViewMeta(String(runId || '')),
+)
+ipcMain.handle(
+  'outbound:appendEvidence',
+  async (
+    _evt,
+    input: {
+      eventType: string
+      runId?: string
+      providerId?: string
+      effectiveGuardMode?: string
+      policySource?: string
+      policyVersion?: string
+      action?: string
+      exclusions?: Array<{ source: string; startLine: number; endLine: number }>
+    },
+    sealed?: boolean,
+  ) =>
+    appendOutboundEvidence(input as never, sealed == null ? undefined : { sealed: Boolean(sealed) }),
+)
+ipcMain.handle(
+  'outbound:sandboxProbe',
+  (
+    _evt,
+    opts: { viewRoot: string; forbiddenCanaryPath: string },
+  ) =>
+    verifyCliFilesystemSandbox({
+      viewRoot: String(opts?.viewRoot || ''),
+      forbiddenCanaryPath: String(opts?.forbiddenCanaryPath || ''),
+    }),
+)
+ipcMain.handle('outbound:policyListActive', () => listActivePolicies())
+ipcMain.handle('outbound:policyListDrafts', () => listPolicyDrafts())
+ipcMain.handle('outbound:policyReadDraft', (_evt, draftId: string) =>
+  readPolicyDraft(String(draftId || '')),
+)
+ipcMain.handle(
+  'outbound:policySaveDraft',
+  (
+    _evt,
+    input: {
+      id: string
+      kind: 'company-base' | 'provider-supplement'
+      connectionId?: string
+      body: unknown
+    },
+  ) => savePolicyDraft(input || ({} as never)),
+)
+ipcMain.handle('outbound:policyActivateDraft', (_evt, draftId: string) =>
+  activatePolicyDraft({ draftId: String(draftId || '') }),
+)
+ipcMain.handle(
+  'outbound:policyRollback',
+  (
+    _evt,
+    input: {
+      kind: 'company-base' | 'provider-supplement'
+      connectionId?: string
+      reason: string
+      targetBody?: unknown
+    },
+  ) => rollbackActivePolicy(input || ({} as never)),
+)
+ipcMain.handle(
+  'outbound:policySeedDraft',
+  (
+    _evt,
+    input: {
+      kind: 'company-base' | 'provider-supplement'
+      connectionId?: string
+      draftId: string
+    },
+  ) => seedDraftFromActive(input || ({} as never)),
+)
+
 
 // ── Monitor 事件流(G10)──────────────────────────────────────────
 

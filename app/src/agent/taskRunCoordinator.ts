@@ -22,7 +22,7 @@ import type {
   ExternalRunOpts,
   ExternalRunResult,
   RunSourceKind,
-} from './runExternal'
+} from './taskRunTypes'
 import type { BusyPolicy } from './taskRunPolicy'
 import type { DispatchResult } from './runDispatch'
 import type { HookEvaluation } from './hooks'
@@ -555,7 +555,7 @@ export async function finalizeTaskRun(
   }
 
   try {
-    const { syncOpenCodeSessionMapping } = await import('./runExternal.ts')
+    const { syncOpenCodeSessionMapping } = await import('./opencode/sessionSync.ts')
     await syncOpenCodeSessionMapping(tid, finalAgent.externalRun)
   } catch {
     /* OpenCode mapping is optional; keep finalization resilient. */
@@ -670,6 +670,19 @@ export async function finalizeTaskRun(
 
   // 4) onSettled
   await settle(finalResult)
+
+  // 4b) dispose Restricted Project View (Outbound Data Gate) — never block release
+  try {
+    await window.subagents?.outbound?.disposeRunView?.(runId)
+  } catch {
+    /* non-fatal */
+  }
+  try {
+    const { unpinRestrictedViewRootForRun } = await import('./outbound/sanitizedWorkspace.ts')
+    unpinRestrictedViewRootForRun(runId)
+  } catch {
+    /* non-fatal */
+  }
 
   // 5) release capacity
   await releaseRunCapacity(runId)
@@ -1462,6 +1475,135 @@ async function coordinateTaskRun(
       (await import('../store/projectStore')).useProjectStore.getState().root ||
       undefined
   }
+
+  // Outbound Data Gate: when protection is active, pin tools to a provider-specific
+  // Sanitized Workspace (Restricted Project View) created in Electron main.
+  // Ticket 17: required fails closed on missing root / prepare / policy (pure admission).
+  try {
+    const {
+      effectiveOutboundGuardFromSettings,
+      isProtectionActive,
+      decideRestrictedViewAdmission,
+    } = await import('./outbound/outboundGate.ts')
+    const mode = effectiveOutboundGuardFromSettings(settings)
+    if (isProtectionActive(mode)) {
+      const bridgeAvailable = typeof window.subagents?.outbound?.prepareRunView === 'function'
+      const projectRoot = (overrides.projectRoot || '').trim()
+
+      type PrepOk = {
+        ok: true
+        viewRoot: string
+        exclusionCount: number
+        skippedCount: number
+        connectionId: string
+        profileDegraded?: boolean
+      }
+      let prepare: PrepOk | { ok: false; reason: string } | null = null
+      if (bridgeAvailable && projectRoot) {
+        const prep = await window.subagents!.outbound!.prepareRunView!({
+          runId,
+          projectRoot,
+          apiProvider: settings.apiProvider,
+          baseUrl: settings.baseUrl,
+          effectiveMode: mode,
+        })
+        prepare = prep.ok
+          ? {
+              ok: true,
+              viewRoot: prep.viewRoot,
+              exclusionCount: prep.exclusionCount,
+              skippedCount: prep.skippedCount,
+              connectionId: prep.connectionId,
+              profileDegraded: prep.profileDegraded,
+            }
+          : { ok: false, reason: prep.reason }
+      }
+
+      const admission = decideRestrictedViewAdmission({
+        effectiveMode: mode,
+        projectRoot,
+        prepare:
+          prepare == null
+            ? null
+            : prepare.ok
+              ? { ok: true, viewRoot: prepare.viewRoot }
+              : { ok: false, reason: prepare.reason },
+        bridgeAvailable,
+      })
+
+      if (admission.action === 'block') {
+        return finalizeTaskRun({
+          runId,
+          threadId: tid,
+          objective,
+          sourceKind: opts.sourceKind,
+          projectRoot: opts.projectRoot,
+          settings,
+          onSettled: opts.onSettled,
+          early: {
+            error: `出站資料閘門：${admission.reason}`,
+          },
+        })
+      }
+      if (admission.action === 'use-view' && prepare && prepare.ok) {
+        overrides.projectRoot = admission.viewRoot
+        // Ticket 18: pin local view root so tools resolve via single truth
+        // even when a call site omits explicit projectRoot (main remains owner).
+        try {
+          const { pinRestrictedViewRootForRun } = await import(
+            './outbound/sanitizedWorkspace.ts'
+          )
+          pinRestrictedViewRootForRun(runId, admission.viewRoot)
+        } catch {
+          /* ignore */
+        }
+        const deg = prepare.profileDegraded ? ' · profile=baseline-degraded' : ''
+        thr.pushBubble(
+          tid,
+          'system',
+          `出站資料閘門：Restricted Project View 已建立（exclusions=${prepare.exclusionCount} · skipped=${prepare.skippedCount} · connection=${prepare.connectionId}${deg}）`,
+        )
+        void window.subagents?.outbound?.appendEvidence?.({
+          eventType: 'outbound-decision',
+          runId,
+          providerId: prepare.connectionId,
+          effectiveGuardMode: mode,
+          policySource: 'local',
+          action: prepare.profileDegraded ? 'restricted-view-degraded' : 'restricted-view',
+          exclusions: [],
+        })
+      } else if (admission.action === 'continue-degraded') {
+        thr.pushBubble(
+          tid,
+          'system',
+          `出站資料閘門：${admission.reason}；繼續但 isolation 未驗證（degraded）`,
+        )
+      }
+    }
+  } catch (e) {
+    // Ticket 17: under required, unexpected errors must not soft-continue to original project.
+    try {
+      const { effectiveOutboundGuardFromSettings } = await import('./outbound/outboundGate.ts')
+      const mode = effectiveOutboundGuardFromSettings(settings)
+      if (mode === 'required') {
+        return finalizeTaskRun({
+          runId,
+          threadId: tid,
+          objective,
+          sourceKind: opts.sourceKind,
+          projectRoot: opts.projectRoot,
+          settings,
+          onSettled: opts.onSettled,
+          early: {
+            error: `出站資料閘門：受控視圖準備例外（${e instanceof Error ? e.message : String(e)}）`,
+          },
+        })
+      }
+    } catch {
+      /* ignore nested */
+    }
+  }
+
   const snapshot = buildRunDispatchSnapshot({
     runId,
     threadId: tid,

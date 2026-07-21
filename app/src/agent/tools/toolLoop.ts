@@ -8,9 +8,7 @@
 import { v4 as uuid } from 'uuid'
 import type { LlmSettings, PermissionProjection, ToolCallRecord } from '../types'
 import { chatCompletionWithTools, type ChatMessageExt, type ToolCallRequest } from '../llm'
-import { executeTool } from './executor'
-import type { ToolName } from './registry'
-import { buildOpenAiTools, isToolName, type OpenAiToolDef } from './schemas'
+import { buildOpenAiTools, type OpenAiToolDef } from './schemas'
 import {
   DEFAULT_SUPERVISOR_LIMITS,
   enforceStepContextBudget,
@@ -23,6 +21,12 @@ import { resolveMcpSecretOwnerId } from '../hermes/mcpSecrets'
 import { checkToolPermission, type PermissionPolicy } from '../opencode/permissions'
 import { mcpServersForAgent, isMcpServerAllowedForAgent } from '../opencode/mcpAccess'
 import { authorizeTool } from './toolGuard'
+import {
+  isPostAuthAgentLevelTool,
+  isPreAuthAgentLevelTool,
+} from './agentLevelTools'
+import { invokeGatedTool } from './toolInvocation'
+import { discoverRegisteredToolModules, dispatchRegistered } from './toolRegistry'
 import {
   activeModelSettings,
   applyToolSearchVisibility,
@@ -43,12 +47,7 @@ import {
   type CapabilityRuntimeState,
 } from '../capabilities'
 import { runCodeMode, runCodeToolDef } from './codeMode'
-import {
-  estimateTokensFromText,
-  estimateTranscriptTokens,
-  resolveContextWindow,
-  shouldPreflightCompact,
-} from '../tokenEstimate'
+import { createDefaultContextEngine } from '../contextEngine.ts'
 import {
   ENTER_PLAN_MODE_TOOL,
   EXIT_PLAN_MODE_TOOL,
@@ -221,6 +220,8 @@ export async function runFunctionCallingLoop(
   },
   opts?: ToolLoopOptions,
 ): Promise<ToolLoopResult> {
+  // Hermes discover: import self-registering tool modules once per process
+  await discoverRegisteredToolModules()
   const limits = opts?.limits || DEFAULT_SUPERVISOR_LIMITS
   const cb = opts?.callbacks
   const blocked = new Set((opts?.blockedTools || []).map(String))
@@ -485,8 +486,65 @@ export async function runFunctionCallingLoop(
 
   let tokensUsed = 0
   let rounds = 0
-  // context meter:只在使用率跨越 50/75/90% 門檻時各記一行
-  let lastUsageBucket = 0
+
+  // ContextEngine (Hermes seam) — default adapter wraps ContextGovernor per step.
+  const contextEngine = createDefaultContextEngine({
+    compact: async (s, msgs, o) => {
+      const { maybeCompactMessages } = await import('../opencode/compaction')
+      return maybeCompactMessages(
+        s,
+        msgs as Parameters<typeof maybeCompactMessages>[1],
+        o,
+      )
+    },
+    saveCheckpoint: async (id, payload) => {
+      const { saveCompactionCheckpoint } = await import('../compactionCheckpoint')
+      saveCompactionCheckpoint(id, {
+        summary: payload.summary,
+        messages: payload.messages as Parameters<
+          typeof saveCompactionCheckpoint
+        >[1]['messages'],
+      })
+    },
+    memoryFlush: async (o) => {
+      const { learningLoop } = await import('../hermes/learning')
+      return learningLoop.onPreCompactionFlush({
+        objective: o.objective,
+        summary: o.summary,
+        runId: o.runId,
+        memoryEnabled: o.memoryEnabled,
+        memoryWriteEnabled: o.memoryWriteEnabled,
+      })
+    },
+    memoryRecall: async (query, limit) => {
+      const { memoryStore } = await import('../hermes/memory')
+      return memoryStore.search(query, limit)
+    },
+    evaluateHook: async (point, ctx) => {
+      const { collectHookRules, evaluateHooks } = await import('../hooks')
+      const ev = evaluateHooks(collectHookRules(settings), {
+        point,
+        sourceKind: ctx.sourceKind as import('../hooks').HookContext['sourceKind'],
+        objective: ctx.objective,
+      })
+      return { audits: ev.audits, notifications: ev.notifications }
+    },
+    bumpMetric: async (runId, key) => {
+      const { bumpRunMetric } = await import('../metrics')
+      bumpRunMetric(runId, key)
+    },
+    notify: (title, body) => {
+      void window.subagents?.notify?.(title, body)
+    },
+    log: (level, message) =>
+      cb?.onLog?.(
+        level as 'INFO' | 'PROCESS' | 'EXEC' | 'SUCCESS' | 'WARN' | 'ERROR' | 'AWAIT' | 'THOUGHT' | 'ACTION',
+        message,
+      ),
+    onContextUsage: (u) => cb?.onContextUsage?.(u),
+    contentToPlainText: (content) =>
+      contentPartsToPlainText(content as Parameters<typeof contentPartsToPlainText>[0]),
+  })
 
   const catalog = formatDeferredCatalog(capState)
   const alwaysInstr = formatAlwaysOnInstructions(capState)
@@ -539,175 +597,28 @@ ${systemExtra}`,
     // Refresh tools each round (capability loads expand the set)
     tools = rebuildVisibleTools()
 
-    // Preflight overflow check(tokenEstimate 單一來源):估算已逼近
-    // contextWindow 就強制壓縮再送,避免 API 直接 400。
-    const contextWindow = resolveContextWindow(settings, settings.model)
-    const estTokens =
-      estimateTranscriptTokens(messages) +
-      estimateTokensFromText(JSON.stringify(tools))
-    const overflowRisk = shouldPreflightCompact(estTokens, contextWindow)
-    const usageRatio = estTokens / Math.max(1, contextWindow)
-    cb?.onContextUsage?.({ tokens: estTokens, contextWindow, ratio: usageRatio })
-    const usageBucket = usageRatio >= 0.9 ? 3 : usageRatio >= 0.75 ? 2 : usageRatio >= 0.5 ? 1 : 0
-    if (usageBucket > lastUsageBucket) {
-      lastUsageBucket = usageBucket
-      cb?.onLog?.(
-        'INFO',
-        `context 使用率 ${Math.round(usageRatio * 100)}%（${estTokens}/${contextWindow} tokens）`,
-      )
-    }
-
-    // OpenCode-style compaction — preserve tool_calls / tool_call_id chain.
-    // Skip while vision images are still in the transcript (data URLs + compaction would drop them).
-    const hasVisionParts = messages.some(
-      (m) =>
-        Array.isArray(m.content) &&
-        m.content.some((p) => p.type === 'image_url'),
-    )
-    if (hasVisionParts && overflowRisk) {
-      cb?.onLog?.(
-        'WARN',
-        `context 估算 ${estTokens}/${contextWindow} tokens 已逼近上限,但 transcript 含影像無法壓縮`,
-      )
-    }
-    if (!hasVisionParts && (overflowRisk || rounds === 1 || rounds % 2 === 0)) {
-      try {
-        const { maybeCompactMessages } = await import('../opencode/compaction')
-        const flat = messages.map((m) => ({
-          role: m.role,
-          content:
-            typeof m.content === 'string' || m.content == null
-              ? m.content
-              : contentPartsToPlainText(m.content),
+    // ContextEngine: meter + compact + checkpoint + memory (Hermes-style seam).
+    const governed = await contextEngine.prepareRound({
+      messages,
+      round: rounds,
+      toolsEstimateText: JSON.stringify(tools),
+      settings,
+      model: settings.model,
+      runId: opts?.runId,
+      threadId: opts?.threadId,
+      objective: opts?.objective || args.objective,
+      sourceKind: opts?.sourceKind,
+    })
+    if (governed !== messages) {
+      messages.length = 0
+      for (const m of governed) {
+        messages.push({
+          role: m.role as ChatMessageExt['role'],
+          content: m.content as ChatMessageExt['content'],
           tool_calls: m.tool_calls,
           tool_call_id: m.tool_call_id,
           name: m.name,
-        }))
-        const c = await maybeCompactMessages(
-          settings,
-          flat,
-          overflowRisk
-            ? {
-                force: true,
-                // token gate 觸發時把 char 門檻同步壓到 window 對應量
-                // (bytes/4 ⇒ 1 token ≈ 4 chars 上限),讓壓縮真的發生
-                maxChars: Math.max(12_000, (contextWindow - 2_500) * 3),
-              }
-            : undefined,
-        )
-        if (c.compacted) {
-          if (overflowRisk) {
-            cb?.onLog?.(
-              'WARN',
-              `preflight:context 估算 ${estTokens}/${contextWindow} tokens,已先壓縮再呼叫`,
-            )
-          }
-          // G7 beforeCompaction hook 事件(被動)
-          try {
-            const { collectHookRules, evaluateHooks } = await import('../hooks')
-            const ev = evaluateHooks(collectHookRules(settings), {
-              point: 'beforeCompaction',
-              sourceKind: opts?.sourceKind as import('../hooks').HookContext['sourceKind'],
-              objective: opts?.objective || args.objective,
-            })
-            for (const line of ev.audits) cb?.onLog?.('INFO', line)
-          } catch {
-            /* non-fatal */
-          }
-          // 壓縮前 checkpoint(原始 transcript 可回放)+ memory flush
-          // (grok [compaction.memory_flush] 語意:脈絡被丟棄前先入庫)
-          try {
-            const { saveCompactionCheckpoint } = await import('../compactionCheckpoint')
-            saveCompactionCheckpoint(opts?.runId || opts?.threadId || 'adhoc', {
-              summary: c.summary || '',
-              messages: flat,
-            })
-          } catch {
-            /* non-fatal */
-          }
-          try {
-            const { learningLoop } = await import('../hermes/learning')
-            const flushed = learningLoop.onPreCompactionFlush({
-              objective: opts?.objective || args.objective,
-              summary: c.summary || '',
-              runId: opts?.runId,
-              memoryEnabled: settings.memoryEnabled,
-              memoryWriteEnabled: settings.memoryWriteEnabled,
-            })
-            if (flushed) cb?.onLog?.('INFO', '壓縮前已將重要脈絡 flush 進持久記憶')
-          } catch {
-            /* non-fatal */
-          }
-        }
-        if (c.compacted || c.pruneStats?.changed) {
-          messages.length = 0
-          for (const m of c.messages) {
-            messages.push({
-              role: m.role as ChatMessageExt['role'],
-              content: m.content,
-              tool_calls: m.tool_calls,
-              tool_call_id: m.tool_call_id,
-              name: m.name,
-            })
-          }
-        }
-        if (c.pruneStats?.changed) {
-          cb?.onLog?.(
-            'INFO',
-            `pruning:soft-trim ${c.pruneStats.softTrimmed} 筆、hard-clear ${c.pruneStats.hardCleared} 筆,省下 ${c.pruneStats.savedChars} chars`,
-          )
-        }
-        if (c.compacted) {
-          // 壓縮後記憶召回:把可能被摘要丟掉的相關脈絡補回 compaction 訊息
-          if (settings.memoryEnabled !== false) {
-            try {
-              const { memoryStore } = await import('../hermes/memory')
-              const related = memoryStore.search(opts?.objective || args.objective, 3)
-              if (related.length) {
-                const idx = messages.findIndex(
-                  (m) =>
-                    m.role === 'system' &&
-                    typeof m.content === 'string' &&
-                    m.content.startsWith('## Context compaction'),
-                )
-                if (idx >= 0) {
-                  messages[idx] = {
-                    ...messages[idx],
-                    content: `${messages[idx].content}\n\n### 壓縮後記憶召回\n${related
-                      .map((e) => `- ${e.text.slice(0, 200)}`)
-                      .join('\n')}`,
-                  }
-                }
-              }
-            } catch {
-              /* non-fatal */
-            }
-          }
-          cb?.onLog?.('INFO', 'Context compacted (OpenCode-style)')
-          try {
-            const { bumpRunMetric } = await import('../metrics')
-            bumpRunMetric(opts?.runId, 'compactions')
-          } catch {
-            /* metrics must never block */
-          }
-          // G7 afterCompaction hook 事件(被動)
-          try {
-            const { collectHookRules, evaluateHooks } = await import('../hooks')
-            const ev = evaluateHooks(collectHookRules(settings), {
-              point: 'afterCompaction',
-              sourceKind: opts?.sourceKind as import('../hooks').HookContext['sourceKind'],
-              objective: opts?.objective || args.objective,
-            })
-            for (const line of ev.audits) cb?.onLog?.('INFO', line)
-            for (const n of ev.notifications) {
-              void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
-            }
-          } catch {
-            /* non-fatal */
-          }
-        }
-      } catch {
-        /* non-fatal */
+        })
       }
     }
 
@@ -765,33 +676,64 @@ ${systemExtra}`,
       cb?.onLog?.('THOUGHT', result.content.slice(0, 240))
     }
 
-    for (const tc of result.toolCalls) {
-      if (cb?.shouldAbort?.()) break
-      await executeOneToolCall(tc, {
-        limits,
-        haltOnPayloadOverflow: opts?.haltOnPayloadOverflow,
-        toolCalls,
-        toolChunks,
-        messages,
-        cb,
-        blocked,
-        mcpMap,
-        customMap,
-        settings,
-        permissionPolicy: policy,
-        permissionProjection: opts?.permissionProjection,
-        mcpAgentId: opts?.mcpAgentId,
-        capState,
-        fullPool,
-        onLoadedCaps: emitLoadedCaps,
-        hitlTimeoutMs,
-        unattended: opts?.unattended,
-        sourceKind: opts?.sourceKind,
-        objective: opts?.objective || args.objective,
-        runId: opts?.runId,
-        threadId: opts?.threadId,
-        projectRoot,
-      })
+    // Hermes-style parallel tool_calls: multi-call parallel unless interactive/agent-level.
+    // Each call uses isolated buffers; merge tool messages / records in original order.
+    const { isAgentLevelTool } = await import('./agentLevelTools')
+    const calls = result.toolCalls
+    const forceSerial = (name: string) => name === 'ask_user' || isAgentLevelTool(name)
+    const baseCtx = {
+      limits,
+      haltOnPayloadOverflow: opts?.haltOnPayloadOverflow,
+      cb,
+      blocked,
+      mcpMap,
+      customMap,
+      settings,
+      permissionPolicy: policy,
+      permissionProjection: opts?.permissionProjection,
+      mcpAgentId: opts?.mcpAgentId,
+      capState,
+      fullPool,
+      onLoadedCaps: emitLoadedCaps,
+      hitlTimeoutMs,
+      unattended: opts?.unattended,
+      sourceKind: opts?.sourceKind,
+      objective: opts?.objective || args.objective,
+      runId: opts?.runId,
+      threadId: opts?.threadId,
+      projectRoot,
+    }
+    if (calls.length <= 1 || calls.some((tc) => forceSerial(tc.name))) {
+      for (const tc of calls) {
+        if (cb?.shouldAbort?.()) break
+        await executeOneToolCall(tc, {
+          ...baseCtx,
+          toolCalls,
+          toolChunks,
+          messages,
+        })
+      }
+    } else {
+      const buffers = calls.map(() => ({
+        toolCalls: [] as ToolCallRecord[],
+        toolChunks: [] as string[],
+        messages: [] as ChatMessageExt[],
+      }))
+      await Promise.all(
+        calls.map((tc, i) =>
+          executeOneToolCall(tc, {
+            ...baseCtx,
+            toolCalls: buffers[i]!.toolCalls,
+            toolChunks: buffers[i]!.toolChunks,
+            messages: buffers[i]!.messages,
+          }),
+        ),
+      )
+      for (const b of buffers) {
+        for (const rec of b.toolCalls) toolCalls.push(rec)
+        for (const ch of b.toolChunks) toolChunks.push(ch)
+        for (const m of b.messages) messages.push(m)
+      }
     }
   }
 
@@ -858,8 +800,9 @@ async function executeOneToolCall(
     args = { raw: tc.arguments }
   }
 
-  // ── Framework tools: enter/exit plan mode(自帶 HITL 審批)──
-  if (tc.name === ENTER_PLAN_MODE_TOOL || tc.name === EXIT_PLAN_MODE_TOOL) {
+  // ── Agent-level intercept (pre-auth): plan / tool_search / load_capability ──
+  // Hermes-style: framework tools never enter gated invokeGatedTool path.
+  if (isPreAuthAgentLevelTool(tc.name) && (tc.name === ENTER_PLAN_MODE_TOOL || tc.name === EXIT_PLAN_MODE_TOOL)) {
     const started = Date.now()
     const entering = tc.name === ENTER_PLAN_MODE_TOOL
     let output = ''
@@ -917,8 +860,8 @@ async function executeOneToolCall(
     return
   }
 
-  // ── Framework tool: tool_search (no HITL) ──
-  if (tc.name === TOOL_SEARCH_TOOL && ctx.capState) {
+  // ── Agent-level: tool_search (no HITL) ──
+  if (isPreAuthAgentLevelTool(tc.name) && tc.name === TOOL_SEARCH_TOOL && ctx.capState) {
     const started = Date.now()
     const query = String(args.query || '')
     const limit = Number(args.limit) || 6
@@ -945,8 +888,8 @@ async function executeOneToolCall(
     return
   }
 
-  // ── Framework tool: load_capability (no HITL) ──
-  if (tc.name === LOAD_CAPABILITY_TOOL && ctx.capState) {
+  // ── Agent-level: load_capability (no HITL) ──
+  if (isPreAuthAgentLevelTool(tc.name) && tc.name === LOAD_CAPABILITY_TOOL && ctx.capState) {
     const started = Date.now()
     const id = String(args.id || args.capability_id || '')
     const r = loadCapability(ctx.capState, id, ctx.fullPool)
@@ -995,7 +938,7 @@ async function executeOneToolCall(
   const custom = ctx.customMap.get(tc.name)
   const forceAsk = (ctx.capState ? approvalRequiredFor(ctx.capState, tc.name) : false) ||
     (custom ? isCustomToolApprovalRequired(custom) : false)
-  const auth = await authorizeTool({
+  const authOpts = {
     tool: tc.name,
     input: args,
     settings: ctx.settings,
@@ -1011,10 +954,92 @@ async function executeOneToolCall(
     objective: ctx.objective,
     runId: ctx.runId,
     threadId: ctx.threadId,
-    onLog: (level, message) => {
+    onLog: (level: string, message: string) => {
       ctx.cb?.onLog?.(level as Parameters<NonNullable<ToolLoopCallbacks['onLog']>>[0], message)
     },
-  })
+  }
+
+  // ── Gated path: builtin + custom + MCP via invokeGatedTool (Hermes dispatch) ──
+  if (!isPostAuthAgentLevelTool(tc.name)) {
+    if (tc.name === 'ask_user') ctx.cb?.onQuestionAsked?.()
+    const fin = await invokeGatedTool({
+      tool: tc.name,
+      input: args,
+      authorize: () => authorizeTool(authOpts),
+      execute: async () => {
+        ctx.cb?.onLog?.('ACTION', `Invoking tool '${tc.name}'`)
+        ctx.cb?.onLog?.('EXEC', `Input: ${JSON.stringify(args).slice(0, 200)}`)
+        const mcpRef = ctx.mcpMap.get(tc.name)
+        if (mcpRef) {
+          const server = (ctx.settings.mcpServers || []).find((s) => s.id === mcpRef.serverId)
+          if (!server) return { ok: false, output: `MCP server not found: ${mcpRef.serverId}` }
+          if (!isMcpServerAllowedForAgent(ctx.settings, ctx.mcpAgentId, mcpRef.serverId)) {
+            return { ok: false, output: `MCP server blocked for agent: ${mcpRef.serverId}` }
+          }
+          const r = await mcpCallTool(server, mcpRef.toolName, args, ctx.settings)
+          return { ok: r.ok, output: r.ok ? r.content : r.error || 'MCP failed' }
+        }
+        if (custom) {
+          const r = await executeCustomTool(custom, args, ctx.settings, {
+            runId: ctx.runId,
+            projectRoot: ctx.projectRoot,
+          })
+          return { ok: r.ok, output: r.output }
+        }
+        // Hermes registry dispatch only (no executor switch bypass)
+        return dispatchRegistered(tc.name, args, {
+          mcpAgentId: ctx.mcpAgentId,
+          runId: ctx.runId,
+          threadId: ctx.threadId,
+          projectRoot: ctx.projectRoot,
+          permissionPolicy: ctx.permissionPolicy,
+          permissionProjection: ctx.permissionProjection,
+        })
+      },
+      supervisorLimits: ctx.limits,
+      haltOnPayloadOverflow: ctx.haltOnPayloadOverflow === true,
+      sourceKind: ctx.sourceKind,
+      objective: ctx.objective,
+      newId: () => uuid(),
+      nowTime,
+      onLog: (level, message) => {
+        ctx.cb?.onLog?.(level as Parameters<NonNullable<ToolLoopCallbacks['onLog']>>[0], message)
+      },
+      onRecord: (record) => {
+        ctx.toolCalls.push(record)
+        ctx.cb?.onToolCall?.(record)
+      },
+      evaluateAfterTool: async ({ tool, toolOk }) => {
+        try {
+          const { collectHookRules, evaluateHooks } = await import('../hooks')
+          const ev = evaluateHooks(collectHookRules(ctx.settings), {
+            point: 'afterTool',
+            tool,
+            toolOk,
+            sourceKind: ctx.sourceKind as import('../hooks').HookContext['sourceKind'],
+            objective: ctx.objective,
+          })
+          return { audits: ev.audits, notifications: ev.notifications }
+        } catch {
+          return { audits: [], notifications: [] }
+        }
+      },
+      notify: (title, body) => {
+        void window.subagents?.notify?.(title, body)
+      },
+    })
+    if (tc.name === 'ask_user') ctx.cb?.onQuestionResolved?.()
+    ctx.toolChunks.push(fin.chunk)
+    ctx.messages.push({
+      role: 'tool',
+      tool_call_id: tc.id,
+      content: fin.output.slice(0, 8000),
+    })
+    return
+  }
+
+  // ── Agent-level (post-auth): run_code / delegate — not gated invokeGatedTool ──
+  const auth = await authorizeTool(authOpts)
   if (!auth.allowed) {
     ctx.messages.push({ role: 'tool', tool_call_id: tc.id, content: auth.output })
     return
@@ -1029,7 +1054,7 @@ async function executeOneToolCall(
   let ok = false
 
   // ── CodeMode: run model JS in worker; inner tool calls re-use the same gates ──
-  if (tc.name === RUN_CODE_TOOL) {
+  if (isPostAuthAgentLevelTool(tc.name) && tc.name === RUN_CODE_TOOL) {
     const r = await runCodeMode(String(args.code || ''), {
       timeoutMs: Number(args.timeoutMs) || undefined,
       onLog: (m) => ctx.cb?.onLog?.('EXEC', m),
@@ -1086,11 +1111,9 @@ async function executeOneToolCall(
           })
           innerOk = cr.ok
           innerOut = cr.output
-        } else if (!isToolName(name)) {
-          innerOut = `Unknown tool: ${name}`
         } else {
           try {
-            const er = await executeTool(name as ToolName, innerArgs, {
+            const er = await dispatchRegistered(name, innerArgs, {
               mcpAgentId: ctx.mcpAgentId,
               runId: ctx.runId,
               threadId: ctx.threadId,
@@ -1144,29 +1167,7 @@ async function executeOneToolCall(
     return
   }
 
-  // Dynamic MCP tool from schema injection
-  const mcpRef = ctx.mcpMap.get(tc.name)
-  if (mcpRef) {
-    const server = (ctx.settings.mcpServers || []).find((s) => s.id === mcpRef.serverId)
-    if (!server) {
-      output = `MCP server not found: ${mcpRef.serverId}`
-      ok = false
-    } else if (!isMcpServerAllowedForAgent(ctx.settings, ctx.mcpAgentId, mcpRef.serverId)) {
-      output = `MCP server blocked for agent: ${mcpRef.serverId}`
-      ok = false
-    } else {
-      const r = await mcpCallTool(server, mcpRef.toolName, args, ctx.settings)
-      output = r.ok ? r.content : r.error || 'MCP failed'
-      ok = r.ok
-    }
-  } else if (custom) {
-    const r = await executeCustomTool(custom, args, ctx.settings, {
-      runId: ctx.runId,
-      projectRoot: ctx.projectRoot,
-    })
-    output = r.output
-    ok = r.ok
-  } else if (tc.name === 'delegate_task') {
+  if (isPostAuthAgentLevelTool(tc.name) && tc.name === 'delegate_task') {
     const background = args.background === true
     const notifyOnComplete = args.notify_on_complete !== false && args.notifyOnComplete !== false
     const inheritCapabilities = parseInheritCapabilities(args)
@@ -1228,93 +1229,49 @@ async function executeOneToolCall(
       output = `背景委派已排入：${job.id}（notify=${notifyOnComplete}）\n目標：${job.goal}`
       ok = true
     } else {
-      const { runDelegatedTask } = await import('../hermes/delegate')
-      // OpenCode-style child session thread (does not steal parent focus)
-      let childThreadId: string | undefined
+      // P4: nested leaf via Task run admission (Hermes-aligned single lifecycle)
+      const { runTask } = await import('../taskRunCoordinator')
+      const goal = String(args.goal || '')
       try {
-        const { useThreadStore } = await import('../../store/threadStore')
-        const thr = useThreadStore.getState()
-        const parentId = thr.activeId
-        childThreadId = thr.createThread({
-          title: `↳ ${String(args.goal || 'delegate').slice(0, 36)}`,
-          agentMode: 'build',
-        })
-        thr.pushBubble(
-          childThreadId,
-          'system',
-          `Child session · parent=${parentId || '—'} · ${String(args.goal || '').slice(0, 240)}`,
-        )
-        if (parentId) thr.selectThread(parentId)
-      } catch {
-        /* non-fatal */
-      }
-      const r = await runDelegatedTask(
-        ctx.settings,
-        {
-          goal: String(args.goal || ''),
-          context: childContext,
-          role: args.role === 'orchestrator' ? 'orchestrator' : 'leaf',
-          inheritCapabilities,
-          capabilityMode,
-          persona,
-          isolation,
+        const tr = await runTask({
+          sourceKind: 'delegate',
+          objective: goal,
+          extraContext: childContext,
+          unattended: true,
+          workerThread: true,
           projectRoot: ctx.projectRoot,
-          parentPermissionPolicy: ctx.permissionPolicy,
-          parentPermissionProjection: ctx.permissionProjection,
-          parentMcpAgentId: ctx.mcpAgentId,
-        },
-        {
-          onLog: (m) => {
-            ctx.cb?.onLog?.('INFO', m)
-            if (childThreadId) {
-              void import('../../store/threadStore').then(({ useThreadStore }) => {
-                useThreadStore.getState().pushBubble(childThreadId!, 'system', m.slice(0, 500))
-              })
-            }
+          attachedSkills: inheritCapabilities,
+          overrides: {
+            permissionPolicy: ctx.permissionPolicy,
+            permissionProjection: ctx.permissionProjection,
+            mcpAgentId: ctx.mcpAgentId,
+            preloadCapabilityIds: inheritCapabilities,
           },
-          shouldAbort: ctx.cb?.shouldAbort,
-        },
-      )
-      if (childThreadId) {
-        try {
-          const { useThreadStore } = await import('../../store/threadStore')
-          useThreadStore
-            .getState()
-            .pushBubble(
-              childThreadId,
-              'assistant',
-              r.summary.slice(0, 4000) || (r.ok ? '(empty)' : 'failed'),
-            )
-          useThreadStore
-            .getState()
-            .setThreadStatus(childThreadId, r.ok ? 'success' : 'failed')
-        } catch {
-          /* ignore */
-        }
+          sourceLabel: `delegate:${persona || isolation || capabilityMode || 'leaf'}`,
+        })
+        const summary = tr.error || tr.result || tr.status || ''
+        const success = !tr.error && tr.status !== 'failed' && tr.status !== 'skipped'
+        output = success
+          ? `委派完成（via runTask · ${tr.runId || tr.threadId || ''}）\n\n${String(summary).slice(0, 4000)}`
+          : `委派失敗：${String(summary).slice(0, 2000)}`
+        ok = Boolean(success)
+      } catch (e) {
+        output = `委派失敗：${e instanceof Error ? e.message : String(e)}`
+        ok = false
       }
-      output = r.ok
-        ? `委派 ${r.id} 完成 (depth=${r.depth}, ${r.durationMs}ms)${childThreadId ? ` · child=${childThreadId}` : ''}\n\n${r.summary}`
-        : `委派失敗：${r.summary}`
-      ok = r.ok
-      tokensNote(ctx, r.tokensUsed)
     }
-  } else if (!isToolName(tc.name)) {
-    output = `Unknown tool: ${tc.name}`
-    ok = false
+  } else if (tc.name === 'delegate_status') {
+    const r = await dispatchRegistered('delegate_status', args, {
+      mcpAgentId: ctx.mcpAgentId,
+      runId: ctx.runId,
+      threadId: ctx.threadId,
+      projectRoot: ctx.projectRoot,
+    })
+    output = r.output
+    ok = r.ok
   } else {
-    try {
-      const result = await executeTool(tc.name as ToolName, args, {
-        mcpAgentId: ctx.mcpAgentId,
-        runId: ctx.runId,
-        threadId: ctx.threadId,
-        projectRoot: ctx.projectRoot,
-      })
-      output = result.output
-      ok = result.ok
-    } catch (e) {
-      output = e instanceof Error ? e.message : String(e)
-      ok = false
-    }
+    output = `Unknown agent-level tool: ${tc.name}`
+    ok = false
   }
   if (tc.name === 'ask_user') ctx.cb?.onQuestionResolved?.()
 
@@ -1376,9 +1333,3 @@ async function executeOneToolCall(
   })
 }
 
-function tokensNote(
-  ctx: { toolChunks: string[] },
-  n: number,
-) {
-  if (n > 0) ctx.toolChunks.push(`_(child tokens +${n})_`)
-}

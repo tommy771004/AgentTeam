@@ -15,7 +15,6 @@ import type {
   LoopType,
   RuntimeOverrides,
   SubAgentNode,
-  ToolCallRecord,
 } from './types'
 import { buildParseResult, formatPlanBubble, parseUserRequest } from './parser'
 import { evaluateDoD } from './dodEvaluator'
@@ -30,18 +29,12 @@ import { emptyKnowledge, extractKnowledge } from './knowledge'
 import {
   DEFAULT_LLM_SETTINGS,
   resolveRoleModel,
-  runPrimaryAgentTask,
-  runSubAgentTask,
   synthesizeReport,
   withRoleModel,
 } from './llm'
-import { buildPromptLayers, formatPacketDiagnostics } from './hermes/promptBuilder'
 import { learningLoop } from './hermes/learning'
 import { BUILTIN_RUNNER_CAPABILITIES } from './runners'
-import { compressStepOutputs } from './hermes/sessionSearch'
 import { skillsStore } from './hermes/skills'
-import { buildToolInput, selectToolsForStep } from './tools/registry'
-import { authorizeTool, guardAndExecuteTool } from './tools/toolGuard'
 import {
   isClaimedScheduleTrigger,
   validateScheduleTriggerSnapshot,
@@ -49,17 +42,17 @@ import {
 } from './scheduler'
 import { validateEventTriggerSnapshot } from './eventMatcher'
 import {
-  buildCustomToolInput,
-  executeCustomTool,
-  selectCustomToolsForStep,
-} from './tools/customTools'
-import { runFunctionCallingLoop } from './tools/toolLoop'
-import {
   DEFAULT_SUPERVISOR_LIMITS,
-  enforceToolPayload,
   SupervisorViolation,
   type SupervisorLimits,
 } from './supervisor'
+import { resolveHeuristicStepOutcome } from './stepExecutor'
+import {
+  createStepStrategies,
+  HeuristicLlmFailedError,
+  withToolContext,
+  type StrategyStepInput,
+} from './stepStrategies'
 type Listener = (state: AgentState) => void
 
 type InterventionDecision =
@@ -880,9 +873,8 @@ export class AgentLoopEngine {
 
     const t0 = Date.now()
     let output = ''
-
-    // ── Tools + LLM phase ───────────────────────────────────────
     let toolContext = ''
+
     // P1-B: model capability profile — degrade BEFORE the call fails mid-run
     const { modelSupports } = await import('./modelProfile')
     const stepModel = this.useLlm() ? resolved.model : ''
@@ -912,499 +904,104 @@ export class AgentLoopEngine {
       )
     }
 
+    // Thin strategies — only "obtain step output"; pre/post stay on the orchestrator.
+    const strategies = createStepStrategies({
+      log: (level, message) => this.log(level as LogLevel, message),
+      shouldAbort: () => this.aborted,
+      executionSettings: (r) => this.executionSettings(r),
+      supervisorLimits: () => this.supervisorLimits(),
+      subAgentsEnabled: () => this.subAgentsEnabled(),
+      onToolCall: (record) => {
+        this.state.toolCalls = [...this.state.toolCalls, record]
+        this.emit()
+      },
+      onCapabilityUnion: (ids) => {
+        const set = new Set([...(this.state.loadedCapabilityIds || []), ...ids])
+        this.state.loadedCapabilityIds = [...set].sort()
+        this.emit()
+      },
+      onUnlockedUnion: (names) => {
+        const set = new Set([...(this.state.unlockedToolNames || []), ...names])
+        this.state.unlockedToolNames = [...set].sort()
+        this.emit()
+      },
+      onQuestionAsked: () => {
+        this.state.status = 'awaiting_user'
+        this.emit()
+      },
+      onQuestionResolved: () => {
+        if (this.state.status === 'awaiting_user') this.state.status = 'running'
+        this.emit()
+      },
+      onSubAgentSnippet: (snippet) => {
+        this.setSubAgent(agentName, 'active', snippet)
+      },
+    })
+
+    const strategyInput: StrategyStepInput = {
+      role,
+      agentName,
+      objective: this.state.objective,
+      step: step.description,
+      stepAction: step.action,
+      stepNumber: step.step,
+      iteration,
+      stepOutputs: this.stepOutputs,
+      userAttachments: this.userAttachments,
+      settings: this.settings,
+      overrides: {
+        ...this.overrides,
+        useLlm: this.overrides.useLlm,
+      },
+      loadedCapabilityIds: this.state.loadedCapabilityIds,
+      unlockedToolNames: this.state.unlockedToolNames,
+      temporaryChatDefault: this.settings.temporaryChatDefault === true,
+      projectGuidance: this.projectGuidance,
+      sessionRecallBlock: this.sessionRecallBlock,
+      attachedSkillContext: this.attachedSkillContext,
+      subAgentsEnabled: this.subAgentsEnabled(),
+    }
+
     try {
       if (useFc) {
-        this.log('INFO', `[${agentName}] function-calling tool loop enabled`)
-        this.log('System', 'Binding tool registry… [OK]')
-        const roleSettings = this.executionSettings(role)
-        const layers = buildPromptLayers({
-          role,
-          objective: this.state.objective,
-          settings: this.settings,
-          projectGuidance: this.projectGuidance || undefined,
-          temporary:
-            this.overrides.temporary === true ||
-            this.settings.temporaryChatDefault === true,
-          stepEvidence: compressStepOutputs(this.stepOutputs, 4000),
-          sessionRecall: this.sessionRecallBlock || undefined,
-          skillsContext: this.attachedSkillContext || undefined,
-        })
-        if (layers.packetDiagnostics) {
-          this.log('INFO', formatPacketDiagnostics(layers.packet!))
-        }
-        // Cross-step + cross-run resume: skills + loaded caps + tool_search unlocks
-        const preloadCaps = [
-          ...(this.overrides.attachedSkills || []).map((n) => `skill:${n}`),
-          ...(this.overrides.preloadCapabilityIds || []),
-          ...(this.state.loadedCapabilityIds || []),
-        ]
-        const preloadUnlocks = [
-          ...(this.overrides.preloadUnlockedTools || []),
-          ...(this.state.unlockedToolNames || []),
-        ]
-        if (this.userAttachments.some((a) => a.kind === 'image' && a.dataUrl)) {
-          this.log('INFO', `Multimodal: ${this.userAttachments.filter((a) => a.kind === 'image').length} image(s) in user message`)
-        }
-        const loop = await runFunctionCallingLoop(
-          roleSettings,
-          {
-            role,
-            objective: this.state.objective,
-            step: step.description,
-            context: layers.full.slice(0, 12_000),
-            userAttachments: this.userAttachments,
-          },
-          {
-            limits: this.supervisorLimits(),
-            haltOnPayloadOverflow: this.settings.haltOnPayloadOverflow === true,
-            includeMcpTools: this.settings.mcpEnabled,
-            permissionPolicy: this.overrides.permissionPolicy,
-            permissionProjection: this.overrides.permissionProjection,
-            mcpAgentId: this.overrides.mcpAgentId || this.overrides.agentMode || 'build',
-            preloadCapabilityIds: preloadCaps,
-            preloadUnlockedTools: preloadUnlocks,
-            unattended: this.overrides.unattended === true,
-            hitlTimeoutMs: this.overrides.hitlTimeoutMs,
-            sourceKind: this.overrides.sourceKind,
-            objective: this.state.objective,
-            projectRoot: this.overrides.projectRoot,
-            runId: this.overrides.runId,
-            threadId: this.overrides.threadId,
-            // OpenCode policy deny + role isolation
-            blockedTools: [
-              ...(this.overrides.blockedTools || []),
-              ...(agentName === 'Core' || role === 'executor' ? ['delegate_task'] : []),
-            ],
-            callbacks: {
-              shouldAbort: () => this.aborted,
-              onLog: (level, message) => {
-                const map: Record<string, LogLevel> = {
-                  THOUGHT: 'THOUGHT',
-                  ACTION: 'ACTION',
-                  INFO: 'INFO',
-                  EXEC: 'EXEC',
-                  SUCCESS: 'SUCCESS',
-                  WARN: 'WARN',
-                  ERROR: 'ERROR',
-                  PROCESS: 'PROCESS',
-                }
-                this.log(map[level] || 'INFO', message)
-              },
-              onToolCall: (record) => {
-                this.state.toolCalls = [
-                  ...this.state.toolCalls,
-                  { ...record, step: step.step },
-                ]
-                this.emit()
-              },
-              onCapabilityLoad: (ids) => {
-                // Union across steps within a run
-                const set = new Set([...(this.state.loadedCapabilityIds || []), ...ids])
-                this.state.loadedCapabilityIds = [...set].sort()
-                this.emit()
-              },
-              onQuestionAsked: () => {
-                this.state.status = 'awaiting_user'
-                this.emit()
-              },
-              onQuestionResolved: () => {
-                if (this.state.status === 'awaiting_user') this.state.status = 'running'
-                this.emit()
-              },
-            },
-          },
-        )
-        output = loop.content
-        toolContext = loop.toolContext
-        this.state.tokensUsed += loop.tokensUsed
+        const result = await strategies.functionCalling.execute(strategyInput)
+        output = result.output
+        toolContext = result.toolContext
+        this.state.tokensUsed += result.tokensUsed
         this.state.metrics.apiCredits = this.state.tokensUsed
-        if (loop.loadedCapabilityIds?.length) {
-          const set = new Set([
-            ...(this.state.loadedCapabilityIds || []),
-            ...loop.loadedCapabilityIds,
-          ])
-          this.state.loadedCapabilityIds = [...set].sort()
-        }
-        if (loop.unlockedToolNames?.length) {
-          const set = new Set([
-            ...(this.state.unlockedToolNames || []),
-            ...loop.unlockedToolNames,
-          ])
-          this.state.unlockedToolNames = [...set].sort()
-        }
-        this.setSubAgent(agentName, 'active', output.slice(0, 120))
-        this.log(
-          'INFO',
-          `[${agentName}] FC rounds=${loop.rounds} tokens +${loop.tokensUsed}` +
-            (this.state.loadedCapabilityIds.length
-              ? ` caps=[${this.state.loadedCapabilityIds.join(', ')}]`
-              : '') +
-            (this.state.unlockedToolNames.length
-              ? ` unlock=${this.state.unlockedToolNames.length}`
-              : ''),
-        )
       } else {
-        // Heuristic tools (no FC) then optional plain LLM —
-        // still honor capability approvalTools + progressive preload (no silent bypass)
-        if (this.settings.toolsEnabled !== false) {
-          const {
-            assembleCapabilities,
-            loadCapability,
-            capabilityOwnsTool,
-            approvalRequiredFor,
-            formatAlwaysOnInstructions,
-          } = await import('./capabilities')
-          let projectRoot = ''
-          try {
-            const { useProjectStore } = await import('../store/projectStore')
-            projectRoot =
-              (this.overrides.projectRoot || '').trim() ||
-              useProjectStore.getState().root ||
-              ''
-          } catch {
-            projectRoot = (this.overrides.projectRoot || '').trim()
+        // Heuristic first; orchestrator owns simulation fallback (no strategy knows siblings).
+        // Decision is pure resolveHeuristicStepOutcome — never gate on empty output alone.
+        try {
+          const result = await strategies.heuristic.execute(strategyInput)
+          toolContext = result.toolContext
+          this.state.tokensUsed += result.tokensUsed
+          this.state.metrics.apiCredits = this.state.tokensUsed
+          if (resolveHeuristicStepOutcome(result) === 'simulate') {
+            // tools-only / no LLM — keep prior artificial delay
+            const sim = await strategies.simulation.execute(
+              withToolContext(strategyInput, toolContext),
+            )
+            output = sim.output
+          } else {
+            // LLM completed (content may be ""); keep it
+            output = result.output
           }
-          const capState = assembleCapabilities(this.settings, {
-            progressive: this.settings.capabilitiesEnabled !== false,
-            preloadIds: [
-              ...(this.overrides.attachedSkills || []).map((n) => `skill:${n}`),
-              ...(this.overrides.preloadCapabilityIds || []),
-              ...(this.state.loadedCapabilityIds || []),
-            ],
-            preloadUnlockedTools: [
-              ...(this.overrides.preloadUnlockedTools || []),
-              ...(this.state.unlockedToolNames || []),
-            ],
-            webSearchEnabled: this.settings.webSearchEnabled !== false,
-            projectRoot,
-            agentId: this.overrides.mcpAgentId || this.overrides.agentMode || 'build',
-            blockedTools: [
-              ...(this.overrides.blockedTools || []),
-              ...(agentName === 'Core' || role === 'executor' ? ['delegate_task'] : []),
-            ],
-            entitlement: (await import('../store/subscriptionStore')).useSubscriptionStore.getState().entitlement,
-          })
-
-          const tools = selectToolsForStep(step.description, this.state.objective, step.action, {
-            webSearchEnabled: this.settings.webSearchEnabled !== false,
-          }).filter((t) =>
-            (this.settings.subAgentsEnabled === true || !t.startsWith('delegate_')) &&
-            !(this.overrides.blockedTools || []).includes(t),
-          )
-
-          // Auto-load owning capabilities so heuristic path gets runbooks + approvalTools
-          for (const tool of tools) {
-            for (const c of capState.all) {
-              if (capabilityOwnsTool(c, tool) && !capState.loadedIds.has(c.id)) {
-                loadCapability(capState, c.id)
-                this.log('INFO', `heuristic auto-load capability «${c.id}» for tool ${tool}`)
-              }
-            }
-          }
-          {
-            const set = new Set([
-              ...(this.state.loadedCapabilityIds || []),
-              ...[...capState.loadedIds],
-            ])
-            this.state.loadedCapabilityIds = [...set].sort()
-            this.emit()
-          }
-
-          const runbook = formatAlwaysOnInstructions(capState)
-          if (runbook) {
-            this.log('INFO', `heuristic capability runbooks active (${this.state.loadedCapabilityIds.length})`)
-          }
-
-          // Plugin / connector custom tools (same capability gate as FC)
-          const customTools = selectCustomToolsForStep(
-            step.description,
-            this.state.objective,
-            this.settings,
-            { blockedTools: this.overrides.blockedTools },
-          )
-          for (const custom of customTools) {
-            const ownerCap = `user:${custom.ownerId}`
-            if (!capState.loadedIds.has(ownerCap)) {
-              loadCapability(capState, ownerCap)
-              this.log('INFO', `heuristic auto-load capability «${ownerCap}» for ${custom.name}`)
-            }
-          }
-          {
-            const set = new Set([
-              ...(this.state.loadedCapabilityIds || []),
-              ...[...capState.loadedIds],
-            ])
-            this.state.loadedCapabilityIds = [...set].sort()
-            this.emit()
-          }
-
-          if (tools.length || customTools.length) {
+        } catch (e) {
+          if (e instanceof HeuristicLlmFailedError) {
             this.log(
-              'PROCESS',
-              `[${agentName}] tools: ${[...tools, ...customTools.map((c) => c.name)].join(', ')}`,
+              'WARN',
+              `LLM step failed (${e.message}). Falling back to simulation.`,
             )
-          }
-          const toolChunks: string[] = []
-          if (runbook) toolChunks.push(`### capability runbooks\n${runbook.slice(0, 2000)}`)
-          const hitlTimeoutMs =
-            this.overrides.hitlTimeoutMs ??
-            (this.overrides.unattended ? 45_000 : undefined)
-          for (const tool of tools) {
-            if (this.aborted) break
-            const input = buildToolInput(
-              tool,
-              this.state.objective,
-              step.description,
-              this.stepOutputs,
+            toolContext = e.toolContext
+            // Pre-refactor failure path had no delay — skip artificial wait
+            const sim = await strategies.simulation.execute(
+              withToolContext(strategyInput, toolContext, { skipDelay: true }),
             )
-            const started = Date.now()
-            const forceAsk = approvalRequiredFor(capState, tool)
-            const guarded = await guardAndExecuteTool({
-              tool,
-              input,
-              settings: this.settings,
-              permissionPolicy: this.overrides.permissionPolicy,
-              permissionProjection: this.overrides.permissionProjection,
-              mcpAgentId: this.overrides.mcpAgentId || this.overrides.agentMode || 'build',
-              blockedTools: this.overrides.blockedTools,
-              forceAsk,
-              hitlTimeoutMs,
-              unattended: this.overrides.unattended,
-              runId: this.overrides.runId,
-              threadId: this.overrides.threadId,
-              projectRoot: this.overrides.projectRoot,
-              sourceKind: this.overrides.sourceKind,
-              objective: this.state.objective,
-              onLog: (level, message) =>
-                this.log(level as LogLevel, message),
-            })
-            if (!guarded.allowed) {
-              toolChunks.push(`### tool:${tool}\n${guarded.output}`)
-              this.log('WARN', guarded.output)
-              // P0: record denied tools so step completion / DoD can see failures
-              this.state.toolCalls = [
-                ...this.state.toolCalls,
-                {
-                  id: `deny_${Date.now().toString(36)}`,
-                  tool,
-                  input,
-                  output: guarded.output,
-                  ok: false,
-                  durationMs: Date.now() - started,
-                  timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
-                  step: step.step,
-                },
-              ]
-              this.emit()
-              continue
-            }
-            const result = guarded.result
-            let out = result.output
-            try {
-              const enforced = enforceToolPayload(
-                tool,
-                out,
-                this.supervisorLimits(),
-                this.settings.haltOnPayloadOverflow ? 'halt' : 'truncate',
-              )
-              out = enforced.output
-              if (enforced.truncated) {
-                this.log('WARN', `Supervisor truncated '${tool}' (${enforced.bytes} bytes)`)
-              }
-            } catch (e) {
-              if (e instanceof SupervisorViolation) throw e
-              throw e
-            }
-            const durationMs = Date.now() - started
-            const record: ToolCallRecord = {
-              id: uuid(),
-              tool,
-              input,
-              output: out.slice(0, 4000),
-              ok: result.ok,
-              durationMs,
-              timestamp: nowTime(),
-              step: step.step,
-            }
-            this.state.toolCalls = [...this.state.toolCalls, record]
-            this.emit()
-            this.log(
-              result.ok ? 'SUCCESS' : 'WARN',
-              `tool:${tool} ${result.ok ? 'ok' : 'fail'} (${durationMs}ms)`,
-            )
-            toolChunks.push(`### tool:${tool}\n${out.slice(0, 2000)}`)
-            // P1: afterTool hooks also on heuristic path (parity with FC)
-            try {
-              const { collectHookRules, evaluateHooks } = await import('./hooks')
-              const ev = evaluateHooks(collectHookRules(this.settings), {
-                point: 'afterTool',
-                tool,
-                toolOk: result.ok,
-                sourceKind: this.overrides.sourceKind as import('./hooks').HookContext['sourceKind'],
-                objective: this.state.objective,
-              })
-              for (const line of ev.audits) this.log('INFO', line)
-              for (const n of ev.notifications) {
-                void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
-              }
-            } catch {
-              /* non-fatal */
-            }
+            output = sim.output
+          } else {
+            throw e
           }
-
-          // Connector / plugin custom tools (heuristic path)
-          for (const custom of customTools) {
-            if (this.aborted) break
-            const input = buildCustomToolInput(custom, this.state.objective, step.description)
-            const started = Date.now()
-            const forceAsk = approvalRequiredFor(capState, custom.name)
-            const auth = await authorizeTool({
-              tool: custom.name,
-              input,
-              settings: this.settings,
-              permissionPolicy: this.overrides.permissionPolicy,
-              permissionProjection: this.overrides.permissionProjection,
-              blockedTools: this.overrides.blockedTools,
-              forceAsk,
-              sideEffect: true,
-              hitlTimeoutMs,
-              unattended: this.overrides.unattended,
-              runId: this.overrides.runId,
-              threadId: this.overrides.threadId,
-              sourceKind: this.overrides.sourceKind,
-              objective: this.state.objective,
-              onLog: (level, message) => this.log(level as LogLevel, message),
-            })
-            if (!auth.allowed) {
-              toolChunks.push(`### tool:${custom.name}\n${auth.output}`)
-              this.log('WARN', auth.output)
-              this.state.toolCalls = [
-                ...this.state.toolCalls,
-                {
-                  id: `deny_${Date.now().toString(36)}`,
-                  tool: custom.name,
-                  input,
-                  output: auth.output,
-                  ok: false,
-                  durationMs: Date.now() - started,
-                  timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
-                  step: step.step,
-                },
-              ]
-              this.emit()
-              continue
-            }
-            const result = await executeCustomTool(custom, input, this.settings, {
-              runId: this.overrides.runId,
-              projectRoot: this.overrides.projectRoot,
-            })
-            let out = result.output
-            try {
-              const enforced = enforceToolPayload(
-                custom.name,
-                out,
-                this.supervisorLimits(),
-                this.settings.haltOnPayloadOverflow ? 'halt' : 'truncate',
-              )
-              out = enforced.output
-            } catch (e) {
-              if (e instanceof SupervisorViolation) throw e
-              throw e
-            }
-            const durationMs = Date.now() - started
-            const record: ToolCallRecord = {
-              id: uuid(),
-              tool: custom.name,
-              input,
-              output: out.slice(0, 4000),
-              ok: result.ok,
-              durationMs,
-              timestamp: nowTime(),
-              step: step.step,
-            }
-            this.state.toolCalls = [...this.state.toolCalls, record]
-            this.emit()
-            this.log(
-              result.ok ? 'SUCCESS' : 'WARN',
-              `tool:${custom.name} ${result.ok ? 'ok' : 'fail'} (${durationMs}ms)`,
-            )
-            toolChunks.push(`### tool:${custom.name}\n${out.slice(0, 2000)}`)
-          }
-          toolContext = toolChunks.join('\n\n')
-        }
-
-        if (this.useLlm()) {
-          try {
-            const context = this.stepOutputs.slice(-3).join('\n---\n')
-            const roleSettings = this.executionSettings(role)
-            const layers = buildPromptLayers({
-              role,
-              objective: this.state.objective,
-              settings: this.settings,
-              projectGuidance: this.projectGuidance || undefined,
-              temporary:
-                this.overrides.temporary === true ||
-                this.settings.temporaryChatDefault === true,
-              stepEvidence: context,
-              sessionRecall: this.sessionRecallBlock || undefined,
-              skillsContext: this.attachedSkillContext || undefined,
-            })
-            // Heuristic path: still support vision when attachments present
-            let userContent: import('./llm').ChatMessageContent | undefined
-            if (this.userAttachments.some((a) => a.kind === 'image')) {
-              try {
-                const {
-                  buildMultimodalUserContent,
-                  hydrateAttachmentsFromDisk,
-                  attachmentsPathAppendix,
-                } = await import('../lib/chatAttachments')
-                const hydrated = await hydrateAttachmentsFromDisk(this.userAttachments)
-                const body = `Objective: ${this.state.objective}\n\nYour step: ${step.description}\n\nTool results:\n${toolContext || '(no tools ran)'}\n\nContext so far:\n${layers.full.slice(0, 10_000)}\n\n${attachmentsPathAppendix(hydrated)}\n\nProduce the step output only.`
-                userContent = buildMultimodalUserContent(body, hydrated)
-                if (Array.isArray(userContent)) {
-                  this.log('INFO', 'Heuristic multimodal: sending image(s) to LLM')
-                } else if (hydrated.some((a) => a.kind === 'image' && !a.dataUrl)) {
-                  this.log(
-                    'WARN',
-                    'Heuristic: images lack dataUrl — path appendix only (open FC for full vision path)',
-                  )
-                }
-              } catch {
-                /* fall through to plain text */
-              }
-            }
-            const result = this.subAgentsEnabled()
-              ? await runSubAgentTask(
-                  roleSettings,
-                  role,
-                  this.state.objective,
-                  step.description,
-                  layers.full.slice(0, 10_000),
-                  toolContext,
-                  userContent ? { userContent } : undefined,
-                )
-              : await runPrimaryAgentTask(
-                  roleSettings,
-                  this.state.objective,
-                  step.description,
-                  layers.full.slice(0, 10_000),
-                  toolContext,
-                  userContent ? { userContent } : undefined,
-                )
-            output = result.content
-            this.state.tokensUsed += result.tokensUsed
-            this.state.metrics.apiCredits = this.state.tokensUsed
-            this.setSubAgent(agentName, 'active', output.slice(0, 120))
-            this.log('INFO', `[${agentName}] LLM tokens +${result.tokensUsed}`)
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e)
-            this.log('WARN', `LLM step failed (${msg}). Falling back to simulation.`)
-            output = this.simulateStepOutput(step, iteration, toolContext)
-          }
-        } else {
-          const workMs = 400 + Math.random() * 500
-          await delay(workMs)
-          output = this.simulateStepOutput(step, iteration, toolContext)
         }
       }
     } catch (e) {
@@ -1494,22 +1091,6 @@ export class AgentLoopEngine {
     )
 
     return { ok: true, output, durationMs }
-  }
-
-  private simulateStepOutput(step: ExecutionStep, iteration: number, toolContext = ''): string {
-    const toolSection = toolContext
-      ? `\n## Tool Evidence\n${toolContext.slice(0, 1500)}\n`
-      : ''
-    return [
-      `### ${step.description}`,
-      ``,
-      `Assigned under iteration ${iteration}.`,
-      `Objective alignment: high.`,
-      `Key findings: structured notes for "${this.state.objective.slice(0, 80)}".`,
-      `- Action \`${step.action}\` executed${toolContext ? ' with tools' : ' in simulation mode'}.`,
-      `- Artifacts staged for downstream synthesis.`,
-      toolSection,
-    ].join('\n')
   }
 
   // ── Pattern 1: Turn-based ─────────────────────────────────────

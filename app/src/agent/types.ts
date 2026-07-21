@@ -661,6 +661,23 @@ export interface LlmSettings {
    * 不改變工具面(capability_mode / blockedTools 另管)。
    */
   delegatePersonas: Record<string, DelegatePersona>
+  /**
+   * Outbound Data Gate — user toggle when deploy mode is `optional`.
+   * Ignored when deploy is `required` (always on), `demo` (always on), or `off`.
+   */
+  outboundProtectionEnabled: boolean
+  /**
+   * Optional deploy-mode snapshot injected by Electron main.
+   * When unset, runtime reads SUBAGENTS_OUTBOUND_GUARD (default off).
+   */
+  outboundGuardDeploy?: 'off' | 'demo' | 'optional' | 'required'
+  /**
+   * Company Classification Endpoint — complete pinned URL (often ends in /v1).
+   * Used only when guard is required/demo and URL is set; never sends user project in connection test.
+   */
+  classificationEndpointUrl?: string
+  /** Explicit company approval for plaintext HTTP classifier transport. */
+  classificationAllowPlaintextHttp?: boolean
 
   /* ── ChatGPT app–style preferences (exclude account/login) ── */
 

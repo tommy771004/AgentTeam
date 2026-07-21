@@ -765,6 +765,11 @@ const api = {
         textContent?: string
         filePath?: string
       }>
+      /** When isolation verified — main wraps CLI under seatbelt/bwrap */
+      sandboxWrap?: {
+        engine: 'seatbelt' | 'bwrap'
+        viewRoot: string
+      }
     }) =>
       ipcRenderer.invoke('cli:runAgent', input) as Promise<{
         ok: boolean
@@ -1138,6 +1143,124 @@ const api = {
         ipcRenderer.removeListener('gateway:inbound', handler)
       }
     },
+  },
+  outbound: {
+    status: (opts?: { apiProvider?: string; baseUrl?: string }) =>
+      ipcRenderer.invoke('outbound:status', opts || {}) as Promise<{
+        deployGuard: string
+        deployGuardError?: string
+        policySource: string
+        policySourceError?: string
+        buildFlavor: string
+        buildFlavorError?: string
+        policyDir: string
+        ledgerDir: string
+        encryptionAvailable: boolean
+        connectionId?: string
+        policySummary?: string
+        activeViews: number
+      }>,
+    ensurePolicy: (connectionId: string) =>
+      ipcRenderer.invoke('outbound:ensurePolicy', connectionId) as Promise<unknown>,
+    prepareRunView: (opts: {
+      runId: string
+      projectRoot: string
+      apiProvider?: string
+      baseUrl?: string
+      connectionId?: string
+      effectiveMode?: 'off' | 'demo' | 'optional' | 'required'
+    }) =>
+      ipcRenderer.invoke('outbound:prepareRunView', opts) as Promise<
+        | {
+            ok: true
+            viewRoot: string
+            connectionId: string
+            exclusionCount: number
+            skippedCount: number
+            profileDegraded?: boolean
+          }
+        | { ok: false; reason: string }
+      >,
+    disposeRunView: (runId: string) =>
+      ipcRenderer.invoke('outbound:disposeRunView', runId) as Promise<{ ok: boolean }>,
+    viewRoot: (runId: string) =>
+      ipcRenderer.invoke('outbound:viewRoot', runId) as Promise<string | null>,
+    viewMeta: (runId: string) =>
+      ipcRenderer.invoke('outbound:viewMeta', runId) as Promise<{
+        viewRoot: string
+        originalRoot: string
+        connectionId: string
+      } | null>,
+    appendEvidence: (
+      input: Record<string, unknown>,
+      sealed?: boolean,
+    ) =>
+      ipcRenderer.invoke('outbound:appendEvidence', input, sealed) as Promise<{
+        ok: boolean
+        reason?: string
+      }>,
+    sandboxProbe: (opts: { viewRoot: string; forbiddenCanaryPath: string }) =>
+      ipcRenderer.invoke('outbound:sandboxProbe', opts) as Promise<{
+        status: 'verified' | 'unverified' | 'unavailable'
+        detail: string
+        engine?: 'seatbelt' | 'bwrap' | 'none'
+      }>,
+    policyListActive: () =>
+      ipcRenderer.invoke('outbound:policyListActive') as Promise<
+        Array<{
+          kind: string
+          connectionId?: string
+          version: number
+          changeId: string
+          path: string
+          detectorCount: number
+        }>
+      >,
+    policyListDrafts: () =>
+      ipcRenderer.invoke('outbound:policyListDrafts') as Promise<
+        Array<{
+          id: string
+          kind: string
+          connectionId?: string
+          updatedAtUtc: string
+          version?: number
+          changeId?: string
+        }>
+      >,
+    policyReadDraft: (draftId: string) =>
+      ipcRenderer.invoke('outbound:policyReadDraft', draftId) as Promise<
+        { ok: true; draft: unknown } | { ok: false; reason: string }
+      >,
+    policySaveDraft: (input: {
+      id: string
+      kind: 'company-base' | 'provider-supplement'
+      connectionId?: string
+      body: unknown
+    }) =>
+      ipcRenderer.invoke('outbound:policySaveDraft', input) as Promise<
+        { ok: true; draft: unknown } | { ok: false; reason: string }
+      >,
+    policyActivateDraft: (draftId: string) =>
+      ipcRenderer.invoke('outbound:policyActivateDraft', draftId) as Promise<
+        { ok: true; active: unknown } | { ok: false; reason: string }
+      >,
+    policyRollback: (input: {
+      kind: 'company-base' | 'provider-supplement'
+      connectionId?: string
+      reason: string
+      targetBody?: unknown
+    }) =>
+      ipcRenderer.invoke('outbound:policyRollback', input) as Promise<
+        { ok: true; active: unknown } | { ok: false; reason: string }
+      >,
+    policySeedDraft: (input: {
+      kind: 'company-base' | 'provider-supplement'
+      connectionId?: string
+      draftId: string
+    }) =>
+      ipcRenderer.invoke('outbound:policySeedDraft', input) as Promise<
+        { ok: true; draft: unknown } | { ok: false; reason: string }
+      >,
   },
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list') as Promise<unknown[]>,

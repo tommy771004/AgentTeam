@@ -9,6 +9,18 @@ import {
   EXTERNAL_CLI_DOD_LABEL,
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
 } from './runners'
+import {
+  effectiveOutboundGuardFromSettings,
+  inspectOutbound,
+  readBuildFlavorFromEnv,
+} from './outbound/outboundGate'
+import {
+  detectFilesystemSandboxCapability,
+  allocateForbiddenCanaryPath,
+  evaluateCliSandboxGate,
+  probeFilesystemSandbox,
+  rewriteCliPromptForView,
+} from './outbound/cliSandbox'
 
 export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
 export type LocalCliConfigSnapshot = CliConfigSnapshot
@@ -71,21 +83,123 @@ export async function runPromptViaLocalCli(opts: {
   )
   opts.onLog?.(`approval: ${approval.note}`)
 
+  // Outbound Data Gate — before process creation (same contract as builtin LLM).
+  let gateSettings: {
+    outboundProtectionEnabled?: boolean
+    outboundGuardDeploy?: 'off' | 'demo' | 'optional' | 'required'
+  } = {}
+  try {
+    const { useSettingsStore } = await import('../store/settingsStore')
+    gateSettings = useSettingsStore.getState().settings
+  } catch {
+    /* pure tests without store */
+  }
+  const effectiveMode = effectiveOutboundGuardFromSettings(gateSettings)
+
+  let prompt = opts.prompt
+  let cwd = opts.cwd
+  let viewMeta: { viewRoot: string; originalRoot: string; connectionId: string } | null = null
+  if (opts.runId && window.subagents?.outbound?.viewMeta) {
+    try {
+      viewMeta = await window.subagents.outbound.viewMeta(opts.runId)
+    } catch {
+      viewMeta = null
+    }
+  }
+  if (viewMeta) {
+    prompt = rewriteCliPromptForView(prompt, {
+      originalRoot: viewMeta.originalRoot,
+      viewRoot: viewMeta.viewRoot,
+    })
+    cwd = viewMeta.viewRoot
+  }
+
+  // Required CLI needs verified filesystem sandbox; optional/demo may mark unverified.
+  let isolationStatus = detectFilesystemSandboxCapability()
+  let sandboxEngine: 'seatbelt' | 'bwrap' | 'none' | undefined
+  if (viewMeta?.viewRoot && viewMeta.originalRoot) {
+    // Ticket 20: canary must not live under original project (ADR-0007).
+    const forbiddenCanaryPath = allocateForbiddenCanaryPath({
+      originalRoot: viewMeta.originalRoot,
+      viewRoot: viewMeta.viewRoot,
+    })
+    const probe = await probeFilesystemSandbox({
+      viewRoot: viewMeta.viewRoot,
+      forbiddenCanaryPath,
+    })
+    isolationStatus = probe.status
+    sandboxEngine = probe.engine
+    if (probe.detail) opts.onLog?.(`sandbox probe: ${probe.detail}`)
+  }
+  const sandbox = evaluateCliSandboxGate({ effectiveMode, isolationStatus })
+  if (!sandbox.allow) {
+    opts.onLog?.(sandbox.reason || 'CLI sandbox gate denied')
+    return {
+      ok: false,
+      output: '',
+      command: '',
+      error: sandbox.reason || 'Filesystem sandbox 不允許啟動 external CLI',
+      runId: opts.runId,
+    }
+  }
+  if (sandbox.reason) opts.onLog?.(sandbox.reason)
+  if (viewMeta) {
+    opts.onLog?.(
+      `CLI cwd → Restricted Project View（isolation=${sandbox.isolationStatus}${sandbox.isolationVerified ? ' · verified' : ''}${sandboxEngine && sandboxEngine !== 'none' ? ` · engine=${sandboxEngine}` : ''}）`,
+    )
+  }
+
+  const cliPayload = {
+    prompt,
+    cwd,
+    kind: opts.kind,
+    model: opts.model,
+    attachments: opts.attachments,
+    isolationStatus: sandbox.isolationStatus,
+  }
+  const gate = inspectOutbound({
+    channel: 'cli',
+    runId: opts.runId,
+    payload: cliPayload,
+    effectiveMode,
+    buildFlavor: readBuildFlavorFromEnv(),
+  })
+  if (gate.action === 'block') {
+    return {
+      ok: false,
+      output: '',
+      command: '',
+      error: gate.reason || '出站資料閘門已阻擋此 CLI 啟動',
+      runId: opts.runId,
+    }
+  }
+  const gated = gate.payload as typeof cliPayload
+
+  // When isolation is verified, main process wraps the CLI under seatbelt/bwrap.
+  const sandboxWrap =
+    sandbox.isolationVerified &&
+    viewMeta?.viewRoot &&
+    (sandboxEngine === 'seatbelt' || sandboxEngine === 'bwrap')
+      ? { engine: sandboxEngine, viewRoot: viewMeta.viewRoot }
+      : undefined
+
   // Prefer long-lived stream subscription before invoke (if available)
   // so early stdout is not missed; agentStore also subscribes.
   const r = await window.subagents.cli.runAgent({
     kind: opts.kind,
     binary: opts.binary,
-    prompt: opts.prompt,
-    cwd: opts.cwd,
-    model: opts.model,
+    prompt: String(gated.prompt ?? prompt),
+    cwd: (gated.cwd as string | undefined) ?? cwd,
+    model: gated.model ?? opts.model,
     depth: opts.depth,
     agentMode: opts.agentMode,
     approvalMode: opts.approvalMode,
     unattended: opts.unattended,
+    sandboxWrap,
+    effectiveMode,
     timeoutMs: 300_000,
     runId: opts.runId,
-    attachments: opts.attachments,
+    attachments: (gated.attachments as typeof opts.attachments) ?? opts.attachments,
     configSnapshot: opts.configSnapshot,
   })
   if (r.cancelled) {

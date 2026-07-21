@@ -5,11 +5,9 @@
 
 import type { ArchiveRecord, LlmSettings, ToolCallRecord } from '../types'
 import {
-  runDelegatedTask,
   type DelegateTaskInput,
   type DelegateTaskResult,
   type DelegationBudget,
-  globalDelegationBudget,
 } from './delegate'
 import { recordBackgroundStatus } from '../runJournal.ts'
 
@@ -186,7 +184,7 @@ export function enqueueBackgroundDelegate(
     shouldAbort?: () => boolean
     /**
      * Prefer unified runTask controller when free (queue when busy).
-     * Nested FC still uses runDelegatedTask; background goes through runTask.
+     * Background jobs always go through runTask.
      */
     preferRunTask?: boolean
   },
@@ -245,7 +243,7 @@ export function enqueueBackgroundDelegate(
 
     try {
       let result: DelegateTaskResult
-      const preferRunTask = opts?.preferRunTask !== false
+      // Always Task run admission
       const childRunId = `bg_${provisionalId}`
       const inherited = {
         goal: input.goal,
@@ -262,67 +260,55 @@ export function enqueueBackgroundDelegate(
         parentMcpAgentId: input.parentMcpAgentId,
       }
 
-      if (preferRunTask) {
-        // Unified runTask: queue when busy, same hooks/project pin/settle semantics.
-        // Phase 3 item 6/7: hidden worker thread + single coordinator Archive.
-        const { runTask } = await import('../taskRunCoordinator')
-        type ExternalRunResult = Awaited<ReturnType<typeof runTask>>
-        const settled = await new Promise<ExternalRunResult>((resolve) => {
-          void runTask({
-            sourceKind: 'delegate',
+      const { runTask } = await import('../taskRunCoordinator')
+      type ExternalRunResult = Awaited<ReturnType<typeof runTask>>
+      const settled = await new Promise<ExternalRunResult>((resolve) => {
+        void runTask({
+          sourceKind: 'delegate',
+          runId: childRunId,
+          objective: input.goal,
+          title: `委派 · ${input.goal.slice(0, 32)}`,
+          sourceLabel: `背景委派${input.parentRunId ? ` · parent=${input.parentRunId}` : ''}`,
+          projectRoot: input.projectRoot,
+          unattended: true,
+          enqueueWhenBusy: true,
+          workerThread: true,
+          skipUserBubble: true,
+          overrides: {
             runId: childRunId,
-            objective: input.goal,
-            title: `委派 · ${input.goal.slice(0, 32)}`,
-            sourceLabel: `背景委派${input.parentRunId ? ` · parent=${input.parentRunId}` : ''}`,
+            sourceKind: 'delegate',
             projectRoot: input.projectRoot,
+            preloadCapabilityIds: input.inheritCapabilities,
+            maxToolRounds: input.maxRounds || 3,
+            extraSystemContext: input.context
+              ? `## 父層唯讀上下文\n${input.context.slice(0, 3000)}`
+              : undefined,
             unattended: true,
-            enqueueWhenBusy: true,
-            workerThread: true,
-            skipUserBubble: true,
-            overrides: {
-              runId: childRunId,
-              sourceKind: 'delegate',
-              projectRoot: input.projectRoot,
-              preloadCapabilityIds: input.inheritCapabilities,
-              maxToolRounds: input.maxRounds || 3,
-              extraSystemContext: input.context
-                ? `## 父層唯讀上下文\n${input.context.slice(0, 3000)}`
-                : undefined,
-              unattended: true,
-              hitlTimeoutMs: 45_000,
-              permissionPolicy: input.parentPermissionPolicy,
-              permissionProjection: input.parentPermissionProjection,
-              mcpAgentId: input.parentMcpAgentId,
-            },
-            onSettled: (r) => resolve(r),
-          }).then((r) => {
-            if (!r.queued) resolve(r)
-            else {
-              job.status = 'queued'
-              emit(job)
-              // drain will call onSettled
-            }
-          })
+            hitlTimeoutMs: 45_000,
+            permissionPolicy: input.parentPermissionPolicy,
+            permissionProjection: input.parentPermissionProjection,
+            mcpAgentId: input.parentMcpAgentId,
+          },
+          onSettled: (r) => resolve(r),
+        }).then((r) => {
+          if (!r.queued) resolve(r)
+          else {
+            job.status = 'queued'
+            emit(job)
+          }
         })
-        // Link job metadata to the coordinator execution archive (no second write).
-        job.archiveRunId = settled.runId || childRunId
-        result = {
-          id: settled.runId || childRunId,
-          role: inherited.role,
-          goal: input.goal,
-          ok: settled.status === 'success',
-          summary: settled.result || settled.error || `status=${settled.status}`,
-          tokensUsed: 0,
-          toolCalls: [],
-          durationMs: Date.now() - new Date(job.startedAt).getTime(),
-          depth: 1,
-        }
-      } else {
-        result = await runDelegatedTask(settings, inherited, {
-          budget: opts?.budget || globalDelegationBudget,
-          onLog: opts?.onLog,
-          shouldAbort: opts?.shouldAbort,
-        })
+      })
+      job.archiveRunId = settled.runId || childRunId
+      result = {
+        id: settled.runId || childRunId,
+        role: inherited.role,
+        goal: input.goal,
+        ok: settled.status === 'success',
+        summary: settled.result || settled.error || `status=${settled.status}`,
+        tokensUsed: 0,
+        toolCalls: [],
+        durationMs: Date.now() - new Date(job.startedAt).getTime(),
+        depth: 1,
       }
 
       // Align job id with delegate id for correlation
