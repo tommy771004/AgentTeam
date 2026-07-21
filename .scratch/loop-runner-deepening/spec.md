@@ -25,7 +25,7 @@
 1. **範圍** — `start()` 迴圈 + `executeStepWithAgent` 全部抽出;四種 Loop Pattern 連同 pattern 選擇、DoD、replan、continueGoal 都進 Loop Runner。
    **實作時修訂**(ticket 03 開工前二次確認,見 issues/03):`start()` 實際混雜 Parse(啟發式+LLM 解析)、continueGoal **恢復**(區別於迭代中的 replan)、專案指引/OpenCode instructions 解析、以及 Time/Proactive 觸發驗證 —— 這些不是 loop 迴圈本身,CONTEXT.md 也將 Parse 視為獨立於 Loop Pattern 執行的概念。確認邊界:**Loop Runner 只從已解析的 `LoopRequest` + `LoopRunState` 開始**;Parse、continueGoal 恢復、專案指引、trigger 驗證(`validateTimeBasedTrigger`/`validateEventTriggerSnapshot`)全部留在 engine.start()。DoD、replan(迭代中)、continueGoal **持久化**(`persistContinueGoal`/`clearContinueGoal`,拆成純 snapshot 建構進 loopRunner + `onGoalIncomplete`/`onGoalCleared` port 留 engine 因為要碰 threadStore)、四 pattern 本體、learning hooks 皆進 Loop Runner。
 2. **Consent-first 執行點** — `LoopRequest` 為 discriminated union:`pattern:'time'` 必帶 `ScheduledJobClaim`、`'proactive'` 必帶 `EventEvidence`(無證據呼叫過不了 tsc);`runLoop` 入口做唯一 fail-closed 斷言。發證機關(scheduler claim / eventMatcher)不動。
-3. **State 擁有權** — Loop Runner 持有 plain `LoopRunState`;唯一側效出口 `deps.publish(snapshot)`;結果由回傳值 `{ state, outcome }` 承載。engine adapter 是唯一 production 訂閱者。
+3. **State 擁有權** — Loop Runner 持有 plain `LoopRunState`;唯一側效出口 `deps.publish(state)`(可傳 live 物件以求緊迴圈效率);**production adapter 必須 `snapshot()` 後再寫入 store/emit**,且 `runLoop` 結束後的 final rebind 亦須 clone,避免 UI 持有 live mutator。結果由回傳值 `{ state }` 承載。engine adapter 是唯一 production 訂閱者。
 4. **HITL** — 單一 `deps.ask(req): Promise<AskDecision>` port;intervention 狀態同步進 published snapshot 供 UI 顯示。
    **實作時修訂**:逾時與 auto-deny 政策(unattended 45s / 互動 90s / safety 900s)**維持留在 engine 的 `waitForIntervention()`**(ticket 02 就已如此),ticket 03 未搬移 —— 這條 HITL 逾時政策與「Parse 留 engine」屬同一決策脈絡(safety-critical 計時邏輯與其唯一呼叫路徑共置,降低搬移風險);Loop Runner 的 `ask` port 本身不含計時,只呼叫並等待。若未來要把計時搬進 Loop Runner,是可獨立排程的小 follow-up,不影響本次已交付的四 pattern + 型別化證據範圍。
 5. **Model seam** — `llm.ts` 增 `LlmTransport` 注入點,位於 sanitize→gate **之下**(fake 跑 smoke 時 Outbound Data Gate 一併被行使);`setLlmTransport(t?)` 供 smoke,undefined 還原預設(Electron proxy / fetch)。
@@ -59,12 +59,15 @@ type LoopRequest =
   | { pattern: 'proactive'; evidence: EventEvidence }        // 必填
 
 type LoopDeps = {
-  publish: (s: LoopRunState) => void                 // 唯一側效出口
+  publish: (s: LoopRunState) => void                 // 唯一側效出口;loop 可傳 live 物件,production adapter 必須 snapshot 後再存
   ask: (req: AskRequest) => Promise<AskDecision>     // HITL;逾時政策仍在 engine.waitForIntervention()
   waitForUserAck: () => Promise<void>                // Turn-based 的人工 ACK,與 ask 是不同語意
   onGoalIncomplete: (snapshot: ContinueGoalSnapshot) => void  // threadStore 側效留 engine,port 化
   onGoalCleared: () => void
-  // settings/overrides/log/shouldAbort/projectGuidance/... 沿用 stepRun.ts 既有 deps 形狀
+  getSettings: () => LlmSettings                     // live getter — mid-run configure() 於下一步/下一讀生效
+  getOverrides: () => RuntimeOverrides
+  initialStepOutputs?: string[]                      // continueGoal 恢復種子,拷入各 pattern 的 stepOutputs
+  // log/shouldAbort/projectGuidance/sessionRecallBlock/attachedSkillContext/userAttachments 同既有
 }
 
 type LoopResult = { state: LoopRunState }

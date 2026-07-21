@@ -674,7 +674,9 @@ export class AgentLoopEngine {
         },
       }
       const { state: loopState } = await runLoop(req, this.state, deps)
-      this.state = loopState
+      // Final rebind also clones — do not reattach the live loop mutator after
+      // the publish seam has been cloning throughout the run (review residual).
+      this.state = snapshot(loopState)
 
       // The controller may explicitly choose a post-state for an automation
       // or integration run; apply it after pattern finalization so Goal/Turn
