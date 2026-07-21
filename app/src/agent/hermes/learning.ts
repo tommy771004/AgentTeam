@@ -4,10 +4,10 @@
  */
 
 import { v4 as uuid } from 'uuid'
-import { memoryStore } from './memory'
-import { skillsStore } from './skills'
-import { subDesignProjectMemoryKey } from '../subdesign/preference'
-import { SKILL_SIMILARITY_THRESHOLD, textSimilarity } from './textSimilarity'
+import { memoryStore } from './memory.ts'
+import { skillsStore } from './skills.ts'
+import { subDesignProjectMemoryKey } from '../subdesign/preference.ts'
+import { SKILL_SIMILARITY_THRESHOLD, textSimilarity } from './textSimilarity.ts'
 import type { LearningEvent } from './types'
 
 type Listener = (events: LearningEvent[]) => void

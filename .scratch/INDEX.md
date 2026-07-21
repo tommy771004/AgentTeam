@@ -8,7 +8,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 | Effort | Spec | Frontier | Notes |
 |--------|------|----------|--------|
 | **subagents-paid-beta** | [spec.md](subagents-paid-beta/spec.md) | [14 release qualification](subagents-paid-beta/issues/14-paid-beta-release-qualification.md) | **唯一未完成 P0** — 需真實 signed Win/mac 證據；本地 qualify 腳本 fail-closed No-Go |
-| **loop-runner-deepening** | [spec.md](loop-runner-deepening/spec.md) | [01 llm transport seam](loop-runner-deepening/issues/01-llm-transport-seam.md) | 2026-07-21 architecture review 候選 1；一次到位單 PR，merge bar 見 spec；⚠ PR 期間 smoke 紅窗與 dist 打包互斥（撞 paid-beta #14 時程需協調） |
+| **loop-runner-deepening** | [spec.md](loop-runner-deepening/spec.md) | [04 engine adapter slimdown](loop-runner-deepening/issues/04-engine-adapter-slimdown.md) | 01–03 resolved（transport seam／stepRun／loopRunner 四 pattern，engine.ts 1702→808 行）；04 是收尾（刪 shim、drift guard、CLAUDE.md）+ 05 人工 parity；⚠ PR 期間 smoke 紅窗與 dist 打包互斥（撞 paid-beta #14 時程需協調） |
 | 其餘 product efforts | — | — | **resolved**（見下表） |
 
 ## Resolved this session chain

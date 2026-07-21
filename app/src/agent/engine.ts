@@ -7,7 +7,6 @@
 import { v4 as uuid } from 'uuid'
 import type {
   AgentState,
-  ExecutionStep,
   InterventionState,
   LlmSettings,
   LogEntry,
@@ -17,22 +16,11 @@ import type {
   SubAgentNode,
 } from './types'
 import { buildParseResult, formatPlanBubble, parseUserRequest } from './parser'
-import { evaluateDoD } from './dodEvaluator'
 import { parseWithLlm } from './llmParser'
 import { replanCorrectiveSteps } from './replan'
-import {
-  buildContinueGoalSnapshot,
-  formatContinueGoalOffer,
-} from './continueGoal'
-import { evaluateSafety, formatPayloadForDisplay } from './safety'
-import { emptyKnowledge, extractKnowledge } from './knowledge'
-import {
-  DEFAULT_LLM_SETTINGS,
-  resolveRoleModel,
-  synthesizeReport,
-  withRoleModel,
-} from './llm'
-import { learningLoop } from './hermes/learning'
+import { formatContinueGoalOffer } from './continueGoal'
+import { emptyKnowledge } from './knowledge'
+import { DEFAULT_LLM_SETTINGS, resolveRoleModel, withRoleModel } from './llm'
 import { BUILTIN_RUNNER_CAPABILITIES } from './runners'
 import { skillsStore } from './hermes/skills'
 import {
@@ -41,12 +29,8 @@ import {
   type ScheduleTriggerValidation,
 } from './scheduler'
 import { validateEventTriggerSnapshot } from './eventMatcher'
-import {
-  DEFAULT_SUPERVISOR_LIMITS,
-  SupervisorViolation,
-  type SupervisorLimits,
-} from './supervisor'
-import { pickAgentForStep, runStep, type AskDecision } from './loop/stepRun.ts'
+import { runLoop, type LoopDeps, type LoopRequest } from './loop/index.ts'
+import type { AskDecision } from './loop/stepRun.ts'
 type Listener = (state: AgentState) => void
 
 /** @deprecated Alias kept so resolveIntervention's external signature is untouched — use AskDecision. */
@@ -54,10 +38,6 @@ type InterventionDecision = AskDecision
 
 function nowTime(): string {
   return new Date().toLocaleTimeString('en-GB', { hour12: false })
-}
-
-function delay(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
 }
 
 function emptyIntervention(): InterventionState {
@@ -133,15 +113,6 @@ export class AgentLoopEngine {
     }
   }
 
-  private supervisorLimits(): SupervisorLimits {
-    const kb = this.settings.maxToolPayloadKb || 50
-    return {
-      ...DEFAULT_SUPERVISOR_LIMITS,
-      maxToolPayloadBytes: Math.max(4, kb) * 1024,
-      maxToolRounds: this.settings.maxToolRounds || 4,
-    }
-  }
-
   configure(settings: LlmSettings) {
     this.settings = { ...settings }
   }
@@ -171,27 +142,6 @@ export class AgentLoopEngine {
     }
     this.state.logs = [...this.state.logs, entry]
     this.emit()
-  }
-
-  private setStep(index: number, patch: Partial<ExecutionStep>) {
-    this.state.steps = this.state.steps.map((s, i) => (i === index ? { ...s, ...patch } : s))
-    this.emit()
-  }
-
-  private updateProgress() {
-    const done = this.state.steps.filter((s) => s.status === 'COMPLETED').length
-    const total = this.state.steps.length || 1
-    this.state.progress = Math.round((done / total) * 100)
-    this.refreshKnowledge()
-    this.emit()
-  }
-
-  private refreshKnowledge() {
-    this.state.knowledge = extractKnowledge(
-      this.state.objective,
-      this.stepOutputs,
-      this.state.confidence,
-    )
   }
 
   private minConfidence(): number {
@@ -671,21 +621,54 @@ export class AgentLoopEngine {
       }
       // Phase 4 / R7: onUserTurn is owned by the coordinator for user chat turns only.
 
-      // Must use refined loop type (not the pre-LLM heuristic only)
-      switch (this.state.loopConfig.loopType) {
-        case 'Turn-based':
-          await this.runTurnBased()
-          break
-        case 'Goal-based':
-          await this.runGoalBased()
-          break
-        case 'Time-based':
-          await this.runTimeBased()
-          break
-        case 'Proactive':
-          await this.runProactive()
-          break
+      // Must use refined loop type (not the pre-LLM heuristic only) — Loop Runner
+      // owns pattern dispatch + DoD/replan/continueGoal iteration (ticket 03);
+      // this engine remains its sole production adapter (registry, store wiring,
+      // HITL bridging). Typed trigger evidence is required per pattern at the
+      // type level — see CONTEXT.md「Loop Runner（迴圈執行器）」.
+      const loopType = this.state.loopConfig.loopType
+      const req: LoopRequest =
+        loopType === 'Turn-based'
+          ? { pattern: 'turn' }
+          : loopType === 'Goal-based'
+            ? { pattern: 'goal' }
+            : loopType === 'Time-based'
+              ? { pattern: 'time', claim: this.state.scheduleTrigger! }
+              : { pattern: 'proactive', evidence: this.state.eventTrigger! }
+      const deps: LoopDeps = {
+        publish: (s) => {
+          this.state = s
+          this.emit()
+        },
+        ask: () => this.waitForIntervention(),
+        waitForUserAck: () => this.waitForUser(),
+        log: (level, message) => this.log(level, message),
+        shouldAbort: () => this.aborted,
+        settings: this.settings,
+        overrides: this.overrides,
+        projectGuidance: this.projectGuidance,
+        sessionRecallBlock: this.sessionRecallBlock,
+        attachedSkillContext: this.attachedSkillContext,
+        userAttachments: this.userAttachments,
+        onGoalIncomplete: (snapshot) => {
+          void import('../store/threadStore').then(({ useThreadStore }) => {
+            const thr = useThreadStore.getState()
+            const tid = this.overrides.threadId || thr.runningThreadId || thr.activeId
+            if (!tid) return
+            thr.setContinueGoal(tid, snapshot)
+            thr.pushBubble(tid, 'system', formatContinueGoalOffer(snapshot))
+          })
+        },
+        onGoalCleared: () => {
+          void import('../store/threadStore').then(({ useThreadStore }) => {
+            const thr = useThreadStore.getState()
+            const tid = this.overrides.threadId || thr.runningThreadId || thr.activeId
+            if (tid) thr.setContinueGoal(tid, null)
+          })
+        },
       }
+      const { state: loopState } = await runLoop(req, this.state, deps)
+      this.state = loopState
 
       // The controller may explicitly choose a post-state for an automation
       // or integration run; apply it after pattern finalization so Goal/Turn
@@ -697,16 +680,9 @@ export class AgentLoopEngine {
         }
       }
 
-      if (this.aborted && (this.state.status === 'running' || this.state.status === 'manual_intervention')) {
-        this.state.status = 'halted'
-        this.state.haltReason = this.state.haltReason || 'Stopped by user'
-        this.log('WARN', 'Execution aborted by user')
-      }
-
       this.state.metrics.executionMs = Date.now() - t0
       this.state.metrics.apiCredits = this.state.tokensUsed
       this.state.finishedAt = new Date().toISOString()
-      this.refreshKnowledge()
       this.emit()
       return this.getState()
     } catch (err) {
@@ -750,585 +726,6 @@ export class AgentLoopEngine {
     ]
   }
 
-  private setSubAgent(
-    name: string,
-    status: SubAgentNode['status'],
-    lastMessage?: string,
-    modelMeta?: { model?: string; modelSource?: SubAgentNode['modelSource'] },
-  ) {
-    this.state.subAgents = this.state.subAgents.map((a) =>
-      a.name === name || a.role === name
-        ? {
-            ...a,
-            status,
-            lastMessage: lastMessage ?? a.lastMessage,
-            model: modelMeta?.model ?? a.model,
-            modelSource: modelMeta?.modelSource ?? a.modelSource,
-          }
-        : a,
-    )
-    this.emit()
-  }
-
-  private async executeStepWithAgent(
-    index: number,
-    iteration: number,
-  ): Promise<{ ok: boolean; output: string; durationMs: number }> {
-    const agentName = pickAgentForStep(this.state, index, this.state.steps.length, this.settings)
-    const result = await runStep(this.state, index, iteration, agentName, {
-      publish: (s) => {
-        this.state = s
-        this.emit()
-      },
-      // ticket 02: engine still owns HITL timing (loopRunner takes it over in ticket 03) —
-      // waitForIntervention already applies the unattended/interactive timeout policy.
-      ask: () => this.waitForIntervention(),
-      log: (level, message) => this.log(level, message),
-      shouldAbort: () => this.aborted,
-      settings: this.settings,
-      overrides: this.overrides,
-      projectGuidance: this.projectGuidance,
-      sessionRecallBlock: this.sessionRecallBlock,
-      attachedSkillContext: this.attachedSkillContext,
-      userAttachments: this.userAttachments,
-      stepOutputsSoFar: this.stepOutputs,
-    })
-    this.userAttachments = result.userAttachments
-    if (result.contributesOutput) {
-      this.stepOutputs.push(result.output)
-      this.updateProgress()
-      if (!result.ok) this.emit()
-    }
-    return { ok: result.ok, output: result.output, durationMs: result.durationMs }
-  }
-
-  // ── Pattern 1: Turn-based ─────────────────────────────────────
-
-  private async runTurnBased() {
-    this.log('INFO', 'Pattern: Turn-based — 1 Input = 1 Action')
-    if (!this.state.steps[0]) return
-
-    const { ok, output } = await this.executeStepWithAgent(0, 1)
-    if (!ok || this.aborted) return
-
-    this.state.confidence = Math.max(this.state.confidence, 0.92)
-    this.state.result = output
-    this.state.reportTitle = 'Turn Result'
-    const configuredNextState = this.overrides.nextState || this.state.loopConfig.nextState
-    // Chat-lite / composer / automation: do not block a run slot on ACK.
-    // Explicit Turn on Execution page (no sourceKind) still waits for user validation.
-    const chatLiteAck =
-      this.overrides.unattended === true ||
-      this.overrides.sourceKind === 'composer' ||
-      this.overrides.sourceKind === 'slash' ||
-      this.overrides.sourceKind === 'retry'
-    if (chatLiteAck || configuredNextState === 'Dispatch Webhook') {
-      this.log(
-        'INFO',
-        configuredNextState === 'Dispatch Webhook'
-          ? 'Turn post-state：完成後 Dispatch Webhook'
-          : this.overrides.unattended === true
-          ? '無人值守 Turn-based：跳過人工 ACK，自動確認'
-          : '對話 Turn/Chat-lite：自動確認，不等待 ACK',
-      )
-    } else {
-      this.log('SUCCESS', 'Action completed. Awaiting user validation (ACK).')
-      this.state.loopConfig = {
-        ...this.state.loopConfig,
-        nextState: 'Await User Input',
-      }
-      await this.waitForUser()
-      if (this.aborted) return
-    }
-
-    this.state.status = 'success'
-    this.state.progress = 100
-    this.state.loopConfig = {
-      ...this.state.loopConfig,
-      nextState:
-        this.overrides.nextState ||
-        (configuredNextState === 'Dispatch Webhook' ? 'Dispatch Webhook' : 'Halt'),
-    }
-    this.setSubAgent('Core', 'done')
-    this.log('SUCCESS', chatLiteAck ? 'Turn complete (auto-ACK).' : 'User ACK received. Turn complete.')
-    this.noteLearningSuccess('Turn-based')
-    this.emit()
-  }
-
-  // ── Pattern 2: Goal-based ─────────────────────────────────────
-
-  private async runGoalBased() {
-    const max = this.maxIterations()
-    this.state.loopConfig.maxIterations = max
-    this.log('INFO', 'Pattern: Goal-based — Autonomous iteration until DoD')
-    this.log(
-      'INFO',
-      this.subAgentsEnabled()
-        ? 'Spawning orchestrator agent...'
-        : 'Sub Agent 關閉：由主代理直接執行。',
-    )
-    this.setSubAgent('Manager', 'active')
-    await delay(300)
-    this.log('INFO', 'Allocating resources for semantic processing.')
-    this.setSubAgent('Analyzer-1', 'idle')
-    this.setSubAgent('Writer', 'idle')
-
-    for (let iteration = 1; iteration <= max; iteration++) {
-      if (this.aborted) return
-      this.state.currentIteration = iteration
-      this.state.status = 'running'
-      this.log('PROCESS', `── Iteration ${iteration}/${max} ──`)
-      this.emit()
-
-      let brokeEarly = false
-      for (let i = 0; i < this.state.steps.length; i++) {
-        if (this.aborted) return
-        const step = this.state.steps[i]
-        if (step.status === 'COMPLETED' && iteration > 1) continue
-
-        const { ok } = await this.executeStepWithAgent(i, iteration)
-        if (!ok) return
-
-        // Soft retry path (simulation only, first mid step)
-        if (
-          !this.useLlm() &&
-          iteration === 1 &&
-          i === Math.floor(this.state.steps.length / 2) &&
-          Math.random() < 0.12
-        ) {
-          this.log('WARN', `Validation low confidence (${this.state.confidence.toFixed(2)})`)
-          this.setStep(i, { status: 'PENDING' })
-          this.log('INFO', `Initiating correction loop (Attempt ${iteration}/${max})`)
-          brokeEarly = true
-          break
-        }
-      }
-
-      if (brokeEarly) continue
-
-      const allDone = this.state.steps.every((s) => s.status === 'COMPLETED')
-      let dodMet = allDone && this.state.confidence >= this.minConfidence()
-      let missing: string[] = []
-
-      // 規格 02 Pattern 2：由 validator 對實際產出做語意驗收。
-      // 模擬模式或模型輸出失效時維持既有 confidence fallback。
-      if (allDone && this.useLlm()) {
-        try {
-          const verdict = await evaluateDoD(
-            this.executionSettings('analyst'),
-            this.state.objective,
-            this.state.loopConfig.definitionOfDone,
-            this.stepOutputs,
-          )
-          dodMet = verdict.met
-          missing = verdict.missing
-          this.lastDodMissing = missing
-          this.state.confidence = verdict.confidence
-          this.state.tokensUsed += verdict.tokensUsed
-          this.state.metrics.apiCredits = this.state.tokensUsed
-          this.log(
-            'EVAL',
-            `DoD 語意驗收：met=${verdict.met} confidence=${verdict.confidence.toFixed(2)}` +
-              (missing.length ? ` · 缺口：${missing.join(' | ').slice(0, 300)}` : ''),
-          )
-        } catch (e) {
-          this.log(
-            'WARN',
-            `DoD 語意驗收失敗，回退步驟/信心啟發式：${e instanceof Error ? e.message : e}`,
-          )
-        }
-      }
-
-      this.log(
-        'EVAL',
-        `DoD check: steps=${allDone}, confidence=${this.state.confidence.toFixed(2)} (≥${this.minConfidence().toFixed(2)}) → ${dodMet}`,
-      )
-
-      if (dodMet) {
-        await this.finalizeSuccess()
-        return
-      }
-
-      if (iteration >= max) {
-        this.state.status = 'failed'
-        this.state.haltReason = 'Max Iterations Reached'
-        this.log('ERROR', `Max iterations (${max}) reached without meeting DoD.`)
-        this.log('WARN', this.state.loopConfig.fallbackProtocol)
-        this.setSubAgent('Manager', 'error')
-        this.noteLearningFailure(this.state.loopConfig.loopType, this.state.haltReason)
-        this.persistContinueGoal('failed', this.lastDodMissing)
-        this.emit()
-        return
-      }
-
-      if (allDone && !dodMet) {
-        // 全完成但 DoD 未達：以缺口 replan，避免盲重跑同一計畫空轉。
-        if (missing.length) {
-          this.stepOutputs.push(
-            `### 上一輪 DoD 缺口（本輪必須補齊）\n${missing.map((item) => `- ${item}`).join('\n')}`,
-          )
-          this.state.steps = replanCorrectiveSteps(missing, this.state.objective, {
-            maxSteps: 3,
-          })
-          this.state.loopConfig = {
-            ...this.state.loopConfig,
-            executionSequence: this.state.steps.map((s) => s.description),
-          }
-          this.log(
-            'PROCESS',
-            `迭代 replan：${missing.length} 項缺口 → ${this.state.steps.length} 個修正步驟`,
-          )
-        } else {
-          this.state.steps = this.state.steps.map((step) => ({
-            ...step,
-            status: 'PENDING' as const,
-          }))
-          this.log('PROCESS', 'DoD 未達且無 missing 明細：重跑全部步驟')
-        }
-      } else {
-        this.state.steps = this.state.steps.map((step) =>
-          step.status === 'COMPLETED' ? step : { ...step, status: 'PENDING' as const },
-        )
-      }
-      this.emit()
-    }
-  }
-
-  private async finalizeSuccess() {
-    this.setSubAgent('Manager', 'done')
-    this.setSubAgent('Analyzer-1', 'done')
-    this.setSubAgent('Writer', 'active')
-
-    let report = this.synthesizeResultLocal()
-    if (this.useLlm()) {
-      try {
-        this.log('PROCESS', 'Writer synthesizing final report via LLM...')
-        const writerResolved = this.executionModel('synthesizer')
-        const writerSettings = this.executionSettings('synthesizer')
-        this.log(
-          'INFO',
-          `Writer model=${writerSettings.model} (${this.subAgentsEnabled() ? (writerResolved.usedFallback ? 'fallback→global' : 'roleModels') : 'primary/global'})`,
-        )
-        this.setSubAgent('Writer', 'active', undefined, {
-          model: writerResolved.model || undefined,
-          modelSource: writerResolved.source,
-        })
-        const r = await synthesizeReport(
-          writerSettings,
-          this.state.objective,
-          this.stepOutputs,
-          this.state.loopConfig.definitionOfDone,
-        )
-        report = r.content
-        this.state.tokensUsed += r.tokensUsed
-        this.state.metrics.apiCredits = this.state.tokensUsed
-        this.log('SUCCESS', `Report synthesized (+${r.tokensUsed} tokens)`)
-      } catch (e) {
-        this.log('WARN', `LLM synthesis failed; using local report. ${e instanceof Error ? e.message : e}`)
-      }
-    }
-
-    this.setSubAgent('Writer', 'done')
-    this.state.result = report
-    this.state.reportTitle = this.deriveReportTitle()
-    this.state.status = 'success'
-    this.state.progress = 100
-    // Goal-based stays autonomous (spec 02: no per-step ACK) — this does not block
-    // completion. It only lets the UI surface a "reply to continue" hint when the
-    // synthesized result itself poses a follow-up question. See L6/P1-4 in
-    // docs/CONVERSATION_LOOP_HERMES_FLOW.md.
-    this.state.loopConfig = {
-      ...this.state.loopConfig,
-      nextState:
-        this.overrides.nextState ||
-        (this.state.loopConfig.nextState === 'Dispatch Webhook'
-          ? 'Dispatch Webhook'
-          : this.resultAwaitsReply(report)
-            ? 'Await User Input'
-            : 'Halt'),
-    }
-    this.refreshKnowledge()
-    this.log('SUCCESS', 'Definition of Done met. Terminating loop.')
-    this.noteLearningSuccess(this.state.loopConfig.loopType)
-    this.clearContinueGoal()
-    this.emit()
-  }
-
-  /** Heuristic: does the synthesized result end by asking the user something? */
-  private resultAwaitsReply(text: string): boolean {
-    const trimmed = (text || '').trim()
-    if (!trimmed) return false
-    const tail = trimmed.slice(-240)
-    if (/[?？]\s*$/.test(tail)) return true
-    return /(是否|要不要|需要我|想要我|你希望|你想|would you like|do you want|should i|shall i|let me know)/i.test(tail)
-  }
-
-  /** Persist unfinished Goal so chat can resume same DoD. */
-  private persistContinueGoal(
-    lastStatus: 'failed' | 'halted',
-    missing: string[],
-  ) {
-    try {
-      const digest =
-        this.state.result?.trim() ||
-        this.stepOutputs.slice(-2).join('\n---\n').slice(0, 2000) ||
-        ''
-      const snap = buildContinueGoalSnapshot({
-        objective: this.state.objective,
-        definitionOfDone: this.state.loopConfig.definitionOfDone,
-        loopType: this.state.loopConfig.loopType,
-        steps: this.state.steps,
-        missing,
-        priorDigest: digest,
-        lastStatus,
-        runId: this.state.id,
-      })
-      void import('../store/threadStore').then(({ useThreadStore }) => {
-        const thr = useThreadStore.getState()
-        const tid =
-          this.overrides.threadId || thr.runningThreadId || thr.activeId
-        if (!tid) return
-        thr.setContinueGoal(tid, snap)
-        thr.pushBubble(tid, 'system', formatContinueGoalOffer(snap))
-      })
-      this.log('INFO', 'continueGoal 已保存 — 可「補齊缺口繼續」')
-    } catch {
-      /* non-fatal */
-    }
-  }
-
-  private clearContinueGoal() {
-    try {
-      void import('../store/threadStore').then(({ useThreadStore }) => {
-        const thr = useThreadStore.getState()
-        const tid =
-          this.overrides.threadId || thr.runningThreadId || thr.activeId
-        if (tid) thr.setContinueGoal(tid, null)
-      })
-    } catch {
-      /* ignore */
-    }
-  }
-
-  private deriveReportTitle(): string {
-    const obj = this.state.objective
-    if (/market|landscape|orchestr|市場|競品/i.test(obj)) {
-      return `市場／競品分析：${obj.slice(0, 40)}`
-    }
-    if (/security|log|資安|日誌|異常/i.test(obj)) {
-      return `資安／日誌分析：${obj.slice(0, 40)}`
-    }
-    if (/price|competitor|價格|定價/i.test(obj)) {
-      return `定價比較：${obj.slice(0, 40)}`
-    }
-    return `代理報告：${obj.slice(0, 48)}${obj.length > 48 ? '…' : ''}`
-  }
-
-  // ── Pattern 3: Time-based ─────────────────────────────────────
-
-  private async runTimeBased() {
-    this.log('INFO', 'Pattern: Time-based — Cron-job style execution')
-    const trigger = this.state.scheduleTrigger
-    this.log(
-      'INFO',
-      trigger
-        ? `Trigger window validated：${trigger.jobId} @ ${trigger.triggeredAt}`
-        : `Trigger window validated at ${nowTime()}`,
-    )
-    this.setSubAgent('Manager', 'active')
-
-    for (let i = 0; i < this.state.steps.length; i++) {
-      if (this.aborted) return
-      const { ok } = await this.executeStepWithAgent(i, 1)
-      if (!ok) return
-    }
-
-    this.finalizePatternRun({
-      reportTitle: 'Scheduled Job Report',
-      loopType: 'Time-based',
-      successLog: 'Time-based execution validated and delivered.',
-    })
-  }
-
-  /** Shared success/fail scoring for Time / Proactive (no fake 0.99 on total tool failure). */
-  private finalizePatternRun(opts: {
-    reportTitle: string
-    loopType: string
-    successLog: string
-  }) {
-    const tools = this.state.toolCalls || []
-    const completed = this.state.steps.filter((s) => s.status === 'COMPLETED').length
-    const stepRatio = this.state.steps.length
-      ? completed / this.state.steps.length
-      : 0
-    const toolOkRatio = tools.length
-      ? tools.filter((t) => t.ok).length / tools.length
-      : 1
-
-    if (tools.length > 0 && tools.every((t) => !t.ok)) {
-      this.state.confidence = Math.min(0.35, toolOkRatio)
-      this.state.status = 'failed'
-      this.state.haltReason = 'All tool calls failed — cannot claim delivery success'
-      this.state.progress = 100
-      this.state.result = this.synthesizeResultLocal()
-      this.state.reportTitle = opts.reportTitle
-      this.setSubAgent('Manager', 'error')
-      this.log('ERROR', this.state.haltReason)
-      this.noteLearningFailure(opts.loopType, this.state.haltReason)
-      this.emit()
-      return
-    }
-
-    // 0.55 base + steps + tools (cap 0.99)
-    this.state.confidence = Math.min(
-      0.99,
-      0.55 + 0.3 * stepRatio + 0.15 * toolOkRatio,
-    )
-    this.state.status = 'success'
-    this.state.progress = 100
-    this.state.result = this.synthesizeResultLocal()
-    this.state.reportTitle = opts.reportTitle
-    this.setSubAgent('Manager', 'done')
-    this.log(
-      'SUCCESS',
-      `${opts.successLog} (confidence=${this.state.confidence.toFixed(2)} tools_ok=${(toolOkRatio * 100).toFixed(0)}%)`,
-    )
-    this.noteLearningSuccess(opts.loopType)
-    this.emit()
-  }
-
-  // ── Pattern 4: Proactive ──────────────────────────────────────
-
-  private async runProactive() {
-    this.log('INFO', 'Pattern: Proactive — Event-driven execution')
-    const trigger = this.state.eventTrigger
-    this.log(
-      'SUCCESS',
-      trigger
-        ? `Event matcher predicates verified：${trigger.eventName} · ${trigger.matchedAt}`
-        : 'Event matcher evidence missing — no action taken.',
-    )
-
-    for (let i = 0; i < this.state.steps.length; i++) {
-      if (this.aborted) return
-      const { ok } = await this.executeStepWithAgent(i, 1)
-      if (!ok) return
-    }
-
-    this.finalizePatternRun({
-      reportTitle: 'Proactive Event Report',
-      loopType: 'Proactive',
-      successLog: 'Event action completed successfully.',
-    })
-  }
-
-  /** Shared learning hook for Goal / Time / Proactive success */
-  private noteLearningSuccess(loopType: string) {
-    try {
-      learningLoop.onGoalSuccess({
-        objective: this.state.objective,
-        steps: this.state.steps.map((s) => ({
-          description: s.description,
-          result: s.result,
-        })),
-        // P2: tool trajectory for higher-quality skill drafts
-        toolCalls: (this.state.toolCalls || [])
-          .filter((t) => t.ok)
-          .slice(0, 16)
-          .map((t) => ({
-            tool: t.tool,
-            summary: (t.output || '').slice(0, 120),
-          })),
-        loopType,
-        memoryEnabled: this.settings.memoryEnabled,
-        memoryWriteEnabled:
-          this.settings.memoryWriteEnabled !== false &&
-          this.overrides.temporary !== true &&
-          this.settings.temporaryChatDefault !== true,
-      })
-      this.log('INFO', '學習迴圈：已產生技能草稿／記憶摘要（見學習中心）')
-    } catch {
-      /* non-fatal */
-    }
-  }
-
-  /** Shared failure-lesson hook for max iterations and failed delivery runs. */
-  private noteLearningFailure(loopType: string, haltReason: string) {
-    try {
-      learningLoop.onGoalFailure({
-        objective: this.state.objective,
-        haltReason,
-        loopType,
-        failedTools: [
-          ...new Set((this.state.toolCalls || []).filter((tool) => !tool.ok).map((tool) => tool.tool)),
-        ],
-        memoryEnabled: this.settings.memoryEnabled,
-        memoryWriteEnabled:
-          this.settings.memoryWriteEnabled !== false &&
-          this.overrides.temporary !== true &&
-          this.settings.temporaryChatDefault !== true,
-      })
-      this.log('INFO', '學習迴圈：已記錄失敗教訓（見學習中心／記憶）')
-    } catch {
-      /* learning must never alter task termination */
-    }
-  }
-
-  private synthesizeResultLocal(): string {
-    const obj = this.state.objective
-    const title = this.deriveReportTitle()
-    const steps = this.state.steps
-      .map(
-        (s) =>
-          `- ✓ **${s.description}**${s.assignedAgent ? ` _(${s.assignedAgent})_` : ''}${
-            s.durationMs ? ` — ${(s.durationMs / 1000).toFixed(1)}s` : ''
-          }`,
-      )
-      .join('\n')
-
-    const findings = this.stepOutputs
-      .slice(0, 3)
-      .map((o, i) => `### Finding ${i + 1}\n${o.slice(0, 400)}`)
-      .join('\n\n')
-
-    return `# ${title}
-
-This report synthesizes findings from ${this.subAgentsEnabled() ? `${this.state.subAgents.length} sub-agents` : 'the primary agent'} analyzing the objective.
-
-## Executive Summary
-
-${obj}
-
-The multi-agent loop completed with confidence **${this.state.confidence.toFixed(2)}** after **${this.state.currentIteration}** iteration(s).
-
-## Key Trends
-
-- Sub-agent specialization improved step isolation and auditability.
-- Validation against Definition of Done prevented premature halt.
-- ${this.useLlm() ? 'Cloud LLM synthesis enabled for narrative quality.' : 'Simulation mode produced structured placeholder insights.'}
-
-## Execution Steps
-${steps}
-
-## Definition of Done
-${this.state.loopConfig.definitionOfDone}
-
-## Data Insights
-
-${findings || '_No intermediate findings captured._'}
-
-## Payload Example
-
-\`\`\`json
-{
-  "agent_id": "orchestrator_alpha",
-  "task": "goal_execution",
-  "session_id": "${this.state.id}",
-  "sub_agents": ${JSON.stringify(this.state.subAgents.map((a) => a.name))}
-}
-\`\`\`
-`
-  }
 }
 
 /**
