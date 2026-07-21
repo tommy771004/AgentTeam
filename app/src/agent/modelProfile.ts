@@ -10,7 +10,7 @@
  */
 
 import type { LlmSettings, ModelProfile } from './types'
-import { chatCompletionWithTools } from './llm'
+import { chatCompletionWithTools } from './llm.ts'
 
 /** 1×1 transparent PNG — cheapest possible vision probe payload. */
 const TINY_PNG =

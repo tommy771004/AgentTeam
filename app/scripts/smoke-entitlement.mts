@@ -96,7 +96,10 @@ assert.ok(!read('src/agent/settingsExport.ts').includes('entitlement'), 'export/
 
 // ── 6. Source drift guards: runtime + UI seams actually wire through entitlement.ts ──
 const runtimeSrc = read('src/agent/capabilities/runtime.ts')
-assert.ok(runtimeSrc.includes("from '../entitlement'"), 'capabilities/runtime.ts must import the single entitlement boundary')
+assert.ok(
+  runtimeSrc.includes("from '../entitlement'") || runtimeSrc.includes("from '../entitlement.ts'"),
+  'capabilities/runtime.ts must import the single entitlement boundary',
+)
 assert.ok(runtimeSrc.includes('isCapabilityEntitled'), 'assembleCapabilities must gate through isCapabilityEntitled, not a reimplemented check')
 assert.ok(runtimeSrc.includes('requiresEntitlement'), 'assembleCapabilities must gate on AgentCapability.requiresEntitlement')
 

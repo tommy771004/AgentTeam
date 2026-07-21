@@ -82,7 +82,12 @@ export default defineConfig({
           },
         },
       },
-      renderer: {},
+      // No `renderer` option: vite-plugin-electron-renderer's whole purpose is
+      // polyfilling Node builtins via a real `require` in the renderer, which
+      // needs nodeIntegration:true (see its README warning) — this app runs
+      // contextIsolation:true/nodeIntegration:false (electron/main.ts), so the
+      // shim's `const _r_ = require` throws "require is not defined" on any
+      // renderer-reachable `node:*` import and blanks the whole app.
     }),
   ],
   resolve: {

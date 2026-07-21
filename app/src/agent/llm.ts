@@ -205,6 +205,72 @@ export interface LlmToolsResult extends LlmChatResult {
   finishReason?: string
 }
 
+/** Everything the transport needs, already sanitized and past the Outbound Data Gate. */
+export type LlmTransportRequest = {
+  baseUrl: string
+  apiKey: string
+  fallbackModels: string[]
+  body: Record<string, unknown> & { model: string; messages: unknown[] }
+  runId?: string
+  effectiveMode: ReturnType<typeof effectiveOutboundGuardFromSettings>
+  providerConnectionId: string
+  outboundProfileSource: 'company' | 'baseline' | 'none'
+  fallbackModel: string
+}
+
+/** Loop Runner test seam — swap the network/IPC hop below sanitize → gate. */
+export type LlmTransport = (req: LlmTransportRequest) => Promise<LlmToolsResult>
+
+async function defaultLlmTransport(req: LlmTransportRequest): Promise<LlmToolsResult> {
+  if (window.subagents?.llm?.chat) {
+    const r = await window.subagents.llm.chat({
+      baseUrl: req.baseUrl,
+      apiKey: req.apiKey,
+      fallbackModels: req.fallbackModels,
+      ...req.body,
+      // Ticket 24: main records metadata-only evidence at true transport
+      runId: req.runId,
+      effectiveMode: req.effectiveMode,
+      providerConnectionId: req.providerConnectionId,
+      outboundProfileSource: req.outboundProfileSource,
+    })
+    return normalizeChatResult(r, req.fallbackModel)
+  }
+
+  const base = req.baseUrl.replace(/\/$/, '')
+  const res = await fetch(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${req.apiKey}`,
+    },
+    body: JSON.stringify(req.body),
+  })
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText)
+    const retryAfter = Number(res.headers.get('retry-after') || '')
+    const hint =
+      Number.isFinite(retryAfter) && retryAfter > 0
+        ? ` (retry-after:${Math.ceil(retryAfter)}s)`
+        : ''
+    throw new Error(`LLM HTTP ${res.status}${hint}: ${errText.slice(0, 200)}`)
+  }
+
+  const data = await res.json()
+  return normalizeChatResult(data, req.fallbackModel)
+}
+
+let activeLlmTransport: LlmTransport = defaultLlmTransport
+
+/**
+ * Loop Runner deepening seam — inject a scripted transport for smokes.
+ * `undefined` restores the default window.subagents.llm.chat / fetch selection.
+ */
+export function setLlmTransport(t?: LlmTransport): void {
+  activeLlmTransport = t ?? defaultLlmTransport
+}
+
 export async function chatCompletion(
   settings: LlmSettings,
   messages: Array<{ role: string; content: string }>,
@@ -309,45 +375,18 @@ export async function chatCompletionWithTools(
 
   return callWithResilience(
     breakerKey(settings.baseUrl, settings.apiProvider),
-    async () => {
-      if (window.subagents?.llm?.chat) {
-        const r = await window.subagents.llm.chat({
-          baseUrl: settings.baseUrl,
-          apiKey: settings.apiKey,
-          fallbackModels: settings.fallbackModels,
-          ...gatedBody,
-          // Ticket 24: main records metadata-only evidence at true transport
-          runId: opts?.runId,
-          effectiveMode,
-          providerConnectionId: connectionId,
-          outboundProfileSource,
-        })
-        return normalizeChatResult(r, settings.model)
-      }
-
-      const base = settings.baseUrl.replace(/\/$/, '')
-      const res = await fetch(`${base}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${settings.apiKey}`,
-        },
-        body: JSON.stringify(gatedBody),
-      })
-
-      if (!res.ok) {
-        const errText = await res.text().catch(() => res.statusText)
-        const retryAfter = Number(res.headers.get('retry-after') || '')
-        const hint =
-          Number.isFinite(retryAfter) && retryAfter > 0
-            ? ` (retry-after:${Math.ceil(retryAfter)}s)`
-            : ''
-        throw new Error(`LLM HTTP ${res.status}${hint}: ${errText.slice(0, 200)}`)
-      }
-
-      const data = await res.json()
-      return normalizeChatResult(data, settings.model)
-    },
+    () =>
+      activeLlmTransport({
+        baseUrl: settings.baseUrl,
+        apiKey: settings.apiKey,
+        fallbackModels: settings.fallbackModels,
+        body: gatedBody,
+        runId: opts?.runId,
+        effectiveMode,
+        providerConnectionId: connectionId,
+        outboundProfileSource,
+        fallbackModel: settings.model,
+      }),
     {
       maxAttempts: settings.llmRetryMaxAttempts,
       breakerEnabled: settings.llmCircuitBreakerEnabled !== false,

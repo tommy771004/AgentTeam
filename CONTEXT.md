@@ -25,17 +25,22 @@ One message the user sends from the composer. Owns busy policy (steer/queue), th
 _Avoid_: using "turn" interchangeably with "Loop run" — a single chat turn can dispatch a Turn-based, Goal-based, Time-based, or Proactive loop run underneath it; they are different layers (see `docs/CONVERSATION_LOOP_HERMES_FLOW.md` §5.2).
 
 **Loop run**:
-One `agentEngine.start()` invocation (or one external CLI execution) — the unit that actually Parses (builtin only), picks a Loop Pattern (Turn/Goal/Time/Proactive per `docs/02_Execution_Rules`), executes steps, and evaluates DoD (builtin only). Default product behavior is **one run at a time**; with `concurrentRunsEnabled` (opt-in, ADR-0003) multiple loop runs may be in flight up to `maxConcurrentRuns`, each still 1:1 with the chat turn / automation tick that started it and isolated by `runId`.
+One `agentEngine.start()` invocation (or one external CLI execution) — the unit that actually Parses (builtin only), picks a Loop Pattern (Turn/Goal/Time/Proactive per `docs/02_Execution_Rules`), executes steps, and evaluates DoD (builtin only). The builtin loop semantics are owned by the **Loop Runner**; `agentEngine` remains the invocation point. Default product behavior is **one run at a time**; with `concurrentRunsEnabled` (opt-in, ADR-0003) multiple loop runs may be in flight up to `maxConcurrentRuns`, each still 1:1 with the chat turn / automation tick that started it and isolated by `runId`.
 _Avoid_: "run" alone when the distinction from "chat turn" matters — spell out which layer.
 _Avoid_: describing concurrency as always-on global multi-run — default remains single-run until the user opts in.
+
+**Loop Runner（迴圈執行器）**:
+The builtin execution core (`agent/loop/`) that owns the four Loop Pattern cycles, step execution, DoD/replan, and the fail-closed admission check on typed trigger evidence. Its only outward interface is `runLoop`; `agentEngine` is its sole production adapter (run registry, UI store wiring, human-approval bridging). External CLI runs never enter it.
+_Avoid_: using "engine" for the execution core itself — the engine is the adapter, not the loop semantics.
 
 **Task run (coordinator)**:
 One `taskRunCoordinator.runTask` admission — capacity reserve, attachment prepare, thread bind, beforeRun, dispatch snapshot, and single finalization. Every product entry (composer, slash, schedule, webhook, telegram, delegate) must enter here.
 _Avoid_: calling `dispatchThreadTask` or `startExecution` from UI pages.
 
 **Time-based / Proactive trigger**:
-Time-based requires a claimed ScheduledJob snapshot; Proactive requires event-matcher evidence. Conversation keywords alone never execute these modes (consent-first automation suggestion only).
+Time-based requires a claimed ScheduledJob snapshot; Proactive requires event-matcher evidence. Conversation keywords alone never execute these modes (consent-first automation suggestion only). The claim/evidence travels as a typed, required part of the loop request and is asserted fail-closed at the Loop Runner's single admission point — an evidence-less Time/Proactive request is unrepresentable at the type level and refused at runtime.
 _Avoid_: treating "每天 08:00 …" in chat as an automatic scheduled run.
+_Avoid_: re-verifying triggers at scattered call sites — issuance stays with scheduler/event matcher, assertion happens once at admission.
 
 **External CLI run**:
 `executionKind: 'external'` via local CLI providers. Declares no parse/DoD/iterate/continueGoal/progressive capabilities until a verified prompt contract is enabled (`agent/runners/`).

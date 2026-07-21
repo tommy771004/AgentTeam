@@ -3,7 +3,7 @@
  * 無法取得或解析 LLM 判定時拋出，讓 engine 安全回退既有啟發式。
  */
 
-import { chatCompletion } from './llm'
+import { chatCompletion } from './llm.ts'
 import type { LlmSettings } from './types'
 
 export interface DodVerdict {

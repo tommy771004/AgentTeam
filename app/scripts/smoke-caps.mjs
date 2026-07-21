@@ -373,10 +373,12 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   assert.match(types, /subAgentsEnabled: boolean/)
   assert.match(llm, /subAgentsEnabled: false/)
   assert.match(engine, /private subAgentsEnabled\(\)/)
-  // Primary/subagent LLM calls live on the heuristic step strategy (thin adapter)
-  const strategies = fs.readFileSync(path.join(appRoot, 'src/agent/stepStrategies.ts'), 'utf8')
+  // Primary/subagent LLM calls live on the heuristic step strategy (thin adapter);
+  // dispatch wiring itself lives in the Loop Runner's step-execution seam (ticket 02).
+  const strategies = fs.readFileSync(path.join(appRoot, 'src/agent/loop/strategies.ts'), 'utf8')
   assert.match(strategies, /runPrimaryAgentTask/)
-  assert.match(engine, /createStepStrategies/)
+  const stepRun = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepRun.ts'), 'utf8')
+  assert.match(stepRun, /createStepStrategies/)
   assert.match(runExternal, /opts\.sourceKind === 'delegate'/)
   assert.match(runtime, /capability\.id !== 'delegate'/)
   assert.match(decision, /Sub Agent 功能目前已關閉/)
@@ -458,13 +460,14 @@ await test('side-effect drift guard: every registry tool is read-only OR classif
 await test('toolGuard adapter wires pure decide() + full-mode safety bypass exists in engine', async () => {
   const fs = await import('node:fs')
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
-  assert.match(guard, /from '\.\/approvalDecision'/)
+  assert.match(guard, /from '\.\/approvalDecision(\.ts)?'/)
   assert.match(guard, /\bdecide\b/)
   const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
   assert.match(decision, /export function decide\b/)
   assert.match(decision, /export function decideApprovalNeed\b/)
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
-  assert.match(engine, /approvalMode === 'full'/)
+  // Safety intervention's full-mode bypass lives in the Loop Runner's step-execution seam (ticket 02).
+  const stepRun = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepRun.ts'), 'utf8')
+  assert.match(stepRun, /approvalMode === 'full'/)
 })
 
 // ── W1: runTask capacity policy (mirror of runExternal.resolveBusyPolicy) ──
@@ -521,6 +524,72 @@ await test('W1: entry drift guard — no dispatchThreadTask outside controller',
   const controller = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(controller, /resolveBusyPolicy/)
   assert.match(controller, /runId/)
+})
+
+/**
+ * Pure: given importer files, find any relative import resolving inside
+ * agent/loop/ from outside it — except agent/engine.ts, the Loop Runner's
+ * sole production adapter (CONTEXT.md「Loop Runner（迴圈執行器）」).
+ * Resolves each specifier against the importer's own directory so it holds
+ * regardless of the importer's depth in the tree.
+ */
+function findLoopRunnerImportDrift(files) {
+  const violations = []
+  const importRe = /\bfrom\s+['"]([^'"]+)['"]/g
+  for (const f of files) {
+    if (f.path === 'src/agent/engine.ts') continue
+    if (f.path.startsWith('src/agent/loop/')) continue
+    let m
+    importRe.lastIndex = 0
+    while ((m = importRe.exec(f.content))) {
+      const spec = m[1]
+      if (!spec.startsWith('.')) continue
+      const importerDir = path.posix.dirname(f.path)
+      const resolved = path.posix.normalize(path.posix.join(importerDir, spec))
+      if (resolved === 'src/agent/loop' || resolved.startsWith('src/agent/loop/')) {
+        violations.push(`${f.path} imports '${spec}' → agent/loop is engine.ts-only`)
+      }
+    }
+  }
+  return violations
+}
+
+await test('drift guard: agent/loop is imported only by engine.ts (fixture)', () => {
+  const clean = [
+    { path: 'src/agent/engine.ts', content: "import { runLoop } from './loop/index.ts'" },
+    { path: 'src/agent/runDispatch.ts', content: "import { foo } from './otherThing.ts'" },
+  ]
+  assert.deepEqual(findLoopRunnerImportDrift(clean), [])
+
+  const violating = [
+    ...clean,
+    { path: 'src/agent/runDispatch.ts', content: "import { runLoop } from './loop/index.ts'" },
+  ]
+  const hits = findLoopRunnerImportDrift(violating)
+  assert.equal(hits.length, 1)
+  assert.match(hits[0], /runDispatch\.ts/)
+
+  const nestedViolator = [
+    { path: 'src/pages/SettingsPage.tsx', content: "import { runLoop } from '../agent/loop/index.ts'" },
+  ]
+  assert.equal(findLoopRunnerImportDrift(nestedViolator).length, 1)
+})
+
+await test('drift guard: agent/loop is imported only by engine.ts (real tree)', async () => {
+  const fs = await import('node:fs')
+  const srcRoot = path.join(appRoot, 'src')
+  const entries = fs.readdirSync(srcRoot, { recursive: true, withFileTypes: true })
+  const files = []
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    if (!/\.(ts|tsx)$/.test(entry.name)) continue
+    const abs = path.join(entry.parentPath ?? entry.path, entry.name)
+    const rel = 'src/' + path.relative(srcRoot, abs).split(path.sep).join('/')
+    files.push({ path: rel, content: fs.readFileSync(abs, 'utf8') })
+  }
+  assert.ok(files.some((f) => f.path === 'src/agent/engine.ts'), 'sanity: engine.ts must be scanned')
+  const violations = findLoopRunnerImportDrift(files)
+  assert.deepEqual(violations, [], `agent/loop must only be imported by engine.ts:\n${violations.join('\n')}`)
 })
 
 await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async () => {
@@ -1182,10 +1251,11 @@ await test('P1-B: profile tools=false degrades FC before run; unknown stays perm
 
 await test('P1-B: engine + settings wiring contract', async () => {
   const fs = await import('node:fs')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
-  assert.match(engine, /modelSupports/)
-  assert.match(engine, /fcCapable !== false/)
-  assert.match(engine, /'vision'\)/)
+  // Model-profile degrade lives in the Loop Runner's step-execution seam (ticket 02).
+  const stepRun = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepRun.ts'), 'utf8')
+  assert.match(stepRun, /modelSupports/)
+  assert.match(stepRun, /fcCapable !== false/)
+  assert.match(stepRun, /'vision'\)/)
   const mp = fs.readFileSync(path.join(appRoot, 'src/agent/modelProfile.ts'), 'utf8')
   assert.match(mp, /source: 'verified'/)
   assert.match(mp, /source: 'assumed'/)
@@ -1507,13 +1577,17 @@ await test('Loop plan: parser/evaluator/iteration contracts are wired', async ()
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
   const replan = fs.readFileSync(path.join(appRoot, 'src/agent/replan.ts'), 'utf8')
-  assert.match(engine, /from '\.\/dodEvaluator'/)
-  assert.ok(engine.includes('evaluateDoD('))
+  // Loop Runner deepening (ticket 03): DoD/replan iteration wiring moved to
+  // agent/loop/loopRunner.ts; Parse (parseWithLlm, plan bubble) stays on engine.
+  const loopRunner = fs.readFileSync(path.join(appRoot, 'src/agent/loop/loopRunner.ts'), 'utf8')
+  assert.match(loopRunner, /from '\.\.\/dodEvaluator(\.ts)?'/)
+  assert.ok(loopRunner.includes('evaluateDoD('))
   assert.match(engine, /from '\.\/llmParser'/)
   assert.ok(engine.includes('parseWithLlm('))
-  assert.match(engine, /allDone && !dodMet/)
-  assert.match(engine, /上一輪 DoD 缺口/)
+  assert.match(loopRunner, /allDone && !dodMet/)
+  assert.match(loopRunner, /上一輪 DoD 缺口/)
   assert.match(engine, /replanCorrectiveSteps/)
+  assert.match(loopRunner, /replanCorrectiveSteps/)
   assert.match(engine, /formatPlanBubble/)
   assert.match(engine, /loopTypeMode/)
   assert.match(engine, /this\.state\.loopConfig\.loopType/)
@@ -1604,15 +1678,18 @@ await test('Loop plan: memory relevance, failure learning, unattended turn, and 
   assert.match(learning, /toolCalls/)
   assert.match(learning, /tool:\$\{/)
   assert.match(learning, /strategy:\$\{/)
-  assert.match(engine, /noteLearningFailure/)
+  // Loop Runner deepening (ticket 03): noteLearningFailure + Turn-based pattern
+  // moved to agent/loop/loopRunner.ts; session recall stays on engine (Parse phase).
+  const loopRunner = fs.readFileSync(path.join(appRoot, 'src/agent/loop/loopRunner.ts'), 'utf8')
+  assert.match(loopRunner, /noteLearningFailure/)
   assert.match(engine, /sessionRecallEnabled|searchSessions/)
   assert.match(engine, /formatSessionRecallBlock|sessionRecallBlock/)
   assert.match(runExternal, /loopTypeMode/)
   assert.match(runExternal, /forcedLoopType|forceLoopType/)
   assert.match(textSim, /export function scoreQueryText/)
-  const turn = engine.slice(engine.indexOf('private async runTurnBased'), engine.indexOf('private async runGoalBased'))
+  const turn = loopRunner.slice(loopRunner.indexOf('async function runTurnBased'), loopRunner.indexOf('async function runGoalBased'))
   assert.match(turn, /overrides\.unattended/)
-  assert.match(turn, /waitForUser/)
+  assert.match(turn, /waitForUserAck/)
   assert.match(turn, /sourceKind === 'composer'/)
   assert.match(skills, /export function cjkAwareHit/)
   assert.match(intent, /[一-鿿]|\\u4e00/)
@@ -1808,8 +1885,16 @@ await test('P3: continueGoal + steer digest + chatHistory wiring', async () => {
   assert.match(chatHistory, /export function buildChatHistoryContext/)
   assert.match(chatHistory, /export function isContinueGoalPhrase/)
   assert.match(engine, /continueGoal/)
-  assert.match(engine, /persistContinueGoal/)
-  assert.match(engine, /clearContinueGoal/)
+  // Loop Runner deepening (ticket 03): persistContinueGoal/clearContinueGoal's
+  // snapshot-building moved to agent/loop/loopRunner.ts; the threadStore write
+  // (a UI-store side effect the loop module must not import directly) stays on
+  // engine behind the onGoalIncomplete/onGoalCleared ports.
+  assert.match(engine, /onGoalIncomplete/)
+  assert.match(engine, /onGoalCleared/)
+  const loopRunner = fs.readFileSync(path.join(appRoot, 'src/agent/loop/loopRunner.ts'), 'utf8')
+  assert.match(loopRunner, /buildContinueGoalSnapshot/)
+  assert.match(loopRunner, /onGoalIncomplete/)
+  assert.match(loopRunner, /onGoalCleared/)
   assert.match(runExternal, /buildSteerPartialDigest/)
   assert.match(runExternal, /continueGoal/)
   assert.match(runExternal, /佇列第/)

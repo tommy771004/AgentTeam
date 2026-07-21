@@ -1,12 +1,13 @@
 /**
- * Step Executor seam — shared I/O for function-calling / heuristic / simulation.
+ * Step I/O seam — shared shape + pure helpers for FC / heuristic / simulation.
+ *
+ * Relocated verbatim from ../stepExecutor.ts (Loop Runner deepening, ticket 02).
+ * Kept as its own leaf file (no dependency on strategies.ts or stepRun.ts) so the
+ * acyclic shape survives: strategies.ts depends on this file; stepRun.ts depends
+ * on this file and on strategies.ts. Neither of those two depends back on the other.
  *
  * Strategies share input/output shape only; internal loop shapes stay different
  * (FC multi-round vs heuristic single pass vs simulation no tools).
- *
- * Shared pure-ish helpers:
- *   - buildStepCapabilityPreload (FC + heuristic must not drift)
- *   - formatSimulationStepOutput / resolveHeuristicStepOutcome
  *
  * Gated tool authorize→execute→truncate→record→afterTool lives in
  * tools/toolInvocation.invokeGatedTool (heuristic wires it; FC later).
@@ -16,15 +17,15 @@ import type {
   PermissionPolicy,
   PermissionProjection,
   ToolCallRecord,
-} from './types'
-import type { AssembleOpts } from './capabilities/runtime.ts'
+} from '../types'
+import type { AssembleOpts } from '../capabilities/runtime.ts'
 
 export type StepExecutorInput = {
   role: string
   objective: string
   step: string
   stepOutputs: string[]
-  userAttachments?: import('./types').ChatAttachment[]
+  userAttachments?: import('../types').ChatAttachment[]
   settings: LlmSettings
   overrides: {
     projectRoot?: string
@@ -41,7 +42,7 @@ export type StepExecutorInput = {
     sourceKind?: string
     runId?: string
     threadId?: string
-      temporary?: boolean
+    temporary?: boolean
     /** When false, strategies must not call the LLM even if settings.enabled */
     useLlm?: boolean
   }
@@ -99,7 +100,7 @@ export function buildStepCapabilityPreload(input: {
   agentName?: string
   role?: string
   projectRoot?: string
-  entitlement?: import('./entitlement').EntitlementSnapshot
+  entitlement?: import('../entitlement').EntitlementSnapshot
 }): AssembleOpts {
   const { settings, overrides, loadedCapabilityIds, unlockedToolNames, agentName, role } =
     input

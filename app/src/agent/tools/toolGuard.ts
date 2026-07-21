@@ -16,13 +16,13 @@ import {
   decideApprovalNeed,
   effectiveApprovalMode,
   type DecisionHookRule,
-} from './approvalDecision'
+} from './approvalDecision.ts'
 import {
   isSideEffectTool,
   isSubDesignReadonlyBashCommand,
   isSubDesignWritableBashCommand,
   SIDE_EFFECT_TOOLS,
-} from './toolGuardShared'
+} from './toolGuardShared.ts'
 
 export type AuthorizeResult =
   | { allowed: true }

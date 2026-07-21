@@ -5,7 +5,7 @@
  */
 
 import type { LlmSettings, McpServerConfig, McpToolInfo } from '../types'
-import { enrichMcpServerWithSecrets, mcpServerMissingSecret } from './mcpSecrets'
+import { enrichMcpServerWithSecrets, mcpServerMissingSecret } from './mcpSecrets.ts'
 
 export interface McpCallResult {
   ok: boolean

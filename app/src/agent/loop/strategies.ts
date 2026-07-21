@@ -1,10 +1,10 @@
 /**
- * @internal Loop-run path adapters — NOT a product-facing seam.
+ * @internal Loop Runner strategy adapters — NOT a product-facing seam.
  *
- * Hermes alignment (P3): public story is conversationLoop / runTask → engine.
- * These factories remain private implementation details for engine path
- * selection (FC / heuristic / simulation). Do not import from UI or new
- * product code — use taskRunCoordinator.runTask.
+ * Relocated from ../stepStrategies.ts (Loop Runner deepening, ticket 02).
+ * Consumed by ./stepRun.ts; the only product-facing entry to the Loop
+ * Runner is runLoop (./index.ts). Do not import from UI or new product
+ * code — use taskRunCoordinator.runTask.
  *
  * Internal shapes stay different:
  *   - function-calling: multi-round toolLoop
@@ -18,31 +18,31 @@ import type {
   LogLevel,
   RuntimeOverrides,
   ToolCallRecord,
-} from './types'
+} from '../types'
 import {
   runPrimaryAgentTask,
   runSubAgentTask,
-} from './llm'
-import { buildPromptLayers, formatPacketDiagnostics } from './hermes/promptBuilder'
-import { compressStepOutputs } from './hermes/sessionSearch'
-import { buildToolInput, selectToolsForStep, type ToolName } from './tools/registry'
-import { authorizeTool } from './tools/toolGuard'
-import { dispatchRegistered, discoverRegisteredToolModules } from './tools/toolRegistry'
+} from '../llm.ts'
+import { buildPromptLayers, formatPacketDiagnostics } from '../hermes/promptBuilder.ts'
+import { compressStepOutputs } from '../hermes/sessionSearch.ts'
+import { buildToolInput, selectToolsForStep, type ToolName } from '../tools/registry.ts'
+import { authorizeTool } from '../tools/toolGuard.ts'
+import { dispatchRegistered, discoverRegisteredToolModules } from '../tools/toolRegistry.ts'
 import {
   buildCustomToolInput,
   executeCustomTool,
   selectCustomToolsForStep,
-} from './tools/customTools'
-import { runFunctionCallingLoop } from './tools/toolLoop'
-import { invokeGatedTool } from './tools/toolInvocation'
-import type { SupervisorLimits } from './supervisor'
+} from '../tools/customTools.ts'
+import { runFunctionCallingLoop } from '../tools/toolLoop.ts'
+import { invokeGatedTool } from '../tools/toolInvocation.ts'
+import type { SupervisorLimits } from '../supervisor.ts'
 import {
   buildStepCapabilityPreload,
   formatSimulationStepOutput,
   type StepExecutor,
   type StepExecutorInput,
   type StepExecutorOutput,
-} from './stepExecutor'
+} from './stepIO.ts'
 
 export { formatSimulationStepOutput }
 
@@ -82,12 +82,12 @@ async function evaluateAfterToolHooks(
   ctx: { tool: string; toolOk: boolean; sourceKind?: string; objective?: string },
 ): Promise<{ audits: string[]; notifications: string[] }> {
   try {
-    const { collectHookRules, evaluateHooks } = await import('./hooks')
+    const { collectHookRules, evaluateHooks } = await import('../hooks.ts')
     const ev = evaluateHooks(collectHookRules(settings), {
       point: 'afterTool',
       tool: ctx.tool,
       toolOk: ctx.toolOk,
-      sourceKind: ctx.sourceKind as import('./hooks').HookContext['sourceKind'],
+      sourceKind: ctx.sourceKind as import('../hooks').HookContext['sourceKind'],
       objective: ctx.objective,
     })
     return { audits: ev.audits, notifications: ev.notifications }
@@ -323,10 +323,10 @@ export function createHeuristicStepExecutor(host: StepStrategyHost): StepExecuto
           capabilityOwnsTool,
           approvalRequiredFor,
           formatAlwaysOnInstructions,
-        } = await import('./capabilities')
+        } = await import('../capabilities/index.ts')
         let projectRoot = ''
         try {
-          const { useProjectStore } = await import('../store/projectStore')
+          const { useProjectStore } = await import('../../store/projectStore.ts')
           projectRoot =
             (overrides.projectRoot || '').trim() ||
             useProjectStore.getState().root ||
@@ -337,7 +337,7 @@ export function createHeuristicStepExecutor(host: StepStrategyHost): StepExecuto
 
         let entitlement
         try {
-          entitlement = (await import('../store/subscriptionStore')).useSubscriptionStore.getState()
+          entitlement = (await import('../../store/subscriptionStore.ts')).useSubscriptionStore.getState()
             .entitlement
         } catch {
           entitlement = undefined
@@ -511,14 +511,14 @@ export function createHeuristicStepExecutor(host: StepStrategyHost): StepExecuto
             sessionRecall: input.sessionRecallBlock || undefined,
             skillsContext: input.attachedSkillContext || undefined,
           })
-          let userContent: import('./llm').ChatMessageContent | undefined
+          let userContent: import('../llm').ChatMessageContent | undefined
           if (input.userAttachments?.some((a) => a.kind === 'image')) {
             try {
               const {
                 buildMultimodalUserContent,
                 hydrateAttachmentsFromDisk,
                 attachmentsPathAppendix,
-              } = await import('../lib/chatAttachments')
+              } = await import('../../lib/chatAttachments.ts')
               const hydrated = await hydrateAttachmentsFromDisk(input.userAttachments)
               const body = `Objective: ${input.objective}\n\nYour step: ${input.step}\n\nTool results:\n${toolContext || '(no tools ran)'}\n\nContext so far:\n${layers.full.slice(0, 10_000)}\n\n${attachmentsPathAppendix(hydrated)}\n\nProduce the step output only.`
               userContent = buildMultimodalUserContent(body, hydrated)

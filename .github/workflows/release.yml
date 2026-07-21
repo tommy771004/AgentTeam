@@ -43,13 +43,14 @@ jobs:
             target: mac
     runs-on: ${{ matrix.os }}
     environment: release-signing
-    timeout-minutes: 60
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: app
     env:
-      RELEASE_VERSION: ${{ inputs.version || '' }}
-      RELEASE_CHANNEL: ${{ inputs.channel || 'beta' }}
+      # github.event.inputs is empty on tag push; inputs.* only exists for workflow_dispatch
+      RELEASE_VERSION: ${{ github.event.inputs.version || '' }}
+      RELEASE_CHANNEL: ${{ github.event.inputs.channel || 'beta' }}
       RELEASE_PLATFORM: ${{ matrix.platform }}
       UPDATE_PLATFORM: ${{ matrix.updatePlatform }}
       RELEASE_ARCH: ${{ matrix.arch }}
@@ -74,45 +75,64 @@ jobs:
 
       - name: Install dependencies
         shell: bash
-        run: npm ci 2>&1 | tee release-evidence/npm-ci.log
+        run: |
+          set -o pipefail
+          npm ci 2>&1 | tee release-evidence/npm-ci.log
 
       - name: Lint
         shell: bash
-        run: npx oxlint src electron 2>&1 | tee release-evidence/lint.log
+        run: |
+          set -o pipefail
+          npx oxlint src electron 2>&1 | tee release-evidence/lint.log
 
       - name: Build
         shell: bash
-        run: npm run build 2>&1 | tee release-evidence/build.log
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee release-evidence/build.log
 
       - name: Smoke matrix
         shell: bash
-        run: npm run smoke:ci 2>&1 | tee release-evidence/smoke.log
+        run: |
+          set -o pipefail
+          npm run smoke:ci 2>&1 | tee release-evidence/smoke.log
 
       - name: Security gates (dependency audit + secret scan + exceptions)
         shell: bash
         run: |
+          set -o pipefail
           npm audit --json > release-evidence/npm-audit.json || true
           node scripts/security-gates.mjs --audit-report release-evidence/npm-audit.json 2>&1 | tee release-evidence/security-gates.log
 
       - name: CLI doctor contract
         shell: bash
-        run: npm run smoke:doctor 2>&1 | tee release-evidence/cli-doctor.log
+        run: |
+          set -o pipefail
+          npm run smoke:doctor 2>&1 | tee release-evidence/cli-doctor.log
 
       - name: Install and restart contract
         shell: bash
-        run: npm run smoke:install 2>&1 | tee release-evidence/install-contract.log
+        run: |
+          set -o pipefail
+          npm run smoke:install 2>&1 | tee release-evidence/install-contract.log
 
       - name: Durable recovery process E2E
         shell: bash
-        run: npm run smoke:recovery 2>&1 | tee release-evidence/recovery-e2e.log
+        run: |
+          set -o pipefail
+          npm run smoke:recovery 2>&1 | tee release-evidence/recovery-e2e.log
 
       - name: Signed update and migration contract
         shell: bash
-        run: UPDATE_EVIDENCE_OUTPUT=release-evidence/update-rollback-evidence.json npm run smoke:update 2>&1 | tee release-evidence/update-migration.log
+        run: |
+          set -o pipefail
+          UPDATE_EVIDENCE_OUTPUT=release-evidence/update-rollback-evidence.json npm run smoke:update 2>&1 | tee release-evidence/update-migration.log
 
       - name: Marketplace smoke
         shell: bash
-        run: npm run smoke:marketplace 2>&1 | tee release-evidence/marketplace.log
+        run: |
+          set -o pipefail
+          npm run smoke:marketplace 2>&1 | tee release-evidence/marketplace.log
 
       - name: Verify Windows signing configuration
         if: matrix.target == 'win'
@@ -144,11 +164,15 @@ jobs:
 
       - name: Built Electron contract
         shell: bash
-        run: npm run smoke:built 2>&1 | tee release-evidence/smoke-built.log
+        run: |
+          set -o pipefail
+          npm run smoke:built 2>&1 | tee release-evidence/smoke-built.log
 
       - name: Build icons
         shell: bash
-        run: npm run icons 2>&1 | tee release-evidence/icons.log
+        run: |
+          set -o pipefail
+          npm run icons 2>&1 | tee release-evidence/icons.log
 
       - name: Package Windows
         if: matrix.target == 'win'
@@ -157,7 +181,9 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'true'
         shell: bash
-        run: npx electron-builder --win --x64 --publish never --config.forceCodeSigning=true --config.extraMetadata.version="$RELEASE_VERSION" 2>&1 | tee release-evidence/package.log
+        run: |
+          set -o pipefail
+          npx electron-builder --win --x64 --publish never --config.forceCodeSigning=true --config.extraMetadata.version="$RELEASE_VERSION" 2>&1 | tee release-evidence/package.log
 
       - name: Package macOS
         if: matrix.target == 'mac'
@@ -169,11 +195,15 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
-        run: npx electron-builder --mac --${{ matrix.arch }} --publish never --config.forceCodeSigning=true --config.extraMetadata.version="$RELEASE_VERSION" 2>&1 | tee release-evidence/package.log
+        run: |
+          set -o pipefail
+          npx electron-builder --mac --${{ matrix.arch }} --publish never --config.forceCodeSigning=true --config.extraMetadata.version="$RELEASE_VERSION" 2>&1 | tee release-evidence/package.log
 
       - name: Electron update migration and rollback E2E
         shell: bash
-        run: npm run smoke:update:e2e 2>&1 | tee release-evidence/update-migration-e2e.log
+        run: |
+          set -o pipefail
+          npm run smoke:update:e2e 2>&1 | tee release-evidence/update-migration-e2e.log
 
       - name: Verify Windows Authenticode signatures
         if: matrix.target == 'win'
@@ -266,13 +296,16 @@ jobs:
 
       - name: Verify packaged install lifecycle
         shell: bash
-        run: node scripts/verify-packaged-install.mjs --platform "$RELEASE_PLATFORM" --artifact-dir release --evidence-dir release-evidence 2>&1 | tee release-evidence/install-lifecycle.log
+        run: |
+          set -o pipefail
+          node scripts/verify-packaged-install.mjs --platform "$RELEASE_PLATFORM" --artifact-dir release --evidence-dir release-evidence 2>&1 | tee release-evidence/install-lifecycle.log
 
       - name: Verify update signing key matches packaged trust root
         env:
           UPDATE_PRIVATE_KEY: ${{ secrets.UPDATE_PRIVATE_KEY }}
         shell: bash
         run: |
+          set -o pipefail
           test -n "$UPDATE_PRIVATE_KEY" || { echo "UPDATE_PRIVATE_KEY is required"; exit 1; }
           node --experimental-strip-types scripts/verify-update-signing-key.mts 2>&1 | tee release-evidence/update-key-verification.log
 
@@ -282,6 +315,7 @@ jobs:
           UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL }}
         shell: bash
         run: |
+          set -o pipefail
           test -n "$UPDATE_BASE_URL" || { echo "UPDATE_BASE_URL is required"; exit 1; }
           node scripts/build-update-manifest.mjs --artifact-dir release --output-dir release-evidence/update-channel --version "$RELEASE_VERSION" --platform "$UPDATE_PLATFORM" --arch "$RELEASE_ARCH" --base-url "${UPDATE_BASE_URL%/}/$UPDATE_PLATFORM/$RELEASE_ARCH" 2>&1 | tee release-evidence/update-manifest.log
 
@@ -305,7 +339,9 @@ jobs:
 
       - name: Generate release evidence
         shell: bash
-        run: npm run release:evidence 2>&1 | tee release-evidence/evidence.log
+        run: |
+          set -o pipefail
+          npm run release:evidence 2>&1 | tee release-evidence/evidence.log
 
       - name: Write verification log
         if: always()
