@@ -48,9 +48,10 @@ await test('merge bar smokes exist and claim four patterns + FC + seed + live se
   assert.match(step, /safety gate/)
 })
 
-await test('engine adapter clones publish via snapshot (UI isolation)', () => {
+await test('engine adapter clones publish + final rebind via snapshot (UI isolation)', () => {
   const eng = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   assert.match(eng, /this\.state = snapshot\(s\)/)
+  assert.match(eng, /this\.state = snapshot\(loopState\)/)
   assert.match(eng, /getSettings:\s*\(\)\s*=>\s*this\.settings/)
   assert.match(eng, /initialStepOutputs:\s*this\.stepOutputs\.slice\(\)/)
   // orphan lastDodMissing removed
@@ -76,8 +77,8 @@ await test('unattended intervention timeout policy (pure)', () => {
   assert.equal(unattendedInterventionTimeoutSec(45_000), 45)
   assert.equal(unattendedInterventionTimeoutSec(120_000), 120)
   assert.equal(unattendedInterventionTimeoutSec(200_000), 120) // cap
-  assert.equal(unattendedInterventionTimeoutSec(500), 1) // test floor bypass
-  assert.equal(unattendedInterventionTimeoutSec(10_000), 10) // explicit sub-floor for smokes
+  assert.equal(unattendedInterventionTimeoutSec(500), 15) // hard floor 15s
+  assert.equal(unattendedInterventionTimeoutSec(10_000), 15) // sub-floor still floored
 })
 
 await test('HITL ask port wires engine.waitForIntervention (static)', () => {
@@ -95,7 +96,7 @@ await test('Time/Proactive fail-closed still in loopRunner entry', () => {
   assert.match(lr, /fail-closed|refused|missing/i)
 })
 
-await test('package.json smoke chain includes loop + step + transport', () => {
+await test('package.json smoke chain includes loop + step + transport + parity', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8')) as {
     scripts: Record<string, string>
   }
@@ -104,6 +105,7 @@ await test('package.json smoke chain includes loop + step + transport', () => {
     'smoke-loop-runner',
     'smoke-step-run',
     'smoke-llm-transport',
+    'smoke-loop-parity',
   ]) {
     assert.match(smoke, new RegExp(s))
   }

@@ -17,7 +17,7 @@ spec.md 決議 8。一次到位單 PR 的合併門檻中,smoke 覆蓋不到的�
 - [x] FC multi-round（load_capability → final）+ capability 跨步 union
 - [x] continueGoal `initialStepOutputs` seed；mid-run `getSettings` live-apply
 - [x] publish 經 `snapshot()` clone（engine adapter）
-- [x] unattended 逾時政策純函數（`unattendedInterventionTimeoutSec`，預設 45s / floor 15 / cap 120）
+- [x] unattended 逾時政策純函數（`unattendedInterventionTimeoutSec`，預設 45s / hard floor 15 / cap 120）
 - [x] package.json smoke 鏈含 loop / step / transport / parity
 
 ## 仍需人工（Electron UI — 合併前勾）
@@ -52,3 +52,10 @@ npm run smoke   # 確認自動化 merge bar 仍綠
 
 - Nits: 移除 orphan `lastDodMissing`；修 `stepIO` indent；HITL 註解對齊 engine 逾時擁有權。
 - `hitlTimeout.ts` 抽出 unattended 逾時算術；`smoke-loop-parity.mts` 鎖 merge-bar 自動化項。
+
+### 2026-07-21 — code-review residual (HEAD~3 三 commit 後續)
+
+- Unattended HITL **hard floor 15s**（取消 sub-floor bypass；spec 45/floor15/cap120）。
+- Engine final rebind：`this.state = snapshot(loopState)`，與 publish 路徑一致。
+- Spec `LoopDeps` 契約補 `getSettings`/`getOverrides`/`initialStepOutputs` + publish live+adapter-clone 語意。
+- `smoke-loop-parity` 鏈上自檢含自身 script 名。
