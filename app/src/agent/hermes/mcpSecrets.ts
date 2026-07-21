@@ -8,7 +8,7 @@
  */
 
 import type { LlmSettings, McpServerConfig } from '../types'
-import { getPluginSecret, hasPluginSecret } from './pluginSecrets'
+import { getPluginSecret, hasPluginSecret } from './pluginSecrets.ts'
 
 /** secret owner id → env vars to fill when secret is present */
 export const MCP_SECRET_ENV_KEYS: Record<string, string[]> = {

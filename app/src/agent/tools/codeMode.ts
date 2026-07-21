@@ -8,7 +8,7 @@
  */
 
 import type { OpenAiToolDef } from './schemas'
-import { RUN_CODE_TOOL } from '../capabilities/builtins'
+import { RUN_CODE_TOOL } from '../capabilities/builtins.ts'
 
 export interface CodeModeResult {
   ok: boolean

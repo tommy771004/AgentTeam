@@ -3,8 +3,8 @@
  * Parameter records are derived from toolDefinitions (single source).
  */
 
-import type { ToolName } from './registry'
-import { TOOL_CATALOG } from './registry'
+import type { ToolName } from './registry.ts'
+import { TOOL_CATALOG } from './registry.ts'
 import { toolParameters } from './toolDefinitions.ts'
 
 export interface OpenAiToolDef {

@@ -5,11 +5,11 @@
 
 import type { ArchiveRecord } from '../types'
 import type { LlmSettings } from '../types'
-import { chatCompletion, withRoleModel } from '../llm'
-import { memoryDecayFactor, memoryStalenessNote, memoryStore } from './memory'
-import { skillsStore } from './skills'
+import { chatCompletion, withRoleModel } from '../llm.ts'
+import { memoryDecayFactor, memoryStalenessNote, memoryStore } from './memory.ts'
+import { skillsStore } from './skills.ts'
 import type { SessionSearchHit } from './types'
-import { scoreQueryText } from './textSimilarity'
+import { scoreQueryText } from './textSimilarity.ts'
 
 function scoreText(query: string, text: string): number {
   return scoreQueryText(query, text)

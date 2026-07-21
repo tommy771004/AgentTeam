@@ -65,7 +65,7 @@ test('toolLoop routes via isPreAuth / isPostAuth + invokeGatedTool (wiring)', as
   const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
   assert.match(loop, /isPreAuthAgentLevelTool|isAgentLevelTool/)
-  assert.match(loop, /from '\.\/agentLevelTools'|from \"\.\/agentLevelTools\"/)
+  assert.match(loop, /from '\.\/agentLevelTools(\.ts)?'|from \"\.\/agentLevelTools(\.ts)?\"/)
   assert.match(loop, /invokeGatedTool/)
   assert.match(loop, /!isPostAuthAgentLevelTool/)
 })

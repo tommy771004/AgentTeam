@@ -7,16 +7,16 @@
  */
 
 import type { LlmSettings, PersonalityPreset } from '../types'
-import { memoryStore } from './memory'
-import { skillsStore } from './skills'
-import { pluginRegistry } from './plugins'
+import { memoryStore } from './memory.ts'
+import { skillsStore } from './skills.ts'
+import { pluginRegistry } from './plugins.ts'
 import {
   buildContextPacket,
   formatPacketDiagnostics,
   type ContextPacket,
   type ContextPacketDiagnostics,
   type ContextPacketSource,
-} from './contextPacket'
+} from './contextPacket.ts'
 
 export interface PromptLayers {
   stable: string

@@ -13,7 +13,7 @@
  * }
  */
 
-import { parseSkillMarkdown, skillsStore } from './skills'
+import { parseSkillMarkdown, skillsStore } from './skills.ts'
 import type { Skill } from './types'
 import type { CustomToolDefinition, McpServerConfig } from '../types'
 

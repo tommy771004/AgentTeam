@@ -7,26 +7,26 @@
 
 import { v4 as uuid } from 'uuid'
 import type { LlmSettings, PermissionProjection, ToolCallRecord } from '../types'
-import { chatCompletionWithTools, type ChatMessageExt, type ToolCallRequest } from '../llm'
-import { buildOpenAiTools, type OpenAiToolDef } from './schemas'
+import { chatCompletionWithTools, type ChatMessageExt, type ToolCallRequest } from '../llm.ts'
+import { buildOpenAiTools, type OpenAiToolDef } from './schemas.ts'
 import {
   DEFAULT_SUPERVISOR_LIMITS,
   enforceStepContextBudget,
   enforceToolPayload,
   type SupervisorLimits,
   SupervisorViolation,
-} from '../supervisor'
-import { listAllMcpTools, mcpCallTool } from '../hermes/mcp'
-import { resolveMcpSecretOwnerId } from '../hermes/mcpSecrets'
-import { checkToolPermission, type PermissionPolicy } from '../opencode/permissions'
-import { mcpServersForAgent, isMcpServerAllowedForAgent } from '../opencode/mcpAccess'
-import { authorizeTool } from './toolGuard'
+} from '../supervisor.ts'
+import { listAllMcpTools, mcpCallTool } from '../hermes/mcp.ts'
+import { resolveMcpSecretOwnerId } from '../hermes/mcpSecrets.ts'
+import { checkToolPermission, type PermissionPolicy } from '../opencode/permissions.ts'
+import { mcpServersForAgent, isMcpServerAllowedForAgent } from '../opencode/mcpAccess.ts'
+import { authorizeTool } from './toolGuard.ts'
 import {
   isPostAuthAgentLevelTool,
   isPreAuthAgentLevelTool,
-} from './agentLevelTools'
-import { invokeGatedTool } from './toolInvocation'
-import { discoverRegisteredToolModules, dispatchRegistered } from './toolRegistry'
+} from './agentLevelTools.ts'
+import { invokeGatedTool } from './toolInvocation.ts'
+import { discoverRegisteredToolModules, dispatchRegistered } from './toolRegistry.ts'
 import {
   activeModelSettings,
   applyToolSearchVisibility,
@@ -45,8 +45,8 @@ import {
   TOOL_SEARCH_TOOL,
   toolSearchToolDef,
   type CapabilityRuntimeState,
-} from '../capabilities'
-import { runCodeMode, runCodeToolDef } from './codeMode'
+} from '../capabilities/index.ts'
+import { runCodeMode, runCodeToolDef } from './codeMode.ts'
 import { createDefaultContextEngine } from '../contextEngine.ts'
 import {
   ENTER_PLAN_MODE_TOOL,
@@ -54,19 +54,19 @@ import {
   isPlanModeActive,
   PLAN_FILE_PREFIX,
   setPlanMode,
-} from '../planMode'
+} from '../planMode.ts'
 import {
   customToolDefs,
   customToolsForSettings,
   executeCustomTool,
   isCustomToolApprovalRequired,
   type ResolvedCustomTool,
-} from './customTools'
+} from './customTools.ts'
 import type { ChatAttachment } from '../types'
 import {
   buildMultimodalUserContent,
   contentPartsToPlainText,
-} from '../../lib/chatAttachments'
+} from '../../lib/chatAttachments.ts'
 
 export interface ToolLoopCallbacks {
   onLog?: (
@@ -678,7 +678,7 @@ ${systemExtra}`,
 
     // Hermes-style parallel tool_calls: multi-call parallel unless interactive/agent-level.
     // Each call uses isolated buffers; merge tool messages / records in original order.
-    const { isAgentLevelTool } = await import('./agentLevelTools')
+    const { isAgentLevelTool } = await import('./agentLevelTools.ts')
     const calls = result.toolCalls
     const forceSerial = (name: string) => name === 'ask_user' || isAgentLevelTool(name)
     const baseCtx = {

@@ -8,7 +8,7 @@
 import type { AgentCapability } from './types'
 import type { BuiltinCapabilityId } from './capabilityIds.ts'
 import { toolsForCapability } from '../tools/toolDefinitions.ts'
-import { SUBDESIGN_CAPABILITY, SUBDESIGN_CRITIQUE_CAPABILITY } from './subDesign'
+import { SUBDESIGN_CAPABILITY, SUBDESIGN_CRITIQUE_CAPABILITY } from './subDesign.ts'
 
 /** Framework-managed tool name (reserved). */
 export const LOAD_CAPABILITY_TOOL = 'load_capability'

@@ -373,10 +373,12 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   assert.match(types, /subAgentsEnabled: boolean/)
   assert.match(llm, /subAgentsEnabled: false/)
   assert.match(engine, /private subAgentsEnabled\(\)/)
-  // Primary/subagent LLM calls live on the heuristic step strategy (thin adapter)
-  const strategies = fs.readFileSync(path.join(appRoot, 'src/agent/stepStrategies.ts'), 'utf8')
+  // Primary/subagent LLM calls live on the heuristic step strategy (thin adapter);
+  // dispatch wiring itself lives in the Loop Runner's step-execution seam (ticket 02).
+  const strategies = fs.readFileSync(path.join(appRoot, 'src/agent/loop/strategies.ts'), 'utf8')
   assert.match(strategies, /runPrimaryAgentTask/)
-  assert.match(engine, /createStepStrategies/)
+  const stepRun = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepRun.ts'), 'utf8')
+  assert.match(stepRun, /createStepStrategies/)
   assert.match(runExternal, /opts\.sourceKind === 'delegate'/)
   assert.match(runtime, /capability\.id !== 'delegate'/)
   assert.match(decision, /Sub Agent 功能目前已關閉/)
@@ -458,13 +460,14 @@ await test('side-effect drift guard: every registry tool is read-only OR classif
 await test('toolGuard adapter wires pure decide() + full-mode safety bypass exists in engine', async () => {
   const fs = await import('node:fs')
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
-  assert.match(guard, /from '\.\/approvalDecision'/)
+  assert.match(guard, /from '\.\/approvalDecision(\.ts)?'/)
   assert.match(guard, /\bdecide\b/)
   const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
   assert.match(decision, /export function decide\b/)
   assert.match(decision, /export function decideApprovalNeed\b/)
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
-  assert.match(engine, /approvalMode === 'full'/)
+  // Safety intervention's full-mode bypass lives in the Loop Runner's step-execution seam (ticket 02).
+  const stepRun = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepRun.ts'), 'utf8')
+  assert.match(stepRun, /approvalMode === 'full'/)
 })
 
 // ── W1: runTask capacity policy (mirror of runExternal.resolveBusyPolicy) ──
@@ -1182,10 +1185,11 @@ await test('P1-B: profile tools=false degrades FC before run; unknown stays perm
 
 await test('P1-B: engine + settings wiring contract', async () => {
   const fs = await import('node:fs')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
-  assert.match(engine, /modelSupports/)
-  assert.match(engine, /fcCapable !== false/)
-  assert.match(engine, /'vision'\)/)
+  // Model-profile degrade lives in the Loop Runner's step-execution seam (ticket 02).
+  const stepRun = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepRun.ts'), 'utf8')
+  assert.match(stepRun, /modelSupports/)
+  assert.match(stepRun, /fcCapable !== false/)
+  assert.match(stepRun, /'vision'\)/)
   const mp = fs.readFileSync(path.join(appRoot, 'src/agent/modelProfile.ts'), 'utf8')
   assert.match(mp, /source: 'verified'/)
   assert.match(mp, /source: 'assumed'/)

@@ -7,23 +7,23 @@
 
 import type { LlmSettings } from '../types'
 import type { OpenAiToolDef } from '../tools/schemas'
-import { TOOL_CATALOG, type ToolName } from '../tools/registry'
-import { skillsStore } from '../hermes/skills'
-import { customToolsForSettings } from '../tools/customTools'
+import { TOOL_CATALOG, type ToolName } from '../tools/registry.ts'
+import { skillsStore } from '../hermes/skills.ts'
+import { customToolsForSettings } from '../tools/customTools.ts'
 import {
   BUILTIN_CAPABILITIES,
   LOAD_CAPABILITY_TOOL,
   RUN_CODE_TOOL,
   TOOL_SEARCH_TOOL,
-} from './builtins'
+} from './builtins.ts'
 import type {
   AgentCapability,
   CapabilityCatalogEntry,
   CapabilityModelSettings,
   CapabilityRuntimeState,
 } from './types'
-import { mcpServersForAgent } from '../opencode/mcpAccess'
-import { resolveEntitlement, isCapabilityEntitled, type EntitlementSnapshot } from '../entitlement'
+import { mcpServersForAgent } from '../opencode/mcpAccess.ts'
+import { resolveEntitlement, isCapabilityEntitled, type EntitlementSnapshot } from '../entitlement.ts'
 
 export { LOAD_CAPABILITY_TOOL, RUN_CODE_TOOL, TOOL_SEARCH_TOOL }
 
