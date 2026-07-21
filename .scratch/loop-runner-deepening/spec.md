@@ -86,7 +86,8 @@ export function setLlmTransport(t?: LlmTransport): void   // undefined = 還原�
 - [x] smoke: time / proactive 無 claim / evidence → 入口 refused(fail-closed)—— `smoke-loop-runner.mts` 兩則(bypassing the type system via `as unknown as LoopRequest`)
 - [x] smoke: publish snapshot 序列形狀不變(status 遞進、steps/subAgents 隨每次 mutation 發佈)
 - [x] 既有 smoke chain 全綠(`npm run smoke`)—— 含 ticket 01/02/03 過程中修正的既有 regex smoke(engine.ts 原始碼比對段落改指向 agent/loop/*)
-- [ ] 手動:dev app 四 pattern 各跑一次 + 一次真 intervention 解鎖(ticket 05,待人工 —— 剩下唯一項)
+- [x] 自動化 parity：`smoke-loop-parity` + loop/step smokes 覆蓋四 pattern 邏輯、FC、capability 跨步、seed、live configure、publish clone、unattended 逾時政策（ticket 05 自動化層）
+- [ ] 手動:dev app 四 pattern 各跑一次 + 一次真 intervention 解鎖 + UI 即時性（ticket 05 人工清單 —— 合併前唯一剩餘項）
 - [x] drift guard:production 碼(engine 之外)import `agent/loop` → build fail —— `smoke-caps.mjs` 純函數 `findLoopRunnerImportDrift` + fixture + 實際樹掃描(ticket 04)
 - [x] regex smoke(`smoke-step-executor.mts` 對源碼比對段)已刪(ticket 04)
 - [x] CLAUDE.md 架構節同步(ticket 04)

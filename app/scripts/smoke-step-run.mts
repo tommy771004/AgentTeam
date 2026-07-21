@@ -187,4 +187,142 @@ await test('publish is called on every mutation (UI live-update seam)', async ()
   assert.ok(seen.includes('COMPLETED'), 'must publish COMPLETED after finishing')
 })
 
+await test('FC path: tool_call round then final answer (functionCalling true)', async () => {
+  let round = 0
+  setLlmTransport(async () => {
+    round++
+    if (round === 1) {
+      // load_capability is pure / Node-safe (unlike bash which needs window)
+      return {
+        content: '',
+        tokensUsed: 8,
+        model: 'fake-fc',
+        toolCalls: [
+          {
+            id: 'call_cap_1',
+            name: 'load_capability',
+            arguments: JSON.stringify({ id: 'shell' }),
+          },
+        ],
+      }
+    }
+    return {
+      content: 'FC_FINAL_AFTER_TOOL',
+      tokensUsed: 12,
+      model: 'fake-fc',
+      toolCalls: [],
+    }
+  })
+  const settings: LlmSettings = {
+    ...DEFAULT_LLM_SETTINGS,
+    enabled: true,
+    apiKey: 'test-key',
+    model: 'gpt-4o-mini',
+    baseUrl: 'http://127.0.0.1:9',
+    toolsEnabled: true,
+    functionCalling: true,
+    safetyEnabled: false,
+    modelProfiles: {
+      'gpt-4o-mini': {
+        modelId: 'gpt-4o-mini',
+        tools: true,
+        source: 'assumed',
+      },
+    },
+  }
+  const state = makeState()
+  const deps = makeDeps(settings, {
+    overrides: { runId: 'run-fc-1', sourceKind: 'composer' },
+  })
+  const result = await runStep(state, 0, 1, 'Primary', deps)
+  assert.equal(result.ok, true, 'FC step must complete')
+  assert.match(result.output, /FC_FINAL_AFTER_TOOL/)
+  assert.ok(round >= 2, `expected multi-round FC, got rounds=${round}`)
+  assert.ok(
+    state.toolCalls.some((t) => t.tool === 'load_capability' && t.ok),
+    `expected successful load_capability record, got ${JSON.stringify(state.toolCalls)}`,
+  )
+  assert.ok(
+    (state.loadedCapabilityIds || []).includes('shell'),
+    `expected shell in loadedCapabilityIds, got ${JSON.stringify(state.loadedCapabilityIds)}`,
+  )
+  assert.equal(state.steps[0].status, 'COMPLETED')
+})
+
+await test('capability ids union across sequential steps (preload resume)', async () => {
+  let round = 0
+  setLlmTransport(async () => {
+    round++
+    if (round === 1) {
+      return {
+        content: '',
+        tokensUsed: 5,
+        model: 'fake-fc',
+        toolCalls: [
+          {
+            id: 'call_cap_1',
+            name: 'load_capability',
+            arguments: JSON.stringify({ id: 'shell' }),
+          },
+        ],
+      }
+    }
+    return {
+      content: 'STEP1_DONE',
+      tokensUsed: 5,
+      model: 'fake-fc',
+      toolCalls: [],
+    }
+  })
+  const settings: LlmSettings = {
+    ...DEFAULT_LLM_SETTINGS,
+    enabled: true,
+    apiKey: 'test-key',
+    model: 'gpt-4o-mini',
+    baseUrl: 'http://127.0.0.1:9',
+    toolsEnabled: true,
+    functionCalling: true,
+    safetyEnabled: false,
+    modelProfiles: {
+      'gpt-4o-mini': { modelId: 'gpt-4o-mini', tools: true, source: 'assumed' },
+    },
+  }
+  const state = makeState()
+  state.steps = [
+    { step: 1, action: 'load', description: 'load tools', status: 'PENDING' },
+    { step: 2, action: 'use', description: 'use tools', status: 'PENDING' },
+  ]
+  const deps1 = makeDeps(settings, {
+    overrides: { runId: 'run-cap', sourceKind: 'composer' },
+  })
+  const r1 = await runStep(state, 0, 1, 'Primary', deps1)
+  assert.equal(r1.ok, true)
+  assert.ok(
+    (state.loadedCapabilityIds || []).includes('shell'),
+    `step1 must union shell capability, got ${JSON.stringify(state.loadedCapabilityIds)}`,
+  )
+  const capsAfter1 = [...state.loadedCapabilityIds]
+
+  round = 0
+  setLlmTransport(async () => ({
+    content: 'STEP2_WITH_PRELOAD',
+    tokensUsed: 4,
+    model: 'fake-fc',
+    toolCalls: [],
+  }))
+  const deps2 = makeDeps(settings, {
+    overrides: { runId: 'run-cap', sourceKind: 'composer' },
+    stepOutputsSoFar: [r1.output],
+  })
+  const r2 = await runStep(state, 1, 1, 'Primary', deps2)
+  assert.equal(r2.ok, true)
+  assert.match(r2.output, /STEP2_WITH_PRELOAD/)
+  for (const id of capsAfter1) {
+    assert.ok(
+      (state.loadedCapabilityIds || []).includes(id),
+      `step2 must retain capability ${id}, got ${JSON.stringify(state.loadedCapabilityIds)}`,
+    )
+  }
+})
+
 console.log(`\n${passed} tests passed`)

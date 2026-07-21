@@ -42,7 +42,7 @@ export type StepExecutorInput = {
     sourceKind?: string
     runId?: string
     threadId?: string
-      temporary?: boolean
+    temporary?: boolean
     /** When false, strategies must not call the LLM even if settings.enabled */
     useLlm?: boolean
   }

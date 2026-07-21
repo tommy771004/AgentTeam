@@ -49,7 +49,7 @@ export type AskDecision =
 export type StepRunDeps = {
   /** Sole side-effect outlet — called after every state mutation. */
   publish: (state: LoopRunState) => void
-  /** HITL port. No timeout policy here — the caller wraps it (loopRunner owns timing, ticket 03). */
+  /** HITL port. Timeout policy lives on engine.waitForIntervention (unattended 45s / safety 900s). */
   ask: (req: AskRequest) => Promise<AskDecision>
   log: (level: LogLevel, message: string) => void
   shouldAbort: () => boolean

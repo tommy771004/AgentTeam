@@ -52,8 +52,17 @@ export type LoopDeps = {
   waitForUserAck: () => Promise<void>
   log: (level: LogLevel, message: string) => void
   shouldAbort: () => boolean
-  settings: LlmSettings
-  overrides: RuntimeOverrides
+  /**
+   * Live settings for mid-run configure() — always call the getter so
+   * agentEngine.configure replaces take effect on the next read (review bug 2).
+   */
+  getSettings: () => LlmSettings
+  getOverrides: () => RuntimeOverrides
+  /**
+   * Seeded step evidence from continueGoal restore (prior digest / gaps / user hint).
+   * Copied into each pattern's LoopContext.stepOutputs at start (review bug 1).
+   */
+  initialStepOutputs?: string[]
   projectGuidance: string
   sessionRecallBlock: string
   attachedSkillContext: string
@@ -61,6 +70,13 @@ export type LoopDeps = {
   /** continueGoal persistence touches UI thread state — kept as a port, not an import. */
   onGoalIncomplete: (snapshot: ContinueGoalSnapshot) => void
   onGoalCleared: () => void
+}
+
+function emptyStepContext(deps: LoopDeps): LoopContext {
+  return {
+    stepOutputs: [...(deps.initialStepOutputs || [])],
+    userAttachments: deps.userAttachments,
+  }
 }
 
 export type LoopResult = { state: LoopRunState }
@@ -139,14 +155,14 @@ async function executeStep(
   ctx: LoopContext,
   deps: LoopDeps,
 ): Promise<{ ok: boolean; output: string; durationMs: number }> {
-  const agentName = pickAgentForStep(state, index, state.steps.length, deps.settings)
+  const agentName = pickAgentForStep(state, index, state.steps.length, deps.getSettings())
   const result = await runStep(state, index, iteration, agentName, {
     publish: deps.publish,
     ask: deps.ask,
     log: deps.log,
     shouldAbort: deps.shouldAbort,
-    settings: deps.settings,
-    overrides: deps.overrides,
+    settings: deps.getSettings(),
+    overrides: deps.getOverrides(),
     projectGuidance: deps.projectGuidance,
     sessionRecallBlock: deps.sessionRecallBlock,
     attachedSkillContext: deps.attachedSkillContext,
@@ -255,11 +271,11 @@ function noteLearningSuccess(state: LoopRunState, deps: LoopDeps, loopType: stri
         .slice(0, 16)
         .map((t) => ({ tool: t.tool, summary: (t.output || '').slice(0, 120) })),
       loopType,
-      memoryEnabled: deps.settings.memoryEnabled,
+      memoryEnabled: deps.getSettings().memoryEnabled,
       memoryWriteEnabled:
-        deps.settings.memoryWriteEnabled !== false &&
-        deps.overrides.temporary !== true &&
-        deps.settings.temporaryChatDefault !== true,
+        deps.getSettings().memoryWriteEnabled !== false &&
+        deps.getOverrides().temporary !== true &&
+        deps.getSettings().temporaryChatDefault !== true,
     })
     deps.log('INFO', '學習迴圈：已產生技能草稿／記憶摘要（見學習中心）')
   } catch {
@@ -274,11 +290,11 @@ function noteLearningFailure(state: LoopRunState, deps: LoopDeps, loopType: stri
       haltReason,
       loopType,
       failedTools: [...new Set((state.toolCalls || []).filter((t) => !t.ok).map((t) => t.tool))],
-      memoryEnabled: deps.settings.memoryEnabled,
+      memoryEnabled: deps.getSettings().memoryEnabled,
       memoryWriteEnabled:
-        deps.settings.memoryWriteEnabled !== false &&
-        deps.overrides.temporary !== true &&
-        deps.settings.temporaryChatDefault !== true,
+        deps.getSettings().memoryWriteEnabled !== false &&
+        deps.getOverrides().temporary !== true &&
+        deps.getSettings().temporaryChatDefault !== true,
     })
     deps.log('INFO', '學習迴圈：已記錄失敗教訓（見學習中心／記憶）')
   } catch {
@@ -318,16 +334,16 @@ async function finalizeSuccess(state: LoopRunState, ctx: LoopContext, deps: Loop
   setSubAgent(state, 'Analyzer-1', 'done', undefined, deps.publish)
   setSubAgent(state, 'Writer', 'active', undefined, deps.publish)
 
-  let report = synthesizeResultLocal(state, ctx.stepOutputs, deps.settings)
-  const useLlm = deps.settings.enabled && Boolean(deps.settings.apiKey)
+  let report = synthesizeResultLocal(state, ctx.stepOutputs, deps.getSettings())
+  const useLlm = deps.getSettings().enabled && Boolean(deps.getSettings().apiKey)
   if (useLlm) {
     try {
       deps.log('PROCESS', 'Writer synthesizing final report via LLM...')
-      const writerResolved = executionModelFor(deps.settings, 'synthesizer')
-      const writerSettings = executionSettingsFor(deps.settings, 'synthesizer')
+      const writerResolved = executionModelFor(deps.getSettings(), 'synthesizer')
+      const writerSettings = executionSettingsFor(deps.getSettings(), 'synthesizer')
       deps.log(
         'INFO',
-        `Writer model=${writerSettings.model} (${subAgentsEnabledFor(deps.settings) ? (writerResolved.usedFallback ? 'fallback→global' : 'roleModels') : 'primary/global'})`,
+        `Writer model=${writerSettings.model} (${subAgentsEnabledFor(deps.getSettings()) ? (writerResolved.usedFallback ? 'fallback→global' : 'roleModels') : 'primary/global'})`,
       )
       setSubAgentModel(
         state,
@@ -354,7 +370,7 @@ async function finalizeSuccess(state: LoopRunState, ctx: LoopContext, deps: Loop
   state.loopConfig = {
     ...state.loopConfig,
     nextState:
-      deps.overrides.nextState ||
+      deps.getOverrides().nextState ||
       (state.loopConfig.nextState === 'Dispatch Webhook'
         ? 'Dispatch Webhook'
         : resultAwaitsReply(report)
@@ -373,7 +389,7 @@ async function finalizeSuccess(state: LoopRunState, ctx: LoopContext, deps: Loop
 async function runTurnBased(state: LoopRunState, deps: LoopDeps): Promise<void> {
   deps.log('INFO', 'Pattern: Turn-based — 1 Input = 1 Action')
   if (!state.steps[0]) return
-  const ctx: LoopContext = { stepOutputs: [], userAttachments: deps.userAttachments }
+  const ctx: LoopContext = emptyStepContext(deps)
 
   const { ok, output } = await executeStep(state, 0, 1, ctx, deps)
   if (!ok || deps.shouldAbort()) return
@@ -381,18 +397,18 @@ async function runTurnBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
   state.confidence = Math.max(state.confidence, 0.92)
   state.result = output
   state.reportTitle = 'Turn Result'
-  const configuredNextState = deps.overrides.nextState || state.loopConfig.nextState
+  const configuredNextState = deps.getOverrides().nextState || state.loopConfig.nextState
   const chatLiteAck =
-    deps.overrides.unattended === true ||
-    deps.overrides.sourceKind === 'composer' ||
-    deps.overrides.sourceKind === 'slash' ||
-    deps.overrides.sourceKind === 'retry'
+    deps.getOverrides().unattended === true ||
+    deps.getOverrides().sourceKind === 'composer' ||
+    deps.getOverrides().sourceKind === 'slash' ||
+    deps.getOverrides().sourceKind === 'retry'
   if (chatLiteAck || configuredNextState === 'Dispatch Webhook') {
     deps.log(
       'INFO',
       configuredNextState === 'Dispatch Webhook'
         ? 'Turn post-state：完成後 Dispatch Webhook'
-        : deps.overrides.unattended === true
+        : deps.getOverrides().unattended === true
           ? '無人值守 Turn-based：跳過人工 ACK，自動確認'
           : '對話 Turn/Chat-lite：自動確認，不等待 ACK',
     )
@@ -407,7 +423,7 @@ async function runTurnBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
   state.progress = 100
   state.loopConfig = {
     ...state.loopConfig,
-    nextState: deps.overrides.nextState || (configuredNextState === 'Dispatch Webhook' ? 'Dispatch Webhook' : 'Halt'),
+    nextState: deps.getOverrides().nextState || (configuredNextState === 'Dispatch Webhook' ? 'Dispatch Webhook' : 'Halt'),
   }
   setSubAgent(state, 'Core', 'done', undefined, deps.publish)
   deps.log('SUCCESS', chatLiteAck ? 'Turn complete (auto-ACK).' : 'User ACK received. Turn complete.')
@@ -422,7 +438,7 @@ async function runGoalBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
   deps.log('INFO', 'Pattern: Goal-based — Autonomous iteration until DoD')
   deps.log(
     'INFO',
-    subAgentsEnabledFor(deps.settings) ? 'Spawning orchestrator agent...' : 'Sub Agent 關閉：由主代理直接執行。',
+    subAgentsEnabledFor(deps.getSettings()) ? 'Spawning orchestrator agent...' : 'Sub Agent 關閉：由主代理直接執行。',
   )
   setSubAgent(state, 'Manager', 'active', undefined, deps.publish)
   await delay(300)
@@ -430,8 +446,8 @@ async function runGoalBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
   setSubAgent(state, 'Analyzer-1', 'idle', undefined, deps.publish)
   setSubAgent(state, 'Writer', 'idle', undefined, deps.publish)
 
-  const ctx: LoopContext = { stepOutputs: [], userAttachments: deps.userAttachments }
-  const useLlm = deps.settings.enabled && Boolean(deps.settings.apiKey)
+  const ctx: LoopContext = emptyStepContext(deps)
+  const useLlm = deps.getSettings().enabled && Boolean(deps.getSettings().apiKey)
   let lastDodMissing: string[] = []
 
   for (let iteration = 1; iteration <= max; iteration++) {
@@ -475,7 +491,7 @@ async function runGoalBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
     if (allDone && useLlm) {
       try {
         const verdict = await evaluateDoD(
-          executionSettingsFor(deps.settings, 'analyst'),
+          executionSettingsFor(deps.getSettings(), 'analyst'),
           state.objective,
           state.loopConfig.definitionOfDone,
           ctx.stepOutputs,
@@ -552,7 +568,7 @@ function finalizePatternRun(
     state.status = 'failed'
     state.haltReason = 'All tool calls failed — cannot claim delivery success'
     state.progress = 100
-    state.result = synthesizeResultLocal(state, ctx.stepOutputs, deps.settings)
+    state.result = synthesizeResultLocal(state, ctx.stepOutputs, deps.getSettings())
     state.reportTitle = opts.reportTitle
     setSubAgent(state, 'Manager', 'error', undefined, deps.publish)
     deps.log('ERROR', state.haltReason)
@@ -564,7 +580,7 @@ function finalizePatternRun(
   state.confidence = Math.min(0.99, 0.55 + 0.3 * stepRatio + 0.15 * toolOkRatio)
   state.status = 'success'
   state.progress = 100
-  state.result = synthesizeResultLocal(state, ctx.stepOutputs, deps.settings)
+  state.result = synthesizeResultLocal(state, ctx.stepOutputs, deps.getSettings())
   state.reportTitle = opts.reportTitle
   setSubAgent(state, 'Manager', 'done', undefined, deps.publish)
   deps.log('SUCCESS', `${opts.successLog} (confidence=${state.confidence.toFixed(2)} tools_ok=${(toolOkRatio * 100).toFixed(0)}%)`)
@@ -580,7 +596,7 @@ async function runTimeBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
   deps.log('INFO', trigger ? `Trigger window validated：${trigger.jobId} @ ${trigger.triggeredAt}` : `Trigger window validated at ${nowTime()}`)
   setSubAgent(state, 'Manager', 'active', undefined, deps.publish)
 
-  const ctx: LoopContext = { stepOutputs: [], userAttachments: deps.userAttachments }
+  const ctx: LoopContext = emptyStepContext(deps)
   for (let i = 0; i < state.steps.length; i++) {
     if (deps.shouldAbort()) return
     const { ok } = await executeStep(state, i, 1, ctx, deps)
@@ -604,7 +620,7 @@ async function runProactive(state: LoopRunState, deps: LoopDeps): Promise<void> 
     trigger ? `Event matcher predicates verified：${trigger.eventName} · ${trigger.matchedAt}` : 'Event matcher evidence missing — no action taken.',
   )
 
-  const ctx: LoopContext = { stepOutputs: [], userAttachments: deps.userAttachments }
+  const ctx: LoopContext = emptyStepContext(deps)
   for (let i = 0; i < state.steps.length; i++) {
     if (deps.shouldAbort()) return
     const { ok } = await executeStep(state, i, 1, ctx, deps)

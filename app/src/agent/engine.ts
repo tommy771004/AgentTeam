@@ -30,7 +30,10 @@ import {
 } from './scheduler'
 import { validateEventTriggerSnapshot } from './eventMatcher'
 import { runLoop, type LoopDeps, type LoopRequest } from './loop/index.ts'
+import { snapshot } from './loop/state.ts'
 import type { AskDecision } from './loop/stepRun.ts'
+import { unattendedInterventionTimeoutSec } from './hitlTimeout.ts'
+export { unattendedInterventionTimeoutSec } from './hitlTimeout.ts'
 type Listener = (state: AgentState) => void
 
 /** @deprecated Alias kept so resolveIntervention's external signature is untouched — use AskDecision. */
@@ -58,12 +61,11 @@ export class AgentLoopEngine {
   private interventionResolve: ((d: InterventionDecision) => void) | null = null
   private settings: LlmSettings = { ...DEFAULT_LLM_SETTINGS }
   private overrides: RuntimeOverrides = {}
+  /** continueGoal restore buffer — seeded into LoopDeps.initialStepOutputs */
   private stepOutputs: string[] = []
   private attachedSkillContext = ''
   /** Phase 4: session recall kept separate for ContextPacket (not mashed into skills blob). */
   private sessionRecallBlock = ''
-  /** Last DoD missing[] for continueGoal snapshot */
-  private lastDodMissing: string[] = []
   /** W2: persistent project guidance (AGENTS.md) resolved per run */
   private projectGuidance = ''
   /** Vision / file attachments for this run (FC multimodal) */
@@ -238,9 +240,10 @@ export class AgentLoopEngine {
   private waitForIntervention(): Promise<InterventionDecision> {
     this.state.status = 'manual_intervention'
     const unattended = this.overrides.unattended === true
-    // Unattended (cron/webhook/telegram): short timeout so a run cannot hang overnight
+    // Unattended (cron/webhook/telegram): short timeout so a run cannot hang overnight.
+    // Pure helper keeps the policy testable without sleeping 15s in smokes.
     const timeoutSec = unattended
-      ? Math.max(15, Math.min(120, Math.round((this.overrides.hitlTimeoutMs || 45_000) / 1000)))
+      ? unattendedInterventionTimeoutSec(this.overrides.hitlTimeoutMs)
       : this.state.intervention.timeoutSec || 900
     this.state.intervention = {
       ...this.state.intervention,
@@ -279,7 +282,6 @@ export class AgentLoopEngine {
     this.aborted = false
     this.overrides = overrides || {}
     this.stepOutputs = []
-    this.lastDodMissing = []
     this.attachedSkillContext = ''
     this.sessionRecallBlock = ''
     this.userAttachments = this.overrides.userAttachments || []
@@ -637,15 +639,19 @@ export class AgentLoopEngine {
               : { pattern: 'proactive', evidence: this.state.eventTrigger! }
       const deps: LoopDeps = {
         publish: (s) => {
-          this.state = s
+          // Clone so UI/store never observes in-flight loop mutations (review #4).
+          this.state = snapshot(s)
           this.emit()
         },
         ask: () => this.waitForIntervention(),
         waitForUserAck: () => this.waitForUser(),
         log: (level, message) => this.log(level, message),
         shouldAbort: () => this.aborted,
-        settings: this.settings,
-        overrides: this.overrides,
+        // Live getters so configure() mid-run is visible to the next settings read.
+        getSettings: () => this.settings,
+        getOverrides: () => this.overrides,
+        // continueGoal restore seeds digests into this.stepOutputs before runLoop.
+        initialStepOutputs: this.stepOutputs.slice(),
         projectGuidance: this.projectGuidance,
         sessionRecallBlock: this.sessionRecallBlock,
         attachedSkillContext: this.attachedSkillContext,

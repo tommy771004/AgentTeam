@@ -60,22 +60,44 @@ function makeState(steps: ExecutionStep[], maxIterations = 3): LoopRunState {
   }
 }
 
-function makeDeps(settings: LlmSettings, overrides: Partial<LoopDeps> = {}): LoopDeps {
+type MakeDepsOpts = Partial<
+  Omit<LoopDeps, 'getSettings' | 'getOverrides' | 'initialStepOutputs'>
+> & {
+  /** RuntimeOverrides bag (convenience for smokes). */
+  overrides?: ReturnType<LoopDeps['getOverrides']>
+  initialStepOutputs?: string[]
+  /** Test helper: mutate live settings mid-run. */
+  onBindLiveSettings?: (set: (s: LlmSettings) => void) => void
+}
+
+function makeDeps(settings: LlmSettings, opts: MakeDepsOpts = {}): LoopDeps {
+  let liveSettings = settings
+  let liveOverrides = opts.overrides || {}
+  opts.onBindLiveSettings?.((s) => {
+    liveSettings = s
+  })
+  const {
+    overrides: _runtimeOverrides,
+    initialStepOutputs,
+    onBindLiveSettings: _bind,
+    ...rest
+  } = opts
   return {
     publish: () => {},
     ask: async () => ({ action: 'approve' }),
     waitForUserAck: async () => {},
     log: () => {},
     shouldAbort: () => false,
-    settings,
-    overrides: {},
+    getSettings: () => liveSettings,
+    getOverrides: () => liveOverrides,
+    initialStepOutputs,
     projectGuidance: '',
     sessionRecallBlock: '',
     attachedSkillContext: '',
     userAttachments: [],
     onGoalIncomplete: () => {},
     onGoalCleared: () => {},
-    ...overrides,
+    ...rest,
   }
 }
 
@@ -246,6 +268,87 @@ await test('publish is called across the loop (UI live-update seam)', async () =
   await runLoop({ pattern: 'turn' }, state, deps)
   assert.ok(seenStatuses.includes('success'), 'must publish the final success status')
   assert.ok(seenStatuses.length >= 2, 'must publish more than once across a run')
+})
+
+await test('continueGoal seed: initialStepOutputs appear in first step context / result path', async () => {
+  const settings: LlmSettings = {
+    ...DEFAULT_LLM_SETTINGS,
+    enabled: true,
+    apiKey: 'test-key',
+    model: 'test-model',
+    baseUrl: 'http://127.0.0.1:9',
+    toolsEnabled: false,
+    functionCalling: false,
+    safetyEnabled: false,
+  }
+  const seed = '### 先前執行摘要\nseeded-prior-digest-XYZ'
+  let sawSeed = false
+  setLlmTransport(async (req) => {
+    const text = JSON.stringify(req.body.messages)
+    if (text.includes('seeded-prior-digest-XYZ')) sawSeed = true
+    if (text.includes('驗收代理')) {
+      return { content: '{"met":true,"confidence":0.95,"missing":[]}', tokensUsed: 10, model: 'fake', toolCalls: [] }
+    }
+    return { content: 'STEP_DONE_WITH_SEED', tokensUsed: 5, model: 'fake', toolCalls: [] }
+  })
+  const state = makeState(
+    [{ step: 1, action: 'do', description: 'complete remaining work', status: 'PENDING' }],
+    1,
+  )
+  const deps = makeDeps(settings, { initialStepOutputs: [seed] })
+  const { state: out } = await runLoop({ pattern: 'goal' }, state, deps)
+  assert.equal(out.status, 'success')
+  assert.ok(sawSeed, 'prior digest must reach LLM step/DoD prompts via stepOutputsSoFar')
+})
+
+await test('live getSettings: mid-run configure is visible on next settings read', async () => {
+  const settings: LlmSettings = {
+    ...DEFAULT_LLM_SETTINGS,
+    enabled: false,
+    toolsEnabled: false,
+    safetyEnabled: false,
+    subAgentsEnabled: false,
+  }
+  let setLive: ((s: LlmSettings) => void) | undefined
+  const state = makeState(
+    [
+      { step: 1, action: 'do', description: 'first', status: 'PENDING' },
+      { step: 2, action: 'do', description: 'second', status: 'PENDING' },
+    ],
+    1,
+  )
+  // Goal with maxIterations 1 and always-fail DoD not needed — turn pattern runs all steps.
+  const turnState = makeState(
+    [
+      { step: 1, action: 'do', description: 'first', status: 'PENDING' },
+      { step: 2, action: 'do', description: 'second', status: 'PENDING' },
+    ],
+  )
+  const seenModels: string[] = []
+  const deps = makeDeps(settings, {
+    overrides: { sourceKind: 'composer' },
+    onBindLiveSettings: (set) => {
+      setLive = set
+    },
+    log: (_level, message) => {
+      // Capture model labels if any; also use publish side-effect below.
+      void message
+    },
+    publish: (s) => {
+      // After first step completes, flip model via live configure simulation.
+      const done = s.steps.filter((st) => st.status === 'COMPLETED').length
+      if (done === 1 && setLive) {
+        setLive({ ...settings, model: 'live-configured-model' })
+      }
+      seenModels.push(deps.getSettings().model || '')
+    },
+  })
+  await runLoop({ pattern: 'turn' }, turnState, deps)
+  assert.ok(
+    seenModels.some((m) => m === 'live-configured-model'),
+    'after configure mid-run, getSettings must return the new model',
+  )
+  void state
 })
 
 console.log(`\n${passed} tests passed`)

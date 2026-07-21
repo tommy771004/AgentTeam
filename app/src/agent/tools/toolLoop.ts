@@ -250,7 +250,15 @@ export async function runFunctionCallingLoop(
     projectRoot,
     blockedTools: opts?.blockedTools,
     agentId: opts?.mcpAgentId,
-    entitlement: (await import('../../store/subscriptionStore')).useSubscriptionStore.getState().entitlement,
+    entitlement: await (async () => {
+      try {
+        return (await import('../../store/subscriptionStore.ts')).useSubscriptionStore.getState()
+          .entitlement
+      } catch {
+        // Node smokes / non-renderer: free entitlement floor
+        return undefined
+      }
+    })(),
   })
   cb?.onLog?.('INFO', summarizeCapabilityState(capState))
   const emitLoadedCaps = () => {
