@@ -46,6 +46,7 @@ await test('merge bar smokes exist and claim four patterns + FC + seed + live se
   assert.match(step, /load_capability/)
   assert.match(step, /capability ids union/)
   assert.match(step, /safety gate/)
+  assert.match(step, /mid-step configure model/)
 })
 
 await test('engine adapter clones publish + final rebind via snapshot (UI isolation)', () => {
@@ -116,8 +117,8 @@ console.log(`
 Parity note:
   Automated (this smoke + smoke-loop-runner + smoke-step-run): four patterns,
   intervention approve/reject at step seam, FC multi-round, capability resume,
-  continueGoal seed, live configure, publish clone, unattended timeout policy,
-  Time/Proactive fail-closed.
+  continueGoal seed, live configure (inter-step + mid-step FC model), publish clone,
+  unattended timeout policy, Time/Proactive fail-closed.
   Still human (Electron UI): real ScheduledJob tick, real event matcher hit,
   composer-visible intervention panel, live subAgent/tool panes during a real run.
 `)

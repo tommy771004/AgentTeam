@@ -69,6 +69,9 @@ type LoopDeps = {
   initialStepOutputs?: string[]                      // continueGoal 恢復種子,拷入各 pattern 的 stepOutputs
   // log/shouldAbort/projectGuidance/sessionRecallBlock/attachedSkillContext/userAttachments 同既有
 }
+// StepRunDeps 同形 getSettings/getOverrides；FC toolLoop 每 round 再讀 model 等,
+// 故 step 內 multi-round 中途 configure 亦生效（smoke-step-run 鎖 model 切換）。
+
 
 type LoopResult = { state: LoopRunState }
 // outcome 併入 state.status/haltReason,未另開型別(YAGNI)。

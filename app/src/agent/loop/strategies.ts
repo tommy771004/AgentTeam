@@ -232,6 +232,8 @@ export function createFunctionCallingStepExecutor(host: StepStrategyHost): StepE
         },
         {
           limits: host.supervisorLimits(),
+          // Live re-read each FC round (mid-step configure / model flip).
+          getSettings: () => host.executionSettings(role),
           haltOnPayloadOverflow: settings.haltOnPayloadOverflow === true,
           includeMcpTools: settings.mcpEnabled,
           permissionPolicy: overrides.permissionPolicy,

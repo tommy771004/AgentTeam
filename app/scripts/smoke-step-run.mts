@@ -69,21 +69,32 @@ function makeState(step: Partial<ExecutionStep> = {}): LoopRunState {
   }
 }
 
-function makeDeps(settings: LlmSettings, overrides: Partial<StepRunDeps> = {}): StepRunDeps {
+function makeDeps(
+  settings: LlmSettings,
+  patch: Partial<StepRunDeps> & {
+    /** Convenience: static overrides bag (tests that don't need live flip). */
+    overrides?: import('../src/agent/types.ts').RuntimeOverrides
+  } = {},
+): StepRunDeps {
   const publishes: LoopRunState[] = []
+  const { overrides: staticOverrides, ...rest } = patch
+  let live = settings
+  let ov = staticOverrides || {}
   return {
     publish: (s) => publishes.push(structuredClone(s)),
     ask: async (): Promise<AskDecision> => ({ action: 'approve' }),
     log: () => {},
     shouldAbort: () => false,
-    settings,
-    overrides: {},
+    // Default: stable getters (tests may replace getSettings to simulate
+    // engine.configure replacing the whole settings object mid-step).
+    getSettings: () => live,
+    getOverrides: () => ov,
     projectGuidance: '',
     sessionRecallBlock: '',
     attachedSkillContext: '',
     userAttachments: [],
     stepOutputsSoFar: [],
-    ...overrides,
+    ...rest,
   }
 }
 
@@ -323,6 +334,75 @@ await test('capability ids union across sequential steps (preload resume)', asyn
       `step2 must retain capability ${id}, got ${JSON.stringify(state.loadedCapabilityIds)}`,
     )
   }
+})
+
+/**
+ * Seam: runStep FC multi-round — mid-step configure() replaces the settings
+ * object (as engine.configure does). The next LLM round must use the new model.
+ * Inter-step live-apply is covered by smoke-loop-runner; this locks *within* a step.
+ */
+await test('FC multi-round: mid-step configure model is used on next LLM round', async () => {
+  let live: LlmSettings = {
+    ...DEFAULT_LLM_SETTINGS,
+    enabled: true,
+    apiKey: 'test-key',
+    model: 'model-round-1',
+    baseUrl: 'http://127.0.0.1:9',
+    toolsEnabled: true,
+    functionCalling: true,
+    safetyEnabled: false,
+    modelProfiles: {
+      'model-round-1': { modelId: 'model-round-1', tools: true, source: 'assumed' },
+      'model-round-2': { modelId: 'model-round-2', tools: true, source: 'assumed' },
+    },
+  }
+  const modelsSeen: string[] = []
+  let round = 0
+  setLlmTransport(async (req) => {
+    modelsSeen.push(String(req.body.model))
+    round++
+    if (round === 1) {
+      // Simulate agentEngine.configure replacing the whole settings object
+      // (not in-place mutation of the frozen step snapshot).
+      live = { ...live, model: 'model-round-2' }
+      return {
+        content: '',
+        tokensUsed: 8,
+        model: 'model-round-1',
+        toolCalls: [
+          {
+            id: 'call_cap_live',
+            name: 'load_capability',
+            arguments: JSON.stringify({ id: 'shell' }),
+          },
+        ],
+      }
+    }
+    return {
+      content: 'LIVE_SETTINGS_FINAL',
+      tokensUsed: 10,
+      model: 'model-round-2',
+      toolCalls: [],
+    }
+  })
+  const state = makeState()
+  const deps = makeDeps(live, {
+    getSettings: () => live,
+    getOverrides: () => ({ runId: 'run-live-fc', sourceKind: 'composer' }),
+  })
+  const result = await runStep(state, 0, 1, 'Primary', deps)
+  assert.equal(result.ok, true)
+  assert.match(result.output, /LIVE_SETTINGS_FINAL/)
+  assert.ok(round >= 2, `expected multi-round FC, got rounds=${round}`)
+  assert.equal(
+    modelsSeen[0],
+    'model-round-1',
+    `first FC round must use pre-configure model, saw ${JSON.stringify(modelsSeen)}`,
+  )
+  assert.ok(
+    modelsSeen.slice(1).includes('model-round-2'),
+    `later FC round must use post-configure model, saw ${JSON.stringify(modelsSeen)}`,
+  )
 })
 
 console.log(`\n${passed} tests passed`)

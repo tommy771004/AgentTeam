@@ -136,6 +136,12 @@ export interface ToolLoopOptions {
   /** Explicit identity used for HITL routing, shell cancellation and thread-bound tools. */
   runId?: string
   threadId?: string
+  /**
+   * Live settings re-read each FC LLM round so mid-step configure() (model etc.)
+   * applies without restarting the step. Capability assembly still uses the
+   * entry `settings` argument.
+   */
+  getSettings?: () => LlmSettings
 }
 
 function nowTime(): string {
@@ -605,13 +611,16 @@ ${systemExtra}`,
     // Refresh tools each round (capability loads expand the set)
     tools = rebuildVisibleTools()
 
+    // Live settings each round (mid-step configure) — assembly still uses entry settings.
+    const liveSettings = opts?.getSettings?.() ?? settings
+
     // ContextEngine: meter + compact + checkpoint + memory (Hermes-style seam).
     const governed = await contextEngine.prepareRound({
       messages,
       round: rounds,
       toolsEstimateText: JSON.stringify(tools),
-      settings,
-      model: settings.model,
+      settings: liveSettings,
+      model: liveSettings.model,
       runId: opts?.runId,
       threadId: opts?.threadId,
       objective: opts?.objective || args.objective,
@@ -635,9 +644,11 @@ ${systemExtra}`,
       `function-call round ${rounds}/${limits.maxToolRounds} · tools=${tools.length}`,
     )
 
-    // Per-capability model settings (capability bundles model config, v2 style)
+    // Per-capability model settings (capability bundles model config, v2 style).
     const capModel = activeModelSettings(capState)
-    const callSettings = capModel.model ? { ...settings, model: capModel.model } : settings
+    const callSettings = capModel.model
+      ? { ...liveSettings, model: capModel.model }
+      : liveSettings
     const result = await chatCompletionWithTools(callSettings, messages, tools, {
       temperature: capModel.temperature ?? 0.3,
       maxTokens: capModel.maxTokens ?? 1400,
@@ -750,7 +761,8 @@ ${systemExtra}`,
     role: 'user',
     content: 'Max tool rounds reached. Produce the final Markdown step output now without more tools.',
   })
-  const final = await chatCompletionWithTools(settings, messages, [], {
+  const finalLive = opts?.getSettings?.() ?? settings
+  const final = await chatCompletionWithTools(finalLive, messages, [], {
     temperature: 0.3,
     maxTokens: 1400,
     toolChoice: 'none',

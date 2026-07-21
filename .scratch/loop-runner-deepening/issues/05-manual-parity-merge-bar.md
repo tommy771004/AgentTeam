@@ -15,7 +15,7 @@ spec.md 決議 8。一次到位單 PR 的合併門檻中,smoke 覆蓋不到的�
 - [x] 四 pattern 邏輯（Turn / Goal DoD+replan / Time fail-closed+claim / Proactive fail-closed+evidence）
 - [x] Safety intervention 於 step seam：reject → FAILED；approve → 續跑
 - [x] FC multi-round（load_capability → final）+ capability 跨步 union
-- [x] continueGoal `initialStepOutputs` seed；mid-run `getSettings` live-apply
+- [x] continueGoal `initialStepOutputs` seed；mid-run `getSettings` live-apply（含 **step 內** multi-round FC model 切換）
 - [x] publish 經 `snapshot()` clone（engine adapter）
 - [x] unattended 逾時政策純函數（`unattendedInterventionTimeoutSec`，預設 45s / hard floor 15 / cap 120）
 - [x] package.json smoke 鏈含 loop / step / transport / parity
@@ -59,3 +59,9 @@ npm run smoke   # 確認自動化 merge bar 仍綠
 - Engine final rebind：`this.state = snapshot(loopState)`，與 publish 路徑一致。
 - Spec `LoopDeps` 契約補 `getSettings`/`getOverrides`/`initialStepOutputs` + publish live+adapter-clone 語意。
 - `smoke-loop-parity` 鏈上自檢含自身 script 名。
+
+### 2026-07-21 — step 內 multi-round FC live-settings (TDD)
+
+- Seam：`runStep` / `ToolLoopOptions.getSettings`；觀測：transport `body.model` 於 round2 反映 configure 後物件。
+- `StepRunDeps` 改 `getSettings`/`getOverrides`；`toolLoop` 每 round 再讀；capability 組裝仍用 entry snapshot。
+- `smoke-step-run`：`FC multi-round: mid-step configure model is used on next LLM round`。

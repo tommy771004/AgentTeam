@@ -53,8 +53,12 @@ export type StepRunDeps = {
   ask: (req: AskRequest) => Promise<AskDecision>
   log: (level: LogLevel, message: string) => void
   shouldAbort: () => boolean
-  settings: LlmSettings
-  overrides: RuntimeOverrides
+  /**
+   * Live settings / overrides — re-read so agentEngine.configure mid-step is
+   * visible on the next FC LLM round (not only at step boundary).
+   */
+  getSettings: () => LlmSettings
+  getOverrides: () => RuntimeOverrides
   projectGuidance: string
   sessionRecallBlock: string
   attachedSkillContext: string
@@ -170,9 +174,11 @@ export async function runStep(
   const step = state.steps[index]
   const role = state.subAgents.find((a) => a.name === agentName)?.role || 'executor'
   const publish = deps.publish
+  const settingsAt = () => deps.getSettings()
+  const overridesAt = () => deps.getOverrides()
 
-  const resolved = executionModelFor(deps.settings, role)
-  const useLlm = llmEnabledFor(deps.settings, deps.overrides)
+  const resolved = executionModelFor(settingsAt(), role)
+  const useLlm = llmEnabledFor(settingsAt(), overridesAt())
   setStep(
     state,
     index,
@@ -193,7 +199,7 @@ export async function runStep(
     publish,
   )
   deps.log('EXEC', `[${agentName}] step ${step.step}: ${step.description}`)
-  const modelSourceLabel = subAgentsEnabledFor(deps.settings)
+  const modelSourceLabel = subAgentsEnabledFor(settingsAt())
     ? resolved.usedFallback
       ? 'fallback→global'
       : 'roleModels'
@@ -203,18 +209,18 @@ export async function runStep(
     `[${agentName}] model=${useLlm ? resolved.model || '—' : 'simulation'} (${useLlm ? modelSourceLabel : 'sim'})`,
   )
 
-  // Safety gate
-  if (deps.settings.safetyEnabled) {
+  // Safety gate (entry snapshot — mid-step safety flip is out of scope)
+  if (settingsAt().safetyEnabled) {
     const safety = evaluateSafety(
       state.objective,
       step.description,
       step.action,
-      deps.settings.authLevel,
+      settingsAt().authLevel,
     )
     if (
       !safety.ok &&
-      deps.settings.approvalMode === 'full' &&
-      deps.overrides.unattended !== true
+      settingsAt().approvalMode === 'full' &&
+      overridesAt().unattended !== true
     ) {
       // 完整存取權（僅互動 run）：不停等人工，記錄後直接續跑（deny 規則仍生效）
       deps.log('WARN', 'Proposed action targets sensitive resources')
@@ -267,10 +273,13 @@ export async function runStep(
   let userAttachments = deps.userAttachments
 
   // P1-B: model capability profile — degrade BEFORE the call fails mid-run
+  // Path selection uses entry snapshot; multi-round FC re-reads model via getSettings.
   const { modelSupports } = await import('../modelProfile.ts')
+  const entrySettings = settingsAt()
+  const entryOverrides = overridesAt()
   const stepModel = useLlm ? resolved.model : ''
-  const fcCapable = modelSupports(deps.settings, stepModel, 'tools')
-  if (fcCapable === false && deps.settings.functionCalling !== false) {
+  const fcCapable = modelSupports(entrySettings, stepModel, 'tools')
+  if (fcCapable === false && entrySettings.functionCalling !== false) {
     deps.log(
       'WARN',
       `模型 ${stepModel} 標記不支援 tool calls（profile）— 本步降級 heuristic 路徑`,
@@ -278,13 +287,13 @@ export async function runStep(
   }
   const useFc =
     useLlm &&
-    deps.settings.toolsEnabled !== false &&
-    deps.settings.functionCalling !== false &&
+    entrySettings.toolsEnabled !== false &&
+    entrySettings.functionCalling !== false &&
     fcCapable !== false
   // Vision gate: strip image payloads when profile says unsupported
   if (
     userAttachments.some((a) => a.kind === 'image') &&
-    modelSupports(deps.settings, stepModel, 'vision') === false
+    modelSupports(entrySettings, stepModel, 'vision') === false
   ) {
     deps.log(
       'WARN',
@@ -296,12 +305,13 @@ export async function runStep(
   }
 
   // Thin strategies — only "obtain step output"; pre/post stay on the orchestrator.
+  // Host callbacks re-read getSettings so FC multi-round sees mid-step configure().
   const strategies = createStepStrategies({
     log: (level, message) => deps.log(level as LogLevel, message),
     shouldAbort: () => deps.shouldAbort(),
-    executionSettings: (r) => executionSettingsFor(deps.settings, r),
-    supervisorLimits: () => supervisorLimitsFor(deps.settings),
-    subAgentsEnabled: () => subAgentsEnabledFor(deps.settings),
+    executionSettings: (r) => executionSettingsFor(settingsAt(), r),
+    supervisorLimits: () => supervisorLimitsFor(settingsAt()),
+    subAgentsEnabled: () => subAgentsEnabledFor(settingsAt()),
     onToolCall: (record) => {
       state.toolCalls = [...state.toolCalls, record]
       publish(state)
@@ -339,18 +349,18 @@ export async function runStep(
     iteration,
     stepOutputs: deps.stepOutputsSoFar,
     userAttachments,
-    settings: deps.settings,
+    settings: entrySettings,
     overrides: {
-      ...deps.overrides,
-      useLlm: deps.overrides.useLlm,
+      ...entryOverrides,
+      useLlm: entryOverrides.useLlm,
     },
     loadedCapabilityIds: state.loadedCapabilityIds,
     unlockedToolNames: state.unlockedToolNames,
-    temporaryChatDefault: deps.settings.temporaryChatDefault === true,
+    temporaryChatDefault: entrySettings.temporaryChatDefault === true,
     projectGuidance: deps.projectGuidance,
     sessionRecallBlock: deps.sessionRecallBlock,
     attachedSkillContext: deps.attachedSkillContext,
-    subAgentsEnabled: subAgentsEnabledFor(deps.settings),
+    subAgentsEnabled: subAgentsEnabledFor(entrySettings),
   }
 
   try {
@@ -433,7 +443,7 @@ export async function runStep(
   state.confidence = Math.min(0.98, confBase + Math.random() * 0.04)
   deps.log('EVAL', `Confidence… [Current: ${state.confidence.toFixed(2)}]`)
 
-  const doneResolved = executionModelFor(deps.settings, role)
+  const doneResolved = executionModelFor(settingsAt(), role)
   // P0: if every tool in this step failed, do not mark COMPLETED as success path
   const stepTools = (state.toolCalls || []).filter((t) => t.step === step.step)
   const allToolsFailed = stepTools.length > 0 && stepTools.every((t) => t.ok === false)
