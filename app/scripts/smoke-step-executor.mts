@@ -1,5 +1,10 @@
 /**
- * Step Executor shared helpers — true import tests.
+ * Step I/O pure helpers — true import tests.
+ * Behavioral wiring (dispatch, strategy composition, fallback) is verified
+ * by smoke-step-run.mts / smoke-loop-runner.mts driving real production
+ * code through a scripted transport — not by regex-matching source text
+ * (that was the smoke this file used to be; see Loop Runner deepening
+ * ticket 04, spec.md merge bar).
  * Run: node --experimental-strip-types scripts/smoke-step-executor.mts
  */
 import assert from 'node:assert/strict'
@@ -8,7 +13,7 @@ import {
   formatSimulationStepOutput,
   resolveHeuristicStepOutcome,
   simulateStepOutput,
-} from '../src/agent/stepExecutor.ts'
+} from '../src/agent/loop/stepIO.ts'
 import type { LlmSettings } from '../src/agent/types.ts'
 import { DEFAULT_LLM_SETTINGS } from '../src/agent/llm.ts'
 
@@ -75,32 +80,6 @@ await test('DIAGNOSE: legacy empty-output gate misclassifies LLM empty success',
   )
 })
 
-await test('DIAGNOSE: Loop Runner step seam must use resolveHeuristicStepOutcome (not empty-string gate)', async () => {
-  const fs = await import('node:fs')
-  const path = await import('node:path')
-  const { fileURLToPath } = await import('node:url')
-  const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  // Loop Runner deepening (ticket 02): dispatch wiring moved from engine.ts to
-  // agent/loop/stepRun.ts; behaviorally re-verified by smoke-step-run.mts.
-  const stepRun = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepRun.ts'), 'utf8')
-  const strategies = fs.readFileSync(path.join(appRoot, 'src/agent/loop/strategies.ts'), 'utf8')
-  assert.match(
-    stepRun,
-    /resolveHeuristicStepOutcome/,
-    'stepRun must dispatch on resolveHeuristicStepOutcome',
-  )
-  assert.doesNotMatch(
-    stepRun,
-    /if \(result\.output\)/,
-    'stepRun must not gate simulation on truthy output',
-  )
-  assert.match(
-    strategies,
-    /needsSimulation:\s*true/,
-    'heuristic tools-only path must set needsSimulation: true',
-  )
-})
-
 await test('capability assembly is identical for FC-shaped and heuristic-shaped inputs', () => {
   const settings = {
     ...DEFAULT_LLM_SETTINGS,
@@ -141,60 +120,6 @@ await test('simulateStepOutput helper remains available', () => {
     toolContext: 'evidence',
   })
   assert.match(a, /simulation|Tool evidence|do thing/i)
-})
-
-await test('Loop Runner step seam wires stepIO helpers; heuristic uses invokeGatedTool', async () => {
-  const fs = await import('node:fs')
-  const path = await import('node:path')
-  const { fileURLToPath } = await import('node:url')
-  const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  // Loop Runner deepening (ticket 02): stepExecutor.ts/stepStrategies.ts are now
-  // re-export shims over agent/loop/{stepIO,strategies}.ts — assert the real homes.
-  const stepRun = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepRun.ts'), 'utf8')
-  const step = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepIO.ts'), 'utf8')
-  const strategies = fs.readFileSync(path.join(appRoot, 'src/agent/loop/strategies.ts'), 'utf8')
-  const invocation = fs.readFileSync(
-    path.join(appRoot, 'src/agent/tools/toolInvocation.ts'),
-    'utf8',
-  )
-  assert.match(step, /export function buildStepCapabilityPreload/)
-  assert.doesNotMatch(step, /finalizeAuthorizedToolCall/)
-  assert.doesNotMatch(step, /finalizeDeniedToolCall/)
-  assert.match(invocation, /export async function invokeGatedTool/)
-  // Three thin strategy factories
-  assert.match(strategies, /export function createFunctionCallingStepExecutor/)
-  assert.match(strategies, /export function createHeuristicStepExecutor/)
-  assert.match(strategies, /export function createSimulationStepExecutor/)
-  assert.match(strategies, /export class HeuristicLlmFailedError/)
-  // Strategies never import one another (only createStepStrategies composes them)
-  assert.doesNotMatch(strategies, /from '\.\/strategies(\.ts)?'/)
-  assert.match(strategies, /functionCalling: createFunctionCallingStepExecutor\(host\)/)
-  assert.match(strategies, /heuristic: createHeuristicStepExecutor\(host\)/)
-  assert.match(strategies, /simulation: createSimulationStepExecutor\(host\)/)
-  // Step Run orchestrator owns dispatch + fallback
-  assert.match(stepRun, /createStepStrategies/)
-  assert.match(stepRun, /strategies\.functionCalling\.execute/)
-  assert.match(stepRun, /strategies\.heuristic\.execute/)
-  assert.match(stepRun, /strategies\.simulation\.execute/)
-  assert.match(stepRun, /HeuristicLlmFailedError/)
-  assert.match(stepRun, /Falling back to simulation/)
-  // Heuristic gated tools: one assembly helper (builtin + custom), not dual paste
-  assert.match(strategies, /async function runHeuristicGatedTool/)
-  assert.match(strategies, /invokeGatedTool/)
-  // Both loops call the helper (not a second full authorize-remap block)
-  const assemblyCalls = strategies.match(/runHeuristicGatedTool\(/g) || []
-  assert.ok(
-    assemblyCalls.length >= 3,
-    `expected helper def + builtin + custom calls, got ${assemblyCalls.length}`,
-  )
-  assert.doesNotMatch(strategies, /finalizeAuthorizedToolCall/)
-  assert.doesNotMatch(strategies, /allowed: true as const/)
-  assert.doesNotMatch(strategies, /guardAndExecuteTool/)
-  assert.doesNotMatch(step, /authToDeniedResult/)
-  assert.match(strategies, /buildStepCapabilityPreload/)
-  // Builtin path uses ToolName without Parameters<typeof executeTool> cast
-  assert.doesNotMatch(strategies, /Parameters<typeof executeTool>/)
-  assert.match(invocation, /truncate only/i)
 })
 
 await test('simulation strategy output is deterministic for fixed inputs', () => {

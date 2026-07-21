@@ -526,6 +526,72 @@ await test('W1: entry drift guard — no dispatchThreadTask outside controller',
   assert.match(controller, /runId/)
 })
 
+/**
+ * Pure: given importer files, find any relative import resolving inside
+ * agent/loop/ from outside it — except agent/engine.ts, the Loop Runner's
+ * sole production adapter (CONTEXT.md「Loop Runner（迴圈執行器）」).
+ * Resolves each specifier against the importer's own directory so it holds
+ * regardless of the importer's depth in the tree.
+ */
+function findLoopRunnerImportDrift(files) {
+  const violations = []
+  const importRe = /\bfrom\s+['"]([^'"]+)['"]/g
+  for (const f of files) {
+    if (f.path === 'src/agent/engine.ts') continue
+    if (f.path.startsWith('src/agent/loop/')) continue
+    let m
+    importRe.lastIndex = 0
+    while ((m = importRe.exec(f.content))) {
+      const spec = m[1]
+      if (!spec.startsWith('.')) continue
+      const importerDir = path.posix.dirname(f.path)
+      const resolved = path.posix.normalize(path.posix.join(importerDir, spec))
+      if (resolved === 'src/agent/loop' || resolved.startsWith('src/agent/loop/')) {
+        violations.push(`${f.path} imports '${spec}' → agent/loop is engine.ts-only`)
+      }
+    }
+  }
+  return violations
+}
+
+await test('drift guard: agent/loop is imported only by engine.ts (fixture)', () => {
+  const clean = [
+    { path: 'src/agent/engine.ts', content: "import { runLoop } from './loop/index.ts'" },
+    { path: 'src/agent/runDispatch.ts', content: "import { foo } from './otherThing.ts'" },
+  ]
+  assert.deepEqual(findLoopRunnerImportDrift(clean), [])
+
+  const violating = [
+    ...clean,
+    { path: 'src/agent/runDispatch.ts', content: "import { runLoop } from './loop/index.ts'" },
+  ]
+  const hits = findLoopRunnerImportDrift(violating)
+  assert.equal(hits.length, 1)
+  assert.match(hits[0], /runDispatch\.ts/)
+
+  const nestedViolator = [
+    { path: 'src/pages/SettingsPage.tsx', content: "import { runLoop } from '../agent/loop/index.ts'" },
+  ]
+  assert.equal(findLoopRunnerImportDrift(nestedViolator).length, 1)
+})
+
+await test('drift guard: agent/loop is imported only by engine.ts (real tree)', async () => {
+  const fs = await import('node:fs')
+  const srcRoot = path.join(appRoot, 'src')
+  const entries = fs.readdirSync(srcRoot, { recursive: true, withFileTypes: true })
+  const files = []
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    if (!/\.(ts|tsx)$/.test(entry.name)) continue
+    const abs = path.join(entry.parentPath ?? entry.path, entry.name)
+    const rel = 'src/' + path.relative(srcRoot, abs).split(path.sep).join('/')
+    files.push({ path: rel, content: fs.readFileSync(abs, 'utf8') })
+  }
+  assert.ok(files.some((f) => f.path === 'src/agent/engine.ts'), 'sanity: engine.ts must be scanned')
+  const violations = findLoopRunnerImportDrift(files)
+  assert.deepEqual(violations, [], `agent/loop must only be imported by engine.ts:\n${violations.join('\n')}`)
+})
+
 await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async () => {
   const fs = await import('node:fs')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')

@@ -67,7 +67,7 @@ await test('toolLoop gated path uses invokeGatedTool + registry only', async () 
   assert.match(loop, /invokeGatedTool/)
   assert.match(loop, /dispatchRegistered/)
   assert.doesNotMatch(loop, /from '\.\/executor'|from \"\.\/executor\"/)
-  // Loop Runner deepening (ticket 02): stepStrategies.ts is now a re-export shim over agent/loop/strategies.ts.
+  // Loop Runner deepening: stepStrategies.ts relocated to agent/loop/strategies.ts (ticket 02), shim removed (ticket 04).
   const strategies = fs.readFileSync(path.join(appRoot, 'src/agent/loop/strategies.ts'), 'utf8')
   assert.match(strategies, /dispatchRegistered/)
   assert.doesNotMatch(strategies, /from '\.\/tools\/executor'|from \"\.\/tools\/executor\"/)

@@ -42,9 +42,13 @@ On busy, `resolveBusyPolicy` decides: automation sources **queue** (`agent/runQu
 
 Per run, the engine resolves **project context** (`agent/projectContext.ts` → `project:agentsDocs` IPC): real `AGENTS.md`/`CLAUDE.md` files from the project root (walking up ≤3 levels, stopping at `.git`), injected into prompts ABOVE Hermes user guidance via **ContextPacket** slots, with path/hash/bytes logged for audit. OpenCode `instructions` are temporary-applied the same way; other discovered opencode fields surface as candidates in Settings →「OpenCode 匯入報告」(temporary / review / unsupported — `agent/opencode/configCandidates.ts`), never silently written to Settings.
 
-### Engine (`agent/engine.ts`)
+### Loop Runner (`agent/loop/`) and the Engine adapter (`agent/engine.ts`)
 
-Implements the four loop patterns from the spec (Turn-based / Goal-based / Time-based / Proactive). Each step runs `executeStepWithAgent`, which takes one of three paths:
+The four loop patterns from the spec (Turn-based / Goal-based / Time-based / Proactive), DoD evaluation, iteration-time replan, continueGoal persistence, and per-step execution live in **`agent/loop/`** — `runLoop` (`loop/index.ts`) is its only product-facing export. **`agent/engine.ts` is its sole production adapter**: it owns Parse (heuristic + LLM plan refinement), continueGoal *restore*, project guidance / OpenCode instructions, Time/Proactive trigger verification (`validateTimeBasedTrigger`, `validateEventTriggerSnapshot`), the `AgentEngineRegistry`, and HITL timeout policy (`waitForIntervention`, unchanged) — then hands an already-parsed state + a typed `LoopRequest` to `runLoop`. Nothing outside `engine.ts` may import `agent/loop/*` (enforced by a drift-guard smoke).
+
+`LoopRequest`'s `'time'`/`'proactive'` variants require a `ScheduleTriggerSnapshot`/`EventTriggerSnapshot` field — an evidence-less request is unrepresentable at the type level, and `runLoop`'s entry additionally refuses it at runtime (fail-closed even against a type-system bypass). See CONTEXT.md「Loop Runner（迴圈執行器）」and「Time-based / Proactive trigger」.
+
+Each step runs `agent/loop/stepRun.ts` `runStep`, which takes one of three paths (`agent/loop/strategies.ts`):
 
 1. **Function-calling tool loop** (`agent/tools/toolLoop.ts`) when LLM enabled + `functionCalling` on — the main path, with full progressive disclosure
 2. **Heuristic path** — keyword tool selection (`tools/registry.ts` `selectToolsForStep`) + plain LLM; still capability-aware (runbooks injected, `approvalTools` enforced, owning capabilities auto-loaded) but without model-driven progressive disclosure
@@ -52,7 +56,7 @@ Implements the four loop patterns from the spec (Turn-based / Goal-based / Time-
 
 Runs from automation sources (scheduler / webhook / Telegram / delegate) set `unattended: true` — HITL asks and safety interventions auto-deny after a timeout (45s unattended, 90s interactive) instead of blocking forever.
 
-Sub-agent roles (Manager/Analyzer-1/Writer/Core) map to `settings.roleModels` via `llm.ts` `resolveRoleModel`; every LLM call goes through `chatCompletionWithTools` (OpenAI-compatible, proxied via Electron main when available).
+Sub-agent roles (Manager/Analyzer-1/Writer/Core) map to `settings.roleModels` via `llm.ts` `resolveRoleModel`; every LLM call goes through `chatCompletionWithTools` (OpenAI-compatible, proxied via Electron main when available, `llm.ts` `setLlmTransport` seam for smokes below the Outbound Data Gate).
 
 ### Capability system (`agent/capabilities/`) — Pydantic AI 2.0 style
 
