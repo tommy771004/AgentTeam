@@ -250,6 +250,17 @@ async function executePiHostTurn(
       unattended: overrides.unattended,
     }).filter(([, value]) => value !== undefined),
   )
+  const child = overrides.subagentId
+    ? {
+        role: overrides.subagentId,
+        profile: {
+          ...profile,
+          ...(overrides.subagentId === 'explore' ? { activeTools: ['find', 'grep', 'ls', 'read'] } : {}),
+        },
+        context: { objective: text, facts: [], constraints: overrides.subagentId === 'explore' ? ['read-only'] : [] },
+        depth: 1,
+      }
+    : undefined
   try {
     const result = await runPiOrchestration({
       pattern: loopType,
@@ -263,6 +274,7 @@ async function executePiHostTurn(
           runId,
           cwd: overrides.projectRoot,
           profile,
+          child,
         })
         return { settlement: turn.settlement, result: turn.result }
       },

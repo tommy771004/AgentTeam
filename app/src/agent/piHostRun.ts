@@ -9,6 +9,7 @@ export type PiHostRunnerApi = {
   sessions: {
     list: () => Promise<{ sessions: unknown[] }>
     create: (title?: string, threadId?: string) => Promise<{ sessionId: string; sessions: unknown[] }>
+    createChild?: (input: { title?: string; parentSessionId: string; role: string; profile: Record<string, unknown>; context: { objective: string; facts: string[]; constraints: string[] }; depth: number }) => Promise<{ sessionId: string; sessions: unknown[] }>
   }
   turn: {
     submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown> }) => Promise<{
@@ -27,6 +28,7 @@ export type SubmitPiHostRunInput = {
   runId: string
   cwd?: string
   profile?: Record<string, unknown>
+  child?: { role: string; profile: Record<string, unknown>; context: { objective: string; facts: string[]; constraints: string[] }; depth: number }
 }
 
 export type SubmitPiHostRunResult = {
@@ -71,7 +73,10 @@ export async function submitPiHostRun(
   const existing = (listed.sessions || [])
     .map(asSession)
     .find((session) => session?.threadId === input.threadId && !session.archived)
-  const sessionId = existing?.id || (await api.sessions.create(input.title, input.threadId)).sessionId
+  const parentSessionId = existing?.id || (await api.sessions.create(input.title, input.threadId)).sessionId
+  const sessionId = input.child && api.sessions.createChild
+    ? (await api.sessions.createChild({ title: input.title, parentSessionId, ...input.child })).sessionId
+    : parentSessionId
   const turn = await api.turn.submit({
     sessionId,
     prompt: input.prompt,
