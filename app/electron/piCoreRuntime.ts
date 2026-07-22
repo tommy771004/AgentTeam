@@ -75,10 +75,27 @@ export async function runPiTurn(
   onEvent?: (event: { type?: string; [key: string]: unknown }) => void,
 ) {
   const runtime = await ensurePiSessionRuntime(sessionId, cwd)
-  const unsubscribe = runtime.session.subscribe((event) => onEvent?.(event))
+  let completedMessages: Array<{ role?: string; content?: unknown }> = []
+  const unsubscribe = runtime.session.subscribe((event) => {
+    if (event.type === 'agent_end' && Array.isArray(event.messages)) {
+      completedMessages = event.messages as Array<{ role?: string; content?: unknown }>
+    }
+    onEvent?.(event)
+  })
   try {
     await runtime.session.prompt(prompt)
-    return { settlement: 'success' as const, items: [] as unknown[] }
+    return {
+      settlement: 'success' as const,
+      items: completedMessages
+        .filter((message) => message.role === 'assistant')
+        .map((message) => ({
+          type: 'assistant_message',
+          content: Array.isArray(message.content)
+            ? message.content.filter((part): part is { type: string; text: string } => Boolean(part && typeof part === 'object' && (part as { type?: unknown }).type === 'text' && typeof (part as { text?: unknown }).text === 'string')).map((part) => part.text).join('')
+            : typeof message.content === 'string' ? message.content : '',
+          message,
+        })),
+    }
   } catch (error) {
     return {
       settlement: 'failed' as const,
