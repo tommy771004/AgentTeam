@@ -26,12 +26,20 @@ const send = (id: number, method: string, params: Record<string, unknown>) => ho
 try {
   send(1, 'initialize', { protocolVersion: 1 })
   await waitFor(1)
-  send(2, 'tools/bash', { cwd: root, command: 'printf "hello bash"' })
-  const denied = await waitFor(2)
+  send(2, 'settings/update', { activeTools: ['read'] })
+  await waitFor(2)
+  send(3, 'tools/bash', { cwd: root, command: 'printf "hello bash"', approval: 'allow' })
+  const disabled = await waitFor(3)
+  assert.match(disabled.error?.message ?? '', /disabled|active tool/i)
+
+  send(4, 'settings/update', { activeTools: ['bash'] })
+  await waitFor(4)
+  send(5, 'tools/bash', { cwd: root, command: 'printf "hello bash"' })
+  const denied = await waitFor(5)
   assert.match(denied.error?.message ?? '', /approval/i)
 
-  send(3, 'tools/bash', { cwd: root, command: 'printf "hello bash"', approval: 'allow' })
-  const result = await waitFor(3)
+  send(6, 'tools/bash', { cwd: root, command: 'printf "hello bash"', approval: 'allow' })
+  const result = await waitFor(6)
   assert.equal(result.result?.tool, 'bash')
   assert.equal(result.result?.content?.[0]?.text, 'hello bash')
 } finally {

@@ -13,6 +13,7 @@ const piCodingAgent = await import(/* @vite-ignore */ pathToFileURL(join(vendorD
 const piConfig = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/config.js')).href)
 
 type PiSessionRuntime = {
+  activeToolsKey: string
   sessionManager: {
     appendMessage: (message: unknown) => string
     getEntries: () => unknown[]
@@ -78,9 +79,14 @@ export async function executePiTool(
   }
 }
 
-async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string) {
+async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string, activeTools?: string[]) {
   const existing = sessionRuntimes.get(sessionId)
-  if (existing) return existing
+  const activeToolsKey = JSON.stringify(activeTools || [])
+  if (existing && existing.activeToolsKey === activeToolsKey) return existing
+  if (existing) {
+    await existing.session.dispose?.()
+    sessionRuntimes.delete(sessionId)
+  }
   const agentDir = process.env.SUBAGENTS_PI_AGENT_DIR
   const sessionDir = agentDir ? join(agentDir, 'sessions') : undefined
   const sessionManager = sessionFile
@@ -108,9 +114,10 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     cwd,
     sessionManager,
   }
+  if (activeTools?.length) options.tools = [...activeTools]
   if (agentDir) options.agentDir = agentDir
   const created = await piCodingAgent.createAgentSession(options)
-  const runtime = { sessionManager, session: created.session } as PiSessionRuntime
+  const runtime = { activeToolsKey, sessionManager, session: created.session } as PiSessionRuntime
   sessionRuntimes.set(sessionId, runtime)
   return runtime
 }
@@ -123,8 +130,9 @@ export async function runPiTurn(
   onEvent?: (event: { type?: string; [key: string]: unknown }) => void,
   runId?: string,
   sessionFile?: string,
+  activeTools?: string[],
 ) {
-  const runtime = await ensurePiSessionRuntime(sessionId, cwd, history, sessionFile)
+  const runtime = await ensurePiSessionRuntime(sessionId, cwd, history, sessionFile, activeTools)
   const turn = { session: runtime.session, cancelled: false }
   if (runId) activeTurns.set(runId, turn)
   let completedMessages: Array<{ role?: string; content?: unknown }> = []
