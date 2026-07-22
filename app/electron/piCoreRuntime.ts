@@ -188,6 +188,22 @@ export async function disposePiSession(sessionId: string) {
   sessionRuntimes.delete(sessionId)
 }
 
+export function compactPiSession(sessionId: string, keepMessages = 4) {
+  const runtime = sessionRuntimes.get(sessionId)
+  if (!runtime) return false
+  const entries = runtime.sessionManager.getEntries() as Array<{ type?: string; id?: string }>
+  const messages = entries.filter((entry) => entry.type === 'message' && entry.id)
+  if (messages.length <= keepMessages) return false
+  const firstKeptEntryId = messages[messages.length - keepMessages]?.id
+  if (!firstKeptEntryId) return false
+  ;(runtime.sessionManager as { appendCompaction?: (summary: string, firstKeptEntryId: string, tokensBefore: number) => string }).appendCompaction?.(
+    'Pi Host compacted the conversation while preserving the recent message window.',
+    firstKeptEntryId,
+    messages.length,
+  )
+  return true
+}
+
 export async function cancelPiTurn(runId: string) {
   const turn = activeTurns.get(runId)
   if (!turn) return false

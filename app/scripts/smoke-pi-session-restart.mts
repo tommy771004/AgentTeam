@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert'
 import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -93,8 +93,15 @@ try {
     { role: 'assistant', content: 'first from Pi' },
     { role: 'user', content: [{ type: 'text', text: 'second prompt' }] },
   ])
-  second.send(7, 'sessions/fork', { sessionId })
-  const forked = await second.waitFor((message) => message.id === 7)
+  const sourceFile = String(restoredSession.piSessionFile)
+  second.send(7, 'turn/submit', { sessionId, runId: 'restart-third', cwd: process.cwd(), prompt: 'third prompt' })
+  await second.waitFor((message) => message.id === 7)
+  second.send(8, 'sessions/compact', { sessionId })
+  await second.waitFor((message) => message.id === 8)
+  const compactedPiSession = await readFile(sourceFile, 'utf8')
+  assert.match(compactedPiSession, /"type":"compaction"/)
+  second.send(9, 'sessions/fork', { sessionId })
+  const forked = await second.waitFor((message) => message.id === 9)
   try {
     assert.equal(typeof forked.result.sessions[0].piSessionFile, 'string')
   } finally {

@@ -55,7 +55,7 @@ export type PiHostEvent =
 export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
-import { cancelPiTool, cancelPiTurn, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, piCoreRuntimeStatus, runPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
+import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, piCoreRuntimeStatus, runPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
 
 type HostState = {
   initialized: boolean
@@ -179,9 +179,11 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
         return [{ id, result: { sessionId, sessions: [session] } }]
       })
     }
-    if (session.messages.length > 4) session.messages = session.messages.slice(-4)
-    state.snapshot.cursor += 1
-    return [{ id, result: { sessionId, sessions: [session] } }]
+    return Promise.resolve(compactPiSession(sessionId)).then(() => {
+      if (session.messages.length > 4) session.messages = session.messages.slice(-4)
+      state.snapshot.cursor += 1
+      return [{ id, result: { sessionId, sessions: [session] } }]
+    })
   }
   if (input.method === 'turn/cancel') {
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
