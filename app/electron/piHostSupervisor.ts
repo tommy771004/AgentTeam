@@ -226,6 +226,12 @@ export class PiHostSupervisor {
     return response.result
   }
 
+  async listTools(): Promise<string[]> {
+    const response = await this.request('tools/list', {})
+    if (response.error || !response.result?.builtinTools) throw new Error(response.error?.message || 'Pi tool listing failed')
+    return response.result.builtinTools
+  }
+
   async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}), ...(profile ? { profile } : {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')

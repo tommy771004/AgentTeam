@@ -8,7 +8,7 @@ export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
   params: Record<string, unknown>
 }
 
@@ -146,6 +146,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
   if (!state.initialized) return [errorResponse(id, 'not_initialized', 'Pi Host must be initialized first')]
   if (input.method === 'health/get') return [{ id, result: readyResult() }]
   if (input.method === 'runtime/status') return [{ id, result: piCoreRuntimeStatus() }]
+  if (input.method === 'tools/list') return [{ id, result: { builtinTools: piCoreRuntimeStatus().builtinTools } }]
   if (input.method === 'tools/read' || input.method === 'tools/grep' || input.method === 'tools/find' || input.method === 'tools/ls' || input.method === 'tools/write' || input.method === 'tools/edit' || input.method === 'tools/bash') {
     const params = input.params || {}
     if (typeof params.cwd !== 'string') return [errorResponse(id, 'invalid_request', 'cwd is required')]

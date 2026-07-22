@@ -19,6 +19,7 @@
     "smoke:pi-migration": "node --experimental-strip-types scripts/smoke-pi-settings-migration.mts && node --experimental-strip-types scripts/smoke-pi-settings.mts && node --experimental-strip-types scripts/smoke-pi-external-sources.mts && node --experimental-strip-types scripts/smoke-pi-orchestration-extension.mts && node --experimental-strip-types scripts/smoke-pi-electron-cutover.mts && node --experimental-strip-types scripts/smoke-pi-projection-merge.mts && node --experimental-strip-types scripts/smoke-pi-sync-gate.mts",
     "smoke:pi-host-memory": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-memory.mts",
     "smoke:pi-host-capabilities": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-capabilities.mts",
+    "smoke:pi-host-tool-registry": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-tool-registry.mts",
     "smoke:pi-host-release-evidence": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-release-evidence.mts",
     "smoke:pi-sync-evidence": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-sync-evidence.mts",
     "smoke:pi-sync-release-record": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-sync-release-record.mts",
