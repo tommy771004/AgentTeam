@@ -240,7 +240,14 @@ function uid() {
   return `th_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
 }
 
+function piHostCanonical(): boolean {
+  return typeof window !== 'undefined' && typeof window.subagents?.piHost?.sessions?.list === 'function'
+}
+
 function persist(threads: Thread[], activeId: string | null) {
+  // Host-owned history is not written to renderer storage; this is only a
+  // disposable browser/CLI cache when Pi Host is absent.
+  if (piHostCanonical()) return
   try {
     const current = localStorage.getItem(KEY)
     if (current) localStorage.setItem(BACKUP_KEY, current)
@@ -313,6 +320,7 @@ function migrateThread(raw: Record<string, unknown>): Thread {
 }
 
 function load(): { threads: Thread[]; activeId: string | null } {
+  if (piHostCanonical()) return { threads: [], activeId: null }
   const parse = (raw: string | null) => {
     if (!raw) return null
     try {
@@ -370,7 +378,7 @@ function titleFromText(text: string) {
 function emptyThread(partial?: Partial<Thread>): Thread {
   const now = new Date().toISOString()
   return {
-    id: uid(),
+    id: partial?.id || uid(),
     title: partial?.title || '新對話',
     model: partial?.model || '',
     thinkingDepth: partial?.thinkingDepth || 'deep',
@@ -420,18 +428,23 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     const byThread = new Map(
       sessions.map((session) => [session.threadId, projectPiSession(session)] as const).filter(([id, projection]) => Boolean(id && projection)),
     )
-    const threads = get().threads.map((thread) => {
-      const projection = byThread.get(thread.id)
-      if (!projection) return thread
-      return {
-        ...thread,
-        title: projection.title || thread.title,
-        bubbles: projection.bubbles,
-        updatedAt: new Date().toISOString(),
-      }
-    })
-    set({ threads })
-    persist(threads, get().activeId)
+    const current = get().threads
+    const isPlaceholder = current.length === 1 && current[0].runner === 'builtin' && current[0].title === '新對話' && current[0].bubbles.length === 0
+    const preserved = (isPlaceholder ? [] : current).filter((thread) => !byThread.has(thread.id))
+    const projected = [...byThread.values()].flatMap((projection) => projection ? [{
+      ...(current.find((thread) => thread.id === projection.threadId) || emptyThread({ id: projection.threadId, title: projection.title })),
+      id: projection.threadId,
+      title: projection.title,
+      bubbles: projection.bubbles,
+      updatedAt: new Date().toISOString(),
+    }] : [])
+    const threads = [...projected, ...preserved].slice(0, MAX_THREADS)
+    const currentActiveId = get().activeId
+    const activeId = currentActiveId && threads.some((thread) => thread.id === currentActiveId)
+      ? currentActiveId
+      : threads[0]?.id || null
+    set({ threads, activeId })
+    persist(threads, activeId)
   },
 
   createThread: (opts) => {

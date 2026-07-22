@@ -13,6 +13,7 @@ const incomplete: ReleaseQualificationInput = {
     { platform: 'macos', architecture: 'arm64', signed: false, checksum: false, cleanInstall: false, firstRunTask: false },
   ],
   recovery: { restart: false, crash: false, queueExactlyOnce: false, schedulerOnceJob: false },
+  piHost: { protocol: false, utilityProcess: false, sessions: false, extensions: false },
   update: { nMinusOneToN: false, signatureVerified: false, failedRecovery: false, rollback: false },
   entitlement: { freeCore: false, activePro: false, offlineGrace: false, expired: false, cancelled: false, packRollback: false },
   workflow: { spec: false, tickets: false, tdd: false, review: false, artifactIndex: false, handoff: false, userApprovalBeforeRelease: false },
@@ -24,6 +25,7 @@ const noGo = buildReleaseQualification(incomplete, '2026-07-19T06:00:00.000Z')
 assert.equal(noGo.decision, 'NO-GO')
 assert.equal(noGo.ready, false)
 assert.ok(noGo.failedCriteria.length >= 8)
+assert.ok(noGo.failedCriteria.some((criterion) => criterion.startsWith('piHost-')))
 assert.ok(noGo.warnings.some((warning) => warning.id === 'signed-artifacts'))
 assert.match(noGo.report, /NO-GO/)
 
@@ -31,6 +33,7 @@ const complete: ReleaseQualificationInput = {
   ...incomplete,
   platforms: incomplete.platforms.map((platform) => ({ ...platform, signed: true, checksum: true, cleanInstall: true, firstRunTask: true })),
   recovery: { restart: true, crash: true, queueExactlyOnce: true, schedulerOnceJob: true },
+  piHost: { protocol: true, utilityProcess: true, sessions: true, extensions: true },
   update: { nMinusOneToN: true, signatureVerified: true, failedRecovery: true, rollback: true },
   entitlement: { freeCore: true, activePro: true, offlineGrace: true, expired: true, cancelled: true, packRollback: true },
   workflow: { spec: true, tickets: true, tdd: true, review: true, artifactIndex: true, handoff: true, userApprovalBeforeRelease: true },

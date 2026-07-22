@@ -1,5 +1,11 @@
 export type PiCapability = { id: string; description: string; tools: string[]; runbook: string; deferLoading?: boolean }
 
+export const DEFAULT_PI_CAPABILITIES: PiCapability[] = [
+  { id: 'core-files', description: 'Read-only project file discovery and inspection.', tools: ['find', 'grep', 'ls', 'read'], runbook: 'Use project-scoped read tools before proposing edits.', deferLoading: true },
+  { id: 'workspace-write', description: 'Workspace file edits.', tools: ['edit', 'write'], runbook: 'Review the target and preserve the approved project root.', deferLoading: true },
+  { id: 'shell', description: 'Controlled project shell execution.', tools: ['bash'], runbook: 'Use the policy gate and ask before side effects.', deferLoading: true },
+]
+
 export class PiCapabilityCatalog {
   private readonly active = new Set<string>()
   private readonly capabilities: PiCapability[]

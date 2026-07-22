@@ -2,13 +2,13 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
 
 export const PI_HOST_PROTOCOL_VERSION = 1 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'events', 'automation', 'resources', 'memory'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'events', 'automation', 'resources', 'memory', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/recall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
   params: Record<string, unknown>
 }
 
@@ -64,10 +64,12 @@ import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
 import { isPiMemory, PiMemoryExtension, type PiMemory } from './piMemoryExtension.ts'
+import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
 
 type HostState = {
   initialized: boolean
   snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[] }
+  capabilities: PiCapabilityCatalog
 }
 
 export type SessionRecord = { id: string; title: string; threadId?: string; parentSessionId?: string; role?: string; profile?: Record<string, unknown>; context?: PiContextPacket; depth?: number; messages: Array<{ role: 'user' | 'assistant'; content: string }>; archived?: boolean; piSessionFile?: string }
@@ -215,6 +217,21 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const limit = typeof input.params?.limit === 'number' ? input.params.limit : 5
     const memory = new PiMemoryExtension(state.snapshot.memories)
     return [{ id, result: { memories: memory.recall(query, project, limit) } }]
+  }
+  if (input.method === 'capabilities/list') return [{ id, result: { items: state.capabilities.catalog() } }]
+  if (input.method === 'capabilities/load') {
+    const capabilityId = typeof input.params?.id === 'string' ? input.params.id : ''
+    if (!capabilityId) return [errorResponse(id, 'invalid_request', 'capability id is required')]
+    try {
+      return [{ id, result: { items: [state.capabilities.load(capabilityId)], loaded: true } }]
+    } catch (error) {
+      return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Unknown Pi capability')]
+    }
+  }
+  if (input.method === 'capabilities/search') {
+    const query = typeof input.params?.query === 'string' ? input.params.query : ''
+    if (!query.trim()) return [errorResponse(id, 'invalid_request', 'query is required')]
+    return [{ id, result: { items: state.capabilities.search(query) } }]
   }
   if (input.method === 'runs/list') return [{ id, result: { queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })) } }]
   if (input.method === 'runs/enqueue') {
@@ -389,7 +406,7 @@ export function createPiHostServer(
   },
   onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[] }) => void,
 ) {
-  const state: HostState = { initialized: false, snapshot: initialSnapshot }
+  const state: HostState = { initialized: false, snapshot: initialSnapshot, capabilities: new PiCapabilityCatalog(DEFAULT_PI_CAPABILITIES) }
   return {
     async handle(request: unknown) {
       const messages = await handlePiHostRequest(state, request, send)

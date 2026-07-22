@@ -19,6 +19,12 @@ export type ReleaseQualificationInput = {
     queueExactlyOnce: boolean
     schedulerOnceJob: boolean
   }
+  piHost: {
+    protocol: boolean
+    utilityProcess: boolean
+    sessions: boolean
+    extensions: boolean
+  }
   update: {
     nMinusOneToN: boolean
     signatureVerified: boolean
@@ -88,6 +94,7 @@ function criteria(input: ReleaseQualificationInput): Criterion[] {
     for (const [id, passed] of Object.entries(group)) checks.push({ id: `${prefix}-${id}`, passed, detail: labels[id] || `${prefix} ${id}` })
   }
   addGroup('recovery', input.recovery, { restart: 'Restart recovery', crash: 'Forced crash recovery', queueExactlyOnce: 'Queue exactly-once', schedulerOnceJob: 'Scheduler once-job' })
+  addGroup('piHost', input.piHost, { protocol: 'Pi Host protocol', utilityProcess: 'Pi Host utility process', sessions: 'Pi Host session persistence', extensions: 'Pi Host extensions/resources' })
   addGroup('update', input.update, { nMinusOneToN: 'N-1 to N migration', signatureVerified: 'Update signature verification', failedRecovery: 'Failed update recovery', rollback: 'Update rollback' })
   addGroup('entitlement', input.entitlement, { freeCore: 'Free Core', activePro: 'Active Pro', offlineGrace: 'Offline grace', expired: 'Expired entitlement', cancelled: 'Cancelled entitlement', packRollback: 'Feature-pack rollback' })
   addGroup('workflow', input.workflow, { spec: 'Spec', tickets: 'Tickets', tdd: 'TDD', review: 'Review', artifactIndex: 'Artifact Index', handoff: 'Handoff', userApprovalBeforeRelease: 'User approval before release action' })

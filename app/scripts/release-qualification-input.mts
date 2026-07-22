@@ -130,6 +130,13 @@ export async function buildQualificationInputFromEvidence({
   const smoke = bundles.map((bundle) => bundle.smoke).join('\n')
   const trustDocs = bundles.map((bundle) => bundle.trustDocs).find(Boolean) || ''
   const allBundlesHave = (fileName: string) => bundles.length > 0 && bundles.every((bundle) => fileExists(path.join(bundle.directory, fileName)))
+  const piHostEvidence = await Promise.all(bundles.map((bundle) => readJson(path.join(bundle.directory, 'pi-host-qualification.json'))))
+  const piHost = {
+    protocol: piHostEvidence.length > 0 && piHostEvidence.every((evidence) => evidence?.protocol === true),
+    utilityProcess: piHostEvidence.length > 0 && piHostEvidence.every((evidence) => evidence?.utilityProcess === true),
+    sessions: piHostEvidence.length > 0 && piHostEvidence.every((evidence) => evidence?.sessions === true),
+    extensions: piHostEvidence.length > 0 && piHostEvidence.every((evidence) => evidence?.extensions === true),
+  }
   const workflowEvidence = /paid-workflow smoke:|artifact-index-handoff smoke:|composer selection overrides/i.test(smoke)
   const entitlementEvidence = /Entitlement boundary smoke:|Subscription lifecycle smoke:|Feature pack smoke:/i.test(smoke)
   const releaseVersionFromManifest = String(releaseVersion || bundles[0]?.manifest.version || 'unknown')
@@ -145,6 +152,7 @@ export async function buildQualificationInputFromEvidence({
       queueExactlyOnce: allBundlesHave('recovery-e2e.log'),
       schedulerOnceJob: allBundlesHave('recovery-e2e.log'),
     },
+    piHost,
     update: {
       nMinusOneToN: allBundlesHave('update-rollback-evidence.json'),
       signatureVerified: allBundlesHave('update-key-verification.log'),

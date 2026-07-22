@@ -184,6 +184,24 @@ export class PiHostSupervisor {
     return response.result.memories
   }
 
+  async listCapabilities(): Promise<NonNullable<PiHostResponse['result']>['items']> {
+    const response = await this.request('capabilities/list', {})
+    if (response.error || !response.result?.items) throw new Error(response.error?.message || 'Pi capability listing failed')
+    return response.result.items
+  }
+
+  async loadCapability(id: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('capabilities/load', { id })
+    if (response.error || !response.result?.loaded) throw new Error(response.error?.message || 'Pi capability load failed')
+    return response.result
+  }
+
+  async searchCapabilities(query: string): Promise<NonNullable<PiHostResponse['result']>['items']> {
+    const response = await this.request('capabilities/search', { query })
+    if (response.error || !response.result?.items) throw new Error(response.error?.message || 'Pi capability search failed')
+    return response.result.items
+  }
+
   async forkSession(sessionId: string): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('sessions/fork', { sessionId })
     if (response.error || !response.result?.sessionId) throw new Error(response.error?.message || 'Pi session fork failed')

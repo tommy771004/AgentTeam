@@ -20,6 +20,10 @@ const settingsStore = await readFile(resolve(root, 'src/store/settingsStore.ts')
 assert.match(settingsStore, /piHost\?\.settings\?\.get/)
 assert.match(settingsStore, /piHost\?\.settings\?\.update/)
 
+const threadStore = await readFile(resolve(root, 'src/store/threadStore.ts'), 'utf8')
+assert.match(threadStore, /piHostCanonical/)
+assert.match(threadStore, /Host-owned history is not written to renderer storage/)
+
 const preload = await readFile(resolve(root, 'electron/preload.ts'), 'utf8')
 assert.match(preload, /sessions:create/)
 assert.match(preload, /threadId/) 
