@@ -1,3 +1,5 @@
+import { isAbsolute, relative, resolve } from 'node:path'
+
 export const PI_HOST_PROTOCOL_VERSION = 1 as const
 export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns'] as const
 
@@ -74,6 +76,11 @@ const errorResponse = (
   message: string,
 ): PiHostResponse => ({ id, error: { code, message } })
 
+function isWithinProject(cwd: string, target: string): boolean {
+  const rel = relative(resolve(cwd), resolve(cwd, target))
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
 export function handlePiHostRequest(state: HostState, request: unknown, emit?: (message: PiHostMessage) => void): PiHostMessage[] | Promise<PiHostMessage[]> {
   if (!request || typeof request !== 'object') {
     return [errorResponse('', 'invalid_request', 'Pi Host request must be an object')]
@@ -115,6 +122,8 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     if ((toolName === 'read' && typeof params.path !== 'string') || (toolName === 'grep' && (typeof params.path !== 'string' || typeof params.pattern !== 'string')) || (toolName === 'find' && typeof params.pattern !== 'string') || (toolName === 'write' && (typeof params.path !== 'string' || typeof params.content !== 'string')) || (toolName === 'edit' && (typeof params.path !== 'string' || !Array.isArray(params.edits))) || (toolName === 'bash' && typeof params.command !== 'string')) {
       return [errorResponse(id, 'invalid_request', `${toolName} parameters are invalid`)]
     }
+    const scopedPath = typeof params.path === 'string' ? params.path : undefined
+    if (scopedPath && !isWithinProject(params.cwd, scopedPath)) return [errorResponse(id, 'invalid_request', `${toolName} path is outside the requested project scope`)]
     const args = { ...params }
     delete args.cwd
     delete args.approval
