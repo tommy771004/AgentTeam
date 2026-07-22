@@ -54,7 +54,7 @@
 - [x] Project Studio header 顯示目前 Design System 並可返回 picker。
 - [x] 更新 smoke contract，移除舊 landing-page 的 Capture／Contract／Apply 斷言。
 - [x] TypeScript、lint、build、smoke 與瀏覽器 route/interaction 驗證。
-- [ ] 在 Electron 內用真實 project root 建立、編輯並套用一份 DESIGN.md（需要桌面 IPC 實際檔案環境）。
+- [Ｘ] 在 Electron 內用真實 project root 建立、編輯並套用一份 DESIGN.md；`npm run smoke:design-system:e2e` 透過桌面 IPC 與 picker apply 驗證。
 
 ## 視覺證據
 
@@ -74,4 +74,4 @@
 
 ## 驗證限制
 
-瀏覽器 preview 沒有 Electron workspace API，因此可驗證 picker 路由、搜尋／單選語意、空狀態與 Studio 導覽，但無法在 preview 注入真實檔案系統中的 DESIGN.md。桌面 IPC 路徑由既有 smoke contract 覆蓋，仍保留一項真實桌面 E2E 待辦。
+瀏覽器 preview 沒有 Electron workspace API，因此只能驗證 picker 路由、搜尋／單選語意、空狀態與 Studio 導覽；`smoke:design-system:e2e` 另以真實 Electron、project root 與桌面 IPC 驗證 DESIGN.md 建立、編輯、讀回與套用。

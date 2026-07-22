@@ -46,6 +46,7 @@
     "smoke:scenario": "node scripts/smoke-scenario-e2e.mjs",
     "smoke:prod": "node --experimental-strip-types scripts/smoke-prod-modules.mts",
     "smoke:coordinator": "node scripts/smoke-coordinator-browser.mjs",
+    "smoke:design-system:e2e": "node scripts/smoke-design-system-electron-e2e.mjs",
     "smoke:built": "node scripts/smoke.mjs --require-built",
     "smoke:marketplace": "vite build --config scripts/vite.plugin-e2e.config.ts && node .tmp/plugin-e2e/plugin-installer-e2e.mjs",
     "smoke:plugin-install": "vite build --config scripts/vite.plugin-e2e.config.ts && node .tmp/plugin-e2e/plugin-installer-e2e.mjs --network",
