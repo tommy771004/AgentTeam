@@ -137,8 +137,8 @@ export class PiHostSupervisor {
     return response.result
   }
 
-  async submitTurn(sessionId: string, prompt: string, runId?: string): Promise<NonNullable<PiHostResponse['result']>> {
-    const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}) })
+  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')
     return response.result
   }
