@@ -4,6 +4,7 @@ import { DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
 import type { SessionRecord } from './piHostProtocol.ts'
 import type { PiQueuedRun } from './piRunQueue.ts'
 import type { PiResource } from './piResourceRegistry.ts'
+import { isPiMemory, type PiMemory } from './piMemoryExtension.ts'
 
 export type PiHostSnapshot = {
   cursor: number
@@ -11,6 +12,7 @@ export type PiHostSnapshot = {
   settings: PiSettings
   queue: PiQueuedRun[]
   resources: PiResource[]
+  memories: PiMemory[]
 }
 
 type StoredState = PiHostSnapshot & { schemaVersion: 1 }
@@ -22,6 +24,7 @@ const emptyState = (): StoredState => ({
   settings: { ...DEFAULT_PI_SETTINGS },
   queue: [],
   resources: [],
+  memories: [],
 })
 
 export async function loadPiHostState(statePath: string): Promise<StoredState> {
@@ -53,6 +56,7 @@ export async function loadPiHostState(statePath: string): Promise<StoredState> {
       },
       queue: (value.queue || []).filter((item): item is PiQueuedRun => Boolean(item && typeof item === 'object' && typeof (item as PiQueuedRun).runId === 'string')),
       resources: Array.isArray(value.resources) ? value.resources : [],
+      memories: Array.isArray(value.memories) ? value.memories.filter(isPiMemory) : [],
     }
   } catch {
     return emptyState()

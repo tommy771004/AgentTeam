@@ -10,7 +10,7 @@ type ParentPort = {
 const parentPort = (process as typeof process & { parentPort?: ParentPort }).parentPort
 const statePath = process.env.SUBAGENTS_PI_HOST_STATE_PATH || `${process.cwd()}/pi-host-state.json`
 const storedState = await loadPiHostState(statePath)
-const initialSnapshot: PiHostSnapshot = { cursor: storedState.cursor, sessions: storedState.sessions, settings: storedState.settings, queue: storedState.queue, resources: storedState.resources }
+const initialSnapshot: PiHostSnapshot = { cursor: storedState.cursor, sessions: storedState.sessions, settings: storedState.settings, queue: storedState.queue, resources: storedState.resources, memories: storedState.memories }
 await savePiHostState(statePath, initialSnapshot)
 let persistence = Promise.resolve()
 const persist = (snapshot: typeof initialSnapshot) => {

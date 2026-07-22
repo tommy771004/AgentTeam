@@ -32,7 +32,7 @@ host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { prot
 const initialized = await waitFor((message) => message.id === 1)
 assert.deepEqual(initialized.result, {
   protocolVersion: 1,
-  capabilities: ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'events', 'automation', 'resources'],
+  capabilities: ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'events', 'automation', 'resources', 'memory'],
   status: 'ready',
 })
 

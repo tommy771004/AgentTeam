@@ -166,6 +166,24 @@ export class PiHostSupervisor {
     return response.result.resources
   }
 
+  async listMemories(): Promise<NonNullable<PiHostResponse['result']>['memories']> {
+    const response = await this.request('memory/list', {})
+    if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory listing failed')
+    return response.result.memories
+  }
+
+  async addMemory(memory: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>['memories']> {
+    const response = await this.request('memory/add', { memory })
+    if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory write failed')
+    return response.result.memories
+  }
+
+  async recallMemory(query: string, project?: string, limit?: number): Promise<NonNullable<PiHostResponse['result']>['memories']> {
+    const response = await this.request('memory/recall', { query, ...(project ? { project } : {}), ...(limit === undefined ? {} : { limit }) })
+    if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory recall failed')
+    return response.result.memories
+  }
+
   async forkSession(sessionId: string): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('sessions/fork', { sessionId })
     if (response.error || !response.result?.sessionId) throw new Error(response.error?.message || 'Pi session fork failed')

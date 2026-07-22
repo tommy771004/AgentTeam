@@ -5,6 +5,7 @@ import type { ChatAttachment } from '../agent/types'
 import { sanitizeAttachmentsForStorage } from '../lib/chatAttachments'
 import type { ContinueGoalSnapshot } from '../agent/continueGoal'
 import { recordRecoveryNotice } from '../agent/runJournal.ts'
+import { projectPiSession, type PiSessionProjection } from '../agent/piHostProjection'
 
 const KEY = 'subagents.threads.v5'
 const BACKUP_KEY = `${KEY}.backup`
@@ -157,6 +158,8 @@ interface ThreadStore {
   runningRunIds: Record<string, string>
 
   hydrate: () => void
+  /** Replace the disposable renderer history with the Host snapshot for matching threads. */
+  hydrateFromPiHost: (sessions: PiSessionProjection[]) => void
   createThread: (
     opts?: Partial<
       Pick<
@@ -411,6 +414,24 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       activeId: nextActive,
     })
     persist(threads, nextActive)
+  },
+
+  hydrateFromPiHost: (sessions) => {
+    const byThread = new Map(
+      sessions.map((session) => [session.threadId, projectPiSession(session)] as const).filter(([id, projection]) => Boolean(id && projection)),
+    )
+    const threads = get().threads.map((thread) => {
+      const projection = byThread.get(thread.id)
+      if (!projection) return thread
+      return {
+        ...thread,
+        title: projection.title || thread.title,
+        bubbles: projection.bubbles,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+    set({ threads })
+    persist(threads, get().activeId)
   },
 
   createThread: (opts) => {

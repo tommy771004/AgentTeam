@@ -38,6 +38,7 @@ import {
 } from './agent/runJournal.ts'
 import { applyRendererStorageSnapshot } from './agent/updateMigration'
 import { compareVersions } from './agent/updateContracts'
+import type { PiSessionProjection } from './agent/piHostProjection'
 
 /** Restore automation queue from disk and drain when capacity is available */
 function RunQueueBootstrap() {
@@ -68,6 +69,30 @@ function RunQueueBootstrap() {
     return () => {
       cancelled = true
     }
+  }, [])
+  return null
+}
+
+/** Pi Host is the history authority; Zustand only receives a disposable projection. */
+function PiHostProjectionBootstrap() {
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await waitForStartupRecovery()
+      const api = window.subagents?.piHost?.sessions
+      if (cancelled || !api?.list) return
+      try {
+        const { useThreadStore } = await import('./store/threadStore')
+        useThreadStore.getState().hydrate()
+        const result = await api.list()
+        if (cancelled) return
+        const sessions = (result.sessions || []).filter((item): item is PiSessionProjection => Boolean(item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string' && typeof (item as { title?: unknown }).title === 'string' && Array.isArray((item as { messages?: unknown }).messages)))
+        useThreadStore.getState().hydrateFromPiHost(sessions)
+      } catch {
+        /* Host projection is best-effort; the durable Host remains authoritative. */
+      }
+    })()
+    return () => { cancelled = true }
   }, [])
   return null
 }
@@ -956,6 +981,7 @@ export default function App() {
       <RecoveryBootstrap />
       <StartupGate>
         <PreferencesBootstrap />
+        <PiHostProjectionBootstrap />
         <RunQueueBootstrap />
         <SkillCuratorBootstrap />
         <SchedulerBootstrap />

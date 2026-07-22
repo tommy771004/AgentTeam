@@ -51,6 +51,11 @@ const api = {
         list: () => ipcRenderer.invoke('pi-host:resources:list') as Promise<{ resources: unknown[] }>,
         reload: (resources: unknown[]) => ipcRenderer.invoke('pi-host:resources:reload', resources) as Promise<{ resources: unknown[] }>,
       },
+      memory: {
+        list: () => ipcRenderer.invoke('pi-host:memory:list') as Promise<{ memories: unknown[] }>,
+        add: (memory: Record<string, unknown>) => ipcRenderer.invoke('pi-host:memory:add', memory) as Promise<{ memories: unknown[] }>,
+        recall: (query: string, project?: string, limit?: number) => ipcRenderer.invoke('pi-host:memory:recall', query, project, limit) as Promise<{ memories: unknown[] }>,
+      },
       turn: {
         submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown> }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; items?: unknown[] }>,
         cancel: (runId: string) => ipcRenderer.invoke('pi-host:turn:cancel', runId) as Promise<{ runId: string; settlement: string }>,

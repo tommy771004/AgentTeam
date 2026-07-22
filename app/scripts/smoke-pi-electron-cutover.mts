@@ -14,6 +14,10 @@ const store = await readFile(resolve(root, 'src/store/agentStore.ts'), 'utf8')
 assert.match(store, /submitPiHostRun\(/)
 assert.match(store, /piHost\?\.turn\?\.cancel/) 
 
+const settingsStore = await readFile(resolve(root, 'src/store/settingsStore.ts'), 'utf8')
+assert.match(settingsStore, /piHost\?\.settings\?\.get/)
+assert.match(settingsStore, /piHost\?\.settings\?\.update/)
+
 const preload = await readFile(resolve(root, 'electron/preload.ts'), 'utf8')
 assert.match(preload, /sessions:create/)
 assert.match(preload, /threadId/) 

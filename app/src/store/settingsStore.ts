@@ -138,6 +138,24 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       base = loadLocal()
     }
 
+    // Electron Pi Host owns the overlapping runtime profile. The legacy
+    // settings bridge remains only for provider credentials, CLI, and UI-only
+    // preferences; model/approval/unattended are projected from Pi here.
+    if (window.subagents?.piHost?.settings?.get) {
+      try {
+        const pi = await window.subagents.piHost.settings.get()
+        if (pi?.settings) {
+          base = mergeSettings(base, {
+            model: pi.settings.model,
+            approvalMode: pi.settings.approvalMode,
+            unattended: pi.settings.unattended,
+          })
+        }
+      } catch {
+        /* Pi Host startup/recovery will retry on the next bootstrap. */
+      }
+    }
+
     // Ticket 16: deploy posture is main-owned. Hydrate outboundGuardDeploy from
     // outbound:status so runtime effective mode matches host SUBAGENTS_OUTBOUND_GUARD
     // even when the renderer process.env is empty.
@@ -226,6 +244,13 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     }
     if (window.subagents?.settings?.set) {
       await window.subagents.settings.set(next)
+    }
+    if (window.subagents?.piHost?.settings?.update) {
+      await window.subagents.piHost.settings.update({
+        ...(patch.model == null ? {} : { model: next.model }),
+        ...(patch.approvalMode == null ? {} : { approvalMode: next.approvalMode }),
+        ...(patch.unattended == null ? {} : { unattended: next.unattended }),
+      })
     }
   },
 
