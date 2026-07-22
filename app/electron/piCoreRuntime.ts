@@ -95,7 +95,6 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   }
   const options: Record<string, unknown> = {
     cwd,
-    noTools: 'all',
     sessionManager,
   }
   if (process.env.SUBAGENTS_PI_AGENT_DIR) options.agentDir = process.env.SUBAGENTS_PI_AGENT_DIR

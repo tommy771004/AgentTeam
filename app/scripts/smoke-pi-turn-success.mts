@@ -10,15 +10,16 @@ import { spawn } from 'node:child_process'
 const agentDir = await mkdtemp(join(tmpdir(), 'pi-turn-agent-'))
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-turn-success-state-'))
 let requestSeen = false
+let requestBody: { tools?: unknown[] } | undefined
 const modelServer = createServer(async (request, response) => {
   if (request.url !== '/v1/chat/completions' || request.method !== 'POST') {
     response.writeHead(404).end()
     return
   }
   requestSeen = true
-  for await (const _chunk of request) {
-    // Consume the request body before sending the streaming response.
-  }
+  const chunks: Buffer[] = []
+  for await (const chunk of request) chunks.push(Buffer.from(chunk))
+  requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { tools?: unknown[] }
   response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive', 'cache-control': 'no-cache' })
   response.write(`data: ${JSON.stringify({ id: 'smoke-completion', object: 'chat.completion.chunk', model: 'smoke-model', choices: [{ index: 0, delta: { role: 'assistant', content: 'hello from Pi' }, finish_reason: null }] })}\n\n`)
   response.write(`data: ${JSON.stringify({ id: 'smoke-completion', object: 'chat.completion.chunk', model: 'smoke-model', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`)
@@ -69,6 +70,7 @@ try {
   assert.equal(settled.result.items[0].type, 'assistant_message')
   assert.equal(settled.result.items[0].content, 'hello from Pi')
   assert.equal(requestSeen, true)
+  assert.ok(requestBody?.tools?.some((tool) => Boolean(tool && typeof tool === 'object' && (tool as { function?: { name?: string } }).function?.name === 'read')))
   send(4, 'sessions/list')
   const listed = await waitFor((message) => message.id === 4)
   const projected = listed.result.sessions.find((candidate: { id: string }) => candidate.id === sessionId)

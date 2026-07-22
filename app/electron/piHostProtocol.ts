@@ -1,7 +1,7 @@
 import { isAbsolute, relative, resolve } from 'node:path'
 
 export const PI_HOST_PROTOCOL_VERSION = 1 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'events'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
