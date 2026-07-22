@@ -14,8 +14,8 @@ const api = {
     },
   },
   turn: {
-    submit: async (input: { sessionId: string; prompt: string; runId?: string; cwd?: string }) => {
-      calls.push(`turn:${input.sessionId}:${input.runId}:${input.cwd}`)
+    submit: async (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown> }) => {
+      calls.push(`turn:${input.sessionId}:${input.runId}:${input.cwd}:${String(input.profile?.model || '')}`)
       return {
         sessionId: input.sessionId,
         runId: input.runId || 'generated',
@@ -32,10 +32,11 @@ const existing = await submitPiHostRun(api, {
   prompt: 'existing turn',
   runId: 'run-existing',
   cwd: '/tmp/project',
+  profile: { model: 'writer-model' },
 })
 assert.equal(existing.sessionId, 'pi-session-existing')
 assert.equal(existing.result, 'answer for existing turn')
-assert.deepEqual(calls, ['turn:pi-session-existing:run-existing:/tmp/project'])
+assert.deepEqual(calls, ['turn:pi-session-existing:run-existing:/tmp/project:writer-model'])
 
 const created = await submitPiHostRun(api, {
   threadId: 'thread-new',
@@ -47,9 +48,9 @@ const created = await submitPiHostRun(api, {
 assert.equal(created.sessionId, 'pi-session-new')
 assert.equal(created.result, 'answer for new turn')
 assert.deepEqual(calls, [
-  'turn:pi-session-existing:run-existing:/tmp/project',
+  'turn:pi-session-existing:run-existing:/tmp/project:writer-model',
   'create:New thread:thread-new',
-  'turn:pi-session-new:run-new:/tmp/project',
+  'turn:pi-session-new:run-new:/tmp/project:',
 ])
 
 console.log('Pi Host runner binds one Pi session to each renderer thread')
