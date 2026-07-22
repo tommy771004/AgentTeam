@@ -19,6 +19,9 @@ export class PiHostSupervisor {
   private child: PiHostChild | null = null
   private nextRequestId = 1
   private statusValue: PiHostStatus = { state: 'stopped' }
+  private stopping = false
+  private restartAttempts = 0
+  private restartTimer: ReturnType<typeof setTimeout> | undefined
   private readonly eventListeners = new Set<(event: PiHostEvent) => void>()
   private readonly pending = new Map<
     string | number,
@@ -40,6 +43,11 @@ export class PiHostSupervisor {
 
   async start(): Promise<PiHostStatus> {
     if (this.statusValue.state === 'ready') return this.statusValue
+    this.stopping = false
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = undefined
+    }
     this.statusValue = { state: 'starting' }
     const child = this.fork()
     this.child = child
@@ -55,9 +63,14 @@ export class PiHostSupervisor {
     })
     child.on('exit', (code: number | null, signal?: number) => {
       this.child = null
+      if (this.stopping) {
+        this.statusValue = { state: 'stopped' }
+        return
+      }
       this.statusValue = { state: 'crashed', exitCode: code, signal }
       for (const waiter of this.pending.values()) waiter.reject(new Error('Pi Core Host exited'))
       this.pending.clear()
+      this.scheduleRestart()
     })
     child.on('error', (error: Error) => {
       this.statusValue = { state: 'error', message: error.message }
@@ -74,6 +87,7 @@ export class PiHostSupervisor {
       protocolVersion: response.result.protocolVersion ?? 1,
       capabilities: response.result.capabilities ? [...response.result.capabilities] : [],
     }
+    this.restartAttempts = 0
     return this.statusValue
   }
 
@@ -150,11 +164,28 @@ export class PiHostSupervisor {
   }
 
   stop(): void {
+    this.stopping = true
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = undefined
+    }
     for (const waiter of this.pending.values()) waiter.reject(new Error('Pi Core Host stopped'))
     this.pending.clear()
     this.child?.kill()
     this.child = null
     this.statusValue = { state: 'stopped' }
+  }
+
+  private scheduleRestart(): void {
+    if (this.stopping || this.restartTimer || this.restartAttempts >= 3) return
+    const attempt = this.restartAttempts
+    this.restartAttempts += 1
+    const delayMs = Math.min(100 * (2 ** attempt), 2_000)
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = undefined
+      if (this.stopping || this.statusValue.state !== 'crashed') return
+      void this.start().catch(() => this.scheduleRestart())
+    }, delayMs)
   }
 
   private request(method: PiHostRequest['method'], params: Record<string, unknown>): Promise<PiHostResponse> {

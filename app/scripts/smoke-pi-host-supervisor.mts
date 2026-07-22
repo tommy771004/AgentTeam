@@ -18,9 +18,17 @@ class FakeChild {
     })
   }
   kill() {}
+  exit(code = 1) { this.listeners.get('exit')?.forEach((listener) => listener(code, undefined)) }
 }
 
-const supervisor = new PiHostSupervisor(() => new FakeChild())
+let spawnCount = 0
+let firstChild: FakeChild | undefined
+const supervisor = new PiHostSupervisor(() => {
+  const child = new FakeChild()
+  spawnCount += 1
+  if (!firstChild) firstChild = child
+  return child
+})
 const events: unknown[] = []
 supervisor.onEvent((event) => events.push(event))
 await supervisor.start()
@@ -29,4 +37,10 @@ assert.equal(cancelled.settlement, 'cancelled')
 const tool = await supervisor.executeTool('read', { cwd: '/tmp', path: 'hello.txt' })
 assert.equal(tool.tool, 'read')
 assert.equal(events.length, 1)
+firstChild?.exit(1)
+for (let attempt = 0; attempt < 20 && spawnCount < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10))
+assert.equal(spawnCount, 2)
+assert.equal(supervisor.status().state, 'ready')
+supervisor.stop()
+assert.equal(supervisor.status().state, 'stopped')
 console.log('Pi Host Supervisor exposes cancellation to Electron callers')
