@@ -5,7 +5,7 @@ export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/read' | 'tools/grep' | 'tools/find' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'turn/submit'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'turn/submit'
   params: Record<string, unknown>
 }
 
@@ -103,7 +103,7 @@ export function handlePiHostRequest(state: HostState, request: unknown): PiHostM
   if (!state.initialized) return [errorResponse(id, 'not_initialized', 'Pi Host must be initialized first')]
   if (input.method === 'health/get') return [{ id, result: readyResult() }]
   if (input.method === 'runtime/status') return [{ id, result: piCoreRuntimeStatus() }]
-  if (input.method === 'tools/read' || input.method === 'tools/grep' || input.method === 'tools/find') {
+  if (input.method === 'tools/read' || input.method === 'tools/grep' || input.method === 'tools/find' || input.method === 'tools/ls') {
     const params = input.params || {}
     if (typeof params.cwd !== 'string') return [errorResponse(id, 'invalid_request', 'cwd is required')]
     const toolName = input.method.slice('tools/'.length) as PiBuiltinToolName
