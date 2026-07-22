@@ -15,12 +15,15 @@ const piConfig = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, '
 type PiSessionRuntime = {
   session: {
     prompt: (prompt: string) => Promise<void>
+    abort?: () => Promise<void> | void
     subscribe: (listener: (event: { type?: string; [key: string]: unknown }) => void) => () => void
     dispose?: () => Promise<void> | void
   }
 }
 export type PiHostHistoryMessage = { role: 'user' | 'assistant'; content: string }
 const sessionRuntimes = new Map<string, PiSessionRuntime>()
+const activeTurns = new Map<string, { session: PiSessionRuntime['session']; cancelled: boolean }>()
+const activeToolRuns = new Map<string, { controller: AbortController; cancelled: boolean }>()
 
 const TOOL_FACTORIES = {
   bash: piCodingAgent.createBashToolDefinition,
@@ -47,11 +50,27 @@ export async function executePiRead(cwd: string, args: { path: string; offset?: 
   return executePiTool('read', cwd, args)
 }
 
-export async function executePiTool(toolName: PiBuiltinToolName, cwd: string, args: Record<string, unknown>) {
+export async function executePiTool(
+  toolName: PiBuiltinToolName,
+  cwd: string,
+  args: Record<string, unknown>,
+  options: { runId?: string; onUpdate?: (update: unknown) => void } = {},
+) {
   const factory = TOOL_FACTORIES[toolName]
   if (typeof factory !== 'function') throw new Error(`Pi builtin tool is unavailable: ${toolName}`)
   const tool = factory(cwd)
-  return tool.execute(`pi-host-${toolName}`, args, undefined, undefined, undefined)
+  const controller = new AbortController()
+  const active = options.runId ? { controller, cancelled: false } : undefined
+  if (options.runId && active) activeToolRuns.set(options.runId, active)
+  try {
+    const result = await tool.execute(`pi-host-${toolName}`, args, controller.signal, options.onUpdate, undefined)
+    return active?.cancelled ? { content: [], cancelled: true } : result
+  } catch (error) {
+    if (active?.cancelled) return { content: [], cancelled: true }
+    throw error
+  } finally {
+    if (options.runId) activeToolRuns.delete(options.runId)
+  }
 }
 
 async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[]) {
@@ -92,8 +111,11 @@ export async function runPiTurn(
   prompt: string,
   history: PiHostHistoryMessage[] = [],
   onEvent?: (event: { type?: string; [key: string]: unknown }) => void,
+  runId?: string,
 ) {
   const runtime = await ensurePiSessionRuntime(sessionId, cwd, history)
+  const turn = { session: runtime.session, cancelled: false }
+  if (runId) activeTurns.set(runId, turn)
   let completedMessages: Array<{ role?: string; content?: unknown }> = []
   const unsubscribe = runtime.session.subscribe((event) => {
     if (event.type === 'agent_end' && Array.isArray(event.messages)) {
@@ -103,6 +125,7 @@ export async function runPiTurn(
   })
   try {
     await runtime.session.prompt(prompt)
+    if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
     return {
       settlement: 'success' as const,
       items: completedMessages
@@ -116,11 +139,29 @@ export async function runPiTurn(
         })),
     }
   } catch (error) {
+    if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
     return {
       settlement: 'failed' as const,
       items: [{ type: 'error', content: error instanceof Error ? error.message : 'Pi turn failed' }],
     }
   } finally {
     unsubscribe()
+    if (runId) activeTurns.delete(runId)
   }
+}
+
+export async function cancelPiTurn(runId: string) {
+  const turn = activeTurns.get(runId)
+  if (!turn) return false
+  turn.cancelled = true
+  await turn.session.abort?.()
+  return true
+}
+
+export function cancelPiTool(runId: string) {
+  const tool = activeToolRuns.get(runId)
+  if (!tool) return false
+  tool.cancelled = true
+  tool.controller.abort()
+  return true
 }

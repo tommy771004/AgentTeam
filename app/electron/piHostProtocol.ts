@@ -5,7 +5,7 @@ export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'turn/submit'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'turn/submit' | 'turn/cancel'
   params: Record<string, unknown>
 }
 
@@ -45,11 +45,15 @@ export type PiHostEvent =
       event: 'host/turn-item'
       payload: { runId: string; sessionId: string; item: unknown }
     }
+  | {
+      event: 'host/tool-update'
+      payload: { runId: string; tool: string; item: unknown }
+    }
 
 export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
-import { executePiTool, piCoreRuntimeStatus, runPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
+import { cancelPiTool, cancelPiTurn, executePiTool, piCoreRuntimeStatus, runPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
 
 type HostState = {
   initialized: boolean
@@ -103,17 +107,29 @@ export function handlePiHostRequest(state: HostState, request: unknown): PiHostM
   if (!state.initialized) return [errorResponse(id, 'not_initialized', 'Pi Host must be initialized first')]
   if (input.method === 'health/get') return [{ id, result: readyResult() }]
   if (input.method === 'runtime/status') return [{ id, result: piCoreRuntimeStatus() }]
-  if (input.method === 'tools/read' || input.method === 'tools/grep' || input.method === 'tools/find' || input.method === 'tools/ls') {
+  if (input.method === 'tools/read' || input.method === 'tools/grep' || input.method === 'tools/find' || input.method === 'tools/ls' || input.method === 'tools/write' || input.method === 'tools/edit' || input.method === 'tools/bash') {
     const params = input.params || {}
     if (typeof params.cwd !== 'string') return [errorResponse(id, 'invalid_request', 'cwd is required')]
     const toolName = input.method.slice('tools/'.length) as PiBuiltinToolName
-    if ((toolName === 'read' && typeof params.path !== 'string') || (toolName === 'grep' && (typeof params.path !== 'string' || typeof params.pattern !== 'string')) || (toolName === 'find' && typeof params.pattern !== 'string')) {
+    if ((toolName === 'write' || toolName === 'edit' || toolName === 'bash') && params.approval !== 'allow') return [errorResponse(id, 'invalid_request', `${toolName} requires approval before execution`)]
+    if ((toolName === 'read' && typeof params.path !== 'string') || (toolName === 'grep' && (typeof params.path !== 'string' || typeof params.pattern !== 'string')) || (toolName === 'find' && typeof params.pattern !== 'string') || (toolName === 'write' && (typeof params.path !== 'string' || typeof params.content !== 'string')) || (toolName === 'edit' && (typeof params.path !== 'string' || !Array.isArray(params.edits))) || (toolName === 'bash' && typeof params.command !== 'string')) {
       return [errorResponse(id, 'invalid_request', `${toolName} parameters are invalid`)]
     }
     const args = { ...params }
     delete args.cwd
-    return executePiTool(toolName, params.cwd, args)
-      .then((result) => [{ id, result: { tool: toolName, content: result.content } }])
+    delete args.approval
+    delete args.runId
+    const runId = typeof params.runId === 'string' ? params.runId : undefined
+    const updates: PiHostEvent[] = []
+    return executePiTool(toolName, params.cwd, args, {
+      runId,
+      onUpdate: (item) => {
+        if (runId) updates.push({ event: 'host/tool-update', payload: { runId, tool: toolName, item } })
+      },
+    })
+      .then((result) => result.cancelled
+        ? [...updates, { id, result: { runId, settlement: 'cancelled' as const, tool: toolName, content: result.content } }]
+        : [...updates, { id, result: { tool: toolName, content: result.content } }])
       .catch((error) => [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : `Pi ${toolName} failed`)])
   }
   if (input.method === 'state/snapshot') {
@@ -147,6 +163,13 @@ export function handlePiHostRequest(state: HostState, request: unknown): PiHostM
     state.snapshot.cursor += 1
     return [{ id, result: { sessionId, sessions: [session] } }]
   }
+  if (input.method === 'turn/cancel') {
+    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+    if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
+    return Promise.all([cancelPiTurn(runId), Promise.resolve(cancelPiTool(runId))]).then(([turnCancelled, toolCancelled]) => (turnCancelled || toolCancelled)
+      ? [{ id, result: { runId, settlement: 'cancelled' as const } }]
+      : [errorResponse(id, 'invalid_request', `Unknown Pi run: ${runId}`)])
+  }
   if (input.method === 'turn/submit') {
     const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
     const prompt = typeof input.params?.prompt === 'string' ? input.params.prompt : ''
@@ -158,7 +181,7 @@ export function handlePiHostRequest(state: HostState, request: unknown): PiHostM
     return runPiTurn(sessionId, cwd, prompt, session.messages, (event) => {
       /* Events are collected below so the response remains ordered after them. */
       turnEvents.push({ event: 'host/turn-item', payload: { runId, sessionId, item: event } } as PiHostEvent)
-    }).then((turn) => {
+    }, runId).then((turn) => {
       if (turn.settlement === 'success') {
         const assistant = turn.items.find((item) => Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'assistant_message')) as { content?: string } | undefined
         session.messages = [
