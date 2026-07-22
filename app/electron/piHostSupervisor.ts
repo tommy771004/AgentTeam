@@ -1,4 +1,4 @@
-import type { PiHostRequest, PiHostResponse } from './piHostProtocol.ts'
+import type { PiHostEvent, PiHostRequest, PiHostResponse } from './piHostProtocol.ts'
 
 export type PiHostStatus =
   | { state: 'stopped' }
@@ -19,6 +19,7 @@ export class PiHostSupervisor {
   private child: PiHostChild | null = null
   private nextRequestId = 1
   private statusValue: PiHostStatus = { state: 'stopped' }
+  private readonly eventListeners = new Set<(event: PiHostEvent) => void>()
   private readonly pending = new Map<
     string | number,
     { resolve: (response: PiHostResponse) => void; reject: (error: Error) => void }
@@ -32,13 +33,21 @@ export class PiHostSupervisor {
     return this.statusValue
   }
 
+  onEvent(listener: (event: PiHostEvent) => void): () => void {
+    this.eventListeners.add(listener)
+    return () => this.eventListeners.delete(listener)
+  }
+
   async start(): Promise<PiHostStatus> {
     if (this.statusValue.state === 'ready') return this.statusValue
     this.statusValue = { state: 'starting' }
     const child = this.fork()
     this.child = child
     child.on('message', (message: PiHostResponse & { event?: string }) => {
-      if (message.event) return
+      if (message.event) {
+        this.eventListeners.forEach((listener) => listener(message as unknown as PiHostEvent))
+        return
+      }
       const waiter = this.pending.get(message.id)
       if (!waiter) return
       this.pending.delete(message.id)

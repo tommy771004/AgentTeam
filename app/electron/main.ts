@@ -232,6 +232,10 @@ let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
 
+piHostSupervisor.onEvent((event) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pi-host:event', event)
+})
+
 /**
  * Resolve SubAgents brand icon for window / tray / notifications.
  *

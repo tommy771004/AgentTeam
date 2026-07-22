@@ -6,6 +6,11 @@ const api = {
   platform: () => ipcRenderer.invoke('app:platform') as Promise<string>,
   version: () => ipcRenderer.invoke('app:version') as Promise<string>,
   piHost: {
+    onEvent: (cb: (event: { event: string; payload: unknown }) => void) => {
+      const handler = (_evt: unknown, event: { event: string; payload: unknown }) => cb(event)
+      ipcRenderer.on('pi-host:event', handler)
+      return () => ipcRenderer.removeListener('pi-host:event', handler)
+    },
     status: () => ipcRenderer.invoke('pi-host:status') as Promise<{
       state: 'stopped' | 'starting' | 'ready' | 'crashed' | 'error'
       protocolVersion?: number
