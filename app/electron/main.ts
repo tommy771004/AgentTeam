@@ -2048,7 +2048,12 @@ ipcMain.handle('pi-host:settings:get', async () => ({ settings: await piHostSupe
 ipcMain.handle('pi-host:settings:update', async (_evt, patch: Record<string, unknown>) => ({ settings: await piHostSupervisor.updateSettings(patch || {}) }))
 ipcMain.handle('pi-host:settings:profile', async (_evt, role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) => ({ profile: await piHostSupervisor.profile(role, taskOverride) }))
 ipcMain.handle('pi-host:sessions:create', async (_evt, title?: string) => piHostSupervisor.createSession(title))
+ipcMain.handle('pi-host:sessions:list', async () => ({ sessions: await piHostSupervisor.listSessions() }))
+ipcMain.handle('pi-host:sessions:fork', async (_evt, sessionId: string) => piHostSupervisor.forkSession(sessionId))
+ipcMain.handle('pi-host:sessions:archive', async (_evt, sessionId: string) => piHostSupervisor.archiveSession(sessionId))
+ipcMain.handle('pi-host:sessions:compact', async (_evt, sessionId: string) => piHostSupervisor.compactSession(sessionId))
 ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId))
+ipcMain.handle('pi-host:turn:cancel', async (_evt, runId: string) => piHostSupervisor.cancelTurn(runId))
 
 // ── Signed Beta updates + N-1→N migration transaction ─────────
 // The channel is deliberately opt-in through SUBAGENTS_UPDATE_PUBLIC_KEY;

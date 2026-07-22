@@ -31,9 +31,14 @@ const api = {
         ipcRenderer.invoke('pi-host:settings:profile', role, taskOverride) as Promise<{ profile: unknown }>,
       sessions: {
         create: (title?: string) => ipcRenderer.invoke('pi-host:sessions:create', title) as Promise<{ sessionId: string; sessions: unknown[] }>,
+        list: () => ipcRenderer.invoke('pi-host:sessions:list') as Promise<{ sessions: unknown[] }>,
+        fork: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:fork', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
+        archive: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:archive', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
+        compact: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:compact', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
       },
       turn: {
         submit: (input: { sessionId: string; prompt: string; runId?: string }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; items?: unknown[] }>,
+        cancel: (runId: string) => ipcRenderer.invoke('pi-host:turn:cancel', runId) as Promise<{ runId: string; settlement: string }>,
       },
     },
   },

@@ -15,6 +15,7 @@ type PiHostChild = {
 type PiHostFork = () => PiHostChild
 
 export class PiHostSupervisor {
+  private readonly fork: PiHostFork
   private child: PiHostChild | null = null
   private nextRequestId = 1
   private statusValue: PiHostStatus = { state: 'stopped' }
@@ -23,7 +24,9 @@ export class PiHostSupervisor {
     { resolve: (response: PiHostResponse) => void; reject: (error: Error) => void }
   >()
 
-  constructor(private readonly fork: PiHostFork) {}
+  constructor(fork: PiHostFork) {
+    this.fork = fork
+  }
 
   status(): PiHostStatus {
     return this.statusValue
@@ -95,9 +98,39 @@ export class PiHostSupervisor {
     return response.result
   }
 
+  async listSessions(): Promise<NonNullable<PiHostResponse['result']>['sessions']> {
+    const response = await this.request('sessions/list', {})
+    if (response.error || !response.result?.sessions) throw new Error(response.error?.message || 'Pi session listing failed')
+    return response.result.sessions
+  }
+
+  async forkSession(sessionId: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('sessions/fork', { sessionId })
+    if (response.error || !response.result?.sessionId) throw new Error(response.error?.message || 'Pi session fork failed')
+    return response.result
+  }
+
+  async archiveSession(sessionId: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('sessions/archive', { sessionId })
+    if (response.error || !response.result?.sessionId) throw new Error(response.error?.message || 'Pi session archive failed')
+    return response.result
+  }
+
+  async compactSession(sessionId: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('sessions/compact', { sessionId })
+    if (response.error || !response.result?.sessionId) throw new Error(response.error?.message || 'Pi session compaction failed')
+    return response.result
+  }
+
   async submitTurn(sessionId: string, prompt: string, runId?: string): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')
+    return response.result
+  }
+
+  async cancelTurn(runId: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('turn/cancel', { runId })
+    if (response.error || response.result?.settlement !== 'cancelled') throw new Error(response.error?.message || 'Pi turn cancellation failed')
     return response.result
   }
 
