@@ -173,6 +173,21 @@ export function getPiSessionFile(sessionId: string) {
   return sessionRuntimes.get(sessionId)?.sessionManager.getSessionFile()
 }
 
+export function forkPiSession(sessionId: string) {
+  const runtime = sessionRuntimes.get(sessionId)
+  if (!runtime) return undefined
+  const leafId = (runtime.sessionManager as { getLeafId?: () => string | null }).getLeafId?.()
+  if (!leafId) return undefined
+  return (runtime.sessionManager as { createBranchedSession?: (id: string) => string | undefined }).createBranchedSession?.(leafId)
+}
+
+export async function disposePiSession(sessionId: string) {
+  const runtime = sessionRuntimes.get(sessionId)
+  if (!runtime) return
+  await runtime.session.dispose?.()
+  sessionRuntimes.delete(sessionId)
+}
+
 export async function cancelPiTurn(runId: string) {
   const turn = activeTurns.get(runId)
   if (!turn) return false

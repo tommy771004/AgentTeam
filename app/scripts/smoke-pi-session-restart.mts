@@ -93,7 +93,13 @@ try {
     { role: 'assistant', content: 'first from Pi' },
     { role: 'user', content: [{ type: 'text', text: 'second prompt' }] },
   ])
-  await closeHost(second.host)
+  second.send(7, 'sessions/fork', { sessionId })
+  const forked = await second.waitFor((message) => message.id === 7)
+  try {
+    assert.equal(typeof forked.result.sessions[0].piSessionFile, 'string')
+  } finally {
+    await closeHost(second.host)
+  }
 } finally {
   modelServer.close()
   await rm(agentDir, { recursive: true, force: true })

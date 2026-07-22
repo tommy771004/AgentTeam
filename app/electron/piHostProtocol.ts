@@ -55,7 +55,7 @@ export type PiHostEvent =
 export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
-import { cancelPiTool, cancelPiTurn, executePiTool, getPiSessionFile, piCoreRuntimeStatus, runPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
+import { cancelPiTool, cancelPiTurn, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, piCoreRuntimeStatus, runPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
 
 type HostState = {
   initialized: boolean
@@ -164,7 +164,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const sourceId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
     const source = state.snapshot.sessions.find((candidate) => candidate.id === sourceId)
     if (!source) return [errorResponse(id, 'invalid_request', 'sessionId is required')]
-    const fork: SessionRecord = { id: `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, title: `${source.title} (fork)`, messages: source.messages.map((message) => ({ ...message })) }
+    const fork: SessionRecord = { id: `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, title: `${source.title} (fork)`, messages: source.messages.map((message) => ({ ...message })), piSessionFile: forkPiSession(sourceId) }
     state.snapshot.sessions = [...state.snapshot.sessions, fork]; state.snapshot.cursor += 1
     return [{ id, result: { sessionId: fork.id, sessions: [fork] } }]
   }
@@ -172,8 +172,14 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
     const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
     if (!session) return [errorResponse(id, 'invalid_request', 'sessionId is required')]
-    if (input.method === 'sessions/archive') session.archived = true
-    else if (session.messages.length > 4) session.messages = session.messages.slice(-4)
+    if (input.method === 'sessions/archive') {
+      return disposePiSession(sessionId).then(() => {
+        session.archived = true
+        state.snapshot.cursor += 1
+        return [{ id, result: { sessionId, sessions: [session] } }]
+      })
+    }
+    if (session.messages.length > 4) session.messages = session.messages.slice(-4)
     state.snapshot.cursor += 1
     return [{ id, result: { sessionId, sessions: [session] } }]
   }
