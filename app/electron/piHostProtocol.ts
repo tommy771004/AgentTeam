@@ -49,7 +49,7 @@ export type PiHostEvent =
 export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
-import { executePiTool, piCoreRuntimeStatus, type PiBuiltinToolName } from './piCoreRuntime.ts'
+import { executePiTool, piCoreRuntimeStatus, runPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
 
 type HostState = {
   initialized: boolean
@@ -153,14 +153,15 @@ export function handlePiHostRequest(state: HostState, request: unknown): PiHostM
     const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
     if (!session || !prompt.trim()) return [errorResponse(id, 'invalid_request', 'sessionId and prompt are required')]
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : `pi-run-${Date.now()}`
-    session.messages.push({ role: 'user', content: prompt })
-    const assistant = `Pi turn received: ${prompt}`
-    session.messages.push({ role: 'assistant', content: assistant })
-    state.snapshot.cursor += 1
-    return [
-      { event: 'host/turn-item', payload: { runId, sessionId, item: { type: 'assistant_message', content: assistant } } } as PiHostEvent,
-      { id, result: { sessionId, runId, settlement: 'success', items: [{ type: 'assistant_message', content: assistant }] } },
-    ]
+    const cwd = typeof input.params?.cwd === 'string' ? input.params.cwd : process.cwd()
+    const turnEvents: PiHostEvent[] = []
+    return runPiTurn(sessionId, cwd, prompt, (event) => {
+      /* Events are collected below so the response remains ordered after them. */
+      turnEvents.push({ event: 'host/turn-item', payload: { runId, sessionId, item: event } } as PiHostEvent)
+    }).then((turn) => {
+      state.snapshot.cursor += 1
+      return [...turnEvents, { id, result: { sessionId, runId, settlement: turn.settlement, items: turn.items } }]
+    })
   }
   if (input.method === 'settings/get') return [{ id, result: { settings: { ...state.snapshot.settings } } }]
   if (input.method === 'settings/update') {

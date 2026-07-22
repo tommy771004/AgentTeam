@@ -211,6 +211,7 @@ const piHostSupervisor = new PiHostSupervisor(() =>
     env: {
       ...process.env,
       SUBAGENTS_PI_VENDOR_DIR: path.resolve(__dirname, '../../vendor/pi'),
+      SUBAGENTS_PI_AGENT_DIR: path.join(app.getPath('userData'), 'pi-agent'),
       SUBAGENTS_PI_HOST_STATE_PATH: path.join(app.getPath('userData'), 'pi-host-state.json'),
     },
   }),

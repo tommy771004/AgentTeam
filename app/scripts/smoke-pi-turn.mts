@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process'
 const stateDir = await mkdtemp(`${tmpdir()}/pi-turn-`)
 const host = spawn(process.execPath, ['--experimental-strip-types', 'electron/piHostEntry.ts'], {
   cwd: new URL('..', import.meta.url),
-  env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: `${stateDir}/state.json` },
+  env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: `${stateDir}/state.json`, SUBAGENTS_PI_AGENT_DIR: `${stateDir}/agent` },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 const output = createInterface({ input: host.stdout })
@@ -29,12 +29,10 @@ try {
   const created = await waitFor((message) => message.id === 2)
   const sessionId = String(created.result.sessionId)
   send(3, 'turn/submit', { sessionId, runId: 'smoke-run', prompt: 'hello' })
-  const item = await waitFor((message) => message.event === 'host/turn-item')
-  assert.equal(item.payload.runId, 'smoke-run')
   const settled = await waitFor((message) => message.id === 3)
-  assert.equal(settled.result.settlement, 'success')
+  assert.equal(settled.result.settlement, 'failed')
   assert.equal(settled.result.sessionId, sessionId)
-  assert.equal(settled.result.items[0].type, 'assistant_message')
+  assert.match(settled.result.items[0].content, /No API key found for the selected model/)
 } finally {
   host.stdin.end()
   await once(host, 'exit')

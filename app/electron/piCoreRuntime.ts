@@ -12,6 +12,15 @@ if (!vendorDir) throw new Error('Vendored Pi Core directory is not configured')
 const piCodingAgent = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/index.js')).href)
 const piConfig = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/config.js')).href)
 
+type PiSessionRuntime = {
+  session: {
+    prompt: (prompt: string) => Promise<void>
+    subscribe: (listener: (event: { type?: string; [key: string]: unknown }) => void) => () => void
+    dispose?: () => Promise<void> | void
+  }
+}
+const sessionRuntimes = new Map<string, PiSessionRuntime>()
+
 const TOOL_FACTORIES = {
   bash: piCodingAgent.createBashToolDefinition,
   edit: piCodingAgent.createEditToolDefinition,
@@ -42,4 +51,40 @@ export async function executePiTool(toolName: PiBuiltinToolName, cwd: string, ar
   if (typeof factory !== 'function') throw new Error(`Pi builtin tool is unavailable: ${toolName}`)
   const tool = factory(cwd)
   return tool.execute(`pi-host-${toolName}`, args, undefined, undefined, undefined)
+}
+
+async function ensurePiSessionRuntime(sessionId: string, cwd: string) {
+  const existing = sessionRuntimes.get(sessionId)
+  if (existing) return existing
+  const options: Record<string, unknown> = {
+    cwd,
+    noTools: 'all',
+    sessionManager: piCodingAgent.SessionManager.inMemory(cwd),
+  }
+  if (process.env.SUBAGENTS_PI_AGENT_DIR) options.agentDir = process.env.SUBAGENTS_PI_AGENT_DIR
+  const created = await piCodingAgent.createAgentSession(options)
+  const runtime = { session: created.session } as PiSessionRuntime
+  sessionRuntimes.set(sessionId, runtime)
+  return runtime
+}
+
+export async function runPiTurn(
+  sessionId: string,
+  cwd: string,
+  prompt: string,
+  onEvent?: (event: { type?: string; [key: string]: unknown }) => void,
+) {
+  const runtime = await ensurePiSessionRuntime(sessionId, cwd)
+  const unsubscribe = runtime.session.subscribe((event) => onEvent?.(event))
+  try {
+    await runtime.session.prompt(prompt)
+    return { settlement: 'success' as const, items: [] as unknown[] }
+  } catch (error) {
+    return {
+      settlement: 'failed' as const,
+      items: [{ type: 'error', content: error instanceof Error ? error.message : 'Pi turn failed' }],
+    }
+  } finally {
+    unsubscribe()
+  }
 }
