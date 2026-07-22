@@ -63,7 +63,7 @@ type HostState = {
   snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings }
 }
 
-export type SessionRecord = { id: string; title: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; archived?: boolean; piSessionFile?: string }
+export type SessionRecord = { id: string; title: string; threadId?: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; archived?: boolean; piSessionFile?: string }
 
 const readyResult = (): PiHostResponse['result'] => ({
   protocolVersion: PI_HOST_PROTOCOL_VERSION,
@@ -179,6 +179,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const session: SessionRecord = {
       id: `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       title: typeof input.params?.title === 'string' ? input.params.title : 'New Pi session',
+      threadId: typeof input.params?.threadId === 'string' ? input.params.threadId : undefined,
       messages: [],
     }
     state.snapshot.sessions = [...state.snapshot.sessions, session]

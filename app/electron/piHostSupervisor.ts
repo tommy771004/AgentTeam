@@ -115,8 +115,11 @@ export class PiHostSupervisor {
     return response.result.profile
   }
 
-  async createSession(title?: string): Promise<NonNullable<PiHostResponse['result']>> {
-    const response = await this.request('sessions/create', title ? { title } : {})
+  async createSession(title?: string, threadId?: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('sessions/create', {
+      ...(title ? { title } : {}),
+      ...(threadId ? { threadId } : {}),
+    })
     if (response.error || !response.result?.sessionId) throw new Error(response.error?.message || 'Pi session creation failed')
     return response.result
   }

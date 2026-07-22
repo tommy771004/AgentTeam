@@ -390,6 +390,7 @@ async function runTurnBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
   deps.log('INFO', 'Pattern: Turn-based — 1 Input = 1 Action')
   if (!state.steps[0]) return
   const ctx: LoopContext = emptyStepContext(deps)
+  const overrides = deps.getOverrides()
 
   const { ok, output } = await executeStep(state, 0, 1, ctx, deps)
   if (!ok || deps.shouldAbort()) return
@@ -397,18 +398,18 @@ async function runTurnBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
   state.confidence = Math.max(state.confidence, 0.92)
   state.result = output
   state.reportTitle = 'Turn Result'
-  const configuredNextState = deps.getOverrides().nextState || state.loopConfig.nextState
+  const configuredNextState = overrides.nextState || state.loopConfig.nextState
   const chatLiteAck =
-    deps.getOverrides().unattended === true ||
-    deps.getOverrides().sourceKind === 'composer' ||
-    deps.getOverrides().sourceKind === 'slash' ||
-    deps.getOverrides().sourceKind === 'retry'
+    overrides.unattended === true ||
+    overrides.sourceKind === 'composer' ||
+    overrides.sourceKind === 'slash' ||
+    overrides.sourceKind === 'retry'
   if (chatLiteAck || configuredNextState === 'Dispatch Webhook') {
     deps.log(
       'INFO',
       configuredNextState === 'Dispatch Webhook'
         ? 'Turn post-state：完成後 Dispatch Webhook'
-        : deps.getOverrides().unattended === true
+        : overrides.unattended === true
           ? '無人值守 Turn-based：跳過人工 ACK，自動確認'
           : '對話 Turn/Chat-lite：自動確認，不等待 ACK',
     )
@@ -423,7 +424,7 @@ async function runTurnBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
   state.progress = 100
   state.loopConfig = {
     ...state.loopConfig,
-    nextState: deps.getOverrides().nextState || (configuredNextState === 'Dispatch Webhook' ? 'Dispatch Webhook' : 'Halt'),
+    nextState: overrides.nextState || (configuredNextState === 'Dispatch Webhook' ? 'Dispatch Webhook' : 'Halt'),
   }
   setSubAgent(state, 'Core', 'done', undefined, deps.publish)
   deps.log('SUCCESS', chatLiteAck ? 'Turn complete (auto-ACK).' : 'User ACK received. Turn complete.')

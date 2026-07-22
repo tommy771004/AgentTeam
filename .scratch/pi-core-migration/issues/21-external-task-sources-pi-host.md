@@ -4,10 +4,10 @@
 
 **Blocked by:** 18 — Run durable Time and Proactive automation; 20 — Delegate to role-configured Child Pi Sessions.
 
-**Status:** 可交給代理
+**Status:** 已完成（TDD 驗證）
 
-- [ ] Every supported entry point submits through the single Task run ingress and receives a `runId` before admission.
-- [ ] No timer, gateway, background worker, or integration invokes AgentSessionRuntime directly.
-- [ ] Unattended sources use bounded approval timeouts and return explicit settlements to their origin.
-- [ ] Optional external CLI providers are isolated Integrations behavior and do not become Pi Core or Pi CLI entry points.
-- [ ] Cross-source contract tests assert equivalent admission, queueing, cancellation, archive, and finalization behavior.
+- [Ｘ] Every supported entry point submits through the single Task run ingress and receives a `runId` before admission.
+- [Ｘ] No timer, gateway, background worker, or integration invokes AgentSessionRuntime directly.
+- [Ｘ] Unattended sources use bounded approval timeouts and return explicit settlements to their origin.
+- [Ｘ] Optional external CLI providers are isolated Integrations behavior and do not become Pi Core or Pi CLI entry points.
+- [Ｘ] Cross-source contract tests assert equivalent admission, queueing, cancellation, archive, and finalization behavior.

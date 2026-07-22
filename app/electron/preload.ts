@@ -35,7 +35,7 @@ const api = {
       profile: (role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) =>
         ipcRenderer.invoke('pi-host:settings:profile', role, taskOverride) as Promise<{ profile: unknown }>,
       sessions: {
-        create: (title?: string) => ipcRenderer.invoke('pi-host:sessions:create', title) as Promise<{ sessionId: string; sessions: unknown[] }>,
+        create: (title?: string, threadId?: string) => ipcRenderer.invoke('pi-host:sessions:create', title, threadId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         list: () => ipcRenderer.invoke('pi-host:sessions:list') as Promise<{ sessions: unknown[] }>,
         fork: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:fork', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         archive: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:archive', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,

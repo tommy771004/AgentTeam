@@ -1,0 +1,90 @@
+export type PiHostSession = {
+  id: string
+  title: string
+  threadId?: string
+  archived?: boolean
+}
+
+export type PiHostRunnerApi = {
+  sessions: {
+    list: () => Promise<{ sessions: unknown[] }>
+    create: (title?: string, threadId?: string) => Promise<{ sessionId: string; sessions: unknown[] }>
+  }
+  turn: {
+    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string }) => Promise<{
+      sessionId: string
+      runId: string
+      settlement: string
+      items?: unknown[]
+    }>
+  }
+}
+
+export type SubmitPiHostRunInput = {
+  threadId: string
+  title: string
+  prompt: string
+  runId: string
+  cwd?: string
+}
+
+export type SubmitPiHostRunResult = {
+  sessionId: string
+  runId: string
+  settlement: 'success' | 'failed' | 'cancelled' | 'interrupted'
+  result: string
+  items: unknown[]
+}
+
+function asSession(value: unknown): PiHostSession | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const item = value as Record<string, unknown>
+  if (typeof item.id !== 'string' || typeof item.title !== 'string') return undefined
+  return {
+    id: item.id,
+    title: item.title,
+    threadId: typeof item.threadId === 'string' ? item.threadId : undefined,
+    archived: item.archived === true,
+  }
+}
+
+function assistantText(items: unknown[]): string {
+  return items
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .filter((item) => item.type === 'assistant_message')
+    .map((item) => (typeof item.content === 'string' ? item.content : ''))
+    .join('\n')
+    .trim()
+}
+
+/**
+ * Electron-only runner seam. The renderer never owns Pi history: it only
+ * resolves the durable Host session bound to the conversation thread and
+ * submits one turn through the Host Protocol.
+ */
+export async function submitPiHostRun(
+  api: PiHostRunnerApi,
+  input: SubmitPiHostRunInput,
+): Promise<SubmitPiHostRunResult> {
+  const listed = await api.sessions.list()
+  const existing = (listed.sessions || [])
+    .map(asSession)
+    .find((session) => session?.threadId === input.threadId && !session.archived)
+  const sessionId = existing?.id || (await api.sessions.create(input.title, input.threadId)).sessionId
+  const turn = await api.turn.submit({
+    sessionId,
+    prompt: input.prompt,
+    runId: input.runId,
+    cwd: input.cwd,
+  })
+  const items = Array.isArray(turn.items) ? turn.items : []
+  return {
+    sessionId,
+    runId: turn.runId || input.runId,
+    settlement: (['success', 'failed', 'cancelled', 'interrupted'].includes(turn.settlement)
+      ? turn.settlement
+      : 'failed') as SubmitPiHostRunResult['settlement'],
+    result: assistantText(items),
+    items,
+  }
+}

@@ -115,6 +115,35 @@ export async function dispatchThreadTask(
   const thr = useThreadStore.getState()
   const tid = snapshot.threadId
   const thread = thr.threads.find((t) => t.id === tid)
+
+  // Electron cutover: once the real Pi Host bridge is present, dispatch the
+  // builtin turn before reading legacy renderer model/tool/capability state.
+  // The coordinator still owns admission and finalization; AgentStore only
+  // projects the Host settlement for the existing UI contract.
+  if (snapshot.runner === 'builtin' && window.subagents?.piHost?.sessions?.list && tid) {
+    const appendix = [
+      attachmentsToTextAppendix(attachments),
+      attachmentsPathAppendix(attachments),
+    ].filter(Boolean).join('\n\n')
+    const piText = appendix ? `${raw}\n\n${appendix}`.slice(0, 120_000) : raw
+    await useAgentStore.getState().startExecution(piText, {
+      ...snapshot.overrides,
+      runId: snapshot.runId,
+      threadId: tid,
+      forceLoopType: snapshot.forceLoopType,
+      loopTypeMode: snapshot.forceLoopType ? 'force' : snapshot.overrides.loopTypeMode,
+    })
+    const state = useAgentStore.getState().getRunState(snapshot.runId) || useAgentStore.getState().agent
+    return {
+      path: 'builtin',
+      executionKind: 'loop',
+      status: state.status,
+      result: state.result,
+      error: state.haltReason,
+      postState: state.postState,
+    }
+  }
+
   const settings = useSettingsStore.getState().settings
   // Coordinator snapshot is authoritative for project identity and runner selection.
   const projectRoot = snapshot.overrides.projectRoot?.trim() || ''

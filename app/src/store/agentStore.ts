@@ -15,6 +15,7 @@ import { learningLoop } from '../agent/hermes/learning'
 import { useSettingsStore } from './settingsStore'
 import { useLearningStore } from './learningStore'
 import { consumeNextState } from '../agent/outcomeDispatcher'
+import { submitPiHostRun } from '../agent/piHostRun'
 import {
   emptyAgentLike,
   runPromptViaLocalCli,
@@ -24,6 +25,11 @@ import {
   EXTERNAL_CLI_DOD_LABEL,
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
 } from '../agent/runners'
+
+const runPiOrchestration = async (...args: Parameters<typeof import('../../electron/piOrchestrationExtension').runPiOrchestration>) => {
+  const { runPiOrchestration: run } = await import('../../electron/piOrchestrationExtension')
+  return run(...args)
+}
 
 interface AgentStore {
   agent: AgentState
@@ -202,6 +208,110 @@ function publishRun(set: (partial: Partial<AgentStore>) => void, get: () => Agen
   })
 }
 
+async function executePiHostTurn(
+  set: (partial: Partial<AgentStore>) => void,
+  get: () => AgentStore,
+  text: string,
+  runId: string,
+  overrides: RuntimeOverrides,
+  settings: ReturnType<typeof useSettingsStore.getState>['settings'],
+): Promise<void> {
+  const startedAt = new Date().toISOString()
+  const loopType = overrides.forceLoopType || 'Goal-based'
+  const loopConfig = {
+    loopType,
+    trigger: 'pi-host',
+    executionSequence: ['pi-host-turn'],
+    definitionOfDone: 'Pi Core settlement returned',
+    maxIterations: 1,
+    fallbackProtocol: '',
+    nextState: overrides.nextState || 'Halt',
+  } as const
+  const t0 = Date.now()
+  const piHost = window.subagents?.piHost
+  if (!piHost?.sessions?.list || !piHost.sessions.create || !piHost.turn?.submit || !overrides.threadId) {
+    throw new Error('Pi Core Host bridge is unavailable for an Electron run')
+  }
+  publishRun(set, get, runId, emptyAgentLike({
+    id: runId,
+    objective: text,
+    status: 'running',
+    progress: 15,
+    loopConfig,
+    executionKind: 'loop',
+    startedAt,
+    steps: [{ step: 1, action: 'pi-host-turn', description: 'Pi Core Host turn', status: 'IN_PROGRESS', modelSource: 'primary' }],
+    logs: [{ id: 'pi-host-start', timestamp: startedAt, level: 'PROCESS', message: `Pi Core Host · runId=${runId}` }],
+  }))
+  try {
+    const result = await runPiOrchestration({
+      pattern: loopType,
+      prompt: text,
+      maxIterations: 1,
+      turn: async (prompt) => {
+        const turn = await submitPiHostRun(piHost, {
+          threadId: overrides.threadId!,
+          title: text.slice(0, 48),
+          prompt,
+          runId,
+          cwd: overrides.projectRoot,
+        })
+        return { settlement: turn.settlement, result: turn.result }
+      },
+    })
+    const success = result.settlement === 'success'
+    const halted = result.settlement === 'cancelled' || result.settlement === 'interrupted'
+    const final = emptyAgentLike({
+      id: runId,
+      objective: text,
+      status: success ? 'success' : halted ? 'halted' : 'failed',
+      progress: 100,
+      result: result.result || (success ? 'Pi Core 完成（無文字輸出）' : `Pi Core ${result.settlement}`),
+      confidence: success ? 0.9 : 0.3,
+      loopConfig,
+      executionKind: 'loop',
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      logs: [{ id: 'pi-host-end', timestamp: new Date().toISOString(), level: success ? 'SUCCESS' : halted ? 'HALT' : 'ERROR', message: `Pi Core Host settlement=${result.settlement}` }],
+      steps: [{ step: 1, action: 'pi-host-turn', description: 'Pi Core Host turn', status: success ? 'COMPLETED' : halted ? 'SKIPPED' : 'FAILED', result: result.result || result.settlement, durationMs: Date.now() - t0, modelSource: 'primary' }],
+    })
+    publishRun(set, get, runId, final)
+    const postState = await consumeNextState(loopConfig.nextState, {
+      runId,
+      objective: text,
+      status: final.status,
+      loopType,
+      result: final.result,
+      finishedAt: final.finishedAt,
+      webhookTarget: overrides.webhookTarget || settings.webhookTarget,
+    })
+    get().applyPostState(runId, postState)
+    try {
+      const { useRunActivityStore } = await import('./runActivityStore')
+      useRunActivityStore.getState().end(runId, success ? '完成' : halted ? '已停止' : '失敗')
+    } catch {
+      /* optional renderer activity */
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    publishRun(set, get, runId, emptyAgentLike({
+      id: runId,
+      objective: text,
+      status: 'failed',
+      progress: 100,
+      result: message,
+      haltReason: message,
+      loopConfig,
+      executionKind: 'loop',
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      logs: [{ id: 'pi-host-error', timestamp: new Date().toISOString(), level: 'ERROR', message }],
+      steps: [{ step: 1, action: 'pi-host-turn', description: 'Pi Core Host turn', status: 'FAILED', result: message, durationMs: Date.now() - t0, modelSource: 'primary' }],
+    }))
+    throw error
+  }
+}
+
 export const useAgentStore = create<AgentStore>((set, get) => {
   return {
     agent: agentEngine.getState(),
@@ -300,6 +410,17 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       if (!text) return
       const runId = overrides?.runId || `run_${Date.now().toString(36)}`
       const settings = useSettingsStore.getState().settings
+      if (window.subagents?.piHost?.sessions?.list && overrides?.threadId) {
+        try {
+          const { useRunActivityStore } = await import('./runActivityStore')
+          useRunActivityStore.getState().begin(runId)
+          useRunActivityStore.getState().setStatus('Pi Core Host 執行中…', runId)
+        } catch {
+          /* optional renderer activity */
+        }
+        await executePiHostTurn(set, get, text, runId, overrides, settings)
+        return
+      }
       agentEngine.configure(settings)
       const engine = agentEngine.create(runId)
       liveEngines.set(runId, engine)
@@ -781,6 +902,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       const target = runId
       if (!target) return
       agentEngine.stop(target)
+      void window.subagents?.piHost?.turn?.cancel?.(target)
       // Cancel only the selected run's CLI / bash processes.
       void window.subagents?.cli?.cancel?.(target)
       try {
