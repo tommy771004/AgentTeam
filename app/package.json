@@ -21,6 +21,7 @@
     "smoke:pi-host-capabilities": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-capabilities.mts",
     "smoke:pi-host-release-evidence": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-release-evidence.mts",
     "smoke:pi-sync-evidence": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-sync-evidence.mts",
+    "smoke:pi-sync-release-record": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-sync-release-record.mts",
     "smoke:pi-tools": "node --experimental-strip-types scripts/smoke-pi-equivalent-tools.mts",
     "smoke:pi-policy": "node --experimental-strip-types scripts/smoke-pi-policy.mts",
     "smoke:pi-capabilities": "node --experimental-strip-types scripts/smoke-pi-capabilities.mts",
