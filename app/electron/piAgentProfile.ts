@@ -6,6 +6,8 @@ export type PiSettings = {
   thinkingLevel: PiThinkingLevel
   activeTools: string[]
   compaction: 'auto' | 'manual'
+  approvalMode: 'always' | 'auto' | 'full'
+  unattended: boolean
 }
 
 export type EffectiveAgentProfile = PiSettings
@@ -16,6 +18,8 @@ export const DEFAULT_PI_SETTINGS: PiSettings = {
   thinkingLevel: 'medium',
   activeTools: [],
   compaction: 'auto',
+  approvalMode: 'auto',
+  unattended: false,
 }
 
 export function compileEffectiveAgentProfile(
@@ -29,6 +33,8 @@ export function compileEffectiveAgentProfile(
     thinkingLevel: taskOverride?.thinkingLevel || role?.thinkingLevel || settings.thinkingLevel,
     activeTools: [...(taskOverride?.activeTools || role?.activeTools || settings.activeTools)],
     compaction: taskOverride?.compaction || role?.compaction || settings.compaction,
+    approvalMode: taskOverride?.approvalMode || role?.approvalMode || settings.approvalMode,
+    unattended: taskOverride?.unattended ?? role?.unattended ?? settings.unattended,
   }
 }
 
@@ -57,6 +63,14 @@ export function validatePiSettingsPatch(patch: Record<string, unknown>): Partial
   if ('compaction' in patch) {
     if (!['auto', 'manual'].includes(String(patch.compaction))) throw new Error(`Unsupported compaction: ${String(patch.compaction)}`)
     next.compaction = patch.compaction as PiSettings['compaction']
+  }
+  if ('approvalMode' in patch) {
+    if (!['always', 'auto', 'full'].includes(String(patch.approvalMode))) throw new Error(`Unsupported approval mode: ${String(patch.approvalMode)}`)
+    next.approvalMode = patch.approvalMode as PiSettings['approvalMode']
+  }
+  if ('unattended' in patch) {
+    if (typeof patch.unattended !== 'boolean') throw new Error('unattended must be a boolean')
+    next.unattended = patch.unattended
   }
   return next
 }

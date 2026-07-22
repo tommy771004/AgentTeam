@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { existsSync, realpathSync } from 'node:fs'
 
 export const PI_HOST_PROTOCOL_VERSION = 1 as const
 export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'events'] as const
@@ -77,8 +78,30 @@ const errorResponse = (
 ): PiHostResponse => ({ id, error: { code, message } })
 
 function isWithinProject(cwd: string, target: string): boolean {
-  const rel = relative(resolve(cwd), resolve(cwd, target))
+  const projectRoot = resolveExistingPath(resolve(cwd))
+  const resolvedTarget = resolve(cwd, target)
+  const targetPath = resolveExistingPath(resolvedTarget)
+  const rel = relative(projectRoot, targetPath)
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+/** Resolve symlinks for existing ancestors while retaining a safe lexical tail for new files. */
+function resolveExistingPath(path: string): string {
+  let cursor = path
+  const tail: string[] = []
+  while (!existsSync(cursor)) {
+    const parent = dirname(cursor)
+    if (parent === cursor) break
+    tail.unshift(cursor.slice(parent.length + 1))
+    cursor = parent
+  }
+  let resolved = cursor
+  try {
+    resolved = realpathSync.native(cursor)
+  } catch {
+    resolved = resolve(cursor)
+  }
+  return tail.reduce((current, part) => resolve(current, part), resolved)
 }
 
 export function handlePiHostRequest(state: HostState, request: unknown, emit?: (message: PiHostMessage) => void): PiHostMessage[] | Promise<PiHostMessage[]> {
@@ -119,7 +142,9 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     if (typeof params.cwd !== 'string') return [errorResponse(id, 'invalid_request', 'cwd is required')]
     const toolName = input.method.slice('tools/'.length) as PiBuiltinToolName
     if (state.snapshot.settings.activeTools.length > 0 && !state.snapshot.settings.activeTools.includes(toolName)) return [errorResponse(id, 'invalid_request', `${toolName} is disabled by Pi active tools settings`)]
-    if ((toolName === 'write' || toolName === 'edit' || toolName === 'bash') && params.approval !== 'allow') return [errorResponse(id, 'invalid_request', `${toolName} requires approval before execution`)]
+    const sideEffect = toolName === 'write' || toolName === 'edit' || toolName === 'bash'
+    const requiresApproval = sideEffect && (state.snapshot.settings.approvalMode !== 'full' || state.snapshot.settings.unattended)
+    if (requiresApproval && params.approval !== 'allow') return [errorResponse(id, 'invalid_request', `${toolName} requires approval before execution`)]
     if ((toolName === 'read' && typeof params.path !== 'string') || (toolName === 'grep' && (typeof params.path !== 'string' || typeof params.pattern !== 'string')) || (toolName === 'find' && typeof params.pattern !== 'string') || (toolName === 'write' && (typeof params.path !== 'string' || typeof params.content !== 'string')) || (toolName === 'edit' && (typeof params.path !== 'string' || !Array.isArray(params.edits))) || (toolName === 'bash' && typeof params.command !== 'string')) {
       return [errorResponse(id, 'invalid_request', `${toolName} parameters are invalid`)]
     }
@@ -205,7 +230,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event } }
       if (emit) emit(turnEvent)
       else turnEvents.push(turnEvent)
-    }, runId, session.piSessionFile, state.snapshot.settings.activeTools).then((turn) => {
+    }, runId, session.piSessionFile, state.snapshot.settings).then((turn) => {
       session.piSessionFile ||= getPiSessionFile(sessionId)
       if (turn.settlement === 'success') {
         const assistant = turn.items.find((item) => Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'assistant_message')) as { content?: string } | undefined

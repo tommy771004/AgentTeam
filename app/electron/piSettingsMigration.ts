@@ -6,6 +6,8 @@ export type LegacySettingsInput = {
   thinkingLevel?: unknown
   activeTools?: unknown
   compaction?: unknown
+  approvalMode?: unknown
+  unattended?: unknown
   apiKey?: unknown
 }
 
@@ -24,6 +26,8 @@ export function migrateLegacySettings(input: LegacySettingsInput): PiSettingsMig
     ...(typeof input.thinkingLevel === 'string' ? { thinkingLevel: input.thinkingLevel } : {}),
     ...(Array.isArray(input.activeTools) ? { activeTools: input.activeTools } : {}),
     ...(typeof input.compaction === 'string' ? { compaction: input.compaction } : {}),
+    ...(typeof input.approvalMode === 'string' ? { approvalMode: input.approvalMode } : {}),
+    ...(typeof input.unattended === 'boolean' ? { unattended: input.unattended } : {}),
   })
   const settings: PiSettings = { ...DEFAULT_PI_SETTINGS, ...patch }
   const credential = typeof input.apiKey === 'string' && input.apiKey.length > 0

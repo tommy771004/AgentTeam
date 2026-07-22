@@ -45,15 +45,19 @@ try {
     thinkingLevel: 'medium',
     activeTools: [],
     compaction: 'auto',
+    approvalMode: 'auto',
+    unattended: false,
   })
 
   send(3, 'settings/update', { thinkingLevel: 'extreme' })
   const invalid = await waitFor((message) => message.id === 3)
   assert.equal(invalid.error?.code, 'invalid_request')
 
-  send(4, 'settings/update', { model: 'pi-test-model', thinkingLevel: 'high', activeTools: ['read'] })
+  send(4, 'settings/update', { model: 'pi-test-model', thinkingLevel: 'high', activeTools: ['read'], approvalMode: 'full', unattended: true })
   const updated = await waitFor((message) => message.id === 4)
   assert.equal(updated.result?.settings?.model, 'pi-test-model')
+  assert.equal(updated.result?.settings?.approvalMode, 'full')
+  assert.equal(updated.result?.settings?.unattended, true)
 
   send(5, 'settings/profile', {
     role: { model: 'pi-writer-model', thinkingLevel: 'low', activeTools: ['write'] },
@@ -66,6 +70,8 @@ try {
     thinkingLevel: 'high',
     activeTools: ['write'],
     compaction: 'auto',
+    approvalMode: 'full',
+    unattended: true,
   })
 } finally {
   host.stdin.end()

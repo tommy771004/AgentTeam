@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -10,6 +10,7 @@ const parent = await mkdtemp(join(tmpdir(), 'pi-scope-parent-'))
 const root = join(parent, 'project')
 await import('node:fs/promises').then(({ mkdir }) => mkdir(root))
 await writeFile(join(parent, 'secret.txt'), 'outside')
+await symlink(parent, join(root, 'linked-parent'), 'dir')
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-scope-state-'))
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
   env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json') },
@@ -31,6 +32,9 @@ try {
   host.stdin.write(`${JSON.stringify({ id: 2, method: 'tools/read', params: { cwd: root, path: '../secret.txt' } })}\n`)
   const denied = await waitFor(2)
   assert.match(denied.error?.message ?? '', /scope|outside|project/i)
+  host.stdin.write(`${JSON.stringify({ id: 3, method: 'tools/read', params: { cwd: root, path: 'linked-parent/secret.txt' } })}\n`)
+  const linked = await waitFor(3)
+  assert.match(linked.error?.message ?? '', /scope|outside|project/i)
 } finally {
   host.stdin.end()
   await once(host, 'exit')

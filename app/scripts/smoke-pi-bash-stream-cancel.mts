@@ -38,11 +38,14 @@ try {
     waitForEvent('host/tool-update'),
     new Promise((_, reject) => setTimeout(() => reject(new Error('bash update was not streamed before completion')), 500)),
   ])
+  send(4, 'tools/bash', { cwd: root, runId: 'bash-cancel-run', command: 'printf second; sleep 1; printf never', approval: 'allow' })
   send(3, 'turn/cancel', { runId: 'bash-cancel-run' })
   const cancelAck = await waitFor(3)
   assert.equal(cancelAck.result?.settlement, 'cancelled')
   const settled = await waitFor(2)
   assert.equal(settled.result?.settlement, 'cancelled')
+  const secondSettled = await waitFor(4)
+  assert.equal(secondSettled.result?.settlement, 'cancelled')
   assert.ok(messages.some((item) => item.event === 'host/tool-update' && item.payload?.runId === 'bash-cancel-run'))
 } finally {
   host.stdin.end()

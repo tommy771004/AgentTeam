@@ -41,6 +41,8 @@ export async function loadPiHostState(statePath: string): Promise<StoredState> {
         thinkingLevel: value.settings.thinkingLevel || DEFAULT_PI_SETTINGS.thinkingLevel,
         activeTools: [...value.settings.activeTools],
         compaction: value.settings.compaction === 'manual' ? 'manual' : 'auto',
+        approvalMode: value.settings.approvalMode === 'always' || value.settings.approvalMode === 'full' ? value.settings.approvalMode : DEFAULT_PI_SETTINGS.approvalMode,
+        unattended: value.settings.unattended === true,
       },
     }
   } catch {

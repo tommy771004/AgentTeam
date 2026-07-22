@@ -26,11 +26,11 @@ const api = {
     }>,
     settings: {
       get: () => ipcRenderer.invoke('pi-host:settings:get') as Promise<{
-        settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual' }
+        settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual'; approvalMode: 'always' | 'auto' | 'full'; unattended: boolean }
       }>,
-      update: (patch: { provider?: string; model?: string; thinkingLevel?: 'off' | 'low' | 'medium' | 'high'; activeTools?: string[]; compaction?: 'auto' | 'manual' }) =>
+      update: (patch: { provider?: string; model?: string; thinkingLevel?: 'off' | 'low' | 'medium' | 'high'; activeTools?: string[]; compaction?: 'auto' | 'manual'; approvalMode?: 'always' | 'auto' | 'full'; unattended?: boolean }) =>
         ipcRenderer.invoke('pi-host:settings:update', patch) as Promise<{
-          settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual' }
+          settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual'; approvalMode: 'always' | 'auto' | 'full'; unattended: boolean }
         }>,
       profile: (role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) =>
         ipcRenderer.invoke('pi-host:settings:profile', role, taskOverride) as Promise<{ profile: unknown }>,

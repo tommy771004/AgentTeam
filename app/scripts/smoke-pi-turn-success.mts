@@ -64,7 +64,7 @@ try {
   send(2, 'sessions/create', { title: 'Success smoke' })
   const created = await waitFor((message) => message.id === 2)
   const sessionId = String(created.result.sessionId)
-  send(3, 'settings/update', { activeTools: ['read'] })
+  send(3, 'settings/update', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: ['read'] })
   await waitFor((message) => message.id === 3)
   send(4, 'turn/submit', { sessionId, runId: 'smoke-success-run', cwd: process.cwd(), prompt: 'say hello' })
   const settled = await waitFor((message) => message.id === 4)

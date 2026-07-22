@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { existsSync } from 'node:fs'
+import type { PiThinkingLevel } from './piAgentProfile.ts'
 
 const vendorCandidates = [
   process.env.SUBAGENTS_PI_VENDOR_DIR,
@@ -28,8 +29,8 @@ type PiSessionRuntime = {
 }
 export type PiHostHistoryMessage = { role: 'user' | 'assistant'; content: string }
 const sessionRuntimes = new Map<string, PiSessionRuntime>()
-const activeTurns = new Map<string, { session: PiSessionRuntime['session']; cancelled: boolean }>()
-const activeToolRuns = new Map<string, { controller: AbortController; cancelled: boolean }>()
+const activeTurns = new Map<string, { session?: PiSessionRuntime['session']; cancelled: boolean }>()
+const activeToolRuns = new Map<string, Set<{ controller: AbortController; cancelled: boolean }>>()
 
 const TOOL_FACTORIES = {
   bash: piCodingAgent.createBashToolDefinition,
@@ -67,7 +68,11 @@ export async function executePiTool(
   const tool = factory(cwd)
   const controller = new AbortController()
   const active = options.runId ? { controller, cancelled: false } : undefined
-  if (options.runId && active) activeToolRuns.set(options.runId, active)
+  if (options.runId && active) {
+    const runs = activeToolRuns.get(options.runId) || new Set<{ controller: AbortController; cancelled: boolean }>()
+    runs.add(active)
+    activeToolRuns.set(options.runId, runs)
+  }
   try {
     const result = await tool.execute(`pi-host-${toolName}`, args, controller.signal, options.onUpdate, undefined)
     return active?.cancelled ? { content: [], cancelled: true } : result
@@ -75,13 +80,24 @@ export async function executePiTool(
     if (active?.cancelled) return { content: [], cancelled: true }
     throw error
   } finally {
-    if (options.runId) activeToolRuns.delete(options.runId)
+    if (options.runId && active) {
+      const runs = activeToolRuns.get(options.runId)
+      runs?.delete(active)
+      if (runs?.size === 0) activeToolRuns.delete(options.runId)
+    }
   }
 }
 
-async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string, activeTools?: string[]) {
+export type PiRuntimeSettings = {
+  provider?: string
+  model?: string
+  thinkingLevel?: PiThinkingLevel
+  activeTools?: string[]
+}
+
+async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string, settings: PiRuntimeSettings = {}) {
   const existing = sessionRuntimes.get(sessionId)
-  const activeToolsKey = JSON.stringify(activeTools || [])
+  const activeToolsKey = JSON.stringify(settings)
   if (existing && existing.activeToolsKey === activeToolsKey) return existing
   if (existing) {
     await existing.session.dispose?.()
@@ -114,8 +130,19 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     cwd,
     sessionManager,
   }
-  if (activeTools?.length) options.tools = [...activeTools]
+  if (settings.activeTools?.length) options.tools = [...settings.activeTools]
+  if (settings.thinkingLevel) options.thinkingLevel = settings.thinkingLevel
   if (agentDir) options.agentDir = agentDir
+  if (settings.provider && settings.model && typeof piCodingAgent.ModelRuntime?.create === 'function') {
+    const modelRuntime = await piCodingAgent.ModelRuntime.create({
+      authPath: agentDir ? join(agentDir, 'auth.json') : undefined,
+      modelsPath: agentDir ? join(agentDir, 'models.json') : undefined,
+    })
+    const model = modelRuntime.getModel(settings.provider, settings.model)
+    if (!model) throw new Error(`Pi model is not configured: ${settings.provider}/${settings.model}`)
+    options.modelRuntime = modelRuntime
+    options.model = model
+  }
   const created = await piCodingAgent.createAgentSession(options)
   const runtime = { activeToolsKey, sessionManager, session: created.session } as PiSessionRuntime
   sessionRuntimes.set(sessionId, runtime)
@@ -130,11 +157,25 @@ export async function runPiTurn(
   onEvent?: (event: { type?: string; [key: string]: unknown }) => void,
   runId?: string,
   sessionFile?: string,
-  activeTools?: string[],
+  settings: PiRuntimeSettings = {},
 ) {
-  const runtime = await ensurePiSessionRuntime(sessionId, cwd, history, sessionFile, activeTools)
-  const turn = { session: runtime.session, cancelled: false }
-  if (runId) activeTurns.set(runId, turn)
+  const turn: { session?: PiSessionRuntime['session']; cancelled: boolean } = { cancelled: false }
+  if (runId) {
+    if (activeTurns.has(runId)) throw new Error(`Pi run is already active: ${runId}`)
+    activeTurns.set(runId, turn)
+  }
+  let runtime: PiSessionRuntime
+  try {
+    runtime = await ensurePiSessionRuntime(sessionId, cwd, history, sessionFile, settings)
+  } catch (error) {
+    if (runId) activeTurns.delete(runId)
+    throw error
+  }
+  turn.session = runtime.session
+  if (turn.cancelled) {
+    if (runId) activeTurns.delete(runId)
+    return { settlement: 'cancelled' as const, items: [] }
+  }
   let completedMessages: Array<{ role?: string; content?: unknown }> = []
   const unsubscribe = runtime.session.subscribe((event) => {
     if (event.type === 'agent_end' && Array.isArray(event.messages)) {
@@ -208,14 +249,16 @@ export async function cancelPiTurn(runId: string) {
   const turn = activeTurns.get(runId)
   if (!turn) return false
   turn.cancelled = true
-  await turn.session.abort?.()
+  await turn.session?.abort?.()
   return true
 }
 
 export function cancelPiTool(runId: string) {
-  const tool = activeToolRuns.get(runId)
-  if (!tool) return false
-  tool.cancelled = true
-  tool.controller.abort()
+  const runs = activeToolRuns.get(runId)
+  if (!runs || runs.size === 0) return false
+  for (const tool of runs) {
+    tool.cancelled = true
+    tool.controller.abort()
+  }
   return true
 }

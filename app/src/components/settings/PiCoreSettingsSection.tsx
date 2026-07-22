@@ -16,6 +16,8 @@ type PiSettings = {
   thinkingLevel: 'off' | 'low' | 'medium' | 'high'
   activeTools: string[]
   compaction: 'auto' | 'manual'
+  approvalMode: 'always' | 'auto' | 'full'
+  unattended: boolean
 }
 
 const TOOLS = [
@@ -29,7 +31,7 @@ const TOOLS = [
 ] as const
 
 export function PiCoreSettingsSection() {
-  const [draft, setDraft] = useState<PiSettings>({ provider: '', model: '', thinkingLevel: 'medium', activeTools: [], compaction: 'auto' })
+  const [draft, setDraft] = useState<PiSettings>({ provider: '', model: '', thinkingLevel: 'medium', activeTools: [], compaction: 'auto', approvalMode: 'auto', unattended: false })
   const [status, setStatus] = useState('載入中…')
   const [saving, setSaving] = useState(false)
 
@@ -102,6 +104,16 @@ export function PiCoreSettingsSection() {
           title="Compaction"
           description="由 Pi Core 自行壓縮長對話，或保留手動控制。"
           control={<PillSelect value={draft.compaction} onChange={(value) => setDraft((current) => ({ ...current, compaction: value as PiSettings['compaction'] }))}><option value="auto">自動</option><option value="manual">手動</option></PillSelect>}
+        />
+        <SettingsRow
+          title="核准模式"
+          description="沿用主程式安全政策；完整存取權仍會在 unattended 執行時要求明確核准。"
+          control={<PillSelect value={draft.approvalMode} onChange={(value) => setDraft((current) => ({ ...current, approvalMode: value as PiSettings['approvalMode'] }))}><option value="always">要求核准</option><option value="auto">自動（副作用仍需核准）</option><option value="full">完整存取權</option></PillSelect>}
+        />
+        <SettingsRow
+          title="Unattended"
+          description="排程或背景執行；沒有明確核准時拒絕副作用工具。"
+          control={<SettingsToggle checked={draft.unattended} onChange={() => setDraft((current) => ({ ...current, unattended: !current.unattended }))} />}
         />
       </SettingsGroup>
       <SettingsGroup title="可用工具" action={<span className="text-[11px] text-outline">明確選取，不需編輯 JSON</span>}>

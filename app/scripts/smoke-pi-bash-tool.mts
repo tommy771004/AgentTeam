@@ -42,6 +42,12 @@ try {
   const result = await waitFor(6)
   assert.equal(result.result?.tool, 'bash')
   assert.equal(result.result?.content?.[0]?.text, 'hello bash')
+
+  send(7, 'settings/update', { approvalMode: 'full', unattended: true })
+  await waitFor(7)
+  send(8, 'tools/bash', { cwd: root, command: 'printf "blocked unattended"' })
+  const unattended = await waitFor(8)
+  assert.match(unattended.error?.message ?? '', /approval/i)
 } finally {
   host.stdin.end()
   await once(host, 'exit')
