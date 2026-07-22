@@ -115,12 +115,21 @@ export async function dispatchThreadTask(
   const thr = useThreadStore.getState()
   const tid = snapshot.threadId
   const thread = thr.threads.find((t) => t.id === tid)
+  const electronRuntime = typeof window !== 'undefined' && typeof window.subagents?.platform === 'function'
+  const piHostAvailable = typeof window !== 'undefined' && typeof window.subagents?.piHost?.sessions?.list === 'function'
+
+  // Electron production is fail-closed: a missing Pi Host must never silently
+  // revive the legacy renderer engine. Plain browser development keeps its
+  // intentionally documented fallback because it has no Electron bridge.
+  if (snapshot.runner === 'builtin' && electronRuntime && tid && !piHostAvailable) {
+    return { path: 'builtin', status: 'failed', error: 'Pi Core Host bridge is unavailable' }
+  }
 
   // Electron cutover: once the real Pi Host bridge is present, dispatch the
   // builtin turn before reading legacy renderer model/tool/capability state.
   // The coordinator still owns admission and finalization; AgentStore only
   // projects the Host settlement for the existing UI contract.
-  if (snapshot.runner === 'builtin' && window.subagents?.piHost?.sessions?.list && tid) {
+  if (snapshot.runner === 'builtin' && piHostAvailable && tid) {
     const appendix = [
       attachmentsToTextAppendix(attachments),
       attachmentsPathAppendix(attachments),

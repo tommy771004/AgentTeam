@@ -8,7 +8,9 @@ const piBranch = dispatch.indexOf('Electron cutover: once the real Pi Host bridg
 const legacyStart = dispatch.indexOf('await agent.startExecution(text, overrides)')
 assert.ok(piBranch >= 0, 'builtin dispatch must have an Electron Pi Host branch')
 assert.ok(legacyStart > piBranch, 'legacy engine fallback must not precede the Pi Host branch')
-assert.match(dispatch.slice(piBranch, legacyStart), /sessions\?\.list/)
+assert.match(dispatch.slice(piBranch, legacyStart), /piHostAvailable/)
+assert.match(dispatch, /electronRuntime/)
+assert.match(dispatch, /Pi Core Host bridge is unavailable/)
 
 const store = await readFile(resolve(root, 'src/store/agentStore.ts'), 'utf8')
 assert.match(store, /submitPiHostRun\(/)
