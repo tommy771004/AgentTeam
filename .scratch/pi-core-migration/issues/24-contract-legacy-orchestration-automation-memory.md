@@ -7,7 +7,7 @@
 **Status:** 可交給代理
 
 - [ ] No legacy engine path executes agent turns or tools outside Pi Core.
-- [ ] One Orchestration Extension owns all four Loop Patterns and one Automation Extension owns queue/trigger settlement.
+- [Ｘ] One Orchestration Extension owns all four Loop Patterns and one Automation Extension owns the durable Pi Host queue contract; trigger settlement remains in the coordinator migration seam.
 - [ ] Delegation creates only Child Pi Sessions and no private nested agent loop remains.
 - [ ] Memory has no duplicate session-history or compaction owner.
 - [ ] Composer and every external source pass parity and settlement suites after legacy deletion.

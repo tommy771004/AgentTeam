@@ -2,13 +2,13 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
 
 export const PI_HOST_PROTOCOL_VERSION = 1 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'events'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'events', 'automation', 'resources'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'turn/submit' | 'turn/cancel'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
   params: Record<string, unknown>
 }
 
@@ -26,6 +26,8 @@ export type PiHostResponse = {
     runId?: string
     settlement?: 'success' | 'failed' | 'cancelled' | 'interrupted'
     items?: unknown[]
+    queue?: PiQueuedRun[]
+    resources?: PiResource[]
     tool?: string
     content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>
     loaded?: boolean
@@ -57,13 +59,16 @@ export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
 import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, piCoreRuntimeStatus, runPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
+import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
+import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
+import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
 
 type HostState = {
   initialized: boolean
-  snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings }
+  snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; queue: PiQueuedRun[]; resources: PiResource[] }
 }
 
-export type SessionRecord = { id: string; title: string; threadId?: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; archived?: boolean; piSessionFile?: string }
+export type SessionRecord = { id: string; title: string; threadId?: string; parentSessionId?: string; role?: string; profile?: Record<string, unknown>; context?: PiContextPacket; depth?: number; messages: Array<{ role: 'user' | 'assistant'; content: string }>; archived?: boolean; piSessionFile?: string }
 
 const readyResult = (): PiHostResponse['result'] => ({
   protocolVersion: PI_HOST_PROTOCOL_VERSION,
@@ -172,14 +177,78 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       .catch((error) => [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : `Pi ${toolName} failed`)])
   }
   if (input.method === 'state/snapshot') {
-    return [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions] } }]
+    return [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions], queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })) } }]
   }
   if (input.method === 'sessions/list') return [{ id, result: { sessions: state.snapshot.sessions.map((session) => ({ ...session, messages: [...session.messages] })) } }]
+  if (input.method === 'resources/list') return [{ id, result: { resources: state.snapshot.resources.map((resource) => ({ ...resource })) } }]
+  if (input.method === 'resources/reload') {
+    const resources = input.params?.resources
+    if (!Array.isArray(resources)) return [errorResponse(id, 'invalid_request', 'resources must be an array')]
+    const registry = new PiResourceRegistry()
+    try {
+      registry.reload(resources as PiResource[])
+    } catch (error) {
+      return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid Pi resources')]
+    }
+    state.snapshot.resources = registry.list(); state.snapshot.cursor += 1
+    return [{ id, result: { resources: state.snapshot.resources.map((resource) => ({ ...resource })) } }]
+  }
+  if (input.method === 'runs/list') return [{ id, result: { queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })) } }]
+  if (input.method === 'runs/enqueue') {
+    const params = input.params || {}
+    if (typeof params.runId !== 'string' || typeof params.sessionId !== 'string' || typeof params.prompt !== 'string' || !['interactive', 'time', 'proactive'].includes(String(params.trigger)) || !params.profile || typeof params.profile !== 'object') {
+      return [errorResponse(id, 'invalid_request', 'runId, sessionId, prompt, trigger, and profile are required')]
+    }
+    const queue = new PiRunQueue(24, state.snapshot.queue)
+    const outcome = queue.enqueue({
+      runId: params.runId,
+      sessionId: params.sessionId,
+      prompt: params.prompt,
+      trigger: params.trigger as PiQueuedRun['trigger'],
+      evidence: typeof params.evidence === 'string' ? params.evidence : undefined,
+      profile: { ...(params.profile as Record<string, unknown>) },
+      status: 'queued',
+    })
+    if (!outcome.ok) return [errorResponse(id, 'invalid_request', `Pi run queue ${outcome.code}`)]
+    state.snapshot.queue = queue.snapshot(); state.snapshot.cursor += 1
+    return [{ id, result: { queue: state.snapshot.queue } }]
+  }
+  if (input.method === 'runs/cancel') {
+    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+    if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
+    const queue = new PiRunQueue(24, state.snapshot.queue)
+    if (!queue.snapshot().some((item) => item.runId === runId)) return [errorResponse(id, 'invalid_request', 'Unknown queued Pi run')]
+    queue.markInterrupted(runId); state.snapshot.queue = queue.snapshot(); state.snapshot.cursor += 1
+    return [{ id, result: { queue: state.snapshot.queue } }]
+  }
   if (input.method === 'sessions/create') {
+    const params = input.params || {}
+    const parentSessionId = typeof params.parentSessionId === 'string' ? params.parentSessionId : undefined
+    let id = `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    let childMetadata: Pick<SessionRecord, 'parentSessionId' | 'role' | 'profile' | 'context' | 'depth'> = {}
+    if (parentSessionId) {
+      if (!state.snapshot.sessions.some((candidate) => candidate.id === parentSessionId)) return [errorResponse(id, 'invalid_request', 'parentSessionId is unknown')]
+      if (typeof params.role !== 'string' || !params.profile || typeof params.profile !== 'object' || !params.context || typeof params.context !== 'object' || typeof params.depth !== 'number') {
+        return [errorResponse(id, 'invalid_request', 'Child Pi session requires role, profile, context, and depth')]
+      }
+      try {
+        const child = createPiChildSession({
+          role: params.role,
+          profile: params.profile as Record<string, unknown>,
+          context: params.context as PiContextPacket,
+          depth: params.depth,
+        })
+        id = child.id
+        childMetadata = { parentSessionId, role: child.role, profile: child.profile, context: child.context, depth: child.depth }
+      } catch (error) {
+        return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid child Pi session')]
+      }
+    }
     const session: SessionRecord = {
-      id: `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      title: typeof input.params?.title === 'string' ? input.params.title : 'New Pi session',
-      threadId: typeof input.params?.threadId === 'string' ? input.params.threadId : undefined,
+      id,
+      title: typeof params.title === 'string' ? params.title : 'New Pi session',
+      threadId: typeof params.threadId === 'string' ? params.threadId : undefined,
+      ...childMetadata,
       messages: [],
     }
     state.snapshot.sessions = [...state.snapshot.sessions, session]
@@ -225,13 +294,22 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     if (!session || !prompt.trim()) return [errorResponse(id, 'invalid_request', 'sessionId and prompt are required')]
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : `pi-run-${Date.now()}`
     const cwd = typeof input.params?.cwd === 'string' ? input.params.cwd : process.cwd()
+    let turnSettings = state.snapshot.settings
+    if (input.params?.profile && typeof input.params.profile === 'object') {
+      try {
+        const profilePatch = validatePiSettingsPatch(input.params.profile as Record<string, unknown>)
+        turnSettings = compileEffectiveAgentProfile(state.snapshot.settings, profilePatch, {})
+      } catch (error) {
+        return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid Pi turn profile')]
+      }
+    }
     const turnEvents: PiHostEvent[] = []
     return runPiTurn(sessionId, cwd, prompt, session.messages, (event) => {
       /* Events are collected below so the response remains ordered after them. */
       const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event } }
       if (emit) emit(turnEvent)
       else turnEvents.push(turnEvent)
-    }, runId, session.piSessionFile, state.snapshot.settings).then((turn) => {
+    }, runId, session.piSessionFile, turnSettings).then((turn) => {
       session.piSessionFile ||= getPiSessionFile(sessionId)
       if (turn.settlement === 'success') {
         const assistant = turn.items.find((item) => Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'assistant_message')) as { content?: string } | undefined
@@ -278,19 +356,21 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
 
 export function createPiHostServer(
   send: (message: PiHostMessage) => void,
-  initialSnapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings } = {
+  initialSnapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; queue: PiQueuedRun[]; resources: PiResource[] } = {
     cursor: 0,
     sessions: [],
     settings: { ...DEFAULT_PI_SETTINGS },
+    queue: [],
+    resources: [],
   },
-  onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings }) => void,
+  onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; queue: PiQueuedRun[]; resources: PiResource[] }) => void,
 ) {
   const state: HostState = { initialized: false, snapshot: initialSnapshot }
   return {
     async handle(request: unknown) {
       const messages = await handlePiHostRequest(state, request, send)
       const method = (request as { method?: string } | null)?.method
-      if (method?.startsWith('settings/') || method?.startsWith('sessions/') || method === 'turn/submit') onStateChange?.(state.snapshot)
+      if (method?.startsWith('settings/') || method?.startsWith('sessions/') || method?.startsWith('runs/') || method?.startsWith('resources/') || method === 'turn/submit') onStateChange?.(state.snapshot)
       for (const message of messages) send(message)
     },
   }

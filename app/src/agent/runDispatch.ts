@@ -130,6 +130,7 @@ export async function dispatchThreadTask(
       ...snapshot.overrides,
       runId: snapshot.runId,
       threadId: tid,
+      model: thread?.model,
       forceLoopType: snapshot.forceLoopType,
       loopTypeMode: snapshot.forceLoopType ? 'force' : snapshot.overrides.loopTypeMode,
     })

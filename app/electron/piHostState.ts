@@ -2,11 +2,15 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
 import type { SessionRecord } from './piHostProtocol.ts'
+import type { PiQueuedRun } from './piRunQueue.ts'
+import type { PiResource } from './piResourceRegistry.ts'
 
 export type PiHostSnapshot = {
   cursor: number
   sessions: SessionRecord[]
   settings: PiSettings
+  queue: PiQueuedRun[]
+  resources: PiResource[]
 }
 
 type StoredState = PiHostSnapshot & { schemaVersion: 1 }
@@ -16,6 +20,8 @@ const emptyState = (): StoredState => ({
   cursor: 0,
   sessions: [],
   settings: { ...DEFAULT_PI_SETTINGS },
+  queue: [],
+  resources: [],
 })
 
 export async function loadPiHostState(statePath: string): Promise<StoredState> {
@@ -25,6 +31,7 @@ export async function loadPiHostState(statePath: string): Promise<StoredState> {
       value.schemaVersion !== 1 ||
       typeof value.cursor !== 'number' ||
       !Array.isArray(value.sessions) ||
+      !Array.isArray(value.queue || []) ||
       !value.settings ||
       typeof value.settings.model !== 'string' ||
       !Array.isArray(value.settings.activeTools)
@@ -44,6 +51,8 @@ export async function loadPiHostState(statePath: string): Promise<StoredState> {
         approvalMode: value.settings.approvalMode === 'always' || value.settings.approvalMode === 'full' ? value.settings.approvalMode : DEFAULT_PI_SETTINGS.approvalMode,
         unattended: value.settings.unattended === true,
       },
+      queue: (value.queue || []).filter((item): item is PiQueuedRun => Boolean(item && typeof item === 'object' && typeof (item as PiQueuedRun).runId === 'string')),
+      resources: Array.isArray(value.resources) ? value.resources : [],
     }
   } catch {
     return emptyState()

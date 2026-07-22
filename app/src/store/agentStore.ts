@@ -243,6 +243,13 @@ async function executePiHostTurn(
     steps: [{ step: 1, action: 'pi-host-turn', description: 'Pi Core Host turn', status: 'IN_PROGRESS', modelSource: 'primary' }],
     logs: [{ id: 'pi-host-start', timestamp: startedAt, level: 'PROCESS', message: `Pi Core Host · runId=${runId}` }],
   }))
+  const profile = Object.fromEntries(
+    Object.entries({
+      model: overrides.model,
+      approvalMode: overrides.approvalMode,
+      unattended: overrides.unattended,
+    }).filter(([, value]) => value !== undefined),
+  )
   try {
     const result = await runPiOrchestration({
       pattern: loopType,
@@ -255,6 +262,7 @@ async function executePiHostTurn(
           prompt,
           runId,
           cwd: overrides.projectRoot,
+          profile,
         })
         return { settlement: turn.settlement, result: turn.result }
       },

@@ -124,10 +124,46 @@ export class PiHostSupervisor {
     return response.result
   }
 
+  async createChildSession(input: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('sessions/create', input)
+    if (response.error || !response.result?.sessionId) throw new Error(response.error?.message || 'Child Pi session creation failed')
+    return response.result
+  }
+
   async listSessions(): Promise<NonNullable<PiHostResponse['result']>['sessions']> {
     const response = await this.request('sessions/list', {})
     if (response.error || !response.result?.sessions) throw new Error(response.error?.message || 'Pi session listing failed')
     return response.result.sessions
+  }
+
+  async listQueuedRuns(): Promise<NonNullable<PiHostResponse['result']>['queue']> {
+    const response = await this.request('runs/list', {})
+    if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queue listing failed')
+    return response.result.queue
+  }
+
+  async enqueueRun(input: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>['queue']> {
+    const response = await this.request('runs/enqueue', input)
+    if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queue admission failed')
+    return response.result.queue
+  }
+
+  async cancelQueuedRun(runId: string): Promise<NonNullable<PiHostResponse['result']>['queue']> {
+    const response = await this.request('runs/cancel', { runId })
+    if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queued run cancellation failed')
+    return response.result.queue
+  }
+
+  async listResources(): Promise<NonNullable<PiHostResponse['result']>['resources']> {
+    const response = await this.request('resources/list', {})
+    if (response.error || !response.result?.resources) throw new Error(response.error?.message || 'Pi resource listing failed')
+    return response.result.resources
+  }
+
+  async reloadResources(resources: unknown[]): Promise<NonNullable<PiHostResponse['result']>['resources']> {
+    const response = await this.request('resources/reload', { resources })
+    if (response.error || !response.result?.resources) throw new Error(response.error?.message || 'Pi resource reload failed')
+    return response.result.resources
   }
 
   async forkSession(sessionId: string): Promise<NonNullable<PiHostResponse['result']>> {
@@ -154,8 +190,8 @@ export class PiHostSupervisor {
     return response.result
   }
 
-  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string): Promise<NonNullable<PiHostResponse['result']>> {
-    const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}) })
+  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}), ...(profile ? { profile } : {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')
     return response.result
   }

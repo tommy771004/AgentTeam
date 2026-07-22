@@ -66,14 +66,28 @@ try {
   const sessionId = String(created.result.sessionId)
   send(3, 'settings/update', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: ['read'] })
   await waitFor((message) => message.id === 3)
-  send(4, 'turn/submit', { sessionId, runId: 'smoke-success-run', cwd: process.cwd(), prompt: 'say hello' })
+  send(4, 'turn/submit', {
+    sessionId,
+    runId: 'smoke-success-run',
+    cwd: process.cwd(),
+    prompt: 'say hello',
+    profile: {
+      provider: 'loopback',
+      model: 'smoke-model',
+      thinkingLevel: 'off',
+      activeTools: ['grep'],
+      compaction: 'auto',
+      approvalMode: 'full',
+      unattended: false,
+    },
+  })
   const settled = await waitFor((message) => message.id === 4)
   assert.equal(settled.result.settlement, 'success')
   assert.equal(settled.result.items[0].type, 'assistant_message')
   assert.equal(settled.result.items[0].content, 'hello from Pi')
   assert.equal(requestSeen, true)
-  assert.ok(requestBody?.tools?.some((tool) => Boolean(tool && typeof tool === 'object' && (tool as { function?: { name?: string } }).function?.name === 'read')))
-  assert.ok(requestBody?.tools?.every((tool) => Boolean(tool && typeof tool === 'object' && (tool as { function?: { name?: string } }).function?.name === 'read')))
+  assert.ok(requestBody?.tools?.some((tool) => Boolean(tool && typeof tool === 'object' && (tool as { function?: { name?: string } }).function?.name === 'grep')))
+  assert.ok(requestBody?.tools?.every((tool) => Boolean(tool && typeof tool === 'object' && (tool as { function?: { name?: string } }).function?.name === 'grep')))
   send(5, 'sessions/list')
   const listed = await waitFor((message) => message.id === 5)
   const projected = listed.result.sessions.find((candidate: { id: string }) => candidate.id === sessionId)

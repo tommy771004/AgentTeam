@@ -11,7 +11,7 @@ export type PiHostRunnerApi = {
     create: (title?: string, threadId?: string) => Promise<{ sessionId: string; sessions: unknown[] }>
   }
   turn: {
-    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string }) => Promise<{
+    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown> }) => Promise<{
       sessionId: string
       runId: string
       settlement: string
@@ -26,6 +26,7 @@ export type SubmitPiHostRunInput = {
   prompt: string
   runId: string
   cwd?: string
+  profile?: Record<string, unknown>
 }
 
 export type SubmitPiHostRunResult = {
@@ -76,6 +77,7 @@ export async function submitPiHostRun(
     prompt: input.prompt,
     runId: input.runId,
     cwd: input.cwd,
+    profile: input.profile,
   })
   const items = Array.isArray(turn.items) ? turn.items : []
   return {
