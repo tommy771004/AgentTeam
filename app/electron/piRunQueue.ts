@@ -1,4 +1,4 @@
-export type PiQueuedRun = { runId: string; sessionId: string; prompt: string; trigger: 'interactive' | 'time' | 'proactive'; evidence?: string; profile: Record<string, unknown>; status: 'queued' | 'interrupted' | 'settled' }
+export type PiQueuedRun = { runId: string; sessionId: string; prompt: string; trigger: 'interactive' | 'time' | 'proactive'; evidence?: string; profile: Record<string, unknown>; status: 'queued' | 'running' | 'interrupted' | 'settled' }
 
 export class PiRunQueue {
   private readonly items: PiQueuedRun[]
@@ -11,6 +11,16 @@ export class PiRunQueue {
     return { ok: true }
   }
   dequeue() { return this.items.find((item) => item.status === 'queued') }
+  claim(runId?: string) {
+    const item = runId ? this.items.find((candidate) => candidate.runId === runId && candidate.status === 'queued') : this.dequeue()
+    if (item) item.status = 'running'
+    return item
+  }
   markInterrupted(runId: string) { const item = this.items.find((candidate) => candidate.runId === runId); if (item) item.status = 'interrupted' }
+  settle(runId: string) { const item = this.items.find((candidate) => candidate.runId === runId && itemStatusCanSettle(candidate.status)); if (item) item.status = 'settled'; return item }
   snapshot() { return this.items.map((item) => ({ ...item, profile: { ...item.profile } })) }
+}
+
+function itemStatusCanSettle(status: PiQueuedRun['status']): boolean {
+  return status === 'queued' || status === 'running'
 }

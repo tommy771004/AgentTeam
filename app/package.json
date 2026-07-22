@@ -20,6 +20,7 @@
     "smoke:pi-host-memory": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-memory.mts",
     "smoke:pi-host-capabilities": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-capabilities.mts",
     "smoke:pi-host-tool-registry": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-tool-registry.mts",
+    "smoke:pi-host-queue-settlement": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-queue-settlement.mts",
     "smoke:pi-host-release-evidence": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-release-evidence.mts",
     "smoke:pi-sync-evidence": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-sync-evidence.mts",
     "smoke:pi-sync-release-record": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-sync-release-record.mts",

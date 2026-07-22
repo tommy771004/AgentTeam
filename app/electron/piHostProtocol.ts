@@ -8,7 +8,7 @@ export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
   params: Record<string, unknown>
 }
 
@@ -234,7 +234,25 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     if (!query.trim()) return [errorResponse(id, 'invalid_request', 'query is required')]
     return [{ id, result: { items: state.capabilities.search(query) } }]
   }
-  if (input.method === 'runs/list') return [{ id, result: { queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })) } }]
+    if (input.method === 'runs/list') return [{ id, result: { queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })) } }]
+  if (input.method === 'runs/claim') {
+    const runId = typeof input.params?.runId === 'string' ? input.params.runId : undefined
+    const queue = new PiRunQueue(24, state.snapshot.queue)
+    const run = queue.claim(runId)
+    if (!run) return [errorResponse(id, 'invalid_request', runId ? 'Unknown queued Pi run' : 'No queued Pi run available')]
+    state.snapshot.queue = queue.snapshot(); state.snapshot.cursor += 1
+    return [{ id, result: { run, queue: state.snapshot.queue } }]
+  }
+  if (input.method === 'runs/settle') {
+    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+    const settlement = input.params?.settlement
+    if (!runId || !['success', 'failed', 'cancelled', 'interrupted'].includes(String(settlement))) return [errorResponse(id, 'invalid_request', 'runId and settlement are required')]
+    const queue = new PiRunQueue(24, state.snapshot.queue)
+    const run = queue.settle(runId)
+    if (!run) return [errorResponse(id, 'invalid_request', 'Unknown active Pi run')]
+    state.snapshot.queue = queue.snapshot(); state.snapshot.cursor += 1
+    return [{ id, result: { run, queue: state.snapshot.queue, settlement: settlement as 'success' | 'failed' | 'cancelled' | 'interrupted' } }]
+  }
   if (input.method === 'runs/enqueue') {
     const params = input.params || {}
     if (typeof params.runId !== 'string' || typeof params.sessionId !== 'string' || typeof params.prompt !== 'string' || !['interactive', 'time', 'proactive'].includes(String(params.trigger)) || !params.profile || typeof params.profile !== 'object') {

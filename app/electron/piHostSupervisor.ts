@@ -154,6 +154,18 @@ export class PiHostSupervisor {
     return response.result.queue
   }
 
+  async claimQueuedRun(runId?: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('runs/claim', runId ? { runId } : {})
+    if (response.error || !response.result?.runId && !response.result?.queue) throw new Error(response.error?.message || 'Pi queue claim failed')
+    return response.result
+  }
+
+  async settleQueuedRun(runId: string, settlement: 'success' | 'failed' | 'cancelled' | 'interrupted'): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('runs/settle', { runId, settlement })
+    if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queue settlement failed')
+    return response.result
+  }
+
   async listResources(): Promise<NonNullable<PiHostResponse['result']>['resources']> {
     const response = await this.request('resources/list', {})
     if (response.error || !response.result?.resources) throw new Error(response.error?.message || 'Pi resource listing failed')
