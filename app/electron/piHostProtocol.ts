@@ -5,7 +5,7 @@ export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'turn/submit'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/read' | 'tools/grep' | 'tools/find' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'turn/submit'
   params: Record<string, unknown>
 }
 
@@ -23,6 +23,12 @@ export type PiHostResponse = {
     runId?: string
     settlement?: 'success' | 'failed' | 'cancelled' | 'interrupted'
     items?: unknown[]
+    tool?: string
+    content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>
+    loaded?: boolean
+    package?: string
+    version?: string
+    builtinTools?: string[]
   }
   error?: {
     code: 'invalid_request' | 'protocol_mismatch' | 'not_initialized' | 'unknown_method'
@@ -43,6 +49,7 @@ export type PiHostEvent =
 export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
+import { executePiTool, piCoreRuntimeStatus, type PiBuiltinToolName } from './piCoreRuntime.ts'
 
 type HostState = {
   initialized: boolean
@@ -63,7 +70,7 @@ const errorResponse = (
   message: string,
 ): PiHostResponse => ({ id, error: { code, message } })
 
-export function handlePiHostRequest(state: HostState, request: unknown): PiHostMessage[] {
+export function handlePiHostRequest(state: HostState, request: unknown): PiHostMessage[] | Promise<PiHostMessage[]> {
   if (!request || typeof request !== 'object') {
     return [errorResponse('', 'invalid_request', 'Pi Host request must be an object')]
   }
@@ -95,6 +102,20 @@ export function handlePiHostRequest(state: HostState, request: unknown): PiHostM
 
   if (!state.initialized) return [errorResponse(id, 'not_initialized', 'Pi Host must be initialized first')]
   if (input.method === 'health/get') return [{ id, result: readyResult() }]
+  if (input.method === 'runtime/status') return [{ id, result: piCoreRuntimeStatus() }]
+  if (input.method === 'tools/read' || input.method === 'tools/grep' || input.method === 'tools/find') {
+    const params = input.params || {}
+    if (typeof params.cwd !== 'string') return [errorResponse(id, 'invalid_request', 'cwd is required')]
+    const toolName = input.method.slice('tools/'.length) as PiBuiltinToolName
+    if ((toolName === 'read' && typeof params.path !== 'string') || (toolName === 'grep' && (typeof params.path !== 'string' || typeof params.pattern !== 'string')) || (toolName === 'find' && typeof params.pattern !== 'string')) {
+      return [errorResponse(id, 'invalid_request', `${toolName} parameters are invalid`)]
+    }
+    const args = { ...params }
+    delete args.cwd
+    return executePiTool(toolName, params.cwd, args)
+      .then((result) => [{ id, result: { tool: toolName, content: result.content } }])
+      .catch((error) => [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : `Pi ${toolName} failed`)])
+  }
   if (input.method === 'state/snapshot') {
     return [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions] } }]
   }
@@ -183,8 +204,8 @@ export function createPiHostServer(
 ) {
   const state: HostState = { initialized: false, snapshot: initialSnapshot }
   return {
-    handle(request: unknown) {
-      const messages = handlePiHostRequest(state, request)
+    async handle(request: unknown) {
+      const messages = await handlePiHostRequest(state, request)
       const method = (request as { method?: string } | null)?.method
       if (method?.startsWith('settings/') || method?.startsWith('sessions/') || method === 'turn/submit') onStateChange?.(state.snapshot)
       for (const message of messages) send(message)

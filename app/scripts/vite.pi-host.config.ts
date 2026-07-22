@@ -12,7 +12,7 @@ export default defineConfig({
       fileName: () => 'pi-host.js',
     },
     rollupOptions: {
-      external: ['node:readline', 'node:path', 'node:fs/promises'],
+      external: ['node:readline', 'node:path', 'node:url', 'node:fs', 'node:fs/promises'],
       output: { inlineDynamicImports: true },
     },
   },

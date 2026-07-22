@@ -210,6 +210,7 @@ const piHostSupervisor = new PiHostSupervisor(() =>
     serviceName: 'SubAgents Pi Core Host',
     env: {
       ...process.env,
+      SUBAGENTS_PI_VENDOR_DIR: path.resolve(__dirname, '../../vendor/pi'),
       SUBAGENTS_PI_HOST_STATE_PATH: path.join(app.getPath('userData'), 'pi-host-state.json'),
     },
   }),
