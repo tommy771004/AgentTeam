@@ -131,6 +131,12 @@ export class PiHostSupervisor {
     return response.result
   }
 
+  async executeTool(tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash', params: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request(`tools/${tool}`, params)
+    if (response.error || response.result?.tool !== tool) throw new Error(response.error?.message || `Pi ${tool} failed`)
+    return response.result
+  }
+
   async submitTurn(sessionId: string, prompt: string, runId?: string): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')

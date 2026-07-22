@@ -2056,6 +2056,7 @@ ipcMain.handle('pi-host:sessions:list', async () => ({ sessions: await piHostSup
 ipcMain.handle('pi-host:sessions:fork', async (_evt, sessionId: string) => piHostSupervisor.forkSession(sessionId))
 ipcMain.handle('pi-host:sessions:archive', async (_evt, sessionId: string) => piHostSupervisor.archiveSession(sessionId))
 ipcMain.handle('pi-host:sessions:compact', async (_evt, sessionId: string) => piHostSupervisor.compactSession(sessionId))
+ipcMain.handle('pi-host:tools:execute', async (_evt, input: { tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash'; params?: Record<string, unknown> }) => piHostSupervisor.executeTool(input.tool, input.params || {}))
 ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId))
 ipcMain.handle('pi-host:turn:cancel', async (_evt, runId: string) => piHostSupervisor.cancelTurn(runId))
 
