@@ -159,6 +159,14 @@ export function handlePiHostRequest(state: HostState, request: unknown): PiHostM
       /* Events are collected below so the response remains ordered after them. */
       turnEvents.push({ event: 'host/turn-item', payload: { runId, sessionId, item: event } } as PiHostEvent)
     }).then((turn) => {
+      if (turn.settlement === 'success') {
+        const assistant = turn.items.find((item) => Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'assistant_message')) as { content?: string } | undefined
+        session.messages = [
+          ...session.messages,
+          { role: 'user', content: prompt },
+          { role: 'assistant', content: assistant?.content ?? '' },
+        ]
+      }
       state.snapshot.cursor += 1
       return [...turnEvents, { id, result: { sessionId, runId, settlement: turn.settlement, items: turn.items } }]
     })

@@ -69,6 +69,13 @@ try {
   assert.equal(settled.result.items[0].type, 'assistant_message')
   assert.equal(settled.result.items[0].content, 'hello from Pi')
   assert.equal(requestSeen, true)
+  send(4, 'sessions/list')
+  const listed = await waitFor((message) => message.id === 4)
+  const projected = listed.result.sessions.find((candidate: { id: string }) => candidate.id === sessionId)
+  assert.deepEqual(projected.messages, [
+    { role: 'user', content: 'say hello' },
+    { role: 'assistant', content: 'hello from Pi' },
+  ])
 } finally {
   host.stdin.end()
   await once(host, 'exit')
