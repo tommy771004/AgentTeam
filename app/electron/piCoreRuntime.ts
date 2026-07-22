@@ -19,6 +19,7 @@ type PiSessionRuntime = {
     dispose?: () => Promise<void> | void
   }
 }
+export type PiHostHistoryMessage = { role: 'user' | 'assistant'; content: string }
 const sessionRuntimes = new Map<string, PiSessionRuntime>()
 
 const TOOL_FACTORIES = {
@@ -53,13 +54,30 @@ export async function executePiTool(toolName: PiBuiltinToolName, cwd: string, ar
   return tool.execute(`pi-host-${toolName}`, args, undefined, undefined, undefined)
 }
 
-async function ensurePiSessionRuntime(sessionId: string, cwd: string) {
+async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[]) {
   const existing = sessionRuntimes.get(sessionId)
   if (existing) return existing
+  const sessionManager = piCodingAgent.SessionManager.inMemory(cwd)
+  for (const message of history) {
+    if (message.role === 'user') {
+      sessionManager.appendMessage({ role: 'user', content: [{ type: 'text', text: message.content }], timestamp: Date.now() })
+    } else {
+      sessionManager.appendMessage({
+        role: 'assistant',
+        content: [{ type: 'text', text: message.content }],
+        api: 'openai-completions',
+        provider: 'restored',
+        model: 'restored',
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: 'stop',
+        timestamp: Date.now(),
+      })
+    }
+  }
   const options: Record<string, unknown> = {
     cwd,
     noTools: 'all',
-    sessionManager: piCodingAgent.SessionManager.inMemory(cwd),
+    sessionManager,
   }
   if (process.env.SUBAGENTS_PI_AGENT_DIR) options.agentDir = process.env.SUBAGENTS_PI_AGENT_DIR
   const created = await piCodingAgent.createAgentSession(options)
@@ -72,9 +90,10 @@ export async function runPiTurn(
   sessionId: string,
   cwd: string,
   prompt: string,
+  history: PiHostHistoryMessage[] = [],
   onEvent?: (event: { type?: string; [key: string]: unknown }) => void,
 ) {
-  const runtime = await ensurePiSessionRuntime(sessionId, cwd)
+  const runtime = await ensurePiSessionRuntime(sessionId, cwd, history)
   let completedMessages: Array<{ role?: string; content?: unknown }> = []
   const unsubscribe = runtime.session.subscribe((event) => {
     if (event.type === 'agent_end' && Array.isArray(event.messages)) {

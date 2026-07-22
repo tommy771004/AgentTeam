@@ -155,7 +155,7 @@ export function handlePiHostRequest(state: HostState, request: unknown): PiHostM
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : `pi-run-${Date.now()}`
     const cwd = typeof input.params?.cwd === 'string' ? input.params.cwd : process.cwd()
     const turnEvents: PiHostEvent[] = []
-    return runPiTurn(sessionId, cwd, prompt, (event) => {
+    return runPiTurn(sessionId, cwd, prompt, session.messages, (event) => {
       /* Events are collected below so the response remains ordered after them. */
       turnEvents.push({ event: 'host/turn-item', payload: { runId, sessionId, item: event } } as PiHostEvent)
     }).then((turn) => {
