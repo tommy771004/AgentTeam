@@ -55,14 +55,14 @@ export type PiHostEvent =
 export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
-import { cancelPiTool, cancelPiTurn, executePiTool, piCoreRuntimeStatus, runPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
+import { cancelPiTool, cancelPiTurn, executePiTool, getPiSessionFile, piCoreRuntimeStatus, runPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
 
 type HostState = {
   initialized: boolean
   snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings }
 }
 
-export type SessionRecord = { id: string; title: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; archived?: boolean }
+export type SessionRecord = { id: string; title: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; archived?: boolean; piSessionFile?: string }
 
 const readyResult = (): PiHostResponse['result'] => ({
   protocolVersion: PI_HOST_PROTOCOL_VERSION,
@@ -196,7 +196,8 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event } }
       if (emit) emit(turnEvent)
       else turnEvents.push(turnEvent)
-    }, runId).then((turn) => {
+    }, runId, session.piSessionFile).then((turn) => {
+      session.piSessionFile ||= getPiSessionFile(sessionId)
       if (turn.settlement === 'success') {
         const assistant = turn.items.find((item) => Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'assistant_message')) as { content?: string } | undefined
         session.messages = [

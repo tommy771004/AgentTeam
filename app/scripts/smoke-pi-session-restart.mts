@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert'
 import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -71,6 +71,8 @@ try {
   const firstTurn = await first.waitFor((message) => message.id === 3)
   assert.equal(firstTurn.result.settlement, 'success')
   await closeHost(first.host)
+  const persistedPiFiles = await readdir(agentDir, { recursive: true })
+  assert.ok(persistedPiFiles.some((file) => String(file).endsWith('.jsonl')), 'Pi must persist a canonical session file')
 
   const second = spawnHost()
   second.send(4, 'initialize', { protocolVersion: 1 })

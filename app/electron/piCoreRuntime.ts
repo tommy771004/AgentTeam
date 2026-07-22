@@ -13,6 +13,11 @@ const piCodingAgent = await import(/* @vite-ignore */ pathToFileURL(join(vendorD
 const piConfig = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/config.js')).href)
 
 type PiSessionRuntime = {
+  sessionManager: {
+    appendMessage: (message: unknown) => string
+    getEntries: () => unknown[]
+    getSessionFile: () => string | undefined
+  }
   session: {
     prompt: (prompt: string) => Promise<void>
     abort?: () => Promise<void> | void
@@ -73,33 +78,39 @@ export async function executePiTool(
   }
 }
 
-async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[]) {
+async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string) {
   const existing = sessionRuntimes.get(sessionId)
   if (existing) return existing
-  const sessionManager = piCodingAgent.SessionManager.inMemory(cwd)
-  for (const message of history) {
-    if (message.role === 'user') {
-      sessionManager.appendMessage({ role: 'user', content: [{ type: 'text', text: message.content }], timestamp: Date.now() })
-    } else {
-      sessionManager.appendMessage({
-        role: 'assistant',
-        content: [{ type: 'text', text: message.content }],
-        api: 'openai-completions',
-        provider: 'restored',
-        model: 'restored',
-        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-        stopReason: 'stop',
-        timestamp: Date.now(),
-      })
+  const agentDir = process.env.SUBAGENTS_PI_AGENT_DIR
+  const sessionDir = agentDir ? join(agentDir, 'sessions') : undefined
+  const sessionManager = sessionFile
+    ? piCodingAgent.SessionManager.open(sessionFile, sessionDir, cwd)
+    : piCodingAgent.SessionManager.create(cwd, sessionDir, { id: sessionId })
+  if (sessionManager.getEntries().length === 0) {
+    for (const message of history) {
+      if (message.role === 'user') {
+        sessionManager.appendMessage({ role: 'user', content: [{ type: 'text', text: message.content }], timestamp: Date.now() })
+      } else {
+        sessionManager.appendMessage({
+          role: 'assistant',
+          content: [{ type: 'text', text: message.content }],
+          api: 'openai-completions',
+          provider: 'restored',
+          model: 'restored',
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: 'stop',
+          timestamp: Date.now(),
+        })
+      }
     }
   }
   const options: Record<string, unknown> = {
     cwd,
     sessionManager,
   }
-  if (process.env.SUBAGENTS_PI_AGENT_DIR) options.agentDir = process.env.SUBAGENTS_PI_AGENT_DIR
+  if (agentDir) options.agentDir = agentDir
   const created = await piCodingAgent.createAgentSession(options)
-  const runtime = { session: created.session } as PiSessionRuntime
+  const runtime = { sessionManager, session: created.session } as PiSessionRuntime
   sessionRuntimes.set(sessionId, runtime)
   return runtime
 }
@@ -111,8 +122,9 @@ export async function runPiTurn(
   history: PiHostHistoryMessage[] = [],
   onEvent?: (event: { type?: string; [key: string]: unknown }) => void,
   runId?: string,
+  sessionFile?: string,
 ) {
-  const runtime = await ensurePiSessionRuntime(sessionId, cwd, history)
+  const runtime = await ensurePiSessionRuntime(sessionId, cwd, history, sessionFile)
   const turn = { session: runtime.session, cancelled: false }
   if (runId) activeTurns.set(runId, turn)
   let completedMessages: Array<{ role?: string; content?: unknown }> = []
@@ -147,6 +159,10 @@ export async function runPiTurn(
     unsubscribe()
     if (runId) activeTurns.delete(runId)
   }
+}
+
+export function getPiSessionFile(sessionId: string) {
+  return sessionRuntimes.get(sessionId)?.sessionManager.getSessionFile()
 }
 
 export async function cancelPiTurn(runId: string) {
