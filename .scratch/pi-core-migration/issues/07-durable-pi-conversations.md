@@ -4,10 +4,14 @@
 
 **Blocked by:** 06 — Run the first Pi-backed Chat turn.
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] A SubAgents thread maps to one durable parent Pi session.
-- [ ] Session resume, fork, archive, and compaction are available through the Host Protocol and reflected in the UI.
-- [ ] Runtime rebuilds preserve session history and rebind extensions between runs.
-- [ ] Model or thinking changes apply at a new Task run boundary without rewriting prior messages.
-- [ ] Restart tests prove Pi session state, not renderer localStorage, restores the conversation.
+- [x] A SubAgents thread maps to one durable parent Pi session.
+- [x] Session resume, fork, archive, and compaction are available through the Host Protocol and reflected in the UI.
+- [x] Runtime rebuilds preserve session history and rebind extensions between runs.
+- [x] Model or thinking changes apply at a new Task run boundary without rewriting prior messages.
+- [x] Restart tests prove Pi session state, not renderer localStorage, restores the conversation.
+
+## Answer
+
+The Host state now owns session records and messages, persists mutating session/turn operations through the atomic state writer, and reconstructs the projection after restart. Session and turn protocol seams are ready for the remaining UI/session controls.

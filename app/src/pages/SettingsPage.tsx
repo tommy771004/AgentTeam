@@ -15,6 +15,7 @@ import {
   settingsInputCls,
 } from '../components/settings/SettingsChrome'
 import { PolicyAdminSection } from '../components/settings/PolicyAdminSection'
+import { PiCoreSettingsSection } from '../components/settings/PiCoreSettingsSection'
 import { useSettingsStore } from '../store/settingsStore'
 import { useLearningStore } from '../store/learningStore'
 import { modelsGroupedByCliProvider } from '../agent/cliProviders'
@@ -88,6 +89,7 @@ const SECTIONS = [
   { id: 'data', label: '資料控制', icon: 'database', group: 'personal' },
   { id: 'shortcuts', label: '鍵盤快捷鍵', icon: 'keyboard', group: 'personal' },
   { id: 'safety', label: '組態', icon: 'shield', group: 'agent' },
+  { id: 'piCore', label: 'Pi Core', icon: 'hub', group: 'agent' },
   { id: 'policyAdmin', label: 'Policy Admin', icon: 'policy', group: 'agent' },
   { id: 'roles', label: '角色模型', icon: 'groups', group: 'agent' },
   { id: 'llm', label: '語言模型', icon: 'smart_toy', group: 'agent' },
@@ -130,6 +132,10 @@ const SECTION_META: Record<string, { title: string; subtitle: string }> = {
   safety: {
     title: '組態',
     subtitle: '設定核准政策、工具與安全循環門檻。',
+  },
+  piCore: {
+    title: 'Pi Core',
+    subtitle: 'Pi Agent 的模型、思考層級與工具權限；設定在下一輪代理執行時生效。',
   },
   policyAdmin: {
     title: 'Policy Admin',
@@ -639,6 +645,8 @@ export function SettingsPage() {
     >
       <div className="flex flex-col max-w-[820px] pb-10">
         <SettingsHeader title={meta.title} subtitle={meta.subtitle} />
+
+        {section === 'piCore' && <PiCoreSettingsSection />}
 
         {section === 'general' && (
           <>

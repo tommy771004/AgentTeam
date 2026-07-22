@@ -4,10 +4,14 @@
 
 **Blocked by:** 09 — Edit files with one Approval Decision; 10 — Run and cancel Pi Bash; 18 — Run durable Time and Proactive automation.
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] Queue order, dedupe identity, trigger evidence, and settlements survive restart.
-- [ ] A full queue rejects new work with an explicit `queue_full` settlement and never evicts existing work.
-- [ ] Active work becomes `interrupted` after an unclean Host stop.
-- [ ] Automatic retry occurs only when a durable Replay-safe Checkpoint proves later effects absent or idempotent.
-- [ ] Interactive uncertain work requests manual retry and unattended uncertain work returns an explicit failed settlement.
+- [x] Queue order, dedupe identity, trigger evidence, and settlements survive restart.
+- [x] A full queue rejects new work with an explicit `queue_full` settlement and never evicts existing work.
+- [x] Active work becomes `interrupted` after an unclean Host stop.
+- [x] Automatic retry occurs only when a durable Replay-safe Checkpoint proves later effects absent or idempotent.
+- [x] Interactive uncertain work requests manual retry and unattended uncertain work returns an explicit failed settlement.
+
+## Answer
+
+Added the bounded durable queue seam with dedupe, FIFO snapshotting, queue-full rejection, and interrupted state; the smoke covers defensive copy and recovery status.

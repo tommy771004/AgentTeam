@@ -8,6 +8,7 @@ import { useThreadStore } from '../store/threadStore'
 import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts'
 import { requestFocusComposer } from '../store/commandHistoryStore'
 import { getElectronBridgeStatus } from '../lib/electronBridge'
+import { PiHostStatusPill } from './PiHostStatusPill'
 // Vite-bundled brand mark (always in the JS asset graph — no public/ relative-path 404)
 import brandIconUrl from '../assets/subagents-icon-64.png'
 
@@ -229,6 +230,7 @@ export function Layout() {
         </nav>
 
         <div className="no-drag border-t border-white/10 p-2 space-y-2">
+          <PiHostStatusPill collapsed={collapsed} />
           {(isRunning || agentStatus === 'running') && (
             <button
               type="button"

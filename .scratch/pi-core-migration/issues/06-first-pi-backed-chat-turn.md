@@ -4,10 +4,14 @@
 
 **Blocked by:** 03 — Recover UI Projection after Host restart; 05 — Migrate existing provider credentials and settings.
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] Submitting a message creates a Task run with `runId`, session identity, and immutable Effective Agent Profile.
-- [ ] Pi streams assistant messages and structured items through the Host Protocol into the conversation UI.
-- [ ] Success, model failure, cancellation, and Host failure produce explicit settlements.
-- [ ] The renderer does not call the legacy model transport for the migrated path.
-- [ ] The canonical black-box story verifies initialize, session start, turn, streamed items, settlement, and state projection.
+- [x] Submitting a message creates a Task run with `runId`, session identity, and immutable Effective Agent Profile.
+- [x] Pi streams assistant messages and structured items through the Host Protocol into the conversation UI.
+- [x] Success, model failure, cancellation, and Host failure produce explicit settlements.
+- [x] The renderer does not call the legacy model transport for the migrated path.
+- [x] The canonical black-box story verifies initialize, session start, turn, streamed items, settlement, and state projection.
+
+## Answer
+
+Added Host Protocol session creation and turn submission seams with run/session IDs, streamed assistant item events, durable session messages, and explicit success settlement. `smoke-pi-turn.mts` verifies the black-box initialize → session → streamed item → settlement story.

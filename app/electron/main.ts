@@ -11,6 +11,7 @@ import {
   powerSaveBlocker,
   safeStorage,
   session,
+  utilityProcess,
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -201,8 +202,18 @@ import {
   stopOpenCodeServers,
   type OpenCodeServerMode,
 } from './opencodeServerBridge'
+import { PiHostSupervisor } from './piHostSupervisor'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const piHostSupervisor = new PiHostSupervisor(() =>
+  utilityProcess.fork(path.join(__dirname, 'pi-host.js'), [], {
+    serviceName: 'SubAgents Pi Core Host',
+    env: {
+      ...process.env,
+      SUBAGENTS_PI_HOST_STATE_PATH: path.join(app.getPath('userData'), 'pi-host-state.json'),
+    },
+  }),
+)
 // Policy Admin / outbound policy dir default (node-safe modules read this env).
 try {
   process.env.SUBAGENTS_USER_DATA_DIR = app.getPath('userData')
@@ -680,7 +691,7 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Windows taskbar grouping + correct Jump List icon identity
   if (process.platform === 'win32') {
     app.setAppUserModelId('ai.subagents.desktop')
@@ -694,6 +705,11 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
     decidePermissionRequest(permission),
   )
+  try {
+    await piHostSupervisor.start()
+  } catch (error) {
+    console.error('[pi-host] failed to start', error)
+  }
   createAppMenu()
   createWindow()
   createTray()
@@ -765,6 +781,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  piHostSupervisor.stop()
   void stopOpenCodeServers()
   isQuitting = true
   mcpStdioStopAll()
@@ -2023,6 +2040,13 @@ ipcMain.handle('hermes:set', async (_evt, data: unknown) => {
 
 ipcMain.handle('app:platform', () => process.platform)
 ipcMain.handle('app:version', () => app.getVersion())
+ipcMain.handle('pi-host:status', () => piHostSupervisor.status())
+ipcMain.handle('pi-host:health', async () => piHostSupervisor.health())
+ipcMain.handle('pi-host:settings:get', async () => ({ settings: await piHostSupervisor.getSettings() }))
+ipcMain.handle('pi-host:settings:update', async (_evt, patch: Record<string, unknown>) => ({ settings: await piHostSupervisor.updateSettings(patch || {}) }))
+ipcMain.handle('pi-host:settings:profile', async (_evt, role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) => ({ profile: await piHostSupervisor.profile(role, taskOverride) }))
+ipcMain.handle('pi-host:sessions:create', async (_evt, title?: string) => piHostSupervisor.createSession(title))
+ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId))
 
 // ── Signed Beta updates + N-1→N migration transaction ─────────
 // The channel is deliberately opt-in through SUBAGENTS_UPDATE_PUBLIC_KEY;

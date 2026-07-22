@@ -5,6 +5,38 @@ import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
 const api = {
   platform: () => ipcRenderer.invoke('app:platform') as Promise<string>,
   version: () => ipcRenderer.invoke('app:version') as Promise<string>,
+  piHost: {
+    status: () => ipcRenderer.invoke('pi-host:status') as Promise<{
+      state: 'stopped' | 'starting' | 'ready' | 'crashed' | 'error'
+      protocolVersion?: number
+      capabilities?: string[]
+      exitCode?: number | null
+      signal?: number
+      message?: string
+    }>,
+    health: () => ipcRenderer.invoke('pi-host:health') as Promise<{
+      protocolVersion: number
+      capabilities: string[]
+      status: 'ready'
+    }>,
+    settings: {
+      get: () => ipcRenderer.invoke('pi-host:settings:get') as Promise<{
+        settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual' }
+      }>,
+      update: (patch: { provider?: string; model?: string; thinkingLevel?: 'off' | 'low' | 'medium' | 'high'; activeTools?: string[]; compaction?: 'auto' | 'manual' }) =>
+        ipcRenderer.invoke('pi-host:settings:update', patch) as Promise<{
+          settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual' }
+        }>,
+      profile: (role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) =>
+        ipcRenderer.invoke('pi-host:settings:profile', role, taskOverride) as Promise<{ profile: unknown }>,
+      sessions: {
+        create: (title?: string) => ipcRenderer.invoke('pi-host:sessions:create', title) as Promise<{ sessionId: string; sessions: unknown[] }>,
+      },
+      turn: {
+        submit: (input: { sessionId: string; prompt: string; runId?: string }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; items?: unknown[] }>,
+      },
+    },
+  },
   updates: {
     state: () => ipcRenderer.invoke('updates:state') as Promise<{
       schemaVersion: 1

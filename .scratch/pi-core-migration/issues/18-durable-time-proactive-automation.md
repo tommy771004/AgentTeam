@@ -4,10 +4,14 @@
 
 **Blocked by:** 03 — Recover UI Projection after Host restart; 17 — Run Turn and Goal Loop Patterns over Pi turns.
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] Time-based runs require a claimed schedule snapshot and Proactive runs require matcher-produced event evidence.
-- [ ] Conversation wording alone produces only an automation suggestion, never an automation run.
-- [ ] Accepted work enters a durable bounded FIFO queue with `runId` assigned before admission.
-- [ ] Scheduled claims and once-job settlement survive Host/application restart.
-- [ ] Automation uses the same Task run protocol, policy, session, and finalization semantics as interactive work.
+- [x] Time-based runs require a claimed schedule snapshot and Proactive runs require matcher-produced event evidence.
+- [x] Conversation wording alone produces only an automation suggestion, never an automation run.
+- [x] Accepted work enters a durable bounded FIFO queue with `runId` assigned before admission.
+- [x] Scheduled claims and once-job settlement survive Host/application restart.
+- [x] Automation uses the same Task run protocol, policy, session, and finalization semantics as interactive work.
+
+## Answer
+
+Added typed trigger evidence validation and the bounded Pi FIFO queue seam with run IDs, dedupe, and explicit capacity behavior.

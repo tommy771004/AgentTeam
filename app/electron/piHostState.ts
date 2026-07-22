@@ -1,0 +1,56 @@
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
+import type { SessionRecord } from './piHostProtocol.ts'
+
+export type PiHostSnapshot = {
+  cursor: number
+  sessions: SessionRecord[]
+  settings: PiSettings
+}
+
+type StoredState = PiHostSnapshot & { schemaVersion: 1 }
+
+const emptyState = (): StoredState => ({
+  schemaVersion: 1,
+  cursor: 0,
+  sessions: [],
+  settings: { ...DEFAULT_PI_SETTINGS },
+})
+
+export async function loadPiHostState(statePath: string): Promise<StoredState> {
+  try {
+    const value = JSON.parse(await readFile(statePath, 'utf8')) as Partial<StoredState>
+    if (
+      value.schemaVersion !== 1 ||
+      typeof value.cursor !== 'number' ||
+      !Array.isArray(value.sessions) ||
+      !value.settings ||
+      typeof value.settings.model !== 'string' ||
+      !Array.isArray(value.settings.activeTools)
+    ) {
+      return emptyState()
+    }
+    return {
+      schemaVersion: 1,
+      cursor: value.cursor,
+      sessions: value.sessions,
+      settings: {
+        provider: value.settings.provider || DEFAULT_PI_SETTINGS.provider,
+        model: value.settings.model,
+        thinkingLevel: value.settings.thinkingLevel || DEFAULT_PI_SETTINGS.thinkingLevel,
+        activeTools: [...value.settings.activeTools],
+        compaction: value.settings.compaction === 'manual' ? 'manual' : 'auto',
+      },
+    }
+  } catch {
+    return emptyState()
+  }
+}
+
+export async function savePiHostState(statePath: string, snapshot: PiHostSnapshot): Promise<void> {
+  await mkdir(path.dirname(statePath), { recursive: true })
+  const temporaryPath = `${statePath}.${process.pid}.tmp`
+  await writeFile(temporaryPath, JSON.stringify({ schemaVersion: 1, ...snapshot }), 'utf8')
+  await rename(temporaryPath, statePath)
+}

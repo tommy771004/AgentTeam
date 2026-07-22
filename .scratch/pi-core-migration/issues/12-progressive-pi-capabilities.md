@@ -4,10 +4,14 @@
 
 **Blocked by:** 08 — Read and search projects with Equivalent Pi Tools.
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] The Capability Extension catalogs deferred capabilities without maintaining a second tool-definition owner.
-- [ ] Loading a capability reveals its runbook and activates its Pi tools together.
-- [ ] Tool search reveals relevant hidden tools and loads their owning capability deterministically.
-- [ ] Active capability/tool state persists across turns and later Task runs according to the session contract.
-- [ ] Tests drive actual Pi tool calls and assert visible schemas/events rather than inspecting runtime source.
+- [x] The Capability Extension catalogs deferred capabilities without maintaining a second tool-definition owner.
+- [x] Loading a capability reveals its runbook and activates its Pi tools together.
+- [x] Tool search reveals relevant hidden tools and loads their owning capability deterministically.
+- [x] Active capability/tool state persists across turns and later Task runs according to the session contract.
+- [x] Tests drive actual Pi tool calls and assert visible schemas/events rather than inspecting runtime source.
+
+## Answer
+
+Added a deterministic Pi Capability catalog with deferred visibility, load/runbook coupling, search auto-load, and active-tool persistence semantics plus a smoke fixture.
