@@ -7,8 +7,10 @@ import { buildPiSyncEvidence, type PiSyncEvidenceInput } from '../src/agent/piSy
 const artifactPath = 'dist-electron/pi-host.js'
 const artifactBytes = await readFile(resolve(import.meta.dirname, '../dist-electron/pi-host.js'))
 const artifactSha256 = createHash('sha256').update(artifactBytes).digest('hex')
+const pin = JSON.parse(await readFile(resolve(import.meta.dirname, '../../vendor/pi/PI_UPSTREAM_PIN.json'), 'utf8')) as { commit?: string }
+assert.match(pin.commit || '', /^[0-9a-f]{40}$/)
 const base: PiSyncEvidenceInput = {
-  fromCommit: '1111111111111111111111111111111111111111',
+  fromCommit: pin.commit as string,
   toCommit: '2222222222222222222222222222222222222222',
   ledgerReconciled: true,
   upstreamTests: true,
