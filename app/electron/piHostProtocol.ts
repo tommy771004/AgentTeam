@@ -74,7 +74,7 @@ const errorResponse = (
   message: string,
 ): PiHostResponse => ({ id, error: { code, message } })
 
-export function handlePiHostRequest(state: HostState, request: unknown): PiHostMessage[] | Promise<PiHostMessage[]> {
+export function handlePiHostRequest(state: HostState, request: unknown, emit?: (message: PiHostMessage) => void): PiHostMessage[] | Promise<PiHostMessage[]> {
   if (!request || typeof request !== 'object') {
     return [errorResponse('', 'invalid_request', 'Pi Host request must be an object')]
   }
@@ -124,7 +124,11 @@ export function handlePiHostRequest(state: HostState, request: unknown): PiHostM
     return executePiTool(toolName, params.cwd, args, {
       runId,
       onUpdate: (item) => {
-        if (runId) updates.push({ event: 'host/tool-update', payload: { runId, tool: toolName, item } })
+        if (runId) {
+          const event: PiHostEvent = { event: 'host/tool-update', payload: { runId, tool: toolName, item } }
+          if (emit) emit(event)
+          else updates.push(event)
+        }
       },
     })
       .then((result) => result.cancelled
@@ -180,7 +184,9 @@ export function handlePiHostRequest(state: HostState, request: unknown): PiHostM
     const turnEvents: PiHostEvent[] = []
     return runPiTurn(sessionId, cwd, prompt, session.messages, (event) => {
       /* Events are collected below so the response remains ordered after them. */
-      turnEvents.push({ event: 'host/turn-item', payload: { runId, sessionId, item: event } } as PiHostEvent)
+      const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event } }
+      if (emit) emit(turnEvent)
+      else turnEvents.push(turnEvent)
     }, runId).then((turn) => {
       if (turn.settlement === 'success') {
         const assistant = turn.items.find((item) => Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'assistant_message')) as { content?: string } | undefined
@@ -237,7 +243,7 @@ export function createPiHostServer(
   const state: HostState = { initialized: false, snapshot: initialSnapshot }
   return {
     async handle(request: unknown) {
-      const messages = await handlePiHostRequest(state, request)
+      const messages = await handlePiHostRequest(state, request, send)
       const method = (request as { method?: string } | null)?.method
       if (method?.startsWith('settings/') || method?.startsWith('sessions/') || method === 'turn/submit') onStateChange?.(state.snapshot)
       for (const message of messages) send(message)

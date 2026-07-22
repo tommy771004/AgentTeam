@@ -22,12 +22,22 @@ const waitFor = async (id: number) => {
     await once(output, 'line')
   }
 }
+const waitForEvent = async (event: string) => {
+  for (;;) {
+    const message = messages.find((item) => item.event === event)
+    if (message) return message
+    await once(output, 'line')
+  }
+}
 const send = (id: number, method: string, params: Record<string, unknown>) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 try {
   send(1, 'initialize', { protocolVersion: 1 })
   await waitFor(1)
   send(2, 'tools/bash', { cwd: root, runId: 'bash-cancel-run', command: 'printf first; sleep 1; printf never', approval: 'allow' })
-  await new Promise((resolveDelay) => setTimeout(resolveDelay, 100))
+  await Promise.race([
+    waitForEvent('host/tool-update'),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('bash update was not streamed before completion')), 500)),
+  ])
   send(3, 'turn/cancel', { runId: 'bash-cancel-run' })
   const cancelAck = await waitFor(3)
   assert.equal(cancelAck.result?.settlement, 'cancelled')
