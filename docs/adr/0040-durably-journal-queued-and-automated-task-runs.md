@@ -1,0 +1,3 @@
+# Durably journal queued and automated Task runs
+
+An Automation Extension persists queued Task runs, scheduled claims, webhook and Telegram trigger evidence, and once-job settlement in the Pi Host journal. A `runId` is assigned before admission as the sole dedupe identity, and unsettled work is recovered after Host restart; automation never starts Pi sessions directly and always enters through the Orchestration Extension. When the bounded FIFO queue is full, new work receives an explicit `queue_full` settlement returned to its source; existing queued work is never silently evicted or reordered.

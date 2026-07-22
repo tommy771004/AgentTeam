@@ -4,6 +4,90 @@ An Electron desktop app (`app/`) that runs an agent loop (Turn/Goal/Time-based/P
 
 ## Language
 
+**Pi Core（Pi 核心）**:
+The project-owned, vendored foundation derived from Pi's four packages: `pi-ai`, `pi-agent-core`, `pi-coding-agent`, and `pi-tui`. It owns model access, agent/session execution, the extension host, and terminal primitives while the Electron/React app remains the desktop product shell; the Pi CLI application and interactive TUI mode are not product entry points.
+_Avoid_: treating Pi as an external CLI provider, replacing the Electron interface with Pi's terminal UI, or excluding the `pi-coding-agent` SDK merely because its CLI entry point is excluded.
+
+**SubAgents Extension（SubAgents 擴充）**:
+A product capability attached through the Pi Core extension boundary, primarily the `pi-coding-agent` extension host. It may consume lower-level Pi services through that host; it is not a separate plugin system independently mounted into each of the four Pi packages.
+_Avoid_: saying every Pi package has its own extension host, or using "extension" for code that must remain part of the trusted security boundary.
+
+**Trusted Extension（受信任擴充）**:
+A Pi-compatible extension loaded as local application code with the same filesystem, process, network, environment, and credential authority as SubAgents AI. Installing or enabling one is an explicit trust decision, not a sandbox grant.
+_Avoid_: "safe plugin", "restricted plugin", or implying that signature or marketplace origin limits its runtime authority.
+
+**Pi Settings（Pi 設定）**:
+The canonical runtime configuration owned by Pi Core and edited through the SubAgents AI settings UI. A SubAgents-only setting may remain outside it only when it expresses a desktop product concern that Pi does not model.
+_Avoid_: mirroring provider, model, thinking, tool, compaction, or session settings into a second `LlmSettings` source of truth.
+
+**Orchestration Extension（編排擴充）**:
+The trusted SubAgents Extension that preserves the Turn-based, Goal-based, Time-based, and Proactive Loop Patterns while delegating each agent turn and tool loop to Pi Core. A SubAgents thread owns a durable Pi session; a Task run is one `runId`-scoped orchestration over that session.
+_Avoid_: implementing a second agent/tool loop beside Pi Core, equating a Pi turn with a complete Task run, or creating a fresh Pi session for every run.
+
+**Equivalent Tool（等價工具）**:
+A Pi tool that matches a legacy SubAgents tool's user-visible contract across parameters, results, streaming updates, cancellation, project scope, and session recording. Only an Equivalent Tool may replace and cause removal of its legacy implementation.
+_Avoid_: declaring tools equivalent from a shared name or happy-path output alone.
+
+**Capability Extension（能力擴充）**:
+The trusted SubAgents Extension that progressively reveals runbooks and controls which Pi tools are active for a session. Pi Core remains the only tool loop; the extension does not maintain a parallel registry, executor, or invocation lifecycle.
+_Avoid_: a second capability runtime wrapped around Pi's tool loop, or exposing every installed tool schema on every turn.
+
+**CodeMode（程式編排模式）**:
+A Capability Extension tool that runs model-generated JavaScript in an isolated worker solely to coordinate currently active Pi tools. The generated program has no direct Node, filesystem, process, or network authority, and every nested tool call remains individually observable and cancellable.
+_Avoid_: equating model-generated code with Trusted Extension code or granting it the host process's authority.
+
+**Effective Agent Profile（有效 Agent 設定檔）**:
+The immutable per-agent configuration compiled from Pi Settings, the selected SubAgents role, and the Task run override when a Task run is submitted or queued. It fixes that agent's model, thinking level, prompt, active tools, capability preload, and Approval Mode for the run; a later run in the same durable Pi session uses a new snapshot without rewriting prior history.
+_Avoid_: having agents read mutable UI state during execution or sharing one unresolved settings object across different roles.
+
+**Policy Extension（政策擴充）**:
+The sole SubAgents authority that produces Approval Decisions and outbound-provider decisions for model activity through Pi's tool and provider hooks. Pi hooks are enforcement points for this policy, not a second permission system; direct host actions performed by Trusted Extensions remain outside this model-activity boundary.
+_Avoid_: stacking independent Pi and SubAgents permission verdicts or claiming the Policy Extension sandboxes Trusted Extensions.
+
+**Extension Pack（擴充包）**:
+A cohesive, manifest-declared SubAgents Extension boundary such as Orchestration, Policy, Capabilities, Memory, Automation, Integrations, or Marketplace, including its runtime and desktop UI contributions. A pack exists only for product behavior Pi Core does not already provide equivalently.
+_Avoid_: one monolithic SubAgents extension, one package per file or tool, or wrapping an Equivalent Tool merely to preserve a legacy implementation.
+
+**Settings Registry（設定註冊表）**:
+The typed catalog that binds Electron form controls to Pi Settings or an Extension Pack's settings namespace. Every user-editable value has product copy, a concrete control, defaults, constraints, and validation; complex settings may supply a dedicated React panel.
+_Avoid_: raw JSON editors, internal setting keys as UI labels, or hand-maintaining every extension field inside one central settings page.
+
+**Desktop Contribution（桌面貢獻）**:
+An optional SubAgents manifest attached to an otherwise standard Pi extension to declare settings controls, React panels, navigation, or other Electron-only surfaces. Absence of this manifest never prevents the extension from loading through Pi's native Extension API.
+_Avoid_: a wrapper required to execute Pi extensions or a fork of the Pi Extension API.
+
+**Memory Extension（記憶擴充）**:
+The Extension Pack that owns durable memory, learning, dream consolidation, and cross-session recall beyond Pi's native session history. It consumes Pi session events and contributes recalled context without owning a second history or compaction pipeline.
+_Avoid_: using Hermes to duplicate Pi session persistence, transcript history, or compaction.
+
+**Pi Core Host（Pi 核心主機）**:
+The dedicated Electron utility process that owns Pi Core runtimes, sessions, extensions, tools, and streamed events behind a typed Electron IPC protocol. Electron main supervises this process and the React renderer is its client; neither invokes nor parses the Pi CLI.
+_Avoid_: terminal-output scraping, importing Node-only Pi runtime code into the renderer, or treating the desktop UI as the agent runtime.
+
+**Child Pi Session（子 Pi 工作階段）**:
+An independently configured Pi session created by the Delegation Extension for one subagent, with its own Effective Agent Profile, tools, budget, context, and transcript. It receives an explicit Context Packet and returns a result summary to its parent rather than sharing the parent transcript.
+_Avoid_: temporarily switching roles inside the parent session or copying the entire parent conversation into every subagent.
+
+**Pi Host Protocol（Pi 主機協定）**:
+The versioned, capability-negotiated request/event contract between the Electron clients and Pi Core Host for initialization, sessions, Task runs, streamed items, approvals, settings, steering, and cancellation. Its TypeScript types are generated from one schema version rather than duplicated across processes.
+_Avoid_: ad hoc `ipcMain.handle()` contracts, exposing Pi Core classes across IPC, or using a localhost server for an exclusively local desktop boundary.
+
+**UI Projection（UI 投影）**:
+The disposable renderer view of Pi Host session and run state, reconstructed from a Host snapshot followed by events after a cursor. Zustand may cache this view for presentation but never becomes an authority that can overwrite newer Host state.
+_Avoid_: calling renderer localStorage the session store or implementing two-way canonical-state synchronization.
+
+**Automation Extension（自動化擴充）**:
+The Extension Pack that durably owns queued Task runs, scheduled claims, external trigger evidence, and once-job settlement in the Pi Host journal. It assigns `runId` before admission and resumes unsettled work after Host restart, while the Orchestration Extension remains the only path into Pi sessions.
+_Avoid_: an in-memory scheduler, invoking Pi AgentSession directly from webhook or timer callbacks, or using payload equality as the run identity.
+
+**Replay-safe Checkpoint（可安全重播檢查點）**:
+A durable Task run boundary that proves either no effectful action has occurred since it or every later action is idempotent under the recorded identity. Only an interrupted run with such proof may retry automatically after Pi Host recovery.
+_Avoid_: assuming a logged tool start, model response, or process exit makes an unknown side effect safe to repeat.
+
+**Core Patch Ledger（核心修補帳冊）**:
+The reviewed inventory of every project-owned change inside vendored Pi Core, recording its upstream base, necessity, affected contract, parity tests, and upstream disposition. A Core patch exists only when an Extension Pack or adapter cannot supply a required stable hook.
+_Avoid_: undocumented edits under `vendor/pi`, product features implemented directly in core, or treating the fork as detached from upstream.
+
 **Design System**:
 The canonical, project-owned brand/token contract for a project — a project-relative `DESIGN.md` (plus optional `tokens.css`, `assets/`) living at the project root or under `.subagents/subdesign/design-systems/<id>/`. This is the only form the SubDesign build/critique loop actually reads when generating or scoring artifacts.
 _Avoid_: "design system pack", "system" alone when the project-owned form is meant.

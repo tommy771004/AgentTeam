@@ -1,0 +1,3 @@
+# Compile one policy and profile per agent
+
+SubAgents retains one permission authority as a trusted Policy Extension and uses Pi's tool and provider hooks only as its enforcement points, avoiding competing verdicts. When a Task run is submitted or queued, the host compiles Pi Settings, the selected SubAgents role, and Task run overrides into an immutable Effective Agent Profile containing the model, thinking level, prompt, active tools, capability preload, and Approval Mode. A later run in the same durable Pi session receives a fresh profile from the latest saved settings, while queued or active runs never change underneath execution; trusted extension code remains explicitly outside this model-activity policy boundary.

@@ -1,0 +1,3 @@
+# Pi Settings are the runtime source of truth
+
+Pi's `SettingsManager` and runtime options will replace obsolete or overlapping SubAgents `LlmSettings` fields for providers, models, thinking levels, tools, compaction, and sessions. The Electron settings UI edits Pi Settings through a main-process bridge; only settings that represent SubAgents-specific desktop product concerns absent from Pi may remain in a separate product configuration, preventing permanent two-way synchronization and conflicting runtime state. On first upgrade, a versioned one-time migration validates and transfers compatible provider, model, credential, and preference values before deleting their legacy fields; no permanent compatibility layer remains.
