@@ -26,14 +26,15 @@ const api = {
     }>,
     settings: {
       get: () => ipcRenderer.invoke('pi-host:settings:get') as Promise<{
-        settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual'; approvalMode: 'always' | 'auto' | 'full'; unattended: boolean }
+        settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual'; approvalMode: 'always' | 'auto' | 'full'; bashRequireAsk: boolean; unattended: boolean }
       }>,
-      update: (patch: { provider?: string; model?: string; thinkingLevel?: 'off' | 'low' | 'medium' | 'high'; activeTools?: string[]; compaction?: 'auto' | 'manual'; approvalMode?: 'always' | 'auto' | 'full'; unattended?: boolean }) =>
+      update: (patch: { provider?: string; model?: string; thinkingLevel?: 'off' | 'low' | 'medium' | 'high'; activeTools?: string[]; compaction?: 'auto' | 'manual'; approvalMode?: 'always' | 'auto' | 'full'; bashRequireAsk?: boolean; unattended?: boolean }) =>
         ipcRenderer.invoke('pi-host:settings:update', patch) as Promise<{
-          settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual'; approvalMode: 'always' | 'auto' | 'full'; unattended: boolean }
+          settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual'; approvalMode: 'always' | 'auto' | 'full'; bashRequireAsk: boolean; unattended: boolean }
         }>,
       profile: (role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) =>
         ipcRenderer.invoke('pi-host:settings:profile', role, taskOverride) as Promise<{ profile: unknown }>,
+    },
       sessions: {
         create: (title?: string, threadId?: string) => ipcRenderer.invoke('pi-host:sessions:create', title, threadId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         createChild: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:sessions:create-child', input) as Promise<{ sessionId: string; sessions: unknown[] }>,
@@ -63,14 +64,21 @@ const api = {
         load: (id: string) => ipcRenderer.invoke('pi-host:capabilities:load', id) as Promise<{ items: unknown[]; loaded: boolean }>,
         search: (query: string) => ipcRenderer.invoke('pi-host:capabilities:search', query) as Promise<{ items: unknown[] }>,
       },
+      extensions: {
+        list: () => ipcRenderer.invoke('pi-host:extensions:list') as Promise<{ extensions: unknown[] }>,
+        install: (input: { id: string; name: string; version: string; kind: 'package' | 'mcp'; source: string; enabled?: boolean; trusted?: boolean; tools?: string[]; credentialRefs?: string[]; mcp?: { command: string; args: string[]; env?: Record<string, string> } }) => ipcRenderer.invoke('pi-host:extensions:install', input) as Promise<{ extension?: unknown }>,
+        update: (input: { id: string; name?: string; version?: string; source?: string; enabled?: boolean; trusted?: boolean; tools?: string[]; credentialRefs?: string[]; mcp?: { command: string; args: string[]; env?: Record<string, string> } }) => ipcRenderer.invoke('pi-host:extensions:update', input) as Promise<{ extension?: unknown }>,
+        reload: (id: string) => ipcRenderer.invoke('pi-host:extensions:reload', id) as Promise<{ extension?: unknown }>,
+        setEnabled: (id: string, enabled: boolean) => ipcRenderer.invoke('pi-host:extensions:set-enabled', { id, enabled }) as Promise<{ extension?: unknown }>,
+        uninstall: (id: string) => ipcRenderer.invoke('pi-host:extensions:uninstall', id) as Promise<{ removed?: boolean }>,
+      },
       turn: {
-        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown> }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; items?: unknown[] }>,
+        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }}>,
         cancel: (runId: string) => ipcRenderer.invoke('pi-host:turn:cancel', runId) as Promise<{ runId: string; settlement: string }>,
       },
-    },
       tools: {
       list: () => ipcRenderer.invoke('pi-host:tools:list') as Promise<{ builtinTools: string[] }>,
-        execute: (tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash', params: Record<string, unknown>) =>
+        execute: (tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash' | 'code' | 'mcp', params: Record<string, unknown>) =>
         ipcRenderer.invoke('pi-host:tools:execute', { tool, params }) as Promise<{ tool: string; content: unknown }>,
     },
   },

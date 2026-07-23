@@ -5,6 +5,7 @@ import type { SessionRecord } from './piHostProtocol.ts'
 import type { PiQueuedRun } from './piRunQueue.ts'
 import type { PiResource } from './piResourceRegistry.ts'
 import { isPiMemory, type PiMemory } from './piMemoryExtension.ts'
+import type { PiExtension } from './piExtensionRegistry.ts'
 
 export type PiHostSnapshot = {
   cursor: number
@@ -13,6 +14,7 @@ export type PiHostSnapshot = {
   queue: PiQueuedRun[]
   resources: PiResource[]
   memories: PiMemory[]
+  extensions: PiExtension[]
 }
 
 type StoredState = PiHostSnapshot & { schemaVersion: 1 }
@@ -25,6 +27,7 @@ const emptyState = (): StoredState => ({
   queue: [],
   resources: [],
   memories: [],
+  extensions: [],
 })
 
 export async function loadPiHostState(statePath: string): Promise<StoredState> {
@@ -52,11 +55,13 @@ export async function loadPiHostState(statePath: string): Promise<StoredState> {
         activeTools: [...value.settings.activeTools],
         compaction: value.settings.compaction === 'manual' ? 'manual' : 'auto',
         approvalMode: value.settings.approvalMode === 'always' || value.settings.approvalMode === 'full' ? value.settings.approvalMode : DEFAULT_PI_SETTINGS.approvalMode,
+        bashRequireAsk: value.settings.bashRequireAsk !== false,
         unattended: value.settings.unattended === true,
       },
       queue: (value.queue || []).filter((item): item is PiQueuedRun => Boolean(item && typeof item === 'object' && typeof (item as PiQueuedRun).runId === 'string')),
       resources: Array.isArray(value.resources) ? value.resources : [],
       memories: Array.isArray(value.memories) ? value.memories.filter(isPiMemory) : [],
+      extensions: Array.isArray(value.extensions) ? value.extensions : [],
     }
   } catch {
     return emptyState()

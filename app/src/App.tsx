@@ -39,6 +39,8 @@ import {
 import { applyRendererStorageSnapshot } from './agent/updateMigration'
 import { compareVersions } from './agent/updateContracts'
 import type { PiSessionProjection } from './agent/piHostProjection'
+import { usePiHostEventStore } from './store/piHostEventStore'
+import { isElectronPiProduction } from './agent/piProduction'
 
 /** Restore automation queue from disk and drain when capacity is available */
 function RunQueueBootstrap() {
@@ -97,6 +99,18 @@ function PiHostProjectionBootstrap() {
   return null
 }
 
+/** Keep Host tool decisions/results visible to the renderer without making it a second owner. */
+function PiHostEventBootstrap() {
+  const push = usePiHostEventStore((state) => state.push)
+  useEffect(() => {
+    const onEvent = window.subagents?.piHost?.onEvent
+    if (!onEvent) return
+    const unsubscribe = onEvent((event) => push(event))
+    return () => { unsubscribe?.() }
+  }, [push])
+  return null
+}
+
 /** Reconcile durable run markers before schedulers/queues are allowed to drain. */
 function RecoveryBootstrap() {
   useEffect(() => {
@@ -140,6 +154,18 @@ function RecoveryBootstrap() {
       // Hydrate the visible thread before applying interrupted status so a
       // crash cannot silently turn the user's history into a blank thread.
       useThreadStore.getState().hydrate()
+      // Electron/Pi Host owns conversation history. Reconcile against the
+      // durable Host projection before applying interrupted status; otherwise
+      // startup recovery only sees the temporary renderer placeholder.
+      const piSessions = await window.subagents?.piHost?.sessions?.list?.()
+      if (Array.isArray(piSessions?.sessions)) {
+        const projected = piSessions.sessions.filter((item): item is PiSessionProjection => Boolean(
+          item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string' &&
+          typeof (item as { title?: unknown }).title === 'string' &&
+          Array.isArray((item as { messages?: unknown }).messages),
+        ))
+        useThreadStore.getState().hydrateFromPiHost(projected)
+      }
       const journalReport = journal.reconcileStartup()
       const hasRunRecovery = (journalReport?.items || []).some(
         (item) => item.kind === 'run' && item.action === 'marked-interrupted',
@@ -341,7 +367,7 @@ function SkillCuratorBootstrap() {
     let cancelled = false
     void (async () => {
       await waitForStartupRecovery()
-      if (cancelled || isRunning) return
+      if (cancelled || isRunning || isElectronPiProduction()) return
       scheduleSkillCurator(settings)
       // G6 dream:閒置時整併機器寫入記憶(gate:≥4h 且新條目 ≥3)
       scheduleDreamConsolidation(settings)
@@ -982,6 +1008,7 @@ export default function App() {
       <StartupGate>
         <PreferencesBootstrap />
         <PiHostProjectionBootstrap />
+        <PiHostEventBootstrap />
         <RunQueueBootstrap />
         <SkillCuratorBootstrap />
         <SchedulerBootstrap />

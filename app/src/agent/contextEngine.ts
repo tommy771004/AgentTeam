@@ -9,7 +9,6 @@
  * - flush durable memory BEFORE lossy compress when flushBeforeCompress set
  * - do not split tool_call / tool result pairs (see assertToolPairsAdjacent)
  */
-import type { LlmSettings } from './types'
 import {
   createContextGovernor,
   type ContextGovernor,

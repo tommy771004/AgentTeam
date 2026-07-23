@@ -19,3 +19,14 @@ for (const pattern of ['Turn-based', 'Goal-based', 'Time-based', 'Proactive'] as
 }
 
 console.log('one Pi Orchestration Extension owns all four loop patterns')
+
+const unmet = await runPiOrchestration({
+  pattern: 'Goal-based',
+  prompt: 'unmet',
+  maxIterations: 2,
+  turn: async () => ({ settlement: 'success', result: '', done: false }),
+})
+assert.equal(unmet.settlement, 'failed')
+assert.equal(unmet.iterations, 2)
+assert.equal(unmet.dodMet, false)
+console.log('Goal-based orchestration reports an unmet DoD after the iteration cap')

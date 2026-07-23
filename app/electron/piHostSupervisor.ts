@@ -214,6 +214,18 @@ export class PiHostSupervisor {
     return response.result.items
   }
 
+  async listExtensions(): Promise<NonNullable<PiHostResponse['result']>['extensions']> {
+    const response = await this.request('extensions/list', {})
+    if (response.error || !response.result?.extensions) throw new Error(response.error?.message || 'Pi extension listing failed')
+    return response.result.extensions
+  }
+
+  async mutateExtension(method: 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall', params: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request(method, params)
+    if (response.error || (!response.result?.extension && method !== 'extensions/uninstall')) throw new Error(response.error?.message || 'Pi extension operation failed')
+    return response.result || {}
+  }
+
   async forkSession(sessionId: string): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('sessions/fork', { sessionId })
     if (response.error || !response.result?.sessionId) throw new Error(response.error?.message || 'Pi session fork failed')
@@ -232,9 +244,9 @@ export class PiHostSupervisor {
     return response.result
   }
 
-  async executeTool(tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash', params: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
+  async executeTool(tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash' | 'code' | 'mcp', params: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request(`tools/${tool}`, params)
-    if (response.error || response.result?.tool !== tool) throw new Error(response.error?.message || `Pi ${tool} failed`)
+    if (response.error || !response.result?.tool) throw new Error(response.error?.message || `Pi ${tool} failed`)
     return response.result
   }
 
@@ -244,8 +256,8 @@ export class PiHostSupervisor {
     return response.result.builtinTools
   }
 
-  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
-    const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}), ...(profile ? { profile } : {}) })
+  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}), ...(profile ? { profile } : {}), ...(orchestration || {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')
     return response.result
   }

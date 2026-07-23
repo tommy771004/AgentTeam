@@ -32,8 +32,14 @@ export function selectToolsForStep(
 ): ToolName[] {
   const hay = `${description} ${objective} ${action}`.toLowerCase()
   const picks: ToolName[] = []
+  const electronPiHostOwnsTools = typeof window !== 'undefined' &&
+    typeof window.subagents?.platform === 'function' &&
+    typeof window.subagents?.piHost?.sessions?.list === 'function'
 
   for (const tool of TOOL_CATALOG) {
+    // Electron/Pi Host is the canonical Bash owner. The legacy renderer loop
+    // remains available only for plain-browser development fallback.
+    if (electronPiHostOwnsTools && tool.name === 'bash') continue
     if (tool.name === 'web_search' && opts?.webSearchEnabled === false) continue
     if (tool.keywords.some((k) => hay.includes(k))) {
       picks.push(tool.name)

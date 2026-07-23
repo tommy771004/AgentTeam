@@ -7,6 +7,8 @@
  * 大小上限時降級為「只留摘要 + 訊息數」,絕不讓 quota 錯誤打斷 run。
  */
 
+import { isElectronPiProduction } from './piProduction'
+
 export interface CompactionCheckpoint {
   runId: string
   at: string
@@ -23,6 +25,9 @@ const MAX_RUNS = 5
 const MAX_BYTES = 300_000
 
 function storage(): Storage | null {
+  // Pi SessionManager owns transcript history and compaction in Electron.
+  // Renderer checkpoints remain available to browser-only compatibility runs.
+  if (isElectronPiProduction()) return null
   try {
     if (typeof localStorage !== 'undefined') return localStorage
   } catch {

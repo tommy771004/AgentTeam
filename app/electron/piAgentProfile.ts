@@ -7,6 +7,8 @@ export type PiSettings = {
   activeTools: string[]
   compaction: 'auto' | 'manual'
   approvalMode: 'always' | 'auto' | 'full'
+  /** Segment-aware Bash policy; dangerous/unsplittable commands always ask. */
+  bashRequireAsk: boolean
   unattended: boolean
 }
 
@@ -19,6 +21,7 @@ export const DEFAULT_PI_SETTINGS: PiSettings = {
   activeTools: [],
   compaction: 'auto',
   approvalMode: 'auto',
+  bashRequireAsk: true,
   unattended: false,
 }
 
@@ -34,6 +37,7 @@ export function compileEffectiveAgentProfile(
     activeTools: [...(taskOverride?.activeTools || role?.activeTools || settings.activeTools)],
     compaction: taskOverride?.compaction || role?.compaction || settings.compaction,
     approvalMode: taskOverride?.approvalMode || role?.approvalMode || settings.approvalMode,
+    bashRequireAsk: taskOverride?.bashRequireAsk ?? role?.bashRequireAsk ?? settings.bashRequireAsk,
     unattended: taskOverride?.unattended ?? role?.unattended ?? settings.unattended,
   }
 }
@@ -67,6 +71,10 @@ export function validatePiSettingsPatch(patch: Record<string, unknown>): Partial
   if ('approvalMode' in patch) {
     if (!['always', 'auto', 'full'].includes(String(patch.approvalMode))) throw new Error(`Unsupported approval mode: ${String(patch.approvalMode)}`)
     next.approvalMode = patch.approvalMode as PiSettings['approvalMode']
+  }
+  if ('bashRequireAsk' in patch) {
+    if (typeof patch.bashRequireAsk !== 'boolean') throw new Error('bashRequireAsk must be a boolean')
+    next.bashRequireAsk = patch.bashRequireAsk
   }
   if ('unattended' in patch) {
     if (typeof patch.unattended !== 'boolean') throw new Error('unattended must be a boolean')

@@ -17,7 +17,19 @@ type PiSettings = {
   activeTools: string[]
   compaction: 'auto' | 'manual'
   approvalMode: 'always' | 'auto' | 'full'
+  bashRequireAsk: boolean
   unattended: boolean
+}
+
+type PiExtensionView = {
+  id: string
+  name: string
+  version: string
+  kind: 'package' | 'mcp'
+  enabled: boolean
+  trusted: boolean
+  tools: string[]
+  credentialRefs: string[]
 }
 
 const TOOLS = [
@@ -31,9 +43,10 @@ const TOOLS = [
 ] as const
 
 export function PiCoreSettingsSection() {
-  const [draft, setDraft] = useState<PiSettings>({ provider: '', model: '', thinkingLevel: 'medium', activeTools: [], compaction: 'auto', approvalMode: 'auto', unattended: false })
+  const [draft, setDraft] = useState<PiSettings>({ provider: '', model: '', thinkingLevel: 'medium', activeTools: [], compaction: 'auto', approvalMode: 'auto', bashRequireAsk: true, unattended: false })
   const [status, setStatus] = useState('載入中…')
   const [saving, setSaving] = useState(false)
+  const [extensions, setExtensions] = useState<PiExtensionView[]>([])
 
   useEffect(() => {
     let active = true
@@ -44,6 +57,9 @@ export function PiCoreSettingsSection() {
     }).catch((error: unknown) => {
       if (active) setStatus(error instanceof Error ? error.message : '無法載入 Pi 設定')
     })
+    void window.subagents?.piHost?.extensions?.list?.().then((result) => {
+      if (active) setExtensions((result.extensions || []) as PiExtensionView[])
+    }).catch(() => { /* extensions are optional in older Hosts */ })
     return () => { active = false }
   }, [])
 
@@ -115,6 +131,11 @@ export function PiCoreSettingsSection() {
           description="排程或背景執行；沒有明確核准時拒絕副作用工具。"
           control={<SettingsToggle checked={draft.unattended} onChange={() => setDraft((current) => ({ ...current, unattended: !current.unattended }))} />}
         />
+        <SettingsRow
+          title="Bash 分段安全檢查"
+          description="逐段檢查鏈式命令；危險、子 shell 與未涵蓋命令一律要求核准。"
+          control={<SettingsToggle checked={draft.bashRequireAsk} onChange={() => setDraft((current) => ({ ...current, bashRequireAsk: !current.bashRequireAsk }))} />}
+        />
       </SettingsGroup>
       <SettingsGroup title="可用工具" action={<span className="text-[11px] text-outline">明確選取，不需編輯 JSON</span>}>
         {TOOLS.map(([id, label]) => (
@@ -123,6 +144,20 @@ export function PiCoreSettingsSection() {
             title={label}
             description={id}
             control={<SettingsToggle checked={draft.activeTools.includes(id)} onChange={() => toggleTool(id)} />}
+          />
+        ))}
+      </SettingsGroup>
+      <SettingsGroup title="Pi Extensions / MCP" action={<span className="text-[11px] text-outline">由 Pi Host 管理</span>}>
+        {extensions.length === 0 ? <span className="text-[11px] text-outline">尚未安裝 Pi package 或 MCP extension</span> : extensions.map((extension) => (
+          <SettingsRow
+            key={extension.id}
+            title={`${extension.name} · ${extension.version}`}
+            description={`${extension.kind === 'mcp' ? 'MCP' : 'Package'} · ${extension.trusted ? '已信任來源' : '未信任來源'}${extension.credentialRefs.length ? ` · ${extension.credentialRefs.length} 個 credential reference` : ''}`}
+            control={<SettingsToggle checked={extension.enabled} onChange={() => {
+              void window.subagents?.piHost?.extensions?.setEnabled?.(extension.id, !extension.enabled).then((result) => {
+                if (result.extension) setExtensions((current) => current.map((item) => item.id === extension.id ? result.extension as PiExtensionView : item))
+              })
+            }} />}
           />
         ))}
       </SettingsGroup>

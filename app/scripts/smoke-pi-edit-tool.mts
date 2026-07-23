@@ -23,6 +23,13 @@ const waitFor = async (id: number) => {
     await once(output, 'line')
   }
 }
+const waitForEvent = async (event: string, runId: string) => {
+  for (;;) {
+    const message = messages.find((item) => item.event === event && item.payload?.runId === runId)
+    if (message) return message
+    await once(output, 'line')
+  }
+}
 const send = (id: number, method: string, params: Record<string, unknown>) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 try {
   send(1, 'initialize', { protocolVersion: 1 })
@@ -32,9 +39,12 @@ try {
   assert.match(denied.error?.message ?? '', /approval/i)
   assert.equal(await readFile(join(root, 'note.txt'), 'utf8'), 'before\nkeep\n')
 
-  send(3, 'tools/edit', { cwd: root, path: 'note.txt', edits: [{ oldText: 'before', newText: 'after' }], approval: 'allow' })
+  send(3, 'tools/edit', { cwd: root, runId: 'edit-smoke', path: 'note.txt', edits: [{ oldText: 'before', newText: 'after' }], approval: 'allow' })
+  assert.equal((await waitForEvent('host/tool-start', 'edit-smoke')).payload.tool, 'edit')
+  assert.equal((await waitForEvent('host/tool-decision', 'edit-smoke')).payload.decision, 'allow')
   const edited = await waitFor(3)
   assert.equal(edited.result?.tool, 'edit')
+  assert.equal((await waitForEvent('host/tool-result', 'edit-smoke')).payload.settlement, 'success')
   assert.equal(await readFile(join(root, 'note.txt'), 'utf8'), 'after\nkeep\n')
 } finally {
   host.stdin.end()

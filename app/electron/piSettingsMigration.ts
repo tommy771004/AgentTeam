@@ -3,6 +3,7 @@ import { DEFAULT_PI_SETTINGS, validatePiSettingsPatch, type PiSettings } from '.
 export type LegacySettingsInput = {
   provider?: unknown
   model?: unknown
+  baseUrl?: unknown
   thinkingLevel?: unknown
   activeTools?: unknown
   compaction?: unknown
@@ -14,6 +15,7 @@ export type LegacySettingsInput = {
 export type PiSettingsMigration = {
   version: 1
   settings: PiSettings
+  modelConfig: { provider: string; model: string; baseUrl: string } | null
   credential: { provider: string; apiKey: string } | null
   electronOwned: string[]
 }
@@ -30,8 +32,12 @@ export function migrateLegacySettings(input: LegacySettingsInput): PiSettingsMig
     ...(typeof input.unattended === 'boolean' ? { unattended: input.unattended } : {}),
   })
   const settings: PiSettings = { ...DEFAULT_PI_SETTINGS, ...patch }
+  const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl.trim() : ''
+  const modelConfig = settings.provider && settings.model && baseUrl
+    ? { provider: settings.provider, model: settings.model, baseUrl }
+    : null
   const credential = typeof input.apiKey === 'string' && input.apiKey.length > 0
     ? { provider: settings.provider, apiKey: input.apiKey }
     : null
-  return { version: 1, settings, credential, electronOwned: ['theme', 'shortcuts', 'windowBounds'] }
+  return { version: 1, settings, modelConfig, credential, electronOwned: ['theme', 'shortcuts', 'windowBounds'] }
 }

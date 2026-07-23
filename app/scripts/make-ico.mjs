@@ -69,8 +69,9 @@ const buildRootPng = path.resolve(__dirname, '../build/icon.png')
 fs.writeFileSync(outIco, ico)
 fs.writeFileSync(buildRootIco, ico)
 // electron-builder also looks at buildResources root for icon.png
-fs.copyFileSync(path.join(iconsDir, 'icon-256.png'), buildRootPng)
-fs.copyFileSync(path.join(iconsDir, 'icon-256.png'), path.join(iconsDir, 'icon.png'))
+// macOS requires a source PNG of at least 512×512; keep the ICO inputs separate.
+fs.copyFileSync(path.join(iconsDir, 'icon-512.png'), buildRootPng)
+fs.copyFileSync(path.join(iconsDir, 'icon-512.png'), path.join(iconsDir, 'icon.png'))
 
 console.log('wrote', outIco, `(${ico.length} bytes, ${pngs.length} sizes)`)
 console.log('wrote', buildRootIco)

@@ -4,7 +4,6 @@ import { Icon } from '../components/Icon'
 import { ThemePage } from '../components/SectionNav'
 import {
   SettingsHeader,
-  settingsBtnCls,
   settingsInputCls,
 } from '../components/settings/SettingsChrome'
 import { LogViewer } from '../components/LogViewer'
@@ -283,7 +282,7 @@ function ArchiveSection() {
 
 function LogsSection() {
   const navigate = useNavigate()
-  const { agent, reset, draftInput, startExecution } = useAgentStore()
+  const { agent, reset, draftInput } = useAgentStore()
   const halted =
     agent.status === 'halted' || agent.status === 'failed' || Boolean(agent.violation)
   const exitCode = agent.violation?.exitCode ?? (halted ? 1 : 0)

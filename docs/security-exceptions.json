@@ -1,0 +1,30 @@
+[
+  {
+    "scope": "secret-scan",
+    "id": "scripts/smoke-llm-transport.mts",
+    "reason": "Deterministic fixture token used only to prove outbound sanitization.",
+    "approvedBy": "security-baseline",
+    "expires": "2027-12-31T23:59:59Z"
+  },
+  {
+    "scope": "secret-scan",
+    "id": "scripts/smoke-outbound-run-scenario.mts",
+    "reason": "Deterministic fixture token used only to prove protected-run redaction.",
+    "approvedBy": "security-baseline",
+    "expires": "2027-12-31T23:59:59Z"
+  },
+  {
+    "scope": "secret-scan",
+    "id": "scripts/smoke-sanitized-workspace.mts",
+    "reason": "Deterministic fixture token used only to prove sanitized workspace isolation.",
+    "approvedBy": "security-baseline",
+    "expires": "2027-12-31T23:59:59Z"
+  },
+  {
+    "scope": "secret-scan",
+    "id": "scripts/smoke-text-sanitize.mts",
+    "reason": "Deterministic credential fixtures are required by the sanitizer tests.",
+    "approvedBy": "security-baseline",
+    "expires": "2027-12-31T23:59:59Z"
+  }
+]

@@ -20,6 +20,7 @@ import {
 } from '../agent/hermes/pluginTokenRefresh'
 import type { LearningEvent, MemoryBundle, SessionSearchHit, Skill } from '../agent/hermes/types'
 import type { ArchiveRecord } from '../agent/types'
+import { isElectronPiProduction } from '../agent/piProduction'
 import { useSettingsStore } from './settingsStore'
 
 export type PluginHealth = {
@@ -153,6 +154,7 @@ async function syncPluginMcpServers() {
       (plugin as { secretPluginId?: string }).secretPluginId ||
       catalogItem(plugin.id)?.npm?.secretPluginId ||
       catalogItem(plugin.id)?.dependsOnPluginId
+    if (plugin.piOnly) return []
     return (plugin.mcpServers || []).map((server) => {
       const normalized = normalizePluginMcpServer(server, plugin.id, packageSecret)
       ownedServerIds.add(normalized.id)
@@ -209,6 +211,30 @@ async function stopMcpSessionsForSecretOwner(secretOwnerId: string) {
 }
 
 async function loadFromDisk() {
+  if (isElectronPiProduction()) {
+    // Pi Host owns durable memories/extensions in Electron. Renderer state is
+    // only a projection for existing Learning UI consumers.
+    try {
+      const memories = await window.subagents?.piHost?.memory?.list?.()
+      if (memories?.memories) {
+        memoryStore.loadBundle({
+          userProfile: '',
+          memory: '',
+          entries: memories.memories.map((item) => ({
+            id: String((item as { id?: unknown }).id || crypto.randomUUID()),
+            kind: 'memory' as const,
+            text: String((item as { text?: unknown }).text || ''),
+            createdAt: String((item as { createdAt?: unknown }).createdAt || new Date().toISOString()),
+            tags: Array.isArray((item as { tags?: unknown }).tags) ? (item as { tags: string[] }).tags : [],
+          })),
+        })
+      }
+    } catch {
+      /* Pi Host recovery will retry on the next bootstrap. */
+    }
+    pluginRegistry.apply()
+    return
+  }
   if (window.subagents?.hermes?.get) {
     const data = (await window.subagents.hermes.get()) as {
       memory?: MemoryBundle
@@ -259,6 +285,7 @@ async function loadFromDisk() {
 }
 
 async function saveToDisk() {
+  if (isElectronPiProduction()) return
   const payload = {
     memory: memoryStore.getBundle(),
     skills: skillsStore.exportAll(),
@@ -452,6 +479,11 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     },
 
     appendMemory: async (text) => {
+      if (isElectronPiProduction()) {
+        await window.subagents?.piHost?.memory?.add?.({ text: text.trim(), tags: ['user'] })
+        await get().load()
+        return
+      }
       memoryStore.appendMemory(text)
       get().refresh()
       await get().persist()
@@ -536,6 +568,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
       pluginRegistry.apply()
       get().refresh()
       await syncPluginMcpServers()
+      await window.subagents?.piHost?.extensions?.setEnabled?.(id, enabled).catch(() => { /* legacy-only package */ })
       const manifest = pluginRegistry.list().find((plugin) => plugin.id === id)
       if (manifest) await persistManifest(manifest)
       await get().persist()
@@ -583,6 +616,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
       pluginRegistry.apply()
       get().refresh()
       await syncPluginMcpServers()
+      await window.subagents?.piHost?.extensions?.uninstall?.(id).catch(() => { /* legacy-only package */ })
       await get().persist()
       set((state) => {
         const pluginHealth = { ...state.pluginHealth }
@@ -646,6 +680,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
             enabled: requiresSetup ? false : manifest.enabled !== false,
             installedAt: manifest.installedAt || new Date().toISOString(),
             source: manifest.source || `catalog:${item.installKind}`,
+            ...(item.installKind === 'npm-mcp' ? { piOnly: true } : {}),
             mcpServers: (manifest.mcpServers || []).map((server) =>
               normalizePluginMcpServer(
                 server,
@@ -660,6 +695,29 @@ export const useLearningStore = create<LearningStore>((set, get) => {
           pluginRegistry.apply()
           get().refresh()
           await syncPluginMcpServers()
+          // Pi-compatible marketplace packages are registered with the Pi Host
+          // as the canonical extension boundary. Raw credentials never enter
+          // this payload; only the secret reference is disclosed.
+          const piExtensionApi = window.subagents?.piHost?.extensions
+          const mcpServer = installed.mcpServers?.find((server) => server.transport === 'stdio' && server.command)
+          if (piExtensionApi?.install && mcpServer?.command) {
+            const extensionInput = {
+              id: installed.id,
+              name: installed.name,
+              version: installed.version || '1.0.0',
+              kind: 'mcp' as const,
+              source: installed.source || `marketplace:${item.id}`,
+              enabled: installed.enabled,
+              trusted: installed.source?.startsWith('catalog:') === true,
+              tools: [],
+              credentialRefs: mcpServer.secretPluginId ? [mcpServer.secretPluginId] : [],
+              mcp: { command: mcpServer.command, args: mcpServer.args || [], ...(mcpServer.env ? { env: mcpServer.env } : {}) },
+            }
+            const existing = await piExtensionApi.list?.()
+            const hasExisting = (existing?.extensions || []).some((extension) => Boolean(extension && typeof extension === 'object' && (extension as { id?: unknown }).id === installed.id))
+            if (hasExisting) await piExtensionApi.update?.(extensionInput)
+            else await piExtensionApi.install(extensionInput)
+          }
           await persistManifest(installed)
           await get().persist()
         }

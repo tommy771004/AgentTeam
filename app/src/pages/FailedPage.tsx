@@ -7,7 +7,7 @@ import { useSettingsStore } from '../store/settingsStore'
 
 export function FailedPage() {
   const navigate = useNavigate()
-  const { agent, reset, draftInput, startExecution } = useAgentStore()
+  const { agent, reset, draftInput } = useAgentStore()
   const settings = useSettingsStore((s) => s.settings)
 
   const isHalted = agent.status === 'halted'

@@ -213,6 +213,8 @@ const piHostSupervisor = new PiHostSupervisor(() =>
       SUBAGENTS_PI_VENDOR_DIR: path.resolve(__dirname, '../../vendor/pi'),
       SUBAGENTS_PI_AGENT_DIR: path.join(app.getPath('userData'), 'pi-agent'),
       SUBAGENTS_PI_HOST_STATE_PATH: path.join(app.getPath('userData'), 'pi-host-state.json'),
+      SUBAGENTS_PI_SETTINGS_MIGRATION_PATH: path.join(app.getPath('userData'), 'pi-settings-migration.json'),
+      SUBAGENTS_LEGACY_SETTINGS_PATH: settingsPath(),
     },
   }),
 )
@@ -2067,12 +2069,18 @@ ipcMain.handle('pi-host:memory:recall', async (_evt, query: string, project?: st
 ipcMain.handle('pi-host:capabilities:list', async () => ({ items: await piHostSupervisor.listCapabilities() }))
 ipcMain.handle('pi-host:capabilities:load', async (_evt, id: string) => piHostSupervisor.loadCapability(id))
 ipcMain.handle('pi-host:capabilities:search', async (_evt, query: string) => ({ items: await piHostSupervisor.searchCapabilities(query) }))
+ipcMain.handle('pi-host:extensions:list', async () => ({ extensions: await piHostSupervisor.listExtensions() }))
+ipcMain.handle('pi-host:extensions:install', async (_evt, input: Record<string, unknown>) => piHostSupervisor.mutateExtension('extensions/install', input || {}))
+ipcMain.handle('pi-host:extensions:update', async (_evt, input: Record<string, unknown>) => piHostSupervisor.mutateExtension('extensions/update', input || {}))
+ipcMain.handle('pi-host:extensions:reload', async (_evt, id: string) => piHostSupervisor.mutateExtension('extensions/reload', { id }))
+ipcMain.handle('pi-host:extensions:set-enabled', async (_evt, input: { id: string; enabled: boolean }) => piHostSupervisor.mutateExtension('extensions/set-enabled', input))
+ipcMain.handle('pi-host:extensions:uninstall', async (_evt, id: string) => piHostSupervisor.mutateExtension('extensions/uninstall', { id }))
 ipcMain.handle('pi-host:tools:list', async () => ({ builtinTools: await piHostSupervisor.listTools() }))
 ipcMain.handle('pi-host:sessions:fork', async (_evt, sessionId: string) => piHostSupervisor.forkSession(sessionId))
 ipcMain.handle('pi-host:sessions:archive', async (_evt, sessionId: string) => piHostSupervisor.archiveSession(sessionId))
 ipcMain.handle('pi-host:sessions:compact', async (_evt, sessionId: string) => piHostSupervisor.compactSession(sessionId))
-ipcMain.handle('pi-host:tools:execute', async (_evt, input: { tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash'; params?: Record<string, unknown> }) => piHostSupervisor.executeTool(input.tool, input.params || {}))
-ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown> }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile))
+ipcMain.handle('pi-host:tools:execute', async (_evt, input: { tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash' | 'code' | 'mcp'; params?: Record<string, unknown> }) => piHostSupervisor.executeTool(input.tool, input.params || {}))
+ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, mode: input.mode, queue: input.queue }))
 ipcMain.handle('pi-host:turn:cancel', async (_evt, runId: string) => piHostSupervisor.cancelTurn(runId))
 
 // ── Signed Beta updates + N-1→N migration transaction ─────────

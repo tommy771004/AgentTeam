@@ -5,8 +5,6 @@ import { ThemePage } from '../components/SectionNav'
 import {
   SettingsHeader,
   settingsBtnCls,
-  settingsBtnPrimaryCls,
-  settingsInputCls,
 } from '../components/settings/SettingsChrome'
 import { useAgentStore } from '../store/agentStore'
 import { useProjectStore } from '../store/projectStore'

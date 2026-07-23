@@ -623,6 +623,8 @@ export interface LlmSettings {
    * - 'full':   完整存取權 — 跳過 HITL ask 與 safety intervention（deny 規則仍生效）
    */
   approvalMode: ApprovalMode
+  /** Automation runs are denied on HITL timeout instead of waiting forever. */
+  unattended: boolean
   /**
    * Capability progressive disclosure (Pydantic AI 2.0–style).
    * When true, FC only exposes a catalog + load_capability until the model loads a bundle.

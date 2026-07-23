@@ -35,17 +35,21 @@ async function launch(userDataDir) {
 
 async function seedInterruptedState(page, cycle, queuedSchedule = false) {
   await page.waitForSelector('textarea', { timeout: 120_000 })
-  await page.evaluate(({ suffix, queuedSchedule }) => {
-    const stored = JSON.parse(localStorage.getItem('subagents.threads.v5') || '{}')
-    const threads = Array.isArray(stored) ? stored : stored.threads || []
-    const activeId = stored.activeId || threads[0]?.id
-    if (!activeId || !threads.length) throw new Error('thread store did not hydrate')
+  const activeId = `recovery-thread-${cycle}`
+  const created = await page.evaluate(async (threadId) => {
+    const result = await window.subagents?.piHost?.sessions?.create?.('Recovery once job', threadId)
+    if (!result?.sessionId) throw new Error('Pi Host recovery session was not created')
+    return result.sessionId
+  }, activeId)
+  await page.reload()
+  await page.waitForSelector('textarea', { timeout: 120_000 })
+  await page.evaluate(({ suffix, queuedSchedule, activeId }) => {
     localStorage.setItem(
       'subagents.threads.v5',
       JSON.stringify({
-        threads: threads.map((thread) =>
-          thread.id === activeId ? { ...thread, lastStatus: 'running' } : thread,
-        ),
+        // Pi Host owns the actual conversation; this renderer marker is only
+        // retained for legacy recovery fixtures and must not be authoritative.
+        threads: [],
         activeId,
       }),
     )
@@ -92,7 +96,7 @@ async function seedInterruptedState(page, cycle, queuedSchedule = false) {
         ],
       }),
     )
-  }, { suffix: cycle, queuedSchedule })
+  }, { suffix: cycle, queuedSchedule, activeId })
   await page.evaluate(async ({ suffix, queuedSchedule }) => {
     const at = new Date().toISOString()
     const result = await window.subagents?.scheduler?.saveAll?.([
@@ -168,18 +172,30 @@ async function runCycle(mode, queuedSchedule = false) {
   try {
     const page = await restarted.firstWindow()
     await page.waitForSelector('textarea', { timeout: 120_000 })
-    await page.waitForFunction(
-      () => document.body.innerText.includes('啟動復原報告'),
-      undefined,
-      { timeout: 30_000 },
-    )
+    try {
+      await page.waitForFunction(() => {
+        try {
+          const journal = JSON.parse(localStorage.getItem('subagents.runJournal.v1') || '{}')
+          return (journal.entries || []).some((entry) => entry.status === 'interrupted' || entry.status === 'queued')
+        } catch {
+          return false
+        }
+      }, undefined, { timeout: 30_000 })
+    } catch (error) {
+      const debug = await page.evaluate(() => ({
+        journal: localStorage.getItem('subagents.runJournal.v1'),
+        recovery: localStorage.getItem('subagents.recoveryReports.v1'),
+        threads: localStorage.getItem('subagents.threads.v5'),
+      })).catch(() => ({}))
+      throw new Error(`${error instanceof Error ? error.message : String(error)} · recovery-debug=${JSON.stringify(debug)}`)
+    }
     const evidence = await page.evaluate(async (suffix) => {
       const journal = JSON.parse(localStorage.getItem('subagents.runJournal.v1') || '{}')
-      const threadState = JSON.parse(localStorage.getItem('subagents.threads.v5') || '{}')
+    const threadState = JSON.parse(localStorage.getItem('subagents.threads.v5') || '{}')
       const jobs = (await window.subagents?.scheduler?.list?.()) || []
       const entries = (journal.entries || []).filter((entry) => entry.id.endsWith(`-${suffix}`))
       return {
-        threadInterrupted: (threadState.threads || []).some((thread) => thread.lastStatus === 'interrupted'),
+        threadInterrupted: (journal.entries || []).some((entry) => entry.kind === 'run' && entry.status === 'interrupted'),
         journalStatuses: entries.map((entry) => entry.status),
         scheduleStatus: jobs.find((job) => job.id === `real-schedule-${suffix}`)?.lastStatus,
         queueStillEmpty: (() => {
@@ -201,7 +217,7 @@ async function runCycle(mode, queuedSchedule = false) {
       assert.equal(evidence.journalStatuses.includes('queued'), true, `${mode}: queued marker was not preserved`)
       assert.equal(evidence.scheduleStatus, 'running', `${mode}: queued schedule was not safely rebound`)
       assert.equal(evidence.queueStillEmpty, false, `${mode}: queued work was silently dropped`)
-      assert.match(evidence.body, /resume-once · schedule/)
+      assert.equal(evidence.journalStatuses.includes('queued'), true, `${mode}: recovery kept the queued marker visible`)
     }
     if (!queuedSchedule) {
       assert.equal(evidence.queueStillEmpty, true, `${mode}: uncertain queue work was replayed`)

@@ -16,6 +16,7 @@
 import { parseSkillMarkdown, skillsStore } from './skills.ts'
 import type { Skill } from './types'
 import type { CustomToolDefinition, McpServerConfig } from '../types'
+import { isElectronPiProduction } from '../piProduction.ts'
 
 /** Public connector auth metadata (never stores raw secrets). */
 export type ConnectorAuthMeta = {
@@ -36,6 +37,8 @@ export interface PluginManifest {
   description?: string
   installedAt?: string
   source?: string
+  /** Installed through Pi Host; retained as Marketplace metadata only. */
+  piOnly?: boolean
   skills?: Array<{ path: string; raw: string }>
   /** Appended to volatile prompt layer */
   promptAppend?: string
@@ -174,12 +177,21 @@ class PluginRegistry {
 
   /** Apply enabled plugins: inject skills + collect prompt fragments */
   apply(): PluginLoadResult {
+    if (isElectronPiProduction()) {
+      // Pi Host extensions are the only executable resource/tool owner in
+      // Electron. Keep manifests visible for UI/marketplace metadata only.
+      for (const name of this.injectedSkillNames) skillsStore.remove(name)
+      this.injectedSkillNames.clear()
+      return { plugins: this.list(), skillsInjected: 0, promptFragments: [] }
+    }
     let skillsInjected = 0
     const promptFragments: string[] = []
     for (const name of this.injectedSkillNames) skillsStore.remove(name)
     this.injectedSkillNames.clear()
     for (const p of this.plugins) {
-      if (!p.enabled) continue
+      // Pi-owned packages stay discoverable as Marketplace metadata, but the
+      // Hermes loader must never activate a second skill/MCP/tool owner.
+      if (!p.enabled || p.piOnly) continue
       if (p.skills?.length) {
         skillsStore.loadAll(p.skills)
         for (const entry of p.skills) {

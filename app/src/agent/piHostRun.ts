@@ -12,11 +12,12 @@ export type PiHostRunnerApi = {
     createChild?: (input: { title?: string; parentSessionId: string; role: string; profile: Record<string, unknown>; context: { objective: string; facts: string[]; constraints: string[] }; depth: number }) => Promise<{ sessionId: string; sessions: unknown[] }>
   }
   turn: {
-    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown> }) => Promise<{
+    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => Promise<{
       sessionId: string
       runId: string
       settlement: string
       items?: unknown[]
+      orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
     }>
   }
 }
@@ -29,6 +30,9 @@ export type SubmitPiHostRunInput = {
   cwd?: string
   profile?: Record<string, unknown>
   child?: { role: string; profile: Record<string, unknown>; context: { objective: string; facts: string[]; constraints: string[] }; depth: number }
+  pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
+  maxIterations?: number
+  definitionOfDone?: string
 }
 
 export type SubmitPiHostRunResult = {
@@ -37,6 +41,7 @@ export type SubmitPiHostRunResult = {
   settlement: 'success' | 'failed' | 'cancelled' | 'interrupted'
   result: string
   items: unknown[]
+  orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
 }
 
 function asSession(value: unknown): PiHostSession | undefined {
@@ -83,6 +88,9 @@ export async function submitPiHostRun(
     runId: input.runId,
     cwd: input.cwd,
     profile: input.profile,
+    pattern: input.pattern,
+    maxIterations: input.maxIterations,
+    definitionOfDone: input.definitionOfDone,
   })
   const items = Array.isArray(turn.items) ? turn.items : []
   return {
@@ -93,5 +101,6 @@ export async function submitPiHostRun(
       : 'failed') as SubmitPiHostRunResult['settlement'],
     result: assistantText(items),
     items,
+    orchestration: turn.orchestration,
   }
 }

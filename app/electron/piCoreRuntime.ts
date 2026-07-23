@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { existsSync } from 'node:fs'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type { PiThinkingLevel } from './piAgentProfile.ts'
 
 const vendorCandidates = [
@@ -22,6 +23,8 @@ type PiSessionRuntime = {
   }
   session: {
     prompt: (prompt: string) => Promise<void>
+    steer?: (message: string) => Promise<void> | void
+    followUp?: (message: string) => Promise<void> | void
     abort?: () => Promise<void> | void
     subscribe: (listener: (event: { type?: string; [key: string]: unknown }) => void) => () => void
     dispose?: () => Promise<void> | void
@@ -93,6 +96,81 @@ export type PiRuntimeSettings = {
   model?: string
   thinkingLevel?: PiThinkingLevel
   activeTools?: string[]
+}
+
+export type PiLegacyModelConfig = {
+  provider: string
+  model: string
+  baseUrl: string
+}
+
+/** Merge a legacy OpenAI-compatible endpoint into Pi's credential-blind models config. */
+export function mergePiLegacyModelConfig(input: unknown, patch: PiLegacyModelConfig): Record<string, unknown> {
+  const root = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {}
+  const providerMap = root.providers && typeof root.providers === 'object' && !Array.isArray(root.providers)
+    ? root.providers as Record<string, unknown>
+    : {}
+  const previous = providerMap[patch.provider] && typeof providerMap[patch.provider] === 'object' && !Array.isArray(providerMap[patch.provider])
+    ? providerMap[patch.provider] as Record<string, unknown>
+    : {}
+  const previousModels = Array.isArray(previous.models)
+    ? previous.models.filter((model): model is Record<string, unknown> => Boolean(model && typeof model === 'object' && !Array.isArray(model)))
+    : []
+  const existingModel = previousModels.find((model) => model.id === patch.model) || {}
+  const model = {
+    ...existingModel,
+    id: patch.model,
+    name: typeof existingModel.name === 'string' && existingModel.name ? existingModel.name : patch.model,
+    api: 'openai-completions',
+    baseUrl: patch.baseUrl,
+  }
+  const models = [...previousModels.filter((candidate) => candidate.id !== patch.model), model]
+  return {
+    ...root,
+    providers: {
+      ...providerMap,
+      [patch.provider]: {
+        ...previous,
+        api: 'openai-completions',
+        baseUrl: patch.baseUrl,
+        models,
+      },
+    },
+  }
+}
+
+/** Persist a legacy custom endpoint without placing credentials in models.json. */
+export async function persistPiLegacyModelConfig(patch: PiLegacyModelConfig | null): Promise<boolean> {
+  const agentDir = process.env.SUBAGENTS_PI_AGENT_DIR
+  if (!patch || !agentDir || !patch.provider.trim() || !patch.model.trim() || !patch.baseUrl.trim()) return false
+  const modelsPath = join(agentDir, 'models.json')
+  let existing: unknown = {}
+  try {
+    existing = JSON.parse(await readFile(modelsPath, 'utf8'))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const merged = mergePiLegacyModelConfig(existing, {
+    provider: patch.provider.trim(),
+    model: patch.model.trim(),
+    baseUrl: patch.baseUrl.trim(),
+  })
+  await mkdir(agentDir, { recursive: true })
+  const temporaryPath = `${modelsPath}.${process.pid}.tmp`
+  await writeFile(temporaryPath, `${JSON.stringify(merged, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+  await rename(temporaryPath, modelsPath)
+  return true
+}
+
+/** Import the one legacy API key into Pi's main-process auth.json. */
+export async function persistPiLegacyCredential(provider: string, apiKey: string): Promise<void> {
+  const agentDir = process.env.SUBAGENTS_PI_AGENT_DIR
+  if (!agentDir || !provider.trim() || !apiKey.trim()) return
+  const modelRuntime = await piCodingAgent.ModelRuntime.create({
+    authPath: join(agentDir, 'auth.json'),
+    modelsPath: join(agentDir, 'models.json'),
+  })
+  await modelRuntime.setRuntimeApiKey(provider.trim(), apiKey.trim())
 }
 
 async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string, settings: PiRuntimeSettings = {}) {
@@ -250,6 +328,20 @@ export async function cancelPiTurn(runId: string) {
   if (!turn) return false
   turn.cancelled = true
   await turn.session?.abort?.()
+  return true
+}
+
+export function steerPiTurn(sessionId: string, prompt: string): boolean {
+  const runtime = sessionRuntimes.get(sessionId)
+  if (!runtime?.session.steer) return false
+  void runtime.session.steer(prompt)
+  return true
+}
+
+export function followUpPiTurn(sessionId: string, prompt: string): boolean {
+  const runtime = sessionRuntimes.get(sessionId)
+  if (!runtime?.session.followUp) return false
+  void runtime.session.followUp(prompt)
   return true
 }
 

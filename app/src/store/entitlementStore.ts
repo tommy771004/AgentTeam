@@ -6,7 +6,7 @@ import {
   type FeatureId,
 } from '../agent/entitlement'
 import { useSubscriptionStore } from './subscriptionStore'
-import { readJson, writeJson } from './persist'
+import { readJson } from './persist'
 
 interface EntitlementStore {
   snapshot: EntitlementSnapshot
@@ -33,7 +33,7 @@ function initialSnapshot(): EntitlementSnapshot {
   }
 }
 
-export const useEntitlementStore = create<EntitlementStore>((_set, get) => ({
+export const useEntitlementStore = create<EntitlementStore>(() => ({
   snapshot: initialSnapshot(),
   isEntitled: (featureId) => {
     const snap = useSubscriptionStore.getState().entitlement

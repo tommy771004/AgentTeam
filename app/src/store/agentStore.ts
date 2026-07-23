@@ -8,7 +8,7 @@ import type {
   PostStateOutcome,
   RuntimeOverrides,
 } from '../agent/types'
-import { agentEngine } from '../agent/engine'
+import { isElectronPiProduction } from '../agent/piProduction'
 import { runCapacity } from '../agent/runConcurrency'
 import { emptyKnowledge, extractKnowledge } from '../agent/knowledge'
 import { learningLoop } from '../agent/hermes/learning'
@@ -25,11 +25,6 @@ import {
   EXTERNAL_CLI_DOD_LABEL,
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
 } from '../agent/runners'
-
-const runPiOrchestration = async (...args: Parameters<typeof import('../../electron/piOrchestrationExtension').runPiOrchestration>) => {
-  const { runPiOrchestration: run } = await import('../../electron/piOrchestrationExtension')
-  return run(...args)
-}
 
 interface AgentStore {
   agent: AgentState
@@ -151,7 +146,29 @@ function toArchiveStatus(s: AgentState['status']): ArchiveRecord['status'] {
   return 'warning'
 }
 
-const liveEngines = new Map<string, ReturnType<typeof agentEngine.create>>()
+type LegacyEngineInstance = {
+  subscribe: (listener: (state: AgentState) => void) => () => void
+  start: (raw: string, force?: LoopType, overrides?: RuntimeOverrides) => Promise<AgentState>
+}
+type LegacyEngine = {
+  getState: () => AgentState
+  create: (runId?: string) => LegacyEngineInstance
+  configure: (settings: unknown) => void
+  release: (runId: string) => void
+  stop: (runId?: string) => void
+  continueTurn: (runId?: string) => void
+  resolveIntervention: (decision: { action: 'approve' | 'reject' | 'abort'; payloadJson?: string }, runId?: string) => void
+}
+let legacyEnginePromise: Promise<LegacyEngine> | undefined
+function loadLegacyEngine(): Promise<LegacyEngine> {
+  if (isElectronPiProduction()) {
+    return Promise.reject(new Error('Legacy renderer engine is disabled when Pi Host is available'))
+  }
+  legacyEnginePromise ||= import('../agent/engine').then(({ agentEngine }) => agentEngine as unknown as LegacyEngine)
+  return legacyEnginePromise
+}
+
+const liveEngines = new Map<string, LegacyEngineInstance>()
 const runAgentStates = new Map<string, AgentState>()
 const reservedRuns = new Map<string, { threadId?: string; kind: 'builtin' | 'cli' }>()
 const lastRunIdByThread = new Map<string, string>()
@@ -214,19 +231,19 @@ async function executePiHostTurn(
   text: string,
   runId: string,
   overrides: RuntimeOverrides,
-  settings: ReturnType<typeof useSettingsStore.getState>['settings'],
 ): Promise<void> {
   const startedAt = new Date().toISOString()
   const loopType = overrides.forceLoopType || 'Goal-based'
+  const maxIterations = Math.max(1, Math.min(8, Math.floor(overrides.maxIterations ?? 1)))
   const loopConfig = {
     loopType,
     trigger: 'pi-host',
     executionSequence: ['pi-host-turn'],
     definitionOfDone: 'Pi Core settlement returned',
-    maxIterations: 1,
+    maxIterations,
     fallbackProtocol: '',
     nextState: overrides.nextState || 'Halt',
-  } as const
+  }
   const t0 = Date.now()
   const piHost = window.subagents?.piHost
   if (!piHost?.sessions?.list || !piHost.sessions.create || !piHost.turn?.submit || !overrides.threadId) {
@@ -262,22 +279,17 @@ async function executePiHostTurn(
       }
     : undefined
   try {
-    const result = await runPiOrchestration({
-      pattern: loopType,
+    const result = await submitPiHostRun(piHost, {
+      threadId: overrides.threadId!,
+      title: text.slice(0, 48),
       prompt: text,
-      maxIterations: 1,
-      turn: async (prompt) => {
-        const turn = await submitPiHostRun(piHost, {
-          threadId: overrides.threadId!,
-          title: text.slice(0, 48),
-          prompt,
-          runId,
-          cwd: overrides.projectRoot,
-          profile,
-          child,
-        })
-        return { settlement: turn.settlement, result: turn.result }
-      },
+      runId,
+      cwd: overrides.projectRoot,
+      profile,
+      child,
+      pattern: loopType,
+      maxIterations,
+      definitionOfDone: 'Pi Core settlement returned',
     })
     const success = result.settlement === 'success'
     const halted = result.settlement === 'cancelled' || result.settlement === 'interrupted'
@@ -303,7 +315,7 @@ async function executePiHostTurn(
       loopType,
       result: final.result,
       finishedAt: final.finishedAt,
-      webhookTarget: overrides.webhookTarget || settings.webhookTarget,
+      webhookTarget: overrides.webhookTarget,
     })
     get().applyPostState(runId, postState)
     try {
@@ -334,7 +346,7 @@ async function executePiHostTurn(
 
 export const useAgentStore = create<AgentStore>((set, get) => {
   return {
-    agent: agentEngine.getState(),
+    agent: emptyAgent(),
     selectedLoopType: null,
     isRunning: false,
     activeRunIds: [],
@@ -382,7 +394,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
     releaseRun: (runId) => {
       reservedRuns.delete(runId)
       liveEngines.delete(runId)
-      agentEngine.release(runId)
+      void loadLegacyEngine().then((engine) => engine.release(runId)).catch(() => {})
       publishRun(set, get, runId, runAgentStates.get(runId) || emptyAgent())
     },
 
@@ -429,7 +441,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       const text = (input ?? get().draftInput).trim()
       if (!text) return
       const runId = overrides?.runId || `run_${Date.now().toString(36)}`
-      const settings = useSettingsStore.getState().settings
       if (window.subagents?.piHost?.sessions?.list && overrides?.threadId) {
         try {
           const { useRunActivityStore } = await import('./runActivityStore')
@@ -438,11 +449,13 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         } catch {
           /* optional renderer activity */
         }
-        await executePiHostTurn(set, get, text, runId, overrides, settings)
+        await executePiHostTurn(set, get, text, runId, overrides)
         return
       }
-      agentEngine.configure(settings)
-      const engine = agentEngine.create(runId)
+      const settings = useSettingsStore.getState().settings
+      const legacy = await loadLegacyEngine()
+      legacy.configure(settings)
+      const engine = legacy.create(runId)
       liveEngines.set(runId, engine)
       const unsub = engine.subscribe((state) => publishRun(set, get, runId, state))
       set({ showReport: false })
@@ -921,7 +934,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
     stopExecution: (runId) => {
       const target = runId
       if (!target) return
-      agentEngine.stop(target)
+      void loadLegacyEngine().then((engine) => engine.stop(target)).catch(() => {})
       void window.subagents?.piHost?.turn?.cancel?.(target)
       // Cancel only the selected run's CLI / bash processes.
       void window.subagents?.cli?.cancel?.(target)
@@ -952,17 +965,19 @@ export const useAgentStore = create<AgentStore>((set, get) => {
 
     continueTurn: (runId) => {
       if (!runId) return
-      agentEngine.continueTurn(runId)
+      void loadLegacyEngine().then((engine) => engine.continueTurn(runId)).catch(() => {})
     },
 
     resolveIntervention: (decision, runId) => {
       if (!runId) return
-      agentEngine.resolveIntervention(decision, runId)
+      void loadLegacyEngine().then((engine) => engine.resolveIntervention(decision, runId)).catch(() => {})
     },
 
     reset: () => {
-      agentEngine.stop()
-      for (const runId of reservedRuns.keys()) agentEngine.release(runId)
+      void loadLegacyEngine().then((engine) => {
+        engine.stop()
+        for (const runId of reservedRuns.keys()) engine.release(runId)
+      }).catch(() => {})
       reservedRuns.clear()
       liveEngines.clear()
       runAgentStates.clear()

@@ -4,6 +4,11 @@ import { mergeCliProviders } from '../agent/cliProviders'
 import { recommendToolTuning } from '../agent/modelTuning'
 import { redactSettingsForExport } from '../agent/settingsExport'
 import {
+  isElectronPiProduction,
+  piSettingsPatchFromLlmSettings,
+  stripPiOwnedSettings,
+} from '../agent/piProduction'
+import {
   SETTINGS_CUSTOM_MERGE_KEYS,
   type SettingsCustomMergeKey,
 } from '../agent/settingsMergeKeys.ts'
@@ -94,7 +99,8 @@ function loadLocal(): LlmSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return mergeSettings()
-    return mergeSettings(JSON.parse(raw))
+    const parsed = JSON.parse(raw) as Partial<LlmSettings>
+    return mergeSettings(isElectronPiProduction() ? stripPiOwnedSettings(parsed) : parsed)
   } catch {
     return mergeSettings()
   }
@@ -103,7 +109,8 @@ function loadLocal(): LlmSettings {
 function saveLocal(s: LlmSettings) {
   // Electron persists custom-tool secrets through safeStorage in the main process;
   // don't duplicate those values in renderer localStorage.
-  const local = window.subagents?.settings ? { ...s, customToolSecrets: {} } : s
+  const source = isElectronPiProduction() ? stripPiOwnedSettings(s) : s
+  const local = window.subagents?.settings ? { ...source, customToolSecrets: {} } : source
   localStorage.setItem(STORAGE_KEY, JSON.stringify(local))
 }
 
@@ -127,7 +134,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       try {
         const remote = (await window.subagents.settings.get()) as Partial<LlmSettings> | null
         if (remote) {
-          base = mergeSettings(loadLocal(), remote)
+          base = mergeSettings(loadLocal(), isElectronPiProduction() ? stripPiOwnedSettings(remote) : remote)
         } else {
           base = loadLocal()
         }
@@ -235,27 +242,35 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     }
     set({ settings: next })
     saveLocal(next)
-    // Live-apply into running engine (personality / memory toggles / safety…)
-    try {
-      const { agentEngine } = await import('../agent/engine')
-      agentEngine.configure(next)
-    } catch {
-      /* ignore if engine unavailable */
-    }
-    if (window.subagents?.settings?.set) {
-      await window.subagents.settings.set(next)
+    // Pi Host is the only runtime owner in Electron. Legacy settings IPC and
+    // engine configuration remain a browser-only compatibility path.
+    if (!isElectronPiProduction()) {
+      try {
+        const { agentEngine } = await import('../agent/engine')
+        agentEngine.configure(next)
+      } catch {
+        /* ignore if engine unavailable */
+      }
+      if (window.subagents?.settings?.set) await window.subagents.settings.set(next)
     }
     if (window.subagents?.piHost?.settings?.update) {
-      await window.subagents.piHost.settings.update({
-        ...(patch.model == null ? {} : { model: next.model }),
-        ...(patch.approvalMode == null ? {} : { approvalMode: next.approvalMode }),
-        ...(patch.unattended == null ? {} : { unattended: next.unattended }),
-      })
+      const piPatch = piSettingsPatchFromLlmSettings(patch)
+      if (Object.keys(piPatch).length) await window.subagents.piHost.settings.update(piPatch)
     }
   },
 
   testConnection: async (model) => {
     const s = get().settings
+    if (isElectronPiProduction()) {
+      try {
+        const health = await window.subagents?.piHost?.health?.()
+        return health?.status === 'ready'
+          ? { ok: true, message: `Pi Core Host ready · ${s.model || 'model from host'}` }
+          : { ok: false, message: 'Pi Core Host is not ready' }
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : String(error) }
+      }
+    }
     if (!s.apiKey) return { ok: false, message: 'API key is empty' }
     const m = model || s.model
     try {

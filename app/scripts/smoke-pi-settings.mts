@@ -46,6 +46,7 @@ try {
     activeTools: [],
     compaction: 'auto',
     approvalMode: 'auto',
+    bashRequireAsk: true,
     unattended: false,
   })
 
@@ -71,6 +72,7 @@ try {
     activeTools: ['write'],
     compaction: 'auto',
     approvalMode: 'full',
+    bashRequireAsk: true,
     unattended: true,
   })
 } finally {
