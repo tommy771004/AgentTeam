@@ -21,6 +21,29 @@ function inline(s: string) {
     )
 }
 
+/**
+ * docs/ui「Code Block」：標頭放語言與行數、右側是複製，程式碼本體帶行號側欄。
+ * 每一行包成 span 並保留行內的 \n，行號是 CSS counter 產生的 ::before，
+ * 所以 `code.textContent`（複製按鈕的來源）拿到的仍是乾淨的原始程式碼。
+ */
+function codeBlockHtml(language: string, lines: string[]): string {
+  const body = lines
+    .map(
+      (line, i) =>
+        `<span class="agent-code-line">${esc(line)}${i === lines.length - 1 ? '' : '\n'}</span>`,
+    )
+    .join('')
+  return (
+    '<div class="agent-code-block my-2.5 overflow-hidden rounded-lg border border-white/10 bg-[#0b1326]">' +
+    '<div class="agent-code-header">' +
+    `<span class="agent-code-title"><span class="agent-code-lang">${esc(language)}</span>` +
+    `<span class="agent-code-count">${lines.length} 行</span></span>` +
+    '<button type="button" data-copy-code aria-label="複製程式碼">複製</button></div>' +
+    '<pre class="agent-code-body overflow-x-auto py-2.5 pr-3 pl-2 font-[family-name:var(--font-mono)] text-[12px] text-primary-fixed-dim">' +
+    `<code>${body}</code></pre></div>`
+  )
+}
+
 function isTableRow(s: string): boolean {
   return /^\s*\|.*\|\s*$/.test(s.trim()) || (s.includes('|') && s.trim().length > 0 && /\|.*\|/.test(s))
 }
@@ -65,9 +88,7 @@ export function renderMarkdown(md: string): string {
     const line = lines[li]
     if (line.startsWith('```')) {
       if (inCode) {
-        html.push(
-          `<div class="agent-code-block my-2.5 overflow-hidden rounded-lg border border-white/10 bg-[#0b1326]"><div class="agent-code-header"><span>${esc(codeLanguage)}</span><button type="button" data-copy-code aria-label="複製程式碼">複製</button></div><pre class="overflow-x-auto p-3 font-[family-name:var(--font-mono)] text-[12px] text-primary-fixed-dim"><code>${esc(codeBuf.join('\n'))}</code></pre></div>`,
-        )
+        html.push(codeBlockHtml(codeLanguage, codeBuf))
         codeBuf = []
         codeLanguage = 'code'
         inCode = false
@@ -184,9 +205,7 @@ export function renderMarkdown(md: string): string {
   }
   flushLists()
   if (inCode) {
-    html.push(
-      `<div class="agent-code-block my-2.5 overflow-hidden rounded-lg border border-white/10 bg-[#0b1326]"><div class="agent-code-header"><span>${esc(codeLanguage)}</span><button type="button" data-copy-code aria-label="複製程式碼">複製</button></div><pre class="overflow-x-auto p-3 font-[family-name:var(--font-mono)] text-[12px] text-primary-fixed-dim"><code>${esc(codeBuf.join('\n'))}</code></pre></div>`,
-    )
+    html.push(codeBlockHtml(codeLanguage, codeBuf))
   }
   return html.join('\n')
 }

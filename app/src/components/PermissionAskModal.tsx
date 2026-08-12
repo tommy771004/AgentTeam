@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Icon } from './Icon'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 
@@ -10,11 +11,25 @@ export function PermissionAskModal() {
   const resolve = usePermissionAskStore((s) => s.resolve)
   const getSessionAllow = usePermissionAskStore((s) => s.getSessionAllow)
   const setSessionAllow = usePermissionAskStore((s) => s.setSessionAllow)
+  /**
+   * 這個倒數以前只在 store 變動時重算，所以數字實際上是凍結的 —— 一個講「45s 後
+   * 自動拒絕」卻不會動的安全提示會誤導人。改成每秒 tick，只是讓顯示誠實，
+   * 逾時與自動拒絕的機制完全沒有改變。
+   */
+  const expiresAt = current?.expiresAt ?? 0
+  const [remainSec, setRemainSec] = useState(0)
+
+  useEffect(() => {
+    if (!expiresAt) return
+    const update = () => setRemainSec(Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)))
+    update()
+    const timer = setInterval(update, 1000)
+    return () => clearInterval(timer)
+  }, [expiresAt])
 
   if (!current) return null
 
   const pendingBehind = queue.length
-  const remainSec = Math.max(0, Math.ceil((current.expiresAt - Date.now()) / 1000))
   const sessionAllow = getSessionAllow(current.threadId)
 
   return (

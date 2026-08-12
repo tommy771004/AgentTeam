@@ -16,9 +16,12 @@ export function MarkdownBody({
     const code = button.closest('.agent-code-block')?.querySelector('code')?.textContent
     if (!code || !navigator.clipboard?.writeText) return
     void navigator.clipboard.writeText(code).then(() => {
+      // docs/ui confirms the copy in place (label + green), not with a toast.
       button.textContent = '已複製'
+      button.dataset.copied = 'true'
       window.setTimeout(() => {
         button.textContent = '複製'
+        delete button.dataset.copied
       }, 1400)
     })
   }

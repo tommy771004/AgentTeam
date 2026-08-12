@@ -1,5 +1,8 @@
 import type { ExecutionStep, ModelSource } from '../agent/types'
 import { Icon } from './Icon'
+import { PixelLoader } from './primitives/PixelLoader'
+import { ShimmerLabel } from './primitives/ShimmerLabel'
+import { SpinnerRing } from './primitives/SpinnerRing'
 
 function modelSourceLabel(src?: ModelSource): string {
   switch (src) {
@@ -31,27 +34,28 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
         const srcLabel = modelSourceLabel(step.modelSource)
 
         return (
-          <div key={step.step} className="agent-step-row flex gap-3">
+          <div
+            key={step.step}
+            className="agent-step-row flex gap-3"
+            style={{ animation: `fade-up 400ms cubic-bezier(0.23,1,0.32,1) ${i * 60}ms both` }}
+          >
             <div className="flex flex-col items-center">
-              <div
-                className={`agent-step-marker flex items-center justify-center border shrink-0 ${
-                  isDone
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : isActive
-                      ? 'border-primary text-primary'
-                      : isFailed
-                        ? 'border-error text-error'
-                        : 'border-outline-variant text-outline'
-                }`}
-              >
-                {isDone ? (
-                  <Icon name="check" size={15} filled />
-                ) : isActive ? (
-                  <Icon name="progress_activity" size={15} className="animate-spin" />
-                ) : isFailed ? (
-                  <Icon name="close" size={15} />
+              {/* docs/ui「Task Rows」: 待辦與進行中共用同一個圓環、序號固定在圓心，
+                  只有結束時才換成實心徽章，所以標記不會在狀態切換時跳位。 */}
+              <div className="agent-step-marker flex shrink-0 items-center justify-center">
+                {isDone || isFailed ? (
+                  <span
+                    className={`flex size-[22px] items-center justify-center rounded-full ${
+                      isFailed ? 'bg-error text-on-error' : 'bg-primary-container text-on-primary-container'
+                    }`}
+                    style={{ animation: 'pop-in 300ms cubic-bezier(0.23,1,0.32,1) both' }}
+                  >
+                    <Icon name={isFailed ? 'close' : 'check'} size={14} filled={isDone} />
+                  </span>
                 ) : (
-                  <Icon name="radio_button_unchecked" size={15} />
+                  <SpinnerRing active={isActive} tone={isActive ? 'active' : 'idle'}>
+                    {step.step}
+                  </SpinnerRing>
                 )}
               </div>
               {!isLast && (
@@ -113,9 +117,9 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
                 </p>
               )}
               {isActive && (
-                <p className="text-[12px] text-primary/70 mt-1 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                  處理中…
+                <p className="mt-1 flex items-center gap-2 text-[12px] text-primary/70">
+                  <PixelLoader />
+                  <ShimmerLabel active>處理中…</ShimmerLabel>
                 </p>
               )}
             </div>

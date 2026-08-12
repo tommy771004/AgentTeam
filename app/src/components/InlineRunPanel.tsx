@@ -2,6 +2,10 @@ import { Icon } from './Icon'
 import { StepTimeline } from './StepTimeline'
 import { LogViewer } from './LogViewer'
 import { InterventionPanel } from './InterventionPanel'
+import { ElapsedTime } from './primitives/ElapsedTime'
+import { PixelLoader } from './primitives/PixelLoader'
+import { ShimmerLabel } from './primitives/ShimmerLabel'
+import { SpinnerRing } from './primitives/SpinnerRing'
 import { emptyAgentLike } from '../agent/localCliRun'
 import {
   EXTERNAL_CLI_UI_LABEL,
@@ -21,7 +25,7 @@ const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 
 // Stable references — a fresh object/array literal returned from a zustand
 // selector fallback breaks Object.is identity every render and triggers
 // "Maximum update depth exceeded" (React getSnapshot-must-be-cached loop).
-const EMPTY_ACTIVITY = { active: false, tasks: [], statusLine: '', thought: '' } as const
+const EMPTY_ACTIVITY = { active: false, tasks: [], statusLine: '', thought: '', startedAt: 0 } as const
 const EMPTY_RUN_PLAN: ThreadPlanItem[] = []
 
 export function InlineRunPanel({
@@ -175,10 +179,13 @@ export function InlineRunPanel({
             </div>
           ) : null}
           <div>
-            <div className="flex justify-between text-[10px] text-outline mb-1">
+            <div className="flex items-center justify-between gap-2 text-[10px] text-outline mb-1">
               <span>進度</span>
-              <span className="text-primary font-[family-name:var(--font-mono)]">
-                {agent.progress}%
+              {/* docs/ui 把百分比與實際經過時間放在一起：進度停住時，時間仍在走，
+                  才看得出是「還在做」還是「卡住了」。 */}
+              <span className="flex items-center gap-1.5 font-[family-name:var(--font-mono)]">
+                {live && activity.startedAt > 0 ? <ElapsedTime startedAt={activity.startedAt} /> : null}
+                <span className="text-primary">{agent.progress}%</span>
               </span>
             </div>
             <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
@@ -225,30 +232,35 @@ export function InlineRunPanel({
               )}
             </div>
             {tasks.length === 0 ? (
-              <p className="text-xs text-outline flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                分析任務中…
+              <p className="flex items-center gap-2 text-xs text-outline">
+                <PixelLoader className="text-primary" />
+                <ShimmerLabel active>分析任務中…</ShimmerLabel>
               </p>
             ) : (
+              /* 與 StepTimeline 同一套標記：待辦／進行中是帶序號的圓環，
+                 結束才換成實心徽章，所以左欄不會在狀態切換時抖動。 */
               <ul className="space-y-1.5">
-                {tasks.map((t) => (
+                {tasks.map((t, i) => (
                   <li key={t.id} className="flex items-start gap-2 text-xs">
-                    {t.status === 'done' ? (
-                      <Icon name="check_circle" size={14} filled className="text-primary shrink-0 mt-px" />
-                    ) : t.status === 'active' ? (
-                      <Icon
-                        name="progress_activity"
-                        size={14}
-                        className="text-primary animate-spin shrink-0 mt-px"
-                      />
-                    ) : t.status === 'failed' ? (
-                      <Icon name="cancel" size={14} className="text-error shrink-0 mt-px" />
+                    {t.status === 'done' || t.status === 'failed' ? (
+                      <span
+                        className={`mt-px flex size-[18px] shrink-0 items-center justify-center rounded-full ${
+                          t.status === 'failed'
+                            ? 'bg-error text-on-error'
+                            : 'bg-primary-container text-on-primary-container'
+                        }`}
+                        style={{ animation: 'pop-in 300ms cubic-bezier(0.23,1,0.32,1) both' }}
+                      >
+                        <Icon name={t.status === 'failed' ? 'close' : 'check'} size={12} filled={t.status === 'done'} />
+                      </span>
                     ) : (
-                      <Icon
-                        name="radio_button_unchecked"
-                        size={14}
-                        className="text-outline shrink-0 mt-px"
-                      />
+                      <SpinnerRing
+                        size={18}
+                        active={t.status === 'active'}
+                        tone={t.status === 'active' ? 'active' : 'idle'}
+                      >
+                        {i + 1}
+                      </SpinnerRing>
                     )}
                     <span
                       className={

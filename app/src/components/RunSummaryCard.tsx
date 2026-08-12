@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ThreadRunSummary } from '../store/threadStore'
 import { Icon } from './Icon'
+import { Reveal } from './primitives/Reveal'
 import { contextSummary, groupProcessOperations } from '../lib/runPresentation'
 
 function iconFor(kind: string) {
@@ -42,9 +43,9 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
           </span>
         </span>
         {(additions > 0 || removals > 0) ? (
-          <span className="shrink-0 text-[11px] font-[family-name:var(--font-mono)]">
+          <span className="shrink-0 text-[11px] font-[family-name:var(--font-mono)] tabular-nums">
             {additions > 0 ? <span className="text-primary">+{additions}</span> : null}
-            {removals > 0 ? <span className="ml-1 text-error">-{removals}</span> : null}
+            {removals > 0 ? <span className="ml-1 text-error">−{removals}</span> : null}
           </span>
         ) : null}
         <Icon name={open ? 'expand_less' : 'expand_more'} size={18} className="shrink-0 text-outline" />
@@ -75,11 +76,14 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
         <div className="agent-summary-content max-h-[420px] space-y-3 overflow-y-auto border-t border-white/8 px-3.5 py-3 custom-scrollbar">
           {groups.length ? (
             <div className="agent-summary-trace space-y-1">
-              {groups.map((group) => {
+              {groups.map((group, index) => {
                 const expanded = openOperation === group.id
+                const enter = {
+                  animation: `fade-up 300ms cubic-bezier(0.23,1,0.32,1) ${Math.min(index, 8) * 40}ms both`,
+                }
                 if (group.type === 'context') {
                   return (
-                    <div key={group.id}>
+                    <div key={group.id} style={enter}>
                       <button
                         type="button"
                         className="agent-summary-row flex max-w-full items-center gap-1.5 text-left text-[12px] text-on-surface-variant"
@@ -90,17 +94,17 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
                         <span className="truncate text-[11px] text-outline">{contextSummary(group.operations)}</span>
                         <Icon name={expanded ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" />
                       </button>
-                      {expanded ? (
+                      <Reveal open={expanded}>
                         <pre className="agent-summary-detail ml-5 mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] custom-scrollbar">
                           {group.operations.map((operation) => operation.detail || operation.title).join('\n')}
                         </pre>
-                      ) : null}
+                      </Reveal>
                     </div>
                   )
                 }
                 const operation = group.operation
                 return (
-                  <div key={group.id}>
+                  <div key={group.id} style={enter}>
                     <button
                       type="button"
                       className={`agent-summary-row flex max-w-full items-center gap-1.5 text-left text-[12px] ${
@@ -112,11 +116,11 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
                       <span className="truncate">{operation.title}</span>
                       {(operation.detail || operation.path) ? <Icon name={expanded ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" /> : null}
                     </button>
-                    {expanded && (operation.detail || operation.path) ? (
+                    <Reveal open={expanded && Boolean(operation.detail || operation.path)}>
                       <pre className="agent-summary-detail ml-5 mt-1 whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)]">
                         {operation.path && operation.path !== operation.detail ? `${operation.path}\n` : ''}{operation.detail}
                       </pre>
-                    ) : null}
+                    </Reveal>
                   </div>
                 )
               })}

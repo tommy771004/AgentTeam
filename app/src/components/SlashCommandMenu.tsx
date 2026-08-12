@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import {
   categoryLabel,
@@ -26,12 +26,23 @@ export function SlashCommandMenu({
   query?: string
 }) {
   const listRef = useRef<HTMLDivElement>(null)
+  /**
+   * docs/ui「Prompt Bar」的滑動選取：整份選單只有一塊高亮，會滑到目前這一列，
+   * 而不是每列各自開關自己的底色。鍵盤與滑鼠因此共用同一個「現在在這裡」。
+   */
+  const [highlight, setHighlight] = useState<{ top: number; height: number } | null>(null)
 
   useEffect(() => {
     if (!open || !listRef.current) return
     const el = listRef.current.querySelector(`[data-idx="${activeIndex}"]`)
     el?.scrollIntoView({ block: 'nearest' })
   }, [activeIndex, open])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${activeIndex}"]`)
+    setHighlight(el ? { top: el.offsetTop, height: el.offsetHeight } : null)
+  }, [activeIndex, open, items])
 
   if (!open) return null
 
@@ -59,7 +70,18 @@ export function SlashCommandMenu({
           ↑↓ 選擇 · Enter 確認 · Esc 關閉
         </span>
       </div>
-      <div ref={listRef} className="max-h-60 overflow-y-auto custom-scrollbar py-1">
+      <div ref={listRef} className="relative max-h-60 overflow-y-auto custom-scrollbar py-1">
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-1 rounded-lg bg-primary/15"
+          style={{
+            top: highlight?.top ?? 0,
+            height: highlight?.height ?? 0,
+            opacity: highlight && items.length > 0 ? 1 : 0,
+            transition:
+              'top 200ms cubic-bezier(0.23,1,0.32,1), height 200ms cubic-bezier(0.23,1,0.32,1), opacity 150ms ease',
+          }}
+        />
         {items.length === 0 ? (
           <div className="px-3 py-4 text-xs text-outline text-center">
             無相符指令「/{query}」— 試試 /help
@@ -83,8 +105,8 @@ export function SlashCommandMenu({
                     aria-selected={active}
                     onMouseEnter={() => onHover(idx)}
                     onClick={() => onSelect(cmd)}
-                    className={`w-full text-left px-3 py-2 flex items-start gap-3 transition-colors ${
-                      active ? 'bg-primary/15 text-primary' : 'text-on-surface hover:bg-white/5'
+                    className={`relative z-10 w-full text-left px-3 py-2 flex items-start gap-3 transition-colors ${
+                      active ? 'text-primary' : 'text-on-surface'
                     }`}
                   >
                     <code

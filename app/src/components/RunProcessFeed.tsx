@@ -15,6 +15,10 @@ import {
 } from '../store/runActivityStore'
 import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
+import { ElapsedTime } from './primitives/ElapsedTime'
+import { PixelLoader } from './primitives/PixelLoader'
+import { Reveal } from './primitives/Reveal'
+import { ShimmerLabel } from './primitives/ShimmerLabel'
 import {
   contextSummary,
   groupProcessOperations,
@@ -75,6 +79,7 @@ export function RunProcessFeed({
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
   const activity = useRunActivityStore((s) => s.presentations[runId])
   const activityActive = activity?.active || false
+  const startedAt = activity?.startedAt ?? 0
   const events = activity?.events ?? EMPTY_EVENTS
   const thought = activity?.thought || ''
   const draftText = activity?.draftText || ''
@@ -222,20 +227,31 @@ export function RunProcessFeed({
 
   return (
     <section className="agent-process-feed w-full space-y-2.5 py-1" aria-live="polite" aria-busy={live}>
-      {/* One stable turn status from prompt submission until the first part arrives. */}
-      <div className="agent-process-status flex items-center gap-2 text-[12px] text-outline">
-        <span className="agent-process-spinner" aria-hidden="true">
-          <Icon name="progress_activity" size={14} className="animate-spin text-primary" />
-        </span>
-        <span className="text-on-surface-variant min-w-0 truncate font-medium">
+      {/* One stable turn status from prompt submission until the first part
+          arrives. docs/ui pairs the pixel-grid wavefront with a shimmering
+          label and a live mono timer, so a long silent step still reads as
+          progress rather than a stall. */}
+      <div className="agent-process-status flex items-center gap-2.5 text-[12px] text-outline">
+        <PixelLoader className="text-primary" />
+        <ShimmerLabel active className="min-w-0 truncate font-medium">
           {phase ||
             (agent.executionKind === 'external' || agent.loopConfig?.trigger === 'local-cli'
               ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind || agent.steps[0]?.assignedAgent ? ` · ${agent.externalRunnerKind || agent.steps[0]?.assignedAgent}` : ''}…`
               : `思考中（${depthLabel}）…`)}
-        </span>
-        <span className="ml-auto shrink-0 font-[family-name:var(--font-mono)] text-[10px]">
-          {agent.progress}%
-          {agent.objective ? ` · ${agent.objective.slice(0, 28)}` : ''}
+        </ShimmerLabel>
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10px]">
+          {startedAt > 0 ? (
+            <>
+              <ElapsedTime startedAt={startedAt} />
+              <span aria-hidden="true" className="opacity-40">
+                ·
+              </span>
+            </>
+          ) : null}
+          <span>{agent.progress}%</span>
+          {agent.objective ? (
+            <span className="max-w-40 truncate opacity-70">{agent.objective}</span>
+          ) : null}
         </span>
         {onOpenPanel ? (
           <button
@@ -264,11 +280,11 @@ export function RunProcessFeed({
             </span>
             <Icon name={thoughtOpen ? 'expand_less' : 'expand_more'} size={14} className="ml-0.5 opacity-60" />
           </button>
-          {thoughtOpen ? (
+          <Reveal open={thoughtOpen}>
             <pre className="agent-process-detail mt-1 max-h-36 overflow-y-auto whitespace-pre-wrap text-[12px] leading-relaxed text-on-surface-variant/90 font-[family-name:var(--font-mono)] custom-scrollbar">
               {thought}
             </pre>
-          ) : null}
+          </Reveal>
         </div>
       ) : (
         <div className="agent-process-waiting flex items-center gap-1.5 text-[12px] text-outline/80">
@@ -289,7 +305,10 @@ export function RunProcessFeed({
                 .filter(Boolean)
                 .join('\n')
               return (
-                <div key={group.id}>
+                <div
+                  key={group.id}
+                  style={{ animation: 'fade-up 320ms cubic-bezier(0.23,1,0.32,1) both' }}
+                >
                   <button
                     type="button"
                     className="agent-process-row flex max-w-full items-center gap-1.5 text-left text-[12px] text-outline"
@@ -306,11 +325,11 @@ export function RunProcessFeed({
                     </span>
                     <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" />
                   </button>
-                  {open ? (
+                  <Reveal open={open}>
                     <pre className="agent-process-detail ml-5 mt-0.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] custom-scrollbar">
                       {detail}
                     </pre>
-                  ) : null}
+                  </Reveal>
                 </div>
               )
             }
@@ -318,7 +337,10 @@ export function RunProcessFeed({
             const row = group.operation
             const hasDetail = Boolean((row.detail || row.path) && row.detail !== row.title)
             return (
-              <div key={group.id}>
+              <div
+                key={group.id}
+                style={{ animation: 'fade-up 320ms cubic-bezier(0.23,1,0.32,1) both' }}
+              >
                 <button
                   type="button"
                   className={`agent-process-row flex max-w-full items-center gap-1.5 text-left text-[12px] ${
@@ -334,12 +356,12 @@ export function RunProcessFeed({
                   <span className="truncate">{row.title}</span>
                   {hasDetail ? <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" /> : null}
                 </button>
-                {open && hasDetail ? (
+                <Reveal open={open && hasDetail}>
                   <pre className="agent-process-detail ml-5 mt-0.5 whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] line-clamp-5">
                     {row.path && row.path !== row.detail ? `${row.path}\n` : ''}
                     {row.detail}
                   </pre>
-                ) : null}
+                </Reveal>
               </div>
             )
           })}
@@ -351,31 +373,43 @@ export function RunProcessFeed({
         <div className="agent-process-files">
           <div className="mb-1.5 text-[11px] text-outline">已變更 {allFiles.length} 個檔案</div>
           <div className="flex flex-wrap gap-1.5">
-          {allFiles.slice(-8).map((f) => (
+          {allFiles.slice(-8).map((f, i) => (
             <button
               type="button"
               key={f.path}
               className="agent-file-chip"
               title={`${f.action}: ${f.path.replace(/\\/g, '/')}`}
+              style={{ animation: `pop-in 250ms cubic-bezier(0.23,1,0.32,1) ${i * 60}ms both` }}
             >
               <Icon name="edit" size={14} className="shrink-0" />
               <span className="max-w-48 truncate">{basen(f.path)}</span>
-              {f.added !== undefined ? <span className="text-emerald-400">+{f.added}</span> : null}
-              {f.removed !== undefined && f.removed > 0 ? <span className="text-rose-300">−{f.removed}</span> : null}
+              {f.added !== undefined ? (
+                <span className="shrink-0 text-emerald-400 tabular-nums">+{f.added}</span>
+              ) : null}
+              {f.removed !== undefined && f.removed > 0 ? (
+                <span className="shrink-0 text-rose-300 tabular-nums">−{f.removed}</span>
+              ) : null}
             </button>
           ))}
           </div>
         </div>
       ) : null}
 
-      {/* Streaming draft (markdown) */}
+      {/* Streaming draft (markdown). The answer resolves out of blur once when
+          it first appears, and carries the docs/ui caret on its last line so
+          "still writing" is visible without a second status row. */}
       {draftText ? (
         <div className="agent-streaming-answer pt-2">
           <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-outline">
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
             assistant · 回覆中
           </div>
-          <MarkdownBody content={draftText} />
+          <div
+            className="agent-streaming-body"
+            style={{ animation: 'stream-in 420ms cubic-bezier(0.22,0.61,0.25,1) both' }}
+          >
+            <MarkdownBody content={draftText} />
+          </div>
         </div>
       ) : null}
     </section>
