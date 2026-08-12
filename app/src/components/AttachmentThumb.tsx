@@ -22,7 +22,7 @@ export function AttachmentThumb({ attachment: a }: { attachment: ChatAttachment 
 
   if (a.kind === 'image' && src) {
     return (
-      <a href={src} target="_blank" rel="noreferrer" className="block" title={a.name}>
+      <a href={src} target="_blank" rel="noreferrer" className="agent-attachment-image block" title={a.name}>
         <img
           src={src}
           alt={a.name}
@@ -34,7 +34,7 @@ export function AttachmentThumb({ attachment: a }: { attachment: ChatAttachment 
 
   return (
     <span
-      className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-on-surface-variant"
+      className="agent-attachment-file inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-on-surface-variant"
       title={a.filePath || a.name}
     >
       <Icon name="draft" size={14} />

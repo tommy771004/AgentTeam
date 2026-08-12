@@ -22,7 +22,7 @@ function modelSourceLabel(src?: ModelSource): string {
 
 export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
   return (
-    <div className="flex flex-col gap-0">
+    <div className="agent-step-timeline flex flex-col gap-0" aria-label="執行步驟">
       {steps.map((step, i) => {
         const isDone = step.status === 'COMPLETED'
         const isActive = step.status === 'IN_PROGRESS'
@@ -31,10 +31,10 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
         const srcLabel = modelSourceLabel(step.modelSource)
 
         return (
-          <div key={step.step} className="flex gap-3">
+          <div key={step.step} className="agent-step-row flex gap-3">
             <div className="flex flex-col items-center">
               <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center border shrink-0 ${
+                className={`agent-step-marker flex items-center justify-center border shrink-0 ${
                   isDone
                     ? 'border-primary bg-primary/10 text-primary'
                     : isActive
@@ -45,39 +45,39 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
                 }`}
               >
                 {isDone ? (
-                  <Icon name="check" size={18} filled />
+                  <Icon name="check" size={15} filled />
                 ) : isActive ? (
-                  <Icon name="progress_activity" size={18} className="animate-spin" />
+                  <Icon name="progress_activity" size={15} className="animate-spin" />
                 ) : isFailed ? (
-                  <Icon name="close" size={18} />
+                  <Icon name="close" size={15} />
                 ) : (
-                  <Icon name="radio_button_unchecked" size={18} />
+                  <Icon name="radio_button_unchecked" size={15} />
                 )}
               </div>
               {!isLast && (
                 <div
-                  className={`w-px flex-1 min-h-6 my-1 ${
+                  className={`agent-step-connector w-px flex-1 min-h-5 my-1 ${
                     isDone ? 'bg-primary/40' : 'bg-outline-variant/40'
                   }`}
                 />
               )}
             </div>
-            <div className={`pb-5 flex-1 ${isActive ? 'opacity-100' : isDone ? 'opacity-90' : 'opacity-50'}`}>
+            <div className={`agent-step-content pb-4 flex-1 ${isActive ? 'opacity-100' : isDone ? 'opacity-90' : 'opacity-50'}`}>
               <div className="flex items-center gap-2 flex-wrap">
                 <span
-                  className={`font-semibold text-xs tracking-wider uppercase ${
+                  className={`font-semibold text-[12px] ${
                     isActive ? 'text-primary' : 'text-on-surface'
                   }`}
                 >
                   {step.description}
                 </span>
                 {step.assignedAgent && (
-                  <span className="text-[10px] text-on-surface-variant border border-white/10 px-1.5 py-0.5 rounded">
+                  <span className="agent-step-chip">
                     {step.assignedAgent}
                   </span>
                 )}
                 {isActive && (
-                  <span className="bg-primary/20 text-primary text-[10px] font-semibold px-2 py-0.5 rounded tracking-wider">
+                  <span className="agent-step-active-chip">
                     進行中
                   </span>
                 )}
@@ -89,7 +89,7 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
               </div>
               {(step.modelUsed || srcLabel) && (
                 <p
-                  className={`mt-1 text-[11px] font-[family-name:var(--font-mono)] ${
+                  className={`agent-step-model mt-1 text-[10px] font-[family-name:var(--font-mono)] ${
                     step.modelSource === 'fallback'
                       ? 'text-amber-300/90'
                       : step.modelSource === 'role' || step.modelSource === 'cli'
@@ -108,12 +108,12 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
                 </p>
               )}
               {step.result && (
-                <p className="text-sm text-on-surface-variant mt-1 whitespace-pre-wrap break-words line-clamp-6">
+                <p className="agent-step-result text-[12px] text-on-surface-variant mt-1 whitespace-pre-wrap break-words line-clamp-6">
                   {step.result}
                 </p>
               )}
               {isActive && (
-                <p className="text-sm text-primary/70 mt-1 flex items-center gap-1">
+                <p className="text-[12px] text-primary/70 mt-1 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
                   處理中…
                 </p>

@@ -378,7 +378,7 @@ export function CommandComposer({
 
   return (
     <div
-      className={`relative w-full max-w-full min-w-0 box-border border bg-surface-container/95 backdrop-blur-md transition-shadow focus-within:border-primary/35 focus-within:shadow-[0_0_0_1px_rgba(34,211,238,0.15),0_12px_40px_rgba(0,0,0,0.35)] ${
+      className={`agent-composer relative w-full max-w-full min-w-0 box-border border bg-surface-container/95 backdrop-blur-md ${
         compact ? 'rounded-xl' : 'rounded-2xl'
       } ${
         dragOver
@@ -498,7 +498,7 @@ export function CommandComposer({
             type="button"
             disabled={!canSend}
             onClick={() => void submit()}
-            className="w-9 h-9 rounded-lg bg-primary-container text-on-primary-container hover:brightness-110 disabled:opacity-40 flex items-center justify-center"
+            className="agent-composer-send w-9 h-9 rounded-lg bg-primary-container text-on-primary-container disabled:opacity-40 flex items-center justify-center"
             title={enterBehavior === 'cmdEnter' ? '送出（⌘/Ctrl+Enter）' : '送出（Enter）'}
           >
             <Icon name="arrow_upward" size={18} />
@@ -523,7 +523,8 @@ export function CommandComposer({
                 {canAttach && (
                   <>
                     <span className="opacity-40">·</span>
-                    <span>📎 貼圖/拖放</span>
+                    <Icon name="attach_file" size={12} />
+                    <span>貼圖/拖放</span>
                   </>
                 )}
                 <span className="opacity-40">·</span>

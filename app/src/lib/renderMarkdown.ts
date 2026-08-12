@@ -46,6 +46,7 @@ export function renderMarkdown(md: string): string {
   const html: string[] = []
   let inCode = false
   let codeBuf: string[] = []
+  let codeLanguage = 'code'
   let inUl = false
   let inOl = false
 
@@ -65,13 +66,15 @@ export function renderMarkdown(md: string): string {
     if (line.startsWith('```')) {
       if (inCode) {
         html.push(
-          `<pre class="bg-[#0b1326] border border-white/10 rounded-lg p-3 overflow-x-auto font-[family-name:var(--font-mono)] text-[12px] text-primary-fixed-dim my-2.5"><code>${esc(codeBuf.join('\n'))}</code></pre>`,
+          `<div class="agent-code-block my-2.5 overflow-hidden rounded-lg border border-white/10 bg-[#0b1326]"><div class="agent-code-header"><span>${esc(codeLanguage)}</span><button type="button" data-copy-code aria-label="複製程式碼">複製</button></div><pre class="overflow-x-auto p-3 font-[family-name:var(--font-mono)] text-[12px] text-primary-fixed-dim"><code>${esc(codeBuf.join('\n'))}</code></pre></div>`,
         )
         codeBuf = []
+        codeLanguage = 'code'
         inCode = false
       } else {
         flushLists()
         inCode = true
+        codeLanguage = line.slice(3).trim() || 'code'
       }
       continue
     }
@@ -182,7 +185,7 @@ export function renderMarkdown(md: string): string {
   flushLists()
   if (inCode) {
     html.push(
-      `<pre class="bg-[#0b1326] border border-white/10 rounded-lg p-3 font-[family-name:var(--font-mono)] text-[12px]"><code>${esc(codeBuf.join('\n'))}</code></pre>`,
+      `<div class="agent-code-block my-2.5 overflow-hidden rounded-lg border border-white/10 bg-[#0b1326]"><div class="agent-code-header"><span>${esc(codeLanguage)}</span><button type="button" data-copy-code aria-label="複製程式碼">複製</button></div><pre class="overflow-x-auto p-3 font-[family-name:var(--font-mono)] text-[12px] text-primary-fixed-dim"><code>${esc(codeBuf.join('\n'))}</code></pre></div>`,
     )
   }
   return html.join('\n')

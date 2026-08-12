@@ -49,7 +49,7 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
   }
 
   return (
-    <div className={`group flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <div className={`agent-chat-bubble group flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
       {canRewind ? (
         <button
           type="button"
@@ -57,7 +57,7 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
           aria-label="回捲到此訊息"
           disabled={rewinding}
           onClick={() => void onRewind()}
-          className="mr-1.5 mt-2 hidden h-6 w-6 shrink-0 items-center justify-center rounded-full text-outline transition-colors hover:bg-surface-container hover:text-primary group-hover:flex disabled:opacity-50"
+          className="agent-chat-rewind mr-1.5 mt-2 hidden h-6 w-6 shrink-0 items-center justify-center rounded-full text-outline group-hover:flex disabled:opacity-50"
         >
           <Icon name={rewinding ? 'progress_activity' : 'history'} size={15} />
         </button>
@@ -65,8 +65,8 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
       <div
         className={
           isUser
-            ? 'max-w-[85%] rounded-2xl border border-primary/25 bg-primary/15 px-3.5 py-2.5 text-sm leading-relaxed break-words'
-            : 'w-full max-w-full py-1 text-sm leading-relaxed break-words'
+            ? 'agent-user-bubble max-w-[85%] rounded-2xl border border-primary/25 bg-primary/15 px-3.5 py-2.5 text-sm leading-relaxed break-words'
+            : 'agent-assistant-bubble w-full max-w-full py-1 text-sm leading-relaxed break-words'
         }
       >
         {bubble.attachments?.length ? (
@@ -79,7 +79,8 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
 
         {isAssistant ? (
           <>
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-outline">
+            <div className="agent-assistant-label mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-outline">
+              <span className="h-1.5 w-1.5 rounded-full bg-secondary/80" aria-hidden="true" />
               assistant
             </div>
             <div className={collapsed ? 'relative max-h-80 overflow-hidden' : ''}>
@@ -92,7 +93,7 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
               <button
                 type="button"
                 aria-expanded={expanded}
-                className="mt-2 inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary-fixed"
+                className="agent-chat-expand mt-2 inline-flex items-center gap-1 text-[11px] text-primary"
                 onClick={() => setExpanded((value) => !value)}
               >
                 <Icon name={expanded ? 'expand_less' : 'expand_more'} size={15} />

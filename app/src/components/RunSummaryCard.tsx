@@ -26,12 +26,12 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
     : `執行過程 · ${summary.operations.length} 項`
 
   return (
-    <section data-testid="run-summary-card" className="w-full overflow-hidden rounded-xl border border-white/8 bg-surface-container/35">
+    <section data-testid="run-summary-card" className="agent-summary-card w-full overflow-hidden rounded-xl border border-white/8 bg-surface-container/35">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-3.5 py-3 text-left transition-colors hover:bg-white/[0.04]"
+        className="agent-summary-header flex w-full items-center gap-2 px-3.5 py-3 text-left"
       >
         <Icon name={summary.files.length ? 'note_stack' : 'terminal'} size={18} className="shrink-0 text-on-surface-variant" />
         <span className="min-w-0 flex-1">
@@ -72,9 +72,9 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
       ) : null}
 
       {open ? (
-        <div className="max-h-[420px] space-y-3 overflow-y-auto border-t border-white/8 px-3.5 py-3 custom-scrollbar">
+        <div className="agent-summary-content max-h-[420px] space-y-3 overflow-y-auto border-t border-white/8 px-3.5 py-3 custom-scrollbar">
           {groups.length ? (
-            <div className="space-y-1">
+            <div className="agent-summary-trace space-y-1">
               {groups.map((group) => {
                 const expanded = openOperation === group.id
                 if (group.type === 'context') {
@@ -82,7 +82,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
                     <div key={group.id}>
                       <button
                         type="button"
-                        className="flex max-w-full items-center gap-1.5 text-left text-[12px] text-on-surface-variant hover:text-on-surface"
+                        className="agent-summary-row flex max-w-full items-center gap-1.5 text-left text-[12px] text-on-surface-variant"
                         onClick={() => setOpenOperation((id) => (id === group.id ? null : group.id))}
                       >
                         <Icon name="folder_open" size={15} className="shrink-0 opacity-80" />
@@ -91,7 +91,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
                         <Icon name={expanded ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" />
                       </button>
                       {expanded ? (
-                        <pre className="ml-5 mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-all rounded bg-black/15 p-2 text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] custom-scrollbar">
+                        <pre className="agent-summary-detail ml-5 mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] custom-scrollbar">
                           {group.operations.map((operation) => operation.detail || operation.title).join('\n')}
                         </pre>
                       ) : null}
@@ -103,8 +103,8 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
                   <div key={group.id}>
                     <button
                       type="button"
-                      className={`flex max-w-full items-center gap-1.5 text-left text-[12px] ${
-                        operation.ok === false ? 'text-error' : 'text-on-surface-variant hover:text-on-surface'
+                      className={`agent-summary-row flex max-w-full items-center gap-1.5 text-left text-[12px] ${
+                        operation.ok === false ? 'text-error' : 'text-on-surface-variant'
                       }`}
                       onClick={() => setOpenOperation((id) => (id === group.id ? null : group.id))}
                     >
@@ -113,7 +113,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
                       {(operation.detail || operation.path) ? <Icon name={expanded ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" /> : null}
                     </button>
                     {expanded && (operation.detail || operation.path) ? (
-                      <pre className="ml-5 mt-1 whitespace-pre-wrap break-all rounded bg-black/15 p-2 text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)]">
+                      <pre className="agent-summary-detail ml-5 mt-1 whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)]">
                         {operation.path && operation.path !== operation.detail ? `${operation.path}\n` : ''}{operation.detail}
                       </pre>
                     ) : null}
@@ -124,7 +124,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
           ) : null}
 
           {summary.plan?.length ? (
-            <div className="overflow-hidden rounded-xl border border-white/8">
+            <div className="agent-summary-section overflow-hidden rounded-xl border border-white/8">
               <div className="border-b border-white/8 px-2.5 py-2 text-[11px] font-medium text-on-surface-variant">
                 任務計畫 · {summary.plan.filter((item) => item.status === 'done').length}/{summary.plan.length}
               </div>
@@ -146,7 +146,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
           ) : null}
 
           {summary.agents?.length ? (
-            <div className="overflow-hidden rounded-xl border border-white/8">
+            <div className="agent-summary-section overflow-hidden rounded-xl border border-white/8">
               <div className="border-b border-white/8 px-2.5 py-2 text-[11px] font-medium text-on-surface-variant">
                 子代理工作樹 · {summary.agents.filter((agent) => agent.status === 'done').length}/{summary.agents.length} 完成
               </div>
@@ -171,7 +171,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
           ) : null}
 
           {summary.files.length ? (
-            <div className="overflow-hidden rounded-xl border border-white/8">
+            <div className="agent-summary-section overflow-hidden rounded-xl border border-white/8">
               <div className="border-b border-white/8 px-2.5 py-2 text-[11px] font-medium text-on-surface-variant">變更檔案</div>
               {summary.files.map((file) => (
                 <div key={file.path} className="flex items-center gap-2 border-b border-white/5 px-2.5 py-1.5 last:border-0">
@@ -187,12 +187,12 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
             ) : null}
 
           {summary.diff !== undefined ? (
-            <div data-testid="run-summary-diff" className="overflow-hidden rounded-xl border border-primary/15 bg-black/10">
+            <div data-testid="run-summary-diff" className="agent-summary-diff overflow-hidden rounded-xl border border-primary/15 bg-black/10">
               <button
                 type="button"
                 aria-expanded={diffOpen}
                 onClick={() => setDiffOpen((value) => !value)}
-                className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-[11px] font-medium text-on-surface-variant hover:bg-white/[0.04]"
+                className="agent-summary-diff-header flex w-full items-center gap-2 px-2.5 py-2 text-left text-[11px] font-medium text-on-surface-variant"
               >
                 <Icon name="difference" size={15} className="shrink-0 text-primary" />
                 <span className="flex-1">檢視 Git Diff</span>
@@ -205,7 +205,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
               ) : null}
             </div>
           ) : (
-            <div data-testid="run-summary-diff-empty" className="overflow-hidden rounded-xl border border-primary/15 bg-black/10">
+            <div data-testid="run-summary-diff-empty" className="agent-summary-diff overflow-hidden rounded-xl border border-primary/15 bg-black/10">
               <div className="flex items-center gap-2 px-2.5 py-2 text-left text-[11px] font-medium text-on-surface-variant">
                 <Icon name="difference" size={15} className="shrink-0 text-primary" />
                 <span className="flex-1">檢視 Git Diff</span>

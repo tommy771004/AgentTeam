@@ -10,10 +10,23 @@ export function MarkdownBody({
   className?: string
 }) {
   const html = useMemo(() => renderMarkdown(content || ''), [content])
+  const copyCode = (event: React.MouseEvent<HTMLDivElement>) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-copy-code]')
+    if (!button) return
+    const code = button.closest('.agent-code-block')?.querySelector('code')?.textContent
+    if (!code || !navigator.clipboard?.writeText) return
+    void navigator.clipboard.writeText(code).then(() => {
+      button.textContent = '已複製'
+      window.setTimeout(() => {
+        button.textContent = '複製'
+      }, 1400)
+    })
+  }
   if (!content?.trim()) return null
   return (
     <div
       className={`markdown-body max-w-none break-words ${className}`}
+      onClick={copyCode}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )

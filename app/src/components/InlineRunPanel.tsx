@@ -361,7 +361,7 @@ export function InlineRunPanel({
           </div>
         )}
 
-        <div className="rounded-xl border border-white/10 bg-surface-container/40 p-3">
+        <div className="agent-panel-section rounded-xl border border-white/10 bg-surface-container/40 p-3">
           <h4 className="text-[10px] uppercase tracking-wider text-outline font-semibold mb-2">
             步驟
           </h4>
@@ -372,7 +372,7 @@ export function InlineRunPanel({
           )}
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-[#060e20] overflow-hidden flex flex-col min-h-[160px] max-h-[240px]">
+        <div className="agent-panel-section rounded-xl border border-white/10 bg-[#060e20] overflow-hidden flex flex-col min-h-[160px] max-h-[240px]">
           <div className="px-3 py-1.5 border-b border-white/10 text-[10px] uppercase tracking-wider text-outline font-semibold">
             日誌
           </div>
@@ -382,7 +382,7 @@ export function InlineRunPanel({
         </div>
 
         {agent.toolCalls.length > 0 && (
-          <div className="rounded-xl border border-white/10 p-3 space-y-1">
+          <div className="agent-panel-section rounded-xl border border-white/10 p-3 space-y-1">
             <h4 className="text-[10px] uppercase tracking-wider text-outline font-semibold mb-1">
               工具 ({agent.toolCalls.length})
             </h4>

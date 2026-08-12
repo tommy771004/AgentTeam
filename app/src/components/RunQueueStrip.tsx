@@ -47,11 +47,11 @@ export function RunQueueStrip({
 
   return (
     <div
-      className={`rounded-xl border border-white/10 bg-surface-container/60 ${className}`}
+      className={`agent-run-queue rounded-xl border border-white/10 bg-surface-container/60 ${className}`}
     >
       <button
         type="button"
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
+        className="agent-run-queue-header w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
         onClick={() => setOpen((v) => !v)}
       >
         <span className="flex items-center gap-2 text-[11px] font-semibold text-on-surface-variant">
@@ -107,7 +107,7 @@ export function RunQueueStrip({
                 {queued.map((q, i) => (
                   <li
                     key={q.id}
-                    className="flex items-start gap-1.5 rounded-lg border border-white/8 bg-surface/40 px-2 py-1.5"
+                  className="agent-run-queue-item flex items-start gap-1.5 rounded-lg border border-white/8 bg-surface/40 px-2 py-1.5"
                   >
                     <span className="text-[10px] text-outline font-[family-name:var(--font-mono)] w-4 shrink-0 pt-0.5">
                       {i + 1}

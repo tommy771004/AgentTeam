@@ -26,9 +26,9 @@ export function LogViewer({ logs, live = false }: { logs: LogEntry[]; live?: boo
   }, [logs.length])
 
   return (
-    <div className="font-[family-name:var(--font-mono)] text-[13px] leading-relaxed custom-scrollbar overflow-y-auto h-full p-4 space-y-0.5">
+    <div className="agent-log-viewer font-[family-name:var(--font-mono)] text-[13px] leading-relaxed custom-scrollbar overflow-y-auto h-full p-4 space-y-0.5">
       {logs.map((log) => (
-        <div key={log.id} className="flex gap-2 flex-wrap">
+        <div key={log.id} className="agent-log-row flex gap-2 flex-wrap">
           <span className="text-outline shrink-0">[{log.timestamp}]</span>
           <span className={`font-medium shrink-0 ${levelColor[log.level] || 'text-on-surface-variant'}`}>
             {log.level}
@@ -37,8 +37,8 @@ export function LogViewer({ logs, live = false }: { logs: LogEntry[]; live?: boo
         </div>
       ))}
       {live && (
-        <div className="flex items-center gap-1 text-primary mt-1">
-          <span className="inline-block w-2 h-4 bg-primary animate-pulse" />
+        <div className="agent-log-cursor flex items-center gap-1 text-primary mt-1">
+          <span className="inline-block w-1.5 h-4 bg-primary animate-pulse" />
         </div>
       )}
       <div ref={bottomRef} />

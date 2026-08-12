@@ -33,14 +33,14 @@ export function InterventionPanel({
 
   return (
     <div className="fixed inset-0 z-[150] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-4xl glass-panel rounded-xl border border-error/30 overflow-hidden shadow-[0_0_40px_rgba(255,180,171,0.12)]">
+      <div role="dialog" aria-modal="true" aria-labelledby="intervention-title" className="agent-intervention-card w-full max-w-4xl glass-panel rounded-xl border border-error/30 overflow-hidden shadow-[0_0_40px_rgba(255,180,171,0.12)]">
         <div className="px-5 py-4 border-b border-error/20 bg-error/5 flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-lg bg-error/15 border border-error/30 flex items-center justify-center shrink-0">
               <Icon name="warning" size={22} className="text-error" filled />
             </div>
             <div>
-              <h2 className="font-[family-name:var(--font-sora)] text-xl font-semibold text-error tracking-tight">
+              <h2 id="intervention-title" className="font-[family-name:var(--font-sora)] text-xl font-semibold text-error tracking-tight">
                 需要人工介入
               </h2>
               <p className="text-sm text-on-surface-variant mt-1 max-w-2xl">
@@ -48,7 +48,7 @@ export function InterventionPanel({
               </p>
             </div>
           </div>
-          <span className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container text-error text-[10px] font-semibold tracking-wider uppercase border border-error/20">
+          <span className="agent-intervention-status shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-error text-[10px] font-semibold tracking-wider uppercase border border-error/20">
             <span className="w-1.5 h-1.5 rounded-full bg-error animate-pulse" />
             狀態：已暫停
           </span>
@@ -88,7 +88,7 @@ export function InterventionPanel({
               {(intervention.safety?.evaluations || []).map((ev) => (
                 <div
                   key={ev.name}
-                  className={`rounded-lg p-3 border ${
+                  className={`agent-intervention-evaluation rounded-lg p-3 border ${
                     ev.passed
                       ? 'border-primary/20 bg-primary/5'
                       : 'border-error/30 bg-error/10'
@@ -127,7 +127,7 @@ export function InterventionPanel({
             <button
               type="button"
               onClick={onReject}
-              className="px-4 py-2 rounded-lg border border-error/40 text-error text-xs font-semibold tracking-wider uppercase hover:bg-error/10"
+              className="agent-intervention-secondary px-4 py-2 rounded-lg border border-error/40 text-error text-xs font-semibold tracking-wider uppercase"
             >
               Reject &amp; Abort
             </button>
@@ -135,7 +135,7 @@ export function InterventionPanel({
               <button
                 type="button"
                 onClick={() => onApprove(payload)}
-                className="px-4 py-2 rounded-lg bg-primary-container text-on-primary-container text-xs font-semibold tracking-wider uppercase hover:brightness-110 flex items-center gap-1"
+                className="agent-intervention-primary px-4 py-2 rounded-lg bg-primary-container text-on-primary-container text-xs font-semibold tracking-wider uppercase flex items-center gap-1"
               >
                 <Icon name="verified" size={14} />
                 核准已編輯 Payload
@@ -145,7 +145,7 @@ export function InterventionPanel({
                 <button
                   type="button"
                   onClick={() => setEditing(true)}
-                  className="px-4 py-2 rounded-lg bg-primary-container text-on-primary-container text-xs font-semibold tracking-wider uppercase hover:brightness-110 flex items-center gap-1"
+                  className="agent-intervention-primary px-4 py-2 rounded-lg bg-primary-container text-on-primary-container text-xs font-semibold tracking-wider uppercase flex items-center gap-1"
                 >
                   <Icon name="edit" size={14} />
                   編輯 Payload
@@ -153,7 +153,7 @@ export function InterventionPanel({
                 <button
                   type="button"
                   onClick={() => onApprove(payload)}
-                  className="px-4 py-2 rounded-lg border border-primary/40 text-primary text-xs font-semibold tracking-wider uppercase hover:bg-primary/10"
+                  className="agent-intervention-secondary px-4 py-2 rounded-lg border border-primary/40 text-primary text-xs font-semibold tracking-wider uppercase"
                 >
                   原樣核准
                 </button>

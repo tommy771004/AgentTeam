@@ -221,11 +221,13 @@ export function RunProcessFeed({
   if (!live) return null
 
   return (
-    <section className="w-full space-y-2.5 py-1" aria-live="polite" aria-busy={live}>
+    <section className="agent-process-feed w-full space-y-2.5 py-1" aria-live="polite" aria-busy={live}>
       {/* One stable turn status from prompt submission until the first part arrives. */}
-      <div className="flex items-center gap-2 text-[12px] text-outline">
-        <Icon name="progress_activity" size={15} className="shrink-0 animate-spin text-primary" />
-        <span className="text-on-surface-variant min-w-0 truncate">
+      <div className="agent-process-status flex items-center gap-2 text-[12px] text-outline">
+        <span className="agent-process-spinner" aria-hidden="true">
+          <Icon name="progress_activity" size={14} className="animate-spin text-primary" />
+        </span>
+        <span className="text-on-surface-variant min-w-0 truncate font-medium">
           {phase ||
             (agent.executionKind === 'external' || agent.loopConfig?.trigger === 'local-cli'
               ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind || agent.steps[0]?.assignedAgent ? ` · ${agent.externalRunnerKind || agent.steps[0]?.assignedAgent}` : ''}…`
@@ -238,7 +240,7 @@ export function RunProcessFeed({
         {onOpenPanel ? (
           <button
             type="button"
-            className="shrink-0 text-[11px] text-primary underline"
+            className="agent-process-link shrink-0"
             onClick={onOpenPanel}
           >
             右側任務
@@ -248,34 +250,36 @@ export function RunProcessFeed({
 
       {/* Reasoning is an optional detail, not a competing second answer. */}
       {thought.trim() ? (
-        <div>
+        <div className="agent-process-disclosure">
           <button
             type="button"
-            className="flex items-center gap-1.5 text-[12px] text-outline hover:text-on-surface"
+            aria-expanded={thoughtOpen}
+            className="agent-process-toggle"
             onClick={() => setThoughtOpen((v) => !v)}
           >
             <Icon name="psychology" size={15} className="text-secondary" />
-            <span>推理摘要</span>
+            <span className="font-medium">推理摘要</span>
             <span className="text-[10px] opacity-70">
               {thought.length.toLocaleString()} 字 · {thoughtOpen ? '收合內容' : '檢視內容'}
             </span>
+            <Icon name={thoughtOpen ? 'expand_less' : 'expand_more'} size={14} className="ml-0.5 opacity-60" />
           </button>
           {thoughtOpen ? (
-            <pre className="mt-1 max-h-36 overflow-y-auto whitespace-pre-wrap pl-5 text-[12px] leading-relaxed text-on-surface-variant/90 font-[family-name:var(--font-mono)] custom-scrollbar">
+            <pre className="agent-process-detail mt-1 max-h-36 overflow-y-auto whitespace-pre-wrap text-[12px] leading-relaxed text-on-surface-variant/90 font-[family-name:var(--font-mono)] custom-scrollbar">
               {thought}
             </pre>
           ) : null}
         </div>
       ) : (
-        <div className="flex items-center gap-1.5 text-[12px] text-outline/80">
-          <Icon name="psychology" size={15} />
+        <div className="agent-process-waiting flex items-center gap-1.5 text-[12px] text-outline/80">
+          <span className="agent-process-pulse" aria-hidden="true" />
           <span>等待模型開始回應…</span>
         </div>
       )}
 
       {/* Consecutive read/search parts become one OpenCode-style context group. */}
       {groups.length > 0 ? (
-        <div className="space-y-1">
+        <div className="agent-process-trace space-y-1">
           {groups.map((group, index) => {
             const open = expanded === group.id
             const active = index === groups.length - 1 && !draftText.trim()
@@ -288,7 +292,7 @@ export function RunProcessFeed({
                 <div key={group.id}>
                   <button
                     type="button"
-                    className="flex max-w-full items-center gap-1.5 text-left text-[12px] text-outline hover:text-on-surface"
+                    className="agent-process-row flex max-w-full items-center gap-1.5 text-left text-[12px] text-outline"
                     onClick={() => setExpanded((id) => (id === group.id ? null : group.id))}
                   >
                     <Icon
@@ -303,7 +307,7 @@ export function RunProcessFeed({
                     <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" />
                   </button>
                   {open ? (
-                    <pre className="ml-5 mt-0.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] custom-scrollbar">
+                    <pre className="agent-process-detail ml-5 mt-0.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] custom-scrollbar">
                       {detail}
                     </pre>
                   ) : null}
@@ -317,8 +321,8 @@ export function RunProcessFeed({
               <div key={group.id}>
                 <button
                   type="button"
-                  className={`flex max-w-full items-center gap-1.5 text-left text-[12px] ${
-                    row.ok === false ? 'text-error' : 'text-outline hover:text-on-surface'
+                  className={`agent-process-row flex max-w-full items-center gap-1.5 text-left text-[12px] ${
+                    row.ok === false ? 'text-error' : 'text-outline'
                   }`}
                   onClick={() => hasDetail && setExpanded((id) => (id === group.id ? null : group.id))}
                 >
@@ -331,7 +335,7 @@ export function RunProcessFeed({
                   {hasDetail ? <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" /> : null}
                 </button>
                 {open && hasDetail ? (
-                  <pre className="ml-5 mt-0.5 whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] line-clamp-5">
+                  <pre className="agent-process-detail ml-5 mt-0.5 whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] line-clamp-5">
                     {row.path && row.path !== row.detail ? `${row.path}\n` : ''}
                     {row.detail}
                   </pre>
@@ -344,24 +348,31 @@ export function RunProcessFeed({
 
       {/* Files touched so far */}
       {allFiles.length > 0 ? (
-        <div className="space-y-0.5">
-          <div className="text-[11px] text-outline">已變更 {allFiles.length} 個檔案</div>
+        <div className="agent-process-files">
+          <div className="mb-1.5 text-[11px] text-outline">已變更 {allFiles.length} 個檔案</div>
+          <div className="flex flex-wrap gap-1.5">
           {allFiles.slice(-8).map((f) => (
-            <div
+            <button
+              type="button"
               key={f.path}
-              className="flex items-center gap-1.5 text-[12px] text-outline font-[family-name:var(--font-mono)]"
+              className="agent-file-chip"
+              title={`${f.action}: ${f.path.replace(/\\/g, '/')}`}
             >
               <Icon name="edit" size={14} className="shrink-0" />
-              <span className="truncate">{f.path.replace(/\\/g, '/')}</span>
-            </div>
+              <span className="max-w-48 truncate">{basen(f.path)}</span>
+              {f.added !== undefined ? <span className="text-emerald-400">+{f.added}</span> : null}
+              {f.removed !== undefined && f.removed > 0 ? <span className="text-rose-300">−{f.removed}</span> : null}
+            </button>
           ))}
+          </div>
         </div>
       ) : null}
 
       {/* Streaming draft (markdown) */}
       {draftText ? (
-        <div className="pt-1">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-outline">
+        <div className="agent-streaming-answer pt-2">
+          <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-outline">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
             assistant · 回覆中
           </div>
           <MarkdownBody content={draftText} />

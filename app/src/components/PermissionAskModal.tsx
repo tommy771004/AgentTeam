@@ -19,13 +19,16 @@ export function PermissionAskModal() {
 
   return (
     <div className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-xl flex items-center justify-center p-4 animate-macos-fade">
-      <div className="w-full max-w-lg rounded-[20px] liquid-glass border border-amber-500/25 shadow-[0_24px_80px_rgba(0,0,0,0.5)] overflow-hidden animate-macos-sheet">
+      <div role="dialog" aria-modal="true" aria-labelledby="permission-title" className="agent-approval-card w-full max-w-lg rounded-[20px] liquid-glass border border-amber-500/25 shadow-[0_24px_80px_rgba(0,0,0,0.5)] overflow-hidden animate-macos-sheet">
         <div className="px-5 py-4 border-b border-white/10 flex items-start gap-3 bg-amber-500/10">
           <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
             <Icon name="shield" size={22} className="text-amber-300" />
           </div>
           <div className="min-w-0">
-            <h2 className="font-semibold text-amber-100 text-base">需要核准</h2>
+            <div className="flex items-center gap-2">
+              <h2 id="permission-title" className="font-semibold text-amber-100 text-base">需要核准</h2>
+              <span className="agent-approval-pill">等待你的決定</span>
+            </div>
             <p className="text-sm text-on-surface-variant mt-0.5">{current.reason}</p>
             <p className="text-[11px] text-outline mt-1 font-[family-name:var(--font-mono)]">
               逾時 {remainSec}s 自動拒絕
@@ -53,7 +56,7 @@ export function PermissionAskModal() {
               {current.argsPreview}
             </pre>
           </div>
-          <label className="flex items-center gap-2 text-xs text-on-surface-variant cursor-pointer">
+          <label className="agent-approval-session flex items-center gap-2 text-xs text-on-surface-variant cursor-pointer">
             <input
               type="checkbox"
               checked={sessionAllow}

@@ -355,7 +355,7 @@ function AutomationSuggestionsPanel() {
   }
 
   return (
-    <div className="app-panel border border-secondary/30 bg-secondary/5 p-4 space-y-3">
+    <div className="agent-suggestion-panel app-panel border border-secondary/30 bg-secondary/5 p-4 space-y-3">
       <div className="flex items-start gap-3">
         <Icon name="lightbulb" size={20} className="text-secondary mt-0.5" />
         <div>
@@ -369,12 +369,12 @@ function AutomationSuggestionsPanel() {
         {suggestions.map((suggestion) => (
           <div
             key={suggestion.dedupKey}
-            className="rounded-lg border border-white/10 bg-surface/50 p-3 flex flex-col md:flex-row md:items-center gap-3"
+            className="agent-suggestion-card rounded-lg border border-white/10 bg-surface/50 p-3 flex flex-col md:flex-row md:items-center gap-3"
           >
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-medium">{suggestion.title}</span>
-                <span className="text-[10px] rounded bg-secondary/15 text-secondary px-1.5 py-0.5">
+                <span className="agent-suggestion-signal text-[10px] rounded bg-secondary/15 text-secondary px-1.5 py-0.5">
                   usage · {suggestion.occurrenceCount} 次
                 </span>
               </div>
@@ -385,14 +385,14 @@ function AutomationSuggestionsPanel() {
               <button
                 type="button"
                 onClick={() => void accept(suggestion)}
-                className="px-3 py-1.5 rounded bg-secondary-container text-on-secondary-container text-xs font-semibold"
+                className="agent-suggestion-accept px-3 py-1.5 rounded bg-secondary-container text-on-secondary-container text-xs font-semibold"
               >
                 接受並建立排程
               </button>
               <button
                 type="button"
                 onClick={() => decide(suggestion.dedupKey, 'dismissed')}
-                className="px-3 py-1.5 rounded border border-white/10 text-xs text-on-surface-variant"
+                className="agent-suggestion-dismiss px-3 py-1.5 rounded border border-white/10 text-xs text-on-surface-variant"
               >
                 暫不需要
               </button>

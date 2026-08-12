@@ -549,3 +549,323 @@ html[data-theme='light'] .app-panel {
   background: transparent !important;
   border-radius: 0;
 }
+
+/* ── Agent conversation primitives ────────────────────────
+   Mirrors the quieter, inspectable hierarchy in docs/ui while preserving
+   the existing macOS material and all run/approval behaviours. */
+.agent-composer {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  transition: border-color 160ms ease, box-shadow 200ms var(--ease-spring-soft), background 160ms ease;
+}
+.agent-composer:hover {
+  border-color: rgba(125, 216, 240, 0.22);
+}
+.agent-composer:focus-within {
+  border-color: rgba(125, 216, 240, 0.52);
+  box-shadow: 0 0 0 3px rgba(43, 184, 217, 0.11), 0 12px 32px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.agent-composer-send {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 160ms var(--ease-spring), filter 150ms ease, box-shadow 150ms ease;
+}
+.agent-composer-send:not(:disabled):hover { filter: brightness(1.12); }
+.agent-composer-send:not(:disabled):active { transform: scale(0.94); }
+
+.agent-process-status { min-height: 28px; }
+.agent-process-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 7px;
+  background: rgba(125, 216, 240, 0.09);
+}
+.agent-process-link {
+  border-radius: 6px;
+  padding: 3px 5px;
+  font-size: 11px;
+  color: var(--color-primary);
+  transition: background 120ms ease, color 120ms ease;
+}
+.agent-process-link:hover { background: rgba(125, 216, 240, 0.1); color: var(--color-primary-fixed); }
+.agent-process-toggle, .agent-process-row {
+  border-radius: 7px;
+  padding: 4px 6px;
+  margin-left: -6px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.agent-process-toggle:hover, .agent-process-row:hover { background: rgba(255, 255, 255, 0.055); color: var(--color-on-surface); }
+.agent-process-detail {
+  border-left: 1px solid rgba(125, 216, 240, 0.22);
+  padding: 5px 0 5px 12px;
+}
+.agent-process-waiting { padding-left: 6px; }
+.agent-process-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 0 rgba(125, 216, 240, 0.38);
+  animation: agent-wait-pulse 1.7s ease-out infinite;
+}
+.agent-process-trace {
+  border-left: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 2px 0 2px 13px;
+}
+.agent-process-files {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 10px;
+}
+.agent-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 0 8px;
+  color: var(--color-on-surface-variant);
+  background: rgba(255, 255, 255, 0.035);
+  font: 11px var(--font-mono);
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.agent-file-chip:hover { border-color: rgba(125, 216, 240, 0.32); background: rgba(125, 216, 240, 0.08); color: var(--color-on-surface); }
+.agent-streaming-answer { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.agent-approval-card { max-height: min(680px, calc(100vh - 32px)); }
+.agent-approval-pill {
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: rgb(253 230 138);
+  background: rgba(251, 191, 36, 0.1);
+  font-size: 10px;
+  font-weight: 600;
+}
+.agent-approval-session {
+  border-radius: 10px;
+  padding: 8px;
+  margin: 0 -8px;
+  transition: background 120ms ease;
+}
+.agent-approval-session:hover { background: rgba(255, 255, 255, 0.045); }
+@keyframes agent-wait-pulse {
+  70%, 100% { box-shadow: 0 0 0 6px rgba(125, 216, 240, 0); }
+}
+html[data-theme='light'] .agent-composer,
+html[data-theme='light'] .agent-file-chip { border-color: rgba(15, 23, 42, 0.12); }
+html[data-theme='light'] .agent-composer { background: rgba(255, 255, 255, 0.94); }
+html[data-theme='light'] .agent-process-trace,
+html[data-theme='light'] .agent-process-files,
+html[data-theme='light'] .agent-streaming-answer { border-color: rgba(15, 23, 42, 0.1); }
+html[data-theme='light'] .agent-process-toggle:hover,
+html[data-theme='light'] .agent-process-row:hover { background: rgba(15, 23, 42, 0.045); }
+html[data-theme='light'] .agent-file-chip { background: rgba(15, 23, 42, 0.035); }
+
+/* Right-side execution panel shares the in-chat trace rhythm: compact status
+   marks, quiet metadata and one clear active state. */
+.agent-panel-section {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+.agent-step-row { min-width: 0; }
+.agent-step-marker {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  margin-top: 1px;
+}
+.agent-step-connector { border-radius: 999px; }
+.agent-step-content { min-width: 0; padding-top: 2px; }
+.agent-step-chip,
+.agent-step-active-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  border-radius: 6px;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 1;
+}
+.agent-step-chip {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--color-on-surface-variant);
+  background: rgba(255, 255, 255, 0.035);
+}
+.agent-step-active-chip {
+  color: var(--color-primary-fixed);
+  background: rgba(125, 216, 240, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(125, 216, 240, 0.16);
+}
+.agent-step-model { letter-spacing: -0.01em; }
+.agent-step-result {
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  padding-left: 8px;
+  line-height: 1.55;
+}
+html[data-theme='light'] .agent-panel-section { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+html[data-theme='light'] .agent-step-chip { border-color: rgba(15, 23, 42, 0.12); background: rgba(15, 23, 42, 0.035); }
+html[data-theme='light'] .agent-step-result { border-color: rgba(15, 23, 42, 0.12); }
+
+/* Manual intervention is the deliberate, high-attention branch of approval.
+   The surface stays calm while unsafe evaluations and the irreversible action
+   retain their stronger signals. */
+.agent-intervention-card { max-height: min(760px, calc(100vh - 32px)); }
+.agent-intervention-status { background: rgba(252, 165, 165, 0.08); }
+.agent-intervention-evaluation {
+  transition: border-color 140ms ease, background 140ms ease, transform 160ms var(--ease-spring);
+}
+.agent-intervention-evaluation:hover { transform: translateY(-1px); }
+.agent-intervention-primary,
+.agent-intervention-secondary {
+  transition: transform 150ms var(--ease-spring), background 150ms ease, filter 150ms ease;
+}
+.agent-intervention-primary:hover { filter: brightness(1.1); }
+.agent-intervention-secondary:hover { background: rgba(255, 255, 255, 0.06); }
+.agent-intervention-primary:active,
+.agent-intervention-secondary:active { transform: scale(0.97); }
+html[data-theme='light'] .agent-intervention-status { background: rgba(220, 38, 38, 0.08); }
+html[data-theme='light'] .agent-intervention-secondary:hover { background: rgba(15, 23, 42, 0.05); }
+
+/* Completed-run summaries keep the proof of work compact by default and
+   reveal details with the same trace pattern used while the run is live. */
+.agent-summary-card {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.agent-summary-header,
+.agent-summary-diff-header {
+  transition: background 130ms ease;
+}
+.agent-summary-header:hover,
+.agent-summary-diff-header:hover { background: rgba(255, 255, 255, 0.055); }
+.agent-summary-trace { border-left: 1px solid rgba(255, 255, 255, 0.09); padding: 2px 0 2px 13px; }
+.agent-summary-row {
+  border-radius: 7px;
+  padding: 4px 6px;
+  margin-left: -6px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.agent-summary-row:hover { background: rgba(255, 255, 255, 0.055); color: var(--color-on-surface); }
+.agent-summary-detail {
+  border-left: 1px solid rgba(125, 216, 240, 0.22);
+  padding: 5px 0 5px 12px;
+}
+.agent-summary-section { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025); }
+.agent-summary-diff { box-shadow: inset 0 1px 0 rgba(125, 216, 240, 0.06); }
+html[data-theme='light'] .agent-summary-card,
+html[data-theme='light'] .agent-summary-section { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+html[data-theme='light'] .agent-summary-header:hover,
+html[data-theme='light'] .agent-summary-diff-header:hover,
+html[data-theme='light'] .agent-summary-row:hover { background: rgba(15, 23, 42, 0.045); }
+html[data-theme='light'] .agent-summary-trace { border-color: rgba(15, 23, 42, 0.1); }
+
+/* Conversation results are intentionally flatter than user prompts: the
+   answer owns the reading space, while user intent remains a soft bubble. */
+.agent-user-bubble {
+  box-shadow: inset 0 1px 0 rgba(184, 240, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.agent-assistant-bubble { animation: macos-enter 220ms var(--ease-spring-soft) both; }
+.agent-assistant-label { letter-spacing: 0.08em; }
+.agent-chat-rewind,
+.agent-chat-expand {
+  transition: background 120ms ease, color 120ms ease, transform 150ms var(--ease-spring);
+}
+.agent-chat-rewind:hover { background: rgba(255, 255, 255, 0.07); color: var(--color-primary); }
+.agent-chat-expand:hover { color: var(--color-primary-fixed); transform: translateY(-1px); }
+html[data-theme='light'] .agent-chat-rewind:hover { background: rgba(15, 23, 42, 0.055); }
+
+/* Context and recommendations carry provenance before action: show the
+   repeated-use signal, then make accepting or deferring equally legible. */
+.agent-suggestion-panel { box-shadow: inset 0 1px 0 rgba(221, 214, 254, 0.06); }
+.agent-suggestion-card {
+  transition: border-color 150ms ease, background 150ms ease, transform 180ms var(--ease-spring);
+}
+.agent-suggestion-card:hover {
+  border-color: rgba(196, 181, 253, 0.35);
+  background: rgba(196, 181, 253, 0.06);
+  transform: translateY(-1px);
+}
+.agent-suggestion-signal { box-shadow: inset 0 0 0 1px rgba(196, 181, 253, 0.12); }
+.agent-suggestion-accept,
+.agent-suggestion-dismiss {
+  transition: transform 150ms var(--ease-spring), filter 150ms ease, background 150ms ease;
+}
+.agent-suggestion-accept:hover { filter: brightness(1.12); }
+.agent-suggestion-dismiss:hover { background: rgba(255, 255, 255, 0.06); }
+.agent-suggestion-accept:active,
+.agent-suggestion-dismiss:active { transform: scale(0.97); }
+.agent-attachment-image {
+  overflow: hidden;
+  border-radius: 9px;
+  transition: transform 180ms var(--ease-spring), box-shadow 180ms ease;
+}
+.agent-attachment-image:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.22);
+}
+.agent-attachment-file {
+  max-width: 100%;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.agent-attachment-file:hover {
+  border-color: rgba(125, 216, 240, 0.3);
+  background: rgba(125, 216, 240, 0.08);
+  color: var(--color-on-surface);
+}
+html[data-theme='light'] .agent-suggestion-card:hover { background: rgba(109, 40, 217, 0.045); }
+html[data-theme='light'] .agent-suggestion-dismiss:hover { background: rgba(15, 23, 42, 0.05); }
+
+/* Compact project context behaves like a source chip: enough provenance to
+   orient the user, with richer repository detail kept one click away. */
+.agent-project-picker,
+.agent-project-source,
+.agent-project-branch {
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease, box-shadow 160ms ease;
+}
+.agent-project-picker:hover,
+.agent-project-source:hover,
+.agent-project-branch:hover {
+  border-color: rgba(125, 216, 240, 0.28);
+  background: rgba(125, 216, 240, 0.06);
+}
+.agent-project-menu {
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  animation: macos-enter 180ms var(--ease-spring-soft) both;
+}
+html[data-theme='light'] .agent-project-picker:hover,
+html[data-theme='light'] .agent-project-source:hover,
+html[data-theme='light'] .agent-project-branch:hover { background: rgba(14, 116, 144, 0.06); }
+
+/* Code and diff output are evidence, not a wall of terminal text. The header
+   keeps language and copy affordance discoverable while preserving selection. */
+.agent-code-block { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045); }
+.agent-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 31px;
+  padding: 0 8px 0 11px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-outline);
+  font: 10px var(--font-mono);
+}
+.agent-code-header button {
+  border-radius: 6px;
+  padding: 3px 6px;
+  color: var(--color-on-surface-variant);
+  transition: color 120ms ease, background 120ms ease;
+}
+.agent-code-header button:hover { background: rgba(255, 255, 255, 0.07); color: var(--color-on-surface); }
+.agent-log-row { padding: 1px 4px; margin: 0 -4px; border-radius: 5px; transition: background 100ms ease; }
+.agent-log-row:hover { background: rgba(255, 255, 255, 0.04); }
+.agent-log-cursor { min-height: 20px; }
+.agent-run-queue { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035); }
+.agent-run-queue-header { transition: background 120ms ease; }
+.agent-run-queue-header:hover { background: rgba(255, 255, 255, 0.045); }
+.agent-run-queue-item { transition: border-color 120ms ease, background 120ms ease, transform 150ms var(--ease-spring); }
+.agent-run-queue-item:hover { border-color: rgba(125, 216, 240, 0.25); background: rgba(125, 216, 240, 0.055); transform: translateY(-1px); }
+html[data-theme='light'] .agent-code-header { border-color: rgba(15, 23, 42, 0.1); }
+html[data-theme='light'] .agent-code-header button:hover,
+html[data-theme='light'] .agent-log-row:hover,
+html[data-theme='light'] .agent-run-queue-header:hover { background: rgba(15, 23, 42, 0.045); }

@@ -74,9 +74,9 @@ export function ProjectContextBar() {
   }
 
   return (
-    <div className="relative flex flex-wrap items-center gap-1.5" ref={ref}>
+    <div className="agent-project-context relative flex flex-wrap items-center gap-1.5" ref={ref}>
       {/* Primary: open system folder dialog */}
-      <div className="inline-flex items-center rounded-full border border-white/12 bg-surface-container/80 overflow-hidden max-w-[240px]">
+      <div className="agent-project-picker inline-flex items-center rounded-full border border-white/12 bg-surface-container/80 overflow-hidden max-w-[240px]">
         <button
           type="button"
           disabled={picking}
@@ -110,7 +110,7 @@ export function ProjectContextBar() {
         </button>
       </div>
 
-      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-white/10 text-[11px] text-on-surface-variant">
+      <span className="agent-project-source inline-flex items-center gap-1 px-2 py-1 rounded-full border border-white/10 text-[11px] text-on-surface-variant">
         <Icon
           name={source === 'github' ? 'cloud' : 'computer'}
           size={13}
@@ -126,7 +126,7 @@ export function ProjectContextBar() {
             e.stopPropagation()
             setMenuOpen(true)
           }}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-white/10 text-[11px] text-on-surface-variant hover:border-primary/30 max-w-[140px]"
+          className="agent-project-branch inline-flex items-center gap-1 px-2 py-1 rounded-full border border-white/10 text-[11px] text-on-surface-variant max-w-[140px]"
           title="Git 工作樹 / 分支"
         >
           <Icon name="account_tree" size={13} className="opacity-70 shrink-0" />
@@ -148,7 +148,7 @@ export function ProjectContextBar() {
 
       {menuOpen && (
         <div
-          className="absolute left-0 top-full mt-1.5 z-[95] w-80 rounded-xl border border-white/12 bg-[#1c1c1e]/98 backdrop-blur-xl shadow-2xl overflow-hidden"
+          className="agent-project-menu absolute left-0 top-full mt-1.5 z-[95] w-80 rounded-xl border border-white/12 bg-[#1c1c1e]/98 backdrop-blur-xl shadow-2xl overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-2 border-b border-white/10 text-[11px] text-white/50 font-medium">
