@@ -91,6 +91,7 @@
     "cross-env": "^10.1.0",
     "electron": "^43.1.0",
     "electron-builder": "^26.15.3",
+    "electron-builder-squirrel-windows": "^26.15.3",
     "oxlint": "^1.71.0",
     "playwright": "^1.61.1",
     "tailwindcss": "^4.3.2",
