@@ -76,7 +76,7 @@ export function ProjectContextBar() {
   return (
     <div className="agent-project-context relative flex flex-wrap items-center gap-1.5" ref={ref}>
       {/* Primary: open system folder dialog */}
-      <div className="agent-project-picker inline-flex items-center rounded-full border border-line bg-inset overflow-hidden max-w-[240px] shadow-hairline">
+      <div className="agent-project-picker inline-flex items-center rounded-control border border-line bg-inset overflow-hidden max-w-[240px] shadow-hairline">
         <button
           type="button"
           disabled={picking}
@@ -110,7 +110,7 @@ export function ProjectContextBar() {
         </button>
       </div>
 
-      <span className="agent-project-source inline-flex items-center gap-1 px-2 py-1 rounded-full border border-line bg-inset text-[11px] text-ink-2">
+      <span className="agent-project-source inline-flex items-center gap-1 px-2 py-1 rounded-control border border-line bg-inset text-[11px] text-ink-2">
         <Icon
           name={source === 'github' ? 'cloud' : 'computer'}
           size={13}
@@ -126,7 +126,7 @@ export function ProjectContextBar() {
             e.stopPropagation()
             setMenuOpen(true)
           }}
-          className="agent-project-branch inline-flex items-center gap-1 px-2 py-1 rounded-full border border-line bg-inset text-[11px] text-ink-2 max-w-[140px]"
+          className="agent-project-branch inline-flex items-center gap-1 px-2 py-1 rounded-control border border-line bg-inset text-[11px] text-ink-2 max-w-[140px]"
           title="Git 工作樹 / 分支"
         >
           <Icon name="account_tree" size={13} className="opacity-70 shrink-0" />
@@ -178,7 +178,7 @@ export function ProjectContextBar() {
               openManualPath()
             }}
           >
-            <Icon name="edit" size={16} className="text-white/50" />
+            <Icon name="edit" size={16} className="text-ink-3" />
             手動輸入路徑…
           </button>
           {worktrees.length > 0 && (
@@ -219,7 +219,7 @@ export function ProjectContextBar() {
             重新整理 Git 狀態
           </button>
           {!hasNativePick && (
-            <p className="px-3 py-2 text-[10px] text-amber-400/90 border-t border-white/10">
+            <p className="px-3 py-2 text-[10px] text-amber-400/90 border-t border-line">
               {/Electron/i.test(navigator.userAgent)
                 ? 'preload 未注入 window.subagents，請重啟 npm run dev。'
                 : '這是瀏覽器分頁。請用 npm run dev 開出的 Electron 桌面視窗選資料夾。'}
@@ -235,14 +235,14 @@ export function ProjectContextBar() {
           onClick={() => closeManualPath()}
         >
           <div
-            className="w-full max-w-md rounded-xl border border-white/12 bg-[#1c1c1e] shadow-2xl p-4 space-y-3"
+            className="w-full max-w-md rounded-card border border-line bg-surface shadow-raised p-4 space-y-3"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-white">選擇專案資料夾</h3>
+              <h3 className="text-sm font-semibold text-ink">選擇專案資料夾</h3>
               <button
                 type="button"
-                className="p-1 rounded hover:bg-white/10 text-white/60"
+                className="p-1 rounded-control hover:bg-hover-2 text-ink-3"
                 onClick={() => closeManualPath()}
                 aria-label="關閉"
               >
@@ -255,7 +255,7 @@ export function ProjectContextBar() {
                 type="button"
                 disabled={picking}
                 onClick={() => void pickFolder()}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-primary/90 text-white text-[13px] font-medium hover:bg-primary disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-primary text-on-primary text-[13px] font-medium hover:brightness-105 disabled:opacity-50"
               >
                 <Icon
                   name={picking ? 'progress_activity' : 'folder_open'}
@@ -267,14 +267,14 @@ export function ProjectContextBar() {
             )}
 
             <div className="relative flex items-center gap-2 py-1">
-              <div className="flex-1 h-px bg-white/10" />
-              <span className="text-[10px] text-white/35 shrink-0">或手動輸入</span>
-              <div className="flex-1 h-px bg-white/10" />
+              <div className="flex-1 h-px bg-line" />
+              <span className="text-[10px] text-ink-3 shrink-0">或手動輸入</span>
+              <div className="flex-1 h-px bg-line" />
             </div>
 
-            <p className="text-[11px] text-white/45 leading-relaxed">
+            <p className="text-[11px] text-ink-2 leading-relaxed">
               貼上本機專案資料夾的絕對路徑（例如{' '}
-              <code className="font-mono text-white/60">C:\\Users\\you\\project</code> 或 <code className="font-mono text-white/60">/Users/you/project</code>）。
+              <code className="font-mono text-ink">C:\\Users\\you\\project</code> 或 <code className="font-mono text-ink">/Users/you/project</code>）。
             </p>
             <input
               ref={inputRef}
@@ -285,7 +285,7 @@ export function ProjectContextBar() {
                 if (e.key === 'Escape') closeManualPath()
               }}
               placeholder="/path/to/project"
-              className="w-full bg-white/5 border border-white/12 rounded-lg px-3 py-2 text-[12px] text-white font-[family-name:var(--font-mono)] outline-none focus:border-primary/40"
+              className="w-full bg-inset border border-line rounded-control px-3 py-2 text-[12px] text-ink font-[family-name:var(--font-mono)] outline-none focus:border-line-strong"
               autoComplete="off"
               spellCheck={false}
             />
@@ -295,7 +295,7 @@ export function ProjectContextBar() {
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
-                className="px-3 py-1.5 rounded-lg text-[12px] text-white/70 hover:bg-white/10"
+                className="px-3 py-1.5 rounded-control text-[12px] text-ink-2 hover:bg-hover-2"
                 onClick={() => closeManualPath()}
               >
                 取消
@@ -303,7 +303,7 @@ export function ProjectContextBar() {
               <button
                 type="button"
                 disabled={picking || !manualPath.trim()}
-                className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-white/10 text-white hover:bg-white/15 disabled:opacity-40"
+                className="px-3 py-1.5 rounded-control text-[12px] font-medium border border-line bg-hover text-ink hover:bg-hover-2 disabled:opacity-40"
                 onClick={() => void onSubmitManual()}
               >
                 {picking ? '套用中…' : '套用路徑'}

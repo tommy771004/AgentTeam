@@ -42,12 +42,8 @@ export function SuccessPage() {
 
   return (
     <div className="min-h-full flex flex-col items-center justify-center px-6 py-16 relative overflow-y-auto">
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-primary/10 blur-[120px] rounded-full" />
-      </div>
-
       <div className="relative z-10 flex flex-col items-center gap-6 max-w-3xl w-full">
-        <div className="w-14 h-14 rounded-xl border border-primary/40 bg-primary/10 flex items-center justify-center shadow-[0_0_30px_rgba(34,211,238,0.25)]">
+        <div className="flex h-14 w-14 items-center justify-center text-primary">
           <Icon name="check_circle" size={32} className="text-primary" filled />
         </div>
 

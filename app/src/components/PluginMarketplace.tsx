@@ -181,7 +181,7 @@ export function PluginMarketplace() {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="搜尋能力（GitHub、Notion…）"
-          className="w-full h-10 rounded-full border border-white/[0.07] bg-surface-container-high/60 pl-10 pr-4 text-[13px] text-on-surface placeholder:text-outline/65 outline-none transition-colors focus:border-white/16 focus:bg-surface-container-high/80"
+          className="w-full h-10 rounded-control border border-line bg-surface-container-high/60 pl-10 pr-4 text-[13px] text-on-surface placeholder:text-outline/65 outline-none transition-colors focus:border-line-strong focus:bg-surface-container-high/80"
         />
       </div>
 
@@ -230,7 +230,7 @@ export function PluginMarketplace() {
                   setScope('personal')
                   setQuery(plugin.name)
                 }}
-                className="w-9 h-9 rounded-[10px] bg-secondary text-on-secondary flex items-center justify-center shrink-0"
+                className="w-9 h-9 flex items-center justify-center shrink-0 text-secondary"
               >
                 <Icon name="deployed_code" size={18} />
               </button>
@@ -241,15 +241,15 @@ export function PluginMarketplace() {
       {/* 公開 / 個人 + filter icon (category menu) */}
       <div className="flex items-center justify-between gap-3 mb-6">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-full bg-surface-container/90 p-0.5 border border-white/[0.05]">
+          <div className="inline-flex rounded-control bg-surface-container/90 p-0.5 border border-line">
             {(['public', 'personal'] as const).map((value) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => setScope(value)}
-                className={`min-w-[3.75rem] rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors ${
+                className={`min-w-[3.75rem] rounded-control px-3 py-1.5 text-[12px] font-semibold transition-colors ${
                   scope === value
-                    ? 'bg-white/[0.10] text-on-surface'
+                    ? 'bg-hover text-on-surface'
                     : 'text-outline hover:text-on-surface-variant'
                 }`}
               >
@@ -258,13 +258,13 @@ export function PluginMarketplace() {
             ))}
           </div>
           {scope === 'public' && (
-            <div className="inline-flex rounded-full bg-surface-container/90 p-0.5 border border-white/[0.05]">
+            <div className="inline-flex rounded-control bg-surface-container/90 p-0.5 border border-line">
               {(['simple', 'all'] as const).map((mode) => (
                 <button
                   key={mode}
                   type="button"
                   onClick={() => setCatalogMode(mode)}
-                  className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                  className={`rounded-control px-3 py-1.5 text-[11px] font-semibold transition-colors ${
                     catalogMode === mode
                       ? 'bg-primary/15 text-primary'
                       : 'text-outline hover:text-on-surface-variant'
@@ -298,7 +298,7 @@ export function PluginMarketplace() {
                 className="fixed inset-0 z-10 cursor-default"
                 onClick={() => setFilterOpen(false)}
               />
-              <div className="absolute right-0 top-9 z-20 min-w-[9.5rem] rounded-xl border border-white/10 bg-surface-container-high py-1 shadow-xl shadow-black/40">
+              <div className="absolute right-0 top-9 z-20 min-w-[9.5rem] rounded-card border border-line bg-surface-container-high py-1 shadow-raised">
                 {CATEGORIES.map((value) => (
                   <button
                     key={value}
@@ -388,7 +388,7 @@ export function PluginMarketplace() {
                           brandIcon={item.brandIcon}
                           size={16}
                           iconSize={10}
-                          className="!rounded-[4px] border border-surface"
+                          className=""
                         />
                       ))}
                     </span>
@@ -409,7 +409,7 @@ export function PluginMarketplace() {
         {uncataloguedPlugins.map((plugin) => (
           <div key={plugin.id} className="border-b border-white/[0.06] py-4">
             <div className="flex gap-3 items-start">
-              <div className="w-9 h-9 rounded-[10px] bg-secondary/90 text-on-secondary flex items-center justify-center shrink-0">
+              <div className="w-9 h-9 flex items-center justify-center shrink-0 text-secondary">
                 <Icon name="deployed_code" size={18} />
               </div>
               <div className="min-w-0 flex-1">

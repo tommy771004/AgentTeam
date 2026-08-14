@@ -206,8 +206,8 @@ export function CritiqueTheater({
     <section className="overflow-hidden rounded-2xl border border-primary/20 bg-surface-container-low/55 shadow-[0_12px_35px_rgba(0,0,0,0.14)]">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/8 px-4 py-3.5">
         <div className="flex min-w-0 items-start gap-2.5">
-          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${sessionRunning ? 'bg-secondary/15 text-secondary' : 'bg-primary/12 text-primary'}`}>
-            <Icon name={sessionRunning ? 'radar' : 'fact_check'} size={19} className={sessionRunning ? 'motion-safe:animate-pulse' : ''} />
+          <span className={`grid h-9 w-9 shrink-0 place-items-center ${sessionRunning ? 'text-secondary' : 'text-primary'}`}>
+            <Icon name={sessionRunning ? 'radar' : 'fact_check'} size={19} />
           </span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">

@@ -445,7 +445,7 @@ export function SubDesignPage() {
         </section>
 
         <section className="mx-auto mt-7 max-w-[820px]">
-          <div className="overflow-hidden rounded-[22px] border border-primary/40 bg-surface-container-low shadow-[0_0_0_1px_rgba(125,216,240,0.05),0_18px_45px_rgba(0,0,0,0.2)]">
+          <div className="overflow-hidden rounded-[22px] border border-primary/40 bg-surface-container-low shadow-raised">
             <label htmlFor="subdesign-brief" className="sr-only">設計目標</label>
             <textarea
               id="subdesign-brief"
@@ -641,10 +641,10 @@ export function SubDesignPage() {
                   }}
                   className={`group min-h-[166px] rounded-2xl border text-left transition-all ${
                     selected
-                      ? 'border-primary/45 bg-primary/[0.08] shadow-[0_0_22px_rgba(43,184,217,0.08)]'
+                      ? 'border-primary/45 bg-primary/[0.08]'
                       : unavailable
                         ? 'cursor-not-allowed border-white/[0.07] bg-surface-container-low/60 opacity-65'
-                        : 'border-white/10 bg-surface-container-low hover:-translate-y-0.5 hover:border-primary/30 hover:bg-white/[0.04]'
+                        : 'border-white/10 bg-surface-container-low hover:border-primary/30 hover:bg-white/[0.04]'
                   }`}
                 >
                   <span className={`grid h-[92px] place-items-center border-b ${selected ? 'border-primary/20 text-primary' : 'border-white/[0.07] text-outline group-hover:text-primary'}`}>
@@ -726,7 +726,7 @@ export function SubDesignPage() {
                     onClick={() => resumeBrief(item.id)}
                     className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-white/[0.04]"
                   >
-                    <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary"><Icon name={surface.icon} size={16} /></span>
+                    <span className="grid h-8 w-5 place-items-center text-primary"><Icon name={surface.icon} size={16} /></span>
                     <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium text-on-surface">{item.objective}</span><span className="mt-1 block truncate text-[11px] text-outline">{surface.title} · {stageLabel(itemWorkspace.currentStage)} · {itemWorkspace.nextGate.title}</span>{itemWorkspace.latestArtifact ? <span className="mt-1 block truncate text-[10px] text-outline/75">artifact · {itemWorkspace.latestArtifact.title} · revision {itemWorkspace.latestArtifact.revision}</span> : null}</span>
                     <span className="text-[11px] text-outline">{formatRelativeTime(item.updatedAt)}</span>
                     <Icon name="chevron_right" size={16} className="text-outline" />

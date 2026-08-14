@@ -40,12 +40,7 @@ export function ExecutionPage() {
 
   return (
     <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
-      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-secondary/10 blur-[120px] rounded-full" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-primary/5 blur-[150px] rounded-full" />
-      </div>
-
-      <header className="relative z-50 w-full border-b border-outline-variant/30 bg-surface/80 backdrop-blur-md drag-region shrink-0">
+      <header className="relative z-50 w-full border-b border-line bg-surface drag-region shrink-0">
         <div className="max-w-[1440px] mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4 pl-16 md:pl-0">
             <button
@@ -54,7 +49,7 @@ export function ExecutionPage() {
                 if (runId) stopExecution(runId)
                 navigate('/')
               }}
-              className="no-drag w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/5 text-on-surface-variant transition-colors group"
+              className="no-drag w-8 h-8 rounded-control flex items-center justify-center hover:bg-hover-2 text-on-surface-variant transition-colors group"
             >
               <Icon
                 name="arrow_back"
@@ -71,7 +66,6 @@ export function ExecutionPage() {
                 {agent.objective || '啟動中…'}
                 {live && (
                   <span className="flex h-2 w-2 relative ml-1">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
                   </span>
                 )}
@@ -82,7 +76,7 @@ export function ExecutionPage() {
             <button
               type="button"
               onClick={() => navigate('/knowledge')}
-              className="flex items-center gap-1 px-3 py-2 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30 text-xs font-semibold tracking-wider uppercase"
+              className="flex items-center gap-1 px-3 py-2 rounded-control border border-line text-on-surface-variant hover:text-primary hover:border-line-strong text-xs font-semibold tracking-wider uppercase"
             >
               <Icon name="hub" size={16} />
               知識圖譜
@@ -90,7 +84,7 @@ export function ExecutionPage() {
             <button
               type="button"
               onClick={() => navigate('/records?tab=logs')}
-              className="flex items-center gap-1 px-3 py-2 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30 text-xs font-semibold tracking-wider uppercase"
+              className="flex items-center gap-1 px-3 py-2 rounded-control border border-line text-on-surface-variant hover:text-primary hover:border-line-strong text-xs font-semibold tracking-wider uppercase"
             >
               <Icon name="terminal" size={16} />
               Logs
@@ -98,7 +92,7 @@ export function ExecutionPage() {
             <button
               type="button"
               onClick={() => runId && stopExecution(runId)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-error/30 bg-error/10 text-error hover:bg-error/20 hover:border-error/50 transition-all font-semibold text-xs tracking-wider uppercase shadow-[0_0_15px_rgba(255,180,171,0.1)]"
+              className="flex items-center gap-2 px-4 py-2 rounded-control border border-error/30 bg-error/10 text-error hover:bg-error/15 hover:border-error/50 transition-colors font-semibold text-xs tracking-wider uppercase"
             >
               <Icon name="stop_circle" size={16} />
               停止執行
@@ -136,7 +130,7 @@ export function ExecutionPage() {
                 </div>
                 <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-primary-container to-primary rounded-full transition-all duration-500"
+                    className="h-full bg-primary rounded-full transition-[width] duration-500 motion-reduce:transition-none"
                     style={{ width: `${agent.progress}%` }}
                   />
                 </div>
@@ -150,7 +144,7 @@ export function ExecutionPage() {
                   {agent.loadedCapabilityIds.map((id) => (
                     <span
                       key={id}
-                      className="px-2 py-0.5 rounded-md text-[10px] font-[family-name:var(--font-mono)] border border-primary/25 bg-primary/10 text-primary"
+                      className="px-2 py-0.5 rounded-md text-[10px] font-[family-name:var(--font-mono)] border border-line text-primary"
                     >
                       {id}
                     </span>
@@ -169,7 +163,7 @@ export function ExecutionPage() {
 
           <div className="lg:col-span-8 flex flex-col gap-4 min-h-0">
             <div className="glass-panel rounded-xl flex-1 flex flex-col min-h-0 overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 shrink-0">
+              <div className="flex items-center justify-between px-5 py-3 border-b border-line shrink-0">
                 <div className="flex items-center gap-2 text-on-surface-variant">
                   <Icon name="terminal" size={18} />
                   <span className="font-semibold text-[10px] tracking-widest uppercase">
@@ -178,7 +172,7 @@ export function ExecutionPage() {
                 </div>
                 {live && (
                   <span className="flex items-center gap-1.5 text-primary text-[10px] font-semibold tracking-widest">
-                    <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                    <span className="w-2 h-2 rounded-full bg-primary" />
                     即時串流
                   </span>
                 )}
@@ -229,7 +223,7 @@ export function ExecutionPage() {
                       <div
                         className={`w-12 h-12 rounded-full border-2 flex items-center justify-center ${
                           a.status === 'active'
-                            ? 'border-primary bg-primary/10 shadow-[0_0_15px_rgba(34,211,238,0.3)]'
+                            ? 'border-primary'
                             : a.status === 'done'
                               ? 'border-primary/40 text-primary'
                               : a.status === 'error'
@@ -248,7 +242,7 @@ export function ExecutionPage() {
                                   : 'smart_toy'
                           }
                           size={22}
-                          className={a.status === 'active' ? 'text-primary animate-pulse-glow' : ''}
+                          className={a.status === 'active' ? 'text-primary' : ''}
                         />
                       </div>
                       <span className="text-xs text-on-surface-variant">{a.name}</span>

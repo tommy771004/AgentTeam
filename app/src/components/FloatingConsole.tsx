@@ -67,7 +67,7 @@ export function FloatingConsole() {
 
   return (
     <div
-      className={`fixed z-[120] w-[min(420px,calc(100vw-16px))] rounded-2xl border border-primary/25 bg-surface/95 backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,0.55)] overflow-hidden ${
+      className={`fixed z-[120] w-[min(420px,calc(100vw-16px))] rounded-card border border-line bg-surface shadow-raised overflow-hidden ${
         dragging ? 'cursor-grabbing' : ''
       }`}
       style={{ left: floatPos.x, top: floatPos.y }}
@@ -77,7 +77,7 @@ export function FloatingConsole() {
     >
       <div
         data-drag-handle
-        className="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-surface-container-high/80 cursor-grab select-none"
+        className="flex items-center justify-between px-3 py-2 border-b border-line bg-surface-container-high cursor-grab select-none"
       >
         <div className="flex items-center gap-2 text-sm font-semibold text-primary">
           <Icon name="terminal" size={16} />
@@ -88,7 +88,7 @@ export function FloatingConsole() {
           <button
             type="button"
             title="回到主對話"
-            className="p-1.5 rounded hover:bg-white/10 text-on-surface-variant"
+            className="p-1.5 rounded-control hover:bg-hover-2 text-on-surface-variant"
             onClick={() => {
               setLayoutMode('full')
               setFloatOpen(false)
@@ -100,7 +100,7 @@ export function FloatingConsole() {
           <button
             type="button"
             title="關閉小視窗"
-            className="p-1.5 rounded hover:bg-white/10 text-on-surface-variant"
+            className="p-1.5 rounded-control hover:bg-hover-2 text-on-surface-variant"
             onClick={() => {
               setFloatOpen(false)
               setLayoutMode('full')
@@ -111,7 +111,7 @@ export function FloatingConsole() {
         </div>
       </div>
 
-      <div className="h-36 overflow-y-auto custom-scrollbar bg-[#060e20] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] text-on-surface-variant space-y-0.5">
+      <div className="h-36 overflow-y-auto custom-scrollbar bg-surface-container-lowest px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] text-on-surface-variant space-y-0.5">
         {terminalLog.slice(-40).map((line, i) => (
           <div key={i} className="whitespace-pre-wrap break-all">
             <span className="text-outline select-none">┊ </span>
@@ -121,7 +121,7 @@ export function FloatingConsole() {
         <div ref={logEndRef} />
       </div>
 
-      <div className="p-2 border-t border-white/10">
+      <div className="p-2 border-t border-line">
         <CommandComposer
           value={composer}
           onChange={setComposer}

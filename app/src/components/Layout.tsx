@@ -132,17 +132,9 @@ export function Layout() {
 
   return (
     <div className="h-full flex bg-background text-on-background overflow-hidden">
-      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="ambient-orb absolute top-[-12%] left-[-12%] w-[42%] h-[42%] bg-secondary/12 blur-[130px] rounded-full" />
-        <div
-          className="ambient-orb absolute bottom-[-22%] right-[-12%] w-[52%] h-[52%] bg-primary/8 blur-[160px] rounded-full"
-          style={{ animationDelay: '-6s' }}
-        />
-      </div>
-
-      {/* 左側主選單 — macOS sidebar material */}
+      {/* 左側主選單 — quiet material sidebar */}
       <aside
-        className={`sidebar-panel relative z-50 drag-region material-sidebar flex flex-col shrink-0 transition-[width] duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+        className={`sidebar-panel relative z-50 drag-region material-sidebar flex flex-col shrink-0 transition-[width] duration-300 ease-out ${
           collapsed ? 'w-[68px]' : 'w-[212px]'
         }`}
       >
@@ -158,7 +150,7 @@ export function Layout() {
           />
         )}
         <div
-          className={`flex items-center gap-2.5 px-3 border-b border-white/[0.06] no-drag ${
+          className={`flex items-center gap-2.5 px-3 border-b border-line no-drag ${
             isMac ? 'h-11' : 'h-12'
           }`}
         >
@@ -167,7 +159,7 @@ export function Layout() {
             alt="SubAgents AI"
             width={32}
             height={32}
-            className="w-8 h-8 rounded-[10px] shrink-0 object-cover shadow-[0_0_20px_rgba(43,184,217,0.15)] border border-primary/25 bg-primary/10"
+            className="w-8 h-8 shrink-0 object-contain"
             draggable={false}
             onError={(e) => {
               // Fallback to public/ brand pack (dev + packaged dist/brand)
@@ -213,8 +205,8 @@ export function Layout() {
                       title={item.label}
                       className={`macos-nav-item flex items-center gap-2.5 rounded-[11px] px-2.5 py-2 text-[13px] border ${
                         active
-                          ? 'bg-primary/14 text-primary border-primary/25 shadow-[0_0_20px_rgba(43,184,217,0.12)]'
-                          : 'text-on-surface-variant hover:bg-white/[0.06] hover:text-on-surface border-transparent'
+                          ? 'bg-hover text-on-surface border-transparent'
+                          : 'text-on-surface-variant hover:bg-hover-2 hover:text-on-surface border-transparent'
                       }`}
                     >
                       <Icon name={item.icon} size={20} />
@@ -229,23 +221,23 @@ export function Layout() {
           ))}
         </nav>
 
-        <div className="no-drag border-t border-white/10 p-2 space-y-2">
+        <div className="no-drag border-t border-line p-2 space-y-2">
           <PiHostStatusPill collapsed={collapsed} />
           {(isRunning || agentStatus === 'running') && (
             <button
               type="button"
               onClick={openLiveRun}
               title="開啟新任務右側 Run 面板"
-              className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-semibold text-primary bg-primary/10 border border-primary/30 hover:bg-primary/15 text-left"
+              className="w-full flex items-center gap-2 rounded-control px-2.5 py-2 text-xs font-semibold text-primary bg-primary/10 border border-primary/25 hover:bg-primary/15 text-left"
             >
-              <span className="w-2 h-2 rounded-full bg-primary animate-pulse shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
               {!collapsed && '執行中…'}
             </button>
           )}
           <button
             type="button"
             onClick={() => setCollapsed((c) => !c)}
-            className="w-full flex items-center justify-center gap-1 rounded-lg py-2 text-outline hover:bg-white/5 hover:text-on-surface text-xs"
+            className="w-full flex items-center justify-center gap-1 rounded-lg py-2 text-outline hover:bg-hover-2 hover:text-on-surface text-xs"
           >
             <Icon name={collapsed ? 'chevron_right' : 'chevron_left'} size={18} />
             {!collapsed && '收合選單'}
@@ -257,7 +249,7 @@ export function Layout() {
       <div className="relative z-10 flex-1 flex flex-col min-w-0 min-h-0">
         {/* 首頁（新任務）隱藏頂欄，更接近 Codex 沉浸式 */}
         {!isHome && (
-          <header className="h-11 shrink-0 border-b border-white/8 bg-surface/30 backdrop-blur-sm flex items-center justify-between px-4 drag-region">
+          <header className="h-11 shrink-0 border-b border-line bg-surface flex items-center justify-between px-4 drag-region">
             <div className="no-drag text-xs text-on-surface-variant pl-2 md:pl-0 truncate max-[760px]:hidden">
               本機多代理 · {primaryKey}/ 指令 · {primaryKey}. 小視窗
             </div>
@@ -266,7 +258,7 @@ export function Layout() {
                 type="button"
                 title={`開啟指令選單（${primaryKey}/）`}
                 onClick={() => requestFocusComposer({ openSlash: true })}
-                className="shrink-0 whitespace-nowrap text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30 font-[family-name:var(--font-mono)]"
+                className="shrink-0 whitespace-nowrap text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-line text-on-surface-variant hover:text-on-surface hover:border-line-strong font-[family-name:var(--font-mono)]"
               >
                 /
               </button>
@@ -285,7 +277,7 @@ export function Layout() {
                 className={`shrink-0 whitespace-nowrap text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1 ${
                   floatOpen
                     ? 'border-primary/40 text-primary bg-primary/10'
-                    : 'border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30'
+                    : 'border-line text-on-surface-variant hover:text-on-surface hover:border-line-strong'
                 }`}
               >
                 <Icon name="picture_in_picture_alt" size={14} />
@@ -293,7 +285,7 @@ export function Layout() {
               </button>
               <NavLink
                 to="/settings"
-                className="shrink-0 whitespace-nowrap text-xs font-semibold tracking-wide px-3 py-1.5 rounded-lg border border-white/10 text-on-surface-variant hover:text-primary hover:border-primary/30"
+                className="shrink-0 whitespace-nowrap text-xs font-semibold tracking-wide px-3 py-1.5 rounded-lg border border-line text-on-surface-variant hover:text-on-surface hover:border-line-strong"
               >
                 設定
               </NavLink>

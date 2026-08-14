@@ -1330,7 +1330,7 @@ export function SettingsPage() {
                           type="button"
                           className={`text-[11px] px-2.5 py-1 rounded-full border font-[family-name:var(--font-mono)] ${
                             capturing
-                              ? 'border-primary/50 text-primary bg-primary/10 animate-pulse'
+                              ? 'border-primary/50 text-primary bg-primary/10'
                               : 'bg-white/[0.06] border-white/10 text-on-surface-variant hover:border-primary/40'
                           }`}
                           onClick={() => setCapturingId(capturing ? null : b.id)}

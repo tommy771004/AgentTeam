@@ -92,7 +92,7 @@ export function DocsPage() {
               {LOOP_STEPS.map((s, i) => (
                 <div key={s.label} className="contents">
                   <div className="flex flex-col items-center gap-2">
-                    <div className="w-11 h-11 rounded-full border border-primary/40 flex items-center justify-center bg-primary/10">
+                    <div className="flex h-11 w-11 items-center justify-center">
                       <Icon name={s.icon} className="text-primary" size={20} />
                     </div>
                     <span className="text-[11px] text-on-surface-variant text-center">{s.label}</span>

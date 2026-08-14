@@ -44,20 +44,20 @@ const BY_SLUG: Record<string, SimpleIcon> = {
   Notion: siNotion,
 }
 
-/** Prefer white tile for dark-hex brands so marks stay legible on dark UI */
-function tileBackground(hex: string): { bg: string; border?: string; fg: string } {
+/** Resolve a legible mark color without adding a colored tile behind it. */
+function markStyle(hex: string): { bg: string; border?: string; fg: string } {
   const raw = hex.replace('#', '')
   const r = parseInt(raw.slice(0, 2), 16)
   const g = parseInt(raw.slice(2, 4), 16)
   const b = parseInt(raw.slice(4, 6), 16)
   const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
   if (lum < 0.22) {
-    return { bg: '#FFFFFF', border: 'rgba(255,255,255,0.12)', fg: `#${raw}` }
+    return { bg: 'transparent', fg: 'var(--color-ink-2)' }
   }
   if (lum > 0.85) {
-    return { bg: '#FFFFFF', border: 'rgba(255,255,255,0.12)', fg: '#111111' }
+    return { bg: 'transparent', fg: 'var(--color-ink)' }
   }
-  return { bg: `#${raw}`, border: undefined, fg: lum > 0.55 ? '#111111' : '#FFFFFF' }
+  return { bg: 'transparent', fg: `#${raw}` }
 }
 
 function resolveIcon(pluginId: string, brandIcon?: string): SimpleIcon | null {
@@ -85,7 +85,7 @@ export function PluginBrandIcon({
   const icon = useMemo(() => resolveIcon(pluginId, brandIcon), [pluginId, brandIcon])
   const letter = (name || pluginId).trim()[0]?.toUpperCase() || '?'
   const hex = icon?.hex || accent.replace('#', '')
-  const style = tileBackground(hex.length === 6 ? hex : '64748b')
+  const style = markStyle(hex.length === 6 ? hex : '64748b')
 
   if (!icon) {
     return (
@@ -121,7 +121,7 @@ export function PluginBrandIcon({
   )
 }
 
-/** Full rounded tile used in marketplace rows / installed strip */
+/** Sized hit area for a marketplace mark; the surface stays transparent. */
 export function PluginBrandTile({
   pluginId,
   name,
@@ -145,7 +145,7 @@ export function PluginBrandTile({
 }) {
   const icon = resolveIcon(pluginId, brandIcon)
   const hex = icon?.hex || accent.replace('#', '')
-  const style = tileBackground(hex.length === 6 ? hex : accent.replace('#', ''))
+  const style = markStyle(hex.length === 6 ? hex : accent.replace('#', ''))
   const glyph = iconSize ?? Math.round(size * 0.55)
   const Tag = onClick ? 'button' : 'div'
 
@@ -154,14 +154,14 @@ export function PluginBrandTile({
       type={onClick ? 'button' : undefined}
       title={title}
       onClick={onClick}
-      className={`rounded-[10px] flex items-center justify-center shrink-0 shadow-sm ${
-        onClick ? 'transition-transform hover:-translate-y-0.5' : ''
+      className={`flex items-center justify-center shrink-0 ${
+        onClick ? 'transition-colors hover:text-on-surface' : ''
       } ${className}`}
       style={{
         width: size,
         height: size,
-        backgroundColor: style.bg,
-        border: style.border ? `1px solid ${style.border}` : undefined,
+        backgroundColor: 'transparent',
+        border: '0',
         color: style.fg,
       }}
     >

@@ -369,7 +369,7 @@ export function ProtocolsPage() {
 
       <div className="flex-1 min-w-0 flex flex-col min-h-0">
         {/* Top bar */}
-        <div className="shrink-0 h-12 px-3 md:px-4 border-b border-line flex items-center justify-between gap-2 bg-surface/70">
+        <div className="shrink-0 h-12 px-3 md:px-4 border-b border-line flex items-center justify-between gap-2 bg-surface">
           <div className="flex items-center gap-2 min-w-0">
             {!showThreadList && (
               <button
@@ -388,13 +388,13 @@ export function ProtocolsPage() {
             >
               <Icon name="forum" size={18} />
             </button>
-            <Icon name="auto_awesome" size={16} className="text-accent-ink shrink-0" />
+            <Icon name="auto_awesome" size={16} className="text-ink-2 shrink-0" />
             <span className="font-semibold text-[13px] truncate max-w-[140px] md:max-w-[220px]">
               {thread?.title || '新對話'}
             </span>
             {live && (
               <span className="flex items-center gap-1 text-[11px] text-accent-ink">
-                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                <span className="w-1.5 h-1.5 rounded-full bg-accent" />
                 執行中
               </span>
             )}

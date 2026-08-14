@@ -75,7 +75,7 @@ export function SubDesignWorkspaceHeader({ workspace, onPrimaryAction, primaryAc
             <Icon name="palette" size={13} /><span className="truncate">{designSystem?.title || 'Project default'}</span><Icon name="expand_more" size={13} />
           </button>
           <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${runTone}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${workspace.runStatus === 'active' ? 'animate-pulse bg-secondary' : workspace.runStatus === 'failed' || workspace.runStatus === 'halted' ? 'bg-error' : 'bg-outline/60'}`} />
+            <span className={`h-1.5 w-1.5 rounded-full ${workspace.runStatus === 'active' ? 'bg-secondary' : workspace.runStatus === 'failed' || workspace.runStatus === 'halted' ? 'bg-error' : 'bg-outline/60'}`} />
             {runLabel}
           </span>
           {canAct ? <button type="button" onClick={onPrimaryAction} className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-[11px] font-semibold text-on-primary"><Icon name="arrow_forward" size={14} />{primaryActionLabel || gate.title}</button> : null}

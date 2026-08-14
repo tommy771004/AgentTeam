@@ -58,10 +58,10 @@ export function CliDoctorCard({ onStartTask }: { onStartTask?: () => void }) {
   }
 
   return (
-    <section className="w-full max-w-xl mt-8 mb-6 rounded-2xl border border-white/10 bg-surface/60 p-4 text-left shadow-lg">
+    <section className="app-panel w-full max-w-xl mt-8 mb-6 p-4 text-left">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0">
-          <span className="mt-0.5 rounded-xl bg-primary/15 p-2 text-primary">
+          <span className="mt-0.5 shrink-0 text-primary">
             <Icon name="health_and_safety" size={18} />
           </span>
           <div className="min-w-0">
@@ -85,7 +85,7 @@ export function CliDoctorCard({ onStartTask }: { onStartTask?: () => void }) {
           </p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {report.checks.map((check) => (
-              <div key={check.id} className="rounded-xl border border-white/8 bg-background/40 px-3 py-2">
+              <div key={check.id} className="rounded-card border border-line bg-inset px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-medium truncate">{check.label}</span>
                   <span

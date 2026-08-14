@@ -36,10 +36,10 @@ export function SectionNav({
         key={item.id}
         type="button"
         onClick={() => onChange(item.id)}
-        className={`w-full text-left rounded-xl px-2.5 py-2 transition-colors ${
+        className={`w-full text-left rounded-control px-2.5 py-2 transition-colors ${
           active
-            ? 'bg-white/[0.1] text-on-surface'
-            : 'text-on-surface-variant hover:bg-white/[0.05] hover:text-on-surface'
+            ? 'bg-hover text-on-surface'
+            : 'text-on-surface-variant hover:bg-hover-2 hover:text-on-surface'
         }`}
       >
         <div className="flex items-center gap-2.5">

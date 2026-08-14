@@ -94,7 +94,7 @@ export function DesignSystemsPage() {
           <div className="mt-7 overflow-hidden rounded-[18px] border border-white/10 bg-surface-container-low/55 shadow-[0_18px_55px_rgba(0,0,0,0.18)]">
             {targetBrief ? (
               <div className="flex items-center gap-3 border-b border-white/8 px-4 py-3">
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Icon name="description" size={16} /></span>
+                <span className="grid h-8 w-5 shrink-0 place-items-center text-primary"><Icon name="description" size={16} /></span>
                 <div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-outline">Project brief</p><p className="mt-0.5 truncate text-[11px] font-semibold text-on-surface">{targetBrief.objective}</p></div>
               </div>
             ) : null}

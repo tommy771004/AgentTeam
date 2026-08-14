@@ -483,7 +483,7 @@ export function KnowledgePage() {
                       <div
                         className={`w-12 h-12 rounded-xl border-2 flex items-center justify-center bg-surface-container transition-all ${
                           active
-                            ? 'border-primary shadow-[0_0_20px_rgba(34,211,238,0.4)] scale-110'
+                            ? 'border-primary'
                             : 'border-outline-variant/50 group-hover:border-primary/50'
                         }`}
                       >
@@ -515,14 +515,14 @@ export function KnowledgePage() {
                     style={{
                       background:
                         c > 0.9
-                          ? '#22d3ee'
+                          ? 'var(--color-primary)'
                           : c > 0.8
-                            ? '#8aebff'
+                            ? 'var(--color-primary-fixed-dim)'
                             : c > 0.7
-                              ? '#d0bcff'
+                              ? 'var(--color-secondary)'
                               : c > 0.55
-                                ? '#571bc1'
-                                : '#2d3449',
+                                ? 'var(--color-secondary-container)'
+                                : 'var(--color-surface-container-highest)',
                       opacity: 0.5 + c * 0.5,
                     }}
                     title={`cell ${i}: ${(c * 100).toFixed(0)}%`}

@@ -100,12 +100,12 @@ export function ReportModal({
       onClick={onClose}
     >
       <div
-        className="glass-panel rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-white/10"
+        className="glass-panel rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden shadow-raised border border-line"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-white/10 shrink-0">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-line shrink-0">
           <div className="flex items-start gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center shrink-0">
+            <div className="flex h-9 w-5 items-center justify-center shrink-0">
               <Icon name="description" size={20} className="text-primary" />
             </div>
             <div className="min-w-0">
@@ -128,7 +128,7 @@ export function ReportModal({
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-px bg-white/5 border-b border-white/10 shrink-0">
+        <div className="grid grid-cols-3 gap-px bg-surface-container-low border-b border-line shrink-0">
           <Metric
             icon="memory"
             label="VRAM 用量"
@@ -150,7 +150,7 @@ export function ReportModal({
           <MarkdownBody content={md} />
         </div>
 
-        <div className="flex flex-col gap-2 px-5 py-3 border-t border-white/10 shrink-0 bg-surface-container-low/50">
+        <div className="flex flex-col gap-2 px-5 py-3 border-t border-line shrink-0 bg-surface-container-low/50">
           {status && (
             <p className="text-[11px] text-primary font-[family-name:var(--font-mono)]">{status}</p>
           )}
@@ -159,7 +159,7 @@ export function ReportModal({
               <button
                 type="button"
                 onClick={() => void copy()}
-                className="w-9 h-9 rounded-lg border border-white/10 flex items-center justify-center text-on-surface-variant hover:text-primary hover:border-primary/30"
+                className="w-9 h-9 rounded-control border border-line flex items-center justify-center text-on-surface-variant hover:text-primary hover:border-line-strong"
                 title="複製"
               >
                 <Icon name="content_copy" size={18} />
@@ -167,7 +167,7 @@ export function ReportModal({
               <button
                 type="button"
                 onClick={download}
-                className="w-9 h-9 rounded-lg border border-white/10 flex items-center justify-center text-on-surface-variant hover:text-primary hover:border-primary/30"
+                className="w-9 h-9 rounded-control border border-line flex items-center justify-center text-on-surface-variant hover:text-primary hover:border-line-strong"
                 title="下載 Markdown"
               >
                 <Icon name="download" size={18} />
@@ -177,7 +177,7 @@ export function ReportModal({
               <button
                 type="button"
                 onClick={() => void share()}
-                className="px-3 py-2 rounded-lg border border-white/15 text-xs font-semibold tracking-wider uppercase text-on-surface-variant hover:text-primary flex items-center gap-1"
+                className="px-3 py-2 rounded-control border border-line text-xs font-semibold tracking-wider uppercase text-on-surface-variant hover:text-primary flex items-center gap-1"
               >
                 <Icon name="share" size={14} />
                 分享

@@ -103,7 +103,7 @@ export function InlineRunPanel({
           <span className="text-xs font-semibold truncate">執行</span>
           {live && (
             <span className="flex items-center gap-1 text-[10px] text-primary">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-primary" />
               LIVE
             </span>
           )}
@@ -190,7 +190,7 @@ export function InlineRunPanel({
             </div>
             <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-primary-container to-primary rounded-full transition-all duration-500"
+                className="h-full bg-primary rounded-full transition-[width] duration-500 motion-reduce:transition-none"
                 style={{ width: `${Math.min(100, agent.progress)}%` }}
               />
             </div>

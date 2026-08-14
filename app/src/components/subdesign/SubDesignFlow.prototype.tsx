@@ -27,9 +27,9 @@ const STAGES = [
 function StageChip({ stage, compact = false }: { stage: (typeof STAGES)[number]; compact?: boolean }) {
   const tone =
     stage.state === 'done'
-      ? 'border-primary/25 bg-primary/10 text-primary'
+      ? 'border-primary/25 bg-transparent text-primary'
       : stage.state === 'active'
-        ? 'border-secondary/45 bg-secondary/10 text-secondary'
+        ? 'border-secondary/45 bg-transparent text-secondary'
         : stage.state === 'locked'
           ? 'border-white/8 bg-white/[0.02] text-outline/60'
           : 'border-white/10 bg-white/[0.04] text-outline'
@@ -101,7 +101,7 @@ function VariantA() {
         </aside>
         <section className="overflow-hidden rounded-3xl border border-white/10 bg-[#11161b]">
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-            <div className="flex items-center gap-2 text-[12px] font-semibold text-on-surface"><span className="h-2 w-2 animate-pulse rounded-full bg-secondary" />Build 正在產生 artifact</div>
+            <div className="flex items-center gap-2 text-[12px] font-semibold text-on-surface"><span className="h-2 w-2 rounded-full bg-secondary" />Build 正在產生 artifact</div>
             <span className="text-[10px] text-outline">4 工具呼叫 · 01:42</span>
           </div>
           <div className="grid min-h-[420px] place-items-center bg-[radial-gradient(circle_at_center,rgba(43,184,217,0.15),transparent_55%)] p-8">
@@ -125,11 +125,11 @@ function VariantB() {
           <p className="text-[10px] font-semibold tracking-[0.18em] text-primary">DESIGN JOURNEY</p>
           <h1 className="mt-2 text-lg font-semibold text-on-surface">Aurora 商品詳情頁</h1>
           <div className="mt-6 space-y-1 border-l border-white/12 pl-4">
-            {STAGES.map((stage, index) => <div key={stage.label} className="relative pb-5 last:pb-0"><span className={`absolute -left-[22px] grid h-4 w-4 place-items-center rounded-full border ${stage.state === 'active' ? 'border-secondary bg-secondary' : stage.state === 'done' ? 'border-primary bg-primary' : 'border-white/15 bg-background'}`}><Icon name={stage.state === 'done' ? 'check' : index + 1 === 3 ? 'play_arrow' : 'lock'} size={10} className={stage.state === 'locked' ? 'text-outline' : 'text-on-primary'} /></span><p className={`text-[12px] font-semibold ${stage.state === 'active' ? 'text-secondary' : stage.state === 'locked' ? 'text-outline/60' : 'text-on-surface'}`}>{stage.label}</p><p className="mt-0.5 text-[10px] text-outline">{stage.state === 'active' ? '正在執行' : stage.state === 'done' ? '已確認' : '尚未開放'}</p></div>)}
+            {STAGES.map((stage, index) => <div key={stage.label} className="relative pb-5 last:pb-0"><span className={`absolute -left-[22px] grid h-4 w-4 place-items-center rounded-full border ${stage.state === 'active' ? 'border-secondary bg-transparent' : stage.state === 'done' ? 'border-primary bg-transparent' : 'border-white/15 bg-background'}`}><Icon name={stage.state === 'done' ? 'check' : index + 1 === 3 ? 'play_arrow' : 'lock'} size={10} className={stage.state === 'locked' ? 'text-outline' : stage.state === 'active' ? 'text-secondary' : 'text-primary'} /></span><p className={`text-[12px] font-semibold ${stage.state === 'active' ? 'text-secondary' : stage.state === 'locked' ? 'text-outline/60' : 'text-on-surface'}`}>{stage.label}</p><p className="mt-0.5 text-[10px] text-outline">{stage.state === 'active' ? '正在執行' : stage.state === 'done' ? '已確認' : '尚未開放'}</p></div>)}
           </div>
         </aside>
         <main className="rounded-3xl border border-white/10 bg-surface-container-low p-5">
-          <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold tracking-[0.18em] text-outline">LIVE ACTIVITY</p><h2 className="mt-1 text-xl font-semibold text-on-surface">讓使用者看懂 agent 的下一步</h2></div><span className="rounded-full bg-secondary/10 px-2 py-1 text-[10px] font-semibold text-secondary">LIVE · 01:42</span></div>
+          <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold tracking-[0.18em] text-outline">LIVE ACTIVITY</p><h2 className="mt-1 text-xl font-semibold text-on-surface">讓使用者看懂 agent 的下一步</h2></div><span className="text-[10px] font-semibold text-secondary">LIVE · 01:42</span></div>
           <ol className="mt-7 space-y-1">
             {[
               ['done', '讀取 Aurora DESIGN.md', '套用色彩、字體與間距規則'],
@@ -137,7 +137,7 @@ function VariantB() {
               ['active', '生成 HTML artifact', '正在產生 responsive layout 與 CTA states'],
               ['pending', '執行三角色 critique', 'build 完成後自動啟動'],
               ['locked', '交付 HTML / PDF / PPTX', 'Critique pass 後才可執行'],
-            ].map(([state, title, detail]) => <li key={title} className="flex gap-3 rounded-2xl px-3 py-3 hover:bg-white/[0.03]"><span className={`mt-0.5 grid h-6 w-6 place-items-center rounded-full ${state === 'done' ? 'bg-primary/15 text-primary' : state === 'active' ? 'bg-secondary/15 text-secondary' : 'bg-white/[0.05] text-outline'}`}><Icon name={state === 'done' ? 'check' : state === 'active' ? 'progress_activity' : 'lock'} size={14} className={state === 'active' ? 'animate-spin' : ''} /></span><div><p className="text-[13px] font-semibold text-on-surface">{title}</p><p className="mt-0.5 text-[11px] text-outline">{detail}</p></div></li>)}
+            ].map(([state, title, detail]) => <li key={title} className="flex gap-3 rounded-2xl px-3 py-3 hover:bg-white/[0.03]"><span className={`mt-0.5 grid h-6 w-6 place-items-center ${state === 'done' ? 'text-primary' : state === 'active' ? 'text-secondary' : 'text-outline'}`}><Icon name={state === 'done' ? 'check' : state === 'active' ? 'progress_activity' : 'lock'} size={14} className={state === 'active' ? 'animate-spin' : ''} /></span><div><p className="text-[13px] font-semibold text-on-surface">{title}</p><p className="mt-0.5 text-[11px] text-outline">{detail}</p></div></li>)}
           </ol>
         </main>
         <aside className="space-y-4">
@@ -185,7 +185,7 @@ function PrototypeSwitcher({ current }: { current: VariantKey }) {
     return () => window.removeEventListener('keydown', onKeyDown)
   })
   const variant = VARIANTS[index]
-  return <div className="fixed bottom-5 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-3 rounded-full border border-secondary/50 bg-[#10171d]/95 px-3 py-2 shadow-2xl backdrop-blur"><button type="button" onClick={() => go(-1)} className="grid h-8 w-8 place-items-center rounded-full text-secondary hover:bg-secondary/15" aria-label="Previous prototype variant"><Icon name="arrow_back" size={16} /></button><span className="min-w-[190px] text-center text-[11px] font-semibold text-on-surface">{variant.label} — {variant.name}</span><button type="button" onClick={() => go(1)} className="grid h-8 w-8 place-items-center rounded-full text-secondary hover:bg-secondary/15" aria-label="Next prototype variant"><Icon name="arrow_forward" size={16} /></button></div>
+  return <div className="fixed bottom-5 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-3 rounded-control border border-line bg-surface-container px-3 py-2 shadow-raised"><button type="button" onClick={() => go(-1)} className="grid h-8 w-8 place-items-center rounded-control text-secondary hover:bg-hover-2" aria-label="Previous prototype variant"><Icon name="arrow_back" size={16} /></button><span className="min-w-[190px] text-center text-[11px] font-semibold text-on-surface">{variant.label} — {variant.name}</span><button type="button" onClick={() => go(1)} className="grid h-8 w-8 place-items-center rounded-control text-secondary hover:bg-hover-2" aria-label="Next prototype variant"><Icon name="arrow_forward" size={16} /></button></div>
 }
 
 export function SubDesignFlowPrototype() {

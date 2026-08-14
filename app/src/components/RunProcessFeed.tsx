@@ -405,7 +405,7 @@ export function RunProcessFeed({
       {draftText ? (
         <div className="agent-streaming-answer pt-2">
           <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" aria-hidden="true" />
+            <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
             assistant · 回覆中
           </div>
           <div

@@ -23,7 +23,7 @@ export function SubDesignStudioNav({
   return (
     <div className="flex flex-col gap-3 border-b border-white/[0.08] pb-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+        <span className="grid h-8 w-5 shrink-0 place-items-center text-primary">
           <Icon name="draw" size={17} />
         </span>
         <div className="min-w-0">
@@ -41,7 +41,7 @@ export function SubDesignStudioNav({
               onClick={() => onNavigate(item.href)}
               aria-current={selected ? 'page' : undefined}
               className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[11px] font-semibold transition-colors ${
-                selected ? 'bg-white/[0.09] text-on-surface shadow-sm' : 'text-outline hover:text-on-surface'
+                selected ? 'bg-hover text-on-surface' : 'text-outline hover:text-on-surface'
               }`}
             >
               <Icon name={item.icon} size={14} />{item.label}

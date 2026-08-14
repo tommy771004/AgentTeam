@@ -33,7 +33,7 @@ export function InterventionPanel({
 
   return (
     <div className="fixed inset-0 z-[150] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div role="dialog" aria-modal="true" aria-labelledby="intervention-title" className="agent-intervention-card w-full max-w-4xl glass-panel rounded-xl border border-error/30 overflow-hidden shadow-[0_0_40px_rgba(255,180,171,0.12)]">
+      <div role="dialog" aria-modal="true" aria-labelledby="intervention-title" className="agent-intervention-card w-full max-w-4xl glass-panel rounded-xl border border-error/30 overflow-hidden shadow-raised">
         <div className="px-5 py-4 border-b border-error/20 bg-error/5 flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-lg bg-error/15 border border-error/30 flex items-center justify-center shrink-0">
@@ -49,7 +49,7 @@ export function InterventionPanel({
             </div>
           </div>
           <span className="agent-intervention-status shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-error text-[10px] font-semibold tracking-wider uppercase border border-error/20">
-            <span className="w-1.5 h-1.5 rounded-full bg-error animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-error" />
             狀態：已暫停
           </span>
         </div>

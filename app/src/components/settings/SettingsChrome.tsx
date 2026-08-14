@@ -57,7 +57,7 @@ export function SettingsGroup({
           {action}
         </div>
       )}
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] divide-y divide-white/[0.07] overflow-hidden">
+      <div className="rounded-card border border-line bg-surface-container-low divide-y divide-line overflow-hidden">
         {children}
       </div>
     </section>
@@ -101,7 +101,7 @@ export function PillSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="appearance-none cursor-pointer bg-white/[0.08] hover:bg-white/[0.12] border border-white/12 rounded-full pl-3.5 pr-8 py-1.5 text-[12px] font-medium text-on-surface outline-none focus:border-primary/40 min-w-[6.5rem] max-w-[14rem]"
+        className="appearance-none cursor-pointer bg-surface-container-low hover:bg-hover border border-line rounded-control pl-3.5 pr-8 py-1.5 text-[12px] font-medium text-on-surface outline-none focus:border-primary/40 min-w-[6.5rem] max-w-[14rem]"
       >
         {children}
       </select>
@@ -166,10 +166,10 @@ export function SettingsStack({
 }
 
 export const settingsInputCls =
-  'w-full bg-black/20 border border-white/10 focus:border-primary/35 rounded-xl px-3 py-2 text-[13px] text-on-surface outline-none placeholder:text-outline/60'
+  'w-full bg-inset border border-line focus:border-primary/35 rounded-control px-3 py-2 text-[13px] text-on-surface outline-none placeholder:text-outline/60'
 
 export const settingsBtnCls =
-  'px-3 py-1.5 rounded-full border border-white/12 text-[12px] font-semibold text-on-surface-variant hover:bg-white/[0.06] hover:text-on-surface transition-colors'
+  'px-3 py-1.5 rounded-control border border-line text-[12px] font-semibold text-on-surface-variant hover:bg-hover-2 hover:text-on-surface transition-colors'
 
 export const settingsBtnPrimaryCls =
-  'px-3 py-1.5 rounded-full border border-primary/35 text-[12px] font-semibold text-primary bg-primary/10 hover:bg-primary/15 transition-colors'
+  'px-3 py-1.5 rounded-control border border-primary/30 text-[12px] font-semibold text-primary bg-primary/10 hover:bg-primary/15 transition-colors'

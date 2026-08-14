@@ -25,7 +25,7 @@ export function ConfidenceRing({
             cy={size / 2}
             r={r}
             fill="none"
-            stroke="rgba(133,147,151,0.2)"
+            stroke="var(--color-outline-variant)"
             strokeWidth={stroke}
           />
           <circle
@@ -33,13 +33,12 @@ export function ConfidenceRing({
             cy={size / 2}
             r={r}
             fill="none"
-            stroke="#22d3ee"
+            stroke="var(--color-primary)"
             strokeWidth={stroke}
             strokeLinecap="round"
             strokeDasharray={c}
             strokeDashoffset={offset}
             className="transition-all duration-700"
-            style={{ filter: 'drop-shadow(0 0 6px rgba(34,211,238,0.5))' }}
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">

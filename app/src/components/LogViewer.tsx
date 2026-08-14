@@ -38,7 +38,7 @@ export function LogViewer({ logs, live = false }: { logs: LogEntry[]; live?: boo
       ))}
       {live && (
         <div className="agent-log-cursor flex items-center gap-1 text-primary mt-1">
-          <span className="inline-block w-1.5 h-4 bg-primary animate-pulse" />
+          <span className="inline-block w-1.5 h-4 bg-primary" />
         </div>
       )}
       <div ref={bottomRef} />
