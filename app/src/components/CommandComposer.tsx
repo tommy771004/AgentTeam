@@ -87,6 +87,9 @@ export interface CommandComposerProps {
   }) => ReactNode
   /** Enable file/image attachments (default true for agent mode) */
   allowAttachments?: boolean
+  /** Show the ChatGPT-style stop action while a run is active. */
+  running?: boolean
+  onStop?: () => void
 }
 
 /**
@@ -109,6 +112,8 @@ export function CommandComposer({
   footerRight,
   quickActions,
   allowAttachments,
+  running = false,
+  onStop,
 }: CommandComposerProps) {
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -685,6 +690,17 @@ export function CommandComposer({
           spellCheck={false}
         />
         <div className="flex shrink-0 pb-0.5">
+          {running && onStop ? (
+            <button
+              type="button"
+              onClick={onStop}
+              className="agent-composer-stop mr-1 flex h-8 w-8 items-center justify-center rounded-control text-red"
+              aria-label="停止執行"
+              title="停止執行"
+            >
+              <Icon name="stop" size={17} filled />
+            </button>
+          ) : null}
           <button
             type="button"
             disabled={!canSend}

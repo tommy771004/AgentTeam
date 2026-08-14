@@ -97,8 +97,7 @@ export function RunProcessFeed({
     activityActive ||
     agent.status === 'running' ||
     agent.status === 'parsing' ||
-    agent.status === 'manual_intervention' ||
-    agent.status === 'awaiting_user'
+    agent.status === 'manual_intervention'
 
   /** Flat timeline: stream events + steps + toolCalls + recent logs */
   const timeline = useMemo(() => {
@@ -194,6 +193,8 @@ export function RunProcessFeed({
     operationCount: timeline.length,
     objective: agent.objective,
   })
+  const toolCount = agent.toolCalls.length
+  const messageCount = events.filter((event) => event.kind === 'text').length
 
   const allFiles = useMemo(() => {
     const map = new Map<string, { path: string; action: string; added?: number; removed?: number }>()
@@ -244,14 +245,7 @@ export function RunProcessFeed({
           {startedAt > 0 ? (
             <>
               <ElapsedTime startedAt={startedAt} />
-              <span aria-hidden="true" className="opacity-40">
-                ·
-              </span>
             </>
-          ) : null}
-          <span>{agent.progress}%</span>
-          {agent.objective ? (
-            <span className="max-w-40 truncate opacity-70">{agent.objective}</span>
           ) : null}
         </span>
         {onOpenPanel ? (
@@ -260,7 +254,7 @@ export function RunProcessFeed({
             className="agent-process-link shrink-0"
             onClick={onOpenPanel}
           >
-            右側任務
+            開啟執行摘要
           </button>
         ) : null}
       </div>
@@ -287,19 +281,16 @@ export function RunProcessFeed({
             </pre>
           </Reveal>
         </div>
-      ) : (
-        <div className="agent-process-waiting flex items-center gap-1.5 text-[12px] text-ink-3">
-          <span className="agent-process-pulse" aria-hidden="true" />
-          <span>等待模型開始回應…</span>
-        </div>
-      )}
+      ) : null}
 
       {/* Consecutive read/search parts become one OpenCode-style context group. */}
       {groups.length > 0 ? (
         <div className="agent-process-trace space-y-1">
           <div className="agent-process-trace-head flex items-center justify-between px-1 text-[10px] font-semibold uppercase tracking-[0.12em]">
-            <span>Tool trace</span>
-            <span>{timeline.length} events</span>
+            <span>執行訊息</span>
+            <span className="normal-case tracking-normal">
+              {toolCount} 個工具 · {messageCount} 則訊息
+            </span>
           </div>
           {groups.map((group, index) => {
             const open = expanded === group.id

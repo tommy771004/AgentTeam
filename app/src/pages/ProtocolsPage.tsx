@@ -29,6 +29,7 @@ import { useProjectStore } from '../store/projectStore'
 import { listQueuedRuns, queueLength } from '../agent/runQueue'
 import { ChatBubble } from '../components/ChatBubble'
 import { RunSummaryCard } from '../components/RunSummaryCard'
+import { RunContinuationActions } from '../components/RunContinuationActions'
 import { CliDoctorCard } from '../components/CliDoctorCard'
 import { requestFocusComposer } from '../store/commandHistoryStore'
 import type { ApprovalMode } from '../agent/types'
@@ -50,6 +51,7 @@ export function ProtocolsPage() {
     setSelectedLoopType,
     isRunning,
     agent,
+    stopExecution,
     getRunIdForThread,
     selectRun,
   } = useAgentStore()
@@ -452,6 +454,12 @@ export function ProtocolsPage() {
                           />
                         ) : null}
                         {midAssistants.map(renderBubble)}
+                        {activeId ? (
+                          <RunContinuationActions
+                            threadId={activeId}
+                            runId={presentationRunId}
+                          />
+                        ) : null}
                       </>
                     )
                   })()}
@@ -516,6 +524,8 @@ export function ProtocolsPage() {
                   />
                 )}
                 onSubmitLine={(line, atts) => void runEmbedded(line, atts)}
+                running={live}
+                onStop={() => presentationRunId && stopExecution(presentationRunId)}
                 onSlashCommand={async (cmd, args, raw) => {
                   if (activeId) pushBubble(activeId, 'user', raw)
                   if (cmd.name === 'clear' && activeId) clearBubbles(activeId)

@@ -619,6 +619,11 @@ html[data-theme='light'] .app-panel {
 }
 .agent-composer-send:not(:disabled):hover { filter: brightness(1.12); }
 .agent-composer-send:not(:disabled):active { transform: scale(0.94); }
+.agent-composer-stop {
+  background: transparent;
+  transition: background 120ms ease, color 120ms ease;
+}
+.agent-composer-stop:hover { background: var(--color-red-tint); color: var(--color-red); }
 
 .agent-process-status { min-height: 28px; }
 .agent-process-link {
@@ -684,16 +689,25 @@ html[data-theme='light'] .app-panel {
   background: var(--color-primary);
   animation: fade-in 150ms ease-out both;
 }
-.agent-approval-card { max-height: min(680px, calc(100vh - 32px)); }
-.agent-approval-pill {
-  border: 1px solid rgba(251, 191, 36, 0.3);
-  border-radius: 999px;
-  padding: 2px 7px;
-  color: rgb(253 230 138);
-  background: rgba(251, 191, 36, 0.1);
-  font-size: 10px;
-  font-weight: 600;
+.agent-result-actions {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--color-line);
+  padding: 12px 0 2px;
 }
+.agent-result-action {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 9px;
+  border-radius: 8px;
+  text-align: left;
+  transition: background 120ms ease, color 120ms ease;
+}
+.agent-result-action:hover { background: var(--color-hover-2); }
+.agent-approval-card { max-height: min(680px, calc(100vh - 32px)); }
 .agent-approval-session {
   border-radius: 10px;
   padding: 8px;
@@ -759,20 +773,18 @@ html[data-theme='light'] .agent-step-result { border-color: rgba(15, 23, 42, 0.1
    The surface stays calm while unsafe evaluations and the irreversible action
    retain their stronger signals. */
 .agent-intervention-card { max-height: min(760px, calc(100vh - 32px)); }
-.agent-intervention-status { background: rgba(252, 165, 165, 0.08); }
+.agent-intervention-status { background: transparent; }
 .agent-intervention-evaluation {
   transition: border-color 140ms ease, background 140ms ease;
 }
 .agent-intervention-evaluation:hover { border-color: var(--color-line-strong); }
 .agent-intervention-primary,
 .agent-intervention-secondary {
-  transition: transform 150ms var(--ease-spring), background 150ms ease, filter 150ms ease;
+  transition: background 150ms ease, color 150ms ease, filter 150ms ease;
 }
 .agent-intervention-primary:hover { filter: brightness(1.1); }
 .agent-intervention-secondary:hover { background: rgba(255, 255, 255, 0.06); }
-.agent-intervention-primary:active,
-.agent-intervention-secondary:active { transform: scale(0.97); }
-html[data-theme='light'] .agent-intervention-status { background: rgba(220, 38, 38, 0.08); }
+html[data-theme='light'] .agent-intervention-status { background: transparent; }
 html[data-theme='light'] .agent-intervention-secondary:hover { background: rgba(15, 23, 42, 0.05); }
 
 /* Completed-run summaries keep the proof of work compact by default and
@@ -1109,11 +1121,6 @@ html[data-theme='light'] .agent-run-queue-header:hover { background: rgba(15, 23
   border-color: color-mix(in srgb, var(--color-orange) 32%, var(--color-line));
   background: color-mix(in srgb, var(--color-surface) 96%, transparent);
   box-shadow: var(--shadow-raised);
-}
-.agent-approval-pill {
-  border-color: color-mix(in srgb, var(--color-orange) 36%, transparent);
-  color: var(--color-orange);
-  background: var(--color-orange-tint);
 }
 .agent-approval-session:hover { background: var(--color-hover-2); }
 .agent-question-option:hover { background: var(--color-hover-2); }

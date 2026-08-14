@@ -196,7 +196,7 @@ async function openExternalLink(url: string) {
 }
 
 export function SettingsPage() {
-  const { settings, load, update, testConnection, exportBundle, importBundle } = useSettingsStore()
+  const { settings, update, testConnection, exportBundle, importBundle } = useSettingsStore()
   const [section, setSection] = useState('general')
   const [testMsg, setTestMsg] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
@@ -303,9 +303,8 @@ export function SettingsPage() {
   }, [capturingId, setShortcutChord])
 
   useEffect(() => {
-    void load()
     void loadLearning()
-  }, [load, loadLearning])
+  }, [loadLearning])
 
   // Outbound Data Gate status (Electron main); browser shows null.
   // Ticket 16: keep settings.outboundGuardDeploy in sync with main so runtime

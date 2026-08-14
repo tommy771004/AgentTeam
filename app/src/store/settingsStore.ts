@@ -242,8 +242,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     }
     set({ settings: next })
     saveLocal(next)
-    // Pi Host is the only runtime owner in Electron. Legacy settings IPC and
-    // engine configuration remain a browser-only compatibility path.
+    // Pi Host is the only runtime owner in Electron. The legacy engine path is
+    // browser-only; renderer-owned preferences still use the legacy bridge below.
     if (!isElectronPiProduction()) {
       try {
         const { agentEngine } = await import('../agent/engine')
@@ -252,6 +252,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         /* ignore if engine unavailable */
       }
       if (window.subagents?.settings?.set) await window.subagents.settings.set(next)
+    } else if (window.subagents?.settings?.set) {
+      // Pi Host owns runtime settings, but the legacy bridge still persists
+      // renderer-owned preferences (theme, layout, notifications, integrations,
+      // and other UI settings). Keep it in sync so a later load/remount cannot
+      // overwrite a newer local value with a stale disk snapshot.
+      await window.subagents.settings.set(stripPiOwnedSettings(next))
     }
     if (window.subagents?.piHost?.settings?.update) {
       const piPatch = piSettingsPatchFromLlmSettings(patch)

@@ -3,7 +3,6 @@
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Repository layout
-
 The product is **`app/`** — an Electron desktop app "SubAgents AI" (React 19 + TypeScript + Vite + zustand). Everything else at the root is design input, not code:
 
 - `docs/01_…` / `02_…` / `03_…` `.md` — the loop spec (system definition, four loop patterns, request-parsing schema) the engine implements

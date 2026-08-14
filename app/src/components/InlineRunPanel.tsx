@@ -1,7 +1,6 @@
+import { useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
-import { StepTimeline } from './StepTimeline'
 import { LogViewer } from './LogViewer'
-import { InterventionPanel } from './InterventionPanel'
 import { ElapsedTime } from './primitives/ElapsedTime'
 import { PixelLoader } from './primitives/PixelLoader'
 import { ShimmerLabel } from './primitives/ShimmerLabel'
@@ -13,13 +12,17 @@ import {
   formatRunnerCapabilitiesSummary,
 } from '../agent/runners'
 import { useAgentStore } from '../store/agentStore'
-import { useProjectStore } from '../store/projectStore'
 import { useRunActivityStore } from '../store/runActivityStore'
 import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
+import type { ExecutionStep } from '../agent/types'
 
 /**
- * CloudCLI-style embedded run progress — no page navigation
+ * CloudCLI-style embedded run progress — no page navigation.
+ *
+ * The panel deliberately uses one continuous surface. The chat already owns
+ * the live trace, so this rail is the compact control surface: current state,
+ * progress, and optional diagnostics when someone needs to inspect them.
  */
 const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 })
 // Stable references — a fresh object/array literal returned from a zustand
@@ -27,6 +30,106 @@ const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 
 // "Maximum update depth exceeded" (React getSnapshot-must-be-cached loop).
 const EMPTY_ACTIVITY = { active: false, tasks: [], statusLine: '', thought: '', startedAt: 0 } as const
 const EMPTY_RUN_PLAN: ThreadPlanItem[] = []
+
+function statusLabel(status: string, live: boolean) {
+  if (status === 'manual_intervention') return '等待核准'
+  if (status === 'awaiting_user') return '等待回覆'
+  if (live) return '執行中'
+  if (status === 'success') return '已完成'
+  if (status === 'failed') return '執行失敗'
+  if (status === 'halted') return '已停止'
+  if (status === 'parsing') return '準備中'
+  return '已待命'
+}
+
+function statusIcon(status: string, live: boolean) {
+  if (live) return 'progress_activity'
+  if (status === 'success') return 'check_circle'
+  if (status === 'failed' || status === 'halted') return 'error'
+  return 'play_circle'
+}
+
+function statusTone(status: string, live: boolean) {
+  if (live) return 'text-accent-ink'
+  if (status === 'success') return 'text-green'
+  if (status === 'failed' || status === 'halted') return 'text-red'
+  if (status === 'awaiting_user' || status === 'manual_intervention') return 'text-orange'
+  return 'text-ink-2'
+}
+
+function CompactStepList({ steps }: { steps: ExecutionStep[] }) {
+  return (
+    <ol className="space-y-2" aria-label="執行步驟">
+      {steps.map((step, index) => {
+        const isDone = step.status === 'COMPLETED'
+        const isActive = step.status === 'IN_PROGRESS'
+        const isFailed = step.status === 'FAILED'
+        const tone = isFailed ? 'text-red' : isActive ? 'text-accent-ink' : isDone ? 'text-green' : 'text-ink-3'
+
+        return (
+          <li key={step.step} className="flex min-w-0 items-center gap-2 text-[12px]">
+            <span
+              className={`flex size-[18px] shrink-0 items-center justify-center rounded-full border text-[10px] font-[family-name:var(--font-mono)] ${
+                isDone ? 'border-green bg-green text-white' : isFailed ? 'border-red bg-red text-white' : isActive ? 'border-accent text-accent-ink' : 'border-line-strong text-ink-3'
+              }`}
+            >
+              {isDone ? <Icon name="check" size={11} filled /> : isFailed ? <Icon name="close" size={11} /> : index + 1}
+            </span>
+            <span className={`min-w-0 flex-1 truncate ${isActive ? 'font-medium text-ink' : 'text-ink-2'}`}>
+              {step.description}
+            </span>
+            <span className={`shrink-0 text-[10px] ${tone}`}>
+              {isFailed ? '失敗' : isActive ? '進行中' : isDone ? (step.durationMs != null ? `${(step.durationMs / 1000).toFixed(1)}s` : '完成') : '待處理'}
+            </span>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+function PanelSection({
+  id,
+  title,
+  summary,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string
+  title: string
+  summary?: string
+  open: boolean
+  onToggle: () => void
+  children: ReactNode
+}) {
+  const contentId = `${id}-content`
+
+  return (
+    <section className="border-b border-line last:border-b-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={contentId}
+        onClick={onToggle}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-hover-2"
+      >
+        <span className="min-w-0 flex-1 text-[12px] font-semibold text-ink">{title}</span>
+        {summary ? (
+          <span className="shrink-0 text-[10px] font-[family-name:var(--font-mono)] text-ink-3">
+            {summary}
+          </span>
+        ) : null}
+        <Icon name={open ? 'expand_less' : 'expand_more'} size={16} className="shrink-0 text-ink-3" />
+      </button>
+      {open ? (
+        <div id={contentId} className="px-4 pb-4">
+          {children}
+        </div>
+      ) : null}
+    </section>
+  )
+}
 
 export function InlineRunPanel({
   runId,
@@ -37,14 +140,15 @@ export function InlineRunPanel({
   threadId: string
   onClose?: () => void
 }) {
+  const [progressOpen, setProgressOpen] = useState(true)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [stepsOpen, setStepsOpen] = useState(false)
+  const [subAgentsOpen, setSubAgentsOpen] = useState(false)
+  const [thoughtOpen, setThoughtOpen] = useState(false)
+
   const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
-  const stopExecution = useAgentStore((s) => s.stopExecution)
-  const continueTurn = useAgentStore((s) => s.continueTurn)
-  const resolveIntervention = useAgentStore((s) => s.resolveIntervention)
   const activity = useRunActivityStore((s) => s.presentations[runId]) || EMPTY_ACTIVITY
-  const continueGoal = useThreadStore((s) => s.threads.find((t) => t.id === threadId)?.continueGoal)
-  const activeId = threadId
   const threadRunner = useThreadStore(
     (s) => s.threads.find((t) => t.id === threadId)?.runner || 'builtin',
   )
@@ -68,355 +172,298 @@ export function InlineRunPanel({
     agent.status === 'manual_intervention' ||
     agent.status === 'awaiting_user'
 
-  const done = ['success', 'failed', 'halted'].includes(agent.status)
   const isExternal =
     agent.executionKind === 'external' ||
     agent.loopConfig.trigger === 'local-cli' ||
     threadRunner !== 'builtin'
   const runnerCaps =
     agent.runnerCapabilities || capabilitiesForRunner(isExternal ? threadRunner : 'builtin')
-  const canContinueGoal = Boolean(continueGoal && runnerCaps.continueGoal)
-
-  const onContinueGoal = async () => {
-    if (!canContinueGoal || !continueGoal || !activeId || isRunning) return
-    const { runTask } = await import('../agent/taskRunCoordinator')
-    await runTask({
-      objective: continueGoal.objective,
-      sourceKind: 'retry',
-      reuseThreadId: activeId,
-      continueGoal: true,
-      // Force builtin — only loop adapter can honor DoD/missing.
-      runner: 'builtin',
-      loopType: 'Goal-based',
-      skipUserBubble: false,
-      // Snapshot the project pinned at dispatch time — a concurrent run must not
-      // silently re-resolve to whatever project the UI switches to mid-flight.
-      projectRoot: useProjectStore.getState().root || undefined,
-    })
-  }
+  const completedTasks = tasks.filter((task) => task.status === 'done').length
+  const completedSteps = agent.steps.filter((step) => step.status === 'COMPLETED').length
+  const progressSummary = tasks.length
+    ? `${completedTasks}/${tasks.length}`
+    : agent.steps.length
+      ? `${completedSteps}/${agent.steps.length}`
+      : undefined
+  const detailSummary = [
+    activity.thought ? '推理' : '',
+    agent.toolCalls.length ? `${agent.toolCalls.length} 工具` : '',
+    agent.logs.length ? `${agent.logs.length} 日誌` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const currentStatus = activity.statusLine || statusLabel(agent.status, live)
 
   return (
-    <div className="h-full flex flex-col min-h-0 border-l border-white/10 bg-surface/40">
-      <div className="shrink-0 h-11 px-3 flex items-center justify-between border-b border-white/10">
-        <div className="flex items-center gap-2 min-w-0">
-          <Icon name="play_circle" size={16} className="text-primary shrink-0" />
-          <span className="text-xs font-semibold truncate">執行</span>
-          {live && (
-            <span className="flex items-center gap-1 text-[10px] text-primary">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary" />
-              LIVE
-            </span>
-          )}
-          {done && (
-            <span
-              className={`text-[10px] font-semibold ${
-                agent.status === 'success' ? 'text-primary' : 'text-error'
-              }`}
-            >
-              {agent.status}
-            </span>
-          )}
+    <div className="flex h-full min-h-0 flex-col border-l border-line bg-surface text-ink">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon
+            name={statusIcon(agent.status, live)}
+            size={17}
+            className={`${statusTone(agent.status, live)} shrink-0 ${live ? 'animate-spin' : ''}`}
+          />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] font-semibold text-ink">執行摘要</span>
+              <span className={`text-[11px] font-medium ${statusTone(agent.status, live)}`}>
+                {statusLabel(agent.status, live)}
+              </span>
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          {live && (
-            <button
-              type="button"
-              onClick={() => stopExecution(runId)}
-              className="px-2 py-1 rounded text-[10px] font-semibold border border-error/30 text-error hover:bg-error/10"
-            >
-              停止
-            </button>
-          )}
-          {onClose && (
+        <div className="flex shrink-0 items-center gap-1">
+          {onClose ? (
             <button
               type="button"
               onClick={onClose}
-              className="p-1 rounded hover:bg-white/10 text-outline"
+              className="rounded-control p-1.5 text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
               title="收合面板"
+              aria-label="收合執行面板"
             >
               <Icon name="close" size={16} />
             </button>
-          )}
+          ) : null}
         </div>
-      </div>
+      </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3 space-y-3">
-        <div className="rounded-xl border border-white/10 bg-surface-container/60 p-3 space-y-2">
-          <div className="text-[10px] uppercase tracking-wider text-outline font-semibold">
-            {isExternal
-              ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind ? ` · ${agent.externalRunnerKind}` : ''}`
-              : `${loopTypeZh(agent.loopConfig.loopType)} · 迭代 ${agent.currentIteration}/${agent.loopConfig.maxIterations}`}
+      <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+        <section className="border-b border-line px-4 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold text-ink-3">目前狀態</p>
+              <p className={`mt-1 truncate text-[13px] font-medium ${live ? 'text-accent-ink' : 'text-ink'}`}>
+                {currentStatus}
+              </p>
+            </div>
+            <span className="shrink-0 font-[family-name:var(--font-mono)] text-[18px] font-semibold tabular-nums text-accent-ink">
+              {agent.progress}%
+            </span>
           </div>
-          {isExternal && (
-            <p className="text-[10px] text-outline leading-snug">
-              {formatRunnerCapabilitiesSummary(runnerCaps)}
-            </p>
-          )}
-          {!isExternal && (
-            <p className="text-[10px] text-outline">
-              DoD：{agent.loopConfig.definitionOfDone?.slice(0, 80) || '—'}
-            </p>
-          )}
-          {isExternal && (
-            <p className="text-[10px] text-amber-400/90 leading-snug">
-              外部執行結束 ≠ 內建 DoD 已滿足；不顯示 iterate／能力包進度。
-            </p>
-          )}
-          <p className="text-xs text-on-surface leading-relaxed line-clamp-3">
-            {agent.objective || '—'}
+
+          <p className="mt-3 line-clamp-3 text-[13px] leading-relaxed text-ink-2">
+            {agent.objective || '等待任務內容…'}
           </p>
-          {activity.statusLine ? (
-            <p className="text-[11px] text-secondary line-clamp-2">{activity.statusLine}</p>
-          ) : null}
-          {activity.thought ? (
-            <div className="rounded-lg border border-white/8 bg-surface/50 p-2">
-              <div className="text-[10px] uppercase tracking-wider text-outline font-semibold mb-1">
-                思考
-              </div>
-              <pre className="text-[10px] text-on-surface-variant whitespace-pre-wrap font-[family-name:var(--font-mono)] max-h-20 overflow-y-auto custom-scrollbar line-clamp-6">
-                {activity.thought.slice(-800)}
-              </pre>
-            </div>
-          ) : null}
-          <div>
-            <div className="flex items-center justify-between gap-2 text-[10px] text-outline mb-1">
-              <span>進度</span>
-              {/* docs/ui 把百分比與實際經過時間放在一起：進度停住時，時間仍在走，
-                  才看得出是「還在做」還是「卡住了」。 */}
-              <span className="flex items-center gap-1.5 font-[family-name:var(--font-mono)]">
-                {live && activity.startedAt > 0 ? <ElapsedTime startedAt={activity.startedAt} /> : null}
-                <span className="text-primary">{agent.progress}%</span>
-              </span>
-            </div>
-            <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+
+          <div className="mt-3">
+            <div className="h-1.5 overflow-hidden rounded-full bg-inset">
               <div
-                className="h-full bg-primary rounded-full transition-[width] duration-500 motion-reduce:transition-none"
-                style={{ width: `${Math.min(100, agent.progress)}%` }}
+                className="h-full rounded-full bg-accent transition-[width] duration-500 motion-reduce:transition-none"
+                style={{ width: `${Math.min(100, Math.max(0, agent.progress))}%` }}
               />
             </div>
-          </div>
-          <div className="text-[10px] text-outline font-[family-name:var(--font-mono)]">
-            tokens {agent.tokensUsed} · {agent.metrics?.executionMs || 0}ms
-          </div>
-          {!isExternal && (agent.loadedCapabilityIds?.length ?? 0) > 0 && (
-            <div className="pt-1">
-              <div className="text-[10px] uppercase tracking-wider text-outline font-semibold mb-1.5">
-                Capabilities
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {agent.loadedCapabilityIds.map((id) => (
-                  <span
-                    key={id}
-                    className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-[family-name:var(--font-mono)] border border-primary/25 bg-primary/10 text-primary"
-                    title={id}
-                  >
-                    {id}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {(tasks.length > 0 || (live && agent.loopConfig.trigger === 'local-cli')) && (
-          <div className="rounded-xl border border-white/10 bg-surface-container/40 p-3">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-[10px] uppercase tracking-wider text-outline font-semibold">
-                任務清單
-              </h4>
-              {tasks.length > 0 && (
-                <span className="text-[10px] text-outline font-[family-name:var(--font-mono)]">
-                  {tasks.filter((t) => t.status === 'done').length}/
-                  {tasks.length}
-                </span>
-              )}
-            </div>
-            {tasks.length === 0 ? (
-              <p className="flex items-center gap-2 text-xs text-outline">
-                <PixelLoader className="text-primary" />
-                <ShimmerLabel active>分析任務中…</ShimmerLabel>
-              </p>
-            ) : (
-              /* 與 StepTimeline 同一套標記：待辦／進行中是帶序號的圓環，
-                 結束才換成實心徽章，所以左欄不會在狀態切換時抖動。 */
-              <ul className="space-y-1.5">
-                {tasks.map((t, i) => (
-                  <li key={t.id} className="flex items-start gap-2 text-xs">
-                    {t.status === 'done' || t.status === 'failed' ? (
-                      <span
-                        className={`mt-px flex size-[18px] shrink-0 items-center justify-center rounded-full ${
-                          t.status === 'failed'
-                            ? 'bg-error text-on-error'
-                            : 'bg-primary-container text-on-primary-container'
-                        }`}
-                        style={{ animation: 'pop-in 300ms cubic-bezier(0.23,1,0.32,1) both' }}
-                      >
-                        <Icon name={t.status === 'failed' ? 'close' : 'check'} size={12} filled={t.status === 'done'} />
-                      </span>
-                    ) : (
-                      <SpinnerRing
-                        size={18}
-                        active={t.status === 'active'}
-                        tone={t.status === 'active' ? 'active' : 'idle'}
-                      >
-                        {i + 1}
-                      </SpinnerRing>
-                    )}
-                    <span
-                      className={
-                        t.status === 'done'
-                          ? 'text-on-surface-variant line-through opacity-70'
-                          : t.status === 'active'
-                            ? 'text-on-surface'
-                            : 'text-on-surface-variant'
-                      }
-                    >
-                      {t.text}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-
-        {agent.subAgents.length > 0 && (
-          <div className="rounded-xl border border-white/10 bg-surface-container/40 p-3">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-[10px] uppercase tracking-wider text-outline font-semibold">
-                子代理工作樹
-              </h4>
-              <span className="text-[10px] text-outline font-[family-name:var(--font-mono)]">
-                {agent.subAgents.filter((item) => item.status === 'done').length}/{agent.subAgents.length}
+            <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-ink-3">
+              <span className="truncate">
+                {isExternal
+                  ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind ? ` · ${agent.externalRunnerKind}` : ''}`
+                  : `${loopTypeZh(agent.loopConfig.loopType)} · 第 ${agent.currentIteration}/${agent.loopConfig.maxIterations} 回合`}
+              </span>
+              <span className="shrink-0 font-[family-name:var(--font-mono)] tabular-nums">
+                {live && activity.startedAt > 0 ? <ElapsedTime startedAt={activity.startedAt} /> : null}
+                {live && activity.startedAt > 0 ? ' · ' : ''}
+                {progressSummary ? `${progressSummary} 項` : '準備中'}
               </span>
             </div>
-            <div className="space-y-1.5">
-              {agent.subAgents.map((item) => (
-                <div key={item.id} className="flex items-start gap-2 text-xs">
-                  <Icon
-                    name={item.status === 'done' ? 'check_circle' : item.status === 'error' ? 'cancel' : item.status === 'active' ? 'progress_activity' : 'radio_button_unchecked'}
-                    size={14}
-                    className={item.status === 'done' ? 'text-primary' : item.status === 'error' ? 'text-error' : item.status === 'active' ? 'animate-spin text-primary' : 'text-outline'}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="text-on-surface">{item.name}</span>
-                    <span className="ml-1 text-outline">· {item.role}</span>
-                    {item.model ? <span className="ml-1 text-outline font-mono">· {item.model}</span> : null}
-                    {item.lastMessage ? <span className="mt-0.5 block truncate text-[10px] text-outline">{item.lastMessage}</span> : null}
+          </div>
+
+        </section>
+
+        <PanelSection
+          id="run-progress"
+          title="執行進度"
+          summary={progressSummary ? `${progressSummary} 完成` : undefined}
+          open={progressOpen}
+          onToggle={() => setProgressOpen((value) => !value)}
+        >
+          {tasks.length > 0 ? (
+            <ul className="space-y-2">
+              {tasks.map((task, index) => (
+                <li key={task.id} className="flex items-start gap-2 text-[12px]">
+                  {task.status === 'done' || task.status === 'failed' ? (
+                    <span
+                      className={`mt-px flex size-[18px] shrink-0 items-center justify-center rounded-full ${
+                        task.status === 'failed' ? 'bg-red text-white' : 'bg-green text-white'
+                      }`}
+                    >
+                      <Icon name={task.status === 'failed' ? 'close' : 'check'} size={12} filled={task.status === 'done'} />
+                    </span>
+                  ) : (
+                    <SpinnerRing
+                      size={18}
+                      active={task.status === 'active'}
+                      tone={task.status === 'active' ? 'active' : 'idle'}
+                    >
+                      {index + 1}
+                    </SpinnerRing>
+                  )}
+                  <span
+                    className={
+                      task.status === 'done'
+                        ? 'text-ink-3 line-through'
+                        : task.status === 'active'
+                          ? 'text-ink'
+                          : 'text-ink-2'
+                    }
+                  >
+                    {task.text}
                   </span>
-                </div>
+                </li>
               ))}
-            </div>
-          </div>
-        )}
-
-        {agent.intervention?.active && (
-          <InterventionPanel
-            intervention={agent.intervention}
-            onApprove={(payloadJson) =>
-              resolveIntervention({ action: 'approve', payloadJson }, runId)
-            }
-            onReject={() => resolveIntervention({ action: 'reject' }, runId)}
-          />
-        )}
-
-        {agent.status === 'awaiting_user' && (
-          <button
-            type="button"
-            onClick={() => continueTurn(runId)}
-            className="w-full py-2 rounded-lg border border-primary/40 text-primary text-xs font-semibold hover:bg-primary/10"
-          >
-            繼續下一回合
-          </button>
-        )}
-
-        {continueGoal && !live && canContinueGoal && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
-            <p className="text-[11px] text-on-surface font-medium">
-              未完成 Goal 可保留 DoD 繼續
+            </ul>
+          ) : agent.steps.length > 0 ? (
+            <CompactStepList steps={agent.steps} />
+          ) : live && agent.loopConfig.trigger === 'local-cli' ? (
+            <p className="flex items-center gap-2 text-[12px] text-ink-3">
+              <PixelLoader className="text-accent-ink" />
+              <ShimmerLabel active>正在分析任務…</ShimmerLabel>
             </p>
-            <p className="text-[10px] text-outline line-clamp-2">
-              {continueGoal.definitionOfDone}
-            </p>
-            {continueGoal.missing.length > 0 && (
-              <ul className="text-[10px] text-on-surface-variant space-y-0.5">
-                {continueGoal.missing.slice(0, 4).map((m) => (
-                  <li key={m}>· {m}</li>
-                ))}
-              </ul>
-            )}
-            <button
-              type="button"
-              onClick={() => void onContinueGoal()}
-              className="w-full py-2 rounded-lg border border-primary/40 text-primary text-xs font-semibold hover:bg-primary/10"
-            >
-              補齊缺口繼續
-            </button>
-          </div>
-        )}
-        {continueGoal && !live && !canContinueGoal && (
-          <div className="rounded-xl border border-white/15 bg-surface-container/50 p-3 space-y-1.5">
-            <p className="text-[11px] text-on-surface font-medium">
-              外部 CLI 不支援「補齊缺口繼續」
-            </p>
-            <p className="text-[10px] text-outline leading-snug">
-              已保留原 Goal 快照（DoD／缺口），但目前 runner 未宣告 continueGoal。
-              請切換至內建引擎後再繼續，或重新開啟外部任務。
-            </p>
-            {continueGoal.missing.length > 0 && (
-              <ul className="text-[10px] text-on-surface-variant space-y-0.5">
-                {continueGoal.missing.slice(0, 4).map((m) => (
-                  <li key={m}>· {m}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-
-        <div className="agent-panel-section rounded-xl border border-white/10 bg-surface-container/40 p-3">
-          <h4 className="text-[10px] uppercase tracking-wider text-outline font-semibold mb-2">
-            步驟
-          </h4>
-          {agent.steps.length === 0 ? (
-            <p className="text-xs text-outline">等待引擎…</p>
           ) : (
-            <StepTimeline steps={agent.steps} />
+            <p className="text-[12px] text-ink-3">等待引擎建立進度…</p>
           )}
-        </div>
 
-        <div className="agent-panel-section rounded-xl border border-white/10 bg-[#060e20] overflow-hidden flex flex-col min-h-[160px] max-h-[240px]">
-          <div className="px-3 py-1.5 border-b border-white/10 text-[10px] uppercase tracking-wider text-outline font-semibold">
-            日誌
-          </div>
-          <div className="flex-1 min-h-0">
-            <LogViewer logs={agent.logs.slice(-80)} live={live} />
-          </div>
-        </div>
-
-        {agent.toolCalls.length > 0 && (
-          <div className="agent-panel-section rounded-xl border border-white/10 p-3 space-y-1">
-            <h4 className="text-[10px] uppercase tracking-wider text-outline font-semibold mb-1">
-              工具 ({agent.toolCalls.length})
-            </h4>
-            {agent.toolCalls.slice(-6).map((t) => (
-              <div
-                key={t.id}
-                className="text-[11px] font-[family-name:var(--font-mono)] flex gap-1.5"
+          {tasks.length > 0 && agent.steps.length > 0 ? (
+            <div className="mt-4 border-t border-line pt-3">
+              <button
+                type="button"
+                aria-expanded={stepsOpen}
+                onClick={() => setStepsOpen((value) => !value)}
+                className="flex w-full items-center gap-2 text-left text-[11px] text-ink-3 transition-colors hover:text-ink"
               >
-                <span className={t.ok ? 'text-primary' : 'text-error'}>{t.ok ? '✓' : '✗'}</span>
-                <span className="text-secondary shrink-0">{t.tool}</span>
-                <span className="text-outline truncate">{t.output.slice(0, 60)}</span>
-              </div>
-            ))}
-          </div>
-        )}
+                <span className="flex-1">引擎步驟</span>
+                <span className="font-[family-name:var(--font-mono)]">{agent.steps.length}</span>
+                <Icon name={stepsOpen ? 'expand_less' : 'expand_more'} size={15} />
+              </button>
+              {stepsOpen ? <div className="mt-3"><CompactStepList steps={agent.steps} /></div> : null}
+            </div>
+          ) : null}
 
-        {agent.result && done ? (
-          <p className="px-0.5 text-[10px] text-outline">
-            最終結果已放入主對話，可在主對話收合或展開。
-          </p>
+          {agent.subAgents.length > 0 ? (
+            <div className="mt-4 border-t border-line pt-3">
+              <button
+                type="button"
+                aria-expanded={subAgentsOpen}
+                onClick={() => setSubAgentsOpen((value) => !value)}
+                className="flex w-full items-center gap-2 text-left text-[11px] text-ink-3 transition-colors hover:text-ink"
+              >
+                <span className="flex-1">子代理</span>
+                <span className="font-[family-name:var(--font-mono)]">
+                  {agent.subAgents.filter((item) => item.status === 'done').length}/{agent.subAgents.length}
+                </span>
+                <Icon name={subAgentsOpen ? 'expand_less' : 'expand_more'} size={15} />
+              </button>
+              {subAgentsOpen ? (
+                <div className="mt-3 space-y-2">
+                  {agent.subAgents.map((item) => (
+                    <div key={item.id} className="flex items-start gap-2 text-[11px]">
+                      <Icon
+                        name={item.status === 'done' ? 'check_circle' : item.status === 'error' ? 'cancel' : item.status === 'active' ? 'progress_activity' : 'radio_button_unchecked'}
+                        size={14}
+                        className={item.status === 'done' ? 'text-green' : item.status === 'error' ? 'text-red' : item.status === 'active' ? 'animate-spin text-accent-ink' : 'text-ink-3'}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="text-ink-2">{item.name}</span>
+                        <span className="ml-1 text-ink-3">· {item.role}</span>
+                        {item.model ? <span className="ml-1 font-mono text-[10px] text-ink-3">· {item.model}</span> : null}
+                        {item.lastMessage ? <span className="mt-0.5 block truncate text-[10px] text-ink-3">{item.lastMessage}</span> : null}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </PanelSection>
+
+        {detailSummary || isExternal || agent.loadedCapabilityIds.length > 0 ? (
+          <PanelSection
+            id="run-details"
+            title="詳細紀錄"
+            summary={detailSummary || '執行資訊'}
+            open={detailsOpen}
+            onToggle={() => setDetailsOpen((value) => !value)}
+          >
+            <div className="space-y-4">
+              {activity.thought ? (
+                <div>
+                  <button
+                    type="button"
+                    aria-expanded={thoughtOpen}
+                    onClick={() => setThoughtOpen((value) => !value)}
+                    className="flex w-full items-center gap-2 text-left text-[11px] text-ink-2 transition-colors hover:text-ink"
+                  >
+                    <span className="flex-1 font-medium">推理摘要</span>
+                    <span className="font-[family-name:var(--font-mono)] text-[10px] text-ink-3">
+                      {activity.thought.length.toLocaleString()} 字
+                    </span>
+                    <Icon name={thoughtOpen ? 'expand_less' : 'expand_more'} size={15} className="text-ink-3" />
+                  </button>
+                  {thoughtOpen ? (
+                    <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-control bg-inset p-2.5 text-[10px] leading-relaxed text-ink-2 font-[family-name:var(--font-mono)] custom-scrollbar">
+                      {activity.thought}
+                    </pre>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {isExternal || agent.loadedCapabilityIds.length > 0 ? (
+                <div>
+                  <p className="text-[11px] font-medium text-ink-2">執行資訊</p>
+                  {isExternal ? (
+                    <>
+                      <p className="mt-1 text-[10px] leading-snug text-ink-3">{formatRunnerCapabilitiesSummary(runnerCaps)}</p>
+                      <p className="mt-1 text-[10px] leading-snug text-orange">
+                        外部執行不代表內建 DoD 已滿足，也不顯示內建能力包進度。
+                      </p>
+                    </>
+                  ) : null}
+                  {agent.loadedCapabilityIds.length > 0 ? (
+                    <p className="mt-1 break-words text-[10px] leading-relaxed text-ink-3 font-[family-name:var(--font-mono)]">
+                      能力包：{agent.loadedCapabilityIds.join(' · ')}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {agent.toolCalls.length > 0 ? (
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-medium text-ink-2">工具呼叫</p>
+                    <span className="font-[family-name:var(--font-mono)] text-[10px] text-ink-3">{agent.toolCalls.length}</span>
+                  </div>
+                  <div className="mt-2 space-y-1.5">
+                    {agent.toolCalls.slice(-6).map((tool) => (
+                      <div key={tool.id} className="flex min-w-0 gap-1.5 text-[10px] font-[family-name:var(--font-mono)]">
+                        <span className={tool.ok ? 'text-green' : 'text-red'}>{tool.ok ? '✓' : '✗'}</span>
+                        <span className="shrink-0 text-ink-2">{tool.tool}</span>
+                        <span className="truncate text-ink-3">{tool.output.slice(0, 90)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {agent.logs.length > 0 ? (
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-medium text-ink-2">日誌</p>
+                    <span className="font-[family-name:var(--font-mono)] text-[10px] text-ink-3">{agent.logs.length}</span>
+                  </div>
+                  <div className="mt-2 h-44 overflow-hidden rounded-control bg-inset">
+                    <LogViewer logs={agent.logs.slice(-80)} live={live} />
+                  </div>
+                </div>
+              ) : null}
+
+              {(agent.tokensUsed > 0 || agent.metrics.executionMs > 0) ? (
+                <p className="text-[10px] text-ink-3 font-[family-name:var(--font-mono)]">
+                  tokens {agent.tokensUsed} · {agent.metrics.executionMs || 0}ms
+                </p>
+              ) : null}
+            </div>
+          </PanelSection>
         ) : null}
       </div>
+
     </div>
   )
 }

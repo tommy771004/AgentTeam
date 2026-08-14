@@ -608,7 +608,7 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
     'src/pages/RecordsPage.tsx',
     'src/pages/SuccessPage.tsx',
     'src/pages/SubDesignPage.tsx',
-    'src/components/InlineRunPanel.tsx',
+    'src/components/RunContinuationActions.tsx',
     'src/components/subdesign/CritiqueTheater.tsx',
     'src/agent/hermes/backgroundJobs.ts',
   ]
@@ -839,6 +839,8 @@ await test('Phase 1: run presentation components use explicit run selectors', as
   const fs = await import('node:fs')
   const feed = fs.readFileSync(path.join(appRoot, 'src/components/RunProcessFeed.tsx'), 'utf8')
   const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
+  const continuation = fs.readFileSync(path.join(appRoot, 'src/components/RunContinuationActions.tsx'), 'utf8')
+  const intervention = fs.readFileSync(path.join(appRoot, 'src/components/InterventionOverlay.tsx'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   assert.match(feed, /runId/)
   assert.match(panel, /runId/)
@@ -846,9 +848,8 @@ await test('Phase 1: run presentation components use explicit run selectors', as
   assert.doesNotMatch(feed, /useRunActivityStore\(\)/)
   assert.doesNotMatch(panel, /useAgentStore\(\)/)
   assert.doesNotMatch(panel, /useRunActivityStore\(\)/)
-  assert.match(panel, /stopExecution\(runId\)/)
-  assert.match(panel, /continueTurn\(runId\)/)
-  assert.match(panel, /resolveIntervention\([\s\S]*runId\)/)
+  assert.match(continuation, /continueTurn\(runId\)/)
+  assert.match(intervention, /resolveIntervention\([\s\S]*runId/)
   assert.match(agent, /MAX_RUN_AGENT_STATES = 100/)
   assert.match(agent, /pruneRunAgentStates/)
   assert.match(agent, /lastRunIdByThread/)
@@ -1741,6 +1742,7 @@ await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal gate
   const localCli = fs.readFileSync(path.join(appRoot, 'src/agent/localCliRun.ts'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
+  const continuation = fs.readFileSync(path.join(appRoot, 'src/components/RunContinuationActions.tsx'), 'utf8')
   const runX = readTaskRunRuntimeSource(fs)
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
@@ -1767,9 +1769,9 @@ await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal gate
   assert.match(dispatch, /executionKind: 'loop'/)
 
   // continueGoal UI gated; contract documented but capability stays false
-  assert.match(panel, /canContinueGoal/)
+  assert.match(continuation, /canContinueGoal/)
   assert.match(panel, /EXTERNAL_CLI_UI_LABEL/)
-  assert.match(panel, /外部 CLI 不支援/)
+  assert.match(continuation, /不支援繼續 Goal/)
   assert.match(panel, /formatRunnerCapabilitiesSummary/)
   assert.match(runX, /capabilitiesForRunner/)
   assert.match(runX, /continueBlockedNote|不支援 continueGoal/)
@@ -1960,14 +1962,14 @@ await test('ADR3 follow-up: interactive entry points snapshot projectRoot at dis
   const fs = await import('node:fs')
   const protocols = fs.readFileSync(path.join(appRoot, 'src/pages/ProtocolsPage.tsx'), 'utf8')
   const slash = fs.readFileSync(path.join(appRoot, 'src/hooks/useSlashExecutor.ts'), 'utf8')
-  const inlinePanel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
+  const continuation = fs.readFileSync(path.join(appRoot, 'src/components/RunContinuationActions.tsx'), 'utf8')
   const runContext = fs.readFileSync(path.join(appRoot, 'src/agent/tools/runContext.ts'), 'utf8')
   // Each interactive runTask() call must snapshot the active project explicitly —
   // a concurrent run must not silently re-resolve to whatever project the UI
   // switches to mid-flight. See docs/adr/0003-concurrent-run-lock-removal.md.
   assert.match(protocols, /runTask\(\{[\s\S]{0,400}projectRoot: projectRoot \|\| undefined/)
   assert.match(slash, /runTask\(\{[\s\S]{0,400}projectRoot: projectRoot\(\) \|\| undefined/)
-  assert.match(inlinePanel, /runTask\(\{[\s\S]{0,600}projectRoot: useProjectStore\.getState\(\)\.root \|\| undefined/)
+  assert.match(continuation, /runTask\(\{[\s\S]{0,600}projectRoot: useProjectStore\.getState\(\)\.root \|\| undefined/)
   assert.match(runContext, /should therefore be unreachable during a real run/)
 })
 
