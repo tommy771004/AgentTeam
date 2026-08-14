@@ -15,6 +15,7 @@ import {
 } from '../store/runActivityStore'
 import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
+import { ContextCards } from './ContextCards'
 import { ElapsedTime } from './primitives/ElapsedTime'
 import { PixelLoader } from './primitives/PixelLoader'
 import { Reveal } from './primitives/Reveal'
@@ -226,20 +227,20 @@ export function RunProcessFeed({
   if (!live) return null
 
   return (
-    <section className="agent-process-feed w-full space-y-2.5 py-1" aria-live="polite" aria-busy={live}>
+    <section className="agent-process-feed w-full space-y-3 py-2" aria-live="polite" aria-busy={live}>
       {/* One stable turn status from prompt submission until the first part
           arrives. docs/ui pairs the pixel-grid wavefront with a shimmering
           label and a live mono timer, so a long silent step still reads as
           progress rather than a stall. */}
-      <div className="agent-process-status flex items-center gap-2.5 text-[12px] text-outline">
-        <PixelLoader className="text-primary" />
+      <div className="agent-process-status flex items-center gap-2.5 text-[13px] text-ink-2">
+        <PixelLoader className="text-ink" />
         <ShimmerLabel active className="min-w-0 truncate font-medium">
           {phase ||
             (agent.executionKind === 'external' || agent.loopConfig?.trigger === 'local-cli'
               ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind || agent.steps[0]?.assignedAgent ? ` · ${agent.externalRunnerKind || agent.steps[0]?.assignedAgent}` : ''}…`
               : `思考中（${depthLabel}）…`)}
         </ShimmerLabel>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10px]">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10px] text-ink-3">
           {startedAt > 0 ? (
             <>
               <ElapsedTime startedAt={startedAt} />
@@ -270,24 +271,24 @@ export function RunProcessFeed({
           <button
             type="button"
             aria-expanded={thoughtOpen}
-            className="agent-process-toggle"
+            className="agent-process-toggle flex items-center gap-1.5 text-[12.5px] text-ink-2"
             onClick={() => setThoughtOpen((v) => !v)}
           >
-            <Icon name="psychology" size={15} className="text-secondary" />
+            <Icon name="auto_awesome" size={15} className="text-ink-3" />
             <span className="font-medium">推理摘要</span>
-            <span className="text-[10px] opacity-70">
+            <span className="text-[10px] text-ink-3">
               {thought.length.toLocaleString()} 字 · {thoughtOpen ? '收合內容' : '檢視內容'}
             </span>
-            <Icon name={thoughtOpen ? 'expand_less' : 'expand_more'} size={14} className="ml-0.5 opacity-60" />
+            <Icon name={thoughtOpen ? 'expand_less' : 'expand_more'} size={14} className="ml-0.5 text-ink-3" />
           </button>
           <Reveal open={thoughtOpen}>
-            <pre className="agent-process-detail mt-1 max-h-36 overflow-y-auto whitespace-pre-wrap text-[12px] leading-relaxed text-on-surface-variant/90 font-[family-name:var(--font-mono)] custom-scrollbar">
+            <pre className="agent-process-detail mt-1 max-h-36 overflow-y-auto whitespace-pre-wrap text-[12px] leading-relaxed text-ink-2 font-[family-name:var(--font-mono)] custom-scrollbar">
               {thought}
             </pre>
           </Reveal>
         </div>
       ) : (
-        <div className="agent-process-waiting flex items-center gap-1.5 text-[12px] text-outline/80">
+        <div className="agent-process-waiting flex items-center gap-1.5 text-[12px] text-ink-3">
           <span className="agent-process-pulse" aria-hidden="true" />
           <span>等待模型開始回應…</span>
         </div>
@@ -296,14 +297,14 @@ export function RunProcessFeed({
       {/* Consecutive read/search parts become one OpenCode-style context group. */}
       {groups.length > 0 ? (
         <div className="agent-process-trace space-y-1">
+          <div className="agent-process-trace-head flex items-center justify-between px-1 text-[10px] font-semibold uppercase tracking-[0.12em]">
+            <span>Tool trace</span>
+            <span>{timeline.length} events</span>
+          </div>
           {groups.map((group, index) => {
             const open = expanded === group.id
             const active = index === groups.length - 1 && !draftText.trim()
             if (group.type === 'context') {
-              const detail = group.operations
-                .map((operation) => operation.detail || operation.title)
-                .filter(Boolean)
-                .join('\n')
               return (
                 <div
                   key={group.id}
@@ -311,24 +312,22 @@ export function RunProcessFeed({
                 >
                   <button
                     type="button"
-                    className="agent-process-row flex max-w-full items-center gap-1.5 text-left text-[12px] text-outline"
+                    className="agent-process-row group/context flex max-w-full items-center gap-2 text-left text-[12px] text-ink-2"
                     onClick={() => setExpanded((id) => (id === group.id ? null : group.id))}
                   >
                     <Icon
                       name={active ? 'progress_activity' : 'folder_open'}
                       size={15}
-                      className={active ? 'shrink-0 animate-spin text-primary' : 'shrink-0 opacity-80'}
+                      className={active ? 'shrink-0 animate-spin text-ink' : 'shrink-0 text-ink-3'}
                     />
-                    <span className="truncate">{active ? '正在蒐集上下文' : '已蒐集上下文'}</span>
-                    <span className="truncate text-[11px] text-outline/70">
+                    <span className="shrink-0 font-medium">{active ? '正在蒐集上下文' : '已蒐集上下文'}</span>
+                    <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px]">
                       {contextSummary(group.operations)}
                     </span>
-                    <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" />
+                    <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 text-ink-3" />
                   </button>
                   <Reveal open={open}>
-                    <pre className="agent-process-detail ml-5 mt-0.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] custom-scrollbar">
-                      {detail}
-                    </pre>
+                    <ContextCards operations={group.operations} />
                   </Reveal>
                 </div>
               )
@@ -343,21 +342,26 @@ export function RunProcessFeed({
               >
                 <button
                   type="button"
-                  className={`agent-process-row flex max-w-full items-center gap-1.5 text-left text-[12px] ${
-                    row.ok === false ? 'text-error' : 'text-outline'
+                  className={`agent-process-row group/tool flex max-w-full items-center gap-2 text-left text-[12px] ${
+                    row.ok === false ? 'text-red' : 'text-ink-2'
                   }`}
                   onClick={() => hasDetail && setExpanded((id) => (id === group.id ? null : group.id))}
                 >
                   <Icon
                     name={active ? 'progress_activity' : kindIcon(row.kind)}
                     size={15}
-                    className={active ? 'shrink-0 animate-spin text-primary' : 'shrink-0 opacity-80'}
+                    className={active ? 'shrink-0 animate-spin text-ink' : 'shrink-0 text-ink-3'}
                   />
-                  <span className="truncate">{row.title}</span>
-                  {hasDetail ? <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 opacity-50" /> : null}
+                  <span className="shrink-0 font-medium">{row.title}</span>
+                  {hasDetail ? (
+                    <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px] font-[family-name:var(--font-mono)]">
+                      {row.path || row.detail}
+                    </span>
+                  ) : null}
+                  {hasDetail ? <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 text-ink-3" /> : null}
                 </button>
                 <Reveal open={open && hasDetail}>
-                  <pre className="agent-process-detail ml-5 mt-0.5 whitespace-pre-wrap break-all text-[11px] text-on-surface-variant/80 font-[family-name:var(--font-mono)] line-clamp-5">
+                  <pre className="agent-process-detail ml-5 mt-0.5 whitespace-pre-wrap break-all text-[11px] text-ink-2 font-[family-name:var(--font-mono)] line-clamp-5">
                     {row.path && row.path !== row.detail ? `${row.path}\n` : ''}
                     {row.detail}
                   </pre>
@@ -371,7 +375,7 @@ export function RunProcessFeed({
       {/* Files touched so far */}
       {allFiles.length > 0 ? (
         <div className="agent-process-files">
-          <div className="mb-1.5 text-[11px] text-outline">已變更 {allFiles.length} 個檔案</div>
+          <div className="mb-1.5 text-[11px] text-ink-3">已變更 {allFiles.length} 個檔案</div>
           <div className="flex flex-wrap gap-1.5">
           {allFiles.slice(-8).map((f, i) => (
             <button
@@ -400,8 +404,8 @@ export function RunProcessFeed({
           "still writing" is visible without a second status row. */}
       {draftText ? (
         <div className="agent-streaming-answer pt-2">
-          <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-outline">
-            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
+          <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" aria-hidden="true" />
             assistant · 回覆中
           </div>
           <div

@@ -46,7 +46,7 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
                 {isDone || isFailed ? (
                   <span
                     className={`flex size-[22px] items-center justify-center rounded-full ${
-                      isFailed ? 'bg-error text-on-error' : 'bg-primary-container text-on-primary-container'
+                      isFailed ? 'bg-red text-white' : 'bg-green text-white'
                     }`}
                     style={{ animation: 'pop-in 300ms cubic-bezier(0.23,1,0.32,1) both' }}
                   >
@@ -61,7 +61,7 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
               {!isLast && (
                 <div
                   className={`agent-step-connector w-px flex-1 min-h-5 my-1 ${
-                    isDone ? 'bg-primary/40' : 'bg-outline-variant/40'
+                    isDone ? 'bg-green/40' : 'bg-line-strong/50'
                   }`}
                 />
               )}
@@ -70,7 +70,7 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
               <div className="flex items-center gap-2 flex-wrap">
                 <span
                   className={`font-semibold text-[12px] ${
-                    isActive ? 'text-primary' : 'text-on-surface'
+                    isActive ? 'text-accent-ink' : 'text-ink'
                   }`}
                 >
                   {step.description}
@@ -86,7 +86,7 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
                   </span>
                 )}
                 {step.durationMs != null && isDone && (
-                  <span className="text-outline text-xs font-[family-name:var(--font-mono)] ml-auto">
+                  <span className="text-ink-3 text-xs font-[family-name:var(--font-mono)] ml-auto">
                     {(step.durationMs / 1000).toFixed(1)}s
                   </span>
                 )}
@@ -95,10 +95,10 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
                 <p
                   className={`agent-step-model mt-1 text-[10px] font-[family-name:var(--font-mono)] ${
                     step.modelSource === 'fallback'
-                      ? 'text-amber-300/90'
+                      ? 'text-orange'
                       : step.modelSource === 'role' || step.modelSource === 'cli'
-                        ? 'text-primary/90'
-                        : 'text-outline'
+                        ? 'text-accent-ink'
+                        : 'text-ink-3'
                   }`}
                   title={
                     step.modelSource === 'fallback'
@@ -112,14 +112,14 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
                 </p>
               )}
               {step.result && (
-                <p className="agent-step-result text-[12px] text-on-surface-variant mt-1 whitespace-pre-wrap break-words line-clamp-6">
+                <p className="agent-step-result text-[12px] text-ink-2 mt-1 whitespace-pre-wrap break-words line-clamp-6">
                   {step.result}
                 </p>
               )}
               {isActive && (
-                <p className="mt-1 flex items-center gap-2 text-[12px] text-primary/70">
-                  <PixelLoader />
-                  <ShimmerLabel active>處理中…</ShimmerLabel>
+                <p className="mt-1 flex items-center gap-2 text-[12px] text-ink-2">
+                  <PixelLoader className="text-ink" />
+                  <ShimmerLabel active className="text-accent-ink">處理中…</ShimmerLabel>
                 </p>
               )}
             </div>

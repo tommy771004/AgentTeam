@@ -84,13 +84,13 @@ export function ComposerQuickActions({
         aria-label="新增內容與設定"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-on-surface transition-colors hover:bg-white/15"
+        className="flex size-7 items-center justify-center rounded-control bg-inset text-ink-2 shadow-hairline transition-colors hover:bg-hover hover:text-ink"
       >
         <Icon name={open ? 'close' : 'add'} size={22} />
       </button>
 
       {open ? (
-        <div className="absolute bottom-full left-0 z-[110] mb-3 max-h-[min(600px,calc(100vh-8rem))] w-[min(768px,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-white/15 bg-[#2c2c2e]/98 p-2 shadow-2xl backdrop-blur-2xl custom-scrollbar">
+        <div className="absolute bottom-full left-0 z-[110] mb-2 max-h-[min(600px,calc(100vh-8rem))] w-[min(560px,calc(100vw-2rem))] overflow-y-auto rounded-card border border-line bg-surface p-1 shadow-raised custom-scrollbar">
           <MenuLabel>新增</MenuLabel>
           <MenuButton
             icon="attach_file"
@@ -132,10 +132,10 @@ export function ComposerQuickActions({
                 key={mode}
                 type="button"
                 onClick={() => choose(() => onAgentModeChange(mode))}
-                className={`rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-colors ${
+                className={`rounded-control px-2.5 py-2 text-left text-[13px] font-medium transition-colors ${
                   agentMode === mode
-                    ? 'bg-white/15 text-on-surface'
-                    : 'text-on-surface-variant hover:bg-white/[0.07]'
+                    ? 'bg-hover-2 text-ink'
+                    : 'text-ink-2 hover:bg-hover-2'
                 }`}
               >
                 <Icon name={mode === 'build' ? 'construction' : 'checklist'} size={16} className="mr-1.5 align-text-bottom" />
@@ -154,10 +154,10 @@ export function ComposerQuickActions({
                     : item.label
                 }
                 onClick={() => choose(() => onLoopChange(item.type))}
-                className={`flex flex-col items-center gap-1 rounded-xl px-1 py-2 text-[10px] transition-colors ${
+                className={`flex flex-col items-center gap-1 rounded-control px-1 py-2 text-[10px] transition-colors ${
                   loopType === item.type
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-on-surface-variant hover:bg-white/[0.07]'
+                    ? 'bg-accent-tint text-accent-ink'
+                    : 'text-ink-2 hover:bg-hover-2'
                 }`}
               >
                 <Icon name={item.icon} size={17} />
@@ -175,10 +175,10 @@ export function ComposerQuickActions({
                 disabled={!option.ready && option.id !== 'builtin'}
                 title={option.ready ? option.blurb : `${option.label} 尚未授權`}
                 onClick={() => choose(() => onRunnerChange(option.id))}
-                className={`rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+                className={`rounded-control px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
                   runner === option.id
-                    ? 'bg-primary/20 text-primary'
-                    : 'bg-white/[0.06] text-on-surface-variant hover:bg-white/10'
+                    ? 'bg-accent-tint text-accent-ink'
+                    : 'bg-inset text-ink-2 hover:bg-hover-2'
                 }`}
               >
                 {option.label}
@@ -197,7 +197,7 @@ export function ComposerQuickActions({
 }
 
 function MenuLabel({ children }: { children: string }) {
-  return <p className="px-2 pt-2 pb-1 text-[11px] font-semibold text-white/45">{children}</p>
+  return <p className="px-2 pt-2 pb-1 text-[11px] font-semibold text-ink-3">{children}</p>
 }
 
 function MenuButton({
@@ -218,12 +218,12 @@ function MenuButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-35"
+      className="flex w-full items-center gap-3 rounded-control px-2 py-2 text-left transition-colors hover:bg-hover-2 disabled:cursor-not-allowed disabled:opacity-35"
     >
-      <Icon name={icon} size={19} className="shrink-0 text-on-surface-variant" />
+      <Icon name={icon} size={19} className="shrink-0 text-ink-2" />
       <span className="min-w-0">
-        <span className="block text-[13px] font-medium text-on-surface">{title}</span>
-        <span className="block truncate text-[11px] text-on-surface-variant">{description}</span>
+        <span className="block text-[13px] font-medium text-ink">{title}</span>
+        <span className="block truncate text-[11px] text-ink-3">{description}</span>
       </span>
     </button>
   )

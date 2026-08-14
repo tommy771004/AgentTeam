@@ -46,6 +46,36 @@
   --color-inverse-on-surface: #1e293b;
   --color-inverse-primary: #0e7490;
 
+  /* docs/ui primitive vocabulary. Keep these aliases close to the existing
+     material tokens so the chat surface can use one quiet visual language. */
+  --color-canvas: #070b14;
+  --color-field: #141c2c;
+  --color-inset: #060a12;
+  --color-ink: #e8eefc;
+  --color-ink-2: #a8b4c8;
+  --color-ink-3: #7a8699;
+  --color-line: rgba(255, 255, 255, 0.09);
+  --color-line-strong: #3a4558;
+  --color-hover: rgba(255, 255, 255, 0.07);
+  --color-hover-2: rgba(255, 255, 255, 0.055);
+  --color-accent: #2bb8d9;
+  --color-accent-ink: #7dd8f0;
+  --color-green: #34d399;
+  --color-red: #fb7185;
+  --color-orange: #fbbf24;
+  --color-accent-tint: rgba(43, 184, 217, 0.14);
+  --color-green-tint: rgba(52, 211, 153, 0.12);
+  --color-red-tint: rgba(251, 113, 133, 0.12);
+  --color-orange-tint: rgba(251, 191, 36, 0.12);
+
+  --radius-card: 14px;
+  --radius-control: 8px;
+  --radius-chip: 6px;
+  --shadow-hairline: 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+  --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.18), 0 10px 28px rgba(0, 0, 0, 0.12);
+  --shadow-raised: 0 18px 46px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+
   --font-sora: "Sora", "SF Pro Display", ui-sans-serif, system-ui, sans-serif;
   --font-inter: "Inter", "SF Pro Text", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
@@ -131,6 +161,30 @@ html[data-theme='light'] {
   --color-inverse-surface: #1e293b;
   --color-inverse-on-surface: #f8fafc;
   --color-inverse-primary: #67e8f9;
+
+  --color-canvas: #f4f6fb;
+  --color-field: #e8eef6;
+  --color-inset: #f8fafc;
+  --color-ink: #0f172a;
+  --color-ink-2: #475569;
+  --color-ink-3: #64748b;
+  --color-line: rgba(15, 23, 42, 0.1);
+  --color-line-strong: #cbd5e1;
+  --color-hover: rgba(15, 23, 42, 0.06);
+  --color-hover-2: rgba(15, 23, 42, 0.045);
+  --color-accent: #0e7490;
+  --color-accent-ink: #0e7490;
+  --color-green: #15803d;
+  --color-red: #dc2626;
+  --color-orange: #b45309;
+  --color-accent-tint: rgba(14, 116, 144, 0.12);
+  --color-green-tint: rgba(21, 128, 61, 0.1);
+  --color-red-tint: rgba(220, 38, 38, 0.1);
+  --color-orange-tint: rgba(180, 83, 9, 0.1);
+  --shadow-hairline: 0 0 0 1px rgba(15, 23, 42, 0.06) inset;
+  --shadow-btn: 0 1px 2px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(15, 23, 42, 0.06) inset;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.08), 0 10px 28px rgba(15, 23, 42, 0.06);
+  --shadow-raised: 0 18px 46px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.06) inset;
 }
 
 html[data-theme='light'] body {
@@ -977,3 +1031,231 @@ html[data-theme='light'] .agent-project-branch:hover { background: rgba(14, 116,
    themes, so a dark border / dark hover would disappear against it. */
 html[data-theme='light'] .agent-log-row:hover,
 html[data-theme='light'] .agent-run-queue-header:hover { background: rgba(15, 23, 42, 0.045); }
+
+/* ── docs/ui surface grammar ──────────────────────────────
+   The written specs use a small set of primitives instead of one heavy
+   container per state. These aliases make the same grammar available to the
+   live product while retaining the app's existing dark/light preference. */
+.primitive-card-pad { padding: 12px; }
+.primitive-card-bar { min-height: 34px; padding: 0 12px; }
+.primitive-card-footer { min-height: 42px; padding: 8px 12px; }
+.primitive-table-cell { padding: 8px 12px; }
+
+.agent-composer {
+  border-color: var(--color-line);
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  transition: border-color 160ms ease, box-shadow 200ms var(--ease-spring-soft), background 160ms ease;
+}
+.agent-composer:hover { border-color: color-mix(in srgb, var(--color-line-strong) 72%, transparent); }
+.agent-composer:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 62%, var(--color-line-strong));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent), var(--shadow-card);
+}
+.agent-composer-send {
+  background: var(--color-ink);
+  color: var(--color-canvas);
+  box-shadow: var(--shadow-btn);
+}
+.agent-composer-send:disabled { background: var(--color-line-strong); color: var(--color-ink-2); }
+
+.agent-process-status {
+  min-height: 28px;
+  color: var(--color-ink-2);
+}
+.agent-process-toggle,
+.agent-process-row {
+  margin-left: -6px;
+  border-radius: var(--radius-control);
+  padding: 4px 6px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.agent-process-toggle:hover,
+.agent-process-row:hover {
+  background: var(--color-hover-2);
+  color: var(--color-ink);
+}
+.agent-process-chip {
+  min-width: 0;
+  max-width: min(28rem, 62vw);
+  border-radius: var(--radius-chip);
+  background: var(--color-hover-2);
+  box-shadow: var(--shadow-hairline);
+  color: var(--color-ink-2);
+}
+.agent-process-detail {
+  border-left-color: color-mix(in srgb, var(--color-accent) 32%, var(--color-line));
+  color: var(--color-ink-2);
+}
+.agent-process-trace { border-left-color: var(--color-line); }
+.agent-process-trace-head {
+  color: var(--color-ink-3);
+  padding-top: 3px;
+  padding-bottom: 2px;
+}
+.agent-context-cards {
+  margin: 3px 0 5px 20px;
+  padding-left: 12px;
+  border-left: 1px solid var(--color-line);
+}
+.agent-context-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--color-ink-3);
+  font: 10px var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.agent-context-card {
+  margin-bottom: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-inset);
+  box-shadow: var(--shadow-hairline);
+}
+.agent-context-card:last-child { margin-bottom: 0; }
+.agent-context-index {
+  flex: 0 0 auto;
+  color: var(--color-ink-3);
+  font: 10px var(--font-mono);
+}
+.agent-context-source {
+  min-width: 0;
+  color: var(--color-ink-2);
+  font-size: 11px;
+}
+.agent-context-copy {
+  margin: 7px 0;
+  color: var(--color-ink-2);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-context-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-chip);
+  background: var(--color-surface);
+  font: 10px var(--font-mono);
+}
+.agent-process-files { border-top-color: var(--color-line); }
+.agent-file-chip {
+  height: 28px;
+  border-color: var(--color-line);
+  border-radius: var(--radius-chip);
+  background: var(--color-surface);
+  color: var(--color-ink-2);
+  box-shadow: var(--shadow-btn);
+}
+.agent-file-chip:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 48%, var(--color-line-strong));
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+
+.agent-user-bubble {
+  border-color: var(--color-line);
+  background: var(--color-field);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-btn);
+}
+.agent-assistant-bubble { color: var(--color-ink); }
+.agent-assistant-label { color: var(--color-ink-3); }
+.agent-chat-actions {
+  opacity: 0.62;
+  transition: opacity 150ms ease;
+}
+.agent-assistant-bubble:hover .agent-chat-actions,
+.agent-chat-actions:focus-within { opacity: 1; }
+.agent-chat-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--color-ink-3);
+  transition: background 100ms ease, color 100ms ease, transform 150ms var(--ease-spring);
+}
+.agent-chat-action:hover { background: var(--color-hover-2); color: var(--color-ink); }
+.agent-chat-action:active { transform: scale(0.94); }
+
+.agent-summary-card {
+  border-color: var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+.agent-summary-header:hover,
+.agent-summary-diff-header:hover,
+.agent-summary-row:hover { background: var(--color-hover-2); }
+.agent-summary-trace { border-left-color: var(--color-line); }
+.agent-summary-detail { border-left-color: color-mix(in srgb, var(--color-accent) 32%, var(--color-line)); }
+.agent-summary-section,
+.agent-summary-diff { border-color: var(--color-line); }
+
+.agent-approval-card,
+.agent-question-card {
+  border-color: color-mix(in srgb, var(--color-orange) 32%, var(--color-line));
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  box-shadow: var(--shadow-raised);
+}
+.agent-approval-pill {
+  border-color: color-mix(in srgb, var(--color-orange) 36%, transparent);
+  color: var(--color-orange);
+  background: var(--color-orange-tint);
+}
+.agent-approval-session:hover { background: var(--color-hover-2); }
+.agent-question-option:hover { background: var(--color-hover-2); }
+.agent-question-option[data-selected='true'] { color: var(--color-ink); }
+
+.markdown-body { color: var(--color-ink); }
+.markdown-body p { max-width: 72ch; }
+.markdown-body a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.markdown-body :is(code:not(pre code)) {
+  border: 1px solid var(--color-line);
+  background: var(--color-inset);
+  color: var(--color-accent-ink);
+  border-radius: 5px;
+}
+.markdown-body table { min-width: 30rem; }
+.markdown-body th,
+.markdown-body td { border-color: var(--color-line); }
+
+@keyframes eq-bounce {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+html[data-theme='light'] .agent-composer {
+  background: color-mix(in srgb, white 94%, transparent);
+  box-shadow: var(--shadow-card);
+}
+html[data-theme='light'] .agent-process-chip,
+html[data-theme='light'] .agent-file-chip,
+html[data-theme='light'] .agent-summary-card,
+html[data-theme='light'] .agent-question-card { background: var(--color-surface); }
+
+.agent-code-block { border-color: var(--color-line); background: var(--color-surface); }
+.agent-code-header {
+  min-height: 34px;
+  padding: 0 10px 0 12px;
+  border-bottom-color: var(--color-line);
+  color: var(--color-ink-3);
+}
+.agent-code-lang { color: var(--color-ink); }
+.agent-code-count { color: var(--color-ink-3); }
+.agent-code-header button { color: var(--color-ink-3); }
+.agent-code-header button:hover { background: var(--color-hover-2); color: var(--color-ink); }
+.agent-code-body { background: var(--color-inset); color: var(--color-ink-2); }
+.agent-streaming-body .markdown-body > * { animation: stream-in 420ms cubic-bezier(0.22, 0.61, 0.25, 1) both; }

@@ -19,15 +19,15 @@ export function ThreadSidebar() {
   const globalModel = useSettingsStore((s) => s.settings.model)
 
   return (
-    <div className="h-full flex flex-col min-h-0 border-r border-white/10 bg-surface/50">
-      <div className="shrink-0 h-11 px-2 flex items-center justify-between border-b border-white/10">
-        <span className="text-xs font-semibold px-1">Threads</span>
+    <div className="h-full flex flex-col min-h-0 bg-surface">
+      <div className="shrink-0 h-11 px-2 flex items-center justify-between border-b border-line">
+        <span className="text-xs font-semibold px-1 text-ink">Threads</span>
         <div className="flex items-center gap-0.5">
           <button
             type="button"
             title="新對話"
             onClick={() => createThread()}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-primary"
+            className="p-1.5 rounded-control hover:bg-hover-2 text-accent-ink"
           >
             <Icon name="add" size={18} />
           </button>
@@ -35,7 +35,7 @@ export function ThreadSidebar() {
             type="button"
             title="收合"
             onClick={() => setShowThreadList(false)}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-outline md:hidden"
+            className="p-1.5 rounded-control hover:bg-hover-2 text-ink-3 md:hidden"
           >
             <Icon name="chevron_left" size={18} />
           </button>
@@ -53,8 +53,8 @@ export function ThreadSidebar() {
               key={t.id}
               className={`group flex items-start gap-1 rounded-xl px-2 py-2 cursor-pointer border transition-colors ${
                 active
-                  ? 'bg-primary/10 border-primary/25'
-                  : 'border-transparent hover:bg-white/[0.04]'
+                  ? 'bg-accent-tint border-line-strong'
+                  : 'border-transparent hover:bg-hover-2'
               }`}
               onClick={() => selectThread(t.id)}
               onKeyDown={(e) => {
@@ -66,9 +66,9 @@ export function ThreadSidebar() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   {running && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0" />
                   )}
-                  <span className="text-[12px] font-medium truncate text-on-surface">
+                  <span className="text-[12px] font-medium truncate text-ink">
                     {t.title}
                   </span>
                 </div>
@@ -76,17 +76,17 @@ export function ThreadSidebar() {
                   <span className={`text-[9px] px-1 py-0.5 rounded border font-semibold ${agent.color}`}>
                     {agent.label}
                   </span>
-                  <span className="text-[9px] px-1 py-0.5 rounded border border-white/10 text-outline font-[family-name:var(--font-mono)] truncate max-w-[80px]">
+                  <span className="text-[9px] px-1 py-0.5 rounded-chip border border-line text-ink-3 font-[family-name:var(--font-mono)] truncate max-w-[80px]">
                     {modelLabel}
                   </span>
-                  <span className="text-[9px] px-1 py-0.5 rounded border border-primary/20 text-primary/90">
+                  <span className="text-[9px] px-1 py-0.5 rounded-chip border border-line text-accent-ink">
                     {depth.shortLabel}
                   </span>
                 </div>
               </div>
               <button
                 type="button"
-                className="opacity-0 group-hover:opacity-100 p-1 rounded text-outline hover:text-error shrink-0"
+                className="opacity-0 group-hover:opacity-100 p-1 rounded-control text-ink-3 hover:text-red shrink-0"
                 title="刪除"
                 onClick={(e) => {
                   e.stopPropagation()
@@ -97,7 +97,7 @@ export function ThreadSidebar() {
               </button>
               <button
                 type="button"
-                className="opacity-0 group-hover:opacity-100 p-1 rounded text-outline hover:text-primary shrink-0"
+                className="opacity-0 group-hover:opacity-100 p-1 rounded-control text-ink-3 hover:text-accent-ink shrink-0"
                 title="建立分支"
                 onClick={(e) => {
                   e.stopPropagation()

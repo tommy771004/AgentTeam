@@ -33,19 +33,19 @@ export function PermissionAskModal() {
   const sessionAllow = getSessionAllow(current.threadId)
 
   return (
-    <div className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-xl flex items-center justify-center p-4 animate-macos-fade">
-      <div role="dialog" aria-modal="true" aria-labelledby="permission-title" className="agent-approval-card w-full max-w-lg rounded-[20px] liquid-glass border border-amber-500/25 shadow-[0_24px_80px_rgba(0,0,0,0.5)] overflow-hidden animate-macos-sheet">
-        <div className="px-5 py-4 border-b border-white/10 flex items-start gap-3 bg-amber-500/10">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
-            <Icon name="shield" size={22} className="text-amber-300" />
+    <div className="fixed inset-0 z-[200] bg-black/45 backdrop-blur-md flex items-center justify-center p-4 animate-macos-fade">
+      <div role="dialog" aria-modal="true" aria-labelledby="permission-title" className="agent-approval-card w-full max-w-lg rounded-card border overflow-hidden animate-macos-sheet">
+        <div className="primitive-card-pad border-b border-line flex items-start gap-3 bg-orange-tint">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-control bg-orange-tint text-orange">
+            <Icon name="shield" size={18} className="text-orange" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h2 id="permission-title" className="font-semibold text-amber-100 text-base">需要核准</h2>
+              <h2 id="permission-title" className="font-semibold text-ink text-[14px]">需要核准</h2>
               <span className="agent-approval-pill">等待你的決定</span>
             </div>
-            <p className="text-sm text-on-surface-variant mt-0.5">{current.reason}</p>
-            <p className="text-[11px] text-outline mt-1 font-[family-name:var(--font-mono)]">
+            <p className="text-[13px] text-ink-2 mt-0.5">{current.reason}</p>
+            <p className="text-[10px] text-ink-3 mt-1 font-[family-name:var(--font-mono)]">
               逾時 {remainSec}s 自動拒絕
               {pendingBehind > 0 ? ` · 佇列尚有 ${pendingBehind} 筆` : ''}
               {current.threadId ? ` · thread=${current.threadId.slice(0, 18)}` : ''}
@@ -54,24 +54,24 @@ export function PermissionAskModal() {
           </div>
         </div>
 
-        <div className="p-5 space-y-3">
+        <div className="p-4 space-y-3">
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-outline font-semibold mb-1">
+            <div className="text-[10px] uppercase tracking-wider text-ink-3 font-semibold mb-1">
               工具
             </div>
-            <code className="text-primary font-[family-name:var(--font-mono)] text-sm">
+            <code className="text-accent-ink font-[family-name:var(--font-mono)] text-[13px]">
               {current.tool}
             </code>
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-outline font-semibold mb-1">
+            <div className="text-[10px] uppercase tracking-wider text-ink-3 font-semibold mb-1">
               參數
             </div>
-            <pre className="bg-[#060e20] border border-white/10 rounded-xl p-3 text-[11px] font-[family-name:var(--font-mono)] text-on-surface-variant max-h-48 overflow-auto custom-scrollbar whitespace-pre-wrap">
+            <pre className="bg-inset border border-line rounded-control p-3 text-[11px] font-[family-name:var(--font-mono)] text-ink-2 max-h-48 overflow-auto custom-scrollbar whitespace-pre-wrap">
               {current.argsPreview}
             </pre>
           </div>
-          <label className="agent-approval-session flex items-center gap-2 text-xs text-on-surface-variant cursor-pointer">
+          <label className="agent-approval-session flex items-center gap-2 text-[12px] text-ink-2 cursor-pointer">
             <input
               type="checkbox"
               checked={sessionAllow}
@@ -82,18 +82,18 @@ export function PermissionAskModal() {
           </label>
         </div>
 
-        <div className="px-5 py-4 border-t border-white/10 flex justify-end gap-2 bg-surface/40">
+        <div className="primitive-card-footer border-t border-line flex justify-end gap-2 bg-inset">
           <button
             type="button"
             onClick={() => resolve(current.id, 'deny')}
-            className="px-4 py-2 rounded-xl border border-white/15 text-sm font-semibold text-on-surface-variant hover:bg-white/5"
+            className="px-3 py-1.5 rounded-control border border-line text-[12px] font-semibold text-ink-2 hover:bg-hover"
           >
             拒絕
           </button>
           <button
             type="button"
             onClick={() => resolve(current.id, 'allow')}
-            className="px-4 py-2 rounded-xl bg-primary-container text-on-primary-container text-sm font-semibold hover:brightness-110"
+            className="px-3 py-1.5 rounded-control bg-ink text-canvas text-[12px] font-semibold shadow-btn hover:brightness-110"
           >
             核准執行
           </button>

@@ -39,23 +39,30 @@ export function QuestionAskModal() {
   }
 
   return (
-    <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/50 p-4 backdrop-blur-xl animate-macos-fade">
-      <div className="w-full max-w-lg overflow-hidden rounded-[20px] liquid-glass border border-primary/25 shadow-[0_24px_80px_rgba(0,0,0,0.5)] animate-macos-sheet">
-        <div className="flex items-start gap-3 border-b border-white/10 bg-primary/10 px-5 py-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-primary/15">
-            <Icon name="question_mark" size={22} className="text-primary" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold text-on-surface">需要你的選擇</h2>
-            <p className="mt-0.5 text-sm text-on-surface-variant">{current.reason || 'Agent 需要補充資訊才能繼續。'}</p>
-            <p className="mt-1 font-[family-name:var(--font-mono)] text-[11px] text-outline">
-              逾時 {remainSec}s 將取消這次回答
-            </p>
+    <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/45 p-4 backdrop-blur-md animate-macos-fade">
+      <div className="agent-question-card w-full max-w-sm overflow-hidden rounded-card border animate-macos-sheet">
+        <div className="primitive-card-pad">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+                <Icon name="question_mark" size={13} className="text-accent-ink" />
+                需要你的選擇
+              </div>
+              <h2 className="whitespace-pre-wrap text-[13px] font-medium leading-relaxed text-ink">{current.question}</h2>
+              {current.reason ? <p className="mt-1 text-[12px] leading-relaxed text-ink-2">{current.reason}</p> : null}
+            </div>
+            <button
+              type="button"
+              aria-label="關閉問題"
+              onClick={() => resolve(null)}
+              className="primitive-icon-button shrink-0 text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+            >
+              <Icon name="close" size={14} />
+            </button>
           </div>
         </div>
 
-        <div className="space-y-4 p-5">
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-on-surface">{current.question}</p>
+        <div className="border-t border-line px-3 py-2">
           {current.options.length ? (
             /* docs/ui「approve」: 選項不再各自是一張有框的卡，選取記號本身就是唯一
                的狀態訊號，問題因此保有閱讀重量，一次也只有一個東西在說話。 */
@@ -69,7 +76,8 @@ export function QuestionAskModal() {
                     type="button"
                     aria-pressed={checked}
                     onClick={() => toggle(value)}
-                    className="-mx-2 flex items-start gap-2.5 rounded-xl px-2 py-2 text-left transition-colors hover:bg-white/5"
+                    className="agent-question-option -mx-1.5 flex items-start gap-2.5 rounded-control px-1.5 py-1.5 text-left transition-colors"
+                    data-selected={checked}
                     style={{
                       animation: `fade-up 300ms cubic-bezier(0.23,1,0.32,1) ${i * 45}ms both`,
                     }}
@@ -79,8 +87,8 @@ export function QuestionAskModal() {
                         current.multiSelect ? 'rounded-[6px]' : 'rounded-full'
                       } ${
                         checked
-                          ? 'bg-primary-container text-on-primary-container'
-                          : 'text-transparent shadow-[inset_0_0_0_1.5px_var(--color-outline-variant)]'
+                          ? 'bg-ink text-canvas'
+                          : 'text-transparent shadow-[inset_0_0_0_1.5px_var(--color-line-strong)]'
                       }`}
                     >
                       {current.multiSelect ? (
@@ -95,12 +103,12 @@ export function QuestionAskModal() {
                     <span className="min-w-0">
                       <span
                         className={`block text-sm transition-colors duration-200 ${
-                          checked ? 'text-on-surface' : 'text-on-surface-variant'
+                          checked ? 'text-ink' : 'text-ink-2'
                         }`}
                       >
                         {option.label}
                       </span>
-                      {option.description ? <span className="mt-0.5 block text-xs text-outline">{option.description}</span> : null}
+                      {option.description ? <span className="mt-0.5 block text-xs text-ink-3">{option.description}</span> : null}
                     </span>
                   </button>
                 )
@@ -113,16 +121,23 @@ export function QuestionAskModal() {
               onChange={(event) => setFreeform(event.target.value)}
               placeholder="補充說明（可選）"
               rows={3}
-              className="w-full resize-none rounded-xl border border-white/10 bg-surface/40 px-3 py-2 text-sm text-on-surface outline-none placeholder:text-outline focus:border-primary/50"
+              className="w-full resize-none rounded-control border border-line bg-inset px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-3 focus:border-line-strong"
             />
           ) : null}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-white/10 bg-surface/40 px-5 py-4">
+        <div className="primitive-card-footer flex items-center justify-between gap-3 border-t border-line bg-inset">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1" aria-label="目前問題">
+              <span className="size-2 rounded-full border-2 border-ink" />
+            </span>
+            <span className="font-[family-name:var(--font-mono)] text-[10px] text-ink-3">{remainSec}s</span>
+          </div>
+          <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => resolve(null)}
-            className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-on-surface-variant hover:bg-white/5"
+            className="rounded-control px-2.5 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover"
           >
             取消任務
           </button>
@@ -130,10 +145,12 @@ export function QuestionAskModal() {
             type="button"
             disabled={!selected.length && !freeform.trim()}
             onClick={submit}
-            className="rounded-xl bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex size-7 items-center justify-center rounded-control bg-ink text-canvas shadow-btn transition-transform enabled:active:scale-[0.96] disabled:cursor-not-allowed disabled:bg-field disabled:text-ink-3"
+            aria-label="送出回答"
           >
-            送出回答
+            <Icon name="arrow_upward" size={14} />
           </button>
+          </div>
         </div>
       </div>
     </div>

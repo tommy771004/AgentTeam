@@ -76,12 +76,12 @@ export function ProjectContextBar() {
   return (
     <div className="agent-project-context relative flex flex-wrap items-center gap-1.5" ref={ref}>
       {/* Primary: open system folder dialog */}
-      <div className="agent-project-picker inline-flex items-center rounded-full border border-white/12 bg-surface-container/80 overflow-hidden max-w-[240px]">
+      <div className="agent-project-picker inline-flex items-center rounded-full border border-line bg-inset overflow-hidden max-w-[240px] shadow-hairline">
         <button
           type="button"
           disabled={picking}
           onClick={(e) => void onPick(e)}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-on-surface hover:bg-white/[0.06] disabled:opacity-50 min-w-0"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-ink hover:bg-hover-2 disabled:opacity-50 min-w-0"
           title={
             root
               ? `${root}\n點擊開啟系統資料夾選單`
@@ -91,7 +91,7 @@ export function ProjectContextBar() {
           <Icon
             name={picking ? 'progress_activity' : 'folder_open'}
             size={14}
-            className={`text-primary shrink-0 ${picking ? 'animate-spin' : ''}`}
+            className={`text-accent-ink shrink-0 ${picking ? 'animate-spin' : ''}`}
           />
           <span className="truncate font-medium">
             {picking ? '選擇中…' : loaded ? name || '選擇專案' : '…'}
@@ -103,14 +103,14 @@ export function ProjectContextBar() {
             e.stopPropagation()
             setMenuOpen((o) => !o)
           }}
-          className="px-1.5 py-1 border-l border-white/10 text-outline hover:bg-white/[0.06] hover:text-on-surface"
+            className="px-1.5 py-1 border-l border-line text-ink-3 hover:bg-hover-2 hover:text-ink"
           title="專案詳情 / 工作樹"
         >
           <Icon name="expand_more" size={14} />
         </button>
       </div>
 
-      <span className="agent-project-source inline-flex items-center gap-1 px-2 py-1 rounded-full border border-white/10 text-[11px] text-on-surface-variant">
+      <span className="agent-project-source inline-flex items-center gap-1 px-2 py-1 rounded-full border border-line bg-inset text-[11px] text-ink-2">
         <Icon
           name={source === 'github' ? 'cloud' : 'computer'}
           size={13}
@@ -126,7 +126,7 @@ export function ProjectContextBar() {
             e.stopPropagation()
             setMenuOpen(true)
           }}
-          className="agent-project-branch inline-flex items-center gap-1 px-2 py-1 rounded-full border border-white/10 text-[11px] text-on-surface-variant max-w-[140px]"
+          className="agent-project-branch inline-flex items-center gap-1 px-2 py-1 rounded-full border border-line bg-inset text-[11px] text-ink-2 max-w-[140px]"
           title="Git 工作樹 / 分支"
         >
           <Icon name="account_tree" size={13} className="opacity-70 shrink-0" />
@@ -141,38 +141,38 @@ export function ProjectContextBar() {
       )}
 
       {error && !manualPathOpen && (
-        <span className="text-[10px] text-error max-w-[220px] truncate" title={error}>
+        <span className="text-[10px] text-red max-w-[220px] truncate" title={error}>
           {error}
         </span>
       )}
 
       {menuOpen && (
         <div
-          className="agent-project-menu absolute left-0 top-full mt-1.5 z-[95] w-80 rounded-xl border border-white/12 bg-[#1c1c1e]/98 backdrop-blur-xl shadow-2xl overflow-hidden"
+          className="agent-project-menu absolute left-0 top-full mt-1.5 z-[95] w-80 rounded-card border border-line bg-surface shadow-raised overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="px-3 py-2 border-b border-white/10 text-[11px] text-white/50 font-medium">
+          <div className="px-3 py-2 border-b border-line text-[11px] text-ink-3 font-medium">
             專案與工作樹
           </div>
-          <div className="px-3 py-2 text-[10px] text-white/40 font-[family-name:var(--font-mono)] break-all">
+          <div className="px-3 py-2 text-[10px] text-ink-3 font-[family-name:var(--font-mono)] break-all">
             {root || '尚未選擇目錄'}
           </div>
           <button
             type="button"
-            className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-[13px] text-white/90 hover:bg-white/[0.06]"
+            className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-[13px] text-ink hover:bg-hover-2"
             onClick={(e) => void onPick(e)}
           >
-            <Icon name="folder_open" size={16} className="text-primary" />
+            <Icon name="folder_open" size={16} className="text-accent-ink" />
             <span className="flex flex-col items-start gap-0.5">
               <span>{root ? '更換專案目錄…' : '選擇專案目錄…'}</span>
-              <span className="text-[10px] text-white/40">
+              <span className="text-[10px] text-ink-3">
                 開啟系統資料夾選單{hasNativePick ? '（⌘O）' : ''}
               </span>
             </span>
           </button>
           <button
             type="button"
-            className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-white/80 hover:bg-white/[0.06]"
+            className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-2 hover:bg-hover-2"
             onClick={() => {
               setMenuOpen(false)
               openManualPath()
@@ -183,7 +183,7 @@ export function ProjectContextBar() {
           </button>
           {worktrees.length > 0 && (
             <>
-              <div className="px-3 pt-2 pb-1 text-[10px] text-white/40 uppercase tracking-wider">
+              <div className="px-3 pt-2 pb-1 text-[10px] text-ink-3 uppercase tracking-wider">
                 Git worktrees
               </div>
               {worktrees.map((w) => (
@@ -194,22 +194,22 @@ export function ProjectContextBar() {
                     setMenuOpen(false)
                     void selectWorktree(w.path)
                   }}
-                  className={`w-full text-left px-3 py-2 hover:bg-white/[0.06] ${
-                    w.path === root ? 'bg-white/10' : ''
+                  className={`w-full text-left px-3 py-2 hover:bg-hover-2 ${
+                    w.path === root ? 'bg-hover-2' : ''
                   }`}
                 >
-                  <div className="text-[12px] text-white/90 font-[family-name:var(--font-mono)]">
+                  <div className="text-[12px] text-ink font-[family-name:var(--font-mono)]">
                     {w.branch}
                     {w.detached ? ' (detached)' : ''}
                   </div>
-                  <div className="text-[10px] text-white/40 truncate">{w.path}</div>
+                  <div className="text-[10px] text-ink-3 truncate">{w.path}</div>
                 </button>
               ))}
             </>
           )}
           <button
             type="button"
-            className="w-full flex items-center gap-2 px-3 py-2 text-left text-[12px] text-white/60 hover:bg-white/[0.06] border-t border-white/10"
+            className="w-full flex items-center gap-2 px-3 py-2 text-left text-[12px] text-ink-3 hover:bg-hover-2 border-t border-line"
             onClick={() => {
               setMenuOpen(false)
               void refresh()

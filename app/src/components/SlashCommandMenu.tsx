@@ -58,13 +58,13 @@ export function SlashCommandMenu({
 
   return (
     <div
-      className={`absolute left-0 right-0 z-[80] mx-0 max-h-72 overflow-hidden rounded-2xl liquid-glass shadow-2xl animate-macos-scale ${
+      className={`absolute left-0 right-0 z-[80] mx-0 max-h-72 overflow-hidden rounded-card border border-line bg-surface shadow-raised animate-macos-scale ${
         anchor === 'bottom' ? 'bottom-full mb-2' : 'top-full mt-2'
       }`}
       role="listbox"
     >
-      <div className="px-3 py-2 border-b border-white/10 flex items-center gap-2 text-[10px] tracking-widest text-outline uppercase font-semibold">
-        <Icon name="terminal" size={14} className="text-primary" />
+      <div className="px-3 py-2 border-b border-line flex items-center gap-2 text-[10px] tracking-widest text-ink-3 uppercase font-semibold">
+        <Icon name="terminal" size={14} className="text-accent-ink" />
         指令
         <span className="ml-auto normal-case tracking-normal font-normal">
           ↑↓ 選擇 · Enter 確認 · Esc 關閉
@@ -73,7 +73,7 @@ export function SlashCommandMenu({
       <div ref={listRef} className="relative max-h-60 overflow-y-auto custom-scrollbar py-1">
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-1 rounded-lg bg-primary/15"
+          className="pointer-events-none absolute inset-x-1 rounded-control bg-hover-2"
           style={{
             top: highlight?.top ?? 0,
             height: highlight?.height ?? 0,
@@ -83,13 +83,13 @@ export function SlashCommandMenu({
           }}
         />
         {items.length === 0 ? (
-          <div className="px-3 py-4 text-xs text-outline text-center">
+          <div className="px-3 py-4 text-xs text-ink-3 text-center">
             無相符指令「/{query}」— 試試 /help
           </div>
         ) : (
           [...groups.entries()].map(([group, cmds]) => (
             <div key={group}>
-              <div className="px-3 pt-2 pb-1 text-[10px] text-outline font-semibold tracking-wider">
+              <div className="px-3 pt-2 pb-1 text-[10px] text-ink-3 font-semibold tracking-wider">
                 {group}
               </div>
               {cmds.map((cmd) => {
@@ -106,26 +106,26 @@ export function SlashCommandMenu({
                     onMouseEnter={() => onHover(idx)}
                     onClick={() => onSelect(cmd)}
                     className={`relative z-10 w-full text-left px-3 py-2 flex items-start gap-3 transition-colors ${
-                      active ? 'text-primary' : 'text-on-surface'
+                      active ? 'text-accent-ink' : 'text-ink'
                     }`}
                   >
                     <code
                       className={`font-[family-name:var(--font-mono)] text-[13px] shrink-0 ${
-                        active ? 'text-primary' : 'text-secondary'
+                        active ? 'text-accent-ink' : 'text-ink-2'
                       }`}
                     >
                       /{cmd.name}
                     </code>
-                    <span className="text-xs text-on-surface-variant flex-1 min-w-0">
+                    <span className="text-xs text-ink-2 flex-1 min-w-0">
                       {cmd.description}
                       {cmd.argsHint && (
-                        <span className="text-outline ml-1 font-[family-name:var(--font-mono)]">
+                        <span className="text-ink-3 ml-1 font-[family-name:var(--font-mono)]">
                           {cmd.argsHint}
                         </span>
                       )}
                     </span>
                     {cmd.aliases?.[0] && (
-                      <span className="text-[10px] text-outline shrink-0 font-[family-name:var(--font-mono)]">
+                      <span className="text-[10px] text-ink-3 shrink-0 font-[family-name:var(--font-mono)]">
                         /{cmd.aliases[0]}
                       </span>
                     )}

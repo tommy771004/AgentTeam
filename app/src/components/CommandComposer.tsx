@@ -29,6 +29,29 @@ import {
   MAX_ATTACHMENTS,
 } from '../lib/chatAttachments'
 
+type DictationRecognition = {
+  lang: string
+  interimResults: boolean
+  continuous: boolean
+  onresult: ((event: unknown) => void) | null
+  onend: (() => void) | null
+  onerror: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type DictationWindow = Window & {
+  SpeechRecognition?: new () => DictationRecognition
+  webkitSpeechRecognition?: new () => DictationRecognition
+}
+
+const DATA_SOURCES = [
+  { key: 'project', name: '專案檔案', desc: '目前工作區與程式碼', icon: 'folder_open' },
+  { key: 'memory', name: '工作記憶', desc: '已保存的偏好與上下文', icon: 'database' },
+  { key: 'web', name: 'Web search', desc: '即時新聞與公開資訊', icon: 'language' },
+  { key: 'skills', name: 'Skills', desc: '可載入的工作流程', icon: 'auto_awesome' },
+] as const
+
 export type ComposerMode = 'agent' | 'workspace'
 
 export interface CommandComposerProps {
@@ -95,6 +118,14 @@ export function CommandComposer({
   const [attachError, setAttachError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [attaching, setAttaching] = useState(false)
+  const [mentionOpen, setMentionOpen] = useState(false)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const [listening, setListening] = useState(false)
+  const recognitionRef = useRef<DictationRecognition | null>(null)
+
+  useEffect(() => {
+    return () => recognitionRef.current?.stop()
+  }, [])
   /** -1 = not browsing history */
   const histIdx = useRef(-1)
   const draftBeforeHist = useRef('')
@@ -119,6 +150,23 @@ export function CommandComposer({
   const showMenu = menuOpen && slashQuery !== null
   const safeIndex =
     filtered.length === 0 ? 0 : Math.min(activeIndex, Math.max(0, filtered.length - 1))
+
+  const mentionToken = useMemo(() => {
+    const match = /(^|\s)@([\w-]*)$/.exec(value)
+    if (!match) return null
+    return { query: match[2].toLowerCase(), start: match.index + match[1].length }
+  }, [value])
+
+  const mentionItems = useMemo(() => {
+    if (!mentionToken) return []
+    return DATA_SOURCES.filter(
+      (source) =>
+        source.name.toLowerCase().includes(mentionToken.query) ||
+        source.key.includes(mentionToken.query),
+    )
+  }, [mentionToken])
+
+  const showMentionMenu = mentionOpen && mentionToken !== null
 
   const focusSelf = useCallback(
     (openSlash?: boolean) => {
@@ -198,6 +246,64 @@ export function CommandComposer({
     [onChange, onSlashCommand, pushHistory],
   )
 
+  const pickMention = useCallback(
+    (source: (typeof DATA_SOURCES)[number]) => {
+      const token = mentionToken
+      const next = token
+        ? `${value.slice(0, token.start)}@${source.name} `
+        : `${value}@${source.name} `
+      onChange(next)
+      setMentionOpen(false)
+      setMentionIndex(0)
+      taRef.current?.focus()
+    },
+    [mentionToken, onChange, value],
+  )
+
+  const toggleDictation = useCallback(() => {
+    if (listening) {
+      recognitionRef.current?.stop()
+      setListening(false)
+      return
+    }
+
+    const speechWindow = window as DictationWindow
+    const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition
+    if (!Recognition) {
+      setAttachError('此環境不支援語音輸入，請改用鍵盤輸入。')
+      window.setTimeout(() => setAttachError(null), 2400)
+      return
+    }
+
+    const recognition = new Recognition()
+    recognition.lang = 'zh-TW'
+    recognition.interimResults = false
+    recognition.continuous = false
+    recognition.onresult = (event) => {
+      const results = (event as { results?: ArrayLike<ArrayLike<{ transcript?: string }>> }).results
+      const transcript = results
+        ? Array.from(results)
+            .map((result) => result?.[0]?.transcript || '')
+            .join(' ')
+            .trim()
+        : ''
+      if (transcript) onChange(value ? `${value.trimEnd()} ${transcript}` : transcript)
+    }
+    recognition.onend = () => {
+      setListening(false)
+      recognitionRef.current = null
+    }
+    recognition.onerror = () => {
+      setListening(false)
+      recognitionRef.current = null
+      setAttachError('語音輸入沒有收到內容，請再試一次。')
+      window.setTimeout(() => setAttachError(null), 2400)
+    }
+    recognitionRef.current = recognition
+    setListening(true)
+    recognition.start()
+  }, [listening, onChange, value])
+
   const submit = useCallback(async () => {
     const line = value.trim()
     if (disabled || attaching) return
@@ -206,6 +312,7 @@ export function CommandComposer({
     if (line.startsWith('/')) {
       pushHistory(line)
       histIdx.current = -1
+      setMentionOpen(false)
       const parsed = parseSlashLine(line)
       if (parsed) {
         const cmd = resolveSlashCommand(parsed.cmd)
@@ -270,6 +377,36 @@ export function CommandComposer({
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showMentionMenu && mentionItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionIndex((index) => Math.min(mentionItems.length - 1, index + 1))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionIndex((index) => Math.max(0, index - 1))
+        return
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault()
+        const source = mentionItems[Math.min(mentionIndex, mentionItems.length - 1)]
+        if (source) pickMention(source)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMentionOpen(false)
+        return
+      }
+    }
+
+    if (showMentionMenu && e.key === 'Escape') {
+      e.preventDefault()
+      setMentionOpen(false)
+      return
+    }
+
     if (showMenu && filtered.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -290,11 +427,13 @@ export function CommandComposer({
       if (e.key === 'Escape') {
         e.preventDefault()
         setMenuOpen(false)
+        setMentionOpen(false)
         return
       }
     } else if (showMenu && e.key === 'Escape') {
       e.preventDefault()
       setMenuOpen(false)
+      setMentionOpen(false)
       return
     }
 
@@ -344,9 +483,15 @@ export function CommandComposer({
     onChange(v)
     if (v.startsWith('/')) {
       setMenuOpen(true)
+      setMentionOpen(false)
       setActiveIndex(0)
+    } else if (/(^|\s)@[\w-]*$/.test(v)) {
+      setMenuOpen(false)
+      setMentionOpen(true)
+      setMentionIndex(0)
     } else {
       setMenuOpen(false)
+      setMentionOpen(false)
     }
   }
 
@@ -378,12 +523,12 @@ export function CommandComposer({
 
   return (
     <div
-      className={`agent-composer relative w-full max-w-full min-w-0 box-border border bg-surface-container/95 backdrop-blur-md ${
-        compact ? 'rounded-xl' : 'rounded-2xl'
+      className={`agent-composer relative w-full max-w-full min-w-0 box-border border bg-surface ${
+        compact ? 'rounded-control' : 'rounded-card'
       } ${
         dragOver
-          ? 'border-primary/50 bg-primary/5'
-          : 'border-white/12'
+          ? 'border-accent/60 bg-accent-tint'
+          : 'border-line'
       }`}
       data-composer={primary ? 'primary' : mode}
       onDragEnter={(e) => {
@@ -399,6 +544,51 @@ export function CommandComposer({
       onDragLeave={() => setDragOver(false)}
       onDrop={onDrop}
     >
+      {showMentionMenu && (
+        <div
+          className="absolute bottom-full left-0 right-0 z-[80] mb-2 overflow-hidden rounded-card bg-surface p-1 shadow-raised"
+          role="listbox"
+          aria-label="資料來源"
+          style={{ animation: 'pop-in 180ms cubic-bezier(0.23,1,0.32,1) both' }}
+        >
+          <div className="flex items-center gap-2 border-b border-line px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+            <Icon name="alternate_email" size={13} className="text-accent-ink" />
+            資料來源
+            <span className="ml-auto normal-case tracking-normal font-normal">↑↓ 選擇 · Enter 插入</span>
+          </div>
+          <div className="relative py-1">
+            {mentionItems.length === 0 ? (
+              <div className="px-2 py-3 text-center text-[12px] text-ink-3">
+                沒有相符的來源
+              </div>
+            ) : (
+              mentionItems.map((source, index) => {
+                const selected = index === Math.min(mentionIndex, mentionItems.length - 1)
+                return (
+                  <button
+                    key={source.key}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onMouseEnter={() => setMentionIndex(index)}
+                    onClick={() => pickMention(source)}
+                    className={`relative z-10 flex h-9 w-full items-center gap-2.5 rounded-control px-2 text-left transition-colors ${
+                      selected ? 'bg-hover-2' : 'hover:bg-hover-2'
+                    }`}
+                  >
+                    <span className="flex size-5.5 shrink-0 items-center justify-center rounded-[6px] bg-inset text-ink-2 shadow-hairline">
+                      <Icon name={source.icon} size={14} />
+                    </span>
+                    <span className="shrink-0 text-[12.5px] font-medium text-ink">{source.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">{source.desc}</span>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
+
       <SlashCommandMenu
         open={showMenu}
         items={filtered}
@@ -414,24 +604,24 @@ export function CommandComposer({
           {attachments.map((a) => (
             <div
               key={a.id}
-              className="relative group flex items-center gap-2 rounded-xl border border-white/10 bg-surface/60 pl-1.5 pr-2 py-1.5 max-w-[220px]"
+              className="relative group flex items-center gap-2 rounded-chip border border-line bg-field pl-1.5 pr-2 py-1.5 max-w-[220px] shadow-hairline"
             >
               {a.kind === 'image' && a.dataUrl ? (
                 <img
                   src={a.dataUrl}
                   alt={a.name}
-                  className="w-10 h-10 rounded-lg object-cover shrink-0 bg-black/20"
+                  className="w-10 h-10 rounded-control object-cover shrink-0 bg-inset"
                 />
               ) : (
-                <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
-                  <Icon name={a.kind === 'text' ? 'description' : 'draft'} size={18} className="text-outline" />
+                <div className="w-10 h-10 rounded-control bg-inset flex items-center justify-center shrink-0">
+                  <Icon name={a.kind === 'text' ? 'description' : 'draft'} size={18} className="text-ink-3" />
                 </div>
               )}
               <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-medium text-on-surface truncate" title={a.name}>
+                <p className="text-[11px] font-medium text-ink truncate" title={a.name}>
                   {a.name}
                 </p>
-                <p className="text-[10px] text-outline">
+                <p className="text-[10px] text-ink-3">
                   {a.kind === 'image' ? '圖片' : a.kind === 'text' ? '文字' : '檔案'} ·{' '}
                   {formatBytes(a.size)}
                 </p>
@@ -440,7 +630,7 @@ export function CommandComposer({
                 type="button"
                 title="移除"
                 onClick={() => removeAttachment(a.id)}
-                className="w-6 h-6 rounded-md text-outline hover:text-error hover:bg-error/10 flex items-center justify-center shrink-0"
+                className="w-6 h-6 rounded-control text-ink-3 hover:text-red hover:bg-red-tint flex items-center justify-center shrink-0"
               >
                 <Icon name="close" size={14} />
               </button>
@@ -452,7 +642,7 @@ export function CommandComposer({
       {(attachError || dragOver) && (
         <p
           className={`px-3 pt-2 text-[11px] ${
-            attachError ? 'text-error' : 'text-primary'
+            attachError ? 'text-red' : 'text-accent-ink'
           }`}
         >
           {attachError || '放開以加入附件'}
@@ -473,7 +663,7 @@ export function CommandComposer({
         />
       )}
 
-      <div className={`flex items-end gap-2 ${compact ? 'p-2' : 'px-3 pt-3 md:px-3.5 md:pt-3.5'}`}>
+      <div className={`flex items-end gap-2 ${compact ? 'p-2' : 'px-3 py-3 md:px-3.5'}`}>
         <textarea
           ref={taRef}
           value={value}
@@ -483,14 +673,15 @@ export function CommandComposer({
           onPaste={onPaste}
           onFocus={() => {
             if (value.startsWith('/')) setMenuOpen(true)
+            if (/(^|\s)@[\w-]*$/.test(value)) setMentionOpen(true)
           }}
-          rows={compact ? 2 : 3}
+          rows={compact ? 2 : 2}
           placeholder={
             canAttach
               ? placeholder || '輸入任務，或貼上／拖放圖片…'
               : placeholder
           }
-          className="composer-field flex-1 min-w-0 self-stretch border-0 bg-transparent shadow-none resize-none outline-none ring-0 focus:outline-none focus-visible:outline-none focus:ring-0 text-[15px] text-on-surface placeholder:text-outline/80 leading-relaxed font-[family-name:var(--font-inter)]"
+          className="composer-field flex-1 min-w-0 self-stretch border-0 bg-transparent shadow-none resize-none outline-none ring-0 focus:outline-none focus-visible:outline-none focus:ring-0 text-[14px] text-ink placeholder:text-ink-3 leading-relaxed font-[family-name:var(--font-inter)]"
           spellCheck={false}
         />
         <div className="flex shrink-0 pb-0.5">
@@ -498,7 +689,7 @@ export function CommandComposer({
             type="button"
             disabled={!canSend}
             onClick={() => void submit()}
-            className="agent-composer-send w-9 h-9 rounded-lg bg-primary-container text-on-primary-container disabled:opacity-40 flex items-center justify-center"
+            className="agent-composer-send w-8 h-8 rounded-control disabled:opacity-40 flex items-center justify-center"
             title={enterBehavior === 'cmdEnter' ? '送出（⌘/Ctrl+Enter）' : '送出（Enter）'}
           >
             <Icon name="arrow_upward" size={18} />
@@ -513,10 +704,36 @@ export function CommandComposer({
               openFilePicker: () => fileRef.current?.click(),
               disabled: Boolean(disabled || attaching || attachments.length >= MAX_ATTACHMENTS),
             })}
+            <button
+              type="button"
+              aria-label={listening ? '停止語音輸入' : '開始語音輸入'}
+              aria-pressed={listening}
+              onClick={toggleDictation}
+              className={`flex size-7 items-center justify-center rounded-control transition-colors ${
+                listening
+                  ? 'bg-accent-tint text-accent-ink'
+                  : 'text-ink-3 hover:bg-hover-2 hover:text-ink'
+              }`}
+              title={listening ? '停止語音輸入' : '語音輸入'}
+            >
+              {listening ? (
+                <span className="flex h-3.5 items-center gap-[2.5px]">
+                  {[0, 1, 2].map((index) => (
+                    <span
+                      key={index}
+                      className="w-[2.5px] rounded-full bg-current"
+                      style={{ height: '100%', animation: `eq-bounce 900ms ease-in-out ${index * 150}ms infinite` }}
+                    />
+                  ))}
+                </span>
+              ) : (
+                <Icon name="mic" size={15} />
+              )}
+            </button>
             {footerLeft}
             {!hideHints && !footerLeft && (
-              <span className="text-[10px] text-outline flex items-center gap-1.5">
-                <kbd className="px-1 py-0.5 rounded bg-white/5 border border-white/10 font-[family-name:var(--font-mono)]">
+              <span className="text-[10px] text-ink-3 flex items-center gap-1.5">
+                <kbd className="px-1 py-0.5 rounded bg-inset border border-line font-[family-name:var(--font-mono)]">
                   ⌘/
                 </kbd>
                 <span>指令</span>
@@ -535,7 +752,7 @@ export function CommandComposer({
           <div className="flex items-center gap-2 shrink-0">
             {footerRight}
             {!footerRight && !hideHints && (
-              <span className="text-[10px] text-primary/70">{getLiveSlashCommands().length} 指令</span>
+              <span className="text-[10px] text-accent-ink">{getLiveSlashCommands().length} 指令</span>
             )}
           </div>
         </div>

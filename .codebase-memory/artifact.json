@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "c84f08d143726e79454eed2df00d6d5076033cd5",
-    "indexed_at": "2026-08-12T03:07:13Z",
+    "commit": "b57da52566aac2c7b8e820b8750fe7e2e3aad182",
+    "indexed_at": "2026-08-14T09:41:15Z",
     "project": "AgentTeam",
-    "nodes": 5942,
-    "edges": 22518,
-    "original_size": 14024704,
-    "compressed_size": 3614916,
+    "nodes": 24022,
+    "edges": 53435,
+    "original_size": 31260672,
+    "compressed_size": 6241233,
     "compression_level": 9
 }

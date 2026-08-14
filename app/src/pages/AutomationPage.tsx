@@ -355,12 +355,12 @@ function AutomationSuggestionsPanel() {
   }
 
   return (
-    <div className="agent-suggestion-panel app-panel border border-secondary/30 bg-secondary/5 p-4 space-y-3">
+    <div className="agent-suggestion-panel app-panel border border-line bg-surface p-4 space-y-3">
       <div className="flex items-start gap-3">
-        <Icon name="lightbulb" size={20} className="text-secondary mt-0.5" />
+        <Icon name="lightbulb" size={18} className="text-accent-ink mt-0.5" />
         <div>
-          <h2 className="font-semibold text-sm">建議的自動化</h2>
-          <p className="text-xs text-on-surface-variant mt-1">
+          <h2 className="font-semibold text-[13px] text-ink">建議的自動化</h2>
+          <p className="text-xs text-ink-2 mt-1">
             根據近期成功執行的重複工作提出建議；不會自動建立排程，請由你同意。
           </p>
         </div>
@@ -369,32 +369,37 @@ function AutomationSuggestionsPanel() {
         {suggestions.map((suggestion) => (
           <div
             key={suggestion.dedupKey}
-            className="agent-suggestion-card rounded-lg border border-white/10 bg-surface/50 p-3 flex flex-col md:flex-row md:items-center gap-3"
+            className="agent-suggestion-card overflow-hidden rounded-card border border-line bg-surface p-0 flex flex-col gap-0"
           >
-            <div className="min-w-0 flex-1">
+            <div className="primitive-card-pad min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-medium">{suggestion.title}</span>
-                <span className="agent-suggestion-signal text-[10px] rounded bg-secondary/15 text-secondary px-1.5 py-0.5">
-                  usage · {suggestion.occurrenceCount} 次
+                <span className="text-[13px] font-medium text-ink">{suggestion.title}</span>
+                <span className="agent-suggestion-signal inline-flex items-center gap-1 rounded-full bg-inset px-1.5 py-0.5 text-[10px] text-ink-2">
+                  <span className="flex items-end gap-0.5" aria-hidden="true">
+                    {[0, 1, 2].map((bar) => (
+                      <span key={bar} className="w-1 rounded-full" style={{ height: 8 + bar * 2, background: bar < Math.min(3, Math.max(1, suggestion.occurrenceCount)) ? 'var(--color-green)' : 'var(--color-line-strong)' }} />
+                    ))}
+                  </span>
+                  {suggestion.occurrenceCount} 次
                 </span>
               </div>
-              <p className="text-xs text-on-surface-variant mt-1 truncate">{suggestion.objective}</p>
-              <p className="text-[11px] text-outline mt-1">{suggestion.reason} 建議每日 08:00。</p>
+              <p className="text-[13px] text-ink-2 mt-1.5 leading-relaxed">{suggestion.objective}</p>
+              <p className="text-[11px] text-ink-3 mt-1">{suggestion.reason} 建議每日 08:00。</p>
             </div>
-            <div className="flex gap-2 shrink-0">
+            <div className="primitive-card-footer flex items-center justify-end gap-2 border-t border-line bg-inset">
               <button
                 type="button"
                 onClick={() => void accept(suggestion)}
-                className="agent-suggestion-accept px-3 py-1.5 rounded bg-secondary-container text-on-secondary-container text-xs font-semibold"
+                className="agent-suggestion-accept rounded-control bg-ink px-3 py-1.5 text-[12px] font-semibold text-canvas shadow-btn"
               >
                 接受並建立排程
               </button>
               <button
                 type="button"
                 onClick={() => decide(suggestion.dedupKey, 'dismissed')}
-                className="agent-suggestion-dismiss px-3 py-1.5 rounded border border-white/10 text-xs text-on-surface-variant"
+                className="agent-suggestion-dismiss rounded-control border border-line px-3 py-1.5 text-[12px] text-ink-2"
               >
-                暫不需要
+                Alternatives
               </button>
             </div>
           </div>

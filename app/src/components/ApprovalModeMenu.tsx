@@ -31,17 +31,17 @@ export function ApprovalModeMenu({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-white/12 bg-surface-container/90 hover:bg-white/[0.06] text-[11px] text-on-surface-variant transition-colors"
+        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-line bg-inset hover:bg-hover-2 text-[11px] text-ink-2 shadow-hairline transition-colors"
         title="動作應如何核准？"
       >
         <Icon name={active.icon} size={13} className="shrink-0 opacity-80" />
-        <span className="font-medium text-on-surface">{active.title}</span>
+        <span className="font-medium text-ink">{active.title}</span>
         <Icon name="expand_more" size={14} className="shrink-0 opacity-70" />
       </button>
 
       {open && (
-        <div className="absolute bottom-full right-0 mb-2 z-[90] w-[300px] rounded-xl border border-white/12 bg-[#1c1c1e]/95 backdrop-blur-xl shadow-2xl py-1 overflow-hidden">
-          <div className="px-3 py-2 text-[11px] text-white/50 font-medium">
+        <div className="absolute bottom-full right-0 mb-2 z-[90] w-[300px] rounded-card border border-line bg-surface shadow-raised py-1 overflow-hidden">
+          <div className="px-3 py-2 text-[11px] text-ink-3 font-medium">
             動作應如何核准？
           </div>
           {APPROVAL_MODE_DEFS.map((d) => {
@@ -55,32 +55,32 @@ export function ApprovalModeMenu({
                   setOpen(false)
                 }}
                 className={`w-full flex items-start gap-2.5 px-3 py-2.5 text-left transition-colors ${
-                  selected ? 'bg-white/[0.07]' : 'hover:bg-white/[0.05]'
+                    selected ? 'bg-hover-2' : 'hover:bg-hover-2'
                 }`}
               >
                 <Icon
                   name={d.icon}
                   size={18}
                   className={`shrink-0 mt-0.5 ${
-                    d.id === 'full' ? 'text-amber-300/90' : 'text-on-surface-variant'
+                    d.id === 'full' ? 'text-orange' : 'text-ink-2'
                   }`}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-semibold text-on-surface">
+                  <span className="block text-[13px] font-semibold text-ink">
                     {d.title}
                   </span>
-                  <span className="block text-[11px] text-on-surface-variant leading-snug mt-0.5">
+                  <span className="block text-[11px] text-ink-2 leading-snug mt-0.5">
                     {d.desc}
                   </span>
                 </span>
                 {selected && (
-                  <Icon name="check" size={16} className="shrink-0 mt-1 text-primary" />
+                  <Icon name="check" size={16} className="shrink-0 mt-1 text-accent-ink" />
                 )}
               </button>
             )
           })}
           {(mode || 'auto') === 'full' && (
-            <div className="px-3 py-2 text-[11px] text-amber-300/80 border-t border-white/10">
+            <div className="px-3 py-2 text-[11px] text-orange border-t border-line">
               完整存取權會跳過人工核准與 safety 攔截（deny 規則仍生效），請小心使用。
             </div>
           )}

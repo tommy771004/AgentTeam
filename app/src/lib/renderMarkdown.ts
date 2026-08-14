@@ -13,7 +13,7 @@ function inline(s: string) {
     .replace(/\*(.+?)\*/g, '<em class="text-on-surface-variant">$1</em>')
     .replace(
       /`(.+?)`/g,
-      '<code class="px-1 py-0.5 rounded bg-black/30 text-primary font-[family-name:var(--font-mono)] text-[12px]">$1</code>',
+      '<code class="px-1 py-0.5 rounded-[5px] bg-inset text-accent-ink shadow-hairline font-[family-name:var(--font-mono)] text-[12px]">$1</code>',
     )
     .replace(
       /\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
@@ -34,12 +34,12 @@ function codeBlockHtml(language: string, lines: string[]): string {
     )
     .join('')
   return (
-    '<div class="agent-code-block my-2.5 overflow-hidden rounded-lg border border-white/10 bg-[#0b1326]">' +
-    '<div class="agent-code-header">' +
+    '<div class="agent-code-block my-2.5 overflow-hidden rounded-card border border-line bg-surface shadow-card">' +
+    '<div class="agent-code-header border-b border-line">' +
     `<span class="agent-code-title"><span class="agent-code-lang">${esc(language)}</span>` +
     `<span class="agent-code-count">${lines.length} 行</span></span>` +
     '<button type="button" data-copy-code aria-label="複製程式碼">複製</button></div>' +
-    '<pre class="agent-code-body overflow-x-auto py-2.5 pr-3 pl-2 font-[family-name:var(--font-mono)] text-[12px] text-primary-fixed-dim">' +
+    '<pre class="agent-code-body overflow-x-auto bg-inset py-2.5 pr-3 pl-2 font-[family-name:var(--font-mono)] text-[12px] text-ink-2">' +
     `<code>${body}</code></pre></div>`
   )
 }
@@ -117,22 +117,22 @@ export function renderMarkdown(md: string): string {
       const thead = headers
         .map(
           (h) =>
-            `<th class="px-3 py-1.5 text-left text-xs font-semibold text-on-surface border-b border-white/15 whitespace-nowrap">${inline(h)}</th>`,
+            `<th class="primitive-table-cell text-left text-xs font-semibold text-ink-3 border-b border-line whitespace-nowrap">${inline(h)}</th>`,
         )
         .join('')
       const tbody = rows
         .map(
           (cells) =>
-            `<tr class="border-t border-white/8">${headers
+            `<tr class="border-t border-line">${headers
               .map(
                 (_, ci) =>
-                  `<td class="px-3 py-1.5 text-sm text-on-surface-variant align-top">${inline(cells[ci] ?? '')}</td>`,
+                  `<td class="primitive-table-cell text-sm text-ink-2 align-top">${inline(cells[ci] ?? '')}</td>`,
               )
               .join('')}</tr>`,
         )
         .join('')
       html.push(
-        `<div class="overflow-x-auto my-2.5 rounded-lg border border-white/10 bg-surface-container/40"><table class="w-full border-collapse"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`,
+        `<div class="overflow-x-auto my-2.5 rounded-card border border-line bg-surface shadow-card"><table class="w-full border-collapse"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`,
       )
       li = ri - 1
       continue

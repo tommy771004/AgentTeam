@@ -360,21 +360,21 @@ export function ProtocolsPage() {
   }
 
   return (
-    <div className="h-full flex min-h-0 bg-background">
+    <div className="h-full flex min-h-0 bg-canvas text-ink">
       {showThreadList && (
-        <aside className="w-[200px] md:w-[220px] shrink-0 hidden sm:flex flex-col min-h-0">
+        <aside className="w-[200px] md:w-[220px] shrink-0 hidden sm:flex flex-col min-h-0 border-r border-line">
           <ThreadSidebar />
         </aside>
       )}
 
       <div className="flex-1 min-w-0 flex flex-col min-h-0">
         {/* Top bar */}
-        <div className="shrink-0 h-12 px-3 md:px-4 border-b border-white/8 flex items-center justify-between gap-2 bg-surface/30">
+        <div className="shrink-0 h-12 px-3 md:px-4 border-b border-line flex items-center justify-between gap-2 bg-surface/70">
           <div className="flex items-center gap-2 min-w-0">
             {!showThreadList && (
               <button
                 type="button"
-                className="p-1.5 rounded-lg hover:bg-white/10 text-outline"
+                className="p-1.5 rounded-control hover:bg-hover-2 text-ink-3"
                 onClick={() => setShowThreadList(true)}
                 title="Threads"
               >
@@ -383,18 +383,18 @@ export function ProtocolsPage() {
             )}
             <button
               type="button"
-              className="sm:hidden p-1.5 rounded-lg hover:bg-white/10 text-outline"
+              className="sm:hidden p-1.5 rounded-control hover:bg-hover-2 text-ink-3"
               onClick={() => setShowThreadList(!showThreadList)}
             >
               <Icon name="forum" size={18} />
             </button>
-            <Icon name="auto_awesome" size={16} className="text-primary shrink-0" />
-            <span className="font-semibold text-sm truncate max-w-[140px] md:max-w-[220px]">
+            <Icon name="auto_awesome" size={16} className="text-accent-ink shrink-0" />
+            <span className="font-semibold text-[13px] truncate max-w-[140px] md:max-w-[220px]">
               {thread?.title || '新對話'}
             </span>
             {live && (
-              <span className="flex items-center gap-1 text-[11px] text-primary">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              <span className="flex items-center gap-1 text-[11px] text-accent-ink">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
                 執行中
               </span>
             )}
@@ -409,7 +409,7 @@ export function ProtocolsPage() {
           <div className="chat-column flex-1 min-h-0 flex flex-col w-full max-w-3xl mx-auto px-4 md:px-5">
             <div
               ref={scrollRef}
-              className="flex-1 min-h-0 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] py-6"
+              className="flex-1 min-h-0 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] py-5"
             >
               {empty ? (
                 <div className="flex flex-col items-center justify-center pt-[18vh] pb-6 text-center">
@@ -424,7 +424,7 @@ export function ProtocolsPage() {
                   />
                 </div>
               ) : (
-                <div className="w-full space-y-3 pb-2">
+                <div className="w-full space-y-4 pb-2">
                   {(() => {
                     const items = thread?.bubbles || []
                     // Codex order: …user → system → [process] → assistant

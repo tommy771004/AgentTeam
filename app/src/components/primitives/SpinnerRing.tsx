@@ -18,7 +18,7 @@ export function SpinnerRing({
   const stroke = 2
   const radius = (size - stroke) / 2
   const circumference = 2 * Math.PI * radius
-  const arc = tone === 'muted' ? 'var(--color-outline)' : 'var(--color-primary)'
+  const arc = tone === 'muted' ? 'var(--color-ink-3)' : 'var(--color-ink-2)'
 
   return (
     <span
@@ -38,7 +38,7 @@ export function SpinnerRing({
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="var(--color-outline-variant)"
+          stroke="var(--color-line-strong)"
           strokeWidth={stroke}
         />
         {active ? (
@@ -56,7 +56,7 @@ export function SpinnerRing({
       </svg>
       <span
         className={`relative text-[10.5px] font-semibold tabular-nums ${
-          tone === 'idle' ? 'text-outline' : 'text-on-surface'
+          tone === 'idle' ? 'text-ink-3' : 'text-ink'
         }`}
       >
         {children}
