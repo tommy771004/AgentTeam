@@ -6,6 +6,16 @@ export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
+/** Non-secret provenance exposed to the renderer so users can verify bootstrap behavior. */
+export type PiHostConfigStatus = {
+  settingsSource: 'native' | 'managed' | 'default'
+  settingsLoaded: boolean
+  oauthSources: Array<'codex-cli' | 'claude-cli'>
+  oauthImportedProviders: string[]
+  oauthSkippedProviders: string[]
+  oauthConflicts: string[]
+}
+
 export type PiHostRequest = {
   id: string | number
   method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
@@ -21,6 +31,7 @@ export type PiHostResponse = {
     cursor?: number
     sessions?: unknown[]
     settings?: PiSettings
+    config?: PiHostConfigStatus
     profile?: PiSettings
     sessionId?: string
     runId?: string
@@ -92,7 +103,7 @@ import { callPiMcpTool, listPiMcpTools, stopPiMcp } from './piMcpClient.ts'
 
 type HostState = {
   initialized: boolean
-  snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[] }
+  snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[] }
   capabilities: PiCapabilityCatalog
   extensions: PiExtensionRegistry
 }
@@ -695,7 +706,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       if (activeSessionRuns.get(sessionId)?.runId === runId) activeSessionRuns.delete(sessionId)
     })
   }
-  if (input.method === 'settings/get') return [{ id, result: { settings: { ...state.snapshot.settings } } }]
+  if (input.method === 'settings/get') return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config } }]
   if (input.method === 'settings/update') {
     try {
       const patch = validatePiSettingsPatch(input.params || {})
@@ -704,8 +715,10 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
         ...patch,
         activeTools: patch.activeTools || state.snapshot.settings.activeTools,
       }
+      state.snapshot.settingsOrigin = 'managed'
+      if (state.snapshot.config) state.snapshot.config = { ...state.snapshot.config, settingsSource: 'managed' }
       state.snapshot.cursor += 1
-      return [{ id, result: { settings: { ...state.snapshot.settings } } }]
+      return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config } }]
     } catch (error) {
       return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid settings')]
     }
@@ -728,7 +741,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
 
 export function createPiHostServer(
   send: (message: PiHostMessage) => void,
-  initialSnapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions?: PiExtension[] } = {
+  initialSnapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions?: PiExtension[] } = {
     cursor: 0,
     sessions: [],
     settings: { ...DEFAULT_PI_SETTINGS },
@@ -737,7 +750,7 @@ export function createPiHostServer(
     memories: [],
     extensions: [],
   },
-  onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[] }) => void,
+  onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[] }) => void,
 ) {
   const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [] }
   const state: HostState = { initialized: false, snapshot, capabilities: new PiCapabilityCatalog(DEFAULT_PI_CAPABILITIES), extensions: new PiExtensionRegistry(snapshot.extensions) }

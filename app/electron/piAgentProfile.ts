@@ -1,4 +1,4 @@
-export type PiThinkingLevel = 'off' | 'low' | 'medium' | 'high'
+export type PiThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export type PiSettings = {
   provider: string
@@ -23,6 +23,10 @@ export const DEFAULT_PI_SETTINGS: PiSettings = {
   approvalMode: 'auto',
   bashRequireAsk: true,
   unattended: false,
+}
+
+export function isPiThinkingLevel(value: unknown): value is PiThinkingLevel {
+  return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(String(value))
 }
 
 export function compileEffectiveAgentProfile(
@@ -53,7 +57,7 @@ export function validatePiSettingsPatch(patch: Record<string, unknown>): Partial
     next.model = patch.model.trim()
   }
   if ('thinkingLevel' in patch) {
-    if (!['off', 'low', 'medium', 'high'].includes(String(patch.thinkingLevel))) {
+    if (!['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(String(patch.thinkingLevel))) {
       throw new Error(`Unsupported thinking level: ${String(patch.thinkingLevel)}`)
     }
     next.thinkingLevel = patch.thinkingLevel as PiThinkingLevel

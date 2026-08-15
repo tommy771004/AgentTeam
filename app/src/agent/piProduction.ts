@@ -48,7 +48,7 @@ export function stripPiOwnedSettings(input: Partial<LlmSettings>): Partial<LlmSe
 export type PiSettingsPatch = {
   provider?: string
   model?: string
-  thinkingLevel?: 'off' | 'low' | 'medium' | 'high'
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   activeTools?: string[]
   approvalMode?: 'always' | 'auto' | 'full'
   bashRequireAsk?: boolean

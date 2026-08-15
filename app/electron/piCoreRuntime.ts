@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type { PiThinkingLevel } from './piAgentProfile.ts'
+import { resolvePiAgentDir } from './piUserConfig.ts'
 
 const vendorCandidates = [
   process.env.SUBAGENTS_PI_VENDOR_DIR,
@@ -141,7 +142,7 @@ export function mergePiLegacyModelConfig(input: unknown, patch: PiLegacyModelCon
 
 /** Persist a legacy custom endpoint without placing credentials in models.json. */
 export async function persistPiLegacyModelConfig(patch: PiLegacyModelConfig | null): Promise<boolean> {
-  const agentDir = process.env.SUBAGENTS_PI_AGENT_DIR
+  const agentDir = resolvePiAgentDir()
   if (!patch || !agentDir || !patch.provider.trim() || !patch.model.trim() || !patch.baseUrl.trim()) return false
   const modelsPath = join(agentDir, 'models.json')
   let existing: unknown = {}
@@ -164,7 +165,7 @@ export async function persistPiLegacyModelConfig(patch: PiLegacyModelConfig | nu
 
 /** Import the one legacy API key into Pi's main-process auth.json. */
 export async function persistPiLegacyCredential(provider: string, apiKey: string): Promise<void> {
-  const agentDir = process.env.SUBAGENTS_PI_AGENT_DIR
+  const agentDir = resolvePiAgentDir()
   if (!agentDir || !provider.trim() || !apiKey.trim()) return
   const modelRuntime = await piCodingAgent.ModelRuntime.create({
     authPath: join(agentDir, 'auth.json'),
@@ -181,7 +182,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     await existing.session.dispose?.()
     sessionRuntimes.delete(sessionId)
   }
-  const agentDir = process.env.SUBAGENTS_PI_AGENT_DIR
+  const agentDir = resolvePiAgentDir()
   const sessionDir = agentDir ? join(agentDir, 'sessions') : undefined
   const sessionManager = sessionFile
     ? piCodingAgent.SessionManager.open(sessionFile, sessionDir, cwd)

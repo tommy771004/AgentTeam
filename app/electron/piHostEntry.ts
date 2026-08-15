@@ -5,6 +5,7 @@ import { createPiHostServer, type PiHostMessage } from './piHostProtocol.ts'
 import { loadPiHostState, savePiHostState, type PiHostSnapshot } from './piHostState.ts'
 import { migrateLegacySettings } from './piSettingsMigration.ts'
 import { persistPiLegacyCredential, persistPiLegacyModelConfig } from './piCoreRuntime.ts'
+import { bootstrapPiUserConfig } from './piUserConfig.ts'
 
 type ParentPort = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
@@ -14,6 +15,7 @@ type ParentPort = {
 const parentPort = (process as typeof process & { parentPort?: ParentPort }).parentPort
 const statePath = process.env.SUBAGENTS_PI_HOST_STATE_PATH || `${process.cwd()}/pi-host-state.json`
 const storedState = await loadPiHostState(statePath)
+const userConfig = await bootstrapPiUserConfig()
 const migrationPath = process.env.SUBAGENTS_PI_SETTINGS_MIGRATION_PATH || path.join(path.dirname(statePath), 'pi-settings-migration.json')
 let migratedSettings = storedState.settings
 try {
@@ -57,7 +59,19 @@ try {
     }
   }
 }
-const initialSnapshot: PiHostSnapshot = { cursor: storedState.cursor, sessions: storedState.sessions, settings: migratedSettings, queue: storedState.queue, resources: storedState.resources, memories: storedState.memories, extensions: storedState.extensions }
+const settingsOrigin = storedState.settingsOrigin === 'managed' ? 'managed' : 'native'
+const effectiveSettings = settingsOrigin === 'native'
+  ? { ...migratedSettings, ...userConfig.settings }
+  : migratedSettings
+const config = {
+  settingsSource: settingsOrigin === 'managed' ? 'managed' : userConfig.settingsPath ? 'native' : 'default',
+  settingsLoaded: Boolean(userConfig.settingsPath),
+  oauthSources: userConfig.oauth.sourceKinds,
+  oauthImportedProviders: userConfig.oauth.importedProviders,
+  oauthSkippedProviders: userConfig.oauth.skippedProviders,
+  oauthConflicts: userConfig.oauth.conflicts,
+} as const
+const initialSnapshot: PiHostSnapshot = { cursor: storedState.cursor, sessions: storedState.sessions, settings: effectiveSettings, settingsOrigin, config, queue: storedState.queue, resources: storedState.resources, memories: storedState.memories, extensions: storedState.extensions }
 await savePiHostState(statePath, initialSnapshot)
 let persistence = Promise.resolve()
 const persist = (snapshot: typeof initialSnapshot) => {

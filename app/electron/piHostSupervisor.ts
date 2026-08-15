@@ -98,15 +98,25 @@ export class PiHostSupervisor {
   }
 
   async getSettings(): Promise<NonNullable<PiHostResponse['result']>['settings']> {
+    const result = await this.getSettingsSnapshot()
+    return result.settings
+  }
+
+  async getSettingsSnapshot(): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('settings/get', {})
     if (response.error || !response.result?.settings) throw new Error(response.error?.message || 'Pi Host settings failed')
-    return response.result.settings
+    return response.result
   }
 
   async updateSettings(patch: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>['settings']> {
+    const result = await this.updateSettingsSnapshot(patch)
+    return result.settings
+  }
+
+  async updateSettingsSnapshot(patch: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('settings/update', patch)
     if (response.error || !response.result?.settings) throw new Error(response.error?.message || 'Pi Host settings update failed')
-    return response.result.settings
+    return response.result
   }
 
   async profile(role?: Record<string, unknown>, taskOverride?: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>['profile']> {

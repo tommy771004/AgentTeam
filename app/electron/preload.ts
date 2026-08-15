@@ -2,6 +2,26 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
 import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
 
+type PiHostThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+type PiHostSettings = {
+  provider: string
+  model: string
+  thinkingLevel: PiHostThinkingLevel
+  activeTools: string[]
+  compaction: 'auto' | 'manual'
+  approvalMode: 'always' | 'auto' | 'full'
+  bashRequireAsk: boolean
+  unattended: boolean
+}
+type PiHostConfigStatus = {
+  settingsSource: 'native' | 'managed' | 'default'
+  settingsLoaded: boolean
+  oauthSources: Array<'codex-cli' | 'claude-cli'>
+  oauthImportedProviders: string[]
+  oauthSkippedProviders: string[]
+  oauthConflicts: string[]
+}
+
 const api = {
   platform: () => ipcRenderer.invoke('app:platform') as Promise<string>,
   version: () => ipcRenderer.invoke('app:version') as Promise<string>,
@@ -26,11 +46,13 @@ const api = {
     }>,
     settings: {
       get: () => ipcRenderer.invoke('pi-host:settings:get') as Promise<{
-        settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual'; approvalMode: 'always' | 'auto' | 'full'; bashRequireAsk: boolean; unattended: boolean }
+        settings: PiHostSettings
+        config?: PiHostConfigStatus
       }>,
-      update: (patch: { provider?: string; model?: string; thinkingLevel?: 'off' | 'low' | 'medium' | 'high'; activeTools?: string[]; compaction?: 'auto' | 'manual'; approvalMode?: 'always' | 'auto' | 'full'; bashRequireAsk?: boolean; unattended?: boolean }) =>
+      update: (patch: { provider?: string; model?: string; thinkingLevel?: PiHostThinkingLevel; activeTools?: string[]; compaction?: 'auto' | 'manual'; approvalMode?: 'always' | 'auto' | 'full'; bashRequireAsk?: boolean; unattended?: boolean }) =>
         ipcRenderer.invoke('pi-host:settings:update', patch) as Promise<{
-          settings: { provider: string; model: string; thinkingLevel: 'off' | 'low' | 'medium' | 'high'; activeTools: string[]; compaction: 'auto' | 'manual'; approvalMode: 'always' | 'auto' | 'full'; bashRequireAsk: boolean; unattended: boolean }
+          settings: PiHostSettings
+          config?: PiHostConfigStatus
         }>,
       profile: (role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) =>
         ipcRenderer.invoke('pi-host:settings:profile', role, taskOverride) as Promise<{ profile: unknown }>,

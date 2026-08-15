@@ -13,12 +13,21 @@ import {
 type PiSettings = {
   provider: string
   model: string
-  thinkingLevel: 'off' | 'low' | 'medium' | 'high'
+  thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   activeTools: string[]
   compaction: 'auto' | 'manual'
   approvalMode: 'always' | 'auto' | 'full'
   bashRequireAsk: boolean
   unattended: boolean
+}
+
+type PiConfigStatus = {
+  settingsSource: 'native' | 'managed' | 'default'
+  settingsLoaded: boolean
+  oauthSources: Array<'codex-cli' | 'claude-cli'>
+  oauthImportedProviders: string[]
+  oauthSkippedProviders: string[]
+  oauthConflicts: string[]
 }
 
 type PiExtensionView = {
@@ -42,18 +51,39 @@ const TOOLS = [
   ['ls', '列出目錄'],
 ] as const
 
+function piSourceLabel(source: 'codex-cli' | 'claude-cli'): string {
+  return source === 'codex-cli' ? 'Codex CLI' : 'Claude CLI'
+}
+
+function piOAuthStatus(config: PiConfigStatus): string {
+  const sources = config.oauthSources.map(piSourceLabel).join('、')
+  if (config.oauthImportedProviders.length) return `已套用 ${sources || 'CLI'} OAuth`
+  if (config.oauthSkippedProviders.length) return '已保留 Pi 目前 OAuth'
+  if (config.oauthConflicts.length) return 'CLI OAuth 帳號不同，未覆蓋'
+  return sources ? `已偵測 ${sources}，未變更` : '未偵測到 CLI OAuth'
+}
+
+function piSettingsSourceStatus(config?: PiConfigStatus): string {
+  if (!config) return '由 Pi Core 管理'
+  if (config.settingsSource === 'managed') return '使用 App 儲存的覆寫'
+  if (config.settingsLoaded) return '已載入 ~/.pi/agent/settings.json'
+  return '使用 Pi 預設值'
+}
+
 export function PiCoreSettingsSection() {
   const [draft, setDraft] = useState<PiSettings>({ provider: '', model: '', thinkingLevel: 'medium', activeTools: [], compaction: 'auto', approvalMode: 'auto', bashRequireAsk: true, unattended: false })
   const [status, setStatus] = useState('載入中…')
   const [saving, setSaving] = useState(false)
   const [extensions, setExtensions] = useState<PiExtensionView[]>([])
+  const [configStatus, setConfigStatus] = useState<PiConfigStatus | undefined>()
 
   useEffect(() => {
     let active = true
     void window.subagents?.piHost?.settings?.get?.().then((result) => {
       if (!active || !result?.settings) return
       setDraft(result.settings)
-      setStatus('已從 Pi Core 載入')
+      setConfigStatus(result.config)
+      setStatus(result.config?.oauthImportedProviders.length ? '已載入 Pi 設定檔，並套用 CLI OAuth' : '已從 Pi Core 載入')
     }).catch((error: unknown) => {
       if (active) setStatus(error instanceof Error ? error.message : '無法載入 Pi 設定')
     })
@@ -77,6 +107,7 @@ export function PiCoreSettingsSection() {
     try {
       const result = await window.subagents?.piHost?.settings?.update?.(draft)
       if (result?.settings) setDraft(result.settings)
+      if (result?.config) setConfigStatus(result.config)
       setStatus('已儲存；下一輪代理執行會套用新設定')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '儲存失敗')
@@ -110,9 +141,12 @@ export function PiCoreSettingsSection() {
           control={
             <PillSelect value={draft.thinkingLevel} onChange={(value) => setDraft((current) => ({ ...current, thinkingLevel: value as PiSettings['thinkingLevel'] }))}>
               <option value="off">關閉</option>
+              <option value="minimal">極低</option>
               <option value="low">低</option>
               <option value="medium">中</option>
               <option value="high">高</option>
+              <option value="xhigh">極高</option>
+              <option value="max">最大</option>
             </PillSelect>
           }
         />
@@ -135,6 +169,18 @@ export function PiCoreSettingsSection() {
           title="Bash 分段安全檢查"
           description="逐段檢查鏈式命令；危險、子 shell 與未涵蓋命令一律要求核准。"
           control={<SettingsToggle checked={draft.bashRequireAsk} onChange={() => setDraft((current) => ({ ...current, bashRequireAsk: !current.bashRequireAsk }))} />}
+        />
+      </SettingsGroup>
+      <SettingsGroup title="設定來源">
+        <SettingsRow
+          title="Pi 設定檔"
+          description="Pi Host 啟動時自動讀取使用者的 Pi 設定；儲存後可由 App 覆寫。"
+          control={<span className="text-[11px] text-outline">{piSettingsSourceStatus(configStatus)}</span>}
+        />
+        <SettingsRow
+          title="CLI OAuth"
+          description="OAuth 只在 Electron 主程序同步到 Pi auth.json，Renderer 不會接觸 token。"
+          control={<span className="text-[11px] text-outline">{configStatus ? piOAuthStatus(configStatus) : '載入中…'}</span>}
         />
       </SettingsGroup>
       <SettingsGroup title="可用工具" action={<span className="text-[11px] text-outline">明確選取，不需編輯 JSON</span>}>

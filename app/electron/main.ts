@@ -212,6 +212,10 @@ const piHostSupervisor = new PiHostSupervisor(() =>
       ...process.env,
       SUBAGENTS_PI_VENDOR_DIR: path.resolve(__dirname, '../../vendor/pi'),
       SUBAGENTS_PI_AGENT_DIR: path.join(app.getPath('userData'), 'pi-agent'),
+      SUBAGENTS_PI_NATIVE_AGENT_DIR: path.join(app.getPath('home'), '.pi', 'agent'),
+      SUBAGENTS_PI_SYNC_CLI_OAUTH: 'true',
+      SUBAGENTS_CODEX_AUTH_PATH: path.join(app.getPath('home'), '.codex', 'auth.json'),
+      SUBAGENTS_CLAUDE_CREDENTIALS_PATH: path.join(app.getPath('home'), '.claude', '.credentials.json'),
       SUBAGENTS_PI_HOST_STATE_PATH: path.join(app.getPath('userData'), 'pi-host-state.json'),
       SUBAGENTS_PI_SETTINGS_MIGRATION_PATH: path.join(app.getPath('userData'), 'pi-settings-migration.json'),
       SUBAGENTS_LEGACY_SETTINGS_PATH: settingsPath(),
@@ -2050,8 +2054,8 @@ ipcMain.handle('app:platform', () => process.platform)
 ipcMain.handle('app:version', () => app.getVersion())
 ipcMain.handle('pi-host:status', () => piHostSupervisor.status())
 ipcMain.handle('pi-host:health', async () => piHostSupervisor.health())
-ipcMain.handle('pi-host:settings:get', async () => ({ settings: await piHostSupervisor.getSettings() }))
-ipcMain.handle('pi-host:settings:update', async (_evt, patch: Record<string, unknown>) => ({ settings: await piHostSupervisor.updateSettings(patch || {}) }))
+ipcMain.handle('pi-host:settings:get', async () => piHostSupervisor.getSettingsSnapshot())
+ipcMain.handle('pi-host:settings:update', async (_evt, patch: Record<string, unknown>) => piHostSupervisor.updateSettingsSnapshot(patch || {}))
 ipcMain.handle('pi-host:settings:profile', async (_evt, role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) => ({ profile: await piHostSupervisor.profile(role, taskOverride) }))
 ipcMain.handle('pi-host:sessions:create', async (_evt, title?: string, threadId?: string) => piHostSupervisor.createSession(title, threadId))
 ipcMain.handle('pi-host:sessions:create-child', async (_evt, input: Record<string, unknown>) => piHostSupervisor.createChildSession(input || {}))
