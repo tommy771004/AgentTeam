@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ThreadRunSummary } from '../store/threadStore'
+import { deriveRunLifecycle, lifecycleToneClass } from '../agent/runLifecycle'
 import { ContextCards } from './ContextCards'
 import { Icon } from './Icon'
 import { Reveal } from './primitives/Reveal'
@@ -13,13 +14,6 @@ function iconFor(kind: string) {
   return 'terminal'
 }
 
-function terminalLabel(status: ThreadRunSummary['status']) {
-  if (status === 'failed') return '失敗'
-  if (status === 'halted') return '已停止'
-  if (status === 'success') return '完成'
-  return ''
-}
-
 /** Persisted, collapsible record of what an agent did for one answer. */
 export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
   const navigate = useNavigate()
@@ -30,7 +24,11 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
   const groups = groupProcessOperations(summary.operations)
   const additions = summary.files.reduce((total, file) => total + (file.added || 0), 0)
   const removals = summary.files.reduce((total, file) => total + (file.removed || 0), 0)
-  const outcome = terminalLabel(summary.status)
+  const lifecycle = deriveRunLifecycle({
+    status: summary.status || 'idle',
+    terminal: Boolean(summary.status),
+  })
+  const outcome = summary.status ? lifecycle.label : ''
   const label = summary.files.length
     ? `已變更 ${summary.files.length} 個檔案`
     : `執行過程 · ${summary.operations.length} 項`
@@ -43,7 +41,11 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
         onClick={() => setOpen((value) => !value)}
         className="agent-summary-header flex w-full items-center gap-2 px-3.5 py-3 text-left"
       >
-        <Icon name={summary.status === 'failed' ? 'error' : summary.status === 'halted' ? 'stop_circle' : summary.files.length ? 'note_stack' : 'terminal'} size={18} className={`shrink-0 ${summary.status === 'failed' ? 'text-red' : summary.status === 'halted' ? 'text-ink-3' : 'text-ink-2'}`} />
+        <Icon
+          name={summary.status ? lifecycle.icon : summary.files.length ? 'note_stack' : 'terminal'}
+          size={18}
+          className={`shrink-0 ${summary.status ? lifecycleToneClass(lifecycle.tone) : 'text-ink-2'}`}
+        />
         <span className="min-w-0 flex-1">
           <span className="block text-[13px] font-semibold text-ink">{label}</span>
           <span className="block text-[11px] text-ink-3">
@@ -52,7 +54,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
           </span>
         </span>
         {outcome ? (
-          <span className={`shrink-0 text-[11px] font-medium ${summary.status === 'failed' ? 'text-red' : summary.status === 'halted' ? 'text-ink-3' : 'text-green'}`}>
+          <span className={`shrink-0 text-[11px] font-medium ${lifecycleToneClass(lifecycle.tone)}`}>
             {outcome}
           </span>
         ) : null}

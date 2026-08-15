@@ -7,12 +7,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { emptyAgentLike } from '../agent/localCliRun'
 import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
+import { deriveRunLifecycle } from '../agent/runLifecycle'
 import { useAgentStore } from '../store/agentStore'
+import { usePermissionAskStore } from '../store/permissionAskStore'
 import {
   useRunActivityStore,
   type FileChangeRecord,
   type RunActivityEvent,
-  type RunActivityPhase,
   type RunTaskItem,
 } from '../store/runActivityStore'
 import { Icon } from './Icon'
@@ -51,27 +52,6 @@ function kindIcon(kind: string): string {
   }
 }
 
-function phaseLabel(input: {
-  phase: RunActivityPhase
-  statusLine: string
-  thought: string
-  draftText: string
-  operationCount: number
-  objective: string
-}) {
-  if (input.phase === 'responding' || input.draftText.trim()) return '正在撰寫回覆'
-  if (input.phase === 'thinking' || input.thought.trim()) return '正在推理'
-  if (input.phase === 'planning') return input.statusLine || '正在整理任務'
-  if (input.phase === 'executing') return input.statusLine || '正在執行任務'
-  if (input.phase === 'finalizing') return '正在整理執行摘要…'
-  if (input.phase === 'cancelled') return '已停止，正在收尾…'
-  if (input.phase === 'failed') return input.statusLine || '執行失敗'
-  if (input.phase === 'completed') return input.statusLine || '已完成'
-  if (input.statusLine.trim()) return input.statusLine
-  if (input.operationCount > 0) return '正在執行任務'
-  return input.objective ? '正在準備任務' : '正在啟動'
-}
-
 const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 })
 const EMPTY_EVENTS: RunActivityEvent[] = []
 const EMPTY_FILES: FileChangeRecord[] = []
@@ -89,6 +69,12 @@ export function RunProcessFeed({
   const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
   const activity = useRunActivityStore((s) => s.presentations[runId])
+  const approvalPending = usePermissionAskStore((s) =>
+    Boolean(
+      (s.current?.runId && s.current.runId === runId) ||
+        s.queue.some((item) => item.runId === runId),
+    ),
+  )
   const activityActive = activity?.active || false
   const startedAt = activity?.startedAt ?? 0
   const events = activity?.events ?? EMPTY_EVENTS
@@ -113,12 +99,7 @@ export function RunProcessFeed({
     setProcessOpen(true)
   }, [runId])
 
-  const live =
-    isRunning ||
-    activityActive ||
-    agent.status === 'running' ||
-    agent.status === 'parsing' ||
-    agent.status === 'manual_intervention'
+  const runActive = isRunning || activityActive
 
   /** Flat timeline: stream events + steps + toolCalls + recent logs */
   const timeline = useMemo(() => {
@@ -209,14 +190,16 @@ export function RunProcessFeed({
   }, [events, agent.steps, agent.toolCalls, agent.logs])
 
   const groups = useMemo(() => groupProcessOperations(timeline), [timeline])
-  const phase = phaseLabel({
+  const lifecycle = deriveRunLifecycle({
     phase: activityPhase,
+    status: agent.status,
     statusLine,
-    thought,
-    draftText,
-    operationCount: timeline.length,
+    active: runActive,
+    approvalPending,
+    terminal: Boolean(activity?.terminal),
     objective: agent.objective,
   })
+  const phase = lifecycle.label
   const toolCount = new Set(
     [
       ...agent.toolCalls.map((tool) => tool.id),
@@ -258,13 +241,18 @@ export function RunProcessFeed({
   }, [fileChanges, agent.toolCalls, events])
 
   // ALWAYS show while live — even before first event (spinner + objective)
-  if (!live) return null
+  if (!lifecycle.live) return null
 
   return (
-    <section className="agent-process-feed w-full space-y-3 py-2" aria-live="polite" aria-busy={live}>
+    <section
+      className="agent-process-feed w-full space-y-3 py-2"
+      aria-live="polite"
+      aria-busy={lifecycle.live && !lifecycle.needsAttention}
+      data-run-phase={lifecycle.phase}
+    >
       {/* ChatGPT Desktop-style compact run header. The current phase and counts
           stay visible; the noisy execution trace lives behind one disclosure. */}
-      <div className="agent-process-status flex w-full items-center gap-2.5 text-left text-[13px] text-ink-2">
+      <div className={`agent-process-status flex w-full items-center gap-2.5 text-left text-[13px] text-ink-2 ${lifecycle.needsAttention ? 'text-orange' : ''}`}>
         <button
           type="button"
           aria-expanded={processOpen}
@@ -272,9 +260,13 @@ export function RunProcessFeed({
           className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
           onClick={() => setProcessOpen((value) => !value)}
         >
-          <PixelLoader className="shrink-0 text-ink" />
+          {lifecycle.needsAttention ? (
+            <Icon name={lifecycle.icon} size={16} className="shrink-0 text-orange" />
+          ) : (
+            <PixelLoader className="shrink-0 text-ink" />
+          )}
           <span className="min-w-0 flex-1">
-            <ShimmerLabel active className="block truncate font-medium">
+            <ShimmerLabel active={!lifecycle.needsAttention} className="block truncate font-medium">
               {phase ||
                 (agent.executionKind === 'external' || agent.loopConfig?.trigger === 'local-cli'
                   ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind || agent.steps[0]?.assignedAgent ? ` · ${agent.externalRunnerKind || agent.steps[0]?.assignedAgent}` : ''}…`

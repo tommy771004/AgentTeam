@@ -626,6 +626,12 @@ html[data-theme='light'] .app-panel {
 .agent-composer-stop:hover { background: var(--color-red-tint); color: var(--color-red); }
 
 .agent-process-status { min-height: 28px; }
+/* Waiting states are decisions, not background work: keep them calm and
+   explicit instead of showing a loader that implies progress. */
+.agent-process-feed[data-run-phase='awaiting_user'] .agent-process-status,
+.agent-process-feed[data-run-phase='manual_intervention'] .agent-process-status {
+  color: var(--color-orange);
+}
 .agent-process-link {
   border-radius: 6px;
   padding: 3px 5px;

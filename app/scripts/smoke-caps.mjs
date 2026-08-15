@@ -902,11 +902,15 @@ await test('Phase 1: active thread selects its run state through the UI seam', a
 await test('Phase 1: run activity is run-scoped with bounded terminal retention', async () => {
   const fs = await import('node:fs')
   const activity = fs.readFileSync(path.join(appRoot, 'src/store/runActivityStore.ts'), 'utf8')
+  const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(activity, /presentations: Record<string, RunPresentation>/)
   assert.match(activity, /MAX_PRESENTATIONS = 100/)
   assert.match(activity, /getPresentation: \(runId\)/)
   assert.match(activity, /terminalizePresentation/)
-  assert.match(activity, /get\(\)\.end\(streamRunId/)
+  // Stream adapters keep the feed live through summary/archive finalization;
+  // the coordinator is the single owner of terminalization.
+  assert.match(activity, /get\(\)\.setStatus\(payload\.title \|\| 'CLI 完成', streamRunId\)/)
+  assert.match(coordinator, /useRunActivityStore\.getState\(\)\.end\(runId, terminalLabel\)/)
   assert.match(activity, /clearDraft: \(runId\)/)
 })
 

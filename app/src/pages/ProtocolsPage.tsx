@@ -16,6 +16,7 @@ import { useSlashExecutor } from '../hooks/useSlashExecutor'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { inferRunnerFromModel } from '../agent/localCliRun'
+import { deriveRunLifecycle } from '../agent/runLifecycle'
 import type { AgentMode, LoopType } from '../agent/types'
 import type { ThinkingDepth } from '../agent/thinking'
 import { getThinkingDepth } from '../agent/thinking'
@@ -89,6 +90,31 @@ export function ProtocolsPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const thread = activeThread()
   const presentationRunId = activeId ? getRunIdForThread(activeId) : null
+  const activity = useRunActivityStore((s) =>
+    presentationRunId ? s.presentations[presentationRunId] : undefined,
+  )
+  const presentationActive = useAgentStore((s) =>
+    presentationRunId ? s.activeRunIds.includes(presentationRunId) : false,
+  )
+  const presentationAgent = useAgentStore((s) =>
+    presentationRunId ? s.runStates[presentationRunId] || s.agent : s.agent,
+  )
+  const approvalPending = usePermissionAskStore((s) =>
+    Boolean(
+      presentationRunId &&
+        ((s.current?.runId && s.current.runId === presentationRunId) ||
+          s.queue.some((item) => item.runId === presentationRunId)),
+    ),
+  )
+  const lifecycle = deriveRunLifecycle({
+    phase: activity?.phase,
+    status: presentationAgent.status,
+    statusLine: activity?.statusLine,
+    active: presentationActive || Boolean(activity?.active),
+    approvalPending,
+    terminal: Boolean(activity?.terminal),
+    objective: presentationAgent.objective,
+  })
   const composerApprovalMode = activeId ? composerApprovalModes[activeId] : undefined
   const handoff = buildHandoffAvailability(
     readArtifactIndex(typeof window === 'undefined' ? undefined : window.localStorage, activeId || ''),
@@ -110,10 +136,8 @@ export function ProtocolsPage() {
 
   // Auto-open right task panel while running (Codex-style split)
   useEffect(() => {
-    if (isRunning || agent.status === 'running' || agent.status === 'parsing') {
-      setShowRunPanel(true)
-    }
-  }, [isRunning, agent.status, setShowRunPanel])
+    if (lifecycle.live) setShowRunPanel(true)
+  }, [lifecycle.live, setShowRunPanel])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -135,12 +159,8 @@ export function ProtocolsPage() {
   const agentMode: AgentMode = thread?.agentMode || 'build'
   const threadModel = thread?.model || ''
   const runner: ThreadRunner = thread?.runner || 'builtin'
-  const empty = !thread?.bubbles.length && !isRunning
-  const live =
-    isRunning ||
-    agent.status === 'running' ||
-    agent.status === 'parsing' ||
-    agent.status === 'manual_intervention'
+  const live = lifecycle.live
+  const empty = !thread?.bubbles.length && !live
 
   const authorizedRunners = (settings.cliProviders || []).filter(
     (p) => p.enabled && p.authorized,
@@ -524,7 +544,7 @@ export function ProtocolsPage() {
                   />
                 )}
                 onSubmitLine={(line, atts) => void runEmbedded(line, atts)}
-                running={live}
+                running={lifecycle.canStop}
                 onStop={() => {
                   // Resolve at click time so a just-started run cannot be
                   // cancelled with the previous thread's stale projection id.

@@ -707,6 +707,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           const act = useRunActivityStore.getState()
           // Keep thought / process events for center timeline; clear draft so
           // final answer is only the markdown assistant bubble (no duplicate).
+          // Do not call end() here: the coordinator owns finalizing → summary
+          // → archive → terminal digest as one lifecycle transaction.
           if (r.ok) {
             act.push({ kind: 'done', title: 'CLI 完成', ok: true, runId })
             act.setStatus('完成', runId)
@@ -842,15 +844,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           },
         )
         get().applyPostState(runId, postState)
-        const settled = get().getRunState(runId) || { ...final, postState }
-        try {
-          const { useRunActivityStore } = await import('./runActivityStore')
-          useRunActivityStore
-            .getState()
-            .end(runId, r.ok && settled.status === 'success' ? '完成' : settled.status === 'halted' ? '已停止' : '失敗')
-        } catch {
-          /* ignore */
-        }
+        // Terminalization is intentionally deferred to finalizeTaskRun so the
+        // visible feed can show finalizing while summary/archive settle.
 
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')

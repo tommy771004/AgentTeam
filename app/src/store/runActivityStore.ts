@@ -4,6 +4,10 @@
  */
 
 import { create } from 'zustand'
+import {
+  phaseFromStatusLine,
+  type RunLifecyclePhase,
+} from '../agent/runLifecycle.ts'
 
 export type RunActivityKind =
   | 'status'
@@ -15,18 +19,8 @@ export type RunActivityKind =
   | 'error'
   | 'done'
 
-/** Shared lifecycle phase for every in-chat execution surface. */
-export type RunActivityPhase =
-  | 'starting'
-  | 'thinking'
-  | 'planning'
-  | 'executing'
-  | 'responding'
-  | 'finalizing'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-
+/** Compatibility name; the lifecycle vocabulary is shared by every UI surface. */
+export type RunActivityPhase = RunLifecyclePhase
 export type RunActivityEvent = {
   id: string
   at: number
@@ -306,16 +300,7 @@ function terminalizePresentation(
 }
 
 function phaseFromStatus(line: string, fallback: RunActivityPhase): RunActivityPhase {
-  const value = line.toLowerCase()
-  if (/已停止|取消|cancel|interrupt|halt/.test(value)) return 'cancelled'
-  if (/失敗|錯誤|error|fail/.test(value)) return 'failed'
-  if (/完成|成功|success|settle|整理.*摘要/.test(value)) return 'finalizing'
-  if (/回覆|回答|撰寫|產生回答|respond|answer/.test(value)) return 'responding'
-  if (/任務清單|計畫|plan|todo/.test(value)) return 'planning'
-  if (/思考|推理|reason|think/.test(value)) return 'thinking'
-  if (/執行|工具|搜尋|蒐集|讀取|編輯|host|cli|tool|run/.test(value)) return 'executing'
-  if (/啟動|準備|loading|start|initial/.test(value)) return 'starting'
-  return fallback
+  return phaseFromStatusLine(line, fallback)
 }
 
 function phaseFromEvent(

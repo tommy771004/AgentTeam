@@ -6,12 +6,14 @@ import { PixelLoader } from './primitives/PixelLoader'
 import { ShimmerLabel } from './primitives/ShimmerLabel'
 import { SpinnerRing } from './primitives/SpinnerRing'
 import { emptyAgentLike } from '../agent/localCliRun'
+import { deriveRunLifecycle, lifecycleToneClass } from '../agent/runLifecycle'
 import {
   EXTERNAL_CLI_UI_LABEL,
   capabilitiesForRunner,
   formatRunnerCapabilitiesSummary,
 } from '../agent/runners'
 import { useAgentStore } from '../store/agentStore'
+import { usePermissionAskStore } from '../store/permissionAskStore'
 import { useRunActivityStore } from '../store/runActivityStore'
 import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
@@ -28,34 +30,8 @@ const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 
 // Stable references — a fresh object/array literal returned from a zustand
 // selector fallback breaks Object.is identity every render and triggers
 // "Maximum update depth exceeded" (React getSnapshot-must-be-cached loop).
-const EMPTY_ACTIVITY = { active: false, tasks: [], statusLine: '', thought: '', startedAt: 0 } as const
+const EMPTY_ACTIVITY = { active: false, tasks: [], statusLine: '', thought: '', startedAt: 0, phase: 'starting' as const, terminal: null } as const
 const EMPTY_RUN_PLAN: ThreadPlanItem[] = []
-
-function statusLabel(status: string, live: boolean) {
-  if (status === 'manual_intervention') return '等待核准'
-  if (status === 'awaiting_user') return '等待回覆'
-  if (live) return '執行中'
-  if (status === 'success') return '已完成'
-  if (status === 'failed') return '執行失敗'
-  if (status === 'halted') return '已停止'
-  if (status === 'parsing') return '準備中'
-  return '已待命'
-}
-
-function statusIcon(status: string, live: boolean) {
-  if (live) return 'progress_activity'
-  if (status === 'success') return 'check_circle'
-  if (status === 'failed' || status === 'halted') return 'error'
-  return 'play_circle'
-}
-
-function statusTone(status: string, live: boolean) {
-  if (live) return 'text-accent-ink'
-  if (status === 'success') return 'text-green'
-  if (status === 'failed' || status === 'halted') return 'text-red'
-  if (status === 'awaiting_user' || status === 'manual_intervention') return 'text-orange'
-  return 'text-ink-2'
-}
 
 function CompactStepList({ steps }: { steps: ExecutionStep[] }) {
   return (
@@ -149,6 +125,12 @@ export function InlineRunPanel({
   const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
   const activity = useRunActivityStore((s) => s.presentations[runId]) || EMPTY_ACTIVITY
+  const approvalPending = usePermissionAskStore((s) =>
+    Boolean(
+      (s.current?.runId && s.current.runId === runId) ||
+        s.queue.some((item) => item.runId === runId),
+    ),
+  )
   const threadRunner = useThreadStore(
     (s) => s.threads.find((t) => t.id === threadId)?.runner || 'builtin',
   )
@@ -164,13 +146,17 @@ export function InlineRunPanel({
         at: Date.parse(item.at) || Date.now(),
       }))
 
-  const live =
-    isRunning ||
-    activity.active ||
-    agent.status === 'running' ||
-    agent.status === 'parsing' ||
-    agent.status === 'manual_intervention' ||
-    agent.status === 'awaiting_user'
+  const runActive = isRunning || activity.active
+  const lifecycle = deriveRunLifecycle({
+    phase: activity.phase,
+    status: agent.status,
+    statusLine: activity.statusLine,
+    active: runActive,
+    approvalPending,
+    terminal: Boolean(activity.terminal),
+    objective: agent.objective,
+  })
+  const live = lifecycle.live
 
   const isExternal =
     agent.executionKind === 'external' ||
@@ -192,22 +178,22 @@ export function InlineRunPanel({
   ]
     .filter(Boolean)
     .join(' · ')
-  const currentStatus = activity.statusLine || statusLabel(agent.status, live)
+  const currentStatus = lifecycle.label
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-line bg-surface text-ink">
       <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
         <div className="flex min-w-0 items-center gap-2">
           <Icon
-            name={statusIcon(agent.status, live)}
+            name={lifecycle.icon}
             size={17}
-            className={`${statusTone(agent.status, live)} shrink-0 ${live ? 'animate-spin' : ''}`}
+            className={`${lifecycleToneClass(lifecycle.tone)} shrink-0 ${live && !lifecycle.needsAttention ? 'animate-spin' : ''}`}
           />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-[13px] font-semibold text-ink">執行摘要</span>
-              <span className={`text-[11px] font-medium ${statusTone(agent.status, live)}`}>
-                {statusLabel(agent.status, live)}
+              <span className={`text-[11px] font-medium ${lifecycleToneClass(lifecycle.tone)}`}>
+                {lifecycle.label}
               </span>
             </div>
           </div>
