@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "b57da52566aac2c7b8e820b8750fe7e2e3aad182",
-    "indexed_at": "2026-08-14T09:41:15Z",
-    "project": "AgentTeam",
-    "nodes": 24022,
-    "edges": 53435,
-    "original_size": 31260672,
-    "compressed_size": 6241233,
-    "compression_level": 9
+    "commit": "89d26e072765c71120590e46c902330752157c25",
+    "indexed_at": "2026-08-15T04:57:36Z",
+    "project": "Users-tommy-Documents-Proj-AgentTeam",
+    "nodes": 24129,
+    "edges": 53870,
+    "original_size": 56754176,
+    "compressed_size": 8824954,
+    "compression_level": 3
 }

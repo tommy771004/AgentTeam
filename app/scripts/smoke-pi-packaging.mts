@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { once } from 'node:events'
 import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { join, resolve } from 'node:path'
@@ -24,11 +25,21 @@ const appRoot = resolve(import.meta.dirname, '..')
 const packageJson = JSON.parse(await readFile(resolve(appRoot, 'package.json'), 'utf8')) as PackageJson
 const piResource = packageJson.build?.extraResources?.find((resource) => resource.from === '../vendor/pi')
 assert.deepEqual(piResource, { from: '../vendor/pi', to: 'vendor/pi' })
+const piDependenciesResource = packageJson.build?.extraResources?.find((resource) => resource.from === '../vendor/pi/node_modules')
+assert.deepEqual(piDependenciesResource, { from: '../vendor/pi/node_modules', to: 'vendor/pi/node_modules' })
 assert.ok(packageJson.build?.mac?.target, 'macOS package target is required')
 assert.ok(packageJson.build?.win?.target, 'Windows package target is required')
 
 const artifact = resolve(appRoot, 'dist-electron/pi-host.js')
 const vendor = resolve(appRoot, '../vendor/pi')
+for (const relative of [
+  'packages/ai/dist/index.js',
+  'packages/agent/dist/index.js',
+  'packages/coding-agent/dist/index.js',
+  'packages/coding-agent/dist/config.js',
+]) {
+  assert.ok(existsSync(join(vendor, relative)), `missing Pi vendor build artifact: ${relative}; run npm run build:pi-vendor`)
+}
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'pi-packaging-'))
 const sharedVendor = join(temporaryRoot, 'shared-vendor', 'pi')
 await cp(vendor, sharedVendor, { recursive: true, force: true })

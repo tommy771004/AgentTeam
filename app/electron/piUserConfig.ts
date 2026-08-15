@@ -241,7 +241,10 @@ async function syncPiCliOAuth(agentDir: string): Promise<PiOAuthSyncStatus> {
     skippedProviders: [],
     conflicts: [],
   }
-  if (!sources.length || process.env.SUBAGENTS_PI_SYNC_CLI_OAUTH === 'false') return status
+  // Electron main opts into this explicitly after wiring the user's CLI paths.
+  // Keeping the host default off prevents direct protocol tests and utility
+  // process callers from importing credentials from the developer's home.
+  if (!sources.length || process.env.SUBAGENTS_PI_SYNC_CLI_OAUTH !== 'true') return status
 
   const authPath = path.join(agentDir, 'auth.json')
   const existing = existsSync(authPath) ? await readJsonObject(authPath) : {}
