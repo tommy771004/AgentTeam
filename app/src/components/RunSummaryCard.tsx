@@ -13,6 +13,13 @@ function iconFor(kind: string) {
   return 'terminal'
 }
 
+function terminalLabel(status: ThreadRunSummary['status']) {
+  if (status === 'failed') return '失敗'
+  if (status === 'halted') return '已停止'
+  if (status === 'success') return '完成'
+  return ''
+}
+
 /** Persisted, collapsible record of what an agent did for one answer. */
 export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
   const navigate = useNavigate()
@@ -23,6 +30,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
   const groups = groupProcessOperations(summary.operations)
   const additions = summary.files.reduce((total, file) => total + (file.added || 0), 0)
   const removals = summary.files.reduce((total, file) => total + (file.removed || 0), 0)
+  const outcome = terminalLabel(summary.status)
   const label = summary.files.length
     ? `已變更 ${summary.files.length} 個檔案`
     : `執行過程 · ${summary.operations.length} 項`
@@ -35,7 +43,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
         onClick={() => setOpen((value) => !value)}
         className="agent-summary-header flex w-full items-center gap-2 px-3.5 py-3 text-left"
       >
-        <Icon name={summary.files.length ? 'note_stack' : 'terminal'} size={18} className="shrink-0 text-ink-2" />
+        <Icon name={summary.status === 'failed' ? 'error' : summary.status === 'halted' ? 'stop_circle' : summary.files.length ? 'note_stack' : 'terminal'} size={18} className={`shrink-0 ${summary.status === 'failed' ? 'text-red' : summary.status === 'halted' ? 'text-ink-3' : 'text-ink-2'}`} />
         <span className="min-w-0 flex-1">
           <span className="block text-[13px] font-semibold text-ink">{label}</span>
           <span className="block text-[11px] text-ink-3">
@@ -43,6 +51,11 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
             {summary.durationMs ? ` · ${Math.round(summary.durationMs / 1000)} 秒` : ''}
           </span>
         </span>
+        {outcome ? (
+          <span className={`shrink-0 text-[11px] font-medium ${summary.status === 'failed' ? 'text-red' : summary.status === 'halted' ? 'text-ink-3' : 'text-green'}`}>
+            {outcome}
+          </span>
+        ) : null}
         {(additions > 0 || removals > 0) ? (
           <span className="shrink-0 text-[11px] font-[family-name:var(--font-mono)] tabular-nums">
             {additions > 0 ? <span className="text-green">+{additions}</span> : null}

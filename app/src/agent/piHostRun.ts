@@ -1,3 +1,45 @@
+import type { LoopType } from './types'
+
+export type PiHostRunConfigInput = {
+  forceLoopType?: LoopType
+  maxIterations?: number
+}
+
+export type PiHostRunConfig = {
+  loopType: LoopType
+  maxIterations: number
+  definitionOfDone: string
+}
+
+/** The renderer's default DoD is the Host settlement, not response text. */
+export const PI_CORE_SETTLEMENT_DEFINITION_OF_DONE = 'Pi Core settlement returned'
+
+export function isPiHostDefinitionOfDoneMet(
+  definitionOfDone: string | undefined,
+  settlement: 'success' | 'failed' | 'cancelled' | 'interrupted',
+  assistantContent?: string,
+): boolean | undefined {
+  if (!definitionOfDone) return undefined
+  if (definitionOfDone === PI_CORE_SETTLEMENT_DEFINITION_OF_DONE) {
+    return settlement === 'success'
+  }
+  return Boolean(assistantContent?.trim())
+}
+
+/** Keep the renderer cutover's loop defaults aligned with the builtin parser. */
+export function buildPiHostRunConfig(input: PiHostRunConfigInput = {}): PiHostRunConfig {
+  const loopType = input.forceLoopType || 'Goal-based'
+  const fallbackIterations = loopType === 'Goal-based' ? 5 : 1
+  const requestedIterations = typeof input.maxIterations === 'number' && Number.isFinite(input.maxIterations)
+    ? Math.floor(input.maxIterations)
+    : fallbackIterations
+  return {
+    loopType,
+    maxIterations: Math.max(1, Math.min(8, requestedIterations)),
+    definitionOfDone: PI_CORE_SETTLEMENT_DEFINITION_OF_DONE,
+  }
+}
+
 export type PiHostSession = {
   id: string
   title: string

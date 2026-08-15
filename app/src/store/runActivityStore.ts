@@ -15,6 +15,18 @@ export type RunActivityKind =
   | 'error'
   | 'done'
 
+/** Shared lifecycle phase for every in-chat execution surface. */
+export type RunActivityPhase =
+  | 'starting'
+  | 'thinking'
+  | 'planning'
+  | 'executing'
+  | 'responding'
+  | 'finalizing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
 export type RunActivityEvent = {
   id: string
   at: number
@@ -24,6 +36,8 @@ export type RunActivityEvent = {
   title?: string
   detail?: string
   tool?: string
+  /** Stable Pi/CLI tool-call identity so start/result rows count as one call. */
+  callId?: string
   ok?: boolean
   /** File path when kind=file */
   path?: string
@@ -63,6 +77,7 @@ export type TerminalRunDigest = {
   draftText: string
   fileChanges: FileChangeRecord[]
   tasks: RunTaskItem[]
+  phase: RunActivityPhase
 }
 
 /** One run's isolated live presentation or bounded terminal digest. */
@@ -77,6 +92,7 @@ export type RunPresentation = {
   statusLine: string
   fileChanges: FileChangeRecord[]
   tasks: RunTaskItem[]
+  phase: RunActivityPhase
   terminal: TerminalRunDigest | null
 }
 
@@ -87,6 +103,7 @@ export type CliStreamPayload = {
   title?: string
   detail?: string
   tool?: string
+  callId?: string
   ok?: boolean
   delta?: string
   channel?: 'thought' | 'text' | 'stdout' | 'stderr'
@@ -106,6 +123,7 @@ export interface RunActivityStore {
   thought: string
   draftText: string
   statusLine: string
+  phase: RunActivityPhase
   /** Unique file edits for final Codex-style summary card */
   fileChanges: FileChangeRecord[]
   /** 分析出的須執行任務項 — 右側面板即時同步 */
@@ -151,7 +169,15 @@ const MAX_TERMINAL_TASKS = 40
 
 type RunActivityProjection = Pick<
   RunActivityStore,
-  'runId' | 'active' | 'events' | 'thought' | 'draftText' | 'statusLine' | 'fileChanges' | 'tasks'
+  | 'runId'
+  | 'active'
+  | 'events'
+  | 'thought'
+  | 'draftText'
+  | 'statusLine'
+  | 'fileChanges'
+  | 'tasks'
+  | 'phase'
 >
 
 function emptyPresentation(runId: string, now = Date.now()): RunPresentation {
@@ -166,6 +192,7 @@ function emptyPresentation(runId: string, now = Date.now()): RunPresentation {
     statusLine: '',
     fileChanges: [],
     tasks: [],
+    phase: 'starting',
     terminal: null,
   }
 }
@@ -180,6 +207,7 @@ function projectPresentation(p: RunPresentation | undefined): RunActivityProject
     statusLine: p?.statusLine || '',
     fileChanges: p?.fileChanges || [],
     tasks: p?.tasks || [],
+    phase: p?.phase || 'starting',
   }
 }
 
@@ -250,6 +278,7 @@ function terminalizePresentation(
   statusLine: string | undefined,
   finishedAt: number,
 ): RunPresentation {
+  const phase = terminalPhase(statusLine || presentation.statusLine)
   const digest: TerminalRunDigest = {
     runId: presentation.runId,
     finishedAt,
@@ -259,6 +288,7 @@ function terminalizePresentation(
     draftText: presentation.draftText.slice(-MAX_TERMINAL_DRAFT),
     fileChanges: presentation.fileChanges.slice(-MAX_TERMINAL_FILES),
     tasks: presentation.tasks.slice(-MAX_TERMINAL_TASKS),
+    phase,
   }
   return {
     ...presentation,
@@ -270,8 +300,43 @@ function terminalizePresentation(
     draftText: digest.draftText,
     fileChanges: digest.fileChanges,
     tasks: digest.tasks,
+    phase,
     terminal: digest,
   }
+}
+
+function phaseFromStatus(line: string, fallback: RunActivityPhase): RunActivityPhase {
+  const value = line.toLowerCase()
+  if (/已停止|取消|cancel|interrupt|halt/.test(value)) return 'cancelled'
+  if (/失敗|錯誤|error|fail/.test(value)) return 'failed'
+  if (/完成|成功|success|settle|整理.*摘要/.test(value)) return 'finalizing'
+  if (/回覆|回答|撰寫|產生回答|respond|answer/.test(value)) return 'responding'
+  if (/任務清單|計畫|plan|todo/.test(value)) return 'planning'
+  if (/思考|推理|reason|think/.test(value)) return 'thinking'
+  if (/執行|工具|搜尋|蒐集|讀取|編輯|host|cli|tool|run/.test(value)) return 'executing'
+  if (/啟動|準備|loading|start|initial/.test(value)) return 'starting'
+  return fallback
+}
+
+function phaseFromEvent(
+  kind: RunActivityKind,
+  label: string,
+  fallback: RunActivityPhase,
+): RunActivityPhase {
+  if (kind === 'error') return 'failed'
+  if (kind === 'done') return 'finalizing'
+  if (kind === 'thought') return 'thinking'
+  if (kind === 'text') return 'responding'
+  if (kind === 'tool' || kind === 'file') return 'executing'
+  if (kind === 'status') return phaseFromStatus(label, fallback)
+  return fallback
+}
+
+function terminalPhase(line: string): RunActivityPhase {
+  const value = line.toLowerCase()
+  if (/已停止|取消|cancel|interrupt|halt/.test(value)) return 'cancelled'
+  if (/失敗|錯誤|error|fail/.test(value)) return 'failed'
+  return 'completed'
 }
 
 function basen(p: string) {
@@ -329,6 +394,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
   thought: '',
   draftText: '',
   statusLine: '',
+  phase: 'starting',
   fileChanges: [],
   tasks: [],
   presentations: {},
@@ -338,6 +404,14 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     const now = Date.now()
     resetTaskLineBuf(target)
     set((s) => {
+      const existing = s.presentations[target]
+      // Adapters may defensively call begin after the coordinator has already
+      // admitted the run. Keep the same presentation so early activity is not
+      // erased when the runner takes over.
+      if (existing?.active && !existing.terminal) {
+        const selected = s.runId ? s.presentations[s.runId] : existing
+        return { presentations: s.presentations, ...projectPresentation(selected) }
+      }
       const presentation: RunPresentation = {
         ...emptyPresentation(target, now),
         active: true,
@@ -410,6 +484,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       title: ev.title,
       detail: ev.detail?.slice(0, 2000),
       tool: ev.tool,
+      callId: ev.callId,
       ok: ev.ok,
       path: ev.path,
       added: ev.added,
@@ -420,6 +495,11 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         ...presentation,
         updatedAt: item.at,
         events: [...presentation.events, item].slice(-MAX_EVENTS),
+        phase: phaseFromEvent(
+          ev.kind,
+          `${ev.title || ''} ${ev.detail || ''}`,
+          presentation.phase,
+        ),
         statusLine:
           ev.kind === 'status' || ev.kind === 'tool' || ev.kind === 'file' || ev.kind === 'error'
             ? (ev.title || ev.detail || presentation.statusLine).slice(0, 200)
@@ -438,6 +518,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         thought: (presentation.thought + delta).slice(-MAX_THOUGHT),
         updatedAt: Date.now(),
         active: true,
+        phase: 'thinking',
       })),
     )
   },
@@ -452,6 +533,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         draftText: (presentation.draftText + delta).slice(-MAX_DRAFT),
         updatedAt: Date.now(),
         active: true,
+        phase: 'responding',
       })),
     )
   },
@@ -465,6 +547,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         ...presentation,
         statusLine,
         updatedAt: Date.now(),
+        phase: phaseFromStatus(statusLine, presentation.phase),
       })),
     )
   },
@@ -496,17 +579,20 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
           ...presentation,
           tasks,
           updatedAt: now,
+          phase: 'planning',
         })),
       )
       // Persist the latest snapshot on the run's thread. The explicit runId
       // prevents a late concurrent stream from writing into another thread.
-      void import('./threadStore').then(({ useThreadStore }) => {
-        const threadState = useThreadStore.getState()
-        const threadId = threadState.threads.find(
-          (thread) => threadState.runningRunIds[thread.id] === target,
-        )?.id
-        if (threadId) useThreadStore.getState().setRunPlan(threadId, tasks)
-      })
+      if (typeof window !== 'undefined') {
+        void import('./threadStore').then(({ useThreadStore }) => {
+          const threadState = useThreadStore.getState()
+          const threadId = threadState.threads.find(
+            (thread) => threadState.runningRunIds[thread.id] === target,
+          )?.id
+          if (threadId) useThreadStore.getState().setRunPlan(threadId, tasks)
+        })
+      }
     }
   },
 
@@ -655,7 +741,9 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         detail: payload.detail,
         ok: payload.ok !== false,
       })
-      get().end(streamRunId, payload.title || 'CLI 完成')
+      // The coordinator owns terminalization so the response bubble,
+      // execution summary, and archive settle before the digest is frozen.
+      get().setStatus(payload.title || 'CLI 完成', streamRunId)
       return
     }
 

@@ -40,7 +40,9 @@ import {
 import { applyRendererStorageSnapshot } from './agent/updateMigration'
 import { compareVersions } from './agent/updateContracts'
 import type { PiSessionProjection } from './agent/piHostProjection'
+import { mapPiHostEventToActivity } from './agent/piHostActivity'
 import { usePiHostEventStore } from './store/piHostEventStore'
+import { useRunActivityStore } from './store/runActivityStore'
 import { isElectronPiProduction } from './agent/piProduction'
 
 /** Restore automation queue from disk and drain when capacity is available */
@@ -106,7 +108,31 @@ function PiHostEventBootstrap() {
   useEffect(() => {
     const onEvent = window.subagents?.piHost?.onEvent
     if (!onEvent) return
-    const unsubscribe = onEvent((event) => push(event))
+    const unsubscribe = onEvent((event) => {
+      push(event)
+      const update = mapPiHostEventToActivity(event)
+      if (!update) return
+      const activity = useRunActivityStore.getState()
+      if (update.kind === 'text') {
+        activity.appendText(update.delta, update.runId)
+        return
+      }
+      if (update.kind === 'thought') {
+        activity.appendThought(update.delta, update.runId)
+        return
+      }
+      activity.push({
+        id: update.eventId,
+        runId: update.runId,
+        kind: update.kind,
+        title: update.title,
+        detail: update.detail,
+        tool: update.tool,
+        callId: update.callId,
+        ok: update.ok,
+      })
+      activity.setStatus(update.title, update.runId)
+    })
     return () => { unsubscribe?.() }
   }, [push])
   return null

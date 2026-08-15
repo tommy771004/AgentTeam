@@ -46,6 +46,8 @@ export type ThreadAgentSummary = {
 }
 
 export type ThreadRunSummary = {
+  /** Terminal lifecycle state shared with the live process feed. */
+  status?: 'success' | 'failed' | 'halted'
   durationMs?: number
   subDesign?: {
     briefId: string
@@ -406,6 +408,11 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   runningRunIds: {},
 
   hydrate: () => {
+    // In Electron the Pi Host owns durable history, while this Zustand store
+    // remains the live projection used by the renderer. Route changes unmount
+    // ProtocolsPage and call hydrate again; do not replace that live projection
+    // with a blank starter thread during the same app session.
+    if (piHostCanonical() && get().threads.length > 0) return
     const { threads, activeId } = load()
     if (threads.length === 0) {
       const t = emptyThread()
@@ -438,7 +445,13 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       bubbles: projection.bubbles,
       updatedAt: new Date().toISOString(),
     }] : [])
-    const threads = [...projected, ...preserved].slice(0, MAX_THREADS)
+    // A fresh Electron/Pi Host install has no durable sessions yet. Keep the
+    // renderer's empty starter thread in that case so the first composer
+    // submission still has an active thread to bind to the Host session.
+    const fallback = projected.length || preserved.length || !isPlaceholder
+      ? []
+      : [current[0]]
+    const threads = [...projected, ...preserved, ...fallback].slice(0, MAX_THREADS)
     const currentActiveId = get().activeId
     const activeId = currentActiveId && threads.some((thread) => thread.id === currentActiveId)
       ? currentActiveId
@@ -613,6 +626,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       content: '執行過程',
       at: new Date().toISOString(),
       runSummary: {
+        status: summary.status,
         durationMs: summary.durationMs,
         subDesign: summary.subDesign
           ? {

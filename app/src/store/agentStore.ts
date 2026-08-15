@@ -15,7 +15,7 @@ import { learningLoop } from '../agent/hermes/learning'
 import { useSettingsStore } from './settingsStore'
 import { useLearningStore } from './learningStore'
 import { consumeNextState } from '../agent/outcomeDispatcher'
-import { submitPiHostRun } from '../agent/piHostRun'
+import { buildPiHostRunConfig, submitPiHostRun } from '../agent/piHostRun'
 import {
   emptyAgentLike,
   runPromptViaLocalCli,
@@ -233,13 +233,12 @@ async function executePiHostTurn(
   overrides: RuntimeOverrides,
 ): Promise<void> {
   const startedAt = new Date().toISOString()
-  const loopType = overrides.forceLoopType || 'Goal-based'
-  const maxIterations = Math.max(1, Math.min(8, Math.floor(overrides.maxIterations ?? 1)))
+  const { loopType, maxIterations, definitionOfDone } = buildPiHostRunConfig(overrides)
   const loopConfig = {
     loopType,
     trigger: 'pi-host',
     executionSequence: ['pi-host-turn'],
-    definitionOfDone: 'Pi Core settlement returned',
+    definitionOfDone,
     maxIterations,
     fallbackProtocol: '',
     nextState: overrides.nextState || 'Halt',
@@ -289,7 +288,7 @@ async function executePiHostTurn(
       child,
       pattern: loopType,
       maxIterations,
-      definitionOfDone: 'Pi Core settlement returned',
+      definitionOfDone,
     })
     const success = result.settlement === 'success'
     const halted = result.settlement === 'cancelled' || result.settlement === 'interrupted'
@@ -318,12 +317,6 @@ async function executePiHostTurn(
       webhookTarget: overrides.webhookTarget,
     })
     get().applyPostState(runId, postState)
-    try {
-      const { useRunActivityStore } = await import('./runActivityStore')
-      useRunActivityStore.getState().end(runId, success ? '完成' : halted ? '已停止' : '失敗')
-    } catch {
-      /* optional renderer activity */
-    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     publishRun(set, get, runId, emptyAgentLike({
@@ -507,7 +500,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             settled.status === 'success' ? '完成' : settled.status,
             runId,
           )
-          useRunActivityStore.getState().end(runId)
         } catch {
           /* ignore */
         }
@@ -522,12 +514,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       } catch (e) {
         unsub()
         publishRun(set, get, runId, runAgentStates.get(runId) || emptyAgent())
-        try {
-          const { useRunActivityStore } = await import('./runActivityStore')
-          useRunActivityStore.getState().end(runId)
-        } catch {
-          /* ignore */
-        }
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore')
           usePermissionAskStore.getState().setSessionAllow(false, overrides?.threadId)
@@ -886,7 +872,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             title: 'CLI 例外',
             detail: e instanceof Error ? e.message : String(e),
           })
-          useRunActivityStore.getState().end(runId)
         } catch {
           /* ignore */
         }
@@ -935,13 +920,14 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       const target = runId
       if (!target) return
       void loadLegacyEngine().then((engine) => engine.stop(target)).catch(() => {})
-      void window.subagents?.piHost?.turn?.cancel?.(target)
+      const cancelPiHostTurn = window.subagents?.piHost?.turn?.cancel
+      if (cancelPiHostTurn) void cancelPiHostTurn(target).catch(() => {})
       // Cancel only the selected run's CLI / bash processes.
-      void window.subagents?.cli?.cancel?.(target)
+      const cancelCliRun = window.subagents?.cli?.cancel
+      if (cancelCliRun) void cancelCliRun(target).catch(() => {})
       try {
         void import('./runActivityStore').then(({ useRunActivityStore }) => {
           useRunActivityStore.getState().push({ kind: 'status', title: '使用者停止', runId: target })
-          useRunActivityStore.getState().end(target)
         })
       } catch {
         /* ignore */

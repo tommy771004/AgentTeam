@@ -16,7 +16,8 @@ const evidenceDir = path.resolve(argument('--evidence-dir', 'release-evidence'))
 if (!['windows', 'macos'].includes(platform)) throw new Error('--platform must be windows or macos')
 fs.mkdirSync(evidenceDir, { recursive: true })
 
-const PACKAGED_SMOKE_OBJECTIVE = 'Smoke first task: write a report file.'
+const PACKAGED_SMOKE_REPORT_PATH = 'reports/packaged-smoke-report.md'
+const PACKAGED_SMOKE_OBJECTIVE = `Smoke first task: use the write tool to update ${PACKAGED_SMOKE_REPORT_PATH} with a short report and reply with a brief confirmation.`
 
 function runGit(cwd, args) {
   const result = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8' })
@@ -25,19 +26,11 @@ function runGit(cwd, args) {
   }
 }
 
-function smokeSlug(text) {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_|_$/g, '')
-    .slice(0, 40)
-}
-
 function createSmokeProject() {
   const root = path.join(os.tmpdir(), `subagents-ai-smoke-project-${process.pid}`)
   fs.rmSync(root, { recursive: true, force: true })
   try {
-    const reportPath = path.join('reports', `${smokeSlug(PACKAGED_SMOKE_OBJECTIVE)}.md`)
+    const reportPath = PACKAGED_SMOKE_REPORT_PATH
     fs.mkdirSync(path.join(root, 'reports'), { recursive: true })
     fs.writeFileSync(path.join(root, reportPath), '# Packaged install baseline\n', 'utf8')
     runGit(root, ['init', '--quiet'])
@@ -79,6 +72,33 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function waitForPiApproval(page, timeout = 10000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    const approvalMode = await page.evaluate(async () => (await window.subagents?.piHost?.settings?.get?.())?.settings?.approvalMode)
+    if (approvalMode === 'full') return
+    await wait(250)
+  }
+  throw new Error('Pi Host approval mode did not settle to full')
+}
+
+async function waitForPiHostSession(page, objective, timeout = 120000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    const found = await page.evaluate(async (text) => {
+      const sessions = (await window.subagents?.piHost?.sessions?.list?.())?.sessions || []
+      return sessions.some((session) =>
+        Array.isArray(session?.messages) &&
+        session.messages.some((message) => message?.role === 'user' && message?.content === text) &&
+        session.messages.some((message) => message?.role === 'assistant'),
+      )
+    }, objective).catch(() => false)
+    if (found) return
+    await wait(500)
+  }
+  throw new Error('Pi Host session did not settle with the packaged task')
+}
+
 async function runPackagedFirstTask(executable, platform, userDataDir, smokeProject) {
   const { _electron: electron } = await import('playwright')
   const objective = PACKAGED_SMOKE_OBJECTIVE
@@ -115,12 +135,11 @@ async function runPackagedFirstTask(executable, platform, userDataDir, smokeProj
       .filter({ hasText: '完整存取權' })
       .filter({ hasText: '可無限制存取' })
       .click()
-    await page.waitForFunction(
-      () => JSON.parse(localStorage.getItem('subagents.settings.v1') || '{}').approvalMode === 'full',
-      undefined,
-      { timeout: 10000 },
-    )
-    const configuredSettings = await page.evaluate(() => localStorage.getItem('subagents.settings.v1'))
+    await waitForPiApproval(page)
+    const configuredSettings = await page.evaluate(async () => ({
+      renderer: localStorage.getItem('subagents.settings.v1'),
+      piHost: await window.subagents?.piHost?.settings?.get?.(),
+    }))
     await page.evaluate(() => {
       window.location.hash = '#/'
     })
@@ -128,35 +147,29 @@ async function runPackagedFirstTask(executable, platform, userDataDir, smokeProj
     const composer = page.locator('textarea').first()
     await composer.fill(objective)
     await composer.press('Enter')
-    await page.waitForFunction(
-      (text) => {
-        try {
-          const stored = JSON.parse(localStorage.getItem('subagents.threads.v5') || '{}')
-          const threads = Array.isArray(stored) ? stored : stored.threads || []
-          return threads.some((thread) =>
-            thread.lastStatus === 'success' &&
-            thread.bubbles?.some((bubble) => bubble.role === 'user' && bubble.content === text) &&
-            thread.bubbles?.some((bubble) => bubble.role === 'run' && bubble.runSummary) &&
-            thread.bubbles?.some((bubble) => bubble.role === 'assistant' && String(bubble.content || '').trim()),
-          )
-        } catch {
-          return false
-        }
-      },
-      objective,
-      { timeout: 120000 },
-    )
-    const firstRun = await page.evaluate(() => ({
-      threadState: localStorage.getItem('subagents.threads.v5'),
+    await waitForPiHostSession(page, objective)
+    await page.waitForSelector('[data-testid="run-summary-card"]', { state: 'attached', timeout: 120000 })
+    const firstRun = await page.evaluate(async () => ({
       settingsState: localStorage.getItem('subagents.settings.v1'),
+      piHostSettings: await window.subagents?.piHost?.settings?.get?.(),
+      piHostSessions: (await window.subagents?.piHost?.sessions?.list?.())?.sessions || [],
       body: document.body.innerText,
     }))
-    if (!firstRun.threadState || !firstRun.threadState.includes(objective)) {
-      throw new Error('First task did not persist the local thread state')
-    }
-    if (!firstRun.threadState.includes('"lastStatus":"success"')) {
-      throw new Error('First task did not settle successfully')
-    }
+    const firstTaskSession = firstRun.piHostSessions.find((session) =>
+      Array.isArray(session?.messages) &&
+      session.messages.some((message) => message?.role === 'user' && message?.content === objective) &&
+      session.messages.some((message) => message?.role === 'assistant'),
+    )
+    if (!firstTaskSession) throw new Error('First task did not settle a Pi Host session')
+    await page.locator('[data-testid="run-summary-card"] > button').first().click()
+    await page.waitForSelector('[data-testid="run-summary-diff"]', { state: 'attached', timeout: 120000 })
+    await page.locator('[data-testid="run-summary-diff"] > button').click()
+    const diffContent = page.locator('[data-testid="run-summary-diff-content"]')
+    await diffContent.waitFor({ state: 'visible', timeout: 120000 })
+    const diffText = await diffContent.innerText()
+    const resultVisible = await page.locator('[data-testid="run-summary-card"]').count() > 0
+    const diffVisible = /^(?:diff --git |--- |\+\+\+ |@@ )/m.test(diffText)
+    if (!resultVisible || !diffVisible) throw new Error('First task result or Git Diff was not visible')
     await app.close()
     app = undefined
 
@@ -169,7 +182,7 @@ async function runPackagedFirstTask(executable, platform, userDataDir, smokeProj
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         await restartedPage.waitForSelector('textarea', { timeout: 120000 })
-        await restartedPage.waitForSelector('[data-testid="run-summary-card"]', { state: 'attached', timeout: 120000 })
+        await waitForPiHostSession(restartedPage, objective)
         break
       } catch (error) {
         await restarted.close()
@@ -184,38 +197,34 @@ async function runPackagedFirstTask(executable, platform, userDataDir, smokeProj
         restartedPage = await restarted.firstWindow()
       }
     }
-    await restartedPage.locator('[data-testid="run-summary-card"] > button').first().click()
-    await restartedPage.waitForSelector('[data-testid="run-summary-diff"]', { state: 'attached', timeout: 120000 })
-    await restartedPage.locator('[data-testid="run-summary-diff"] > button').click()
-    const diffContent = restartedPage.locator('[data-testid="run-summary-diff-content"]')
-    await diffContent.waitFor({ state: 'visible', timeout: 120000 })
-    const diffText = await diffContent.innerText()
-    const resultVisible = await restartedPage.locator('[data-testid="run-summary-card"]').count() > 0
-    const diffVisible = /^(?:diff --git |--- |\+\+\+ |@@ )/m.test(diffText)
-    if (!resultVisible || !diffVisible) throw new Error('First task result or Git Diff was not visible after restart')
-    const afterRestart = await restartedPage.evaluate(() => ({
-      threadState: localStorage.getItem('subagents.threads.v5'),
+    const afterRestart = await restartedPage.evaluate(async () => ({
       settingsState: localStorage.getItem('subagents.settings.v1'),
+      piHostSettings: await window.subagents?.piHost?.settings?.get?.(),
+      piHostSessions: (await window.subagents?.piHost?.sessions?.list?.())?.sessions || [],
       body: document.body.innerText,
     }))
-    if (afterRestart.threadState !== firstRun.threadState || !afterRestart.body.includes(objective)) {
-      throw new Error('Restart did not restore the first task thread state')
-    }
-    const afterRestartSettings = JSON.parse(afterRestart.settingsState || '{}')
-    if (JSON.parse(configuredSettings || '{}').approvalMode !== 'full' || afterRestartSettings.approvalMode !== 'full') {
+    const restoredSession = afterRestart.piHostSessions.find((session) =>
+      Array.isArray(session?.messages) &&
+      session.messages.some((message) => message?.role === 'user' && message?.content === objective) &&
+      session.messages.some((message) => message?.role === 'assistant'),
+    )
+    if (!restoredSession || !afterRestart.body.includes(objective)) throw new Error('Restart did not restore the Pi Host session projection')
+    const configuredPiSettings = configuredSettings.piHost?.settings?.approvalMode
+    const afterRestartPiSettings = afterRestart.piHostSettings?.settings?.approvalMode
+    if (configuredPiSettings !== 'full' || afterRestartPiSettings !== 'full') {
       throw new Error('Restart did not restore the first-run settings')
     }
     await restarted.close()
     restarted = undefined
     return {
-    objective,
-    resultVisible,
-    diffVisible,
-    diffPreview: diffText.slice(0, 600),
-    firstTaskThreadBytes: firstRun.threadState.length,
-    settingsPersisted: Boolean(firstRun.settingsState && afterRestart.settingsState === firstRun.settingsState),
-    restartedThreadBytes: afterRestart.threadState.length,
-    platform,
+      objective,
+      resultVisible,
+      diffVisible,
+      diffPreview: diffText.slice(0, 600),
+      firstTaskSessionMessages: firstTaskSession.messages.length,
+      settingsPersisted: Boolean(firstRun.settingsState && afterRestart.settingsState === firstRun.settingsState),
+      restartedSessionMessages: restoredSession.messages.length,
+      platform,
     }
   } finally {
     await restarted?.close().catch(() => {})

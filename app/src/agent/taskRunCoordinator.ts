@@ -381,6 +381,13 @@ export async function finalizeTaskRun(
   const thr = useThreadStore.getState()
   const { runId, threadId: tid, objective, settings } = input
 
+  try {
+    const { useRunActivityStore } = await import('../store/runActivityStore')
+    useRunActivityStore.getState().setStatus('正在整理執行摘要…', runId)
+  } catch {
+    /* renderer activity is optional for headless / recovery paths */
+  }
+
   // G8:plan mode 是 run-scoped 狀態,finalization 唯一出口負責釋放
   try {
     const { clearPlanMode } = await import('./planMode')
@@ -487,6 +494,12 @@ export async function finalizeTaskRun(
       await agent.saveToArchive(failureAgent, runId)
     } catch {
       /* archive optional on early fail */
+    }
+    try {
+      const { useRunActivityStore } = await import('../store/runActivityStore')
+      useRunActivityStore.getState().end(runId, '失敗')
+    } catch {
+      /* renderer activity is optional for headless / recovery paths */
     }
     await settle(failResult)
     await releaseRunCapacity(runId)
@@ -668,6 +681,19 @@ export async function finalizeTaskRun(
   // run without its evidence.
   recordRunTerminal({ runId, threadId: tid, status: String(status) })
 
+  try {
+    const { useRunActivityStore } = await import('../store/runActivityStore')
+    const terminalLabel =
+      String(status) === 'failed'
+        ? '失敗'
+        : String(status) === 'halted'
+          ? '已停止'
+          : '完成'
+    useRunActivityStore.getState().end(runId, terminalLabel)
+  } catch {
+    /* renderer activity is optional for headless / recovery paths */
+  }
+
   // 4) onSettled
   await settle(finalResult)
 
@@ -752,6 +778,37 @@ async function pushRunProcessSummary(args: {
       undefined,
     ok: tool.ok,
   }))
+  const piHostAudits: Array<Record<string, unknown>> = []
+  try {
+    const listed = await window.subagents?.piHost?.sessions?.list?.()
+    const session = (listed?.sessions || []).find((candidate) => {
+      if (!candidate || typeof candidate !== 'object') return false
+      return (candidate as { threadId?: unknown }).threadId === tid
+    })
+    const audits = session && typeof session === 'object' ? (session as { toolAudit?: unknown }).toolAudit : undefined
+    if (Array.isArray(audits)) {
+      for (const audit of audits) {
+        if (audit && typeof audit === 'object') piHostAudits.push(audit as Record<string, unknown>)
+      }
+    }
+  } catch {
+    /* Pi Host evidence is optional; the run result remains authoritative. */
+  }
+  const piHostOperations = piHostAudits
+    .filter((audit) => audit.phase === 'start')
+    .map((audit, index) => {
+      const tool = String(audit.tool || 'tool')
+      const filePath = typeof audit.path === 'string' && audit.path ? audit.path : undefined
+      const result = piHostAudits.find((candidate) => candidate.phase === 'result' && candidate.callId === audit.callId)
+      return {
+        id: `pi_${String(audit.callId || index)}`,
+        kind: /write|edit/i.test(tool) ? 'file' : 'tool',
+        title: filePath ? `已處理 ${filePath.split(/[\\/]/).pop()}` : `已執行 ${tool}`,
+        detail: filePath || `Pi Host ${tool}`,
+        path: filePath,
+        ok: result ? result.settlement === 'success' : undefined,
+      }
+    })
   const fileMap = new Map<
     string,
     { path: string; action: string; added?: number; removed?: number }
@@ -768,6 +825,15 @@ async function pushRunProcessSummary(args: {
         action: /write|create/i.test(tool.tool) ? 'create' : 'edit',
       })
     }
+  }
+  for (const audit of piHostAudits) {
+    if (audit.phase !== 'start' || typeof audit.path !== 'string' || !/write|edit/i.test(String(audit.tool || ''))) continue
+    const path = audit.path.trim()
+    if (!path || fileMap.has(path)) continue
+    fileMap.set(path, {
+      path,
+      action: /write/i.test(String(audit.tool || '')) ? 'create' : 'edit',
+    })
   }
   const stepOps = (finalAgent.steps || []).map((step, index) => ({
     id: `step_${step.step}_${index}`,
@@ -797,6 +863,8 @@ async function pushRunProcessSummary(args: {
   const operations =
     activityOperations.length > 0
       ? activityOperations
+      : piHostOperations.length > 0
+        ? piHostOperations
       : fallbackOperations.length > 0
         ? fallbackOperations
         : stepOps.length > 0
@@ -832,6 +900,8 @@ async function pushRunProcessSummary(args: {
     ? useSubDesignExportStore.getState().findByArtifactId(subDesignArtifact.id)
     : []
   thr.pushRunSummary(tid, {
+    status:
+      status === 'failed' ? 'failed' : status === 'halted' ? 'halted' : 'success',
     durationMs: finalAgent.metrics?.executionMs,
     subDesign: subDesignBrief
       ? {
@@ -1294,6 +1364,16 @@ async function coordinateTaskRun(
   })
   boundThreadId = tid
   recordRunStarted({ runId, threadId: tid })
+  // The coordinator is the lifecycle owner for the shared in-chat surfaces.
+  // Adapters may still mirror activity for compatibility, but they must not
+  // decide when the visible run is terminal.
+  try {
+    const { useRunActivityStore } = await import('../store/runActivityStore')
+    useRunActivityStore.getState().begin(runId)
+    useRunActivityStore.getState().setStatus('啟動中…', runId)
+  } catch {
+    /* renderer activity is optional for headless / recovery paths */
+  }
   if (!opts.skipUserBubble) {
     thr.pushBubble(tid, 'user', objective, attachments)
   }

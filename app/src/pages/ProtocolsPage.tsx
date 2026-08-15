@@ -525,7 +525,12 @@ export function ProtocolsPage() {
                 )}
                 onSubmitLine={(line, atts) => void runEmbedded(line, atts)}
                 running={live}
-                onStop={() => presentationRunId && stopExecution(presentationRunId)}
+                onStop={() => {
+                  // Resolve at click time so a just-started run cannot be
+                  // cancelled with the previous thread's stale projection id.
+                  const runId = (activeId && getRunIdForThread(activeId)) || presentationRunId
+                  if (runId) stopExecution(runId)
+                }}
                 onSlashCommand={async (cmd, args, raw) => {
                   if (activeId) pushBubble(activeId, 'user', raw)
                   if (cmd.name === 'clear' && activeId) clearBubbles(activeId)

@@ -100,6 +100,7 @@ import { runPiOrchestration, type PiLoopPattern } from './piOrchestrationExtensi
 import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
 import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
 import { callPiMcpTool, listPiMcpTools, stopPiMcp } from './piMcpClient.ts'
+import { isPiHostDefinitionOfDoneMet } from '../src/agent/piHostRun.ts'
 
 type HostState = {
   initialized: boolean
@@ -388,7 +389,11 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
   if (input.method === 'state/snapshot') {
     return [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions], queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })), resources: state.snapshot.resources.map((resource) => ({ ...resource })), memories: new PiMemoryExtension(state.snapshot.memories).export() } }]
   }
-  if (input.method === 'sessions/list') return [{ id, result: { sessions: state.snapshot.sessions.map((session) => ({ ...session, messages: [...session.messages] })) } }]
+  if (input.method === 'sessions/list') return [{ id, result: { sessions: state.snapshot.sessions.map((session) => ({
+    ...session,
+    messages: [...session.messages],
+    ...(session.toolAudit ? { toolAudit: [...session.toolAudit] } : {}),
+  })) } }]
   if (input.method === 'resources/list') return [{ id, result: { resources: state.snapshot.resources.map((resource) => ({ ...resource })) } }]
   if (input.method === 'resources/reload') {
     const resources = input.params?.resources
@@ -674,7 +679,11 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
             { role: 'user', content: iterationPrompt },
             { role: 'assistant', content: assistant?.content ?? '' },
           ]
-          const done = definitionOfDone ? Boolean(assistant?.content?.trim()) : undefined
+          const done = isPiHostDefinitionOfDoneMet(
+            definitionOfDone,
+            turn.settlement,
+            assistant?.content,
+          )
           if (definitionOfDone) {
             publishOrchestration('dod', iteration, done ? 'met' : 'unmet')
             if (!done && iteration < iterationLimit) publishOrchestration('replan', iteration, 'DoD unmet; retrying the Pi turn')
