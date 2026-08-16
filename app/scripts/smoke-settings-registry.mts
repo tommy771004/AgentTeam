@@ -75,6 +75,23 @@ test('fail-closed 覆蓋率：每個設定 key 都必須被歸類', () => {
   )
 })
 
+test('過渡期待辦清單已清空——fail-closed 完全生效', () => {
+  assert.deepEqual(
+    PENDING_SETTINGS_KEYS,
+    [],
+    'PENDING_SETTINGS_KEYS 必須維持空陣列；往裡面加 key 等於把覆蓋率檢查關掉',
+  )
+})
+
+test('蓄意加一個未宣告欄位時，覆蓋率檢查真的會失敗', () => {
+  // 不是口頭保證：模擬「有人在 LlmSettings 加了新欄位卻沒宣告 metadata」
+  const withNewKey = [...allKeys, 'someBrandNewSettingKey']
+  const unclassified = withNewKey.filter(
+    (key) => !declaredKeys.has(key) && !nonUiKeys.has(key) && !pendingKeys.has(key),
+  )
+  assert.deepEqual(unclassified, ['someBrandNewSettingKey'])
+})
+
 test('分類清單不得腐化：排除／待辦名單不能有不存在的 key', () => {
   const known = new Set(allKeys)
   const staleNonUi = [...nonUiKeys].filter((key) => !known.has(key))
@@ -273,5 +290,8 @@ test('宣告了就要畫得出來：每個欄位都有對應的渲染錨點', ()
 })
 
 console.log(`\n${passed} settings registry smoke tests passed`)
-console.log(`（待宣告 ${PENDING_SETTINGS_KEYS.length} 個 key，由 ticket 03–05 清空）`)
+console.log(
+  `（${allKeys.length} 個 settings key：已宣告 ${allKeys.filter((k) => declaredKeys.has(k)).length}` +
+    `／非 UI ${nonUiKeys.size}／待辦 ${PENDING_SETTINGS_KEYS.length}）`,
+)
 console.log('OK')

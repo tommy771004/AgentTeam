@@ -632,6 +632,154 @@ export const SETTINGS_FIELDS: SettingsFieldDef[] = [
     keywords: ['CLI', '授權', '執行引擎', 'cli', 'providers', 'authorize'],
     settingsKeys: ['cliProviders'],
   },
+  // ── Git ────────────────────────────────────────────────────────────
+  {
+    id: 'git.gitBranchPrefix',
+    section: 'git',
+    tier: 'advanced',
+    label: '分支前綴',
+    summary: 'agent 建立分支時的名稱前綴，方便和自己開的分支分辨。',
+    keywords: ['分支', '前綴', '命名', 'branch', 'prefix', 'git'],
+    settingsKeys: ['gitBranchPrefix'],
+  },
+  {
+    id: 'git.gitCreateDraftPr',
+    section: 'git',
+    tier: 'advanced',
+    label: 'Draft PR',
+    summary: '開 PR 時預設為草稿，避免還沒看過就通知審查者。',
+    keywords: ['草稿', '拉取請求', 'draft', 'pull request', 'pr'],
+    settingsKeys: ['gitCreateDraftPr'],
+  },
+  {
+    id: 'git.gitForcePush',
+    section: 'git',
+    tier: 'advanced',
+    label: 'Force-with-lease',
+    summary: '允許以 --force-with-lease 覆寫遠端分支；仍會在別人推過後拒絕。',
+    keywords: ['強制推送', '覆寫', 'force push', 'force-with-lease', 'git'],
+    settingsKeys: ['gitForcePush'],
+  },
+  {
+    id: 'git.gitCommitInstructions',
+    section: 'git',
+    tier: 'advanced',
+    label: 'Commit 指引',
+    summary: 'commit 訊息的固定要求（語言、格式、要不要帶 issue 編號）。',
+    keywords: ['提交', '訊息', '指引', 'commit', 'message', 'convention'],
+    settingsKeys: ['gitCommitInstructions'],
+  },
+  {
+    id: 'git.gitPrInstructions',
+    section: 'git',
+    tier: 'advanced',
+    label: 'Pull Request 指引',
+    summary: 'PR 標題與描述的固定要求（測試計畫、風險說明）。',
+    keywords: ['拉取請求', '描述', '指引', 'pull request', 'pr', 'template'],
+    settingsKeys: ['gitPrInstructions'],
+  },
+  // ── Webhook ────────────────────────────────────────────────────────
+  {
+    id: 'webhook.webhookEnabled',
+    section: 'webhook',
+    tier: 'basic',
+    label: '啟用 Webhook',
+    summary: '開一個本機端點接收外部事件，用來觸發事件規則。',
+    keywords: ['啟用', '端點', '事件', 'webhook', 'enable', 'server'],
+    settingsKeys: ['webhookEnabled'],
+  },
+  {
+    id: 'webhook.webhookPort',
+    section: 'webhook',
+    tier: 'advanced',
+    label: '連接埠',
+    summary: '本機 webhook 伺服器監聽的埠號；與其他服務衝突時才需要改。',
+    keywords: ['埠', '連接埠', '通訊埠', 'port', 'listen', 'webhook'],
+    settingsKeys: ['webhookPort'],
+  },
+  {
+    id: 'webhook.webhookToken',
+    section: 'webhook',
+    tier: 'advanced',
+    label: '驗證 Token',
+    summary: '收到的請求必須帶這個 token 才受理；留空等於不驗證，不建議。',
+    keywords: ['驗證', '權杖', '密鑰', 'token', 'auth', 'secret'],
+    settingsKeys: ['webhookToken'],
+  },
+  {
+    id: 'webhook.webhookTarget',
+    section: 'webhook',
+    tier: 'advanced',
+    label: 'Post-state Webhook target',
+    summary: '任務結束後把結果 POST 到這個網址；留空表示不外送。',
+    keywords: ['回呼', '目標', '外送', 'target', 'callback', 'post'],
+    settingsKeys: ['webhookTarget'],
+  },
+  // ── 訊息閘道 ───────────────────────────────────────────────────────
+  {
+    id: 'gateway.telegramEnabled',
+    section: 'gateway',
+    tier: 'basic',
+    label: '啟用 Telegram',
+    summary: '從 Telegram 收訊息並派任務。',
+    keywords: ['啟用', '訊息', '閘道', 'telegram', 'enable', 'gateway'],
+    settingsKeys: ['telegramEnabled'],
+  },
+  {
+    id: 'gateway.telegramBotToken',
+    section: 'gateway',
+    tier: 'advanced',
+    label: 'Bot Token',
+    summary: '@BotFather 給的憑證，只存在本機。',
+    keywords: ['權杖', '憑證', '機器人', 'bot token', 'telegram', 'credential'],
+    settingsKeys: ['telegramBotToken'],
+  },
+  {
+    id: 'gateway.telegramAllowedChatIds',
+    section: 'gateway',
+    tier: 'advanced',
+    label: '允許的 Chat ID',
+    summary: '只有名單內的對話能派任務；留空等於誰都能，不建議。',
+    keywords: ['白名單', '對話', '允許', 'chat id', 'allowlist', 'telegram'],
+    settingsKeys: ['telegramAllowedChatIds'],
+  },
+  {
+    id: 'gateway.telegramAutoRun',
+    section: 'gateway',
+    tier: 'advanced',
+    label: '自動執行',
+    summary: '收到訊息就直接開跑，不再等你確認。',
+    keywords: ['自動執行', '免確認', 'auto run', 'telegram', 'unattended'],
+    settingsKeys: ['telegramAutoRun'],
+  },
+  {
+    id: 'gateway.telegramReplyWithResult',
+    section: 'gateway',
+    tier: 'advanced',
+    label: '回覆結果',
+    summary: '任務完成後把結果回傳到原本那個對話。',
+    keywords: ['回覆', '結果', '通知', 'reply', 'result', 'telegram'],
+    settingsKeys: ['telegramReplyWithResult'],
+  },
+  // ── MCP 伺服器 ─────────────────────────────────────────────────────
+  {
+    id: 'mcp.mcpEnabled',
+    section: 'mcp',
+    tier: 'basic',
+    label: '啟用 MCP',
+    summary: '連接 MCP 伺服器，把它們的工具交給 agent 使用。',
+    keywords: ['啟用', '伺服器', '外部工具', 'mcp', 'enable', 'servers'],
+    settingsKeys: ['mcpEnabled'],
+  },
+  {
+    id: 'mcp.mcpServers',
+    section: 'mcp',
+    tier: 'advanced',
+    label: 'MCP 伺服器',
+    summary: '已連接的伺服器清單與其工具；每台的工具都以自己的前綴隔開。',
+    keywords: ['伺服器', '清單', '工具', 'mcp servers', 'stdio', 'http'],
+    settingsKeys: ['mcpServers'],
+  },
 ]
 
 /**
@@ -652,28 +800,13 @@ export const NON_UI_SETTINGS_KEYS: Record<string, string> = {
 }
 
 /**
- * 尚未宣告的 settings key（過渡期）。
+ * 尚未宣告的 settings key。
  *
- * ticket 03–05 逐群清空；ticket 05 收尾後這個陣列必須為空，fail-closed 才真正生效。
+ * **必須維持空陣列。** 過渡期（ticket 01–04）曾用它讓分批宣告能保持綠燈；
+ * ticket 05 之後 fail-closed 已完全生效：新增設定欄位就必須在上面宣告 metadata，
+ * 或列入 NON_UI_SETTINGS_KEYS 並寫下理由。往這裡加東西等於把檢查關掉。
  */
-export const PENDING_SETTINGS_KEYS: string[] = [
-  'gitBranchPrefix',
-  'gitCommitInstructions',
-  'gitCreateDraftPr',
-  'gitForcePush',
-  'gitPrInstructions',
-  'mcpEnabled',
-  'mcpServers',
-  'telegramAllowedChatIds',
-  'telegramAutoRun',
-  'telegramBotToken',
-  'telegramEnabled',
-  'telegramReplyWithResult',
-  'webhookEnabled',
-  'webhookPort',
-  'webhookTarget',
-  'webhookToken',
-]
+export const PENDING_SETTINGS_KEYS: string[] = []
 
 const FIELD_BY_ID = new Map(SETTINGS_FIELDS.map((field) => [field.id, field]))
 

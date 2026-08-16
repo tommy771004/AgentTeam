@@ -1367,9 +1367,9 @@ export function SettingsPage() {
         {section === 'git' && (
           <>
             <SettingsGroup title="分支與推送">
-              <SettingsRow
-                title="分支前綴"
-                description="代理建立分支時使用"
+              <SettingsField
+                id="git.gitBranchPrefix"
+                ctx={fieldCtx}
                 control={
                   <input
                     className={settingsInputCls + ' w-40 text-right'}
@@ -1379,9 +1379,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="Draft PR"
-                description="建立 PR 時預設為 draft"
+              <SettingsField
+                id="git.gitCreateDraftPr"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.gitCreateDraftPr !== false}
@@ -1389,9 +1389,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="Force-with-lease"
-                description="允許進階推送（謹慎）"
+              <SettingsField
+                id="git.gitForcePush"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.gitForcePush === true}
@@ -1401,7 +1401,7 @@ export function SettingsPage() {
               />
             </SettingsGroup>
             <SettingsGroup title="指引（注入提示）">
-              <SettingsStack title="Commit 指引">
+              <SettingsField id="git.gitCommitInstructions" ctx={fieldCtx}>
                 <textarea
                   className={settingsInputCls + ' min-h-[72px] resize-y'}
                   value={settings.gitCommitInstructions || ''}
@@ -1410,15 +1410,15 @@ export function SettingsPage() {
                   }
                   placeholder="例如：conventional commits、中文摘要…"
                 />
-              </SettingsStack>
-              <SettingsStack title="Pull Request 指引">
+              </SettingsField>
+              <SettingsField id="git.gitPrInstructions" ctx={fieldCtx}>
                 <textarea
                   className={settingsInputCls + ' min-h-[72px] resize-y'}
                   value={settings.gitPrInstructions || ''}
                   onChange={(e) => set({ gitPrInstructions: e.target.value })}
                   placeholder="例如：標題簡短、描述含測試計畫…"
                 />
-              </SettingsStack>
+              </SettingsField>
             </SettingsGroup>
           </>
         )}
@@ -2974,8 +2974,9 @@ export function SettingsPage() {
         {section === 'webhook' && (
           <>
             <SettingsGroup title="本機 Webhook">
-              <SettingsRow
-                title="啟用"
+              <SettingsField
+                id="webhook.webhookEnabled"
+                ctx={fieldCtx}
                 description="聆聽 127.0.0.1"
                 control={
                   <SettingsToggle
@@ -2989,8 +2990,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="連接埠"
+              <SettingsField
+                id="webhook.webhookPort"
+                ctx={fieldCtx}
                 control={
                   <input
                     type="number"
@@ -3004,7 +3006,7 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsStack title="驗證 Token（留空＝不驗證，不建議）">
+              <SettingsField id="webhook.webhookToken" ctx={fieldCtx}>
                 <input
                   type="password"
                   className={settingsInputCls}
@@ -3012,8 +3014,8 @@ export function SettingsPage() {
                   onChange={(e) => set({ webhookToken: e.target.value })}
                   autoComplete="off"
                 />
-              </SettingsStack>
-              <SettingsStack title="Post-state Webhook target（選填）">
+              </SettingsField>
+              <SettingsField id="webhook.webhookTarget" ctx={fieldCtx}>
                 <input
                   type="url"
                   className={settingsInputCls}
@@ -3025,7 +3027,7 @@ export function SettingsPage() {
                 <p className="text-[11px] text-outline mt-1">
                   只有 Next_State=Dispatch Webhook 才會送出；未設定或非 http/https 會留下失敗 audit。
                 </p>
-              </SettingsStack>
+              </SettingsField>
             </SettingsGroup>
             <pre className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-[11px] font-[family-name:var(--font-mono)] text-on-surface-variant overflow-x-auto whitespace-pre-wrap mb-4">
               {`curl -X POST http://127.0.0.1:${settings.webhookPort || 8787}/webhook \\
@@ -3043,9 +3045,9 @@ export function SettingsPage() {
         {section === 'gateway' && (
           <>
             <SettingsGroup title="Telegram">
-              <SettingsRow
-                title="啟用 Telegram"
-                description="Bot 長輪詢入站訊息"
+              <SettingsField
+                id="gateway.telegramEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.telegramEnabled === true}
@@ -3053,7 +3055,7 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsStack title="Bot Token（@BotFather）">
+              <SettingsField id="gateway.telegramBotToken" ctx={fieldCtx}>
                 <input
                   className={settingsInputCls}
                   type="password"
@@ -3061,8 +3063,8 @@ export function SettingsPage() {
                   onChange={(e) => set({ telegramBotToken: e.target.value })}
                   placeholder="123456:ABC-DEF..."
                 />
-              </SettingsStack>
-              <SettingsStack title="允許的 Chat ID" description="逗號分隔，空白＝全部">
+              </SettingsField>
+              <SettingsField id="gateway.telegramAllowedChatIds" ctx={fieldCtx} description="逗號分隔，空白＝全部">
                 <input
                   className={settingsInputCls}
                   value={settings.telegramAllowedChatIds || ''}
@@ -3071,10 +3073,10 @@ export function SettingsPage() {
                   }
                   placeholder="例如 123456789"
                 />
-              </SettingsStack>
-              <SettingsRow
-                title="自動執行"
-                description="收到訊息自動執行代理"
+              </SettingsField>
+              <SettingsField
+                id="gateway.telegramAutoRun"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.telegramAutoRun !== false}
@@ -3082,9 +3084,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="回覆結果"
-                description="執行完成後回覆聊天室"
+              <SettingsField
+                id="gateway.telegramReplyWithResult"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.telegramReplyWithResult !== false}
@@ -3162,9 +3164,9 @@ export function SettingsPage() {
         {section === 'mcp' && (
           <>
             <SettingsGroup title="MCP">
-              <SettingsRow
-                title="啟用 MCP"
-                description="代理可用 mcp_list_tools / mcp_call"
+              <SettingsField
+                id="mcp.mcpEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.mcpEnabled === true}
@@ -3339,6 +3341,7 @@ export function SettingsPage() {
               ))}
             </SettingsGroup>
 
+            <SettingsAnchor id="mcp.mcpServers" ctx={fieldCtx}>
             <div className="space-y-3">
               {(settings.mcpServers || []).map((s, idx) => (
                 <div
@@ -3462,6 +3465,7 @@ export function SettingsPage() {
                 </div>
               ))}
             </div>
+            </SettingsAnchor>
 
             <div className="flex flex-wrap gap-2">
               <button
