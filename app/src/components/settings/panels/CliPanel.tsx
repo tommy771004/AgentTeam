@@ -14,6 +14,7 @@ import {
   SettingsGroupFor,
   type SettingsFieldContext,
 } from '../SettingsField'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— CLI 授權節（安全、adapter capability matrix、廠商矩陣）。
@@ -30,11 +31,12 @@ export function CliPanel({
   set: (patch: Partial<LlmSettings>) => void
   fieldCtx: SettingsFieldContext
 }) {
+  const { t } = useTranslation()
   const [cliMsg, setCliMsg] = useState<string | null>(null)
 
   return (
     <>
-          <SettingsGroupFor section="cli" group="安全" ctx={fieldCtx}>
+          <SettingsGroupFor section="cli" group={t('settings.cli.8e662a')} ctx={fieldCtx}>
             <SettingsField
               id="cli.bashRequireAsk"
               ctx={fieldCtx}
@@ -56,14 +58,14 @@ export function CliPanel({
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[12px] font-semibold text-on-surface">{adapter.displayName}</span>
                       <span className={`text-[10px] ${provider?.enabled && provider.authorized ? 'text-primary' : 'text-outline'}`}>
-                        {provider?.enabled && provider.authorized ? '已授權' : '未授權'}
+                        {provider?.enabled && provider.authorized ? t('settings.cli.125ee5') : t('settings.cli.6e428a')}
                       </span>
                     </div>
                     <p className="mt-1 text-[10px] leading-relaxed text-outline">
                       resume {adapter.supports.resume ? '✓' : '—'} · image {adapter.supports.images ? '✓' : '—'} · MCP {adapter.supports.mcp ? '✓' : '—'} · sandbox {adapter.supports.sandbox}
                     </p>
                     <p className="mt-1 truncate text-[10px] text-outline/70">
-                      probe {provider?.lastProbeAt ? new Date(provider.lastProbeAt).toLocaleString() : '尚未掃描'} · {provider?.diagnostic?.binaryPath || adapter.binaryCandidates[0]}
+                      probe {provider?.lastProbeAt ? new Date(provider.lastProbeAt).toLocaleString() : t('settings.cli.cdbf0c')} · {provider?.diagnostic?.binaryPath || adapter.binaryCandidates[0]}
                     </p>
                   </div>
                 )
@@ -74,13 +76,13 @@ export function CliPanel({
             </p>
           </SettingsGroup>
           <SettingsAnchor id="cli.cliProviders" ctx={fieldCtx}>
-          <SettingsGroupFor section="cli" group="廠商" ctx={fieldCtx}>
+          <SettingsGroupFor section="cli" group={t('settings.cli.d7ccfc')} ctx={fieldCtx}>
             {(settings.cliProviders || []).map((p, idx) => (
               <div key={p.id} className="px-4 py-3 space-y-2 border-b border-white/[0.07] last:border-0">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="text-[13px] font-medium">{p.name}</div>
                   <div className="flex items-center gap-3">
-                    <span className="text-[11px] text-outline">啟用</span>
+                    <span className="text-[11px] text-outline">{t('settings.cli.ce6c3d')}</span>
                     <SettingsToggle
                       checked={p.enabled}
                       onChange={(v) => {
@@ -89,7 +91,7 @@ export function CliPanel({
                         set({ cliProviders: next })
                       }}
                     />
-                    <span className="text-[11px] text-outline">已授權</span>
+                    <span className="text-[11px] text-outline">{t('settings.cli.125ee5')}</span>
                     <SettingsToggle
                       checked={p.authorized}
                       onChange={(v) => {
@@ -154,7 +156,7 @@ export function CliPanel({
                       onClick={async () => {
                         const bin = p.cliBinary || p.kind
                         if (!window.subagents?.cli?.which) {
-                          setCliMsg('需 Electron 偵測 CLI')
+                          setCliMsg(t('settings.cli.3c1f98'))
                           return
                         }
                         const r = await window.subagents.cli.which(bin)
@@ -172,7 +174,7 @@ export function CliPanel({
                         )
                       }}
                     >
-                      偵測 CLI
+                      {t('settings.cli.80ca30')}
                     </button>
                   </div>
                 )}
@@ -189,10 +191,10 @@ export function CliPanel({
               className={settingsBtnPrimaryCls}
               onClick={async () => {
                 if (!window.subagents?.cli?.applyDiscovery) {
-                  setCliMsg('一鍵偵測需 Electron（會讀本機 ~/.codex、~/.claude、~/.grok、opencode.jsonc）')
+                  setCliMsg(t('settings.cli.d0ab07'))
                   return
                 }
-                setCliMsg('掃描本機 CLI 與設定中…')
+                setCliMsg(t('settings.cli.b15ab0'))
                 try {
                   const r = await window.subagents.cli.applyDiscovery(
                     (settings.cliProviders || []) as unknown[],
@@ -209,14 +211,14 @@ export function CliPanel({
                   })
                   setCliMsg(
                     [
-                      '✓ 已匯入本機偵測結果（不會複製 OAuth/API secret）',
+                      t('settings.cli.31e06f'),
                       r.summary,
                       r.suggestedModel ? `建議模型：${r.suggestedModel}` : '',
-                      strongest ? '已套用角色模型建議（協調/合成＝較強；分析/執行＝較快）。' : '',
+                      strongest ? t('settings.cli.81c4ff') : '',
                       r.suggestedDepth ? `建議推理：${r.suggestedDepth}` : '',
                       '',
-                      '說明：Codex/Claude/Grok 若用訂閱登入，執行仍走各自 CLI；',
-                      '本 App 內建 LLM 請求需另外設定 OpenAI 相容 API（或用 bash 呼叫 CLI）。',
+                      t('settings.cli.63ac1d'),
+                      t('settings.cli.d79f11'),
                     ]
                       .filter(Boolean)
                       .join('\n'),
@@ -226,14 +228,14 @@ export function CliPanel({
                 }
               }}
             >
-              一鍵偵測本機 CLI 並匯入模型
+              {t('settings.cli.55b2e8')}
             </button>
             <button
               type="button"
               className={settingsBtnCls}
               onClick={async () => {
                 if (!window.subagents?.opencode) {
-                  setCliMsg('opencode 掃描需 Electron')
+                  setCliMsg(t('settings.cli.6313e2'))
                   return
                 }
                 const d = await window.subagents.opencode.detect()
@@ -247,7 +249,7 @@ export function CliPanel({
                 const subs = oc.agents.filter((a) => a.kind === 'subagent')
                 setCliMsg(
                   [
-                    d.found ? `CLI ${d.path} (${d.version || '?'})` : 'opencode CLI 未找到',
+                    d.found ? `CLI ${d.path} (${d.version || '?'})` : t('settings.cli.a41faf'),
                     `config sources: ${oc.sources.length}`,
                     ...oc.sources.map((s) => `  · ${s}`),
                     `agents: primary=${primaries.length} subagent=${subs.length}`,
@@ -276,7 +278,7 @@ export function CliPanel({
                 }
               }}
             >
-              掃描 OpenCode agents
+              {t('settings.cli.ac5147')}
             </button>
           </div>
           {cliMsg && (

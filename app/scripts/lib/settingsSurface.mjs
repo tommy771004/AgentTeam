@@ -10,8 +10,21 @@ import path from 'node:path'
 
 const SURFACE_DIRS = ['src/components/settings', 'src/components/settings/panels']
 
+/**
+ * 語言檔也是設定畫面的一部分。
+ *
+ * spec 6/6 把面板字串抽進 `t(key)` 之後，文案本體住在語言檔裡；只讀元件原始碼的
+ * 契約檢查會找不到那些字，但那個 UI 明明還在。把 zh-TW 檔一起納入，讓「這段文案
+ * 還在不在」的檢查繼續有效，而不是被迫改寫成比對 key。
+ */
+const CATALOG_FILES = ['src/i18n/locales/zh-TW.ts']
+
 export function settingsSurfaceFiles(appRoot) {
   const files = [path.join(appRoot, 'src/pages/SettingsPage.tsx')]
+  for (const rel of CATALOG_FILES) {
+    const abs = path.join(appRoot, rel)
+    if (fs.existsSync(abs)) files.push(abs)
+  }
   for (const dir of SURFACE_DIRS) {
     const abs = path.join(appRoot, dir)
     if (!fs.existsSync(abs)) continue

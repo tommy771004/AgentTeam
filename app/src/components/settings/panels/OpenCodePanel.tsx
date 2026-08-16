@@ -16,6 +16,7 @@ import {
   StatChip,
   settingsBtnCls,
 } from '../SettingsChrome'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6 ticket 07）— OpenCode 節。
@@ -29,6 +30,7 @@ export function OpenCodePanel({
   settings: LlmSettings
   set: (patch: Partial<LlmSettings>) => void
 }) {
+  const { t } = useTranslation()
   const oc = useOpenCodeConfigStore()
   const projectRoot = useProjectStore((s) => s.root)
   const [ocProviderMsg, setOcProviderMsg] = useState<string | null>(null)
@@ -36,7 +38,7 @@ export function OpenCodePanel({
   return (
         <div className="space-y-1 animate-macos-enter">
           <SettingsGroup
-            title="狀態"
+            title={t('settings.opencode.452935')}
             action={
               <div className="flex gap-1.5">
                 <button
@@ -45,15 +47,15 @@ export function OpenCodePanel({
                   onClick={() => void oc.hydrate(projectRoot)}
                   className={settingsBtnCls + ' disabled:opacity-40'}
                 >
-                  {oc.loading ? '載入中…' : '重新整理'}
+                  {oc.loading ? t('settings.opencode.c38b87') : t('settings.opencode.5387b5')}
                 </button>
                 <button
                   type="button"
                   onClick={async () => {
-                    setOcProviderMsg('讀取 OpenCode provider catalog…')
+                    setOcProviderMsg(t('settings.opencode.4d57cf'))
                     const health = await inspectOpenCodeServer()
                     if (!health.ok || !health.baseUrl) {
-                      setOcProviderMsg(health.error || '找不到 localhost OpenCode server；先啟動 server。')
+                      setOcProviderMsg(health.error || t('settings.opencode.9257ee'))
                       return
                     }
                     const raw = await getOpenCodeProviderCatalog(health.baseUrl)
@@ -61,7 +63,7 @@ export function OpenCodePanel({
                       unwrapOpenCodeServerValue(raw) as Parameters<typeof mapOpenCodeProviderCatalog>[0],
                     )
                     if (!mapped.modelIds.length) {
-                      setOcProviderMsg('server 沒有回傳可採用的 model candidate。')
+                      setOcProviderMsg(t('settings.opencode.eaf5c8'))
                       return
                     }
                     const existing = settings.modelProfiles || {}
@@ -77,24 +79,24 @@ export function OpenCodePanel({
                   }}
                   className={settingsBtnCls}
                 >
-                  採用 Provider candidates
+                  {t('settings.opencode.297918')}
                 </button>
               </div>
             }
           >
             <div className="px-4 py-3 text-[11px] text-outline leading-relaxed">
               合併{' '}
-              <code className="text-primary/80 font-mono">使用者資料目錄/opencode/opencode.json</code>
-              、專案 <code className="text-primary/80 font-mono">opencode.json</code> 與{' '}
+              <code className="text-primary/80 font-mono">{t('settings.opencode.3263fb')}</code>
+              {t('settings.opencode.425113')} <code className="text-primary/80 font-mono">opencode.json</code> 與{' '}
               <code className="text-primary/80 font-mono">.opencode/agents|commands</code>
-              。Commands 會自動匯入為 slash（/cmd）。
+              {t('settings.opencode.142fa5')}
             </div>
             <div className="grid grid-cols-2 gap-2 px-4 pb-3">
-              <StatChip label="Config 來源" value={String(oc.sources.length)} />
+              <StatChip label={t('settings.opencode.7ee19b')} value={String(oc.sources.length)} />
               <StatChip label="Agents" value={String(oc.agents.length)} />
               <StatChip label="Commands" value={String(oc.commands.length)} />
               <StatChip
-                label="Slash 總數"
+                label={t('settings.opencode.1bd60f')}
                 value={String(getLiveSlashCommands().length)}
               />
             </div>
@@ -109,10 +111,10 @@ export function OpenCodePanel({
             )}
           </SettingsGroup>
 
-          <SettingsGroup title="Config 路徑">
+          <SettingsGroup title={t('settings.opencode.717118')}>
             {oc.sources.length === 0 ? (
               <div className="px-4 py-3 text-[12px] text-outline">
-                尚未找到 opencode.json（可選建立）
+                {t('settings.opencode.0b4237')}
               </div>
             ) : (
               oc.sources.map((s) => (
@@ -129,12 +131,12 @@ export function OpenCodePanel({
           <SettingsGroup title="Project permissions">
             {Object.keys(oc.permission).length === 0 ? (
               <div className="px-4 py-3 text-[12px] text-outline">
-                未設定專案／全域 OpenCode permission；使用內建 Build / Plan 預設規則。
+                {t('settings.opencode.9f71d8')}
               </div>
             ) : (
               <>
                 <div className="px-4 py-2 text-[10px] text-outline">
-                  這些規則只會套用到目前載入的專案 run；deny 優先於 ask，bash pattern 依檔案順序由後到前覆蓋。
+                  {t('settings.opencode.00ff54')}
                 </div>
                 {Object.entries(oc.permission).map(([key, value]) => (
                   <SettingsRow
@@ -164,7 +166,7 @@ export function OpenCodePanel({
             )}
           </SettingsGroup>
 
-          <SettingsGroup title="Agents 註冊表">
+          <SettingsGroup title={t('settings.opencode.3abdb9')}>
             <div className="max-h-56 overflow-y-auto custom-scrollbar">
               {oc.agents.map((a) => (
                 <SettingsRow

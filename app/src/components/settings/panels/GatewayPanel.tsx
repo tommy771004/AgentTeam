@@ -9,6 +9,7 @@ import {
   settingsInputCls,
 } from '../SettingsChrome'
 import { SettingsField, type SettingsFieldContext } from '../SettingsField'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— 訊息閘道節（Telegram）。
@@ -25,6 +26,7 @@ export function GatewayPanel({
   set: (patch: Partial<LlmSettings>) => void
   fieldCtx: SettingsFieldContext
 }) {
+  const { t } = useTranslation()
   const [gatewayMsg, setGatewayMsg] = useState<string | null>(null)
   const gatewayInbound = useGatewayStore((s) => s.inbound)
   const bgJobs = useGatewayStore((s) => s.jobs)
@@ -42,10 +44,10 @@ export function GatewayPanel({
         if (!cancelled) {
           setGatewayMsg(
             settings.telegramEnabled
-              ? `${st.telegram.running ? '運行中' : '已停止'}${
+              ? `${st.telegram.running ? t('settings.gateway.ae7738') : t('settings.gateway.75dddf')}${
                   st.telegram.botUsername ? ` @${st.telegram.botUsername}` : ''
                 }${st.telegram.lastError ? ` · ${st.telegram.lastError}` : ''}`
-              : '已關閉',
+              : t('settings.gateway.e8a92f'),
           )
         }
       } catch {
@@ -83,14 +85,14 @@ export function GatewayPanel({
                 placeholder="123456:ABC-DEF..."
               />
             </SettingsField>
-            <SettingsField id="gateway.telegramAllowedChatIds" ctx={fieldCtx} description="逗號分隔，空白＝全部">
+            <SettingsField id="gateway.telegramAllowedChatIds" ctx={fieldCtx} description={t('settings.gateway.260893')}>
               <input
                 className={settingsInputCls}
                 value={settings.telegramAllowedChatIds || ''}
                 onChange={(e) =>
                   set({ telegramAllowedChatIds: e.target.value })
                 }
-                placeholder="例如 123456789"
+                placeholder={t('settings.gateway.963ba8')}
               />
             </SettingsField>
             <SettingsField
@@ -114,10 +116,10 @@ export function GatewayPanel({
               }
             />
           </SettingsGroup>
-          <SettingsGroup title="連線狀態">
+          <SettingsGroup title={t('settings.gateway.1a25d8')}>
             <SettingsRow
-              title="Telegram 輪詢"
-              description="開關與 Token 變更後會自動啟動／停止"
+              title={t('settings.gateway.d37167')}
+              description={t('settings.gateway.a6e4e0')}
               control={
                 <button
                   type="button"
@@ -126,16 +128,16 @@ export function GatewayPanel({
                     const st = await window.subagents?.gateway?.status()
                     setGatewayMsg(
                       st
-                        ? `${st.telegram.running ? '運行中' : '已停止'}${
+                        ? `${st.telegram.running ? t('settings.gateway.ae7738') : t('settings.gateway.75dddf')}${
                             st.telegram.botUsername ? ` @${st.telegram.botUsername}` : ''
                           } · msgs=${st.telegram.messageCount}${
                             st.telegram.lastError ? ` · ${st.telegram.lastError}` : ''
                           }`
-                        : '需 Electron 環境',
+                        : t('settings.gateway.c40199'),
                     )
                   }}
                 >
-                  重新整理
+                  {t('settings.gateway.5387b5')}
                 </button>
               }
             />
@@ -145,10 +147,10 @@ export function GatewayPanel({
               {gatewayMsg}
             </p>
           )}
-          <SettingsGroup title="最近入站訊息">
+          <SettingsGroup title={t('settings.gateway.8d6bfc')}>
             <div className="px-4 py-3">
               {gatewayInbound.length === 0 ? (
-                <p className="text-[12px] text-outline">尚無訊息</p>
+                <p className="text-[12px] text-outline">{t('settings.gateway.28115f')}</p>
               ) : (
                 <ul className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar text-[11px] font-[family-name:var(--font-mono)]">
                   {gatewayInbound.slice(0, 12).map((m, i) => (
@@ -160,11 +162,11 @@ export function GatewayPanel({
               )}
             </div>
           </SettingsGroup>
-          <SettingsGroup title="背景委派任務">
+          <SettingsGroup title={t('settings.gateway.067f6d')}>
             <div className="px-4 py-3">
               {bgJobs.length === 0 ? (
                 <p className="text-[12px] text-outline">
-                  尚無背景任務 — 使用 delegate_task(background=true)
+                  {t('settings.gateway.c59a62')}
                 </p>
               ) : (
                 <ul className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar text-[11px] font-[family-name:var(--font-mono)]">

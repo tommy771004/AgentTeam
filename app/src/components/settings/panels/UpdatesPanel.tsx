@@ -5,6 +5,7 @@ import {
   settingsBtnCls,
   settingsBtnPrimaryCls,
 } from '../SettingsChrome'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 export type UpdateState = {
   status: string
@@ -40,39 +41,40 @@ export function UpdatesPanel({
   deferCurrentUpdate: () => void | Promise<void>
   rollbackCurrentUpdate: () => void | Promise<void>
 }) {
+  const { t } = useTranslation()
   return (
     <>
-          <SettingsGroup title="Beta 更新通道">
+          <SettingsGroup title={t('settings.updates.b86a93')}>
             <SettingsRow
-              title="目前版本"
-              description="僅接受符合目前平台與架構、且版本較新的簽章 manifest。"
-              control={<span className="text-[12px] font-mono text-on-surface-variant">{updateState?.currentVersion || '讀取中…'}</span>}
+              title={t('settings.updates.0f31d8')}
+              description={t('settings.updates.50a87f')}
+              control={<span className="text-[12px] font-mono text-on-surface-variant">{updateState?.currentVersion || t('settings.updates.75dc5e')}</span>}
             />
             <SettingsRow
-              title="檢查更新"
-              description="通道與 public key 由安裝環境提供；驗證失敗會 fail closed。"
-              control={<button type="button" className={settingsBtnPrimaryCls} onClick={() => void checkForUpdate()}>檢查</button>}
+              title={t('settings.updates.57d698')}
+              description={t('settings.updates.c0bc14')}
+              control={<button type="button" className={settingsBtnPrimaryCls} onClick={() => void checkForUpdate()}>{t('settings.updates.6faa5f')}</button>}
             />
             {updateState?.manifest && (
               <>
-                <SettingsStack title={`Beta ${updateState.manifest.version}`} description={updateState.manifest.mandatory ? '必要更新' : '可延後更新'}>
+                <SettingsStack title={`Beta ${updateState.manifest.version}`} description={updateState.manifest.mandatory ? t('settings.updates.b39c66') : t('settings.updates.9f5118')}>
                   <p className="text-[12px] leading-relaxed text-on-surface-variant whitespace-pre-wrap">{updateState.manifest.releaseNotes}</p>
                 </SettingsStack>
                 <SettingsRow
-                  title="下載更新"
-                  description={updateState.status === 'downloaded' ? '檔案已驗證，可開始安裝。' : '下載進度只反映已驗證的 HTTPS artifact。'}
+                  title={t('settings.updates.cc54e3')}
+                  description={updateState.status === 'downloaded' ? t('settings.updates.bccc4e') : t('settings.updates.c10221')}
                   control={
                     <div className="flex items-center gap-2">
-                      {updateState.status !== 'downloaded' && <button type="button" className={settingsBtnPrimaryCls} onClick={() => void downloadCurrentUpdate()}>下載</button>}
-                      {!updateState.manifest.mandatory && <button type="button" className={settingsBtnCls} onClick={() => void deferCurrentUpdate()}>延後</button>}
+                      {updateState.status !== 'downloaded' && <button type="button" className={settingsBtnPrimaryCls} onClick={() => void downloadCurrentUpdate()}>{t('settings.updates.4082c9')}</button>}
+                      {!updateState.manifest.mandatory && <button type="button" className={settingsBtnCls} onClick={() => void deferCurrentUpdate()}>{t('settings.updates.fa9c90')}</button>}
                     </div>
                   }
                 />
                 {updateState.status === 'downloaded' && (
-                  <SettingsRow title="開始安裝" description="會先建立 N-1→N migration backup；安裝失敗可回復。" control={<button type="button" className={settingsBtnPrimaryCls} onClick={() => void installCurrentUpdate()}>安裝並重啟</button>} />
+                  <SettingsRow title={t('settings.updates.729120')} description={t('settings.updates.347104')} control={<button type="button" className={settingsBtnPrimaryCls} onClick={() => void installCurrentUpdate()}>{t('settings.updates.6faf69')}</button>} />
                 )}
                 {(updateState.status === 'install-pending' || updateState.status === 'failed') && (
-                  <SettingsRow title="回復 migration" description="安裝器失敗或中斷時，保留目前版本並清除暫存更新檔。" control={<button type="button" className={settingsBtnCls} onClick={() => void rollbackCurrentUpdate()}>回復</button>} />
+                  <SettingsRow title={t('settings.updates.7cc570')} description={t('settings.updates.8ead29')} control={<button type="button" className={settingsBtnCls} onClick={() => void rollbackCurrentUpdate()}>{t('settings.updates.b6c460')}</button>} />
                 )}
               </>
             )}

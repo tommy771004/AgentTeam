@@ -8,6 +8,7 @@ import {
   settingsBtnCls,
 } from '../SettingsChrome'
 import { SettingsField, type SettingsFieldContext } from '../SettingsField'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— 資料控制節。
@@ -24,18 +25,19 @@ export function DataControlsPanel({
   set: (patch: Partial<LlmSettings>) => void
   fieldCtx: SettingsFieldContext
 }) {
+  const { t } = useTranslation()
   const [dataMsg, setDataMsg] = useState<string | null>(null)
 
   return (
     <>
-          <SettingsGroup title="運行指標（G11）">
+          <SettingsGroup title={t('settings.data.a2b87b')}>
             <SettingsRow
-              title="本地指標"
+              title={t('settings.data.fd7750')}
               description={(() => {
                 const s = metricsSummary()
                 return s.runs
                   ? `${s.runs} runs · ask ${s.toolAsks} / deny ${s.toolDenials}（denial ratio ${(s.denialRatio * 100).toFixed(1)}%）· 壓縮 ${s.compactions} 次 · LLM 重試 ${s.llmRetries} 次`
-                  : '尚無紀錄；每個 run 結束時自動記一筆（只記數字，不含 prompt 內容）'
+                  : t('settings.data.8b2627')
               })()}
               control={
                 <div className="flex items-center gap-2">
@@ -45,7 +47,7 @@ export function DataControlsPanel({
                     onClick={() => {
                       const jsonl = exportRunMetricsJsonl()
                       if (!jsonl) {
-                        setDataMsg('沒有可匯出的指標')
+                        setDataMsg(t('settings.data.858dcc'))
                         return
                       }
                       const blob = new Blob([jsonl], { type: 'application/jsonl' })
@@ -55,26 +57,26 @@ export function DataControlsPanel({
                       a.download = `subagents-metrics-${new Date().toISOString().slice(0, 10)}.jsonl`
                       a.click()
                       URL.revokeObjectURL(url)
-                      setDataMsg('指標已匯出（JSONL）')
+                      setDataMsg(t('settings.data.ec2ffc'))
                     }}
                   >
-                    匯出 JSONL
+                    {t('settings.data.1a6faf')}
                   </button>
                   <button
                     type="button"
                     className="text-[11px] text-error hover:underline"
                     onClick={() => {
                       resetRunMetrics()
-                      setDataMsg('指標已清除')
+                      setDataMsg(t('settings.data.2e6b28'))
                     }}
                   >
-                    清除
+                    {t('settings.data.7b15e5')}
                   </button>
                 </div>
               }
             />
           </SettingsGroup>
-          <SettingsGroup title="對話">
+          <SettingsGroup title={t('settings.data.d54f1b')}>
             <SettingsField
               id="data.temporaryChatDefault"
               ctx={fieldCtx}
@@ -90,7 +92,7 @@ export function DataControlsPanel({
               ctx={fieldCtx}
               description={
                 (settings.autoArchiveDays ?? 0) === 0
-                  ? '不自動封存'
+                  ? t('settings.data.604f20')
                   : `${settings.autoArchiveDays} 天後封存`
               }
               control={
@@ -107,10 +109,10 @@ export function DataControlsPanel({
               }
             />
           </SettingsGroup>
-          <SettingsGroup title="管理">
+          <SettingsGroup title={t('settings.data.4989b5')}>
             <SettingsRow
-              title="封存與日誌"
-              description="開啟紀錄頁"
+              title={t('settings.data.ffe673')}
+              description={t('settings.data.6f951b')}
               control={
                 <button
                   type="button"
@@ -119,19 +121,19 @@ export function DataControlsPanel({
                     window.location.hash = '#/records'
                   }}
                 >
-                  開啟
+                  {t('settings.data.0ae5c7')}
                 </button>
               }
             />
             <SettingsRow
-              title="刪除全部對話"
-              description="不可復原"
+              title={t('settings.data.489bdc')}
+              description={t('settings.data.e1ae61')}
               control={
                 <button
                   type="button"
                   className={settingsBtnCls + ' text-error border-error/30'}
                   onClick={async () => {
-                    if (!confirm('清除所有對話執行緒？（不可復原）')) return
+                    if (!confirm(t('settings.data.8ff258'))) return
                     try {
                       const { useThreadStore } = await import('../../../store/threadStore')
                       const st = useThreadStore.getState()
@@ -139,13 +141,13 @@ export function DataControlsPanel({
                       for (const id of ids) st.deleteThread(id)
                       const active = st.activeId
                       if (active) st.clearBubbles?.(active)
-                      setDataMsg('已清除對話執行緒')
+                      setDataMsg(t('settings.data.6717b0'))
                     } catch (e) {
                       setDataMsg(e instanceof Error ? e.message : String(e))
                     }
                   }}
                 >
-                  刪除
+                  {t('settings.data.a48f5d')}
                 </button>
               }
             />

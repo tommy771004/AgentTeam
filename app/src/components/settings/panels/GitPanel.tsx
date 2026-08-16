@@ -1,6 +1,7 @@
 import type { LlmSettings } from '../../../agent/types'
 import { SettingsGroup, SettingsToggle, settingsInputCls } from '../SettingsChrome'
 import { SettingsField, type SettingsFieldContext } from '../SettingsField'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— Git 節。
@@ -17,9 +18,10 @@ export function GitPanel({
   set: (patch: Partial<LlmSettings>) => void
   fieldCtx: SettingsFieldContext
 }) {
+  const { t } = useTranslation()
   return (
     <>
-          <SettingsGroup title="分支與推送">
+          <SettingsGroup title={t('settings.git.67087a')}>
             <SettingsField
               id="git.gitBranchPrefix"
               ctx={fieldCtx}
@@ -53,7 +55,7 @@ export function GitPanel({
               }
             />
           </SettingsGroup>
-          <SettingsGroup title="指引（注入提示）">
+          <SettingsGroup title={t('settings.git.24473e')}>
             <SettingsField id="git.gitCommitInstructions" ctx={fieldCtx}>
               <textarea
                 className={settingsInputCls + ' min-h-[72px] resize-y'}
@@ -61,7 +63,7 @@ export function GitPanel({
                 onChange={(e) =>
                   set({ gitCommitInstructions: e.target.value })
                 }
-                placeholder="例如：conventional commits、中文摘要…"
+                placeholder={t('settings.git.e1f513')}
               />
             </SettingsField>
             <SettingsField id="git.gitPrInstructions" ctx={fieldCtx}>
@@ -69,7 +71,7 @@ export function GitPanel({
                 className={settingsInputCls + ' min-h-[72px] resize-y'}
                 value={settings.gitPrInstructions || ''}
                 onChange={(e) => set({ gitPrInstructions: e.target.value })}
-                placeholder="例如：標題簡短、描述含測試計畫…"
+                placeholder={t('settings.git.be386a')}
               />
             </SettingsField>
           </SettingsGroup>

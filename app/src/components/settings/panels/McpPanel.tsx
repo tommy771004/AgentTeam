@@ -20,6 +20,7 @@ import {
   settingsInputCls,
 } from '../SettingsChrome'
 import { SettingsAnchor, SettingsField, type SettingsFieldContext } from '../SettingsField'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— MCP 伺服器節（伺服器清單、探測、工具封裝審核、憑證）。
@@ -36,6 +37,7 @@ export function McpPanel({
   set: (patch: Partial<LlmSettings>) => void
   fieldCtx: SettingsFieldContext
 }) {
+  const { t } = useTranslation()
   const projectRoot = useProjectStore((s) => s.root)
   const [mcpProbe, setMcpProbe] = useState<string | null>(null)
   const [mcpSessions, setMcpSessions] = useState<string | null>(null)
@@ -92,35 +94,35 @@ export function McpPanel({
 
           <SettingsGroup title="Plugin permission summary">
             {oc.plugins.length === 0 ? (
-              <p className="px-4 py-3 text-[12px] text-outline">目前 config 沒有 npm plugin reference；`.opencode/plugins` 本地檔案仍維持 OpenCode 自己的載入範圍。</p>
+              <p className="px-4 py-3 text-[12px] text-outline">{t('settings.mcp.0ca0b4')}</p>
             ) : (
               <div className="divide-y divide-white/10">
                 {oc.plugins.map((plugin) => (
                   <div key={plugin} className="px-4 py-2.5">
                     <div className="text-[12px] font-mono text-on-surface">{plugin}</div>
-                    <div className="text-[10px] text-amber-300/90 mt-0.5">permission：未知（manifest reference only） · 不自動安裝／不執行 plugin code</div>
+                    <div className="text-[10px] text-amber-300/90 mt-0.5">{t('settings.mcp.042b83')}</div>
                   </div>
                 ))}
               </div>
             )}
           </SettingsGroup>
 
-          <SettingsGroup title="Per-agent MCP 存取">
+          <SettingsGroup title={t('settings.mcp.7a992b')}>
             <div className="px-4 py-2 text-[11px] text-outline leading-relaxed">
-              未設定 agent 會沿用全域 MCP；一旦切換成自訂清單，空清單代表該 agent 完全不能使用 MCP。這是 allowlist，不會放寬 OpenCode permission deny。
+              {t('settings.mcp.24afdf')}
             </div>
             {(() => {
               const servers = (settings.mcpServers || []).filter((server) => server.enabled)
               const configured = settings.mcpAgentServers || {}
               const agentRows = [
-                { id: 'build', label: 'Build（內建）' },
-                { id: 'plan', label: 'Plan（內建）' },
+                { id: 'build', label: t('settings.mcp.ba0f5a') },
+                { id: 'plan', label: t('settings.mcp.210370') },
                 ...oc.agents
                   .filter((agent) => !agent.hidden && agent.id !== 'build' && agent.id !== 'plan')
                   .map((agent) => ({ id: agent.id, label: `${agent.label}（${agent.id}）` })),
               ].filter((agent, index, rows) => rows.findIndex((x) => x.id === agent.id) === index)
               if (!agentRows.length) {
-                return <p className="px-4 py-3 text-[12px] text-outline">尚未載入 OpenCode agent；先到 OpenCode 分頁重新整理。</p>
+                return <p className="px-4 py-3 text-[12px] text-outline">{t('settings.mcp.5eba79')}</p>
               }
               return (
                 <div className="divide-y divide-white/10">
@@ -143,13 +145,13 @@ export function McpPanel({
                               }}
                               className="accent-primary-container"
                             />
-                            沿用全域
+                            {t('settings.mcp.c86dc4')}
                           </label>
                         </div>
                         {custom && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                             {servers.length === 0 ? (
-                              <span className="text-[11px] text-outline">尚無啟用中的 MCP server</span>
+                              <span className="text-[11px] text-outline">{t('settings.mcp.579e99')}</span>
                             ) : servers.map((server) => (
                               <label key={server.id} className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1.5 text-[11px]">
                                 <input
@@ -164,7 +166,7 @@ export function McpPanel({
                                   className="accent-primary-container"
                                 />
                                 <span className="truncate">{server.name}</span>
-                                <span className="ml-auto text-[9px] text-outline">{mcpHealthById[server.id] || '未探測'}</span>
+                                <span className="ml-auto text-[9px] text-outline">{mcpHealthById[server.id] || t('settings.mcp.ae73c8')}</span>
                               </label>
                             ))}
                           </div>
@@ -177,13 +179,13 @@ export function McpPanel({
             })()}
           </SettingsGroup>
 
-          <SettingsGroup title="宣告式自訂工具">
+          <SettingsGroup title={t('settings.mcp.8d93e9')}>
             {/* P1-C: tool packages awaiting privilege review */}
             {(() => {
               const pending = listPendingToolPackages()
               if (!pending.length) return null
               return (
-                <SettingsStack title="Tool package 權限審核（待核准）">
+                <SettingsStack title={t('settings.mcp.42aedc')}>
                   <div className="space-y-1.5">
                     {pending.map((p) => (
                       <div
@@ -199,7 +201,7 @@ export function McpPanel({
                             暫扣工具（write/destructive/bash）：{p.withheld.join(', ')}
                           </span>
                           <span className="block text-[10px] text-outline mt-0.5">
-                            核准後解鎖 schema；執行時仍逐次 HITL 審批
+                            {t('settings.mcp.3eb0cb')}
                           </span>
                         </span>
                         <button
@@ -210,7 +212,7 @@ export function McpPanel({
                             setCustomToolsError(r.ok ? null : r.message)
                           }}
                         >
-                          核准權限面
+                          {t('settings.mcp.c26f33')}
                         </button>
                       </div>
                     ))}
@@ -226,7 +228,7 @@ export function McpPanel({
                 onBlur={() => {
                   try {
                     const parsed = customToolsDraft.trim() ? JSON.parse(customToolsDraft) : []
-                    if (!Array.isArray(parsed)) throw new Error('必須是 JSON array')
+                    if (!Array.isArray(parsed)) throw new Error(t('settings.mcp.316be1'))
                     set({ customTools: parsed })
                     setCustomToolsDraft('')
                   } catch (error) {
@@ -236,8 +238,7 @@ export function McpPanel({
                 spellCheck={false}
               />
               <p className="mt-1 text-[11px] text-outline">
-                支援 http_template 與 bash_template；bash 永遠需核准。外掛 manifest 的 customTools 也會自動載入。
-                下方 secret 鍵會掃描設定 JSON + 已安裝 plugin 模板 + 市集授權 id。
+                {t('settings.mcp.1fcdb3')}
               </p>
               {customToolsError && <p className="mt-1 text-[11px] text-error">JSON 無法儲存：{customToolsError}</p>}
             </SettingsField>
@@ -271,7 +272,7 @@ export function McpPanel({
                       next[idx] = { ...s, name: e.target.value }
                       set({ mcpServers: next })
                     }}
-                    placeholder="顯示名稱"
+                    placeholder={t('settings.mcp.46f3d1')}
                   />
                   <label className="flex items-center gap-1 text-xs shrink-0">
                     <input
@@ -284,7 +285,7 @@ export function McpPanel({
                       }}
                       className="accent-primary-container"
                     />
-                    啟用
+                    {t('settings.mcp.ce6c3d')}
                   </label>
                   <button
                     type="button"
@@ -303,7 +304,7 @@ export function McpPanel({
                       })
                     }}
                   >
-                    刪除
+                    {t('settings.mcp.a48f5d')}
                   </button>
                 </div>
                 <select
@@ -319,10 +320,10 @@ export function McpPanel({
                   }}
                 >
                   <option value="http">HTTP JSON-RPC</option>
-                  <option value="stdio">stdio（僅 Electron）</option>
+                  <option value="stdio">{t('settings.mcp.531a82')}</option>
                 </select>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-outline font-[family-name:var(--font-mono)]">
-                  <span>health: {mcpHealthById[s.id] || '未探測'}</span>
+                  <span>health: {mcpHealthById[s.id] || t('settings.mcp.ae73c8')}</span>
                   <span>secret owner: {s.secretPluginId || s.pluginId || 'manual'}</span>
                 </div>
                 {s.transport === 'http' ? (
@@ -346,7 +347,7 @@ export function McpPanel({
                         next[idx] = { ...s, authToken: e.target.value }
                         set({ mcpServers: next })
                       }}
-                      placeholder="Bearer Token（選填）"
+                      placeholder={t('settings.mcp.dae5b9')}
                     />
                   </>
                 ) : (
@@ -359,7 +360,7 @@ export function McpPanel({
                         next[idx] = { ...s, command: e.target.value }
                         set({ mcpServers: next })
                       }}
-                      placeholder="指令，例如 npx"
+                      placeholder={t('settings.mcp.162964')}
                     />
                     <input
                       className={settingsInputCls}
@@ -372,7 +373,7 @@ export function McpPanel({
                         }
                         set({ mcpServers: next })
                       }}
-                      placeholder="參數，空白分隔"
+                      placeholder={t('settings.mcp.559303')}
                     />
                   </>
                 )}
@@ -388,7 +389,7 @@ export function McpPanel({
                 const id = `mcp_${Math.random().toString(36).slice(2, 8)}`
                 const row: McpServerConfig = {
                   id,
-                  name: '新 MCP 伺服器',
+                  name: t('settings.mcp.d3fc95'),
                   enabled: true,
                   transport: 'http',
                   url: 'http://127.0.0.1:3100/mcp',
@@ -398,22 +399,22 @@ export function McpPanel({
               }}
               className="px-3 py-2 rounded border border-white/15 text-xs font-semibold hover:border-primary/40 hover:text-primary"
             >
-              新增伺服器
+              {t('settings.mcp.3ccaa2')}
             </button>
             <button
               type="button"
               className={settingsBtnCls}
               onClick={async () => {
-                if (!window.subagents?.mcp?.discover) { setMcpProbe('匯入 MCP 需 Electron'); return }
+                if (!window.subagents?.mcp?.discover) { setMcpProbe(t('settings.mcp.3403e6')); return }
                 const found = await window.subagents.mcp.discover(projectRoot || undefined)
                 const current = settings.mcpServers || []
                 const exists = new Set(current.map((s) => `${s.transport}:${s.url || s.command || ''}:${(s.args || []).join('\u0000')}`))
                 const additions = found.servers.filter((s) => !exists.has(`${s.transport}:${s.url || s.command || ''}:${(s.args || []).join('\u0000')}`))
                 if (additions.length) set({ mcpServers: [...current, ...additions], mcpEnabled: true })
-                setMcpProbe(additions.length ? `已匯入 ${additions.length} 個 MCP（未複製 token／env secret）\n${found.sources.join('\n')}` : '未發現新 MCP 設定（或皆已存在）')
+                setMcpProbe(additions.length ? `已匯入 ${additions.length} 個 MCP（未複製 token／env secret）\n${found.sources.join('\n')}` : t('settings.mcp.f16fb8'))
               }}
             >
-              一鍵匯入 MCP
+              {t('settings.mcp.ab377b')}
             </button>
             <button
               type="button"
@@ -439,7 +440,7 @@ export function McpPanel({
                       ? tools
                           .map((t) => `${t.serverName}/${t.name}`)
                           .join('\n')
-                      : '無工具或連線失敗',
+                      : t('settings.mcp.48eeb2'),
                   )
                 } catch (e) {
                   setMcpProbe(e instanceof Error ? e.message : String(e))
@@ -447,7 +448,7 @@ export function McpPanel({
               }}
               className="px-3 py-2 rounded border border-primary/40 text-primary text-xs font-semibold"
             >
-              探測工具列表
+              {t('settings.mcp.7fe6ea')}
             </button>
             <button
               type="button"
@@ -468,7 +469,7 @@ export function McpPanel({
                       : `✗ ${s.name}: ${r.error}`,
                   )
                 }
-                setMcpSessions(lines.join('\n') || '無啟用的 stdio 伺服器')
+                setMcpSessions(lines.join('\n') || t('settings.mcp.7f51cd'))
                 const all = await mcpListSessions()
                 if (all.length) {
                   setMcpSessions(
@@ -481,7 +482,7 @@ export function McpPanel({
               }}
               className="px-3 py-2 rounded border border-white/15 text-xs font-semibold hover:border-primary/40 hover:text-primary"
             >
-              啟動長連線
+              {t('settings.mcp.56aafe')}
             </button>
             <button
               type="button"
@@ -490,11 +491,11 @@ export function McpPanel({
                   await mcpStopSession(s.id)
                 }
                 await window.subagents?.mcp?.stdioStopAll?.()
-                setMcpSessions('已停止所有 stdio session')
+                setMcpSessions(t('settings.mcp.2f474a'))
               }}
               className="px-3 py-2 rounded border border-white/15 text-xs font-semibold"
             >
-              停止全部 session
+              {t('settings.mcp.f9afe6')}
             </button>
           </div>
           {mcpProbe && (
@@ -509,13 +510,13 @@ export function McpPanel({
           )}
 
           {/* W3: OpenCode 匯入報告 — 每個欄位三擇一：暫時套用 / 待採用 / 不支援 */}
-          <SettingsGroup title="OpenCode 匯入報告">
+          <SettingsGroup title={t('settings.mcp.685dba')}>
             <p className="text-[12px] text-on-surface-variant mb-2 leading-relaxed px-1">
               偵測到的設定不會靜默覆蓋全域：暫時套用僅影響本 run；待採用需按「採用」；
-              不支援欄位顯式列出。來源：{ocSources.join('、') || '（尚未偵測到 opencode 設定）'}
+              不支援欄位顯式列出。來源：{ocSources.join('、') || t('settings.mcp.3c1a5a')}
             </p>
             {ocCandidates.length === 0 ? (
-              <p className="text-[12px] text-outline px-1">無設定候選。</p>
+              <p className="text-[12px] text-outline px-1">{t('settings.mcp.2b7596')}</p>
             ) : (
               <div className="space-y-1.5">
                 {ocCandidates.map((c) => (
@@ -533,12 +534,12 @@ export function McpPanel({
                       }`}
                     >
                       {c.applyMode === 'temporary'
-                        ? '暫時套用'
+                        ? t('settings.mcp.1de4c1')
                         : c.applyMode === 'review'
                           ? c.adopted
-                            ? '已採用'
-                            : '待採用'
-                          : '不支援'}
+                            ? t('settings.mcp.c422ca')
+                            : t('settings.mcp.df5093')
+                          : t('settings.mcp.fe6b26')}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[12px] font-semibold text-on-surface font-[family-name:var(--font-mono)]">
@@ -560,7 +561,7 @@ export function McpPanel({
                           setMcpProbe(r.message)
                         }}
                       >
-                        採用
+                        {t('settings.mcp.a581c5')}
                       </button>
                     )}
                   </div>

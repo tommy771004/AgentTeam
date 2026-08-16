@@ -14,6 +14,7 @@ import {
 import { SettingsField, type SettingsFieldContext } from '../SettingsField'
 import { Icon } from '../../Icon'
 import { openExternalLink } from '../../../lib/electronBridge'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— 一般節（方案、功能包、輸入與行為、通知、建議）。
@@ -33,6 +34,7 @@ export function GeneralPanel({
   /** 功能包啟用／回復需要比對的 app 版本 */
   appVersion?: string
 }) {
+  const { t } = useTranslation()
   const entitlementSnapshot = useEntitlementStore((s) => s.snapshot)
   const subscription = useSubscriptionStore((s) => s.state)
   const subscriptionEntitlement = useSubscriptionStore((s) => s.entitlement)
@@ -46,13 +48,13 @@ export function GeneralPanel({
 
   return (
     <>
-          <SettingsGroup title="方案">
+          <SettingsGroup title={t('settings.general.0fee25')}>
             <SettingsRow
-              title={entitlementSnapshot.tier === 'paid' ? '已啟用付費方案' : 'Free Core（本機優先，免登入）'}
+              title={entitlementSnapshot.tier === 'paid' ? t('settings.general.069210') : t('settings.general.4f2521')}
               description={
                 entitlementSnapshot.tier === 'paid'
-                  ? `已授權功能：${[...entitlementSnapshot.grantedFeatures].join(', ') || '無'}`
-                  : 'Local providers/CLI、專案、sessions、多代理、Plan/Goal、權限、skills/MCP、diff/terminal/history、匯出與 Handoff 皆免費、免登入可用。'
+                  ? `已授權功能：${[...entitlementSnapshot.grantedFeatures].join(', ') || t('settings.general.9ecc4e')}`
+                  : t('settings.general.1c85a8')
               }
               control={
                 <span className="rounded-full border border-outline/30 px-2.5 py-1 text-[11px] font-medium">
@@ -64,16 +66,16 @@ export function GeneralPanel({
               <SettingsRow
                 title={
                   subscription.status === 'canceled'
-                    ? '訂閱已取消'
+                    ? t('settings.general.f88962')
                     : subscription.status === 'refunded'
-                      ? '訂閱已退款'
-                      : '尚未訂閱 Pro'
+                      ? t('settings.general.b5eac1')
+                      : t('settings.general.f0c14d')
                 }
                 description={
                   subscription.status === 'canceled'
-                    ? '目前方案將於到期後轉為 Free Core；到期前仍可使用已授權功能。'
+                    ? t('settings.general.1b9fcd')
                     : subscription.status === 'refunded'
-                      ? '已退款訂閱需重新購買才能再次啟用；本機資料與 Free Core 不受影響。'
+                      ? t('settings.general.f4483b')
                       : `Pro：US$${SUBSCRIPTION_PRICING.monthly.usd}/月 或 US$${SUBSCRIPTION_PRICING.annual.usd}/年（最多 ${subscription.maxDevices} 台裝置）。`
                 }
                 control={
@@ -82,7 +84,7 @@ export function GeneralPanel({
                     className={settingsBtnCls}
                     onClick={() => void openExternalLink('https://subagents.ai/pricing')}
                   >
-                    查看方案
+                    {t('settings.general.0b40b5')}
                   </button>
                 }
               />
@@ -100,7 +102,7 @@ export function GeneralPanel({
                         className={settingsBtnCls}
                         onClick={() => removeSubscriptionDevice(d.deviceId)}
                       >
-                        移除裝置
+                        {t('settings.general.fcb920')}
                       </button>
                     }
                   />
@@ -118,31 +120,31 @@ export function GeneralPanel({
             )}
           </SettingsGroup>
           {featurePacks.length > 0 && (
-            <SettingsGroup title="功能包">
+            <SettingsGroup title={t('settings.general.477c5e')}>
               {featurePacks.filter((p) => p.status !== 'uninstalled').map((p) => (
                 <SettingsRow
                   key={p.id}
                   title={`${p.manifest.name} v${p.manifest.version}`}
                   description={
                     p.status === 'entitlement-denied'
-                      ? '需要更高方案授權才能啟用；Free Core 不受影響。'
+                      ? t('settings.general.e045d3')
                       : p.status === 'incompatible'
                         ? `需要 app 版本 ${p.manifest.minAppVersion}${p.manifest.maxAppVersion ? `–${p.manifest.maxAppVersion}` : '+'}。`
                         : p.status === 'disabled'
-                          ? '已停用。'
-                          : '已啟用。'
+                          ? t('settings.general.52ff3b')
+                          : t('settings.general.1165f3')
                   }
                   control={
                     <div className="flex items-center gap-2">
                       {p.status === 'active' ? (
-                        <button type="button" className={settingsBtnCls} onClick={() => disableFeaturePackAction(p.id)}>停用</button>
+                        <button type="button" className={settingsBtnCls} onClick={() => disableFeaturePackAction(p.id)}>{t('settings.general.d989e5')}</button>
                       ) : p.status === 'disabled' ? (
                         <button
                           type="button"
                           className={settingsBtnCls}
                           onClick={() => enableFeaturePackAction(p.id, appVersion || '0.0.0', subscriptionEntitlement)}
                         >
-                          啟用
+                          {t('settings.general.ce6c3d')}
                         </button>
                       ) : null}
                       {p.previousManifest && (
@@ -154,14 +156,14 @@ export function GeneralPanel({
                           回復 v{p.previousManifest.version}
                         </button>
                       )}
-                      <button type="button" className={settingsBtnCls} onClick={() => uninstallFeaturePackAction(p.id)}>移除</button>
+                      <button type="button" className={settingsBtnCls} onClick={() => uninstallFeaturePackAction(p.id)}>{t('settings.general.2f752c')}</button>
                     </div>
                   }
                 />
               ))}
             </SettingsGroup>
           )}
-          <SettingsGroup title="輸入與行為">
+          <SettingsGroup title={t('settings.general.ccc7f0')}>
             <SettingsField
               id="general.enterBehavior"
               ctx={fieldCtx}
@@ -172,8 +174,8 @@ export function GeneralPanel({
                     set({ enterBehavior: v as EnterBehavior })
                   }
                 >
-                  <option value="enter">Enter 送出</option>
-                  <option value="cmdEnter">⌘/Ctrl+Enter 送出</option>
+                  <option value="enter">{t('settings.general.6129ad')}</option>
+                  <option value="cmdEnter">{t('settings.general.34c967')}</option>
                 </PillSelect>
               }
             />
@@ -187,8 +189,8 @@ export function GeneralPanel({
                     set({ followUpMode: v as FollowUpMode })
                   }
                 >
-                  <option value="steer">轉向（Steer）</option>
-                  <option value="queue">排隊（Queue）</option>
+                  <option value="steer">{t('settings.general.0bbe80')}</option>
+                  <option value="queue">{t('settings.general.d2adc0')}</option>
                 </PillSelect>
               }
             />
@@ -208,8 +210,8 @@ export function GeneralPanel({
             >
               <Icon name="warning" size={15} className="mt-0.5 shrink-0 text-amber-300" />
               <p>
-                <span className="font-semibold text-amber-200">實驗性：</span>
-                多 run 呈現尚未完成。開啟後，活動、停止與介入畫面可能仍有跨 run 混線；建議暫時保持關閉。
+                <span className="font-semibold text-amber-200">{t('settings.general.ca031f')}</span>
+                {t('settings.general.807418')}
               </p>
             </div>
             {settings.concurrentRunsEnabled === true && (
@@ -231,7 +233,7 @@ export function GeneralPanel({
               />
             )}
           </SettingsGroup>
-          <SettingsGroup title="通知">
+          <SettingsGroup title={t('settings.general.7a66c0')}>
             <SettingsField
               id="general.notifyOnComplete"
               ctx={fieldCtx}
@@ -263,7 +265,7 @@ export function GeneralPanel({
               }
             />
           </SettingsGroup>
-          <SettingsGroup title="建議">
+          <SettingsGroup title={t('settings.general.dd6c3f')}>
             <SettingsField
               id="general.ambientSuggestions"
               ctx={fieldCtx}

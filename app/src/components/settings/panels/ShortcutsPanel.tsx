@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { eventToChord, formatChord, useShortcutStore } from '../../../store/shortcutStore'
 import { SettingsGroup, SettingsRow, settingsBtnCls } from '../SettingsChrome'
 import type { LlmSettings } from '../../../agent/types'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— 鍵盤快捷鍵節。錄製狀態只有這一節在用，一併搬進來。
@@ -14,6 +15,7 @@ export function ShortcutsPanel({
 }: {
   settings: LlmSettings
 }) {
+  const { t } = useTranslation()
   const shortcutBindings = useShortcutStore((s) => s.bindings)
   const setShortcutChord = useShortcutStore((s) => s.setChord)
   const resetShortcuts = useShortcutStore((s) => s.resetAll)
@@ -44,14 +46,14 @@ export function ShortcutsPanel({
   return (
     <>
           <SettingsGroup
-            title="可自訂快捷鍵"
+            title={t('settings.shortcuts.f62bab')}
             action={
               <button
                 type="button"
                 className={settingsBtnCls}
                 onClick={() => resetShortcuts()}
               >
-                重設全部
+                {t('settings.shortcuts.e9d976')}
               </button>
             }
           >
@@ -77,9 +79,9 @@ export function ShortcutsPanel({
                             : 'bg-white/[0.06] border-white/10 text-on-surface-variant hover:border-primary/40'
                         }`}
                         onClick={() => setCapturingId(capturing ? null : b.id)}
-                        title="點擊後按下新快捷鍵"
+                        title={t('settings.shortcuts.90f65c')}
                       >
-                        {capturing ? '按下按鍵…' : shown}
+                        {capturing ? t('settings.shortcuts.3faf37') : shown}
                       </button>
                       {b.chord ? (
                         <button
@@ -87,7 +89,7 @@ export function ShortcutsPanel({
                           className="text-[11px] text-outline hover:text-error"
                           onClick={() => setShortcutChord(b.id, '')}
                         >
-                          還原
+                          {t('settings.shortcuts.76eb96')}
                         </button>
                       ) : null}
                     </div>
@@ -96,19 +98,19 @@ export function ShortcutsPanel({
               )
             })}
           </SettingsGroup>
-          <SettingsGroup title="固定（隨送出快捷鍵設定）">
+          <SettingsGroup title={t('settings.shortcuts.4ce656')}>
             {(
               [
                 [
                   settings.enterBehavior === 'cmdEnter' ? '⌘ / Ctrl + Enter' : 'Enter',
-                  '送出訊息',
+                  t('settings.shortcuts.b5ba55'),
                 ],
                 [
                   settings.enterBehavior === 'cmdEnter' ? 'Enter' : 'Shift + Enter',
-                  '換行',
+                  t('settings.shortcuts.91eb82'),
                 ],
-                ['↑ / ↓', '輸入歷史'],
-                ['Esc', '關閉 slash／浮動視窗'],
+                ['↑ / ↓', t('settings.shortcuts.dbe2c4')],
+                ['Esc', t('settings.shortcuts.ba0c35')],
               ] as const
             ).map(([k, v]) => (
               <SettingsRow

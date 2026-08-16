@@ -1,6 +1,7 @@
 import type { LlmSettings, PersonalityPreset } from '../../../agent/types'
 import { PillSelect, SettingsGroup, settingsInputCls } from '../SettingsChrome'
 import { SettingsField, type SettingsFieldContext } from '../SettingsField'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— 個人化節。
@@ -17,9 +18,10 @@ export function PersonalizationPanel({
   set: (patch: Partial<LlmSettings>) => void
   fieldCtx: SettingsFieldContext
 }) {
+  const { t } = useTranslation()
   return (
     <>
-          <SettingsGroup title="人格">
+          <SettingsGroup title={t('settings.personalization.63f44a')}>
             <SettingsField
               id="personalization.personality"
               ctx={fieldCtx}
@@ -30,24 +32,24 @@ export function PersonalizationPanel({
                     set({ personality: v as PersonalityPreset })
                   }
                 >
-                  <option value="default">預設</option>
-                  <option value="none">無（中性）</option>
-                  <option value="friendly">友善</option>
-                  <option value="efficient">務實精簡</option>
-                  <option value="professional">專業</option>
-                  <option value="candid">直率</option>
-                  <option value="quirky">俏皮</option>
+                  <option value="default">{t('settings.personalization.f7f780')}</option>
+                  <option value="none">{t('settings.personalization.afbae3')}</option>
+                  <option value="friendly">{t('settings.personalization.0e083d')}</option>
+                  <option value="efficient">{t('settings.personalization.45997b')}</option>
+                  <option value="professional">{t('settings.personalization.7d7671')}</option>
+                  <option value="candid">{t('settings.personalization.b83afd')}</option>
+                  <option value="quirky">{t('settings.personalization.2ffb51')}</option>
                 </PillSelect>
               }
             />
           </SettingsGroup>
-          <SettingsGroup title="自訂指令">
+          <SettingsGroup title={t('settings.personalization.a583fc')}>
             <SettingsField id="personalization.customAboutUser" ctx={fieldCtx}>
               <textarea
                 className={settingsInputCls + ' min-h-[96px] resize-y'}
                 value={settings.customAboutUser || ''}
                 onChange={(e) => set({ customAboutUser: e.target.value })}
-                placeholder="寫下希望代理知道的背景…"
+                placeholder={t('settings.personalization.be9753')}
               />
             </SettingsField>
             <SettingsField id="personalization.customResponseStyle" ctx={fieldCtx}>
@@ -57,7 +59,7 @@ export function PersonalizationPanel({
                 onChange={(e) =>
                   set({ customResponseStyle: e.target.value })
                 }
-                placeholder="例如：先結論再步驟、繁中、少 emoji…"
+                placeholder={t('settings.personalization.429fd6')}
               />
             </SettingsField>
           </SettingsGroup>

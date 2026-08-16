@@ -13,6 +13,7 @@ import {
   settingsBtnCls,
   settingsInputCls,
 } from '../SettingsChrome'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— 外掛 OAuth 節。
@@ -27,35 +28,35 @@ export function OAuthPanel({
   settings: LlmSettings
   set: (patch: Partial<LlmSettings>) => void
 }) {
+  const { t } = useTranslation()
   const [oauthRefreshMsg, setOauthRefreshMsg] = useState<string | null>(null)
   const refreshPluginTokens = useLearningStore((s) => s.refreshPluginTokens)
 
   return (
     <>
-          <SettingsGroup title="本機 OAuth 回呼">
-            <SettingsStack title="Redirect URI（code flow 必須完全一致）">
+          <SettingsGroup title={t('settings.oauth.a176d2')}>
+            <SettingsStack title={t('settings.oauth.88b266')}>
               <code className="block text-[12px] font-[family-name:var(--font-mono)] text-on-surface break-all">
                 {OAUTH_REDIRECT_URI}
               </code>
               <p className="mt-2 text-[11px] text-outline leading-relaxed">
-                GitHub 使用<strong>裝置碼</strong>（通常只需 Client ID）。Notion / Google / Dropbox 等需在開發者後台登錄此 Redirect URI。
-                Access token 存在本機 secret store；有 refresh_token 時會每分鐘檢查並自動 refresh。
+                {t('settings.oauth.0e0066')}<strong>{t('settings.oauth.9f5d4a')}</strong>{t('settings.oauth.4c784e')}
               </p>
             </SettingsStack>
             <SettingsRow
-              title="立即刷新到期 token"
-              description="對所有含 refresh_token 且即將過期的 connector 執行一次 refresh"
+              title={t('settings.oauth.00fd4c')}
+              description={t('settings.oauth.ab79bd')}
               control={
                 <button
                   type="button"
                   className={settingsBtnCls}
                   onClick={() => {
                     void refreshPluginTokens().then((n) => {
-                      setOauthRefreshMsg(n > 0 ? `已刷新 ${n} 個 token` : '目前沒有需要刷新的 token')
+                      setOauthRefreshMsg(n > 0 ? `已刷新 ${n} 個 token` : t('settings.oauth.7fdfb3'))
                     })
                   }}
                 >
-                  立即 refresh
+                  {t('settings.oauth.27e4aa')}
                 </button>
               }
             />
@@ -64,7 +65,7 @@ export function OAuthPanel({
             )}
           </SettingsGroup>
 
-          <SettingsGroup title="OAuth Client 憑證">
+          <SettingsGroup title={t('settings.oauth.1e8339')}>
             {Array.from(
               new Map(
                 Object.values(PLUGIN_OAUTH_PROVIDERS).map((p) => [
@@ -85,8 +86,8 @@ export function OAuthPanel({
                     <div>
                       <div className="text-[13px] font-semibold text-on-surface capitalize">{row.key}</div>
                       <div className="text-[11px] text-outline">
-                        {row.flow === 'device' ? '裝置碼流程' : 'Code + 本機回呼'}
-                        {row.needsSecret ? ' · 建議填 Client Secret' : ''}
+                        {row.flow === 'device' ? t('settings.oauth.9c5752') : t('settings.oauth.2876e2')}
+                        {row.needsSecret ? t('settings.oauth.70b163') : ''}
                       </div>
                     </div>
                     {row.docsUrl && (
@@ -96,7 +97,7 @@ export function OAuthPanel({
                         rel="noreferrer"
                         className="text-[11px] font-semibold text-primary hover:underline"
                       >
-                        開發者後台
+                        {t('settings.oauth.646be9')}
                       </a>
                     )}
                   </div>
@@ -118,7 +119,7 @@ export function OAuthPanel({
                   <input
                     type="password"
                     className={settingsInputCls + ' font-[family-name:var(--font-mono)] text-[12px]'}
-                    placeholder="Client Secret（選填／部分供應商必要）"
+                    placeholder={t('settings.oauth.8ce866')}
                     value={live.clientSecret || ''}
                     autoComplete="off"
                     onChange={(e) =>
@@ -135,10 +136,10 @@ export function OAuthPanel({
             })}
           </SettingsGroup>
 
-          <SettingsGroup title="本機 token 狀態">
+          <SettingsGroup title={t('settings.oauth.58c214')}>
             <div className="px-4 py-3 space-y-1.5 text-[12px]">
               {listPluginSecretMeta().length === 0 ? (
-                <p className="text-outline">尚無 connector 密鑰 — 在學習中心 → 外掛完成授權後會顯示於此。</p>
+                <p className="text-outline">{t('settings.oauth.432bb4')}</p>
               ) : (
                 listPluginSecretMeta().map((meta) => (
                   <div
@@ -151,17 +152,17 @@ export function OAuthPanel({
                       {meta.encrypted ? (
                         <span className="ml-2 text-[10px] text-primary/80">vault</span>
                       ) : (
-                        <span className="ml-2 text-[10px] text-amber-300/80">未加密（無 OS 鑰匙圈）</span>
+                        <span className="ml-2 text-[10px] text-amber-300/80">{t('settings.oauth.412b25')}</span>
                       )}
                     </span>
                     <span className="shrink-0 text-[11px] text-outline">
                       {meta.hasRefreshToken
                         ? secretNeedsRefresh(meta)
-                          ? 'refresh 待執行'
+                          ? t('settings.oauth.6bd184')
                           : meta.expiresAt
                             ? `到期 ${new Date(meta.expiresAt).toLocaleString()}`
-                            : '有 refresh_token'
-                        : '無 refresh（PAT / 裝置碼）'}
+                            : t('settings.oauth.e1392e')
+                        : t('settings.oauth.8a7dfe')}
                     </span>
                   </div>
                 ))

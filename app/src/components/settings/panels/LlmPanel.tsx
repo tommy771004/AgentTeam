@@ -11,6 +11,7 @@ import {
   settingsInputCls,
 } from '../SettingsChrome'
 import { SettingsField, type SettingsFieldContext } from '../SettingsField'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— 語言模型節（連線、模型探索、能力探針）。
@@ -29,6 +30,7 @@ export function LlmPanel({
   fieldCtx: SettingsFieldContext
   testConnection: () => Promise<{ ok: boolean; message: string }>
 }) {
+  const { t } = useTranslation()
   const [testMsg, setTestMsg] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [verifyingModel, setVerifyingModel] = useState(false)
@@ -44,7 +46,7 @@ export function LlmPanel({
 
   return (
     <>
-          <SettingsGroup title="連線">
+          <SettingsGroup title={t('settings.llm.9abf79')}>
             <SettingsField id="llm.apiProvider" ctx={fieldCtx}>
               <select
                 value={settings.apiProvider || 'custom'}
@@ -108,7 +110,7 @@ export function LlmPanel({
                 value={settings.model}
                 onChange={(e) => set({ model: e.target.value })}
                 className={settingsInputCls}
-                placeholder="model id（由 CLI 偵測或手動填入）"
+                placeholder={t('settings.llm.52baa8')}
               />
               <datalist id="discovered-models">
                 {(settings.discoveredModels || []).map((id) => <option key={id} value={id} />)}
@@ -121,18 +123,18 @@ export function LlmPanel({
                 const p = settings.modelProfiles?.[settings.model || '']
                 const badge = p
                   ? p.source === 'verified'
-                    ? '已驗證'
-                    : '推測'
-                  : '未知'
+                    ? t('settings.llm.8d9d79')
+                    : t('settings.llm.26fb0d')
+                  : t('settings.llm.d9c32a')
                 const cap = (v: boolean | undefined, name: string) =>
                   `${name} ${v === true ? '✓' : v === false ? '✗' : '?'}`
                 return (
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
                     <span
                       className={`px-1.5 py-0.5 rounded font-semibold ${
-                        badge === '已驗證'
+                        badge === t('settings.llm.8d9d79')
                           ? 'bg-primary/15 text-primary'
-                          : badge === '推測'
+                          : badge === t('settings.llm.26fb0d')
                             ? 'bg-amber-500/15 text-amber-300'
                             : 'bg-white/10 text-outline'
                       }`}
@@ -173,7 +175,7 @@ export function LlmPanel({
                         }
                       }}
                     >
-                      {verifyingModel ? '驗證中…' : '驗證模型能力（3 次極小呼叫）'}
+                      {verifyingModel ? t('settings.llm.d8ef9b') : t('settings.llm.d65214')}
                     </button>
                     {modelVerifyMsg && (
                       <span className="text-outline">{modelVerifyMsg}</span>
@@ -182,7 +184,7 @@ export function LlmPanel({
                 )
               })()}
             </SettingsField>
-            <SettingsStack title="通道備援模型">
+            <SettingsStack title={t('settings.llm.f78cec')}>
               <input
                 value={(settings.fallbackModels || []).join(', ')}
                 onChange={(e) =>
@@ -194,10 +196,10 @@ export function LlmPanel({
                   })
                 }
                 className={settingsInputCls}
-                placeholder="僅在供應商回報無可用通道時依序重試"
+                placeholder={t('settings.llm.b1bcea')}
               />
               <p className="mt-1 text-[11px] text-outline">
-                僅在 `no_available_channel` 時自動重試；驗證、配額與格式錯誤不會被掩蓋。
+                {t('settings.llm.e7645e')}
               </p>
               {settings.apiProvider === 'aihubmix' && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -222,15 +224,15 @@ export function LlmPanel({
               disabled={testing}
               className={settingsBtnPrimaryCls + ' disabled:opacity-50'}
             >
-              {testing ? '測試中…' : '測試連線'}
+              {testing ? t('settings.llm.58b883') : t('settings.llm.48b807')}
             </button>
             <button
               type="button"
               onClick={() => reopenFirstRunWizard()}
               className={settingsBtnCls}
-              title="重新執行首次設定精靈（引導式設定語言模型或 CLI 授權）"
+              title={t('settings.llm.3e8e76')}
             >
-              重新執行首次設定精靈
+              {t('settings.llm.651e6e')}
             </button>
             {testMsg && (
               <span

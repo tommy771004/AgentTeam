@@ -90,6 +90,17 @@ test('zh-TW 檔沒有孤兒 key（沒人用的字串是下一個翻譯者的白�
   assert.deepEqual(orphans, [], `這些 key 沒有任何使用點：\n${orphans.map((k) => `  - ${k}`).join('\n')}`)
 })
 
+test('遷入是搬家不是改稿：語言檔不得留下未跳脫的內插殘骸', () => {
+  // 抓「本來是樣板字串、被錯誤地當成一般字串搬進來」的情況——
+  // 那種字串會把 `${x}` 原封不動印在畫面上。
+  const leaked = Object.entries(zhTW).filter(([, value]) => /\$\{/.test(String(value)))
+  assert.deepEqual(
+    leaked.map(([key]) => key),
+    [],
+    '這些 key 含 ${...}，應改用 {param} 內插或留在原地',
+  )
+})
+
 test('zh-TW 沒有空字串（空翻譯等於畫面空白）', () => {
   const empty = Object.entries(zhTW).filter(([, value]) => !String(value).trim())
   assert.deepEqual(empty.map(([key]) => key), [])

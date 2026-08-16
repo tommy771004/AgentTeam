@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { LlmSettings } from '../../../agent/types'
 import { SettingsGroup, SettingsToggle, settingsInputCls } from '../SettingsChrome'
 import { SettingsField, type SettingsFieldContext } from '../SettingsField'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— Webhook 節。
@@ -18,6 +19,7 @@ export function WebhookPanel({
   set: (patch: Partial<LlmSettings>) => void
   fieldCtx: SettingsFieldContext
 }) {
+  const { t } = useTranslation()
   const [webhookStatus, setWebhookStatus] = useState<string | null>(null)
 
   // 這裡只是為了把狀態字串顯示出來——webhook 的真正生命週期由 App 的
@@ -37,7 +39,7 @@ export function WebhookPanel({
             setWebhookStatus(
               st.running
                 ? `Webhook 聆聽中：${st.url}`
-                : `Webhook 失敗：${st.lastError || '未知'}`,
+                : `Webhook 失敗：${st.lastError || t('settings.webhook.d9c32a')}`,
             )
           }
         } else {
@@ -55,11 +57,11 @@ export function WebhookPanel({
 
   return (
     <>
-          <SettingsGroup title="本機 Webhook">
+          <SettingsGroup title={t('settings.webhook.6530c9')}>
             <SettingsField
               id="webhook.webhookEnabled"
               ctx={fieldCtx}
-              description="聆聽 127.0.0.1"
+              description={t('settings.webhook.00cb1f')}
               control={
                 <SettingsToggle
                   checked={settings.webhookEnabled === true}
@@ -107,7 +109,7 @@ export function WebhookPanel({
                 autoComplete="off"
               />
               <p className="text-[11px] text-outline mt-1">
-                只有 Next_State=Dispatch Webhook 才會送出；未設定或非 http/https 會留下失敗 audit。
+                {t('settings.webhook.58aae3')}
               </p>
             </SettingsField>
           </SettingsGroup>

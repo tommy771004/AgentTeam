@@ -18,6 +18,7 @@ import {
   SettingsGroupFor,
   type SettingsFieldContext,
 } from '../SettingsField'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— 組態節（核准與沙盒、門檻、LLM 韌性、專案 Hooks 信任）。
@@ -34,6 +35,7 @@ export function SafetyPanel({
   set: (patch: Partial<LlmSettings>) => void
   fieldCtx: SettingsFieldContext
 }) {
+  const { t } = useTranslation()
   const projectRoot = useProjectStore((s) => s.root)
   const [hookRulesDraft, setHookRulesDraft] = useState('')
   const [hookRulesError, setHookRulesError] = useState<string | null>(null)
@@ -44,7 +46,7 @@ export function SafetyPanel({
 
   return (
     <>
-          <SettingsGroupFor section="safety" group="核准與沙盒" ctx={fieldCtx}>
+          <SettingsGroupFor section="safety" group={t('settings.safety.f607d1')} ctx={fieldCtx}>
             <SettingsField id="safety.approvalMode" ctx={fieldCtx}>
               <div className="space-y-1.5">
                 {APPROVAL_MODE_DEFS.map((d) => {
@@ -84,8 +86,7 @@ export function SafetyPanel({
               </div>
               {(settings.approvalMode || 'auto') === 'full' && (
                 <p className="text-[11px] text-amber-300/80 mt-2 leading-relaxed">
-                  完整存取權：跳過工具 HITL ask 與 safety intervention；deny 規則
-                  （隔離封鎖、權限 deny、bash deny pattern）與 supervisor 限制仍生效。
+                  {t('settings.safety.cd1e01')}
                 </p>
               )}
             </SettingsField>
@@ -196,7 +197,7 @@ export function SafetyPanel({
                   />
                 )}
                 <SettingsRow
-                  title="模型感知工具預算"
+                  title={t('settings.safety.9ad62c')}
                   description={toolTuning.label}
                   control={
                     <button
@@ -210,7 +211,7 @@ export function SafetyPanel({
                         })
                       }
                     >
-                      套用建議
+                      {t('settings.safety.ad0837')}
                     </button>
                   }
                 />
@@ -229,13 +230,13 @@ export function SafetyPanel({
             {settings.capabilitiesEnabled !== false && (
               <SettingsField id="safety.alwaysOnCapabilities" ctx={fieldCtx}>
                 <p className="text-[12px] text-on-surface-variant mb-2 leading-relaxed">
-                  點選可將 deferred 包改為第一輪就可用（不必 load_capability）。依類型分組：內建 / MCP / 外掛 / 技能。
+                  {t('settings.safety.1dfa4e')}
                 </p>
                 {(() => {
                   type CapChip = { id: string; description: string; isFixed: boolean }
                   const groups: Array<{ label: string; items: CapChip[] }> = [
                     {
-                      label: '內建',
+                      label: t('settings.safety.f41e61'),
                       items: BUILTIN_CAPABILITIES.map((c) => ({
                         id: c.id,
                         description: c.description,
@@ -255,7 +256,7 @@ export function SafetyPanel({
                         : [],
                     },
                     {
-                      label: '外掛 / Connector',
+                      label: t('settings.safety.d7f452'),
                       items: (() => {
                         const owners = new Map<string, string[]>()
                         for (const tool of customToolsForSettings(settings)) {
@@ -270,7 +271,7 @@ export function SafetyPanel({
                       })(),
                     },
                     {
-                      label: '技能',
+                      label: t('settings.safety.53da13'),
                       items: skillsStore.list().map((s) => ({
                         id: `skill:${s.meta.name}`,
                         description: s.meta.description || s.meta.name,
@@ -321,7 +322,7 @@ export function SafetyPanel({
                                     } ${c.isFixed ? 'opacity-80 cursor-default' : ''}`}
                                   >
                                     {c.id.replace(/^(user|mcp|skill):/, '')}
-                                    {c.isFixed ? ' · 固定' : active ? ' · on' : ''}
+                                    {c.isFixed ? t('settings.safety.95963a') : active ? ' · on' : ''}
                                   </button>
                                 )
                               })}
@@ -334,7 +335,7 @@ export function SafetyPanel({
                           className={settingsBtnCls}
                           onClick={() => set({ alwaysOnCapabilities: [] })}
                         >
-                          清除 always-on 覆寫
+                          {t('settings.safety.8fb187')}
                         </button>
                       )}
                     </div>
@@ -345,9 +346,7 @@ export function SafetyPanel({
             {/* P1-D: declarative lifecycle hook rules */}
             <SettingsField id="safety.hookRules" ctx={fieldCtx}>
               <p className="text-[11px] text-on-surface-variant mb-1 leading-relaxed">
-                純資料規則，只能限制/觀察：point（beforeRun/beforeTool/afterTool/afterRun）
-                × action（deny / require-approval / append-context / log / notify）。
-                require-approval 連「完整存取權」也會攔。外掛 hooks 由 manifest 提供並經 sanitize。
+                {t('settings.safety.fd7452')}
               </p>
               <textarea
                 className={settingsInputCls + ' min-h-[120px] resize-y font-[family-name:var(--font-mono)] text-[11px]'}
@@ -356,14 +355,14 @@ export function SafetyPanel({
                 onBlur={() => {
                   try {
                     const parsed = hookRulesDraft.trim() ? JSON.parse(hookRulesDraft) : []
-                    if (!Array.isArray(parsed)) throw new Error('必須是陣列')
+                    if (!Array.isArray(parsed)) throw new Error(t('settings.safety.dc2ac2'))
                     void set({ hookRules: parsed })
                     setHookRulesDraft('')
                   } catch (err) {
                     setHookRulesError(err instanceof Error ? err.message : String(err))
                   }
                 }}
-                placeholder='[{"id":"deny-bash-on-schedule","point":"beforeTool","match":{"tool":"bash","sourceKind":["schedule"]},"action":"deny","reason":"排程禁用 bash"}]'
+                placeholder={t('settings.safety.bc35f0')}
               />
               {hookRulesError && (
                 <p className="text-[11px] text-error mt-1">{hookRulesError}</p>
@@ -380,7 +379,7 @@ export function SafetyPanel({
               }
             />
           </SettingsGroupFor>
-          <SettingsGroupFor section="safety" group="門檻" ctx={fieldCtx}>
+          <SettingsGroupFor section="safety" group={t('settings.safety.12aab0')} ctx={fieldCtx}>
             <SettingsField
               id="safety.authLevel"
               ctx={fieldCtx}
@@ -467,7 +466,7 @@ export function SafetyPanel({
               }
             />
           </SettingsGroupFor>
-          <SettingsGroupFor section="safety" group="LLM 韌性" ctx={fieldCtx}>
+          <SettingsGroupFor section="safety" group={t('settings.safety.b75f1d')} ctx={fieldCtx}>
             <SettingsField
               id="safety.llmRetryMaxAttempts"
               ctx={fieldCtx}
@@ -523,14 +522,14 @@ export function SafetyPanel({
               }
             />
           </SettingsGroupFor>
-          <SettingsGroupFor section="safety" group="專案 Hooks 信任" ctx={fieldCtx}>
+          <SettingsGroupFor section="safety" group={t('settings.safety.5f5093')} ctx={fieldCtx}>
             <SettingsField
               id="safety.trustedHookProjects"
               ctx={fieldCtx}
               description={
                 projectRoot
                   ? `允許載入 ${projectRoot} 下的 .subagents/hooks.json（僅能限制/觀察，不能放寬權限）`
-                  : '尚未綁定專案；未信任的專案 hooks 一律靜默跳過'
+                  : t('settings.safety.681b10')
               }
               control={
                 <SettingsToggle
@@ -573,14 +572,14 @@ export function SafetyPanel({
                       )
                     }}
                   >
-                    移除信任
+                    {t('settings.safety.93446f')}
                   </button>
                 }
               />
             ))}
           </SettingsGroupFor>
           <p className="text-[11px] text-outline px-1">
-            人工介入示範：目標含敏感匯出且授權等級 &lt; 4 時會暫停等待核准。
+            {t('settings.safety.a8b8b9')}
           </p>
     </>
   )

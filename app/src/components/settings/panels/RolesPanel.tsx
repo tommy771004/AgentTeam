@@ -18,6 +18,7 @@ import {
   settingsInputCls,
 } from '../SettingsChrome'
 import { SettingsAnchor, SettingsField, type SettingsFieldContext } from '../SettingsField'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— 角色模型節（角色指派、Delegate Personas、出站資料閘門）。
@@ -39,6 +40,7 @@ export function RolesPanel({
   /** 導向另一個設定節（例如「前往 CLI 授權」） */
   onNavigateSection: (sectionId: string) => void
 }) {
+  const { t } = useTranslation()
   const [classifierTestMsg, setClassifierTestMsg] = useState<string | null>(null)
   const [classifierTesting, setClassifierTesting] = useState(false)
   const [personaDraft, setPersonaDraft] = useState({ name: '', instructions: '', model: '' })
@@ -89,11 +91,11 @@ export function RolesPanel({
     <>
           <SettingsAnchor id="roles.roleModels" ctx={fieldCtx}>
           <SettingsGroup
-            title="各角色模型"
+            title={t('settings.roles.79c884')}
             action={
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-outline">{roleModelGroups.length ? `${roleModelGroups.length} 個 CLI · ${allRoleModelIds.size} 模型` : '尚無已授權 CLI 模型'}</span>
-                <button type="button" className={settingsBtnCls} onClick={() => set({ roleModels: suggestedRoleModels })} disabled={!suggestedRoleModels.orchestrator}>套用建議</button>
+                <span className="text-[11px] text-outline">{roleModelGroups.length ? `${roleModelGroups.length} 個 CLI · ${allRoleModelIds.size} 模型` : t('settings.roles.f880e0')}</span>
+                <button type="button" className={settingsBtnCls} onClick={() => set({ roleModels: suggestedRoleModels })} disabled={!suggestedRoleModels.orchestrator}>{t('settings.roles.ad0837')}</button>
               </div>
             }
           >
@@ -151,13 +153,13 @@ export function RolesPanel({
                 return (
                   <>
                     <SettingsRow
-                      title="出站資料閘門"
+                      title={t('settings.roles.bbac0c')}
                       description={`部署模式 off：LLM／CLI 出站不經淨化（維持既有路徑）。${policyMeta}${extraStatus}`}
                       control={<span className="text-[11px] text-outline">off</span>}
                     />
                     <SettingsRow
                       title="Build flavor"
-                      description="與 guard mode 正交；policy-admin 僅增加管理面，不形成 bypass。"
+                      description={t('settings.roles.59a8b0')}
                       control={<span className="text-[11px] text-outline">{flavor}</span>}
                     />
                   </>
@@ -167,17 +169,17 @@ export function RolesPanel({
                 return (
                   <>
                     <SettingsRow
-                      title="出站資料閘門（公司強制）"
+                      title={t('settings.roles.9d7ecc')}
                       description={`required：公司部署強制保護，使用者無法關閉。所有 builtin LLM 與 external CLI 出站都會經過閘門。${policyMeta}${extraStatus}`}
                       control={
-                        <span className="text-[11px] text-outline" title="公司強制 · 不可關閉">
-                          公司強制 · 開
+                        <span className="text-[11px] text-outline" title={t('settings.roles.23c78b')}>
+                          {t('settings.roles.b60850')}
                         </span>
                       }
                     />
                     <SettingsRow
                       title="Build flavor"
-                      description="與 guard mode 正交；policy-admin 僅增加管理面，不形成 bypass。"
+                      description={t('settings.roles.59a8b0')}
                       control={<span className="text-[11px] text-outline">{flavor}</span>}
                     />
                   </>
@@ -187,13 +189,13 @@ export function RolesPanel({
                 return (
                   <>
                     <SettingsRow
-                      title="出站資料閘門（demo）"
+                      title={t('settings.roles.f0033a')}
                       description={`⚠ demo 非企業保障：會跑淨化流程與暫時證據，不可當作公司合規驗證。${policyMeta}${extraStatus}`}
                       control={<span className="text-[11px] text-amber-400">demo</span>}
                     />
                     <SettingsRow
                       title="Build flavor"
-                      description="與 guard mode 正交；policy-admin 僅增加管理面，不形成 bypass。"
+                      description={t('settings.roles.59a8b0')}
                       control={<span className="text-[11px] text-outline">{flavor}</span>}
                     />
                   </>
@@ -202,7 +204,7 @@ export function RolesPanel({
               return (
                 <>
                   <SettingsRow
-                    title="出站資料閘門"
+                    title={t('settings.roles.bbac0c')}
                     description={`optional：可自行開啟保護。啟用後每次 LLM／CLI 出站都會經過閘門（可即時套用，無需重啟）。${policyMeta}${extraStatus}`}
                     control={
                       <SettingsToggle
@@ -213,7 +215,7 @@ export function RolesPanel({
                   />
                   <SettingsRow
                     title="Build flavor"
-                    description="與 guard mode 正交；policy-admin 僅增加管理面，不形成 bypass。"
+                    description={t('settings.roles.59a8b0')}
                     control={<span className="text-[11px] text-outline">{flavor}</span>}
                   />
                 </>
@@ -224,7 +226,7 @@ export function RolesPanel({
             <SettingsField
               id="roles.policyAdminBuild"
               ctx={fieldCtx}
-              description="此 build 含政策草稿／啟用／證據驗證管理面。Possession of this artifact is the management authority — 不會繞過 Outbound Data Gate。"
+              description={t('settings.roles.3b3b3a')}
               control={<span className="text-[11px] text-primary">enabled</span>}
             />
             <SettingsField
@@ -250,8 +252,8 @@ export function RolesPanel({
               }
             />
             <SettingsRow
-              title="Classifier 連線測試"
-              description={classifierTestMsg || '使用 synthetic payload 探測 endpoint。'}
+              title={t('settings.roles.2b840e')}
+              description={classifierTestMsg || t('settings.roles.9c38df')}
               control={
                 <button
                   type="button"
@@ -292,16 +294,16 @@ export function RolesPanel({
                     })()
                   }}
                 >
-                  {classifierTesting ? '測試中…' : '測試'}
+                  {classifierTesting ? t('settings.roles.58b883') : t('settings.roles.8b2da2')}
                 </button>
               }
             />
             {(
               [
-                ['orchestrator', 'Manager／協調者'],
-                ['analyst', 'Analyzer-1／分析'],
-                ['synthesizer', 'Writer／合成'],
-                ['executor', 'Core／執行'],
+                ['orchestrator', t('settings.roles.6a8e43')],
+                ['analyst', t('settings.roles.3571dd')],
+                ['synthesizer', t('settings.roles.8ed013')],
+                ['executor', t('settings.roles.0e65fb')],
               ] as const
             ).map(([key, label]) => {
               const current = settings.roleModels?.[key] || ''
@@ -311,7 +313,7 @@ export function RolesPanel({
                 <SettingsRow
                   key={key}
                   title={label}
-                  description="依 CLI 類別選擇；留空＝全域預設"
+                  description={t('settings.roles.eea333')}
                   control={
                     <PillSelect
                       value={current}
@@ -323,14 +325,14 @@ export function RolesPanel({
                         {settings.model ? `（${settings.model}）` : ''}
                       </option>
                       {settings.model?.trim() ? (
-                        <optgroup label="語言模型設定">
+                        <optgroup label={t('settings.roles.b07e92')}>
                           <option value={settings.model.trim()}>
                             {settings.model.trim()}
                           </option>
                         </optgroup>
                       ) : null}
                       {(settings.discoveredModels || []).length ? (
-                        <optgroup label="已測試 API／models">
+                        <optgroup label={t('settings.roles.56b1fa')}>
                           {settings.discoveredModels.map((id) => <option key={`api-${id}`} value={id}>{id}</option>)}
                         </optgroup>
                       ) : null}
@@ -347,7 +349,7 @@ export function RolesPanel({
                         </optgroup>
                       ))}
                       {orphan ? (
-                        <optgroup label="目前值（不在清單）">
+                        <optgroup label={t('settings.roles.ea4241')}>
                           <option value={orphan}>{orphan}</option>
                         </optgroup>
                       ) : null}
@@ -366,12 +368,12 @@ export function RolesPanel({
                 className="text-primary font-semibold hover:underline"
                 onClick={() => onNavigateSection('cli')}
               >
-                CLI 授權
+                {t('settings.roles.0c6edc')}
               </button>{' '}
               啟用並「一鍵偵測本機 CLI 並匯入模型」，或到語言模型填寫預設 model。
             </p>
           )}
-          <SettingsGroup title="Delegate Personas（G9 行為疊層）">
+          <SettingsGroup title={t('settings.roles.d8d54e')}>
             {Object.entries(settings.delegatePersonas || {}).map(([name, p]) => (
               <SettingsRow
                 key={name}
@@ -387,17 +389,17 @@ export function RolesPanel({
                       set({ delegatePersonas: next })
                     }}
                   >
-                    刪除
+                    {t('settings.roles.a48f5d')}
                   </button>
                 }
               />
             ))}
-            <SettingsStack title="新增 persona">
+            <SettingsStack title={t('settings.roles.15a059')}>
               <div className="space-y-1.5">
                 <input
                   value={personaDraft.name}
                   onChange={(e) => setPersonaDraft({ ...personaDraft, name: e.target.value })}
-                  placeholder="名稱（如 researcher / concise）"
+                  placeholder={t('settings.roles.e9b225')}
                   className={settingsInputCls + ' w-full'}
                 />
                 <textarea
@@ -405,7 +407,7 @@ export function RolesPanel({
                   onChange={(e) =>
                     setPersonaDraft({ ...personaDraft, instructions: e.target.value })
                   }
-                  placeholder="行為指示（注入子代理 prompt；如「務必引用具體檔案路徑」）"
+                  placeholder={t('settings.roles.525021')}
                   rows={3}
                   className={settingsInputCls + ' w-full'}
                 />
@@ -413,7 +415,7 @@ export function RolesPanel({
                   <input
                     value={personaDraft.model}
                     onChange={(e) => setPersonaDraft({ ...personaDraft, model: e.target.value })}
-                    placeholder="模型覆寫（選填；role 覆寫優先）"
+                    placeholder={t('settings.roles.2c762c')}
                     className={settingsInputCls + ' flex-1'}
                   />
                   <button
@@ -434,11 +436,11 @@ export function RolesPanel({
                       setPersonaDraft({ name: '', instructions: '', model: '' })
                     }}
                   >
-                    新增
+                    {t('settings.roles.2cd9e6')}
                   </button>
                 </div>
                 <p className="text-[11px] text-outline">
-                  delegate_task 以 persona=&lt;名稱&gt; 套用；只影響指示與模型，不放寬工具權限（capability_mode 另管）。
+                  {t('settings.roles.ee2de3')}
                 </p>
               </div>
             </SettingsStack>

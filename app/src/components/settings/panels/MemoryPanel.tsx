@@ -11,6 +11,7 @@ import {
   settingsInputCls,
 } from '../SettingsChrome'
 import { SettingsField, type SettingsFieldContext } from '../SettingsField'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6）— 記憶節。記憶清單與新增草稿只有這一節在用，一併搬進來。
@@ -27,6 +28,7 @@ export function MemoryPanel({
   set: (patch: Partial<LlmSettings>) => void
   fieldCtx: SettingsFieldContext
 }) {
+  const { t } = useTranslation()
   const memory = useLearningStore((s) => s.memory)
   const deleteMemoryEntry = useLearningStore((s) => s.deleteMemoryEntry)
   const clearMemories = useLearningStore((s) => s.clearMemories)
@@ -36,7 +38,7 @@ export function MemoryPanel({
 
   return (
     <>
-          <SettingsGroup title="記憶控制">
+          <SettingsGroup title={t('settings.memory.04c048')}>
             <SettingsField
               id="memory.memoryEnabled"
               ctx={fieldCtx}
@@ -68,37 +70,37 @@ export function MemoryPanel({
               }
             />
           </SettingsGroup>
-          <SettingsGroup title="使用者檔案">
-            <SettingsStack title="USER profile" description="穩定自我介紹／角色">
+          <SettingsGroup title={t('settings.memory.0e6f38')}>
+            <SettingsStack title="USER profile" description={t('settings.memory.0ec624')}>
               <textarea
                 className={settingsInputCls + ' min-h-[80px] resize-y'}
                 value={memory.userProfile || ''}
                 onChange={(e) => void setUserProfile(e.target.value)}
-                placeholder="會優先進入提示…"
+                placeholder={t('settings.memory.22232f')}
               />
             </SettingsStack>
           </SettingsGroup>
           <SettingsGroup
-            title="已存記憶"
+            title={t('settings.memory.afd998')}
             action={
               <button
                 type="button"
                 className={settingsBtnCls + ' text-error border-error/30'}
                 onClick={() => {
-                  if (confirm('確定清除所有記憶與使用者檔案？')) void clearMemories()
+                  if (confirm(t('settings.memory.941cd3'))) void clearMemories()
                 }}
               >
-                清除全部
+                {t('settings.memory.2e9ab4')}
               </button>
             }
           >
-            <SettingsStack title="新增" description="手動寫入一條記憶">
+            <SettingsStack title={t('settings.memory.2cd9e6')} description={t('settings.memory.9fb328')}>
               <div className="flex gap-2">
                 <input
                   className={settingsInputCls + ' flex-1'}
                   value={newMemory}
                   onChange={(e) => setNewMemory(e.target.value)}
-                  placeholder="輸入後 Enter 或按新增…"
+                  placeholder={t('settings.memory.d4c904')}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && newMemory.trim()) {
                       void appendMemory(newMemory.trim()).then(() => setNewMemory(''))
@@ -113,12 +115,12 @@ export function MemoryPanel({
                     void appendMemory(newMemory.trim()).then(() => setNewMemory(''))
                   }}
                 >
-                  新增
+                  {t('settings.memory.2cd9e6')}
                 </button>
               </div>
             </SettingsStack>
             {(memory.entries || []).length === 0 ? (
-              <div className="px-4 py-4 text-[12px] text-outline">尚無記憶條目</div>
+              <div className="px-4 py-4 text-[12px] text-outline">{t('settings.memory.f1e2fe')}</div>
             ) : (
               (memory.entries || []).slice(0, 40).map((e) => (
                 <SettingsRow
@@ -132,7 +134,7 @@ export function MemoryPanel({
                       className="text-[12px] text-error font-medium px-2"
                       onClick={() => void deleteMemoryEntry(e.id)}
                     >
-                      刪除
+                      {t('settings.memory.a48f5d')}
                     </button>
                   }
                 />

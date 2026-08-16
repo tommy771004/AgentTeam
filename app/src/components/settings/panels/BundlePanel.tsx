@@ -6,6 +6,7 @@ import {
   settingsBtnCls,
   settingsBtnPrimaryCls,
 } from '../SettingsChrome'
+import { useTranslation } from '../../../i18n/useTranslation'
 
 /**
  * Settings registry restructure（spec 3/6 ticket 08）— 匯出匯入節。
@@ -19,14 +20,15 @@ export function BundlePanel({
   exportBundle: () => Promise<string>
   importBundle: (raw: string) => Promise<{ ok: boolean; message: string }>
 }) {
+  const { t } = useTranslation()
   const [bundleMsg, setBundleMsg] = useState<string | null>(null)
 
   return (
     <>
-      <SettingsGroup title="備份">
+      <SettingsGroup title={t('settings.bundle.e2d78e')}>
           <SettingsRow
-            title="匯出設定包"
-            description="含設定、排程與事件；API 金鑰與 token 會自動遮罩"
+            title={t('settings.bundle.495e57')}
+            description={t('settings.bundle.3781c6')}
             control={
               <button
                 type="button"
@@ -34,7 +36,7 @@ export function BundlePanel({
                 onClick={async () => {
                   // Issue 06 — 匯出前明確同意：說明遮罩範圍與仍包含的敏感 metadata
                   if (!window.confirm(bundleSensitivityNotice())) {
-                    setBundleMsg('已取消匯出。')
+                    setBundleMsg(t('settings.bundle.9f3791'))
                     return
                   }
                   const json = await exportBundle()
@@ -45,19 +47,19 @@ export function BundlePanel({
                   a.download = `subagents-bundle-${Date.now()}.json`
                   a.click()
                   URL.revokeObjectURL(url)
-                  setBundleMsg('已下載匯出檔。')
+                  setBundleMsg(t('settings.bundle.b34243'))
                 }}
               >
-                匯出 JSON
+                {t('settings.bundle.776608')}
               </button>
             }
           />
           <SettingsRow
-            title="匯入設定包"
-            description="覆寫本機設定"
+            title={t('settings.bundle.97b336')}
+            description={t('settings.bundle.b5c069')}
             control={
               <label className={settingsBtnCls + ' cursor-pointer'}>
-                匯入 JSON
+                {t('settings.bundle.67b9a0')}
                 <input
                   type="file"
                   accept="application/json,.json"
