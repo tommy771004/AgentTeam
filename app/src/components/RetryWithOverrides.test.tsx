@@ -10,7 +10,7 @@ vi.mock('../agent/taskRunCoordinator', () => ({
   runTask: (input: TaskRunInput) => runTask(input),
 }))
 
-const defaults = { maxIterations: 5, minConfidence: 0.8, timeoutMs: 30_000 }
+const defaults = { maxIterations: 5, minConfidence: 0.8 }
 
 function renderRetry(overrides: Partial<Parameters<typeof RetryWithOverrides>[0]> = {}) {
   render(
@@ -41,7 +41,8 @@ describe('對話內調整參數重跑', () => {
     await user.click(screen.getByRole('button', { name: /調整參數重跑/ }))
     expect(screen.getByLabelText('最大迭代次數')).toHaveValue(5)
     expect(screen.getByLabelText('最低信心')).toHaveValue(0.8)
-    expect(screen.getByLabelText('逾時（秒）')).toHaveValue(30)
+    // 逾時刻意不提供：RuntimeOverrides.timeoutMs 在 run 路徑上沒有消費者
+    expect(screen.queryByLabelText(/逾時/)).not.toBeInTheDocument()
   })
 
   it('改過的參數會進到新 run，且來源記為 retry、回到同一個對話', async () => {
@@ -65,7 +66,6 @@ describe('對話內調整參數重跑', () => {
     expect(input.overrides).toEqual({
       maxIterations: 9,
       minConfidence: 0.8,
-      timeoutMs: 30_000,
     })
   })
 

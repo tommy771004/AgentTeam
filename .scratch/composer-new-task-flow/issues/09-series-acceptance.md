@@ -37,3 +37,17 @@
 - [ ] Goal 任務：DoD 卡出現、編輯後送出，run 的驗收標準採用編輯後的文字
 - [ ] 失敗 run：「調整參數重跑」實際跑起來、回到同一對話
 - [ ] rewind 確認面板與舊連結 `/failed` redirect
+
+### Code-review 修正（2026-08-16，第二輪 commit）
+
+兩軸審查後立即修正的項目：
+
+- **Spec-c1（真 bug）**：composer 仍可能送出 Time-based/Proactive run——排程／事件跑出來的 thread 會被 `bindRunThread` 綁上該 loopType，舊版釘選過的對話也是；直接當釘選送出會撞「trigger 無效」fail-closed，正是本 spec 要消滅的死路。新增 `composerSendableLoopType()` 在送出路徑收斂為 Goal/Turn/null（進階區摘要一併使用，UI 不再誤報釘選）。
+- **Standards-5（真 bug）**：`dodSkipped` 在送出時沒被讀到——編輯 DoD 後按「略過」仍會送出那段編輯。改為送出時直接使用畫面上那張卡的 `dodPreview`（略過時為 null），順帶消除送出時重跑一次 `parseUserRequest` 的浪費與 attachment-only 路徑的預覽不一致。
+- **Spec-a2（誠實性）**：`RuntimeOverrides.timeoutMs` 在整個 run 路徑上**沒有任何消費者**（engine/loop 都不讀，退役的失敗頁那顆同樣是空的）。與其保留一顆按了沒作用的控制，已從 retry popover 與白名單移除，理由寫進 `retryOverrides.ts`。**這是對 spec US11「逾時」的刻意偏離**——要真的支援需在 engine 加 run-level watchdog（與 HITL 等待、工具呼叫、佇列互動），屬另一件工作。
+- **Spec-a1**：`ThreadBubble` 新增選用 `link`，系統訊息現在附「前往自動化頁調整或停用」直達連結（排程→`#/automation`、事件→`#/automation?tab=events`），補上 spec 要求的「job 連結」。
+- **Standards-4**：`jobRunnerFor(runner: string)` 收緊為 `ThreadRunner`，呼叫端打錯字不再能編譯過。
+- **Testing**：最脆的 source-regex 斷言改寫——不再比對整段程式碼形狀，只驗「套用點排在 LLM 精煉之後」與「套用區塊只碰 definitionOfDone，不改 loopType/steps/maxIterations」。
+- 未修正（記錄取捨）：`composerLayering`／`composerAutomationDraft` 的 icon/label 屬呈現資料卻放在 `agent/` 層——放這裡是為了讓 smoke 不必載入 JSX 就能驗契約；modal 外殼 class 在三個元件間重複（鍵盤契約已抽成 `useDialogKeys`，視覺外殼未抽）；`AutomationCreateSheet` 的 `isSchedule ? :` 分支仍多；LLM 於 auto 模式改判 Turn-based 時使用者 DoD 會被丟棄（僅 WARN log）——spec 明訂「使用者 DoD 不影響 loop 判定」，故維持記錄而非改判。
+
+修正後驗證：`npm run build` **BUILD_EXIT=0**、`npm run smoke` **SMOKE_EXIT=0**（smoke-composer-new-task 22 項）、`npm test` **75 passed**、`npx oxlint src` 0 errors。

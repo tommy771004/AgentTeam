@@ -9,6 +9,7 @@
  * 送出任何 run。Time-based / Proactive 依然只能由排程或事件證據進入執行。
  */
 import { parseScheduleHintFromText, type AutomationScheduleHint } from './automationSuggestion.ts'
+import type { ThreadRunner } from '../store/threadStore.ts'
 import type { JobRunner, ScheduleKind } from './types.ts'
 
 export type ScheduleDraft = {
@@ -121,6 +122,6 @@ const JOB_RUNNERS: readonly JobRunner[] = [
  * ScheduledJob 的 runner union 比對話的窄（例如沒有 gemini）。落到內建是安全的
  * 退路，但不能默默發生——呼叫端要拿回傳值和原值比對，並把降級講給使用者聽。
  */
-export function jobRunnerFor(runner: string): JobRunner {
+export function jobRunnerFor(runner: ThreadRunner): JobRunner {
   return (JOB_RUNNERS as readonly string[]).includes(runner) ? (runner as JobRunner) : 'builtin'
 }

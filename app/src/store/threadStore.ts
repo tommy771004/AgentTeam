@@ -23,6 +23,11 @@ export type ThreadBubble = {
   at: string
   /** Optional user message attachments (images / files) */
   attachments?: ChatAttachment[]
+  /**
+   * Optional in-app destination for a system message (e.g. the automation rule
+   * this bubble just reported creating). Href is a hash route.
+   */
+  link?: { label: string; href: string }
   /** Persisted compact process record shown before its final assistant answer. */
   runSummary?: ThreadRunSummary
 }
@@ -194,6 +199,7 @@ interface ThreadStore {
     role: ThreadBubble['role'],
     content: string,
     attachments?: ChatAttachment[],
+    link?: ThreadBubble['link'],
   ) => void
   pushRunSummary: (threadId: string, summary: ThreadRunSummary) => void
   appendSubDesignExport: (threadId: string, item: {
@@ -588,7 +594,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     persist(threads, get().activeId)
   },
 
-  pushBubble: (threadId, role, content, attachments) => {
+  pushBubble: (threadId, role, content, attachments, link) => {
     const c = content.trim()
     const atts = attachments?.length ? attachments : undefined
     if (!c && !atts?.length) return
@@ -603,6 +609,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       ),
       at: new Date().toISOString(),
       attachments: sanitizeAttachmentsForStorage(atts),
+      link,
     }
     const threads = get().threads.map((t) => {
       if (t.id !== threadId) return t

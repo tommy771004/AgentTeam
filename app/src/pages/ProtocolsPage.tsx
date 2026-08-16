@@ -20,6 +20,12 @@ import { useScheduleStore } from '../store/scheduleStore'
 import { jobRunnerFor } from '../agent/composerAutomationDraft'
 import { DodPreviewCard } from '../components/DodPreviewCard'
 import { previewDod, resolveUserDefinitionOfDone } from '../agent/dodPreview'
+import { composerSendableLoopType } from '../agent/composerLayering'
+
+/** 建立完成後直達該筆規則所在的自動化分頁。 */
+function automationLink(kind: AutomationCreateKind): string {
+  return kind === 'schedule' ? '#/automation' : '#/automation?tab=events'
+}
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import { useAgentStore } from '../store/agentStore'
 import { useRunActivityStore } from '../store/runActivityStore'
@@ -168,8 +174,15 @@ export function ProtocolsPage() {
     setSelectedLoopType(thread?.loopType ?? null)
   }, [thread?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** null = 自動分類（Chat-lite Turn / Goal …）；非 null = 使用者釘選 */
-  const pinnedLoopType: LoopType | null = thread?.loopType ?? selectedLoopType
+  /**
+   * null = 自動分類（Chat-lite Turn / Goal …）；非 null = 使用者釘選。
+   *
+   * 收斂成 composer 送得出的 loop：排程／事件建立出來的對話帶著 Time-based /
+   * Proactive，那兩種只能由觸發證據進入執行，從 composer 送出只會被拒。
+   */
+  const pinnedLoopType: LoopType | null = composerSendableLoopType(
+    thread?.loopType ?? selectedLoopType,
+  )
   const depth: ThinkingDepth = thread?.thinkingDepth || 'deep'
   const depthDef = getThinkingDepth(depth)
   const speed = thread?.speed || 'standard'
@@ -253,10 +266,8 @@ export function ProtocolsPage() {
       composerApprovalMode,
     )
     // 只有真的改過的 DoD 才隨 ingress snapshot 送出；沒改就完全沿用 auto-parse。
-    const userDefinitionOfDone = resolveUserDefinitionOfDone(
-      editedDod,
-      previewDod(raw, pinnedLoopType),
-    )
+    // 用畫面上那張卡的 preview（略過時為 null），使用者按了「略過」就真的不送。
+    const userDefinitionOfDone = resolveUserDefinitionOfDone(editedDod, dodPreview)
 
     setBusy(true)
     setDraftInput('')
@@ -370,7 +381,7 @@ export function ProtocolsPage() {
     // （onAutomationCreated），composer 送不出帶觸發語意的 run。
   }
 
-  /** 建立成功後把結果留在對話裡，並指出去哪裡調整。 */
+  /** 建立成功後把結果留在對話裡，並附上直達該筆規則的連結。 */
   const onAutomationCreated = (created: AutomationCreated) => {
     if (!activeId) return
     const label = created.kind === 'schedule' ? '定時任務' : '事件規則'
@@ -382,7 +393,9 @@ export function ProtocolsPage() {
     pushBubble(
       activeId,
       'system',
-      `已建立${label}「${created.name}」：${created.summary}${downgraded}。可在「自動化」頁調整或停用。`,
+      `已建立${label}「${created.name}」：${created.summary}${downgraded}。`,
+      undefined,
+      { label: '前往自動化頁調整或停用', href: automationLink(created.kind) },
     )
   }
 

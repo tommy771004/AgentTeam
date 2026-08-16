@@ -87,4 +87,10 @@ describe('送出時解析使用者 DoD', () => {
   it('沒有預覽（非 Goal-based）時不夾帶任何 DoD', () => {
     expect(resolveUserDefinitionOfDone('三家報價都有含稅價', null)).toBeUndefined()
   })
+
+  it('編輯後又按「略過」→ 不送出那段編輯（略過時卡片的 preview 為 null）', () => {
+    // 送出時用的是畫面上那張卡的 preview；按了略過就沒有卡，編輯自然不生效。
+    const skippedPreview = null
+    expect(resolveUserDefinitionOfDone('我改過的驗收標準', skippedPreview)).toBeUndefined()
+  })
 })

@@ -47,6 +47,20 @@ export const LOOP_CHOICES: readonly LoopChoice[] = [
 ] as const
 
 /**
+ * composer 真的送得出來的 loop pattern。
+ *
+ * Time-based / Proactive 的執行只能由 claimed ScheduledJob 或事件證據進入。但
+ * thread 的 loopType 可能已經是那兩種——排程／事件跑出來的對話會被綁上
+ * `Time-based`，舊版釘選過的對話也是。若直接把它當成釘選送出，run 會在觸發證據
+ * 檢查那裡 fail-closed 被拒，使用者只看到一句「trigger 無效」：正是這份 spec 要
+ * 消滅的死路。所以送出前一律收斂成 composer 送得出的三種之一。
+ */
+export function composerSendableLoopType(pinned: LoopType | null): LoopType | null {
+  if (pinned === 'Goal-based' || pinned === 'Turn-based') return pinned
+  return null
+}
+
+/**
  * 某個模型允許的推理程度。
  *
  * 沒有任何已授權 CLI（或該模型沒有宣告 depth）時回全部——不能因為查不到就把

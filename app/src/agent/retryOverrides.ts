@@ -15,16 +15,21 @@ import type {
   ScheduleTriggerSnapshot,
 } from './types.ts'
 
+/**
+ * 重跑可調的參數。
+ *
+ * 刻意不含 timeout：`RuntimeOverrides.timeoutMs` 在整個 run 路徑上沒有任何消費者
+ * （engine 與 loop 都不讀它），退役的失敗頁上那顆也一樣是空的。與其擺一顆按了
+ * 沒作用的控制，不如先不擺——真正的 run 逾時要在 engine 加 watchdog，屬於另一件事。
+ */
 export type RetryParams = {
   maxIterations: number
   minConfidence: number
-  timeoutMs: number
 }
 
 export const RETRY_LIMITS = {
   maxIterations: { min: 1, max: 20 },
   minConfidence: { min: 0.1, max: 1 },
-  timeoutMs: { min: 5_000, max: 600_000 },
 } as const
 
 function clamp(value: number, min: number, max: number, fallback: number): number {
@@ -48,14 +53,6 @@ export function clampRetryParams(raw: Partial<RetryParams>, defaults: RetryParam
       RETRY_LIMITS.minConfidence.min,
       RETRY_LIMITS.minConfidence.max,
       defaults.minConfidence,
-    ),
-    timeoutMs: Math.round(
-      clamp(
-        Number(raw.timeoutMs),
-        RETRY_LIMITS.timeoutMs.min,
-        RETRY_LIMITS.timeoutMs.max,
-        defaults.timeoutMs,
-      ),
     ),
   }
 }
@@ -91,7 +88,7 @@ export function retryEligibility(
 /**
  * 組出重跑的 runtime overrides。
  *
- * 白名單就是這三個參數，加上重放同一種 loop 必需的觸發證據。其他任何東西
+ * 白名單就是 RetryParams 的欄位，加上重放同一種 loop 必需的觸發證據。其他任何東西
  * （模型、approval、能力預載…）都不從失敗的那次帶過來——重跑是一次新的 run。
  */
 export function buildRetryOverrides(
@@ -101,7 +98,6 @@ export function buildRetryOverrides(
   const overrides: RuntimeOverrides = {
     maxIterations: params.maxIterations,
     minConfidence: params.minConfidence,
-    timeoutMs: params.timeoutMs,
   }
   if (evidence.scheduleTrigger) overrides.scheduleTrigger = evidence.scheduleTrigger
   if (evidence.eventTrigger) overrides.eventTrigger = evidence.eventTrigger

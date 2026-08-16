@@ -44,9 +44,20 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
   if (bubble.role === 'system') {
     return (
       <div className="flex w-full items-start gap-2 px-0.5 py-1 text-[11px] text-ink-3">
-        <Icon name="info" size={14} className="mt-0.5 shrink-0" />
-        <span className="whitespace-pre-wrap break-words font-[family-name:var(--font-mono)]">
-          {bubble.content}
+        <Icon aria-hidden name="info" size={14} className="mt-0.5 shrink-0" />
+        <span className="min-w-0">
+          <span className="block whitespace-pre-wrap break-words font-[family-name:var(--font-mono)]">
+            {bubble.content}
+          </span>
+          {bubble.link ? (
+            <a
+              href={bubble.link.href}
+              className="mt-1 inline-flex items-center gap-1 text-accent-ink underline-offset-2 hover:underline"
+            >
+              {bubble.link.label}
+              <Icon aria-hidden name="arrow_forward" size={13} />
+            </a>
+          ) : null}
         </span>
       </div>
     )

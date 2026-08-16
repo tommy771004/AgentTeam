@@ -134,7 +134,6 @@ export function RunContinuationActions({
               settings.maxIterationsDefault || 5,
             ),
             minConfidence: runState.minConfidence || settings.minConfidence || 0.8,
-            timeoutMs: 30_000,
           }}
         />
       ) : null}

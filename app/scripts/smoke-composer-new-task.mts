@@ -19,7 +19,11 @@ import {
   jobRunnerFor,
   scheduleDraftReady,
 } from '../src/agent/composerAutomationDraft.ts'
-import { LOOP_CHOICES, allowedDepthsFor } from '../src/agent/composerLayering.ts'
+import {
+  LOOP_CHOICES,
+  allowedDepthsFor,
+  composerSendableLoopType,
+} from '../src/agent/composerLayering.ts'
 import { previewDod, resolveUserDefinitionOfDone } from '../src/agent/dodPreview.ts'
 import {
   buildRetryOverrides,
@@ -133,6 +137,17 @@ test('定時／事件是建立動作，不是可釘選的 loop', () => {
   )
 })
 
+test('composer 送不出 Time/Proactive：排程或事件綁出來的對話會被收斂', () => {
+  // 排程／事件跑出來的 thread 會被綁上這兩種 loopType；直接當釘選送出只會撞
+  // 「trigger 無效」，正是這份 spec 要消滅的死路。
+  assert.equal(composerSendableLoopType('Time-based'), null)
+  assert.equal(composerSendableLoopType('Proactive'), null)
+  // 可釘選的三種原樣保留
+  assert.equal(composerSendableLoopType('Goal-based'), 'Goal-based')
+  assert.equal(composerSendableLoopType('Turn-based'), 'Turn-based')
+  assert.equal(composerSendableLoopType(null), null)
+})
+
 test('推理程度：查不到模型能力時給全部，不把使用者鎖住', () => {
   assert.equal(allowedDepthsFor(undefined, '', 'gpt-x').length, THINKING_DEPTHS.length)
   assert.equal(allowedDepthsFor([], 'gpt-x', 'gpt-x').length, THINKING_DEPTHS.length)
@@ -175,34 +190,30 @@ test('DoD ingress：只有真的改過才隨 snapshot 送出（缺省完全回�
   )
 })
 
-test('DoD 只覆寫文本：engine 在分類與 LLM 精煉之後才套用，且非 Goal 不套用', () => {
+test('DoD 只覆寫文本：engine 在 LLM 精煉之後才套用，且只碰 definitionOfDone', () => {
   const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
-  assert.match(engine, /userDefinitionOfDone/)
-  assert.match(
-    engine,
-    /loopConfig\.loopType === 'Goal-based'\s*\)\s*\{\s*\n\s*this\.state\.loopConfig\.definitionOfDone = userDod/,
-    '使用者 DoD 必須只在 Goal-based 時覆寫 DoD 文本',
-  )
   const applyAt = engine.indexOf('const userDod =')
   const llmRefineAt = engine.indexOf('LLM 解析：')
-  assert.ok(applyAt > llmRefineAt && llmRefineAt > 0, '必須排在 LLM 精煉之後套用')
+  assert.ok(applyAt > 0, 'engine 必須讀取使用者 DoD')
+  assert.ok(llmRefineAt > 0 && applyAt > llmRefineAt, '必須排在 LLM 精煉之後套用')
+  // 套用區塊只能碰 DoD 文本——不得順手改 loopType / steps / maxIterations
+  const blockEnd = engine.indexOf('// Defense in depth', applyAt)
+  assert.ok(blockEnd > applyAt, 'DoD 套用必須仍在 parse 區塊內')
+  const applyBlock = engine.slice(applyAt, blockEnd)
+  assert.match(applyBlock, /definitionOfDone = userDod/)
+  assert.doesNotMatch(applyBlock, /loopConfig\.loopType =(?!=)|state\.steps =(?!=)|maxIterations =(?!=)/)
 })
 
-const RETRY_DEFAULTS = { maxIterations: 5, minConfidence: 0.8, timeoutMs: 30_000 }
+const RETRY_DEFAULTS = { maxIterations: 5, minConfidence: 0.8 }
 
-test('retry 覆寫白名單：只有三個參數（加必需的觸發證據）進到新 run', () => {
-  const overrides = buildRetryOverrides(
-    { maxIterations: 8, minConfidence: 0.9, timeoutMs: 45_000 },
-    {},
-  )
-  assert.deepEqual(Object.keys(overrides).sort(), [
-    'maxIterations',
-    'minConfidence',
-    'timeoutMs',
-  ])
+test('retry 覆寫白名單：只有可調參數（加必需的觸發證據）進到新 run', () => {
+  const overrides = buildRetryOverrides({ maxIterations: 8, minConfidence: 0.9 }, {})
+  assert.deepEqual(Object.keys(overrides).sort(), ['maxIterations', 'minConfidence'])
   assert.equal(overrides.maxIterations, 8)
   assert.equal(overrides.minConfidence, 0.9)
-  assert.equal(overrides.timeoutMs, 45_000)
+  // timeout 不在白名單：RuntimeOverrides.timeoutMs 在 run 路徑上沒有消費者，
+  // 擺一顆按了沒作用的控制就是死控制。
+  assert.equal('timeoutMs' in overrides, false)
 })
 
 test('retry 覆寫：有觸發證據才夾帶，且不夾帶其他任何欄位', () => {
@@ -212,26 +223,20 @@ test('retry 覆寫：有觸發證據才夾帶，且不夾帶其他任何欄位',
     'eventTrigger',
     'maxIterations',
     'minConfidence',
-    'timeoutMs',
   ])
 })
 
 test('retry 參數夾緊：超界收斂、NaN 回退預設', () => {
-  const high = clampRetryParams(
-    { maxIterations: 999, minConfidence: 5, timeoutMs: 10_000_000 },
-    RETRY_DEFAULTS,
-  )
+  const high = clampRetryParams({ maxIterations: 999, minConfidence: 5 }, RETRY_DEFAULTS)
   assert.equal(high.maxIterations, 20)
   assert.equal(high.minConfidence, 1)
-  assert.equal(high.timeoutMs, 600_000)
 
-  const low = clampRetryParams({ maxIterations: 0, minConfidence: 0, timeoutMs: 1 }, RETRY_DEFAULTS)
+  const low = clampRetryParams({ maxIterations: 0, minConfidence: 0 }, RETRY_DEFAULTS)
   assert.equal(low.maxIterations, 1)
   assert.equal(low.minConfidence, 0.1)
-  assert.equal(low.timeoutMs, 5_000)
 
   const bad = clampRetryParams(
-    { maxIterations: Number.NaN, minConfidence: Number.NaN, timeoutMs: Number.NaN },
+    { maxIterations: Number.NaN, minConfidence: Number.NaN },
     RETRY_DEFAULTS,
   )
   assert.deepEqual(bad, RETRY_DEFAULTS)

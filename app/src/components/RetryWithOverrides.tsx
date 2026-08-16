@@ -81,7 +81,7 @@ export function RetryWithOverrides({
             {running ? '正在重跑…' : '調整參數重跑'}
           </span>
           <span className="mt-0.5 block text-[10px] text-ink-3">
-            改迭代次數、信心門檻或逾時後再跑一次
+            改迭代次數或信心門檻後再跑一次
           </span>
         </span>
         <Icon
@@ -111,17 +111,6 @@ export function RetryWithOverrides({
             max={RETRY_LIMITS.minConfidence.max}
             step={0.05}
             onChange={(minConfidence) => setParams((current) => ({ ...current, minConfidence }))}
-          />
-          <NumberField
-            label="逾時（秒）"
-            hint={`${RETRY_LIMITS.timeoutMs.min / 1000}–${RETRY_LIMITS.timeoutMs.max / 1000}`}
-            value={Math.round(params.timeoutMs / 1000)}
-            min={RETRY_LIMITS.timeoutMs.min / 1000}
-            max={RETRY_LIMITS.timeoutMs.max / 1000}
-            step={5}
-            onChange={(seconds) =>
-              setParams((current) => ({ ...current, timeoutMs: seconds * 1000 }))
-            }
           />
 
           {eligibility.canRetry ? null : (
