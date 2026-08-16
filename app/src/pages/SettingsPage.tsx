@@ -6,6 +6,8 @@ import { reopenOnboardingTour } from '../components/OnboardingTour'
 import { SETTINGS_SECTION_GROUPS, SETTINGS_SECTIONS } from '../commands/settingsSections'
 import { AppearancePanel } from '../components/settings/panels/AppearancePanel'
 import type { SettingsFieldContext } from '../components/settings/SettingsField'
+import { SettingsSearch } from '../components/settings/SettingsSearch'
+import { fieldAnchorId, getSettingsField } from '../settings/fieldRegistry'
 import { useSettingsUiStore } from '../store/settingsUiStore'
 
 
@@ -615,6 +617,8 @@ export function SettingsPage() {
   const meta = SECTION_META[section] || { title: '設定', subtitle: '' }
   const showAdvanced = useSettingsUiStore((state) => state.showAdvanced)
   const setShowAdvanced = useSettingsUiStore((state) => state.setShowAdvanced)
+  /** 搜尋跳轉／深連結命中的欄位——捲到它並短暫高亮 */
+  const [highlightId, setHighlightId] = useState<string | null>(null)
   const isPolicyAdminBuild =
     outboundStatus?.buildFlavor === 'policy-admin' ||
     (typeof process !== 'undefined' &&
@@ -627,7 +631,37 @@ export function SettingsPage() {
   const fieldCtx: SettingsFieldContext = {
     showAdvanced,
     policyAdminBuild: isPolicyAdminBuild,
+    highlightId,
   }
+
+  /**
+   * 跳到某個設定欄位：切節 → 需要時打開進階 → 捲動並高亮。
+   *
+   * 進階欄位若停在 basic 檢視就會捲到一個不存在的節點，所以這裡先展開再捲。
+   */
+  const jumpToField = (fieldId: string) => {
+    const field = getSettingsField(fieldId)
+    if (!field) return
+    setSection(field.section)
+    if (field.tier === 'advanced' && !showAdvanced) setShowAdvanced(true)
+    setHighlightId(fieldId)
+  }
+
+  // 切節／展開後 DOM 才存在，等這一輪 render 完成再捲。
+  useEffect(() => {
+    if (!highlightId) return
+    const node = document.getElementById(fieldAnchorId(highlightId))
+    node?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    const timer = window.setTimeout(() => setHighlightId(null), 2_400)
+    return () => window.clearTimeout(timer)
+  }, [highlightId, section, showAdvanced])
+
+  // ?section=&field= 深連結：橫幅 CTA／palette／文件都能連到指定欄位
+  const requestedField = searchParams.get('field')
+  useEffect(() => {
+    if (requestedField && getSettingsField(requestedField)) jumpToField(requestedField)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedField])
 
   return (
     <ThemePage
@@ -640,6 +674,13 @@ export function SettingsPage() {
     >
       <div className="flex flex-col max-w-[820px] pb-10">
         <SettingsHeader title={meta.title} subtitle={meta.subtitle} />
+
+        <div className="mb-4">
+          <SettingsSearch
+            policyAdminBuild={isPolicyAdminBuild}
+            onJump={(hit) => jumpToField(hit.field.id)}
+          />
+        </div>
 
         <div className="mb-5 flex items-center justify-between gap-3 border-b border-line pb-3">
           <p className="text-[11px] leading-relaxed text-outline">

@@ -9,7 +9,7 @@ import { SettingsRow } from './SettingsChrome'
 export type SettingsFieldContext = {
   showAdvanced: boolean
   policyAdminBuild: boolean
-  /** 搜尋跳轉命中的欄位 id — 高亮用 */
+  /** 搜尋跳轉／深連結命中的欄位 id — 高亮用 */
   highlightId?: string | null
 }
 

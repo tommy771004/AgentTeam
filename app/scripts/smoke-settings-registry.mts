@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict'
 
 import { DEFAULT_LLM_SETTINGS } from '../src/agent/llm.ts'
-import { SETTINGS_SECTIONS } from '../src/commands/settingsSections.ts'
+import { SETTINGS_SECTIONS, settingsPath } from '../src/commands/settingsSections.ts'
 import {
   NON_UI_SETTINGS_KEYS,
   PENDING_SETTINGS_KEYS,
@@ -169,6 +169,20 @@ test('搜尋不看 tier：進階欄位在 basic 檢視下仍找得到', () => {
 test('搜尋：空字串不回傳整包，避免一開啟就洗版', () => {
   assert.deepEqual(searchSettingsFields('', { policyAdminBuild: false }), [])
   assert.deepEqual(searchSettingsFields('   ', { policyAdminBuild: false }), [])
+})
+
+test('欄位深連結：settingsPath 帶欄位時仍是合法路徑，且節深連結行為不變', () => {
+  assert.equal(settingsPath('llm'), '/settings?section=llm')
+  assert.equal(
+    settingsPath('appearance', 'appearance.theme'),
+    '/settings?section=appearance&field=appearance.theme',
+  )
+  // 每個已宣告欄位都組得出深連結，且 section 真的存在
+  const sectionIds = new Set(SETTINGS_SECTIONS.map((section) => section.id))
+  for (const field of SETTINGS_FIELDS) {
+    assert.ok(sectionIds.has(field.section))
+    assert.match(settingsPath(field.section, field.id), /^\/settings\?section=[^&]+&field=/)
+  }
 })
 
 console.log(`\n${passed} settings registry smoke tests passed`)

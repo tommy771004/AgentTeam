@@ -48,6 +48,7 @@ export function paletteSettingsSections(): SettingsSectionDef[] {
   return SETTINGS_SECTIONS.filter((section) => section.id !== 'policyAdmin')
 }
 
-export function settingsPath(sectionId: string): string {
-  return `/settings?section=${encodeURIComponent(sectionId)}`
+export function settingsPath(sectionId: string, fieldId?: string): string {
+  const base = `/settings?section=${encodeURIComponent(sectionId)}`
+  return fieldId ? `${base}&field=${encodeURIComponent(fieldId)}` : base
 }
