@@ -1,6 +1,8 @@
 import { create } from 'zustand'
-import type { SuggestionDecision } from '../agent/automationConsent'
-import type { AutomationCreatedInfo } from '../components/AutomationSuggestionCard'
+import type {
+  AutomationCreatedInfo,
+  SuggestionDecision,
+} from '../agent/automationConsent'
 import { readJson, writeJson } from './persist'
 
 const KEY = 'automation.consent.v1'

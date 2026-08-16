@@ -45,10 +45,7 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
   // 自動化建議以互動卡呈現：意圖在哪裡說出口，建立就在哪裡完成。
   if (bubble.role === 'system' && bubble.suggestion) {
     return (
-      <ChatAutomationSuggestion
-        suggestion={bubble.suggestion}
-        threadId={useThreadStore.getState().activeId}
-      />
+      <ChatAutomationSuggestion suggestion={bubble.suggestion} />
     )
   }
 

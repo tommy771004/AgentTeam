@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { scheduleCreateRequest } from '../agent/composerAutomationDraft'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import { ThemePage } from '../components/SectionNav'
@@ -104,17 +105,25 @@ function SchedulerSection() {
   const onCreate = async () => {
     if (!objective.trim()) return
     const root = pinProject ? (projectRootInput.trim() || projectRoot || '') : ''
-    await addJob({
-      name: name.trim() || objective.slice(0, 40),
-      objective: objective.trim(),
-      kind,
-      dailyAt: kind === 'daily' ? dailyAt : undefined,
-      intervalMinutes: kind === 'interval' ? intervalMinutes : undefined,
-      runAt: kind === 'once' ? runAt || new Date(Date.now() + 60_000).toISOString() : undefined,
-      skillNames,
-      runner: runner || 'builtin',
-      projectRoot: root || undefined,
-    })
+    // 與 composer 快速動作、對話建議卡共用同一條建立轉換（不各自組 payload）
+    await addJob(
+      scheduleCreateRequest(
+        {
+          name,
+          objective,
+          kind,
+          dailyAt,
+          intervalMinutes,
+          runAt,
+          skillNames,
+        },
+        {
+          runner: runner || 'builtin',
+          projectRoot: root,
+          createdFrom: 'automation-page',
+        },
+      ),
+    )
     setSkillNames([])
   }
 

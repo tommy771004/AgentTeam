@@ -40,3 +40,27 @@
 安全模型未放寬，並以契約測試守住：`presentConversationAutomationSuggestion` 區塊不得出現 `runTask`／`dispatchThreadTask`／`startExecution` 且必須回 `status: 'suggested'`；建議卡不得 import 任何執行入口。
 
 驗證：`npm run build` BUILD_EXIT=0、`npm run smoke` SMOKE_EXIT=0、`npm test` 113 passed（新增 12）、`smoke-automation-one-click` 22 項（已掛入 smoke／smoke:ci／新 smoke:automation）、`oxlint` 0 errors。
+
+### Code-review 兩軸修正（2026-08-16，第二輪 commit）
+
+**真 bug**
+
+- **「不用了」是死控制（US9）**：`onDismiss` 只把決定記起來，卡片仍原樣留著、建立鍵照樣可按——按下去看起來什麼都沒發生。冷卻只擋「未來」的推播，擋不住眼前這張卡。已改為拒絕後卡片立即收起為一句「已略過這個自動化建議」。
+- **同一個問題兩套答案（US8）**：policy 端用正規化的 `sameObjective` 比對，卡片端卻用 `job.objective === suggestion.objective` 原字串比。空白或大小寫差一點就會出現「policy 說不用推、卡片說可以建」的矛盾。卡片改用共用的 `findActiveScheduleFor`／`findActiveEventFor`。
+- **下次觸發時間不可靠（US3）**：`addJob` 回傳 `void`，卡片只好用 name+objective 回讀剛建立的那一筆——同目標多筆或名稱被正規化就會抓錯人或抓不到，畫面靜靜少掉「下次觸發」。已改為 `addJob`／`addEvent` 回傳建立出來的那一筆。
+- **佇列數字是凍住的（US11）**：`queueLength()` 是模組層快照不是 store，只在 render 當下取一次。卡片開著時輕量輪詢，讓「待跑 n/24」講的是現在。
+
+**沒做完的宣稱，補做**
+
+- **建立來源未落地**（Implementation Decision：journal 記錄來源為 chat suggestion，供統計建議轉換率）——原本這條在票上打勾但程式裡完全沒有。已新增 `ScheduledJob.createdFrom`（`automation-page` / `composer` / `chat-suggestion`），由建立轉換帶入、`createJob` 原樣保存，並加 smoke 斷言「來源不影響執行、觸發驗證不因來源放寬」。
+- **「與 Automation 頁共用同一條建立路徑」原本只是半真**：共用只發生在 composer 與卡片之間，`AutomationPage` 仍自己組 payload（共四個呼叫點）。已改為三個殼都走 `scheduleCreateRequest`，並加 smoke 釘住「沒有人再自己組 addJob payload」。
+- **執行引擎原本是唯讀顯示（US13）**：只顯示對話的引擎名稱，無法「指定」。已改為可選（`JOB_RUNNER_OPTIONS` 與白名單同一份資料），預設沿用對話。
+
+**層次修正**：`AutomationCreatedInfo` 從元件移到 `agent/automationConsent.ts`——store 匯入 components 形成反向相依與循環；`ChatBubble` 不再用 `getState()` 傳非響應式的 `threadId`，容器自己訂閱。
+
+**刻意保留的偏離（記錄而非默默跳過）**
+
+- **表單元件三殼共用未做**：spec 要求「Automation 頁、chat 建議卡、composer 快速動作共用同一表單元件」。目前共用的是**建立轉換**（`scheduleCreateRequest`／`eventCreateRequest`），三個殼的表單仍是各自的畫面——modal sheet、頁面表單與對話內卡片的版面需求差異大，硬合會做出一個三邊都不合身的元件。建立語義已由共用轉換與 smoke 保證一致；表單合併留待有第四個殼出現時再做。
+- **專案綁定**：卡片直接沿用目前專案，沒有 Automation 頁的 `pinProject` 開關（卡片走的是「快速建立」路徑）。
+
+修正後驗證：`npm run build` BUILD_EXIT=0、`npm run smoke` SMOKE_EXIT=0、`npm test` 114 passed、`smoke-automation-one-click` 25 項、`oxlint` 0 errors。

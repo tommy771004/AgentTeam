@@ -322,5 +322,44 @@ test('建議卡不得自己送出 run：只呼叫建立介面', () => {
   assert.match(card, /eventCreateRequest/)
 })
 
+test('建立來源被記錄（ADR-0040 來源欄位，供統計建議轉換率）', () => {
+  const draft = scheduleDraftFromSuggestion(detectAutomationSuggestion('每天 08:00 整理')!)
+  const fromCard = scheduleCreateRequest(draft, {
+    runner: 'builtin',
+    createdFrom: 'chat-suggestion',
+  })
+  assert.equal(fromCard.createdFrom, 'chat-suggestion')
+  const fromPage = scheduleCreateRequest(draft, {
+    runner: 'builtin',
+    createdFrom: 'automation-page',
+  })
+  assert.equal(fromPage.createdFrom, 'automation-page')
+  // 沒指定來源時不硬塞值（舊呼叫端行為不變）
+  assert.equal(scheduleCreateRequest(draft, { runner: 'builtin' }).createdFrom, undefined)
+})
+
+test('三個殼共用同一條建立轉換：沒有人再自己組 addJob payload', () => {
+  const shells = [
+    'src/pages/AutomationPage.tsx',
+    'src/pages/ProtocolsPage.tsx',
+    'src/components/ChatAutomationSuggestion.tsx',
+  ]
+  for (const shell of shells) {
+    const source = fs.readFileSync(path.join(appRoot, shell), 'utf8')
+    assert.match(
+      source,
+      /scheduleCreateRequest\(/,
+      `${shell} 應透過共用轉換建立排程`,
+    )
+  }
+})
+
+test('來源欄位不影響執行：createJob 只是原樣保存', () => {
+  const scheduler = fs.readFileSync(path.join(appRoot, 'src/agent/scheduler.ts'), 'utf8')
+  assert.match(scheduler, /createdFrom: input\.createdFrom/)
+  // 排程觸發驗證不得因為來源不同而放寬
+  assert.doesNotMatch(scheduler, /createdFrom === 'chat-suggestion'/)
+})
+
 console.log(`\n${passed} automation one-click smoke tests passed`)
 console.log('OK')

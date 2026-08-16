@@ -8,13 +8,32 @@
  * ScheduledJob snapshot、Proactive 仍需布林事件證據（見 CONTEXT.md）。
  */
 import type { AutomationSuggestion } from './automationSuggestion.ts'
-import { buildEventDraft, buildScheduleDraft, type ScheduleDraft } from './composerAutomationDraft.ts'
-import type { EventDraft } from './composerAutomationDraft.ts'
+import {
+  buildEventDraft,
+  buildScheduleDraft,
+  type EventDraft,
+  type ScheduleDraft,
+} from './composerAutomationDraft.ts'
 import type { ProactiveEvent, ScheduledJob } from './types.ts'
 
 /** 拒絕之後多久不再對同一個目標提出同樣的建議。 */
 export const SUGGESTION_COOLDOWN_DAYS = 7
 const COOLDOWN_MS = SUGGESTION_COOLDOWN_DAYS * 24 * 60 * 60 * 1000
+
+/**
+ * 建立成功後要記住的東西——持久化的領域資料，因此住在 agent 層而不是元件裡。
+ * （store 匯入 components 會形成反向相依與循環。）
+ */
+export type AutomationCreatedInfo = {
+  kind: AutomationSuggestion['kind']
+  name: string
+  /** 一句話：何時會觸發 */
+  summary: string
+  /** 管理連結（hash route） */
+  href: string
+  /** 下次觸發時間（排程才有） */
+  nextRunAt?: string | null
+}
 
 export type SuggestionDecision = {
   action: 'accepted' | 'dismissed'

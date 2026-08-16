@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { AutomationCreatedInfo } from '../agent/automationConsent'
 import type { AutomationSuggestion } from '../agent/automationSuggestion'
 import {
   SCHEDULE_TRIGGER_CAVEAT,
@@ -15,19 +16,10 @@ import {
   type EventDraft,
   type ScheduleDraft,
 } from '../agent/composerAutomationDraft'
+import { JOB_RUNNER_OPTIONS } from '../agent/composerAutomationDraft'
 import type { ScheduleKind } from '../agent/types'
+import type { ThreadRunner } from '../store/threadStore'
 import { Icon } from './Icon'
-
-export type AutomationCreatedInfo = {
-  kind: AutomationSuggestion['kind']
-  name: string
-  /** 一句話：何時會觸發 */
-  summary: string
-  /** 管理連結（hash route） */
-  href: string
-  /** 下次觸發時間（排程才有） */
-  nextRunAt?: string | null
-}
 
 /**
  * Automation one-click（spec 5/6 ticket 01）— 對話內的自動化建議卡。
@@ -43,7 +35,8 @@ export function AutomationSuggestionCard({
   queueLength,
   queueMax,
   availableSkills,
-  runnerLabel,
+  runner,
+  onRunnerChange,
   onCreateSchedule,
   onCreateEvent,
   onDismiss,
@@ -53,8 +46,9 @@ export function AutomationSuggestionCard({
   queueLength: number
   queueMax: number
   availableSkills: string[]
-  /** 目前對話的執行引擎，建立時沿用 */
-  runnerLabel: string
+  /** 這筆自動化要用的執行引擎（預設沿用對話，但可改） */
+  runner: ThreadRunner
+  onRunnerChange: (runner: ThreadRunner) => void
   onCreateSchedule: (draft: ScheduleDraft) => Promise<AutomationCreatedInfo>
   onCreateEvent: (draft: EventDraft) => Promise<AutomationCreatedInfo>
   onDismiss: () => void
@@ -160,9 +154,26 @@ export function AutomationSuggestionCard({
           )}
 
           <p className="text-[10px] leading-relaxed text-ink-3">
-            {isSchedule ? describeScheduleDraft(schedule) : describeEventDraft(event)} · 引擎{' '}
-            {runnerLabel} · {describeQueueLoad(queueLength, queueMax)}
+            {isSchedule ? describeScheduleDraft(schedule) : describeEventDraft(event)} ·{' '}
+            {describeQueueLoad(queueLength, queueMax)}
           </p>
+
+          <div>
+            <span className="mb-1 block text-[10px] font-semibold text-ink-2">執行引擎</span>
+            <div className="flex flex-wrap gap-1">
+              {JOB_RUNNER_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  aria-pressed={runner === option.id}
+                  onClick={() => onRunnerChange(option.id)}
+                  className={chipCls(runner === option.id)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
           {isSchedule ? (
             <p className="text-[10px] leading-relaxed text-ink-3">{SCHEDULE_TRIGGER_CAVEAT}</p>
           ) : null}

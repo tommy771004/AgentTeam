@@ -833,6 +833,12 @@ export interface ScheduledJob {
   runner?: JobRunner
   /** Pin project workspace for this job (absolute path); empty = use current UI project */
   projectRoot?: string
+  /**
+   * Where this job was created from — `chat-suggestion` when it came from a
+   * conversation proposal card (spec 5/6). Recorded so suggestion→creation
+   * conversion can be measured later; it never affects execution.
+   */
+  createdFrom?: 'automation-page' | 'composer' | 'chat-suggestion'
   lastRunAt: string | null
   nextRunAt: string | null
   lastStatus: 'idle' | 'running' | 'success' | 'failed' | 'skipped' | 'interrupted'

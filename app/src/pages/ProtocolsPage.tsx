@@ -548,7 +548,13 @@ export function ProtocolsPage() {
                 kind={automationKind}
                 objective={draftInput}
                 onCreateSchedule={(draft) =>
-                  addJob(scheduleCreateRequest(draft, { runner, projectRoot }))
+                  addJob(
+                    scheduleCreateRequest(draft, {
+                      runner,
+                      projectRoot,
+                      createdFrom: 'composer',
+                    }),
+                  )
                 }
                 onCreateEvent={(draft) => addEvent(eventCreateRequest(draft))}
                 onCreated={onAutomationCreated}

@@ -3,10 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { detectAutomationSuggestion } from '../agent/automationSuggestion'
 import type { EventDraft, ScheduleDraft } from '../agent/composerAutomationDraft'
-import {
-  AutomationSuggestionCard,
-  type AutomationCreatedInfo,
-} from './AutomationSuggestionCard'
+import type { AutomationCreatedInfo } from '../agent/automationConsent'
+import { AutomationSuggestionCard } from './AutomationSuggestionCard'
 
 const scheduleSuggestion = detectAutomationSuggestion('每天早上 08:00 整理 inbox')!
 const eventSuggestion = detectAutomationSuggestion('當 webhook 收到 CI 失敗就通知我')!
@@ -32,20 +30,22 @@ function renderCard(
     }),
   )
   const onDismiss = vi.fn()
+  const onRunnerChange = vi.fn()
   render(
     <AutomationSuggestionCard
       suggestion={scheduleSuggestion}
       queueLength={0}
       queueMax={24}
       availableSkills={[]}
-      runnerLabel="內建"
+      runner="builtin"
+      onRunnerChange={onRunnerChange}
       onCreateSchedule={onCreateSchedule}
       onCreateEvent={onCreateEvent}
       onDismiss={onDismiss}
       {...overrides}
     />,
   )
-  return { onCreateSchedule, onCreateEvent, onDismiss }
+  return { onCreateSchedule, onCreateEvent, onDismiss, onRunnerChange }
 }
 
 afterEach(() => {
@@ -66,7 +66,6 @@ describe('對話內自動化建議卡', () => {
     const card = screen.getByTestId('automation-suggestion-card')
     expect(card).toHaveTextContent('排程只在 app 開啟或常駐系統匣時觸發')
     expect(card).toHaveTextContent('目前待跑 3/24')
-    expect(card).toHaveTextContent('內建')
   })
 
   it('改時間後建立，草稿帶著改過的值送出', async () => {
@@ -140,6 +139,13 @@ describe('對話內自動化建議卡', () => {
       '低於 10 分鐘的高頻觸發',
     )
     expect(screen.getByRole('button', { name: '建立' })).toBeEnabled()
+  })
+
+  it('可以改執行引擎（不是唯讀顯示）', async () => {
+    const user = userEvent.setup()
+    const { onRunnerChange } = renderCard()
+    await user.click(screen.getByRole('button', { name: 'Codex' }))
+    expect(onRunnerChange).toHaveBeenCalledWith('codex')
   })
 
   it('可以附掛 Skills（不是閹割版）', async () => {

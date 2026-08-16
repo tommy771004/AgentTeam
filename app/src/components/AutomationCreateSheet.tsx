@@ -44,8 +44,8 @@ export function AutomationCreateSheet({
   kind: AutomationCreateKind | null
   /** composer 現有文字，用來預填 */
   objective: string
-  onCreateSchedule: (draft: ScheduleDraft) => Promise<void>
-  onCreateEvent: (draft: EventDraft) => Promise<void>
+  onCreateSchedule: (draft: ScheduleDraft) => Promise<unknown>
+  onCreateEvent: (draft: EventDraft) => Promise<unknown>
   onCreated: (created: AutomationCreated) => void
   onClose: () => void
 }) {

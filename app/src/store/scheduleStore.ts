@@ -37,14 +37,17 @@ interface ScheduleStore {
     skillNames?: string[]
     runner?: ScheduledJob['runner']
     projectRoot?: string
-  }) => Promise<void>
+    createdFrom?: ScheduledJob['createdFrom']
+  }) => Promise<ScheduledJob>
   updateJobSkills: (id: string, skillNames: string[]) => Promise<void>
   addJobFromObjective: (objective: string) => Promise<void>
   toggleJob: (id: string) => Promise<void>
   removeJob: (id: string) => Promise<void>
   markJobResult: (id: string, status: ScheduledJob['lastStatus']) => Promise<void>
   claimDueJobs: () => ScheduledJob[]
-  addEvent: (input: Omit<ProactiveEvent, 'id' | 'lastTriggeredAt' | 'triggerCount'>) => Promise<void>
+  addEvent: (
+    input: Omit<ProactiveEvent, 'id' | 'lastTriggeredAt' | 'triggerCount'>,
+  ) => Promise<ProactiveEvent>
   removeEvent: (id: string) => Promise<void>
   toggleEvent: (id: string) => Promise<void>
   matchEventEvidence: (payload: ProactiveEventPayload) => EventMatchResult | null
@@ -106,6 +109,9 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
     const job = createJob(input)
     set({ jobs: [job, ...get().jobs] })
     await get().persistJobs()
+    // 回傳建立出來的那一筆：呼叫端需要 id 與 nextRunAt，
+    // 靠 name+objective 回讀會在同目標多筆時抓錯人。
+    return job
   },
 
   updateJobSkills: async (id, skillNames) => {
@@ -198,6 +204,7 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
     }
     set({ events: [event, ...get().events] })
     await get().persistEvents()
+    return event
   },
 
   removeEvent: async (id) => {

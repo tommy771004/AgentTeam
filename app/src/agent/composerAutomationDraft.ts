@@ -109,7 +109,16 @@ export function eventDraftReady(draft: EventDraft): boolean {
   return Boolean(draft.objective.trim() && draft.source.trim())
 }
 
-/** 排程能表達的執行引擎。 */
+/** 排程能表達的執行引擎（UI 選單與白名單共用同一份）。 */
+export const JOB_RUNNER_OPTIONS: ReadonlyArray<{ id: JobRunner; label: string }> = [
+  { id: 'builtin', label: '內建' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'claude', label: 'Claude' },
+  { id: 'grok', label: 'Grok' },
+  { id: 'opencode', label: 'OpenCode' },
+  { id: 'cursor', label: 'Cursor' },
+]
+
 const JOB_RUNNERS: readonly JobRunner[] = [
   'builtin',
   'codex',
@@ -135,9 +144,17 @@ export function jobRunnerFor(runner: ThreadRunner): JobRunner {
  * 抽成純轉換是為了讓「composer 快速動作」「對話建議卡」「自動化頁」三個殼
  * 送出的東西逐欄位相同——卡片是另一個殼，不是另一條 API。
  */
+export type AutomationCreatedFrom = 'automation-page' | 'composer' | 'chat-suggestion'
+
 export function scheduleCreateRequest(
   draft: ScheduleDraft,
-  context: { runner: ThreadRunner; projectRoot?: string | null; now?: number },
+  context: {
+    runner: ThreadRunner
+    projectRoot?: string | null
+    now?: number
+    /** 建立來源（ADR-0040 的來源欄位；不影響執行） */
+    createdFrom?: AutomationCreatedFrom
+  },
 ) {
   const now = context.now ?? Date.now()
   return {
@@ -153,6 +170,7 @@ export function scheduleCreateRequest(
     skillNames: draft.skillNames?.length ? draft.skillNames : undefined,
     runner: jobRunnerFor(context.runner),
     projectRoot: context.projectRoot || undefined,
+    createdFrom: context.createdFrom,
   }
 }
 

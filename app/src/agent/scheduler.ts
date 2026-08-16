@@ -168,6 +168,7 @@ export function createJob(input: {
   skillNames?: string[]
   runner?: ScheduledJob['runner']
   projectRoot?: string
+  createdFrom?: ScheduledJob['createdFrom']
 }): ScheduledJob {
   const now = new Date()
   const id = `job_${Math.random().toString(36).slice(2, 10)}`
@@ -191,6 +192,7 @@ export function createJob(input: {
     skillNames: input.skillNames?.filter(Boolean) || [],
     runner: input.runner && input.runner !== 'builtin' ? input.runner : undefined,
     projectRoot: input.projectRoot?.trim() || undefined,
+    createdFrom: input.createdFrom,
     lastRunAt: null,
     nextRunAt,
     lastStatus: 'idle',
