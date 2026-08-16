@@ -1,29 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AgentMode, LoopType } from '../agent/types'
 import type { HandoffAvailability } from '../agent/composerRunControls'
-import type { ThreadRunner } from '../store/threadStore'
 import { Icon } from './Icon'
-
-type RunnerOption = {
-  id: ThreadRunner
-  label: string
-  ready: boolean
-  blurb: string
-}
 
 type ComposerQuickActionsProps = {
   disabled: boolean
   projectRoot: string | null
-  /** null = auto classify */
-  loopType: LoopType | null
-  agentMode: AgentMode
-  runner: ThreadRunner
-  runners: RunnerOption[]
   onAttach: () => void
   onPickProject: () => void
-  onLoopChange: (type: LoopType | null) => void
-  onAgentModeChange: (mode: AgentMode) => void
-  onRunnerChange: (runner: ThreadRunner) => void
   onOpenCapabilities: () => void
   onToggleRunPanel: () => void
   onToggleTerminal: () => void
@@ -32,27 +15,17 @@ type ComposerQuickActionsProps = {
   onCreateHandoff: () => void
 }
 
-const LOOPS: Array<{ type: LoopType | null; label: string; icon: string }> = [
-  { type: null, label: '自動', icon: 'auto_awesome' },
-  { type: 'Goal-based', label: '目標', icon: 'track_changes' },
-  { type: 'Turn-based', label: '回合', icon: 'forum' },
-  { type: 'Time-based', label: '定時', icon: 'schedule' },
-  { type: 'Proactive', label: '事件', icon: 'bolt' },
-]
-
-/** Compact Codex-style + menu for optional conversation controls. */
+/**
+ * Compact Codex-style + menu for adding content to the conversation.
+ *
+ * Loop Pattern / 執行引擎 / Build-Plan / 推理程度 已移入 ComposerAdvanced
+ * （ticket 03）——這個選單只留「加東西進來」與少數面板開關。
+ */
 export function ComposerQuickActions({
   disabled,
   projectRoot,
-  loopType,
-  agentMode,
-  runner,
-  runners,
   onAttach,
   onPickProject,
-  onLoopChange,
-  onAgentModeChange,
-  onRunnerChange,
   onOpenCapabilities,
   onToggleRunPanel,
   onToggleTerminal,
@@ -124,67 +97,6 @@ export function ComposerQuickActions({
             disabled={!handoff.available}
             onClick={() => choose(onCreateHandoff)}
           />
-
-          <MenuLabel>工作方式</MenuLabel>
-          <div className="grid grid-cols-2 gap-1 px-1 pb-1">
-            {(['build', 'plan'] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => choose(() => onAgentModeChange(mode))}
-                className={`rounded-control px-2.5 py-2 text-left text-[13px] font-medium transition-colors ${
-                  agentMode === mode
-                    ? 'bg-hover-2 text-ink'
-                    : 'text-ink-2 hover:bg-hover-2'
-                }`}
-              >
-                <Icon name={mode === 'build' ? 'construction' : 'checklist'} size={16} className="mr-1.5 align-text-bottom" />
-                {mode === 'build' ? 'Build' : '規劃模式'}
-              </button>
-            ))}
-          </div>
-          <div className="grid grid-cols-5 gap-1 px-1 pb-1">
-            {LOOPS.map((item) => (
-              <button
-                key={item.type ?? 'auto'}
-                type="button"
-                title={
-                  item.type === null
-                    ? '自動分類：短訊息回合制、複雜目標多步迴圈'
-                    : item.label
-                }
-                onClick={() => choose(() => onLoopChange(item.type))}
-                className={`flex flex-col items-center gap-1 rounded-control px-1 py-2 text-[10px] transition-colors ${
-                  loopType === item.type
-                    ? 'bg-accent-tint text-accent-ink'
-                    : 'text-ink-2 hover:bg-hover-2'
-                }`}
-              >
-                <Icon name={item.icon} size={17} />
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          <MenuLabel>執行引擎</MenuLabel>
-          <div className="flex flex-wrap gap-1 px-1 pb-1">
-            {runners.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                disabled={!option.ready && option.id !== 'builtin'}
-                title={option.ready ? option.blurb : `${option.label} 尚未授權`}
-                onClick={() => choose(() => onRunnerChange(option.id))}
-                className={`rounded-control px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
-                  runner === option.id
-                    ? 'bg-accent-tint text-accent-ink'
-                    : 'bg-inset text-ink-2 hover:bg-hover-2'
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
 
           <MenuLabel>更多</MenuLabel>
           <MenuButton icon="extension" title="擴充能力" description="管理連線、技能與外掛程式" onClick={() => choose(onOpenCapabilities)} />

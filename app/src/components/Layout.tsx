@@ -112,26 +112,10 @@ export function Layout() {
     setShowRunPanel(true)
   }
 
-  const bareShell =
-    location.pathname.startsWith('/execution') ||
-    location.pathname.startsWith('/success') ||
-    location.pathname.startsWith('/failed')
+  // 裸殼外殼（/execution、/success、/failed）已隨那三個頁面一起退役（ticket 08）；
+  // 這些路徑現在 redirect 回首頁，走一般的 chrome。
 
   const isHome = location.pathname === '/' || location.pathname === ''
-
-  if (bareShell) {
-    return (
-      <div className="h-full flex flex-col bg-background text-on-background">
-        {!bridge.bridgeReady && bridge.detail && (
-          <div className="shrink-0 px-3 py-2 text-[11px] bg-amber-500/15 text-amber-100 border-b border-amber-500/30">
-            <strong className="font-semibold">{bridge.label}：</strong> {bridge.detail}
-          </div>
-        )}
-        <Outlet />
-        <FloatingConsole />
-      </div>
-    )
-  }
 
   return (
     <div className="h-full flex bg-background text-on-background overflow-hidden">

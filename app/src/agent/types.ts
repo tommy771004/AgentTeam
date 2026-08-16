@@ -299,6 +299,14 @@ export interface RuntimeOverrides {
   loopTypeMode?: 'force' | 'auto'
   /** When loopTypeMode=force, re-derive plan for this loop type. */
   forceLoopType?: LoopType
+  /**
+   * User-edited Definition of Done from the composer preview (ticket 06).
+   *
+   * Overwrites ONLY the DoD text of a Goal-based run, after classification and
+   * any LLM plan refinement. It never changes the loop type, the steps or the
+   * iteration budget — an absent value leaves auto-parse behaviour untouched.
+   */
+  userDefinitionOfDone?: string
   /** Thread id for plan bubble / UI correlation (optional). */
   threadId?: string
   /**

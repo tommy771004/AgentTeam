@@ -60,7 +60,11 @@ function parseClock(text: string): string | undefined {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
-function parseScheduleHint(text: string): AutomationScheduleHint {
+/**
+ * 從文字推出排程提示（每 N 分鐘／每天幾點）。
+ * composer 的排程建立表單（ticket 04）與這裡的建議卡共用同一份判讀。
+ */
+export function parseScheduleHintFromText(text: string): AutomationScheduleHint {
   const interval = text.match(INTERVAL_RE)
   if (interval) {
     const amount = Math.max(1, Number(interval[1]))
@@ -119,7 +123,7 @@ export function detectAutomationSuggestion(
     }
   }
 
-  const schedule = parseScheduleHint(objective)
+  const schedule = parseScheduleHintFromText(objective)
   return {
     id: `automation_${dedupKey.replace(/[^a-z0-9._:-]+/gi, '_').slice(0, 110)}`,
     dedupKey,

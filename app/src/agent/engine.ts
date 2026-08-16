@@ -483,6 +483,23 @@ export class AgentLoopEngine {
             )
           }
         }
+
+        // Ticket 06: the composer's DoD preview may carry a user-edited
+        // acceptance criterion. It overwrites the DoD text only — after
+        // classification and any LLM refinement — so the loop type, the steps
+        // and the iteration budget stay exactly what parsing decided.
+        const userDod = this.overrides.userDefinitionOfDone?.trim()
+        if (userDod) {
+          if (this.state.loopConfig.loopType === 'Goal-based') {
+            this.state.loopConfig.definitionOfDone = userDod
+            this.log('INFO', `DoD 由使用者指定：${userDod.slice(0, 120)}`)
+          } else {
+            this.log(
+              'WARN',
+              `使用者 DoD 已忽略：本次分類為 ${this.state.loopConfig.loopType}，非 Goal-based`,
+            )
+          }
+        }
       }
 
       // Defense in depth: taskRunCoordinator validates before reservation,

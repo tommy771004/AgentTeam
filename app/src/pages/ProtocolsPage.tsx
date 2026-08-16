@@ -3,13 +3,23 @@ import { Icon } from '../components/Icon'
 import { CommandComposer } from '../components/CommandComposer'
 import { EngineAvailabilityBanner } from '../components/EngineAvailabilityBanner'
 import { ThreadSidebar } from '../components/ThreadSidebar'
-import { ModelDepthMenu } from '../components/ModelDepthMenu'
+import { ModelMenu } from '../components/ModelMenu'
 import { ApprovalModeMenu } from '../components/ApprovalModeMenu'
 import { ProjectContextBar } from '../components/ProjectContextBar'
 import { InlineRunPanel } from '../components/InlineRunPanel'
 import { RunProcessFeed } from '../components/RunProcessFeed'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { ComposerQuickActions } from '../components/ComposerQuickActions'
+import { ComposerAdvanced, type RunnerOption } from '../components/ComposerAdvanced'
+import {
+  AutomationCreateSheet,
+  type AutomationCreateKind,
+  type AutomationCreated,
+} from '../components/AutomationCreateSheet'
+import { useScheduleStore } from '../store/scheduleStore'
+import { jobRunnerFor } from '../agent/composerAutomationDraft'
+import { DodPreviewCard } from '../components/DodPreviewCard'
+import { previewDod, resolveUserDefinitionOfDone } from '../agent/dodPreview'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import { useAgentStore } from '../store/agentStore'
 import { useRunActivityStore } from '../store/runActivityStore'
@@ -59,11 +69,17 @@ export function ProtocolsPage() {
   } = useAgentStore()
   const [busy, setBusy] = useState(false)
   const [showTerminal, setShowTerminal] = useState(false)
+  const [automationKind, setAutomationKind] = useState<AutomationCreateKind | null>(null)
+  /** 使用者編輯過的 DoD（undefined = 未編輯，沿用 auto-parse） */
+  const [editedDod, setEditedDod] = useState<string | undefined>(undefined)
+  const [dodSkipped, setDodSkipped] = useState(false)
   const [composerApprovalModes, setComposerApprovalModes] = useState<Record<string, ApprovalMode>>({})
   const { run: runSlash } = useSlashExecutor()
   const settings = useSettingsStore((s) => s.settings)
   const projectRoot = useProjectStore((s) => s.root)
   const pickProjectFolder = useProjectStore((s) => s.pickFolder)
+  const addJob = useScheduleStore((s) => s.addJob)
+  const addEvent = useScheduleStore((s) => s.addEvent)
 
   const {
     hydrate,
@@ -162,18 +178,14 @@ export function ProtocolsPage() {
   const runner: ThreadRunner = thread?.runner || 'builtin'
   const live = lifecycle.live
   const empty = !thread?.bubbles.length && !live
+  // 送出前預覽這次任務的驗收標準；Turn-based 的輕量對話不會拿到卡片。
+  const dodPreview = dodSkipped ? null : previewDod(draftInput, pinnedLoopType)
 
   const authorizedRunners = (settings.cliProviders || []).filter(
     (p) => p.enabled && p.authorized,
   )
 
-  const runnerOptions: Array<{
-    id: ThreadRunner
-    label: string
-    ready: boolean
-    /** Capability blurb for title tooltip */
-    blurb: string
-  }> = [
+  const runnerOptions: RunnerOption[] = [
     {
       id: 'builtin',
       label: '內建',
@@ -240,9 +252,16 @@ export function ProtocolsPage() {
       settings.approvalMode || 'auto',
       composerApprovalMode,
     )
+    // 只有真的改過的 DoD 才隨 ingress snapshot 送出；沒改就完全沿用 auto-parse。
+    const userDefinitionOfDone = resolveUserDefinitionOfDone(
+      editedDod,
+      previewDod(raw, pinnedLoopType),
+    )
 
     setBusy(true)
     setDraftInput('')
+    setEditedDod(undefined)
+    setDodSkipped(false)
     if (thread?.loopType) setSelectedLoopType(thread.loopType)
     else setSelectedLoopType(null)
 
@@ -287,7 +306,7 @@ export function ProtocolsPage() {
         // Snapshot the project pinned at dispatch time — a concurrent run must not
         // silently re-resolve to whatever project the UI switches to mid-flight.
         projectRoot: projectRoot || undefined,
-        overrides: approvalMode,
+        overrides: { ...approvalMode, userDefinitionOfDone },
       })
       suggestionOnly = Boolean(r.suggestion)
       if (r.queued) {
@@ -347,8 +366,24 @@ export function ProtocolsPage() {
   const onModeChange = (t: LoopType | null) => {
     setSelectedLoopType(t)
     if (activeId) setLoopType(activeId, t)
-    // Time / Proactive 真正規則在「自動化」；此處僅標記語意
-    // null = 自動分類
+    // null = 自動分類。Time / Proactive 不從這裡進來——那兩格是建立規則的動作
+    // （onAutomationCreated），composer 送不出帶觸發語意的 run。
+  }
+
+  /** 建立成功後把結果留在對話裡，並指出去哪裡調整。 */
+  const onAutomationCreated = (created: AutomationCreated) => {
+    if (!activeId) return
+    const label = created.kind === 'schedule' ? '定時任務' : '事件規則'
+    // 排程存不下對話目前的引擎時，把降級講出來而不是默默換掉。
+    const downgraded =
+      created.kind === 'schedule' && jobRunnerFor(runner) !== runner
+        ? `（排程不支援 ${runner} 引擎，將以內建引擎執行）`
+        : ''
+    pushBubble(
+      activeId,
+      'system',
+      `已建立${label}「${created.name}」：${created.summary}${downgraded}。可在「自動化」頁調整或停用。`,
+    )
   }
 
   const createHandoff = () => {
@@ -492,6 +527,62 @@ export function ProtocolsPage() {
             <div className="shrink-0 w-full pt-3 pb-4 space-y-2">
               <EngineAvailabilityBanner />
               <ProjectContextBar />
+              <AutomationCreateSheet
+                kind={automationKind}
+                objective={draftInput}
+                onCreateSchedule={(draft) =>
+                  addJob({
+                    name: draft.name.trim() || draft.objective.slice(0, 40),
+                    objective: draft.objective.trim(),
+                    kind: draft.kind,
+                    dailyAt: draft.kind === 'daily' ? draft.dailyAt : undefined,
+                    intervalMinutes:
+                      draft.kind === 'interval' ? draft.intervalMinutes : undefined,
+                    runAt:
+                      draft.kind === 'once'
+                        ? new Date(draft.runAt || Date.now() + 60_000).toISOString()
+                        : undefined,
+                    runner: jobRunnerFor(runner),
+                    projectRoot: projectRoot || undefined,
+                  })
+                }
+                onCreateEvent={(draft) =>
+                  addEvent({
+                    name: draft.name.trim() || draft.objective.slice(0, 40),
+                    source: draft.source.trim(),
+                    subjectContains: draft.subjectContains.trim() || undefined,
+                    hasAttachment: draft.hasAttachment,
+                    keyword: draft.keyword.trim() || undefined,
+                    objective: draft.objective.trim(),
+                    enabled: true,
+                  })
+                }
+                onCreated={onAutomationCreated}
+                onClose={() => setAutomationKind(null)}
+              />
+              <DodPreviewCard
+                preview={dodPreview}
+                value={editedDod}
+                onChange={setEditedDod}
+                onSkip={() => setDodSkipped(true)}
+              />
+              <ComposerAdvanced
+                loopType={pinnedLoopType}
+                agentMode={agentMode}
+                runner={runner}
+                runners={runnerOptions}
+                depth={depth}
+                speed={speed}
+                model={threadModel}
+                globalModel={settings.model}
+                cliProviders={settings.cliProviders}
+                onLoopChange={onModeChange}
+                onCreateAutomation={setAutomationKind}
+                onAgentModeChange={(mode) => activeId && setAgentMode(activeId, mode)}
+                onRunnerChange={(nextRunner) => activeId && setRunner(activeId, nextRunner)}
+                onDepthChange={(next) => activeId && setThinkingDepth(activeId, next)}
+                onSpeedChange={(next) => activeId && setSpeed(activeId, next)}
+              />
               <CommandComposer
                 value={draftInput}
                 onChange={setDraftInput}
@@ -514,15 +605,8 @@ export function ProtocolsPage() {
                   <ComposerQuickActions
                     disabled={disabled}
                     projectRoot={projectRoot}
-                    loopType={pinnedLoopType}
-                    agentMode={agentMode}
-                    runner={runner}
-                    runners={runnerOptions}
                     onAttach={openFilePicker}
                     onPickProject={() => void pickProjectFolder()}
-                    onLoopChange={onModeChange}
-                    onAgentModeChange={(mode) => activeId && setAgentMode(activeId, mode)}
-                    onRunnerChange={(nextRunner) => activeId && setRunner(activeId, nextRunner)}
                     onOpenCapabilities={() => {
                       window.location.hash = '#/learning?tab=plugins'
                     }}
@@ -578,10 +662,8 @@ export function ProtocolsPage() {
                   </div>
                 }
                 footerRight={
-                  <ModelDepthMenu
+                  <ModelMenu
                     model={threadModel}
-                    depth={depth}
-                    speed={speed}
                     globalModel={settings.model}
                     cliProviders={settings.cliProviders}
                     onModelChange={(m) => {
@@ -590,8 +672,6 @@ export function ProtocolsPage() {
                       const inferred = inferRunnerFromModel(m, settings.cliProviders || [])
                       if (inferred !== 'builtin') setRunner(activeId, inferred)
                     }}
-                    onDepthChange={(d) => activeId && setThinkingDepth(activeId, d)}
-                    onSpeedChange={(s) => activeId && setSpeed(activeId, s)}
                   />
                 }
               />

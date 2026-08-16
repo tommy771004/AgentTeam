@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { capabilitiesForRunner } from '../agent/runners'
 import { Icon } from './Icon'
+import { RetryWithOverrides } from './RetryWithOverrides'
 import { useAgentStore } from '../store/agentStore'
 import { useProjectStore } from '../store/projectStore'
+import { useSettingsStore } from '../store/settingsStore'
 import { useThreadStore } from '../store/threadStore'
 
 /**
@@ -11,6 +13,9 @@ import { useThreadStore } from '../store/threadStore'
  * Keeping these below the result prevents the live execution surface from
  * turning into a second composer. It also means collapsing the run summary
  * never hides the one action that can move the conversation forward.
+ *
+ * ticket 07：失敗／中止的 run 在這裡也能直接調參數重跑——那個能力以前只在
+ * legacy 的裸殼失敗頁上，等於藏起來了。三個後續動作都在同一區。
  */
 export function RunContinuationActions({
   threadId,
@@ -23,6 +28,7 @@ export function RunContinuationActions({
   const continueTurn = useAgentStore((state) => state.continueTurn)
   const activeRunIds = useAgentStore((state) => state.activeRunIds)
   const runState = useAgentStore((state) => (runId ? state.runStates[runId] : undefined))
+  const settings = useSettingsStore((state) => state.settings)
   const [startingGoal, setStartingGoal] = useState(false)
 
   const live = Boolean(
@@ -38,8 +44,14 @@ export function RunContinuationActions({
     !live && continueGoal && capabilitiesForRunner(thread?.runner || 'builtin').continueGoal,
   )
   const hasPendingGoal = Boolean(!live && continueGoal)
+  // 只有真的沒跑成的 run 才給重跑；成功的結果不需要這顆按鈕。
+  const canRetry = Boolean(
+    !live &&
+      runState?.objective &&
+      (runState.status === 'failed' || runState.status === 'halted'),
+  )
 
-  if (!canContinueTurn && !hasPendingGoal) return null
+  if (!canContinueTurn && !hasPendingGoal && !canRetry) return null
 
   const onContinueGoal = async () => {
     if (!canContinueGoal || !continueGoal || startingGoal) return
@@ -65,7 +77,7 @@ export function RunContinuationActions({
     <section className="agent-result-actions" aria-label="結果後續操作">
       <div className="flex items-center gap-2 text-[11px] text-ink-3">
         <span className="font-medium text-ink-2">下一步</span>
-        <span>結果已完成，可繼續這個對話</span>
+        <span>{canRetry ? '這次沒跑完，可以調整後再試' : '結果已完成，可繼續這個對話'}</span>
       </div>
 
       {canContinueTurn ? (
@@ -105,6 +117,26 @@ export function RunContinuationActions({
             className={`shrink-0 text-ink-3 ${startingGoal ? 'animate-spin' : ''}`}
           />
         </button>
+      ) : null}
+
+      {canRetry && runState ? (
+        <RetryWithOverrides
+          threadId={threadId}
+          objective={runState.objective}
+          loopType={runState.loopConfig?.loopType}
+          evidence={{
+            scheduleTrigger: runState.scheduleTrigger,
+            eventTrigger: runState.eventTrigger,
+          }}
+          defaults={{
+            maxIterations: Math.max(
+              runState.loopConfig?.maxIterations || 0,
+              settings.maxIterationsDefault || 5,
+            ),
+            minConfidence: runState.minConfidence || settings.minConfidence || 0.8,
+            timeoutMs: 30_000,
+          }}
+        />
       ) : null}
 
       {hasPendingGoal && continueGoal && !canContinueGoal ? (

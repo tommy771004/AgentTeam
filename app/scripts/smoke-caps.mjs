@@ -22,6 +22,30 @@ function readTaskRunRuntimeSource(fs) {
   ].join('\n')
 }
 
+/**
+ * Renderer entry surface: every page / hook / component / job that could
+ * plausibly start a run. Enumerated from disk rather than hard-coded so a
+ * deleted or added file can never silently drop out of the drift guards.
+ */
+function listRunEntrySurface(fs) {
+  const dirs = ['src/pages', 'src/hooks', 'src/components', 'src/agent/hermes']
+  const files = []
+  const walk = (rel) => {
+    const abs = path.join(appRoot, rel)
+    if (!fs.existsSync(abs)) return
+    for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+      const next = `${rel}/${entry.name}`
+      if (entry.isDirectory()) walk(next)
+      else if (/\.tsx?$/.test(entry.name) && !/\.(test|prototype)\.tsx?$/.test(entry.name)) {
+        files.push(next)
+      }
+    }
+  }
+  for (const dir of dirs) walk(dir)
+  files.push('src/App.tsx')
+  return files.sort()
+}
+
 let passed = 0
 let skipped = 0
 
@@ -502,17 +526,7 @@ await test('W1: busy policy — automation queues, interactive follows followUpM
 
 await test('W1: entry drift guard — no dispatchThreadTask outside controller', async () => {
   const fs = await import('node:fs')
-  const files = [
-    'src/pages/ProtocolsPage.tsx',
-    'src/hooks/useSlashExecutor.ts',
-    'src/App.tsx',
-    'src/pages/FailedPage.tsx',
-    'src/pages/RecordsPage.tsx',
-    'src/pages/LogsPage.tsx',
-    'src/pages/SuccessPage.tsx',
-    'src/pages/EventsPage.tsx',
-    'src/pages/AutomationPage.tsx',
-  ]
+  const files = listRunEntrySurface(fs)
   for (const f of files) {
     const src = fs.readFileSync(path.join(appRoot, f), 'utf8')
     assert.equal(
@@ -597,21 +611,7 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   const policy = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunPolicy.ts'), 'utf8')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunTypes.ts'), 'utf8')
-  const callers = [
-    'src/App.tsx',
-    'src/hooks/useSlashExecutor.ts',
-    'src/pages/ProtocolsPage.tsx',
-    'src/pages/AutomationPage.tsx',
-    'src/pages/EventsPage.tsx',
-    'src/pages/FailedPage.tsx',
-    'src/pages/LogsPage.tsx',
-    'src/pages/RecordsPage.tsx',
-    'src/pages/SuccessPage.tsx',
-    'src/pages/SubDesignPage.tsx',
-    'src/components/RunContinuationActions.tsx',
-    'src/components/subdesign/CritiqueTheater.tsx',
-    'src/agent/hermes/backgroundJobs.ts',
-  ]
+  const callers = listRunEntrySurface(fs)
   assert.match(coordinator, /async function coordinateTaskRun/)
   assert.doesNotMatch(coordinator, /export async function coordinateTaskRun/)
   assert.match(coordinator, /export async function runTask/)
@@ -628,6 +628,7 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
     false,
     'runExternal.ts must be deleted',
   )
+  let coordinatorCallers = 0
   for (const file of callers) {
     const source = fs.readFileSync(path.join(appRoot, file), 'utf8')
     assert.doesNotMatch(
@@ -635,8 +636,15 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
       /runExternalObjective\s*\(/,
       `${file} 不可直接呼叫 runExternalObjective`,
     )
-    assert.match(source, /taskRunCoordinator/)
+    if (!/\brunTask\s*\(/.test(source)) continue
+    coordinatorCallers++
+    assert.match(
+      source,
+      /taskRunCoordinator/,
+      `${file} 呼叫 runTask 就必須從 taskRunCoordinator 取得`,
+    )
   }
+  assert.ok(coordinatorCallers >= 5, 'entry surface should still contain real runTask callers')
 })
 
 await test('Task run deepening: coordinator owns orchestration; runExternal shell gone', async () => {
@@ -674,21 +682,7 @@ await test('Ticket 03: lifecycle-control plumbing is contracted', async () => {
 await test('Ticket 04: lifecycle ownership drift stays blocked at module seams', async () => {
   const fs = await import('node:fs')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
-  const entryFiles = [
-    'src/App.tsx',
-    'src/hooks/useSlashExecutor.ts',
-    'src/pages/ProtocolsPage.tsx',
-    'src/pages/AutomationPage.tsx',
-    'src/pages/EventsPage.tsx',
-    'src/pages/FailedPage.tsx',
-    'src/pages/LogsPage.tsx',
-    'src/pages/RecordsPage.tsx',
-    'src/pages/SuccessPage.tsx',
-    'src/pages/SubDesignPage.tsx',
-    'src/components/InlineRunPanel.tsx',
-    'src/components/subdesign/CritiqueTheater.tsx',
-    'src/agent/hermes/backgroundJobs.ts',
-  ]
+  const entryFiles = listRunEntrySurface(fs)
   for (const file of entryFiles) {
     const source = fs.readFileSync(path.join(appRoot, file), 'utf8')
     assert.doesNotMatch(source, /dispatchThreadTask\s*\(/, `${file} must enter through runTask`)

@@ -1,43 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './Icon'
-import {
-  SPEED_MODES,
-  THINKING_DEPTHS,
-  getSpeedMode,
-  getThinkingDepth,
-  type SpeedMode,
-  type ThinkingDepth,
-} from '../agent/thinking'
-import {
-  depthsForModel,
-  modelsFromCliProviders,
-} from '../agent/cliProviders'
+import { modelsFromCliProviders } from '../agent/cliProviders'
 import type { CliProviderConfig } from '../agent/types'
 
-type Panel = 'root' | 'model' | 'depth' | 'speed'
+type Panel = 'root' | 'model'
 
 /**
- * 附圖風格：右下角 pill「模型 推理強度」巢狀選單
- * 模型列表來自已啟用+授權的 CLI
+ * 右下角常駐的模型 pill。
+ *
+ * ticket 03 之後這裡只管模型：推理程度與速度屬於開發者級決策，已移入 composer
+ * 的「進階」折疊區（ComposerAdvanced），兩邊不重複擺同一個控制。
  */
-export function ModelDepthMenu({
+export function ModelMenu({
   model,
-  depth,
-  speed = 'standard',
   globalModel,
   cliProviders,
   onModelChange,
-  onDepthChange,
-  onSpeedChange,
 }: {
   model: string
-  depth: ThinkingDepth
-  speed?: SpeedMode
   globalModel: string
   cliProviders?: CliProviderConfig[]
   onModelChange: (m: string) => void
-  onDepthChange: (d: ThinkingDepth) => void
-  onSpeedChange?: (s: SpeedMode) => void
 }) {
   const [open, setOpen] = useState(false)
   const [panel, setPanel] = useState<Panel>('root')
@@ -59,19 +42,8 @@ export function ModelDepthMenu({
     [dynamicModels],
   )
 
-  const allowedDepths = useMemo(() => {
-    const mid = model.trim() || globalModel
-    if (!cliProviders?.length || !dynamicModels.length) {
-      return THINKING_DEPTHS
-    }
-    const ids = depthsForModel(cliProviders, mid)
-    return THINKING_DEPTHS.filter((d) => ids.includes(d.id))
-  }, [cliProviders, dynamicModels.length, model, globalModel])
-
   const effective = (model.trim() || globalModel || '模型').slice(0, 28)
-  const depthDef = getThinkingDepth(depth)
-  const speedDef = getSpeedMode(speed)
-  const pillLabel = `${effective.length > 14 ? effective.slice(0, 12) + '…' : effective} ${depthDef.label}`
+  const pillLabel = effective.length > 20 ? `${effective.slice(0, 18)}…` : effective
 
   useEffect(() => {
     if (!open) return
@@ -89,14 +61,6 @@ export function ModelDepthMenu({
     if (open) setCustomModel(model)
   }, [open, model])
 
-  // 若目前深度不在允許列表，提示仍可顯示
-  useEffect(() => {
-    if (!allowedDepths.some((d) => d.id === depth) && allowedDepths[0]) {
-      onDepthChange(allowedDepths[0].id)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, allowedDepths.map((d) => d.id).join(',')])
-
   return (
     <div className="relative" ref={rootRef}>
       <button
@@ -106,7 +70,7 @@ export function ModelDepthMenu({
           setPanel('root')
         }}
         className="inline-flex items-center gap-1 max-w-[220px] px-2.5 py-1 rounded-control border border-line bg-surface-container hover:bg-hover-2 text-[11px] text-on-surface-variant transition-colors"
-        title="模型與推理強度"
+        title="模型"
       >
         <span className="truncate font-medium text-on-surface">{pillLabel}</span>
         <Icon name="expand_more" size={14} className="shrink-0 opacity-70" />
@@ -114,36 +78,6 @@ export function ModelDepthMenu({
 
       {open && (
         <div className="absolute bottom-full right-0 mb-2 z-[90] flex items-end gap-1">
-          {panel === 'depth' && (
-            <div className="w-48 rounded-card border border-line bg-surface-container shadow-raised py-1 overflow-hidden">
-              <div className="px-3 py-2 text-[11px] text-ink-3 font-medium">推理程度</div>
-              {allowedDepths.map((d) => {
-                const active = depth === d.id
-                return (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => {
-                      onDepthChange(d.id)
-                      setPanel('root')
-                    }}
-                    className={`w-full flex items-center justify-between px-3 py-2 text-left text-[13px] ${
-                      active ? 'bg-hover text-ink' : 'text-ink-2 hover:bg-hover-2'
-                    }`}
-                  >
-                    <span>
-                      {d.label}
-                      {d.costNote && (
-                        <span className="block text-[10px] text-ink-3 mt-0.5">{d.costNote}</span>
-                      )}
-                    </span>
-                    {active && <Icon name="check" size={16} className="text-ink shrink-0" />}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
           {panel === 'model' && (
             <div className="w-64 rounded-card border border-line bg-surface-container shadow-raised py-1 overflow-hidden max-h-80 flex flex-col">
               <div className="px-3 py-2 text-[11px] text-ink-3 font-medium">
@@ -211,54 +145,15 @@ export function ModelDepthMenu({
             </div>
           )}
 
-          {panel === 'speed' && (
-            <div className="w-44 rounded-card border border-line bg-surface-container shadow-raised py-1 overflow-hidden">
-              <div className="px-3 py-2 text-[11px] text-ink-3 font-medium">速度</div>
-              {SPEED_MODES.map((s) => {
-                const active = speed === s.id
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => {
-                      onSpeedChange?.(s.id)
-                      setPanel('root')
-                    }}
-                    className={`w-full flex items-center justify-between px-3 py-2 text-left text-[13px] ${
-                      active ? 'bg-hover text-ink' : 'text-ink-2 hover:bg-hover-2'
-                    }`}
-                  >
-                    <span>
-                      {s.label}
-                      <span className="block text-[10px] text-ink-3 mt-0.5">{s.description}</span>
-                    </span>
-                    {active && <Icon name="check" size={16} />}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
           <div className="w-56 rounded-card border border-line bg-surface-container shadow-raised py-1 overflow-hidden">
             <MenuRow
               label="模型"
               value={effective}
               onClick={() => setPanel(panel === 'model' ? 'root' : 'model')}
             />
-            <MenuRow
-              label="推理強度"
-              value={depthDef.label}
-              active={panel === 'depth'}
-              onClick={() => setPanel(panel === 'depth' ? 'root' : 'depth')}
-            />
-            <MenuRow
-              label="速度"
-              value={speedDef.label}
-              onClick={() => setPanel(panel === 'speed' ? 'root' : 'speed')}
-            />
             <div className="mx-2 my-1 border-t border-line" />
             <p className="px-3 py-2 text-[10px] text-ink-3 leading-snug">
-              模型來自「設定 → CLI 授權」已啟用項目
+              模型來自「設定 → CLI 授權」已啟用項目。推理程度與速度在輸入框的「進階」。
             </p>
           </div>
         </div>

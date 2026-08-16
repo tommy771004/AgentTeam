@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useThreadStore, type ThreadBubble } from '../store/threadStore'
 import { AttachmentThumb } from './AttachmentThumb'
+import { ConfirmSheet } from './ConfirmSheet'
 import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
 
@@ -10,6 +11,7 @@ const COLLAPSE_AT = 1_200
 export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
   const [expanded, setExpanded] = useState(false)
   const [rewinding, setRewinding] = useState(false)
+  const [confirmingRewind, setConfirmingRewind] = useState(false)
   const [copied, setCopied] = useState(false)
   const isUser = bubble.role === 'user'
   const isAssistant = bubble.role === 'assistant'
@@ -23,13 +25,7 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
     const thr = useThreadStore.getState()
     const threadId = thr.activeId
     if (!threadId) return
-    if (
-      !window.confirm(
-        '回捲到此訊息？此氣泡之後的對話會被截斷，agent 寫入的檔案將還原到此時點（外部改動過的檔案會跳過）。',
-      )
-    ) {
-      return
-    }
+    setConfirmingRewind(false)
     setRewinding(true)
     try {
       await thr.rewindToBubble(threadId, bubble.id)
@@ -64,12 +60,22 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
           title="回捲到此訊息（還原檔案並截斷之後對話）"
           aria-label="回捲到此訊息"
           disabled={rewinding}
-          onClick={() => void onRewind()}
+          onClick={() => setConfirmingRewind(true)}
           className="agent-chat-rewind mr-1.5 mt-2 hidden h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-3 group-hover:flex disabled:opacity-50"
         >
           <Icon name={rewinding ? 'progress_activity' : 'history'} size={15} />
         </button>
       ) : null}
+      <ConfirmSheet
+        open={confirmingRewind}
+        tone="danger"
+        title="回捲到此訊息？"
+        description="此氣泡之後的對話會被截斷，agent 寫入的檔案將還原到此時點。外部改動過的檔案會跳過，不會被覆蓋。"
+        confirmLabel="回捲"
+        busy={rewinding}
+        onConfirm={() => void onRewind()}
+        onCancel={() => setConfirmingRewind(false)}
+      />
       <div
         className={
           isUser

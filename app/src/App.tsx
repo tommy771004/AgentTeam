@@ -3,9 +3,6 @@ import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-d
 import { Layout } from './components/Layout'
 import { ProtocolsPage } from './pages/ProtocolsPage'
 import { DocsPage } from './pages/DocsPage'
-import { ExecutionPage } from './pages/ExecutionPage'
-import { SuccessPage } from './pages/SuccessPage'
-import { FailedPage } from './pages/FailedPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { KnowledgePage } from './pages/KnowledgePage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -1062,10 +1059,12 @@ export default function App() {
             <Route path="settings" element={<SettingsPage />} />
             <Route path="workspace" element={<Navigate to="/" replace />} />
             <Route path="learning" element={<LearningPage />} />
-            <Route path="execution" element={<ExecutionPage />} />
+            {/* 裸殼路由退役（ticket 08）：舊連結（例如 Handoff 匯出文件引用的
+                /failed）不撞白屏，一律回首頁。參數重跑已在對話內的「下一步」區。 */}
+            <Route path="execution" element={<Navigate to="/" replace />} />
             <Route path="knowledge" element={<KnowledgePage />} />
-            <Route path="success" element={<SuccessPage />} />
-            <Route path="failed" element={<FailedPage />} />
+            <Route path="success" element={<Navigate to="/" replace />} />
+            <Route path="failed" element={<Navigate to="/" replace />} />
             <Route path="scheduler" element={<Navigate to="/automation" replace />} />
             <Route path="events" element={<Navigate to="/automation?tab=events" replace />} />
             <Route path="archive" element={<Navigate to="/records" replace />} />
