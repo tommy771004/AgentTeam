@@ -351,6 +351,25 @@ export function getJournalEntry(kind: JournalKind, id: string): JournalEntry | u
   return loadState().entries.find((entry) => entry.kind === kind && entry.id === id)
 }
 
+/**
+ * Journal 列表讀取（dod-verified-reports 票 03）：
+ * 依 kind 過濾、updatedAt 新→舊排序。純讀取——不改寫入語義與容量上限。
+ */
+export function listJournal(kind?: JournalKind): JournalEntry[] {
+  const entries = [...loadState().entries]
+  const filtered = kind ? entries.filter((entry) => entry.kind === kind) : entries
+  return filtered.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+}
+
+/** 以 runId 找 journal 條目（run 為主鍵；queue/schedule 條目以其關聯 runId 為附屬） */
+export function findJournalEntryByRunId(runId: string): JournalEntry | undefined {
+  const entries = loadState().entries
+  return (
+    entries.find((entry) => entry.kind === 'run' && entry.runId === runId) ||
+    entries.find((entry) => entry.runId === runId)
+  )
+}
+
 /** Mark uncertain in-flight work interrupted; never replay an uncertain side effect. */
 export function reconcileStartup(): RecoveryReport | null {
   const state = loadState()

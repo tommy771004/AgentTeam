@@ -904,6 +904,10 @@ async function pushRunProcessSummary(args: {
     status:
       status === 'failed' ? 'failed' : status === 'halted' ? 'halted' : 'success',
     simulated: finalAgent.simulated === true,
+    runnerKind: result.path === 'cli' ? 'external' : 'builtin',
+    runId,
+    dodVerdicts: finalAgent.dodVerdicts?.length ? finalAgent.dodVerdicts : undefined,
+    definitionOfDone: finalAgent.loopConfig?.definitionOfDone?.slice(0, 800),
     durationMs: finalAgent.metrics?.executionMs,
     subDesign: subDesignBrief
       ? {

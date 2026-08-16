@@ -1011,6 +1011,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         confidence: agent.confidence || null,
         timestamp: agent.finishedAt || agent.startedAt || new Date().toISOString(),
         simulated: agent.simulated === true ? true : undefined,
+        dodVerdicts: agent.dodVerdicts?.length ? agent.dodVerdicts : undefined,
+        definitionOfDone: agent.loopConfig?.definitionOfDone?.slice(0, 800),
         iterations: agent.currentIteration,
         maxIterations: agent.loopConfig.maxIterations,
         steps: agent.steps,

@@ -20,6 +20,7 @@ import type {
 } from '../types.ts'
 import { extractKnowledge } from '../knowledge.ts'
 import { evaluateDoD } from '../dodEvaluator.ts'
+import { appendDodVerdict } from '../dodVerdicts.ts'
 import { replanCorrectiveSteps } from '../replan.ts'
 import { resolveRoleModel, synthesizeReport, withRoleModel } from '../llm.ts'
 import { learningLoop } from '../hermes/learning.ts'
@@ -488,6 +489,7 @@ async function runGoalBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
     const allDone = state.steps.every((s) => s.status === 'COMPLETED')
     let dodMet = allDone && state.confidence >= state.minConfidence
     let missing: string[] = []
+    let semantic = false
 
     if (allDone && useLlm) {
       try {
@@ -503,6 +505,7 @@ async function runGoalBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
         state.confidence = verdict.confidence
         state.tokensUsed += verdict.tokensUsed
         state.metrics.apiCredits = state.tokensUsed
+        semantic = true
         deps.log(
           'EVAL',
           `DoD 語意驗收：met=${verdict.met} confidence=${verdict.confidence.toFixed(2)}` +
@@ -517,6 +520,16 @@ async function runGoalBased(state: LoopRunState, deps: LoopDeps): Promise<void> 
       'EVAL',
       `DoD check: steps=${allDone}, confidence=${state.confidence.toFixed(2)} (≥${state.minConfidence.toFixed(2)}) → ${dodMet}`,
     )
+
+    // dod-verified-reports 票 01：每輪一筆判定快照（含啟發式輪——semantic=false 明確標記未驗證）
+    state.dodVerdicts = appendDodVerdict(state.dodVerdicts, {
+      iteration,
+      met: dodMet,
+      semantic,
+      confidence: state.confidence,
+      missing,
+      evaluatedAt: new Date().toISOString(),
+    })
 
     if (dodMet) {
       await finalizeSuccess(state, ctx, deps)

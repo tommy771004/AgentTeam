@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { ThreadRunSummary } from '../store/threadStore'
 import { deriveRunLifecycle, lifecycleToneClass } from '../agent/runLifecycle'
 import { ContextCards } from './ContextCards'
+import { DodScorecard } from './DodScorecard'
 import { Icon } from './Icon'
 import { Reveal } from './primitives/Reveal'
 import { contextSummary, groupProcessOperations } from '../lib/runPresentation'
@@ -15,12 +16,51 @@ function iconFor(kind: string) {
 }
 
 /** Persisted, collapsible record of what an agent did for one answer. */
-export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
+export function RunSummaryCard({ summary, threadId }: { summary: ThreadRunSummary; threadId?: string }) {
   const navigate = useNavigate()
   // Context is visible at a glance; details remain one click away.
   const [open, setOpen] = useState(false)
   const [openOperation, setOpenOperation] = useState<string | null>(null)
   const [diffOpen, setDiffOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportMsg, setExportMsg] = useState<string | null>(null)
+
+  const handleExport = async (format: 'md' | 'html') => {
+    setExporting(true)
+    setExportMsg(null)
+    try {
+      const [{ useAgentStore }, { useThreadStore }, { useProjectStore }, { listJournal }, { collectReportSource, exportRunReport }] =
+        await Promise.all([
+          import('../store/agentStore'),
+          import('../store/threadStore'),
+          import('../store/projectStore'),
+          import('../agent/runJournal'),
+          import('../agent/reportExport'),
+        ])
+      const threadSummaries: Record<string, ThreadRunSummary | undefined> = {}
+      for (const thread of useThreadStore.getState().threads) {
+        const runBubble = [...thread.bubbles].reverse().find((b) => b.role === 'run' && b.runSummary)
+        if (runBubble?.runSummary) threadSummaries[thread.id] = runBubble.runSummary
+      }
+      const bundle = collectReportSource({
+        runId: summary.runId,
+        threadId,
+        journal: listJournal(),
+        archive: useAgentStore.getState().archive,
+        threadSummaries,
+      })
+      const result = await exportRunReport({
+        bundle,
+        format,
+        projectRoot: useProjectStore.getState().root || undefined,
+      })
+      setExportMsg(result.message)
+    } catch (e) {
+      setExportMsg(`匯出失敗：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setExporting(false)
+    }
+  }
   const groups = groupProcessOperations(summary.operations)
   const additions = summary.files.reduce((total, file) => total + (file.added || 0), 0)
   const removals = summary.files.reduce((total, file) => total + (file.removed || 0), 0)
@@ -75,6 +115,8 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
         <Icon name={open ? 'expand_less' : 'expand_more'} size={18} className="shrink-0 text-ink-3" />
       </button>
 
+      <DodScorecard verdicts={summary.dodVerdicts} runnerKind={summary.runnerKind} />
+
       {summary.subDesign ? (
         <div className="border-t border-line bg-accent-tint px-3.5 py-3 text-[11px] text-ink-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
@@ -98,6 +140,25 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
 
       {open ? (
           <div className="agent-summary-content max-h-[420px] space-y-3 overflow-y-auto border-t border-line px-3.5 py-3 custom-scrollbar">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-semibold tracking-widest text-ink-3">報告</span>
+            <button
+              type="button"
+              className="rounded-lg border border-line px-2 py-1 text-[11px] font-medium text-ink-2 transition-colors hover:bg-hover-2"
+              onClick={() => void handleExport('md')}
+            >
+              匯出 Markdown
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-line px-2 py-1 text-[11px] font-medium text-ink-2 transition-colors hover:bg-hover-2"
+              onClick={() => void handleExport('html')}
+            >
+              匯出 HTML
+            </button>
+            {exporting ? <span className="text-[11px] text-ink-3">匯出中…</span> : null}
+            {exportMsg ? <span className="text-[11px] text-ink-3">{exportMsg}</span> : null}
+          </div>
           {groups.length ? (
             <div className="agent-summary-trace space-y-1">
               {groups.map((group, index) => {

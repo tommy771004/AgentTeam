@@ -48,6 +48,35 @@ function ArchiveSection() {
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<ArchiveRecord | null>(null)
+  const [exportMsg, setExportMsg] = useState<string | null>(null)
+
+  /** 票 09：封存詳情匯出——與摘要卡共用 reportExport 流程；journal 缺件走降級文件 */
+  const exportSelected = async (format: 'md' | 'html') => {
+    if (!selected) return
+    setExportMsg('匯出中…')
+    try {
+      const [{ listJournal }, { collectReportSource, exportRunReport }, { useProjectStore }] =
+        await Promise.all([
+          import('../agent/runJournal'),
+          import('../agent/reportExport'),
+          import('../store/projectStore'),
+        ])
+      const bundle = collectReportSource({
+        runId: selected.id,
+        journal: listJournal(),
+        archive,
+        threadSummaries: {},
+      })
+      const result = await exportRunReport({
+        bundle,
+        format,
+        projectRoot: useProjectStore.getState().root || undefined,
+      })
+      setExportMsg(result.message)
+    } catch (e) {
+      setExportMsg(`匯出失敗：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
 
   useEffect(() => {
     void loadArchive()
@@ -203,6 +232,23 @@ function ArchiveSection() {
               </button>
             </div>
             <div className="p-5 overflow-y-auto custom-scrollbar space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-line px-2.5 py-1 text-[11px] font-medium text-on-surface-variant transition-colors hover:bg-hover-2"
+                  onClick={() => void exportSelected('md')}
+                >
+                  匯出報告（MD）
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-line px-2.5 py-1 text-[11px] font-medium text-on-surface-variant transition-colors hover:bg-hover-2"
+                  onClick={() => void exportSelected('html')}
+                >
+                  匯出報告（HTML）
+                </button>
+                {exportMsg && <span className="text-[11px] text-outline">{exportMsg}</span>}
+              </div>
               <p className="text-sm">{selected.objective}</p>
               {selected.result && (
                 <pre className="bg-surface border border-white/10 rounded-lg p-3 text-[12px] font-[family-name:var(--font-mono)] text-on-surface-variant whitespace-pre-wrap">

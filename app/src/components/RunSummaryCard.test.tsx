@@ -1,7 +1,18 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { RunSummaryCard } from './RunSummaryCard'
+
+// 票 08：匯出動作走 reportExport 縫隙——mock 後斷言呼叫與格式
+vi.mock('../agent/reportExport', () => ({
+  collectReportSource: vi.fn(() => ({ runId: 'run-x', lineageRunIds: ['run-x'], runnerKind: 'builtin', degraded: [] })),
+  exportRunReport: vi.fn(async ({ format }: { format: string }) => ({
+    ok: true,
+    message: `已寫入 /tmp/reports/report-run-x.${format}`,
+  })),
+  reportFileName: vi.fn(() => 'report-run-x.md'),
+}))
 
 const baseSummary = {
   status: 'success' as const,
@@ -37,5 +48,22 @@ describe('RunSummaryCard 模擬執行章', () => {
       </MemoryRouter>,
     )
     expect(screen.queryByText('模擬執行')).not.toBeInTheDocument()
+  })
+
+  it('展開後可匯出報告（MD/HTML），訊息回顯', async () => {
+    const user = userEvent.setup()
+    const { exportRunReport } = await import('../agent/reportExport')
+    render(
+      <MemoryRouter>
+        <RunSummaryCard summary={{ ...baseSummary, runId: 'run-x' }} threadId="t-1" />
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByRole('button', { name: /已變更|執行過程/ }))
+    await user.click(screen.getByRole('button', { name: '匯出 Markdown' }))
+    expect(await screen.findByText(/report-run-x\.md/)).toBeInTheDocument()
+    expect(exportRunReport).toHaveBeenCalledWith(expect.objectContaining({ format: 'md' }))
+
+    await user.click(screen.getByRole('button', { name: '匯出 HTML' }))
+    expect(exportRunReport).toHaveBeenCalledWith(expect.objectContaining({ format: 'html' }))
   })
 })
