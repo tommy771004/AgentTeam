@@ -2,9 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import { reopenFirstRunWizard } from '../components/FirstRunWizard'
-import { reopenOnboardingTour } from '../components/OnboardingTour'
 import { SETTINGS_SECTION_GROUPS, SETTINGS_SECTIONS } from '../commands/settingsSections'
 import { AppearancePanel } from '../components/settings/panels/AppearancePanel'
+import { PersonalizationPanel } from '../components/settings/panels/PersonalizationPanel'
+import { DataControlsPanel } from '../components/settings/panels/DataControlsPanel'
+import { GeneralPanel } from '../components/settings/panels/GeneralPanel'
+import { MemoryPanel } from '../components/settings/panels/MemoryPanel'
+import { ShortcutsPanel } from '../components/settings/panels/ShortcutsPanel'
 import {
   SettingsAnchor,
   SettingsField,
@@ -16,7 +20,6 @@ import { useSettingsUiStore } from '../store/settingsUiStore'
 
 
 import { APPROVAL_MODE_DEFS } from '../agent/approvalModes'
-import { exportRunMetricsJsonl, metricsSummary, resetRunMetrics } from '../agent/metrics'
 import { ThemePage } from '../components/SectionNav'
 import {
   PillSelect,
@@ -37,11 +40,6 @@ import { modelsGroupedByCliProvider } from '../agent/cliProviders'
 import { CLI_ADAPTERS, DISCOVERY_ONLY_AGENT_ADAPTERS } from '../agent/cliAdapters'
 import type {
   McpServerConfig,
-  PersonalityPreset,
-  ThemePreference,
-  ReducedMotionPreference,
-  EnterBehavior,
-  FollowUpMode,
   ApiProviderPreset,
 } from '../agent/types'
 import {
@@ -51,10 +49,6 @@ import {
   mcpStopSession,
 } from '../agent/hermes/mcp'
 import { useGatewayStore } from '../store/gatewayStore'
-import { useEntitlementStore } from '../store/entitlementStore'
-import { useSubscriptionStore } from '../store/subscriptionStore'
-import { SUBSCRIPTION_PRICING } from '../agent/subscription'
-import { useFeaturePackStore } from '../store/featurePackStore'
 import {
   parseDeployOutboundGuard,
   type OutboundGuardMode,
@@ -67,9 +61,6 @@ import { getLiveSlashCommands } from '../commands/registry'
 import { applyRendererStorageSnapshot } from '../agent/updateMigration'
 import { bundleSensitivityNotice } from '../agent/settingsExport'
 import {
-  eventToChord,
-  formatChord,
-  useShortcutStore,
 } from '../store/shortcutStore'
 import { BUILTIN_CAPABILITIES } from '../agent/capabilities'
 import { skillsStore } from '../agent/hermes/skills'
@@ -172,14 +163,6 @@ const SECTION_META: Record<string, { title: string; subtitle: string }> = {
   },
 }
 
-async function openExternalLink(url: string) {
-  if (window.subagents?.shell?.openExternal) {
-    await window.subagents.shell.openExternal(url)
-    return
-  }
-  window.open(url, '_blank', 'noopener,noreferrer')
-}
-
 export function SettingsPage() {
   const { settings, update, testConnection, exportBundle, importBundle } = useSettingsStore()
   // ?section= 深連結（誠實性橫幅 CTA / Command Palette 共用）；無效值回一般節
@@ -204,19 +187,8 @@ export function SettingsPage() {
   const [ocProviderMsg, setOcProviderMsg] = useState<string | null>(null)
   const [gatewayMsg, setGatewayMsg] = useState<string | null>(null)
   const [cliMsg, setCliMsg] = useState<string | null>(null)
-  const [dataMsg, setDataMsg] = useState<string | null>(null)
   // G9 persona 疊層新增表單
   const [personaDraft, setPersonaDraft] = useState({ name: '', instructions: '', model: '' })
-  const entitlementSnapshot = useEntitlementStore((s) => s.snapshot)
-  const subscription = useSubscriptionStore((s) => s.state)
-  const subscriptionEntitlement = useSubscriptionStore((s) => s.entitlement)
-  const subscriptionError = useSubscriptionStore((s) => s.lastError)
-  const removeSubscriptionDevice = useSubscriptionStore((s) => s.removeDevice)
-  const featurePacks = useFeaturePackStore((s) => s.packs)
-  const disableFeaturePackAction = useFeaturePackStore((s) => s.disable)
-  const enableFeaturePackAction = useFeaturePackStore((s) => s.enable)
-  const uninstallFeaturePackAction = useFeaturePackStore((s) => s.uninstall)
-  const rollbackFeaturePackAction = useFeaturePackStore((s) => s.rollback)
   const gatewayInbound = useGatewayStore((s) => s.inbound)
   const bgJobs = useGatewayStore((s) => s.jobs)
   const projectRoot = useProjectStore((s) => s.root)
@@ -224,17 +196,7 @@ export function SettingsPage() {
   const ocCandidates = useOpenCodeConfigStore((s) => s.candidates)
   const ocSources = useOpenCodeConfigStore((s) => s.sources)
   const adoptOcCandidate = useOpenCodeConfigStore((s) => s.adoptCandidate)
-  const memory = useLearningStore((s) => s.memory)
   const loadLearning = useLearningStore((s) => s.load)
-  const deleteMemoryEntry = useLearningStore((s) => s.deleteMemoryEntry)
-  const clearMemories = useLearningStore((s) => s.clearMemories)
-  const appendMemory = useLearningStore((s) => s.appendMemory)
-  const setUserProfile = useLearningStore((s) => s.setUserProfile)
-  const [newMemory, setNewMemory] = useState('')
-  const shortcutBindings = useShortcutStore((s) => s.bindings)
-  const setShortcutChord = useShortcutStore((s) => s.setChord)
-  const resetShortcuts = useShortcutStore((s) => s.resetAll)
-  const [capturingId, setCapturingId] = useState<string | null>(null)
   const [hookRulesDraft, setHookRulesDraft] = useState('')
   const [hookRulesError, setHookRulesError] = useState<string | null>(null)
   const [verifyingModel, setVerifyingModel] = useState(false)
@@ -276,27 +238,6 @@ export function SettingsPage() {
     void update(patch)
   }
 
-  // Capture new shortcut chord
-  useEffect(() => {
-    if (!capturingId) return
-    const onKey = (e: KeyboardEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      if (e.key === 'Escape') {
-        setCapturingId(null)
-        return
-      }
-      const chord = eventToChord(e)
-      if (!chord) return
-      setShortcutChord(
-        capturingId as 'slashMenu' | 'focusComposer' | 'toggleConsole' | 'newThread',
-        chord,
-      )
-      setCapturingId(null)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [capturingId, setShortcutChord])
 
   useEffect(() => {
     void loadLearning()
@@ -714,237 +655,12 @@ export function SettingsPage() {
         {section === 'piCore' && <PiCoreSettingsSection />}
 
         {section === 'general' && (
-          <>
-            <SettingsGroup title="方案">
-              <SettingsRow
-                title={entitlementSnapshot.tier === 'paid' ? '已啟用付費方案' : 'Free Core（本機優先，免登入）'}
-                description={
-                  entitlementSnapshot.tier === 'paid'
-                    ? `已授權功能：${[...entitlementSnapshot.grantedFeatures].join(', ') || '無'}`
-                    : 'Local providers/CLI、專案、sessions、多代理、Plan/Goal、權限、skills/MCP、diff/terminal/history、匯出與 Handoff 皆免費、免登入可用。'
-                }
-                control={
-                  <span className="rounded-full border border-outline/30 px-2.5 py-1 text-[11px] font-medium">
-                    {entitlementSnapshot.tier === 'paid' ? 'Pro' : 'Free Core'}
-                  </span>
-                }
-              />
-              {subscription.status !== 'active' && (
-                <SettingsRow
-                  title={
-                    subscription.status === 'canceled'
-                      ? '訂閱已取消'
-                      : subscription.status === 'refunded'
-                        ? '訂閱已退款'
-                        : '尚未訂閱 Pro'
-                  }
-                  description={
-                    subscription.status === 'canceled'
-                      ? '目前方案將於到期後轉為 Free Core；到期前仍可使用已授權功能。'
-                      : subscription.status === 'refunded'
-                        ? '已退款訂閱需重新購買才能再次啟用；本機資料與 Free Core 不受影響。'
-                        : `Pro：US$${SUBSCRIPTION_PRICING.monthly.usd}/月 或 US$${SUBSCRIPTION_PRICING.annual.usd}/年（最多 ${subscription.maxDevices} 台裝置）。`
-                  }
-                  control={
-                    <button
-                      type="button"
-                      className={settingsBtnCls}
-                      onClick={() => void openExternalLink('https://subagents.ai/pricing')}
-                    >
-                      查看方案
-                    </button>
-                  }
-                />
-              )}
-              {subscription.status === 'active' && subscription.devices.length > 0 && (
-                <SettingsStack title={`已啟用裝置（${subscription.devices.length}/${subscription.maxDevices}）`}>
-                  {subscription.devices.map((d) => (
-                    <SettingsRow
-                      key={d.deviceId}
-                      title={d.label || d.deviceId}
-                      description={`啟用於 ${new Date(d.activatedAt).toLocaleString()}`}
-                      control={
-                        <button
-                          type="button"
-                          className={settingsBtnCls}
-                          onClick={() => removeSubscriptionDevice(d.deviceId)}
-                        >
-                          移除裝置
-                        </button>
-                      }
-                    />
-                  ))}
-                </SettingsStack>
-              )}
-              {subscriptionError && (
-                <div
-                  role="status"
-                  className="mx-4 mb-3 flex items-start gap-2 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-[11px] leading-relaxed text-amber-200/90"
-                >
-                  <Icon name="warning" size={15} className="mt-0.5 shrink-0 text-amber-300" />
-                  <p>{subscriptionError}</p>
-                </div>
-              )}
-            </SettingsGroup>
-            {featurePacks.length > 0 && (
-              <SettingsGroup title="功能包">
-                {featurePacks.filter((p) => p.status !== 'uninstalled').map((p) => (
-                  <SettingsRow
-                    key={p.id}
-                    title={`${p.manifest.name} v${p.manifest.version}`}
-                    description={
-                      p.status === 'entitlement-denied'
-                        ? '需要更高方案授權才能啟用；Free Core 不受影響。'
-                        : p.status === 'incompatible'
-                          ? `需要 app 版本 ${p.manifest.minAppVersion}${p.manifest.maxAppVersion ? `–${p.manifest.maxAppVersion}` : '+'}。`
-                          : p.status === 'disabled'
-                            ? '已停用。'
-                            : '已啟用。'
-                    }
-                    control={
-                      <div className="flex items-center gap-2">
-                        {p.status === 'active' ? (
-                          <button type="button" className={settingsBtnCls} onClick={() => disableFeaturePackAction(p.id)}>停用</button>
-                        ) : p.status === 'disabled' ? (
-                          <button
-                            type="button"
-                            className={settingsBtnCls}
-                            onClick={() => enableFeaturePackAction(p.id, updateState?.currentVersion || '0.0.0', subscriptionEntitlement)}
-                          >
-                            啟用
-                          </button>
-                        ) : null}
-                        {p.previousManifest && (
-                          <button
-                            type="button"
-                            className={settingsBtnCls}
-                            onClick={() => rollbackFeaturePackAction(p.id, updateState?.currentVersion || '0.0.0', subscriptionEntitlement)}
-                          >
-                            回復 v{p.previousManifest.version}
-                          </button>
-                        )}
-                        <button type="button" className={settingsBtnCls} onClick={() => uninstallFeaturePackAction(p.id)}>移除</button>
-                      </div>
-                    }
-                  />
-                ))}
-              </SettingsGroup>
-            )}
-            <SettingsGroup title="輸入與行為">
-              <SettingsField
-                id="general.enterBehavior"
-                ctx={fieldCtx}
-                control={
-                  <PillSelect
-                    value={settings.enterBehavior || 'enter'}
-                    onChange={(v) =>
-                      set({ enterBehavior: v as EnterBehavior })
-                    }
-                  >
-                    <option value="enter">Enter 送出</option>
-                    <option value="cmdEnter">⌘/Ctrl+Enter 送出</option>
-                  </PillSelect>
-                }
-              />
-              <SettingsField
-                id="general.followUpMode"
-                ctx={fieldCtx}
-                control={
-                  <PillSelect
-                    value={settings.followUpMode || 'steer'}
-                    onChange={(v) =>
-                      set({ followUpMode: v as FollowUpMode })
-                    }
-                  >
-                    <option value="steer">轉向（Steer）</option>
-                    <option value="queue">排隊（Queue）</option>
-                  </PillSelect>
-                }
-              />
-              <SettingsField
-                id="general.concurrentRunsEnabled"
-                ctx={fieldCtx}
-                control={
-                  <SettingsToggle
-                    checked={settings.concurrentRunsEnabled === true}
-                    onChange={(v) => set({ concurrentRunsEnabled: v })}
-                  />
-                }
-              />
-              <div
-                role="status"
-                className="mx-4 mb-3 flex items-start gap-2 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-[11px] leading-relaxed text-amber-200/90"
-              >
-                <Icon name="warning" size={15} className="mt-0.5 shrink-0 text-amber-300" />
-                <p>
-                  <span className="font-semibold text-amber-200">實驗性：</span>
-                  多 run 呈現尚未完成。開啟後，活動、停止與介入畫面可能仍有跨 run 混線；建議暫時保持關閉。
-                </p>
-              </div>
-              {settings.concurrentRunsEnabled === true && (
-                <SettingsField
-                  id="general.maxConcurrentRuns"
-                  ctx={fieldCtx}
-                  control={
-                    <PillSelect
-                      value={String(settings.maxConcurrentRuns || 4)}
-                      onChange={(v) => set({ maxConcurrentRuns: Number(v) })}
-                    >
-                      <option value="2">2 runs</option>
-                      <option value="3">3 runs</option>
-                      <option value="4">4 runs</option>
-                      <option value="6">6 runs</option>
-                      <option value="8">8 runs</option>
-                    </PillSelect>
-                  }
-                />
-              )}
-            </SettingsGroup>
-            <SettingsGroup title="通知">
-              <SettingsField
-                id="general.notifyOnComplete"
-                ctx={fieldCtx}
-                control={
-                  <SettingsToggle
-                    checked={settings.notifyOnComplete !== false}
-                    onChange={(v) => set({ notifyOnComplete: v })}
-                  />
-                }
-              />
-              <SettingsField
-                id="general.soundOnComplete"
-                ctx={fieldCtx}
-                control={
-                  <SettingsToggle
-                    checked={settings.soundOnComplete === true}
-                    onChange={(v) => set({ soundOnComplete: v })}
-                  />
-                }
-              />
-              <SettingsField
-                id="general.preventSleepWhileRunning"
-                ctx={fieldCtx}
-                control={
-                  <SettingsToggle
-                    checked={settings.preventSleepWhileRunning === true}
-                    onChange={(v) => set({ preventSleepWhileRunning: v })}
-                  />
-                }
-              />
-            </SettingsGroup>
-            <SettingsGroup title="建議">
-              <SettingsField
-                id="general.ambientSuggestions"
-                ctx={fieldCtx}
-                control={
-                  <SettingsToggle
-                    checked={settings.ambientSuggestions !== false}
-                    onChange={(v) => set({ ambientSuggestions: v })}
-                  />
-                }
-              />
-            </SettingsGroup>
-          </>
+          <GeneralPanel
+            settings={settings}
+            set={set}
+            fieldCtx={fieldCtx}
+            appVersion={updateState?.currentVersion}
+          />
         )}
 
         {section === 'updates' && (
@@ -994,374 +710,19 @@ export function SettingsPage() {
         )}
 
         {section === 'personalization' && (
-          <>
-            <SettingsGroup title="人格">
-              <SettingsField
-                id="personalization.personality"
-                ctx={fieldCtx}
-                control={
-                  <PillSelect
-                    value={settings.personality || 'default'}
-                    onChange={(v) =>
-                      set({ personality: v as PersonalityPreset })
-                    }
-                  >
-                    <option value="default">預設</option>
-                    <option value="none">無（中性）</option>
-                    <option value="friendly">友善</option>
-                    <option value="efficient">務實精簡</option>
-                    <option value="professional">專業</option>
-                    <option value="candid">直率</option>
-                    <option value="quirky">俏皮</option>
-                  </PillSelect>
-                }
-              />
-            </SettingsGroup>
-            <SettingsGroup title="自訂指令">
-              <SettingsField id="personalization.customAboutUser" ctx={fieldCtx}>
-                <textarea
-                  className={settingsInputCls + ' min-h-[96px] resize-y'}
-                  value={settings.customAboutUser || ''}
-                  onChange={(e) => set({ customAboutUser: e.target.value })}
-                  placeholder="寫下希望代理知道的背景…"
-                />
-              </SettingsField>
-              <SettingsField id="personalization.customResponseStyle" ctx={fieldCtx}>
-                <textarea
-                  className={settingsInputCls + ' min-h-[96px] resize-y'}
-                  value={settings.customResponseStyle || ''}
-                  onChange={(e) =>
-                    set({ customResponseStyle: e.target.value })
-                  }
-                  placeholder="例如：先結論再步驟、繁中、少 emoji…"
-                />
-              </SettingsField>
-            </SettingsGroup>
-          </>
+          <PersonalizationPanel settings={settings} set={set} fieldCtx={fieldCtx} />
         )}
 
         {section === 'memory' && (
-          <>
-            <SettingsGroup title="記憶控制">
-              <SettingsField
-                id="memory.memoryEnabled"
-                ctx={fieldCtx}
-                control={
-                  <SettingsToggle
-                    checked={settings.memoryEnabled !== false}
-                    onChange={(v) => set({ memoryEnabled: v })}
-                  />
-                }
-              />
-              <SettingsField
-                id="memory.memoryWriteEnabled"
-                ctx={fieldCtx}
-                control={
-                  <SettingsToggle
-                    checked={settings.memoryWriteEnabled !== false}
-                    onChange={(v) => set({ memoryWriteEnabled: v })}
-                  />
-                }
-              />
-              <SettingsField
-                id="memory.referenceChatHistory"
-                ctx={fieldCtx}
-                control={
-                  <SettingsToggle
-                    checked={settings.referenceChatHistory !== false}
-                    onChange={(v) => set({ referenceChatHistory: v })}
-                  />
-                }
-              />
-            </SettingsGroup>
-            <SettingsGroup title="使用者檔案">
-              <SettingsStack title="USER profile" description="穩定自我介紹／角色">
-                <textarea
-                  className={settingsInputCls + ' min-h-[80px] resize-y'}
-                  value={memory.userProfile || ''}
-                  onChange={(e) => void setUserProfile(e.target.value)}
-                  placeholder="會優先進入提示…"
-                />
-              </SettingsStack>
-            </SettingsGroup>
-            <SettingsGroup
-              title="已存記憶"
-              action={
-                <button
-                  type="button"
-                  className={settingsBtnCls + ' text-error border-error/30'}
-                  onClick={() => {
-                    if (confirm('確定清除所有記憶與使用者檔案？')) void clearMemories()
-                  }}
-                >
-                  清除全部
-                </button>
-              }
-            >
-              <SettingsStack title="新增" description="手動寫入一條記憶">
-                <div className="flex gap-2">
-                  <input
-                    className={settingsInputCls + ' flex-1'}
-                    value={newMemory}
-                    onChange={(e) => setNewMemory(e.target.value)}
-                    placeholder="輸入後 Enter 或按新增…"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newMemory.trim()) {
-                        void appendMemory(newMemory.trim()).then(() => setNewMemory(''))
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className={settingsBtnPrimaryCls + ' shrink-0'}
-                    onClick={() => {
-                      if (!newMemory.trim()) return
-                      void appendMemory(newMemory.trim()).then(() => setNewMemory(''))
-                    }}
-                  >
-                    新增
-                  </button>
-                </div>
-              </SettingsStack>
-              {(memory.entries || []).length === 0 ? (
-                <div className="px-4 py-4 text-[12px] text-outline">尚無記憶條目</div>
-              ) : (
-                (memory.entries || []).slice(0, 40).map((e) => (
-                  <SettingsRow
-                    key={e.id}
-                    title={e.text}
-                    description={e.createdAt?.slice(0, 19).replace('T', ' ')}
-                    align="start"
-                    control={
-                      <button
-                        type="button"
-                        className="text-[12px] text-error font-medium px-2"
-                        onClick={() => void deleteMemoryEntry(e.id)}
-                      >
-                        刪除
-                      </button>
-                    }
-                  />
-                ))
-              )}
-            </SettingsGroup>
-          </>
+          <MemoryPanel settings={settings} set={set} fieldCtx={fieldCtx} />
         )}
 
         {section === 'data' && (
-          <>
-            <SettingsGroup title="運行指標（G11）">
-              <SettingsRow
-                title="本地指標"
-                description={(() => {
-                  const s = metricsSummary()
-                  return s.runs
-                    ? `${s.runs} runs · ask ${s.toolAsks} / deny ${s.toolDenials}（denial ratio ${(s.denialRatio * 100).toFixed(1)}%）· 壓縮 ${s.compactions} 次 · LLM 重試 ${s.llmRetries} 次`
-                    : '尚無紀錄；每個 run 結束時自動記一筆（只記數字，不含 prompt 內容）'
-                })()}
-                control={
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className={settingsBtnCls}
-                      onClick={() => {
-                        const jsonl = exportRunMetricsJsonl()
-                        if (!jsonl) {
-                          setDataMsg('沒有可匯出的指標')
-                          return
-                        }
-                        const blob = new Blob([jsonl], { type: 'application/jsonl' })
-                        const url = URL.createObjectURL(blob)
-                        const a = document.createElement('a')
-                        a.href = url
-                        a.download = `subagents-metrics-${new Date().toISOString().slice(0, 10)}.jsonl`
-                        a.click()
-                        URL.revokeObjectURL(url)
-                        setDataMsg('指標已匯出（JSONL）')
-                      }}
-                    >
-                      匯出 JSONL
-                    </button>
-                    <button
-                      type="button"
-                      className="text-[11px] text-error hover:underline"
-                      onClick={() => {
-                        resetRunMetrics()
-                        setDataMsg('指標已清除')
-                      }}
-                    >
-                      清除
-                    </button>
-                  </div>
-                }
-              />
-            </SettingsGroup>
-            <SettingsGroup title="對話">
-              <SettingsField
-                id="data.temporaryChatDefault"
-                ctx={fieldCtx}
-                control={
-                  <SettingsToggle
-                    checked={settings.temporaryChatDefault === true}
-                    onChange={(v) => set({ temporaryChatDefault: v })}
-                  />
-                }
-              />
-              <SettingsField
-                id="data.autoArchiveDays"
-                ctx={fieldCtx}
-                description={
-                  (settings.autoArchiveDays ?? 0) === 0
-                    ? '不自動封存'
-                    : `${settings.autoArchiveDays} 天後封存`
-                }
-                control={
-                  <input
-                    type="range"
-                    min={0}
-                    max={90}
-                    value={settings.autoArchiveDays ?? 0}
-                    onChange={(e) =>
-                      set({ autoArchiveDays: Number(e.target.value) })
-                    }
-                    className="w-36 accent-primary"
-                  />
-                }
-              />
-            </SettingsGroup>
-            <SettingsGroup title="管理">
-              <SettingsRow
-                title="封存與日誌"
-                description="開啟紀錄頁"
-                control={
-                  <button
-                    type="button"
-                    className={settingsBtnCls}
-                    onClick={() => {
-                      window.location.hash = '#/records'
-                    }}
-                  >
-                    開啟
-                  </button>
-                }
-              />
-              <SettingsRow
-                title="刪除全部對話"
-                description="不可復原"
-                control={
-                  <button
-                    type="button"
-                    className={settingsBtnCls + ' text-error border-error/30'}
-                    onClick={async () => {
-                      if (!confirm('清除所有對話執行緒？（不可復原）')) return
-                      try {
-                        const { useThreadStore } = await import('../store/threadStore')
-                        const st = useThreadStore.getState()
-                        const ids = [...st.threads.map((t) => t.id)]
-                        for (const id of ids) st.deleteThread(id)
-                        const active = st.activeId
-                        if (active) st.clearBubbles?.(active)
-                        setDataMsg('已清除對話執行緒')
-                      } catch (e) {
-                        setDataMsg(e instanceof Error ? e.message : String(e))
-                      }
-                    }}
-                  >
-                    刪除
-                  </button>
-                }
-              />
-            </SettingsGroup>
-            {dataMsg && (
-              <p className="text-[12px] font-[family-name:var(--font-mono)] text-primary px-1">
-                {dataMsg}
-              </p>
-            )}
-          </>
+          <DataControlsPanel settings={settings} set={set} fieldCtx={fieldCtx} />
         )}
 
         {section === 'shortcuts' && (
-          <>
-            <SettingsGroup
-              title="可自訂快捷鍵"
-              action={
-                <button
-                  type="button"
-                  className={settingsBtnCls}
-                  onClick={() => resetShortcuts()}
-                >
-                  重設全部
-                </button>
-              }
-            >
-              {shortcutBindings.map((b) => {
-                const shown = formatChord(b.chord || b.defaultChord)
-                const capturing = capturingId === b.id
-                return (
-                  <SettingsRow
-                    key={b.id}
-                    title={b.label}
-                    description={
-                      b.chord
-                        ? `${b.description} · 預設 ${formatChord(b.defaultChord)}`
-                        : b.description
-                    }
-                    control={
-                      <div className="flex items-center gap-2" data-shortcut-capture>
-                        <button
-                          type="button"
-                          className={`text-[11px] px-2.5 py-1 rounded-full border font-[family-name:var(--font-mono)] ${
-                            capturing
-                              ? 'border-primary/50 text-primary bg-primary/10'
-                              : 'bg-white/[0.06] border-white/10 text-on-surface-variant hover:border-primary/40'
-                          }`}
-                          onClick={() => setCapturingId(capturing ? null : b.id)}
-                          title="點擊後按下新快捷鍵"
-                        >
-                          {capturing ? '按下按鍵…' : shown}
-                        </button>
-                        {b.chord ? (
-                          <button
-                            type="button"
-                            className="text-[11px] text-outline hover:text-error"
-                            onClick={() => setShortcutChord(b.id, '')}
-                          >
-                            還原
-                          </button>
-                        ) : null}
-                      </div>
-                    }
-                  />
-                )
-              })}
-            </SettingsGroup>
-            <SettingsGroup title="固定（隨送出快捷鍵設定）">
-              {(
-                [
-                  [
-                    settings.enterBehavior === 'cmdEnter' ? '⌘ / Ctrl + Enter' : 'Enter',
-                    '送出訊息',
-                  ],
-                  [
-                    settings.enterBehavior === 'cmdEnter' ? 'Enter' : 'Shift + Enter',
-                    '換行',
-                  ],
-                  ['↑ / ↓', '輸入歷史'],
-                  ['Esc', '關閉 slash／浮動視窗'],
-                ] as const
-              ).map(([k, v]) => (
-                <SettingsRow
-                  key={k + v}
-                  title={v}
-                  control={
-                    <kbd className="text-[11px] px-2.5 py-1 rounded-full bg-white/[0.06] border border-white/10 font-[family-name:var(--font-mono)] text-on-surface-variant">
-                      {k}
-                    </kbd>
-                  }
-                />
-              ))}
-            </SettingsGroup>
-          </>
+          <ShortcutsPanel settings={settings} fieldCtx={fieldCtx} />
         )}
 
         {section === 'git' && (

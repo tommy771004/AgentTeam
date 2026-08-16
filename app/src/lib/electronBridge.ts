@@ -69,3 +69,17 @@ export function getElectronBridgeStatus(): ElectronBridgeStatus {
 export function isElectronBridgeReady(): boolean {
   return Boolean(window.subagents)
 }
+
+/**
+ * 用系統瀏覽器開外部連結。
+ *
+ * Electron 下走 shell bridge（不會把外站塞進 app 視窗）；純瀏覽器預覽時退回
+ * `window.open`。設定頁與各 panel 共用同一條路徑。
+ */
+export async function openExternalLink(url: string): Promise<void> {
+  if (window.subagents?.shell?.openExternal) {
+    await window.subagents.shell.openExternal(url)
+    return
+  }
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
