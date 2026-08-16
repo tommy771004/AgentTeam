@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import { useNavigate } from 'react-router-dom'
 import { Icon } from './Icon'
 import { CommandComposer } from './CommandComposer'
+import { ENGINE_BANNER_COPY, deriveEngineAvailabilityFromSettings } from '../agent/engineAvailability'
+import { useSettingsStore } from '../store/settingsStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { useSlashExecutor } from '../hooks/useSlashExecutor'
 import type { SlashCommand } from '../commands/registry'
@@ -11,6 +13,12 @@ import type { SlashCommand } from '../commands/registry'
  */
 export function FloatingConsole() {
   const navigate = useNavigate()
+  const settings = useSettingsStore((s) => s.settings)
+  const lastTest = useSettingsStore((s) => s.lastConnectionTest)
+  const noEngine = deriveEngineAvailabilityFromSettings(
+    settings,
+    lastTest ? lastTest.ok : null,
+  ).bannerVisible
   const {
     layoutMode,
     floatOpen,
@@ -110,6 +118,17 @@ export function FloatingConsole() {
           </button>
         </div>
       </div>
+
+      {noEngine && (
+        <button
+          type="button"
+          onClick={() => navigate('/settings?section=llm')}
+          className="block w-full border-b border-amber-500/30 bg-amber-500/15 px-3 py-1.5 text-left text-[10px] font-medium text-amber-100 hover:bg-amber-500/25"
+          title={ENGINE_BANNER_COPY.body}
+        >
+          ⚠ {ENGINE_BANNER_COPY.title}——{ENGINE_BANNER_COPY.cta} →
+        </button>
+      )}
 
       <div className="h-36 overflow-y-auto custom-scrollbar bg-surface-container-lowest px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] text-on-surface-variant space-y-0.5">
         {terminalLog.slice(-40).map((line, i) => (

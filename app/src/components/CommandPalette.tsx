@@ -29,7 +29,7 @@ export function CommandPalette() {
   const setComposer = useWorkspaceUiStore((s) => s.setComposer)
 
   const entries = useMemo(
-    () => (open ? filterCommandEntries(query, getAllCommandEntries()) : []),
+    () => (open ? filterCommandEntries(query, getAllCommandEntries()).slice(0, 40) : []),
     [open, query],
   )
 
@@ -122,7 +122,7 @@ export function CommandPalette() {
           {entries.length === 0 && (
             <p className="px-4 py-6 text-center text-xs text-outline">沒有符合的項目</p>
           )}
-          {entries.slice(0, 40).map((entry, i) => (
+          {entries.map((entry, i) => (
             <button
               key={entry.name}
               type="button"

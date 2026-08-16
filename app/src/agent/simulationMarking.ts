@@ -13,10 +13,12 @@ export interface SimulationMarkInput {
   overrideUseLlm?: boolean | null
 }
 
+import { llmCredentialPresent } from './engineAvailability.ts'
+
 export function isSimulationRun(input: SimulationMarkInput): boolean {
   if (input.runner !== 'builtin') return false
   if (input.overrideUseLlm === false) return true
-  return !(input.llmEnabled && input.llmApiKey.trim().length > 0)
+  return !(input.llmEnabled && llmCredentialPresent(input.llmApiKey))
 }
 
 export const SIMULATION_NOTE =

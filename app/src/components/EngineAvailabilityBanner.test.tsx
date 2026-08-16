@@ -24,7 +24,7 @@ function renderBanner() {
 }
 
 afterEach(() => {
-  useSettingsStore.setState({ settings: { ...DEFAULT_LLM_SETTINGS } })
+  useSettingsStore.setState({ settings: { ...DEFAULT_LLM_SETTINGS }, lastConnectionTest: null })
   window.localStorage.clear()
 })
 
@@ -100,5 +100,14 @@ describe('EngineAvailabilityBanner', () => {
 
     await user.click(screen.getByRole('button', { name: '開啟設定精靈' }))
     expect(screen.getByTestId('first-run-wizard')).toBeInTheDocument()
+  })
+
+  it('連線測試失敗會讓橫幅出現（即使金鑰已填）', () => {
+    useSettingsStore.setState({
+      settings: { ...DEFAULT_LLM_SETTINGS, enabled: true, apiKey: 'sk-bad', cliProviders: [] },
+      lastConnectionTest: { ok: false, at: 1 },
+    })
+    renderBanner()
+    expect(screen.getByTestId('engine-availability-banner')).toBeInTheDocument()
   })
 })

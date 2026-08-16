@@ -14,9 +14,13 @@ import { reopenFirstRunWizard } from './FirstRunWizard'
  */
 export function EngineAvailabilityBanner() {
   const settings = useSettingsStore((s) => s.settings)
+  const lastTest = useSettingsStore((s) => s.lastConnectionTest)
   const navigate = useNavigate()
-  // 連線測試結果目前不留存於 store；尚未測試視為可用（對齊引擎 useLlm 語義）。
-  const { bannerVisible } = deriveEngineAvailabilityFromSettings(settings, null)
+  // 消費最近一次連線測試結果：失敗會讓橫幅出現（誠實），尚未測試視為可用（對齊引擎語義）。
+  const { bannerVisible } = deriveEngineAvailabilityFromSettings(
+    settings,
+    lastTest ? lastTest.ok : null,
+  )
   if (!bannerVisible) return null
 
   return (

@@ -4,6 +4,8 @@ import { Icon } from '../components/Icon'
 import { reopenFirstRunWizard } from '../components/FirstRunWizard'
 import { reopenOnboardingTour } from '../components/OnboardingTour'
 import { SETTINGS_SECTION_GROUPS, SETTINGS_SECTIONS } from '../commands/settingsSections'
+
+
 import { APPROVAL_MODE_DEFS } from '../agent/approvalModes'
 import { exportRunMetricsJsonl, metricsSummary, resetRunMetrics } from '../agent/metrics'
 import { ThemePage } from '../components/SectionNav'
@@ -77,9 +79,6 @@ import {
   inspectOpenCodeServer,
   unwrapOpenCodeServerValue,
 } from '../agent/opencode/serverClient'
-
-const SECTION_GROUPS = SETTINGS_SECTION_GROUPS
-const SECTIONS = SETTINGS_SECTIONS
 
 const SECTION_META: Record<string, { title: string; subtitle: string }> = {
   general: {
@@ -174,12 +173,18 @@ async function openExternalLink(url: string) {
 
 export function SettingsPage() {
   const { settings, update, testConnection, exportBundle, importBundle } = useSettingsStore()
-  // ?section= 深連結（誠實性橫幅 CTA / 未來 Command Palette 共用）；無效值回一般節
+  // ?section= 深連結（誠實性橫幅 CTA / Command Palette 共用）；無效值回一般節
   const [searchParams] = useSearchParams()
   const requestedSection = searchParams.get('section')
   const [section, setSection] = useState(
-    requestedSection && SECTIONS.some((s) => s.id === requestedSection) ? requestedSection : 'general',
+    requestedSection && SETTINGS_SECTIONS.some((s) => s.id === requestedSection) ? requestedSection : 'general',
   )
+  // 已掛載的設定頁再次收到深連結（palette / 橫幅重複點擊）也要切節
+  useEffect(() => {
+    if (requestedSection && SETTINGS_SECTIONS.some((s) => s.id === requestedSection)) {
+      setSection(requestedSection)
+    }
+  }, [requestedSection])
   const [testMsg, setTestMsg] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [bundleMsg, setBundleMsg] = useState<string | null>(null)
@@ -611,7 +616,7 @@ export function SettingsPage() {
       (process as { env?: Record<string, string | undefined> }).env?.SUBAGENTS_BUILD_FLAVOR ===
         'policy-admin')
   const navSections = useMemo(
-    () => (isPolicyAdminBuild ? SECTIONS : SECTIONS.filter((s) => s.id !== 'policyAdmin')),
+    () => (isPolicyAdminBuild ? SETTINGS_SECTIONS : SETTINGS_SECTIONS.filter((s) => s.id !== 'policyAdmin')),
     [isPolicyAdminBuild],
   )
 
@@ -619,7 +624,7 @@ export function SettingsPage() {
     <ThemePage
       title="設定"
       sections={navSections}
-      groups={SECTION_GROUPS}
+      groups={SETTINGS_SECTION_GROUPS}
       activeId={section}
       onChange={setSection}
       hideNavTitle

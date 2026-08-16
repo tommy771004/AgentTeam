@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { deriveEngineAvailabilityFromSettings } from '../agent/engineAvailability'
+import { authorizedCliCount, deriveEngineAvailabilityFromSettings } from '../agent/engineAvailability'
 import { useSettingsStore } from '../store/settingsStore'
 import { Icon } from './Icon'
 import { settingsBtnCls, settingsBtnPrimaryCls } from './settings/SettingsChrome'
@@ -17,6 +17,16 @@ const STATE_KEY = 'subagents.firstRunWizard.state.v1'
 const REOPEN_EVENT = 'subagents:first-run-wizard:reopen'
 /** 精靈落定（完成/跳過）後通知 onboarding tour 接棒 */
 export const WIZARD_SETTLED_EVENT = 'subagents:first-run-wizard:settled'
+
+/** 精靈是否已落定（完成或跳過）——tour 接棒判斷用，單一讀取點 */
+export function isFirstRunWizardSettled(): boolean {
+  try {
+    const value = window.localStorage.getItem(STATE_KEY)
+    return value === 'completed' || value === 'skipped'
+  } catch {
+    return false
+  }
+}
 
 /**
  * 重開精靈（ticket 08）：誠實性橫幅與設定頁的重開入口。
@@ -143,8 +153,7 @@ export function FirstRunWizard() {
     }
   }
 
-  const cliAuthorized =
-    settings.cliProviders.filter((p) => p.enabled && p.authorized).length > 0
+  const cliAuthorized = authorizedCliCount(settings.cliProviders) > 0
   const testPassed = llmPath ? testResult === true : cliAuthorized
 
   return (

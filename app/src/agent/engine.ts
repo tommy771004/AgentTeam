@@ -20,6 +20,7 @@ import { parseWithLlm } from './llmParser'
 import { replanCorrectiveSteps } from './replan'
 import { formatContinueGoalOffer } from './continueGoal'
 import { emptyKnowledge } from './knowledge'
+import { llmCredentialPresent } from './engineAvailability'
 import { DEFAULT_LLM_SETTINGS, resolveRoleModel, withRoleModel } from './llm'
 import { BUILTIN_RUNNER_CAPABILITIES } from './runners'
 import { skillsStore } from './hermes/skills'
@@ -181,7 +182,7 @@ export class AgentLoopEngine {
 
   private useLlm(): boolean {
     if (this.overrides.useLlm === false) return false
-    return this.settings.enabled && Boolean(this.settings.apiKey)
+    return this.settings.enabled && llmCredentialPresent(this.settings.apiKey)
   }
 
   private subAgentsEnabled(): boolean {

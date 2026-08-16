@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { WIZARD_SETTLED_EVENT } from './FirstRunWizard'
+import { WIZARD_SETTLED_EVENT, isFirstRunWizardSettled } from './FirstRunWizard'
 import { Icon } from './Icon'
 import { settingsBtnCls, settingsBtnPrimaryCls } from './settings/SettingsChrome'
 
@@ -11,7 +11,6 @@ import { settingsBtnCls, settingsBtnPrimaryCls } from './settings/SettingsChrome
  * 設定 → 外觀提供「重新導覽」；Esc 視同跳過；動效掛 data-reduced-motion 閘門。
  */
 const TOUR_STATE_KEY = 'subagents.onboardingTour.state.v1'
-const WIZARD_STATE_KEY = 'subagents.firstRunWizard.state.v1'
 const REOPEN_EVENT = 'subagents:onboarding-tour:reopen'
 
 /** 設定頁「重新導覽」入口 */
@@ -58,15 +57,6 @@ function readTourState(): TourState | null {
   }
 }
 
-function wizardSettled(): boolean {
-  try {
-    const value = window.localStorage.getItem(WIZARD_STATE_KEY)
-    return value === 'completed' || value === 'skipped'
-  } catch {
-    return false
-  }
-}
-
 function writeTourState(value: TourState) {
   try {
     window.localStorage.setItem(TOUR_STATE_KEY, value)
@@ -79,14 +69,14 @@ export function OnboardingTour() {
   const [tourState, setTourState] = useState<TourState | null>(() => readTourState())
   const [step, setStep] = useState(0)
   const [forcedOpen, setForcedOpen] = useState(false)
-  const [wizardDone, setWizardDone] = useState(() => wizardSettled())
+  const [wizardDone, setWizardDone] = useState(() => isFirstRunWizardSettled())
 
   const visible = tourState === null && (wizardDone || forcedOpen)
 
   // 精靈落定 / 重開事件 → 重新評估
   useEffect(() => {
     const reevaluate = () => {
-      setWizardDone(wizardSettled())
+      setWizardDone(isFirstRunWizardSettled())
     }
     const onReopen = () => {
       setTourState(null)

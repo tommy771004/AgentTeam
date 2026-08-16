@@ -117,6 +117,8 @@ function saveLocal(s: LlmSettings) {
 interface SettingsStore {
   settings: LlmSettings
   loaded: boolean
+  /** 最近一次連線測試結果（記憶體，不持久化）——誠實性橫幅／醫生卡共用 */
+  lastConnectionTest: { ok: boolean; at: number } | null
   load: () => Promise<void>
   update: (patch: Partial<LlmSettings>) => Promise<void>
   testConnection: (model?: string) => Promise<{ ok: boolean; message: string }>
@@ -124,9 +126,77 @@ interface SettingsStore {
   importBundle: (json: string) => Promise<{ ok: boolean; message: string }>
 }
 
+/** 連線測試實作（原 store 內邏輯；抽出以便 wrapper 記錄 lastConnectionTest） */
+async function performConnectionTest(
+  model: string | undefined,
+  get: () => SettingsStore,
+): Promise<{ ok: boolean; message: string }> {
+  const s = get().settings
+  if (isElectronPiProduction()) {
+    try {
+      const health = await window.subagents?.piHost?.health?.()
+      return health?.status === 'ready'
+        ? { ok: true, message: `Pi Core Host ready · ${s.model || 'model from host'}` }
+        : { ok: false, message: 'Pi Core Host is not ready' }
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) }
+    }
+  }
+  if (!s.apiKey) return { ok: false, message: 'API key is empty' }
+  const m = model || s.model
+  try {
+    let discoveredModels: string[] = []
+    if (window.subagents?.llm?.models) {
+      try {
+        const listed = await window.subagents.llm.models({ baseUrl: s.baseUrl, apiKey: s.apiKey })
+        discoveredModels = listed.models
+        if (discoveredModels.length) await get().update({ discoveredModels })
+      } catch {
+        // Some compatible gateways omit /models; a chat probe remains valid.
+      }
+    }
+    if (window.subagents?.llm?.chat) {
+      const r = await window.subagents.llm.chat({
+        baseUrl: s.baseUrl,
+        apiKey: s.apiKey,
+        fallbackModels: s.fallbackModels,
+        model: m,
+        messages: [{ role: 'user', content: 'Reply with exactly: pong' }],
+        max_tokens: 8,
+        temperature: 0,
+      })
+      const fallbackNote = r.model && r.model !== m ? ` · 已自動切換備援 ${r.model}` : ''
+      return { ok: true, message: `OK · ${r.model} · ${discoveredModels.length} models${fallbackNote} · "${r.content.slice(0, 40)}"` }
+    }
+    const base = s.baseUrl.replace(/\/$/, '')
+    const res = await fetch(`${base}/models`, {
+      headers: { Authorization: `Bearer ${s.apiKey}` },
+    })
+    if (!res.ok) return { ok: false, message: `HTTP ${res.status}` }
+    const body = (await res.json()) as { data?: Array<{ id?: string }> }
+    discoveredModels = (body.data || []).map((x) => x.id || '').filter(Boolean)
+    if (discoveredModels.length) await get().update({ discoveredModels })
+    return { ok: true, message: `找到 ${discoveredModels.length} 個模型（target: ${m}）` }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    if (/aihubmix\.com/i.test(s.baseUrl) && message.includes('no_available_channel')) {
+      const tid = message.match(/tid:\s*([\w-]+)/i)?.[1]
+      const fallbacks = s.fallbackModels.length
+        ? s.fallbackModels.join('、')
+        : 'gpt-4.1-mini-free、glm-4.7-flash-free'
+      return {
+        ok: false,
+        message: `AIHubMix 暫時無法路由「${m}」。已嘗試備援模型；請稍後重試或改選：${fallbacks}${tid ? `（tid: ${tid}）` : ''}`,
+      }
+    }
+    return { ok: false, message }
+  }
+}
+
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   settings: loadLocal(),
   loaded: false,
+  lastConnectionTest: null,
 
   load: async () => {
     let base: LlmSettings
@@ -266,66 +336,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   testConnection: async (model) => {
-    const s = get().settings
-    if (isElectronPiProduction()) {
-      try {
-        const health = await window.subagents?.piHost?.health?.()
-        return health?.status === 'ready'
-          ? { ok: true, message: `Pi Core Host ready · ${s.model || 'model from host'}` }
-          : { ok: false, message: 'Pi Core Host is not ready' }
-      } catch (error) {
-        return { ok: false, message: error instanceof Error ? error.message : String(error) }
-      }
-    }
-    if (!s.apiKey) return { ok: false, message: 'API key is empty' }
-    const m = model || s.model
-    try {
-      let discoveredModels: string[] = []
-      if (window.subagents?.llm?.models) {
-        try {
-          const listed = await window.subagents.llm.models({ baseUrl: s.baseUrl, apiKey: s.apiKey })
-          discoveredModels = listed.models
-          if (discoveredModels.length) await get().update({ discoveredModels })
-        } catch {
-          // Some compatible gateways omit /models; a chat probe remains valid.
-        }
-      }
-      if (window.subagents?.llm?.chat) {
-        const r = await window.subagents.llm.chat({
-          baseUrl: s.baseUrl,
-          apiKey: s.apiKey,
-          fallbackModels: s.fallbackModels,
-          model: m,
-          messages: [{ role: 'user', content: 'Reply with exactly: pong' }],
-          max_tokens: 8,
-          temperature: 0,
-        })
-        const fallbackNote = r.model && r.model !== m ? ` · 已自動切換備援 ${r.model}` : ''
-        return { ok: true, message: `OK · ${r.model} · ${discoveredModels.length} models${fallbackNote} · "${r.content.slice(0, 40)}"` }
-      }
-      const base = s.baseUrl.replace(/\/$/, '')
-      const res = await fetch(`${base}/models`, {
-        headers: { Authorization: `Bearer ${s.apiKey}` },
-      })
-      if (!res.ok) return { ok: false, message: `HTTP ${res.status}` }
-      const body = (await res.json()) as { data?: Array<{ id?: string }> }
-      discoveredModels = (body.data || []).map((x) => x.id || '').filter(Boolean)
-      if (discoveredModels.length) await get().update({ discoveredModels })
-      return { ok: true, message: `找到 ${discoveredModels.length} 個模型（target: ${m}）` }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      if (/aihubmix\.com/i.test(s.baseUrl) && message.includes('no_available_channel')) {
-        const tid = message.match(/tid:\s*([\w-]+)/i)?.[1]
-        const fallbacks = s.fallbackModels.length
-          ? s.fallbackModels.join('、')
-          : 'gpt-4.1-mini-free、glm-4.7-flash-free'
-        return {
-          ok: false,
-          message: `AIHubMix 暫時無法路由「${m}」。已嘗試備援模型；請稍後重試或改選：${fallbacks}${tid ? `（tid: ${tid}）` : ''}`,
-        }
-      }
-      return { ok: false, message }
-    }
+    const result = await performConnectionTest(model, get)
+    set({ lastConnectionTest: { ok: result.ok, at: Date.now() } })
+    return result
   },
 
   exportBundle: async () => {

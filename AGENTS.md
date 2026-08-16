@@ -20,12 +20,13 @@ All from `app/`:
 npm install
 npm run dev        # Vite + Electron; UI also works in plain browser at :5173
 npm run build      # tsc -b && vite build (use this as the typecheck)
-npm run smoke      # smoke.mjs + smoke-caps.mjs — pure logic + Electron contract
+npm run smoke      # full smoke chain — pure logic + Electron contract (ends with npm test)
+npm test           # vitest + @testing-library/react component tests (src/**/*.test.tsx)
 npx oxlint src     # lint
 npm run dist:mac   # smoke + build + electron-builder (also dist / dist:win / dist:all)
 ```
 
-There is no unit-test runner; smoke scripts cover scheduler math, event matching, capability/compaction pure logic, and the built Electron preload/main contract. `dist*` refuses to package if smoke fails.
+Smoke scripts cover scheduler math, event matching, capability/compaction pure logic, and the built Electron preload/main contract; UI component tests run on vitest + jsdom + Testing Library (`vitest.config.ts`, setup at `src/test/setup.ts`, devDependencies only). `dist*` refuses to package if smoke (including component tests) fails.
 
 ## Architecture
 

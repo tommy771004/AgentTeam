@@ -27,6 +27,19 @@
 - Electron 選單／通知：本系列零 `electron/` 目錄變更（`git diff --stat electron/` 為空），main process 行為不受影響。
 - 全新 profile 首次流程：以元件測試覆蓋各環節與時序（醫生卡三態、精靈完成/跳過兩路與橫幅連動、tour 接棒事件、palette 呼出/過濾/導航）。
 
+### Code-review 修正（2026-08-16，第二輪 commit）
+
+Standards 與 Spec 兩軸審查後立即修正的項目：
+
+- **Spec-c3**：Command Palette 鍵盤選擇迴圈改以截斷後的 40 筆為界（原先 ↑↓ 可選到未渲染的隱形條目）
+- **Spec-c2**：`?section=` 深連結加 effect——已掛載的設定頁再次收到深連結也會切節
+- **Spec-c1**：`settingsStore` 新增記憶體欄位 `lastConnectionTest`（testConnection wrapper 記錄）；橫幅與浮動 console 消費——連線測試失敗會讓橫幅出現（新增回歸測試）
+- **Spec-a1**：FloatingConsole（浮動 console 場景）加入精簡 amber 警示條（點擊直達語言模型節）
+- **Standards-1**：AGENTS.md 測試面敘述更新（vitest 元件測試）；`npm test` 掛入 `smoke` 與 `smoke:ci` 鏈尾——dist* 打包閘門現在涵蓋元件測試
+- **Standards-smells**：「LLM 憑證已填」收斂為 `llmCredentialPresent` 單一判定（engine `useLlm`／橫幅／simulation marking 三處共用，引擎語義改為全空白金鑰=模擬，更誠實）；`authorizedCliCount` helper 消除精靈重複；OnboardingTour 改用 `isFirstRunWizardSettled()` 單一讀取點；SettingsPage 移除 SECTIONS 別名 Middle Man
+- 未修正（記錄取捨）：精靈 CLI 路徑授權仍導向設定頁（Electron `which` 掃描屬設定域）；字級採 px 為全 codebase 既有慣例；`engineAvailability` 命名與 glossary「Runner」的偏差保留（產品 copy 既有用語即「執行引擎」）
+- 修正後驗證：`tsc -b` 綠、`npm test` 30 passed、engine-availability／command-registry／build-flavor-matrix／run-lifecycle smoke 全過
+
 ### 待 Tommy 實機 spot-check（需人工）
 
 - [ ] 真實 Electron 視窗：乾淨 profile 首次啟動 → 醫生卡 → 精靈 → 橫幅 → tour → ⌘⇧P palette 的一鏈流暢度

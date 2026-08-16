@@ -5,7 +5,20 @@
  * 醫生卡三態。不讀 store、不觸 IPC——消費端（橫幅／醫生卡）自己接資料。
  * 文案以 key 對應 zh-TW；i18n spec 落地時改為語言檔 key。
  */
-import type { LlmSettings } from './types'
+import type { CliProviderConfig, LlmSettings } from './types'
+
+/**
+ * 「LLM 憑證已填」的單一判定（engine useLlm／橫幅／精靈共用，避免漂移）：
+ * 全空白視同未填。
+ */
+export function llmCredentialPresent(apiKey: string): boolean {
+  return apiKey.trim().length > 0
+}
+
+/** 已啟用且已授權的 CLI provider 數（橫幅推導與精靈驗證共用） */
+export function authorizedCliCount(providers: Array<Pick<CliProviderConfig, 'enabled' | 'authorized'>>): number {
+  return providers.filter((p) => p.enabled && p.authorized).length
+}
 
 /** 醫生卡三態：未啟用 / 已啟用未通連 / 可用 */
 export type LlmCheckState = 'disabled' | 'unverified' | 'ok'
@@ -48,9 +61,9 @@ export function deriveEngineAvailabilityFromSettings(
 ): EngineAvailability {
   return deriveEngineAvailability({
     llmEnabled: settings.enabled,
-    llmCredentialPresent: settings.apiKey.trim().length > 0,
+    llmCredentialPresent: llmCredentialPresent(settings.apiKey),
     llmConnected,
-    authorizedCliCount: settings.cliProviders.filter((p) => p.enabled && p.authorized).length,
+    authorizedCliCount: authorizedCliCount(settings.cliProviders),
   })
 }
 
