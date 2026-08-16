@@ -3,6 +3,7 @@ import {
   searchSettingsFields,
   type SettingsSearchHit,
 } from '../../settings/fieldRegistry'
+import { useTranslation } from '../../i18n/useTranslation'
 import { Icon } from '../Icon'
 
 const MAX_HITS = 20
@@ -24,6 +25,7 @@ export function SettingsSearch({
   /** 跳到某個欄位：切節、必要時展開進階、捲動並高亮 */
   onJump: (hit: SettingsSearchHit) => void
 }) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
   const [open, setOpen] = useState(false)
@@ -78,8 +80,8 @@ export function SettingsSearch({
           aria-activedescendant={
             showList && hits[index] ? `settings-hit-${hits[index].field.id}` : undefined
           }
-          aria-label="搜尋設定"
-          placeholder="搜尋設定（中英文皆可）"
+          aria-label={t('settings.search.label')}
+          placeholder={t('settings.search.placeholder')}
           onFocus={() => setOpen(true)}
           onChange={(event) => {
             setQuery(event.target.value)
@@ -110,11 +112,11 @@ export function SettingsSearch({
           ref={listRef}
           id="settings-search-results"
           role="listbox"
-          aria-label="設定搜尋結果"
+          aria-label={t('settings.search.resultsLabel')}
           className="absolute left-0 right-0 top-full z-[80] mt-1 max-h-80 overflow-y-auto rounded-card border border-line bg-surface shadow-raised custom-scrollbar"
         >
           {hits.length === 0 ? (
-            <p className="px-3 py-3 text-[11px] text-outline">沒有符合的設定。</p>
+            <p className="px-3 py-3 text-[11px] text-outline">{t('settings.search.empty')}</p>
           ) : (
             hits.map((hit, i) => (
               <button
@@ -133,7 +135,9 @@ export function SettingsSearch({
                   <span className="block truncate text-[12px] font-medium text-on-surface">
                     {hit.field.label}
                     {hit.field.tier === 'advanced' ? (
-                      <span className="ml-1.5 text-[10px] font-normal text-outline">進階</span>
+                      <span className="ml-1.5 text-[10px] font-normal text-outline">
+                        {t('settings.field.advancedBadge')}
+                      </span>
                     ) : null}
                   </span>
                   <span className="block truncate text-[10px] text-outline">

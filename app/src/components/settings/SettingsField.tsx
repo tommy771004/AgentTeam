@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import type { MessageKey } from '../../i18n'
+import { useTranslation } from '../../i18n/useTranslation'
 import {
   fieldAnchorId,
   fieldIsVisible,
@@ -41,6 +43,7 @@ export function SettingsField({
   description?: ReactNode
   ctx: SettingsFieldContext
 }) {
+  const { t } = useTranslation()
   const field = getSettingsField(id)
   if (!field) {
     console.warn(`[settings] 未宣告的欄位 id：${id}`)
@@ -48,15 +51,20 @@ export function SettingsField({
   }
   if (!fieldIsVisible(field, ctx)) return null
 
+  // 已 key 化的欄位走語言檔；尚未遷入的沿用 registry 的 zh-TW 字面值。
+  const label = field.labelKey ? t(field.labelKey) : field.label
+  const summary = field.summaryKey ? t(field.summaryKey) : field.summary
   const highlighted = ctx.highlightId === id
   const title =
     field.tier === 'advanced' ? (
       <span className="inline-flex items-baseline gap-1.5">
-        {field.label}
-        <span className="text-[10px] font-normal text-outline">進階</span>
+        {label}
+        <span className="text-[10px] font-normal text-outline">
+          {t('settings.field.advancedBadge')}
+        </span>
       </span>
     ) : (
-      field.label
+      label
     )
 
   return (
@@ -66,11 +74,11 @@ export function SettingsField({
       className={`scroll-mt-24 transition-colors ${highlighted ? 'bg-accent-tint' : ''}`}
     >
       {children ? (
-        <SettingsStack title={title} description={description ?? field.summary}>
+        <SettingsStack title={title} description={description ?? summary}>
           {children}
         </SettingsStack>
       ) : (
-        <SettingsRow title={title} description={description ?? field.summary} control={control} />
+        <SettingsRow title={title} description={description ?? summary} control={control} />
       )}
     </div>
   )
@@ -120,19 +128,24 @@ export function SettingsAnchor({
 export function SettingsGroupFor({
   section,
   group,
+  titleKey,
   ctx,
   action,
   children,
 }: {
   section: string
+  /** registry 裡的群組識別（同時是尚未 key 化時的 zh-TW 標題） */
   group: string
+  /** 已 key 化的群組標題（spec 6/6） */
+  titleKey?: MessageKey
   ctx: SettingsFieldContext
   action?: ReactNode
   children: ReactNode
 }) {
+  const { t } = useTranslation()
   if (!groupHasVisibleFields(section, group, ctx)) return null
   return (
-    <SettingsGroup title={group} action={action}>
+    <SettingsGroup title={titleKey ? t(titleKey) : group} action={action}>
       {children}
     </SettingsGroup>
   )

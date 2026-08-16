@@ -25,6 +25,7 @@ import {
 import { SettingsSearch } from '../components/settings/SettingsSearch'
 import { fieldAnchorId, getSettingsField, sectionHasVisibleFields } from '../settings/fieldRegistry'
 import { useSettingsUiStore } from '../store/settingsUiStore'
+import { useTranslation } from '../i18n/useTranslation'
 
 
 import { ThemePage } from '../components/SectionNav'
@@ -340,6 +341,7 @@ export function SettingsPage() {
   }
 
   const meta = SECTION_META[section] || { title: '設定', subtitle: '' }
+  const { t } = useTranslation()
   const showAdvanced = useSettingsUiStore((state) => state.showAdvanced)
   const setShowAdvanced = useSettingsUiStore((state) => state.setShowAdvanced)
   /** 搜尋跳轉／深連結命中的欄位——捲到它並短暫高亮 */
@@ -440,11 +442,11 @@ export function SettingsPage() {
         <div className="mb-5 flex items-center justify-between gap-3 border-b border-line pb-3">
           <p className="text-[11px] leading-relaxed text-outline">
             {showAdvanced
-              ? '進階檢視：工程參數與少用開關都在。'
-              : '基礎檢視：只顯示常用設定；進階參數仍在，值不受影響。'}
+              ? t('settings.view.advancedHint')
+              : t('settings.view.basicHint')}
           </p>
           <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[12px] font-medium text-on-surface">
-            顯示進階
+            {t('settings.view.showAdvanced')}
             <SettingsToggle checked={showAdvanced} onChange={setShowAdvanced} />
           </label>
         </div>
@@ -573,7 +575,7 @@ export function SettingsPage() {
             importBundle={importBundle}
           />
         )}
-        <p className="text-[11px] text-outline px-1 mt-2">變更會立即套用，無需儲存。</p>
+        <p className="text-[11px] text-outline px-1 mt-2">{t('settings.footer.autoApply')}</p>
       </div>
     </ThemePage>
   )

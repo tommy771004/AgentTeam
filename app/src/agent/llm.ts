@@ -94,6 +94,7 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   // ChatGPT-style prefs
   theme: 'dark',
   reducedMotion: 'system',
+  uiLanguage: 'system',
   uiFontSize: 14,
   codeFontSize: 13,
   translucentSidebar: true,

@@ -9,6 +9,7 @@
  * runtime settings，ADR-0025）。registry 只描述呈現與可發現性。
  */
 import { fuzzyMatch } from '../commands/registry.ts'
+import type { MessageKey } from '../i18n/index.ts'
 import { SETTINGS_SECTIONS } from '../commands/settingsSections.ts'
 
 export type SettingsTier = 'basic' | 'advanced'
@@ -24,9 +25,16 @@ export type SettingsFieldDef = {
   /** 節內的卡片群組標題（沿用現行分組） */
   group?: string
   tier: SettingsTier
+  /** zh-TW 文案（source of truth）。已 key 化的欄位仍保留，作為對帳基準。 */
   label: string
   /** 一句話說明它調什麼——進階欄位必備，讓人敢調也知道何時調回去 */
   summary: string
+  /**
+   * 語言檔 key（spec 6/6）。宣告後畫面改用 `t()`；未宣告者沿用上面的 zh-TW 字面值，
+   * 讓各域可以分批遷入而不必一次到位。
+   */
+  labelKey?: MessageKey
+  summaryKey?: MessageKey
   /** 中英文搜尋關鍵字（zh-TW + en） */
   keywords: string[]
   /**
@@ -46,6 +54,18 @@ export type SettingsFieldDef = {
  */
 export const SETTINGS_FIELDS: SettingsFieldDef[] = [
   {
+    id: 'appearance.language',
+    section: 'appearance',
+    group: '主題',
+    tier: 'basic',
+    label: '介面語言',
+    summary: '介面文字使用的語言；切換後立即生效，不需重新啟動。',
+    keywords: ['語言', '介面語言', '中文', '英文', 'language', 'locale', 'i18n', 'english'],
+    settingsKeys: ['uiLanguage'],
+    labelKey: 'settings.appearance.language.label',
+    summaryKey: 'settings.appearance.language.summary',
+  },
+  {
     id: 'appearance.theme',
     section: 'appearance',
     group: '主題',
@@ -54,6 +74,8 @@ export const SETTINGS_FIELDS: SettingsFieldDef[] = [
     summary: '深色、淺色或跟隨系統。',
     keywords: ['主題', '深色', '淺色', '暗色', 'theme', 'dark', 'light', 'appearance'],
     settingsKeys: ['theme'],
+    labelKey: 'settings.appearance.theme.label',
+    summaryKey: 'settings.appearance.theme.summary',
   },
   {
     id: 'appearance.reducedMotion',
@@ -64,6 +86,8 @@ export const SETTINGS_FIELDS: SettingsFieldDef[] = [
     summary: '降低動效，或跟隨系統的減少動態偏好。',
     keywords: ['動畫', '動效', '減少動畫', 'motion', 'reduced motion', 'animation', 'a11y'],
     settingsKeys: ['reducedMotion'],
+    labelKey: 'settings.appearance.reducedMotion.label',
+    summaryKey: 'settings.appearance.reducedMotion.summary',
   },
   {
     id: 'appearance.translucentSidebar',
@@ -74,6 +98,8 @@ export const SETTINGS_FIELDS: SettingsFieldDef[] = [
     summary: '側欄改用半透明材質；在低效能機器上關掉可讓捲動更順。',
     keywords: ['側欄', '半透明', '毛玻璃', 'sidebar', 'translucent', 'glass', 'blur'],
     settingsKeys: ['translucentSidebar'],
+    labelKey: 'settings.appearance.translucentSidebar.label',
+    summaryKey: 'settings.appearance.translucentSidebar.summary',
   },
   {
     id: 'appearance.tour',
@@ -84,6 +110,8 @@ export const SETTINGS_FIELDS: SettingsFieldDef[] = [
     summary: '再看一次四個概念點：Loop Pattern、執行引擎、Approval Mode、誠實性。',
     keywords: ['導覽', '教學', '新手', 'tour', 'onboarding', 'guide'],
     settingsKeys: [],
+    labelKey: 'settings.appearance.tour.label',
+    summaryKey: 'settings.appearance.tour.summary',
   },
   {
     id: 'appearance.uiFontSize',
@@ -94,6 +122,8 @@ export const SETTINGS_FIELDS: SettingsFieldDef[] = [
     summary: '整個介面的文字大小。',
     keywords: ['字級', '字體大小', '字型大小', 'font size', 'ui font', 'text size'],
     settingsKeys: ['uiFontSize'],
+    labelKey: 'settings.appearance.uiFontSize.label',
+    summaryKey: 'settings.appearance.uiFontSize.summary',
   },
   {
     id: 'appearance.codeFontSize',
@@ -104,6 +134,8 @@ export const SETTINGS_FIELDS: SettingsFieldDef[] = [
     summary: '終端機、程式碼區塊與 diff 的等寬字大小。',
     keywords: ['程式碼字級', '等寬', '終端機字級', 'code font', 'monospace', 'terminal font'],
     settingsKeys: ['codeFontSize'],
+    labelKey: 'settings.appearance.codeFontSize.label',
+    summaryKey: 'settings.appearance.codeFontSize.summary',
   },
 // ── 一般 ───────────────────────────────────────────────────────────
   {

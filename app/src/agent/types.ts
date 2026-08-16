@@ -570,6 +570,8 @@ export type FollowUpMode = 'steer' | 'queue'
 /** Provider-specific convenience preset; every option remains OpenAI-compatible. */
 export type ApiProviderPreset = 'aihubmix' | 'openai' | 'openrouter' | 'custom'
 
+export type UiLanguagePreference = 'system' | 'zh-TW' | 'en'
+
 export interface LlmSettings {
   enabled: boolean
   apiProvider: ApiProviderPreset
@@ -719,6 +721,11 @@ export interface LlmSettings {
   theme: ThemePreference
   /** Appearance · Reduce motion */
   reducedMotion: ReducedMotionPreference
+  /**
+   * Appearance · UI language (spec 6/6). `system` follows the OS.
+   * Shell strings only — model output is never translated.
+   */
+  uiLanguage: UiLanguagePreference
   /** Appearance · UI base font size (px) */
   uiFontSize: number
   /** Appearance · Code base font size (px) */
