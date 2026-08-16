@@ -5,9 +5,13 @@ import { reopenFirstRunWizard } from '../components/FirstRunWizard'
 import { reopenOnboardingTour } from '../components/OnboardingTour'
 import { SETTINGS_SECTION_GROUPS, SETTINGS_SECTIONS } from '../commands/settingsSections'
 import { AppearancePanel } from '../components/settings/panels/AppearancePanel'
-import { SettingsField, type SettingsFieldContext } from '../components/settings/SettingsField'
+import {
+  SettingsAnchor,
+  SettingsField,
+  type SettingsFieldContext,
+} from '../components/settings/SettingsField'
 import { SettingsSearch } from '../components/settings/SettingsSearch'
-import { fieldAnchorId, getSettingsField } from '../settings/fieldRegistry'
+import { fieldAnchorId, getSettingsField, sectionHasVisibleFields } from '../settings/fieldRegistry'
 import { useSettingsUiStore } from '../store/settingsUiStore'
 
 
@@ -624,10 +628,16 @@ export function SettingsPage() {
     (typeof process !== 'undefined' &&
       (process as { env?: Record<string, string | undefined> }).env?.SUBAGENTS_BUILD_FLAVOR ===
         'policy-admin')
-  const navSections = useMemo(
-    () => (isPolicyAdminBuild ? SETTINGS_SECTIONS : SETTINGS_SECTIONS.filter((s) => s.id !== 'policyAdmin')),
-    [isPolicyAdminBuild],
-  )
+  const navSections = useMemo(() => {
+    const byBuild = isPolicyAdminBuild
+      ? SETTINGS_SECTIONS
+      : SETTINGS_SECTIONS.filter((s) => s.id !== 'policyAdmin')
+    // 整節都是進階的節（例如角色模型）在基礎檢視直接收起來——留一個點進去
+    // 空白的節名比藏起來更糟。
+    return byBuild.filter((s) =>
+      sectionHasVisibleFields(s.id, { showAdvanced, policyAdminBuild: isPolicyAdminBuild }),
+    )
+  }, [isPolicyAdminBuild, showAdvanced])
   const fieldCtx: SettingsFieldContext = {
     showAdvanced,
     policyAdminBuild: isPolicyAdminBuild,
@@ -646,6 +656,13 @@ export function SettingsPage() {
     if (field.tier === 'advanced' && !showAdvanced) setShowAdvanced(true)
     setHighlightId(fieldId)
   }
+
+  // 目前這一節因為切回基礎檢視而被收起時，退回第一個仍看得見的節，
+  // 否則畫面會停在一個導覽列上已經不存在的節。
+  useEffect(() => {
+    if (navSections.some((item) => item.id === section)) return
+    setSection(navSections[0]?.id || 'general')
+  }, [navSections, section])
 
   // 切節／展開後 DOM 才存在，等這一輪 render 完成再捲。
   useEffect(() => {
@@ -1409,7 +1426,7 @@ export function SettingsPage() {
         {section === 'llm' && (
           <>
             <SettingsGroup title="連線">
-              <SettingsStack title="API 供應商">
+              <SettingsField id="llm.apiProvider" ctx={fieldCtx}>
                 <select
                   value={settings.apiProvider || 'custom'}
                   className={settingsInputCls}
@@ -1437,10 +1454,10 @@ export function SettingsPage() {
                 <p className="mt-1 text-[11px] text-outline">
                   {apiProviderPreset(settings.apiProvider || 'custom').note}
                 </p>
-              </SettingsStack>
-              <SettingsRow
-                title="啟用 LLM"
-                description="使用所選供應商的 OpenAI 相容 API"
+              </SettingsField>
+              <SettingsField
+                id="llm.enabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.enabled}
@@ -1448,15 +1465,15 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsStack title="Base URL">
+              <SettingsField id="llm.baseUrl" ctx={fieldCtx}>
                 <input
                   value={settings.baseUrl}
                   onChange={(e) => set({ baseUrl: e.target.value })}
                   className={settingsInputCls}
                   placeholder="https://api.openai.com/v1"
                 />
-              </SettingsStack>
-              <SettingsStack title="API 金鑰">
+              </SettingsField>
+              <SettingsField id="llm.apiKey" ctx={fieldCtx}>
                 <input
                   type="password"
                   value={settings.apiKey}
@@ -1465,8 +1482,8 @@ export function SettingsPage() {
                   placeholder="sk-..."
                   autoComplete="off"
                 />
-              </SettingsStack>
-              <SettingsStack title="預設模型">
+              </SettingsField>
+              <SettingsField id="llm.model" ctx={fieldCtx}>
                 <input
                   list="discovered-models"
                   value={settings.model}
@@ -1545,7 +1562,7 @@ export function SettingsPage() {
                     </div>
                   )
                 })()}
-              </SettingsStack>
+              </SettingsField>
               <SettingsStack title="通道備援模型">
                 <input
                   value={(settings.fallbackModels || []).join(', ')}
@@ -1612,9 +1629,9 @@ export function SettingsPage() {
         {section === 'cli' && (
           <>
             <SettingsGroup title="安全">
-              <SettingsRow
-                title="bash 一律核准"
-                description="指令執行前 HITL 詢問"
+              <SettingsField
+                id="cli.bashRequireAsk"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.bashRequireAsk !== false}
@@ -1650,6 +1667,7 @@ export function SettingsPage() {
                 未安裝或未授權只會顯示診斷，不會自動安裝 binary 或複製 token。其他 agent 目前維持 discovery-only：{DISCOVERY_ONLY_AGENT_ADAPTERS.slice(0, 6).map((item) => item.displayName).join('、')} 等。
               </p>
             </SettingsGroup>
+            <SettingsAnchor id="cli.cliProviders" ctx={fieldCtx}>
             <SettingsGroup title="廠商">
               {(settings.cliProviders || []).map((p, idx) => (
                 <div key={p.id} className="px-4 py-3 space-y-2 border-b border-white/[0.07] last:border-0">
@@ -1758,6 +1776,7 @@ export function SettingsPage() {
                 </div>
               ))}
             </SettingsGroup>
+            </SettingsAnchor>
             <div className="flex flex-wrap gap-2 mb-3">
               <button
                 type="button"
@@ -2043,6 +2062,7 @@ export function SettingsPage() {
 
         {section === 'roles' && (
           <>
+            <SettingsAnchor id="roles.roleModels" ctx={fieldCtx}>
             <SettingsGroup
               title="各角色模型"
               action={
@@ -2052,9 +2072,9 @@ export function SettingsPage() {
                 </div>
               }
             >
-              <SettingsRow
-                title="啟用 Sub Agent"
-                description="開啟後才會使用 Manager／Analyzer-1／Writer 角色模型與 delegate_task；預設關閉，關閉時所有步驟使用全域模型。"
+              <SettingsField
+                id="roles.subAgentsEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.subAgentsEnabled === true}
@@ -2062,6 +2082,7 @@ export function SettingsPage() {
                   />
                 }
               />
+              <SettingsAnchor id="roles.outboundProtectionEnabled" ctx={fieldCtx}>
               {(() => {
                 // Outbound Data Gate (deploy × user). Build flavor is orthogonal.
                 let deploy: OutboundGuardMode = settings.outboundGuardDeploy || 'off'
@@ -2173,6 +2194,7 @@ export function SettingsPage() {
                   </>
                 )
               })()}
+              </SettingsAnchor>
               {(outboundStatus?.buildFlavor === 'policy-admin' ||
                 (typeof process !== 'undefined' &&
                   (process as { env?: Record<string, string | undefined> }).env
@@ -2183,9 +2205,9 @@ export function SettingsPage() {
                   control={<span className="text-[11px] text-primary">enabled</span>}
                 />
               )}
-              <SettingsRow
-                title="Classification endpoint"
-                description="完整 URL（通常以 /v1 結尾）。連線測試只送 SYNTHETIC 內容，不讀專案／prompt。"
+              <SettingsField
+                id="roles.classificationEndpointUrl"
+                ctx={fieldCtx}
                 control={
                   <input
                     className={settingsInputCls + ' min-w-[14rem]'}
@@ -2195,9 +2217,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="允許 plaintext HTTP classifier"
-                description="僅在公司明確核准時開啟；evidence 會標示未加密。"
+              <SettingsField
+                id="roles.classificationAllowPlaintextHttp"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.classificationAllowPlaintextHttp === true}
@@ -2313,6 +2335,7 @@ export function SettingsPage() {
                 )
               })}
             </SettingsGroup>
+            </SettingsAnchor>
             {!roleModelGroups.length && (
               <p className="text-[12px] text-outline px-1 leading-relaxed">
                 尚無可選模型。請先到{' '}
@@ -2408,7 +2431,7 @@ export function SettingsPage() {
         {section === 'safety' && (
           <>
             <SettingsGroup title="核准與沙盒">
-              <SettingsStack title="動作應如何核准？">
+              <SettingsField id="safety.approvalMode" ctx={fieldCtx}>
                 <div className="space-y-1.5">
                   {APPROVAL_MODE_DEFS.map((d) => {
                     const selected = (settings.approvalMode || 'auto') === d.id
@@ -2451,10 +2474,10 @@ export function SettingsPage() {
                     （隔離封鎖、權限 deny、bash deny pattern）與 supervisor 限制仍生效。
                   </p>
                 )}
-              </SettingsStack>
-              <SettingsRow
-                title="安全閘道"
-                description="敏感 Payload 需人工介入"
+              </SettingsField>
+              <SettingsField
+                id="safety.safetyEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.safetyEnabled}
@@ -2462,9 +2485,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="代理工具"
-                description="允許執行工具迴圈"
+              <SettingsField
+                id="safety.toolsEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.toolsEnabled !== false}
@@ -2472,9 +2495,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="web_search"
-                description="允許網路搜尋工具"
+              <SettingsField
+                id="safety.webSearchEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.webSearchEnabled !== false}
@@ -2482,9 +2505,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="Function Calling"
-                description="LLM 多輪工具迴圈"
+              <SettingsField
+                id="safety.functionCalling"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.functionCalling !== false}
@@ -2492,9 +2515,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="LLM 任務解析"
-                description="以 LLM 產生貼合目標的步驟與可量測 DoD（規格 03）；失敗時回退啟發式模板"
+              <SettingsField
+                id="safety.llmParseEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.llmParseEnabled !== false}
@@ -2502,9 +2525,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="跨 Session 召回"
-                description="執行開始時搜尋 Archive／記憶／技能，把同類任務摘要注入 prompt（Hermes 召回）"
+              <SettingsField
+                id="safety.sessionRecallEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.sessionRecallEnabled !== false}
@@ -2512,9 +2535,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="Capability 漸進披露"
-                description="Pydantic AI 2.0 風格：工具+runbook 打包為 capability，先列目錄，模型 load_capability 後才展開（省 token、較可控）"
+              <SettingsField
+                id="safety.capabilitiesEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.capabilitiesEnabled !== false}
@@ -2524,8 +2547,9 @@ export function SettingsPage() {
               />
               {settings.capabilitiesEnabled !== false && (
                 <>
-                  <SettingsRow
-                    title="Tool Search"
+                  <SettingsField
+                    id="safety.toolSearchEnabled"
+                    ctx={fieldCtx}
                     description={`工具太多先藏起來：可見 schema 超過 ${settings.toolSearchThreshold ?? 24} 個時，模型用 tool_search 關鍵字檢索解鎖（省 context）`}
                     control={
                       <SettingsToggle
@@ -2535,9 +2559,9 @@ export function SettingsPage() {
                     }
                   />
                   {settings.toolSearchEnabled !== false && (
-                    <SettingsRow
-                      title="Tool Search 門檻"
-                      description="可見工具 schema 超過此數才啟動隱藏（最小 4）"
+                    <SettingsField
+                      id="safety.toolSearchThreshold"
+                      ctx={fieldCtx}
                       control={
                         <input
                           type="number"
@@ -2576,9 +2600,9 @@ export function SettingsPage() {
                       </button>
                     }
                   />
-                  <SettingsRow
-                    title="CodeMode（run_code）"
-                    description="模型寫一段 JS 一次批量呼叫多個工具（迴圈/過濾），N 輪壓成 1 輪；每次執行都需人工核准"
+                  <SettingsField
+                    id="safety.codeModeEnabled"
+                    ctx={fieldCtx}
                     control={
                       <SettingsToggle
                         checked={settings.codeModeEnabled !== false}
@@ -2589,7 +2613,7 @@ export function SettingsPage() {
                 </>
               )}
               {settings.capabilitiesEnabled !== false && (
-                <SettingsStack title="Always-on 能力包">
+                <SettingsField id="safety.alwaysOnCapabilities" ctx={fieldCtx}>
                   <p className="text-[12px] text-on-surface-variant mb-2 leading-relaxed">
                     點選可將 deferred 包改為第一輪就可用（不必 load_capability）。依類型分組：內建 / MCP / 外掛 / 技能。
                   </p>
@@ -2702,10 +2726,10 @@ export function SettingsPage() {
                       </div>
                     )
                   })()}
-                </SettingsStack>
+                </SettingsField>
               )}
               {/* P1-D: declarative lifecycle hook rules */}
-              <SettingsStack title="Lifecycle hooks（宣告式規則）">
+              <SettingsField id="safety.hookRules" ctx={fieldCtx}>
                 <p className="text-[11px] text-on-surface-variant mb-1 leading-relaxed">
                   純資料規則，只能限制/觀察：point（beforeRun/beforeTool/afterTool/afterRun）
                   × action（deny / require-approval / append-context / log / notify）。
@@ -2730,10 +2754,10 @@ export function SettingsPage() {
                 {hookRulesError && (
                   <p className="text-[11px] text-error mt-1">{hookRulesError}</p>
                 )}
-              </SettingsStack>
-              <SettingsRow
-                title="輸出超限中止"
-                description="工具輸出超過上限時中止（否則截斷）"
+              </SettingsField>
+              <SettingsField
+                id="safety.haltOnPayloadOverflow"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.haltOnPayloadOverflow === true}
@@ -2743,8 +2767,9 @@ export function SettingsPage() {
               />
             </SettingsGroup>
             <SettingsGroup title="門檻">
-              <SettingsRow
-                title="授權等級"
+              <SettingsField
+                id="safety.authLevel"
+                ctx={fieldCtx}
                 description={`目前 ${settings.authLevel}（敏感表需 ≥ 4）`}
                 control={
                   <input
@@ -2759,8 +2784,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="最低信心度"
+              <SettingsField
+                id="safety.minConfidence"
+                ctx={fieldCtx}
                 description={settings.minConfidence.toFixed(2)}
                 control={
                   <input
@@ -2776,9 +2802,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="預設最大迭代"
-                description="目標導向 loop"
+              <SettingsField
+                id="safety.maxIterationsDefault"
+                ctx={fieldCtx}
                 control={
                   <input
                     type="number"
@@ -2793,8 +2819,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="工具輸出上限"
+              <SettingsField
+                id="safety.maxToolPayloadKb"
+                ctx={fieldCtx}
                 description={`${settings.maxToolPayloadKb ?? 50} KB`}
                 control={
                   <input
@@ -2809,9 +2836,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="FC 最大輪數"
-                description="每步 function-call"
+              <SettingsField
+                id="safety.maxToolRounds"
+                ctx={fieldCtx}
                 control={
                   <input
                     type="number"
@@ -2827,9 +2854,9 @@ export function SettingsPage() {
               />
             </SettingsGroup>
             <SettingsGroup title="LLM 韌性">
-              <SettingsRow
-                title="重試次數"
-                description="429/5xx/網路錯誤自動退避重試（含首次呼叫；1 = 不重試）"
+              <SettingsField
+                id="safety.llmRetryMaxAttempts"
+                ctx={fieldCtx}
                 control={
                   <input
                     type="number"
@@ -2848,9 +2875,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="Circuit breaker"
-                description="provider 錯誤率過高時暫停呼叫並降級（冷卻後自動探測恢復）"
+              <SettingsField
+                id="safety.llmCircuitBreakerEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.llmCircuitBreakerEnabled !== false}
@@ -2858,8 +2885,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="預設 context window"
+              <SettingsField
+                id="safety.defaultContextWindowTokens"
+                ctx={fieldCtx}
                 description={`模型 profile 未知時的 token 上限（目前 ${settings.defaultContextWindowTokens ?? 64000}）；供壓縮門檻與溢位預檢`}
                 control={
                   <input
@@ -2882,8 +2910,9 @@ export function SettingsPage() {
               />
             </SettingsGroup>
             <SettingsGroup title="專案 Hooks 信任">
-              <SettingsRow
-                title="信任目前專案"
+              <SettingsField
+                id="safety.trustedHookProjects"
+                ctx={fieldCtx}
                 description={
                   projectRoot
                     ? `允許載入 ${projectRoot} 下的 .subagents/hooks.json（僅能限制/觀察，不能放寬權限）`
@@ -3273,7 +3302,7 @@ export function SettingsPage() {
                   </SettingsStack>
                 )
               })()}
-              <SettingsStack title="Custom tools JSON">
+              <SettingsField id="safety.customTools" ctx={fieldCtx}>
                 <textarea
                   className={settingsInputCls + ' min-h-[180px] resize-y font-[family-name:var(--font-mono)] text-[11px]'}
                   value={customToolsDraft || JSON.stringify(settings.customTools || [], null, 2)}
@@ -3295,7 +3324,7 @@ export function SettingsPage() {
                   下方 secret 鍵會掃描設定 JSON + 已安裝 plugin 模板 + 市集授權 id。
                 </p>
                 {customToolsError && <p className="mt-1 text-[11px] text-error">JSON 無法儲存：{customToolsError}</p>}
-              </SettingsStack>
+              </SettingsField>
               {customToolSecretKeys.map((key) => (
                 <SettingsStack key={key} title={`Secret · ${key}`}>
                   <input

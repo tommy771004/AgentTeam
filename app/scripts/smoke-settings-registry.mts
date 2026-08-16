@@ -9,6 +9,9 @@
  * Run: node --experimental-strip-types scripts/smoke-settings-registry.mts
  */
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { DEFAULT_LLM_SETTINGS } from '../src/agent/llm.ts'
 import { SETTINGS_SECTIONS, settingsPath } from '../src/commands/settingsSections.ts'
@@ -22,6 +25,22 @@ import {
   searchSettingsFields,
   sectionHasVisibleFields,
 } from '../src/settings/fieldRegistry.ts'
+
+const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+/** 設定畫面的所有渲染來源（設定頁本體 + 已拆出的 panel）。 */
+function settingsRenderSource(): string {
+  const files = [path.join(appRoot, 'src/pages/SettingsPage.tsx')]
+  const panelDir = path.join(appRoot, 'src/components/settings/panels')
+  if (fs.existsSync(panelDir)) {
+    for (const name of fs.readdirSync(panelDir)) {
+      if (name.endsWith('.tsx') && !name.endsWith('.test.tsx')) {
+        files.push(path.join(panelDir, name))
+      }
+    }
+  }
+  return files.map((file) => fs.readFileSync(file, 'utf8')).join('\n')
+}
 
 let passed = 0
 function test(name: string, fn: () => void) {
@@ -129,22 +148,36 @@ test('tier 過濾：basic 檢視只留基礎欄位，advanced 全展', () => {
   }
 })
 
-test('每個已宣告的節：basic 都是 advanced 的子集合，且不是空的', () => {
+test('每個已宣告的節：basic 是 advanced 的子集合，且沒有空殼節', () => {
   const sections = [...new Set(SETTINGS_FIELDS.map((field) => field.section))]
   for (const section of sections) {
     const basic = fieldsForSection(section, CTX)
     const advanced = fieldsForSection(section, ADV)
     assert.ok(advanced.length > 0, `${section} 在 advanced 檢視是空的`)
-    assert.ok(
-      basic.length > 0,
-      `${section} 在 basic 檢視一列都不剩——一般使用者會看到空白的節`,
-    )
     for (const field of basic) {
       assert.ok(
         advanced.some((item) => item.id === field.id),
         `${section}／${field.id} 在 advanced 檢視消失`,
       )
     }
+    // 整節都是進階時（例如角色模型），basic 檢視必須把整個節收起來，
+    // 而不是留一個點進去空白的節名。
+    assert.equal(
+      sectionHasVisibleFields(section, CTX),
+      basic.length > 0,
+      `${section} 的節可見性與欄位可見性不一致`,
+    )
+  }
+})
+
+test('整節皆為進階的節在 basic 檢視會被收起來', () => {
+  const allAdvancedSections = [...new Set(SETTINGS_FIELDS.map((field) => field.section))].filter(
+    (section) => fieldsForSection(section, ADV).every((field) => field.tier === 'advanced'),
+  )
+  assert.ok(allAdvancedSections.includes('roles'), '角色模型應為整節進階')
+  for (const section of allAdvancedSections) {
+    assert.equal(sectionHasVisibleFields(section, CTX), false, `${section} 應在 basic 檢視收起`)
+    assert.equal(sectionHasVisibleFields(section, ADV), true)
   }
 })
 
@@ -226,6 +259,17 @@ test('欄位深連結：settingsPath 帶欄位時仍是合法路徑，且節深�
     assert.ok(sectionIds.has(field.section))
     assert.match(settingsPath(field.section, field.id), /^\/settings\?section=[^&]+&field=/)
   }
+})
+
+test('宣告了就要畫得出來：每個欄位都有對應的渲染錨點', () => {
+  const source = settingsRenderSource()
+  const missing = SETTINGS_FIELDS.filter((field) => !source.includes(`id="${field.id}"`))
+  assert.deepEqual(
+    missing.map((field) => field.id),
+    [],
+    '這些欄位有 metadata 卻沒有任何渲染點，搜尋跳過去會找不到東西：\n' +
+      missing.map((field) => `  - ${field.id}`).join('\n'),
+  )
 })
 
 console.log(`\n${passed} settings registry smoke tests passed`)

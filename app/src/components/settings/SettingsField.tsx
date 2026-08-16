@@ -74,3 +74,37 @@ export function SettingsField({
     </div>
   )
 }
+
+/**
+ * 給「不是一列開關」的欄位用的錨點包裝。
+ *
+ * CLI 授權矩陣、角色模型指派、MCP 伺服器這些是完整的工作流，不該被硬塞進
+ * 標題＋控件的格子裡。它們保留原本的畫面，只補上 registry 的可見性與錨點，
+ * 於是搜尋跳得到、tier 也管得到。
+ */
+export function SettingsAnchor({
+  id,
+  ctx,
+  children,
+}: {
+  id: string
+  ctx: SettingsFieldContext
+  children: ReactNode
+}) {
+  const field = getSettingsField(id)
+  if (!field) {
+    console.warn(`[settings] 未宣告的欄位 id：${id}`)
+    return null
+  }
+  if (!fieldIsVisible(field, ctx)) return null
+
+  return (
+    <div
+      id={fieldAnchorId(id)}
+      data-settings-field={id}
+      className={`scroll-mt-24 transition-colors ${ctx.highlightId === id ? 'bg-accent-tint' : ''}`}
+    >
+      {children}
+    </div>
+  )
+}
