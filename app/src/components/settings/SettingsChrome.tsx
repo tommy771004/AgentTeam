@@ -12,8 +12,8 @@ export function SettingsRow({
   control,
   align = 'center',
 }: {
-  title: string
-  description?: string
+  title: ReactNode
+  description?: ReactNode
   control: ReactNode
   /** Use start for tall controls (sliders spanning right) */
   align?: 'center' | 'start'

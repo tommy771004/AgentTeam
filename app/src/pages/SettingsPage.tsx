@@ -4,6 +4,9 @@ import { Icon } from '../components/Icon'
 import { reopenFirstRunWizard } from '../components/FirstRunWizard'
 import { reopenOnboardingTour } from '../components/OnboardingTour'
 import { SETTINGS_SECTION_GROUPS, SETTINGS_SECTIONS } from '../commands/settingsSections'
+import { AppearancePanel } from '../components/settings/panels/AppearancePanel'
+import type { SettingsFieldContext } from '../components/settings/SettingsField'
+import { useSettingsUiStore } from '../store/settingsUiStore'
 
 
 import { APPROVAL_MODE_DEFS } from '../agent/approvalModes'
@@ -610,6 +613,8 @@ export function SettingsPage() {
   }
 
   const meta = SECTION_META[section] || { title: '設定', subtitle: '' }
+  const showAdvanced = useSettingsUiStore((state) => state.showAdvanced)
+  const setShowAdvanced = useSettingsUiStore((state) => state.setShowAdvanced)
   const isPolicyAdminBuild =
     outboundStatus?.buildFlavor === 'policy-admin' ||
     (typeof process !== 'undefined' &&
@@ -619,6 +624,10 @@ export function SettingsPage() {
     () => (isPolicyAdminBuild ? SETTINGS_SECTIONS : SETTINGS_SECTIONS.filter((s) => s.id !== 'policyAdmin')),
     [isPolicyAdminBuild],
   )
+  const fieldCtx: SettingsFieldContext = {
+    showAdvanced,
+    policyAdminBuild: isPolicyAdminBuild,
+  }
 
   return (
     <ThemePage
@@ -631,6 +640,18 @@ export function SettingsPage() {
     >
       <div className="flex flex-col max-w-[820px] pb-10">
         <SettingsHeader title={meta.title} subtitle={meta.subtitle} />
+
+        <div className="mb-5 flex items-center justify-between gap-3 border-b border-line pb-3">
+          <p className="text-[11px] leading-relaxed text-outline">
+            {showAdvanced
+              ? '進階檢視：工程參數與少用開關都在。'
+              : '基礎檢視：只顯示常用設定；進階參數仍在，值不受影響。'}
+          </p>
+          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[12px] font-medium text-on-surface">
+            顯示進階
+            <SettingsToggle checked={showAdvanced} onChange={setShowAdvanced} />
+          </label>
+        </div>
 
         {section === 'piCore' && <PiCoreSettingsSection />}
 
@@ -911,96 +932,7 @@ export function SettingsPage() {
         )}
 
         {section === 'appearance' && (
-          <>
-            <SettingsGroup title="主題">
-              <SettingsRow
-                title="外觀主題"
-                description="深色、淺色或跟隨系統"
-                control={
-                  <PillSelect
-                    value={settings.theme || 'dark'}
-                    onChange={(v) => set({ theme: v as ThemePreference })}
-                  >
-                    <option value="dark">深色</option>
-                    <option value="light">淺色</option>
-                    <option value="system">系統</option>
-                  </PillSelect>
-                }
-              />
-              <SettingsRow
-                title="減少動畫"
-                description="降低動效或跟隨系統偏好"
-                control={
-                  <PillSelect
-                    value={settings.reducedMotion || 'system'}
-                    onChange={(v) =>
-                      set({ reducedMotion: v as ReducedMotionPreference,
-                      })
-                    }
-                  >
-                    <option value="system">系統</option>
-                    <option value="on">開啟</option>
-                    <option value="off">關閉</option>
-                  </PillSelect>
-                }
-              />
-              <SettingsRow
-                title="側欄半透明"
-                description="Liquid Glass 材質側欄"
-                control={
-                  <SettingsToggle
-                    checked={settings.translucentSidebar !== false}
-                    onChange={(v) => set({ translucentSidebar: v })}
-                  />
-                }
-              />
-            </SettingsGroup>
-            <SettingsGroup title="導覽">
-              <SettingsRow
-                title="重新執行使用導覽"
-                description="四個概念點：Loop Pattern、執行引擎、Approval Mode、誠實性"
-                control={
-                  <button type="button" className={settingsBtnCls} onClick={() => reopenOnboardingTour()}>
-                    重新導覽
-                  </button>
-                }
-              />
-            </SettingsGroup>
-            <SettingsGroup title="字級">
-              <SettingsRow
-                title="介面字級"
-                description={`${settings.uiFontSize ?? 14}px`}
-                control={
-                  <input
-                    type="range"
-                    min={12}
-                    max={18}
-                    value={settings.uiFontSize ?? 14}
-                    onChange={(e) =>
-                      set({ uiFontSize: Number(e.target.value) })
-                    }
-                    className="w-36 accent-primary"
-                  />
-                }
-              />
-              <SettingsRow
-                title="程式碼字級"
-                description={`${settings.codeFontSize ?? 13}px`}
-                control={
-                  <input
-                    type="range"
-                    min={11}
-                    max={16}
-                    value={settings.codeFontSize ?? 13}
-                    onChange={(e) =>
-                      set({ codeFontSize: Number(e.target.value) })
-                    }
-                    className="w-36 accent-primary"
-                  />
-                }
-              />
-            </SettingsGroup>
-          </>
+          <AppearancePanel settings={settings} set={set} fieldCtx={fieldCtx} />
         )}
 
         {section === 'personalization' && (

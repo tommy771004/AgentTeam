@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-16T04:14:00.080Z",
+  "generatedAt": "2026-08-16T04:23:27.562Z",
   "upstreamCommit": "4567a0d",
   "sourceUrl": "https://open-design.ai/zh/plugins/",
   "records": [
@@ -33,7 +33,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:audio-jingle:skill",
@@ -61,7 +61,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:blog-post",
@@ -93,7 +93,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:blog-post:skill",
@@ -122,7 +122,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:clinical-case-report",
@@ -153,7 +153,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:clinical-case-report:skill",
@@ -179,7 +179,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:contact-widget",
@@ -207,7 +207,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:contact-widget:skill",
@@ -233,7 +233,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:critique",
@@ -261,7 +261,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:critique:skill",
@@ -287,7 +287,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:dashboard",
@@ -319,7 +319,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:dashboard:skill",
@@ -348,7 +348,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:dating-web",
@@ -376,7 +376,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:dating-web:skill",
@@ -402,7 +402,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:dcf-valuation",
@@ -429,7 +429,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:dcf-valuation:skill",
@@ -455,7 +455,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:digital-eguide",
@@ -483,7 +483,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:digital-eguide:skill",
@@ -509,7 +509,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:docs-page",
@@ -541,7 +541,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:docs-page:skill",
@@ -570,7 +570,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:email-marketing",
@@ -602,7 +602,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:email-marketing:skill",
@@ -631,7 +631,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:eng-runbook",
@@ -663,7 +663,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:eng-runbook:skill",
@@ -692,7 +692,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:finance-report",
@@ -724,7 +724,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:finance-report:skill",
@@ -753,7 +753,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:flowai-live-dashboard-template",
@@ -787,7 +787,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:flowai-live-dashboard-template:skill",
@@ -816,7 +816,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:gamified-app",
@@ -844,7 +844,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:gamified-app:skill",
@@ -870,7 +870,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:github-dashboard",
@@ -907,7 +907,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:github-dashboard:skill",
@@ -936,7 +936,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:guizang-ppt",
@@ -978,7 +978,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:guizang-ppt:skill",
@@ -1008,7 +1008,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:hr-onboarding",
@@ -1036,7 +1036,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:hr-onboarding:skill",
@@ -1062,7 +1062,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-course-module",
@@ -1090,7 +1090,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-course-module:skill",
@@ -1116,7 +1116,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-graphify-dark-graph",
@@ -1144,7 +1144,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-graphify-dark-graph:skill",
@@ -1170,7 +1170,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-hermes-cyber-terminal",
@@ -1198,7 +1198,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-hermes-cyber-terminal:skill",
@@ -1224,7 +1224,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-knowledge-arch-blueprint",
@@ -1252,7 +1252,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-knowledge-arch-blueprint:skill",
@@ -1278,7 +1278,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-obsidian-claude-gradient",
@@ -1306,7 +1306,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-obsidian-claude-gradient:skill",
@@ -1332,7 +1332,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-pitch-deck",
@@ -1364,7 +1364,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-pitch-deck:skill",
@@ -1393,7 +1393,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-presenter-mode-reveal",
@@ -1421,7 +1421,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-presenter-mode-reveal:skill",
@@ -1447,7 +1447,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-product-launch",
@@ -1475,7 +1475,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-product-launch:skill",
@@ -1501,7 +1501,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-taste-brutalist",
@@ -1529,7 +1529,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-taste-brutalist:skill",
@@ -1555,7 +1555,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-taste-editorial",
@@ -1583,7 +1583,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-taste-editorial:skill",
@@ -1609,7 +1609,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-tech-sharing",
@@ -1637,7 +1637,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-tech-sharing:skill",
@@ -1663,7 +1663,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-testing-safety-alert",
@@ -1691,7 +1691,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-testing-safety-alert:skill",
@@ -1717,7 +1717,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-weekly-report",
@@ -1745,7 +1745,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-weekly-report:skill",
@@ -1771,7 +1771,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-pastel-card",
@@ -1799,7 +1799,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-pastel-card:skill",
@@ -1825,7 +1825,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-white-editorial",
@@ -1853,7 +1853,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-white-editorial:skill",
@@ -1879,7 +1879,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-8-bit-orbit",
@@ -1910,7 +1910,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-8-bit-orbit:skill",
@@ -1937,7 +1937,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-biennale-yellow",
@@ -1968,7 +1968,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-biennale-yellow:skill",
@@ -1995,7 +1995,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-block-frame",
@@ -2026,7 +2026,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-block-frame:skill",
@@ -2053,7 +2053,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-blue-professional",
@@ -2084,7 +2084,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-blue-professional:skill",
@@ -2111,7 +2111,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-bold-poster",
@@ -2142,7 +2142,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-bold-poster:skill",
@@ -2169,7 +2169,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-broadside",
@@ -2200,7 +2200,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-broadside:skill",
@@ -2227,7 +2227,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-capsule",
@@ -2258,7 +2258,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-capsule:skill",
@@ -2285,7 +2285,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cartesian",
@@ -2316,7 +2316,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cartesian:skill",
@@ -2343,7 +2343,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cobalt-grid",
@@ -2374,7 +2374,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cobalt-grid:skill",
@@ -2401,7 +2401,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-coral",
@@ -2432,7 +2432,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-coral:skill",
@@ -2459,7 +2459,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-creative-mode",
@@ -2491,7 +2491,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-creative-mode:skill",
@@ -2518,7 +2518,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-daisy-days",
@@ -2549,7 +2549,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-daisy-days:skill",
@@ -2576,7 +2576,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-editorial-tri-tone",
@@ -2608,7 +2608,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-editorial-tri-tone:skill",
@@ -2635,7 +2635,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-grove",
@@ -2666,7 +2666,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-grove:skill",
@@ -2693,7 +2693,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-long-table",
@@ -2724,7 +2724,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-long-table:skill",
@@ -2751,7 +2751,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-mat",
@@ -2782,7 +2782,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-mat:skill",
@@ -2809,7 +2809,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-monochrome",
@@ -2840,7 +2840,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-monochrome:skill",
@@ -2867,7 +2867,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-neo-grid-bold",
@@ -2899,7 +2899,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-neo-grid-bold:skill",
@@ -2926,7 +2926,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-peoples-platform",
@@ -2958,7 +2958,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-peoples-platform:skill",
@@ -2985,7 +2985,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pin-and-paper",
@@ -3018,7 +3018,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pin-and-paper:skill",
@@ -3045,7 +3045,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pink-script",
@@ -3077,7 +3077,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pink-script:skill",
@@ -3104,7 +3104,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-playful",
@@ -3135,7 +3135,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-playful:skill",
@@ -3162,7 +3162,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-raw-grid",
@@ -3193,7 +3193,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-raw-grid:skill",
@@ -3220,7 +3220,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-windows",
@@ -3251,7 +3251,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-windows:skill",
@@ -3278,7 +3278,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-zine",
@@ -3309,7 +3309,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-zine:skill",
@@ -3336,7 +3336,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-sakura-chroma",
@@ -3367,7 +3367,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-sakura-chroma:skill",
@@ -3394,7 +3394,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-scatterbrain",
@@ -3425,7 +3425,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-scatterbrain:skill",
@@ -3452,7 +3452,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-signal",
@@ -3483,7 +3483,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-signal:skill",
@@ -3510,7 +3510,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-soft-editorial",
@@ -3542,7 +3542,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-soft-editorial:skill",
@@ -3569,7 +3569,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-stencil-tablet",
@@ -3601,7 +3601,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-stencil-tablet:skill",
@@ -3628,7 +3628,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-studio",
@@ -3659,7 +3659,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-studio:skill",
@@ -3686,7 +3686,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-vellum",
@@ -3717,7 +3717,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-vellum:skill",
@@ -3744,7 +3744,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt",
@@ -4011,7 +4011,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:html-ppt:skill",
@@ -4038,7 +4038,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:hyperframes",
@@ -4107,7 +4107,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:hyperframes:skill",
@@ -4135,7 +4135,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:ib-pitch-book",
@@ -4169,7 +4169,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:ib-pitch-book:skill",
@@ -4196,7 +4196,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:image-poster",
@@ -4227,7 +4227,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:image-poster:skill",
@@ -4255,7 +4255,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:invoice",
@@ -4283,7 +4283,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:invoice:skill",
@@ -4309,7 +4309,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:kami-deck",
@@ -4342,7 +4342,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:kami-deck:skill",
@@ -4371,7 +4371,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:kami-landing",
@@ -4400,7 +4400,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:kami-landing:skill",
@@ -4426,7 +4426,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:kanban-board",
@@ -4454,7 +4454,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:kanban-board:skill",
@@ -4480,7 +4480,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:last30days",
@@ -4582,7 +4582,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:last30days:skill",
@@ -4610,7 +4610,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:live-artifact",
@@ -4656,7 +4656,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:live-artifact:skill",
@@ -4685,7 +4685,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:live-dashboard",
@@ -4722,7 +4722,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:live-dashboard:skill",
@@ -4751,7 +4751,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:magazine-poster",
@@ -4779,7 +4779,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:magazine-poster:skill",
@@ -4805,7 +4805,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:meeting-notes",
@@ -4833,7 +4833,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:meeting-notes:skill",
@@ -4859,7 +4859,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:mobile-app",
@@ -4894,7 +4894,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:mobile-app:skill",
@@ -4923,7 +4923,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:mobile-onboarding",
@@ -4955,7 +4955,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:mobile-onboarding:skill",
@@ -4984,7 +4984,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:motion-frames",
@@ -5012,7 +5012,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:motion-frames:skill",
@@ -5038,7 +5038,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:open-design-landing-deck",
@@ -5070,7 +5070,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:open-design-landing-deck:skill",
@@ -5096,7 +5096,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:open-design-landing",
@@ -5159,7 +5159,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:open-design-landing:skill",
@@ -5185,7 +5185,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:orbit-general",
@@ -5213,7 +5213,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:orbit-general:skill",
@@ -5239,7 +5239,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:orbit-github",
@@ -5267,7 +5267,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:orbit-github:skill",
@@ -5293,7 +5293,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:orbit-gmail",
@@ -5321,7 +5321,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:orbit-gmail:skill",
@@ -5347,7 +5347,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:orbit-linear",
@@ -5375,7 +5375,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:orbit-linear:skill",
@@ -5401,7 +5401,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:orbit-notion",
@@ -5429,7 +5429,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:orbit-notion:skill",
@@ -5455,7 +5455,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:pm-spec",
@@ -5487,7 +5487,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:pm-spec:skill",
@@ -5516,7 +5516,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:pricing-page",
@@ -5544,7 +5544,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:pricing-page:skill",
@@ -5570,7 +5570,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:replit-deck",
@@ -5606,7 +5606,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:replit-deck:skill",
@@ -5632,7 +5632,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:saas-landing",
@@ -5664,7 +5664,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:saas-landing:skill",
@@ -5693,7 +5693,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:simple-deck",
@@ -5728,7 +5728,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:simple-deck:skill",
@@ -5757,7 +5757,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:social-carousel",
@@ -5788,7 +5788,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:social-carousel:skill",
@@ -5816,7 +5816,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:social-media-dashboard",
@@ -5844,7 +5844,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:social-media-dashboard:skill",
@@ -5870,7 +5870,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:social-media-matrix-tracker-template",
@@ -5900,7 +5900,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:social-media-matrix-tracker-template:skill",
@@ -5926,7 +5926,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:sprite-animation",
@@ -5954,7 +5954,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:sprite-animation:skill",
@@ -5980,7 +5980,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:team-okrs",
@@ -6012,7 +6012,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:team-okrs:skill",
@@ -6041,7 +6041,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:trading-analysis-dashboard-template",
@@ -6071,7 +6071,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:trading-analysis-dashboard-template:skill",
@@ -6097,7 +6097,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:tweaks",
@@ -6126,7 +6126,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:tweaks:skill",
@@ -6152,7 +6152,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:video-shortform",
@@ -6183,7 +6183,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:video-shortform:skill",
@@ -6211,7 +6211,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:waitlist-page",
@@ -6241,7 +6241,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:waitlist-page:skill",
@@ -6267,7 +6267,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:web-prototype-taste-brutalist",
@@ -6295,7 +6295,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:web-prototype-taste-brutalist:skill",
@@ -6321,7 +6321,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:web-prototype-taste-editorial",
@@ -6349,7 +6349,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:web-prototype-taste-editorial:skill",
@@ -6375,7 +6375,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:web-prototype-taste-soft",
@@ -6403,7 +6403,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:web-prototype-taste-soft:skill",
@@ -6429,7 +6429,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:web-prototype",
@@ -6464,7 +6464,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:web-prototype:skill",
@@ -6493,7 +6493,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:webgl-experience",
@@ -6521,7 +6521,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:webgl-experience:skill",
@@ -6547,7 +6547,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:weekly-update",
@@ -6579,7 +6579,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:weekly-update:skill",
@@ -6608,7 +6608,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:wireframe-annotated",
@@ -6636,7 +6636,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:wireframe-annotated:skill",
@@ -6662,7 +6662,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:wireframe-greybox",
@@ -6690,7 +6690,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:wireframe-greybox:skill",
@@ -6716,7 +6716,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:wireframe-mobile-flow",
@@ -6744,7 +6744,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:wireframe-mobile-flow:skill",
@@ -6770,7 +6770,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:wireframe-sketch",
@@ -6798,7 +6798,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:wireframe-sketch:skill",
@@ -6824,7 +6824,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:worker-visualizer",
@@ -6856,7 +6856,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:worker-visualizer:skill",
@@ -6885,7 +6885,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:x-research",
@@ -6911,7 +6911,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "design-templates:x-research:skill",
@@ -6937,7 +6937,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:3d-stone-staircase-evolution-infographic",
@@ -6968,7 +6968,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:anime-martial-arts-battle-illustration",
@@ -7000,7 +7000,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:e-commerce-live-stream-ui-mockup",
@@ -7033,7 +7033,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-anime-fighting-game-captain-ryuuga-vs-kaze-renshin",
@@ -7071,7 +7071,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-three-kingdoms-guanyu-slaying-yanliang",
@@ -7109,7 +7109,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-three-kingdoms-lyubu-yuanmen-archery",
@@ -7146,7 +7146,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-three-kingdoms-zhaoyun-cradle-escape",
@@ -7173,7 +7173,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:game-ui-ancient-china-open-world-mmo-hud",
@@ -7200,7 +7200,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:illustrated-city-food-map",
@@ -7232,7 +7232,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:illustration-crayon-kid-drawing-rework",
@@ -7269,7 +7269,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:infographic-otaku-dance-choreography-breakdown-gokurakujodo-16-panels",
@@ -7296,7 +7296,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:momotaro-explainer-slide-in-hybrid-style",
@@ -7326,7 +7326,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:notion-team-dashboard-live-artifact",
@@ -7353,7 +7353,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-anime-girl-to-cinematic-photo",
@@ -7386,7 +7386,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-casual-fashion-grid-photoshoot",
@@ -7419,7 +7419,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-cinematic-south-asian-male-portrait-with-vultures",
@@ -7452,7 +7452,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-cyberpunk-anime-portrait-with-neon-face-text",
@@ -7486,7 +7486,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-elegant-fantasy-girl-in-violet-garden",
@@ -7520,7 +7520,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-ethereal-blue-haired-fantasy-portrait",
@@ -7554,7 +7554,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-glamorous-woman-in-black-portrait",
@@ -7586,7 +7586,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-hyper-realistic-selfie-texture-prompts",
@@ -7618,7 +7618,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-lavender-fantasy-mage-portrait",
@@ -7652,7 +7652,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-monochrome-studio-portrait",
@@ -7684,7 +7684,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-old-photo-restoration-to-dslr-portrait",
@@ -7716,7 +7716,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-poetic-woman-in-garden-portrait",
@@ -7748,7 +7748,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-professional-identity-portrait-wallpaper",
@@ -7782,7 +7782,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-realistically-imperfect-ai-selfie",
@@ -7814,7 +7814,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-signed-marker-portrait-on-shikishi",
@@ -7847,7 +7847,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snow-rabbit-empress-portrait",
@@ -7881,7 +7881,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snow-rabbit-mask-hanfu-portrait",
@@ -7915,7 +7915,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snowy-rabbit-hanfu-portrait",
@@ -7948,7 +7948,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snowy-rabbit-spirit-portrait",
@@ -7981,7 +7981,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-song-dynasty-hanfu-portrait",
@@ -8012,7 +8012,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-anime-pokemon-shop-outfit-teaser-poster",
@@ -8046,7 +8046,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-cinematic-elevator-scene",
@@ -8077,7 +8077,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-confused-elf-girl-at-pastel-desk",
@@ -8109,7 +8109,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-editorial-fashion-photography",
@@ -8139,7 +8139,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-fashion-editorial-collage",
@@ -8166,7 +8166,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-psg-transfer-announcement-poster",
@@ -8198,7 +8198,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-sensational-girl-dance-storyboard-8-shots",
@@ -8225,7 +8225,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-showa-day-retro-culture-magazine-cover",
@@ -8258,7 +8258,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-social-media-fashion-outfit-generation",
@@ -8289,7 +8289,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-travel-snapshot-collage-prompt",
@@ -8321,7 +8321,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-vintage-sign-painter-sketch",
@@ -8352,7 +8352,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:image-templates:vr-headset-exploded-view-poster",
@@ -8385,7 +8385,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:3d-animated-boy-building-lego",
@@ -8415,7 +8415,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:a-decade-of-refinement-glow-up",
@@ -8448,7 +8448,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:ancient-guardian-dragon-rescue",
@@ -8480,7 +8480,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:ancient-indian-kingdom-fpv-video",
@@ -8512,7 +8512,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:animation-transfer-and-camera-tracking-prompt",
@@ -8542,7 +8542,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:beat-synced-outfit-transformation-dance",
@@ -8573,7 +8573,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:character-intro-motion-graphics-sequence",
@@ -8606,7 +8606,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-birthday-celebration-sequence",
@@ -8638,7 +8638,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-dragon-interaction-flight",
@@ -8670,7 +8670,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-east-asian-woman-hand-dance",
@@ -8697,7 +8697,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-emotional-face-close-up",
@@ -8729,7 +8729,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-marine-biologist-exploration",
@@ -8759,7 +8759,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-music-podcast-and-guitar-technique",
@@ -8791,7 +8791,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-route-navigation-guide",
@@ -8823,7 +8823,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-street-racing-sequence-for-seedance-2",
@@ -8855,7 +8855,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-vampire-alley-fight-sequence",
@@ -8886,7 +8886,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:crimson-horizon-sci-fi-cinematic-sequence",
@@ -8916,7 +8916,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:cyberpunk-game-trailer-script",
@@ -8949,7 +8949,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:forbidden-city-cat-satire",
@@ -8980,7 +8980,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-poster",
@@ -9037,7 +9037,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-poster:skill",
@@ -9080,7 +9080,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-signal",
@@ -9132,7 +9132,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-signal:skill",
@@ -9173,7 +9173,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-build-minimal",
@@ -9223,7 +9223,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-build-minimal:skill",
@@ -9264,7 +9264,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-creative-voltage",
@@ -9319,7 +9319,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-creative-voltage:skill",
@@ -9359,7 +9359,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-chart-nyt",
@@ -9419,7 +9419,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-chart-nyt:skill",
@@ -9459,7 +9459,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-rollup",
@@ -9509,7 +9509,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-rollup:skill",
@@ -9551,7 +9551,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-decision-tree",
@@ -9599,7 +9599,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-decision-tree:skill",
@@ -9637,7 +9637,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-electric-studio",
@@ -9686,7 +9686,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-electric-studio:skill",
@@ -9726,7 +9726,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-glitch-title",
@@ -9778,7 +9778,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-glitch-title:skill",
@@ -9818,7 +9818,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-kinetic-type",
@@ -9873,7 +9873,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-kinetic-type:skill",
@@ -9912,7 +9912,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-light-leak-cinema",
@@ -9972,7 +9972,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-light-leak-cinema:skill",
@@ -10012,7 +10012,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-liquid-bg-hero",
@@ -10066,7 +10066,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-liquid-bg-hero:skill",
@@ -10106,7 +10106,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-logo-outro",
@@ -10158,7 +10158,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-logo-outro:skill",
@@ -10198,7 +10198,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-nyt-graph",
@@ -10249,7 +10249,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-nyt-graph:skill",
@@ -10288,7 +10288,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-pentagram-stat",
@@ -10338,7 +10338,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-pentagram-stat:skill",
@@ -10379,7 +10379,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-play-mode",
@@ -10430,7 +10430,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-play-mode:skill",
@@ -10469,7 +10469,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo-30s",
@@ -10550,7 +10550,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo-30s:skill",
@@ -10591,7 +10591,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo",
@@ -10645,7 +10645,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo:skill",
@@ -10684,7 +10684,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-swiss-grid",
@@ -10733,7 +10733,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-swiss-grid:skill",
@@ -10772,7 +10772,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-takram-organic",
@@ -10822,7 +10822,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-takram-organic:skill",
@@ -10863,7 +10863,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-vignelli",
@@ -10910,7 +10910,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-vignelli:skill",
@@ -10949,7 +10949,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-warm-grain",
@@ -11001,7 +11001,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-warm-grain:skill",
@@ -11040,7 +11040,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:hollywood-haute-couture-fantasy-video-prompt",
@@ -11073,7 +11073,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:hunched-character-animation",
@@ -11103,7 +11103,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:live-action-anime-adaptation-water-vs-thunder-breathing-duel",
@@ -11135,7 +11135,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:luxury-supercar-cinematic-narrative",
@@ -11167,7 +11167,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:magical-academy-storyboard-sequence",
@@ -11198,7 +11198,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:modern-rural-aesthetics-healing-short-film-video-prompt",
@@ -11230,7 +11230,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:nightclub-flyer-atmospheric-animation",
@@ -11262,7 +11262,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:retro-hk-wuxia-film-aesthetic",
@@ -11293,7 +11293,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:seedance-2-0-15-second-cinematic-japanese-romance-short-film",
@@ -11324,7 +11324,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:seedance-2-0-80-year-old-rapper-mv",
@@ -11356,7 +11356,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:sequence-and-movement-instruction-for-martial-arts-video",
@@ -11388,7 +11388,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:soul-switching-mirror-magic-sequence",
@@ -11419,7 +11419,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:toaster-rocket-jumpscare",
@@ -11450,7 +11450,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:traditional-dance-performance",
@@ -11483,7 +11483,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:vfx-text-cursor",
@@ -11535,7 +11535,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:vfx-text-cursor:skill",
@@ -11575,7 +11575,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-desk-hologram-ar-realdesk",
@@ -11615,7 +11615,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-three-kingdoms-guanyu-slaying-yanliang",
@@ -11642,7 +11642,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-three-kingdoms-lyubu-yuanmen-archery",
@@ -11669,7 +11669,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-three-kingdoms-zhaoyun-cradle-escape",
@@ -11696,7 +11696,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:vintage-disney-style-pirate-crocodile-animation",
@@ -11726,7 +11726,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:viral-k-pop-dance-choreography",
@@ -11758,7 +11758,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "plugins:_official:video-templates:wasteland-factory-chase",
@@ -11789,7 +11789,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "prompt-templates:image",
@@ -11861,7 +11861,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     },
     {
       "id": "prompt-templates:video",
@@ -11942,7 +11942,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-16T04:14:00.080Z"
+      "indexedAt": "2026-08-16T04:23:27.562Z"
     }
   ],
   "warnings": []
