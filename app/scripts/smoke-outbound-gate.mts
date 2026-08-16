@@ -4,6 +4,7 @@
  * Run: node --experimental-strip-types scripts/smoke-outbound-gate.mts
  */
 import assert from 'node:assert/strict'
+import { readSettingsSurface } from './lib/settingsSurface.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -142,7 +143,7 @@ await test('wiring: llm.ts and localCliRun call inspectOutbound before transport
 await test('settings surface: outboundProtectionEnabled + deploy/flavor types exist', () => {
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
   const defaults = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
-  const page = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
+  const page = readSettingsSurface(appRoot)
   assert.match(types, /outboundProtectionEnabled:\s*boolean/)
   assert.match(defaults, /outboundProtectionEnabled:\s*false/)
   assert.match(page, /outboundProtectionEnabled/)

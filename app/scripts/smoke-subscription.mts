@@ -7,6 +7,7 @@
  * boundary (never reimplements it).
  */
 import assert from 'node:assert/strict'
+import { readSettingsSurface } from './lib/settingsSurface.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -158,9 +159,9 @@ for (const kind of ['account', 'payment', 'webhook', 'entitlement-refresh'] as c
 }
 
 // ── 8. UI seam: Settings surfaces pricing + device/lifecycle state ──
-const settingsPageSrc = read('src/pages/SettingsPage.tsx')
+const settingsPageSrc = readSettingsSurface(appRoot)
 assert.ok(settingsPageSrc.includes('useSubscriptionStore') || settingsPageSrc.includes('SUBSCRIPTION_PRICING'),
-  'SettingsPage must surface subscription pricing/lifecycle state')
+  'Settings surface must expose subscription pricing/lifecycle state')
 
 // ── 9. Store seam: single place that layers subscription state on the entitlement boundary ──
 const storeSrc = read('src/store/subscriptionStore.ts')

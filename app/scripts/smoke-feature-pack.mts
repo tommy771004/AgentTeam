@@ -7,6 +7,7 @@
  * existing tools/toolPackage.ts permission model — no parallel gating path.
  */
 import assert from 'node:assert/strict'
+import { readSettingsSurface } from './lib/settingsSurface.mjs'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -192,7 +193,7 @@ assert.ok(!runtimeSrc.includes('featurePack') && !runtimeSrc.includes('feature-p
 const storeSrc = read('src/store/featurePackStore.ts')
 assert.ok(storeSrc.includes('installFeaturePack') && storeSrc.includes('featurePackAuditEvent'),
   'featurePackStore must route through the shared pure lifecycle + audit builder, not reimplement them')
-const settingsPageSrc = read('src/pages/SettingsPage.tsx')
+const settingsPageSrc = readSettingsSurface(appRoot)
 assert.ok(settingsPageSrc.includes('useFeaturePackStore'), 'SettingsPage must surface feature pack lifecycle state')
 
 console.log('Feature pack smoke: 9 groups passed')

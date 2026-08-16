@@ -3,6 +3,7 @@
  * Run: node --experimental-strip-types scripts/smoke-build-flavor-matrix.mts
  */
 import assert from 'node:assert/strict'
+import { readSettingsSurface } from './lib/settingsSurface.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -49,7 +50,7 @@ await test('policy-admin surfaces only on policy-admin flavor', () => {
 })
 
 await test('Settings gates Policy Admin nav by flavor (static contract)', () => {
-  const t = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
+  const t = readSettingsSurface(appRoot)
   assert.match(t, /isPolicyAdminBuild/)
   assert.match(t, /filter\(\(s\) => s\.id !== 'policyAdmin'\)/)
   // 節定義的單一真相在 settingsSections.ts（first-run-honesty ticket 09 抽出）；

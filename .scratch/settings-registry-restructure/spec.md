@@ -1,6 +1,6 @@
 # Settings Registry Restructure：設定分層與搜尋（ADR-0032 落實）
 
-Status: 可交給代理
+Status: resolved（01–08 已實作；09 系列驗收待人工 spot-check）
 
 ## Problem Statement
 

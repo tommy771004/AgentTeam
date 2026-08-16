@@ -6,6 +6,7 @@
  * seams route through it instead of scattered feature flags.
  */
 import assert from 'node:assert/strict'
+import { readSettingsSurface } from './lib/settingsSurface.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -106,7 +107,7 @@ assert.ok(runtimeSrc.includes('requiresEntitlement'), 'assembleCapabilities must
 const typesSrc = read('src/agent/capabilities/types.ts')
 assert.ok(typesSrc.includes('requiresEntitlement'), 'AgentCapability must declare requiresEntitlement seam for future paid capabilities')
 
-const settingsPageSrc = read('src/pages/SettingsPage.tsx')
+const settingsPageSrc = readSettingsSurface(appRoot)
 assert.ok(settingsPageSrc.includes('useEntitlementStore'), 'SettingsPage must surface plan/tier via the entitlement store (UI seam)')
 assert.ok(settingsPageSrc.includes('Free Core') || settingsPageSrc.includes('免費核心'), 'SettingsPage must label the free tier for users')
 

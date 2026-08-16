@@ -6,6 +6,7 @@
 
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { readSettingsSurface } from './lib/settingsSurface.mjs'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -27,6 +28,7 @@ function readTaskRunRuntimeSource(fs) {
  * plausibly start a run. Enumerated from disk rather than hard-coded so a
  * deleted or added file can never silently drop out of the drift guards.
  */
+
 function listRunEntrySurface(fs) {
   const dirs = ['src/pages', 'src/hooks', 'src/components', 'src/agent/hermes']
   const files = []
@@ -374,7 +376,7 @@ await test('Phase 3: MCP access is per-agent allowlist with health/secret owner 
   const fs = await import('node:fs')
   const access = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/mcpAccess.ts'), 'utf8')
   const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  const settings = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
+  const settings = readSettingsSurface(appRoot)
   assert.match(access, /mcpAgentServers/)
   assert.match(access, /hasOwnProperty\.call\(map, agentId\)/)
   assert.match(loop, /mcpServersForAgent/)
@@ -393,7 +395,7 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   const background = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
-  const settings = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
+  const settings = readSettingsSurface(appRoot)
   assert.match(types, /subAgentsEnabled: boolean/)
   assert.match(llm, /subAgentsEnabled: false/)
   assert.match(engine, /private subAgentsEnabled\(\)/)
@@ -410,7 +412,14 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   const regDelegate = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registered/delegate_task.ts'), 'utf8')
   assert.match(regDelegate, /subAgentsEnabled !== true/)
   assert.match(background, /背景委派未排入/)
-  assert.match(settings, /title="啟用 Sub Agent"/)
+  // 標題現在由 settings registry 宣告（spec 3/6）；這裡驗的是「這個開關仍暴露在設定裡」
+  assert.match(settings, /id="roles\.subAgentsEnabled"/)
+  const fieldRegistry = fs.readFileSync(
+    path.join(appRoot, 'src/settings/fieldRegistry.ts'),
+    'utf8',
+  )
+  assert.match(fieldRegistry, /id: 'roles\.subAgentsEnabled'/)
+  assert.match(fieldRegistry, /label: '啟用 Sub Agent'/)
 })
 
 await test('Phase 4/5: LSP adapter, provider adoption, and plugin summary stay explicit', async () => {
@@ -800,7 +809,7 @@ await test('ADR3: concurrent-run registry, targeted HITL, and CLI cancellation s
   const permission = fs.readFileSync(path.join(appRoot, 'src/store/permissionAskStore.ts'), 'utf8')
   const controller = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
-  const settingsPage = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
+  const settingsPage = readSettingsSurface(appRoot)
   const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   const scenario = fs.readFileSync(path.join(appRoot, 'scripts/smoke-scenario-e2e.mjs'), 'utf8')
@@ -1543,7 +1552,7 @@ await test('Phase 2d: Next_State is consumed once with explicit webhook delivery
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
   const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
-  const settingsPage = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
+  const settingsPage = readSettingsSurface(appRoot)
   const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   const server = fs.readFileSync(path.join(appRoot, 'electron/webhookServer.ts'), 'utf8')

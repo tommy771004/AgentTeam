@@ -3,6 +3,7 @@
  * Run: node --experimental-strip-types scripts/smoke-outbound-platform.mts
  */
 import assert from 'node:assert/strict'
+import { readSettingsSurface } from './lib/settingsSurface.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -68,7 +69,7 @@ await test('coordinator prepares and disposes restricted view', () => {
 })
 
 await test('Settings surfaces build flavor + outbound status + policy admin', () => {
-  const t = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
+  const t = readSettingsSurface(appRoot)
   assert.match(t, /outboundStatus/)
   assert.match(t, /Build flavor/)
   assert.match(t, /outbound\?\.status/)
