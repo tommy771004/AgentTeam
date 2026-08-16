@@ -1,5 +1,19 @@
 import type { ReactNode } from 'react'
 
+/** 出站閘門的執行時狀態投影（main process 回報，設定頁與 panel 共用）。 */
+export type OutboundStatus = {
+  deployGuard: string
+  policySource: string
+  buildFlavor: string
+  policyDir?: string
+  ledgerDir?: string
+  encryptionAvailable?: boolean
+  connectionId?: string
+  activeViews?: number
+  deployGuardError?: string
+  policySourceError?: string
+}
+
 /**
  * Shared page chrome — same language as Settings (ChatGPT-style rows/groups).
  * Used by Dashboard / Automation / Learning / Records / Docs / etc.
@@ -173,3 +187,40 @@ export const settingsBtnCls =
 
 export const settingsBtnPrimaryCls =
   'px-3 py-1.5 rounded-control border border-primary/30 text-[12px] font-semibold text-primary bg-primary/10 hover:bg-primary/15 transition-colors'
+
+/** 小統計磚：左上標籤 + 大數字。設定頁與各 panel 共用。 */
+export function StatChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2">
+      <div className="text-[9px] uppercase tracking-wider text-outline font-semibold">
+        {label}
+      </div>
+      <div className="text-lg font-semibold text-primary font-[family-name:var(--font-sora)] tabular-nums">
+        {value}
+      </div>
+    </div>
+  )
+}
+
+/** 鍵值列：左標籤、右值（可選等寬）。診斷區塊共用。 */
+export function Row({
+  k,
+  v,
+  mono,
+}: {
+  k: string
+  v: string
+  mono?: boolean
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 text-[12px]">
+      <span className="text-outline shrink-0">{k}</span>
+      <span
+        className={`text-on-surface truncate text-right ${mono ? 'font-mono text-[11px]' : ''}`}
+        title={v}
+      >
+        {v}
+      </span>
+    </div>
+  )
+}
