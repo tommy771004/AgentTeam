@@ -21,6 +21,12 @@ import {
   validateScheduleTriggerSnapshot,
 } from './scheduler'
 import { useThreadStore } from '../store/threadStore'
+import { useScheduleStore } from '../store/scheduleStore'
+import { useAutomationConsentStore } from '../store/automationConsentStore'
+import {
+  decideSuggestionPresentation,
+  type SuggestionPresentation,
+} from './automationConsent.ts'
 import type {
   ExternalRunOpts,
   ExternalRunResult,
@@ -187,6 +193,28 @@ export async function verifyClaimedScheduleTrigger(
   }
 }
 
+/**
+ * 依目前已存在的自動化與過往決定，判斷這次要不要推卡。
+ *
+ * store 讀取集中在這裡，讓 `automationConsent` 保持純函式、可被 smoke 完整覆蓋。
+ */
+function decideConversationSuggestion(suggestion: AutomationSuggestion): SuggestionPresentation {
+  try {
+    const schedule = useScheduleStore.getState()
+    const consent = useAutomationConsentStore.getState()
+    consent.hydrate()
+    return decideSuggestionPresentation({
+      suggestion,
+      jobs: schedule.jobs,
+      events: schedule.events,
+      decisions: useAutomationConsentStore.getState().decisions,
+    })
+  } catch {
+    // 讀不到 store 時仍以推卡為預設——建議本身不會執行任何東西
+    return { mode: 'card' }
+  }
+}
+
 /** Present a consent-first automation suggestion without admitting a run. */
 export function presentConversationAutomationSuggestion(
   opts: ExternalRunOpts,
@@ -220,7 +248,16 @@ export function presentConversationAutomationSuggestion(
   if (opts.sourceLabel && !opts.skipUserBubble) {
     thr.pushBubble(tid, 'system', opts.sourceLabel)
   }
-  thr.pushBubble(tid, 'system', formatAutomationSuggestion(suggestion))
+  // 建議如何呈現：推卡、只講一句、或（拒絕過且冷卻中）什麼都不說。
+  // 判定純在 automationConsent 裡，這裡只負責把結果放進對話。
+  const presentation = decideConversationSuggestion(suggestion)
+  if (presentation.mode === 'card') {
+    thr.pushBubble(tid, 'system', formatAutomationSuggestion(suggestion), undefined, {
+      suggestion,
+    })
+  } else if (presentation.mode === 'notice') {
+    thr.pushBubble(tid, 'system', presentation.message)
+  }
   if (!threadIsRunning) {
     thr.setThreadStatus(tid, 'idle')
     thr.setAwaitingReply(tid, false)

@@ -19,6 +19,8 @@ export type ScheduleDraft = {
   dailyAt: string
   intervalMinutes: number
   runAt: string
+  /** 附掛的 Skills（沿用排程表單既有欄位） */
+  skillNames?: string[]
 }
 
 export type EventDraft = {
@@ -61,6 +63,7 @@ export function buildScheduleDraft(objective: string): ScheduleDraft {
     dailyAt: hint.dailyAt || '08:00',
     intervalMinutes: hint.intervalMinutes || 30,
     runAt: hint.runAt || '',
+    skillNames: [],
   }
 }
 
@@ -124,4 +127,44 @@ const JOB_RUNNERS: readonly JobRunner[] = [
  */
 export function jobRunnerFor(runner: ThreadRunner): JobRunner {
   return (JOB_RUNNERS as readonly string[]).includes(runner) ? (runner as JobRunner) : 'builtin'
+}
+
+/**
+ * 排程建立請求（`scheduleStore.addJob` 的輸入）。
+ *
+ * 抽成純轉換是為了讓「composer 快速動作」「對話建議卡」「自動化頁」三個殼
+ * 送出的東西逐欄位相同——卡片是另一個殼，不是另一條 API。
+ */
+export function scheduleCreateRequest(
+  draft: ScheduleDraft,
+  context: { runner: ThreadRunner; projectRoot?: string | null; now?: number },
+) {
+  const now = context.now ?? Date.now()
+  return {
+    name: draft.name.trim() || draft.objective.slice(0, 40),
+    objective: draft.objective.trim(),
+    kind: draft.kind,
+    dailyAt: draft.kind === 'daily' ? draft.dailyAt : undefined,
+    intervalMinutes: draft.kind === 'interval' ? draft.intervalMinutes : undefined,
+    runAt:
+      draft.kind === 'once'
+        ? new Date(draft.runAt || now + 60_000).toISOString()
+        : undefined,
+    skillNames: draft.skillNames?.length ? draft.skillNames : undefined,
+    runner: jobRunnerFor(context.runner),
+    projectRoot: context.projectRoot || undefined,
+  }
+}
+
+/** 事件規則建立請求（`scheduleStore.addEvent` 的輸入）。 */
+export function eventCreateRequest(draft: EventDraft) {
+  return {
+    name: draft.name.trim() || draft.objective.slice(0, 40),
+    source: draft.source.trim(),
+    subjectContains: draft.subjectContains.trim() || undefined,
+    hasAttachment: draft.hasAttachment,
+    keyword: draft.keyword.trim() || undefined,
+    objective: draft.objective.trim(),
+    enabled: true,
+  }
 }

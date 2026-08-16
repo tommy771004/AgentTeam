@@ -389,6 +389,11 @@ export interface AgentState {
   externalRunnerKind?: string
   /** Builtin run executed without an LLM (heuristic simulation) — honesty flag for summary/archive. */
   simulated?: boolean
+  /**
+   * 逐輪 DoD 驗收判定（dod-verified-reports 票 01）：每輪一筆快照，
+   * semantic=true 代表走過語意驗收（evaluateDoD）；false 為啟發式/例外回退（未驗證）。
+   */
+  dodVerdicts?: DodVerdict[]
   /** Canonical trigger snapshot retained for audit/archive. */
   scheduleTrigger?: ScheduleTriggerSnapshot
   /** Canonical matcher evidence retained for audit/archive. */
@@ -400,6 +405,17 @@ export interface AgentState {
     apiCredits: number
     executionMs: number
   }
+}
+
+/** 單輪 DoD 驗收判定快照（dod-verified-reports） */
+export interface DodVerdict {
+  iteration: number
+  met: boolean
+  /** true = 語意驗收（evaluateDoD）；false = 步驟/信心啟發式或驗收例外回退（未驗證） */
+  semantic: boolean
+  confidence: number
+  missing: string[]
+  evaluatedAt: string
 }
 
 export interface SubAgentNode {
@@ -422,6 +438,10 @@ export interface ArchiveRecord {
   timestamp: string
   /** Builtin run executed without an LLM (heuristic simulation) — honesty badge. */
   simulated?: boolean
+  /** 逐輪 DoD 驗收判定（dod-verified-reports；外部 CLI run 無此欄位） */
+  dodVerdicts?: DodVerdict[]
+  /** 本 run 的 DoD 文本（loopConfig.definitionOfDone；報告/計分卡用） */
+  definitionOfDone?: string
   iterations: number
   maxIterations: number
   steps: ExecutionStep[]

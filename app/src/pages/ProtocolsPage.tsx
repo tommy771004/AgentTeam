@@ -17,7 +17,11 @@ import {
   type AutomationCreated,
 } from '../components/AutomationCreateSheet'
 import { useScheduleStore } from '../store/scheduleStore'
-import { jobRunnerFor } from '../agent/composerAutomationDraft'
+import {
+  eventCreateRequest,
+  jobRunnerFor,
+  scheduleCreateRequest,
+} from '../agent/composerAutomationDraft'
 import { DodPreviewCard } from '../components/DodPreviewCard'
 import { previewDod, resolveUserDefinitionOfDone } from '../agent/dodPreview'
 import { composerSendableLoopType } from '../agent/composerLayering'
@@ -395,7 +399,7 @@ export function ProtocolsPage() {
       'system',
       `已建立${label}「${created.name}」：${created.summary}${downgraded}。`,
       undefined,
-      { label: '前往自動化頁調整或停用', href: automationLink(created.kind) },
+      { link: { label: '前往自動化頁調整或停用', href: automationLink(created.kind) } },
     )
   }
 
@@ -506,7 +510,7 @@ export function ProtocolsPage() {
                     const midAssistants = rest.filter((b) => b.role !== 'system')
                     const renderBubble = (b: (typeof items)[0]) =>
                       b.role === 'run' && b.runSummary ? (
-                        <RunSummaryCard key={b.id} summary={b.runSummary} />
+                        <RunSummaryCard key={b.id} summary={b.runSummary} threadId={thread?.id} />
                       ) : (
                         <ChatBubble key={b.id} bubble={b} />
                       )
@@ -544,32 +548,9 @@ export function ProtocolsPage() {
                 kind={automationKind}
                 objective={draftInput}
                 onCreateSchedule={(draft) =>
-                  addJob({
-                    name: draft.name.trim() || draft.objective.slice(0, 40),
-                    objective: draft.objective.trim(),
-                    kind: draft.kind,
-                    dailyAt: draft.kind === 'daily' ? draft.dailyAt : undefined,
-                    intervalMinutes:
-                      draft.kind === 'interval' ? draft.intervalMinutes : undefined,
-                    runAt:
-                      draft.kind === 'once'
-                        ? new Date(draft.runAt || Date.now() + 60_000).toISOString()
-                        : undefined,
-                    runner: jobRunnerFor(runner),
-                    projectRoot: projectRoot || undefined,
-                  })
+                  addJob(scheduleCreateRequest(draft, { runner, projectRoot }))
                 }
-                onCreateEvent={(draft) =>
-                  addEvent({
-                    name: draft.name.trim() || draft.objective.slice(0, 40),
-                    source: draft.source.trim(),
-                    subjectContains: draft.subjectContains.trim() || undefined,
-                    hasAttachment: draft.hasAttachment,
-                    keyword: draft.keyword.trim() || undefined,
-                    objective: draft.objective.trim(),
-                    enabled: true,
-                  })
-                }
+                onCreateEvent={(draft) => addEvent(eventCreateRequest(draft))}
                 onCreated={onAutomationCreated}
                 onClose={() => setAutomationKind(null)}
               />

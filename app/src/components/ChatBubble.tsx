@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useThreadStore, type ThreadBubble } from '../store/threadStore'
 import { AttachmentThumb } from './AttachmentThumb'
+import { ChatAutomationSuggestion } from './ChatAutomationSuggestion'
 import { ConfirmSheet } from './ConfirmSheet'
 import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
@@ -39,6 +40,16 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
     await navigator.clipboard.writeText(bubble.content)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1500)
+  }
+
+  // 自動化建議以互動卡呈現：意圖在哪裡說出口，建立就在哪裡完成。
+  if (bubble.role === 'system' && bubble.suggestion) {
+    return (
+      <ChatAutomationSuggestion
+        suggestion={bubble.suggestion}
+        threadId={useThreadStore.getState().activeId}
+      />
+    )
   }
 
   if (bubble.role === 'system') {

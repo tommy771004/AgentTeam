@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { SpeedMode, ThinkingDepth } from '../agent/thinking'
-import type { AgentMode, ExecutionStatus, ExternalRunRef, LoopType } from '../agent/types'
+import type { AgentMode, DodVerdict, ExecutionStatus, ExternalRunRef, LoopType } from '../agent/types'
+import type { AutomationSuggestion } from '../agent/automationSuggestion'
 import type { ChatAttachment } from '../agent/types'
 import { sanitizeAttachmentsForStorage } from '../lib/chatAttachments'
 import type { ContinueGoalSnapshot } from '../agent/continueGoal'
@@ -28,6 +29,12 @@ export type ThreadBubble = {
    * this bubble just reported creating). Href is a hash route.
    */
   link?: { label: string; href: string }
+  /**
+   * Consent-first automation proposal rendered as an interactive card
+   * (spec 5/6). Carrying it on the bubble keeps the proposal in the transcript
+   * where the intent was expressed — nothing is created until the user acts.
+   */
+  suggestion?: AutomationSuggestion
   /** Persisted compact process record shown before its final assistant answer. */
   runSummary?: ThreadRunSummary
 }
@@ -55,6 +62,14 @@ export type ThreadRunSummary = {
   status?: 'success' | 'failed' | 'halted'
   /** Builtin run executed without an LLM (heuristic simulation) — honesty badge. */
   simulated?: boolean
+  /** 逐輪 DoD 驗收判定（dod-verified-reports；外部 CLI run 無此欄位） */
+  dodVerdicts?: DodVerdict[]
+  /** 本 run 的 DoD 文本（報告/計分卡用） */
+  definitionOfDone?: string
+  /** builtin 或外部 CLI（dod-verified-reports：計分卡誠實標章） */
+  runnerKind?: 'builtin' | 'external'
+  /** 本摘要對應的 Task run id（dod-verified-reports：匯出報告的 join key） */
+  runId?: string
   durationMs?: number
   subDesign?: {
     briefId: string
@@ -199,7 +214,8 @@ interface ThreadStore {
     role: ThreadBubble['role'],
     content: string,
     attachments?: ChatAttachment[],
-    link?: ThreadBubble['link'],
+    /** 附加在這則訊息上的東西（連結、建議卡）——用具名欄位而不是一路加位置參數 */
+    extras?: Pick<ThreadBubble, 'link' | 'suggestion'>,
   ) => void
   pushRunSummary: (threadId: string, summary: ThreadRunSummary) => void
   appendSubDesignExport: (threadId: string, item: {
@@ -594,7 +610,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     persist(threads, get().activeId)
   },
 
-  pushBubble: (threadId, role, content, attachments, link) => {
+  pushBubble: (threadId, role, content, attachments, extras) => {
     const c = content.trim()
     const atts = attachments?.length ? attachments : undefined
     if (!c && !atts?.length) return
@@ -609,7 +625,8 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       ),
       at: new Date().toISOString(),
       attachments: sanitizeAttachmentsForStorage(atts),
-      link,
+      link: extras?.link,
+      suggestion: extras?.suggestion,
     }
     const threads = get().threads.map((t) => {
       if (t.id !== threadId) return t
@@ -636,6 +653,20 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       at: new Date().toISOString(),
       runSummary: {
         status: summary.status,
+        simulated: summary.simulated === true ? true : undefined,
+        runnerKind: summary.runnerKind === 'external' ? 'external' : undefined,
+        runId: summary.runId?.slice(0, 120),
+        definitionOfDone: summary.definitionOfDone?.slice(0, 800),
+        dodVerdicts: summary.dodVerdicts?.length
+          ? summary.dodVerdicts.slice(-20).map((verdict) => ({
+              iteration: verdict.iteration,
+              met: verdict.met,
+              semantic: verdict.semantic,
+              confidence: verdict.confidence,
+              missing: verdict.missing.slice(0, 8).map((item) => item.slice(0, 200)),
+              evaluatedAt: verdict.evaluatedAt,
+            }))
+          : undefined,
         durationMs: summary.durationMs,
         subDesign: summary.subDesign
           ? {

@@ -28,8 +28,14 @@ export type AutomationSuggestion = {
   schedule?: AutomationScheduleHint
 }
 
+/**
+ * 排程語意的訊號。
+ *
+ * 必須涵蓋 INTERVAL_RE 讀得懂的講法（例如「每 15 分鐘」）——模組能解析卻不認得
+ * 是同一個模組內部不一致：使用者說了一句我們解析得出來的排程，卻收不到建議。
+ */
 const SCHEDULE_SIGNAL_RE =
-  /(?:\bcron\b|\bschedule(?:d)?\b|\bdaily\b|\bevery\s+(?:day|hour|week|\d+)\b|\bweekly\b|每(?:天|日|週|星期|小時)|每日|定時|排程)/i
+  /(?:\bcron\b|\bschedule(?:d)?\b|\bdaily\b|\bevery\s+(?:day|hour|week|\d+)\b|\bweekly\b|每(?:天|日|週|星期|小時)|每隔?\s*\d+\s*(?:分鐘|分|小時)|每日|定時|排程)/i
 const INTERVAL_RE =
   /(?:every|每隔?)\s*(\d+)\s*(minutes?|mins?|minute|hours?|hour|分鐘|分|小時)/i
 const CLOCK_RE =

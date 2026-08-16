@@ -90,7 +90,8 @@ export type PersistedQueueItem = {
 
 const STORAGE_KEY = 'subagents.runQueue.v1'
 const BACKUP_KEY = `${STORAGE_KEY}.backup`
-const MAX_QUEUE = 24
+/** 佇列上限——UI 顯示「待跑 n/24」時共用同一個常數，不各自寫死 */
+export const MAX_QUEUE = 24
 const queue: QueuedExternalRun[] = []
 let draining = false
 let hydrated = false
