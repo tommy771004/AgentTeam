@@ -13,7 +13,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 | **composer-new-task-flow** | [spec.md](composer-new-task-flow/spec.md) | [09 系列驗收](composer-new-task-flow/issues/09-series-acceptance.md)（待人工 spot-check） | 系列 2/6 **已實作完成**（01–08 resolved；T09 自動驗收全綠：build/smoke/74 元件測試，僅剩實機 spot-check）：composer 基礎/進階分層＋偏好持久化、排程/事件 tile 改為預填建立動作（死路接通）、DoD 建立時可見可編輯、調參重跑入 chat、裸殼路由 redirect＋7 個死檔清理、共用 ConfirmSheet |
 | **settings-registry-restructure** | [spec.md](settings-registry-restructure/spec.md) | [09 系列驗收](settings-registry-restructure/issues/09-series-acceptance.md)（待人工 spot-check） | 系列 3/6 **已實作完成**（01–08 resolved；T09 自動驗收全綠：build/smoke/101 元件測試）：欄位 registry（tier／中英文 keywords／錨點／條件可見性）＋fail-closed 覆蓋率、basic/advanced 分層與偏好、設定搜尋與欄位深連結、SettingsPage 3898→586 行拆成 18 個 panel |
 | **dod-verified-reports** | [spec.md](dod-verified-reports/spec.md) | [11 張票已拆](dod-verified-reports/issues/)（frontier：01、03、04 可並行） | 系列 4/6：DoD scorecard、從 run journal 渲染可分享驗證報告（MD/HTML 同源）、transcript 匯出；護城河放大的核心 |
-| **automation-one-click** | [spec.md](automation-one-click/spec.md) | spec（尚未拆票） | 系列 5/6：對話內建議卡一鍵建立排程/事件規則（與 Automation 頁共用建立路徑），consent-first 不變 |
+| **automation-one-click** | [spec.md](automation-one-click/spec.md) | [03 系列驗收](automation-one-click/issues/03-series-acceptance.md)（待人工 spot-check） | 系列 5/6 **已實作完成**（01–02 resolved；T03 自動驗收全綠：build/smoke/114 元件測試）：對話內建議卡一鍵建立排程/事件規則、抑制與 7 天冷卻、建立來源標記、背景委派成功後一鍵轉為排程；consent-first 以契約測試釘住 |
 | **full-localization** | [spec.md](full-localization/spec.md) | spec（尚未拆票） | 系列 6/6：t(key) 抽取層 + zh-TW/en 語言檔、聽寫/選單/通知跟隨、lint 防 hardcode、light theme hack 清償；**建議最後執行** |
 | 其餘 product efforts | — | — | **resolved**（見下表） |
 

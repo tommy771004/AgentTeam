@@ -158,3 +158,31 @@ export function formatAutomationSuggestion(suggestion: AutomationSuggestion): st
     `下一步：${recommendation}；確認前不會執行工具。`,
   ].join('\n')
 }
+
+/**
+ * 明確為某個目標組一張「轉為排程」的提案。
+ *
+ * 和 `detectAutomationSuggestion` 不同：那支是從對話文字**猜**有沒有排程意圖，
+ * 這支是使用者已經把事情做成功了、我們問要不要常態化——目標文字裡本來就不會有
+ * cron 字樣，所以不能靠偵測。
+ *
+ * 仍然只是提案：回傳值不含任何觸發證據，什麼都不會被執行。
+ */
+export function buildRecurringSuggestion(
+  objective: string,
+  reason: string,
+): AutomationSuggestion | null {
+  const normalized = normalizeObjective(objective)
+  if (!normalized) return null
+  const dedupKey = keyFor(normalized)
+  return {
+    id: `automation_${dedupKey.replace(/[^a-z0-9._:-]+/gi, '_').slice(0, 110)}`,
+    dedupKey,
+    source: 'conversation',
+    kind: 'schedule',
+    title: `轉為排程：${normalized.slice(0, 36)}`,
+    objective: normalized,
+    reason,
+    schedule: parseScheduleHintFromText(normalized),
+  }
+}

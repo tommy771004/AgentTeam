@@ -10,6 +10,7 @@ import {
   type DelegationBudget,
 } from './delegate'
 import { recordBackgroundStatus } from '../runJournal.ts'
+import { buildRecurringSuggestion } from '../automationSuggestion.ts'
 
 /**
  * Phase 3 item 6: durable background job completion.
@@ -95,10 +96,20 @@ async function injectBackgroundResult(job: BackgroundJob): Promise<void> {
 
     const title = job.ok ? '背景委派完成' : '背景委派失敗'
     const detail = (job.summary || job.error || '沒有摘要').trim().slice(0, 6000)
+    // 成功的一次性委派附上「轉為排程」提案（spec 5/6 US12）：做成功的事最值得
+    // 常態化，而使用者此刻不必回想剛才那句措辭。失敗的任務不提議重複執行。
+    const recurring = job.ok
+      ? buildRecurringSuggestion(
+          job.goal,
+          '這個背景委派剛剛成功了。要讓它固定跑嗎？時間與引擎都可以改。',
+        )
+      : null
     useThreadStore.getState().pushBubble(
       job.parentThreadId,
       'system',
       `${title} · ${job.id}\n目標：${job.goal.slice(0, 240)}\n\n結果摘要：\n${detail}`,
+      undefined,
+      recurring ? { suggestion: recurring } : undefined,
     )
   } catch {
     /* Thread injection is additive; archive persistence must still succeed. */

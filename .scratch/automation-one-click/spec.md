@@ -1,6 +1,6 @@
 # Automation One-Click：自動化最後一哩
 
-Status: 可交給代理
+Status: resolved（01–02 已實作；03 系列驗收待人工 spot-check）
 
 ## Problem Statement
 

@@ -23,7 +23,10 @@ import {
   scheduleDraftFromSuggestion,
   SCHEDULE_TRIGGER_CAVEAT,
 } from '../src/agent/automationConsent.ts'
-import { detectAutomationSuggestion } from '../src/agent/automationSuggestion.ts'
+import {
+  buildRecurringSuggestion,
+  detectAutomationSuggestion,
+} from '../src/agent/automationSuggestion.ts'
 import {
   eventCreateRequest,
   scheduleCreateRequest,
@@ -359,6 +362,71 @@ test('來源欄位不影響執行：createJob 只是原樣保存', () => {
   assert.match(scheduler, /createdFrom: input\.createdFrom/)
   // 排程觸發驗證不得因為來源不同而放寬
   assert.doesNotMatch(scheduler, /createdFrom === 'chat-suggestion'/)
+})
+
+// ── 一次性成功 → 轉為排程（US12）────────────────────────────────────
+
+test('轉為排程：目標沒有 cron 字樣也組得出提案（不能靠偵測）', () => {
+  // 使用者做成功的事，措辭裡本來就不會有「每天」；靠 detect 會得到 null。
+  const goal = '整理今天的收件匣並寫出待辦摘要'
+  assert.equal(detectAutomationSuggestion(goal), null, '前提：這句話偵測不到排程意圖')
+  const suggestion = buildRecurringSuggestion(goal, '剛剛成功了')
+  assert.ok(suggestion)
+  assert.equal(suggestion.kind, 'schedule')
+  assert.equal(suggestion.objective, goal)
+  assert.ok(suggestion.schedule, '要有可編輯的預設時間')
+})
+
+test('轉為排程仍然只是提案：不含任何觸發證據', () => {
+  const suggestion = buildRecurringSuggestion('跑每日報表', '剛剛成功了')
+  assert.ok(suggestion)
+  assert.equal(suggestion.source, 'conversation')
+  assert.equal('scheduleTrigger' in suggestion, false)
+  assert.equal('eventTrigger' in suggestion, false)
+})
+
+test('轉為排程沿用同一套抑制與冷卻（不是另一條路）', () => {
+  const goal = '整理今天的收件匣'
+  const suggestion = buildRecurringSuggestion(goal, '剛剛成功了')
+  assert.ok(suggestion)
+  // 已有等價啟用中排程 → 只提示
+  assert.equal(
+    decideSuggestionPresentation({
+      suggestion,
+      jobs: [job({ objective: goal })],
+      events: [],
+      decisions: {},
+      now: NOW,
+    }).mode,
+    'notice',
+  )
+  // 拒絕過 → 靜音
+  assert.equal(
+    decideSuggestionPresentation({
+      suggestion,
+      jobs: [],
+      events: [],
+      decisions: {
+        [suggestion.dedupKey]: { action: 'dismissed', at: new Date(NOW - DAY).toISOString() },
+      },
+      now: NOW,
+    }).mode,
+    'silent',
+  )
+})
+
+test('空目標不產生提案', () => {
+  assert.equal(buildRecurringSuggestion('   ', '剛剛成功了'), null)
+})
+
+test('只有成功的背景委派才提議常態化，失敗的不提', () => {
+  const bg = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
+  assert.match(bg, /job\.ok\s*\n?\s*\?\s*buildRecurringSuggestion/, '必須以 job.ok 為條件')
+  assert.match(bg, /suggestion: recurring/)
+  // 完成通知本身不得變成執行入口
+  const start = bg.indexOf('async function injectBackgroundResult')
+  const block = bg.slice(start, bg.indexOf('export type BackgroundJobStatus'))
+  assert.doesNotMatch(block, /runTask\s*\(|dispatchThreadTask|addJob\s*\(/)
 })
 
 console.log(`\n${passed} automation one-click smoke tests passed`)
