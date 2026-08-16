@@ -48,6 +48,8 @@ export type ThreadAgentSummary = {
 export type ThreadRunSummary = {
   /** Terminal lifecycle state shared with the live process feed. */
   status?: 'success' | 'failed' | 'halted'
+  /** Builtin run executed without an LLM (heuristic simulation) — honesty badge. */
+  simulated?: boolean
   durationMs?: number
   subDesign?: {
     briefId: string

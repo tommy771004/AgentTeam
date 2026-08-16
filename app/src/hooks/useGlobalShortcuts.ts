@@ -40,6 +40,15 @@ export function useGlobalShortcuts() {
       const focus = effective('focusComposer')
       const consoleChord = effective('toggleConsole')
       const newThread = effective('newThread')
+      const paletteChord = effective('commandPalette')
+
+      if (chordMatches(e, paletteChord)) {
+        e.preventDefault()
+        void import('../store/paletteStore').then(({ usePaletteStore }) => {
+          usePaletteStore.getState().setOpen(true)
+        })
+        return
+      }
 
       if (chordMatches(e, slash)) {
         e.preventDefault()

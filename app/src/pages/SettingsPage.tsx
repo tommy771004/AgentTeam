@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Icon } from '../components/Icon'
+import { reopenFirstRunWizard } from '../components/FirstRunWizard'
+import { reopenOnboardingTour } from '../components/OnboardingTour'
+import { SETTINGS_SECTION_GROUPS, SETTINGS_SECTIONS } from '../commands/settingsSections'
 import { APPROVAL_MODE_DEFS } from '../agent/approvalModes'
 import { exportRunMetricsJsonl, metricsSummary, resetRunMetrics } from '../agent/metrics'
 import { ThemePage } from '../components/SectionNav'
@@ -74,35 +78,8 @@ import {
   unwrapOpenCodeServerValue,
 } from '../agent/opencode/serverClient'
 
-const SECTION_GROUPS = [
-  { id: 'personal', label: '個人' },
-  { id: 'agent', label: '代理' },
-  { id: 'integrate', label: '整合' },
-  { id: 'system', label: '系統' },
-]
-
-const SECTIONS = [
-  { id: 'general', label: '一般', icon: 'tune', group: 'personal' },
-  { id: 'appearance', label: '外觀', icon: 'palette', group: 'personal' },
-  { id: 'personalization', label: '個人化', icon: 'person', group: 'personal' },
-  { id: 'memory', label: '記憶', icon: 'psychology', group: 'personal' },
-  { id: 'data', label: '資料控制', icon: 'database', group: 'personal' },
-  { id: 'shortcuts', label: '鍵盤快捷鍵', icon: 'keyboard', group: 'personal' },
-  { id: 'safety', label: '組態', icon: 'shield', group: 'agent' },
-  { id: 'piCore', label: 'Pi Core', icon: 'hub', group: 'agent' },
-  { id: 'policyAdmin', label: 'Policy Admin', icon: 'policy', group: 'agent' },
-  { id: 'roles', label: '角色模型', icon: 'groups', group: 'agent' },
-  { id: 'llm', label: '語言模型', icon: 'smart_toy', group: 'agent' },
-  { id: 'cli', label: 'CLI 授權', icon: 'terminal', group: 'agent' },
-  { id: 'opencode', label: 'OpenCode', icon: 'auto_awesome', group: 'agent' },
-  { id: 'git', label: 'Git', icon: 'commit', group: 'integrate' },
-  { id: 'webhook', label: 'Webhook', icon: 'webhook', group: 'integrate' },
-  { id: 'gateway', label: '訊息閘道', icon: 'forum', group: 'integrate' },
-  { id: 'mcp', label: 'MCP 伺服器', icon: 'extension', group: 'integrate' },
-  { id: 'oauth', label: '外掛 OAuth', icon: 'key', group: 'integrate' },
-  { id: 'updates', label: '安全更新', icon: 'system_update', group: 'system' },
-  { id: 'bundle', label: '匯出匯入', icon: 'import_export', group: 'system' },
-]
+const SECTION_GROUPS = SETTINGS_SECTION_GROUPS
+const SECTIONS = SETTINGS_SECTIONS
 
 const SECTION_META: Record<string, { title: string; subtitle: string }> = {
   general: {
@@ -197,7 +174,12 @@ async function openExternalLink(url: string) {
 
 export function SettingsPage() {
   const { settings, update, testConnection, exportBundle, importBundle } = useSettingsStore()
-  const [section, setSection] = useState('general')
+  // ?section= 深連結（誠實性橫幅 CTA / 未來 Command Palette 共用）；無效值回一般節
+  const [searchParams] = useSearchParams()
+  const requestedSection = searchParams.get('section')
+  const [section, setSection] = useState(
+    requestedSection && SECTIONS.some((s) => s.id === requestedSection) ? requestedSection : 'general',
+  )
   const [testMsg, setTestMsg] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [bundleMsg, setBundleMsg] = useState<string | null>(null)
@@ -968,6 +950,17 @@ export function SettingsPage() {
                 }
               />
             </SettingsGroup>
+            <SettingsGroup title="導覽">
+              <SettingsRow
+                title="重新執行使用導覽"
+                description="四個概念點：Loop Pattern、執行引擎、Approval Mode、誠實性"
+                control={
+                  <button type="button" className={settingsBtnCls} onClick={() => reopenOnboardingTour()}>
+                    重新導覽
+                  </button>
+                }
+              />
+            </SettingsGroup>
             <SettingsGroup title="字級">
               <SettingsRow
                 title="介面字級"
@@ -1621,6 +1614,14 @@ export function SettingsPage() {
                 className={settingsBtnPrimaryCls + ' disabled:opacity-50'}
               >
                 {testing ? '測試中…' : '測試連線'}
+              </button>
+              <button
+                type="button"
+                onClick={() => reopenFirstRunWizard()}
+                className={settingsBtnCls}
+                title="重新執行首次設定精靈（引導式設定語言模型或 CLI 授權）"
+              >
+                重新執行首次設定精靈
               </button>
               {testMsg && (
                 <span

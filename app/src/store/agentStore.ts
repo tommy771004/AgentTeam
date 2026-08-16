@@ -1010,6 +1010,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         loopType: agent.loopConfig.loopType,
         confidence: agent.confidence || null,
         timestamp: agent.finishedAt || agent.startedAt || new Date().toISOString(),
+        simulated: agent.simulated === true ? true : undefined,
         iterations: agent.currentIteration,
         maxIterations: agent.loopConfig.maxIterations,
         steps: agent.steps,

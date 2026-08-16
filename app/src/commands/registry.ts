@@ -4,6 +4,8 @@
  * OpenCode commands/*.md 與 opencode.json command 會動態合併進來
  */
 
+import { paletteSettingsSections, settingsPath } from './settingsSections.ts'
+
 export type SlashCommandCategory =
   | 'session'
   | 'project'
@@ -29,7 +31,40 @@ export interface SlashCommand {
   /** Prefer agent for this command */
   agentHint?: string
   modelHint?: string
+  /**
+   * 執行動作（ticket 09）：slash = 走既有 slash 執行器；
+   * navigate = 頁面導航；settings = 設定節錨點深連結。
+   * 缺省視為 slash（既有條目行為不變）。
+   */
+  action?: CommandAction
 }
+
+export type CommandAction =
+  | { kind: 'slash' }
+  | { kind: 'navigate'; path: string }
+  | { kind: 'settings'; section: string }
+
+/** 尚未有 slash 指令的頁面導航條目（palette 用；與既有 nav 類指令互補） */
+export const PAGE_NAV_ENTRIES: SlashCommand[] = [
+  {
+    name: 'subdesign',
+    description: '前往 SubDesign 設計工作室',
+    category: 'nav',
+    action: { kind: 'navigate', path: '/subdesign' },
+  },
+  {
+    name: 'design-systems',
+    description: '瀏覽與管理設計系統',
+    category: 'nav',
+    action: { kind: 'navigate', path: '/design-systems' },
+  },
+  {
+    name: 'content-publishing',
+    description: '內容發佈排程',
+    category: 'nav',
+    action: { kind: 'navigate', path: '/content-publishing' },
+  },
+]
 
 /** Built-in static list (OpenCode dynamics appended at runtime) */
 export const SLASH_COMMANDS: SlashCommand[] = [
@@ -456,4 +491,58 @@ export function parseSlashLine(line: string): { cmd: string; args: string; raw: 
   const m = t.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
   if (!m) return { cmd: '', args: '', raw: t }
   return { cmd: m[1], args: (m[2] || '').trim(), raw: t }
+}
+
+// ── Command Palette 共用層（ticket 09）──────────────────────────────
+
+/**
+ * 共用模糊匹配純函數（palette 與未來設定搜尋共用）：
+ * 子字串或子序列（subsequence）命中皆可；大小寫不敏感。
+ */
+export function fuzzyMatch(query: string, text: string): boolean {
+  const q = query.toLowerCase().trim()
+  const t = text.toLowerCase()
+  if (!q) return true
+  if (t.includes(q)) return true
+  let cursor = 0
+  for (const ch of q) {
+    cursor = t.indexOf(ch, cursor)
+    if (cursor === -1) return false
+    cursor += 1
+  }
+  return true
+}
+
+/** 統一條目輸出：slash 指令（含動態 OpenCode）＋頁面導航＋設定節錨點 */
+export function getAllCommandEntries(): SlashCommand[] {
+  const settingsEntries: SlashCommand[] = paletteSettingsSections().map((section) => ({
+    name: `settings:${section.id}`,
+    description: `設定 · ${section.label}`,
+    category: 'nav' as const,
+    action: { kind: 'settings', section: section.id },
+  }))
+  return [
+    ...getLiveSlashCommands().map((c) => ({ ...c, action: c.action ?? ({ kind: 'slash' } as const) })),
+    ...PAGE_NAV_ENTRIES,
+    ...settingsEntries,
+  ]
+}
+
+/** palette 過濾：以 name／aliases／description 做 fuzzyMatch */
+export function filterCommandEntries(query: string, entries: SlashCommand[] = getAllCommandEntries()): SlashCommand[] {
+  const q = query.trim()
+  if (!q) return entries
+  return entries.filter(
+    (c) =>
+      fuzzyMatch(q, c.name) ||
+      Boolean(c.aliases?.some((a) => fuzzyMatch(q, a))) ||
+      fuzzyMatch(q, c.description),
+  )
+}
+
+/** 執行統一條目的導航目標（slash 條目回 null，由 slash 執行器處理） */
+export function commandEntryPath(entry: SlashCommand): string | null {
+  if (!entry.action || entry.action.kind === 'slash') return null
+  if (entry.action.kind === 'navigate') return entry.action.path
+  return settingsPath(entry.action.section)
 }

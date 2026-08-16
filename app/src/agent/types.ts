@@ -379,6 +379,8 @@ export interface AgentState {
   }
   /** External CLI kind when executionKind=external (codex / claude / …). */
   externalRunnerKind?: string
+  /** Builtin run executed without an LLM (heuristic simulation) — honesty flag for summary/archive. */
+  simulated?: boolean
   /** Canonical trigger snapshot retained for audit/archive. */
   scheduleTrigger?: ScheduleTriggerSnapshot
   /** Canonical matcher evidence retained for audit/archive. */
@@ -410,6 +412,8 @@ export interface ArchiveRecord {
   loopType: string
   confidence: number | null
   timestamp: string
+  /** Builtin run executed without an LLM (heuristic simulation) — honesty badge. */
+  simulated?: boolean
   iterations: number
   maxIterations: number
   steps: ExecutionStep[]

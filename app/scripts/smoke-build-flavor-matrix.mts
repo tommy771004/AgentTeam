@@ -52,7 +52,11 @@ await test('Settings gates Policy Admin nav by flavor (static contract)', () => 
   const t = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
   assert.match(t, /isPolicyAdminBuild/)
   assert.match(t, /filter\(\(s\) => s\.id !== 'policyAdmin'\)/)
-  assert.match(t, /id: 'policyAdmin'/)
+  // 節定義的單一真相在 settingsSections.ts（first-run-honesty ticket 09 抽出）；
+  // SettingsPage 必須從它 import，policy-admin 專屬節才不會在兩處漂移。
+  const defs = fs.readFileSync(path.join(appRoot, 'src/commands/settingsSections.ts'), 'utf8')
+  assert.match(defs, /id: 'policyAdmin'/)
+  assert.match(t, /settingsSections/)
 })
 
 await test('check-build-flavor script exists and uses strict parser', () => {

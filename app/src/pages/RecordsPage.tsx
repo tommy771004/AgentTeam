@@ -191,6 +191,11 @@ function ArchiveSection() {
                 <h3 className="font-semibold">{selected.id}</h3>
                 <p className="text-xs text-on-surface-variant">
                   {loopTypeZh(selected.loopType)} · {statusZh(selected.status)}
+                  {selected.simulated ? (
+                    <span className="ml-1.5 rounded-md border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-100">
+                      模擬執行
+                    </span>
+                  ) : null}
                 </p>
               </div>
               <button type="button" onClick={() => setSelected(null)} className="text-outline">

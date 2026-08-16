@@ -3,6 +3,9 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Icon } from './Icon'
 import { useAgentStore } from '../store/agentStore'
 import { FloatingConsole } from './FloatingConsole'
+import { FirstRunWizard } from './FirstRunWizard'
+import { OnboardingTour } from './OnboardingTour'
+import { CommandPalette } from './CommandPalette'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { useThreadStore } from '../store/threadStore'
 import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts'
@@ -301,6 +304,9 @@ export function Layout() {
           <Outlet />
         </main>
         <FloatingConsole />
+        <FirstRunWizard />
+        <OnboardingTour />
+        <CommandPalette />
       </div>
     </div>
   )

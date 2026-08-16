@@ -594,6 +594,8 @@ export class AgentLoopEngine {
       this.state.currentIteration = 1
       this.state.minConfidence = this.minConfidence()
       this.state.metrics.vramLabel = this.useLlm() ? 'cloud' : 'local-sim 4.2 GB'
+      // First-run honesty：模擬執行的 ground truth 旗標（summary 卡 / Archive 同源讀取）
+      this.state.simulated = !this.useLlm()
       this.emit()
 
       this.log('INFO', 'SubAgents AI Execution Kernel v2.5.0')

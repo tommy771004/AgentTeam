@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { CommandComposer } from '../components/CommandComposer'
+import { EngineAvailabilityBanner } from '../components/EngineAvailabilityBanner'
 import { ThreadSidebar } from '../components/ThreadSidebar'
 import { ModelDepthMenu } from '../components/ModelDepthMenu'
 import { ApprovalModeMenu } from '../components/ApprovalModeMenu'
@@ -489,6 +490,7 @@ export function ProtocolsPage() {
 
             {/* 專案 pill 置於輸入上方；其餘次要控制集中在左下＋選單。 */}
             <div className="shrink-0 w-full pt-3 pb-4 space-y-2">
+              <EngineAvailabilityBanner />
               <ProjectContextBar />
               <CommandComposer
                 value={draftInput}

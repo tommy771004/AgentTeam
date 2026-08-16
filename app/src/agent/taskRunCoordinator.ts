@@ -35,6 +35,7 @@ import {
   recordRunTerminal,
   waitForStartupRecovery,
 } from './runJournal.ts'
+import { SIMULATION_NOTE, isSimulationRun } from './simulationMarking.ts'
 
 export type { ExternalRunOpts, ExternalRunResult, RunSourceKind }
 export type TaskRunInput = ExternalRunOpts
@@ -902,6 +903,7 @@ async function pushRunProcessSummary(args: {
   thr.pushRunSummary(tid, {
     status:
       status === 'failed' ? 'failed' : status === 'halted' ? 'halted' : 'success',
+    simulated: finalAgent.simulated === true,
     durationMs: finalAgent.metrics?.executionMs,
     subDesign: subDesignBrief
       ? {
@@ -1401,6 +1403,20 @@ async function coordinateTaskRun(
   }
   if (opts.projectRoot?.trim() && !opts.skipUserBubble) {
     thr.pushBubble(tid, 'system', `專案綁定：${opts.projectRoot.trim()}`)
+  }
+
+  // First-run honesty：本 run 將以模擬策略執行時，在 transcript 明確標示
+  // （條件與 engine useLlm() 對齊；隱藏 worker thread 不投射，避免背景噪訊）。
+  if (
+    !opts.workerThread &&
+    isSimulationRun({
+      runner: opts.runner || 'builtin',
+      llmEnabled: settings.enabled,
+      llmApiKey: settings.apiKey,
+      overrideUseLlm: opts.overrides?.useLlm,
+    })
+  ) {
+    thr.pushBubble(tid, 'system', SIMULATION_NOTE)
   }
 
   if (forcedLoopType) {

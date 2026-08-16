@@ -53,6 +53,14 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
             {summary.durationMs ? ` · ${Math.round(summary.durationMs / 1000)} 秒` : ''}
           </span>
         </span>
+        {summary.simulated ? (
+          <span
+            title="本 run 以本地模擬策略執行（未使用語言模型）"
+            className="shrink-0 rounded-md border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-100"
+          >
+            模擬執行
+          </span>
+        ) : null}
         {outcome ? (
           <span className={`shrink-0 text-[11px] font-medium ${lifecycleToneClass(lifecycle.tone)}`}>
             {outcome}

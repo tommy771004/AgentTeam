@@ -11,6 +11,7 @@ export type ShortcutId =
   | 'focusComposer'
   | 'toggleConsole'
   | 'newThread'
+  | 'commandPalette'
 
 export type ShortcutBinding = {
   id: ShortcutId
@@ -46,6 +47,12 @@ const DEFAULTS: Omit<ShortcutBinding, 'chord'>[] = [
     label: '新對話',
     description: '建立新 thread',
     defaultChord: 'Meta+n',
+  },
+  {
+    id: 'commandPalette',
+    label: '指令面板',
+    description: '全域搜尋指令／頁面／設定節',
+    defaultChord: 'Meta+Shift+p',
   },
 ]
 
