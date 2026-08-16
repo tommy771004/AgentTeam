@@ -148,8 +148,8 @@ export function SettingsStack({
   description,
   children,
 }: {
-  title: string
-  description?: string
+  title: ReactNode
+  description?: ReactNode
   children: ReactNode
 }) {
   return (

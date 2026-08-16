@@ -4,7 +4,7 @@ import {
   fieldIsVisible,
   getSettingsField,
 } from '../../settings/fieldRegistry'
-import { SettingsRow } from './SettingsChrome'
+import { SettingsRow, SettingsStack } from './SettingsChrome'
 
 export type SettingsFieldContext = {
   showAdvanced: boolean
@@ -26,12 +26,16 @@ export type SettingsFieldContext = {
 export function SettingsField({
   id,
   control,
+  children,
   description,
   ctx,
 }: {
   /** registry 的欄位 id（同時是錨點） */
   id: string
-  control: ReactNode
+  /** 靠右的控件（row 版面） */
+  control?: ReactNode
+  /** 標題下方的整寬控件（stack 版面，例如多行輸入） */
+  children?: ReactNode
   /** 覆寫說明文字（用於值會變動的說明，例如目前字級） */
   description?: ReactNode
   ctx: SettingsFieldContext
@@ -44,6 +48,15 @@ export function SettingsField({
   if (!fieldIsVisible(field, ctx)) return null
 
   const highlighted = ctx.highlightId === id
+  const title =
+    field.tier === 'advanced' ? (
+      <span className="inline-flex items-baseline gap-1.5">
+        {field.label}
+        <span className="text-[10px] font-normal text-outline">進階</span>
+      </span>
+    ) : (
+      field.label
+    )
 
   return (
     <div
@@ -51,20 +64,13 @@ export function SettingsField({
       data-settings-field={id}
       className={`scroll-mt-24 transition-colors ${highlighted ? 'bg-accent-tint' : ''}`}
     >
-      <SettingsRow
-        title={
-          field.tier === 'advanced' ? (
-            <span className="inline-flex items-baseline gap-1.5">
-              {field.label}
-              <span className="text-[10px] font-normal text-outline">進階</span>
-            </span>
-          ) : (
-            field.label
-          )
-        }
-        description={description ?? field.summary}
-        control={control}
-      />
+      {children ? (
+        <SettingsStack title={title} description={description ?? field.summary}>
+          {children}
+        </SettingsStack>
+      ) : (
+        <SettingsRow title={title} description={description ?? field.summary} control={control} />
+      )}
     </div>
   )
 }

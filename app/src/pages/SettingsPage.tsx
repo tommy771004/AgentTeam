@@ -5,7 +5,7 @@ import { reopenFirstRunWizard } from '../components/FirstRunWizard'
 import { reopenOnboardingTour } from '../components/OnboardingTour'
 import { SETTINGS_SECTION_GROUPS, SETTINGS_SECTIONS } from '../commands/settingsSections'
 import { AppearancePanel } from '../components/settings/panels/AppearancePanel'
-import type { SettingsFieldContext } from '../components/settings/SettingsField'
+import { SettingsField, type SettingsFieldContext } from '../components/settings/SettingsField'
 import { SettingsSearch } from '../components/settings/SettingsSearch'
 import { fieldAnchorId, getSettingsField } from '../settings/fieldRegistry'
 import { useSettingsUiStore } from '../store/settingsUiStore'
@@ -814,9 +814,9 @@ export function SettingsPage() {
               </SettingsGroup>
             )}
             <SettingsGroup title="輸入與行為">
-              <SettingsRow
-                title="送出快捷鍵"
-                description="選擇 Enter 或 ⌘/Ctrl+Enter 送出訊息"
+              <SettingsField
+                id="general.enterBehavior"
+                ctx={fieldCtx}
                 control={
                   <PillSelect
                     value={settings.enterBehavior || 'enter'}
@@ -829,9 +829,9 @@ export function SettingsPage() {
                   </PillSelect>
                 }
               />
-              <SettingsRow
-                title="執行中追問行為"
-                description="代理忙碌時，新訊息要轉向目前執行或排隊"
+              <SettingsField
+                id="general.followUpMode"
+                ctx={fieldCtx}
                 control={
                   <PillSelect
                     value={settings.followUpMode || 'steer'}
@@ -844,9 +844,9 @@ export function SettingsPage() {
                   </PillSelect>
                 }
               />
-              <SettingsRow
-                title="允許並行執行"
-                description="讓不同 thread 同時執行；預設關閉，達到上限時仍會排隊／轉向"
+              <SettingsField
+                id="general.concurrentRunsEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.concurrentRunsEnabled === true}
@@ -865,9 +865,9 @@ export function SettingsPage() {
                 </p>
               </div>
               {settings.concurrentRunsEnabled === true && (
-                <SettingsRow
-                  title="並行上限"
-                  description="小型固定 ceiling，避免同時啟動過多本機或 LLM 工作"
+                <SettingsField
+                  id="general.maxConcurrentRuns"
+                  ctx={fieldCtx}
                   control={
                     <PillSelect
                       value={String(settings.maxConcurrentRuns || 4)}
@@ -884,9 +884,9 @@ export function SettingsPage() {
               )}
             </SettingsGroup>
             <SettingsGroup title="通知">
-              <SettingsRow
-                title="任務完成通知"
-                description="執行結束時顯示桌面通知"
+              <SettingsField
+                id="general.notifyOnComplete"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.notifyOnComplete !== false}
@@ -894,9 +894,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="完成提示音"
-                description="任務結束時播放輕提示音"
+              <SettingsField
+                id="general.soundOnComplete"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.soundOnComplete === true}
@@ -904,9 +904,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="執行中防止睡眠"
-                description="長任務時盡量保持系統喚醒（需 Electron）"
+              <SettingsField
+                id="general.preventSleepWhileRunning"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.preventSleepWhileRunning === true}
@@ -916,9 +916,9 @@ export function SettingsPage() {
               />
             </SettingsGroup>
             <SettingsGroup title="建議">
-              <SettingsRow
-                title="建議提示"
-                description="空對話時顯示 Suggested prompts"
+              <SettingsField
+                id="general.ambientSuggestions"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.ambientSuggestions !== false}
@@ -979,9 +979,9 @@ export function SettingsPage() {
         {section === 'personalization' && (
           <>
             <SettingsGroup title="人格">
-              <SettingsRow
-                title="預設人格"
-                description="改變語氣，不改變模型能力"
+              <SettingsField
+                id="personalization.personality"
+                ctx={fieldCtx}
                 control={
                   <PillSelect
                     value={settings.personality || 'default'}
@@ -1001,21 +1001,15 @@ export function SettingsPage() {
               />
             </SettingsGroup>
             <SettingsGroup title="自訂指令">
-              <SettingsStack
-                title="關於你"
-                description="職業、專案、偏好語言、常用工具…"
-              >
+              <SettingsField id="personalization.customAboutUser" ctx={fieldCtx}>
                 <textarea
                   className={settingsInputCls + ' min-h-[96px] resize-y'}
                   value={settings.customAboutUser || ''}
                   onChange={(e) => set({ customAboutUser: e.target.value })}
                   placeholder="寫下希望代理知道的背景…"
                 />
-              </SettingsStack>
-              <SettingsStack
-                title="希望如何回覆"
-                description="結構、語言、emoji、程式碼風格…"
-              >
+              </SettingsField>
+              <SettingsField id="personalization.customResponseStyle" ctx={fieldCtx}>
                 <textarea
                   className={settingsInputCls + ' min-h-[96px] resize-y'}
                   value={settings.customResponseStyle || ''}
@@ -1024,7 +1018,7 @@ export function SettingsPage() {
                   }
                   placeholder="例如：先結論再步驟、繁中、少 emoji…"
                 />
-              </SettingsStack>
+              </SettingsField>
             </SettingsGroup>
           </>
         )}
@@ -1032,9 +1026,9 @@ export function SettingsPage() {
         {section === 'memory' && (
           <>
             <SettingsGroup title="記憶控制">
-              <SettingsRow
-                title="啟用記憶"
-                description="讀取並注入跨對話記憶"
+              <SettingsField
+                id="memory.memoryEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.memoryEnabled !== false}
@@ -1042,9 +1036,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="自動寫入"
-                description="成功任務摘要與工具可寫入記憶"
+              <SettingsField
+                id="memory.memoryWriteEnabled"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.memoryWriteEnabled !== false}
@@ -1052,9 +1046,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="參考對話歷史"
-                description="允許引用過去對話脈絡"
+              <SettingsField
+                id="memory.referenceChatHistory"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.referenceChatHistory !== false}
@@ -1186,9 +1180,9 @@ export function SettingsPage() {
               />
             </SettingsGroup>
             <SettingsGroup title="對話">
-              <SettingsRow
-                title="預設臨時對話"
-                description="不讀寫跨對話記憶"
+              <SettingsField
+                id="data.temporaryChatDefault"
+                ctx={fieldCtx}
                 control={
                   <SettingsToggle
                     checked={settings.temporaryChatDefault === true}
@@ -1196,11 +1190,12 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsRow
-                title="自動封存"
+              <SettingsField
+                id="data.autoArchiveDays"
+                ctx={fieldCtx}
                 description={
                   (settings.autoArchiveDays ?? 0) === 0
-                    ? '關閉'
+                    ? '不自動封存'
                     : `${settings.autoArchiveDays} 天後封存`
                 }
                 control={

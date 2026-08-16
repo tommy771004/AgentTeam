@@ -129,6 +129,49 @@ test('tier 過濾：basic 檢視只留基礎欄位，advanced 全展', () => {
   }
 })
 
+test('每個已宣告的節：basic 都是 advanced 的子集合，且不是空的', () => {
+  const sections = [...new Set(SETTINGS_FIELDS.map((field) => field.section))]
+  for (const section of sections) {
+    const basic = fieldsForSection(section, CTX)
+    const advanced = fieldsForSection(section, ADV)
+    assert.ok(advanced.length > 0, `${section} 在 advanced 檢視是空的`)
+    assert.ok(
+      basic.length > 0,
+      `${section} 在 basic 檢視一列都不剩——一般使用者會看到空白的節`,
+    )
+    for (const field of basic) {
+      assert.ok(
+        advanced.some((item) => item.id === field.id),
+        `${section}／${field.id} 在 advanced 檢視消失`,
+      )
+    }
+  }
+})
+
+test('工程調參一律收進進階，不擋在一般使用者面前', () => {
+  const engineering = [
+    'general.concurrentRunsEnabled',
+    'general.maxConcurrentRuns',
+    'general.followUpMode',
+    'general.preventSleepWhileRunning',
+    'memory.memoryWriteEnabled',
+    'memory.referenceChatHistory',
+    'data.autoArchiveDays',
+  ]
+  for (const id of engineering) {
+    const field = SETTINGS_FIELDS.find((item) => item.id === id)
+    assert.ok(field, `${id} 尚未宣告`)
+    assert.equal(field.tier, 'advanced', `${id} 應為進階`)
+  }
+})
+
+test('搜尋：工程參數的中英文都找得到（併行／concurrency）', () => {
+  const zh = searchSettingsFields('並行', { policyAdminBuild: false })
+  const en = searchSettingsFields('concurrency', { policyAdminBuild: false })
+  assert.ok(zh.some((hit) => hit.field.id === 'general.maxConcurrentRuns'))
+  assert.ok(en.some((hit) => hit.field.id === 'general.maxConcurrentRuns'))
+})
+
 test('條件可見性以宣告表達：policy-admin build 才看得到的欄位', () => {
   const gated = {
     id: 'test.policyOnly',
