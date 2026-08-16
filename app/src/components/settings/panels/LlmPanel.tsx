@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { API_PROVIDER_PRESETS, apiProviderPreset } from '../../../agent/apiProviders'
 import type { ApiProviderPreset, LlmSettings } from '../../../agent/types'
 import { reopenFirstRunWizard } from '../../FirstRunWizard'
-import { Icon } from '../../Icon'
 import {
   SettingsGroup,
   SettingsStack,

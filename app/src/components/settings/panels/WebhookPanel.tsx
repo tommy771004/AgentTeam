@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { LlmSettings } from '../../../agent/types'
-import { SettingsGroup, SettingsToggle, settingsBtnCls, settingsInputCls } from '../SettingsChrome'
+import { SettingsGroup, SettingsToggle, settingsInputCls } from '../SettingsChrome'
 import { SettingsField, type SettingsFieldContext } from '../SettingsField'
 
 /**

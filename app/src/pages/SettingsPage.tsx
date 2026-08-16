@@ -15,7 +15,7 @@ import { GitPanel } from '../components/settings/panels/GitPanel'
 import { McpPanel } from '../components/settings/panels/McpPanel'
 import { OAuthPanel } from '../components/settings/panels/OAuthPanel'
 import { SafetyPanel } from '../components/settings/panels/SafetyPanel'
-import { UpdatesPanel } from '../components/settings/panels/UpdatesPanel'
+import { UpdatesPanel, type UpdateState } from '../components/settings/panels/UpdatesPanel'
 import { WebhookPanel } from '../components/settings/panels/WebhookPanel'
 import { MemoryPanel } from '../components/settings/panels/MemoryPanel'
 import { ShortcutsPanel } from '../components/settings/panels/ShortcutsPanel'
@@ -37,21 +37,9 @@ import { PolicyAdminSection } from '../components/settings/PolicyAdminSection'
 import { PiCoreSettingsSection } from '../components/settings/PiCoreSettingsSection'
 import { useSettingsStore } from '../store/settingsStore'
 import { useLearningStore } from '../store/learningStore'
-import type {
-} from '../agent/types'
-import {
-} from '../agent/hermes/mcp'
-import {
-} from '../agent/outbound/outboundGate'
 import { useOpenCodeConfigStore } from '../store/opencodeConfigStore'
 import { useProjectStore } from '../store/projectStore'
 import { applyRendererStorageSnapshot } from '../agent/updateMigration'
-import {
-} from '../store/shortcutStore'
-import {
-} from '../agent/hermes/pluginOAuth'
-import {
-} from '../agent/opencode/serverClient'
 
 const SECTION_META: Record<string, { title: string; subtitle: string }> = {
   general: {
@@ -155,14 +143,7 @@ export function SettingsPage() {
   const oc = useOpenCodeConfigStore()
   const loadLearning = useLearningStore((s) => s.load)
   const [outboundStatus, setOutboundStatus] = useState<OutboundStatus | null>(null)
-  const [updateState, setUpdateState] = useState<{
-    status: string
-    currentVersion: string
-    manifest?: { version: string; mandatory: boolean; releaseNotes: string }
-    progress: number
-    deferredUntil?: string
-    lastError?: string
-  } | null>(null)
+  const [updateState, setUpdateState] = useState<UpdateState>(null)
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   const [updateProgress, setUpdateProgress] = useState(0)
   // Recompute secret key list when plugins change
@@ -363,11 +344,19 @@ export function SettingsPage() {
   const setShowAdvanced = useSettingsUiStore((state) => state.setShowAdvanced)
   /** 搜尋跳轉／深連結命中的欄位——捲到它並短暫高亮 */
   const [highlightId, setHighlightId] = useState<string | null>(null)
+  /**
+   * 為了讓跳轉能看到進階欄位而「暫時」展開。
+   *
+   * 這一份刻意不寫進偏好：搜尋跳到一個進階欄位不代表你想從此改用進階檢視，
+   * 把它存起來會讓一次搜尋永久翻掉記住的檢視模式。
+   */
+  const [revealAdvancedForJump, setRevealAdvancedForJump] = useState(false)
   const isPolicyAdminBuild =
     outboundStatus?.buildFlavor === 'policy-admin' ||
     (typeof process !== 'undefined' &&
       (process as { env?: Record<string, string | undefined> }).env?.SUBAGENTS_BUILD_FLAVOR ===
         'policy-admin')
+  const effectiveShowAdvanced = showAdvanced || revealAdvancedForJump
   const navSections = useMemo(() => {
     const byBuild = isPolicyAdminBuild
       ? SETTINGS_SECTIONS
@@ -375,11 +364,14 @@ export function SettingsPage() {
     // 整節都是進階的節（例如角色模型）在基礎檢視直接收起來——留一個點進去
     // 空白的節名比藏起來更糟。
     return byBuild.filter((s) =>
-      sectionHasVisibleFields(s.id, { showAdvanced, policyAdminBuild: isPolicyAdminBuild }),
+      sectionHasVisibleFields(s.id, {
+        showAdvanced: effectiveShowAdvanced,
+        policyAdminBuild: isPolicyAdminBuild,
+      }),
     )
-  }, [isPolicyAdminBuild, showAdvanced])
+  }, [isPolicyAdminBuild, effectiveShowAdvanced])
   const fieldCtx: SettingsFieldContext = {
-    showAdvanced,
+    showAdvanced: effectiveShowAdvanced,
     policyAdminBuild: isPolicyAdminBuild,
     highlightId,
   }
@@ -393,7 +385,8 @@ export function SettingsPage() {
     const field = getSettingsField(fieldId)
     if (!field) return
     setSection(field.section)
-    if (field.tier === 'advanced' && !showAdvanced) setShowAdvanced(true)
+    // 暫時展開即可——不動使用者記住的檢視模式
+    if (field.tier === 'advanced' && !showAdvanced) setRevealAdvancedForJump(true)
     setHighlightId(fieldId)
   }
 
@@ -411,7 +404,12 @@ export function SettingsPage() {
     node?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     const timer = window.setTimeout(() => setHighlightId(null), 2_400)
     return () => window.clearTimeout(timer)
-  }, [highlightId, section, showAdvanced])
+  }, [highlightId, section, effectiveShowAdvanced])
+
+  // 使用者自己打開進階、或離開這一節之後，暫時展開就沒有存在的理由了。
+  useEffect(() => {
+    if (showAdvanced) setRevealAdvancedForJump(false)
+  }, [showAdvanced])
 
   // ?section=&field= 深連結：橫幅 CTA／palette／文件都能連到指定欄位
   const requestedField = searchParams.get('field')
@@ -472,7 +470,6 @@ export function SettingsPage() {
             installCurrentUpdate={installCurrentUpdate}
             deferCurrentUpdate={deferCurrentUpdate}
             rollbackCurrentUpdate={rollbackCurrentUpdate}
-            fieldCtx={fieldCtx}
           />
         )}
 
@@ -493,7 +490,7 @@ export function SettingsPage() {
         )}
 
         {section === 'shortcuts' && (
-          <ShortcutsPanel settings={settings} fieldCtx={fieldCtx} />
+          <ShortcutsPanel settings={settings} />
         )}
 
         {section === 'git' && (
@@ -518,7 +515,7 @@ export function SettingsPage() {
         )}
 
         {section === 'opencode' && (
-          <OpenCodePanel settings={settings} set={set} fieldCtx={fieldCtx} />
+          <OpenCodePanel settings={settings} set={set} />
         )}
 
         {section === 'roles' && (
@@ -567,7 +564,6 @@ export function SettingsPage() {
           <OAuthPanel
             settings={settings}
             set={set}
-            fieldCtx={fieldCtx}
           />
         )}
 
@@ -575,7 +571,6 @@ export function SettingsPage() {
           <BundlePanel
             exportBundle={exportBundle}
             importBundle={importBundle}
-            fieldCtx={fieldCtx}
           />
         )}
         <p className="text-[11px] text-outline px-1 mt-2">變更會立即套用，無需儲存。</p>

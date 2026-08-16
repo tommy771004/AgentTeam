@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { settingsPath } from '../commands/settingsSections'
 import {
   ENGINE_BANNER_COPY,
   deriveEngineAvailabilityFromSettings,
@@ -37,7 +38,7 @@ export function EngineAvailabilityBanner() {
       <div className="flex shrink-0 flex-col gap-1.5">
         <button
           type="button"
-          onClick={() => navigate('/settings?section=llm')}
+          onClick={() => navigate(settingsPath('llm', 'llm.apiKey'))}
           className="rounded-lg border border-amber-500/40 bg-amber-500/20 px-2.5 py-1 text-[11px] font-medium text-amber-100 transition-colors hover:bg-amber-500/30"
         >
           {ENGINE_BANNER_COPY.cta}

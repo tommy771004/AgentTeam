@@ -3,21 +3,21 @@ import { APPROVAL_MODE_DEFS } from '../../../agent/approvalModes'
 import { recommendToolTuning } from '../../../agent/modelTuning'
 import { BUILTIN_CAPABILITIES } from '../../../agent/capabilities'
 import { skillsStore } from '../../../agent/hermes/skills'
-import { customToolsForSettings, listPendingToolPackages } from '../../../agent/tools/customTools'
+import { customToolsForSettings } from '../../../agent/tools/customTools'
 import type { LlmSettings } from '../../../agent/types'
-import { useLearningStore } from '../../../store/learningStore'
 import { useProjectStore } from '../../../store/projectStore'
 import { Icon } from '../../Icon'
 import {
-  PillSelect,
-  SettingsGroup,
   SettingsRow,
-  SettingsStack,
   SettingsToggle,
   settingsBtnCls,
   settingsInputCls,
 } from '../SettingsChrome'
-import { SettingsField, type SettingsFieldContext } from '../SettingsField'
+import {
+  SettingsField,
+  SettingsGroupFor,
+  type SettingsFieldContext,
+} from '../SettingsField'
 
 /**
  * Settings registry restructure（spec 3/6）— 組態節（核准與沙盒、門檻、LLM 韌性、專案 Hooks 信任）。
@@ -44,7 +44,7 @@ export function SafetyPanel({
 
   return (
     <>
-          <SettingsGroup title="核准與沙盒">
+          <SettingsGroupFor section="safety" group="核准與沙盒" ctx={fieldCtx}>
             <SettingsField id="safety.approvalMode" ctx={fieldCtx}>
               <div className="space-y-1.5">
                 {APPROVAL_MODE_DEFS.map((d) => {
@@ -379,8 +379,8 @@ export function SafetyPanel({
                 />
               }
             />
-          </SettingsGroup>
-          <SettingsGroup title="門檻">
+          </SettingsGroupFor>
+          <SettingsGroupFor section="safety" group="門檻" ctx={fieldCtx}>
             <SettingsField
               id="safety.authLevel"
               ctx={fieldCtx}
@@ -466,8 +466,8 @@ export function SafetyPanel({
                 />
               }
             />
-          </SettingsGroup>
-          <SettingsGroup title="LLM 韌性">
+          </SettingsGroupFor>
+          <SettingsGroupFor section="safety" group="LLM 韌性" ctx={fieldCtx}>
             <SettingsField
               id="safety.llmRetryMaxAttempts"
               ctx={fieldCtx}
@@ -522,8 +522,8 @@ export function SafetyPanel({
                 />
               }
             />
-          </SettingsGroup>
-          <SettingsGroup title="專案 Hooks 信任">
+          </SettingsGroupFor>
+          <SettingsGroupFor section="safety" group="專案 Hooks 信任" ctx={fieldCtx}>
             <SettingsField
               id="safety.trustedHookProjects"
               ctx={fieldCtx}
@@ -578,7 +578,7 @@ export function SafetyPanel({
                 }
               />
             ))}
-          </SettingsGroup>
+          </SettingsGroupFor>
           <p className="text-[11px] text-outline px-1">
             人工介入示範：目標含敏感匯出且授權等級 &lt; 4 時會暫停等待核准。
           </p>

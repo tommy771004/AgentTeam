@@ -1,8 +1,11 @@
 import type { LlmSettings, ReducedMotionPreference, ThemePreference } from '../../../agent/types'
-import { fieldsForSection } from '../../../settings/fieldRegistry'
 import { reopenOnboardingTour } from '../../OnboardingTour'
-import { PillSelect, SettingsGroup, SettingsToggle, settingsBtnCls } from '../SettingsChrome'
-import { SettingsField, type SettingsFieldContext } from '../SettingsField'
+import { PillSelect, SettingsToggle, settingsBtnCls } from '../SettingsChrome'
+import {
+  SettingsField,
+  SettingsGroupFor,
+  type SettingsFieldContext,
+} from '../SettingsField'
 
 /**
  * Settings registry restructure（spec 3/6 ticket 01）— 外觀節。
@@ -19,13 +22,9 @@ export function AppearancePanel({
   set: (patch: Partial<LlmSettings>) => void
   fieldCtx: SettingsFieldContext
 }) {
-  const visible = fieldsForSection('appearance', fieldCtx)
-  const hasGroup = (group: string) => visible.some((field) => field.group === group)
-
   return (
     <>
-      {hasGroup('主題') ? (
-        <SettingsGroup title="主題">
+      <SettingsGroupFor section="appearance" group="主題" ctx={fieldCtx}>
           <SettingsField
             id="appearance.theme"
             ctx={fieldCtx}
@@ -64,11 +63,9 @@ export function AppearancePanel({
               />
             }
           />
-        </SettingsGroup>
-      ) : null}
+      </SettingsGroupFor>
 
-      {hasGroup('導覽') ? (
-        <SettingsGroup title="導覽">
+      <SettingsGroupFor section="appearance" group="導覽" ctx={fieldCtx}>
           <SettingsField
             id="appearance.tour"
             ctx={fieldCtx}
@@ -82,11 +79,9 @@ export function AppearancePanel({
               </button>
             }
           />
-        </SettingsGroup>
-      ) : null}
+      </SettingsGroupFor>
 
-      {hasGroup('字級') ? (
-        <SettingsGroup title="字級">
+      <SettingsGroupFor section="appearance" group="字級" ctx={fieldCtx}>
           <SettingsField
             id="appearance.uiFontSize"
             ctx={fieldCtx}
@@ -119,8 +114,7 @@ export function AppearancePanel({
               />
             }
           />
-        </SettingsGroup>
-      ) : null}
+      </SettingsGroupFor>
     </>
   )
 }

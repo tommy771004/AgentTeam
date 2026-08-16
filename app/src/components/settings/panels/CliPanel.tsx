@@ -1,18 +1,19 @@
 import { useState } from 'react'
-import type { CliProviderConfig, LlmSettings } from '../../../agent/types'
+import type { LlmSettings } from '../../../agent/types'
 import { CLI_ADAPTERS, DISCOVERY_ONLY_AGENT_ADAPTERS } from '../../../agent/cliAdapters'
-import { capabilitiesForRunner } from '../../../agent/runners'
-import { useOpenCodeConfigStore } from '../../../store/opencodeConfigStore'
-import { Icon } from '../../Icon'
 import {
   SettingsGroup,
-  SettingsRow,
   SettingsToggle,
   settingsBtnCls,
   settingsBtnPrimaryCls,
   settingsInputCls,
 } from '../SettingsChrome'
-import { SettingsAnchor, SettingsField, type SettingsFieldContext } from '../SettingsField'
+import {
+  SettingsAnchor,
+  SettingsField,
+  SettingsGroupFor,
+  type SettingsFieldContext,
+} from '../SettingsField'
 
 /**
  * Settings registry restructure（spec 3/6）— CLI 授權節（安全、adapter capability matrix、廠商矩陣）。
@@ -29,12 +30,11 @@ export function CliPanel({
   set: (patch: Partial<LlmSettings>) => void
   fieldCtx: SettingsFieldContext
 }) {
-  const oc = useOpenCodeConfigStore()
   const [cliMsg, setCliMsg] = useState<string | null>(null)
 
   return (
     <>
-          <SettingsGroup title="安全">
+          <SettingsGroupFor section="cli" group="安全" ctx={fieldCtx}>
             <SettingsField
               id="cli.bashRequireAsk"
               ctx={fieldCtx}
@@ -45,7 +45,7 @@ export function CliPanel({
                 />
               }
             />
-          </SettingsGroup>
+          </SettingsGroupFor>
           <SettingsGroup title="Adapter capability matrix">
             <div className="grid gap-2 px-4 py-3 sm:grid-cols-2">
               {CLI_ADAPTERS.map((adapter) => {
@@ -74,7 +74,7 @@ export function CliPanel({
             </p>
           </SettingsGroup>
           <SettingsAnchor id="cli.cliProviders" ctx={fieldCtx}>
-          <SettingsGroup title="廠商">
+          <SettingsGroupFor section="cli" group="廠商" ctx={fieldCtx}>
             {(settings.cliProviders || []).map((p, idx) => (
               <div key={p.id} className="px-4 py-3 space-y-2 border-b border-white/[0.07] last:border-0">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -181,7 +181,7 @@ export function CliPanel({
                 </p>
               </div>
             ))}
-          </SettingsGroup>
+          </SettingsGroupFor>
           </SettingsAnchor>
           <div className="flex flex-wrap gap-2 mb-3">
             <button

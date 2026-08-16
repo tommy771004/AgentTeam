@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { eventToChord, formatChord, useShortcutStore } from '../../../store/shortcutStore'
 import { SettingsGroup, SettingsRow, settingsBtnCls } from '../SettingsChrome'
 import type { LlmSettings } from '../../../agent/types'
-import type { SettingsFieldContext } from '../SettingsField'
 
 /**
  * Settings registry restructure（spec 3/6）— 鍵盤快捷鍵節。錄製狀態只有這一節在用，一併搬進來。
@@ -14,7 +13,6 @@ export function ShortcutsPanel({
   settings,
 }: {
   settings: LlmSettings
-  fieldCtx: SettingsFieldContext
 }) {
   const shortcutBindings = useShortcutStore((s) => s.bindings)
   const setShortcutChord = useShortcutStore((s) => s.setChord)

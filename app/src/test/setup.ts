@@ -19,3 +19,9 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
       dispatchEvent: () => false,
     }) as MediaQueryList
 }
+
+// jsdom 沒有實作 scrollIntoView；元件用它把鍵盤選中的項目捲進視野，
+// 測試環境補一個 no-op 就好——這是 jsdom 的缺口，不是產品行為。
+if (typeof Element !== 'undefined' && typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = () => {}
+}

@@ -611,6 +611,18 @@ export const SETTINGS_FIELDS: SettingsFieldDef[] = [
     keywords: ['明文', 'HTTP', '未加密', 'plaintext', 'insecure', 'classifier'],
     settingsKeys: ['classificationAllowPlaintextHttp'],
   },
+  {
+    id: 'roles.policyAdminBuild',
+    section: 'roles',
+    tier: 'advanced',
+    label: 'Policy Admin',
+    summary: '此 build 含政策草稿／啟用／證據驗證管理面；不會繞過出站資料閘門。',
+    keywords: ['政策', '管理', '稽核', 'policy admin', 'policy', 'governance'],
+    settingsKeys: [],
+    // 只有 policy-admin build 存在這一列——條件寫在宣告裡，不在 panel 裡長 if 樹
+    visibility: 'policyAdminBuild',
+  },
+
   // ── CLI 授權 ───────────────────────────────────────────────────────
   {
     id: 'cli.bashRequireAsk',
@@ -843,6 +855,20 @@ export function fieldsForSection(
   return SETTINGS_FIELDS.filter(
     (field) => field.section === section && fieldIsVisible(field, ctx),
   )
+}
+
+/** 這個群組在目前檢視下還有欄位可看嗎（用來決定要不要畫那張卡）。 */
+export function groupHasVisibleFields(
+  section: string,
+  group: string,
+  ctx: { showAdvanced: boolean; policyAdminBuild: boolean },
+): boolean {
+  const declared = SETTINGS_FIELDS.filter(
+    (field) => field.section === section && field.group === group,
+  )
+  // 尚未宣告欄位的群組一律視為有內容——不能因為還沒登記就把整張卡藏起來。
+  if (!declared.length) return true
+  return declared.some((field) => fieldIsVisible(field, ctx))
 }
 
 /** 這個節在目前檢視下還有東西可看嗎（用來決定要不要列出該節）。 */

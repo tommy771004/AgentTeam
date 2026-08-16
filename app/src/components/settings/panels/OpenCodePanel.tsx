@@ -8,7 +8,6 @@ import {
 import type { LlmSettings } from '../../../agent/types'
 import { useOpenCodeConfigStore } from '../../../store/opencodeConfigStore'
 import { useProjectStore } from '../../../store/projectStore'
-import { Icon } from '../../Icon'
 import { getLiveSlashCommands } from '../../../commands/registry'
 import {
   Row,
@@ -16,9 +15,7 @@ import {
   SettingsRow,
   StatChip,
   settingsBtnCls,
-  settingsInputCls,
 } from '../SettingsChrome'
-import type { SettingsFieldContext } from '../SettingsField'
 
 /**
  * Settings registry restructure（spec 3/6 ticket 07）— OpenCode 節。
@@ -31,7 +28,6 @@ export function OpenCodePanel({
 }: {
   settings: LlmSettings
   set: (patch: Partial<LlmSettings>) => void
-  fieldCtx: SettingsFieldContext
 }) {
   const oc = useOpenCodeConfigStore()
   const projectRoot = useProjectStore((s) => s.root)

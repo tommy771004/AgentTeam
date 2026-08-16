@@ -7,7 +7,6 @@ import { connectionIdForBuiltinLlm } from '../../../agent/outbound/providerConne
 import { parsePolicySourceMode } from '../../../agent/outbound/policySourceMode'
 import { modelsGroupedByCliProvider } from '../../../agent/cliProviders'
 import type { LlmSettings } from '../../../agent/types'
-import { Icon } from '../../Icon'
 import {
   type OutboundStatus,
   PillSelect,
@@ -221,16 +220,13 @@ export function RolesPanel({
               )
             })()}
             </SettingsAnchor>
-            {(outboundStatus?.buildFlavor === 'policy-admin' ||
-              (typeof process !== 'undefined' &&
-                (process as { env?: Record<string, string | undefined> }).env
-                  ?.SUBAGENTS_BUILD_FLAVOR === 'policy-admin')) && (
-              <SettingsRow
-                title="Policy Admin"
-                description="此 build 含政策草稿／啟用／證據驗證管理面。Possession of this artifact is the management authority — 不會繞過 Outbound Data Gate。"
-                control={<span className="text-[11px] text-primary">enabled</span>}
-              />
-            )}
+            {/* 可見性由 registry 的 visibility: 'policyAdminBuild' 決定（fieldCtx 帶入） */}
+            <SettingsField
+              id="roles.policyAdminBuild"
+              ctx={fieldCtx}
+              description="此 build 含政策草稿／啟用／證據驗證管理面。Possession of this artifact is the management authority — 不會繞過 Outbound Data Gate。"
+              control={<span className="text-[11px] text-primary">enabled</span>}
+            />
             <SettingsField
               id="roles.classificationEndpointUrl"
               ctx={fieldCtx}

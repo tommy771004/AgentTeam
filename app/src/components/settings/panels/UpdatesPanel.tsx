@@ -5,7 +5,6 @@ import {
   settingsBtnCls,
   settingsBtnPrimaryCls,
 } from '../SettingsChrome'
-import type { SettingsFieldContext } from '../SettingsField'
 
 export type UpdateState = {
   status: string
@@ -40,7 +39,6 @@ export function UpdatesPanel({
   installCurrentUpdate: () => void | Promise<void>
   deferCurrentUpdate: () => void | Promise<void>
   rollbackCurrentUpdate: () => void | Promise<void>
-  fieldCtx: SettingsFieldContext
 }) {
   return (
     <>

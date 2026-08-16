@@ -40,7 +40,11 @@ describe('CliDoctorCard 語言模型檢查磚', () => {
     const tile = screen.getByTestId('llm-check-tile')
     expect(tile).toHaveTextContent('未啟用')
     expect(tile).toHaveTextContent('語言模型未啟用')
-    expect(screen.getByRole('link', { name: '前往設定' })).toHaveAttribute('href', '/settings?section=llm')
+    // 深連結直接落在 API Key 欄位上，而不只是「語言模型」這一節
+    expect(screen.getByRole('link', { name: '前往設定' })).toHaveAttribute(
+      'href',
+      '/settings?section=llm&field=llm.apiKey',
+    )
   })
 
   it('已啟用未測試 → 「未通連」＋手動「測試連線」通過後轉「可用」', async () => {

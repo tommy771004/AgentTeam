@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { settingsPath } from '../commands/settingsSections'
 import { Link } from 'react-router-dom'
 import { Icon } from './Icon'
 import { settingsBtnCls, settingsBtnPrimaryCls } from './settings/SettingsChrome'
@@ -116,7 +117,7 @@ export function CliDoctorCard({ onStartTask }: { onStartTask?: () => void }) {
         {llmMessage && <p className="mt-1 text-[11px] text-on-surface-variant break-words">{llmMessage}</p>}
         <div className="mt-1.5 flex flex-wrap gap-2">
           {llmAvailability.llmCheck === 'disabled' && (
-            <Link to="/settings?section=llm" className="text-[11px] font-medium text-primary hover:underline">
+            <Link to={settingsPath('llm', 'llm.apiKey')} className="text-[11px] font-medium text-primary hover:underline">
               前往設定
             </Link>
           )}

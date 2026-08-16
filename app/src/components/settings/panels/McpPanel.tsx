@@ -12,14 +12,11 @@ import type { LlmSettings, McpServerConfig } from '../../../agent/types'
 import { useLearningStore } from '../../../store/learningStore'
 import { useOpenCodeConfigStore } from '../../../store/opencodeConfigStore'
 import { useProjectStore } from '../../../store/projectStore'
-import { Icon } from '../../Icon'
 import {
   SettingsGroup,
-  SettingsRow,
   SettingsStack,
   SettingsToggle,
   settingsBtnCls,
-  settingsBtnPrimaryCls,
   settingsInputCls,
 } from '../SettingsChrome'
 import { SettingsAnchor, SettingsField, type SettingsFieldContext } from '../SettingsField'

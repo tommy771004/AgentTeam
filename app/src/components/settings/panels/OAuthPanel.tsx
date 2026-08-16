@@ -6,7 +6,6 @@ import {
 import { listPluginSecretMeta, secretNeedsRefresh } from '../../../agent/hermes/pluginSecrets'
 import { useLearningStore } from '../../../store/learningStore'
 import type { LlmSettings } from '../../../agent/types'
-import { Icon } from '../../Icon'
 import {
   SettingsGroup,
   SettingsRow,
@@ -14,7 +13,6 @@ import {
   settingsBtnCls,
   settingsInputCls,
 } from '../SettingsChrome'
-import type { SettingsFieldContext } from '../SettingsField'
 
 /**
  * Settings registry restructure（spec 3/6）— 外掛 OAuth 節。
@@ -28,7 +26,6 @@ export function OAuthPanel({
 }: {
   settings: LlmSettings
   set: (patch: Partial<LlmSettings>) => void
-  fieldCtx: SettingsFieldContext
 }) {
   const [oauthRefreshMsg, setOauthRefreshMsg] = useState<string | null>(null)
   const refreshPluginTokens = useLearningStore((s) => s.refreshPluginTokens)

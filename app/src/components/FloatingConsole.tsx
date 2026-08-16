@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { settingsPath } from '../commands/settingsSections'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from './Icon'
 import { CommandComposer } from './CommandComposer'
@@ -122,7 +123,7 @@ export function FloatingConsole() {
       {noEngine && (
         <button
           type="button"
-          onClick={() => navigate('/settings?section=llm')}
+          onClick={() => navigate(settingsPath('llm', 'llm.apiKey'))}
           className="block w-full border-b border-amber-500/30 bg-amber-500/15 px-3 py-1.5 text-left text-[10px] font-medium text-amber-100 hover:bg-amber-500/25"
           title={ENGINE_BANNER_COPY.body}
         >

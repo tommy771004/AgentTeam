@@ -3,8 +3,9 @@ import {
   fieldAnchorId,
   fieldIsVisible,
   getSettingsField,
+  groupHasVisibleFields,
 } from '../../settings/fieldRegistry'
-import { SettingsRow, SettingsStack } from './SettingsChrome'
+import { SettingsGroup, SettingsRow, SettingsStack } from './SettingsChrome'
 
 export type SettingsFieldContext = {
   showAdvanced: boolean
@@ -106,5 +107,33 @@ export function SettingsAnchor({
     >
       {children}
     </div>
+  )
+}
+
+/**
+ * 只在這個群組還有欄位可看時才畫出卡片。
+ *
+ * 一整組都是進階欄位時（例如「門檻」「LLM 韌性」），基礎檢視若照畫卡片，
+ * 使用者會看到一張只有標題、裡面空空如也的卡。這個規則必須是結構性的，
+ * 不能靠每個 panel 各自記得寫一次 if。
+ */
+export function SettingsGroupFor({
+  section,
+  group,
+  ctx,
+  action,
+  children,
+}: {
+  section: string
+  group: string
+  ctx: SettingsFieldContext
+  action?: ReactNode
+  children: ReactNode
+}) {
+  if (!groupHasVisibleFields(section, group, ctx)) return null
+  return (
+    <SettingsGroup title={group} action={action}>
+      {children}
+    </SettingsGroup>
   )
 }

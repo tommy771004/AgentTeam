@@ -6,7 +6,6 @@ import {
   settingsBtnCls,
   settingsBtnPrimaryCls,
 } from '../SettingsChrome'
-import type { SettingsFieldContext } from '../SettingsField'
 
 /**
  * Settings registry restructure（spec 3/6 ticket 08）— 匯出匯入節。
@@ -19,7 +18,6 @@ export function BundlePanel({
 }: {
   exportBundle: () => Promise<string>
   importBundle: (raw: string) => Promise<{ ok: boolean; message: string }>
-  fieldCtx: SettingsFieldContext
 }) {
   const [bundleMsg, setBundleMsg] = useState<string | null>(null)
 

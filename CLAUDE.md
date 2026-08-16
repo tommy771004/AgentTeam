@@ -91,7 +91,7 @@ Adding a tool touches: `registry.ts` (name + catalog entry), `schemas.ts` (param
 
 ### Settings
 
-One flat `LlmSettings` object. Adding a field requires three edits: the interface in `agent/types.ts`, the default in `DEFAULT_LLM_SETTINGS` (`agent/llm.ts`), and UI in `pages/SettingsPage.tsx`. Persisted to localStorage + Electron `settings` IPC; merged in `store/settingsStore.ts` (array/object fields need explicit merge handling there). Settings updates live-apply to the running engine via `agentEngine.configure`.
+One flat `LlmSettings` object. Adding a field requires **four** edits: the interface in `agent/types.ts`, the default in `DEFAULT_LLM_SETTINGS` (`agent/llm.ts`), a field declaration in `settings/fieldRegistry.ts`, and the control in the owning panel under `components/settings/panels/`. The registry declaration is **fail-closed** — `scripts/smoke-settings-registry.mts` compares every `DEFAULT_LLM_SETTINGS` key against the registry, so an undeclared key fails the build; a key with genuinely no settings UI goes in `NON_UI_SETTINGS_KEYS` with a written reason. The declaration carries visibility tier (basic/advanced), zh-TW + en search keywords, a one-line summary and a stable anchor id; `SettingsPage.tsx` is only the assembly layer (nav, tier context, deep-link jump). Persisted to localStorage + Electron `settings` IPC; merged in `store/settingsStore.ts` (array/object fields need explicit merge handling there). Settings updates live-apply to the running engine via `agentEngine.configure`.
 
 ## Agent skills
 

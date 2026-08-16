@@ -13,10 +13,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { readSettingsSurface } from './lib/settingsSurface.mjs'
+
 import { DEFAULT_LLM_SETTINGS } from '../src/agent/llm.ts'
 import { SETTINGS_SECTIONS, settingsPath } from '../src/commands/settingsSections.ts'
 import {
   NON_UI_SETTINGS_KEYS,
+  groupHasVisibleFields,
   PENDING_SETTINGS_KEYS,
   SETTINGS_FIELDS,
   fieldAnchorId,
@@ -28,19 +31,6 @@ import {
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 設定畫面的所有渲染來源（設定頁本體 + 已拆出的 panel）。 */
-function settingsRenderSource(): string {
-  const files = [path.join(appRoot, 'src/pages/SettingsPage.tsx')]
-  const panelDir = path.join(appRoot, 'src/components/settings/panels')
-  if (fs.existsSync(panelDir)) {
-    for (const name of fs.readdirSync(panelDir)) {
-      if (name.endsWith('.tsx') && !name.endsWith('.test.tsx')) {
-        files.push(path.join(panelDir, name))
-      }
-    }
-  }
-  return files.map((file) => fs.readFileSync(file, 'utf8')).join('\n')
-}
 
 let passed = 0
 function test(name: string, fn: () => void) {
@@ -187,6 +177,30 @@ test('每個已宣告的節：basic 是 advanced 的子集合，且沒有空殼�
   }
 })
 
+test('整組皆為進階的群組在 basic 檢視不畫空殼卡片', () => {
+  // 一張只有標題、裡面一列都沒有的卡，比把它收起來更糟。
+  const groups = new Map<string, typeof SETTINGS_FIELDS>()
+  for (const field of SETTINGS_FIELDS) {
+    if (!field.group) continue
+    const key = `${field.section}\u0000${field.group}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(field)
+  }
+  let allAdvancedGroups = 0
+  for (const [key, fields] of groups) {
+    const [section, group] = key.split('\u0000')
+    const anyBasic = fields.some((field) => field.tier === 'basic')
+    assert.equal(
+      groupHasVisibleFields(section, group, CTX),
+      anyBasic,
+      `${section}／${group} 的卡片可見性與欄位可見性不一致`,
+    )
+    assert.equal(groupHasVisibleFields(section, group, ADV), true)
+    if (!anyBasic) allAdvancedGroups += 1
+  }
+  assert.ok(allAdvancedGroups > 0, '應存在整組皆進階的群組（例如 safety／門檻）')
+})
+
 test('整節皆為進階的節在 basic 檢視會被收起來', () => {
   const allAdvancedSections = [...new Set(SETTINGS_FIELDS.map((field) => field.section))].filter(
     (section) => fieldsForSection(section, ADV).every((field) => field.tier === 'advanced'),
@@ -222,6 +236,21 @@ test('搜尋：工程參數的中英文都找得到（併行／concurrency）', 
   assert.ok(en.some((hit) => hit.field.id === 'general.maxConcurrentRuns'))
 })
 
+test('條件可見性真的被用上：至少一個實際欄位以宣告表達，而非 panel 裡的 if', () => {
+  const gated = SETTINGS_FIELDS.filter((field) => field.visibility === 'policyAdminBuild')
+  assert.ok(gated.length > 0, '若無任何實際欄位使用 visibility，這個機制等於沒落地')
+  for (const field of gated) {
+    assert.equal(fieldIsVisible(field, { showAdvanced: true, policyAdminBuild: false }), false)
+    assert.equal(fieldIsVisible(field, { showAdvanced: true, policyAdminBuild: true }), true)
+  }
+  // 對應的 panel 不得再自己判斷 build flavor
+  const roles = fs.readFileSync(
+    path.join(appRoot, 'src/components/settings/panels/RolesPanel.tsx'),
+    'utf8',
+  )
+  assert.doesNotMatch(roles, /SUBAGENTS_BUILD_FLAVOR/, 'build flavor 判斷應留在 registry 宣告裡')
+})
+
 test('條件可見性以宣告表達：policy-admin build 才看得到的欄位', () => {
   const gated = {
     id: 'test.policyOnly',
@@ -239,8 +268,13 @@ test('條件可見性以宣告表達：policy-admin build 才看得到的欄位'
   assert.equal(fieldIsVisible(gated, { showAdvanced: false, policyAdminBuild: true }), false)
 })
 
-test('尚未宣告欄位的節不會被藏起來（過渡期安全）', () => {
-  assert.equal(sectionHasVisibleFields('mcp', CTX), true)
+test('尚未宣告欄位的節不會被藏起來（fail-open 分支）', () => {
+  // 挑一個真的沒有任何欄位宣告的節來驗這條分支——拿已宣告的節來測等於沒測到。
+  const undeclared = SETTINGS_SECTIONS.map((section) => section.id).find(
+    (id) => !SETTINGS_FIELDS.some((field) => field.section === id),
+  )
+  assert.ok(undeclared, '應至少有一個尚未宣告欄位的節（例如 Pi Core）')
+  assert.equal(sectionHasVisibleFields(undeclared, CTX), true)
   assert.equal(sectionHasVisibleFields('appearance', CTX), true)
 })
 
@@ -279,7 +313,7 @@ test('欄位深連結：settingsPath 帶欄位時仍是合法路徑，且節深�
 })
 
 test('宣告了就要畫得出來：每個欄位都有對應的渲染錨點', () => {
-  const source = settingsRenderSource()
+  const source = readSettingsSurface(appRoot)
   const missing = SETTINGS_FIELDS.filter((field) => !source.includes(`id="${field.id}"`))
   assert.deepEqual(
     missing.map((field) => field.id),

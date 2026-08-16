@@ -28,6 +28,7 @@ export function SettingsSearch({
   const [index, setIndex] = useState(0)
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const hits = useMemo(
     () => searchSettingsFields(query, { policyAdminBuild }).slice(0, MAX_HITS),
@@ -37,6 +38,14 @@ export function SettingsSearch({
   useEffect(() => {
     setIndex(0)
   }, [query])
+
+  // 清單可捲動且最多 20 筆：只把 index 移下去、畫面不跟著捲，
+  // 純鍵盤的人就會「選到」一個看不見的項目。
+  useEffect(() => {
+    listRef.current
+      ?.querySelector<HTMLElement>('[aria-selected="true"]')
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [index, query])
 
   useEffect(() => {
     if (!open) return
@@ -66,6 +75,9 @@ export function SettingsSearch({
           role="combobox"
           aria-expanded={showList}
           aria-controls="settings-search-results"
+          aria-activedescendant={
+            showList && hits[index] ? `settings-hit-${hits[index].field.id}` : undefined
+          }
           aria-label="搜尋設定"
           placeholder="搜尋設定（中英文皆可）"
           onFocus={() => setOpen(true)}
@@ -95,6 +107,7 @@ export function SettingsSearch({
 
       {showList ? (
         <div
+          ref={listRef}
           id="settings-search-results"
           role="listbox"
           aria-label="設定搜尋結果"
@@ -106,6 +119,7 @@ export function SettingsSearch({
             hits.map((hit, i) => (
               <button
                 key={hit.field.id}
+                id={`settings-hit-${hit.field.id}`}
                 type="button"
                 role="option"
                 aria-selected={i === index}
