@@ -346,6 +346,24 @@ const api = {
         ok: boolean
         content: string
       }>,
+    workspaceGrep: (input: { query: string; path?: string; glob?: string; maxResults?: number }, projectRoot?: string) =>
+      ipcRenderer.invoke('tools:workspaceGrep', input, projectRoot) as Promise<{
+        ok: boolean
+        root: string
+        matches: Array<{ path: string; line: number; text: string }>
+        files: string[]
+        truncated: boolean
+        error?: string
+      }>,
+    workspaceGlob: (input: { pattern: string; path?: string; maxResults?: number }, projectRoot?: string) =>
+      ipcRenderer.invoke('tools:workspaceGlob', input, projectRoot) as Promise<{
+        ok: boolean
+        root: string
+        matches: Array<{ path: string; line: number; text: string }>
+        files: string[]
+        truncated: boolean
+        error?: string
+      }>,
     workspaceWrite: (path: string, content: string, projectRoot?: string) =>
       ipcRenderer.invoke('tools:workspaceWrite', path, content, projectRoot) as Promise<{
         ok: boolean
@@ -369,10 +387,26 @@ const api = {
     workspaceDelete: (path: string, recursive?: boolean, projectRoot?: string) =>
       ipcRenderer.invoke('tools:workspaceDelete', path, recursive, projectRoot) as Promise<{ ok: boolean; path: string; error?: string }>,
     workspaceRoot: () => ipcRenderer.invoke('tools:workspaceRoot') as Promise<string>,
+    toolOutputSpillWrite: (input: { runId: string; threadId?: string; tool: string; output: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('tools:toolOutputSpillWrite', input) as Promise<{ ok: boolean; locator?: string; bytes?: number; error?: string }>,
+    toolOutputSpillRead: (input: { locator: string; runId: string; projectRoot?: string; offset?: number; maxBytes?: number }) =>
+      ipcRenderer.invoke('tools:toolOutputSpillRead', input) as Promise<{ ok: boolean; output?: string; bytes?: number; offset?: number; nextOffset?: number; error?: string }>,
+    toolOutputSpillDispose: (input: { runId: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('tools:toolOutputSpillDispose', input) as Promise<{ ok: boolean }>,
     memorySet: (key: string, value: string) =>
       ipcRenderer.invoke('tools:memorySet', key, value) as Promise<{ ok: boolean }>,
     memoryGet: (key: string) =>
       ipcRenderer.invoke('tools:memoryGet', key) as Promise<string | null>,
+  },
+  learning: {
+    export: (input: { relativePath: string; content: string; projectRoot?: string; overwrite?: boolean }) =>
+      ipcRenderer.invoke('learning:export', input) as Promise<{
+        ok: boolean
+        path?: string
+        bytes?: number
+        exists?: boolean
+        error?: string
+      }>,
   },
   subdesign: {
     readMetadata: (projectRoot?: string) =>
@@ -875,6 +909,8 @@ const api = {
       }
       /** Effective outbound guard mode for main sandbox admission (ticket 20) */
       effectiveMode?: 'off' | 'demo' | 'optional' | 'required'
+      /** External CLI delegate/continue contract; no parent transcript. */
+      externalCliContract?: unknown
     }) =>
       ipcRenderer.invoke('cli:runAgent', input) as Promise<{
         ok: boolean
@@ -1299,6 +1335,20 @@ const api = {
         originalRoot: string
         connectionId: string
       } | null>,
+    runEvidence: (runId: string) =>
+      ipcRenderer.invoke('outbound:runEvidence', runId) as Promise<Array<{
+        eventId: string
+        eventType: string
+        timestampUtc: string
+        runId?: string
+        providerId?: string
+        effectiveGuardMode?: string
+        policySource?: string
+        filesystemIsolation?: string
+        action?: string
+        exclusionCount: number
+        sealed: boolean
+      }>>,
     appendEvidence: (
       input: Record<string, unknown>,
       sealed?: boolean,

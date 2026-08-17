@@ -34,6 +34,10 @@ import type { RunDispatchSnapshot } from './taskRunCoordinator'
 
 export type { DispatchResult } from './dispatchResult.ts'
 import type { DispatchResult } from './dispatchResult.ts'
+import {
+  formatCliContinueGoalPrompt,
+  isCompleteCliContinueGoalContract,
+} from './runners/types.ts'
 
 function resolveCliBinary(kind: LocalRunnerKind): string | undefined {
   const settings = useSettingsStore.getState().settings
@@ -217,6 +221,27 @@ export async function dispatchThreadTask(
     // Keep CLI follow-ups coherent with builtin runs. The current request is
     // deliberately first, so the runner's prompt cap never cuts it off.
     let cliPrompt = subDesignContext ? `${subDesignContext}\n\n## Current request\n${text}` : text
+    const continueContract =
+      snapshot.overrides.externalCliContract?.continueGoal ||
+      (snapshot.overrides.continueGoal
+        ? {
+            objective: snapshot.overrides.continueGoal.objective,
+            definitionOfDone: snapshot.overrides.continueGoal.definitionOfDone,
+            missing: snapshot.overrides.continueGoal.missing || [],
+            priorDigest: snapshot.overrides.continueGoal.priorDigest,
+            projectRoot,
+            approvalMode: snapshot.overrides.approvalMode || settings.approvalMode,
+            userHint: snapshot.overrides.continueGoal.userHint,
+          }
+        : undefined)
+    if (isCompleteCliContinueGoalContract(continueContract)) {
+      cliPrompt = [
+        formatCliContinueGoalPrompt(continueContract),
+        subDesignContext,
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    }
     if (settings.referenceChatHistory !== false && thread?.bubbles?.length) {
       const chat = thread.bubbles.filter(
         (b) => b.role === 'user' || b.role === 'assistant',
@@ -259,6 +284,7 @@ export async function dispatchThreadTask(
       eventTrigger: snapshot.overrides.eventTrigger,
       nextState: snapshot.overrides.nextState,
       webhookTarget: snapshot.overrides.webhookTarget,
+      externalCliContract: snapshot.overrides.externalCliContract,
     })
     const a =
       useAgentStore.getState().getRunState(snapshot.runId) || useAgentStore.getState().agent

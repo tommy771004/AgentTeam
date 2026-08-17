@@ -2,7 +2,7 @@
  * Renderer helper: run prompt via local CLI and synthesize AgentState-like result
  */
 
-import type { AgentState, ApprovalMode, CliConfigSnapshot, ExternalRunRef } from './types'
+import type { AgentState, ApprovalMode, CliConfigSnapshot, ExternalRunRef, RuntimeOverrides } from './types'
 import { emptyKnowledge } from './knowledge'
 import { resolveCliApproval } from './cliApproval'
 import {
@@ -47,6 +47,8 @@ export async function runPromptViaLocalCli(opts: {
   configSnapshot?: LocalCliConfigSnapshot
   /** Materialized on disk by Electron for CLI vision/file tools */
   attachments?: LocalCliAttachmentPayload[]
+  /** External CLI delegate/continue contract; contains no parent transcript. */
+  externalCliContract?: RuntimeOverrides['externalCliContract']
   onLog?: (line: string) => void
 }): Promise<{
   ok: boolean
@@ -156,6 +158,7 @@ export async function runPromptViaLocalCli(opts: {
     model: opts.model,
     attachments: opts.attachments,
     isolationStatus: sandbox.isolationStatus,
+    externalCliContract: opts.externalCliContract,
   }
   const gate = inspectOutbound({
     channel: 'cli',
@@ -201,6 +204,7 @@ export async function runPromptViaLocalCli(opts: {
     runId: opts.runId,
     attachments: (gated.attachments as typeof opts.attachments) ?? opts.attachments,
     configSnapshot: opts.configSnapshot,
+    externalCliContract: opts.externalCliContract,
   })
   if (r.cancelled) {
     opts.onLog?.('■ CLI 已取消')

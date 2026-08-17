@@ -79,6 +79,12 @@ export function buildToolInput(
       return { path: '.' }
     case 'workspace_read':
       return { path: guessFilename(objective, 'input') }
+    case 'workspace_grep':
+      return { query: extractQuery(objective, stepDescription), path: '.', maxResults: 100 }
+    case 'workspace_glob':
+      return { pattern: '**/*', path: '.', maxResults: 200 }
+    case 'tool_output_read':
+      return { locator: '', offset: 0, maxBytes: 16_384 }
     case 'workspace_diff':
       return { paths: [] }
     case 'workspace_write':

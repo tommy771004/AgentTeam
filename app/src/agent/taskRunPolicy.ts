@@ -74,6 +74,7 @@ export function resolveBusyPolicy(
     case 'telegram':
     case 'event':
     case 'delegate':
+    case 'headless':
     case 'queue-drain':
       return 'queue'
     case 'composer':
@@ -91,6 +92,7 @@ const AUTOMATION_KINDS: ReadonlySet<RunSourceKind> = new Set([
   'telegram',
   'event',
   'delegate',
+  'headless',
   'queue-drain',
 ])
 

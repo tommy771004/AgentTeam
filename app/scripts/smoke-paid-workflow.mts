@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   approveWorkflowSpec,
+  buildWorkflowStageDeliverables,
   buildReviewableResult,
   canStartPaidWorkflow,
   collectWorkflowArtifactEvidence,
@@ -12,6 +13,7 @@ import {
   recordTddResult,
   requestBoundedCorrection,
   resolveWorkflowRunner,
+  rejectWorkflowDeliverable,
   startTicketTdd,
   type WorkflowSession,
 } from '../src/agent/paidWorkflow.ts'
@@ -114,6 +116,18 @@ const indexed = recordWorkflowArtifacts({
 }, reviewed, '2026-07-19T01:07:00.000Z')
 assert.ok(indexed.entries.some((entry) => entry.type === 'test'))
 assert.ok(indexed.entries.some((entry) => entry.type === 'review'))
+
+const deliverables = buildWorkflowStageDeliverables(reviewed, '2026-07-19T01:07:30.000Z')
+assert.deepEqual(deliverables.map((item) => item.stage), ['spec', 'tickets', 'tdd', 'review', 'final-output'])
+assert.ok(deliverables.every((item) => item.inspectable && item.rejectable))
+const rejected = rejectWorkflowDeliverable(deliverables[0], 'Spec needs a clearer acceptance boundary', '2026-07-19T01:08:00.000Z')
+assert.equal(rejected.ok, true)
+if (!rejected.ok) throw new Error(rejected.reason)
+assert.equal(rejected.deliverable.status, 'rejected')
+const rejectedAgain = rejectWorkflowDeliverable(rejected.deliverable, 'again')
+assert.equal(rejectedAgain.ok, false)
+if (rejectedAgain.ok) throw new Error('already rejected deliverable was accepted')
+assert.match(rejectedAgain.reason, /already rejected/i)
 
 assert.deepEqual(resolveWorkflowRunner('codex').capabilities, {
   parseDoD: false,

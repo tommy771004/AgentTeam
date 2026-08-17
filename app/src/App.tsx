@@ -3,13 +3,12 @@ import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-d
 import { Layout } from './components/Layout'
 import { ProtocolsPage } from './pages/ProtocolsPage'
 import { DocsPage } from './pages/DocsPage'
-import { ExecutionPage } from './pages/ExecutionPage'
 import { SuccessPage } from './pages/SuccessPage'
 import { FailedPage } from './pages/FailedPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { KnowledgePage } from './pages/KnowledgePage'
 import { DashboardPage } from './pages/DashboardPage'
-import { AutomationPage } from './pages/AutomationPage'
+import { OpsPage } from './pages/OpsPage'
 import { RecordsPage } from './pages/RecordsPage'
 import { LearningPage } from './pages/LearningPage'
 import { SubDesignPage } from './pages/SubDesignPage'
@@ -1055,19 +1054,20 @@ export default function App() {
             <Route path="design-systems/:id" element={<DesignSystemDetailPage />} />
             <Route path="design-systems" element={<DesignSystemsPage />} />
             <Route path="dashboard" element={<DashboardPage />} />
-            <Route path="automation" element={<AutomationPage />} />
+            <Route path="ops" element={<OpsPage />} />
             <Route path="content-publishing" element={<ContentPublishingPage />} />
             <Route path="docs" element={<DocsPage />} />
             <Route path="records" element={<RecordsPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="workspace" element={<Navigate to="/" replace />} />
             <Route path="learning" element={<LearningPage />} />
-            <Route path="execution" element={<ExecutionPage />} />
             <Route path="knowledge" element={<KnowledgePage />} />
             <Route path="success" element={<SuccessPage />} />
             <Route path="failed" element={<FailedPage />} />
-            <Route path="scheduler" element={<Navigate to="/automation" replace />} />
-            <Route path="events" element={<Navigate to="/automation?tab=events" replace />} />
+            <Route path="automation" element={<Navigate to="/ops?tab=automation" replace />} />
+            <Route path="scheduler" element={<Navigate to="/ops?tab=automation" replace />} />
+            <Route path="events" element={<Navigate to="/ops?tab=automation" replace />} />
+            <Route path="execution" element={<Navigate to="/ops?tab=execution" replace />} />
             <Route path="archive" element={<Navigate to="/records" replace />} />
             <Route path="logs" element={<Navigate to="/records?tab=logs" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />

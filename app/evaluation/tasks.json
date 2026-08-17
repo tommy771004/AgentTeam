@@ -1,0 +1,20 @@
+[
+  {
+    "id": "turn-summary",
+    "objective": "整理一段短摘要並列出三個重點",
+    "loopType": "Turn-based",
+    "runner": "builtin"
+  },
+  {
+    "id": "goal-check",
+    "objective": "完成一個可驗證的待辦清單並指出缺口",
+    "loopType": "Goal-based",
+    "runner": "builtin"
+  },
+  {
+    "id": "external-contract",
+    "objective": "以外部執行器整理輸出，保持 DoD 語義誠實",
+    "loopType": "Goal-based",
+    "runner": "codex"
+  }
+]

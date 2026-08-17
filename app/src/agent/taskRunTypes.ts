@@ -26,6 +26,7 @@ export type RunSourceKind =
   | 'telegram'
   | 'event'
   | 'delegate'
+  | 'headless'
   | 'queue-drain'
 
 export type ExternalRunOpts = {

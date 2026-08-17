@@ -14,7 +14,8 @@ import type { ToolCallRecord } from '../types'
 import type { AuthorizeResult } from './toolGuard.ts'
 import {
   DEFAULT_SUPERVISOR_LIMITS,
-  enforceToolPayload,
+  enforceToolPayloadWithSpill,
+  type ToolPayloadSpillAdapter,
   type SupervisorLimits,
   SupervisorViolation,
 } from '../supervisor.ts'
@@ -51,6 +52,10 @@ export type InvokeGatedToolInput = {
     | { audits: string[]; notifications: string[] }
     | Promise<{ audits: string[]; notifications: string[] }>
   notify?: (title: string, body: string) => void
+  spill?: ToolPayloadSpillAdapter
+  runId?: string
+  threadId?: string
+  projectRoot?: string
 }
 
 export type InvokeGatedToolResult = {
@@ -161,14 +166,21 @@ export async function invokeGatedTool(
 
   const mode = opts.haltOnPayloadOverflow ? 'halt' : 'truncate'
   try {
-    const enforced = enforceToolPayload(
+    const enforced = await enforceToolPayloadWithSpill(
       opts.tool,
       out,
       opts.supervisorLimits || DEFAULT_SUPERVISOR_LIMITS,
       mode,
+      opts.spill,
+      { runId: opts.runId, threadId: opts.threadId, projectRoot: opts.projectRoot },
     )
     out = enforced.output
-    if (enforced.truncated) {
+    if (enforced.spilled) {
+      opts.onLog?.(
+        'WARN',
+        `Supervisor spilled '${opts.tool}' (${enforced.bytes} bytes) → ${enforced.locator}`,
+      )
+    } else if (enforced.truncated) {
       opts.onLog?.(
         'WARN',
         `Supervisor truncated '${opts.tool}' (${enforced.bytes} bytes)`,

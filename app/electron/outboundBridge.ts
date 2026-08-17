@@ -23,6 +23,7 @@ import {
 import {
   appendEvidenceRecord,
   allowEvidenceAppendFromIpc,
+  readEvidenceRecords,
   type AppendEvidenceInput,
   type HmacKeyProvider,
 } from '../src/agent/outbound/evidenceLedger.ts'
@@ -320,6 +321,26 @@ export function getOutboundRunViewMeta(runId: string): {
     originalRoot: ws.originalRoot,
     connectionId: ws.connectionId,
   }
+}
+
+export function readOutboundRunEvidence(runId: string) {
+  return readEvidenceRecords({
+    ledgerDir: outboundLedgerDir(),
+    runId: String(runId || ''),
+    limit: 100,
+  }).map((record) => ({
+    eventId: record.eventId,
+    eventType: record.eventType,
+    timestampUtc: record.timestampUtc,
+    runId: record.runId,
+    providerId: record.providerId,
+    effectiveGuardMode: record.effectiveGuardMode,
+    policySource: record.policySource,
+    filesystemIsolation: record.filesystemIsolation,
+    action: record.action,
+    exclusionCount: record.exclusions?.length || 0,
+    sealed: record.sealed,
+  }))
 }
 
 export async function appendOutboundEvidence(

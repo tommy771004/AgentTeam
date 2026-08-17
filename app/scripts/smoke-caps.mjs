@@ -426,7 +426,7 @@ await test('side-effect drift guard: every registry tool is read-only OR classif
 
   // 唯讀白名單：新工具必須加入這裡「或」進 SIDE_EFFECT_TOOLS / approvalTools，二選一
   const READ_ONLY = new Set([
-    'workspace_list', 'workspace_read', 'workspace_diff', 'datetime_now',
+    'workspace_list', 'workspace_read', 'workspace_grep', 'workspace_glob', 'tool_output_read', 'workspace_diff', 'datetime_now',
     'memory_get', 'memory_search',
     'skill_list', 'skill_load',
     'mcp_list_tools',
@@ -528,8 +528,8 @@ await test('W1: entry drift guard — no dispatchThreadTask outside controller',
 
 /**
  * Pure: given importer files, find any relative import resolving inside
- * agent/loop/ from outside it — except agent/engine.ts, the Loop Runner's
- * sole production adapter (CONTEXT.md「Loop Runner（迴圈執行器）」).
+ * agent/loop/ from outside it — except agent/engine.ts, the legacy browser
+ * compatibility adapter (CONTEXT.md「Pi Core tool loop」).
  * Resolves each specifier against the importer's own directory so it holds
  * regardless of the importer's depth in the tree.
  */
@@ -554,6 +554,18 @@ function findLoopRunnerImportDrift(files) {
   return violations
 }
 
+function findLoopRunnerReferenceDrift(files) {
+  const violations = []
+  for (const f of files) {
+    if (f.path === 'src/agent/engine.ts') continue
+    if (f.path.startsWith('src/agent/loop/')) continue
+    if (/agent\/loop\//.test(f.content)) {
+      violations.push(`${f.path} references agent/loop/ outside the compatibility allowlist`)
+    }
+  }
+  return violations
+}
+
 await test('drift guard: agent/loop is imported only by engine.ts (fixture)', () => {
   const clean = [
     { path: 'src/agent/engine.ts', content: "import { runLoop } from './loop/index.ts'" },
@@ -573,6 +585,11 @@ await test('drift guard: agent/loop is imported only by engine.ts (fixture)', ()
     { path: 'src/pages/SettingsPage.tsx', content: "import { runLoop } from '../agent/loop/index.ts'" },
   ]
   assert.equal(findLoopRunnerImportDrift(nestedViolator).length, 1)
+
+  const stringViolator = [
+    { path: 'src/pages/SettingsPage.tsx', content: "const legacy = 'agent/loop/stepRun.ts'" },
+  ]
+  assert.equal(findLoopRunnerReferenceDrift(stringViolator).length, 1)
 })
 
 await test('drift guard: agent/loop is imported only by engine.ts (real tree)', async () => {
@@ -590,6 +607,8 @@ await test('drift guard: agent/loop is imported only by engine.ts (real tree)', 
   assert.ok(files.some((f) => f.path === 'src/agent/engine.ts'), 'sanity: engine.ts must be scanned')
   const violations = findLoopRunnerImportDrift(files)
   assert.deepEqual(violations, [], `agent/loop must only be imported by engine.ts:\n${violations.join('\n')}`)
+  const references = findLoopRunnerReferenceDrift(files)
+  assert.deepEqual(references, [], `agent/loop references must stay behind the compatibility allowlist:\n${references.join('\n')}`)
 })
 
 await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async () => {
@@ -1739,7 +1758,7 @@ await test('Phase 6: docs align concurrency, triggers, runners, no in-repo RTK.m
   assert.match(plan, /Phase 6 實作記錄/)
 })
 
-await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal gated', async () => {
+await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal contract', async () => {
   const fs = await import('node:fs')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/runners/types.ts'), 'utf8')
   const index = fs.readFileSync(path.join(appRoot, 'src/agent/runners/index.ts'), 'utf8')
@@ -1755,7 +1774,7 @@ await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal gate
   assert.match(types, /export type ExecutionKind/)
   assert.match(types, /BUILTIN_RUNNER_CAPABILITIES/)
   assert.match(types, /EXTERNAL_CLI_RUNNER_CAPABILITIES/)
-  assert.match(types, /continueGoal: false/)
+  assert.match(types, /continueGoal: true/)
   assert.match(types, /validateDoD: false/)
   assert.match(types, /EXTERNAL_CLI_DOD_LABEL/)
   assert.match(types, /formatCliContinueGoalPrompt/)

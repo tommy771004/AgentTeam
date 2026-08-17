@@ -10,6 +10,7 @@ import {
   type DelegationBudget,
 } from './delegate'
 import { recordBackgroundStatus } from '../runJournal.ts'
+import { buildExternalCliDelegateContract } from '../runners/types.ts'
 
 /**
  * Phase 3 item 6: durable background job completion.
@@ -254,6 +255,7 @@ export function enqueueBackgroundDelegate(
         parentRunId: input.parentRunId,
         parentThreadId: input.parentThreadId,
         sourceKind: input.sourceKind || 'delegate',
+        runner: input.runner,
         projectRoot: input.projectRoot,
         parentPermissionPolicy: input.parentPermissionPolicy,
         parentPermissionProjection: input.parentPermissionProjection,
@@ -267,6 +269,7 @@ export function enqueueBackgroundDelegate(
           sourceKind: 'delegate',
           runId: childRunId,
           objective: input.goal,
+          runner: input.runner,
           title: `委派 · ${input.goal.slice(0, 32)}`,
           sourceLabel: `背景委派${input.parentRunId ? ` · parent=${input.parentRunId}` : ''}`,
           projectRoot: input.projectRoot,
@@ -288,6 +291,10 @@ export function enqueueBackgroundDelegate(
             permissionPolicy: input.parentPermissionPolicy,
             permissionProjection: input.parentPermissionProjection,
             mcpAgentId: input.parentMcpAgentId,
+            externalCliContract:
+              input.runner && input.runner !== 'builtin'
+                ? buildExternalCliDelegateContract({ role: 'leaf', unattended: true })
+                : undefined,
           },
           onSettled: (r) => resolve(r),
         }).then((r) => {

@@ -1,5 +1,6 @@
 import type { PublishSchedule } from './contentPublishing.ts'
 import type { YouTubePrivacyStatus } from './contentPublishPlatforms.ts'
+import { createSideEffectEvidence, validateSideEffectEvidence, type SideEffectEvidence } from './evidence/sideEffectEvidence.ts'
 
 export interface ContentPublishPayload {
   contentItemId: string
@@ -15,7 +16,7 @@ export interface ContentPublishPayload {
 }
 
 export type PublishAdapterResult =
-  | { ok: true; status: 'published'; externalId?: string }
+  | { ok: true; status: 'published'; externalId?: string; evidence?: SideEffectEvidence }
   | {
       ok: false
       status: 'not-published'
@@ -48,8 +49,12 @@ export interface ContentPublishAdapterRegistry {
       | 'targetId'
       | 'privacyStatus'
     >,
-  ) => Promise<PublishAdapterResult>
+  ) => Promise<VerifiedPublishAdapterResult>
 }
+
+export type VerifiedPublishAdapterResult =
+  | { ok: true; status: 'published'; externalId?: string; evidence: SideEffectEvidence }
+  | Extract<PublishAdapterResult, { ok: false }>
 
 const ADAPTER_UNAVAILABLE_MESSAGE = '尚未設定此平台的發布 adapter，排程未發布'
 const ADAPTER_FAILED_MESSAGE = '平台發布 adapter 執行失敗，內容未發布'
@@ -85,7 +90,7 @@ export function createContentPublishAdapterRegistry(
       }
 
       try {
-        return await adapter.publish({
+        const result = await adapter.publish({
           contentItemId: schedule.contentItemId,
           title: content.title,
           body: content.body,
@@ -97,6 +102,34 @@ export function createContentPublishAdapterRegistry(
           targetId: content.targetId,
           privacyStatus: content.privacyStatus,
         })
+        if (!result.ok) return result
+        // The registry is the trusted adapter boundary. A model cannot supply
+        // this field through a tool argument; a custom adapter's claim is
+        // validated and the registry issues the canonical snapshot.
+        if (result.evidence) {
+          const supplied = validateSideEffectEvidence(result.evidence)
+          if (!supplied.ok || supplied.evidence.kind !== 'content_publish') {
+            return {
+              ok: false,
+              status: 'not-published',
+              code: 'PLATFORM_PUBLISH_FAILED',
+              message: '發布 adapter 回傳的 execution evidence 無效',
+            }
+          }
+        }
+        return {
+          ...result,
+          evidence: createSideEffectEvidence({
+            kind: 'content_publish',
+            source: `platform:${normalizePlatform(schedule.platform)}`,
+            metadata: {
+              platform: normalizePlatform(schedule.platform),
+              contentItemId: schedule.contentItemId,
+              externalId: result.externalId,
+              payload: 'metadata-only',
+            },
+          }),
+        }
       } catch {
         return {
           ok: false,

@@ -4,67 +4,29 @@
  */
 
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-// ── Minimal re-implementations mirrored from source for CI without TS build ──
-// Prefer importing built modules when available; otherwise inline critical paths.
-
-function computeNextRun(kind, opts) {
-  const from = opts.from || new Date()
-  if (kind === 'interval') {
-    const mins = Math.max(1, opts.intervalMinutes || 60)
-    return new Date(from.getTime() + mins * 60_000).toISOString()
-  }
-  if (kind === 'daily') {
-    const [hh, mm] = (opts.dailyAt || '08:00').split(':').map(Number)
-    const next = new Date(from)
-    next.setSeconds(0, 0)
-    next.setHours(hh || 8, mm || 0, 0, 0)
-    if (next.getTime() <= from.getTime()) next.setDate(next.getDate() + 1)
-    return next.toISOString()
-  }
-  return null
+// Import the actual TypeScript seams. The plain `node` entry re-execs itself
+// with Node's built-in type stripping so this smoke cannot silently drift into
+// a hand-maintained mirror of scheduler/parser/supervisor/eventMatcher logic.
+if (!process.execArgv.includes('--experimental-strip-types')) {
+  const child = spawnSync(
+    process.execPath,
+    ['--experimental-strip-types', fileURLToPath(import.meta.url), ...process.argv.slice(2)],
+    { stdio: 'inherit' },
+  )
+  process.exit(child.status ?? 1)
 }
 
-function byteLength(text) {
-  return new TextEncoder().encode(text).length
-}
-
-function enforceToolPayload(tool, output, maxBytes, mode = 'truncate') {
-  const bytes = byteLength(output)
-  if (bytes <= maxBytes) return { output, truncated: false, bytes }
-  if (mode === 'halt') {
-    const err = new Error(`MemoryConstraintViolation: ${tool} ${bytes}`)
-    err.code = 'MemoryConstraintViolation'
-    throw err
-  }
-  let cut = Math.floor(output.length * (maxBytes / bytes))
-  let sliced = output.slice(0, cut)
-  while (byteLength(sliced) > maxBytes && cut > 0) {
-    cut = Math.floor(cut * 0.9)
-    sliced = output.slice(0, cut)
-  }
-  return { output: sliced, truncated: true, bytes }
-}
-
-function classifyLoopType(input) {
-  const lower = input.toLowerCase()
-  if (
-    /\bcron\b|\bschedule(?:d)?\b|\bdaily\b|\bevery\s+(?:day|hour|week|\d+)\b|\bweekly\b|每(?:天|日|週|星期|小時)|每日|定時|排程/i.test(input) ||
-    /\bwhen\b|\bon\s+event\b|\bwebhook\b|\bmonitor\b|\btrigger(?:\s+when)?\b|當|如果|若|一旦|每當|事件/i.test(input)
-  ) return 'Goal-based'
-  if (input.length > 40 || /find|analyze|research/i.test(input)) return 'Goal-based'
-  return 'Turn-based'
-}
-
-function detectAutomationSuggestion(input) {
-  if (/\bcron\b|\bschedule(?:d)?\b|\bdaily\b|\bevery\s+(?:day|hour|week|\d+)\b|\bweekly\b|每(?:天|日|週|星期|小時)|每日|定時|排程/i.test(input)) {
-    return { kind: 'schedule' }
-  }
-  if (/\bwhen\b|\bon\s+event\b|\bwebhook\b|\bmonitor\b|\btrigger(?:\s+when)?\b|當|如果|若|一旦|每當|事件/i.test(input)) {
-    return { kind: 'event' }
-  }
-  return null
-}
+const [{ computeNextRun }, { byteLength, enforceToolPayload, DEFAULT_SUPERVISOR_LIMITS }, { classifyLoopType, detectAutomationSuggestion }, { matchProactiveEvent }] = await Promise.all([
+  import('../src/agent/scheduler.ts'),
+  import('../src/agent/supervisor.ts'),
+  import('../src/agent/parser.ts'),
+  import('../src/agent/eventMatcher.ts'),
+])
 
 // ── Tests ───────────────────────────────────────────────────────
 
@@ -128,18 +90,21 @@ await test('schedule next interval', () => {
 
 await test('supervisor truncates oversized payload', () => {
   const big = 'x'.repeat(10_000)
-  const r = enforceToolPayload('web_search', big, 100, 'truncate')
+  const r = enforceToolPayload('web_search', big, { ...DEFAULT_SUPERVISOR_LIMITS, maxToolPayloadBytes: 100 }, 'truncate')
   assert.equal(r.truncated, true)
-  assert.ok(byteLength(r.output) <= 100)
+  assert.ok(r.output.length < big.length)
+  assert.match(r.output, /truncated by supervisor/)
 })
 
 await test('supervisor halt mode throws', () => {
   const big = 'y'.repeat(5000)
-  assert.throws(() => enforceToolPayload('http_fetch', big, 50, 'halt'))
+  assert.throws(() => enforceToolPayload('http_fetch', big, { ...DEFAULT_SUPERVISOR_LIMITS, maxToolPayloadBytes: 50 }, 'halt'))
 })
 
-await test('strict event match semantics (manual)', () => {
+await test('strict event match semantics use the real matcher', () => {
   const rule = {
+    id: 'event_invoice',
+    name: 'Invoice received',
     enabled: true,
     source: 'email.received',
     subjectContains: 'Invoice',
@@ -149,25 +114,13 @@ await test('strict event match semantics (manual)', () => {
     source: 'email.received',
     subject: 'Q3 Invoice',
     hasAttachment: true,
+    receivedAt: '2026-01-01T00:00:00.000Z',
   }
-  const ok =
-    rule.enabled &&
-    rule.source === payload.source &&
-    payload.subject.toLowerCase().includes(rule.subjectContains.toLowerCase()) &&
-    payload.hasAttachment === rule.hasAttachment
-  assert.equal(ok, true)
+  assert.ok(matchProactiveEvent(rule, payload))
 
   const noAttach = { ...payload, hasAttachment: false }
-  const fail =
-    rule.hasAttachment === noAttach.hasAttachment &&
-    noAttach.subject.toLowerCase().includes(rule.subjectContains.toLowerCase())
-  assert.equal(fail, false)
+  assert.equal(matchProactiveEvent(rule, noAttach), null)
 })
-
-// ── Electron bridge build contract (preload ESM/CJS regression) ──
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const distElectron = path.join(appRoot, 'dist-electron')

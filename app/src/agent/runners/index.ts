@@ -1,15 +1,18 @@
 export {
   BUILTIN_RUNNER_CAPABILITIES,
+  EXTERNAL_CLI_LEAF_BLOCKED_TOOLS,
   EXTERNAL_CLI_DOD_LABEL,
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
   EXTERNAL_CLI_UI_LABEL,
   capabilitiesForRunner,
+  buildExternalCliDelegateContract,
   executionKindForRunner,
   formatCliContinueGoalPrompt,
   formatRunnerCapabilitiesSummary,
   isBuiltinRunner,
   isCompleteCliContinueGoalContract,
   type CliContinueGoalPromptContract,
+  type ExternalCliDelegateContract,
   type ExecutionKind,
   type RunnerCapabilities,
 } from './types'

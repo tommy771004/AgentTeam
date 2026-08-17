@@ -5,6 +5,7 @@ import { useThreadStore } from '../store/threadStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { forkOpenCodeSession } from '../agent/opencode/serverClient'
 import { extractOpenCodeSessionId } from '../agent/opencode/sessionMapping'
+import { rerunFromReplaySafeCheckpoint } from '../agent/taskRunCoordinator'
 
 export function ThreadSidebar() {
   const {
@@ -12,6 +13,7 @@ export function ThreadSidebar() {
     activeId,
     createThread,
     forkThread,
+    resetLastCapabilities,
     selectThread,
     deleteThread,
     setShowThreadList,
@@ -129,10 +131,58 @@ export function ThreadSidebar() {
               >
                 <Icon name="call_split" size={14} />
               </button>
+              <button
+                type="button"
+                className="opacity-0 group-hover:opacity-100 p-1 rounded-control text-ink-3 hover:text-accent-ink shrink-0"
+                title="從最近 replay-safe checkpoint 重跑"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void rerunFromReplaySafeCheckpoint({ sourceThreadId: t.id }).then((result) => {
+                    if (result.skipped) {
+                      useThreadStore.getState().pushBubble(t.id, 'system', result.error || '無法從 checkpoint 重跑。')
+                    }
+                  })
+                }}
+              >
+                <Icon name="replay" size={14} />
+              </button>
             </div>
           )
         })}
       </div>
+      {(() => {
+        const activeThread = threads.find((thread) => thread.id === activeId)
+        if (!activeThread) return null
+        const caps = activeThread.lastCapabilityIds || []
+        const tools = activeThread.lastUnlockedTools || []
+        return (
+          <div className="shrink-0 border-t border-line bg-surface-2 p-2.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">Run capability state</div>
+                <div className="text-[9px] text-ink-3">來源：上一輪 Pi Host run（cross-run restore）</div>
+              </div>
+              {(caps.length > 0 || tools.length > 0) && (
+                <button
+                  type="button"
+                  className="text-[10px] text-error hover:underline"
+                  onClick={() => resetLastCapabilities(activeThread.id)}
+                >
+                  重置
+                </button>
+              )}
+            </div>
+            <div className="text-[10px] text-ink-2">
+              <span className="font-semibold">Capabilities</span>{' '}
+              {caps.length ? caps.map((id) => `${id}（${id.startsWith('skill:') ? 'skill' : id.startsWith('mcp:') ? 'mcp' : 'builtin'}）`).join('、') : '（無）'}
+            </div>
+            <div className="text-[10px] text-ink-2">
+              <span className="font-semibold">Unlocked tools</span>{' '}
+              {tools.length ? tools.join('、') : '（無）'}
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

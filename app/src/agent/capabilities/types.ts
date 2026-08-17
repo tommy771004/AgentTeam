@@ -85,4 +85,9 @@ export interface CapabilityRuntimeState {
     /** Tool names revealed via tool_search / load_capability */
     unlocked: Set<string>
   }
+  /** In-memory provenance for the current run; never treated as user input. */
+  provenance: {
+    capabilities: Map<string, 'always-on' | 'preloaded' | 'load_capability' | 'tool_search' | 'progressive-off' | 'restored'>
+    tools: Map<string, 'preloaded' | 'load_capability' | 'tool_search' | 'restored'>
+  }
 }

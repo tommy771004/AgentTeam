@@ -6,6 +6,8 @@ import { SettingsHeader } from '../components/settings/SettingsChrome'
 import { useLearningStore } from '../store/learningStore'
 import { useAgentStore } from '../store/agentStore'
 import { PluginMarketplace } from '../components/PluginMarketplace'
+import { useProjectStore } from '../store/projectStore'
+import { buildLearningExportPlan } from '../agent/hermes/learningExport'
 
 const SECTIONS = [
   { id: 'memory', label: '持久記憶', icon: 'psychology' },
@@ -62,6 +64,8 @@ export function LearningPage() {
   } = useLearningStore()
   const archive = useAgentStore((s) => s.archive)
   const loadArchive = useAgentStore((s) => s.loadArchive)
+  const knowledge = useAgentStore((s) => s.agent.knowledge)
+  const projectRoot = useProjectStore((s) => s.root)
 
   const [userEdit, setUserEdit] = useState('')
   const [memEdit, setMemEdit] = useState('')
@@ -73,6 +77,7 @@ export function LearningPage() {
   const [newSkillDesc, setNewSkillDesc] = useState('')
   const [newSkillBody, setNewSkillBody] = useState('')
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null)
+  const [exportStatus, setExportStatus] = useState('')
 
   useEffect(() => {
     void load()
@@ -93,6 +98,48 @@ export function LearningPage() {
 
   const meta = META[section] || META.memory
 
+  const exportLearning = async (kind: 'skill' | 'memory' | 'knowledge') => {
+    const files = buildLearningExportPlan({ skills, memory, knowledge }).filter((file) => file.kind === kind)
+    if (!files.length) {
+      setExportStatus('目前沒有可匯出的資料。')
+      return
+    }
+    if (!projectRoot) {
+      setExportStatus('請先選擇 project root，匯出會寫入該專案的 .subagents/。')
+      return
+    }
+    const api = window.subagents?.learning?.export
+    if (!api) {
+      for (const file of files) {
+        const blob = new Blob([file.content], { type: 'text/markdown;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = file.relativePath.split('/').pop() || 'learning-export.md'
+        anchor.click()
+        URL.revokeObjectURL(url)
+      }
+      setExportStatus(`瀏覽器模式已下載 ${files.length} 個檔案（無法直接寫入 project root）。`)
+      return
+    }
+    let overwrite = false
+    let written = 0
+    for (const file of files) {
+      let result = await api({ relativePath: file.relativePath, content: file.content, projectRoot })
+      if (!result.ok && result.exists && !overwrite) {
+        overwrite = window.confirm('部分學習檔案已存在。要覆寫這批匯出檔嗎？')
+        if (!overwrite) break
+        result = await api({ relativePath: file.relativePath, content: file.content, projectRoot, overwrite: true })
+      }
+      if (!result.ok) {
+        setExportStatus(`匯出中止：${result.error || file.relativePath}`)
+        return
+      }
+      written += 1
+    }
+    setExportStatus(`已匯出 ${written}/${files.length} 個檔案至專案 .subagents/。`)
+  }
+
   return (
     <ThemePage
       title="學習中心"
@@ -103,6 +150,15 @@ export function LearningPage() {
       immersive={section === 'plugins'}
     >
       {section !== 'plugins' && <SettingsHeader title={meta.title} subtitle={meta.subtitle} />}
+      {section !== 'plugins' && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className="text-[10px] text-outline">Project learning export</span>
+          <button type="button" onClick={() => void exportLearning('skill')} className="px-2.5 py-1.5 rounded border border-primary/30 text-primary text-[10px] font-semibold">匯出技能</button>
+          <button type="button" onClick={() => void exportLearning('memory')} className="px-2.5 py-1.5 rounded border border-secondary/30 text-secondary text-[10px] font-semibold">匯出記憶</button>
+          <button type="button" onClick={() => void exportLearning('knowledge')} className="px-2.5 py-1.5 rounded border border-tertiary/30 text-tertiary text-[10px] font-semibold">匯出 entities</button>
+          {exportStatus && <span className="text-[10px] text-on-surface-variant">{exportStatus}</span>}
+        </div>
+      )}
       <div className="flex flex-col gap-4">
         {section === 'memory' && (
           <div className="space-y-4">

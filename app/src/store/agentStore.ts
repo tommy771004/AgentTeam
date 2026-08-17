@@ -77,6 +77,8 @@ interface AgentStore {
     nextState?: RuntimeOverrides['nextState']
     /** Per-run outbound target; falls back to settings.webhookTarget. */
     webhookTarget?: RuntimeOverrides['webhookTarget']
+    /** External CLI delegate/continue contract; no parent transcript. */
+    externalCliContract?: RuntimeOverrides['externalCliContract']
     /** Chat attachments for CLI (written to disk in Electron) */
     attachments?: Array<{
       name: string

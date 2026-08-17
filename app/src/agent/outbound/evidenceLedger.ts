@@ -45,6 +45,39 @@ export type EvidenceRecord = {
   recordMac?: string
 }
 
+/** Bounded metadata-only read used by the per-run Ops projection. */
+export function readEvidenceRecords(opts: {
+  ledgerDir: string
+  runId: string
+  limit?: number
+}): EvidenceRecord[] {
+  const runId = String(opts.runId || '').trim()
+  if (!runId || !path.isAbsolute(opts.ledgerDir)) return []
+  const limit = Math.max(1, Math.min(200, Math.floor(opts.limit || 100)))
+  try {
+    const files = fs
+      .readdirSync(opts.ledgerDir)
+      .filter((name) => /^evidence-[0-9]{4}-W[0-9]{2}\.jsonl$/.test(name))
+      .sort()
+    const records: EvidenceRecord[] = []
+    for (const file of files) {
+      const lines = fs.readFileSync(path.join(opts.ledgerDir, file), 'utf8').split('\n')
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const record = JSON.parse(line) as EvidenceRecord
+          if (record.runId === runId) records.push(record)
+        } catch {
+          /* ignore malformed historical lines */
+        }
+      }
+    }
+    return records.slice(-limit)
+  } catch {
+    return []
+  }
+}
+
 export type HmacKeyProvider = {
   getKey(): Promise<Buffer | null>
 }

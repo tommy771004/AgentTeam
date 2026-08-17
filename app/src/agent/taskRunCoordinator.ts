@@ -27,6 +27,11 @@ import type { BusyPolicy } from './taskRunPolicy'
 import type { DispatchResult } from './runDispatch'
 import type { HookEvaluation } from './hooks'
 import type { ThreadRunner } from '../store/threadStore'
+import { findReplaySafeCheckpoint } from './runFork.ts'
+import {
+  buildExternalCliDelegateContract,
+  capabilitiesForRunner,
+} from './runners/types.ts'
 
 import { v4 as uuid } from 'uuid'
 import {
@@ -418,6 +423,14 @@ export async function finalizeTaskRun(
       })
     } catch {
       /* metrics must never block finalization */
+    }
+    try {
+      await window.subagents?.tools?.toolOutputSpillDispose?.({
+        runId,
+        projectRoot: input.projectRoot,
+      })
+    } catch {
+      /* spill cleanup is bounded best effort and never changes the run result */
     }
     try {
       await input.onSettled?.(result)
@@ -1331,12 +1344,12 @@ async function coordinateTaskRun(
     existingSnap &&
       (opts.continueGoal === true || isContinueGoalPhrase(objective)),
   )
-  // Phase 5: only runners that declare continueGoal may resume DoD/missing.
-  // External CLI must not silently ignore gaps.
+  // Only runners that declare continueGoal may resume DoD/missing. External
+  // CLI declares this capability because runDispatch turns the snapshot into
+  // an explicit prompt contract; it does not claim builtin DoD validation.
   const intendedRunner = opts.runner || existing?.runner || 'builtin'
   let continueBlockedNote: string | undefined
   if (wantContinue) {
-    const { capabilitiesForRunner } = await import('./runners')
     if (!capabilitiesForRunner(intendedRunner).continueGoal) {
       wantContinue = false
       continueBlockedNote =
@@ -1498,6 +1511,23 @@ async function coordinateTaskRun(
           userHint: continueHint,
         }
       : opts.overrides?.continueGoal,
+    externalCliContract:
+      opts.overrides?.externalCliContract ||
+      (continueSnap && intendedRunner !== 'builtin'
+        ? buildExternalCliDelegateContract({
+            role: 'orchestrator',
+            unattended: opts.overrides?.unattended ?? sourceIsAutomation,
+            continueGoal: {
+              objective: continueSnap.objective,
+              definitionOfDone: continueSnap.definitionOfDone,
+              missing: continueSnap.missing,
+              priorDigest: continueSnap.priorDigest,
+              projectRoot: opts.projectRoot?.trim() || opts.overrides?.projectRoot,
+              approvalMode: opts.overrides?.approvalMode || settings.approvalMode,
+              userHint: continueHint,
+            },
+          })
+        : undefined),
   }
 
   // Coordinator owns beforeRun once: deny / append-context / log / notify
@@ -1740,7 +1770,12 @@ export async function runTask(input: TaskRunInput): Promise<TaskRunResult> {
   // Every renderer ingress (composer, scheduler, gateway, webhook, and
   // background delegates) waits behind the one-shot storage/journal recovery.
   // Node-only contract smokes have no renderer lifecycle and continue directly.
-  if (typeof window !== 'undefined') await waitForStartupRecovery()
+  // Renderer/Electron lifecycle recovery has no owner in a plain Node seam.
+  // The document check keeps headless runs from waiting on a renderer-only
+  // startup barrier while preserving recovery ordering in the product.
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    await waitForStartupRecovery()
+  }
   const normalized = normalizeTaskRunInput(input)
   const runId = normalized.runId || `run_${uuid().slice(0, 12)}`
   if (coordinatingRunIds.has(runId)) {
@@ -1760,4 +1795,54 @@ export async function runTask(input: TaskRunInput): Promise<TaskRunResult> {
   } finally {
     coordinatingRunIds.delete(runId)
   }
+}
+
+/**
+ * Fork/rerun from a persisted user checkpoint through the canonical
+ * coordinator. Only the user request is replayed; prior tool calls and side
+ * effects are never replayed, and the fork starts with clean capability/DoD
+ * state (enforced by forkThreadFromCheckpoint).
+ */
+export async function rerunFromReplaySafeCheckpoint(input: {
+  sourceThreadId: string
+  checkpointBubbleId?: string
+  runner?: ThreadRunner
+  continueHint?: string
+}): Promise<TaskRunResult> {
+  const { useThreadStore } = await import('../store/threadStore')
+  const store = useThreadStore.getState()
+  const source = store.threads.find((thread) => thread.id === input.sourceThreadId)
+  const checkpoint = source ? findReplaySafeCheckpoint(source, input.checkpointBubbleId) : null
+  if (!source || !checkpoint) {
+    return {
+      path: 'builtin',
+      status: 'skipped',
+      error: '找不到可重播的 user checkpoint；工具執行結果與 side effect 不可直接 replay。',
+      threadId: input.sourceThreadId,
+      skipped: true,
+      skipReason: 'replay-unsafe',
+    }
+  }
+  const forkedId = store.forkThreadFromCheckpoint(source.id, checkpoint.bubbleId)
+  if (!forkedId) {
+    return {
+      path: 'builtin',
+      status: 'skipped',
+      error: '建立 replay-safe 分支失敗。',
+      threadId: source.id,
+      skipped: true,
+      skipReason: 'fork-failed',
+    }
+  }
+  return runTask({
+    sourceKind: 'retry',
+    objective: checkpoint.objective,
+    title: `重跑 · ${source.title}`,
+    runner: input.runner || source.runner,
+    loopType: source.loopType || undefined,
+    reuseThreadId: forkedId,
+    attachments: checkpoint.attachments,
+    sourceLabel: `Replay-safe checkpoint · ${checkpoint.bubbleId}`,
+    continueHint: input.continueHint,
+  })
 }

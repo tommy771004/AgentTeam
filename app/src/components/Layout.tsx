@@ -29,6 +29,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: '自動化',
     items: [
       { to: '/automation', label: '定時與事件', icon: 'schedule' },
+      { to: '/ops', label: 'Ops Console', icon: 'monitoring' },
       { to: '/content-publishing', label: '內容發布', icon: 'campaign' },
     ],
   },

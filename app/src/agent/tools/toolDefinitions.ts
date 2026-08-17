@@ -97,6 +97,49 @@ export const TOOL_DEFINITIONS = {
     },
     owningCapability: 'workspace',
   },
+  workspace_grep: {
+    description: "Search text in files under the run-scoped workspace root",
+    keywords: ["grep", "search files", "find text", "code search", "workspace"],
+    parameters: {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "Case-insensitive regular expression" },
+        "path": { "type": "string", "description": "Relative directory under workspace", "default": "." },
+        "glob": { "type": "string", "description": "Optional file glob, e.g. **/*.ts" },
+        "maxResults": { "type": "integer", "description": "Maximum matching lines (1-500)", "default": 100 }
+      },
+      "required": ["query"]
+    },
+    owningCapability: 'workspace',
+  },
+  workspace_glob: {
+    description: "Find files by glob under the run-scoped workspace root",
+    keywords: ["glob", "find files", "file pattern", "workspace"],
+    parameters: {
+      "type": "object",
+      "properties": {
+        "pattern": { "type": "string", "description": "Relative glob, e.g. src/**/*.ts" },
+        "path": { "type": "string", "description": "Relative directory under workspace", "default": "." },
+        "maxResults": { "type": "integer", "description": "Maximum files (1-1000)", "default": 200 }
+      },
+      "required": ["pattern"]
+    },
+    owningCapability: 'workspace',
+  },
+  tool_output_read: {
+    description: "Read a bounded region of a spilled tool output for this run",
+    keywords: ["tool output", "locator", "spill", "offset", "retrieve"],
+    parameters: {
+      "type": "object",
+      "properties": {
+        "locator": { "type": "string", "description": "toolspill locator returned by a previous tool" },
+        "offset": { "type": "integer", "description": "Byte offset", "default": 0 },
+        "maxBytes": { "type": "integer", "description": "Maximum bytes to retrieve (1-65536)", "default": 16384 }
+      },
+      "required": ["locator"]
+    },
+    owningCapability: 'workspace',
+  },
   workspace_diff: {
     description: "Read the current Git working-tree diff for selected workspace files.",
     keywords: ["diff","review changes","patch","working tree","changed files"],
@@ -544,6 +587,19 @@ export const TOOL_DEFINITIONS = {
             "leaf",
             "orchestrator"
           ]
+        },
+        "runner": {
+          "type": "string",
+          "enum": [
+            "builtin",
+            "codex",
+            "claude",
+            "grok",
+            "opencode",
+            "gemini",
+            "cursor"
+          ],
+          "description": "Optional child runner; external CLI continues through the explicit delegate contract"
         },
         "background": {
           "type": "boolean",

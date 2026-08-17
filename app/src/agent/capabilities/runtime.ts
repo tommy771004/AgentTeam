@@ -197,17 +197,27 @@ export function assembleCapabilities(
   }
 
   const loadedIds = new Set<string>()
+  const capabilityProvenance = new Map<string, 'always-on' | 'preloaded' | 'load_capability' | 'tool_search' | 'progressive-off' | 'restored'>()
   // Always-on are "available" without load
   for (const c of all) {
-    if (!c.deferLoading) loadedIds.add(c.id)
+    if (!c.deferLoading) {
+      loadedIds.add(c.id)
+      capabilityProvenance.set(c.id, 'always-on')
+    }
   }
   for (const id of opts?.preloadIds || []) {
-    if (all.some((c) => c.id === id)) loadedIds.add(id)
+    if (all.some((c) => c.id === id)) {
+      loadedIds.add(id)
+      capabilityProvenance.set(id, 'preloaded')
+    }
   }
 
   // Progressive off → everything loaded
   if (!progressive) {
-    for (const c of all) loadedIds.add(c.id)
+    for (const c of all) {
+      loadedIds.add(c.id)
+      capabilityProvenance.set(c.id, 'progressive-off')
+    }
   }
 
   const toolSearchActive =
@@ -218,8 +228,12 @@ export function assembleCapabilities(
   )
 
   const unlocked = new Set<string>()
+  const toolProvenance = new Map<string, 'preloaded' | 'load_capability' | 'tool_search' | 'restored'>()
   for (const t of opts?.preloadUnlockedTools || []) {
-    if (t?.trim()) unlocked.add(t.trim())
+    if (t?.trim()) {
+      unlocked.add(t.trim())
+      toolProvenance.set(t.trim(), 'restored')
+    }
   }
 
   return {
@@ -227,6 +241,7 @@ export function assembleCapabilities(
     loadedIds,
     progressive,
     toolSearch: { active: toolSearchActive, threshold, unlocked },
+    provenance: { capabilities: capabilityProvenance, tools: toolProvenance },
   }
 }
 
@@ -251,6 +266,34 @@ export function listCatalog(state: CapabilityRuntimeState): CapabilityCatalogEnt
       (c.toolNames?.length || 0) +
       (c.toolNamePrefixes?.length ? 1 : 0),
   }))
+}
+
+export type CapabilityInspection = {
+  capabilities: Array<CapabilityCatalogEntry & {
+    provenance: 'always-on' | 'preloaded' | 'load_capability' | 'tool_search' | 'progressive-off' | 'restored'
+  }>
+  unlockedTools: Array<{
+    name: string
+    provenance: 'preloaded' | 'load_capability' | 'tool_search' | 'restored'
+  }>
+}
+
+/** UI/audit projection: expose how the current run obtained each capability. */
+export function inspectCapabilityState(state: CapabilityRuntimeState): CapabilityInspection {
+  const capabilities = listCatalog(state).map((entry) => ({
+    ...entry,
+    provenance: state.provenance.capabilities.get(entry.id) ||
+      (!state.progressive
+        ? ('progressive-off' as const)
+        : !entry.deferLoading
+          ? ('always-on' as const)
+          : ('preloaded' as const)),
+  }))
+  const unlockedTools = [...state.toolSearch.unlocked].sort().map((name) => ({
+    name,
+    provenance: state.provenance.tools.get(name) || 'preloaded',
+  }))
+  return { capabilities, unlockedTools }
 }
 
 /** Catalog text for system / user prompt (deferred only). */
@@ -347,6 +390,7 @@ export function loadCapability(
   }
   const newlyLoaded = !state.loadedIds.has(cap.id)
   state.loadedIds.add(cap.id)
+  state.provenance.capabilities.set(cap.id, 'load_capability')
   const tools = [
     ...(cap.tools || []),
     ...(cap.toolNames || []),
@@ -355,14 +399,23 @@ export function loadCapability(
   let searchNote = ''
   if (state.toolSearch.active) {
     // Explicit tools are revealed; large prefix bundles (MCP) stay searchable
-    for (const t of cap.tools || []) state.toolSearch.unlocked.add(t)
-    for (const t of cap.toolNames || []) state.toolSearch.unlocked.add(t)
+    for (const t of cap.tools || []) {
+      state.toolSearch.unlocked.add(t)
+      state.provenance.tools.set(t, 'load_capability')
+    }
+    for (const t of cap.toolNames || []) {
+      state.toolSearch.unlocked.add(t)
+      state.provenance.tools.set(t, 'load_capability')
+    }
     if (cap.toolNamePrefixes?.length && pool) {
       const prefixDefs = pool.filter((d) =>
         cap.toolNamePrefixes!.some((p) => d.function.name.startsWith(p)),
       )
       if (prefixDefs.length <= 8) {
-        for (const d of prefixDefs) state.toolSearch.unlocked.add(d.function.name)
+        for (const d of prefixDefs) {
+          state.toolSearch.unlocked.add(d.function.name)
+          state.provenance.tools.set(d.function.name, 'load_capability')
+        }
       } else {
         searchNote = `\n\nThis capability exposes ${prefixDefs.length} tools. Their schemas stay hidden — use tool_search with a keyword to reveal the ones you need.`
       }
@@ -508,11 +561,13 @@ export function searchTools(
   for (const { d } of scored) {
     const name = d.function.name
     state.toolSearch.unlocked.add(name)
+    state.provenance.tools.set(name, 'tool_search')
     unlocked.push(name)
     const owners = state.all.filter((c) => capabilityOwnsTool(c, name))
     const inactiveOwner = owners.find((c) => !isCapabilityActive(state, c))
     if (inactiveOwner && !autoLoaded.includes(inactiveOwner.id)) {
       state.loadedIds.add(inactiveOwner.id)
+      state.provenance.capabilities.set(inactiveOwner.id, 'tool_search')
       autoLoaded.push(inactiveOwner.id)
     }
     lines.push(`- ${name}: ${d.function.description.slice(0, 140)}`)

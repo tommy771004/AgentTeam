@@ -10,11 +10,17 @@
 
 import { v4 as uuid } from 'uuid'
 import type { LlmSettings, PermissionPolicy, PermissionProjection, ToolCallRecord } from '../types'
+import type { ThreadRunner } from '../../store/threadStore'
 import { resolveRoleModel } from '../llm'
 import {
   blockedToolsForCapabilityMode,
   type DelegateCapabilityMode,
 } from './capabilityMode'
+import {
+  buildExternalCliDelegateContract,
+  EXTERNAL_CLI_LEAF_BLOCKED_TOOLS,
+  type ExternalCliDelegateContract,
+} from '../runners/types'
 
 export type DelegateRole = 'leaf' | 'orchestrator'
 
@@ -53,6 +59,8 @@ export interface DelegateTaskInput {
   parentThreadId?: string
   /** Parent entry source for hooks (delegate / schedule / …) */
   sourceKind?: string
+  /** Optional external CLI runner for this delegated child. */
+  runner?: ThreadRunner
   /** Per-run project pin (must not use UI store alone) */
   projectRoot?: string
   /** Parent policy is inherited only restrictively by the child. */
@@ -125,6 +133,7 @@ export type PreparedDelegateSpawn = {
   blockedTools: string[]
   preloadCapabilityIds: string[]
   extraSystemContext: string
+  externalCliContract: ExternalCliDelegateContract
   personaName?: string
 } | {
   ok: false
@@ -237,23 +246,7 @@ export async function prepareDelegateSpawn(
 
   const roleBlocked =
     role === 'leaf'
-      ? [
-          'skill_save',
-          'delegate_task',
-          'run_code',
-          'bash',
-          'workspace_write',
-          'workspace_download',
-          'workspace_mkdir',
-          'workspace_move',
-          'workspace_delete',
-          'design_system_create',
-          'design_system_update',
-          'design_artifact_register',
-          'design_artifact_export',
-          'message_send',
-          'mcp_call',
-        ]
+      ? [...EXTERNAL_CLI_LEAF_BLOCKED_TOOLS]
       : ['delegate_task']
   // G9 capability_mode 疊加(只更嚴,不放寬 role 既有封鎖)
   const blockedTools = [
@@ -262,6 +255,10 @@ export async function prepareDelegateSpawn(
       ...blockedToolsForCapabilityMode(input.capabilityMode),
     ]),
   ]
+  const externalCliContract = buildExternalCliDelegateContract({
+    role,
+    unattended: true,
+  })
 
   const baseline = ['core-utils', 'web-research', 'memory']
   const inherited = (input.inheritCapabilities || [])
@@ -290,6 +287,7 @@ export async function prepareDelegateSpawn(
       ? `## Worktree 隔離\n你在獨立 git worktree 工作：${worktreeNote}。變更不會影響主工作區。`
       : '',
     input.context ? `## 父層提供的唯讀上下文\n${input.context.slice(0, 3000)}` : '',
+    `## External CLI delegate contract\n${JSON.stringify(externalCliContract)}`,
   ]
     .filter(Boolean)
     .join('\n')
@@ -305,6 +303,7 @@ export async function prepareDelegateSpawn(
     blockedTools,
     preloadCapabilityIds,
     extraSystemContext,
+    externalCliContract,
     personaName: input.persona,
   }
 }
@@ -360,6 +359,7 @@ export async function spawnDelegateViaRunTask(
     const tr = await runTask({
       sourceKind: 'delegate',
       runId: childRunId,
+      runner: input.runner,
       objective: input.goal,
       extraContext: prepared.extraSystemContext,
       unattended: true,
@@ -380,6 +380,7 @@ export async function spawnDelegateViaRunTask(
         permissionProjection: input.parentPermissionProjection,
         mcpAgentId: input.parentMcpAgentId,
         model: prepared.childModel,
+        externalCliContract: prepared.externalCliContract,
       },
       sourceLabel: `delegate:${prepared.id}`,
     })

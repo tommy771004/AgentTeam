@@ -10,6 +10,7 @@
 import type { LoopType } from './types.ts'
 import { isFeatureEntitled, type EntitlementSnapshot, type FeatureId } from './entitlement.ts'
 import { recordArtifactEvidence, type ArtifactEvidence, type ArtifactEvidenceType, type ArtifactIndex } from './artifactIndex.ts'
+import { requireSideEffectEvidence, type SideEffectEvidence } from './evidence/sideEffectEvidence.ts'
 
 export const PAID_WORKFLOW_FEATURE_ID = 'paid-spec-ticket-tdd-review' as FeatureId
 
@@ -109,6 +110,25 @@ export type ReviewableResult = {
   handoffAvailable: boolean
   userApprovalRequired: true
   deliveryActions: { merge: 'approval-required'; push: 'approval-required'; deploy: 'approval-required' }
+}
+
+export type WorkflowDeliverableStage = 'spec' | 'tickets' | 'tdd' | 'review' | 'final-output'
+export type WorkflowDeliverableStatus = 'pending' | 'ready' | 'failed' | 'rejected'
+
+/** User-facing projection of the evidence produced by one workflow stage. */
+export type WorkflowStageDeliverable = {
+  id: string
+  sessionId: string
+  stage: WorkflowDeliverableStage
+  title: string
+  status: WorkflowDeliverableStatus
+  revision: number
+  producedAt: string
+  inspectable: true
+  rejectable: true
+  evidence: ArtifactEvidence[]
+  rejectedAt?: string
+  rejectionReason?: string
 }
 
 type Result<T> = ({ ok: true } & T) | { ok: false; reason: string }
@@ -352,6 +372,20 @@ export function workflowActionRequiresApproval(action: 'merge' | 'push' | 'deplo
   return action === 'merge' || action === 'push' || action === 'deploy'
 }
 
+/** Delivery adapters must call this after the user approval and real effect. */
+export function acceptWorkflowDeliveryEvidence(
+  action: 'merge' | 'push' | 'deploy',
+  value: unknown,
+): Result<{ action: typeof action; evidence: SideEffectEvidence }> {
+  try {
+    const evidence = requireSideEffectEvidence(value)
+    if (evidence.kind !== action) return { ok: false, reason: `evidence kind ${evidence.kind} does not match ${action}` }
+    return { ok: true, action, evidence }
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 function evidence(
   type: ArtifactEvidenceType,
   source: string,
@@ -379,6 +413,71 @@ export function collectWorkflowArtifactEvidence(session: WorkflowSession, at = n
   }
   result.push(evidence('final-output', `workflow:${session.id}/result`, session.status === 'ready-for-approval' ? 'complete' : 'pending', 1, 'Reviewable result', `status=${session.status} at=${at}`))
   return result
+}
+
+const DELIVERABLE_STAGES: Array<{
+  stage: WorkflowDeliverableStage
+  title: string
+  types: ArtifactEvidenceType[]
+}> = [
+  { stage: 'spec', title: 'Approved Spec', types: ['spec', 'decision'] },
+  { stage: 'tickets', title: 'Ticket breakdown', types: ['ticket'] },
+  { stage: 'tdd', title: 'TDD evidence', types: ['test'] },
+  { stage: 'review', title: 'Review findings', types: ['review'] },
+  { stage: 'final-output', title: 'Reviewable final output', types: ['final-output'] },
+]
+
+function deliverableStatus(evidence: ArtifactEvidence[]): WorkflowDeliverableStatus {
+  if (evidence.some((item) => item.status === 'failed')) return 'failed'
+  if (evidence.length > 0 && evidence.every((item) => item.status === 'complete')) return 'ready'
+  return 'pending'
+}
+
+/**
+ * Turn internal ArtifactEvidence into stage-level deliverables. A stage has a
+ * stable id, bounded evidence references, and an explicit rejection state so
+ * UI approval is about the artifact rather than an opaque state transition.
+ */
+export function buildWorkflowStageDeliverables(
+  session: WorkflowSession,
+  at = new Date().toISOString(),
+): WorkflowStageDeliverable[] {
+  const evidence = collectWorkflowArtifactEvidence(session, at)
+  return DELIVERABLE_STAGES.map((definition) => {
+    const stageEvidence = evidence.filter((item) => definition.types.includes(item.type))
+    const revision = Math.max(1, ...stageEvidence.map((item) => item.revision || 1))
+    return {
+      id: `deliverable:${session.id}:${definition.stage}`,
+      sessionId: session.id,
+      stage: definition.stage,
+      title: definition.title,
+      status: deliverableStatus(stageEvidence),
+      revision,
+      producedAt: at,
+      inspectable: true,
+      rejectable: true,
+      evidence: stageEvidence,
+    }
+  })
+}
+
+export function rejectWorkflowDeliverable(
+  deliverable: WorkflowStageDeliverable,
+  reason: string,
+  at = new Date().toISOString(),
+): Result<{ deliverable: WorkflowStageDeliverable }> {
+  const normalized = compact(reason, 360)
+  if (!normalized) return { ok: false, reason: 'rejection reason is required' }
+  if (deliverable.status === 'rejected') return { ok: false, reason: 'deliverable is already rejected' }
+  return {
+    ok: true,
+    deliverable: {
+      ...deliverable,
+      status: 'rejected',
+      rejectedAt: at,
+      rejectionReason: normalized,
+    },
+  }
 }
 
 export function recordWorkflowArtifacts(

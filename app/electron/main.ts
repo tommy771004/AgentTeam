@@ -75,6 +75,7 @@ import {
   getOutboundRunViewRoot,
   getOutboundStatus,
   prepareOutboundRunView,
+  readOutboundRunEvidence,
 } from './outboundBridge'
 import { verifyCliFilesystemSandbox } from './cliFilesystemSandbox'
 import {
@@ -172,6 +173,7 @@ import {
   isProjectRelativePath,
   validateSubDesignArtifactManifest,
 } from '../src/agent/subdesign/artifactManifest'
+import { isSafeLearningExportPath } from '../src/agent/hermes/learningExport'
 import { normalizeSubDesignCritique, critiqueAllowsDeliver } from '../src/agent/subdesign/critique'
 import type {
   SubDesignArtifact,
@@ -1656,6 +1658,8 @@ ipcMain.handle(
       }
       /** Renderer effective mode; main still re-enforces under required (ticket 20). */
       effectiveMode?: OutboundGuardMode
+      /** External CLI delegate/continue contract; metadata only. */
+      externalCliContract?: unknown
     },
   ) => {
     const cwd =
@@ -1903,6 +1907,51 @@ ipcMain.handle(
     return readFileAsDataUrl(String(filePath || ''))
   },
 )
+
+ipcMain.handle('tools:toolOutputSpillWrite', async (_evt, input: unknown) => {
+  try {
+    const value = input && typeof input === 'object' ? input as {
+      runId?: string; threadId?: string; tool?: string; output?: string; projectRoot?: string
+    } : {}
+    const { writeToolOutputSpill } = await import('./attachmentStore')
+    return {
+      ok: true,
+      ...writeToolOutputSpill({
+        runId: String(value.runId || ''),
+        threadId: value.threadId,
+        tool: String(value.tool || 'tool'),
+        output: String(value.output || ''),
+        projectRoot: value.projectRoot,
+      }),
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('tools:toolOutputSpillRead', async (_evt, input: unknown) => {
+  try {
+    const value = input && typeof input === 'object' ? input as {
+      locator?: string; runId?: string; projectRoot?: string; offset?: number; maxBytes?: number
+    } : {}
+    const { readToolOutputSpill } = await import('./attachmentStore')
+    return readToolOutputSpill({
+      locator: String(value.locator || ''),
+      runId: String(value.runId || ''),
+      projectRoot: value.projectRoot,
+      offset: value.offset,
+      maxBytes: value.maxBytes,
+    })
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('tools:toolOutputSpillDispose', async (_evt, input: unknown) => {
+  const value = input && typeof input === 'object' ? input as { runId?: string; projectRoot?: string } : {}
+  const { disposeToolOutputSpills } = await import('./attachmentStore')
+  return { ok: disposeToolOutputSpills(String(value.runId || ''), value.projectRoot) }
+})
 
 // ── CodeGraph (https://github.com/colbymchenry/codegraph) ────────
 
@@ -3330,6 +3379,68 @@ ipcMain.handle('tools:workspaceRead', async (_evt, a: unknown, b?: unknown) => {
   }
 })
 
+ipcMain.handle('tools:workspaceGrep', async (_evt, input: unknown, projectRoot?: unknown) => {
+  try {
+    const value = input && typeof input === 'object' ? input as { query?: string; path?: string; glob?: string; maxResults?: number } : {}
+    const root = workspaceRootFor(projectRoot)
+    const baseDir = resolveWorkspacePath(String(value.path || '.'), root)
+    if (!fs.existsSync(baseDir) || !fs.statSync(baseDir).isDirectory()) {
+      return { ok: false, root, matches: [], files: [], truncated: false, error: `Not a directory: ${value.path || '.'}` }
+    }
+    const { grepWorkspaceFiles } = await import('./workspaceFs')
+    return grepWorkspaceFiles(root, String(value.query || ''), {
+      baseDir,
+      glob: value.glob,
+      maxResults: value.maxResults,
+    })
+  } catch (error) {
+    return { ok: false, root: workspaceRoot(), matches: [], files: [], truncated: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('tools:workspaceGlob', async (_evt, input: unknown, projectRoot?: unknown) => {
+  try {
+    const value = input && typeof input === 'object' ? input as { pattern?: string; path?: string; maxResults?: number } : {}
+    const root = workspaceRootFor(projectRoot)
+    const baseDir = resolveWorkspacePath(String(value.path || '.'), root)
+    if (!fs.existsSync(baseDir) || !fs.statSync(baseDir).isDirectory()) {
+      return { ok: false, root, matches: [], files: [], truncated: false, error: `Not a directory: ${value.path || '.'}` }
+    }
+    const { globWorkspaceFiles } = await import('./workspaceFs')
+    return globWorkspaceFiles(root, String(value.pattern || ''), {
+      baseDir,
+      maxResults: value.maxResults,
+    })
+  } catch (error) {
+    return { ok: false, root: workspaceRoot(), matches: [], files: [], truncated: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('learning:export', async (_evt, input: unknown) => {
+  try {
+    const value = input && typeof input === 'object' ? input as {
+      relativePath?: string
+      content?: string
+      projectRoot?: string
+      overwrite?: boolean
+    } : {}
+    const relativePath = String(value.relativePath || '').replace(/\\/g, '/')
+    if (!isSafeLearningExportPath(relativePath)) {
+      return { ok: false, error: 'learning export path 必須位於 .subagents/ 下。' }
+    }
+    const root = workspaceRootFor(value.projectRoot)
+    const file = resolveWorkspacePath(relativePath, root)
+    if (fs.existsSync(file) && value.overwrite !== true) {
+      return { ok: false, exists: true, path: relativePath, error: '檔案已存在；請明確選擇覆寫。' }
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, String(value.content || ''), 'utf8')
+    return { ok: true, path: relativePath, bytes: Buffer.byteLength(String(value.content || ''), 'utf8') }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
 ipcMain.handle('tools:workspaceWrite', async (_evt, a: unknown, b?: unknown, c?: unknown) => {
   // (relPath, content) | (relPath, content, projectRoot) | ({ path, content, projectRoot })
   try {
@@ -3510,6 +3621,9 @@ ipcMain.handle('outbound:viewRoot', (_evt, runId: string) =>
 )
 ipcMain.handle('outbound:viewMeta', (_evt, runId: string) =>
   getOutboundRunViewMeta(String(runId || '')),
+)
+ipcMain.handle('outbound:runEvidence', (_evt, runId: string) =>
+  readOutboundRunEvidence(String(runId || '')),
 )
 ipcMain.handle(
   'outbound:appendEvidence',

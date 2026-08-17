@@ -34,15 +34,16 @@ export const BUILTIN_RUNNER_CAPABILITIES: RunnerCapabilities = {
 }
 
 /**
- * Local CLI specialists (codex / claude / …).
- * Phase 5 keeps all Loop capabilities false until a prompt/evidence contract
- * and smoke fixture exist (see formatCliContinueGoalPrompt).
+ * Local CLI specialists (codex / claude / …). They do not run the builtin
+ * Parse/DoD/iterate/capability machinery. `continueGoal` is different: it is
+ * implemented by an explicit prompt contract, so it can be enabled without
+ * claiming that the CLI performed builtin validation.
  */
 export const EXTERNAL_CLI_RUNNER_CAPABILITIES: RunnerCapabilities = {
   parse: false,
   validateDoD: false,
   iterate: false,
-  continueGoal: false,
+  continueGoal: true,
   progressiveCapabilities: false,
   runScopedProgress: true,
 }
@@ -92,8 +93,8 @@ export function formatRunnerCapabilitiesSummary(caps: RunnerCapabilities): strin
 /**
  * Prompt contract required before CLI `continueGoal` may be enabled.
  * All fields must be explicit in the external prompt; results must return
- * verifiable evidence. Smoke fixtures assert this shape — capability stays false
- * until a runner-specific fixture is green.
+ * verifiable evidence. The parity smoke asserts this shape for builtin and
+ * external runners alike.
  */
 export type CliContinueGoalPromptContract = {
   objective: string
@@ -102,6 +103,58 @@ export type CliContinueGoalPromptContract = {
   priorDigest?: string
   projectRoot?: string
   approvalMode?: string
+  userHint?: string
+}
+
+/**
+ * Contract carried when a CLI is used as a delegated worker. The child gets a
+ * bounded, role-specific tool surface and never receives the parent's raw
+ * transcript. This is metadata as well as a prompt boundary: the coordinator
+ * remains the only lifecycle ingress.
+ */
+export type ExternalCliDelegateContract = {
+  kind: 'external-cli-delegate'
+  role: 'leaf' | 'orchestrator'
+  parentTranscript: 'none'
+  unattended: boolean
+  blockedTools: string[]
+  continueGoal?: CliContinueGoalPromptContract
+}
+
+export const EXTERNAL_CLI_LEAF_BLOCKED_TOOLS = [
+  'skill_save',
+  'delegate_task',
+  'run_code',
+  'bash',
+  'workspace_write',
+  'workspace_download',
+  'workspace_mkdir',
+  'workspace_move',
+  'workspace_delete',
+  'design_system_create',
+  'design_system_update',
+  'design_artifact_register',
+  'design_artifact_export',
+  'message_send',
+  'mcp_call',
+] as const
+
+export function buildExternalCliDelegateContract(opts: {
+  role?: 'leaf' | 'orchestrator'
+  unattended?: boolean
+  continueGoal?: CliContinueGoalPromptContract
+} = {}): ExternalCliDelegateContract {
+  return {
+    kind: 'external-cli-delegate',
+    role: opts.role || 'leaf',
+    parentTranscript: 'none',
+    unattended: opts.unattended !== false,
+    blockedTools:
+      opts.role === 'orchestrator'
+        ? ['delegate_task']
+        : [...EXTERNAL_CLI_LEAF_BLOCKED_TOOLS],
+    continueGoal: opts.continueGoal,
+  }
 }
 
 /** Build a corrective CLI prompt only after the capability is turned on. */
@@ -138,6 +191,10 @@ export function formatCliContinueGoalPrompt(
       ? `## Approval mode\n${contract.approvalMode}`
       : '## Approval mode\n（預設）',
     '',
+    contract.userHint?.trim()
+      ? `## Current user hint\n${contract.userHint.trim().slice(0, 1200)}`
+      : '',
+    '',
     '## Required output',
     '- Address every missing gap with concrete evidence.',
     '- State clearly whether Definition of Done is met.',
@@ -146,7 +203,7 @@ export function formatCliContinueGoalPrompt(
     .join('\n')
 }
 
-/** Validate that a contract is complete enough for a future CLI continueGoal fixture. */
+/** Validate that a contract is complete enough for a CLI continueGoal run. */
 export function isCompleteCliContinueGoalContract(
   value: unknown,
 ): value is CliContinueGoalPromptContract {

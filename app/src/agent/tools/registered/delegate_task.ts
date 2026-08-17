@@ -12,7 +12,7 @@ register({
   toolset: "delegate",
   description: "Spawn isolated leaf subagent with separate context (supports background + notify)",
   keywords: ["delegate","subagent","parallel","spawn","isolate","background"],
-  schemaParams: {"type":"object","properties":{"goal":{"type":"string"},"context":{"type":"string"},"role":{"type":"string","enum":["leaf","orchestrator"]},"background":{"type":"boolean","description":"If true, return immediately and run in background"},"notify_on_complete":{"type":"boolean","description":"Desktop notification when background job finishes (default true)"},"inherit_capabilities":{"type":"array","items":{"type":"string"},"description":"Capability ids to preload in child (e.g. codegraph, workspace). Explicit inherit only."},"persona":{"type":"string","description":"Named delegate persona from settings"},"capability_mode":{"type":"string","enum":["read-only","read-write","execute","all"]},"isolation":{"type":"string","enum":["none","worktree"]}},"required":["goal"]} as Record<string, unknown>,
+  schemaParams: {"type":"object","properties":{"goal":{"type":"string"},"context":{"type":"string"},"role":{"type":"string","enum":["leaf","orchestrator"]},"runner":{"type":"string","enum":["builtin","codex","claude","grok","opencode","gemini","cursor"],"description":"Optional child runner; external CLI continues through the explicit delegate contract"},"background":{"type":"boolean","description":"If true, return immediately and run in background"},"notify_on_complete":{"type":"boolean","description":"Desktop notification when background job finishes (default true)"},"inherit_capabilities":{"type":"array","items":{"type":"string"},"description":"Capability ids to preload in child (e.g. codegraph, workspace). Explicit inherit only."},"persona":{"type":"string","description":"Named delegate persona from settings"},"capability_mode":{"type":"string","enum":["read-only","read-write","execute","all"]},"isolation":{"type":"string","enum":["none","worktree"]}},"required":["goal"]} as Record<string, unknown>,
   owningCapability: "delegate",
   handler: async (args, ctx) => {
     const input = args
@@ -61,12 +61,18 @@ register({
 
       const isolationRaw = String(input.isolation || '').trim()
       const isolation = isolationRaw === 'worktree' ? 'worktree' as const : 'none' as const
+      const runnerRaw = String(input.runner || '').trim()
+      const allowedRunners = ['builtin', 'codex', 'claude', 'grok', 'opencode', 'gemini', 'cursor'] as const
+      const runner = (allowedRunners as readonly string[]).includes(runnerRaw)
+        ? (runnerRaw as (typeof allowedRunners)[number])
+        : undefined
 
       const parentCtx = {
         parentRunId: runId,
         parentThreadId: threadId,
         projectRoot: projectRoot || context?.projectRoot,
         sourceKind: 'delegate' as const,
+        runner,
         inheritCapabilities,
         capabilityMode,
         persona: input.persona ? String(input.persona) : undefined,

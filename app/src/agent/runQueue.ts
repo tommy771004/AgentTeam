@@ -90,10 +90,21 @@ export type PersistedQueueItem = {
 
 const STORAGE_KEY = 'subagents.runQueue.v1'
 const BACKUP_KEY = `${STORAGE_KEY}.backup`
+const DEDUPE_KEY = 'subagents.runQueue.dedupe.v1'
 const MAX_QUEUE = 24
+const MAX_DEDUPE_EVENTS = 80
 const queue: QueuedExternalRun[] = []
+export type QueueDedupeEvent = {
+  at: string
+  dedupeKey: string
+  objective: string
+  sourceKind?: ExternalRunOpts['sourceKind']
+  reason: 'duplicate'
+}
+const dedupeEvents: QueueDedupeEvent[] = []
 let draining = false
 let hydrated = false
+let dedupeHydrated = false
 
 type QueueListener = () => void
 const listeners = new Set<QueueListener>()
@@ -269,11 +280,51 @@ function persist() {
   }
 }
 
+function persistDedupeEvents() {
+  try {
+    localStorage.setItem(DEDUPE_KEY, JSON.stringify(dedupeEvents.slice(-MAX_DEDUPE_EVENTS)))
+  } catch {
+    /* optional storage */
+  }
+}
+
+function hydrateDedupeEvents() {
+  if (dedupeHydrated) return
+  dedupeHydrated = true
+  try {
+    const raw = localStorage.getItem(DEDUPE_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    if (!Array.isArray(parsed)) return
+    dedupeEvents.push(
+      ...parsed.filter((item): item is QueueDedupeEvent => Boolean(
+        item && typeof item === 'object' && typeof item.dedupeKey === 'string' &&
+        typeof item.objective === 'string' && item.reason === 'duplicate',
+      )).slice(-MAX_DEDUPE_EVENTS),
+    )
+  } catch {
+    /* optional storage */
+  }
+}
+
+function recordDedupeEvent(opts: ExternalRunOpts, key: string) {
+  hydrateDedupeEvents()
+  dedupeEvents.push({
+    at: new Date().toISOString(),
+    dedupeKey: key,
+    objective: opts.objective.slice(0, 240),
+    sourceKind: opts.sourceKind,
+    reason: 'duplicate',
+  })
+  while (dedupeEvents.length > MAX_DEDUPE_EVENTS) dedupeEvents.shift()
+  persistDedupeEvents()
+}
+
 /**
  * Load queue from localStorage once. Safe to call multiple times.
  * Returns number of items restored.
  */
 export function hydrateRunQueue(): number {
+  hydrateDedupeEvents()
   if (hydrated) return queue.length
   hydrated = true
   try {
@@ -341,6 +392,11 @@ export function listQueuedRuns(): QueuedExternalRun[] {
   return [...queue]
 }
 
+export function listQueueDedupeEvents(): QueueDedupeEvent[] {
+  hydrateDedupeEvents()
+  return dedupeEvents.map((event) => ({ ...event }))
+}
+
 export function queueLength(): number {
   return queue.length
 }
@@ -354,6 +410,8 @@ export function resetRunQueueForTests(): void {
   queue.splice(0)
   draining = false
   hydrated = false
+  dedupeEvents.splice(0)
+  dedupeHydrated = false
 }
 
 function parsePersistedQueue(raw: string | null): { items: PersistedQueueItem[] } {
@@ -458,6 +516,7 @@ export function enqueueExternalRun(opts: ExternalRunOpts): QueuedExternalRun | n
   hydrateRunQueue()
   const key = dedupeKey(opts)
   if (queue.some((q) => q.dedupeKey === key)) {
+    recordDedupeEvent(opts, key)
     return null
   }
   const item: QueuedExternalRun = {

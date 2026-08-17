@@ -69,6 +69,51 @@ export function enforceToolPayload(
   }
 }
 
+export type ToolPayloadSpillAdapter = {
+  write: (input: {
+    tool: string
+    output: string
+    runId?: string
+    threadId?: string
+    projectRoot?: string
+  }) => Promise<{ locator: string; bytes: number }>
+}
+
+export type EnforcedToolPayload = {
+  output: string
+  truncated: boolean
+  spilled?: boolean
+  locator?: string
+  bytes: number
+}
+
+/** Async enforcement seam: persist oversized output and expose only a locator. */
+export async function enforceToolPayloadWithSpill(
+  tool: string,
+  output: string,
+  limits: SupervisorLimits,
+  mode: 'truncate' | 'halt' = 'truncate',
+  spill?: ToolPayloadSpillAdapter,
+  context?: { runId?: string; threadId?: string; projectRoot?: string },
+): Promise<EnforcedToolPayload> {
+  const bytes = byteLength(output)
+  if (bytes <= limits.maxToolPayloadBytes) return { output, truncated: false, bytes }
+  if (mode === 'halt') return enforceToolPayload(tool, output, limits, mode)
+  if (!spill || !context?.runId) return enforceToolPayload(tool, output, limits, mode)
+  const record = await spill.write({ tool, output, ...context })
+  return {
+    output: [
+      `Tool output from '${tool}' was stored outside the model context (${bytes} bytes).`,
+      `Locator: ${record.locator}`,
+      'Use tool_output_read with this locator and a bounded offset/maxBytes to inspect more.',
+    ].join('\n'),
+    truncated: false,
+    spilled: true,
+    locator: record.locator,
+    bytes,
+  }
+}
+
 export function enforceStepContextBudget(
   chunks: string[],
   limits: SupervisorLimits,

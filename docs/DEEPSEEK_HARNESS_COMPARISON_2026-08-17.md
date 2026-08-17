@@ -43,7 +43,7 @@ dsh 的 `core/session` 是**唯一真實來源**：`SessionEvent` append-only lo
 | Windows | `sandbox-windows-acl` | 無 |
 | 遠端 | `e2b` + `fs-e2b` + `subprocess-e2b` — fs 與 subprocess 共用同一執行世界，**指向遠端 sandbox 時 Bash / PTY / LSP 一起搬過去** | 無 |
 | Policy 粒度 | **per-call**：`ctx.sandbox.confine(argv, policy)`；被拒後 same-turn `sandbox_permissions` 升級重試 | 全域 `settings.approvalMode` |
-| 覆蓋範圍 | 所有 spawn 的 process | **僅 external CLI**（ADR-0022 明定的範圍）；builtin `bash` 是 `electron/shellBridge.ts` 的裸 `child_process.spawn` |
+| 覆蓋範圍 | 所有 spawn 的 process ；builtin `bash` 是 `electron/shellBridge.ts` 的裸 `child_process.spawn` |
 
 **要點**：`outbound/cliSandbox.ts` 的 `decideBuiltinShellUnderProtection()` 以硬編碼 `shellIsolationVerified: false` 呼叫，`required` 模式下 builtin `bash` 因此被**拒絕**而非被沙箱化。這**不是 bug** — ADR-0022 只把 filesystem sandboxing 的義務加在 external CLI 上，並明定「若 verified isolation 不可用，external CLI 執行即不可用」。要把同一保證延伸到 builtin shell，需要一份新的（或修訂的）ADR，不是直接改程式。
 

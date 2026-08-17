@@ -178,6 +178,8 @@ interface ThreadStore {
     >,
   ) => string
   forkThread: (id: string) => string | null
+  /** Create a new thread containing only a replay-safe user checkpoint prefix. */
+  forkThreadFromCheckpoint: (id: string, bubbleId: string) => string | null
   selectThread: (id: string) => void
   deleteThread: (id: string) => void
   renameThread: (id: string, title: string) => void
@@ -231,6 +233,7 @@ interface ThreadStore {
     capabilityIds: string[],
     unlockedTools?: string[],
   ) => void
+  resetLastCapabilities: (id: string) => void
   setSubDesignBriefId: (id: string, briefId: string | null) => void
   setContinueGoal: (id: string, snap: ContinueGoalSnapshot | null) => void
   setExternalRun: (id: string, externalRun?: ExternalRunRef) => void
@@ -500,6 +503,37 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
             finishedAt: undefined,
           }
         : undefined,
+      createdAt: now,
+      updatedAt: now,
+      lastStatus: 'idle',
+    }
+    const threads = [forked, ...get().threads].slice(0, MAX_THREADS)
+    set({ threads, activeId: forked.id, showRunPanel: false })
+    persist(threads, forked.id)
+    return forked.id
+  },
+
+  forkThreadFromCheckpoint: (id, bubbleId) => {
+    const source = get().threads.find((thread) => thread.id === id)
+    const checkpointIndex = source?.bubbles.findIndex((bubble) => bubble.id === bubbleId) ?? -1
+    const checkpoint = checkpointIndex >= 0 ? source?.bubbles[checkpointIndex] : undefined
+    if (!source || !checkpoint || checkpoint.role !== 'user' || !checkpoint.content.trim()) return null
+    const now = new Date().toISOString()
+    const forked: Thread = {
+      ...source,
+      id: uid(),
+      title: `重跑 · ${source.title}`.slice(0, 42),
+      bubbles: source.bubbles.slice(0, checkpointIndex + 1).map((bubble) => ({
+        ...bubble,
+        id: `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      })),
+      // A replay starts a fresh adapter run. It must not inherit capability
+      // unlocks, an unfinished DoD, or a plan produced after the checkpoint.
+      lastCapabilityIds: undefined,
+      lastUnlockedTools: undefined,
+      continueGoal: null,
+      runPlan: undefined,
+      externalRun: undefined,
       createdAt: now,
       updatedAt: now,
       lastStatus: 'idle',
@@ -902,6 +936,16 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
             lastUnlockedTools: unlocks?.length ? unlocks : t.lastUnlockedTools,
             updatedAt: new Date().toISOString(),
           }
+        : t,
+    )
+    set({ threads })
+    persist(threads, get().activeId)
+  },
+
+  resetLastCapabilities: (id) => {
+    const threads = get().threads.map((t) =>
+      t.id === id
+        ? { ...t, lastCapabilityIds: undefined, lastUnlockedTools: undefined, updatedAt: new Date().toISOString() }
         : t,
     )
     set({ threads })

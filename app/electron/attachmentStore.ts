@@ -255,3 +255,98 @@ export function readFileAsDataUrl(filePath: string): { ok: boolean; dataUrl?: st
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+export type ToolOutputSpillInput = {
+  runId: string
+  threadId?: string
+  tool: string
+  output: string
+  projectRoot?: string
+}
+
+export type ToolOutputSpillRecord = {
+  locator: string
+  runId: string
+  tool: string
+  bytes: number
+  createdAt: string
+}
+
+const MAX_TOOL_SPILL_BYTES = 8 * 1024 * 1024
+const MAX_TOOL_SPILLS_PER_RUN = 24
+
+function safeSpillSegment(value: string, fallback: string): string {
+  return (value || fallback).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || fallback
+}
+
+function toolSpillDir(projectRoot: string | undefined, runId: string): string {
+  return path.join(resolveBaseDir(projectRoot), 'tool-spills', safeSpillSegment(runId, 'run'))
+}
+
+function pruneToolSpills(dir: string) {
+  try {
+    const entries = fs.readdirSync(dir)
+      .filter((name) => name.endsWith('.txt'))
+      .map((name) => ({ name, mtime: fs.statSync(path.join(dir, name)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime)
+    for (const entry of entries.slice(MAX_TOOL_SPILLS_PER_RUN)) {
+      try { fs.rmSync(path.join(dir, entry.name), { force: true }) } catch { /* best effort */ }
+    }
+  } catch { /* best effort */ }
+}
+
+/** Persist oversized tool output outside the provider context window. */
+export function writeToolOutputSpill(input: ToolOutputSpillInput): ToolOutputSpillRecord {
+  if (!input.runId.trim()) throw new Error('runId required for tool spill')
+  const content = input.output.slice(0, MAX_TOOL_SPILL_BYTES)
+  const id = `spill_${randomUUID().replaceAll('-', '').slice(0, 24)}`
+  const dir = toolSpillDir(input.projectRoot, input.runId)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, `${id}.txt`), content, 'utf8')
+  pruneToolSpills(dir)
+  return {
+    locator: `toolspill:${safeSpillSegment(input.runId, 'run')}:${id}`,
+    runId: input.runId,
+    tool: input.tool.slice(0, 120),
+    bytes: Buffer.byteLength(input.output, 'utf8'),
+    createdAt: new Date().toISOString(),
+  }
+}
+
+/** Read a bounded byte region; locator and runId must agree. */
+export function readToolOutputSpill(input: {
+  locator: string
+  runId: string
+  projectRoot?: string
+  offset?: number
+  maxBytes?: number
+}): { ok: boolean; output?: string; bytes?: number; offset?: number; nextOffset?: number; error?: string } {
+  const match = /^toolspill:([a-zA-Z0-9._-]+):(spill_[a-zA-Z0-9._-]+)$/.exec(input.locator.trim())
+  const safeRun = safeSpillSegment(input.runId, 'run')
+  if (!match || match[1] !== safeRun) return { ok: false, error: 'invalid or cross-run spill locator' }
+  const file = path.join(toolSpillDir(input.projectRoot, input.runId), `${match[2]}.txt`)
+  try {
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return { ok: false, error: 'spill not found' }
+    const buf = fs.readFileSync(file)
+    const offset = Math.max(0, Math.min(buf.byteLength, Math.floor(input.offset || 0)))
+    const maxBytes = Math.max(1, Math.min(64 * 1024, Math.floor(input.maxBytes || 16 * 1024)))
+    const chunk = buf.subarray(offset, offset + maxBytes)
+    return {
+      ok: true,
+      output: chunk.toString('utf8'),
+      bytes: buf.byteLength,
+      offset,
+      nextOffset: offset + chunk.byteLength < buf.byteLength ? offset + chunk.byteLength : undefined,
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+export function disposeToolOutputSpills(runId: string, projectRoot?: string): boolean {
+  if (!runId.trim()) return false
+  try {
+    fs.rmSync(toolSpillDir(projectRoot, runId), { recursive: true, force: true })
+    return true
+  } catch { return false }
+}

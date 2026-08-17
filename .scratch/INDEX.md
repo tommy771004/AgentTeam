@@ -7,6 +7,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 | Effort | Spec | Frontier | Notes |
 |--------|------|----------|--------|
+| **harness-gap-closure** | [spec.md](harness-gap-closure/spec.md) | [01 統一架構敘述](harness-gap-closure/issues/01-unify-architecture-narrative.md) | 由 `docs/DEEPSEEK_HARNESS_COMPARISON_2026-08-17.md` 展開，17 張票。01 應先做（決定後續程式該落在哪一軌）；09 為範圍決策，`待分流` 待維護者裁決 |
 | **subagents-paid-beta** | [spec.md](subagents-paid-beta/spec.md) | [14 release qualification](subagents-paid-beta/issues/14-paid-beta-release-qualification.md) | **唯一未完成 P0** — 需真實 signed Win/mac 證據；本地 qualify 腳本 fail-closed No-Go |
 | **loop-runner-deepening** | [spec.md](loop-runner-deepening/spec.md) | [05 manual parity](loop-runner-deepening/issues/05-manual-parity-merge-bar.md) | 01–04 resolved（transport seam／stepRun／loopRunner 四 pattern／engine 瘦身+drift guard，engine.ts 1702→808 行，`npm run smoke` 全綠）；僅剩 05 人工 dev-app parity 待做（需人工處理，非代理） |
 | 其餘 product efforts | — | — | **resolved**（見下表） |

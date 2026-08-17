@@ -77,7 +77,8 @@ const startupRecoveryReady = new Promise<void>((resolve) => {
   resolveStartupRecovery = resolve
 })
 
-function storage(): Storage | null {
+function storage(preferred?: Storage): Storage | null {
+  if (preferred) return preferred
   try {
     return typeof localStorage === 'undefined' ? null : localStorage
   } catch {
@@ -145,8 +146,8 @@ function retainedEntries(entries: JournalEntry[]): JournalEntry[] {
   return [...terminal.slice(-terminalBudget), ...keptActive]
 }
 
-function loadState(): JournalState {
-  const store = storage()
+function loadState(preferred?: Storage): JournalState {
+  const store = storage(preferred)
   if (!store) return emptyState()
   let primaryRaw: string | null = null
   let backupRaw: string | null = null
@@ -349,6 +350,29 @@ export function recordBackgroundStatus(input: {
 
 export function getJournalEntry(kind: JournalKind, id: string): JournalEntry | undefined {
   return loadState().entries.find((entry) => entry.kind === kind && entry.id === id)
+}
+
+/** Read-only evaluation/Ops projection; unlike consumeRecoveryReports it does not mark state delivered. */
+export function listJournalEntries(preferred?: Storage): JournalEntry[] {
+  const state = loadState(preferred)
+  return state.entries.map((entry) => ({ ...entry }))
+}
+
+/** Read recovery reports without changing delivery state. */
+export function listRecoveryReports(preferred?: Storage): RecoveryReport[] {
+  const store = storage(preferred)
+  if (!store) return []
+  try {
+    const value = JSON.parse(store.getItem(REPORT_KEY) || '[]')
+    return Array.isArray(value)
+      ? value.map((report) => ({
+          ...report,
+          items: Array.isArray(report?.items) ? report.items.map((item: RecoveryItem) => ({ ...item })) : [],
+        }))
+      : []
+  } catch {
+    return []
+  }
 }
 
 /** Mark uncertain in-flight work interrupted; never replay an uncertain side effect. */

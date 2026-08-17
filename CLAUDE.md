@@ -42,13 +42,15 @@ On busy, `resolveBusyPolicy` decides: automation sources **queue** (`agent/runQu
 
 Per run, the engine resolves **project context** (`agent/projectContext.ts` → `project:agentsDocs` IPC): real `AGENTS.md`/`CLAUDE.md` files from the project root (walking up ≤3 levels, stopping at `.git`), injected into prompts ABOVE Hermes user guidance via **ContextPacket** slots, with path/hash/bytes logged for audit. OpenCode `instructions` are temporary-applied the same way; other discovered opencode fields surface as candidates in Settings →「OpenCode 匯入報告」(temporary / review / unsupported — `agent/opencode/configCandidates.ts`), never silently written to Settings.
 
-### Loop Runner (`agent/loop/`) and the Engine adapter (`agent/engine.ts`)
+### Pi Core loop and the renderer compatibility seam
 
-The four loop patterns from the spec (Turn-based / Goal-based / Time-based / Proactive), DoD evaluation, iteration-time replan, continueGoal persistence, and per-step execution live in **`agent/loop/`** — `runLoop` (`loop/index.ts`) is its only product-facing export. **`agent/engine.ts` is its sole production adapter**: it owns Parse (heuristic + LLM plan refinement), continueGoal *restore*, project guidance / OpenCode instructions, Time/Proactive trigger verification (`validateTimeBasedTrigger`, `validateEventTriggerSnapshot`), the `AgentEngineRegistry`, and HITL timeout policy (`waitForIntervention`, unchanged) — then hands an already-parsed state + a typed `LoopRequest` to `runLoop`. Nothing outside `engine.ts` may import `agent/loop/*` (enforced by a drift-guard smoke).
+Pi Core in the supervised Electron utility process is the production owner of the tool loop, tool execution, approvals, and settlement. **`agent/engine.ts` / `runDispatch.ts` are adapters**: they own Parse (heuristic + LLM plan refinement), continueGoal restore, project guidance / OpenCode instructions, Time/Proactive trigger verification (`validateTimeBasedTrigger`, `validateEventTriggerSnapshot`), the `AgentEngineRegistry`, and HITL timeout policy (`waitForIntervention`, unchanged) before handing the coordinator snapshot to Pi Core.
 
-`LoopRequest`'s `'time'`/`'proactive'` variants require a `ScheduleTriggerSnapshot`/`EventTriggerSnapshot` field — an evidence-less request is unrepresentable at the type level, and `runLoop`'s entry additionally refuses it at runtime (fail-closed even against a type-system bypass). See CONTEXT.md「Loop Runner（迴圈執行器）」and「Time-based / Proactive trigger」.
+`agent/loop/` is a removable plain-browser compatibility seam. It remains testable for browser fallback parity but is not a second production owner. Nothing outside the existing compatibility allowlist may import it; the drift-guard smoke fails on a new source import or string reference. The deletion gate is: Pi Host lifecycle parity, coordinator/replay smoke coverage, and removal of the browser-only fallback without changing the public `runTask` contract (ADR-0045).
 
-Each step runs `agent/loop/stepRun.ts` `runStep`, which takes one of three paths (`agent/loop/strategies.ts`):
+Pi Host task requests preserve the same typed trigger requirement: `'time'`/`'proactive'` variants require a `ScheduleTriggerSnapshot`/`EventTriggerSnapshot` field, and coordinator admission refuses missing evidence. The browser compatibility seam keeps the equivalent runtime check for parity. See CONTEXT.md「Pi Core tool loop」and「Time-based / Proactive trigger」.
+
+The compatibility seam's `agent/loop/stepRun.ts` `runStep` still has three browser-only paths (`agent/loop/strategies.ts`):
 
 1. **Function-calling tool loop** (`agent/tools/toolLoop.ts`) when LLM enabled + `functionCalling` on — the main path, with full progressive disclosure
 2. **Heuristic path** — keyword tool selection (`tools/registry.ts` `selectToolsForStep`) + plain LLM; still capability-aware (runbooks injected, `approvalTools` enforced, owning capabilities auto-loaded) but without model-driven progressive disclosure
@@ -72,9 +74,9 @@ The central abstraction for the FC path. `AgentCapability` bundles tools + instr
 
 ### Tool layer (`agent/tools/`)
 
-`registry.ts` (catalog + `ToolName` union) → `schemas.ts` (OpenAI defs) → `executor.ts` (actual I/O through `window.subagents.*` IPC with browser fallbacks) → `toolGuard.ts` (`authorizeTool`: deny / HITL ask via `permissionAskStore`, shared by FC and heuristic paths) → `supervisor.ts` (payload byte limits, round budgets; can halt or truncate).
+`toolDefinitions.ts` + self-registering `registered/*.ts` modules are the authoritative tool registration seam; `registry.ts` / `schemas.ts` are derived views and the Pi Host owns production execution. The compatibility executor still uses `window.subagents.*` IPC with browser fallbacks. `toolGuard.ts` (`authorizeTool`: deny / HITL ask via `permissionAskStore`) and `supervisor.ts` (payload byte limits, round budgets; can halt or spill/halt) remain shared policy seams.
 
-Adding a tool touches: `registry.ts` (name + catalog entry), `schemas.ts` (params), `executor.ts` (implementation), and an owning capability in `capabilities/builtins.ts` — otherwise it is ungated.
+Adding a tool touches: one self-registering module under `tools/registered/`, its entry in `toolDefinitions.ts`, and an owning capability in `capabilities/builtins.ts`; derived registry/schema views must expose it and Pi Host parity must be checked. Avoid adding a central executor switch.
 
 ### Governance & security layers
 

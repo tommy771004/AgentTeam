@@ -56,6 +56,7 @@ import {
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
   BUILTIN_RUNNER_CAPABILITIES,
   capabilitiesForRunner,
+  buildExternalCliDelegateContract,
   formatCliContinueGoalPrompt,
   isCompleteCliContinueGoalContract,
 } from '../src/agent/runners/types.ts'
@@ -415,7 +416,7 @@ await test('SubDesign workspace derives stage and gate presentation from canonic
 
 await test('Phase 5 runner capabilities stay honest for external CLI', () => {
   assert.equal(capabilitiesForRunner('builtin').continueGoal, true)
-  assert.equal(capabilitiesForRunner('codex').continueGoal, false)
+  assert.equal(capabilitiesForRunner('codex').continueGoal, true)
   assert.equal(capabilitiesForRunner('claude').validateDoD, false)
   assert.equal(EXTERNAL_CLI_RUNNER_CAPABILITIES.iterate, false)
   assert.equal(BUILTIN_RUNNER_CAPABILITIES.parse, true)
@@ -436,8 +437,11 @@ await test('Phase 5 runner capabilities stay honest for external CLI', () => {
   assert.match(prompt, /缺價格欄/)
   assert.match(prompt, /\/tmp\/proj/)
   assert.match(prompt, /approvalMode|Approval mode/i)
-  // Capability remains false until a runner fixture enables it
-  assert.equal(capabilitiesForRunner('codex').continueGoal, false)
+  const delegate = buildExternalCliDelegateContract({ role: 'leaf', unattended: true, continueGoal: contract })
+  assert.equal(delegate.parentTranscript, 'none')
+  assert.equal(delegate.unattended, true)
+  assert.ok(delegate.blockedTools.includes('bash'))
+  assert.equal(delegate.continueGoal?.objective, contract.objective)
 })
 
 await test('Phase 4 ContextPacket keeps failure lessons and session recall under budget', () => {

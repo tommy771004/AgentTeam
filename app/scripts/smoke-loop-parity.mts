@@ -12,6 +12,11 @@ import { fileURLToPath } from 'node:url'
 import { unattendedInterventionTimeoutSec } from '../src/agent/hitlTimeout.ts'
 import { snapshot } from '../src/agent/loop/state.ts'
 import type { LoopRunState } from '../src/agent/loop/state.ts'
+import {
+  capabilitiesForRunner,
+  formatCliContinueGoalPrompt,
+  isCompleteCliContinueGoalContract,
+} from '../src/agent/runners/types.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 let passed = 0
@@ -79,6 +84,26 @@ await test('unattended intervention timeout policy (pure)', () => {
   assert.equal(unattendedInterventionTimeoutSec(200_000), 120) // cap
   assert.equal(unattendedInterventionTimeoutSec(500), 15) // hard floor 15s
   assert.equal(unattendedInterventionTimeoutSec(10_000), 15) // sub-floor still floored
+})
+
+await test('builtin/external continueGoal parity uses the same explicit contract', () => {
+  const contract = {
+    objective: '補齊報表',
+    definitionOfDone: '價格欄存在且有驗證輸出',
+    missing: ['缺少價格欄', '缺少驗證輸出'],
+    priorDigest: '上一輪只完成欄位盤點',
+    projectRoot: '/tmp/parity-project',
+    approvalMode: 'auto',
+    userHint: '先補價格欄',
+  }
+  assert.equal(isCompleteCliContinueGoalContract(contract), true)
+  const prompt = formatCliContinueGoalPrompt(contract)
+  for (const runner of ['builtin', 'codex']) {
+    assert.equal(capabilitiesForRunner(runner).continueGoal, true)
+    assert.match(prompt, /Definition of Done/)
+    assert.match(prompt, /缺少價格欄/)
+    assert.match(prompt, /先補價格欄/)
+  }
 })
 
 await test('HITL ask port wires engine.waitForIntervention (static)', () => {

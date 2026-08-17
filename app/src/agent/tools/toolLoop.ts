@@ -12,7 +12,7 @@ import { buildOpenAiTools, type OpenAiToolDef } from './schemas.ts'
 import {
   DEFAULT_SUPERVISOR_LIMITS,
   enforceStepContextBudget,
-  enforceToolPayload,
+  enforceToolPayloadWithSpill,
   type SupervisorLimits,
   SupervisorViolation,
 } from '../supervisor.ts'
@@ -67,6 +67,24 @@ import {
   buildMultimodalUserContent,
   contentPartsToPlainText,
 } from '../../lib/chatAttachments.ts'
+
+function spillAdapterForContext(context: { runId?: string; threadId?: string; projectRoot?: string }) {
+  const api = typeof window !== 'undefined' ? window.subagents?.tools : undefined
+  if (!api?.toolOutputSpillWrite) return undefined
+  return {
+    write: async (input: { tool: string; output: string; runId?: string; threadId?: string; projectRoot?: string }) => {
+      const result = await api.toolOutputSpillWrite({
+        tool: input.tool,
+        output: input.output,
+        runId: input.runId || context.runId || '',
+        threadId: input.threadId || context.threadId,
+        projectRoot: input.projectRoot || context.projectRoot,
+      })
+      if (!result.ok || !result.locator) throw new Error(result.error || 'tool output spill failed')
+      return { locator: result.locator, bytes: result.bytes || 0 }
+    },
+  }
+}
 
 export interface ToolLoopCallbacks {
   onLog?: (
@@ -1008,6 +1026,10 @@ async function executeOneToolCall(
       haltOnPayloadOverflow: ctx.haltOnPayloadOverflow === true,
       sourceKind: ctx.sourceKind,
       objective: ctx.objective,
+      spill: spillAdapterForContext(ctx),
+      runId: ctx.runId,
+      threadId: ctx.threadId,
+      projectRoot: ctx.projectRoot,
       newId: () => uuid(),
       nowTime,
       onLog: (level, message) => {
@@ -1133,7 +1155,14 @@ async function executeOneToolCall(
             innerOut = e instanceof Error ? e.message : String(e)
           }
         }
-        const enforced = enforceToolPayload(name, innerOut, ctx.limits, 'truncate')
+        const enforced = await enforceToolPayloadWithSpill(
+          name,
+          innerOut,
+          ctx.limits,
+          'truncate',
+          spillAdapterForContext(ctx),
+          ctx,
+        )
         const record: ToolCallRecord = {
           id: uuid(),
           tool: `run_code›${name}`,
@@ -1183,6 +1212,11 @@ async function executeOneToolCall(
     const capabilityMode = parseCapabilityMode(args.capability_mode ?? args.capabilityMode)
     const persona = String(args.persona || '').trim() || undefined
     const isolation = args.isolation === 'worktree' ? ('worktree' as const) : undefined
+    const runnerRaw = String(args.runner || '').trim()
+    const allowedRunners = ['builtin', 'codex', 'claude', 'grok', 'opencode', 'gemini', 'cursor'] as const
+    const requestedRunner = (allowedRunners as readonly string[]).includes(runnerRaw)
+      ? (runnerRaw as (typeof allowedRunners)[number])
+      : undefined
     // G9 resume_from:引用已完成背景委派的結果作為唯讀上下文
     let resumeContext = ''
     const resumeFrom = String(args.resume_from || args.resumeFrom || '').trim()
@@ -1222,6 +1256,7 @@ async function executeOneToolCall(
           capabilityMode,
           persona,
           isolation,
+          runner: requestedRunner,
           projectRoot: ctx.projectRoot,
           parentRunId: ctx.runId,
           parentThreadId: ctx.threadId,
@@ -1243,6 +1278,7 @@ async function executeOneToolCall(
       try {
         const tr = await runTask({
           sourceKind: 'delegate',
+          runner: requestedRunner,
           objective: goal,
           extraContext: childContext,
           unattended: true,
@@ -1254,6 +1290,13 @@ async function executeOneToolCall(
             permissionProjection: ctx.permissionProjection,
             mcpAgentId: ctx.mcpAgentId,
             preloadCapabilityIds: inheritCapabilities,
+            externalCliContract:
+              requestedRunner && requestedRunner !== 'builtin'
+                ? (await import('../runners/types')).buildExternalCliDelegateContract({
+                    role: 'leaf',
+                    unattended: true,
+                  })
+                : undefined,
           },
           sourceLabel: `delegate:${persona || isolation || capabilityMode || 'leaf'}`,
         })
@@ -1284,13 +1327,17 @@ async function executeOneToolCall(
   if (tc.name === 'ask_user') ctx.cb?.onQuestionResolved?.()
 
   try {
-    const enforced = enforceToolPayload(
+    const enforced = await enforceToolPayloadWithSpill(
       tc.name,
       output,
       ctx.limits,
       ctx.haltOnPayloadOverflow ? 'halt' : 'truncate',
+      spillAdapterForContext(ctx),
+      ctx,
     )
-    if (enforced.truncated) {
+    if (enforced.spilled) {
+      ctx.cb?.onLog?.('WARN', `Supervisor spilled '${tc.name}' payload (${enforced.bytes} bytes) → ${enforced.locator}`)
+    } else if (enforced.truncated) {
       ctx.cb?.onLog?.('WARN', `Supervisor truncated '${tc.name}' payload (${enforced.bytes} bytes)`)
     }
     output = enforced.output
@@ -1340,4 +1387,3 @@ async function executeOneToolCall(
     content: output.slice(0, 8000),
   })
 }
-

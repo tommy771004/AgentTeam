@@ -5,6 +5,7 @@
 import { register } from '../toolRegistry.ts'
 import { resolveEffectiveProjectRoot } from '../runContext.ts'
 import type { ToolExecutionContext } from '../toolIoHelpers.ts'
+import { createSideEffectEvidence } from '../../evidence/sideEffectEvidence.ts'
 
 register({
   name: "message_send",
@@ -39,7 +40,17 @@ register({
     return {
       ok: r.ok,
       output: r.ok ? `已送出至 ${channel}:${chatId}` : r.error || 'send failed',
-      data: r,
+      data: r.ok
+        ? {
+            ...r,
+            evidence: createSideEffectEvidence({
+              runId,
+              kind: 'message_send',
+              source: `gateway:${channel}`,
+              metadata: { channel, targetRef: chatId, payload: 'metadata-only' },
+            }),
+          }
+        : r,
     }
     } catch (e) {
       return { ok: false, output: e instanceof Error ? e.message : String(e) }

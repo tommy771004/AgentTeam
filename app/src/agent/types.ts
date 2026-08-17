@@ -1,6 +1,8 @@
 /** Loop patterns from 02_Execution_Rules */
 export type LoopType = 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
 
+import type { ExternalCliDelegateContract } from './runners/types'
+
 /** Chat composer attachment (images / text files) — pure type, no DOM */
 export type ChatAttachmentKind = 'image' | 'text' | 'binary'
 
@@ -315,6 +317,8 @@ export interface RuntimeOverrides {
     /** Optional user hint this turn (e.g.「補價格欄」) */
     userHint?: string
   }
+  /** Contract metadata for an external CLI delegate; never a parent transcript. */
+  externalCliContract?: ExternalCliDelegateContract
 }
 
 export interface ToolCallRecord {

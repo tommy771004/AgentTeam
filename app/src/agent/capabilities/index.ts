@@ -24,6 +24,7 @@ export {
   formatDeferredCatalog,
   isCapabilityActive,
   isToolAllowedByCapabilities,
+  inspectCapabilityState,
   listCatalog,
   loadCapability,
   loadCapabilityToolDef,
@@ -34,4 +35,5 @@ export {
   type AssembleOpts,
   type LoadCapabilityResult,
   type ToolSearchResult,
+  type CapabilityInspection,
 } from './runtime.ts'
