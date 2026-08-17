@@ -10,7 +10,7 @@
  *
  * Adapters are required (authorize / execute).
  */
-import type { ToolCallRecord } from '../types'
+import type { ToolCallRecord } from '../types.ts'
 import type { AuthorizeResult } from './toolGuard.ts'
 import {
   DEFAULT_SUPERVISOR_LIMITS,

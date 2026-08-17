@@ -21,12 +21,16 @@ All from `app/`:
 npm install
 npm run dev        # Vite + Electron; UI also works in plain browser at :5173
 npm run build      # tsc -b && vite build (use this as the typecheck)
-npm run smoke      # smoke.mjs + smoke-caps.mjs — pure logic + Electron contract
+npm run smoke      # full chain, incl. smoke:gap-closure — imports real modules
+npm run smoke:gap-closure  # workspace search, learning export, capability inspection,
+                   # spill, headless, evaluation, ops, evidence, outbound, compliance
 npx oxlint src     # lint
 npm run dist:mac   # smoke + build + electron-builder (also dist / dist:win / dist:all)
 ```
 
 There is no unit-test runner; smoke scripts cover scheduler math, event matching, capability/compaction pure logic, and the built Electron preload/main contract. `dist*` refuses to package if smoke fails.
+
+Smokes import the shipped modules (`.mts` + `--experimental-strip-types`) rather than mirroring their logic, so a green suite means the shipped path is correct. Coverage claims are falsifiable: deliberately breaking `computeNextRun`, the supervisor byte bound, `classifyLoopType`, or `eventMatcher` must fail `node scripts/smoke.mjs`. Do not reintroduce inline re-implementations, and do not add a loader dependency (`jiti` etc.) to make an import work — fix the specifier instead.
 
 ## Architecture
 
@@ -38,7 +42,7 @@ On busy, `resolveBusyPolicy` decides: automation sources **queue** (`agent/runQu
 
 **Time-based** only via claimed ScheduledJob trigger; **Proactive** only via verified event matcher evidence. Conversation text with cron/event intent yields an automation **suggestion**, not execution.
 
-**Runners** (`agent/runners/`): builtin `executionKind: 'loop'` has full Parse/DoD/iterate/continueGoal/capabilities; external CLI is `executionKind: 'external'` with only run-scoped progress until a continueGoal prompt contract is enabled. CLI must not present as DoD met.
+**Runners** (`agent/runners/`): builtin `executionKind: 'loop'` has full Parse/DoD/iterate/continueGoal/capabilities; external CLI is `executionKind: 'external'` with run-scoped progress plus `continueGoal`, which is delivered by the explicit prompt contract in `runners/types.ts` (`buildCliContinueGoalContract` → `formatCliContinueGoalPrompt`, consumed in `runDispatch.ts`). It still declares `parse: false` / `validateDoD: false` / `iterate: false`, so CLI must not present as DoD met. `npm run smoke:loop-parity` asserts both runners derive one contract from the same resume override.
 
 Per run, the engine resolves **project context** (`agent/projectContext.ts` → `project:agentsDocs` IPC): real `AGENTS.md`/`CLAUDE.md` files from the project root (walking up ≤3 levels, stopping at `.git`), injected into prompts ABOVE Hermes user guidance via **ContextPacket** slots, with path/hash/bytes logged for audit. OpenCode `instructions` are temporary-applied the same way; other discovered opencode fields surface as candidates in Settings →「OpenCode 匯入報告」(temporary / review / unsupported — `agent/opencode/configCandidates.ts`), never silently written to Settings.
 

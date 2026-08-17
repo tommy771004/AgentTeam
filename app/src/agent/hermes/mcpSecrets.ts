@@ -7,7 +7,7 @@
  * - server.secretPluginId = where tokens live (github-connector)
  */
 
-import type { LlmSettings, McpServerConfig } from '../types'
+import type { LlmSettings, McpServerConfig } from '../types.ts'
 import { getPluginSecret, hasPluginSecret } from './pluginSecrets.ts'
 
 /** secret owner id → env vars to fill when secret is present */

@@ -1,4 +1,4 @@
-import type { ApprovalMode } from './types'
+import type { ApprovalMode } from './types.ts'
 
 export type CliApprovalResolution = {
   mode: ApprovalMode

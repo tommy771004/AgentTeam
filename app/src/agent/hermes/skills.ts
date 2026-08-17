@@ -3,7 +3,7 @@
  * SKILL.md with YAML frontmatter + markdown body.
  */
 
-import type { Skill, SkillMeta } from './types'
+import type { Skill, SkillMeta } from './types.ts'
 
 const DEFAULT_SKILLS: Array<{ path: string; raw: string }> = [
   {

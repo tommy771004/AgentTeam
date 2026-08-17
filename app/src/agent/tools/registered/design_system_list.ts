@@ -23,7 +23,7 @@ register({
     try {
     const { scanDesignSystems } = await import('../../subdesign/designSystem.ts')
     const systems = await scanDesignSystems(projectRoot)
-    const { useSubDesignStore } = await import('../../../store/subDesignStore')
+    const { useSubDesignStore } = await import('../../../store/subDesignStore.ts')
     useSubDesignStore.getState().setSystems(systems)
     return {
       ok: true,

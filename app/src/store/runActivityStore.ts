@@ -570,7 +570,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       // Persist the latest snapshot on the run's thread. The explicit runId
       // prevents a late concurrent stream from writing into another thread.
       if (typeof window !== 'undefined') {
-        void import('./threadStore').then(({ useThreadStore }) => {
+        void import('./threadStore.ts').then(({ useThreadStore }) => {
           const threadState = useThreadStore.getState()
           const threadId = threadState.threads.find(
             (thread) => threadState.runningRunIds[thread.id] === target,

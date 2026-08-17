@@ -10,31 +10,32 @@ import type {
   AgentMode,
   CliConfigSnapshot,
   RuntimeOverrides,
-} from './types'
-import type { ThinkingDepth } from './thinking'
-import type { LocalRunnerKind } from './localCliRun'
-import { useSettingsStore } from '../store/settingsStore'
-import { useAgentStore } from '../store/agentStore'
-import { useThreadStore, type ThreadRunner } from '../store/threadStore'
-import { parseSubagentMentions } from './opencode/agents'
+} from './types.ts'
+import type { ThinkingDepth } from './thinking.ts'
+import type { LocalRunnerKind } from './localCliRun.ts'
+import { useSettingsStore } from '../store/settingsStore.ts'
+import { useAgentStore } from '../store/agentStore.ts'
+import { useThreadStore, type ThreadRunner } from '../store/threadStore.ts'
+import { parseSubagentMentions } from './opencode/agents.ts'
 import {
   openCodeRuntimeOverrides,
   getRegistryAgent,
   parseRegistryMentions,
-} from './opencode/agentRegistry'
-import { buildIntentPreloadIds } from './intentPreload'
-import { buildSubDesignRuntimeContext } from './subdesign/prompt'
-import { getSubDesignBriefForThread, useSubDesignStore } from '../store/subDesignStore'
+} from './opencode/agentRegistry.ts'
+import { buildIntentPreloadIds } from './intentPreload.ts'
+import { buildSubDesignRuntimeContext } from './subdesign/prompt.ts'
+import { getSubDesignBriefForThread, useSubDesignStore } from '../store/subDesignStore.ts'
 import {
   attachmentsToTextAppendix,
   attachmentsPathAppendix,
   defaultGoalForAttachments,
-} from '../lib/chatAttachments'
-import type { RunDispatchSnapshot } from './taskRunCoordinator'
+} from '../lib/chatAttachments.ts'
+import type { RunDispatchSnapshot } from './taskRunCoordinator.ts'
 
 export type { DispatchResult } from './dispatchResult.ts'
 import type { DispatchResult } from './dispatchResult.ts'
 import {
+  buildCliContinueGoalContract,
   formatCliContinueGoalPrompt,
   isCompleteCliContinueGoalContract,
 } from './runners/types.ts'
@@ -60,7 +61,7 @@ async function captureOpenCodeConfigSnapshot(
   agentMode: AgentMode,
   model: string,
 ): Promise<CliConfigSnapshot> {
-  const { useOpenCodeConfigStore } = await import('../store/opencodeConfigStore')
+  const { useOpenCodeConfigStore } = await import('../store/opencodeConfigStore.ts')
   const store = useOpenCodeConfigStore.getState()
   if (!store.loaded || store.lastProjectRoot !== projectRoot) {
     await store.hydrate(projectRoot)
@@ -184,7 +185,7 @@ export async function dispatchThreadTask(
   // Intent preload v2: builtins + skills + enabled plugins/MCP + project packs
   const preloadCandidates = buildIntentPreloadIds(text, settings, projectRoot, {
     max: 8,
-    entitlement: (await import('../store/subscriptionStore')).useSubscriptionStore.getState().entitlement,
+    entitlement: (await import('../store/subscriptionStore.ts')).useSubscriptionStore.getState().entitlement,
   })
   if (subDesignBrief) {
     preloadCandidates.unshift('subdesign-workflow')
@@ -221,19 +222,10 @@ export async function dispatchThreadTask(
     // Keep CLI follow-ups coherent with builtin runs. The current request is
     // deliberately first, so the runner's prompt cap never cuts it off.
     let cliPrompt = subDesignContext ? `${subDesignContext}\n\n## Current request\n${text}` : text
-    const continueContract =
-      snapshot.overrides.externalCliContract?.continueGoal ||
-      (snapshot.overrides.continueGoal
-        ? {
-            objective: snapshot.overrides.continueGoal.objective,
-            definitionOfDone: snapshot.overrides.continueGoal.definitionOfDone,
-            missing: snapshot.overrides.continueGoal.missing || [],
-            priorDigest: snapshot.overrides.continueGoal.priorDigest,
-            projectRoot,
-            approvalMode: snapshot.overrides.approvalMode || settings.approvalMode,
-            userHint: snapshot.overrides.continueGoal.userHint,
-          }
-        : undefined)
+    const continueContract = buildCliContinueGoalContract(snapshot.overrides, {
+      projectRoot,
+      approvalMode: settings.approvalMode,
+    })
     if (isCompleteCliContinueGoalContract(continueContract)) {
       cliPrompt = [
         formatCliContinueGoalPrompt(continueContract),
@@ -324,7 +316,7 @@ export async function dispatchThreadTask(
   // Chat history: recent verbatim + older condensed (budget-friendly).
   let extra = baseOverrides.extraSystemContext || ''
   if (settings.referenceChatHistory !== false && thread?.bubbles?.length) {
-    const { buildChatHistoryContext, CHAT_HISTORY_CONTEXT_CHARS } = await import('./chatHistory')
+    const { buildChatHistoryContext, CHAT_HISTORY_CONTEXT_CHARS } = await import('./chatHistory.ts')
     const hist = buildChatHistoryContext(
       thread.bubbles.map((b) => ({ role: b.role, content: b.content })),
       { keepRecent: 3, maxChars: CHAT_HISTORY_CONTEXT_CHARS, perMessageChars: 600 },

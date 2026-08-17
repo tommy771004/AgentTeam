@@ -3,7 +3,7 @@
  * Models/depths come only from local discovery or user settings.
  */
 
-import type { ThinkingDepth } from './thinking'
+import type { ThinkingDepth } from './thinking.ts'
 
 export type CliKind =
   | 'openai'

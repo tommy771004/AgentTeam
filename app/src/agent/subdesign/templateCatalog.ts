@@ -1,5 +1,5 @@
-import type { SubDesignSurface } from './types'
-import type { OpenDesignCatalogRecord } from '../openDesign/catalog'
+import type { SubDesignSurface } from './types.ts'
+import type { OpenDesignCatalogRecord } from '../openDesign/catalog.ts'
 
 export type SubDesignTemplateCategory =
   | 'all'

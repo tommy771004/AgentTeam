@@ -2,7 +2,7 @@
  * Shared tool I/O primitives (Hermes-style libraries, not a dispatch switch).
  */
 
-import type { LlmSettings, PermissionPolicy, PermissionProjection } from '../types'
+import type { LlmSettings, PermissionPolicy, PermissionProjection } from '../types.ts'
 
 export interface ToolResult {
   ok: boolean

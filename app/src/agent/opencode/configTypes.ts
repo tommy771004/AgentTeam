@@ -9,7 +9,7 @@ import type {
   PermissionPolicy,
   PermissionProjection,
   PermissionRuleValue,
-} from '../types'
+} from '../types.ts'
 
 /** allow | ask | deny, or pattern map for bash-like keys */
 export type PermissionRule =

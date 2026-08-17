@@ -21,7 +21,7 @@ register({
     const runId = context?.runId
     const threadId = context?.threadId
     try {
-    const { useSubDesignStore } = await import('../../../store/subDesignStore')
+    const { useSubDesignStore } = await import('../../../store/subDesignStore.ts')
     const briefId = String(input.briefId || '').trim()
     const linked = briefId
       ? useSubDesignStore.getState().findById(briefId)

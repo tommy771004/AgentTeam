@@ -2,7 +2,7 @@
  * 對話層：模型 + 推理強度（UI 對齊 Cursor 式下拉）
  */
 
-import type { RuntimeOverrides } from './types'
+import type { RuntimeOverrides } from './types.ts'
 
 /**
  * 推理程度（對應附圖：快思 / 中 / 高 / 極高 / 超高）

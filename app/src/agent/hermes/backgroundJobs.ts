@@ -3,12 +3,12 @@
  * Hermes Phase 5: fire-and-forget leaf tasks with desktop notification
  */
 
-import type { ArchiveRecord, LlmSettings, ToolCallRecord } from '../types'
+import type { ArchiveRecord, LlmSettings, ToolCallRecord } from '../types.ts'
 import {
   type DelegateTaskInput,
   type DelegateTaskResult,
   type DelegationBudget,
-} from './delegate'
+} from './delegate.ts'
 import { recordBackgroundStatus } from '../runJournal.ts'
 import { buildExternalCliDelegateContract } from '../runners/types.ts'
 
@@ -27,7 +27,7 @@ async function archiveBackgroundJob(
       // Link-only: coordinator finalization already archived the execution.
       // Optionally refresh list so Records shows the linked run id promptly.
       try {
-        const { useAgentStore } = await import('../../store/agentStore')
+        const { useAgentStore } = await import('../../store/agentStore.ts')
         await useAgentStore.getState().loadArchive()
       } catch {
         /* ignore */
@@ -60,7 +60,7 @@ async function archiveBackgroundJob(
       if (window.subagents?.archive?.save) {
         await window.subagents.archive.save(record)
         try {
-          const { useAgentStore } = await import('../../store/agentStore')
+          const { useAgentStore } = await import('../../store/agentStore.ts')
           await useAgentStore.getState().loadArchive()
         } catch {
           /* ignore */
@@ -84,9 +84,9 @@ async function injectBackgroundResult(job: BackgroundJob): Promise<void> {
   if (!job.parentThreadId) return
   try {
     const [{ useAgentStore }, { useThreadStore }, { queueLength }] = await Promise.all([
-      import('../../store/agentStore'),
-      import('../../store/threadStore'),
-      import('../runQueue'),
+      import('../../store/agentStore.ts'),
+      import('../../store/threadStore.ts'),
+      import('../runQueue.ts'),
     ])
     const agent = useAgentStore.getState()
     const threads = useThreadStore.getState()
@@ -262,7 +262,7 @@ export function enqueueBackgroundDelegate(
         parentMcpAgentId: input.parentMcpAgentId,
       }
 
-      const { runTask } = await import('../taskRunCoordinator')
+      const { runTask } = await import('../taskRunCoordinator.ts')
       type ExternalRunResult = Awaited<ReturnType<typeof runTask>>
       const settled = await new Promise<ExternalRunResult>((resolve) => {
         void runTask({

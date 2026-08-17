@@ -17,10 +17,10 @@
  * Every triggered rule is audited into run logs.
  */
 
-import type { LlmSettings } from './types'
-import type { RunSourceKind } from './taskRunCoordinator'
-import { pluginRegistry } from './hermes/plugins'
-import { activeProjectHookRules } from './projectHooks'
+import type { LlmSettings } from './types.ts'
+import type { RunSourceKind } from './taskRunCoordinator.ts'
+import { pluginRegistry } from './hermes/plugins.ts'
+import { activeProjectHookRules } from './projectHooks.ts'
 
 export type HookPoint =
   | 'beforeRun'

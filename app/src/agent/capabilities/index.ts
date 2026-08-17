@@ -4,7 +4,7 @@ export type {
   CapabilityId,
   CapabilityModelSettings,
   CapabilityRuntimeState,
-} from './types'
+} from './types.ts'
 export {
   BUILTIN_CAPABILITIES,
   LOAD_CAPABILITY_TOOL,

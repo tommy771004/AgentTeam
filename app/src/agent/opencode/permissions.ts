@@ -4,7 +4,7 @@
  * Pure map + checks live in toolPermissionMap (shared with approvalDecision).
  */
 
-import type { PermissionPolicy } from '../types'
+import type { PermissionPolicy } from '../types.ts'
 import { checkToolPermission } from './toolPermissionMap.ts'
 
 export type { PermissionAction, PermissionKey, PermissionPolicy } from './toolPermissionMap.ts'

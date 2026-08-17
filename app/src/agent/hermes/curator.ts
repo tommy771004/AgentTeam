@@ -7,12 +7,12 @@
  * user-authored skills.
  */
 
-import type { LlmSettings } from '../types'
-import { chatCompletion, withRoleModel } from '../llm'
-import { learningLoop } from './learning'
-import { skillsStore } from './skills'
-import { SKILL_SIMILARITY_THRESHOLD, textSimilarity } from './textSimilarity'
-import type { Skill } from './types'
+import type { LlmSettings } from '../types.ts'
+import { chatCompletion, withRoleModel } from '../llm.ts'
+import { learningLoop } from './learning.ts'
+import { skillsStore } from './skills.ts'
+import { SKILL_SIMILARITY_THRESHOLD, textSimilarity } from './textSimilarity.ts'
+import type { Skill } from './types.ts'
 
 export const SKILL_CURATOR_INTERVAL_MS = 24 * 60 * 60 * 1000
 export const SKILL_CURATOR_IDLE_DELAY_MS = 15_000
@@ -178,7 +178,7 @@ export async function runSkillCurator(
     const changed = archivedNames.filter((name) => skillsStore.archive(name))
     if (changed.length) {
       try {
-        const { useLearningStore } = await import('../../store/learningStore')
+        const { useLearningStore } = await import('../../store/learningStore.ts')
         useLearningStore.getState().refresh()
         await useLearningStore.getState().persist()
       } catch {
@@ -229,8 +229,8 @@ export function scheduleSkillCurator(
     idleTimer = undefined
     void (async () => {
       const [{ useAgentStore }, { queueLength }] = await Promise.all([
-        import('../../store/agentStore'),
-        import('../runQueue'),
+        import('../../store/agentStore.ts'),
+        import('../runQueue.ts'),
       ])
       if (!useAgentStore.getState().canStartRun().allowed || queueLength() > 0) return
       await runSkillCurator(settings)

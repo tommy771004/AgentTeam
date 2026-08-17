@@ -79,7 +79,7 @@ export async function resolveEffectiveProjectRoot(
   let uiStoreRoot: string | undefined
   if (!boundViewRoot && !(explicitRoot || '').trim()) {
     try {
-      const { useProjectStore } = await import('../../store/projectStore')
+      const { useProjectStore } = await import('../../store/projectStore.ts')
       uiStoreRoot = useProjectStore.getState().root || undefined
     } catch {
       uiStoreRoot = undefined

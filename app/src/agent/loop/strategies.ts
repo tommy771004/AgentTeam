@@ -18,7 +18,7 @@ import type {
   LogLevel,
   RuntimeOverrides,
   ToolCallRecord,
-} from '../types'
+} from '../types.ts'
 import {
   runPrimaryAgentTask,
   runSubAgentTask,
@@ -87,7 +87,7 @@ async function evaluateAfterToolHooks(
       point: 'afterTool',
       tool: ctx.tool,
       toolOk: ctx.toolOk,
-      sourceKind: ctx.sourceKind as import('../hooks').HookContext['sourceKind'],
+      sourceKind: ctx.sourceKind as import('../hooks.ts').HookContext['sourceKind'],
       objective: ctx.objective,
     })
     return { audits: ev.audits, notifications: ev.notifications }
@@ -511,7 +511,7 @@ export function createHeuristicStepExecutor(host: StepStrategyHost): StepExecuto
             sessionRecall: input.sessionRecallBlock || undefined,
             skillsContext: input.attachedSkillContext || undefined,
           })
-          let userContent: import('../llm').ChatMessageContent | undefined
+          let userContent: import('../llm.ts').ChatMessageContent | undefined
           if (input.userAttachments?.some((a) => a.kind === 'image')) {
             try {
               const {

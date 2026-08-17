@@ -9,7 +9,7 @@ import type {
   PermissionKey,
   PermissionPolicy,
   PermissionProjection,
-} from '../types'
+} from '../types.ts'
 import { matchGlob, resolvePatternPermission } from './configTypes.ts'
 
 export type { PermissionAction, PermissionKey, PermissionPolicy }

@@ -10,7 +10,7 @@ import type {
   OpenCodeCommandFileDef,
   OpenCodeMergedConfig,
   OpenCodePermissionBlock,
-} from './configTypes'
+} from './configTypes.ts'
 
 function deepMergeAgents(
   a: Record<string, OpenCodeAgentConfig> = {},

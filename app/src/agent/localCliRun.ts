@@ -2,13 +2,13 @@
  * Renderer helper: run prompt via local CLI and synthesize AgentState-like result
  */
 
-import type { AgentState, ApprovalMode, CliConfigSnapshot, ExternalRunRef, RuntimeOverrides } from './types'
-import { emptyKnowledge } from './knowledge'
-import { resolveCliApproval } from './cliApproval'
+import type { AgentState, ApprovalMode, CliConfigSnapshot, ExternalRunRef, RuntimeOverrides } from './types.ts'
+import { emptyKnowledge } from './knowledge.ts'
+import { resolveCliApproval } from './cliApproval.ts'
 import {
   EXTERNAL_CLI_DOD_LABEL,
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
-} from './runners'
+} from './runners/index.ts'
 import {
   effectiveOutboundGuardFromSettings,
   inspectOutbound,
@@ -91,7 +91,7 @@ export async function runPromptViaLocalCli(opts: {
     outboundGuardDeploy?: 'off' | 'demo' | 'optional' | 'required'
   } = {}
   try {
-    const { useSettingsStore } = await import('../store/settingsStore')
+    const { useSettingsStore } = await import('../store/settingsStore.ts')
     gateSettings = useSettingsStore.getState().settings
   } catch {
     /* pure tests without store */

@@ -2,8 +2,8 @@
  * Real declarative tools for marketplace connectors.
  * Secrets resolve via {{secret:<pluginId>}} → pluginSecrets / customToolSecrets.
  */
-import type { CustomToolDefinition } from '../types'
-import type { PluginManifest } from './plugins'
+import type { CustomToolDefinition } from '../types.ts'
+import type { PluginManifest } from './plugins.ts'
 
 function httpGet(
   name: string,

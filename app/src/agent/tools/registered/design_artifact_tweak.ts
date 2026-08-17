@@ -21,8 +21,8 @@ register({
     const runId = context?.runId
     const threadId = context?.threadId
     try {
-    const { useSubDesignArtifactStore } = await import('../../../store/subDesignArtifactStore')
-    const { useSubDesignStore } = await import('../../../store/subDesignStore')
+    const { useSubDesignArtifactStore } = await import('../../../store/subDesignArtifactStore.ts')
+    const { useSubDesignStore } = await import('../../../store/subDesignStore.ts')
     const artifactId = String(input.artifactId || '').trim()
     const artifact = useSubDesignArtifactStore.getState().findById(artifactId)
     if (!artifact) return { ok: false, output: `找不到 artifact：${artifactId}` }

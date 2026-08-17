@@ -2,15 +2,13 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createJiti } from 'jiti'
+import { runEvaluationBatch } from '../src/agent/evaluationHarness.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const tasks = JSON.parse(fs.readFileSync(path.join(appRoot, 'evaluation/tasks.json'), 'utf8'))
 assert.equal(Array.isArray(tasks), true)
 assert.equal(tasks.length, 3)
 
-const jiti = createJiti(import.meta.url, { interopDefault: true })
-const { runEvaluationBatch } = await jiti.import('../src/agent/evaluationHarness.ts') as typeof import('../src/agent/evaluationHarness.ts')
 const result = await runEvaluationBatch(tasks, { settingsPatch: { enabled: false } })
 assert.equal(result.tasks.length, tasks.length)
 assert.equal(Array.isArray(result.journal), true)

@@ -6,7 +6,7 @@
  * 是工具輸出防線,與 context 用量是兩件事)。
  */
 
-import type { LlmSettings } from './types'
+import type { LlmSettings } from './types.ts'
 
 /** Leaf lookup — avoids importing modelProfile (which pulls llm). */
 function profileContextWindow(

@@ -2,8 +2,8 @@
  * Shared dispatch outcome shape — pure types only.
  * Used by runDispatch (runner) and taskRunTypes.ExternalRunResult (lifecycle).
  */
-import type { PostStateOutcome } from './types'
-import type { LocalRunnerKind } from './localCliRun'
+import type { PostStateOutcome } from './types.ts'
+import type { LocalRunnerKind } from './localCliRun.ts'
 
 export type DispatchResult = {
   path: 'builtin' | 'cli'

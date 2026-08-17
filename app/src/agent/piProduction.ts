@@ -1,4 +1,4 @@
-import type { LlmSettings } from './types'
+import type { LlmSettings } from './types.ts'
 
 /**
  * Electron's Pi Host is the production runtime boundary. The renderer keeps

@@ -1,4 +1,4 @@
-import type { LlmSettings, McpServerConfig } from '../types'
+import type { LlmSettings, McpServerConfig } from '../types.ts'
 
 /**
  * Per-agent MCP access is opt-in only when a mapping exists for that agent.

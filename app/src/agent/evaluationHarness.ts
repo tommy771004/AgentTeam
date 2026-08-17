@@ -1,4 +1,6 @@
 /** Fixed-task evaluation harness; development/evaluation seam only. */
+import type { RunnerId } from './runners/types.ts'
+import { createMemoryStorage } from './memoryStorage.ts'
 import { loadArtifactIndexes, type ArtifactIndex } from './artifactIndex.ts'
 import {
   listJournalEntries,
@@ -13,7 +15,7 @@ export type EvaluationTask = {
   id: string
   objective: string
   loopType?: LoopType
-  runner?: 'builtin' | 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
+  runner?: RunnerId
 }
 
 export type EvaluationTaskResult = {
@@ -36,20 +38,6 @@ export type EvaluationBatchResult = {
   score: number
 }
 
-function evaluationStorage(): Storage {
-  const values = new Map<string, string>()
-  return {
-    getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => values.set(key, value),
-    removeItem: (key) => values.delete(key),
-    clear: () => values.clear(),
-    key: (index) => [...values.keys()][index] ?? null,
-    get length() {
-      return values.size
-    },
-  } as Storage
-}
-
 function scoreTask(status: string, artifact: ArtifactIndex | undefined): number {
   if (status !== 'success') return 0
   const evidence = artifact?.entries.filter((entry) => entry.status === 'complete').length || 0
@@ -62,7 +50,7 @@ export async function runEvaluationBatch(
   opts: Pick<HeadlessRunOptions, 'transport' | 'settingsPatch'> = {},
 ): Promise<EvaluationBatchResult> {
   const results: EvaluationTaskResult[] = []
-  const storage = evaluationStorage()
+  const storage = createMemoryStorage()
   for (const task of tasks) {
     const run = await runHeadlessTask({
       objective: task.objective,

@@ -4,7 +4,7 @@
  * Stdio servers go through Electron main process.
  */
 
-import type { LlmSettings, McpServerConfig, McpToolInfo } from '../types'
+import type { LlmSettings, McpServerConfig, McpToolInfo } from '../types.ts'
 import { enrichMcpServerWithSecrets, mcpServerMissingSecret } from './mcpSecrets.ts'
 
 export interface McpCallResult {

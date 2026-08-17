@@ -7,24 +7,24 @@ import type {
   LoopType,
   PostStateOutcome,
   RuntimeOverrides,
-} from '../agent/types'
-import { isElectronPiProduction } from '../agent/piProduction'
-import { runCapacity } from '../agent/runConcurrency'
-import { emptyKnowledge, extractKnowledge } from '../agent/knowledge'
-import { learningLoop } from '../agent/hermes/learning'
-import { useSettingsStore } from './settingsStore'
-import { useLearningStore } from './learningStore'
-import { consumeNextState } from '../agent/outcomeDispatcher'
-import { buildPiHostRunConfig, submitPiHostRun } from '../agent/piHostRun'
+} from '../agent/types.ts'
+import { isElectronPiProduction } from '../agent/piProduction.ts'
+import { runCapacity } from '../agent/runConcurrency.ts'
+import { emptyKnowledge, extractKnowledge } from '../agent/knowledge.ts'
+import { learningLoop } from '../agent/hermes/learning.ts'
+import { useSettingsStore } from './settingsStore.ts'
+import { useLearningStore } from './learningStore.ts'
+import { consumeNextState } from '../agent/outcomeDispatcher.ts'
+import { buildPiHostRunConfig, submitPiHostRun } from '../agent/piHostRun.ts'
 import {
   emptyAgentLike,
   runPromptViaLocalCli,
   type LocalRunnerKind,
-} from '../agent/localCliRun'
+} from '../agent/localCliRun.ts'
 import {
   EXTERNAL_CLI_DOD_LABEL,
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
-} from '../agent/runners'
+} from '../agent/runners/index.ts'
 
 interface AgentStore {
   agent: AgentState
@@ -166,7 +166,7 @@ function loadLegacyEngine(): Promise<LegacyEngine> {
   if (isElectronPiProduction()) {
     return Promise.reject(new Error('Legacy renderer engine is disabled when Pi Host is available'))
   }
-  legacyEnginePromise ||= import('../agent/engine').then(({ agentEngine }) => agentEngine as unknown as LegacyEngine)
+  legacyEnginePromise ||= import('../agent/engine.ts').then(({ agentEngine }) => agentEngine as unknown as LegacyEngine)
   return legacyEnginePromise
 }
 
@@ -438,7 +438,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       const runId = overrides?.runId || `run_${Date.now().toString(36)}`
       if (window.subagents?.piHost?.sessions?.list && overrides?.threadId) {
         try {
-          const { useRunActivityStore } = await import('./runActivityStore')
+          const { useRunActivityStore } = await import('./runActivityStore.ts')
           useRunActivityStore.getState().begin(runId)
           useRunActivityStore.getState().setStatus('Pi Core Host 執行中…', runId)
         } catch {
@@ -457,7 +457,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       try {
         // Center process feed (Codex-style)
         try {
-          const { useRunActivityStore } = await import('./runActivityStore')
+          const { useRunActivityStore } = await import('./runActivityStore.ts')
           useRunActivityStore.getState().begin(runId)
           useRunActivityStore.getState().setStatus('內建引擎執行中…', runId)
         } catch {
@@ -465,7 +465,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         }
         // Per-run HITL counters for Archive
         try {
-          const { usePermissionAskStore } = await import('./permissionAskStore')
+          const { usePermissionAskStore } = await import('./permissionAskStore.ts')
           usePermissionAskStore.getState().beginRunAudit(runId, overrides?.threadId)
         } catch {
           /* ignore */
@@ -497,7 +497,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         get().applyPostState(runId, postState)
         const settled = get().getRunState(runId) || { ...final, postState }
         try {
-          const { useRunActivityStore } = await import('./runActivityStore')
+          const { useRunActivityStore } = await import('./runActivityStore.ts')
           useRunActivityStore.getState().setStatus(
             settled.status === 'success' ? '完成' : settled.status,
             runId,
@@ -507,7 +507,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         }
         // End of run: clear sticky "代我核准" unless user wants multi-run (opt-in later)
         try {
-          const { usePermissionAskStore } = await import('./permissionAskStore')
+          const { usePermissionAskStore } = await import('./permissionAskStore.ts')
           usePermissionAskStore.getState().setSessionAllow(false, overrides?.threadId)
         } catch {
           /* ignore */
@@ -517,7 +517,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         unsub()
         publishRun(set, get, runId, runAgentStates.get(runId) || emptyAgent())
         try {
-          const { usePermissionAskStore } = await import('./permissionAskStore')
+          const { usePermissionAskStore } = await import('./permissionAskStore.ts')
           usePermissionAskStore.getState().setSessionAllow(false, overrides?.threadId)
         } catch {
           /* ignore */
@@ -602,7 +602,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         })
         // Mirror logs into center process feed even when CLI stream IPC is missing
         try {
-          void import('./runActivityStore').then(({ useRunActivityStore }) => {
+          void import('./runActivityStore.ts').then(({ useRunActivityStore }) => {
             const short = message.slice(0, 200)
             if (!short || short.startsWith('$ ')) return
             useRunActivityStore.getState().push({
@@ -625,13 +625,13 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       // Codex-style center feed
       let unsubStream: (() => void) | undefined
       try {
-        const { useRunActivityStore } = await import('./runActivityStore')
+        const { useRunActivityStore } = await import('./runActivityStore.ts')
         useRunActivityStore.getState().begin(runId)
         useRunActivityStore.getState().setStatus(`本機 ${opts.kind} CLI · 啟動中`, runId)
         unsubStream = window.subagents?.cli?.onStream?.((ev) => {
           useRunActivityStore.getState().handleCliStream({
             ...ev,
-            kind: ev.kind as import('./runActivityStore').CliStreamPayload['kind'],
+            kind: ev.kind as import('./runActivityStore.ts').CliStreamPayload['kind'],
             path: ev.path,
             paths: ev.paths,
             added: ev.added,
@@ -689,7 +689,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
 
       try {
         try {
-          const { usePermissionAskStore } = await import('./permissionAskStore')
+          const { usePermissionAskStore } = await import('./permissionAskStore.ts')
           usePermissionAskStore.getState().beginRunAudit(runId, opts.threadId)
         } catch {
           /* ignore */
@@ -705,7 +705,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           /* ignore */
         }
         try {
-          const { useRunActivityStore } = await import('./runActivityStore')
+          const { useRunActivityStore } = await import('./runActivityStore.ts')
           const act = useRunActivityStore.getState()
           // Keep thought / process events for center timeline; clear draft so
           // final answer is only the markdown assistant bubble (no duplicate).
@@ -850,7 +850,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         // visible feed can show finalizing while summary/archive settle.
 
         try {
-          const { usePermissionAskStore } = await import('./permissionAskStore')
+          const { usePermissionAskStore } = await import('./permissionAskStore.ts')
           usePermissionAskStore.getState().setSessionAllow(false, opts.threadId)
         } catch {
           /* ignore */
@@ -862,7 +862,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           /* ignore */
         }
         try {
-          const { useRunActivityStore } = await import('./runActivityStore')
+          const { useRunActivityStore } = await import('./runActivityStore.ts')
           useRunActivityStore.getState().push({
             kind: 'error',
             runId,
@@ -905,7 +905,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         })
         publishRun(set, get, runId, final)
         try {
-          const { usePermissionAskStore } = await import('./permissionAskStore')
+          const { usePermissionAskStore } = await import('./permissionAskStore.ts')
           usePermissionAskStore.getState().setSessionAllow(false, opts.threadId)
         } catch {
           /* ignore */
@@ -923,7 +923,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       const cancelCliRun = window.subagents?.cli?.cancel
       if (cancelCliRun) void cancelCliRun(target).catch(() => {})
       try {
-        void import('./runActivityStore').then(({ useRunActivityStore }) => {
+        void import('./runActivityStore.ts').then(({ useRunActivityStore }) => {
           useRunActivityStore.getState().push({ kind: 'status', title: '使用者停止', runId: target })
         })
       } catch {
@@ -931,7 +931,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       }
       // Clear sticky "代我核准" so a stopped run cannot auto-allow the next one
       try {
-        void import('./permissionAskStore').then(({ usePermissionAskStore }) => {
+        void import('./permissionAskStore.ts').then(({ usePermissionAskStore }) => {
           if (target) {
             usePermissionAskStore.getState().cancelRun(target)
             usePermissionAskStore.getState().setSessionAllow(false, reservedRuns.get(target)?.threadId)
@@ -975,7 +975,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         showReport: false,
       })
       try {
-        void import('./permissionAskStore').then(({ usePermissionAskStore }) => {
+        void import('./permissionAskStore.ts').then(({ usePermissionAskStore }) => {
           usePermissionAskStore.getState().setSessionAllow(false)
         })
       } catch {
@@ -997,7 +997,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       if (!agent.id) return
       let hitl: ArchiveRecord['hitl']
       try {
-        const { usePermissionAskStore } = await import('./permissionAskStore')
+        const { usePermissionAskStore } = await import('./permissionAskStore.ts')
         const snap = usePermissionAskStore.getState().getRunHitlSnapshot(runId)
         if (snap.allowed || snap.denied || snap.timedOut) {
           hitl = snap
@@ -1040,7 +1040,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       // Usage-based automation suggestions are generated from the same
       // successful archive source; decisions are kept separately by the UI.
       try {
-        const { useAutomationSuggestionStore } = await import('./automationSuggestionStore')
+        const { useAutomationSuggestionStore } = await import('./automationSuggestionStore.ts')
         useAutomationSuggestionStore.getState().refreshFromArchive(get().archive)
       } catch {
         /* suggestions are advisory and never change run outcome */

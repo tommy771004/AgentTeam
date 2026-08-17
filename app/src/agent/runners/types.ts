@@ -8,6 +8,23 @@
 
 export type ExecutionKind = 'loop' | 'external'
 
+/**
+ * Every runner the product can dispatch to. One source of truth: the delegate
+ * tool schema, its argument validation, and the evaluation harness all derive
+ * from this rather than each restating the list.
+ */
+export const RUNNER_IDS = [
+  'builtin',
+  'codex',
+  'claude',
+  'grok',
+  'opencode',
+  'gemini',
+  'cursor',
+] as const
+
+export type RunnerId = (typeof RUNNER_IDS)[number]
+
 export type RunnerCapabilities = {
   /** Structured Parse / loop-type classification inside the adapter. */
   parse: boolean
@@ -121,7 +138,11 @@ export type ExternalCliDelegateContract = {
   continueGoal?: CliContinueGoalPromptContract
 }
 
-export const EXTERNAL_CLI_LEAF_BLOCKED_TOOLS = [
+/**
+ * Tools a leaf worker never gets, regardless of runner. Named without a CLI
+ * prefix because `hermes/delegate.ts` applies it to builtin children too.
+ */
+export const LEAF_BLOCKED_TOOLS = [
   'skill_save',
   'delegate_task',
   'run_code',
@@ -152,8 +173,43 @@ export function buildExternalCliDelegateContract(opts: {
     blockedTools:
       opts.role === 'orchestrator'
         ? ['delegate_task']
-        : [...EXTERNAL_CLI_LEAF_BLOCKED_TOOLS],
+        : [...LEAF_BLOCKED_TOOLS],
     continueGoal: opts.continueGoal,
+  }
+}
+
+/**
+ * Derive the CLI continueGoal contract from the same `continueGoal` override
+ * the builtin runner restores from. Extracted so parity is provable: both
+ * runners read one source of DoD / missing / digest rather than each shaping
+ * its own. An explicit `externalCliContract.continueGoal` wins when present.
+ */
+export function buildCliContinueGoalContract(
+  overrides: {
+    continueGoal?: {
+      objective: string
+      definitionOfDone: string
+      missing?: string[]
+      priorDigest?: string
+      userHint?: string
+    }
+    externalCliContract?: { continueGoal?: CliContinueGoalPromptContract }
+    approvalMode?: string
+  },
+  context: { projectRoot?: string; approvalMode?: string } = {},
+): CliContinueGoalPromptContract | undefined {
+  const explicit = overrides.externalCliContract?.continueGoal
+  if (explicit) return explicit
+  const resume = overrides.continueGoal
+  if (!resume) return undefined
+  return {
+    objective: resume.objective,
+    definitionOfDone: resume.definitionOfDone,
+    missing: resume.missing || [],
+    priorDigest: resume.priorDigest,
+    projectRoot: context.projectRoot,
+    approvalMode: overrides.approvalMode || context.approvalMode,
+    userHint: resume.userHint,
   }
 }
 

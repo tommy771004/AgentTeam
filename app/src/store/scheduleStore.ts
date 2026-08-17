@@ -3,18 +3,18 @@ import type {
   EventTriggerSnapshot,
   ProactiveEvent,
   ScheduledJob,
-} from '../agent/types'
+} from '../agent/types.ts'
 import {
   matchProactiveEvent,
   type EventMatchResult,
   type ProactiveEventPayload,
-} from '../agent/eventMatcher'
+} from '../agent/eventMatcher.ts'
 import {
   advanceJobAfterRun,
   createJob,
   jobIsDue,
   parseScheduleFromText,
-} from '../agent/scheduler'
+} from '../agent/scheduler.ts'
 import { recordScheduleStatus } from '../agent/runJournal.ts'
 
 interface ScheduleStore {

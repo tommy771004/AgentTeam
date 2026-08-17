@@ -4,9 +4,9 @@ import {
   resolveEntitlement,
   type EntitlementSnapshot,
   type FeatureId,
-} from '../agent/entitlement'
-import { useSubscriptionStore } from './subscriptionStore'
-import { readJson } from './persist'
+} from '../agent/entitlement.ts'
+import { useSubscriptionStore } from './subscriptionStore.ts'
+import { readJson } from './persist.ts'
 
 interface EntitlementStore {
   snapshot: EntitlementSnapshot

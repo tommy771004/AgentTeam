@@ -4,7 +4,7 @@
  * Do not reintroduce executeTool(tool) switch here.
  */
 
-export type { ToolResult, ToolExecutionContext } from './toolIoHelpers'
+export type { ToolResult, ToolExecutionContext } from './toolIoHelpers.ts'
 export {
   memory,
   recordRewindSnapshot,
@@ -12,4 +12,4 @@ export {
   browserWebSearch,
   browserHttpFetch,
   applyGitSettingsToBash,
-} from './toolIoHelpers'
+} from './toolIoHelpers.ts'

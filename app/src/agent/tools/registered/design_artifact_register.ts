@@ -21,8 +21,8 @@ register({
     const runId = context?.runId
     const threadId = context?.threadId
     try {
-    const { useSubDesignStore } = await import('../../../store/subDesignStore')
-    const { useSubDesignArtifactStore } = await import('../../../store/subDesignArtifactStore')
+    const { useSubDesignStore } = await import('../../../store/subDesignStore.ts')
+    const { useSubDesignArtifactStore } = await import('../../../store/subDesignArtifactStore.ts')
     const linked = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
     const rawManifest = input.manifest && typeof input.manifest === 'object'
       ? { ...(input.manifest as Record<string, unknown>) }

@@ -119,7 +119,11 @@ assert.ok(indexed.entries.some((entry) => entry.type === 'review'))
 
 const deliverables = buildWorkflowStageDeliverables(reviewed, '2026-07-19T01:07:30.000Z')
 assert.deepEqual(deliverables.map((item) => item.stage), ['spec', 'tickets', 'tdd', 'review', 'final-output'])
-assert.ok(deliverables.every((item) => item.inspectable && item.rejectable))
+// every stage must expose readable evidence and a stable address — that is
+// what makes it inspectable, rather than a field asserting that it is
+assert.ok(deliverables.every((item) => item.id.startsWith('deliverable:')))
+assert.ok(deliverables.every((item) => Array.isArray(item.evidence)))
+assert.ok(deliverables.some((item) => item.evidence.length > 0))
 const rejected = rejectWorkflowDeliverable(deliverables[0], 'Spec needs a clearer acceptance boundary', '2026-07-19T01:08:00.000Z')
 assert.equal(rejected.ok, true)
 if (!rejected.ok) throw new Error(rejected.reason)
@@ -141,4 +145,73 @@ assert.equal(resolveWorkflowRunner('opencode').displayName, 'OpenCode')
 assert.equal(recordReviewFindings(reviewed, [], '2026-07-19T01:08:00.000Z').status, 'ready-for-approval')
 assert.throws(() => approveWorkflowSpec({ ...draft.spec, status: 'approved' }, '2026-07-19T01:09:00.000Z'), /already approved/i)
 
-console.log('paid-workflow smoke: 12 assertions passed')
+// ── ticket 17: deliverables persist and can be sent back ───────
+{
+  const {
+    buildStageDeliverablesFromIndex,
+    rejectWorkflowDeliverable,
+    workflowRejectionEvidence,
+    REJECTION_PREFIX,
+  } = await import('../src/agent/paidWorkflow.ts')
+  const { recordArtifactEvidence } = await import('../src/agent/artifactIndex.ts')
+
+  let index = {
+    id: 'artifact:t1:r1',
+    threadId: 't1',
+    runId: 'r1',
+    status: 'active' as const,
+    currentStatus: 'review',
+    decisions: [],
+    blockers: [],
+    suggestedNextSkills: [],
+    updatedAt: '2026-08-17T00:00:00.000Z',
+    entries: [],
+  }
+  for (const evidence of [
+    { type: 'spec' as const, source: 'workflow/spec', status: 'complete' as const, title: 'Approved Spec', revision: 2 },
+    { type: 'ticket' as const, source: 'workflow/ticket/1', status: 'complete' as const, title: 'Ticket 1' },
+    { type: 'test' as const, source: 'workflow/test/1', status: 'pending' as const, title: 'TDD test' },
+  ]) {
+    index = recordArtifactEvidence(index, evidence, '2026-08-17T00:00:00.000Z')
+  }
+
+  // deliverables are addressable off the persisted index, not a live session
+  const deliverables = buildStageDeliverablesFromIndex(index)
+  assert.ok(deliverables.length >= 3)
+  const spec = deliverables.find((item) => item.stage === 'spec')
+  assert.ok(spec)
+  assert.equal(spec.status, 'ready')
+  assert.equal(spec.id, 'deliverable:artifact:t1:r1:spec')
+  assert.ok(spec.evidence.length > 0, 'stage must expose readable evidence')
+
+  // the blocking gate is visible: tdd is still pending
+  const tdd = deliverables.find((item) => item.stage === 'tdd')
+  assert.equal(tdd?.status, 'pending')
+
+  // reject-and-return: a reason is required, and it is recorded in history
+  assert.equal(rejectWorkflowDeliverable(spec, '   ').ok, false)
+  const rejected = rejectWorkflowDeliverable(spec, '缺少驗收準則')
+  assert.equal(rejected.ok, true)
+  if (rejected.ok) {
+    assert.equal(rejected.deliverable.status, 'rejected')
+    assert.equal(rejected.deliverable.rejectionReason, '缺少驗收準則')
+    // rejecting twice is refused
+    assert.equal(rejectWorkflowDeliverable(rejected.deliverable, '再次').ok, false)
+
+    const persisted = recordArtifactEvidence(
+      index,
+      workflowRejectionEvidence(rejected.deliverable, '缺少驗收準則'),
+      '2026-08-17T01:00:00.000Z',
+    )
+    const after = buildStageDeliverablesFromIndex(persisted)
+    const specAfter = after.find((item) => item.stage === 'spec')
+    assert.equal(specAfter?.status, 'rejected', 'rejection must survive a reload of the index')
+    assert.equal(specAfter?.rejectionReason, '缺少驗收準則')
+    assert.ok(
+      persisted.entries.some((entry) => entry.detail?.startsWith(REJECTION_PREFIX)),
+      'rejection must be visible in the workflow history',
+    )
+  }
+}
+
+console.log('paid-workflow smoke: 12 + ticket-17 deliverable assertions passed')

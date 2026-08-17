@@ -7,6 +7,7 @@ import {
   settingsInputCls,
 } from '../components/settings/SettingsChrome'
 import { LogViewer } from '../components/LogViewer'
+import { ForkFromCheckpoint } from '../components/ForkFromCheckpoint'
 import { useAgentStore } from '../store/agentStore'
 import type { ArchiveRecord } from '../agent/types'
 import { STATUS_ZH, loopTypeZh, statusZh } from '../i18n/zh'
@@ -211,6 +212,10 @@ function ArchiveSection() {
                 {selected.toolCalls?.length
                   ? ` · ${selected.toolCalls.length} 工具`
                   : ''}
+              </div>
+              <div className="pt-3 border-t border-line">
+                <p className="text-[10px] tracking-widest text-outline mb-2">重跑</p>
+                <ForkFromCheckpoint allowThreadPick />
               </div>
               {(selected.loadedCapabilityIds?.length ?? 0) > 0 && (
                 <div>

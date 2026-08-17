@@ -60,3 +60,49 @@ export function requireSideEffectEvidence(value: unknown): SideEffectEvidence {
   if (!result.ok) throw new Error(result.reason)
   return result.evidence
 }
+
+/**
+ * Type-level unrepresentability (ADR-0048 layer one): a successful side effect
+ * cannot be constructed without adapter-issued evidence, mirroring how
+ * `LoopRequest`'s 'time' / 'proactive' variants require a trigger snapshot.
+ */
+export type SideEffectOutcome<T> =
+  | { ok: true; evidence: SideEffectEvidence; result: T }
+  | { ok: false; reason: string }
+
+export const MODEL_SUPPLIED_EVIDENCE_REFUSAL =
+  'execution evidence cannot be supplied through tool arguments; it is issued by the adapter that performs the effect'
+
+/**
+ * Model tool arguments are never a credential. A model that names an evidence
+ * field is refused with a reason rather than having the field silently dropped,
+ * so the attempt is visible in the transcript.
+ */
+export function rejectModelSuppliedEvidence(args: unknown): string | undefined {
+  if (!args || typeof args !== 'object') return undefined
+  const keys = Object.keys(args as Record<string, unknown>)
+  const offending = keys.find((key) => /^(evidence|evidenceId|attestation|issuedBy)$/i.test(key))
+  return offending ? `${MODEL_SUPPLIED_EVIDENCE_REFUSAL} (rejected argument: ${offending})` : undefined
+}
+
+/**
+ * Fail-closed runtime refusal (ADR-0048 layer two). Re-validates the snapshot
+ * at the exit even when the type system said it was present, because IPC
+ * payloads, casts and plain-JS callers erase layer one.
+ */
+export function gateSideEffect<T>(input: {
+  kind: SideEffectKind
+  evidence: unknown
+  result: T
+  runId?: string
+}): SideEffectOutcome<T> {
+  const validation = validateSideEffectEvidence(input.evidence)
+  if (!validation.ok) return { ok: false, reason: validation.reason }
+  if (validation.evidence.kind !== input.kind) {
+    return { ok: false, reason: `evidence kind ${validation.evidence.kind} does not match ${input.kind}` }
+  }
+  if (input.runId && validation.evidence.runId && validation.evidence.runId !== input.runId) {
+    return { ok: false, reason: 'evidence is scoped to a different run' }
+  }
+  return { ok: true, evidence: validation.evidence, result: input.result }
+}

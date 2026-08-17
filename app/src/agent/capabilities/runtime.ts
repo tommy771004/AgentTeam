@@ -5,8 +5,9 @@
  * Loading activates tools + instructions as one bundle (Pydantic AI 2.0 style).
  */
 
-import type { LlmSettings } from '../types'
-import type { OpenAiToolDef } from '../tools/schemas'
+export type { CapabilityUnlockProvenance } from './types.ts'
+import type { LlmSettings } from '../types.ts'
+import type { OpenAiToolDef } from '../tools/schemas.ts'
 import { TOOL_CATALOG, type ToolName } from '../tools/registry.ts'
 import { skillsStore } from '../hermes/skills.ts'
 import { customToolsForSettings } from '../tools/customTools.ts'
@@ -21,7 +22,8 @@ import type {
   CapabilityCatalogEntry,
   CapabilityModelSettings,
   CapabilityRuntimeState,
-} from './types'
+  CapabilityUnlockProvenance,
+} from './types.ts'
 import { mcpServersForAgent } from '../opencode/mcpAccess.ts'
 import { resolveEntitlement, isCapabilityEntitled, type EntitlementSnapshot } from '../entitlement.ts'
 
@@ -197,7 +199,7 @@ export function assembleCapabilities(
   }
 
   const loadedIds = new Set<string>()
-  const capabilityProvenance = new Map<string, 'always-on' | 'preloaded' | 'load_capability' | 'tool_search' | 'progressive-off' | 'restored'>()
+  const capabilityProvenance = new Map<string, CapabilityUnlockProvenance>()
   // Always-on are "available" without load
   for (const c of all) {
     if (!c.deferLoading) {
@@ -228,7 +230,7 @@ export function assembleCapabilities(
   )
 
   const unlocked = new Set<string>()
-  const toolProvenance = new Map<string, 'preloaded' | 'load_capability' | 'tool_search' | 'restored'>()
+  const toolProvenance = new Map<string, CapabilityUnlockProvenance>()
   for (const t of opts?.preloadUnlockedTools || []) {
     if (t?.trim()) {
       unlocked.add(t.trim())
@@ -269,13 +271,8 @@ export function listCatalog(state: CapabilityRuntimeState): CapabilityCatalogEnt
 }
 
 export type CapabilityInspection = {
-  capabilities: Array<CapabilityCatalogEntry & {
-    provenance: 'always-on' | 'preloaded' | 'load_capability' | 'tool_search' | 'progressive-off' | 'restored'
-  }>
-  unlockedTools: Array<{
-    name: string
-    provenance: 'preloaded' | 'load_capability' | 'tool_search' | 'restored'
-  }>
+  capabilities: Array<CapabilityCatalogEntry & { provenance: CapabilityUnlockProvenance }>
+  unlockedTools: Array<{ name: string; provenance: CapabilityUnlockProvenance }>
 }
 
 /** UI/audit projection: expose how the current run obtained each capability. */

@@ -26,6 +26,7 @@ import {
   type YouTubePrivacyStatus,
 } from '../src/agent/contentPublishPlatforms'
 import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
+import { createSideEffectEvidence } from '../src/agent/evidence/sideEffectEvidence.ts'
 
 const VAULT_PREFIX = 'content-publishing:'
 const TOKEN_REFRESH_WINDOW_MS = 60_000
@@ -438,6 +439,28 @@ function failed(
   return { ok: false, status: 'not-published', code, message }
 }
 
+/**
+ * Trusted adapter boundary for content publishing (ADR-0048). Only this file
+ * observed the platform API succeed, so only this file may issue the snapshot;
+ * the renderer-side registry validates and forwards it but never mints one.
+ */
+function published(
+  platform: string,
+  contentItemId: string,
+  externalId?: string,
+): PublishAdapterResult {
+  return {
+    ok: true,
+    status: 'published',
+    externalId,
+    evidence: createSideEffectEvidence({
+      kind: 'content_publish',
+      source: `platform:${platform}`,
+      metadata: { platform, contentItemId, externalId, payload: 'metadata-only' },
+    }),
+  }
+}
+
 async function publishLinkedIn(content: ContentPublishBridgeInput, token: string): Promise<PublishAdapterResult> {
   const identity = await identify('linkedin', token)
   if (!identity?.accountId) return failed('PLATFORM_API_FAILED', '無法取得 LinkedIn member identity')
@@ -462,7 +485,7 @@ async function publishLinkedIn(content: ContentPublishBridgeInput, token: string
     }),
   })
   return response.ok
-    ? { ok: true, status: 'published', externalId: response.headers.get('x-restli-id') || undefined }
+    ? published('linkedin', content.contentItemId, response.headers.get('x-restli-id') || undefined)
     : failed('PLATFORM_API_FAILED', apiError(response, 'LinkedIn 發布失敗'))
 }
 
@@ -474,7 +497,7 @@ async function publishX(content: ContentPublishBridgeInput, token: string): Prom
   })
   const data = response.json.data as Record<string, unknown> | undefined
   return response.ok && typeof data?.id === 'string'
-    ? { ok: true, status: 'published', externalId: data.id }
+    ? published('x', content.contentItemId, data.id)
     : failed('PLATFORM_API_FAILED', apiError(response, 'X 發布失敗'))
 }
 
@@ -497,7 +520,7 @@ async function publishFacebook(content: ContentPublishBridgeInput, token: string
   })
   const id = typeof response.json.id === 'string' ? response.json.id : undefined
   return response.ok && id
-    ? { ok: true, status: 'published', externalId: id }
+    ? published('facebook', content.contentItemId, id)
     : failed('PLATFORM_API_FAILED', apiError(response, 'Facebook Page 發布失敗'))
 }
 
@@ -520,15 +543,15 @@ async function publishInstagram(content: ContentPublishBridgeInput, token: strin
   if (!container.ok || !creationId) {
     return failed('PLATFORM_API_FAILED', apiError(container, 'Instagram media container 建立失敗'))
   }
-  const published = await bearerRequest(instagramGraphUrl(`/${userId}/media_publish`), token, {
+  const publishResponse = await bearerRequest(instagramGraphUrl(`/${userId}/media_publish`), token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ creation_id: creationId }),
   })
-  const id = typeof published.json.id === 'string' ? published.json.id : undefined
-  return published.ok && id
-    ? { ok: true, status: 'published', externalId: id }
-    : failed('PLATFORM_API_FAILED', apiError(published, 'Instagram 發布失敗'))
+  const id = typeof publishResponse.json.id === 'string' ? publishResponse.json.id : undefined
+  return publishResponse.ok && id
+    ? published('instagram', content.contentItemId, id)
+    : failed('PLATFORM_API_FAILED', apiError(publishResponse, 'Instagram 發布失敗'))
 }
 
 function youtubePrivacyStatus(value: YouTubePrivacyStatus | undefined) {
@@ -585,7 +608,7 @@ async function publishYouTube(content: ContentPublishBridgeInput, token: string)
   }
   const id = typeof upload.json.id === 'string' ? upload.json.id : undefined
   return upload.ok && id
-    ? { ok: true, status: 'published', externalId: id }
+    ? published('youtube', content.contentItemId, id)
     : failed('PLATFORM_API_FAILED', apiError(upload, 'YouTube 發布失敗'))
 }
 

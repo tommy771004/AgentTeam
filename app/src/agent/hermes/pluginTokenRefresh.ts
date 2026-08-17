@@ -11,8 +11,8 @@ import {
   pluginSecretsVaultApi,
   secretNeedsRefresh,
   type PluginSecretMeta,
-} from './pluginSecrets'
-import { oauthProviderForPlugin } from './pluginOAuth'
+} from './pluginSecrets.ts'
+import { oauthProviderForPlugin } from './pluginOAuth.ts'
 
 export type RefreshClientCreds = { clientId: string; clientSecret?: string }
 

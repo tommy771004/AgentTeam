@@ -1,4 +1,4 @@
-import type { AgentCapability } from './types'
+import type { AgentCapability } from './types.ts'
 import { toolsForCapability } from '../tools/toolDefinitions.ts'
 
 /** SubDesign is preloaded only for threads linked to a structured brief. */

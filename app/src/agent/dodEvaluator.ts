@@ -4,7 +4,7 @@
  */
 
 import { chatCompletion } from './llm.ts'
-import type { LlmSettings } from './types'
+import type { LlmSettings } from './types.ts'
 
 export interface DodVerdict {
   met: boolean

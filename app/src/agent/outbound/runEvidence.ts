@@ -22,6 +22,11 @@ export type OutboundRunView = {
   sealedRecords: number
 }
 
+/** One definition of "this record involved redaction" — shared with the report. */
+export function isRedactionEvent(record: Pick<OutboundRunEvidenceRecord, 'exclusionCount' | 'eventType'>): boolean {
+  return record.exclusionCount > 0 || /redact|sanitize|exclusion/i.test(record.eventType)
+}
+
 export function projectOutboundRunEvidence(
   runId: string,
   records: OutboundRunEvidenceRecord[],
@@ -40,7 +45,7 @@ export function projectOutboundRunEvidence(
     records: bounded,
     providerIds: [...new Set(bounded.map((record) => record.providerId).filter(Boolean) as string[])],
     exclusionCount: bounded.reduce((sum, record) => sum + record.exclusionCount, 0),
-    redactionEvents: bounded.filter((record) => record.exclusionCount > 0 || /redact|sanitize|exclusion/i.test(record.eventType)).length,
+    redactionEvents: bounded.filter(isRedactionEvent).length,
     sealedRecords: bounded.filter((record) => record.sealed).length,
   }
 }

@@ -1,4 +1,4 @@
-import type { LlmSettings } from './types'
+import type { LlmSettings } from './types.ts'
 
 /** Small fixed rollout ceiling for the opt-in concurrent-run mode. */
 export const DEFAULT_MAX_CONCURRENT_RUNS = 4

@@ -15,7 +15,7 @@ import type {
   ApprovalMode,
   PermissionPolicy,
   PermissionProjection,
-} from '../types'
+} from '../types.ts'
 import {
   checkProjectedToolPermission,
   checkToolPermission,

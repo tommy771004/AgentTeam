@@ -124,8 +124,6 @@ export type WorkflowStageDeliverable = {
   status: WorkflowDeliverableStatus
   revision: number
   producedAt: string
-  inspectable: true
-  rejectable: true
   evidence: ArtifactEvidence[]
   rejectedAt?: string
   rejectionReason?: string
@@ -386,6 +384,56 @@ export function acceptWorkflowDeliveryEvidence(
   }
 }
 
+export type WorkflowDelivery = {
+  action: 'merge' | 'push' | 'deploy'
+  sessionId: string
+  approvedBy: 'user'
+  recordedAt: string
+  evidence: SideEffectEvidence
+}
+
+/**
+ * The only way a delivery action is recorded as performed. Two independent
+ * gates, per ADR-0048 and the paid-workflow rule that delivery is never an
+ * automatic side effect: explicit user approval (authorisation) and
+ * adapter-issued evidence (execution credential). Approval mode `full` reaches
+ * the first gate only — it cannot manufacture the second, and an unattended run
+ * that times out produces no evidence and so records nothing.
+ */
+export function recordWorkflowDelivery(
+  session: WorkflowSession,
+  input: {
+    action: 'merge' | 'push' | 'deploy'
+    userApproved: boolean
+    evidence: unknown
+    at?: string
+  },
+): Result<{ session: WorkflowSession; delivery: WorkflowDelivery }> {
+  if (!workflowActionRequiresApproval(input.action)) {
+    return { ok: false, reason: `${input.action} is not a delivery action` }
+  }
+  if (!input.userApproved) {
+    return { ok: false, reason: `${input.action} requires explicit user approval before delivery` }
+  }
+  const accepted = acceptWorkflowDeliveryEvidence(input.action, input.evidence)
+  if (!accepted.ok) return { ok: false, reason: accepted.reason }
+  if (accepted.evidence.runId && accepted.evidence.runId !== session.runId) {
+    return { ok: false, reason: 'delivery evidence is scoped to a different run' }
+  }
+  const at = input.at || new Date().toISOString()
+  return {
+    ok: true,
+    session,
+    delivery: {
+      action: input.action,
+      sessionId: session.id,
+      approvedBy: 'user',
+      recordedAt: at,
+      evidence: accepted.evidence,
+    },
+  }
+}
+
 function evidence(
   type: ArtifactEvidenceType,
   source: string,
@@ -454,11 +502,64 @@ export function buildWorkflowStageDeliverables(
       status: deliverableStatus(stageEvidence),
       revision,
       producedAt: at,
-      inspectable: true,
-      rejectable: true,
       evidence: stageEvidence,
     }
   })
+}
+
+/**
+ * The same five stages, derived from the persisted artifact index rather than
+ * from a live session. This is what makes a deliverable addressable after the
+ * run settles, and it deliberately reuses the index instead of adding a second
+ * workflow store.
+ */
+export function buildStageDeliverablesFromIndex(
+  index: Pick<ArtifactIndex, 'id' | 'entries'>,
+  at = new Date().toISOString(),
+): WorkflowStageDeliverable[] {
+  return DELIVERABLE_STAGES.map((definition) => {
+    const entries = index.entries.filter((entry) => definition.types.includes(entry.type))
+    const stageEvidence: ArtifactEvidence[] = entries.map((entry) => ({
+      type: entry.type,
+      source: entry.source,
+      status: entry.status,
+      title: entry.title,
+      detail: entry.detail,
+      revision: entry.revision,
+      digest: entry.digest,
+    }))
+    const rejection = entries.find((entry) => entry.detail?.startsWith(REJECTION_PREFIX))
+    return {
+      id: `deliverable:${index.id}:${definition.stage}`,
+      sessionId: index.id,
+      stage: definition.stage,
+      title: definition.title,
+      status: rejection ? 'rejected' : deliverableStatus(stageEvidence),
+      revision: Math.max(1, ...stageEvidence.map((item) => item.revision || 1)),
+      producedAt: entries.at(-1)?.at || at,
+      evidence: stageEvidence,
+      rejectedAt: rejection?.at,
+      rejectionReason: rejection?.detail?.slice(REJECTION_PREFIX.length),
+    }
+  }).filter((deliverable) => deliverable.evidence.length > 0)
+}
+
+/** Marker that keeps a rejection in the run's own history, not a new store. */
+export const REJECTION_PREFIX = '退回：'
+
+/** Persistable evidence describing a user rejection of one stage. */
+export function workflowRejectionEvidence(
+  deliverable: WorkflowStageDeliverable,
+  reason: string,
+): ArtifactEvidence {
+  return {
+    type: deliverable.stage === 'final-output' ? 'final-output' : 'decision',
+    source: `${deliverable.id}/rejection`,
+    status: 'failed',
+    revision: deliverable.revision,
+    title: `${deliverable.title} 已退回`,
+    detail: `${REJECTION_PREFIX}${compact(reason, 300)}`,
+  }
 }
 
 export function rejectWorkflowDeliverable(

@@ -2,7 +2,7 @@
  * LLM client — OpenAI-compatible Chat Completions + function calling.
  */
 
-import type { LlmSettings, ModelSource } from './types'
+import type { LlmSettings, ModelSource } from './types.ts'
 import { DEFAULT_CLI_PROVIDERS } from './cliProviders.ts'
 import { breakerKey, callWithResilience } from './llmResilience.ts'
 import {

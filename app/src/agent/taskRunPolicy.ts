@@ -10,24 +10,24 @@ import type {
   EventTriggerSnapshot,
   LoopType,
   ScheduleTriggerSnapshot,
-} from './types'
+} from './types.ts'
 import {
   formatAutomationSuggestion,
   type AutomationSuggestion,
-} from './automationSuggestion'
-import { validateEventTriggerSnapshot } from './eventMatcher'
+} from './automationSuggestion.ts'
+import { validateEventTriggerSnapshot } from './eventMatcher.ts'
 import {
   isClaimedScheduleTrigger,
   validateScheduleTriggerSnapshot,
-} from './scheduler'
-import { useThreadStore } from '../store/threadStore'
+} from './scheduler.ts'
+import { useThreadStore } from '../store/threadStore.ts'
 import type {
   ExternalRunOpts,
   ExternalRunResult,
   RunSourceKind,
-} from './taskRunTypes'
+} from './taskRunTypes.ts'
 
-export type BusyPolicy = 'queue' | 'steer' | 'reject'
+export { resolveBusyPolicy, type BusyPolicy } from './taskRunTypes.ts'
 
 /** Compact partial result when steer aborts a running task. */
 export function buildSteerPartialDigest(agent: AgentState): string {
@@ -61,29 +61,6 @@ export function buildSteerPartialDigest(agent: AgentState): string {
     if (stepTail) bits.push(`部分產出：${String(stepTail).slice(0, 400)}`)
   }
   return bits.join('\n').slice(0, 1200)
-}
-
-/** Declarative busy policy. */
-export function resolveBusyPolicy(
-  sourceKind: RunSourceKind | undefined,
-  followUpMode: 'steer' | 'queue' | undefined,
-): BusyPolicy {
-  switch (sourceKind) {
-    case 'schedule':
-    case 'webhook':
-    case 'telegram':
-    case 'event':
-    case 'delegate':
-    case 'headless':
-    case 'queue-drain':
-      return 'queue'
-    case 'composer':
-    case 'slash':
-    case 'retry':
-      return (followUpMode || 'steer') === 'queue' ? 'queue' : 'steer'
-    default:
-      return 'reject'
-  }
 }
 
 const AUTOMATION_KINDS: ReadonlySet<RunSourceKind> = new Set([
@@ -175,7 +152,7 @@ export async function verifyClaimedScheduleTrigger(
   snapshot: ScheduleTriggerSnapshot,
 ): Promise<string | null> {
   try {
-    const { useScheduleStore } = await import('../store/scheduleStore')
+    const { useScheduleStore } = await import('../store/scheduleStore.ts')
     const store = useScheduleStore.getState()
     if (!store.loaded) await store.load()
     const job = useScheduleStore

@@ -40,6 +40,14 @@ import {
   buildHandoffDocument,
   readArtifactIndex,
 } from '../agent/composerRunControls'
+import {
+  buildStageDeliverablesFromIndex,
+  rejectWorkflowDeliverable,
+  workflowRejectionEvidence,
+  type WorkflowStageDeliverable,
+} from '../agent/paidWorkflow'
+import { recordArtifactEvidence, upsertArtifactIndex, type ArtifactIndex } from '../agent/artifactIndex'
+import { WorkflowDeliverablesPanel } from '../components/WorkflowDeliverablesPanel'
 
 /**
  * OpenCode 風格：Build/Plan + 模型/深度 + Threads + 內嵌執行
@@ -116,10 +124,37 @@ export function ProtocolsPage() {
     objective: presentationAgent.objective,
   })
   const composerApprovalMode = activeId ? composerApprovalModes[activeId] : undefined
-  const handoff = buildHandoffAvailability(
-    readArtifactIndex(typeof window === 'undefined' ? undefined : window.localStorage, activeId || ''),
+  // Ticket 17: stage deliverables are read from the persisted artifact index,
+  // so they remain addressable after the run settles — no second workflow store.
+  const workflowIndex = readArtifactIndex(
+    typeof window === 'undefined' ? undefined : window.localStorage,
     activeId || '',
   )
+  const workflowDeliverables = workflowIndex?.id
+    ? buildStageDeliverablesFromIndex({ id: workflowIndex.id, entries: workflowIndex.entries || [] })
+    : []
+  const rejectDeliverable = (
+    deliverable: WorkflowStageDeliverable,
+    reason: string,
+  ) => {
+    const index = readArtifactIndex(
+      typeof window === 'undefined' ? undefined : window.localStorage,
+      activeId || '',
+    ) as ArtifactIndex | null
+    if (!index) return
+    const rejected = rejectWorkflowDeliverable(deliverable, reason)
+    if (!rejected.ok) return
+    // The rejection lives in the run's own history as artifact evidence.
+    upsertArtifactIndex(
+      typeof window === 'undefined' ? undefined : window.localStorage,
+      recordArtifactEvidence(index, workflowRejectionEvidence(rejected.deliverable, reason)),
+    )
+    if (activeId) {
+      pushBubble(activeId, 'system', `已退回 ${deliverable.title}：${reason}`)
+    }
+  }
+
+  const handoff = buildHandoffAvailability(workflowIndex, activeId || '')
 
   useEffect(() => {
     hydrate()
@@ -478,6 +513,12 @@ export function ProtocolsPage() {
                           <RunContinuationActions
                             threadId={activeId}
                             runId={presentationRunId}
+                          />
+                        ) : null}
+                        {workflowDeliverables.length > 0 ? (
+                          <WorkflowDeliverablesPanel
+                            deliverables={workflowDeliverables}
+                            onReject={rejectDeliverable}
                           />
                         ) : null}
                       </>

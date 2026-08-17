@@ -6,6 +6,21 @@ import { useSettingsStore } from '../store/settingsStore'
 import { forkOpenCodeSession } from '../agent/opencode/serverClient'
 import { extractOpenCodeSessionId } from '../agent/opencode/sessionMapping'
 import { rerunFromReplaySafeCheckpoint } from '../agent/taskRunCoordinator'
+import type { CapabilityUnlockProvenance } from '../agent/capabilities/runtime'
+
+/** Ticket 03: entries state how they were unlocked, not what kind they are. */
+const PROVENANCE_ZH: Record<CapabilityUnlockProvenance, string> = {
+  'always-on': '預設常駐',
+  preloaded: '預先載入',
+  load_capability: 'load_capability',
+  tool_search: 'tool_search',
+  'progressive-off': '未啟用漸進揭露',
+  restored: '跨輪還原',
+}
+
+function provenanceZh(value?: CapabilityUnlockProvenance): string {
+  return value ? PROVENANCE_ZH[value] : '跨輪還原'
+}
 
 export function ThreadSidebar() {
   const {
@@ -174,11 +189,19 @@ export function ThreadSidebar() {
             </div>
             <div className="text-[10px] text-ink-2">
               <span className="font-semibold">Capabilities</span>{' '}
-              {caps.length ? caps.map((id) => `${id}（${id.startsWith('skill:') ? 'skill' : id.startsWith('mcp:') ? 'mcp' : 'builtin'}）`).join('、') : '（無）'}
+              {caps.length
+                ? caps
+                    .map((id) => `${id}（${provenanceZh(activeThread.lastCapabilityProvenance?.[id])}）`)
+                    .join('、')
+                : '（無）'}
             </div>
             <div className="text-[10px] text-ink-2">
               <span className="font-semibold">Unlocked tools</span>{' '}
-              {tools.length ? tools.join('、') : '（無）'}
+              {tools.length
+                ? tools
+                    .map((name) => `${name}（${provenanceZh(activeThread.lastUnlockedToolProvenance?.[name])}）`)
+                    .join('、')
+                : '（無）'}
             </div>
           </div>
         )

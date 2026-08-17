@@ -1,4 +1,4 @@
-import type { DesignSystemDocument, DesignSystemSummary } from './types'
+import type { DesignSystemDocument, DesignSystemSummary } from './types.ts'
 
 export const DESIGN_SYSTEM_ROOT = '.subagents/subdesign/design-systems'
 const SAFE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/

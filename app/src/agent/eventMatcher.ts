@@ -10,7 +10,7 @@ import type {
   EventPredicateEvidence,
   EventTriggerSnapshot,
   ProactiveEvent,
-} from './types'
+} from './types.ts'
 
 export interface ProactiveEventPayload {
   source: string

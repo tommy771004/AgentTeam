@@ -24,7 +24,7 @@ register({
     let root = input.projectRoot ? String(input.projectRoot) : ''
     if (!root) {
       try {
-        const { useProjectStore } = await import('../../../store/projectStore')
+        const { useProjectStore } = await import('../../../store/projectStore.ts')
         root = useProjectStore.getState().root || ''
       } catch {
         /* ignore */

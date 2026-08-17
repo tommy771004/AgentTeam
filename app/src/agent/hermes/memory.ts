@@ -3,7 +3,7 @@
  */
 
 import { v4 as uuid } from 'uuid'
-import type { MemoryBundle, MemoryEntry } from './types'
+import type { MemoryBundle, MemoryEntry } from './types.ts'
 import { scoreQueryText } from './textSimilarity.ts'
 
 const MAX_MEMORY_CHARS = 12_000

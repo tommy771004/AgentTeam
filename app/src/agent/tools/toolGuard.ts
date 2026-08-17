@@ -10,7 +10,7 @@
  * uses authorizeTool + execute via invokeGatedTool. Do not reintroduce a
  * parallel auth+execute entry without a real caller.
  */
-import type { LlmSettings, PermissionPolicy, PermissionProjection } from '../types'
+import type { LlmSettings, PermissionPolicy, PermissionProjection } from '../types.ts'
 import {
   decide,
   decideApprovalNeed,
@@ -51,11 +51,11 @@ async function emitPermissionDenied(
   onLog?: (level: string, message: string) => void,
 ): Promise<void> {
   try {
-    const { collectHookRules, evaluateHooks } = await import('../hooks')
+    const { collectHookRules, evaluateHooks } = await import('../hooks.ts')
     const ev = evaluateHooks(collectHookRules(settings), {
       point: 'permissionDenied',
       tool,
-      sourceKind: ctx.sourceKind as import('../hooks').HookContext['sourceKind'],
+      sourceKind: ctx.sourceKind as import('../hooks.ts').HookContext['sourceKind'],
       objective: ctx.objective,
       reason,
     })
@@ -68,7 +68,7 @@ async function emitPermissionDenied(
   }
   // G11 denial 記帳(denial ratio 是 approvalMode / allowlist 的調整回饋)
   try {
-    const { bumpRunMetric } = await import('../metrics')
+    const { bumpRunMetric } = await import('../metrics.ts')
     bumpRunMetric(ctx.runId, 'toolDenials')
   } catch {
     /* metrics must never block */
@@ -117,7 +117,7 @@ export async function authorizeTool(opts: {
   }
   if (opts.runId) {
     try {
-      const { isPlanModeActive, planModeToolDecision } = await import('../planMode')
+      const { isPlanModeActive, planModeToolDecision } = await import('../planMode.ts')
       if (isPlanModeActive(opts.runId)) {
         const d = planModeToolDecision(tool, input, opts.sideEffect === true)
         planMode = { active: true, allowed: d.allowed, reason: d.reason }
@@ -129,7 +129,7 @@ export async function authorizeTool(opts: {
 
   let subDesign: { selectedDirectionId?: string | null } | null = null
   try {
-    const { useSubDesignStore } = await import('../../store/subDesignStore')
+    const { useSubDesignStore } = await import('../../store/subDesignStore.ts')
     const runThreadId = opts.threadId
     const brief = runThreadId ? useSubDesignStore.getState().findByThreadId(runThreadId) : null
     if (brief) subDesign = { selectedDirectionId: brief.selectedDirectionId }
@@ -143,7 +143,7 @@ export async function authorizeTool(opts: {
   if (tool === 'bash' || (tool === 'monitor' && String(input.action || '') === 'start')) {
     let agentId: string | undefined
     try {
-      const { useThreadStore } = await import('../../store/threadStore')
+      const { useThreadStore } = await import('../../store/threadStore.ts')
       const thr = useThreadStore.getState()
       const runThreadId = opts.threadId
       const t = thr.threads.find((x) => x.id === (runThreadId || thr.activeId))
@@ -152,7 +152,7 @@ export async function authorizeTool(opts: {
       /* ignore */
     }
     try {
-      const { resolveBashAction } = await import('../opencode/agentRegistry')
+      const { resolveBashAction } = await import('../opencode/agentRegistry.ts')
       resolveBash = (candidate, fb) => resolveBashAction(agentId, candidate, fb)
     } catch {
       /* bash resolver unavailable — decide() falls back to bashRequireAsk */
@@ -161,7 +161,7 @@ export async function authorizeTool(opts: {
 
   let hookRules: DecisionHookRule[] | undefined
   try {
-    const { collectHookRules } = await import('../hooks')
+    const { collectHookRules } = await import('../hooks.ts')
     hookRules = collectHookRules(settings) as DecisionHookRule[]
   } catch {
     /* hooks unavailable — never block execution on hook infra */
@@ -209,7 +209,7 @@ export async function authorizeTool(opts: {
 
   if (decision.verdict === 'ask' && decision.askSpec) {
     try {
-      const { bumpRunMetric } = await import('../metrics')
+      const { bumpRunMetric } = await import('../metrics.ts')
       bumpRunMetric(opts.runId, 'toolAsks')
     } catch {
       /* metrics must never block */
@@ -222,7 +222,7 @@ export async function authorizeTool(opts: {
       `權限 ask：${tool} — 等待使用者核准…（${Math.round(timeoutMs / 1000)}s 逾時自動拒絕${opts.unattended ? ' · 無人值守' : ''}）`,
     )
     try {
-      const { usePermissionAskStore } = await import('../../store/permissionAskStore')
+      const { usePermissionAskStore } = await import('../../store/permissionAskStore.ts')
       const hitl = await usePermissionAskStore.getState().requestAsk({
         threadId: opts.threadId,
         runId: opts.runId,

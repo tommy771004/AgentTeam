@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import type { BackgroundJob } from '../agent/hermes/backgroundJobs'
+import type { BackgroundJob } from '../agent/hermes/backgroundJobs.ts'
 import {
   listBackgroundJobs,
   subscribeBackgroundJobs,
-} from '../agent/hermes/backgroundJobs'
+} from '../agent/hermes/backgroundJobs.ts'
 
 export type GatewayInboundMsg = {
   channel: 'telegram' | 'webhook' | 'system'

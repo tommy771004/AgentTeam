@@ -17,7 +17,7 @@ import type {
   RuntimeOverrides,
   SafetyCheck,
   SubAgentNode,
-} from '../types'
+} from '../types.ts'
 import { evaluateSafety, formatPayloadForDisplay } from '../safety.ts'
 import { resolveRoleModel, withRoleModel } from '../llm.ts'
 import {

@@ -17,7 +17,7 @@ import type {
   PermissionPolicy,
   PermissionProjection,
   ToolCallRecord,
-} from '../types'
+} from '../types.ts'
 import type { AssembleOpts } from '../capabilities/runtime.ts'
 
 export type StepExecutorInput = {
@@ -25,7 +25,7 @@ export type StepExecutorInput = {
   objective: string
   step: string
   stepOutputs: string[]
-  userAttachments?: import('../types').ChatAttachment[]
+  userAttachments?: import('../types.ts').ChatAttachment[]
   settings: LlmSettings
   overrides: {
     projectRoot?: string
@@ -100,7 +100,7 @@ export function buildStepCapabilityPreload(input: {
   agentName?: string
   role?: string
   projectRoot?: string
-  entitlement?: import('../entitlement').EntitlementSnapshot
+  entitlement?: import('../entitlement.ts').EntitlementSnapshot
 }): AssembleOpts {
   const { settings, overrides, loadedCapabilityIds, unlockedToolNames, agentName, role } =
     input

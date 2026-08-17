@@ -4,6 +4,11 @@
  * Supports text + photo/document attachments (downloaded as data URLs).
  */
 
+import {
+  createSideEffectEvidence,
+  type SideEffectEvidence,
+} from '../src/agent/evidence/sideEffectEvidence.ts'
+
 export type GatewayChannel = 'telegram' | 'webhook' | 'system'
 
 export type GatewayAttachment = {
@@ -311,12 +316,18 @@ export async function stopTelegramGateway(): Promise<GatewayStatus> {
   return getGatewayStatus()
 }
 
+/**
+ * Trusted adapter boundary for outbound messaging (ADR-0048). Evidence is
+ * issued here — in main, after the API call actually succeeded — because this
+ * is the only component that observed the effect. The renderer never mints it.
+ */
 export async function gatewaySendMessage(input: {
   channel: GatewayChannel
   chatId: string
   text: string
   token?: string
-}): Promise<{ ok: boolean; error?: string }> {
+  runId?: string
+}): Promise<{ ok: boolean; error?: string; evidence?: SideEffectEvidence }> {
   if (input.channel !== 'telegram') {
     return { ok: false, error: 'only telegram outbound supported' }
   }
@@ -327,7 +338,15 @@ export async function gatewaySendMessage(input: {
       chat_id: input.chatId,
       text: (input.text || '').slice(0, 4000),
     })
-    return { ok: true }
+    return {
+      ok: true,
+      evidence: createSideEffectEvidence({
+        runId: input.runId,
+        kind: 'message_send',
+        source: `gateway:${input.channel}`,
+        metadata: { channel: input.channel, targetRef: input.chatId, payload: 'metadata-only' },
+      }),
+    }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

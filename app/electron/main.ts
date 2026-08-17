@@ -173,7 +173,7 @@ import {
   isProjectRelativePath,
   validateSubDesignArtifactManifest,
 } from '../src/agent/subdesign/artifactManifest'
-import { isSafeLearningExportPath } from '../src/agent/hermes/learningExport'
+import { writeLearningExport } from './learningExportWrite.ts'
 import { normalizeSubDesignCritique, critiqueAllowsDeliver } from '../src/agent/subdesign/critique'
 import type {
   SubDesignArtifact,
@@ -1260,7 +1260,13 @@ ipcMain.handle(
   'gateway:send',
   async (
     _evt,
-    input: { channel: 'telegram' | 'webhook' | 'system'; chatId: string; text: string; token?: string },
+    input: {
+      channel: 'telegram' | 'webhook' | 'system'
+      chatId: string
+      text: string
+      token?: string
+      runId?: string
+    },
   ) => gatewaySendMessage(input),
 )
 
@@ -3424,18 +3430,9 @@ ipcMain.handle('learning:export', async (_evt, input: unknown) => {
       projectRoot?: string
       overwrite?: boolean
     } : {}
-    const relativePath = String(value.relativePath || '').replace(/\\/g, '/')
-    if (!isSafeLearningExportPath(relativePath)) {
-      return { ok: false, error: 'learning export path 必須位於 .subagents/ 下。' }
-    }
-    const root = workspaceRootFor(value.projectRoot)
-    const file = resolveWorkspacePath(relativePath, root)
-    if (fs.existsSync(file) && value.overwrite !== true) {
-      return { ok: false, exists: true, path: relativePath, error: '檔案已存在；請明確選擇覆寫。' }
-    }
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, String(value.content || ''), 'utf8')
-    return { ok: true, path: relativePath, bytes: Buffer.byteLength(String(value.content || ''), 'utf8') }
+    // Confinement (traversal / absolute / symlink) lives in the writer so it
+    // is covered by smoke-learning-export.mts rather than only by review.
+    return writeLearningExport(value, workspaceRootFor)
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }

@@ -14,21 +14,21 @@ import type {
   LoopType,
   RuntimeOverrides,
   SubAgentNode,
-} from './types'
-import { buildParseResult, formatPlanBubble, parseUserRequest } from './parser'
-import { parseWithLlm } from './llmParser'
-import { replanCorrectiveSteps } from './replan'
-import { formatContinueGoalOffer } from './continueGoal'
-import { emptyKnowledge } from './knowledge'
-import { DEFAULT_LLM_SETTINGS, resolveRoleModel, withRoleModel } from './llm'
-import { BUILTIN_RUNNER_CAPABILITIES } from './runners'
-import { skillsStore } from './hermes/skills'
+} from './types.ts'
+import { buildParseResult, formatPlanBubble, parseUserRequest } from './parser.ts'
+import { parseWithLlm } from './llmParser.ts'
+import { replanCorrectiveSteps } from './replan.ts'
+import { formatContinueGoalOffer } from './continueGoal.ts'
+import { emptyKnowledge } from './knowledge.ts'
+import { DEFAULT_LLM_SETTINGS, resolveRoleModel, withRoleModel } from './llm.ts'
+import { BUILTIN_RUNNER_CAPABILITIES } from './runners/index.ts'
+import { skillsStore } from './hermes/skills.ts'
 import {
   isClaimedScheduleTrigger,
   validateScheduleTriggerSnapshot,
   type ScheduleTriggerValidation,
-} from './scheduler'
-import { validateEventTriggerSnapshot } from './eventMatcher'
+} from './scheduler.ts'
+import { validateEventTriggerSnapshot } from './eventMatcher.ts'
 import { runLoop, type LoopDeps, type LoopRequest } from './loop/index.ts'
 import { snapshot } from './loop/state.ts'
 import type { AskDecision } from './loop/stepRun.ts'
@@ -69,7 +69,7 @@ export class AgentLoopEngine {
   /** W2: persistent project guidance (AGENTS.md) resolved per run */
   private projectGuidance = ''
   /** Vision / file attachments for this run (FC multimodal) */
-  private userAttachments: import('./types').ChatAttachment[] = []
+  private userAttachments: import('./types.ts').ChatAttachment[] = []
 
   constructor() {
     this.state = this.emptyState()
@@ -165,7 +165,7 @@ export class AgentLoopEngine {
     const validation = validateScheduleTriggerSnapshot(this.overrides.scheduleTrigger)
     if (!validation.ok) return validation
     try {
-      const { useScheduleStore } = await import('../store/scheduleStore')
+      const { useScheduleStore } = await import('../store/scheduleStore.ts')
       const store = useScheduleStore.getState()
       if (!store.loaded) await store.load()
       const job = useScheduleStore
@@ -327,10 +327,10 @@ export class AgentLoopEngine {
     this.projectGuidance = ''
     try {
       const { resolveProjectContext, formatProjectGuidance, summarizeProjectContext } =
-        await import('./projectContext')
+        await import('./projectContext.ts')
       let root = (this.overrides.projectRoot || '').trim()
       if (!root) {
-        const { useProjectStore } = await import('../store/projectStore')
+        const { useProjectStore } = await import('../store/projectStore.ts')
         root = useProjectStore.getState().root || ''
       }
       const docs = await resolveProjectContext(root)
@@ -341,7 +341,7 @@ export class AgentLoopEngine {
       }
       // W3: OpenCode instructions — temporary apply per run（不寫入全域設定）
       try {
-        const { useOpenCodeConfigStore } = await import('../store/opencodeConfigStore')
+        const { useOpenCodeConfigStore } = await import('../store/opencodeConfigStore.ts')
         // Per-run project pin — must not use wrong UI project's instructions
         const pinRoot = (this.overrides.projectRoot || root || '').trim()
         const oc = useOpenCodeConfigStore.getState()
@@ -532,10 +532,10 @@ export class AgentLoopEngine {
         !temporaryRun
       ) {
         try {
-          const { searchSessions } = await import('./hermes/sessionSearch')
-          const { formatSessionRecallBlock } = await import('./hermes/contextPacket')
-          const { SESSION_RECALL_CONTEXT_CHARS } = await import('./chatHistory')
-          const { useAgentStore } = await import('../store/agentStore')
+          const { searchSessions } = await import('./hermes/sessionSearch.ts')
+          const { formatSessionRecallBlock } = await import('./hermes/contextPacket.ts')
+          const { SESSION_RECALL_CONTEXT_CHARS } = await import('./chatHistory.ts')
+          const { useAgentStore } = await import('../store/agentStore.ts')
           const hits = searchSessions(rawInput, useAgentStore.getState().archive || [], 8)
           if (hits.length) {
             this.sessionRecallBlock = formatSessionRecallBlock(hits, {
@@ -569,7 +569,7 @@ export class AgentLoopEngine {
 
       // P0: surface plan in chat bubble (visible parse result)
       try {
-        const { useThreadStore } = await import('../store/threadStore')
+        const { useThreadStore } = await import('../store/threadStore.ts')
         const thr = useThreadStore.getState()
         const tid =
           this.overrides.threadId || thr.runningThreadId || thr.activeId
@@ -657,7 +657,7 @@ export class AgentLoopEngine {
         attachedSkillContext: this.attachedSkillContext,
         userAttachments: this.userAttachments,
         onGoalIncomplete: (snapshot) => {
-          void import('../store/threadStore').then(({ useThreadStore }) => {
+          void import('../store/threadStore.ts').then(({ useThreadStore }) => {
             const thr = useThreadStore.getState()
             const tid = this.overrides.threadId || thr.runningThreadId || thr.activeId
             if (!tid) return
@@ -666,7 +666,7 @@ export class AgentLoopEngine {
           })
         },
         onGoalCleared: () => {
-          void import('../store/threadStore').then(({ useThreadStore }) => {
+          void import('../store/threadStore.ts').then(({ useThreadStore }) => {
             const thr = useThreadStore.getState()
             const tid = this.overrides.threadId || thr.runningThreadId || thr.activeId
             if (tid) thr.setContinueGoal(tid, null)

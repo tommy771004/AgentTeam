@@ -1,5 +1,5 @@
-import type { PluginManifest } from '../hermes/plugins'
-import type { OpenDesignCatalogRecord, OpenDesignExecutionStatus } from './catalog'
+import type { PluginManifest } from '../hermes/plugins.ts'
+import type { OpenDesignCatalogRecord, OpenDesignExecutionStatus } from './catalog.ts'
 
 export type OpenDesignPackKind = 'template' | 'skill' | 'design-system' | 'prompt' | 'craft' | 'media'
 export type OpenDesignTrustState = 'bundled' | 'community-reviewed' | 'local-user' | 'remote-unverified'

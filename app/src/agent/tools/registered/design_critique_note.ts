@@ -21,7 +21,7 @@ register({
     const runId = context?.runId
     const threadId = context?.threadId
     try {
-    const { useSubDesignCritiqueSessionStore } = await import('../../../store/subDesignCritiqueSessionStore')
+    const { useSubDesignCritiqueSessionStore } = await import('../../../store/subDesignCritiqueSessionStore.ts')
     const artifactId = String(input.artifactId || '').trim()
     const panelistId = input.panelistId
     if (!['visual', 'accessibility', 'implementation'].includes(String(panelistId))) {

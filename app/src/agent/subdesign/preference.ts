@@ -1,5 +1,5 @@
-import type { MemoryEntry } from '../hermes/types'
-import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignPlatform, SubDesignSurface } from './types'
+import type { MemoryEntry } from '../hermes/types.ts'
+import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignPlatform, SubDesignSurface } from './types.ts'
 
 export type SubDesignPreference = Pick<
   SubDesignBrief,

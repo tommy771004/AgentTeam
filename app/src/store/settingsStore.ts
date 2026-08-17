@@ -1,18 +1,18 @@
 import { create } from 'zustand'
-import { DEFAULT_LLM_SETTINGS } from '../agent/llm'
-import { mergeCliProviders } from '../agent/cliProviders'
-import { recommendToolTuning } from '../agent/modelTuning'
-import { redactSettingsForExport } from '../agent/settingsExport'
+import { DEFAULT_LLM_SETTINGS } from '../agent/llm.ts'
+import { mergeCliProviders } from '../agent/cliProviders.ts'
+import { recommendToolTuning } from '../agent/modelTuning.ts'
+import { redactSettingsForExport } from '../agent/settingsExport.ts'
 import {
   isElectronPiProduction,
   piSettingsPatchFromLlmSettings,
   stripPiOwnedSettings,
-} from '../agent/piProduction'
+} from '../agent/piProduction.ts'
 import {
   SETTINGS_CUSTOM_MERGE_KEYS,
   type SettingsCustomMergeKey,
 } from '../agent/settingsMergeKeys.ts'
-import type { LlmSettings } from '../agent/types'
+import type { LlmSettings } from '../agent/types.ts'
 
 export { SETTINGS_CUSTOM_MERGE_KEYS, type SettingsCustomMergeKey }
 
@@ -246,7 +246,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     // browser-only; renderer-owned preferences still use the legacy bridge below.
     if (!isElectronPiProduction()) {
       try {
-        const { agentEngine } = await import('../agent/engine')
+        const { agentEngine } = await import('../agent/engine.ts')
         agentEngine.configure(next)
       } catch {
         /* ignore if engine unavailable */

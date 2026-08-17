@@ -11,9 +11,9 @@ import {
   type DeviceActivation,
   type SubscriptionLifecycleEvent,
   type SubscriptionFailureKind,
-} from '../agent/subscription'
-import type { EntitlementSnapshot } from '../agent/entitlement'
-import { readJson, writeJson } from './persist'
+} from '../agent/subscription.ts'
+import type { EntitlementSnapshot } from '../agent/entitlement.ts'
+import { readJson, writeJson } from './persist.ts'
 
 const STORAGE_KEY = 'subscription'
 const RAW_ENTITLEMENT_KEY = 'entitlement'

@@ -11,7 +11,7 @@ import type {
   NextState,
   PostStateOutcome,
   ScheduleTriggerSnapshot,
-} from './types'
+} from './types.ts'
 
 export interface WebhookDeliveryRequest {
   target: string

@@ -3,7 +3,7 @@
  * Triggers manual intervention when proposed actions touch sensitive resources.
  */
 
-import type { SafetyCheck } from './types'
+import type { SafetyCheck } from './types.ts'
 
 const SENSITIVE_TABLES = [
   'user_credentials',

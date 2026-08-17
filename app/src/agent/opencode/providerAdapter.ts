@@ -1,4 +1,4 @@
-import type { ModelProfile } from '../types'
+import type { ModelProfile } from '../types.ts'
 
 export type OpenCodeProviderCatalog = {
   providers?: Array<{

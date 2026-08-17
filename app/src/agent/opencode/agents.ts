@@ -3,7 +3,7 @@
  * @see https://opencode.ai/docs/agents
  */
 
-import type { AgentMode, PermissionPolicy, SubagentId } from '../types'
+import type { AgentMode, PermissionPolicy, SubagentId } from '../types.ts'
 
 export type { AgentMode, SubagentId }
 

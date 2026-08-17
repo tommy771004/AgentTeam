@@ -3,7 +3,7 @@
  * with gap-driven corrective steps instead of blind re-run of the same plan.
  */
 
-import type { ExecutionStep } from './types'
+import type { ExecutionStep } from './types.ts'
 
 /**
  * Build 1–3 corrective steps from DoD missing[] items, plus an optional re-validate step.

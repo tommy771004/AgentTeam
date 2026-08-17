@@ -83,7 +83,7 @@ register({
       }
 
       if (background) {
-        const { enqueueBackgroundDelegate } = await import('../../hermes/backgroundJobs')
+        const { enqueueBackgroundDelegate } = await import('../../hermes/backgroundJobs.ts')
         const job = enqueueBackgroundDelegate(settings, {
           goal,
           context: input.context ? String(input.context) : undefined,
@@ -100,7 +100,7 @@ register({
       }
 
       // Always Task run admission (+ G9 prepare inside spawnDelegateViaRunTask)
-      const { spawnDelegateViaRunTask } = await import('../../hermes/delegate')
+      const { spawnDelegateViaRunTask } = await import('../../hermes/delegate.ts')
       const r = await spawnDelegateViaRunTask(settings, {
         goal,
         context: input.context ? String(input.context) : undefined,

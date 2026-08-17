@@ -640,7 +640,13 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
   assert.match(coordinator, /dispatchThreadTask\(snapshot\)/)
   assert.match(types, /export type ExternalRunOpts/)
   assert.match(types, /export type RunSourceKind/)
-  assert.match(policy, /export function resolveBusyPolicy/)
+  // The busy policy is defined once on the neutral leaf so the coordinator,
+  // the queue and the Ops projection read one decision (ticket 12).
+  assert.match(types, /export function resolveBusyPolicy/)
+  assert.match(policy, /export \{ resolveBusyPolicy[^}]*\} from '\.\/taskRunTypes(\.ts)?'/)
+  const ops = fs.readFileSync(path.join(appRoot, 'src/agent/opsConsole.ts'), 'utf8')
+  assert.match(ops, /resolveBusyPolicy/)
+  assert.doesNotMatch(ops, /reason:\s*'capacity'/)
   // Legacy shell must not exist
   assert.equal(
     fs.existsSync(path.join(appRoot, 'src/agent/runExternal.ts')),
@@ -1606,7 +1612,7 @@ await test('Loop plan: parser/evaluator/iteration contracts are wired', async ()
   const loopRunner = fs.readFileSync(path.join(appRoot, 'src/agent/loop/loopRunner.ts'), 'utf8')
   assert.match(loopRunner, /from '\.\.\/dodEvaluator(\.ts)?'/)
   assert.ok(loopRunner.includes('evaluateDoD('))
-  assert.match(engine, /from '\.\/llmParser'/)
+  assert.match(engine, /from '\.\/llmParser(\.ts)?'/)
   assert.ok(engine.includes('parseWithLlm('))
   assert.match(loopRunner, /allDone && !dodMet/)
   assert.match(loopRunner, /上一輪 DoD 缺口/)
@@ -1779,7 +1785,7 @@ await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal cont
   assert.match(types, /EXTERNAL_CLI_DOD_LABEL/)
   assert.match(types, /formatCliContinueGoalPrompt/)
   assert.match(types, /isCompleteCliContinueGoalContract/)
-  assert.match(index, /from '\.\/types'/)
+  assert.match(index, /from '\.\/types(\.ts)?'/)
 
   // Honest CLI DoD — never "CLI returned" as met
   assert.doesNotMatch(localCli, /definitionOfDone: 'CLI returned'/)

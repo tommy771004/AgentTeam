@@ -1258,8 +1258,14 @@ const api = {
       chatId: string
       text: string
       token?: string
+      runId?: string
     }) =>
-      ipcRenderer.invoke('gateway:send', input) as Promise<{ ok: boolean; error?: string }>,
+      // evidence is issued in main after the send actually succeeded (ADR-0048)
+      ipcRenderer.invoke('gateway:send', input) as Promise<{
+        ok: boolean
+        error?: string
+        evidence?: import('../src/agent/evidence/sideEffectEvidence.ts').SideEffectEvidence
+      }>,
     onInbound: (
       cb: (msg: {
         channel: 'telegram' | 'webhook' | 'system'

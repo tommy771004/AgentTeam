@@ -33,7 +33,7 @@ register({
       outboundGuardDeploy?: 'off' | 'demo' | 'optional' | 'required'
     } = {}
     try {
-      const { useSettingsStore } = await import('../../../store/settingsStore')
+      const { useSettingsStore } = await import('../../../store/settingsStore.ts')
       settingsForGuard = useSettingsStore.getState().settings
       command = applyGitSettingsToBash(command, useSettingsStore.getState().settings)
     } catch {

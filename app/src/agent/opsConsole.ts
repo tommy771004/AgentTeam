@@ -2,6 +2,7 @@
 import type { ProactiveEvent, ScheduledJob } from './types.ts'
 import type { JournalEntry, RecoveryReport } from './runJournal.ts'
 import type { QueueDedupeEvent, QueuedExternalRun } from './runQueue.ts'
+import { resolveBusyPolicy, type BusyPolicy, type RunSourceKind } from './taskRunTypes.ts'
 
 export type OpsActiveRun = {
   runId: string
@@ -18,7 +19,16 @@ export type OpsSnapshotInput = {
   dedupeEvents?: QueueDedupeEvent[]
   journal: JournalEntry[]
   recoveryReports: RecoveryReport[]
+  /** `settings.followUpMode` — the other half of the busy-policy decision. */
+  followUpMode?: 'steer' | 'queue'
 }
+
+/** Why this item is in the queue rather than steering the running task. */
+export type OpsQueueReason =
+  | 'automation-source'
+  | 'follow-up-mode'
+  | 'explicit-enqueue'
+  | 'capacity'
 
 export type OpsQueueItem = {
   id: string
@@ -27,8 +37,47 @@ export type OpsQueueItem = {
   runner?: string
   enqueuedAt: string
   dedupeKey: string
-  reason: 'capacity'
+  busyPolicy: BusyPolicy
+  reason: OpsQueueReason
+  reasonDetail: string
   position: number
+}
+
+const REASON_LABELS: Record<OpsQueueReason, string> = {
+  'automation-source': '自動化來源一律排隊，不打斷進行中的任務',
+  'follow-up-mode': '互動來源，但 followUpMode 設為 queue',
+  'explicit-enqueue': '呼叫端明確要求排隊（enqueueWhenBusy／同一 thread 續跑）',
+  capacity: '併發額度已滿，等待釋出',
+}
+
+/**
+ * Explain one queued item using the same decision the coordinator made, so the
+ * console answers "why was this queued rather than steered" from the policy
+ * rather than from a constant.
+ */
+function explainQueueItem(
+  item: QueuedExternalRun,
+  followUpMode: 'steer' | 'queue' | undefined,
+  capacityExhausted: boolean,
+): { busyPolicy: BusyPolicy; reason: OpsQueueReason; reasonDetail: string } {
+  const sourceKind = item.sourceKind as RunSourceKind | undefined
+  const busyPolicy = resolveBusyPolicy(sourceKind, followUpMode)
+  const reason: OpsQueueReason =
+    busyPolicy === 'queue'
+      ? sourceKind === 'composer' || sourceKind === 'slash' || sourceKind === 'retry'
+        ? 'follow-up-mode'
+        : 'automation-source'
+      : item.enqueueWhenBusy === true || Boolean(item.reuseThreadId)
+        ? 'explicit-enqueue'
+        : 'capacity'
+  const detail = capacityExhausted && reason !== 'capacity'
+    ? `${REASON_LABELS[reason]}；目前併發額度亦已滿`
+    : REASON_LABELS[reason]
+  return {
+    busyPolicy,
+    reason,
+    reasonDetail: `sourceKind=${sourceKind || '未標示'} · busyPolicy=${busyPolicy} · ${detail}`,
+  }
 }
 
 export type OpsSnapshot = {
@@ -44,13 +93,14 @@ export type OpsSnapshot = {
 }
 
 export function buildOpsSnapshot(input: OpsSnapshotInput): OpsSnapshot {
+  const remaining = Math.max(0, input.capacity.limit - input.capacity.active)
   return {
     generatedAt: new Date().toISOString(),
     activeRuns: input.activeRuns.map((run) => ({ ...run })),
     capacity: {
       active: input.capacity.active,
       limit: input.capacity.limit,
-      remaining: Math.max(0, input.capacity.limit - input.capacity.active),
+      remaining,
     },
     queue: input.queuedRuns.map((item, index) => ({
       id: item.id,
@@ -59,7 +109,7 @@ export function buildOpsSnapshot(input: OpsSnapshotInput): OpsSnapshot {
       runner: item.runner,
       enqueuedAt: item.enqueuedAt,
       dedupeKey: item.dedupeKey,
-      reason: 'capacity',
+      ...explainQueueItem(item, input.followUpMode, remaining === 0),
       position: index + 1,
     })),
     deduplicated: (input.dedupeEvents || []).map((event) => ({ ...event })),

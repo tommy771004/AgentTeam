@@ -5,7 +5,7 @@
  * tools[] for each pack are derived from toolDefinitions (single source).
  */
 
-import type { AgentCapability } from './types'
+import type { AgentCapability } from './types.ts'
 import type { BuiltinCapabilityId } from './capabilityIds.ts'
 import { toolsForCapability } from '../tools/toolDefinitions.ts'
 import { SUBDESIGN_CAPABILITY, SUBDESIGN_CRITIQUE_CAPABILITY } from './subDesign.ts'

@@ -3,9 +3,9 @@
  * parser.ts 的啟發式版本保留為零 LLM 或解析失敗時的 fallback。
  */
 
-import { chatCompletion } from './llm'
-import { buildParseResult } from './parser'
-import type { LlmSettings, LoopType, NextState, ParseResult } from './types'
+import { chatCompletion } from './llm.ts'
+import { buildParseResult } from './parser.ts'
+import type { LlmSettings, LoopType, NextState, ParseResult } from './types.ts'
 
 const LOOP_TYPES: LoopType[] = ['Turn-based', 'Goal-based', 'Time-based', 'Proactive']
 const AUTO_LOOP_TYPES: LoopType[] = ['Turn-based', 'Goal-based']

@@ -1,5 +1,5 @@
-import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignExportRecord } from './types'
-import type { OpenDesignContentPackManifest } from '../openDesign/packs'
+import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignExportRecord } from './types.ts'
+import type { OpenDesignContentPackManifest } from '../openDesign/packs.ts'
 
 export type SubDesignMetadataKind = 'brief' | 'artifact' | 'critique' | 'export' | 'open-design-pack'
 

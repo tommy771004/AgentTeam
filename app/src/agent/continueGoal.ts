@@ -3,7 +3,7 @@
  * can continue the same loop instead of re-parsing from scratch.
  */
 
-import type { LoopType } from './types'
+import type { LoopType } from './types.ts'
 
 export type ContinueGoalSnapshot = {
   objective: string

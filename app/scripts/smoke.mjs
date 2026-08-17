@@ -88,12 +88,61 @@ await test('schedule next interval', () => {
   assert.equal(new Date(next).getTime() - from.getTime(), 30 * 60_000)
 })
 
-await test('supervisor truncates oversized payload', () => {
+await test('supervisor truncates oversized payload to the byte limit', () => {
   const big = 'x'.repeat(10_000)
-  const r = enforceToolPayload('web_search', big, { ...DEFAULT_SUPERVISOR_LIMITS, maxToolPayloadBytes: 100 }, 'truncate')
+  const limit = 100
+  const r = enforceToolPayload('web_search', big, { ...DEFAULT_SUPERVISOR_LIMITS, maxToolPayloadBytes: limit }, 'truncate')
   assert.equal(r.truncated, true)
-  assert.ok(r.output.length < big.length)
-  assert.match(r.output, /truncated by supervisor/)
+  assert.equal(r.bytes, 10_000, 'reports the original size')
+
+  // The bound is the point of the function: assert the payload body actually
+  // fits the limit, not merely that it got shorter. A truncator that returned
+  // 9,999 bytes would pass `output.length < big.length` and fail here.
+  const note = /\n\n…\[truncated by supervisor: (\d+) bytes → (\d+) bytes\]$/
+  const annotation = r.output.match(note)
+  assert.ok(annotation, 'truncation must annotate original and resulting size')
+  const body = r.output.replace(note, '')
+  assert.ok(
+    byteLength(body) <= limit,
+    `truncated body is ${byteLength(body)} bytes, must be <= ${limit}`,
+  )
+  assert.equal(Number(annotation[1]), 10_000)
+  assert.equal(Number(annotation[2]), byteLength(body))
+})
+
+await test('supervisor leaves within-limit payloads untouched', () => {
+  const small = 'z'.repeat(50)
+  const r = enforceToolPayload('web_search', small, { ...DEFAULT_SUPERVISOR_LIMITS, maxToolPayloadBytes: 100 }, 'truncate')
+  assert.equal(r.truncated, false)
+  assert.equal(r.output, small)
+  assert.equal(r.bytes, 50)
+})
+
+await test('supervisor byte limit is measured in bytes, not characters', () => {
+  // 40 multibyte chars = 120 bytes: a char-counting truncator would not cut.
+  const wide = '漢'.repeat(40)
+  assert.equal(byteLength(wide), 120)
+  const r = enforceToolPayload('web_search', wide, { ...DEFAULT_SUPERVISOR_LIMITS, maxToolPayloadBytes: 100 }, 'truncate')
+  assert.equal(r.truncated, true)
+  const body = r.output.replace(/\n\n…\[truncated by supervisor:.*\]$/, '')
+  assert.ok(byteLength(body) <= 100, `body ${byteLength(body)} bytes must be <= 100`)
+})
+
+await test('supervisor re-shrinks when the proportional estimate overshoots', () => {
+  // A dense multibyte prefix with a sparse ASCII tail: the char-proportional
+  // first cut lands at 184 bytes, so only the shrink loop can hold the bound.
+  const dense = `${'漢'.repeat(50)}${'x'.repeat(500)}`
+  const limit = 100
+  assert.equal(byteLength(dense), 650)
+  const firstCut = Math.floor(dense.length * (limit / byteLength(dense)))
+  assert.ok(
+    byteLength(dense.slice(0, firstCut)) > limit,
+    'fixture must overshoot on the first estimate, or it proves nothing',
+  )
+  const r = enforceToolPayload('web_search', dense, { ...DEFAULT_SUPERVISOR_LIMITS, maxToolPayloadBytes: limit }, 'truncate')
+  assert.equal(r.truncated, true)
+  const body = r.output.replace(/\n\n…\[truncated by supervisor:.*\]$/, '')
+  assert.ok(byteLength(body) <= limit, `body ${byteLength(body)} bytes must be <= ${limit}`)
 })
 
 await test('supervisor halt mode throws', () => {

@@ -21,7 +21,7 @@ register({
     const runId = context?.runId
     const threadId = context?.threadId
     try {
-    const { useSubDesignArtifactStore } = await import('../../../store/subDesignArtifactStore')
+    const { useSubDesignArtifactStore } = await import('../../../store/subDesignArtifactStore.ts')
     const artifactId = String(input.artifactId || '').trim()
     const kind = input.kind === 'dom' ? 'dom' : input.kind === 'screenshot' ? 'screenshot' : ''
     const artifact = useSubDesignArtifactStore.getState().findById(artifactId)

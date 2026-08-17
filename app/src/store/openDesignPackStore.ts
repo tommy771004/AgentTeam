@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { pluginRegistry } from '../agent/hermes/plugins'
+import { pluginRegistry } from '../agent/hermes/plugins.ts'
 import {
   createOpenDesignContentPack,
   normalizeOpenDesignContentPack,
@@ -8,9 +8,9 @@ import {
   packMayEnable,
   type OpenDesignContentPackManifest,
   type OpenDesignPackAuditEvent,
-} from '../agent/openDesign/packs'
-import { readOpenDesignText, type OpenDesignCatalogRecord } from '../agent/openDesign/catalog'
-import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
+} from '../agent/openDesign/packs.ts'
+import { readOpenDesignText, type OpenDesignCatalogRecord } from '../agent/openDesign/catalog.ts'
+import { persistSubDesignMetadata } from '../agent/subdesign/metadata.ts'
 
 const PACKS_KEY = 'subagents.open-design.packs.v1'
 const AUDIT_KEY = 'subagents.open-design.audit.v1'

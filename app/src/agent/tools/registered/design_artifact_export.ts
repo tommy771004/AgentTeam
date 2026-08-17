@@ -21,9 +21,9 @@ register({
     const runId = context?.runId
     const threadId = context?.threadId
     try {
-    const { critiqueAllowsDeliver } = await import('../../subdesign/critique')
-    const { useSubDesignArtifactStore } = await import('../../../store/subDesignArtifactStore')
-    const { useSubDesignCritiqueStore } = await import('../../../store/subDesignCritiqueStore')
+    const { critiqueAllowsDeliver } = await import('../../subdesign/critique.ts')
+    const { useSubDesignArtifactStore } = await import('../../../store/subDesignArtifactStore.ts')
+    const { useSubDesignCritiqueStore } = await import('../../../store/subDesignCritiqueStore.ts')
     const artifactId = String(input.artifactId || '').trim()
     const format = String(input.format || '').trim() as 'html' | 'zip' | 'pdf' | 'pptx' | 'mp4'
     if (!artifactId || !['html', 'zip', 'pdf', 'pptx', 'mp4'].includes(format)) {
@@ -57,7 +57,7 @@ register({
         data: result,
       }
     }
-    const { useSubDesignExportStore } = await import('../../../store/subDesignExportStore')
+    const { useSubDesignExportStore } = await import('../../../store/subDesignExportStore.ts')
     const record = useSubDesignExportStore.getState().record({
       artifactId: artifact.id,
       revision: result.revision || artifact.revision,

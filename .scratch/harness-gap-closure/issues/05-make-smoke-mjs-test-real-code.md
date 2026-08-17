@@ -10,12 +10,38 @@
 
 `smoke-caps.mjs` does not have this problem — it imports real modules — and the `.mts` plus `--experimental-strip-types` pattern is already used by dozens of `smoke-*.mts` scripts. This is a port, not a design task.
 
-- [ ] `computeNextRun` assertions import `agent/scheduler.ts` rather than an inline copy.
-- [ ] Supervisor truncation and halt assertions import `agent/supervisor.ts`.
-- [ ] `classifyLoopType` assertions import `agent/parser.ts`.
-- [ ] Event-matching assertions import `agent/eventMatcher.ts`.
-- [ ] Every inline mirror is deleted, not left beside the import.
-- [ ] `npm run smoke` and `npm run smoke:ci` are fully green after the change.
-- [ ] Falsification, recorded in the ticket: deliberately breaking `computeNextRun` passes the pre-change suite and fails the post-change suite. Repeat for supervisor truncation, `classifyLoopType`, and `eventMatcher`.
+- [x] `computeNextRun` assertions import `agent/scheduler.ts` rather than an inline copy.
+- [x] Supervisor truncation and halt assertions import `agent/supervisor.ts`.
+- [x] `classifyLoopType` assertions import `agent/parser.ts`.
+- [x] Event-matching assertions import `agent/eventMatcher.ts`.
+- [x] Every inline mirror is deleted, not left beside the import.
+- [x] `npm run smoke` and `npm run smoke:ci` are fully green after the change.
+- [x] Falsification, recorded in the ticket: deliberately breaking `computeNextRun` passes the pre-change suite and fails the post-change suite. Repeat for supervisor truncation, `classifyLoopType`, and `eventMatcher`.
 
 Files: `app/scripts/smoke.mjs`, `app/src/agent/scheduler.ts`, `app/src/agent/supervisor.ts`, `app/src/agent/parser.ts`, `app/src/agent/eventMatcher.ts`.
+
+## Comments
+
+**2026-08-17 — falsification recorded (spec line 97).** `scripts/smoke.mjs` now
+re-execs itself with `--experimental-strip-types` and imports `scheduler.ts`,
+`supervisor.ts`, `parser.ts` and `eventMatcher.ts`; the inline mirrors are
+deleted, not left alongside.
+
+Verified by deliberately breaking each covered path and confirming the suite
+fails (each was reverted immediately after):
+
+| Break | Result |
+| --- | --- |
+| `computeNextRun` interval `mins * 60_000` → `mins * 120_000` | ✗ fails (10 passed) |
+| `enforceToolPayload` shrink loop disabled | ✗ fails (11 passed) |
+| `eventMatcher` `hasAttachment` predicate removed | ✗ fails (10 passed) |
+| `classifyLoopType` forced to `'Turn-based'` | ✗ fails (8 passed) |
+| unmodified | ✓ 12 passed |
+
+The first attempt at the supervisor break (changing only the initial
+proportional estimate) still passed, because the shrink loop corrects it. The
+assertion was strengthened accordingly: the byte bound is now asserted on the
+truncated body with the annotation stripped, plus a dense-prefix fixture whose
+first estimate lands at 184 bytes so the loop is the only thing holding the
+bound. The earlier `r.output.length < big.length` check would have passed a
+truncator returning 9,999 bytes.

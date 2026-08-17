@@ -1,7 +1,7 @@
 /** Loop patterns from 02_Execution_Rules */
 export type LoopType = 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
 
-import type { ExternalCliDelegateContract } from './runners/types'
+import type { ExternalCliDelegateContract } from './runners/types.ts'
 
 /** Chat composer attachment (images / text files) — pure type, no DOM */
 export type ChatAttachmentKind = 'image' | 'text' | 'binary'

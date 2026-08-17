@@ -3,15 +3,15 @@
  * Prioritizes secret-backed packs when credentials exist.
  */
 
-import type { LlmSettings } from './types'
-import type { EntitlementSnapshot } from './entitlement'
-import { assembleCapabilities, capabilityOwnsTool } from './capabilities'
-import { selectToolsForStep } from './tools/registry'
-import { skillsStore } from './hermes/skills'
-import { pluginRegistry } from './hermes/plugins'
-import { CONNECTOR_INTENT_KEYWORDS } from './hermes/connectorTools'
-import { catalogItem } from './hermes/pluginCatalog'
-import { hasPluginSecret } from './hermes/pluginSecrets'
+import type { LlmSettings } from './types.ts'
+import type { EntitlementSnapshot } from './entitlement.ts'
+import { assembleCapabilities, capabilityOwnsTool } from './capabilities/index.ts'
+import { selectToolsForStep } from './tools/registry.ts'
+import { skillsStore } from './hermes/skills.ts'
+import { pluginRegistry } from './hermes/plugins.ts'
+import { CONNECTOR_INTENT_KEYWORDS } from './hermes/connectorTools.ts'
+import { catalogItem } from './hermes/pluginCatalog.ts'
+import { hasPluginSecret } from './hermes/pluginSecrets.ts'
 
 function scoreHay(hay: string, objective: string): number {
   const lower = objective.toLowerCase()

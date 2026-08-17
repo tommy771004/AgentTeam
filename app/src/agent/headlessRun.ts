@@ -6,6 +6,7 @@
  * stores while keeping the browser document absent, then restores the globals
  * before returning.
  */
+import { createMemoryStorage } from './memoryStorage.ts'
 import { setLlmTransport, type LlmTransport } from './llm.ts'
 import { runTask, type TaskRunInput, type TaskRunResult } from './taskRunCoordinator.ts'
 import type { LlmSettings } from './types.ts'
@@ -28,16 +29,6 @@ type HeadlessStorage = {
 
 let sharedNodeStorage: HeadlessStorage | undefined
 
-function makeStorage(): HeadlessStorage {
-  const values = new Map<string, string>()
-  return {
-    getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => values.set(key, value),
-    removeItem: (key) => values.delete(key),
-    clear: () => values.clear(),
-  }
-}
-
 function installNodeGlobals(preferredStorage?: Storage): {
   restore: () => void
   storage: HeadlessStorage
@@ -52,12 +43,12 @@ function installNodeGlobals(preferredStorage?: Storage): {
   const nodeRuntime =
     typeof process !== 'undefined' && Boolean(process.versions?.node) && typeof document === 'undefined'
   const storage = preferredStorage || (nodeRuntime
-    ? (sharedNodeStorage ||= makeStorage())
+    ? (sharedNodeStorage ||= createMemoryStorage())
     : previousStorage &&
         typeof previousStorage.getItem === 'function' &&
         typeof previousStorage.setItem === 'function'
       ? previousStorage
-      : makeStorage())
+      : createMemoryStorage())
   const replaceWindow = !hadWindow
   const replaceStorage = !hadStorage || runtime.localStorage !== storage
 

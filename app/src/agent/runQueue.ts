@@ -8,9 +8,9 @@ import type {
   LoopType,
   RuntimeOverrides,
   ScheduleKind,
-} from './types'
-import type { ExternalRunOpts, ExternalRunResult } from './taskRunCoordinator'
-import type { ThreadRunner } from '../store/threadStore'
+} from './types.ts'
+import type { ExternalRunOpts, ExternalRunResult } from './taskRunCoordinator.ts'
+import type { ThreadRunner } from '../store/threadStore.ts'
 import {
   getJournalEntry,
   recordRecoveryNotice,
@@ -244,7 +244,7 @@ function fromPersisted(p: PersistedQueueItem): QueuedExternalRun {
     const jobId = p.scheduleJobId
     base.onSettled = async (r) => {
       try {
-        const { useScheduleStore } = await import('../store/scheduleStore')
+        const { useScheduleStore } = await import('../store/scheduleStore.ts')
         const mark = useScheduleStore.getState().markJobResult
         if (r.skipped) {
           if (r.skipReason === 'cancelled') {
@@ -546,7 +546,7 @@ export function enqueueExternalRun(opts: ExternalRunOpts): QueuedExternalRun | n
 
 async function availableDrainSlots(): Promise<number> {
   try {
-    const { useAgentStore } = await import('../store/agentStore')
+    const { useAgentStore } = await import('../store/agentStore.ts')
     const capacity = useAgentStore.getState().canStartRun()
     return capacity.allowed ? Math.max(1, capacity.limit - capacity.active) : 0
   } catch {

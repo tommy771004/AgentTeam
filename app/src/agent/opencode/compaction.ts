@@ -7,14 +7,14 @@
  * Flattening to {role, content} only breaks subsequent FC rounds (API 400).
  */
 
-import type { LlmSettings } from '../types'
-import { chatCompletion } from '../llm'
-import { getCompactionConfig, getSmallModel } from './agentRegistry'
+import type { LlmSettings } from '../types.ts'
+import { chatCompletion } from '../llm.ts'
+import { getCompactionConfig, getSmallModel } from './agentRegistry.ts'
 import {
   DEFAULT_PRUNING_CONFIG,
   pruneToolResults,
   type PruneStats,
-} from '../contextPruning'
+} from '../contextPruning.ts'
 
 export type CompactableMessage = {
   role: string

@@ -9,7 +9,7 @@
  *   the degrade BEFORE the task fails mid-run.
  */
 
-import type { LlmSettings, ModelProfile } from './types'
+import type { LlmSettings, ModelProfile } from './types.ts'
 import { chatCompletionWithTools } from './llm.ts'
 
 /** 1×1 transparent PNG — cheapest possible vision probe payload. */

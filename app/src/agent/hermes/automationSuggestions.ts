@@ -1,6 +1,6 @@
 /** Consent-first automation suggestions derived from repeated successful work. */
 
-import type { ArchiveRecord } from '../types'
+import type { ArchiveRecord } from '../types.ts'
 
 export type AutomationSuggestion = {
   id: string

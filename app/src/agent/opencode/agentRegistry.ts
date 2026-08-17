@@ -3,17 +3,17 @@
  * Runtime resolution of model / permission / prompt / steps
  */
 
-import type { PermissionPolicy, PermissionProjection, RuntimeOverrides } from '../types'
+import type { PermissionPolicy, PermissionProjection, RuntimeOverrides } from '../types.ts'
 import {
   PRIMARY_AGENTS,
   SUBAGENTS,
   type AgentModeDef,
   type SubagentDef,
-} from './agents'
+} from './agents.ts'
 import {
   deniedToolsFromPolicy,
   type PermissionAction,
-} from './permissions'
+} from './permissions.ts'
 import {
   extractBashPermission,
   mergePermissionProjectionsRestrictive,
@@ -24,8 +24,8 @@ import {
   type OpenCodeMergedConfig,
   type OpenCodePermissionBlock,
   type PermissionRule,
-} from './configTypes'
-import { conversationRuntimeOverrides, type SpeedMode, type ThinkingDepth } from '../thinking'
+} from './configTypes.ts'
+import { conversationRuntimeOverrides, type SpeedMode, type ThinkingDepth } from '../thinking.ts'
 
 export type RegistryAgent = {
   id: string

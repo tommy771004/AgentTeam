@@ -1,4 +1,4 @@
-import type { PluginManifest } from './plugins'
+import type { PluginManifest } from './plugins.ts'
 import {
   asanaConnectorTools,
   canvaConnectorTools,
@@ -12,7 +12,7 @@ import {
   linearConnectorTools,
   notionConnectorTools,
   sheetsConnectorTools,
-} from './connectorTools'
+} from './connectorTools.ts'
 
 export type PluginCatalogCategory = 'Featured' | 'Productivity' | 'Creativity'
 export type PluginInstallKind = 'bundled' | 'npm-mcp' | 'connector'

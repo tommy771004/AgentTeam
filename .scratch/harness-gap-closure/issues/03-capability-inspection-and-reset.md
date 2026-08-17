@@ -10,12 +10,23 @@ Progressive disclosure persists correctly and invisibly. `state.loadedCapability
 
 This reads data that already exists. No new persistence layer.
 
-- [ ] The thread sidebar lists the capabilities currently loaded for that thread and the tools currently unlocked.
-- [ ] Entries distinguish how each was unlocked: preloaded, `load_capability`, or `tool_search`.
-- [ ] A reset control clears `lastCapabilityIds` and `lastUnlockedTools` for the thread.
-- [ ] After a reset, the next run starts from the deferred catalog with no preloaded ids or unlocked tool names.
-- [ ] Skill (`skill:<name>`) and MCP (`mcp:<serverId>`) capabilities generated at assemble time appear in the list with their generated identity.
-- [ ] Resetting one thread does not affect any other thread.
-- [ ] Behaviour confirmed manually under `npm run dev`; the reset path is covered by a capability smoke.
+- [x] The thread sidebar lists the capabilities currently loaded for that thread and the tools currently unlocked.
+- [x] Entries distinguish how each was unlocked: preloaded, `load_capability`, or `tool_search`.
+- [x] A reset control clears `lastCapabilityIds` and `lastUnlockedTools` for the thread.
+- [x] After a reset, the next run starts from the deferred catalog with no preloaded ids or unlocked tool names.
+- [x] Skill (`skill:<name>`) and MCP (`mcp:<serverId>`) capabilities generated at assemble time appear in the list with their generated identity.
+- [x] Resetting one thread does not affect any other thread.
+- [x] Behaviour confirmed manually under `npm run dev`; the reset path is covered by a capability smoke.
 
 Files: `app/src/agent/capabilities/runtime.ts`, thread sidebar component, `app/scripts/smoke-caps.mjs`.
+
+## Comments
+
+**2026-08-17.** The sidebar was labelling entries by identity
+(`skill`/`mcp`/`builtin`) rather than by how they were unlocked. Provenance is
+now persisted alongside the ids on the thread and rendered as
+預設常駐 / 預先載入 / `load_capability` / `tool_search` / 跨輪還原; anything
+carried across runs is honestly reported as restored. The repeated inline
+provenance union became one exported `CapabilityUnlockProvenance`.
+`smoke:capability-inspection` covers each mechanism and asserts no new
+persistence layer was introduced.

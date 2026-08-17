@@ -4,6 +4,7 @@ import { Icon } from '../components/Icon'
 import { LogViewer } from '../components/LogViewer'
 import { StepTimeline } from '../components/StepTimeline'
 import { InterventionPanel } from '../components/InterventionPanel'
+import { ForkFromCheckpoint } from '../components/ForkFromCheckpoint'
 import { useAgentStore } from '../store/agentStore'
 import { loopTypeZh } from '../i18n/zh'
 
@@ -158,6 +159,9 @@ export function ExecutionPage() {
                 執行序列
               </h3>
               <StepTimeline steps={agent.steps} />
+              <div className="mt-4 pt-4 border-t border-line">
+                <ForkFromCheckpoint />
+              </div>
             </div>
           </div>
 

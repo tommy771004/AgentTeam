@@ -3,7 +3,7 @@
  * Converts raw user input into a structured Loop Configuration.
  */
 
-import type { LoopConfiguration, LoopType, NextState, ParseResult, ExecutionStep } from './types'
+import type { LoopConfiguration, LoopType, NextState, ParseResult, ExecutionStep } from './types.ts'
 import { detectAutomationSuggestion } from './automationSuggestion.ts'
 export type {
   AutomationScheduleHint,

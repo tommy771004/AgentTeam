@@ -79,4 +79,19 @@ await test('toolLoop gated path uses invokeGatedTool + registry only', async () 
   assert.doesNotMatch(delegate, /runFunctionCallingLoop/)
 })
 
+// The delegate_task schema enum and RUNNER_IDS must not drift apart.
+{
+  const { RUNNER_IDS } = await import('../src/agent/runners/types.ts')
+  const { TOOL_DEFINITIONS } = await import('../src/agent/tools/toolDefinitions.ts')
+  const params = TOOL_DEFINITIONS.delegate_task?.parameters as {
+    properties?: { runner?: { enum?: string[] } }
+  }
+  const schemaEnum = params?.properties?.runner?.enum || []
+  assert.deepEqual(
+    [...schemaEnum].sort(),
+    [...RUNNER_IDS].sort(),
+    'delegate_task runner enum drifted from RUNNER_IDS',
+  )
+}
+
 console.log(`\n${passed} tests passed`)

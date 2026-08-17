@@ -39,7 +39,7 @@ register({
       })
       .filter((option): option is { label: string; description?: string; value?: string } => Boolean(option))
       .slice(0, 12)
-    const { useQuestionAskStore } = await import('../../../store/questionAskStore')
+    const { useQuestionAskStore } = await import('../../../store/questionAskStore.ts')
     const answer = await useQuestionAskStore.getState().requestQuestion({
       question,
       options,

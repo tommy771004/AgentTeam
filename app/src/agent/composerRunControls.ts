@@ -1,4 +1,4 @@
-import type { ApprovalMode } from './types'
+import type { ApprovalMode } from './types.ts'
 import {
   buildHandoffDocument as buildArtifactHandoffDocument,
   readArtifactIndex as readStoredArtifactIndex,

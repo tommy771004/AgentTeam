@@ -14,8 +14,8 @@
  */
 
 import { parseSkillMarkdown, skillsStore } from './skills.ts'
-import type { Skill } from './types'
-import type { CustomToolDefinition, McpServerConfig } from '../types'
+import type { Skill } from './types.ts'
+import type { CustomToolDefinition, McpServerConfig } from '../types.ts'
 import { isElectronPiProduction } from '../piProduction.ts'
 
 /** Public connector auth metadata (never stores raw secrets). */
@@ -48,9 +48,9 @@ export interface PluginManifest {
    * P1-C: governed tool package (schema-validated; operationClass per tool).
    * Privileged tools stay withheld until the user approves the fingerprint.
    */
-  toolPackage?: import('../tools/toolPackage').ToolPackageManifest
+  toolPackage?: import('../tools/toolPackage.ts').ToolPackageManifest
   /** User approval of the package's privilege fingerprint */
-  packageReview?: import('../tools/toolPackage').PackageReview
+  packageReview?: import('../tools/toolPackage.ts').PackageReview
   /**
    * P1-D: declarative lifecycle hook rules (sanitized on collect; may only
    * restrict/observe — deny / require-approval / append-context / log / notify).

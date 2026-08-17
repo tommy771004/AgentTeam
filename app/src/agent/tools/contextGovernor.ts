@@ -8,7 +8,7 @@
  * Effectful work is injected; pure math (token estimate / window / preflight)
  * is called directly from tokenEstimate.
  */
-import type { LlmSettings } from '../types'
+import type { LlmSettings } from '../types.ts'
 import {
   estimateTokensFromText,
   estimateTranscriptTokens,

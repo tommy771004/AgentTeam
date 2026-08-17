@@ -1,4 +1,4 @@
-import type { EntityKind, KnowledgeEdge, KnowledgeEntity } from '../types'
+import type { EntityKind, KnowledgeEdge, KnowledgeEntity } from '../types.ts'
 
 export type OpenCodeLspOperation =
   | 'definition'

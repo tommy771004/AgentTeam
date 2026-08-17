@@ -74,6 +74,7 @@ import {
 import { useContentItemStore } from '../src/store/contentItemStore.ts'
 import { useContentPublishStore } from '../src/store/contentPublishStore.ts'
 import { createContentPublishAdapterRegistry } from '../src/agent/contentPublishAdapters.ts'
+import { createSideEffectEvidence } from '../src/agent/evidence/sideEffectEvidence.ts'
 import {
   CONTENT_PUBLISH_PROVIDERS,
   composePublishText,
@@ -748,7 +749,17 @@ await test('platform adapter success is the only path that reports published', a
       platform: 'LINKEDIN',
       publish: async (payload) => {
         receivedPlatform = payload.platform
-        return { ok: true, status: 'published', externalId: 'post_123' }
+        return {
+          ok: true,
+          status: 'published',
+          externalId: 'post_123',
+          // ADR-0048: the adapter that performed the publish issues the snapshot
+          evidence: createSideEffectEvidence({
+            kind: 'content_publish',
+            source: `platform:${payload.platform}`,
+            metadata: { platform: payload.platform, contentItemId: payload.contentItemId, payload: 'metadata-only' },
+          }),
+        }
       },
     },
   ])

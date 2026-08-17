@@ -1,9 +1,9 @@
-import { readSubDesignMetadata } from '../agent/subdesign/metadata'
-import { useOpenDesignPackStore } from './openDesignPackStore'
-import { useSubDesignArtifactStore } from './subDesignArtifactStore'
-import { useSubDesignCritiqueStore } from './subDesignCritiqueStore'
-import { useSubDesignExportStore } from './subDesignExportStore'
-import { useSubDesignStore } from './subDesignStore'
+import { readSubDesignMetadata } from '../agent/subdesign/metadata.ts'
+import { useOpenDesignPackStore } from './openDesignPackStore.ts'
+import { useSubDesignArtifactStore } from './subDesignArtifactStore.ts'
+import { useSubDesignCritiqueStore } from './subDesignCritiqueStore.ts'
+import { useSubDesignExportStore } from './subDesignExportStore.ts'
+import { useSubDesignStore } from './subDesignStore.ts'
 
 /** Hydrate all SubDesign caches from the project-scoped canonical metadata files. */
 export async function hydrateSubDesignStores(projectRoot?: string): Promise<void> {

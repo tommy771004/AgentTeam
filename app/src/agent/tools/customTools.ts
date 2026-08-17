@@ -1,10 +1,10 @@
 /** Safe declarative custom-tool helpers. No plugin-provided JavaScript is executed. */
 
-import type { CustomToolDefinition, LlmSettings } from '../types'
+import type { CustomToolDefinition, LlmSettings } from '../types.ts'
 import { pluginRegistry } from '../hermes/plugins.ts'
 import { getPluginSecret, hasPluginSecret } from '../hermes/pluginSecrets.ts'
 import { compileToolPackage, validateToolPackage } from './toolPackage.ts'
-import type { OpenAiToolDef } from './schemas'
+import type { OpenAiToolDef } from './schemas.ts'
 
 const NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
 const TOKEN = /{{\s*(secret:)?([A-Za-z0-9_.-]+)\s*}}/g

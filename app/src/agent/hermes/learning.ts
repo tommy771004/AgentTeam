@@ -8,7 +8,7 @@ import { memoryStore } from './memory.ts'
 import { skillsStore } from './skills.ts'
 import { subDesignProjectMemoryKey } from '../subdesign/preference.ts'
 import { SKILL_SIMILARITY_THRESHOLD, textSimilarity } from './textSimilarity.ts'
-import type { LearningEvent } from './types'
+import type { LearningEvent } from './types.ts'
 
 type Listener = (events: LearningEvent[]) => void
 

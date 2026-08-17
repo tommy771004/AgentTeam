@@ -14,8 +14,8 @@
  * 最壞情況是多印稽核行,不會放寬權限。
  */
 
-import type { LlmSettings } from './types'
-import { sanitizeHookRules, type HookRule } from './hooks'
+import type { LlmSettings } from './types.ts'
+import { sanitizeHookRules, type HookRule } from './hooks.ts'
 
 export const PROJECT_HOOKS_FILE = '.subagents/hooks.json'
 

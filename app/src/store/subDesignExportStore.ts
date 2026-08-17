@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import type { SubDesignExportRecord } from '../agent/subdesign/types'
-import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
+import type { SubDesignExportRecord } from '../agent/subdesign/types.ts'
+import { persistSubDesignMetadata } from '../agent/subdesign/metadata.ts'
 
 const STORAGE_KEY = 'subagents.subdesign.exports.v1'
 

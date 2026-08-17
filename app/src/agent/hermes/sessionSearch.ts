@@ -3,12 +3,12 @@
  * (Hermes uses SQLite FTS5; we use token scoring for portability.)
  */
 
-import type { ArchiveRecord } from '../types'
-import type { LlmSettings } from '../types'
+import type { ArchiveRecord } from '../types.ts'
+import type { LlmSettings } from '../types.ts'
 import { chatCompletion, withRoleModel } from '../llm.ts'
 import { memoryDecayFactor, memoryStalenessNote, memoryStore } from './memory.ts'
 import { skillsStore } from './skills.ts'
-import type { SessionSearchHit } from './types'
+import type { SessionSearchHit } from './types.ts'
 import { scoreQueryText } from './textSimilarity.ts'
 
 function scoreText(query: string, text: string): number {
@@ -94,7 +94,7 @@ export async function summarizeSessionHits(
   let settings = providedSettings
   if (!settings) {
     try {
-      const { useSettingsStore } = await import('../../store/settingsStore')
+      const { useSettingsStore } = await import('../../store/settingsStore.ts')
       settings = useSettingsStore.getState().settings
     } catch {
       return null

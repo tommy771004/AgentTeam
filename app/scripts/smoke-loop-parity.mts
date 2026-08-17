@@ -13,6 +13,7 @@ import { unattendedInterventionTimeoutSec } from '../src/agent/hitlTimeout.ts'
 import { snapshot } from '../src/agent/loop/state.ts'
 import type { LoopRunState } from '../src/agent/loop/state.ts'
 import {
+  buildCliContinueGoalContract,
   capabilitiesForRunner,
   formatCliContinueGoalPrompt,
   isCompleteCliContinueGoalContract,
@@ -86,24 +87,75 @@ await test('unattended intervention timeout policy (pure)', () => {
   assert.equal(unattendedInterventionTimeoutSec(10_000), 15) // sub-floor still floored
 })
 
-await test('builtin/external continueGoal parity uses the same explicit contract', () => {
-  const contract = {
-    objective: '補齊報表',
-    definitionOfDone: '價格欄存在且有驗證輸出',
-    missing: ['缺少價格欄', '缺少驗證輸出'],
-    priorDigest: '上一輪只完成欄位盤點',
-    projectRoot: '/tmp/parity-project',
-    approvalMode: 'auto',
-    userHint: '先補價格欄',
+await test('builtin/external continueGoal derive one contract from the same override', () => {
+  // The Goal resume state a builtin run restores from. The external CLI path
+  // must reach the same DoD / missing / digest, not a separately shaped copy.
+  const overrides = {
+    continueGoal: {
+      objective: '補齊報表',
+      definitionOfDone: '價格欄存在且有驗證輸出',
+      missing: ['缺少價格欄', '缺少驗證輸出'],
+      priorDigest: '上一輪只完成欄位盤點',
+      userHint: '先補價格欄',
+    },
   }
-  assert.equal(isCompleteCliContinueGoalContract(contract), true)
-  const prompt = formatCliContinueGoalPrompt(contract)
+  const context = { projectRoot: '/tmp/parity-project', approvalMode: 'auto' }
+
+  const derived = buildCliContinueGoalContract(overrides, context)
+  assert.ok(derived, 'external CLI must derive a contract from the resume override')
+  assert.equal(isCompleteCliContinueGoalContract(derived), true)
+
+  // Field-level parity with the builtin resume source — no dropped gaps.
+  assert.equal(derived.objective, overrides.continueGoal.objective)
+  assert.equal(derived.definitionOfDone, overrides.continueGoal.definitionOfDone)
+  assert.deepEqual(derived.missing, overrides.continueGoal.missing)
+  assert.equal(derived.priorDigest, overrides.continueGoal.priorDigest)
+  assert.equal(derived.userHint, overrides.continueGoal.userHint)
+  assert.equal(derived.projectRoot, context.projectRoot)
+  assert.equal(derived.approvalMode, context.approvalMode)
+
+  // Every missing gap the builtin loop would replan against reaches the prompt.
+  const prompt = formatCliContinueGoalPrompt(derived)
+  for (const gap of overrides.continueGoal.missing) assert.match(prompt, new RegExp(gap))
+  assert.match(prompt, /Definition of Done/)
+  assert.match(prompt, new RegExp(overrides.continueGoal.definitionOfDone))
+  assert.match(prompt, new RegExp(overrides.continueGoal.priorDigest))
+  assert.match(prompt, /Do not invent prior tool evidence/)
+
+  // Both runners declare continueGoal, and both reach it through this contract.
   for (const runner of ['builtin', 'codex']) {
     assert.equal(capabilitiesForRunner(runner).continueGoal, true)
-    assert.match(prompt, /Definition of Done/)
-    assert.match(prompt, /缺少價格欄/)
-    assert.match(prompt, /先補價格欄/)
   }
+  // External CLI must still not claim builtin Parse / DoD / iterate.
+  assert.equal(capabilitiesForRunner('codex').validateDoD, false)
+  assert.equal(capabilitiesForRunner('codex').iterate, false)
+  assert.equal(capabilitiesForRunner('builtin').iterate, true)
+})
+
+await test('an explicit externalCliContract.continueGoal wins over the resume override', () => {
+  const explicit = {
+    objective: 'explicit objective',
+    definitionOfDone: 'explicit DoD',
+    missing: ['explicit gap'],
+  }
+  const derived = buildCliContinueGoalContract({
+    continueGoal: { objective: 'resume', definitionOfDone: 'resume DoD', missing: ['resume gap'] },
+    externalCliContract: { continueGoal: explicit },
+  })
+  assert.deepEqual(derived, explicit)
+})
+
+await test('no resume override yields no contract, so no continueGoal prompt is built', () => {
+  assert.equal(buildCliContinueGoalContract({}), undefined)
+  assert.equal(isCompleteCliContinueGoalContract(undefined), false)
+  assert.equal(isCompleteCliContinueGoalContract({ objective: '', definitionOfDone: 'x', missing: [] }), false)
+})
+
+await test('runDispatch drives the CLI prompt through the shared contract builder', () => {
+  const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  assert.match(dispatch, /buildCliContinueGoalContract\(snapshot\.overrides/)
+  assert.match(dispatch, /isCompleteCliContinueGoalContract\(continueContract\)/)
+  assert.match(dispatch, /formatCliContinueGoalPrompt\(continueContract\)/)
 })
 
 await test('HITL ask port wires engine.waitForIntervention (static)', () => {

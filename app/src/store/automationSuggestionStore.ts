@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import {
   detectUsageAutomationSuggestions,
   type AutomationSuggestion,
-} from '../agent/hermes/automationSuggestions'
-import type { ArchiveRecord } from '../agent/types'
+} from '../agent/hermes/automationSuggestions.ts'
+import type { ArchiveRecord } from '../agent/types.ts'
 
 const STORAGE_KEY = 'subagents.automationSuggestions.v1'
 

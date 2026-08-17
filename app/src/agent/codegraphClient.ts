@@ -3,8 +3,8 @@
  * @see https://github.com/colbymchenry/codegraph
  */
 
-import type { EntityKind, KnowledgeEdge, KnowledgeEntity, KnowledgeGraph } from './types'
-import { mapOpenCodeLspToKnowledgeGraph, type OpenCodeLspOperation } from './opencode/codeIntelligenceAdapter'
+import type { EntityKind, KnowledgeEdge, KnowledgeEntity, KnowledgeGraph } from './types.ts'
+import { mapOpenCodeLspToKnowledgeGraph, type OpenCodeLspOperation } from './opencode/codeIntelligenceAdapter.ts'
 
 /** Translate an OpenCode experimental LSP result into the existing CodeGraph view. */
 export function parseOpenCodeLspToGraph(
@@ -271,7 +271,7 @@ export async function fetchCodegraphStatus(
 
 async function applyGraphToAgent(graph: KnowledgeGraph) {
   try {
-    const { useAgentStore } = await import('../store/agentStore')
+    const { useAgentStore } = await import('../store/agentStore.ts')
     const cur = useAgentStore.getState().agent
     const merged = mergeKnowledgeGraphs(
       cur.knowledge || { entities: [], edges: [], phase: 'Idle' },

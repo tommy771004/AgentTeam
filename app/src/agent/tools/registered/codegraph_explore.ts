@@ -26,14 +26,14 @@ register({
     let root = input.projectRoot ? String(input.projectRoot) : ''
     if (!root) {
       try {
-        const { useProjectStore } = await import('../../../store/projectStore')
+        const { useProjectStore } = await import('../../../store/projectStore.ts')
         root = useProjectStore.getState().root || ''
       } catch {
         /* ignore */
       }
     }
     if (!root) return { ok: false, output: '請先選擇專案目錄（專案 pill / ⌘O）' }
-    const { runCodegraphExplore } = await import('../../codegraphClient')
+    const { runCodegraphExplore } = await import('../../codegraphClient.ts')
     const r = await runCodegraphExplore(root, query)
     return {
       ok: r.ok,

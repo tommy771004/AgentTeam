@@ -7,7 +7,7 @@
  * through the same capability gate + HITL authorization as a direct call.
  */
 
-import type { OpenAiToolDef } from './schemas'
+import type { OpenAiToolDef } from './schemas.ts'
 import { RUN_CODE_TOOL } from '../capabilities/builtins.ts'
 
 export interface CodeModeResult {

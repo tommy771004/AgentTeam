@@ -5,7 +5,7 @@
  * Adding an object/array field to LlmSettings / DEFAULT_LLM_SETTINGS without
  * listing it here will fail the settings-merge completeness smoke test.
  */
-import type { LlmSettings } from './types'
+import type { LlmSettings } from './types.ts'
 
 export const SETTINGS_CUSTOM_MERGE_KEYS = [
   'roleModels',

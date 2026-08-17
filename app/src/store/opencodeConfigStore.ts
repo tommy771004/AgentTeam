@@ -8,21 +8,21 @@ import {
   commandsFromConfigJson,
   mergeOpenCodeConfigs,
   type HydratedOpenCodeBundle,
-} from '../agent/opencode/configLoader'
+} from '../agent/opencode/configLoader.ts'
 import type {
   OpenCodeAgentFileDef,
   OpenCodeCommandFileDef,
   OpenCodePermissionBlock,
-} from '../agent/opencode/configTypes'
-import { setHydratedOpenCodeConfig, listRegistryAgents } from '../agent/opencode/agentRegistry'
-import type { RegistryAgent } from '../agent/opencode/agentRegistry'
+} from '../agent/opencode/configTypes.ts'
+import { setHydratedOpenCodeConfig, listRegistryAgents } from '../agent/opencode/agentRegistry.ts'
+import type { RegistryAgent } from '../agent/opencode/agentRegistry.ts'
 import {
   buildConfigCandidates,
   instructionsPromptNote,
   mcpCandidateToServer,
   type DiscoveredConfigCandidate,
-} from '../agent/opencode/configCandidates'
-import { useProjectStore } from './projectStore'
+} from '../agent/opencode/configCandidates.ts'
+import { useProjectStore } from './projectStore.ts'
 
 interface OpenCodeConfigStore {
   loaded: boolean
@@ -195,7 +195,7 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
     if (c.applyMode !== 'review') {
       return { ok: false, message: `候選 ${id} 非待採用型（${c.applyMode}）` }
     }
-    const { useSettingsStore } = await import('./settingsStore')
+    const { useSettingsStore } = await import('./settingsStore.ts')
     const settings = useSettingsStore.getState()
 
     if (c.id === 'model') {

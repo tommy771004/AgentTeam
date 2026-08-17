@@ -2,7 +2,7 @@
  * OpenCode session → local Thread store sync (effectful).
  * Pure normalizers stay in sessionMapping.ts so UI importers stay store-free.
  */
-import type { ExternalRunRef } from '../types'
+import type { ExternalRunRef } from '../types.ts'
 import { useThreadStore } from '../../store/threadStore.ts'
 import {
   mapOpenCodeTodoToThreadPlan,
@@ -22,7 +22,7 @@ export async function syncOpenCodeSessionMapping(
 ): Promise<void> {
   if (externalRun?.provider !== 'opencode' || !externalRun.serverUrl || !externalRun.sessionId) return
   try {
-    const { getOpenCodeSessionTodo, getOpenCodeSessionChildren } = await import('./serverClient')
+    const { getOpenCodeSessionTodo, getOpenCodeSessionChildren } = await import('./serverClient.ts')
     const [todoResult, childrenResult] = await Promise.allSettled([
       getOpenCodeSessionTodo(externalRun.serverUrl, externalRun.sessionId),
       getOpenCodeSessionChildren(externalRun.serverUrl, externalRun.sessionId),

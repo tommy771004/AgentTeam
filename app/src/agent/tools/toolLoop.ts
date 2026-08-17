@@ -6,7 +6,7 @@
  */
 
 import { v4 as uuid } from 'uuid'
-import type { LlmSettings, PermissionProjection, ToolCallRecord } from '../types'
+import type { LlmSettings, PermissionProjection, ToolCallRecord } from '../types.ts'
 import { chatCompletionWithTools, type ChatMessageExt, type ToolCallRequest } from '../llm.ts'
 import { buildOpenAiTools, type OpenAiToolDef } from './schemas.ts'
 import {
@@ -62,7 +62,7 @@ import {
   isCustomToolApprovalRequired,
   type ResolvedCustomTool,
 } from './customTools.ts'
-import type { ChatAttachment } from '../types'
+import type { ChatAttachment } from '../types.ts'
 import {
   buildMultimodalUserContent,
   contentPartsToPlainText,
@@ -248,7 +248,7 @@ export async function runFunctionCallingLoop(
   let projectRoot = (opts?.projectRoot || '').trim()
   if (!projectRoot) {
     try {
-      const { useProjectStore } = await import('../../store/projectStore')
+      const { useProjectStore } = await import('../../store/projectStore.ts')
       projectRoot = useProjectStore.getState().root || ''
     } catch {
       /* browser/unit-test fallback */
@@ -516,7 +516,7 @@ export async function runFunctionCallingLoop(
   // ContextEngine (Hermes seam) — default adapter wraps ContextGovernor per step.
   const contextEngine = createDefaultContextEngine({
     compact: async (s, msgs, o) => {
-      const { maybeCompactMessages } = await import('../opencode/compaction')
+      const { maybeCompactMessages } = await import('../opencode/compaction.ts')
       return maybeCompactMessages(
         s,
         msgs as Parameters<typeof maybeCompactMessages>[1],
@@ -524,7 +524,7 @@ export async function runFunctionCallingLoop(
       )
     },
     saveCheckpoint: async (id, payload) => {
-      const { saveCompactionCheckpoint } = await import('../compactionCheckpoint')
+      const { saveCompactionCheckpoint } = await import('../compactionCheckpoint.ts')
       saveCompactionCheckpoint(id, {
         summary: payload.summary,
         messages: payload.messages as Parameters<
@@ -533,7 +533,7 @@ export async function runFunctionCallingLoop(
       })
     },
     memoryFlush: async (o) => {
-      const { learningLoop } = await import('../hermes/learning')
+      const { learningLoop } = await import('../hermes/learning.ts')
       return learningLoop.onPreCompactionFlush({
         objective: o.objective,
         summary: o.summary,
@@ -543,20 +543,20 @@ export async function runFunctionCallingLoop(
       })
     },
     memoryRecall: async (query, limit) => {
-      const { memoryStore } = await import('../hermes/memory')
+      const { memoryStore } = await import('../hermes/memory.ts')
       return memoryStore.search(query, limit)
     },
     evaluateHook: async (point, ctx) => {
-      const { collectHookRules, evaluateHooks } = await import('../hooks')
+      const { collectHookRules, evaluateHooks } = await import('../hooks.ts')
       const ev = evaluateHooks(collectHookRules(settings), {
         point,
-        sourceKind: ctx.sourceKind as import('../hooks').HookContext['sourceKind'],
+        sourceKind: ctx.sourceKind as import('../hooks.ts').HookContext['sourceKind'],
         objective: ctx.objective,
       })
       return { audits: ev.audits, notifications: ev.notifications }
     },
     bumpMetric: async (runId, key) => {
-      const { bumpRunMetric } = await import('../metrics')
+      const { bumpRunMetric } = await import('../metrics.ts')
       bumpRunMetric(runId, key)
     },
     notify: (title, body) => {
@@ -662,7 +662,7 @@ ${systemExtra}`,
       toolChoice: 'auto',
       onResilienceEvent: (m) => {
         cb?.onLog?.('WARN', m)
-        void import('../metrics').then(({ bumpRunMetric }) =>
+        void import('../metrics.ts').then(({ bumpRunMetric }) =>
           bumpRunMetric(opts?.runId, 'llmRetries'),
         )
       },
@@ -837,7 +837,7 @@ async function executeOneToolCall(
       output = 'Plan mode 僅供互動式 run(unattended 無人可審批)。請以一般流程直接執行。'
     } else {
       try {
-        const { usePermissionAskStore } = await import('../../store/permissionAskStore')
+        const { usePermissionAskStore } = await import('../../store/permissionAskStore.ts')
         ctx.cb?.onLog?.(
           'AWAIT',
           entering ? 'Plan mode:等待使用者核准進入…' : 'Plan mode:計畫審批中…',
@@ -1041,12 +1041,12 @@ async function executeOneToolCall(
       },
       evaluateAfterTool: async ({ tool, toolOk }) => {
         try {
-          const { collectHookRules, evaluateHooks } = await import('../hooks')
+          const { collectHookRules, evaluateHooks } = await import('../hooks.ts')
           const ev = evaluateHooks(collectHookRules(ctx.settings), {
             point: 'afterTool',
             tool,
             toolOk,
-            sourceKind: ctx.sourceKind as import('../hooks').HookContext['sourceKind'],
+            sourceKind: ctx.sourceKind as import('../hooks.ts').HookContext['sourceKind'],
             objective: ctx.objective,
           })
           return { audits: ev.audits, notifications: ev.notifications }
@@ -1208,12 +1208,12 @@ async function executeOneToolCall(
     const background = args.background === true
     const notifyOnComplete = args.notify_on_complete !== false && args.notifyOnComplete !== false
     const inheritCapabilities = parseInheritCapabilities(args)
-    const { parseCapabilityMode } = await import('../hermes/capabilityMode')
+    const { parseCapabilityMode } = await import('../hermes/capabilityMode.ts')
     const capabilityMode = parseCapabilityMode(args.capability_mode ?? args.capabilityMode)
     const persona = String(args.persona || '').trim() || undefined
     const isolation = args.isolation === 'worktree' ? ('worktree' as const) : undefined
     const runnerRaw = String(args.runner || '').trim()
-    const allowedRunners = ['builtin', 'codex', 'claude', 'grok', 'opencode', 'gemini', 'cursor'] as const
+    const { RUNNER_IDS: allowedRunners, buildExternalCliDelegateContract } = await import('../runners/types.ts')
     const requestedRunner = (allowedRunners as readonly string[]).includes(runnerRaw)
       ? (runnerRaw as (typeof allowedRunners)[number])
       : undefined
@@ -1221,7 +1221,7 @@ async function executeOneToolCall(
     let resumeContext = ''
     const resumeFrom = String(args.resume_from || args.resumeFrom || '').trim()
     if (resumeFrom) {
-      const { getBackgroundJob } = await import('../hermes/backgroundJobs')
+      const { getBackgroundJob } = await import('../hermes/backgroundJobs.ts')
       const prev = getBackgroundJob(resumeFrom)
       if (!prev) {
         const msg = `resume_from 失敗:找不到背景委派 ${resumeFrom}(用 delegate_status 查可用 id)。`
@@ -1243,7 +1243,7 @@ async function executeOneToolCall(
       .filter(Boolean)
       .join('\n\n') || undefined
     if (background) {
-      const { enqueueBackgroundDelegate } = await import('../hermes/backgroundJobs')
+      const { enqueueBackgroundDelegate } = await import('../hermes/backgroundJobs.ts')
       const job = enqueueBackgroundDelegate(
         ctx.settings,
         {
@@ -1273,7 +1273,7 @@ async function executeOneToolCall(
       ok = true
     } else {
       // P4: nested leaf via Task run admission (Hermes-aligned single lifecycle)
-      const { runTask } = await import('../taskRunCoordinator')
+      const { runTask } = await import('../taskRunCoordinator.ts')
       const goal = String(args.goal || '')
       try {
         const tr = await runTask({
@@ -1292,10 +1292,7 @@ async function executeOneToolCall(
             preloadCapabilityIds: inheritCapabilities,
             externalCliContract:
               requestedRunner && requestedRunner !== 'builtin'
-                ? (await import('../runners/types')).buildExternalCliDelegateContract({
-                    role: 'leaf',
-                    unattended: true,
-                  })
+                ? buildExternalCliDelegateContract({ role: 'leaf', unattended: true })
                 : undefined,
           },
           sourceLabel: `delegate:${persona || isolation || capabilityMode || 'leaf'}`,
@@ -1364,12 +1361,12 @@ async function executeOneToolCall(
   ctx.cb?.onLog?.(ok ? 'SUCCESS' : 'WARN', `tool:${tc.name} ${ok ? 'ok' : 'fail'} (${durationMs}ms)`)
   // P1-D lifecycle hooks (afterTool): audit / notify only
   try {
-    const { collectHookRules, evaluateHooks } = await import('../hooks')
+    const { collectHookRules, evaluateHooks } = await import('../hooks.ts')
     const ev = evaluateHooks(collectHookRules(ctx.settings), {
       point: 'afterTool',
       tool: tc.name,
       toolOk: ok,
-      sourceKind: ctx.sourceKind as import('../hooks').HookContext['sourceKind'],
+      sourceKind: ctx.sourceKind as import('../hooks.ts').HookContext['sourceKind'],
       objective: ctx.objective,
     })
     for (const line of ev.audits) ctx.cb?.onLog?.('INFO', line)

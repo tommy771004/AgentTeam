@@ -1,7 +1,7 @@
-import { formatDesignSystemContext } from './designSystem'
-import { findSubDesignTemplate } from './templateCatalog'
-import type { DesignSystemSummary, SubDesignBrief, SubDesignDirection } from './types'
-import { stageLabel } from './types'
+import { formatDesignSystemContext } from './designSystem.ts'
+import { findSubDesignTemplate } from './templateCatalog.ts'
+import type { DesignSystemSummary, SubDesignBrief, SubDesignDirection } from './types.ts'
+import { stageLabel } from './types.ts'
 
 const surfaceLabels: Record<SubDesignBrief['surface'], string> = {
   prototype: '產品原型',

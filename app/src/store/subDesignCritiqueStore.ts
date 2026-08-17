@@ -1,7 +1,7 @@
 import { create } from 'zustand'
-import { normalizeSubDesignCritique } from '../agent/subdesign/critique'
-import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
-import type { SubDesignCritique } from '../agent/subdesign/types'
+import { normalizeSubDesignCritique } from '../agent/subdesign/critique.ts'
+import { persistSubDesignMetadata } from '../agent/subdesign/metadata.ts'
+import type { SubDesignCritique } from '../agent/subdesign/types.ts'
 
 const STORAGE_KEY = 'subagents.subdesign.critiques.v1'
 

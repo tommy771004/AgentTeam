@@ -12,15 +12,26 @@ The compared harness has turns and steps but no equivalent layer — how an exte
 
 This is a projection of existing state. It adds no lifecycle behaviour.
 
-- [ ] One console replaces `SchedulerPage`, `EventsPage`, and `ExecutionPage` as the operations surface.
-- [ ] It shows current queue depth against the cap, what is running now, and remaining concurrency headroom.
-- [ ] It shows what was deduplicated and against which existing run.
-- [ ] It shows why a given run was queued rather than steered, naming the `sourceKind` and the busy-policy decision.
-- [ ] It shows the last startup `RecoveryReport`: which runs were `marked-interrupted`, `resume-once`, `restored`, or `quarantined`.
-- [ ] Each entry names its `sourceKind` — composer, slash, retry, schedule, webhook, telegram, event, or delegate.
-- [ ] The console reads existing coordinator, queue, concurrency, and journal state and introduces no new lifecycle behaviour or persistence.
-- [ ] Journal display honours the bounded-metadata rule — no prompts, no tool payloads, no credentials.
-- [ ] Existing routes to the three merged pages redirect rather than 404.
-- [ ] Behaviour confirmed manually under `npm run dev`; `npm run smoke:journal` and `npm run smoke:coordinator` stay green.
+- [x] One console replaces `SchedulerPage`, `EventsPage`, and `ExecutionPage` as the operations surface.
+- [x] It shows current queue depth against the cap, what is running now, and remaining concurrency headroom.
+- [x] It shows what was deduplicated and against which existing run.
+- [x] It shows why a given run was queued rather than steered, naming the `sourceKind` and the busy-policy decision.
+- [x] It shows the last startup `RecoveryReport`: which runs were `marked-interrupted`, `resume-once`, `restored`, or `quarantined`.
+- [x] Each entry names its `sourceKind` — composer, slash, retry, schedule, webhook, telegram, event, or delegate.
+- [x] The console reads existing coordinator, queue, concurrency, and journal state and introduces no new lifecycle behaviour or persistence.
+- [x] Journal display honours the bounded-metadata rule — no prompts, no tool payloads, no credentials.
+- [x] Existing routes to the three merged pages redirect rather than 404.
+- [x] Behaviour confirmed manually under `npm run dev`; `npm run smoke:journal` and `npm run smoke:coordinator` stay green.
 
 Files: `app/src/pages/SchedulerPage.tsx`, `app/src/pages/EventsPage.tsx`, `app/src/pages/ExecutionPage.tsx`, `app/src/agent/taskRunCoordinator.ts`, `app/src/agent/runQueue.ts`, `app/src/agent/runConcurrency.ts`, `app/src/agent/runJournal.ts`.
+
+## Comments
+
+**2026-08-17.** `OpsQueueItem.reason` was a hardcoded `'capacity'` literal, so
+"why was this queued rather than steered" was unanswerable. `resolveBusyPolicy`
+moved to the neutral leaf (`taskRunTypes.ts`, re-exported from `taskRunPolicy`)
+so the Ops projection reads the same decision the coordinator made without
+pulling the store graph. Reasons are now `automation-source` / `follow-up-mode`
+/ `explicit-enqueue` / `capacity`, each with the `sourceKind` and busy-policy
+decision spelled out in `reasonDetail`. `smoke:ops-console` asserts the mapping
+per source kind and guards against the constant returning.

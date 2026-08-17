@@ -6,7 +6,7 @@
  * a final whole-blob hard cut that could drop session recall entirely.
  */
 
-import type { LlmSettings, PersonalityPreset } from '../types'
+import type { LlmSettings, PersonalityPreset } from '../types.ts'
 import { memoryStore } from './memory.ts'
 import { skillsStore } from './skills.ts'
 import { pluginRegistry } from './plugins.ts'

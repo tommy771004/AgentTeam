@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import { OutboundRunView } from '../components/OutboundRunView'
+import { ComplianceReportExport } from '../components/ComplianceReportExport'
 import { useAgentStore } from '../store/agentStore'
 import { useScheduleStore } from '../store/scheduleStore'
+import { useSettingsStore } from '../store/settingsStore'
 import { buildOpsSnapshot } from '../agent/opsConsole'
 import {
   listJournalEntries,
@@ -30,7 +32,11 @@ export function OpsPage() {
   const events = useScheduleStore((state) => state.events)
   const activeRunIds = useAgentStore((state) => state.activeRunIds)
   const runStates = useAgentStore((state) => state.runStates)
-  const capacity = useAgentStore((state) => state.canStartRun())
+  // canStartRun() builds a fresh object per call, so select the primitives it
+  // derives from — selecting the object itself re-renders on every store tick.
+  const capacityActive = useAgentStore((state) => state.canStartRun().active)
+  const capacityLimit = useAgentStore((state) => state.canStartRun().limit)
+  const followUpMode = useSettingsStore((state) => state.settings.followUpMode)
 
   useEffect(() => {
     hydrateRunQueue()
@@ -46,13 +52,14 @@ export function OpsPage() {
         runId,
         status: runStates[runId]?.status || 'running',
       })),
-      capacity: { active: capacity.active, limit: capacity.limit },
+      capacity: { active: capacityActive, limit: capacityLimit },
       queuedRuns: listQueuedRuns(),
       dedupeEvents: listQueueDedupeEvents(),
       journal: listJournalEntries(),
       recoveryReports: listRecoveryReports(),
+      followUpMode,
     })
-  }, [activeRunIds, capacity.active, capacity.limit, events, jobs, queueTick, runStates])
+  }, [activeRunIds, capacityActive, capacityLimit, events, followUpMode, jobs, queueTick, runStates])
 
   const setTab = (id: string) => setParams(id === 'overview' ? {} : { tab: id })
   const showQueue = tab === 'overview' || tab === 'execution'
@@ -91,13 +98,14 @@ export function OpsPage() {
       {showQueue && (
         <section className="grid grid-cols-1 xl:grid-cols-2 gap-5">
           <Panel title="執行佇列" icon="queue">
-            {snapshot.queue.length === 0 ? <Empty text="目前沒有因容量限制等待的工作。" /> : (
+            {snapshot.queue.length === 0 ? <Empty text="目前沒有等待中的工作。" /> : (
               <div className="flex flex-col divide-y divide-line/50">
                 {snapshot.queue.map((item) => (
                   <div key={item.id} className="py-3 flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <p className="text-sm truncate">#{item.position} · {item.objective}</p>
                       <p className="text-[11px] text-on-surface-variant font-[family-name:var(--font-mono)]">{item.id} · {item.sourceKind || 'unknown'} · {item.runner || 'builtin'}</p>
+                      <p className="text-[11px] text-on-surface-variant mt-1">{item.reasonDetail}</p>
                     </div>
                     <span className="shrink-0 text-[10px] px-2 py-1 rounded border border-warning/30 text-warning">{item.reason}</span>
                   </div>
@@ -127,6 +135,8 @@ export function OpsPage() {
       )}
 
       <OutboundRunView runId={snapshot.activeRuns[0]?.runId} />
+
+      <ComplianceReportExport activeRunIds={activeRunIds} />
 
       {showAutomation && (
         <section className="grid grid-cols-1 xl:grid-cols-2 gap-5">

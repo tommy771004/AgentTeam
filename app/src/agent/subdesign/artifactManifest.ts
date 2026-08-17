@@ -4,7 +4,7 @@ import type {
   SubDesignArtifactKind,
   SubDesignArtifactRenderer,
   SubDesignArtifactTweak,
-} from './types'
+} from './types.ts'
 
 const KINDS: readonly SubDesignArtifactKind[] = [
   'html',

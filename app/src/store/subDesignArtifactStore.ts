@@ -1,7 +1,7 @@
 import { create } from 'zustand'
-import { validateSubDesignArtifactManifest } from '../agent/subdesign/artifactManifest'
-import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
-import type { SubDesignArtifact } from '../agent/subdesign/types'
+import { validateSubDesignArtifactManifest } from '../agent/subdesign/artifactManifest.ts'
+import { persistSubDesignMetadata } from '../agent/subdesign/metadata.ts'
+import type { SubDesignArtifact } from '../agent/subdesign/types.ts'
 
 const STORAGE_KEY = 'subagents.subdesign.artifacts.v1'
 

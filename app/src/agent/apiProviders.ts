@@ -1,4 +1,4 @@
-import type { ApiProviderPreset } from './types'
+import type { ApiProviderPreset } from './types.ts'
 
 export type ApiProviderDefinition = {
   id: ApiProviderPreset

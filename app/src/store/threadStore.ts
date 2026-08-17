@@ -1,11 +1,13 @@
 import { create } from 'zustand'
-import type { SpeedMode, ThinkingDepth } from '../agent/thinking'
-import type { AgentMode, ExecutionStatus, ExternalRunRef, LoopType } from '../agent/types'
-import type { ChatAttachment } from '../agent/types'
-import { sanitizeAttachmentsForStorage } from '../lib/chatAttachments'
-import type { ContinueGoalSnapshot } from '../agent/continueGoal'
+import type { SpeedMode, ThinkingDepth } from '../agent/thinking.ts'
+import type { AgentMode, ExecutionStatus, ExternalRunRef, LoopType } from '../agent/types.ts'
+import type { ChatAttachment } from '../agent/types.ts'
+import { sanitizeAttachmentsForStorage } from '../lib/chatAttachments.ts'
+import type { ContinueGoalSnapshot } from '../agent/continueGoal.ts'
 import { recordRecoveryNotice } from '../agent/runJournal.ts'
-import { projectPiSession, type PiSessionProjection } from '../agent/piHostProjection'
+import { replaySafeCheckpointIndex } from '../agent/runFork.ts'
+import type { CapabilityUnlockProvenance } from '../agent/capabilities/runtime.ts'
+import { projectPiSession, type PiSessionProjection } from '../agent/piHostProjection.ts'
 
 const KEY = 'subagents.threads.v5'
 const BACKUP_KEY = `${KEY}.backup`
@@ -124,8 +126,11 @@ export type Thread = {
    * Restored as preload on the next run (cross-run progressive disclosure).
    */
   lastCapabilityIds?: string[]
+  /** How each capability was obtained last run (ticket 03 provenance). */
+  lastCapabilityProvenance?: Record<string, CapabilityUnlockProvenance>
   /** tool_search unlock set from last run */
   lastUnlockedTools?: string[]
+  lastUnlockedToolProvenance?: Record<string, CapabilityUnlockProvenance>
   /** Structured SubDesign session linked to this thread. */
   subDesignBriefId?: string
   /**
@@ -232,6 +237,10 @@ interface ThreadStore {
     id: string,
     capabilityIds: string[],
     unlockedTools?: string[],
+    provenance?: {
+      capabilities?: Record<string, CapabilityUnlockProvenance>
+      tools?: Record<string, CapabilityUnlockProvenance>
+    },
   ) => void
   resetLastCapabilities: (id: string) => void
   setSubDesignBriefId: (id: string, briefId: string | null) => void
@@ -241,8 +250,8 @@ interface ThreadStore {
   activeThread: () => Thread | null
 }
 
-function uid() {
-  return `th_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
+function uid(prefix = 'th') {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
 }
 
 function piHostCanonical(): boolean {
@@ -487,7 +496,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       title: `分支 · ${source.title}`.slice(0, 42),
       bubbles: source.bubbles.slice(-MAX_BUBBLES).map((bubble) => ({
         ...bubble,
-        id: `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        id: uid('b'),
       })),
       runPlan: source.runPlan?.map((item) => ({ ...item })),
       // A fork must never silently keep pointing at the source session. The
@@ -515,9 +524,9 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
 
   forkThreadFromCheckpoint: (id, bubbleId) => {
     const source = get().threads.find((thread) => thread.id === id)
-    const checkpointIndex = source?.bubbles.findIndex((bubble) => bubble.id === bubbleId) ?? -1
-    const checkpoint = checkpointIndex >= 0 ? source?.bubbles[checkpointIndex] : undefined
-    if (!source || !checkpoint || checkpoint.role !== 'user' || !checkpoint.content.trim()) return null
+    // Admissibility is decided in one place (runFork), not restated here.
+    const checkpointIndex = source ? replaySafeCheckpointIndex(source, bubbleId) : -1
+    if (!source || checkpointIndex < 0) return null
     const now = new Date().toISOString()
     const forked: Thread = {
       ...source,
@@ -525,12 +534,14 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       title: `重跑 · ${source.title}`.slice(0, 42),
       bubbles: source.bubbles.slice(0, checkpointIndex + 1).map((bubble) => ({
         ...bubble,
-        id: `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        id: uid('b'),
       })),
       // A replay starts a fresh adapter run. It must not inherit capability
       // unlocks, an unfinished DoD, or a plan produced after the checkpoint.
       lastCapabilityIds: undefined,
       lastUnlockedTools: undefined,
+      lastCapabilityProvenance: undefined,
+      lastUnlockedToolProvenance: undefined,
       continueGoal: null,
       runPlan: undefined,
       externalRun: undefined,
@@ -625,7 +636,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     const atts = attachments?.length ? attachments : undefined
     if (!c && !atts?.length) return
     const bubble: ThreadBubble = {
-      id: `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      id: uid('b'),
       role,
       // CLI answers can be much longer than ordinary chat. Keep enough output
       // for the collapsible conversation renderer without unbounded storage.
@@ -655,7 +666,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
 
   pushRunSummary: (threadId, summary) => {
     const bubble: ThreadBubble = {
-      id: `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      id: uid('r'),
       role: 'run',
       content: '執行過程',
       at: new Date().toISOString(),
@@ -798,7 +809,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
         if (target) {
           let projectRoot: string | undefined
           try {
-            const { useProjectStore } = await import('./projectStore')
+            const { useProjectStore } = await import('./projectStore.ts')
             projectRoot = useProjectStore.getState().root || undefined
           } catch {
             /* browser fallback */
@@ -923,17 +934,27 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     persist(threads, get().activeId)
   },
 
-  setLastCapabilities: (id, capabilityIds, unlockedTools) => {
+  setLastCapabilities: (id, capabilityIds, unlockedTools, provenance) => {
     const caps = [...new Set(capabilityIds.filter(Boolean))].sort()
     const unlocks = unlockedTools
       ? [...new Set(unlockedTools.filter(Boolean))].sort()
       : undefined
+    // Anything carried across runs is, by definition, restored — the live
+    // mechanism (load_capability / tool_search) is recorded when known.
+    const capProvenance = Object.fromEntries(
+      caps.map((capId) => [capId, provenance?.capabilities?.[capId] || 'restored']),
+    ) as Record<string, CapabilityUnlockProvenance>
+    const toolProvenance = Object.fromEntries(
+      (unlocks || []).map((tool) => [tool, provenance?.tools?.[tool] || 'restored']),
+    ) as Record<string, CapabilityUnlockProvenance>
     const threads = get().threads.map((t) =>
       t.id === id
         ? {
             ...t,
             lastCapabilityIds: caps.length ? caps : t.lastCapabilityIds,
             lastUnlockedTools: unlocks?.length ? unlocks : t.lastUnlockedTools,
+            lastCapabilityProvenance: caps.length ? capProvenance : t.lastCapabilityProvenance,
+            lastUnlockedToolProvenance: unlocks?.length ? toolProvenance : t.lastUnlockedToolProvenance,
             updatedAt: new Date().toISOString(),
           }
         : t,
@@ -945,7 +966,14 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   resetLastCapabilities: (id) => {
     const threads = get().threads.map((t) =>
       t.id === id
-        ? { ...t, lastCapabilityIds: undefined, lastUnlockedTools: undefined, updatedAt: new Date().toISOString() }
+        ? {
+            ...t,
+            lastCapabilityIds: undefined,
+            lastUnlockedTools: undefined,
+            lastCapabilityProvenance: undefined,
+            lastUnlockedToolProvenance: undefined,
+            updatedAt: new Date().toISOString(),
+          }
         : t,
     )
     set({ threads })

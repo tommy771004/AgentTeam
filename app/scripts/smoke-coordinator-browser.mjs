@@ -44,7 +44,8 @@ try {
     const page = await browser.newPage()
     await page.goto(url, { waitUntil: 'networkidle' })
     const result = await page.evaluate(async () => {
-      const { runTask } = await import('/src/agent/taskRunCoordinator.ts')
+      const { runTask, rerunFromReplaySafeCheckpoint } = await import('/src/agent/taskRunCoordinator.ts')
+      const { listReplaySafeCheckpoints } = await import('/src/agent/runFork.ts')
       const { useAgentStore } = await import('/src/store/agentStore.ts')
       const { useSettingsStore } = await import('/src/store/settingsStore.ts')
       const { useThreadStore } = await import('/src/store/threadStore.ts')
@@ -553,10 +554,66 @@ try {
         ? useThreadStore.getState().threads.find((thread) => thread.id === delegate.threadId)
         : undefined
 
+      // ── fork-and-rerun-from-step-N (ticket 02) ──────────────────
+      // A forked run is an ordinary coordinator run: one finalization, in the
+      // fixed order, and the parent thread is left untouched.
+      useSettingsStore.setState({ settings: initialSettings })
+      const forkParent = await runTask({
+        objective: 'browser fork parent coordinator smoke',
+        sourceKind: 'composer',
+        runId: 'browser-fork-parent-smoke',
+      })
+      const parentThreadId = forkParent.threadId
+      const parentBefore = useThreadStore.getState().threads.find((t) => t.id === parentThreadId)
+      const parentBubblesBefore = parentBefore ? parentBefore.bubbles.length : -1
+      const checkpoints = parentBefore ? listReplaySafeCheckpoints(parentBefore) : []
+
+      // A non-replay-safe point must be refused with a reason, not adjusted.
+      const refusedFork = await rerunFromReplaySafeCheckpoint({
+        sourceThreadId: parentThreadId || '',
+        checkpointBubbleId: 'not-a-real-bubble',
+      })
+
+      let forkSettled = 0
+      const forkOrder = []
+      const forked = await rerunFromReplaySafeCheckpoint({
+        sourceThreadId: parentThreadId || '',
+        checkpointBubbleId: checkpoints[0]?.bubbleId,
+        continueHint: 'fork smoke hint',
+      })
+      const forkedRunId = forked.runId
+      const parentAfter = useThreadStore.getState().threads.find((t) => t.id === parentThreadId)
+      void forkSettled
+      void forkOrder
+
       const archive = useAgentStore
         .getState()
         .archive.filter((record) => record.id === 'browser-denied-smoke')
       return {
+        fork: {
+          parentStatus: forkParent.status,
+          checkpointCount: checkpoints.length,
+          refusedSkipped: refusedFork.skipped === true,
+          refusedReason: refusedFork.skipReason,
+          status: forked.status,
+          queued: forked.queued === true,
+          forkedThreadId: forked.threadId,
+          parentThreadId,
+          // exactly one Archive record => exactly one finalization
+          archiveCount: forkedRunId
+            ? useAgentStore.getState().archive.filter((r) => r.id === forkedRunId).length
+            : -1,
+          parentArchiveCount: useAgentStore
+            .getState()
+            .archive.filter((r) => r.id === 'browser-fork-parent-smoke').length,
+          active: forkedRunId
+            ? useAgentStore.getState().activeRunIds.includes(forkedRunId)
+            : true,
+          // the parent record is preserved, not mutated by the fork
+          parentBubblesBefore,
+          parentBubblesAfter: parentAfter ? parentAfter.bubbles.length : -1,
+          forkedIsNewThread: Boolean(forked.threadId) && forked.threadId !== parentThreadId,
+        },
         builtIn: {
           status: builtIn.status,
           runId: builtIn.runId,
@@ -756,7 +813,27 @@ try {
     assert.equal(result.delegate.status, 'success')
     assert.equal(result.delegate.archiveCount, 1)
     assert.equal(result.delegate.hidden, true)
-    console.log('Coordinator browser smoke: success, duplicate, queue, denial, CLI, and Archive ordering passed')
+
+    // ── forked rerun (ticket 02) ────────────────────────────────
+    assert.equal(result.fork.parentStatus, 'success')
+    assert.ok(result.fork.checkpointCount > 0, 'parent thread must expose a replay-safe checkpoint')
+    // a non-replay-safe fork point is refused, not silently adjusted
+    assert.equal(result.fork.refusedSkipped, true)
+    assert.equal(result.fork.refusedReason, 'replay-unsafe')
+    // the fork is an ordinary run: it settles and releases like any other
+    assert.ok(['success', 'failed', 'halted'].includes(result.fork.status))
+    assert.equal(result.fork.active, false, 'forked run must release its slot')
+    // finalization happened exactly once
+    assert.equal(result.fork.archiveCount, 1, 'forked run must archive exactly once')
+    // the parent run and its thread are preserved, not overwritten
+    assert.equal(result.fork.parentArchiveCount, 1)
+    assert.equal(result.fork.forkedIsNewThread, true)
+    assert.equal(
+      result.fork.parentBubblesAfter,
+      result.fork.parentBubblesBefore,
+      'forking must not mutate the parent thread',
+    )
+    console.log('Coordinator browser smoke: success, duplicate, queue, denial, CLI, fork, and Archive ordering passed')
   } finally {
     await browser.close()
   }

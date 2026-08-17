@@ -1,3 +1,12 @@
+/** How the current run obtained a capability or tool (ticket 03 audit). */
+export type CapabilityUnlockProvenance =
+  | 'always-on'
+  | 'preloaded'
+  | 'load_capability'
+  | 'tool_search'
+  | 'progressive-off'
+  | 'restored'
+
 /**
  * Capability primitive (Pydantic AI 2.0–style):
  * a reusable, composable unit of agent behavior.
@@ -6,8 +15,8 @@
  * deferLoading → progressive disclosure via load_capability.
  */
 
-import type { ToolName } from '../tools/registry'
-import type { FeatureId } from '../entitlement'
+import type { ToolName } from '../tools/registry.ts'
+import type { FeatureId } from '../entitlement.ts'
 
 export type CapabilityId = string
 
@@ -87,7 +96,7 @@ export interface CapabilityRuntimeState {
   }
   /** In-memory provenance for the current run; never treated as user input. */
   provenance: {
-    capabilities: Map<string, 'always-on' | 'preloaded' | 'load_capability' | 'tool_search' | 'progressive-off' | 'restored'>
-    tools: Map<string, 'preloaded' | 'load_capability' | 'tool_search' | 'restored'>
+    capabilities: Map<string, CapabilityUnlockProvenance>
+    tools: Map<string, CapabilityUnlockProvenance>
   }
 }

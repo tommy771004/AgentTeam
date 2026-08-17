@@ -14,7 +14,7 @@
  *   user re-approves the package fingerprint (never silent escalation)
  */
 
-import type { CustomToolDefinition } from '../types'
+import type { CustomToolDefinition } from '../types.ts'
 
 export type OperationClass = 'read' | 'write' | 'destructive' | 'external'
 

@@ -8,10 +8,10 @@ import {
   featurePackAuditEvent,
   type FeaturePackRecord,
   type FeaturePackAuditEvent,
-} from '../agent/featurePacks'
-import { validateFeaturePackManifest, type FeaturePackManifest } from '../agent/featurePackContracts'
-import type { EntitlementSnapshot } from '../agent/entitlement'
-import { readJson, writeJson } from './persist'
+} from '../agent/featurePacks.ts'
+import { validateFeaturePackManifest, type FeaturePackManifest } from '../agent/featurePackContracts.ts'
+import type { EntitlementSnapshot } from '../agent/entitlement.ts'
+import { readJson, writeJson } from './persist.ts'
 
 const PACKS_KEY = 'feature-packs.v1'
 const AUDIT_KEY = 'feature-packs.audit.v1'

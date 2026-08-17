@@ -10,7 +10,7 @@
  * - Production adapters **must** clone before storing or fan-out (use
  *   `snapshot(state)`). Smokes that assert isolation should clone on publish.
  */
-import type { AgentState } from '../types'
+import type { AgentState } from '../types.ts'
 
 export type LoopRunState = AgentState
 

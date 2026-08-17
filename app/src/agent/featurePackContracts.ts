@@ -9,7 +9,7 @@
 
 import { canonicalJson, compareVersions, type UpdateArtifactDescriptor } from './updateContracts.ts'
 import { validateToolPackage, type ToolPackageManifest } from './tools/toolPackage.ts'
-import type { FeatureId } from './entitlement'
+import type { FeatureId } from './entitlement.ts'
 
 export interface FeaturePackManifest {
   schemaVersion: 1

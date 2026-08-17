@@ -4,7 +4,7 @@
  * (inspired by https://github.com/colbymchenry/codegraph).
  */
 
-import type { EntityKind, KnowledgeEntity, KnowledgeGraph } from './types'
+import type { EntityKind, KnowledgeEntity, KnowledgeGraph } from './types.ts'
 
 function uid(prefix: string, i: number) {
   return `${prefix}_${i}`

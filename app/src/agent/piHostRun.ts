@@ -1,4 +1,4 @@
-import type { LoopType } from './types'
+import type { LoopType } from './types.ts'
 
 export type PiHostRunConfigInput = {
   forceLoopType?: LoopType

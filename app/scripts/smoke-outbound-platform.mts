@@ -34,7 +34,7 @@ await test('outboundBridge module exports main handlers', () => {
 
 await test('main.ts registers outbound IPC', () => {
   const t = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
-  assert.match(t, /from '\.\/outboundBridge'/)
+  assert.match(t, /from '\.\/outboundBridge(\.ts)?'/)
   for (const ch of [
     'outbound:status',
     'outbound:ensurePolicy',

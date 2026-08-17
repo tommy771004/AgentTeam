@@ -53,7 +53,7 @@ register({
       .slice(0, 40)
     if (!todos.length) return { ok: false, output: 'update_plan 需要至少一個有效的 todos 項目' }
     try {
-      const { useRunActivityStore } = await import('../../../store/runActivityStore')
+      const { useRunActivityStore } = await import('../../../store/runActivityStore.ts')
       useRunActivityStore.getState().setTasks(todos, runId)
       useRunActivityStore.getState().push({
         kind: 'status',
@@ -70,8 +70,8 @@ register({
       .join('\n')
     let subDesignStage: string | undefined
     try {
-      const { stageFromPlan } = await import('../../subdesign/brief')
-      const { useSubDesignStore } = await import('../../../store/subDesignStore')
+      const { stageFromPlan } = await import('../../subdesign/brief.ts')
+      const { useSubDesignStore } = await import('../../../store/subDesignStore.ts')
       const linked = threadId ? useSubDesignStore.getState().findByThreadId(threadId) : null
       const inferred = stageFromPlan(todos)
       if (linked && inferred && (inferred !== 'build' || linked.selectedDirectionId)) {

@@ -1,6 +1,6 @@
 export {
   BUILTIN_RUNNER_CAPABILITIES,
-  EXTERNAL_CLI_LEAF_BLOCKED_TOOLS,
+  LEAF_BLOCKED_TOOLS,
   EXTERNAL_CLI_DOD_LABEL,
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
   EXTERNAL_CLI_UI_LABEL,
@@ -15,4 +15,4 @@ export {
   type ExternalCliDelegateContract,
   type ExecutionKind,
   type RunnerCapabilities,
-} from './types'
+} from './types.ts'

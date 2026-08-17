@@ -1,27 +1,27 @@
 import { create } from 'zustand'
-import { memoryStore } from '../agent/hermes/memory'
-import { skillsStore } from '../agent/hermes/skills'
-import { learningLoop } from '../agent/hermes/learning'
-import { searchSessions, summarizeSessionHits } from '../agent/hermes/sessionSearch'
-import { getAgentsDoc, getSoulDoc, setAgentsDoc, setSoulDoc } from '../agent/hermes/promptBuilder'
-import { pluginRegistry, type PluginManifest } from '../agent/hermes/plugins'
-import { PLUGIN_CATALOG, catalogItem, type PluginCatalogItem } from '../agent/hermes/pluginCatalog'
+import { memoryStore } from '../agent/hermes/memory.ts'
+import { skillsStore } from '../agent/hermes/skills.ts'
+import { learningLoop } from '../agent/hermes/learning.ts'
+import { searchSessions, summarizeSessionHits } from '../agent/hermes/sessionSearch.ts'
+import { getAgentsDoc, getSoulDoc, setAgentsDoc, setSoulDoc } from '../agent/hermes/promptBuilder.ts'
+import { pluginRegistry, type PluginManifest } from '../agent/hermes/plugins.ts'
+import { PLUGIN_CATALOG, catalogItem, type PluginCatalogItem } from '../agent/hermes/pluginCatalog.ts'
 import {
   accountHintFromToken,
   clearPluginSecret,
   hasPluginSecret,
   setPluginSecret,
-} from '../agent/hermes/pluginSecrets'
-import { oauthProviderForPlugin } from '../agent/hermes/pluginOAuth'
+} from '../agent/hermes/pluginSecrets.ts'
+import { oauthProviderForPlugin } from '../agent/hermes/pluginOAuth.ts'
 import {
   refreshDueTokens,
   startPluginTokenRefreshScheduler,
   stopPluginTokenRefreshScheduler,
-} from '../agent/hermes/pluginTokenRefresh'
-import type { LearningEvent, MemoryBundle, SessionSearchHit, Skill } from '../agent/hermes/types'
-import type { ArchiveRecord } from '../agent/types'
-import { isElectronPiProduction } from '../agent/piProduction'
-import { useSettingsStore } from './settingsStore'
+} from '../agent/hermes/pluginTokenRefresh.ts'
+import type { LearningEvent, MemoryBundle, SessionSearchHit, Skill } from '../agent/hermes/types.ts'
+import type { ArchiveRecord } from '../agent/types.ts'
+import { isElectronPiProduction } from '../agent/piProduction.ts'
+import { useSettingsStore } from './settingsStore.ts'
 
 export type PluginHealth = {
   ok: boolean
@@ -431,7 +431,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     load: async () => {
       // P1-A: hydrate vault metadata mirror + one-time localStorage → vault migration
       try {
-        const { hydratePluginSecrets } = await import('../agent/hermes/pluginSecrets')
+        const { hydratePluginSecrets } = await import('../agent/hermes/pluginSecrets.ts')
         await hydratePluginSecrets()
       } catch {
         /* non-fatal */

@@ -1,6 +1,6 @@
 import type { PublishSchedule } from './contentPublishing.ts'
 import type { YouTubePrivacyStatus } from './contentPublishPlatforms.ts'
-import { createSideEffectEvidence, validateSideEffectEvidence, type SideEffectEvidence } from './evidence/sideEffectEvidence.ts'
+import { gateSideEffect, type SideEffectEvidence } from './evidence/sideEffectEvidence.ts'
 
 export interface ContentPublishPayload {
   contentItemId: string
@@ -16,7 +16,9 @@ export interface ContentPublishPayload {
 }
 
 export type PublishAdapterResult =
-  | { ok: true; status: 'published'; externalId?: string; evidence?: SideEffectEvidence }
+  // ADR-0048 layer one: 'published' is unrepresentable without the snapshot
+  // issued by the adapter that performed the publish.
+  | { ok: true; status: 'published'; externalId?: string; evidence: SideEffectEvidence }
   | {
       ok: false
       status: 'not-published'
@@ -103,33 +105,23 @@ export function createContentPublishAdapterRegistry(
           privacyStatus: content.privacyStatus,
         })
         if (!result.ok) return result
-        // The registry is the trusted adapter boundary. A model cannot supply
-        // this field through a tool argument; a custom adapter's claim is
-        // validated and the registry issues the canonical snapshot.
-        if (result.evidence) {
-          const supplied = validateSideEffectEvidence(result.evidence)
-          if (!supplied.ok || supplied.evidence.kind !== 'content_publish') {
-            return {
-              ok: false,
-              status: 'not-published',
-              code: 'PLATFORM_PUBLISH_FAILED',
-              message: '發布 adapter 回傳的 execution evidence 無效',
-            }
+        // ADR-0048: the adapter performed the effect, so only the adapter may
+        // issue the snapshot. The registry validates and forwards it; it never
+        // mints one of its own, because it did not observe the publish.
+        const gated = gateSideEffect({
+          kind: 'content_publish',
+          evidence: result.evidence,
+          result,
+        })
+        if (!gated.ok) {
+          return {
+            ok: false,
+            status: 'not-published',
+            code: 'PLATFORM_PUBLISH_FAILED',
+            message: `發布 adapter 未提供可採信的 execution evidence：${gated.reason}`,
           }
         }
-        return {
-          ...result,
-          evidence: createSideEffectEvidence({
-            kind: 'content_publish',
-            source: `platform:${normalizePlatform(schedule.platform)}`,
-            metadata: {
-              platform: normalizePlatform(schedule.platform),
-              contentItemId: schedule.contentItemId,
-              externalId: result.externalId,
-              payload: 'metadata-only',
-            },
-          }),
-        }
+        return { ...result, evidence: gated.evidence }
       } catch {
         return {
           ok: false,

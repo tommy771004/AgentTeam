@@ -12,15 +12,30 @@ That plus outbound is the whole compliance story, and telling it currently requi
 
 Nothing new is collected — this composes what `security:gates`, `release:qualification`, the smoke evidence ledger, `outbound/evidenceLedger.ts`, and tool-package fingerprints already produce.
 
-- [ ] One export produces a document covering a chosen period or run set.
-- [ ] It records who was authorised to run what, and under which approval mode.
-- [ ] It records which credentials were referenced, by metadata only — never the secret material.
-- [ ] It records which files were changed.
-- [ ] It records which tools were blocked by a fingerprint change and awaited re-approval.
-- [ ] It includes the outbound egress evidence from ticket 15, so permissions and data flow are answered in one place.
-- [ ] It records entitlement decisions, including any fail-closed downgrade to `free`.
-- [ ] Sources are existing output from `security:gates`, `release:qualification`, the smoke evidence ledger, `outbound/evidenceLedger.ts`, and `tools/toolPackage.ts`; no new collection is added.
-- [ ] The export is reviewable as a document by someone who has not read the source.
-- [ ] A smoke asserts the exported document contains the expected authorisation, credential-reference, file-change, and blocked-tool entries, and contains no raw secret material.
+- [x] One export produces a document covering a chosen period or run set.
+- [x] It records who was authorised to run what, and under which approval mode.
+- [x] It records which credentials were referenced, by metadata only — never the secret material.
+- [x] It records which files were changed.
+- [x] It records which tools were blocked by a fingerprint change and awaited re-approval.
+- [x] It includes the outbound egress evidence from ticket 15, so permissions and data flow are answered in one place.
+- [x] It records entitlement decisions, including any fail-closed downgrade to `free`.
+- [x] Sources are existing output from `security:gates`, `release:qualification`, the smoke evidence ledger, `outbound/evidenceLedger.ts`, and `tools/toolPackage.ts`; no new collection is added.
+- [x] The export is reviewable as a document by someone who has not read the source.
+- [x] A smoke asserts the exported document contains the expected authorisation, credential-reference, file-change, and blocked-tool entries, and contains no raw secret material.
 
 Files: `app/src/agent/outbound/evidenceLedger.ts`, `app/src/agent/tools/toolPackage.ts`, `app/src/agent/entitlement.ts`, `app/scripts/security-gates.mjs`, `app/scripts/release-evidence.mjs`.
+
+## Comments
+
+**2026-08-17.** `buildComplianceReport` took every input as a caller-supplied
+array and had no caller, so no export existed. Added:
+- `complianceReportSources.ts`, which composes the document from the run
+  archive, `outbound/evidenceLedger`, `tools/toolPackage` fingerprints and
+  `entitlement` — a projection only, no new collection.
+- `entitlementDecisions` (including the fail-closed downgrade to `free`),
+  `period` / run-set scoping, and `approvalMode` + `unattended` on each
+  authorisation.
+- A Markdown rendering with six titled sections so a reviewer who has not read
+  the source can answer each question, rather than a JSON blob in a fence.
+- `ComplianceReportExport` in the Ops console, writing through the same scoped
+  project path as learning export.

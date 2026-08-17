@@ -22,11 +22,11 @@ register({
     const threadId = context?.threadId
     try {
     const { useSettingsStore } = await import('../../../store/settingsStore.ts')
-    const { critiqueAllowsDeliver } = await import('../../subdesign/critique')
-    const { useSubDesignArtifactStore } = await import('../../../store/subDesignArtifactStore')
-    const { useSubDesignCritiqueStore } = await import('../../../store/subDesignCritiqueStore')
-    const { useSubDesignCritiqueSessionStore } = await import('../../../store/subDesignCritiqueSessionStore')
-    const { useSubDesignStore } = await import('../../../store/subDesignStore')
+    const { critiqueAllowsDeliver } = await import('../../subdesign/critique.ts')
+    const { useSubDesignArtifactStore } = await import('../../../store/subDesignArtifactStore.ts')
+    const { useSubDesignCritiqueStore } = await import('../../../store/subDesignCritiqueStore.ts')
+    const { useSubDesignCritiqueSessionStore } = await import('../../../store/subDesignCritiqueSessionStore.ts')
+    const { useSubDesignStore } = await import('../../../store/subDesignStore.ts')
     const rawCritique = input.critique && typeof input.critique === 'object'
       ? { ...(input.critique as Record<string, unknown>) }
       : null
@@ -67,7 +67,7 @@ register({
     const brief = useSubDesignStore.getState().findById(briefId)
     const stageResult = brief ? useSubDesignStore.getState().setStage(brief.id, nextStage, projectRoot) : null
     if (result.critique.verdict === 'pass' && brief) {
-      const { learningLoop } = await import('../../hermes/learning')
+      const { learningLoop } = await import('../../hermes/learning.ts')
       learningLoop.onSubDesignPass({
         projectRoot,
         surface: brief.surface,

@@ -1,7 +1,7 @@
 /** Pure learning-export plan. Electron owns the final scoped write. */
-import type { KnowledgeGraph } from '../types'
-import type { MemoryBundle } from './types'
-import type { Skill } from './types'
+import type { KnowledgeGraph } from '../types.ts'
+import type { MemoryBundle } from './types.ts'
+import type { Skill } from './types.ts'
 
 export type LearningExportKind = 'skill' | 'memory' | 'knowledge'
 

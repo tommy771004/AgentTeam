@@ -11,9 +11,9 @@ import type {
   LoopType,
   RuntimeOverrides,
   ScheduleKind,
-} from './types'
-import type { AutomationSuggestion } from './automationSuggestion'
-import type { ThreadRunner } from '../store/threadStore'
+} from './types.ts'
+import type { AutomationSuggestion } from './automationSuggestion.ts'
+import type { ThreadRunner } from '../store/threadStore.ts'
 import type { DispatchResult } from './dispatchResult.ts'
 
 /** Where a run request came from — the ONLY thing entries may vary. */
@@ -28,6 +28,34 @@ export type RunSourceKind =
   | 'delegate'
   | 'headless'
   | 'queue-drain'
+
+export type BusyPolicy = 'queue' | 'steer' | 'reject'
+
+/**
+ * Declarative busy policy. Lives on the neutral leaf so the coordinator, the
+ * queue and the Ops projection all read one decision rather than restating it.
+ */
+export function resolveBusyPolicy(
+  sourceKind: RunSourceKind | undefined,
+  followUpMode: 'steer' | 'queue' | undefined,
+): BusyPolicy {
+  switch (sourceKind) {
+    case 'schedule':
+    case 'webhook':
+    case 'telegram':
+    case 'event':
+    case 'delegate':
+    case 'headless':
+    case 'queue-drain':
+      return 'queue'
+    case 'composer':
+    case 'slash':
+    case 'retry':
+      return (followUpMode || 'steer') === 'queue' ? 'queue' : 'steer'
+    default:
+      return 'reject'
+  }
+}
 
 export type ExternalRunOpts = {
   objective: string

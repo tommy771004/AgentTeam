@@ -7,7 +7,7 @@
  * 大小上限時降級為「只留摘要 + 訊息數」,絕不讓 quota 錯誤打斷 run。
  */
 
-import { isElectronPiProduction } from './piProduction'
+import { isElectronPiProduction } from './piProduction.ts'
 
 export interface CompactionCheckpoint {
   runId: string

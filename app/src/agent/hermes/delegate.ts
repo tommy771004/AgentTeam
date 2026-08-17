@@ -9,18 +9,18 @@
  */
 
 import { v4 as uuid } from 'uuid'
-import type { LlmSettings, PermissionPolicy, PermissionProjection, ToolCallRecord } from '../types'
-import type { ThreadRunner } from '../../store/threadStore'
-import { resolveRoleModel } from '../llm'
+import type { LlmSettings, PermissionPolicy, PermissionProjection, ToolCallRecord } from '../types.ts'
+import type { ThreadRunner } from '../../store/threadStore.ts'
+import { resolveRoleModel } from '../llm.ts'
 import {
   blockedToolsForCapabilityMode,
   type DelegateCapabilityMode,
-} from './capabilityMode'
+} from './capabilityMode.ts'
 import {
   buildExternalCliDelegateContract,
-  EXTERNAL_CLI_LEAF_BLOCKED_TOOLS,
+  LEAF_BLOCKED_TOOLS,
   type ExternalCliDelegateContract,
-} from '../runners/types'
+} from '../runners/types.ts'
 
 export type DelegateRole = 'leaf' | 'orchestrator'
 
@@ -246,7 +246,7 @@ export async function prepareDelegateSpawn(
 
   const roleBlocked =
     role === 'leaf'
-      ? [...EXTERNAL_CLI_LEAF_BLOCKED_TOOLS]
+      ? [...LEAF_BLOCKED_TOOLS]
       : ['delegate_task']
   // G9 capability_mode 疊加(只更嚴,不放寬 role 既有封鎖)
   const blockedTools = [
@@ -331,7 +331,7 @@ export async function spawnDelegateViaRunTask(
   // G7 delegateStart hook 事件(被動:log / notify)
   const emitDelegateHook = async (point: 'delegateStart' | 'delegateEnd', ok?: boolean) => {
     try {
-      const { collectHookRules, evaluateHooks } = await import('../hooks')
+      const { collectHookRules, evaluateHooks } = await import('../hooks.ts')
       const ev = evaluateHooks(collectHookRules(settings), {
         point,
         tool: 'delegate_task',
@@ -354,7 +354,7 @@ export async function spawnDelegateViaRunTask(
   }
 
   try {
-    const { runTask } = await import('../taskRunCoordinator')
+    const { runTask } = await import('../taskRunCoordinator.ts')
     const childRunId = `${input.parentRunId || 'delegate'}>${prepared.id}`
     const tr = await runTask({
       sourceKind: 'delegate',

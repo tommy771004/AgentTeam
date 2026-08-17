@@ -17,16 +17,16 @@ import type {
   LlmSettings,
   LoopType,
   RuntimeOverrides,
-} from './types'
+} from './types.ts'
 import type {
   ExternalRunOpts,
   ExternalRunResult,
   RunSourceKind,
-} from './taskRunTypes'
-import type { BusyPolicy } from './taskRunPolicy'
-import type { DispatchResult } from './runDispatch'
-import type { HookEvaluation } from './hooks'
-import type { ThreadRunner } from '../store/threadStore'
+} from './taskRunTypes.ts'
+import type { BusyPolicy } from './taskRunPolicy.ts'
+import type { DispatchResult } from './runDispatch.ts'
+import type { HookEvaluation } from './hooks.ts'
+import type { ThreadRunner } from '../store/threadStore.ts'
 import { findReplaySafeCheckpoint } from './runFork.ts'
 import {
   buildExternalCliDelegateContract,
@@ -85,7 +85,7 @@ export async function prepareRunAttachments(
       materializeAttachmentsOnDisk,
       normalizeImageAttachmentsForVision,
       hydrateAttachmentsFromDisk,
-    } = await import('../lib/chatAttachments')
+    } = await import('../lib/chatAttachments.ts')
     let next = attachments
     if (phase === 'persist' || phase === 'full') {
       next = await normalizeImageAttachmentsForVision(next)
@@ -115,7 +115,7 @@ export async function checkRunCapacity(
   runId: string,
   threadId?: string,
 ): Promise<CapacityCheck> {
-  const { useAgentStore } = await import('../store/agentStore')
+  const { useAgentStore } = await import('../store/agentStore.ts')
   return useAgentStore.getState().canStartRun(runId, threadId)
 }
 
@@ -128,13 +128,13 @@ export async function reserveRunCapacity(
   threadId: string | undefined,
   kind: 'builtin' | 'cli',
 ): Promise<boolean> {
-  const { useAgentStore } = await import('../store/agentStore')
+  const { useAgentStore } = await import('../store/agentStore.ts')
   return useAgentStore.getState().reserveRun(runId, threadId, kind)
 }
 
 /** Release a previously reserved slot (hook deny / early failure before dispatch). */
 export async function releaseRunCapacity(runId: string): Promise<void> {
-  const { useAgentStore } = await import('../store/agentStore')
+  const { useAgentStore } = await import('../store/agentStore.ts')
   useAgentStore.getState().releaseRun(runId)
 }
 
@@ -167,8 +167,8 @@ export type BoundRunThread = {
  */
 export async function bindRunThread(opts: BindRunThreadOpts): Promise<BoundRunThread> {
   const [{ useThreadStore }, { useAgentStore }] = await Promise.all([
-    import('../store/threadStore'),
-    import('../store/agentStore'),
+    import('../store/threadStore.ts'),
+    import('../store/agentStore.ts'),
   ])
   const thr = useThreadStore.getState()
   if (!thr.activeId && thr.threads.length === 0) thr.hydrate()
@@ -238,12 +238,12 @@ export async function evaluateBeforeRunHooks(
 ): Promise<BeforeRunHookResult> {
   try {
     const [{ collectHookRules, evaluateHooks }, { useThreadStore }] = await Promise.all([
-      import('./hooks'),
-      import('../store/threadStore'),
+      import('./hooks.ts'),
+      import('../store/threadStore.ts'),
     ])
     // G7:先 hydrate 專案級 hooks(未信任專案靜默跳過),collect 才收得到
     try {
-      const { hydrateProjectHooks } = await import('./projectHooks')
+      const { hydrateProjectHooks } = await import('./projectHooks.ts')
       const hydrated = await hydrateProjectHooks(opts.settings, opts.projectRoot)
       if (hydrated.loaded > 0) {
         useThreadStore
@@ -378,16 +378,16 @@ export async function finalizeTaskRun(
 ): Promise<ExternalRunResult> {
   const [{ useAgentStore }, { useThreadStore }, { drainExternalRunQueue }] =
     await Promise.all([
-      import('../store/agentStore'),
-      import('../store/threadStore'),
-      import('./runQueue'),
+      import('../store/agentStore.ts'),
+      import('../store/threadStore.ts'),
+      import('./runQueue.ts'),
     ])
 
   const thr = useThreadStore.getState()
   const { runId, threadId: tid, objective, settings } = input
 
   try {
-    const { useRunActivityStore } = await import('../store/runActivityStore')
+    const { useRunActivityStore } = await import('../store/runActivityStore.ts')
     useRunActivityStore.getState().setStatus('正在整理執行摘要…', runId)
   } catch {
     /* renderer activity is optional for headless / recovery paths */
@@ -395,7 +395,7 @@ export async function finalizeTaskRun(
 
   // G8:plan mode 是 run-scoped 狀態,finalization 唯一出口負責釋放
   try {
-    const { clearPlanMode } = await import('./planMode')
+    const { clearPlanMode } = await import('./planMode.ts')
     clearPlanMode(runId)
   } catch {
     /* non-fatal */
@@ -414,7 +414,7 @@ export async function finalizeTaskRun(
   const settle = async (result: ExternalRunResult) => {
     // G11:每 run 一筆指標(finalization 唯一出口保證恰好一次)
     try {
-      const { finalizeRunMetric } = await import('./metrics')
+      const { finalizeRunMetric } = await import('./metrics.ts')
       finalizeRunMetric(runId, {
         sourceKind: input.sourceKind,
         path: result.path,
@@ -446,7 +446,7 @@ export async function finalizeTaskRun(
     thr.setThreadRunning(tid, false, runId)
     thr.pushBubble(tid, 'system', input.early.error)
     try {
-      const { collectHookRules, evaluateHooks } = await import('./hooks')
+      const { collectHookRules, evaluateHooks } = await import('./hooks.ts')
       const ev = evaluateHooks(collectHookRules(settings), {
         point: 'afterRun',
         sourceKind: input.sourceKind,
@@ -509,7 +509,7 @@ export async function finalizeTaskRun(
       /* archive optional on early fail */
     }
     try {
-      const { useRunActivityStore } = await import('../store/runActivityStore')
+      const { useRunActivityStore } = await import('../store/runActivityStore.ts')
       useRunActivityStore.getState().end(runId, '失敗')
     } catch {
       /* renderer activity is optional for headless / recovery paths */
@@ -665,7 +665,7 @@ export async function finalizeTaskRun(
 
   // 2) afterRun hooks
   try {
-    const { collectHookRules, evaluateHooks } = await import('./hooks')
+    const { collectHookRules, evaluateHooks } = await import('./hooks.ts')
     const ev = evaluateHooks(collectHookRules(settings), {
       point: 'afterRun',
       sourceKind: input.sourceKind,
@@ -695,7 +695,7 @@ export async function finalizeTaskRun(
   recordRunTerminal({ runId, threadId: tid, status: String(status) })
 
   try {
-    const { useRunActivityStore } = await import('../store/runActivityStore')
+    const { useRunActivityStore } = await import('../store/runActivityStore.ts')
     const terminalLabel =
       String(status) === 'failed'
         ? '失敗'
@@ -749,23 +749,23 @@ export async function finalizeTaskRun(
 }
 
 async function pushRunProcessSummary(args: {
-  thr: ReturnType<typeof import('../store/threadStore').useThreadStore.getState>
+  thr: ReturnType<typeof import('../store/threadStore.ts').useThreadStore.getState>
   tid: string
   runId: string
   objective: string
-  finalAgent: import('./types').AgentState
+  finalAgent: import('./types.ts').AgentState
   result: DispatchResult
   status: string
   projectRoot?: string
 }): Promise<void> {
   const { thr, tid, runId, finalAgent, result, status } = args
-  const { useRunActivityStore } = await import('../store/runActivityStore')
+  const { useRunActivityStore } = await import('../store/runActivityStore.ts')
   const {
     useSubDesignStore,
-  } = await import('../store/subDesignStore')
-  const { useSubDesignArtifactStore } = await import('../store/subDesignArtifactStore')
-  const { useSubDesignCritiqueStore } = await import('../store/subDesignCritiqueStore')
-  const { useSubDesignExportStore } = await import('../store/subDesignExportStore')
+  } = await import('../store/subDesignStore.ts')
+  const { useSubDesignArtifactStore } = await import('../store/subDesignArtifactStore.ts')
+  const { useSubDesignCritiqueStore } = await import('../store/subDesignCritiqueStore.ts')
+  const { useSubDesignExportStore } = await import('../store/subDesignExportStore.ts')
 
   const presentation = useRunActivityStore.getState().getPresentation(runId)
   const activityOperations = (presentation?.events || [])
@@ -886,7 +886,7 @@ async function pushRunProcessSummary(args: {
   let diff: string | undefined
   if (fileMap.size > 0) {
     try {
-      const { useProjectStore } = await import('../store/projectStore')
+      const { useProjectStore } = await import('../store/projectStore.ts')
       const projectRoot = args.projectRoot || useProjectStore.getState().root || undefined
       const diffResult = await window.subagents?.tools?.workspaceDiff?.(
         [...fileMap.keys()],
@@ -1199,7 +1199,7 @@ async function coordinateTaskRun(
 
   // Coordinator owns attachment I/O: materialize once early so queue keeps filePath.
   // Hydrate happens once after capacity is reserved (below).
-  const { useProjectStore } = await import('../store/projectStore')
+  const { useProjectStore } = await import('../store/projectStore.ts')
   const attachmentProjectRoot =
     opts.projectRoot || useProjectStore.getState().root || undefined
   const attachmentSessionId = opts.reuseThreadId || opts.meta?.scheduleJobId
@@ -1381,7 +1381,7 @@ async function coordinateTaskRun(
   // Adapters may still mirror activity for compatibility, but they must not
   // decide when the visible run is terminal.
   try {
-    const { useRunActivityStore } = await import('../store/runActivityStore')
+    const { useRunActivityStore } = await import('../store/runActivityStore.ts')
     useRunActivityStore.getState().begin(runId)
     useRunActivityStore.getState().setStatus('啟動中…', runId)
   } catch {
@@ -1571,14 +1571,14 @@ async function coordinateTaskRun(
     opts.sourceKind === 'retry'
   if (userChatTurn && !temporary) {
     try {
-      const { learningLoop } = await import('./hermes/learning')
+      const { learningLoop } = await import('./hermes/learning.ts')
       learningLoop.onUserTurn()
     } catch {
       /* non-fatal */
     }
     // G7 userTurn hook 事件(被動:log / notify)
     try {
-      const { collectHookRules, evaluateHooks } = await import('./hooks')
+      const { collectHookRules, evaluateHooks } = await import('./hooks.ts')
       const ev = evaluateHooks(collectHookRules(settings), {
         point: 'userTurn',
         sourceKind: opts.sourceKind,
@@ -1598,7 +1598,7 @@ async function coordinateTaskRun(
   if (!overrides.projectRoot) {
     overrides.projectRoot =
       opts.projectRoot?.trim() ||
-      (await import('../store/projectStore')).useProjectStore.getState().root ||
+      (await import('../store/projectStore.ts')).useProjectStore.getState().root ||
       undefined
   }
 
@@ -1809,7 +1809,7 @@ export async function rerunFromReplaySafeCheckpoint(input: {
   runner?: ThreadRunner
   continueHint?: string
 }): Promise<TaskRunResult> {
-  const { useThreadStore } = await import('../store/threadStore')
+  const { useThreadStore } = await import('../store/threadStore.ts')
   const store = useThreadStore.getState()
   const source = store.threads.find((thread) => thread.id === input.sourceThreadId)
   const checkpoint = source ? findReplaySafeCheckpoint(source, input.checkpointBubbleId) : null

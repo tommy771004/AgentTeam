@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { clampScore, normalizeEvidence, normalizeFindings } from '../agent/subdesign/critique'
+import { clampScore, normalizeEvidence, normalizeFindings } from '../agent/subdesign/critique.ts'
 import type {
   SubDesignCritique,
   SubDesignCritiquePanelist,
@@ -7,7 +7,7 @@ import type {
   SubDesignCritiqueRound,
   SubDesignCritiqueSession,
   SubDesignCritiqueSessionEvent,
-} from '../agent/subdesign/types'
+} from '../agent/subdesign/types.ts'
 
 const STORAGE_KEY = 'subagents.subdesign.critique-sessions.v1'
 

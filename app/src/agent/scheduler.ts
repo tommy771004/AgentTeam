@@ -6,7 +6,7 @@ import type {
   ScheduledJob,
   ScheduleKind,
   ScheduleTriggerSnapshot,
-} from './types'
+} from './types.ts'
 
 export type ScheduleTriggerValidation =
   | { ok: true; snapshot: ScheduleTriggerSnapshot }

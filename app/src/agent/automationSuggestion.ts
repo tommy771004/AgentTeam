@@ -6,7 +6,7 @@
  * executing a tool belongs to a later, explicit user/trigger action.
  */
 
-import type { ScheduleKind } from './types'
+import type { ScheduleKind } from './types.ts'
 
 export type AutomationSuggestionKind = 'schedule' | 'event'
 

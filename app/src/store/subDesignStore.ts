@@ -5,16 +5,16 @@ import {
   selectSubDesignDirection,
   transitionSubDesignStage,
   updateSubDesignBrief,
-} from '../agent/subdesign/brief'
-import { scanDesignSystems } from '../agent/subdesign/designSystem'
-import { persistSubDesignMetadata } from '../agent/subdesign/metadata'
+} from '../agent/subdesign/brief.ts'
+import { scanDesignSystems } from '../agent/subdesign/designSystem.ts'
+import { persistSubDesignMetadata } from '../agent/subdesign/metadata.ts'
 import type {
   DesignSystemSummary,
   SubDesignBrief,
   SubDesignBriefPatch,
   SubDesignDirection,
   SubDesignStage,
-} from '../agent/subdesign/types'
+} from '../agent/subdesign/types.ts'
 
 const STORAGE_KEY = 'subagents.subdesign.briefs.v1'
 

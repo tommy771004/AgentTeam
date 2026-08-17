@@ -40,8 +40,8 @@ export async function revertOpenCodeMessage(
   if (!window.subagents?.opencodeServer?.revert) {
     return { ok: false, preview, error: 'OpenCode revert 僅支援 Electron' }
   }
-  const { useSettingsStore } = await import('../../store/settingsStore')
-  const { authorizeTool } = await import('../tools/toolGuard')
+  const { useSettingsStore } = await import('../../store/settingsStore.ts')
+  const { authorizeTool } = await import('../tools/toolGuard.ts')
   const auth = await authorizeTool({
     tool: 'workspace_write',
     input: { provider: 'opencode', sessionId, messageId, preview },
