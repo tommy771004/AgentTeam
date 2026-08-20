@@ -31,7 +31,9 @@ function which(bin: string): string | null {
 
 /** Seatbelt profile: allow viewRoot R/W + essential system reads; deny default. */
 export function buildSeatbeltProfile(viewRoot: string): string {
-  const root = path.resolve(viewRoot)
+  // Seatbelt is a macOS-only engine, so its SBPL paths must keep POSIX
+  // semantics even when this pure builder is exercised by a Windows CI host.
+  const root = path.posix.resolve(viewRoot)
   // Escape for SBPL strings
   const esc = root.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
   return `(version 1)

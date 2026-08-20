@@ -50,6 +50,21 @@ await test('verify probe: missing view → unavailable', () => {
   assert.equal(r.status, 'unavailable')
 })
 
+await test('verify probe never selects Seatbelt on Windows', () => {
+  const view = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-win-view-'))
+  try {
+    const r = verifyCliFilesystemSandbox({
+      viewRoot: view,
+      forbiddenCanaryPath: path.join(os.tmpdir(), 'forbid.txt'),
+      platform: 'win32',
+    })
+    assert.equal(r.status, 'unavailable')
+    assert.equal(r.engine, 'none')
+  } finally {
+    fs.rmSync(view, { recursive: true, force: true })
+  }
+})
+
 await test('verify probe runs on this host when engine exists', () => {
   const view = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-view-'))
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-out-'))
