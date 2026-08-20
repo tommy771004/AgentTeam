@@ -3,9 +3,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureElectronExecutable } from './electron-executable.mjs'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const electronExecutable = path.join(appRoot, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
+const electronExecutable = ensureElectronExecutable()
 if (!fs.existsSync(path.join(appRoot, 'dist', 'index.html'))) throw new Error('Run npm run build before the update migration E2E')
 const { _electron: electron } = await import('playwright')
 const userDataDir = path.join(os.tmpdir(), `subagents-ai-update-e2e-${process.pid}`)
@@ -26,6 +27,7 @@ const waitForUpdateStatus = async (page, expected) => {
   throw new Error(`update state did not reach ${expected}`)
 }
 const writeJson = (file, value) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8') }
+const canonicalPath = (target) => fs.realpathSync.native(target)
 
 const app = await launch()
 try {
@@ -46,7 +48,7 @@ try {
     return { userDataPath, threads: localStorage.getItem('subagents.threads.v5') }
   }, projectRootBefore)
   assert.ok(baseline.userDataPath)
-  assert.equal(path.resolve(baseline.userDataPath), path.resolve(userDataDir), 'Electron E2E must use isolated userData')
+  assert.equal(canonicalPath(baseline.userDataPath), canonicalPath(userDataDir), 'Electron E2E must use isolated userData')
   const updatesDir = path.join(baseline.userDataPath, 'updates')
   const backupPath = path.join(updatesDir, 'migration-backup-e2e.json')
   const stagedPath = path.join(updatesDir, 'fixture-installer.bin')
@@ -75,6 +77,7 @@ try {
   await page.waitForFunction(() => document.body.innerText.includes('設定'), undefined, { timeout: 30_000 })
   const migrated = await page.evaluate(async () => ({
     settings: JSON.parse(localStorage.getItem('subagents.settings.v1') || '{}'),
+    settingsBridge: await window.subagents?.settings?.get?.(),
     queue: JSON.parse(localStorage.getItem('subagents.runQueue.v1') || '{}'),
     queueBackup: JSON.parse(localStorage.getItem('subagents.runQueue.v1.backup') || '{}'),
     project: localStorage.getItem('subagents.project.root.v1'),
@@ -85,12 +88,13 @@ try {
     jobs: await window.subagents?.scheduler?.list?.(),
   }))
   assert.equal(migrated.settings.theme, 'light')
-  assert.equal(migrated.settings.apiKey, 'keep-in-renderer-before-migration')
+  assert.equal(migrated.settings.apiKey, undefined, 'migration must not restore API keys into renderer storage')
+  assert.equal(migrated.settingsBridge?.apiKey, 'keep-in-renderer-before-migration', 'main-process settings must preserve the existing API key')
   assert.ok([migrated.queue, migrated.queueBackup].some((queue) => queue.items?.some((item) => item.id === 'queued-after-update')), 'queue item must survive migration or be durably acknowledged')
   assert.equal(migrated.project, projectRootMigrated)
   assert.deepEqual(migrated.artifactIndex, { refs: ['update-e2e'] })
   assert.ok(migrated.vault?.some((item) => item.id === 'fixture'), 'vault metadata must survive migration')
-  assert.equal(path.resolve(migrated.activeProject?.projectRoot || ''), path.resolve(projectRootMigrated))
+  assert.equal(canonicalPath(migrated.activeProject?.projectRoot || ''), canonicalPath(projectRootMigrated))
   assert.equal(migrated.state.status, 'idle')
   assert.equal(migrated.jobs.find((job) => job.id === 'update-e2e-job')?.enabled, true)
 
