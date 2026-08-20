@@ -151,6 +151,12 @@ export type Thread = {
    * Parent conversation sees completion via injectBackgroundResult only.
    */
   hidden?: boolean
+  /**
+   * Project this conversation ran against, stamped once at run bind time.
+   * Drives the sidebar's per-project grouping; absent on threads created
+   * before the binding existed, or never dispatched.
+   */
+  projectRoot?: string
 }
 
 interface ThreadStore {
@@ -179,6 +185,7 @@ interface ThreadStore {
         | 'agentMode'
         | 'runner'
         | 'hidden'
+        | 'projectRoot'
       >
     >,
   ) => string
@@ -194,6 +201,8 @@ interface ThreadStore {
   setAgentMode: (id: string, mode: AgentMode) => void
   setRunner: (id: string, runner: ThreadRunner) => void
   setLoopType: (id: string, loop: LoopType | null) => void
+  /** Bind a conversation to the project it ran against (sidebar grouping). */
+  setThreadProject: (id: string, projectRoot: string) => void
   pushBubble: (
     threadId: string,
     role: ThreadBubble['role'],
@@ -256,6 +265,63 @@ function uid(prefix = 'th') {
 
 function piHostCanonical(): boolean {
   return typeof window !== 'undefined' && typeof window.subagents?.piHost?.sessions?.list === 'function'
+}
+
+/**
+ * Pi Host owns durable history, so removing the renderer row is not a delete:
+ * the next `sessions/list` projection would resurrect the thread. Archive marks
+ * the Host session as a tombstone, which `projectPiSession` then filters out and
+ * `submitPiHostRun` refuses to reuse.
+ */
+async function archivePiHostSession(threadId: string): Promise<void> {
+  if (typeof window === 'undefined') return
+  const api = window.subagents?.piHost?.sessions
+  if (!api?.list || !api.archive) return
+  try {
+    const listed = await api.list()
+    for (const raw of listed?.sessions || []) {
+      if (!raw || typeof raw !== 'object') continue
+      const session = raw as { id?: unknown; threadId?: unknown; archived?: unknown }
+      if (session.threadId !== threadId || typeof session.id !== 'string') continue
+      if (session.archived === true) continue
+      await api.archive(session.id)
+    }
+  } catch {
+    /* Host teardown is best-effort; the renderer projection already dropped it */
+  }
+}
+
+/**
+ * Thread deletion is a lifecycle teardown, not a list edit. Dropping only the
+ * row leaves the in-flight run writing to a dead thread, queued follow-ups
+ * waiting to re-create it, and a sticky session approval alive.
+ */
+function disposeThreadRuntime(threadId: string, runId?: string): void {
+  void (async () => {
+    if (runId) {
+      try {
+        const { useAgentStore } = await import('./agentStore.ts')
+        useAgentStore.getState().stopExecution(runId)
+      } catch {
+        /* stopping is best-effort; the Host tombstone below still applies */
+      }
+    }
+    try {
+      const queue = await import('../agent/runQueue.ts')
+      for (const item of queue.listQueuedRuns()) {
+        if (item.reuseThreadId === threadId) queue.removeQueuedRun(item.id)
+      }
+    } catch {
+      /* queue may be unavailable in a restricted browser */
+    }
+    try {
+      const { usePermissionAskStore } = await import('./permissionAskStore.ts')
+      usePermissionAskStore.getState().setSessionAllow(false, threadId)
+    } catch {
+      /* approval state is renderer-only */
+    }
+    await archivePiHostSession(threadId)
+  })()
 }
 
 function persist(threads: Thread[], activeId: string | null) {
@@ -330,6 +396,10 @@ function migrateThread(raw: Record<string, unknown>): Thread {
         ? (raw.externalRun as ExternalRunRef)
         : undefined,
     hidden: raw.hidden === true ? true : undefined,
+    projectRoot:
+      typeof raw.projectRoot === 'string' && raw.projectRoot.trim()
+        ? raw.projectRoot.trim()
+        : undefined,
   }
 }
 
@@ -407,6 +477,7 @@ function emptyThread(partial?: Partial<Thread>): Thread {
     lastStatus: 'idle',
     subDesignBriefId: partial?.subDesignBriefId,
     hidden: partial?.hidden === true ? true : undefined,
+    projectRoot: partial?.projectRoot?.trim() || undefined,
   }
 }
 
@@ -447,9 +518,16 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     const byThread = new Map(
       sessions.map((session) => [session.threadId, projectPiSession(session)] as const).filter(([id, projection]) => Boolean(id && projection)),
     )
+    // Archived sessions are Host tombstones. A thread only survives them if a
+    // live session re-bound the same threadId after the delete.
+    const tombstoned = new Set(
+      sessions
+        .filter((session) => session.archived && session.threadId && !byThread.has(session.threadId))
+        .map((session) => session.threadId as string),
+    )
     const current = get().threads
     const isPlaceholder = current.length === 1 && current[0].runner === 'builtin' && current[0].title === '新對話' && current[0].bubbles.length === 0
-    const preserved = (isPlaceholder ? [] : current).filter((thread) => !byThread.has(thread.id))
+    const preserved = (isPlaceholder ? [] : current).filter((thread) => !byThread.has(thread.id) && !tombstoned.has(thread.id))
     const projected = [...byThread.values()].flatMap((projection) => projection ? [{
       ...(current.find((thread) => thread.id === projection.threadId) || emptyThread({ id: projection.threadId, title: projection.title })),
       id: projection.threadId,
@@ -562,8 +640,12 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   },
 
   deleteThread: (id) => {
-    let threads = get().threads.filter((t) => t.id !== id)
-    let activeId = get().activeId
+    const previous = get()
+    // Stop the run, drop queued follow-ups, tombstone the Host session first —
+    // otherwise the row disappears while the thread is still alive underneath.
+    disposeThreadRuntime(id, previous.runningRunIds[id])
+    let threads = previous.threads.filter((t) => t.id !== id)
+    let activeId = previous.activeId
     if (threads.length === 0) {
       const t = emptyThread()
       threads = [t]
@@ -571,7 +653,14 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     } else if (activeId === id) {
       activeId = threads[0].id
     }
-    set({ threads, activeId })
+    const runningRunIds = { ...previous.runningRunIds }
+    delete runningRunIds[id]
+    const runningThreadIds = Object.keys(runningRunIds)
+    const runningThreadId =
+      previous.runningThreadId && runningThreadIds.includes(previous.runningThreadId)
+        ? previous.runningThreadId
+        : runningThreadIds.at(-1) || null
+    set({ threads, activeId, runningRunIds, runningThreadIds, runningThreadId })
     persist(threads, activeId)
   },
 
@@ -626,6 +715,18 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   setLoopType: (id, loop) => {
     const threads = get().threads.map((t) =>
       t.id === id ? { ...t, loopType: loop, updatedAt: new Date().toISOString() } : t,
+    )
+    set({ threads })
+    persist(threads, get().activeId)
+  },
+
+  setThreadProject: (id, projectRoot) => {
+    const root = projectRoot.trim()
+    if (!root) return
+    const threads = get().threads.map((t) =>
+      t.id === id && t.projectRoot !== root
+        ? { ...t, projectRoot: root, updatedAt: new Date().toISOString() }
+        : t,
     )
     set({ threads })
     persist(threads, get().activeId)

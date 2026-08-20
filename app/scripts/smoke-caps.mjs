@@ -730,7 +730,9 @@ await test('Phase 3 item 6/7: background delegate links Archive once + hidden wo
   const fs = await import('node:fs')
   const bg = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
   const thread = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
-  const sidebar = fs.readFileSync(path.join(appRoot, 'src/components/ThreadSidebar.tsx'), 'utf8')
+  // The sidebar now groups by project; hidden-thread exclusion moved with the
+  // grouping into its own pure module (covered by smoke-thread-project-groups).
+  const sidebar = fs.readFileSync(path.join(appRoot, 'src/lib/threadProjectGroups.ts'), 'utf8')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunTypes.ts'), 'utf8')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(bg, /archiveRunId/)
@@ -739,7 +741,7 @@ await test('Phase 3 item 6/7: background delegate links Archive once + hidden wo
   assert.match(bg, /Link-only|coordinator finalization already archived/i)
   assert.match(thread, /hidden\?: boolean/)
   assert.match(thread, /t\.hidden/)
-  assert.match(sidebar, /threads\.filter\(\(t\) => !t\.hidden\)/)
+  assert.match(sidebar, /if \(thread\.hidden\) continue/)
   assert.match(types, /workerThread\?: boolean/)
   assert.match(coordinator, /hidden: opts\.hidden/)
 })

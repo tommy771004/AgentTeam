@@ -1207,10 +1207,17 @@ html[data-theme='light'] .agent-question-card { background: var(--color-surface)
   color: var(--color-ink) !important;
 }
 
-.sidebar-panel .macos-nav-item,
 .sidebar-panel > div:first-of-type,
 .sidebar-panel > div:last-child {
   border-color: var(--color-line);
+}
+
+/* 側邊欄功能項目不畫外框線（保留 1px 透明邊避免位移） */
+.sidebar-panel .macos-nav-item,
+.sidebar-panel .macos-nav-item:hover,
+.sidebar-panel .macos-nav-item[aria-current='page'] {
+  border-color: transparent !important;
+  box-shadow: none !important;
 }
 
 .app-panel,

@@ -20,4 +20,17 @@ assert.deepEqual(projected, {
   ],
 })
 
+// Deleting a thread archives its Host session. The projection must treat that
+// as a tombstone, otherwise the next hydrate resurrects the deleted thread.
+assert.equal(
+  projectPiSession({
+    id: 'pi-session-2',
+    threadId: 'thread-2',
+    title: 'Deleted thread',
+    archived: true,
+    messages: [{ role: 'user', content: 'hello' }],
+  }),
+  null,
+)
+
 console.log('Pi Host session history projects deterministically into the disposable UI view')

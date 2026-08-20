@@ -1,7 +1,10 @@
+import { useMemo, useState } from 'react'
 import { Icon } from './Icon'
 import { getThinkingDepth } from '../agent/thinking'
 import { getPrimaryAgent } from '../agent/opencode/agents'
 import { useThreadStore } from '../store/threadStore'
+import { useProjectStore } from '../store/projectStore'
+import { buildProjectGroups, COLLAPSED_PER_PROJECT } from '../lib/threadProjectGroups'
 import { useSettingsStore } from '../store/settingsStore'
 import { forkOpenCodeSession } from '../agent/opencode/serverClient'
 import { extractOpenCodeSessionId } from '../agent/opencode/sessionMapping'
@@ -33,12 +36,20 @@ export function ThreadSidebar() {
     deleteThread,
     setShowThreadList,
   } = useThreadStore()
+  const activeRoot = useProjectStore((s) => s.root)
+  const activeName = useProjectStore((s) => s.name)
   const globalModel = useSettingsStore((s) => s.settings.model)
+  const [expanded, setExpanded] = useState(false)
+
+  const groups = useMemo(
+    () => buildProjectGroups(threads, activeRoot, activeName),
+    [threads, activeRoot, activeName],
+  )
+  const truncated = groups.some((group) => group.threads.length > COLLAPSED_PER_PROJECT)
 
   return (
     <div className="h-full flex flex-col min-h-0 bg-surface">
-      <div className="shrink-0 h-11 px-2 flex items-center justify-between border-b border-line">
-        <span className="text-xs font-semibold px-1 text-ink">Threads</span>
+      <div className="shrink-0 h-11 px-2 flex items-center justify-end border-b border-line">
         <div className="flex items-center gap-0.5">
           <button
             type="button"
@@ -58,113 +69,127 @@ export function ThreadSidebar() {
           </button>
         </div>
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-1.5 space-y-0.5">
-        {threads.filter((t) => !t.hidden).map((t) => {
-          const active = t.id === activeId
-          const depth = getThinkingDepth(t.thinkingDepth)
-          const agent = getPrimaryAgent(t.agentMode)
-          const modelLabel = (t.model || globalModel || '—').slice(0, 14)
-          const running = t.lastStatus === 'running' || t.lastStatus === 'parsing'
+
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-3">
+        <div className="px-3 pt-3 pb-1 text-[11px] tracking-wide text-ink-3">專案</div>
+
+        {groups.map((group) => {
+          const visible = expanded ? group.threads : group.threads.slice(0, COLLAPSED_PER_PROJECT)
           return (
-            <div
-              key={t.id}
-              className={`group flex items-start gap-1 rounded-xl px-2 py-2 cursor-pointer border transition-colors ${
-                active
-                  ? 'bg-hover border-transparent'
-                  : 'border-transparent hover:bg-hover-2'
-              }`}
-              onClick={() => selectThread(t.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') selectThread(t.id)
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  {running && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
-                  )}
-                  <span className="text-[12px] font-medium truncate text-ink">
-                    {t.title}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                  <span className={`text-[9px] px-1 py-0.5 rounded border font-semibold ${agent.color}`}>
-                    {agent.label}
-                  </span>
-                  <span className="text-[9px] px-1 py-0.5 rounded-chip border border-line text-ink-3 font-[family-name:var(--font-mono)] truncate max-w-[80px]">
-                    {modelLabel}
-                  </span>
-                  <span className="text-[9px] px-1 py-0.5 rounded-chip border border-line text-accent-ink">
-                    {depth.shortLabel}
-                  </span>
-                </div>
+            <div key={group.key} className="pt-2.5">
+              <div
+                className="flex items-center gap-2 px-3 py-1 text-[13px] text-ink-2"
+                title={group.root || '尚未綁定專案資料夾'}
+              >
+                <Icon name="folder_open" size={16} className="shrink-0 text-ink-3" />
+                <span className="truncate">{group.label}</span>
               </div>
-              <button
-                type="button"
-                className="opacity-0 group-hover:opacity-100 p-1 rounded-control text-ink-3 hover:text-red shrink-0"
-                title="刪除"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  deleteThread(t.id)
-                }}
-              >
-                <Icon name="close" size={14} />
-              </button>
-              <button
-                type="button"
-                className="opacity-0 group-hover:opacity-100 p-1 rounded-control text-ink-3 hover:text-accent-ink shrink-0"
-                title="建立分支"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  const forkedId = forkThread(t.id)
-                  const sourceSession = t.externalRun
-                  if (!forkedId || sourceSession?.provider !== 'opencode' || !sourceSession.serverUrl || !sourceSession.sessionId) return
-                  void forkOpenCodeSession(sourceSession.serverUrl, sourceSession.sessionId).then((raw) => {
-                    const sessionId = extractOpenCodeSessionId(raw)
-                    if (!sessionId) {
-                      useThreadStore.getState().setExternalRun(forkedId, undefined)
-                      useThreadStore.getState().pushBubble(forkedId, 'system', 'OpenCode fork 未回傳 session id，已保留為本地分支。')
-                      return
-                    }
-                    useThreadStore.getState().setExternalRun(forkedId, {
-                      ...sourceSession,
-                      sessionId,
-                      parentSessionId: sourceSession.sessionId,
-                      childSessionIds: undefined,
-                      status: 'starting',
-                      completionReason: 'fork-created',
-                      finishedAt: undefined,
-                    })
-                    useThreadStore.getState().pushBubble(forkedId, 'system', `OpenCode fork 已同步 · ${sessionId}`)
-                  }).catch((error) => {
-                    useThreadStore.getState().setExternalRun(forkedId, undefined)
-                    useThreadStore.getState().pushBubble(forkedId, 'system', `OpenCode fork 失敗，已保留為本地分支：${error instanceof Error ? error.message : String(error)}`)
-                  })
-                }}
-              >
-                <Icon name="call_split" size={14} />
-              </button>
-              <button
-                type="button"
-                className="opacity-0 group-hover:opacity-100 p-1 rounded-control text-ink-3 hover:text-accent-ink shrink-0"
-                title="從最近 replay-safe checkpoint 重跑"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void rerunFromReplaySafeCheckpoint({ sourceThreadId: t.id }).then((result) => {
-                    if (result.skipped) {
-                      useThreadStore.getState().pushBubble(t.id, 'system', result.error || '無法從 checkpoint 重跑。')
-                    }
-                  })
-                }}
-              >
-                <Icon name="replay" size={14} />
-              </button>
+
+              {visible.length === 0 ? (
+                <div className="pl-[38px] pr-3 py-1.5 text-[13px] text-ink-3">沒有對話</div>
+              ) : (
+                visible.map((t) => {
+                  const active = t.id === activeId
+                  const depth = getThinkingDepth(t.thinkingDepth)
+                  const agent = getPrimaryAgent(t.agentMode)
+                  const modelLabel = t.model || globalModel || '—'
+                  const running = t.lastStatus === 'running' || t.lastStatus === 'parsing'
+                  return (
+                    <div
+                      key={t.id}
+                      className={`group flex items-center gap-1 pl-[38px] pr-1.5 py-1.5 cursor-pointer transition-colors ${
+                        active ? 'bg-hover text-ink' : 'text-ink hover:bg-hover-2'
+                      }`}
+                      onClick={() => selectThread(t.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') selectThread(t.id)
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      // Chips moved into the tooltip so the row stays one clean line.
+                      title={`${t.title}\n${agent.label} · ${modelLabel} · ${depth.shortLabel}`}
+                    >
+                      {running && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
+                      <span className="text-[13px] truncate flex-1 min-w-0">{t.title}</span>
+                      <button
+                        type="button"
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded-control text-ink-3 hover:text-red shrink-0"
+                        title="刪除"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          deleteThread(t.id)
+                        }}
+                      >
+                        <Icon name="close" size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded-control text-ink-3 hover:text-accent-ink shrink-0"
+                        title="建立分支"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          const forkedId = forkThread(t.id)
+                          const sourceSession = t.externalRun
+                          if (!forkedId || sourceSession?.provider !== 'opencode' || !sourceSession.serverUrl || !sourceSession.sessionId) return
+                          void forkOpenCodeSession(sourceSession.serverUrl, sourceSession.sessionId).then((raw) => {
+                            const sessionId = extractOpenCodeSessionId(raw)
+                            if (!sessionId) {
+                              useThreadStore.getState().setExternalRun(forkedId, undefined)
+                              useThreadStore.getState().pushBubble(forkedId, 'system', 'OpenCode fork 未回傳 session id，已保留為本地分支。')
+                              return
+                            }
+                            useThreadStore.getState().setExternalRun(forkedId, {
+                              ...sourceSession,
+                              sessionId,
+                              parentSessionId: sourceSession.sessionId,
+                              childSessionIds: undefined,
+                              status: 'starting',
+                              completionReason: 'fork-created',
+                              finishedAt: undefined,
+                            })
+                            useThreadStore.getState().pushBubble(forkedId, 'system', `OpenCode fork 已同步 · ${sessionId}`)
+                          }).catch((error) => {
+                            useThreadStore.getState().setExternalRun(forkedId, undefined)
+                            useThreadStore.getState().pushBubble(forkedId, 'system', `OpenCode fork 失敗，已保留為本地分支：${error instanceof Error ? error.message : String(error)}`)
+                          })
+                        }}
+                      >
+                        <Icon name="call_split" size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded-control text-ink-3 hover:text-accent-ink shrink-0"
+                        title="從最近 replay-safe checkpoint 重跑"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void rerunFromReplaySafeCheckpoint({ sourceThreadId: t.id }).then((result) => {
+                            if (result.skipped) {
+                              useThreadStore.getState().pushBubble(t.id, 'system', result.error || '無法從 checkpoint 重跑。')
+                            }
+                          })
+                        }}
+                      >
+                        <Icon name="replay" size={14} />
+                      </button>
+                    </div>
+                  )
+                })
+              )}
             </div>
           )
         })}
+
+        {truncated && (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="mt-3 w-full text-left px-3 py-1.5 text-[13px] text-ink-3 hover:text-ink-2"
+          >
+            {expanded ? '收合' : '顯示更多'}
+          </button>
+        )}
       </div>
+
       {(() => {
         const activeThread = threads.find((thread) => thread.id === activeId)
         if (!activeThread) return null

@@ -152,6 +152,8 @@ export type BindRunThreadOpts = {
    * Does not steal active selection or open the run panel.
    */
   hidden?: boolean
+  /** Project this run is pinned to; stamped on the thread for sidebar grouping. */
+  projectRoot?: string
 }
 
 export type BoundRunThread = {
@@ -184,9 +186,13 @@ export async function bindRunThread(opts: BindRunThreadOpts): Promise<BoundRunTh
       thinkingDepth: opts.thinkingDepth || 'standard',
       runner: opts.runner || 'builtin',
       hidden: opts.hidden === true ? true : undefined,
+      projectRoot: opts.projectRoot,
     })
     reused = false
   }
+  // A reused thread may predate the binding, or the user may have switched
+  // projects between runs; the latest run owns the grouping.
+  if (opts.projectRoot) thr.setThreadProject(tid, opts.projectRoot)
 
   const isHidden =
     opts.hidden === true ||
@@ -1374,6 +1380,7 @@ async function coordinateTaskRun(
     runner: opts.runner,
     loopType: forcedLoopType || null,
     hidden: opts.workerThread === true,
+    projectRoot: attachmentProjectRoot,
   })
   boundThreadId = tid
   recordRunStarted({ runId, threadId: tid })
