@@ -200,6 +200,18 @@ export class PiHostSupervisor {
     return response.result.memories
   }
 
+  async deleteMemory(id: string): Promise<NonNullable<PiHostResponse['result']>['memories']> {
+    const response = await this.request('memory/delete', { id })
+    if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory deletion failed')
+    return response.result.memories
+  }
+
+  async clearMemories(): Promise<NonNullable<PiHostResponse['result']>['memories']> {
+    const response = await this.request('memory/clear', {})
+    if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory clear failed')
+    return response.result.memories
+  }
+
   async recallMemory(query: string, project?: string, limit?: number): Promise<NonNullable<PiHostResponse['result']>['memories']> {
     const response = await this.request('memory/recall', { query, ...(project ? { project } : {}), ...(limit === undefined ? {} : { limit }) })
     if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory recall failed')
@@ -242,6 +254,12 @@ export class PiHostSupervisor {
     return response.result
   }
 
+  async resetSession(sessionId: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('sessions/reset', { sessionId })
+    if (response.error || !response.result?.sessionId) throw new Error(response.error?.message || 'Pi session reset failed')
+    return response.result
+  }
+
   async archiveSession(sessionId: string): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('sessions/archive', { sessionId })
     if (response.error || !response.result?.sessionId) throw new Error(response.error?.message || 'Pi session archive failed')
@@ -266,7 +284,7 @@ export class PiHostSupervisor {
     return response.result.builtinTools
   }
 
-  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }): Promise<NonNullable<PiHostResponse['result']>> {
+  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}), ...(profile ? { profile } : {}), ...(orchestration || {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')
     return response.result

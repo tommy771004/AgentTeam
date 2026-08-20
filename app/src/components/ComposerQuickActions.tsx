@@ -24,7 +24,9 @@ type ComposerQuickActionsProps = {
   onLoopChange: (type: LoopType | null) => void
   onAgentModeChange: (mode: AgentMode) => void
   onRunnerChange: (runner: ThreadRunner) => void
+  onOpenAutomation: (kind: 'schedule' | 'event') => void
   onOpenCapabilities: () => void
+  runPanelAvailable: boolean
   onToggleRunPanel: () => void
   onToggleTerminal: () => void
   onCreateThread: () => void
@@ -36,8 +38,6 @@ const LOOPS: Array<{ type: LoopType | null; label: string; icon: string }> = [
   { type: null, label: '自動', icon: 'auto_awesome' },
   { type: 'Goal-based', label: '目標', icon: 'track_changes' },
   { type: 'Turn-based', label: '回合', icon: 'forum' },
-  { type: 'Time-based', label: '定時', icon: 'schedule' },
-  { type: 'Proactive', label: '事件', icon: 'bolt' },
 ]
 
 /** Compact Codex-style + menu for optional conversation controls. */
@@ -53,7 +53,9 @@ export function ComposerQuickActions({
   onLoopChange,
   onAgentModeChange,
   onRunnerChange,
+  onOpenAutomation,
   onOpenCapabilities,
+  runPanelAvailable,
   onToggleRunPanel,
   onToggleTerminal,
   onCreateThread,
@@ -143,7 +145,7 @@ export function ComposerQuickActions({
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-5 gap-1 px-1 pb-1">
+          <div className="grid grid-cols-3 gap-1 px-1 pb-1">
             {LOOPS.map((item) => (
               <button
                 key={item.type ?? 'auto'}
@@ -165,6 +167,20 @@ export function ComposerQuickActions({
               </button>
             ))}
           </div>
+
+          <MenuLabel>自動化</MenuLabel>
+          <MenuButton
+            icon="schedule"
+            title="定時任務"
+            description="前往自動化建立可驗證的排程"
+            onClick={() => choose(() => onOpenAutomation('schedule'))}
+          />
+          <MenuButton
+            icon="bolt"
+            title="事件觸發"
+            description="前往自動化建立事件規則"
+            onClick={() => choose(() => onOpenAutomation('event'))}
+          />
 
           <MenuLabel>執行引擎</MenuLabel>
           <div className="flex flex-wrap gap-1 px-1 pb-1">
@@ -188,7 +204,13 @@ export function ComposerQuickActions({
 
           <MenuLabel>更多</MenuLabel>
           <MenuButton icon="extension" title="擴充能力" description="管理連線、技能與外掛程式" onClick={() => choose(onOpenCapabilities)} />
-          <MenuButton icon="vertical_split" title="任務面板" description="查看目前執行進度" onClick={() => choose(onToggleRunPanel)} />
+          <MenuButton
+            icon="vertical_split"
+            title="任務面板"
+            description={runPanelAvailable ? '查看目前執行進度' : '尚無任務執行紀錄'}
+            disabled={!runPanelAvailable}
+            onClick={() => choose(onToggleRunPanel)}
+          />
           <MenuButton icon="terminal" title="終端機" description="開啟工作區終端" onClick={() => choose(onToggleTerminal)} />
         </div>
       ) : null}

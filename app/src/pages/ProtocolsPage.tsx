@@ -35,7 +35,7 @@ import { CliDoctorCard } from '../components/CliDoctorCard'
 import { requestFocusComposer } from '../store/commandHistoryStore'
 import type { ApprovalMode } from '../agent/types'
 import {
-  buildComposerRunOverrides,
+  buildComposerRunInput,
   buildHandoffAvailability,
   buildHandoffDocument,
   readArtifactIndex,
@@ -270,10 +270,21 @@ export function ProtocolsPage() {
     let suggestionOnly = false
 
     const { subagents } = parseSubagentMentions(raw)
-    const approvalMode = buildComposerRunOverrides(
-      settings.approvalMode || 'auto',
-      composerApprovalMode,
-    )
+    const runInput = buildComposerRunInput({
+      objective: raw,
+      threadId: activeId,
+      runner,
+      loopType: pinnedLoopType,
+      attachments,
+      projectRoot: projectRoot || undefined,
+      settingsApprovalMode: settings.approvalMode || 'auto',
+      selectedApprovalMode: composerApprovalMode,
+      agentMode,
+      model: threadModel || settings.model,
+      thinkingDepth: depth,
+      speed,
+      temporary: settings.temporaryChatDefault === true,
+    })
 
     setBusy(true)
     setDraftInput('')
@@ -311,18 +322,7 @@ export function ProtocolsPage() {
       // user/assistant bubbles, trace runId, drain — all owned by runTask.
       // Omit loopType when unpinned → engine auto-classifies (Chat-lite / Goal).
       const { runTask } = await import('../agent/taskRunCoordinator')
-      const r = await runTask({
-        objective: raw,
-        sourceKind: 'composer',
-        reuseThreadId: activeId,
-        runner,
-        loopType: pinnedLoopType || undefined,
-        attachments,
-        // Snapshot the project pinned at dispatch time — a concurrent run must not
-        // silently re-resolve to whatever project the UI switches to mid-flight.
-        projectRoot: projectRoot || undefined,
-        overrides: approvalMode,
-      })
+      const r = await runTask(runInput)
       suggestionOnly = Boolean(r.suggestion)
       if (r.queued) {
         const n = queueLength()
@@ -562,9 +562,13 @@ export function ProtocolsPage() {
                     onLoopChange={onModeChange}
                     onAgentModeChange={(mode) => activeId && setAgentMode(activeId, mode)}
                     onRunnerChange={(nextRunner) => activeId && setRunner(activeId, nextRunner)}
+                    onOpenAutomation={(kind) => {
+                      window.location.hash = kind === 'event' ? '#/automation?tab=events' : '#/automation'
+                    }}
                     onOpenCapabilities={() => {
                       window.location.hash = '#/learning?tab=plugins'
                     }}
+                    runPanelAvailable={Boolean(presentationRunId)}
                     onToggleRunPanel={() => {
                       setShowRunPanel(!showRunPanel)
                       setShowTerminal(false)
@@ -577,7 +581,10 @@ export function ProtocolsPage() {
                       createThread({
                         model: threadModel,
                         thinkingDepth: depth,
+                        speed,
                         agentMode,
+                        runner,
+                        loopType: pinnedLoopType,
                       })
                     }
                     handoff={handoff}

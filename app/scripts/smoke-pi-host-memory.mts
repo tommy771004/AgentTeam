@@ -5,6 +5,21 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { buildPiTurnMemory } from '../electron/piSessionContext.ts'
+
+assert.equal(buildPiTurnMemory('ordinary chat', { runId: 'r1', sessionId: 's1' }), undefined)
+assert.deepEqual(buildPiTurnMemory('請記住我的偏好是繁體中文', {
+  runId: 'r2',
+  sessionId: 's1',
+  project: 'demo',
+  createdAt: '2026-08-20T00:00:00.000Z',
+}), {
+  id: 'turn-s1-r2',
+  project: 'demo',
+  text: '請記住我的偏好是繁體中文',
+  tags: ['turn-memory', 'explicit', 'session:s1'],
+  createdAt: '2026-08-20T00:00:00.000Z',
+})
 
 type Message = {
   id?: number
@@ -42,6 +57,12 @@ try {
   assert.equal((await waitFor(5)).error, undefined)
   send(6, 'memory/recall', { query: 'ui' })
   assert.equal((await waitFor(6)).result?.memories?.[0]?.tags.includes('ui'), true)
+  send(9, 'memory/delete', { id: 'pref-language' })
+  assert.equal((await waitFor(9)).result?.memories?.length, 0)
+  send(10, 'memory/add', { memory: { id: 'temporary-memory', text: 'delete me', tags: [], createdAt: '2026-07-22T00:00:00.000Z' } })
+  await waitFor(10)
+  send(11, 'memory/clear')
+  assert.equal((await waitFor(11)).result?.memories?.length, 0)
   host.stdin.end()
   await once(host, 'exit')
   const restarted = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
@@ -61,7 +82,7 @@ try {
   restarted.stdin.write(`${JSON.stringify({ id: 7, method: 'initialize', params: { protocolVersion: 1 } })}\n`)
   assert.equal((await restartedWaitFor(7)).error, undefined)
   restarted.stdin.write(`${JSON.stringify({ id: 8, method: 'memory/list', params: {} })}\n`)
-  assert.equal((await restartedWaitFor(8)).result?.memories?.[0]?.id, 'pref-language')
+  assert.equal((await restartedWaitFor(8)).result?.memories?.length, 0)
   restarted.stdin.end()
   await once(restarted, 'exit')
 } finally {

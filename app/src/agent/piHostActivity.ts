@@ -223,5 +223,50 @@ export function mapPiHostEventToActivity(event: PiHostEventLike): PiHostActivity
     }
   }
 
+  if (event.event === 'host/context') {
+    const phase = asText(payload?.phase)
+    const contextWindow = typeof payload?.contextWindowTokens === 'number'
+      ? `${payload.contextWindowTokens.toLocaleString()} tokens`
+      : undefined
+    if (phase === 'memory-recalled') {
+      const recalled = typeof payload?.recalled === 'number' ? payload.recalled : 0
+      return {
+        kind: 'status',
+        runId,
+        title: `已載入 ${recalled} 筆相關記憶`,
+        eventId: `pi-context-memory-${recalled}`,
+      }
+    }
+    if (phase === 'memory-written') {
+      const written = typeof payload?.written === 'number' ? payload.written : 1
+      return {
+        kind: 'status',
+        runId,
+        title: `已儲存 ${written} 筆長期記憶`,
+        eventId: `pi-context-memory-written-${written}`,
+      }
+    }
+    if (phase === 'compacted') {
+      return {
+        kind: 'status',
+        runId,
+        title: '已壓縮對話上下文',
+        detail: contextWindow,
+        eventId: 'pi-context-compacted',
+      }
+    }
+    if (phase === 'model-switched') {
+      const provider = asText(payload?.provider)
+      const model = asText(payload?.model) || 'unknown model'
+      return {
+        kind: 'status',
+        runId,
+        title: `模型已切換為 ${provider ? `${provider}/` : ''}${model}`,
+        detail: contextWindow,
+        eventId: `pi-context-model-${provider || 'unknown'}-${model}`,
+      }
+    }
+  }
+
   return null
 }

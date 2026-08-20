@@ -5,6 +5,39 @@ import {
   PI_CORE_SETTLEMENT_DEFINITION_OF_DONE,
 } from '../src/agent/piHostRun.ts'
 import { runPiOrchestration } from '../electron/piOrchestrationExtension.ts'
+import { DEFAULT_LLM_SETTINGS } from '../src/agent/llm.ts'
+import { buildRunContextPolicy, resolveRunSettingsOverrides, snapshotRunSettings } from '../src/agent/runSettingsSnapshot.ts'
+
+const mutableSettings = {
+  ...DEFAULT_LLM_SETTINGS,
+  model: 'large-model',
+  referenceChatHistory: false,
+  modelProfiles: { 'large-model': { contextWindow: 128_000 } },
+}
+const frozenSettings = snapshotRunSettings(mutableSettings)
+mutableSettings.modelProfiles['large-model'].contextWindow = 4_096
+assert.equal(frozenSettings.modelProfiles['large-model']?.contextWindow, 128_000)
+assert.deepEqual(buildRunContextPolicy(frozenSettings, {
+  model: 'large-model',
+  project: '/project',
+}), {
+  memoryEnabled: true,
+  memoryWriteEnabled: true,
+  referenceChatHistory: false,
+  temporary: false,
+  project: '/project',
+  contextWindowTokens: 128_000,
+})
+assert.equal(buildRunContextPolicy(frozenSettings, { temporary: true }).memoryEnabled, false)
+const admitted = resolveRunSettingsOverrides(frozenSettings, {
+  model: 'conversation-model',
+  approvalMode: 'full',
+  temporary: false,
+  project: '/conversation-project',
+})
+assert.equal(admitted.model, 'conversation-model')
+assert.equal(admitted.approvalMode, 'full')
+assert.equal(admitted.contextPolicySnapshot?.referenceChatHistory, false)
 
 const goal = buildPiHostRunConfig({})
 assert.equal(goal.loopType, 'Goal-based')

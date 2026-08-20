@@ -2124,6 +2124,8 @@ ipcMain.handle('pi-host:resources:list', async () => ({ resources: await piHostS
 ipcMain.handle('pi-host:resources:reload', async (_evt, resources: unknown[]) => ({ resources: await piHostSupervisor.reloadResources(resources || []) }))
 ipcMain.handle('pi-host:memory:list', async () => ({ memories: await piHostSupervisor.listMemories() }))
 ipcMain.handle('pi-host:memory:add', async (_evt, memory: Record<string, unknown>) => ({ memories: await piHostSupervisor.addMemory(memory || {}) }))
+ipcMain.handle('pi-host:memory:delete', async (_evt, id: string) => ({ memories: await piHostSupervisor.deleteMemory(id) }))
+ipcMain.handle('pi-host:memory:clear', async () => ({ memories: await piHostSupervisor.clearMemories() }))
 ipcMain.handle('pi-host:memory:recall', async (_evt, query: string, project?: string, limit?: number) => ({ memories: await piHostSupervisor.recallMemory(query, project, limit) }))
 ipcMain.handle('pi-host:capabilities:list', async () => ({ items: await piHostSupervisor.listCapabilities() }))
 ipcMain.handle('pi-host:capabilities:load', async (_evt, id: string) => piHostSupervisor.loadCapability(id))
@@ -2136,10 +2138,11 @@ ipcMain.handle('pi-host:extensions:set-enabled', async (_evt, input: { id: strin
 ipcMain.handle('pi-host:extensions:uninstall', async (_evt, id: string) => piHostSupervisor.mutateExtension('extensions/uninstall', { id }))
 ipcMain.handle('pi-host:tools:list', async () => ({ builtinTools: await piHostSupervisor.listTools() }))
 ipcMain.handle('pi-host:sessions:fork', async (_evt, sessionId: string) => piHostSupervisor.forkSession(sessionId))
+ipcMain.handle('pi-host:sessions:reset', async (_evt, sessionId: string) => piHostSupervisor.resetSession(sessionId))
 ipcMain.handle('pi-host:sessions:archive', async (_evt, sessionId: string) => piHostSupervisor.archiveSession(sessionId))
 ipcMain.handle('pi-host:sessions:compact', async (_evt, sessionId: string) => piHostSupervisor.compactSession(sessionId))
 ipcMain.handle('pi-host:tools:execute', async (_evt, input: { tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash' | 'code' | 'mcp'; params?: Record<string, unknown> }) => piHostSupervisor.executeTool(input.tool, input.params || {}))
-ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, mode: input.mode, queue: input.queue }))
+ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { contextPolicy: input.contextPolicy, pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, mode: input.mode, queue: input.queue }))
 ipcMain.handle('pi-host:turn:cancel', async (_evt, runId: string) => piHostSupervisor.cancelTurn(runId))
 
 // ── Signed Beta updates + N-1→N migration transaction ─────────

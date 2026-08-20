@@ -9,11 +9,11 @@
 import type {
   AgentMode,
   CliConfigSnapshot,
+  LlmSettings,
   RuntimeOverrides,
 } from './types.ts'
 import type { ThinkingDepth } from './thinking.ts'
 import type { LocalRunnerKind } from './localCliRun.ts'
-import { useSettingsStore } from '../store/settingsStore.ts'
 import { useAgentStore } from '../store/agentStore.ts'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore.ts'
 import { parseSubagentMentions } from './opencode/agents.ts'
@@ -40,15 +40,13 @@ import {
   isCompleteCliContinueGoalContract,
 } from './runners/types.ts'
 
-function resolveCliBinary(kind: LocalRunnerKind): string | undefined {
-  const settings = useSettingsStore.getState().settings
+function resolveCliBinary(kind: LocalRunnerKind, settings: LlmSettings): string | undefined {
   const mapId = kind === 'claude' ? 'anthropic' : kind === 'gemini' ? 'google' : kind
   const p = (settings.cliProviders || []).find((x) => x.id === mapId || x.id === kind)
   return p?.cliBinary || undefined
 }
 
-function isRunnerAuthorized(kind: LocalRunnerKind): boolean {
-  const settings = useSettingsStore.getState().settings
+function isRunnerAuthorized(kind: LocalRunnerKind, settings: LlmSettings): boolean {
   const mapId = kind === 'claude' ? 'anthropic' : kind === 'gemini' ? 'google' : kind
   return (settings.cliProviders || []).some(
     (p) =>
@@ -118,6 +116,7 @@ export async function dispatchThreadTask(
   }
 
   const thr = useThreadStore.getState()
+  const settings = snapshot.settings
   const tid = snapshot.threadId
   const thread = thr.threads.find((t) => t.id === tid)
   const electronRuntime = typeof window !== 'undefined' && typeof window.subagents?.platform === 'function'
@@ -144,7 +143,7 @@ export async function dispatchThreadTask(
       ...snapshot.overrides,
       runId: snapshot.runId,
       threadId: tid,
-      model: thread?.model,
+      model: snapshot.overrides.model || thread?.model || undefined,
       forceLoopType: snapshot.forceLoopType,
       loopTypeMode: snapshot.forceLoopType ? 'force' : snapshot.overrides.loopTypeMode,
     })
@@ -159,7 +158,6 @@ export async function dispatchThreadTask(
     }
   }
 
-  const settings = useSettingsStore.getState().settings
   // Coordinator snapshot is authoritative for project identity and runner selection.
   const projectRoot = snapshot.overrides.projectRoot?.trim() || ''
   const agent = useAgentStore.getState()
@@ -169,12 +167,14 @@ export async function dispatchThreadTask(
   const legacy = parseSubagentMentions(raw)
   const subId = mentioned.subagents[0] || legacy.subagents[0]
   let text = mentioned.cleaned || legacy.cleaned || raw
-  const depth = (thread?.thinkingDepth || 'deep') as ThinkingDepth
-  const agentMode = (thread?.agentMode ||
-    snapshot.overrides.agentMode ||
+  const depth = (snapshot.overrides.thinkingDepth ||
+    thread?.thinkingDepth ||
+    'deep') as ThinkingDepth
+  const agentMode = (snapshot.overrides.agentMode ||
+    thread?.agentMode ||
     'build') as AgentMode
-  const model = thread?.model || settings.model
-  const speed = thread?.speed || 'standard'
+  const model = snapshot.overrides.model || thread?.model || settings.model
+  const speed = snapshot.overrides.speed || thread?.speed || 'standard'
   const subDesignBrief = tid ? getSubDesignBriefForThread(tid) : null
   const subDesignSystem = subDesignBrief?.designSystemId
     ? useSubDesignStore.getState().systems.find((system) => system.id === subDesignBrief.designSystemId)
@@ -198,7 +198,7 @@ export async function dispatchThreadTask(
       kind === 'opencode'
         ? await captureOpenCodeConfigSnapshot(projectRoot, agentMode, model)
         : undefined
-    if (!isRunnerAuthorized(kind)) {
+    if (!isRunnerAuthorized(kind, settings)) {
       return {
         path: 'cli',
         kind,
@@ -260,7 +260,7 @@ export async function dispatchThreadTask(
     await agent.startLocalCliExecution({
       kind,
       prompt: cliPrompt,
-      binary: resolveCliBinary(kind),
+      binary: resolveCliBinary(kind, settings),
       cwd: projectRoot || undefined,
       model,
       depth,

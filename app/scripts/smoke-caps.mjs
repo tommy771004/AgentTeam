@@ -694,6 +694,9 @@ await test('Ticket 03: lifecycle-control plumbing is contracted', async () => {
   assert.doesNotMatch(dispatch, /snapshotOrGoal|legacyOpts|run_legacy_/, 'Runner dispatch must not synthesize legacy entry context')
   assert.doesNotMatch(dispatch, /thr\.activeId|thread\?\.runner|useProjectStore\.getState\(\)\.root/, 'Dispatch must not fall back to mutable UI identity')
   assert.match(dispatch, /const attachments = snapshot\.attachments/)
+  assert.doesNotMatch(dispatch, /useSettingsStore/, 'Dispatch adapters must consume admitted settings, not mutable Settings')
+  assert.match(coordinator, /settings:\s*snapshotRunSettings\(parts\.settings\)/)
+  assert.match(coordinator, /contextPolicySnapshot:\s*admittedSettings\.contextPolicySnapshot/)
 })
 
 await test('Ticket 04: lifecycle ownership drift stays blocked at module seams', async () => {
@@ -1992,13 +1995,16 @@ await test('Open Design Phase 3: shared adapter contract and Gemini diagnostic',
 await test('ADR3 follow-up: interactive entry points snapshot projectRoot at dispatch (no implicit global fallback)', async () => {
   const fs = await import('node:fs')
   const protocols = fs.readFileSync(path.join(appRoot, 'src/pages/ProtocolsPage.tsx'), 'utf8')
+  const composerControls = fs.readFileSync(path.join(appRoot, 'src/agent/composerRunControls.ts'), 'utf8')
   const slash = fs.readFileSync(path.join(appRoot, 'src/hooks/useSlashExecutor.ts'), 'utf8')
   const continuation = fs.readFileSync(path.join(appRoot, 'src/components/RunContinuationActions.tsx'), 'utf8')
   const runContext = fs.readFileSync(path.join(appRoot, 'src/agent/tools/runContext.ts'), 'utf8')
   // Each interactive runTask() call must snapshot the active project explicitly —
   // a concurrent run must not silently re-resolve to whatever project the UI
   // switches to mid-flight. See docs/adr/0003-concurrent-run-lock-removal.md.
-  assert.match(protocols, /runTask\(\{[\s\S]{0,400}projectRoot: projectRoot \|\| undefined/)
+  assert.match(protocols, /buildComposerRunInput\(\{[\s\S]{0,400}projectRoot: projectRoot \|\| undefined/)
+  assert.match(protocols, /runTask\(runInput\)/)
+  assert.match(composerControls, /projectRoot: input\.projectRoot\?\.trim\(\) \|\| undefined/)
   assert.match(slash, /runTask\(\{[\s\S]{0,400}projectRoot: projectRoot\(\) \|\| undefined/)
   assert.match(continuation, /runTask\(\{[\s\S]{0,600}projectRoot: useProjectStore\.getState\(\)\.root \|\| undefined/)
   assert.match(runContext, /should therefore be unreachable during a real run/)

@@ -62,6 +62,7 @@ const api = {
         createChild: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:sessions:create-child', input) as Promise<{ sessionId: string; sessions: unknown[] }>,
         list: () => ipcRenderer.invoke('pi-host:sessions:list') as Promise<{ sessions: unknown[] }>,
         fork: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:fork', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
+        reset: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:reset', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         archive: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:archive', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         compact: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:compact', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
       },
@@ -79,6 +80,8 @@ const api = {
       memory: {
         list: () => ipcRenderer.invoke('pi-host:memory:list') as Promise<{ memories: unknown[] }>,
         add: (memory: Record<string, unknown>) => ipcRenderer.invoke('pi-host:memory:add', memory) as Promise<{ memories: unknown[] }>,
+        delete: (id: string) => ipcRenderer.invoke('pi-host:memory:delete', id) as Promise<{ memories: unknown[] }>,
+        clear: () => ipcRenderer.invoke('pi-host:memory:clear') as Promise<{ memories: unknown[] }>,
         recall: (query: string, project?: string, limit?: number) => ipcRenderer.invoke('pi-host:memory:recall', query, project, limit) as Promise<{ memories: unknown[] }>,
       },
       capabilities: {
@@ -95,7 +98,7 @@ const api = {
         uninstall: (id: string) => ipcRenderer.invoke('pi-host:extensions:uninstall', id) as Promise<{ removed?: boolean }>,
       },
       turn: {
-        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }}>,
+        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: { memoryEnabled: boolean; memoryWriteEnabled: boolean; referenceChatHistory: boolean; temporary: boolean; project?: string; contextWindowTokens?: number }; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }}>,
         cancel: (runId: string) => ipcRenderer.invoke('pi-host:turn:cancel', runId) as Promise<{ runId: string; settlement: string }>,
       },
       tools: {

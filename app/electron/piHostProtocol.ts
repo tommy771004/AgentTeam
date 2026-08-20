@@ -18,7 +18,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
   params: Record<string, unknown>
 }
 
@@ -82,6 +82,10 @@ export type PiHostEvent =
       payload: { runId: string; sessionId: string; phase: 'parse' | 'iterate' | 'dod' | 'replan' | 'settlement' | 'cancelled'; iteration?: number; pattern?: PiLoopPattern; detail?: string }
     }
   | {
+      event: 'host/context'
+      payload: { runId: string; sessionId: string; phase: 'memory-recalled' | 'memory-written' | 'compacted' | 'model-switched'; recalled?: number; written?: number; previousModel?: string; model?: string; provider?: string; contextWindowTokens?: number }
+    }
+  | {
       event: 'host/extension'
       payload: { action: 'installed' | 'updated' | 'enabled' | 'disabled' | 'uninstalled'; extension: PiExtension }
     }
@@ -95,6 +99,14 @@ import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
 import { isPiMemory, PiMemoryExtension, type PiMemory } from './piMemoryExtension.ts'
+import {
+  buildPiCompactionSummary,
+  buildPiMemoryContext,
+  buildPiTurnMemory,
+  parsePiTurnContextPolicy,
+  shouldCompactPiContext,
+  withPiMemoryContext,
+} from './piSessionContext.ts'
 import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
 import { runPiOrchestration, type PiLoopPattern } from './piOrchestrationExtension.ts'
 import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
@@ -278,7 +290,6 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const params = input.params || {}
     if (typeof params.cwd !== 'string' || typeof params.code !== 'string') return [errorResponse(id, 'invalid_request', 'cwd and code are required')]
     const runId = typeof params.runId === 'string' ? params.runId : String(id)
-    const callId = typeof params.callId === 'string' ? params.callId : runId
     const requiresApproval = state.snapshot.settings.approvalMode !== 'full' || state.snapshot.settings.unattended
     if (requiresApproval && params.approval !== 'allow') return [errorResponse(id, 'invalid_request', 'code requires approval before execution')]
     const activeTools = state.snapshot.settings.activeTools.length ? [...state.snapshot.settings.activeTools] : piCoreRuntimeStatus().builtinTools
@@ -416,6 +427,22 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     if (!isPiMemory(candidate)) return [errorResponse(id, 'invalid_request', 'memory must include id, text, tags, and createdAt')]
     const memory = new PiMemoryExtension(state.snapshot.memories)
     memory.add(candidate)
+    state.snapshot.memories = memory.export()
+    state.snapshot.cursor += 1
+    return [{ id, result: { memories: state.snapshot.memories } }]
+  }
+  if (input.method === 'memory/delete') {
+    const memoryId = typeof input.params?.id === 'string' ? input.params.id : ''
+    if (!memoryId) return [errorResponse(id, 'invalid_request', 'memory id is required')]
+    const memory = new PiMemoryExtension(state.snapshot.memories)
+    memory.delete(memoryId)
+    state.snapshot.memories = memory.export()
+    state.snapshot.cursor += 1
+    return [{ id, result: { memories: state.snapshot.memories } }]
+  }
+  if (input.method === 'memory/clear') {
+    const memory = new PiMemoryExtension(state.snapshot.memories)
+    memory.clear()
     state.snapshot.memories = memory.export()
     state.snapshot.cursor += 1
     return [{ id, result: { memories: state.snapshot.memories } }]
@@ -572,9 +599,35 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const sourceId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
     const source = state.snapshot.sessions.find((candidate) => candidate.id === sourceId)
     if (!source) return [errorResponse(id, 'invalid_request', 'sessionId is required')]
-    const fork: SessionRecord = { id: `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, title: `${source.title} (fork)`, messages: source.messages.map((message) => ({ ...message })), piSessionFile: forkPiSession(sourceId) }
+    const fork: SessionRecord = {
+      id: `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title: `${source.title} (fork)`,
+      parentSessionId: source.id,
+      role: source.role,
+      profile: source.profile ? { ...source.profile } : undefined,
+      context: source.context ? { objective: source.context.objective, facts: [...source.context.facts], constraints: [...source.context.constraints] } : undefined,
+      depth: source.depth,
+      messages: source.messages.map((message) => ({ ...message })),
+      piSessionFile: forkPiSession(sourceId),
+    }
     state.snapshot.sessions = [...state.snapshot.sessions, fork]; state.snapshot.cursor += 1
     return [{ id, result: { sessionId: fork.id, sessions: [fork] } }]
+  }
+  if (input.method === 'sessions/reset') {
+    const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
+    const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
+    if (!session) return [errorResponse(id, 'invalid_request', 'sessionId is required')]
+    if (activeSessionRuns.has(sessionId)) return [errorResponse(id, 'invalid_request', 'Cannot reset an active Pi session')]
+    return disposePiSession(sessionId).then(() => {
+      session.messages = []
+      session.profile = undefined
+      session.context = undefined
+      session.piSessionFile = undefined
+      session.toolAudit = []
+      session.archived = false
+      state.snapshot.cursor += 1
+      return [{ id, result: { sessionId, sessions: [session] } }]
+    })
   }
   if (input.method === 'sessions/archive' || input.method === 'sessions/compact') {
     const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
@@ -651,6 +704,28 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       }
     }
     const turnEvents: PiHostEvent[] = []
+    const contextPolicy = parsePiTurnContextPolicy(input.params?.contextPolicy)
+    const previousModel = typeof session.profile?.model === 'string' ? session.profile.model : undefined
+    const nextProfile: Record<string, unknown> = {
+      ...(session.profile || {}),
+      provider: turnSettings.provider,
+      model: turnSettings.model,
+      thinkingLevel: turnSettings.thinkingLevel,
+    }
+    let profileCommitted = false
+    const memory = new PiMemoryExtension(state.snapshot.memories)
+    const recalled = contextPolicy.memoryEnabled && !contextPolicy.temporary
+      ? memory.recall(prompt, contextPolicy.project, 5)
+      : []
+    const memoryContext = buildPiMemoryContext(recalled)
+    const executionPrompt = withPiMemoryContext(prompt, recalled)
+    if (recalled.length) {
+      const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'memory-recalled', recalled: recalled.length } }
+      if (emit) emit(event)
+      else turnEvents.push(event)
+    }
+    let contextPreflightComplete = false
+    let resolvedContextWindow = contextPolicy.contextWindowTokens
     activeSessionRuns.set(sessionId, { runId, cancelled: false })
     const publishOrchestration = (phase: 'parse' | 'iterate' | 'dod' | 'replan' | 'settlement' | 'cancelled', iteration?: number, detail?: string) => {
       const event: PiHostEvent = { event: 'host/orchestration', payload: { runId, sessionId, phase, iteration, pattern, detail } }
@@ -670,15 +745,73 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event, iteration } }
           if (emit) emit(turnEvent)
           else turnEvents.push(turnEvent)
-        }, runId, session.piSessionFile, turnSettings)
+        }, runId, session.piSessionFile, turnSettings, memoryContext, contextPolicy.referenceChatHistory, (registryContextWindow) => {
+          if (contextPreflightComplete) return
+          contextPreflightComplete = true
+          resolvedContextWindow = registryContextWindow || contextPolicy.contextWindowTokens
+          if (resolvedContextWindow) nextProfile.contextWindowTokens = resolvedContextWindow
+          const keepMessages = 6
+          if (
+            turnSettings.compaction !== 'auto'
+            || session.messages.length <= keepMessages
+            || !shouldCompactPiContext(session.messages, executionPrompt, resolvedContextWindow)
+          ) return
+          const oldMessages = session.messages.slice(0, -keepMessages)
+          const summary = buildPiCompactionSummary(oldMessages)
+          if (!summary || !compactPiSession(sessionId, keepMessages, summary)) return
+          session.messages = session.messages.slice(-keepMessages)
+          if (contextPolicy.memoryWriteEnabled && !contextPolicy.temporary) {
+            memory.add({
+              id: `compaction-${sessionId}-${Date.now()}`,
+              project: contextPolicy.project,
+              text: summary,
+              tags: ['compaction', 'session', `session:${sessionId}`],
+              createdAt: new Date().toISOString(),
+            })
+            state.snapshot.memories = memory.export()
+          }
+          const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'compacted', recalled: recalled.length, contextWindowTokens: resolvedContextWindow } }
+          if (emit) emit(event)
+          else turnEvents.push(event)
+        })
         session.piSessionFile ||= getPiSessionFile(sessionId)
         if (turn.settlement === 'success') {
+          if (!profileCommitted) {
+            session.profile = nextProfile
+            profileCommitted = true
+            if (previousModel && previousModel !== turnSettings.model) {
+              const event: PiHostEvent = {
+                event: 'host/context',
+                payload: {
+                  runId,
+                  sessionId,
+                  phase: 'model-switched',
+                  previousModel,
+                  model: turnSettings.model,
+                  provider: turnSettings.provider,
+                  contextWindowTokens: resolvedContextWindow,
+                },
+              }
+              if (emit) emit(event)
+              else turnEvents.push(event)
+            }
+          }
           const assistant = turn.items.find((item) => Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'assistant_message')) as { content?: string } | undefined
           session.messages = [
             ...session.messages,
-            { role: 'user', content: iterationPrompt },
+            { role: 'user', content: iteration === 1 ? prompt : iterationPrompt },
             { role: 'assistant', content: assistant?.content ?? '' },
           ]
+          if (iteration === 1 && contextPolicy.memoryWriteEnabled && !contextPolicy.temporary) {
+            const candidate = buildPiTurnMemory(prompt, { runId, sessionId, project: contextPolicy.project })
+            if (candidate) {
+              memory.add(candidate)
+              state.snapshot.memories = memory.export()
+              const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'memory-written', written: 1 } }
+              if (emit) emit(event)
+              else turnEvents.push(event)
+            }
+          }
           const done = isPiHostDefinitionOfDoneMet(
             definitionOfDone,
             turn.settlement,

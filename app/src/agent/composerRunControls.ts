@@ -1,4 +1,12 @@
-import type { ApprovalMode } from './types.ts'
+import type {
+  AgentMode,
+  ApprovalMode,
+  ChatAttachment,
+  LoopType,
+} from './types.ts'
+import type { ThreadRunner } from '../store/threadStore.ts'
+import type { ExternalRunOpts } from './taskRunTypes.ts'
+import { conversationRuntimeOverrides, type SpeedMode, type ThinkingDepth } from './thinking.ts'
 import {
   buildHandoffDocument as buildArtifactHandoffDocument,
   readArtifactIndex as readStoredArtifactIndex,
@@ -40,6 +48,49 @@ export function buildComposerRunOverrides(
   selectedMode?: ApprovalMode,
 ): { approvalMode: ApprovalMode } {
   return { approvalMode: resolveComposerApprovalMode(settingsMode, selectedMode) }
+}
+
+/**
+ * Freeze every execution-affecting Composer selection at click time. Queueing,
+ * project switching, or editing the thread later must not mutate this turn.
+ */
+export function buildComposerRunInput(input: {
+  objective: string
+  threadId: string
+  runner: ThreadRunner
+  loopType: LoopType | null
+  attachments?: ChatAttachment[]
+  projectRoot?: string
+  settingsApprovalMode: ApprovalMode
+  selectedApprovalMode?: ApprovalMode
+  agentMode: AgentMode
+  model?: string
+  thinkingDepth: ThinkingDepth
+  speed: SpeedMode
+  temporary: boolean
+}): ExternalRunOpts {
+  const overrides = conversationRuntimeOverrides({
+    model: input.model,
+    depth: input.thinkingDepth,
+    speed: input.speed,
+    extra: {
+      ...buildComposerRunOverrides(input.settingsApprovalMode, input.selectedApprovalMode),
+      agentMode: input.agentMode,
+      thinkingDepth: input.thinkingDepth,
+      speed: input.speed,
+      temporary: input.temporary,
+    },
+  })
+  return {
+    objective: input.objective.trim(),
+    sourceKind: 'composer',
+    reuseThreadId: input.threadId,
+    runner: input.runner,
+    loopType: input.loopType || undefined,
+    attachments: input.attachments || [],
+    projectRoot: input.projectRoot?.trim() || undefined,
+    overrides,
+  }
 }
 
 /** Only an index owned by the submitted thread can power its Handoff. */

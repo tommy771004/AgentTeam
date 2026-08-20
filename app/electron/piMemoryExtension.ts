@@ -1,5 +1,9 @@
 export type PiMemory = { id: string; project?: string; text: string; tags: string[]; createdAt: string }
 
+function terms(value: string): string[] {
+  return [...new Set(value.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) || [])]
+}
+
 export class PiMemoryExtension {
   private memories: PiMemory[]
   constructor(initial: PiMemory[] = []) {
@@ -7,9 +11,24 @@ export class PiMemoryExtension {
     this.import(initial)
   }
   add(memory: PiMemory) { this.memories = [...this.memories.filter((item) => item.id !== memory.id), { ...memory, tags: [...memory.tags] }] }
+  delete(id: string) { this.memories = this.memories.filter((memory) => memory.id !== id) }
+  clear() { this.memories = [] }
   recall(query: string, project?: string, limit = 5) {
-    const q = query.toLowerCase()
-    return this.memories.filter((memory) => (!project || memory.project === project) && `${memory.text} ${memory.tags.join(' ')}`.toLowerCase().includes(q)).slice(0, limit).map((memory) => ({ ...memory, tags: [...memory.tags] }))
+    const queryTerms = terms(query)
+    if (!queryTerms.length) return []
+    return this.memories
+      .filter((memory) => !project || memory.project === project)
+      .map((memory) => {
+        const text = memory.text.toLowerCase()
+        const tags = memory.tags.map((tag) => tag.toLowerCase())
+        const matched = queryTerms.filter((term) => text.includes(term) || tags.some((tag) => tag.includes(term)))
+        const exactTagMatches = queryTerms.filter((term) => tags.includes(term)).length
+        return { memory, score: matched.length / queryTerms.length + exactTagMatches * 0.25 }
+      })
+      .filter((candidate) => candidate.score > 0)
+      .sort((a, b) => b.score - a.score || b.memory.createdAt.localeCompare(a.memory.createdAt))
+      .slice(0, Math.max(1, Math.floor(limit)))
+      .map(({ memory }) => ({ ...memory, tags: [...memory.tags] }))
   }
   export() { return this.memories.map((memory) => ({ ...memory, tags: [...memory.tags] })) }
   import(memories: PiMemory[]) { memories.forEach((memory) => this.add(memory)) }

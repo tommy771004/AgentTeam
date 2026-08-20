@@ -216,6 +216,16 @@ export type AgentMode = 'build' | 'plan'
 /** OpenCode subagent ids */
 export type SubagentId = 'general' | 'explore'
 
+/** Settings-derived context policy frozen when taskRunCoordinator admits a run. */
+export interface RunContextPolicy {
+  memoryEnabled: boolean
+  memoryWriteEnabled: boolean
+  referenceChatHistory: boolean
+  temporary: boolean
+  project?: string
+  contextWindowTokens?: number
+}
+
 export interface RuntimeOverrides {
   /** Stable trace id assigned by runTask controller; engine adopts it as state.id */
   runId?: string
@@ -244,6 +254,10 @@ export interface RuntimeOverrides {
   useLlm?: boolean
   /** Per-conversation model override (does not change global settings permanently) */
   model?: string
+  /** Composer-selected thinking depth, frozen when the turn is submitted. */
+  thinkingDepth?: 'fast' | 'standard' | 'deep' | 'max' | 'ultra'
+  /** Composer-selected speed, frozen when the turn is submitted. */
+  speed?: 'fast' | 'standard' | 'careful'
   /** Inject skill bodies into prompt (cron / manual) */
   attachedSkills?: string[]
   /** Extra system context (e.g. MCP notes) */
@@ -269,6 +283,8 @@ export interface RuntimeOverrides {
   eventPreMatched?: boolean
   /** Per-run temporary chat (no memory read/write); falls back to settings */
   temporary?: boolean
+  /** Immutable settings projection; adapters must not re-read mutable Settings. */
+  contextPolicySnapshot?: RunContextPolicy
   /**
    * Unattended run (scheduler / webhook / telegram).
    * HITL ask & safety intervention auto-deny on timeout so an unattended run cannot hang overnight.

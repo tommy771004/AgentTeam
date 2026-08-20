@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../Icon'
+import { useSettingsStore } from '../../store/settingsStore'
 import {
   PillSelect,
   SettingsGroup,
@@ -71,6 +72,7 @@ function piSettingsSourceStatus(config?: PiConfigStatus): string {
 }
 
 export function PiCoreSettingsSection() {
+  const syncPiHostSettings = useSettingsStore((state) => state.syncPiHostSettings)
   const [draft, setDraft] = useState<PiSettings>({ provider: '', model: '', thinkingLevel: 'medium', activeTools: [], compaction: 'auto', approvalMode: 'auto', bashRequireAsk: true, unattended: false })
   const [status, setStatus] = useState('載入中…')
   const [saving, setSaving] = useState(false)
@@ -82,6 +84,7 @@ export function PiCoreSettingsSection() {
     void window.subagents?.piHost?.settings?.get?.().then((result) => {
       if (!active || !result?.settings) return
       setDraft(result.settings)
+      syncPiHostSettings(result.settings)
       setConfigStatus(result.config)
       setStatus(result.config?.oauthImportedProviders.length ? '已載入 Pi 設定檔，並套用 CLI OAuth' : '已從 Pi Core 載入')
     }).catch((error: unknown) => {
@@ -91,7 +94,7 @@ export function PiCoreSettingsSection() {
       if (active) setExtensions((result.extensions || []) as PiExtensionView[])
     }).catch(() => { /* extensions are optional in older Hosts */ })
     return () => { active = false }
-  }, [])
+  }, [syncPiHostSettings])
 
   const toggleTool = (tool: string) => {
     setDraft((current) => ({
@@ -106,7 +109,10 @@ export function PiCoreSettingsSection() {
     setSaving(true)
     try {
       const result = await window.subagents?.piHost?.settings?.update?.(draft)
-      if (result?.settings) setDraft(result.settings)
+      if (result?.settings) {
+        setDraft(result.settings)
+        syncPiHostSettings(result.settings)
+      }
       if (result?.config) setConfigStatus(result.config)
       setStatus('已儲存；下一輪代理執行會套用新設定')
     } catch (error) {

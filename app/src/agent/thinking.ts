@@ -11,6 +11,8 @@ export type ThinkingDepth = 'fast' | 'standard' | 'deep' | 'max' | 'ultra'
 
 export type SpeedMode = 'fast' | 'standard' | 'careful'
 
+export type PiThinkingLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
 export interface ThinkingDepthDef {
   id: ThinkingDepth
   /** 選單顯示名 */
@@ -90,6 +92,18 @@ export function getThinkingDepth(id: ThinkingDepth | string | undefined): Thinki
 
 export function getSpeedMode(id: SpeedMode | string | undefined) {
   return SPEED_MODES.find((s) => s.id === id) || SPEED_MODES[1]
+}
+
+/** Translate the Composer's depth vocabulary to Pi Core's task profile. */
+export function piThinkingLevelForDepth(depth?: ThinkingDepth): PiThinkingLevel | undefined {
+  if (!depth) return undefined
+  return {
+    fast: 'low',
+    standard: 'medium',
+    deep: 'high',
+    max: 'xhigh',
+    ultra: 'max',
+  }[depth] as PiThinkingLevel
 }
 
 export function conversationRuntimeOverrides(opts: {

@@ -3,8 +3,10 @@ import {
   buildHandoffAvailability,
   buildHandoffDocument,
   buildComposerRunOverrides,
+  buildComposerRunInput,
   resolveComposerApprovalMode,
 } from '../src/agent/composerRunControls.ts'
+import { piThinkingLevelForDepth } from '../src/agent/thinking.ts'
 import {
   clearRunQueue,
   enqueueExternalRun,
@@ -21,6 +23,56 @@ test('composer selection overrides the Settings default for one submitted run', 
   assert.equal(resolveComposerApprovalMode('auto', 'always'), 'always')
   assert.equal(resolveComposerApprovalMode('full', undefined), 'full')
   assert.deepEqual(buildComposerRunOverrides('auto', 'always'), { approvalMode: 'always' })
+})
+
+test('composer plus-menu and Settings selections are frozen into one runTask input', () => {
+  const attachment = {
+    id: 'attachment-1',
+    kind: 'text' as const,
+    name: 'notes.txt',
+    mimeType: 'text/plain',
+    textContent: 'integration audit',
+  }
+  const input = buildComposerRunInput({
+    objective: '  inspect integrations  ',
+    threadId: 'thread-a',
+    runner: 'codex',
+    loopType: 'Goal-based',
+    attachments: [attachment],
+    projectRoot: '/workspace/a',
+    settingsApprovalMode: 'auto',
+    selectedApprovalMode: 'always',
+    agentMode: 'plan',
+    model: 'gpt-5.4',
+    thinkingDepth: 'max',
+    speed: 'careful',
+    temporary: true,
+  })
+
+  assert.equal(input.objective, 'inspect integrations')
+  assert.equal(input.sourceKind, 'composer')
+  assert.equal(input.reuseThreadId, 'thread-a')
+  assert.equal(input.runner, 'codex')
+  assert.equal(input.loopType, 'Goal-based')
+  assert.equal(input.attachments?.[0], attachment)
+  assert.equal(input.projectRoot, '/workspace/a')
+  assert.equal(input.overrides?.approvalMode, 'always')
+  assert.equal(input.overrides?.agentMode, 'plan')
+  assert.equal(input.overrides?.model, 'gpt-5.4')
+  assert.equal(input.overrides?.thinkingDepth, 'max')
+  assert.equal(input.overrides?.speed, 'careful')
+  assert.equal(input.overrides?.temporary, true)
+  assert.ok((input.overrides?.maxIterations || 0) > 0)
+  assert.ok((input.overrides?.maxToolRounds || 0) > 0)
+})
+
+test('Composer depth reaches the Pi Core task profile vocabulary', () => {
+  assert.equal(piThinkingLevelForDepth('fast'), 'low')
+  assert.equal(piThinkingLevelForDepth('standard'), 'medium')
+  assert.equal(piThinkingLevelForDepth('deep'), 'high')
+  assert.equal(piThinkingLevelForDepth('max'), 'xhigh')
+  assert.equal(piThinkingLevelForDepth('ultra'), 'max')
+  assert.equal(piThinkingLevelForDepth(undefined), undefined)
 })
 
 test('handoff is unavailable when the current thread has no Artifact Index', () => {

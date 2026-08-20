@@ -17,6 +17,8 @@ const piConfig = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, '
 
 type PiSessionRuntime = {
   activeToolsKey: string
+  contextWindowTokens?: number
+  requestContext?: { value: string; includeHistory: boolean }
   sessionManager: {
     appendMessage: (message: unknown) => string
     getEntries: () => unknown[]
@@ -178,10 +180,6 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   const existing = sessionRuntimes.get(sessionId)
   const activeToolsKey = JSON.stringify(settings)
   if (existing && existing.activeToolsKey === activeToolsKey) return existing
-  if (existing) {
-    await existing.session.dispose?.()
-    sessionRuntimes.delete(sessionId)
-  }
   const agentDir = resolvePiAgentDir()
   const sessionDir = agentDir ? join(agentDir, 'sessions') : undefined
   const sessionManager = sessionFile
@@ -209,6 +207,37 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     cwd,
     sessionManager,
   }
+  let contextWindowTokens: number | undefined
+  const requestContext = { value: '', includeHistory: true }
+  if (agentDir && typeof piCodingAgent.DefaultResourceLoader === 'function') {
+    const resourceLoader = new piCodingAgent.DefaultResourceLoader({
+      cwd,
+      agentDir,
+      extensionFactories: [{
+        name: 'subagents-session-context',
+        hidden: true,
+        factory: (pi: { on: (event: string, handler: (input: Record<string, unknown>) => unknown) => void }) => {
+          pi.on('before_agent_start', (event) => requestContext.value && typeof event.systemPrompt === 'string'
+            ? { systemPrompt: `${event.systemPrompt}\n\n${requestContext.value}` }
+            : undefined)
+          pi.on('context', (event) => {
+            if (requestContext.includeHistory || !Array.isArray(event.messages)) return undefined
+            let lastUser = -1
+            for (let index = event.messages.length - 1; index >= 0; index -= 1) {
+              const message = event.messages[index]
+              if (message && typeof message === 'object' && (message as { role?: unknown }).role === 'user') {
+                lastUser = index
+                break
+              }
+            }
+            return lastUser >= 0 ? { messages: event.messages.slice(lastUser) } : undefined
+          })
+        },
+      }],
+    })
+    await resourceLoader.reload()
+    options.resourceLoader = resourceLoader
+  }
   if (settings.activeTools?.length) options.tools = [...settings.activeTools]
   if (settings.thinkingLevel) options.thinkingLevel = settings.thinkingLevel
   if (agentDir) options.agentDir = agentDir
@@ -221,9 +250,17 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     if (!model) throw new Error(`Pi model is not configured: ${settings.provider}/${settings.model}`)
     options.modelRuntime = modelRuntime
     options.model = model
+    contextWindowTokens = model.contextWindow
   }
   const created = await piCodingAgent.createAgentSession(options)
-  const runtime = { activeToolsKey, sessionManager, session: created.session } as PiSessionRuntime
+  const runtime = {
+    activeToolsKey,
+    sessionManager,
+    session: created.session,
+    ...(contextWindowTokens ? { contextWindowTokens } : {}),
+    ...(options.resourceLoader ? { requestContext } : {}),
+  } as PiSessionRuntime
+  if (existing) await existing.session.dispose?.()
   sessionRuntimes.set(sessionId, runtime)
   return runtime
 }
@@ -237,6 +274,9 @@ export async function runPiTurn(
   runId?: string,
   sessionFile?: string,
   settings: PiRuntimeSettings = {},
+  requestContext = '',
+  referenceChatHistory = true,
+  onRuntimeReady?: (contextWindowTokens?: number) => void,
 ) {
   const turn: { session?: PiSessionRuntime['session']; cancelled: boolean } = { cancelled: false }
   if (runId) {
@@ -255,6 +295,12 @@ export async function runPiTurn(
     if (runId) activeTurns.delete(runId)
     return { settlement: 'cancelled' as const, items: [] }
   }
+  try {
+    onRuntimeReady?.(runtime.contextWindowTokens)
+  } catch (error) {
+    if (runId) activeTurns.delete(runId)
+    throw error
+  }
   let completedMessages: Array<{ role?: string; content?: unknown }> = []
   const unsubscribe = runtime.session.subscribe((event) => {
     if (event.type === 'agent_end' && Array.isArray(event.messages)) {
@@ -263,7 +309,11 @@ export async function runPiTurn(
     onEvent?.(event)
   })
   try {
-    await runtime.session.prompt(prompt)
+    if (runtime.requestContext) {
+      runtime.requestContext.value = requestContext
+      runtime.requestContext.includeHistory = referenceChatHistory
+    }
+    await runtime.session.prompt(runtime.requestContext || !requestContext ? prompt : `${requestContext}\n## Current request\n${prompt}`)
     if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
     return {
       settlement: 'success' as const,
@@ -284,6 +334,10 @@ export async function runPiTurn(
       items: [{ type: 'error', content: error instanceof Error ? error.message : 'Pi turn failed' }],
     }
   } finally {
+    if (runtime.requestContext) {
+      runtime.requestContext.value = ''
+      runtime.requestContext.includeHistory = true
+    }
     unsubscribe()
     if (runId) activeTurns.delete(runId)
   }
@@ -308,7 +362,11 @@ export async function disposePiSession(sessionId: string) {
   sessionRuntimes.delete(sessionId)
 }
 
-export function compactPiSession(sessionId: string, keepMessages = 4) {
+export function compactPiSession(
+  sessionId: string,
+  keepMessages = 4,
+  summary = 'Pi Host compacted the conversation while preserving the recent message window.',
+) {
   const runtime = sessionRuntimes.get(sessionId)
   if (!runtime) return false
   const entries = runtime.sessionManager.getEntries() as Array<{ type?: string; id?: string }>
@@ -317,7 +375,7 @@ export function compactPiSession(sessionId: string, keepMessages = 4) {
   const firstKeptEntryId = messages[messages.length - keepMessages]?.id
   if (!firstKeptEntryId) return false
   ;(runtime.sessionManager as { appendCompaction?: (summary: string, firstKeptEntryId: string, tokensBefore: number) => string }).appendCompaction?.(
-    'Pi Host compacted the conversation while preserving the recent message window.',
+    summary,
     firstKeptEntryId,
     messages.length,
   )

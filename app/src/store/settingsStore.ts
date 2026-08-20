@@ -123,6 +123,8 @@ interface SettingsStore {
   loaded: boolean
   load: () => Promise<void>
   update: (patch: Partial<LlmSettings>) => Promise<void>
+  /** Refresh the renderer projection after Pi Host-owned settings change. */
+  syncPiHostSettings: (settings: { model: string; approvalMode: LlmSettings['approvalMode']; unattended: boolean }) => void
   testConnection: (model?: string) => Promise<{ ok: boolean; message: string }>
   exportBundle: () => Promise<string>
   importBundle: (json: string) => Promise<{ ok: boolean; message: string }>
@@ -131,6 +133,16 @@ interface SettingsStore {
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   settings: loadLocal(),
   loaded: false,
+
+  syncPiHostSettings: (pi) => {
+    const next = mergeSettings(get().settings, {
+      model: pi.model,
+      approvalMode: pi.approvalMode,
+      unattended: pi.unattended,
+    })
+    set({ settings: next })
+    saveLocal(next)
+  },
 
   load: async () => {
     let base: LlmSettings

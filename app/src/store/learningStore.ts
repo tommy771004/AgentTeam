@@ -490,12 +490,22 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     },
 
     deleteMemoryEntry: async (id) => {
+      if (isElectronPiProduction()) {
+        await window.subagents?.piHost?.memory?.delete?.(id)
+        await get().load()
+        return
+      }
       memoryStore.deleteEntry(id)
       get().refresh()
       await get().persist()
     },
 
     clearMemories: async () => {
+      if (isElectronPiProduction()) {
+        await window.subagents?.piHost?.memory?.clear?.()
+        await get().load()
+        return
+      }
       memoryStore.clearAll()
       get().refresh()
       await get().persist()

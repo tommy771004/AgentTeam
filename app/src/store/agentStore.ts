@@ -9,6 +9,7 @@ import type {
   RuntimeOverrides,
 } from '../agent/types.ts'
 import { isElectronPiProduction } from '../agent/piProduction.ts'
+import { piThinkingLevelForDepth } from '../agent/thinking.ts'
 import { runCapacity } from '../agent/runConcurrency.ts'
 import { emptyKnowledge, extractKnowledge } from '../agent/knowledge.ts'
 import { learningLoop } from '../agent/hermes/learning.ts'
@@ -264,10 +265,21 @@ async function executePiHostTurn(
   const profile = Object.fromEntries(
     Object.entries({
       model: overrides.model,
+      thinkingLevel: piThinkingLevelForDepth(overrides.thinkingDepth),
       approvalMode: overrides.approvalMode,
       unattended: overrides.unattended,
     }).filter(([, value]) => value !== undefined),
   )
+  const runtimeSettings = useSettingsStore.getState().settings
+  const contextPolicy = overrides.contextPolicySnapshot || {
+    memoryEnabled: runtimeSettings.memoryEnabled,
+    memoryWriteEnabled: runtimeSettings.memoryWriteEnabled,
+    referenceChatHistory: runtimeSettings.referenceChatHistory !== false,
+    temporary: overrides.temporary === true,
+    project: overrides.projectRoot,
+    contextWindowTokens: runtimeSettings.modelProfiles?.[overrides.model || runtimeSettings.model]?.contextWindow
+      || runtimeSettings.defaultContextWindowTokens,
+  }
   const child = overrides.subagentId
     ? {
         role: overrides.subagentId,
@@ -287,6 +299,7 @@ async function executePiHostTurn(
       runId,
       cwd: overrides.projectRoot,
       profile,
+      contextPolicy,
       child,
       pattern: loopType,
       maxIterations,

@@ -32,6 +32,7 @@ import {
   buildExternalCliDelegateContract,
   capabilitiesForRunner,
 } from './runners/types.ts'
+import { resolveRunSettingsOverrides, snapshotRunSettings } from './runSettingsSnapshot.ts'
 
 import { v4 as uuid } from 'uuid'
 import {
@@ -308,6 +309,8 @@ export type RunDispatchSnapshot = {
   forceLoopType?: LoopType
   /** Coordinator-prepared attachments (persist + hydrate already done). */
   attachments: ChatAttachment[]
+  /** Deep-cloned at admission; adapters must never re-read mutable Settings. */
+  settings: LlmSettings
   /** Full runtime overrides; always carries coordinator-owned run/thread identity. */
   overrides: RuntimeOverrides
 }
@@ -320,6 +323,7 @@ export function buildRunDispatchSnapshot(parts: {
   runner?: ThreadRunner
   forceLoopType?: LoopType
   attachments?: ChatAttachment[]
+  settings: LlmSettings
   overrides: RuntimeOverrides
 }): RunDispatchSnapshot {
   const attachments =
@@ -336,6 +340,7 @@ export function buildRunDispatchSnapshot(parts: {
     runner: parts.runner || 'builtin',
     forceLoopType,
     attachments: attachments.slice(),
+    settings: snapshotRunSettings(parts.settings),
     overrides: {
       ...parts.overrides,
       runId: parts.runId,
@@ -1423,9 +1428,16 @@ async function coordinateTaskRun(
     thr.pushBubble(tid, 'system', `專案綁定：${opts.projectRoot.trim()}`)
   }
 
-  const temporary =
-    opts.overrides?.temporary ??
-    settings.temporaryChatDefault === true
+  const boundThread = useThreadStore.getState().threads.find((thread) => thread.id === tid)
+  const admittedSettings = resolveRunSettingsOverrides(settings, {
+    model: opts.overrides?.model || boundThread?.model || undefined,
+    thinkingDepth: opts.overrides?.thinkingDepth || boundThread?.thinkingDepth,
+    speed: opts.overrides?.speed || boundThread?.speed,
+    approvalMode: opts.overrides?.approvalMode,
+    temporary: opts.overrides?.temporary,
+    project: opts.projectRoot?.trim() || opts.overrides?.projectRoot,
+  })
+  const temporary = admittedSettings.temporary === true
 
   const sourceIsAutomation = isAutomationSource(opts)
 
@@ -1475,6 +1487,7 @@ async function coordinateTaskRun(
   const dispatchObjective = continueSnap ? continueSnap.objective : objective
 
   const overrides: RuntimeOverrides = {
+    ...admittedSettings,
     ...(opts.overrides || {}),
     runId,
     sourceKind: opts.sourceKind || opts.overrides?.sourceKind,
@@ -1490,6 +1503,7 @@ async function coordinateTaskRun(
     attachedSkills:
       opts.attachedSkills || opts.overrides?.attachedSkills || undefined,
     temporary,
+    contextPolicySnapshot: admittedSettings.contextPolicySnapshot,
     unattended: opts.overrides?.unattended ?? sourceIsAutomation,
     hitlTimeoutMs: opts.overrides?.hitlTimeoutMs,
     projectRoot: opts.projectRoot?.trim() || opts.overrides?.projectRoot,
@@ -1729,6 +1743,7 @@ async function coordinateTaskRun(
     runner: opts.runner,
     forceLoopType: forcedLoopType,
     attachments,
+    settings,
     overrides,
   })
 

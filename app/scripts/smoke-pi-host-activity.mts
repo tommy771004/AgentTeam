@@ -26,6 +26,18 @@ const tool = mapPiHostEventToActivity({
     item: { path: '/tmp/example.txt' },
   },
 })
+
+const context = mapPiHostEventToActivity({
+  event: 'host/context',
+  payload: { runId: 'run-context', phase: 'model-switched', provider: 'loopback', model: 'small-model', contextWindowTokens: 10 },
+})
+assert.deepEqual(context, {
+  kind: 'status',
+  runId: 'run-context',
+  title: '模型已切換為 loopback/small-model',
+  detail: '10 tokens',
+  eventId: 'pi-context-model-loopback-small-model',
+})
 assert.deepEqual(tool, {
   kind: 'tool',
   runId: 'run-1',

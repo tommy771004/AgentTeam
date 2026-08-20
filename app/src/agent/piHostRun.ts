@@ -1,4 +1,4 @@
-import type { LoopType } from './types.ts'
+import type { LoopType, RunContextPolicy } from './types.ts'
 
 export type PiHostRunConfigInput = {
   forceLoopType?: LoopType
@@ -47,6 +47,8 @@ export type PiHostSession = {
   archived?: boolean
 }
 
+export type PiTurnContextPolicy = RunContextPolicy
+
 export type PiHostRunnerApi = {
   sessions: {
     list: () => Promise<{ sessions: unknown[] }>
@@ -54,7 +56,7 @@ export type PiHostRunnerApi = {
     createChild?: (input: { title?: string; parentSessionId: string; role: string; profile: Record<string, unknown>; context: { objective: string; facts: string[]; constraints: string[] }; depth: number }) => Promise<{ sessionId: string; sessions: unknown[] }>
   }
   turn: {
-    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => Promise<{
+    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => Promise<{
       sessionId: string
       runId: string
       settlement: string
@@ -71,6 +73,7 @@ export type SubmitPiHostRunInput = {
   runId: string
   cwd?: string
   profile?: Record<string, unknown>
+  contextPolicy?: PiTurnContextPolicy
   child?: { role: string; profile: Record<string, unknown>; context: { objective: string; facts: string[]; constraints: string[] }; depth: number }
   pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
   maxIterations?: number
@@ -130,6 +133,7 @@ export async function submitPiHostRun(
     runId: input.runId,
     cwd: input.cwd,
     profile: input.profile,
+    contextPolicy: input.contextPolicy,
     pattern: input.pattern,
     maxIterations: input.maxIterations,
     definitionOfDone: input.definitionOfDone,
