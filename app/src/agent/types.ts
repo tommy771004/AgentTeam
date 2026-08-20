@@ -701,7 +701,7 @@ export interface LlmSettings {
   enterBehavior: EnterBehavior
   /** General · Follow-up while running */
   followUpMode: FollowUpMode
-  /** Opt-in full N-thread concurrency; disabled preserves the legacy single-run rollout. */
+  /** Legacy persisted field. Different conversation threads always run independently. */
   concurrentRunsEnabled: boolean
   /** Concurrent-run ceiling, clamped to a small fixed range by runtime. */
   maxConcurrentRuns: number

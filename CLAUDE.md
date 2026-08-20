@@ -1,114 +1,47 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code here. `AGENTS.md` points at this file — keep this one canonical.
 
-## Repository layout
+## Layout
 
-The product is **`app/`** — an Electron desktop app "SubAgents AI" (React 19 + TypeScript + Vite + zustand). Everything else at the root is design input, not code:
+The product is **`app/`** — Electron + React 19 + TypeScript + Vite + zustand ("SubAgents AI"). Everything else at the root is design input: `docs/0{1,2,3}_…` are the loop spec the engine implements, `docs/adr/` holds decisions, `CONTEXT.md` is the domain language — read it before naming anything. **No in-repo `RTK.md`**; agent guidance is `AGENTS.md` / `CLAUDE.md` / `CONTEXT.md` / `docs/*` only.
 
-- `docs/01_…` / `02_…` / `03_…` `.md` — the loop spec (system definition, four loop patterns, request-parsing schema) the engine implements
-- `docs/` — integration plans and audits; `docs/TASK_AGENT_WORKFLOW_INTEGRATION_PLAN_2026-07-14.md` is the task lifecycle plan (Phases 0–5 done); `docs/PYDANTIC_AI_V2_CAPABILITIES.md` maps capability concepts; `docs/WORKFLOW_AUDIT.md` is the older audit ledger
-- `CONTEXT.md` — product domain language
-- **No in-repo `RTK.md`.** Product agent guidance is `AGENTS.md` / `CLAUDE.md` / `CONTEXT.md` / `docs/*` only.
-
-UI copy, log messages, and some comments are Traditional Chinese mixed with English — keep that style.
+UI copy, logs, and some comments are Traditional Chinese mixed with English — keep that style. Renderer code must feature-detect `window.subagents?.x`; the app also runs in a plain browser. Issues and specs live as local Markdown under `.scratch/<feature-slug>/`; `docs/agents/` covers the issue tracker, the `Status:` vocabulary, and the domain setup.
 
 ## Commands
 
 All from `app/`:
 
 ```bash
-npm install
 npm run dev        # Vite + Electron; UI also works in plain browser at :5173
-npm run build      # tsc -b && vite build (use this as the typecheck)
-npm run smoke      # full chain, incl. smoke:gap-closure — imports real modules
-npm run smoke:gap-closure  # workspace search, learning export, capability inspection,
-                   # spill, headless, evaluation, ops, evidence, outbound, compliance
+npm run build      # tsc -b && vite build — use this as the typecheck
+npm run smoke      # full chain; dist* refuses to package if it fails
 npx oxlint src     # lint
 npm run dist:mac   # smoke + build + electron-builder (also dist / dist:win / dist:all)
 ```
 
-There is no unit-test runner; smoke scripts cover scheduler math, event matching, capability/compaction pure logic, and the built Electron preload/main contract. `dist*` refuses to package if smoke fails.
-
-Smokes import the shipped modules (`.mts` + `--experimental-strip-types`) rather than mirroring their logic, so a green suite means the shipped path is correct. Coverage claims are falsifiable: deliberately breaking `computeNextRun`, the supervisor byte bound, `classifyLoopType`, or `eventMatcher` must fail `node scripts/smoke.mjs`. Do not reintroduce inline re-implementations, and do not add a loader dependency (`jiti` etc.) to make an import work — fix the specifier instead.
+No unit-test runner. Smokes import the shipped modules, so green means the shipped path is correct — never re-implement logic inline in a smoke, and never add a loader dependency to make an import work. Many are drift guards over source text: moving code can require repointing one at its new owner, never weakening it.
 
 ## Architecture
 
-### Execution flow (default single run; optional capped concurrency)
+**One ingress — `agent/taskRunCoordinator.ts` `runTask`.** Every entry point (`sourceKind`: composer/slash/retry/schedule/webhook/telegram/event/delegate) goes through it; it owns capacity, attachments, thread bind, beforeRun, dispatch snapshot, and **unique finalization** (summary → afterRun → Archive → onSettled → release → drain). `runExternal.ts` is the legacy implementation behind it. **Never call `dispatchThreadTask` or `startExecution` from UI code** — a drift guard fails the build.
 
-All entry points go through ONE lifecycle controller — **`agent/taskRunCoordinator.ts` `runTask`**. Callers pass `sourceKind` (`composer`/`slash`/`retry`/`schedule`/`webhook`/`telegram`/`event`/`delegate`); the coordinator owns capacity, attachments, thread bind, beforeRun, dispatch snapshot, and **unique finalization** (summary → afterRun → Archive → onSettled → release → drain). `runExternal.ts` is the legacy implementation behind the coordinator; **never call `dispatchThreadTask` or `startExecution` from UI code** — a smoke drift guard fails the build if a page does.
+**Busy policy.** Different conversation threads execute independently, up to the `maxConcurrentRuns` safety cap. Same-thread follow-ups steer or queue per `settings.followUpMode`; automation overflow queues through `agent/runQueue.ts` (FIFO + dedupe + persist, max 24). Capacity is held in the run registry, so `agentStore.isRunning` is derived rather than a sole lock.
 
-On busy, `resolveBusyPolicy` decides: automation sources **queue** (`agent/runQueue.ts`, FIFO + dedupe + localStorage persist, max 24); interactive sources **steer** or queue per `settings.followUpMode`. With `concurrentRunsEnabled` (default **false**), a capped registry (`maxConcurrentRuns`) allows multiple `runId`s (ADR-0003). `agentStore.isRunning` is derived from the registry, not a sole global mutex.
+**Triggers.** Time-based runs only from a claimed ScheduledJob trigger, Proactive only from verified event-matcher evidence; both are required typed fields asserted fail-closed at admission. Cron/event wording in chat yields a suggestion, never execution.
 
-**Time-based** only via claimed ScheduledJob trigger; **Proactive** only via verified event matcher evidence. Conversation text with cron/event intent yields an automation **suggestion**, not execution.
+**Runners** (`agent/runners/`). Builtin is `executionKind: 'loop'` with full parse/DoD/iterate/continueGoal; external CLI is `'external'` with those false — **CLI success is never DoD met**, and its `continueGoal` works only via the explicit prompt contract in `runners/types.ts`.
 
-**Runners** (`agent/runners/`): builtin `executionKind: 'loop'` has full Parse/DoD/iterate/continueGoal/capabilities; external CLI is `executionKind: 'external'` with run-scoped progress plus `continueGoal`, which is delivered by the explicit prompt contract in `runners/types.ts` (`buildCliContinueGoalContract` → `formatCliContinueGoalPrompt`, consumed in `runDispatch.ts`). It still declares `parse: false` / `validateDoD: false` / `iterate: false`, so CLI must not present as DoD met. `npm run smoke:loop-parity` asserts both runners derive one contract from the same resume override.
+**Project context.** `agent/projectContext.ts` injects the project's real `AGENTS.md` / `CLAUDE.md` (walking up ≤3 levels, stopping at `.git`) ABOVE Hermes user guidance via ContextPacket slots, logging path/hash/bytes. OpenCode `instructions` apply the same way; other opencode fields become Settings candidates, never silent writes.
 
-Per run, the engine resolves **project context** (`agent/projectContext.ts` → `project:agentsDocs` IPC): real `AGENTS.md`/`CLAUDE.md` files from the project root (walking up ≤3 levels, stopping at `.git`), injected into prompts ABOVE Hermes user guidance via **ContextPacket** slots, with path/hash/bytes logged for audit. OpenCode `instructions` are temporary-applied the same way; other discovered opencode fields surface as candidates in Settings →「OpenCode 匯入報告」(temporary / review / unsupported — `agent/opencode/configCandidates.ts`), never silently written to Settings.
+**Pi Core owns the loop.** Pi Core in the supervised Electron utility process is the production owner of the tool loop, execution, approvals, and settlement; `agent/engine.ts` / `runDispatch.ts` are adapters (Parse, continueGoal restore, project guidance, trigger verification, HITL timeout policy) handing it the snapshot. `agent/loop/` is a removable plain-browser seam, not a second owner — nothing outside the existing allowlist may import it and a drift guard fails on a new import or string reference (ADR-0045). Its fallback paths bottom out in simulation with no LLM, so every feature must degrade gracefully to that. Every LLM call goes through `chatCompletionWithTools`, below the Outbound Data Gate.
 
-### Pi Core loop and the renderer compatibility seam
+Automation runs set `unattended: true`: HITL asks and safety interventions auto-deny after a timeout (45s unattended, 90s interactive).
 
-Pi Core in the supervised Electron utility process is the production owner of the tool loop, tool execution, approvals, and settlement. **`agent/engine.ts` / `runDispatch.ts` are adapters**: they own Parse (heuristic + LLM plan refinement), continueGoal restore, project guidance / OpenCode instructions, Time/Proactive trigger verification (`validateTimeBasedTrigger`, `validateEventTriggerSnapshot`), the `AgentEngineRegistry`, and HITL timeout policy (`waitForIntervention`, unchanged) before handing the coordinator snapshot to Pi Core.
+**Capabilities** (`agent/capabilities/`). `AgentCapability` bundles tools + runbook + `modelSettings` + `approvalTools`; mechanics in `runtime.ts`, consumed by `toolLoop.ts`. `deferLoading` packs show one catalog line until `load_capability` reveals schemas + runbook, and loaded ids plus unlocked tools persist on the thread to re-preload next run. Past `settings.toolSearchThreshold`, non-core schemas hide behind `tool_search`. `run_code` runs model JS in a Blob Worker with network APIs disabled, nested `tools.<name>()` re-entering the same gate. `load_capability` / `tool_search` / `run_code` are reserved in `builtins.ts`.
 
-`agent/loop/` is a removable plain-browser compatibility seam. It remains testable for browser fallback parity but is not a second production owner. Nothing outside the existing compatibility allowlist may import it; the drift-guard smoke fails on a new source import or string reference. The deletion gate is: Pi Host lifecycle parity, coordinator/replay smoke coverage, and removal of the browser-only fallback without changing the public `runTask` contract (ADR-0045).
+**Approval.** `approvalTools` force a HITL ask allow-patterns cannot bypass. Above that, `settings.approvalMode` is `always` / `auto` (default) / `full` — `full` skips asks, but deny rules, `require-approval` hooks and supervisor limits still apply and unattended downgrades it to `auto`. Decided in `toolGuard.decideApprovalNeed`. Hooks (`agent/hooks.ts`) can only restrict or observe, never allow. Connector tokens live only in a safeStorage-encrypted file in main (`electron/secretsVault.ts`); `{{secret:key}}` resolves main-side and no renderer path may read raw tokens.
 
-Pi Host task requests preserve the same typed trigger requirement: `'time'`/`'proactive'` variants require a `ScheduleTriggerSnapshot`/`EventTriggerSnapshot` field, and coordinator admission refuses missing evidence. The browser compatibility seam keeps the equivalent runtime check for parity. See CONTEXT.md「Pi Core tool loop」and「Time-based / Proactive trigger」.
+**Tools** (`agent/tools/`). `toolDefinitions.ts` + self-registering `registered/*.ts` are the authoritative registration seam; `registry.ts` / `schemas.ts` are derived views and Pi Host owns production execution. A new tool touches `tools/registered/`, `toolDefinitions.ts`, and an owning capability in `capabilities/builtins.ts` — derived views must expose it, Pi Host parity must be checked, and no central executor switch added.
 
-The compatibility seam's `agent/loop/stepRun.ts` `runStep` still has three browser-only paths (`agent/loop/strategies.ts`):
-
-1. **Function-calling tool loop** (`agent/tools/toolLoop.ts`) when LLM enabled + `functionCalling` on — the main path, with full progressive disclosure
-2. **Heuristic path** — keyword tool selection (`tools/registry.ts` `selectToolsForStep`) + plain LLM; still capability-aware (runbooks injected, `approvalTools` enforced, owning capabilities auto-loaded) but without model-driven progressive disclosure
-3. **Simulation** when no LLM configured — all features must degrade gracefully to this
-
-Runs from automation sources (scheduler / webhook / Telegram / delegate) set `unattended: true` — HITL asks and safety interventions auto-deny after a timeout (45s unattended, 90s interactive) instead of blocking forever.
-
-Sub-agent roles (Manager/Analyzer-1/Writer/Core) map to `settings.roleModels` via `llm.ts` `resolveRoleModel`; every LLM call goes through `chatCompletionWithTools` (OpenAI-compatible, proxied via Electron main when available, `llm.ts` `setLlmTransport` seam for smokes below the Outbound Data Gate).
-
-### Capability system (`agent/capabilities/`) — Pydantic AI 2.0 style
-
-The central abstraction for the FC path. `AgentCapability` bundles tools + instructions (runbook) + `modelSettings` + `approvalTools` into one unit. Key mechanics, all in `runtime.ts` and consumed by `toolLoop.ts`:
-
-- **Progressive disclosure**: `deferLoading` caps appear only as one catalog line in the system prompt until the model calls `load_capability`; loading reveals tool schemas + runbook together. Skill (`skill:<name>`, from `hermes/skills.ts`) and MCP (`mcp:<serverId>`, prefix-owned `mcp_<id>_*` tools) capabilities are generated dynamically at assemble time.
-- **Cross-step + cross-run resume**: within a run, `state.loadedCapabilityIds` is preloaded each step; after a run, ids + `unlockedToolNames` are stored on the thread (`lastCapabilityIds` / `lastUnlockedTools`) and re-injected via `dispatchThreadTask` → `preloadCapabilityIds` / `preloadUnlockedTools`.
-- **Tool Search**: when visible schemas exceed `settings.toolSearchThreshold`, non-core defs are hidden; `tool_search(query)` reveals matches and auto-loads their owning capability. Unlocks persist across steps/runs with caps.
-- **CodeMode**: `run_code` (`tools/codeMode.ts`) executes model-written JS in a Blob Web Worker with `fetch`/`XHR`/`WebSocket` disabled (must use `tools.http_fetch`); inner `tools.<name>(args)` RPC through the same gate + `authorizeTool`, recorded as `run_code›<tool>`.
-- **Approval**: `approvalTools` on an active capability forces a HITL ask that allow-patterns cannot bypass (`toolGuard.ts` `forceAsk`). Shell also declares `bash`. On top sits the ChatGPT-style `settings.approvalMode` — `always` (ask before any side-effect/network tool), `auto` (default; ask only on unsafe signals), `full` (skip asks and safety interventions; deny rules and supervisor limits still apply; unattended runs downgrade `full` → `auto` via `effectiveApprovalMode`) — decided centrally in `toolGuard.decideApprovalNeed` (custom http/bash template tools are flagged via a `sideEffect` hint since their names aren't statically known) and surfaced as a composer pill (`ApprovalModeMenu`) + Settings.
-- **Leaf isolation**: `assembleCapabilities({ blockedTools })` strips empty packs from the deferred catalog; `delegate_task.inherit_capabilities[]` optionally preloads extra packs in the child.
-- Framework tool names (`load_capability`, `tool_search`, `run_code`) are reserved constants in `builtins.ts`.
-
-### Tool layer (`agent/tools/`)
-
-`toolDefinitions.ts` + self-registering `registered/*.ts` modules are the authoritative tool registration seam; `registry.ts` / `schemas.ts` are derived views and the Pi Host owns production execution. The compatibility executor still uses `window.subagents.*` IPC with browser fallbacks. `toolGuard.ts` (`authorizeTool`: deny / HITL ask via `permissionAskStore`) and `supervisor.ts` (payload byte limits, round budgets; can halt or spill/halt) remain shared policy seams.
-
-Adding a tool touches: one self-registering module under `tools/registered/`, its entry in `toolDefinitions.ts`, and an owning capability in `capabilities/builtins.ts`; derived registry/schema views must expose it and Pi Host parity must be checked. Avoid adding a central executor switch.
-
-### Governance & security layers
-
-- **Approval hooks** (`agent/hooks.ts`): declarative lifecycle rules (beforeRun/beforeTool/afterTool/afterRun) from `settings.hookRules` + plugin manifests, sanitized on collect. Rules can only restrict/observe (deny / require-approval / append-context / log / notify — no allow); `require-approval` overrides even approvalMode `full`. Evaluated in `runExternal` (run points), `toolGuard` (beforeTool), `toolLoop` (afterTool).
-- **Credential vault** (`electron/secretsVault.ts`): connector tokens live ONLY in a safeStorage-encrypted file in main. Renderer sees metadata (`pluginSecrets.ts` mirror); `{{secret:key}}` placeholders are resolved main-side (tools:httpRequest, mcp http/stdio). Never add a renderer path that reads raw tokens.
-- **Model profiles** (`agent/modelProfile.ts`): per-model capability facts (`settings.modelProfiles`) with provenance (verified via explicit probe / assumed / unknown). Engine degrades BEFORE calls fail: `tools:false` → heuristic path, `vision:false` → images become path notes.
-- **Tool packages** (`agent/tools/toolPackage.ts`): plugins may ship a `toolPackage` manifest where every tool declares `operationClass` (read/write/destructive/external). Unapproved privilege surfaces compile read-only; escalating updates change the fingerprint and require re-approval in Settings.
-
-### Supporting layers
-
-- **Hermes** (`agent/hermes/`): skills (SKILL.md playbooks; `learning.ts` drafts new skills/memory from successful runs → surfaces in Learning page; `onUserTurn` only on coordinator-accepted composer/slash/retry), durable memory, **ContextPacket** (`contextPacket.ts` + `promptBuilder.ts`), `delegate.ts` (leaf/orchestrator isolation with `DelegationBudget` depth+concurrency caps; leaves get `blockedTools` and no parent transcript), `backgroundJobs.ts` (fire-and-forget; single Archive when via coordinator; hidden worker threads), minimal MCP client.
-- **OpenCode** (`agent/opencode/`): permission policies per agent mode (build/plan), bash pattern allow/ask/deny (`agentRegistry.ts`), transcript compaction.
-- **Electron** (`electron/`): main-process bridges (webhook server, Telegram gateway, MCP stdio/http, shell, pty, project/codegraph). Exposed via preload as `window.subagents.*`. Renderer code must always feature-detect (`window.subagents?.x`) because the app also runs in a plain browser.
-
-### Settings
-
-One flat `LlmSettings` object. Adding a field requires three edits: the interface in `agent/types.ts`, the default in `DEFAULT_LLM_SETTINGS` (`agent/llm.ts`), and UI in `pages/SettingsPage.tsx`. Persisted to localStorage + Electron `settings` IPC; merged in `store/settingsStore.ts` (array/object fields need explicit merge handling there). Settings updates live-apply to the running engine via `agentEngine.configure`.
-
-## Agent skills
-
-### Issue tracker
-
-Issues and specs are tracked as local Markdown under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Local issue `Status:` fields use the repository's Traditional Chinese status vocabulary. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-This is a single-context repository using the root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+**Settings.** One flat `LlmSettings`; a new field needs three edits — the interface in `agent/types.ts`, the default in `DEFAULT_LLM_SETTINGS` (`agent/llm.ts`), and UI in `pages/SettingsPage.tsx`. Persisted to localStorage + Electron IPC, merged in `store/settingsStore.ts` (array/object fields need explicit merge handling).

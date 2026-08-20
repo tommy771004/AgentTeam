@@ -92,6 +92,10 @@ export function mergeSettings(...parts: Array<Partial<LlmSettings> | null | unde
           : out.delegatePersonas,
     }
   }
+  // Migration: cross-thread execution is now an invariant, not an opt-in.
+  // Keep the persisted field for bundle compatibility, but never restore the
+  // legacy app-wide single-run lock.
+  out.concurrentRunsEnabled = true
   return out
 }
 

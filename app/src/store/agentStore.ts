@@ -505,7 +505,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         } catch {
           /* ignore */
         }
-        // End of run: clear sticky "代我核准" unless user wants multi-run (opt-in later)
+        // End of run: clear sticky "代我核准" for this conversation only.
         try {
           const { usePermissionAskStore } = await import('./permissionAskStore.ts')
           usePermissionAskStore.getState().setSessionAllow(false, overrides?.threadId)

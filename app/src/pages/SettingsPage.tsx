@@ -796,43 +796,21 @@ export function SettingsPage() {
                 }
               />
               <SettingsRow
-                title="允許並行執行"
-                description="讓不同 thread 同時執行；預設關閉，達到上限時仍會排隊／轉向"
+                title="同時任務上限"
+                description="不同對話會各自執行；此上限避免同時啟動過多本機或 LLM 工作"
                 control={
-                  <SettingsToggle
-                    checked={settings.concurrentRunsEnabled === true}
-                    onChange={(v) => set({ concurrentRunsEnabled: v })}
-                  />
+                  <PillSelect
+                    value={String(settings.maxConcurrentRuns || 4)}
+                    onChange={(v) => set({ maxConcurrentRuns: Number(v) })}
+                  >
+                    <option value="2">2 runs</option>
+                    <option value="3">3 runs</option>
+                    <option value="4">4 runs</option>
+                    <option value="6">6 runs</option>
+                    <option value="8">8 runs</option>
+                  </PillSelect>
                 }
               />
-              <div
-                role="status"
-                className="mx-4 mb-3 flex items-start gap-2 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-[11px] leading-relaxed text-amber-200/90"
-              >
-                <Icon name="warning" size={15} className="mt-0.5 shrink-0 text-amber-300" />
-                <p>
-                  <span className="font-semibold text-amber-200">實驗性：</span>
-                  多 run 呈現尚未完成。開啟後，活動、停止與介入畫面可能仍有跨 run 混線；建議暫時保持關閉。
-                </p>
-              </div>
-              {settings.concurrentRunsEnabled === true && (
-                <SettingsRow
-                  title="並行上限"
-                  description="小型固定 ceiling，避免同時啟動過多本機或 LLM 工作"
-                  control={
-                    <PillSelect
-                      value={String(settings.maxConcurrentRuns || 4)}
-                      onChange={(v) => set({ maxConcurrentRuns: Number(v) })}
-                    >
-                      <option value="2">2 runs</option>
-                      <option value="3">3 runs</option>
-                      <option value="4">4 runs</option>
-                      <option value="6">6 runs</option>
-                      <option value="8">8 runs</option>
-                    </PillSelect>
-                  }
-                />
-              )}
             </SettingsGroup>
             <SettingsGroup title="通知">
               <SettingsRow

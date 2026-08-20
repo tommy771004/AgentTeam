@@ -173,15 +173,18 @@ try {
       const queuedSettled = new Promise((resolve) => {
         resolveQueuedSettled = resolve
       })
+      const queueThreadId = useThreadStore.getState().createThread({ title: 'browser queue thread' })
       const queuedFirst = runTask({
         objective: 'browser queue first',
         sourceKind: 'composer',
         runId: 'browser-queue-first',
+        reuseThreadId: queueThreadId,
       })
       const queued = await runTask({
         objective: 'browser queue second',
         sourceKind: 'schedule',
         runId: 'browser-queue-second',
+        reuseThreadId: queueThreadId,
         loopType: 'Goal-based',
         onSettled: (value) => {
           queuedSettledResult = value
@@ -207,10 +210,12 @@ try {
       })
       let deniedSettled = 0
       const deniedLifecycle = []
+      const deniedThreadId = useThreadStore.getState().createThread({ title: 'browser denied thread' })
       const denied = runTask({
         objective: 'browser denied coordinator smoke',
         sourceKind: 'composer',
         runId: 'browser-denied-smoke',
+        reuseThreadId: deniedThreadId,
         onSettled: () => {
           deniedSettled += 1
           deniedLifecycle.push({
@@ -228,6 +233,7 @@ try {
         objective: 'browser denied queued coordinator smoke',
         sourceKind: 'schedule',
         runId: 'browser-denied-queued-smoke',
+        reuseThreadId: deniedThreadId,
         loopType: 'Goal-based',
         onSettled: (value) => {
           deniedQueuedSettled = value
@@ -310,6 +316,14 @@ try {
                 pendingCliRuns.set(opts.runId, resolve)
               })
             }
+            if (
+              opts.runId === 'browser-independent-thread-a' ||
+              opts.runId === 'browser-independent-thread-b'
+            ) {
+              return await new Promise((resolve) => {
+                pendingCliRuns.set(opts.runId, resolve)
+              })
+            }
             if (opts.runId === 'browser-cli-queued-smoke') {
               cliQueueStartedAfterRelease = !useAgentStore
                 .getState()
@@ -364,7 +378,70 @@ try {
       let cliFailure
       let cliCancelled
       let cliSurvivor
+      let independentThreads
       try {
+        useSettingsStore.setState({
+          settings: {
+            ...initialSettings,
+            concurrentRunsEnabled: false,
+            cliProviders: [{ id: 'codex', enabled: true, authorized: true, cliBinary: 'codex' }],
+          },
+        })
+        const independentThreadA = useThreadStore.getState().createThread({
+          title: 'independent thread A',
+          runner: 'codex',
+        })
+        const independentThreadB = useThreadStore.getState().createThread({
+          title: 'independent thread B',
+          runner: 'codex',
+        })
+        const independentFirstPromise = runTask({
+          objective: 'browser independent thread A',
+          sourceKind: 'composer',
+          runner: 'codex',
+          runId: 'browser-independent-thread-a',
+          reuseThreadId: independentThreadA,
+        })
+        await waitForPendingCli(['browser-independent-thread-a'], 'independent thread A')
+        const independentSecondPromise = runTask({
+          objective: 'browser independent thread B',
+          sourceKind: 'composer',
+          runner: 'codex',
+          runId: 'browser-independent-thread-b',
+          reuseThreadId: independentThreadB,
+        })
+        for (let i = 0; i < 100; i += 1) {
+          if (pendingCliRuns.has('browser-independent-thread-b')) break
+          await new Promise((resolve) => setTimeout(resolve, 5))
+        }
+        independentThreads = {
+          bothStarted:
+            pendingCliRuns.has('browser-independent-thread-a') &&
+            pendingCliRuns.has('browser-independent-thread-b'),
+          activeRunIds: [...useAgentStore.getState().activeRunIds],
+          threadA: independentThreadA,
+          threadB: independentThreadB,
+        }
+        resolvePendingCli('browser-independent-thread-a', {
+          ok: true,
+          output: 'fake output for browser-independent-thread-a',
+          command: 'fake codex',
+          runId: 'browser-independent-thread-a',
+        })
+        const independentFirst = await independentFirstPromise
+        for (let i = 0; i < 100; i += 1) {
+          if (pendingCliRuns.has('browser-independent-thread-b')) break
+          await new Promise((resolve) => setTimeout(resolve, 5))
+        }
+        resolvePendingCli('browser-independent-thread-b', {
+          ok: true,
+          output: 'fake output for browser-independent-thread-b',
+          command: 'fake codex',
+          runId: 'browser-independent-thread-b',
+        })
+        const independentSecond = await independentSecondPromise
+        independentThreads.results = [independentFirst, independentSecond]
+
         cliSuccess = await runTask({
           objective: 'browser CLI adapter success smoke',
           sourceKind: 'composer',
@@ -687,6 +764,7 @@ try {
             .archive.filter((record) => record.id === 'browser-denied-queued-smoke').length,
         },
         cli: { status: cli.status, settled: cliSettled },
+        independentThreads,
         cliSuccess: {
           status: cliSuccess.status,
           settled: cliSuccessSettled,
@@ -764,6 +842,12 @@ try {
     assert.ok(['success', 'failed', 'halted'].includes(result.overflow.settledStatus))
     assert.equal(result.overflow.archiveCount, 1)
     assert.equal(result.queue.queued, true)
+    assert.equal(result.independentThreads.bothStarted, true)
+    assert.ok(result.independentThreads.activeRunIds.includes('browser-independent-thread-a'))
+    assert.ok(result.independentThreads.activeRunIds.includes('browser-independent-thread-b'))
+    assert.notEqual(result.independentThreads.threadA, result.independentThreads.threadB)
+    assert.equal(result.independentThreads.results[0].threadId, result.independentThreads.threadA)
+    assert.equal(result.independentThreads.results[1].threadId, result.independentThreads.threadB)
     assert.equal(result.queue.skipReason, 'queued')
     assert.ok(['success', 'failed', 'halted'].includes(result.queue.settledStatus))
     assert.equal(result.queue.archiveCount, 1)

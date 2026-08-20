@@ -242,7 +242,6 @@ function createFakeRunController({
   hitl = createFakeHitl(),
   hooks = [],
   followUpMode = 'steer',
-  concurrentRunsEnabled = false,
   maxConcurrentRuns = 4,
 } = {}) {
   const activeRuns = new Map()
@@ -255,7 +254,7 @@ function createFakeRunController({
   const jobResults = new Map()
   let projectContext = { root: null, agentsHash: null, guidance: '' }
   const rules = sanitizeHookRules(hooks)
-  const limit = () => (concurrentRunsEnabled ? Math.max(2, maxConcurrentRuns) : 1)
+  const limit = () => Math.max(2, maxConcurrentRuns)
 
   async function authorize(tool, ctx) {
     const ev = evaluateHooks(rules, {
@@ -698,10 +697,9 @@ await test('§7 busy follow-up: composer queue → FIFO drain with same run sema
   void p1
 })
 
-await test('ADR3: opt-in concurrent runs share capacity, isolate HITL identity, and drain overflow', async () => {
+await test('ADR3: independent thread runs share capacity, isolate HITL identity, and drain overflow', async () => {
   const hitl = createFakeHitl({ auto: 'approve', delayMs: 30 })
   const ctrl = createFakeRunController({
-    concurrentRunsEnabled: true,
     maxConcurrentRuns: 2,
     hitl,
     hooks: [
@@ -743,7 +741,6 @@ await test('ADR3: opt-in concurrent runs share capacity, isolate HITL identity, 
 await test('Phase 0: switching active threads keeps cancel and completion run-scoped', async () => {
   const hitl = createFakeHitl({ auto: 'approve', delayMs: 30 })
   const ctrl = createFakeRunController({
-    concurrentRunsEnabled: true,
     maxConcurrentRuns: 2,
     hitl,
     hooks: [
@@ -859,12 +856,14 @@ await test('§7 schedule job rebind: onSettled marks job after queue drain', asy
     sourceKind: 'composer',
     objective: 'block lock',
     runId: 'hold',
+    reuseThreadId: 'scheduled-thread',
   })
   await new Promise((r) => setTimeout(r, 5))
   const cron = await ctrl.runTask({
     sourceKind: 'schedule',
     objective: 'nightly report',
     runId: 'cron1',
+    reuseThreadId: 'scheduled-thread',
     meta: { scheduleJobId: 'job_nightly' },
     onSettled: async (r) => {
       ctrl.jobResults.set('job_nightly', r.status)

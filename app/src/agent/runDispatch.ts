@@ -367,11 +367,9 @@ export async function dispatchThreadTask(
     thread?.loopType ||
     undefined
   if (forceLoop) {
-    if (!settings.concurrentRunsEnabled) agent.setSelectedLoopType(forceLoop)
     overrides.loopTypeMode = 'force'
     overrides.forceLoopType = forceLoop
   } else {
-    if (!settings.concurrentRunsEnabled) agent.setSelectedLoopType(null)
     overrides.loopTypeMode = overrides.loopTypeMode || 'auto'
   }
   await agent.startExecution(text, overrides)

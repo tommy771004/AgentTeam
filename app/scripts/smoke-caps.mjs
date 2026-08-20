@@ -854,12 +854,12 @@ await test('ADR3: concurrent-run registry, targeted HITL, and CLI cancellation s
     /export async function (checkRunCapacity|reserveRunCapacity)/,
   )
   assert.doesNotMatch(controller, /agent\.isRunning/)
-  assert.match(settings, /concurrentRunsEnabled: false/)
+  assert.match(settings, /concurrentRunsEnabled: true/)
   assert.match(settings, /maxConcurrentRuns: 4/)
-  assert.match(settingsPage, /實驗性：[\s\S]*多 run 呈現尚未完成/)
+  assert.match(settingsPage, /同時任務上限[\s\S]*不同對話會各自執行/)
   assert.match(preload, /cancel: \(runId\?: string\)/)
   assert.match(main, /ipcMain\.handle\('cli:cancel', async \(_evt, runId\?: string\)/)
-  assert.match(scenario, /ADR3: opt-in concurrent runs/)
+  assert.match(scenario, /ADR3: independent thread runs/)
 })
 
 await test('Phase 1: run presentation components use explicit run selectors', async () => {
@@ -891,7 +891,7 @@ await test('Phase 0: workflow baseline matrix stays recorded', async () => {
   const background = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
   const baseline = {
     twoBuiltInRuns:
-      /ADR3: opt-in concurrent runs/.test(scenario) &&
+      /ADR3: independent thread runs/.test(scenario) &&
       /parallel-1/.test(scenario) &&
       /parallel-2/.test(scenario),
     builtInAndCli:
@@ -1744,11 +1744,11 @@ await test('Phase 6: docs align concurrency, triggers, runners, no in-repo RTK.m
   assert.match(agents, /no in-repo `RTK\.md`|No in-repo `RTK\.md`|There is \*\*no in-repo `RTK\.md`\*\*/i)
   assert.match(claude, /No in-repo `RTK\.md`/i)
 
-  // Concurrency language: default single, opt-in cap — not "always global mutex only"
-  assert.match(agents, /default single run|預設單 run|concurrentRunsEnabled/i)
-  assert.match(claude, /default single run|concurrentRunsEnabled|maxConcurrentRuns/i)
-  assert.match(context, /concurrentRunsEnabled|opt-in|maxConcurrentRuns/i)
-  assert.match(adr, /Default.*single-run|concurrentRunsEnabled/i)
+  // Concurrency language: different conversations are independent, with a cap.
+  assert.match(agents, /different conversation|不同對話|maxConcurrentRuns/i)
+  assert.match(claude, /different conversation|不同對話|maxConcurrentRuns/i)
+  assert.match(context, /different conversation|不同對話|maxConcurrentRuns/i)
+  assert.match(adr, /different conversation|不同對話|maxConcurrentRuns/i)
   assert.doesNotMatch(agents, /isRunning` is a global mutex/)
   assert.doesNotMatch(claude, /isRunning` is a global mutex/)
 

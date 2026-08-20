@@ -1423,13 +1423,6 @@ async function coordinateTaskRun(
     thr.pushBubble(tid, 'system', `專案綁定：${opts.projectRoot.trim()}`)
   }
 
-  if (forcedLoopType) {
-    agent.setSelectedLoopType(forcedLoopType)
-  } else {
-    // Clear sticky force from previous run so auto classification works
-    agent.setSelectedLoopType(null)
-  }
-
   const temporary =
     opts.overrides?.temporary ??
     settings.temporaryChatDefault === true
