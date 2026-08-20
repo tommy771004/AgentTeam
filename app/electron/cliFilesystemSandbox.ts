@@ -10,6 +10,8 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import type { FilesystemIsolationStatus } from '../src/agent/outbound/cliSandbox.ts'
 
+const resolvePosixPath = path.posix.resolve.bind(path.posix)
+
 export type SandboxProbeResult = {
   status: FilesystemIsolationStatus
   /** Non-sensitive diagnostic (no file contents). */
@@ -33,7 +35,7 @@ function which(bin: string): string | null {
 export function buildSeatbeltProfile(viewRoot: string): string {
   // Seatbelt is a macOS-only engine, so its SBPL paths must keep POSIX
   // semantics even when this pure builder is exercised by a Windows CI host.
-  const root = path.posix.resolve(viewRoot)
+  const root = resolvePosixPath(viewRoot)
   // Escape for SBPL strings
   const esc = root.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
   return `(version 1)
@@ -65,7 +67,9 @@ export function buildSeatbeltProfile(viewRoot: string): string {
 }
 
 export function buildBwrapArgs(viewRoot: string, command: string[]): string[] {
-  const root = path.resolve(viewRoot)
+  // Bubblewrap is a Linux-only engine; keep its bind/chdir arguments POSIX
+  // when this pure builder is exercised by a Windows CI host.
+  const root = resolvePosixPath(viewRoot)
   return [
     '--ro-bind',
     '/usr',
