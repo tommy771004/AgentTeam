@@ -4,12 +4,12 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { hashPiVendorTree } from './piVendorTree.mts'
+import { resolveNpmCliInvocation } from './npm-cli-invocation.mts'
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..')
 const appRoot = path.resolve(import.meta.dirname, '..')
 const vendorRoot = path.join(repositoryRoot, 'vendor/pi')
 const buildCachePath = path.join(appRoot, '.cache/pi-vendor-build.json')
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
 const buildPackages = [
   'packages/tui',
@@ -36,7 +36,12 @@ type PiBuildCache = {
 }
 
 function runNpm(args: string[], cwd: string): void {
-  execFileSync(npmCommand, args, { cwd, stdio: 'inherit' })
+  const invocation = resolveNpmCliInvocation(args, {
+    platform: process.platform,
+    execPath: process.execPath,
+    npmExecPath: process.env.npm_execpath,
+  })
+  execFileSync(invocation.command, invocation.args, { cwd, stdio: 'inherit' })
 }
 
 function hasRuntimeDependencies(): boolean {

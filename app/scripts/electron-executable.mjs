@@ -1,19 +1,12 @@
 import path from 'node:path'
+import { createRequire } from 'node:module'
 
-export function resolveElectronExecutable(appRoot, platform = process.platform) {
-  const relativeExecutable = platform === 'darwin'
-    ? path.join('Electron.app', 'Contents', 'MacOS', 'Electron')
-    : platform === 'linux'
-      ? 'electron'
-      : platform === 'win32'
-        ? 'electron.exe'
-        : undefined
-  if (!relativeExecutable) throw new Error(`Unsupported Electron launch platform: ${platform}`)
-  return path.join(
-    appRoot,
-    'node_modules',
-    'electron',
-    'dist',
-    relativeExecutable,
-  )
+const require = createRequire(import.meta.url)
+
+export function resolveElectronExecutable(loadElectron = () => require('electron')) {
+  const executable = loadElectron()
+  if (typeof executable !== 'string' || !path.isAbsolute(executable)) {
+    throw new Error('Electron package did not resolve an absolute executable path')
+  }
+  return executable
 }

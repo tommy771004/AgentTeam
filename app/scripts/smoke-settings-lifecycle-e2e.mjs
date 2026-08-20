@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { resolveElectronExecutable } from './electron-executable.mjs'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const electronExecutable = resolveElectronExecutable(appRoot)
+const electronExecutable = resolveElectronExecutable()
 if (!fs.existsSync(path.join(appRoot, 'dist', 'index.html'))) {
   throw new Error('Run npm run build before the settings lifecycle E2E')
 }
