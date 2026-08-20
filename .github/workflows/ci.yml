@@ -57,7 +57,12 @@ jobs:
       - name: Smoke (CI stable matrix)
         run: npm run smoke:ci
 
-      - name: Smoke built Electron contract
+      - name: Smoke built Electron contract (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run smoke:built
+
+      - name: Smoke built Electron contract (Windows)
+        if: runner.os == 'Windows'
         run: npm run smoke:built
 
   marketplace:

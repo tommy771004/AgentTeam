@@ -74,7 +74,7 @@
     "smoke:coordinator": "node scripts/smoke-coordinator-browser.mjs",
     "smoke:design-system:e2e": "node scripts/smoke-design-system-electron-e2e.mjs",
     "smoke:built": "node scripts/smoke.mjs --require-built && npm run smoke:settings-lifecycle",
-    "smoke:settings-lifecycle": "node scripts/smoke-settings-lifecycle-e2e.mjs",
+    "smoke:settings-lifecycle": "node scripts/smoke-settings-lifecycle-launch-path.mjs && node scripts/smoke-settings-lifecycle-e2e.mjs",
     "smoke:marketplace": "vite build --config scripts/vite.plugin-e2e.config.ts && node .tmp/plugin-e2e/plugin-installer-e2e.mjs",
     "smoke:plugin-install": "vite build --config scripts/vite.plugin-e2e.config.ts && node .tmp/plugin-e2e/plugin-installer-e2e.mjs --network",
     "icons": "node scripts/render-icons.mjs && node scripts/make-ico.mjs",

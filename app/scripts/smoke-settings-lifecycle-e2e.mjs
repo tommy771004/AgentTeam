@@ -3,15 +3,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveElectronExecutable } from './electron-executable.mjs'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const electronExecutable = path.join(
-  appRoot,
-  'node_modules',
-  'electron',
-  'dist',
-  process.platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron',
-)
+const electronExecutable = resolveElectronExecutable(appRoot)
 if (!fs.existsSync(path.join(appRoot, 'dist', 'index.html'))) {
   throw new Error('Run npm run build before the settings lifecycle E2E')
 }
