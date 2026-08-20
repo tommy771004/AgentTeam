@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { hashPiVendorTree } from './piVendorTree.mts'
 import { resolveNpmCliInvocation } from './npm-cli-invocation.mts'
+import { relinkPiBuildWorkspaces } from './piBuildWorkspaceLinks.mts'
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..')
 const appRoot = path.resolve(import.meta.dirname, '..')
@@ -106,6 +107,7 @@ async function prepareBuildWorkspace(root: string): Promise<string> {
     force: true,
     verbatimSymlinks: true,
   })
+  await relinkPiBuildWorkspaces(stagingVendor)
 
   const existingModelData = path.join(vendorRoot, 'packages/ai/src/providers/data')
   if (existsSync(existingModelData)) {
@@ -130,8 +132,10 @@ async function copyBuildArtifacts(stagingVendor: string): Promise<void> {
 const sourceTreeSha256 = await hashPiVendorTree(vendorRoot)
 const packageJson = JSON.parse(await readFile(path.join(vendorRoot, 'package.json'), 'utf8')) as { version?: string }
 const previous = await readBuildCache()
+const forceBuild = process.env.SUBAGENTS_PI_VENDOR_FORCE_BUILD === '1'
 if (
-  previous?.sourceTreeSha256 === sourceTreeSha256
+  !forceBuild
+  && previous?.sourceTreeSha256 === sourceTreeSha256
   && previous.packageVersion === packageJson.version
   && hasRequiredArtifacts()
 ) {
