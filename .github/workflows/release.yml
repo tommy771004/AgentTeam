@@ -507,7 +507,7 @@ jobs:
               throw new Error('Packaged restart persistence evidence is incomplete')
             }
             if (!evidence.uninstall || evidence.uninstall.removed !== true) throw new Error('Packaged uninstall/removal evidence is missing')
-NODE
+          NODE
             platform="$(node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSync(process.argv[1], 'utf8')).platform)" "$evidence_dir/release-manifest.json")"
             manifest_arch="$(node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSync(process.argv[1], 'utf8')).arch)" "$evidence_dir/release-manifest.json")"
             test "$platform-${manifest_arch}" = "$key" || { echo "Manifest platform/arch mismatch for $report"; exit 1; }
