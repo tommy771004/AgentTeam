@@ -2,7 +2,6 @@
  * SubDesign Harness goal-based UX testing — optional, macOS permission-sensitive.
  * Session is adapter-owned, never Task-run owner. Stop cancels targeted.
  */
-import { isProviderEnabled } from './providerFlags.ts'
 import { issueProviderEvidence, type ProviderAvailability, type ProviderEvidence } from './providerContract.ts'
 
 /** Reviewed upstream harness-mcp standalone protocol identity. */
@@ -33,8 +32,11 @@ export type HarnessResult = {
   providerId: 'harness'
 }
 
-export function harnessAvailability(opts?: { platform?: string; hasPermission?: boolean }): ProviderAvailability {
-  if (!isProviderEnabled('harness')) return { available: false, reason: 'Harness provider 未啟用（feature flag 關閉）', code: 'unavailable' }
+export function harnessAvailability(
+  enabled: boolean | undefined,
+  opts?: { platform?: string; hasPermission?: boolean },
+): ProviderAvailability {
+  if (!enabled) return { available: false, reason: 'Harness provider 未啟用（feature flag 關閉）', code: 'unavailable' }
   if (opts?.platform && opts.platform !== 'darwin') return { available: false, reason: `Harness 目前僅支援 macOS（platform=${opts.platform}）`, code: 'unsupported-platform' }
   if (opts?.hasPermission === false) return { available: false, reason: '需要 Screen Recording / Accessibility 權限', code: 'permission-denied' }
   return { available: true }

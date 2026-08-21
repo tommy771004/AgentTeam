@@ -7,6 +7,7 @@ import { HARNESS_PINNED_VERSION } from './harnessProvider.ts'
 export const STORYBOOK_PROVIDER_SETTINGS_ID = 'storybook'
 export const CHROME_DEVTOOLS_PROVIDER_SETTINGS_ID = 'chrome-devtools'
 export const HARNESS_PROVIDER_SETTINGS_ID = 'harness'
+export const EXPERIMENTAL_PROVIDER_SETTINGS_ID = 'experimental-surfaces'
 
 export type StorybookProviderSettings = {
   schemaVersion: 1
@@ -36,6 +37,40 @@ export type HarnessProviderSettings = {
   updatedAt: string
 }
 
+/**
+ * Experimental in-product surfaces that have no endpoint or binary of their
+ * own. Persisted like every other provider so the gate is reachable through a
+ * real control rather than a test-only override (issue 09: host support must
+ * be user-visible).
+ */
+export type ExperimentalSurfaceSettings = {
+  schemaVersion: 1
+  id: typeof EXPERIMENTAL_PROVIDER_SETTINGS_ID
+  mcpApps: boolean
+  streaming: boolean
+  updatedAt: string
+}
+
+export const DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS: ExperimentalSurfaceSettings = {
+  schemaVersion: 1,
+  id: EXPERIMENTAL_PROVIDER_SETTINGS_ID,
+  mcpApps: false,
+  streaming: false,
+  updatedAt: '',
+}
+
+export function normalizeExperimentalSurfaceSettings(value: unknown): ExperimentalSurfaceSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS
+  const input = value as Partial<ExperimentalSurfaceSettings>
+  return {
+    schemaVersion: 1,
+    id: EXPERIMENTAL_PROVIDER_SETTINGS_ID,
+    mcpApps: input.mcpApps === true,
+    streaming: input.streaming === true,
+    updatedAt: typeof input.updatedAt === 'string' && !Number.isNaN(Date.parse(input.updatedAt)) ? input.updatedAt : '',
+  }
+}
+
 export const DEFAULT_STORYBOOK_PROVIDER_SETTINGS: StorybookProviderSettings = {
   schemaVersion: 1,
   id: STORYBOOK_PROVIDER_SETTINGS_ID,
@@ -62,6 +97,75 @@ export const DEFAULT_HARNESS_PROVIDER_SETTINGS: HarnessProviderSettings = {
   targetUrl: 'http://127.0.0.1:5173',
   resolvedVersion: HARNESS_PINNED_VERSION,
   updatedAt: '',
+}
+
+
+// ── Shared project-metadata access ──────────────────────────────────────
+// One reader for all three providers: the settings record for an id, and the
+// provider runs that belong to it. Each provider only supplies its own
+// normalizer, so adding a provider does not re-copy this plumbing.
+
+export type ProviderSettingsId =
+  | typeof STORYBOOK_PROVIDER_SETTINGS_ID
+  | typeof CHROME_DEVTOOLS_PROVIDER_SETTINGS_ID
+  | typeof HARNESS_PROVIDER_SETTINGS_ID
+  | typeof EXPERIMENTAL_PROVIDER_SETTINGS_ID
+
+function isProviderRun(value: unknown): value is SubDesignPluginExecutionProjection {
+  return Boolean(
+    value && typeof value === 'object' && !Array.isArray(value)
+    && (value as Record<string, unknown>).schemaVersion === 1,
+  )
+}
+
+/** Newest first. Pass an id to keep only that provider's runs. */
+export function selectProviderRuns(
+  runs: readonly unknown[] | undefined,
+  providerId?: ProviderSettingsId,
+): SubDesignPluginExecutionProjection[] {
+  return (runs || [])
+    .filter(isProviderRun)
+    .filter((run) => !providerId || run.providerId === providerId)
+    .sort((a, b) => b.finishedAt.localeCompare(a.finishedAt))
+}
+
+async function loadProviderState<T>(
+  projectRoot: string | undefined,
+  providerId: ProviderSettingsId,
+  normalize: (value: unknown) => T,
+  fallback: T,
+): Promise<{ settings: T; runs: SubDesignPluginExecutionProjection[] }> {
+  if (!projectRoot) return { settings: fallback, runs: [] }
+  const metadata = await readSubDesignMetadata(projectRoot)
+  const rawSettings = metadata?.openDesignProviderSettings.find((item) => (
+    Boolean(item && typeof item === 'object' && !Array.isArray(item))
+    && (item as Record<string, unknown>).id === providerId
+  ))
+  return {
+    settings: normalize(rawSettings),
+    runs: selectProviderRuns(metadata?.openDesignProviderRuns, providerId),
+  }
+}
+
+/** Every provider run in the project, newest first — used to recover previews. */
+export async function loadAllProviderRuns(projectRoot?: string): Promise<SubDesignPluginExecutionProjection[]> {
+  if (!projectRoot) return []
+  const metadata = await readSubDesignMetadata(projectRoot)
+  return selectProviderRuns(metadata?.openDesignProviderRuns)
+}
+
+type ProviderSettings =
+  | StorybookProviderSettings
+  | ChromeDevToolsProviderSettings
+  | HarnessProviderSettings
+  | ExperimentalSurfaceSettings
+
+async function saveProviderSettings<T extends ProviderSettings>(
+  settings: T,
+  projectRoot: string,
+): Promise<{ ok: true; settings: T } | { ok: false; reason: string }> {
+  const persisted = await persistSubDesignMetadata('open-design-provider-settings', settings, projectRoot)
+  return persisted ? { ok: true, settings } : { ok: false, reason: '無法寫入 project provider settings。' }
 }
 
 function isLoopbackHttpEndpoint(value: string): boolean {
@@ -127,20 +231,10 @@ export async function loadStorybookProviderState(projectRoot?: string): Promise<
   settings: StorybookProviderSettings
   runs: SubDesignPluginExecutionProjection[]
 }> {
-  if (!projectRoot) return { settings: DEFAULT_STORYBOOK_PROVIDER_SETTINGS, runs: [] }
-  const metadata = await readSubDesignMetadata(projectRoot)
-  const rawSettings = metadata?.openDesignProviderSettings.find((item) => (
-    Boolean(item && typeof item === 'object' && !Array.isArray(item))
-    && (item as Record<string, unknown>).id === STORYBOOK_PROVIDER_SETTINGS_ID
-  ))
-  const runs = (metadata?.openDesignProviderRuns || [])
-    .filter((item): item is SubDesignPluginExecutionProjection => Boolean(
-      item && typeof item === 'object' && !Array.isArray(item)
-      && (item as Record<string, unknown>).schemaVersion === 1
-      && (item as Record<string, unknown>).providerId === STORYBOOK_PROVIDER_SETTINGS_ID,
-    ))
-    .sort((a, b) => b.finishedAt.localeCompare(a.finishedAt))
-  return { settings: normalizeStorybookProviderSettings(rawSettings), runs }
+  return loadProviderState(
+    projectRoot, STORYBOOK_PROVIDER_SETTINGS_ID,
+    normalizeStorybookProviderSettings, DEFAULT_STORYBOOK_PROVIDER_SETTINGS,
+  )
 }
 
 export async function saveStorybookProviderSettings(
@@ -159,28 +253,17 @@ export async function saveStorybookProviderSettings(
     resolvedVersion: STORYBOOK_PINNED_VERSION,
     updatedAt: new Date().toISOString(),
   }
-  const persisted = await persistSubDesignMetadata('open-design-provider-settings', settings, projectRoot)
-  return persisted ? { ok: true, settings } : { ok: false, reason: '無法寫入 project provider settings。' }
+  return saveProviderSettings(settings, projectRoot)
 }
 
 export async function loadChromeDevToolsProviderState(projectRoot?: string): Promise<{
   settings: ChromeDevToolsProviderSettings
   runs: SubDesignPluginExecutionProjection[]
 }> {
-  if (!projectRoot) return { settings: DEFAULT_CHROME_DEVTOOLS_PROVIDER_SETTINGS, runs: [] }
-  const metadata = await readSubDesignMetadata(projectRoot)
-  const rawSettings = metadata?.openDesignProviderSettings.find((item) => (
-    Boolean(item && typeof item === 'object' && !Array.isArray(item))
-    && (item as Record<string, unknown>).id === CHROME_DEVTOOLS_PROVIDER_SETTINGS_ID
-  ))
-  const runs = (metadata?.openDesignProviderRuns || [])
-    .filter((item): item is SubDesignPluginExecutionProjection => Boolean(
-      item && typeof item === 'object' && !Array.isArray(item)
-      && (item as Record<string, unknown>).schemaVersion === 1
-      && (item as Record<string, unknown>).providerId === CHROME_DEVTOOLS_PROVIDER_SETTINGS_ID,
-    ))
-    .sort((a, b) => b.finishedAt.localeCompare(a.finishedAt))
-  return { settings: normalizeChromeDevToolsProviderSettings(rawSettings), runs }
+  return loadProviderState(
+    projectRoot, CHROME_DEVTOOLS_PROVIDER_SETTINGS_ID,
+    normalizeChromeDevToolsProviderSettings, DEFAULT_CHROME_DEVTOOLS_PROVIDER_SETTINGS,
+  )
 }
 
 export async function saveChromeDevToolsProviderSettings(
@@ -199,16 +282,17 @@ export async function saveChromeDevToolsProviderSettings(
     resolvedVersion: CDT_PINNED_VERSION,
     updatedAt: new Date().toISOString(),
   }
-  const persisted = await persistSubDesignMetadata('open-design-provider-settings', settings, projectRoot)
-  return persisted ? { ok: true, settings } : { ok: false, reason: '無法寫入 project provider settings。' }
+  return saveProviderSettings(settings, projectRoot)
 }
 
-export async function loadHarnessProviderState(projectRoot?: string): Promise<{ settings: HarnessProviderSettings; runs: SubDesignPluginExecutionProjection[] }> {
-  if (!projectRoot) return { settings: DEFAULT_HARNESS_PROVIDER_SETTINGS, runs: [] }
-  const metadata = await readSubDesignMetadata(projectRoot)
-  const rawSettings = metadata?.openDesignProviderSettings.find((item) => Boolean(item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).id === HARNESS_PROVIDER_SETTINGS_ID))
-  const runs = (metadata?.openDesignProviderRuns || []).filter((item): item is SubDesignPluginExecutionProjection => Boolean(item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).schemaVersion === 1 && (item as Record<string, unknown>).providerId === HARNESS_PROVIDER_SETTINGS_ID)).sort((a, b) => b.finishedAt.localeCompare(a.finishedAt))
-  return { settings: normalizeHarnessProviderSettings(rawSettings), runs }
+export async function loadHarnessProviderState(projectRoot?: string): Promise<{
+  settings: HarnessProviderSettings
+  runs: SubDesignPluginExecutionProjection[]
+}> {
+  return loadProviderState(
+    projectRoot, HARNESS_PROVIDER_SETTINGS_ID,
+    normalizeHarnessProviderSettings, DEFAULT_HARNESS_PROVIDER_SETTINGS,
+  )
 }
 
 export async function saveHarnessProviderSettings(value: Pick<HarnessProviderSettings, 'enabled' | 'binaryPath' | 'targetUrl'>, projectRoot?: string): Promise<{ ok: true; settings: HarnessProviderSettings } | { ok: false; reason: string }> {
@@ -217,6 +301,27 @@ export async function saveHarnessProviderSettings(value: Pick<HarnessProviderSet
   if (binaryPath !== 'harness-mcp' && !binaryPath.startsWith('/')) return { ok: false, reason: 'Harness binary 必須是 harness-mcp 或絕對路徑。' }
   if (!isLoopbackHttpEndpoint(value.targetUrl.trim())) return { ok: false, reason: 'Harness web target 必須是 localhost HTTP。' }
   const settings: HarnessProviderSettings = { schemaVersion: 1, id: HARNESS_PROVIDER_SETTINGS_ID, enabled: value.enabled, binaryPath, targetUrl: value.targetUrl.trim(), resolvedVersion: HARNESS_PINNED_VERSION, updatedAt: new Date().toISOString() }
-  const persisted = await persistSubDesignMetadata('open-design-provider-settings', settings, projectRoot)
-  return persisted ? { ok: true, settings } : { ok: false, reason: '無法寫入 project provider settings。' }
+  return saveProviderSettings(settings, projectRoot)
+}
+
+export async function loadExperimentalSurfaceSettings(projectRoot?: string): Promise<ExperimentalSurfaceSettings> {
+  const { settings } = await loadProviderState(
+    projectRoot, EXPERIMENTAL_PROVIDER_SETTINGS_ID,
+    normalizeExperimentalSurfaceSettings, DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
+  )
+  return settings
+}
+
+export async function saveExperimentalSurfaceSettings(
+  value: Pick<ExperimentalSurfaceSettings, 'mcpApps' | 'streaming'>,
+  projectRoot?: string,
+): Promise<{ ok: true; settings: ExperimentalSurfaceSettings } | { ok: false; reason: string }> {
+  if (!projectRoot) return { ok: false, reason: '請先綁定 project。' }
+  return saveProviderSettings({
+    schemaVersion: 1,
+    id: EXPERIMENTAL_PROVIDER_SETTINGS_ID,
+    mcpApps: value.mcpApps,
+    streaming: value.streaming,
+    updatedAt: new Date().toISOString(),
+  }, projectRoot)
 }

@@ -4,11 +4,18 @@
  * Run: node --experimental-strip-types scripts/smoke-open-design-providers.mts
  */
 import assert from 'node:assert/strict'
-import { isProviderEnabled, setProviderFlag, resetProviderFlags, providerFlagDescription } from '../src/agent/subdesign/providers/providerFlags.ts'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+import { hydrateProviderFlags, isProviderEnabled, setProviderFlag, resetProviderFlags, providerFlagDescription } from '../src/agent/subdesign/providers/providerFlags.ts'
+import { DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS, normalizeExperimentalSurfaceSettings } from '../src/agent/subdesign/providers/providerSettings.ts'
 import { storybookAvailability, getStorybookContext, clearStorybookCache } from '../src/agent/subdesign/providers/storybookProvider.ts'
 import { cdtAvailability, cdtToProviderEvidence, chromeDevToolsEvidenceAllowsPass, normalizeCdtFixtureRaw } from '../src/agent/subdesign/providers/chromeDevToolsProvider.ts'
 import { createHarnessFakeSession, harnessAvailability, normalizeHarnessFixture } from '../src/agent/subdesign/providers/harnessProvider.ts'
 import { mcpAppsAvailability, validateBridgeMessage, validateSurfaceDeclaration, isToolAllowed } from '../src/agent/subdesign/providers/mcpAppsProvider.ts'
+import { SURFACE_STATUS_LABELS, surfaceFallsBack } from '../src/agent/subdesign/surfaceStatus.ts'
 import { createStreamingEnvelope, appendStreamingUpdate, finalizeEnvelope, reconcileUpdates, canRender } from '../src/agent/subdesign/streamingEnvelope.ts'
 import {
   DEFAULT_STORYBOOK_PROVIDER_SETTINGS,
@@ -29,21 +36,54 @@ console.log('smoke-open-design-providers')
 
 await test('feature flags default off, descriptions visible',()=>{
   resetProviderFlags()
-  assert.equal(isProviderEnabled('storybook'),false)
-  assert.equal(isProviderEnabled('harness'),false)
-  assert.ok(providerFlagDescription('storybook').includes('Storybook'))
-  assert.ok(providerFlagDescription('harness').includes('Harness'))
+  // Experimental surfaces without a settings record default off...
+  assert.equal(isProviderEnabled('mcp-apps'),false)
+  assert.equal(isProviderEnabled('streaming'),false)
+  assert.ok(providerFlagDescription('mcp-apps').includes('MCP Apps'))
+  assert.ok(providerFlagDescription('streaming').includes('Streaming'))
+  // ...and the settings-backed providers are gated only by their own config,
+  // so there is no second flag that can disagree with the executing path.
+  const flagsSrc = fs.readFileSync(path.join(appRoot,'src/agent/subdesign/providers/providerFlags.ts'),'utf8')
+  for (const gone of ['storybook','chrome-devtools','harness']) {
+    assert.doesNotMatch(flagsSrc, new RegExp(`'${gone}'`), `${gone} 不應再有第二個 flag`)
+  }
+  // These two default off but ARE reachable: a persisted per-project record
+  // hydrates the synchronous gate, and a real control exposes it.
+  assert.equal(DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS.mcpApps,false)
+  assert.equal(DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS.streaming,false)
+  hydrateProviderFlags({mcpApps:true,streaming:false})
+  assert.equal(isProviderEnabled('mcp-apps'),true)
+  assert.equal(isProviderEnabled('streaming'),false)
+  assert.equal(mcpAppsAvailability().available,true)
+  resetProviderFlags()
+  assert.equal(isProviderEnabled('mcp-apps'),false)
+
+  // Unknown input can never widen the gate.
+  assert.equal(normalizeExperimentalSurfaceSettings({mcpApps:'yes',streaming:1}).mcpApps,false)
+  assert.equal(normalizeExperimentalSurfaceSettings(null).streaming,false)
+
+  // The gate is renderer-only: Pi Host must not import it, or a renderer
+  // toggle could widen what the Host is willing to execute.
+  const hostFiles = fs.readdirSync(path.join(appRoot,'electron'),{recursive:true,encoding:'utf8'})
+    .filter((file) => /\.tsx?$/.test(file))
+    .filter((file) => fs.readFileSync(path.join(appRoot,'electron',file),'utf8').includes('providerFlags'))
+  assert.deepEqual(hostFiles,[],'Pi Host 不可 import providerFlags')
+
+  // And it is actually wired to the product, not only to smokes.
+  const page = fs.readFileSync(path.join(appRoot,'src/pages/SubDesignPage.tsx'),'utf8')
+  assert.match(page,/hydrateProviderFlags/)
+  assert.match(page,/saveExperimentalSurfaceSettings/)
+  const control = fs.readFileSync(path.join(appRoot,'src/components/subdesign/ExperimentalSurfaceControl.tsx'),'utf8')
+  assert.match(control,/providerFlagDescription/)
 })
 
 await test('storybook: flag off -> unavailable fallback',()=>{
-  resetProviderFlags()
-  const av=storybookAvailability()
+  const av=storybookAvailability(false)
   assert.equal(av.available,false)
 })
 
 await test('storybook: enabled -> context budget + cache',()=>{
-  resetProviderFlags(); setProviderFlag('storybook',true)
-  assert.equal(storybookAvailability().available,true)
+  assert.equal(storybookAvailability(true).available,true)
   const raw={components:[{id:'c1',title:'Button',docs:'A button',controls:['variant']},{id:'c2',title:'Card'}]}
   const r1=getStorybookContext('projA',raw,'fp1')
   assert.equal(r1.fromCache,false)
@@ -106,10 +146,9 @@ await test('chrome devtools: project settings are pinned, loopback-only, and rel
 })
 
 await test('chrome devtools: flag off -> unavailable, enabled -> findings normalized + redaction',()=>{
-  resetProviderFlags()
-  assert.equal(cdtAvailability().available,false)
-  setProviderFlag('chrome-devtools',true)
-  assert.equal(cdtAvailability().available,true)
+  assert.equal(cdtAvailability(false).available,false)
+  assert.equal(cdtAvailability(undefined).available,false)
+  assert.equal(cdtAvailability(true).available,true)
   const raw={console:[{level:'error',message:'boom auth'}],network:[{url:'https://user:pass@example.test/api?token=secret',status:500,failed:true}],performance:[{metric:'LCP',value:2000,threshold:1000}],trace:'x'.repeat(2000)}
   const {findings,attachments}=normalizeCdtFixtureRaw(raw,'run1','stage1','artifact1')
   assert.ok(findings.some(f=>f.kind==='console'))
@@ -136,12 +175,10 @@ await test('chrome devtools: final gate rejects partial, blocker, missing, and c
 })
 
 await test('harness: flag off / unsupported platform / permission denied -> fallback',()=>{
-  resetProviderFlags()
-  assert.equal(harnessAvailability().available,false)
-  setProviderFlag('harness',true)
-  assert.equal(harnessAvailability({platform:'linux'}).available,false)
-  assert.equal(harnessAvailability({platform:'darwin',hasPermission:false}).available,false)
-  assert.equal(harnessAvailability({platform:'darwin',hasPermission:true}).available,true)
+  assert.equal(harnessAvailability(false).available,false)
+  assert.equal(harnessAvailability(true,{platform:'linux'}).available,false)
+  assert.equal(harnessAvailability(true,{platform:'darwin',hasPermission:false}).available,false)
+  assert.equal(harnessAvailability(true,{platform:'darwin',hasPermission:true}).available,true)
   const raw={outcome:'success',steps:[{action:'tap',observation:'ok'}],frictionEvents:[{type:'stall',detail:'slow'}],screenshots:['shot.png']}
   const r=normalizeHarnessFixture(raw,'runH','stageH')
   assert.equal(r.outcome,'success')
@@ -187,8 +224,48 @@ await test('mcp-apps: validation rejects untrusted origin / disallowed tool / ma
   assert.equal(good.ok,true)
 })
 
+await test('mcp-apps: real fallback options, distinct states, no placeholder choices',()=>{
+  const surface=fs.readFileSync(path.join(appRoot,'src/components/subdesign/McpAppSurface.tsx'),'utf8')
+  // The hardcoded placeholder directions must not come back.
+  assert.doesNotMatch(surface,/方向 A/)
+  assert.match(surface,/choiceOptions/)
+  // A caller can supply the real native UI as the fallback.
+  assert.match(surface,/fallback\?: ReactNode/)
+  assert.match(surface,/if \(props\.fallback\) return/)
+  // The non-standard `csp` iframe attribute (and its ts-ignore) is gone;
+  // the CSP meta inside srcDoc is the actual policy.
+  assert.doesNotMatch(surface,/@ts-ignore/)
+  assert.doesNotMatch(surface,/csp=\{CSP_SANDBOX\}/)
+  // The sandbox grants scripts only — allow-same-origin would give the frame a
+  // real origin and, with it, reach into the host.
+  const sandboxAttr = surface.match(/sandbox="([^"]*)"/)
+  assert.ok(sandboxAttr,'iframe 必須宣告 sandbox')
+  assert.equal(sandboxAttr[1],'allow-scripts')
+
+  // Every state has its own wording, so the conversation is not one spinner.
+  const labels=Object.entries(SURFACE_STATUS_LABELS)
+  assert.equal(labels.length,7)
+  assert.equal(new Set(labels.map(([,label])=>label)).size,7)
+  for (const state of ['loading','ready','submitted','invalid','expired','unavailable','error'] as const) {
+    assert.ok(SURFACE_STATUS_LABELS[state],`${state} 缺少說明`)
+  }
+  // Exactly the four failure states hand over to the native fallback.
+  assert.deepEqual(
+    (['loading','ready','submitted','invalid','expired','unavailable','error'] as const).filter(surfaceFallsBack),
+    ['invalid','expired','unavailable','error'],
+  )
+
+  // Direction choice is actually mounted, and backfills the brief's direction.
+  const studio=fs.readFileSync(path.join(appRoot,'src/components/subdesign/SubDesignProjectStudio.tsx'),'utf8')
+  assert.match(studio,/<McpAppSurface/)
+  assert.match(studio,/onSelectDirection\(directionId\)/)
+  assert.match(studio,/onStatusChange/)
+  assert.match(studio,/pushRunActivity/)
+})
+
 await test('streaming envelope: ordered updates, duplicate/out-of-order, cancel, late event',()=>{
-  const env=createStreamingEnvelope('html:artifact','runS')
+  // Real artifact ids carry no kind — the kind comes from the manifest.
+  const env=createStreamingEnvelope({artifactId:'plugin_runS_compose',artifactKind:'html',runId:'runS'})
   const r1=appendStreamingUpdate(env,'hello')
   const r2=appendStreamingUpdate(r1.envelope,' world')
   assert.equal(r2.envelope.updates.length,2)

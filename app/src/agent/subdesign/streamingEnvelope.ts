@@ -3,6 +3,8 @@
  * but no LangGraph / CopilotKit runtime. Renderer declares streaming support.
  */
 
+import type { SubDesignArtifact, SubDesignArtifactKind } from './types.ts'
+
 export type StreamingStatus = 'streaming' | 'complete' | 'error' | 'cancelled'
 
 export type StreamingUpdate = {
@@ -14,7 +16,11 @@ export type StreamingUpdate = {
 export type StreamingEnvelope = {
   version: 1
   artifactId: string
-  artifactKind: string
+  /**
+   * The artifact's declared kind. Never derived from the id — a real artifact
+   * id carries no kind, so parsing one out rejected every genuine artifact.
+   */
+  artifactKind: SubDesignArtifactKind
   runId: string
   stageId?: string
   updates: StreamingUpdate[]
@@ -25,15 +31,48 @@ export type StreamingEnvelope = {
 }
 
 export type RendererCapabilities = {
-  supportedKinds: string[] // e.g., html, deck, markdown, svg
+  supportedKinds: SubDesignArtifactKind[]
   streaming: boolean
   sandbox: string // CSP
   export?: string[]
 }
 
-export function createStreamingEnvelope(artifactId: string, runId: string): StreamingEnvelope {
-  const artifactKind = artifactId.split(':')[0]?.trim() || 'html'
-  return { version: 1, artifactId, artifactKind, runId, updates: [], status: 'streaming', outputRefs: [] }
+export function createStreamingEnvelope(input: {
+  artifactId: string
+  artifactKind: SubDesignArtifactKind
+  runId: string
+  stageId?: string
+  outputRefs?: string[]
+}): StreamingEnvelope {
+  return {
+    version: 1,
+    artifactId: input.artifactId,
+    artifactKind: input.artifactKind,
+    runId: input.runId,
+    stageId: input.stageId,
+    updates: [],
+    status: 'streaming',
+    outputRefs: input.outputRefs ? [...input.outputRefs] : [],
+  }
+}
+
+/**
+ * Build the envelope from the artifact manifest, which stays the source of
+ * truth for status, renderer and exports — the stream never becomes a second
+ * canonical artifact state (issue 08).
+ */
+export function envelopeForArtifact(
+  artifact: Pick<SubDesignArtifact, 'id' | 'kind' | 'entry'>,
+  runId: string,
+  stageId?: string,
+): StreamingEnvelope {
+  return createStreamingEnvelope({
+    artifactId: artifact.id,
+    artifactKind: artifact.kind,
+    runId,
+    stageId,
+    outputRefs: artifact.entry ? [artifact.entry] : [],
+  })
 }
 
 export function appendStreamingUpdate(env: StreamingEnvelope, text: string): { envelope: StreamingEnvelope; rejected?: string } {

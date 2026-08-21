@@ -304,7 +304,21 @@ async function executePiHostTurn(
       pattern: loopType,
       maxIterations,
       definitionOfDone,
+      pluginExecution: overrides.subDesignPluginExecution,
     })
+    if (result.pluginExecution) {
+      const { persistSubDesignMetadata } = await import('../agent/subdesign/metadata.ts')
+      await persistSubDesignMetadata('open-design-provider-run', result.pluginExecution, overrides.projectRoot)
+    }
+    if (result.pluginExecution?.state === 'completed' && result.pluginExecution.artifact) {
+      const { useSubDesignArtifactStore } = await import('./subDesignArtifactStore.ts')
+      const registered = useSubDesignArtifactStore.getState().register(
+        result.pluginExecution.artifact,
+        { briefId: result.pluginExecution.briefId },
+        overrides.projectRoot,
+      )
+      if (!registered.ok) throw new Error(`Pi Host artifact projection invalid: ${registered.errors.join('；')}`)
+    }
     const success = result.settlement === 'success'
     const halted = result.settlement === 'cancelled' || result.settlement === 'interrupted'
     const final = emptyAgentLike({

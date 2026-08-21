@@ -284,7 +284,7 @@ export class PiHostSupervisor {
     return response.result.builtinTools
   }
 
-  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }): Promise<NonNullable<PiHostResponse['result']>> {
+  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: unknown }): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}), ...(profile ? { profile } : {}), ...(orchestration || {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')
     return response.result

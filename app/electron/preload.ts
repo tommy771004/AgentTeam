@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
 import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
+import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from '../src/agent/subdesign/pluginExecution'
+import type { SubDesignMetadataKind } from '../src/agent/subdesign/metadataKinds'
 
 type PiHostThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 type PiHostSettings = {
@@ -98,7 +100,7 @@ const api = {
         uninstall: (id: string) => ipcRenderer.invoke('pi-host:extensions:uninstall', id) as Promise<{ removed?: boolean }>,
       },
       turn: {
-        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: { memoryEnabled: boolean; memoryWriteEnabled: boolean; referenceChatHistory: boolean; temporary: boolean; project?: string; contextWindowTokens?: number }; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }}>,
+        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: { memoryEnabled: boolean; memoryWriteEnabled: boolean; referenceChatHistory: boolean; temporary: boolean; project?: string; contextWindowTokens?: number }; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }; pluginExecution?: SubDesignPluginExecutionProjection }>,
         cancel: (runId: string) => ipcRenderer.invoke('pi-host:turn:cancel', runId) as Promise<{ runId: string; settlement: string }>,
       },
       tools: {
@@ -412,6 +414,14 @@ const api = {
       }>,
   },
   subdesign: {
+    harnessStatus: (binaryPath?: string) => ipcRenderer.invoke('subdesign:harnessStatus', binaryPath) as Promise<{
+      available: boolean
+      platform: string
+      version: string | null
+      reason: string | null
+      screenRecording: string
+      accessibility: string
+    }>,
     readMetadata: (projectRoot?: string) =>
       ipcRenderer.invoke('subdesign:readMetadata', projectRoot) as Promise<{
         ok: boolean
@@ -420,9 +430,12 @@ const api = {
         critiques: unknown[]
         exports: unknown[]
         openDesignPacks: unknown[]
+        openDesignSnapshots: unknown[]
+        openDesignProviderSettings: unknown[]
+        openDesignProviderRuns: unknown[]
         error?: string
       }>,
-    writeMetadata: (input: { kind: 'brief' | 'artifact' | 'critique' | 'export' | 'open-design-pack'; payload: unknown; projectRoot?: string }) =>
+    writeMetadata: (input: { kind: SubDesignMetadataKind; payload: unknown; projectRoot?: string }) =>
       ipcRenderer.invoke('subdesign:writeMetadata', input) as Promise<{
         ok: boolean
         path?: string
@@ -439,6 +452,11 @@ const api = {
       ipcRenderer.invoke('subdesign:readArtifact', input) as Promise<{
         ok: boolean
         content: string
+        error?: string
+      }>,
+    revealProviderAttachment: (input: { locator: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:revealProviderAttachment', input) as Promise<{
+        ok: boolean
         error?: string
       }>,
     patchArtifact: (input: { artifact: unknown; operations: unknown; projectRoot?: string }) =>

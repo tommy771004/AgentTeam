@@ -142,6 +142,33 @@ export function mapPiHostEventToActivity(event: PiHostEventLike): PiHostActivity
 
   if (event.event === 'host/turn-item') return mapTurnItem(runId, payload?.item)
 
+  if (event.event === 'host/pipeline-stage') {
+    const stageId = asText(payload?.stageId) || 'stage'
+    const providerId = asText(payload?.providerId) || 'provider'
+    const state = asText(payload?.state)
+    const failed = state === 'failed' || state === 'blocked' || state === 'cancelled'
+    const stateLabel = state === 'queued'
+      ? '已排入'
+      : state === 'running'
+        ? '執行中'
+        : state === 'completed'
+          ? '已完成'
+          : state === 'blocked'
+            ? '已阻擋'
+            : state === 'cancelled'
+              ? '已取消'
+              : '失敗'
+    return {
+      kind: failed ? 'error' : state === 'completed' ? 'tool' : 'status',
+      runId,
+      title: `${providerId} / ${stageId} ${stateLabel}`,
+      detail: asText(payload?.summary),
+      tool: providerId,
+      ok: !failed,
+      eventId: `pi-pipeline-${stageId}-${state || 'unknown'}`,
+    }
+  }
+
   const tool = asText(payload?.tool)
   const callId = asText(payload?.callId)
   if (event.event === 'host/tool-start' && tool) {

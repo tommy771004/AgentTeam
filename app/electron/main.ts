@@ -12,6 +12,7 @@ import {
   safeStorage,
   session,
   utilityProcess,
+  systemPreferences,
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -175,6 +176,7 @@ import {
 } from '../src/agent/subdesign/artifactManifest'
 import { writeLearningExport } from './learningExportWrite.ts'
 import { normalizeSubDesignCritique, critiqueAllowsDeliver } from '../src/agent/subdesign/critique'
+import { isSubDesignMetadataKind, type SubDesignMetadataKind } from '../src/agent/subdesign/metadataKinds'
 import type {
   SubDesignArtifact,
   SubDesignArtifactPatchOperation,
@@ -2106,6 +2108,25 @@ ipcMain.handle('hermes:set', async (_evt, data: unknown) => {
 })
 
 ipcMain.handle('app:platform', () => process.platform)
+
+ipcMain.handle('subdesign:harnessStatus', async (_evt, binaryPath?: string) => {
+  const binary = String(binaryPath || 'harness-mcp').trim()
+  if (binary !== 'harness-mcp' && !path.isAbsolute(binary)) return { available: false, platform: process.platform, version: null, reason: 'binary path 必須是 harness-mcp 或絕對路徑。', screenRecording: 'not-required', accessibility: 'not-required' }
+  const permissions = process.platform === 'darwin' ? {
+    screenRecording: systemPreferences.getMediaAccessStatus('screen'),
+    accessibility: systemPreferences.isTrustedAccessibilityClient(false) ? 'granted' : 'denied',
+  } : { screenRecording: 'unsupported', accessibility: 'unsupported' }
+  const version = await new Promise<{ ok: boolean; output: string }>((resolve) => {
+    const child = spawn(binary, ['--version'], { stdio: ['ignore', 'pipe', 'ignore'] })
+    let output = ''
+    const timer = setTimeout(() => { child.kill('SIGTERM'); resolve({ ok: false, output: 'version check timeout' }) }, 2_000)
+    child.stdout?.on('data', (chunk) => { output += String(chunk).slice(0, 200) })
+    child.once('error', (error) => { clearTimeout(timer); resolve({ ok: false, output: error.message }) })
+    child.once('exit', (code) => { clearTimeout(timer); resolve({ ok: code === 0, output: output.trim() }) })
+  })
+  const expected = 'harness-mcp 0.7.0'
+  return { available: process.platform === 'darwin' && version.ok && version.output === expected, platform: process.platform, version: version.output || null, reason: process.platform !== 'darwin' ? 'Harness autonomous run 目前僅支援 macOS。' : version.ok && version.output === expected ? null : `需要 ${expected}；${version.output || 'binary unavailable'}`, ...permissions }
+})
 ipcMain.handle('app:version', () => app.getVersion())
 ipcMain.handle('pi-host:status', () => piHostSupervisor.status())
 ipcMain.handle('pi-host:health', async () => piHostSupervisor.health())
@@ -2142,7 +2163,7 @@ ipcMain.handle('pi-host:sessions:reset', async (_evt, sessionId: string) => piHo
 ipcMain.handle('pi-host:sessions:archive', async (_evt, sessionId: string) => piHostSupervisor.archiveSession(sessionId))
 ipcMain.handle('pi-host:sessions:compact', async (_evt, sessionId: string) => piHostSupervisor.compactSession(sessionId))
 ipcMain.handle('pi-host:tools:execute', async (_evt, input: { tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash' | 'code' | 'mcp'; params?: Record<string, unknown> }) => piHostSupervisor.executeTool(input.tool, input.params || {}))
-ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { contextPolicy: input.contextPolicy, pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, mode: input.mode, queue: input.queue }))
+ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: unknown }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { contextPolicy: input.contextPolicy, pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, mode: input.mode, queue: input.queue, pluginExecution: input.pluginExecution }))
 ipcMain.handle('pi-host:turn:cancel', async (_evt, runId: string) => piHostSupervisor.cancelTurn(runId))
 
 // ── Signed Beta updates + N-1→N migration transaction ─────────
@@ -2397,7 +2418,7 @@ function safeSubDesignMetadataId(value: unknown): string {
   return id
 }
 
-function subDesignMetadataFile(root: string, kind: 'brief' | 'artifact' | 'critique' | 'export' | 'open-design-pack', payload: Record<string, unknown>): string {
+function subDesignMetadataFile(root: string, kind: SubDesignMetadataKind, payload: Record<string, unknown>): string {
   if (kind === 'brief') return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/briefs/${safeSubDesignMetadataId(payload.id)}.json`, root)
   if (kind === 'artifact') return resolveWorkspacePath(`${SUBDESIGN_ARTIFACT_ROOT}/${safeSubDesignMetadataId(payload.id)}/manifest.json`, root)
   if (kind === 'critique') return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/critiques/${safeSubDesignMetadataId(payload.artifactId)}-r${Math.max(1, Math.floor(Number(payload.revision) || 1))}.json`, root)
@@ -2409,6 +2430,19 @@ function subDesignMetadataFile(root: string, kind: 'brief' | 'artifact' | 'criti
     const slug = String(payload.id || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 160)
     if (!slug) throw new Error('不安全的 SubDesign metadata id')
     return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/open-design-packs/${slug}.json`, root)
+  }
+  if (kind === 'open-design-snapshot') {
+    const relativePath = String(payload.projectRelativePath || '').trim().replaceAll('\\', '/')
+    if (!/^\.subagents\/open-design\/snapshots\/[a-zA-Z0-9._-]+\.json$/.test(relativePath)) {
+      throw new Error('不安全的 OpenDesign snapshot path')
+    }
+    return resolveWorkspacePath(relativePath, root)
+  }
+  if (kind === 'open-design-provider-settings') {
+    return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/providers/${safeSubDesignMetadataId(payload.id)}.json`, root)
+  }
+  if (kind === 'open-design-provider-run') {
+    return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/provider-runs/${safeSubDesignMetadataId(payload.runId)}.json`, root)
   }
   return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/exports/${safeSubDesignMetadataId(payload.id)}.json`, root)
 }
@@ -3255,16 +3289,19 @@ ipcMain.handle('subdesign:readMetadata', async (_evt, projectRoot?: string) => {
       critiques: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/critiques`, 160),
       exports: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/exports`, 160),
       openDesignPacks: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/open-design-packs`, 500),
+      openDesignSnapshots: readJsonDirectory(root, '.subagents/open-design/snapshots', 500),
+      openDesignProviderSettings: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/providers`, 40),
+      openDesignProviderRuns: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/provider-runs`, 160),
     }
   } catch (error) {
-    return { ok: false, briefs: [], artifacts: [], critiques: [], exports: [], openDesignPacks: [], error: error instanceof Error ? error.message : String(error) }
+    return { ok: false, briefs: [], artifacts: [], critiques: [], exports: [], openDesignPacks: [], openDesignSnapshots: [], openDesignProviderSettings: [], openDesignProviderRuns: [], error: error instanceof Error ? error.message : String(error) }
   }
 })
 
 ipcMain.handle('subdesign:writeMetadata', async (_evt, input: { kind?: string; payload?: unknown; projectRoot?: string }) => {
   try {
     const kind = input?.kind
-    if (kind !== 'brief' && kind !== 'artifact' && kind !== 'critique' && kind !== 'export' && kind !== 'open-design-pack') throw new Error('不支援的 SubDesign metadata kind')
+    if (!isSubDesignMetadataKind(kind)) throw new Error('不支援的 SubDesign metadata kind')
     if (!input.payload || typeof input.payload !== 'object' || Array.isArray(input.payload)) throw new Error('metadata payload 必須是 object')
     const payload = input.payload as Record<string, unknown>
     if (kind === 'artifact') {
@@ -3290,6 +3327,22 @@ ipcMain.handle('subdesign:readArtifact', async (_evt, input: { entry?: string; p
     return { ok: true, content: fs.readFileSync(file, 'utf8').slice(0, 200_000) }
   } catch (error) {
     return { ok: false, content: '', error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('subdesign:revealProviderAttachment', async (_evt, input: { locator?: string; projectRoot?: string }) => {
+  try {
+    const root = workspaceRootFor(input?.projectRoot)
+    const locator = String(input?.locator || '').trim().replaceAll('\\', '/')
+    if (!/^\.subagents\/open-design\/runs\/[a-zA-Z0-9._:@-]+\/[a-zA-Z0-9._:@-]+\/attachments\/(?:screenshot|trace|harness-replay|harness-step-[0-9]{3})\.(?:png|json)$/.test(locator)) {
+      throw new Error('不安全的 provider attachment locator')
+    }
+    const file = resolveWorkspacePath(locator, root)
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error('找不到 provider attachment')
+    shell.showItemInFolder(file)
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
 })
 

@@ -24,14 +24,59 @@
 - Snapshot 含 `contentHash` + `capabilityFingerprint`，指紋改變即 `needsReapproval()==true`。
 - Grant 僅可授權 `requestedCapabilities` 子集，revocation 後下次執行回 `fail closed`。
 
+### 使用者流程（`pluginTrust.ts` + `PluginTrustPanel.tsx`）
+
+決策由 `resolvePluginTrust()` 產生，**唯讀**：準備一次執行不會寫入 snapshot。四種狀態各對應一個明確動作：
+
+| 狀態 | 意義 | 使用者動作 |
+|---|---|---|
+| `adopt-required` | 專案尚未採用此 plugin | `adoptPluginSnapshot()` — 寫入 snapshot，且不授權任何 capability |
+| `refresh-required` | 來源 hash 或 capability 指紋變了 | `refreshPluginSnapshot()` — **明確** refresh 才取代既有 snapshot，並撤銷全部既有 grant |
+| `grant-required` | 有 deny-by-default capability 未授權 | `requestCapabilityGrants()` — 逐項走既有 HITL ask |
+| `trusted` | 已採用且該 scope 已授權 | 可執行；`revokePluginGrants()` 隨時撤銷 |
+
+- **遠端/vendor 更新不會靜默取代 snapshot**：`refresh-required` 只回報，不寫入。
+- Capability 請求走既有 `permissionAskStore.requestAsk()`，維持 run/thread scope 與 unattended timeout（unattended 45s / interactive 90s）；**逾時自動 deny**，unattended 執行因此 fail closed。
+- 部分授權仍然 blocked：只要還有未授權的 deny-by-default capability，狀態維持 `grant-required`。
+
+## Plugin inputs
+
+Contract v1 的 `od.inputs` 由 `pluginInputs.ts` 統一解析，**兩側都跑一次**：
+
+- Renderer：`prepareSubDesignRun()` 解析不過就不啟動 run，並回傳 `inputsRequired`，由
+  `PluginInputForm.tsx` 以 MCP Apps `form` surface 收集（不可用時退回原生表單，草稿存於
+  `surfaceDraftStore`，離開再回來不會遺失）。
+- Pi Host：`validateExecution()` 依自己解析出的 manifest **重新** resolve 一次。
+
+因此 surface crash、表單被略過、或手工偽造的 request 都無法跳過必填 input；未宣告的欄位
+一律丟棄，不會傳到 provider。宣告的 `default` 會自動套用，`select` 值必須落在 `options` 內。
+
 ## Fallback 行為
 
 | 條件 | 結果 |
 |---|---|
-| feature flag `false` | 回原生 `choice/form/confirmation` 備援（`McpAppSurface.tsx:Fallback*`） |
+| feature flag `false` | 回原生 `choice/form/confirmation` 備援（`McpAppSurface.tsx:Fallback*`）；呼叫端可用 `fallback` prop 傳入真正的產品 UI，direction choice 即以原生方向格為備援 |
 | iframe crash / `status=error` | 同上備援；`status` 投影至對話（loading/ready/submitted/invalid/expired/unavailable/error） |
 | unsupported streaming renderer | 預先 `canRender()` 拒絕並顯示靜態備援（`ArtifactPreview.tsx:streamingGate`） |
 | Harness 無權限 / 非 darwin | `harnessAvailability()` 回 `permission-denied` / `unsupported-platform`，降級為靜態 critique |
+| 未啟用的 external provider | 由 Host adapter 呼叫 `storybookAvailability()` / `cdtAvailability()` / `harnessAvailability()`，參數即專案持久化的 `providerConfig.enabled`，回 `blocked` |
+| 無任何 external provider | `fakePipelineProvider` 為**出貨預設**：無外部 I/O，仍產生真實 artifact 與 adapter-issued evidence；provider success ≠ DoD met |
+
+### Feature flag 邊界
+
+`providerFlags.ts` 只涵蓋**沒有專案設定紀錄**的實驗性介面（`mcp-apps`、`streaming`）。
+Storybook / Chrome DevTools / Harness **不在其中**：三者只由各自持久化的 `providerConfig.enabled`
+把關，並由 Host adapter 的 `*Availability()` 檢查。兩套 gate 並存會互相矛盾，且其中一套
+在 smoke 以外形同虛設，因此只保留一套。
+
+兩者**預設關閉**，但可由使用者逐專案開啟：設定持久化為 `ExperimentalSurfaceSettings`
+（與其他 provider 同一套 metadata 機制），由 `ExperimentalSurfaceControl` 呈現支援範圍與開關，
+專案綁定時以 `hydrateProviderFlags()` 套用到同步的 render-path gate。關閉時備援路徑完整可用：
+MCP Apps 退回原生選擇／表單，streaming 改為完成後預覽。
+
+`providerFlags.ts` 是 **renderer-only**：Pi Host 不得 import（有 drift guard）。Host 端一律以
+frozen request 上的 `providerConfig.enabled` 把關，因此 renderer 的開關永遠無法擴大 Host 願意
+執行的範圍。
 
 ## 非 vendoring 項目
 

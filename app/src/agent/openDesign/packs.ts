@@ -1,6 +1,5 @@
 import type { PluginManifest } from '../hermes/plugins.ts'
 import type { OpenDesignCatalogRecord, OpenDesignExecutionStatus } from './catalog.ts'
-import { type PluginContractResult } from './pluginContract.ts'
 
 export type OpenDesignPackKind = 'template' | 'skill' | 'design-system' | 'prompt' | 'craft' | 'media'
 export type OpenDesignTrustState = 'bundled' | 'community-reviewed' | 'local-user' | 'remote-unverified'
@@ -135,15 +134,4 @@ export function packMayEnable(pack: OpenDesignContentPackManifest): { ok: true }
   if (pack.executionStatus === 'invalid') return { ok: false, reason: 'pack inventory 標記為 invalid，不能啟用。' }
   if (pack.kind !== 'skill') return { ok: true }
   return { ok: true }
-}
-
-/** Contract-aware gate: pack may enable only if its embedded contract (if any) is compatible. */
-export function packContractMayEnable(
-  contract: PluginContractResult,
-): { ok: true; contract: PluginContractResult } | { ok: false; reason: string; contract: PluginContractResult } {
-  if (!contract.ok) {
-    return { ok: false, reason: contract.reason, contract }
-  }
-  // Legacy packs remain enable-able; trust gate already checked above.
-  return { ok: true, contract }
 }

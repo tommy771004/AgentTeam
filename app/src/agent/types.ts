@@ -335,6 +335,11 @@ export interface RuntimeOverrides {
   }
   /** Contract metadata for an external CLI delegate; never a parent transcript. */
   externalCliContract?: ExternalCliDelegateContract
+  /**
+   * Immutable SubDesign plugin stage request. It is transported through the
+   * canonical Task run into Pi Host; renderer code never executes providers.
+   */
+  subDesignPluginExecution?: import('./subdesign/pluginExecution.ts').SubDesignPluginExecutionRequest
 }
 
 export interface ToolCallRecord {

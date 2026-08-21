@@ -4,6 +4,9 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { critiqueAllowsDeliver } from '../agent/subdesign/critique'
 import { buildSubDesignPrompt } from '../agent/subdesign/prompt'
 import { prepareSubDesignRun } from '../agent/subdesign/pluginExecutionPreparation'
+import type { PluginInputValues } from '../agent/subdesign/pluginInputs'
+import { hydrateProviderFlags } from '../agent/subdesign/providers/providerFlags'
+import type { PluginInput } from '../agent/openDesign/pluginContract'
 import {
   OPEN_DESIGN_EXPLORE_SOURCE,
   OPEN_DESIGN_TEMPLATE_SOURCE,
@@ -51,7 +54,12 @@ import { useSettingsStore } from '../store/settingsStore'
 import type { ThreadRunner } from '../store/threadStore'
 import {
   DEFAULT_STORYBOOK_PROVIDER_SETTINGS,
+  DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
+  loadAllProviderRuns,
+  loadExperimentalSurfaceSettings,
   loadStorybookProviderState,
+  saveExperimentalSurfaceSettings,
+  type ExperimentalSurfaceSettings,
   saveStorybookProviderSettings,
   type StorybookProviderSettings,
 } from '../agent/subdesign/providers/providerSettings.ts'
@@ -168,12 +176,48 @@ export function SubDesignPage() {
   const [startingRun, setStartingRun] = useState(false)
   const [storybookSettings, setStorybookSettings] = useState<StorybookProviderSettings>(DEFAULT_STORYBOOK_PROVIDER_SETTINGS)
   const [storybookRuns, setStorybookRuns] = useState<SubDesignPluginExecutionProjection[]>([])
+  const [providerRuns, setProviderRuns] = useState<SubDesignPluginExecutionProjection[]>([])
+  const [experimentalSettings, setExperimentalSettings] = useState<ExperimentalSurfaceSettings>(
+    DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
+  )
+  // Values collected by the plugin input form, and whatever the contract still
+  // requires. A blocked run surfaces the form rather than starting without them.
+  const [pluginInputs, setPluginInputs] = useState<PluginInputValues>({})
+  const [pluginDeclaredInputs, setPluginDeclaredInputs] = useState<PluginInput[]>([])
 
   const refreshStorybookState = useCallback(async () => {
-    const state = await loadStorybookProviderState(projectRoot || undefined)
+    const [state, runs, experimental] = await Promise.all([
+      loadStorybookProviderState(projectRoot || undefined),
+      loadAllProviderRuns(projectRoot || undefined),
+      loadExperimentalSurfaceSettings(projectRoot || undefined),
+    ])
     setStorybookSettings(state.settings)
     setStorybookRuns(state.runs)
+    setProviderRuns(runs)
+    setExperimentalSettings(experimental)
+    // Apply the project's choice to the synchronous render-path gate.
+    hydrateProviderFlags(experimental)
   }, [projectRoot])
+
+  // Plugin inputs belong to one brief's plugin. Switching briefs must not carry
+  // the previous plugin's answers into a different contract.
+  useEffect(() => {
+    setPluginInputs({})
+    setPluginDeclaredInputs([])
+  }, [routeBriefId])
+
+  /**
+   * Wraps the shared preparation so a block on unfilled inputs surfaces the
+   * form. Keeps the recording in one place instead of at each run start.
+   */
+  const prepareSubDesignRunTracked = useCallback(
+    async (input: Parameters<typeof prepareSubDesignRun>[0]) => {
+      const prepared = await prepareSubDesignRun(input)
+      setPluginDeclaredInputs(prepared.declaredInputs ?? [])
+      return prepared
+    },
+    [],
+  )
 
   const activeSurface = useMemo(
     () => SURFACES.find((surface) => surface.id === surfaceId) || SURFACES[0],
@@ -384,7 +428,8 @@ export function SubDesignPage() {
     setShowRunPanel(false)
     try {
       const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignRun({
+      const pluginExecution = await prepareSubDesignRunTracked({
+        pluginInputs,
         brief: created,
         runId,
         projectRoot: projectRoot || undefined,
@@ -422,7 +467,8 @@ export function SubDesignPage() {
     setShowRunPanel(false)
     try {
       const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignRun({
+      const pluginExecution = await prepareSubDesignRunTracked({
+        pluginInputs,
         brief: activeBrief,
         runId,
         projectRoot: projectRoot || undefined,
@@ -448,7 +494,8 @@ export function SubDesignPage() {
     setShowRunPanel(false)
     try {
       const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignRun({
+      const pluginExecution = await prepareSubDesignRunTracked({
+        pluginInputs,
         brief: activeBrief,
         runId,
         projectRoot: projectRoot || undefined,
@@ -508,6 +555,25 @@ export function SubDesignPage() {
         onSelectDirection={(directionId) => { selectDirection(activeBrief.id, directionId, undefined, projectRoot || undefined) }}
         storybookSettings={storybookSettings}
         latestStorybookRun={storybookRuns.find((item) => item.briefId === activeBrief.id) || storybookRuns[0] || null}
+        experimentalSettings={experimentalSettings}
+        onSaveExperimentalSettings={async (value) => {
+          const result = await saveExperimentalSurfaceSettings(value, projectRoot || undefined)
+          if (result.ok) {
+            setExperimentalSettings(result.settings)
+            hydrateProviderFlags(result.settings)
+          }
+          return result
+        }}
+        pluginDeclaredInputs={pluginDeclaredInputs}
+        onSubmitPluginInputs={(values) => {
+          setPluginInputs(values)
+          setPluginDeclaredInputs([])
+        }}
+        artifactStream={
+          selectedArtifact
+            ? providerRuns.find((run) => run.artifact?.id === selectedArtifact.id)?.stream ?? null
+            : null
+        }
         onSaveStorybookSettings={async (value) => {
           const result = await saveStorybookProviderSettings(value, projectRoot || undefined)
           if (result.ok) {

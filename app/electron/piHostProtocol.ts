@@ -53,6 +53,7 @@ export type PiHostResponse = {
     extension?: PiExtension
     extensions?: PiExtension[]
     removed?: boolean
+    pluginExecution?: SubDesignPluginExecutionProjection
   }
   error?: {
     code: 'invalid_request' | 'protocol_mismatch' | 'not_initialized' | 'unknown_method'
@@ -86,6 +87,10 @@ export type PiHostEvent =
       payload: { runId: string; sessionId: string; phase: 'memory-recalled' | 'memory-written' | 'compacted' | 'model-switched'; recalled?: number; written?: number; previousModel?: string; model?: string; provider?: string; contextWindowTokens?: number }
     }
   | {
+      event: 'host/pipeline-stage'
+      payload: { runId: string; sessionId: string; stageId: string; providerId: string; state: 'queued' | 'running' | 'completed' | 'failed' | 'blocked' | 'cancelled'; summary: string; at: string }
+    }
+  | {
       event: 'host/extension'
       payload: { action: 'installed' | 'updated' | 'enabled' | 'disabled' | 'uninstalled'; extension: PiExtension }
     }
@@ -113,6 +118,8 @@ import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
 import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
 import { callPiMcpTool, listPiMcpTools, stopPiMcp } from './piMcpClient.ts'
 import { isPiHostDefinitionOfDoneMet } from '../src/agent/piHostRun.ts'
+import { cancelSubDesignProviderRun, executeSubDesignProviderStage } from './subDesignProviderRuntime.ts'
+import { shouldStopForProviderProjection, type SubDesignPluginExecutionProjection } from '../src/agent/subdesign/pluginExecution.ts'
 
 type HostState = {
   initialized: boolean
@@ -652,7 +659,8 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const orchestrationRun = [...activeSessionRuns.values()].find((run) => run.runId === runId)
     if (orchestrationRun) orchestrationRun.cancelled = true
     const codeCancelled = cancelPiCodeMode(runId)
-    return Promise.all([cancelPiTurn(runId), Promise.resolve(cancelPiTool(runId))]).then(([turnCancelled, toolCancelled]) => (turnCancelled || toolCancelled || codeCancelled || Boolean(orchestrationRun))
+    const providerCancelled = cancelSubDesignProviderRun(runId)
+    return Promise.all([cancelPiTurn(runId), Promise.resolve(cancelPiTool(runId))]).then(([turnCancelled, toolCancelled]) => (turnCancelled || toolCancelled || codeCancelled || providerCancelled || Boolean(orchestrationRun))
       ? [{ id, result: { runId, settlement: 'cancelled' as const } }]
       : [errorResponse(id, 'invalid_request', `Unknown Pi run: ${runId}`)])
   }
@@ -733,9 +741,42 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       else turnEvents.push(event)
     }
     publishOrchestration('parse', undefined, definitionOfDone || 'Pi turn settlement is the default DoD')
-    return runPiOrchestration({
+    const pluginExecutionPromise = input.params?.pluginExecution
+      ? executeSubDesignProviderStage({
+          request: input.params.pluginExecution,
+          runId,
+          threadId: session.threadId || sessionId,
+          projectRoot: cwd,
+          onEvent: (stageEvent) => {
+            const event: PiHostEvent = { event: 'host/pipeline-stage', payload: { ...stageEvent, sessionId } }
+            if (emit) emit(event)
+            else turnEvents.push(event)
+          },
+        })
+      : Promise.resolve(undefined)
+    return pluginExecutionPromise.then((pluginExecution) => {
+      if (pluginExecution && shouldStopForProviderProjection(pluginExecution)) {
+        const settlement = pluginExecution.state === 'cancelled' ? 'cancelled' as const : 'failed' as const
+        publishOrchestration(settlement === 'cancelled' ? 'cancelled' : 'settlement', 0, pluginExecution.state)
+        state.snapshot.cursor += 1
+        return [...turnEvents, {
+          id,
+          result: {
+            sessionId,
+            runId,
+            settlement,
+            items: [{ type: 'assistant_message', content: pluginExecution.summary }],
+            pluginExecution,
+            orchestration: { pattern, iterations: 0, maxIterations: iterationLimit, definitionOfDone, dodMet: false },
+          },
+        }]
+      }
+      const orchestrationPrompt = pluginExecution
+        ? `${prompt}\n\n## Trusted provider stage result\n${JSON.stringify(pluginExecution)}`
+        : prompt
+      return runPiOrchestration({
       pattern,
-      prompt,
+      prompt: orchestrationPrompt,
       maxIterations,
       turn: async (iterationPrompt, iteration) => {
         if (activeSessionRuns.get(sessionId)?.cancelled) return { settlement: 'cancelled' as const, result: '' }
@@ -825,7 +866,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
         }
         return { settlement: turn.settlement, result: turn.items.map((item) => typeof item?.content === 'string' ? item.content : '').join('\n') }
       },
-    }).then((orchestration) => {
+      }).then((orchestration) => {
       publishOrchestration(orchestration.settlement === 'cancelled' ? 'cancelled' : 'settlement', orchestration.iterations, orchestration.settlement)
       state.snapshot.cursor += 1
       return [...turnEvents, {
@@ -842,8 +883,10 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
             definitionOfDone,
             dodMet: orchestration.dodMet,
           },
+          ...(pluginExecution ? { pluginExecution } : {}),
         },
       }]
+      })
     }).finally(() => {
       if (activeSessionRuns.get(sessionId)?.runId === runId) activeSessionRuns.delete(sessionId)
     })

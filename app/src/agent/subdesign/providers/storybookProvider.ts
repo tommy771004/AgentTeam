@@ -1,9 +1,8 @@
 /**
  * SubDesign Storybook component context provider — read-only, bounded, cacheable.
  * Upstream is experimental; we normalize to internal ComponentEvidence.
- * Flag-gated: isProviderEnabled('storybook') must be true to activate.
+ * Flag-gated: the project's persisted Storybook setting must be enabled.
  */
-import { isProviderEnabled } from './providerFlags.ts'
 import { issueProviderEvidence, type ProviderAvailability, type ProviderEvidence } from './providerContract.ts'
 
 export const STORYBOOK_PINNED_VERSION = '8.6.0'
@@ -22,8 +21,13 @@ export type ComponentEvidence = {
 
 const cache = new Map<string, { fp: string; evidence: ComponentEvidence }>()
 
-export function storybookAvailability(): ProviderAvailability {
-  if (!isProviderEnabled('storybook')) return { available: false, reason: 'Storybook provider 未啟用（feature flag 關閉）', code: 'unavailable' }
+/**
+ * The one availability gate, called by the Host adapter with the project's
+ * persisted setting. Experimental providers stay off unless the project
+ * explicitly enabled them.
+ */
+export function storybookAvailability(enabled: boolean | undefined): ProviderAvailability {
+  if (!enabled) return { available: false, reason: 'Storybook provider 未啟用（feature flag 關閉）', code: 'unavailable' }
   return { available: true }
 }
 

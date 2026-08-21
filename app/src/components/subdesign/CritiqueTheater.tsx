@@ -8,7 +8,7 @@ import { useProjectStore } from '../../store/projectStore'
 import { useRunActivityStore } from '../../store/runActivityStore'
 import { useSubDesignCritiqueStore } from '../../store/subDesignCritiqueStore'
 import { useSubDesignCritiqueSessionStore } from '../../store/subDesignCritiqueSessionStore'
-import { prepareSubDesignPluginExecution } from '../../agent/subdesign/pluginExecutionPreparation.ts'
+import { prepareSubDesignRun } from '../../agent/subdesign/pluginExecutionPreparation.ts'
 import {
   DEFAULT_CHROME_DEVTOOLS_PROVIDER_SETTINGS,
   loadChromeDevToolsProviderState,
@@ -169,7 +169,7 @@ export function CritiqueTheater({
       if (harnessSettings.enabled) {
         setMessage('正在執行 Harness goal-based UX check…')
         const harnessRunId = `run_${uuid().slice(0, 12)}`
-        const preparedHarness = await prepareSubDesignPluginExecution({
+        const preparedHarness = await prepareSubDesignRun({
           brief,
           runId: harnessRunId,
           projectRoot: projectRoot || undefined,
@@ -189,7 +189,7 @@ export function CritiqueTheater({
             },
           },
         })
-        if (preparedHarness.ready) {
+        if (preparedHarness.overrides) {
           await runTask({
             runId: harnessRunId,
             objective: `執行 Harness UX check：${harnessGoal}`,
@@ -198,18 +198,18 @@ export function CritiqueTheater({
             runner: 'builtin',
             loopType: 'Goal-based',
             projectRoot: projectRoot || undefined,
-            overrides: { agentMode: 'plan', maxIterations: 1, maxToolRounds: 1, blockedTools: CRITIQUE_BLOCKED_TOOLS, subDesignPluginExecution: preparedHarness.request, extraSystemContext: 'Harness is optional execution evidence. Summarize its Host projection only; do not manufacture steps, screenshots, friction, or a passing verdict.' },
+            overrides: { agentMode: 'plan', maxIterations: 1, maxToolRounds: 1, blockedTools: CRITIQUE_BLOCKED_TOOLS, ...preparedHarness.overrides, extraSystemContext: 'Harness is optional execution evidence. Summarize its Host projection only; do not manufacture steps, screenshots, friction, or a passing verdict.' },
           })
           const state = await loadHarnessProviderState(projectRoot || undefined)
           setHarnessRuns(state.runs)
           const projection = state.runs.find((run) => run.runId === harnessRunId)
           if (!projection?.goalResult || projection.goalResult.outcome !== 'success') harnessGateReason = projection?.summary || 'Harness 沒有可信的 success goal result。'
-        } else harnessGateReason = preparedHarness.reason
+        } else harnessGateReason = preparedHarness.blockedReason || 'Harness 尚未就緒。'
       }
       startRound(1)
       const round1RunId = `run_${uuid().slice(0, 12)}`
       const round1Provider = cdtSettings.enabled
-        ? await prepareSubDesignPluginExecution({
+        ? await prepareSubDesignRun({
             brief,
             runId: round1RunId,
             projectRoot: projectRoot || undefined,
@@ -238,8 +238,8 @@ export function CritiqueTheater({
           maxIterations: 3,
           maxToolRounds: 10,
           blockedTools: [...CRITIQUE_BLOCKED_TOOLS, 'design_critique'],
-          extraSystemContext: `Critique Theater round 1: independent review. Write exactly three design_critique_note calls (round=1), one per panelist, each with its own reasoning. Do not call design_critique yet — that only happens after round 2.${cdtSettings.enabled && !round1Provider?.ready ? ` Browser runtime evidence was requested but unavailable (${round1Provider?.reason || 'unknown'}); do not treat it as passed evidence.` : ''}`,
-          ...(round1Provider?.ready ? { subDesignPluginExecution: round1Provider.request } : {}),
+          extraSystemContext: `Critique Theater round 1: independent review. Write exactly three design_critique_note calls (round=1), one per panelist, each with its own reasoning. Do not call design_critique yet — that only happens after round 2.${cdtSettings.enabled && !round1Provider?.overrides ? ` Browser runtime evidence was requested but unavailable (${round1Provider?.blockedReason || 'unknown'}); do not treat it as passed evidence.` : ''}`,
+          ...(round1Provider?.overrides ?? {}),
         },
       })
       if (round1.queued || round1.skipped) {
@@ -259,7 +259,7 @@ export function CritiqueTheater({
       startRound(2)
       const round2RunId = `run_${uuid().slice(0, 12)}`
       const round2Provider = cdtSettings.enabled
-        ? await prepareSubDesignPluginExecution({
+        ? await prepareSubDesignRun({
             brief,
             runId: round2RunId,
             projectRoot: projectRoot || undefined,
@@ -288,8 +288,8 @@ export function CritiqueTheater({
           maxIterations: 4,
           maxToolRounds: 14,
           blockedTools: CRITIQUE_BLOCKED_TOOLS,
-          extraSystemContext: `Critique Theater round 2: cross-check round 1 blockers specifically (do not just restate them), write three design_critique_note calls (round=2), then call design_critique exactly once with the final synthesis.${cdtSettings.enabled && !round2Provider?.ready ? ` Browser runtime evidence was requested but unavailable (${round2Provider?.reason || 'unknown'}); final verdict cannot pass based on missing runtime evidence.` : ''}`,
-          ...(round2Provider?.ready ? { subDesignPluginExecution: round2Provider.request } : {}),
+          extraSystemContext: `Critique Theater round 2: cross-check round 1 blockers specifically (do not just restate them), write three design_critique_note calls (round=2), then call design_critique exactly once with the final synthesis.${cdtSettings.enabled && !round2Provider?.overrides ? ` Browser runtime evidence was requested but unavailable (${round2Provider?.blockedReason || 'unknown'}); final verdict cannot pass based on missing runtime evidence.` : ''}`,
+          ...(round2Provider?.overrides ?? {}),
         },
       })
       if (round2.queued || round2.skipped) {

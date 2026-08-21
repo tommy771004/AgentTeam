@@ -3,7 +3,6 @@
  * Pi Core owns the session; renderer never connects directly.
  * Evidence is adapter-issued only.
  */
-import { isProviderEnabled } from './providerFlags.ts'
 import { issueProviderEvidence, type ProviderAvailability, type ProviderEvidence } from './providerContract.ts'
 import type { SubDesignPluginExecutionProjection } from '../pluginExecution.ts'
 
@@ -28,8 +27,8 @@ export type CdtAttachment = {
   bytes: number
 }
 
-export function cdtAvailability(): ProviderAvailability {
-  if (!isProviderEnabled('chrome-devtools')) return { available: false, reason: 'Chrome DevTools provider 未啟用（feature flag 關閉）', code: 'unavailable' }
+export function cdtAvailability(enabled: boolean | undefined): ProviderAvailability {
+  if (!enabled) return { available: false, reason: 'Chrome DevTools provider 未啟用（feature flag 關閉）', code: 'unavailable' }
   return { available: true }
 }
 

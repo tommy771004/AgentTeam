@@ -1,5 +1,9 @@
 import type { SubDesignSurface } from './types.ts'
-import type { OpenDesignCatalogRecord } from '../openDesign/catalog.ts'
+import {
+  openDesignContractLabel,
+  type OpenDesignCatalogRecord,
+  type OpenDesignContractStatus,
+} from '../openDesign/catalog.ts'
 
 export type SubDesignTemplateCategory =
   | 'all'
@@ -24,42 +28,20 @@ export type SubDesignTemplate = {
   suggestedObjective: string
   sourcePath: string
   availability: SubDesignTemplateAvailability
+  /** Position in the official 「探索全部資源」 collection, or undefined. */
+  exploreRank?: number
+  contractStatus: OpenDesignContractStatus
+  /**
+   * Set when the plugin contract was rejected. Shown verbatim so an unknown
+   * major version reads as an explicit incompatibility rather than a silent
+   * downgrade to content-only (issue 01).
+   */
+  contractNotice?: string
 }
 
 export const OPEN_DESIGN_TEMPLATE_SOURCE = 'https://open-design.ai/zh/plugins/templates/'
 export const OPEN_DESIGN_EXPLORE_SOURCE = 'https://open-design.ai/zh/plugins/'
 
-/**
- * Ordered to match the official 「探索全部資源」 collection. These are stable
- * catalog references only; the OpenDesign inventory remains the source of
- * truth for template content and provenance.
- */
-export const OPEN_DESIGN_EXPLORE_TEMPLATE_IDS = [
-  'plugins:_official:examples:fs-editorial-forest',
-  'plugins:_official:examples:webgl-aurora-veil',
-  'plugins:_official:examples:blog-post',
-  'plugins:_official:video-templates:frame-bold-poster',
-  'plugins:_official:video-templates:frame-bold-signal',
-  'plugins:_official:examples:html-ppt-testing-safety-alert',
-  'plugins:_official:examples:html-ppt',
-  'plugins:_official:examples:huashu-takram-soft-tech',
-  'plugins:_official:examples:html-ppt-zhangzara-neo-grid-bold',
-  'plugins:_official:examples:html-ppt-course-module',
-  'plugins:_official:examples:huashu-pentagram-grid',
-  'plugins:_official:examples:html-ppt-zhangzara-studio',
-  'plugins:_official:examples:html-ppt-zhangzara-editorial-tri-tone',
-  'plugins:_official:video-templates:frame-build-minimal',
-  'plugins:_official:examples:webgl-caustic-pool',
-  'plugins:_official:examples:clinical-case-report',
-  'plugins:_official:examples:codex-interactive-capability-map',
-  'plugins:_official:video-templates:frame-creative-voltage',
-  'plugins:_official:examples:critique',
-  'plugins:_official:examples:html-ppt-zhangzara-biennale-yellow',
-  'plugins:_official:examples:dashboard',
-  'plugins:_official:video-templates:frame-data-rollup',
-  'plugins:_official:examples:dating-web',
-  'plugins:_official:examples:dcf-valuation',
-] as const
 
 /**
  * The OpenDesign catalog (agent/openDesign/catalog.ts) is the single source of
@@ -119,16 +101,24 @@ export function openDesignRecordToTemplate(record: OpenDesignCatalogRecord): Sub
     suggestedObjective: record.suggestedObjective || (surface === 'deck' ? '製作一份可交付的敘事簡報。' : '建立一個可驗證、可交付的設計產物。'),
     sourcePath: record.sourcePath,
     availability: record.executionStatus === 'ready' && Boolean(surface) ? 'ready' : 'requires-capability',
+    exploreRank: record.exploreRank,
+    contractStatus: record.contractStatus,
+    contractNotice: record.contractStatus === 'incompatible' || record.contractStatus === 'malformed'
+      ? openDesignContractLabel(record.contractStatus, record.contractReason)
+      : undefined,
   }
 }
 
+/**
+ * The 「探索全部資源」 collection and its order come from the inventory's
+ * `exploreRank`, so there is no second list here to drift out of step with it.
+ */
 export function getOpenDesignExploreTemplates(
   templates: readonly SubDesignTemplate[],
 ): SubDesignTemplate[] {
-  const byId = new Map(templates.map((template) => [template.id, template]))
-  return OPEN_DESIGN_EXPLORE_TEMPLATE_IDS
-    .map((id) => byId.get(id))
-    .filter((template): template is SubDesignTemplate => Boolean(template))
+  return templates
+    .filter((template) => template.exploreRank !== undefined)
+    .sort((a, b) => (a.exploreRank ?? 0) - (b.exploreRank ?? 0))
 }
 
 // Populated by SubDesignPage once the OpenDesign catalog loads, so prompt.ts

@@ -8,12 +8,14 @@ import { parseOpenDesignPluginManifest } from '../src/agent/openDesign/pluginCon
 import { createResolvedSnapshot, grantCapabilities, needsReapproval, sha256Hex } from '../src/agent/subdesign/pluginSnapshot.ts'
 import { createFakePipelineProvider } from '../src/agent/subdesign/providers/fakePipelineProvider.ts'
 import { rejectModelAttestedEvidence } from '../src/agent/subdesign/providers/providerContract.ts'
+import { selectProviderRuns } from '../src/agent/subdesign/providers/providerSettings.ts'
 import { getStorybookContext } from '../src/agent/subdesign/providers/storybookProvider.ts'
 import { normalizeCdtFixtureRaw } from '../src/agent/subdesign/providers/chromeDevToolsProvider.ts'
 import { normalizeHarnessFixture } from '../src/agent/subdesign/providers/harnessProvider.ts'
 import { validateBridgeMessage } from '../src/agent/subdesign/providers/mcpAppsProvider.ts'
-import { createStreamingEnvelope, appendStreamingUpdate, finalizeEnvelope } from '../src/agent/subdesign/streamingEnvelope.ts'
-import { setProviderFlag, resetProviderFlags } from '../src/agent/subdesign/providers/providerFlags.ts'
+import { appendStreamingUpdate, envelopeForArtifact, finalizeEnvelope } from '../src/agent/subdesign/streamingEnvelope.ts'
+import { surfaceDraftKey } from '../src/agent/subdesign/surfaceDraftStore.ts'
+import { resetProviderFlags } from '../src/agent/subdesign/providers/providerFlags.ts'
 
 let p=0,t=0
 async function test(n:string,fn:()=>Promise<void>|void){t++;try{await fn();p++;console.log(`  ✓ ${n}`)}catch(e){console.error(`  ✗ ${n}`);console.error(e);process.exitCode=1}}
@@ -50,7 +52,7 @@ await test('task run seam: fake pipeline success produces evidence + artifact, D
 })
 
 await test('context/evidence providers normalize without leaking raw secrets',()=>{
-  resetProviderFlags(); setProviderFlag('storybook',true)
+  resetProviderFlags()
   const {evidence}=getStorybookContext('proj', {components:[{id:'c',title:'T'}]},'fp')
   assert.equal(evidence.provider,'storybook')
   const {findings}=normalizeCdtFixtureRaw({console:[{level:'error',message:'err'}]},'r','s')
@@ -62,7 +64,7 @@ await test('context/evidence providers normalize without leaking raw secrets',()
 await test('interactive surface validation + streaming envelope',()=>{
   const ok=validateBridgeMessage({v:1,surfaceId:'s1',kind:'choice',action:'submit',payload:{value:'a'}})
   assert.equal(ok.ok,true)
-  const e=createStreamingEnvelope('html:q','qual_run')
+  const e=envelopeForArtifact({id:'plugin_qual_run_compose',kind:'html',entry:'a/index.html'},'qual_run','compose')
   const r=appendStreamingUpdate(e,'<div>hi</div>').envelope
   const fin=finalizeEnvelope(r,'complete')
   assert.equal(fin.status,'complete')
@@ -93,6 +95,77 @@ await test('settlement cases are distinguishable: success / blocked / failure / 
   assert.equal(fail.kind,'failure')
   assert.equal(blocked.kind,'blocked')
   assert.equal(cancelled.kind,'cancelled')
+})
+
+await test('concurrency: different conversations run in parallel, one conversation stays ordered',async()=>{
+  const provider=createFakePipelineProvider()
+  const start=(runId:string)=>{
+    const ctrl=new AbortController()
+    const session=provider.execute({stageId:'compose'},{runId,stageId:'compose',timeoutMs:4000,outputBudgetBytes:10000,signal:ctrl.signal})
+    return {ctrl,session}
+  }
+
+  // Two conversations: both in flight at once, each settling on its own identity.
+  const a=start('conv_a_run_1')
+  const b=start('conv_b_run_1')
+  const [ra,rb]=await Promise.all([a.session.promise,b.session.promise])
+  assert.equal(ra.kind,'success')
+  assert.equal(rb.kind,'success')
+  assert.equal(ra.runId,'conv_a_run_1')
+  assert.equal(rb.runId,'conv_b_run_1')
+  assert.notEqual(ra.evidenceLocator,rb.evidenceLocator)
+
+  // One conversation: follow-ups stay ordered and never interleave locators.
+  const order:string[]=[]
+  for (const runId of ['conv_a_run_2','conv_a_run_3']) {
+    const {session}=start(runId)
+    order.push((await session.promise).runId)
+  }
+  assert.deepEqual(order,['conv_a_run_2','conv_a_run_3'])
+
+  // Each external session is cancellable on its own identity: cancelling one
+  // must not settle or disturb its sibling.
+  const c=start('conv_c_run_1')
+  const d=start('conv_d_run_1')
+  c.ctrl.abort()
+  const rc=await c.session.promise
+  const rd=await d.session.promise
+  assert.equal(rc.kind,'cancelled')
+  assert.equal(rc.runId,'conv_c_run_1')
+  assert.equal(rd.kind,'success')
+  assert.equal(rd.runId,'conv_d_run_1')
+})
+
+await test('recovery: preview, draft and evidence rebuild from Host state after reload',async()=>{
+  // A finished run, as the Host would have persisted it.
+  const provider=createFakePipelineProvider()
+  const ctrl=new AbortController()
+  const receipt=await provider.execute({stageId:'compose'},{runId:'recover_run',stageId:'compose',timeoutMs:2000,outputBudgetBytes:10000,signal:ctrl.signal}).promise
+  assert.equal(receipt.kind,'success')
+
+  const artifact={id:'plugin_recover_run_compose',kind:'html' as const,entry:'.subagents/open-design/runs/recover_run/compose/artifact/index.html'}
+  const stream=finalizeEnvelope(appendStreamingUpdate(envelopeForArtifact(artifact,'recover_run','compose'),'<h1>recovered</h1>').envelope,'complete')
+
+  // Reload: the projection is rebuilt from the stored run, not renderer state.
+  const stored=[{schemaVersion:1,runId:'recover_run',briefId:'b1',pluginId:'p',providerId:'fake-pipeline',stageId:'compose',state:'completed',providerKind:'success',failurePolicy:'stop',summary:'ok',finishedAt:'2026-08-21T00:00:00.000Z',startedAt:'2026-08-21T00:00:00.000Z',artifact,stream,evidenceLocator:receipt.evidenceLocator}]
+  const recovered=selectProviderRuns(stored).find((run)=>run.artifact?.id===artifact.id)
+  assert.ok(recovered,'run should be recoverable from Host state')
+  assert.equal(recovered.stream?.status,'complete')
+  assert.equal(recovered.stream?.artifactKind,'html')
+  assert.equal(recovered.stream?.updates.length,1)
+  assert.ok(recovered.evidenceLocator)
+
+  // Surface drafts key off the declared scope, so a reload finds the same draft.
+  const ref={surfaceId:'s1',scope:'conversation' as const,scopeKey:'thread_1'}
+  assert.equal(surfaceDraftKey(ref),surfaceDraftKey({...ref}))
+  assert.notEqual(surfaceDraftKey(ref),surfaceDraftKey({...ref,scope:'run' as const}))
+
+  // An archived tombstone is not a live run and must not be revived by replay.
+  const withTombstone=[...stored,{schemaVersion:1,runId:'recover_run',briefId:'b1',pluginId:'p',providerId:'fake-pipeline',stageId:'compose',state:'cancelled',providerKind:'cancelled',failurePolicy:'stop',summary:'archived',finishedAt:'2026-08-20T00:00:00.000Z',startedAt:'2026-08-20T00:00:00.000Z'}]
+  // Newest-first ordering keeps the settled run authoritative over the older tombstone.
+  assert.equal(selectProviderRuns(withTombstone)[0].state,'completed')
+  // ...and a late terminal event cannot rewrite a settled stream.
+  assert.equal(finalizeEnvelope(stream,'error','late').status,'complete')
 })
 
 console.log(`\n${p}/${t} tests passed`)

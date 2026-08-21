@@ -6,7 +6,7 @@ import type {
   SubDesignStage,
   SubDesignReference,
 } from './types.ts'
-import { isSubDesignStage } from './types.ts'
+import { isSubDesignStage, isSubDesignSurface } from './types.ts'
 import type { OpenDesignProvenance } from '../openDesign/catalog.ts'
 
 const MAX_TEXT = 4000
@@ -133,15 +133,7 @@ export function normalizeBrief(raw: unknown): SubDesignBrief | null {
   const threadId = cleanText(value.threadId, 120)
   const surface = value.surface
   if (!id || !threadId || !isSubDesignStage(value.stage)) return null
-  if (
-    surface !== 'prototype' &&
-    surface !== 'dashboard' &&
-    surface !== 'design-system' &&
-    surface !== 'deck' &&
-    surface !== 'video'
-  ) {
-    return null
-  }
+  if (!isSubDesignSurface(surface)) return null
   return {
     id,
     threadId,

@@ -6,23 +6,35 @@
  * - Per-surface allowlist; never calls arbitrary tools or exposes raw tokens
  * - Falls back to native UI on crash / unsupported host / flag disabled
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { validateBridgeMessage, isToolAllowed, CSP_SANDBOX, type SurfaceDeclaration } from '../../agent/subdesign/providers/mcpAppsProvider.ts'
 import { isProviderEnabled } from '../../agent/subdesign/providers/providerFlags.ts'
 import { useSurfaceDraftStore } from '../../agent/subdesign/surfaceDraftStore.ts'
+import { surfaceFallsBack, type SurfaceStatus } from '../../agent/subdesign/surfaceStatus.ts'
 
-export type SurfaceStatus = 'loading' | 'ready' | 'submitted' | 'invalid' | 'expired' | 'unavailable' | 'error'
+export { SURFACE_STATUS_LABELS, type SurfaceStatus } from '../../agent/subdesign/surfaceStatus.ts'
 
 const TRUSTED_ORIGIN = 'null' // sandboxed iframe has opaque origin; host validates via expectedOrigin check in provider, not real network origin
 
-function FallbackChoice(props: { options: string[]; onSelect: (v: string) => void }) {
+export type SurfaceChoiceOption = { id: string; label: string; summary?: string }
+
+function FallbackChoice(props: { options: readonly SurfaceChoiceOption[]; onSelect: (v: string) => void }) {
+  if (!props.options.length) {
+    return <p className="text-[11px] text-outline" role="status">目前沒有可選的方向。</p>
+  }
   return (
-    <div className="rounded-lg border border-neutral-800 p-3">
-      <p className="text-sm text-neutral-400">選擇方向（原生備援）</p>
+    <div className="rounded-xl border border-white/10 p-3">
+      <p className="text-[11px] text-outline">選擇方向（原生備援）</p>
       <div className="mt-2 flex flex-wrap gap-2">
-        {props.options.map((o) => (
-          <button key={o} onClick={() => props.onSelect(o)} className="rounded-full border px-3 py-1 text-sm">
-            {o}
+        {props.options.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            title={option.summary}
+            onClick={() => props.onSelect(option.id)}
+            className="rounded-full border border-white/12 px-3 py-1 text-[11px] text-on-surface transition-colors hover:border-primary/35 hover:bg-white/[0.04]"
+          >
+            {option.label}
           </button>
         ))}
       </div>
@@ -63,6 +75,15 @@ export function McpAppSurface(props: {
   runId?: string
   threadId?: string
   projectRoot?: string
+  /** Real choices for a `choice` surface — never placeholder labels. */
+  choiceOptions?: readonly SurfaceChoiceOption[]
+  /** Native UI to show when the surface is unavailable, invalid, expired or crashed. */
+  fallback?: ReactNode
+  /**
+   * Every surface state change, so the conversation shows real execution
+   * messages instead of one undifferentiated spinner (issue 07).
+   */
+  onStatusChange?: (status: SurfaceStatus, detail?: string) => void
   onChoice?: (value: string) => void
   onFormSubmit?: (values: Record<string, unknown>) => void
   onConfirm?: (confirmed: boolean) => void
@@ -70,12 +91,25 @@ export function McpAppSurface(props: {
   const enabled = isProviderEnabled('mcp-apps')
   const [status, setStatus] = useState<SurfaceStatus>(enabled ? 'loading' : 'unavailable')
   const [error, setError] = useState<string | null>(null)
+  const onStatusChange = props.onStatusChange
+  const reported = useRef<string>('')
+  useEffect(() => {
+    // With the flag off there is no surface, so the native UI is simply the
+    // normal path — reporting "unavailable" on every mount would bury the run
+    // feed in noise. Only a surface that actually ran reports its states.
+    if (!enabled) return
+    const key = `${status}:${error ?? ''}`
+    if (reported.current === key) return
+    reported.current = key
+    onStatusChange?.(status, error ?? undefined)
+  }, [enabled, status, error, onStatusChange])
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const draftStore = useSurfaceDraftStore()
 
   const scopeKey = props.declaration.scope === 'run' ? (props.runId || 'unknown') : props.declaration.scope === 'conversation' ? (props.threadId || 'unknown') : (props.projectRoot || 'unknown')
 
-  const draft = draftStore.loadDraft(props.surfaceId, props.declaration.scope, scopeKey)
+  const draftRef = { surfaceId: props.surfaceId, scope: props.declaration.scope, scopeKey }
+  const draft = draftStore.loadDraft(draftRef)
 
   useEffect(() => {
     if (!enabled) {
@@ -117,7 +151,7 @@ export function McpAppSurface(props: {
       if (msg.action === 'form_submit' && props.onFormSubmit) {
         const values = (msg.payload as Record<string, unknown>)?.values as Record<string, unknown>
         if (values && typeof values === 'object') {
-          draftStore.saveDraft(props.surfaceId, props.declaration.scope, scopeKey, values)
+          draftStore.saveDraft({ surfaceId: props.surfaceId, scope: props.declaration.scope, scopeKey }, values)
         }
         props.onFormSubmit(values || {})
         setStatus('submitted')
@@ -141,7 +175,7 @@ export function McpAppSurface(props: {
     return <FallbackSwitch {...props} draft={draft} status="unavailable" />
   }
 
-  if (status === 'error' || status === 'expired' || status === 'invalid' || status === 'unavailable') {
+  if (surfaceFallsBack(status)) {
     return <FallbackSwitch {...props} draft={draft} status={status} error={error} />
   }
 
@@ -160,9 +194,10 @@ export function McpAppSurface(props: {
       <iframe
         ref={iframeRef}
         title={props.surfaceId}
+        // allow-same-origin stays off, so the frame keeps an opaque origin and
+        // has no Electron/Node authority. The policy itself is the CSP meta in
+        // srcDoc — the `csp` iframe attribute was never shipped by browsers.
         sandbox="allow-scripts"
-        // @ts-ignore csp is not standard but we set via meta inside srcDoc; keep allow-same-origin off
-        csp={CSP_SANDBOX}
         srcDoc={srcDoc}
         onError={() => setStatus('error')}
         onLoad={() => setStatus((s) => (s === 'loading' ? 'ready' : s))}
@@ -183,13 +218,18 @@ function FallbackSwitch(
     onChoice?: (v: string) => void
     onFormSubmit?: (v: Record<string, unknown>) => void
     onConfirm?: (v: boolean) => void
+    choiceOptions?: readonly SurfaceChoiceOption[]
+    fallback?: ReactNode
     draft?: Record<string, unknown> | null
     status?: SurfaceStatus
     error?: string | null
-  } & { draft?: Record<string, unknown> | null },
+  },
 ) {
+  // A caller-supplied native surface always wins: it is the real product UI,
+  // not a stand-in.
+  if (props.fallback) return <>{props.fallback}</>
   if (props.declaration.kind === 'choice') {
-    return <FallbackChoice options={['方向 A', '方向 B', '方向 C']} onSelect={(v) => props.onChoice?.(v)} />
+    return <FallbackChoice options={props.choiceOptions ?? []} onSelect={(v) => props.onChoice?.(v)} />
   }
   if (props.declaration.kind === 'form') {
     return <FallbackForm onSubmit={(v) => props.onFormSubmit?.(v)} draft={props.draft || undefined} />

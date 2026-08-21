@@ -14,8 +14,7 @@ import {
   parseOpenDesignPluginManifest,
   contractResultToDisplay,
 } from '../src/agent/openDesign/pluginContract.ts'
-import { validatePluginContract } from '../src/agent/openDesign/catalog.ts'
-import { packContractMayEnable } from '../src/agent/openDesign/packs.ts'
+import { openDesignContractLabel, parseOpenDesignInventory } from '../src/agent/openDesign/catalog.ts'
 import { admitPluginForTaskRun } from '../src/agent/subdesign/pluginAdmission.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -85,15 +84,10 @@ await test('v1 success: full spec fields are accepted', () => {
     assert.equal(r.manifest.evals?.length, 1)
     assert.equal(r.manifest.preview?.type, 'html')
   }
-  // catalog / packs / admission must use same parser
-  const viaCatalog = validatePluginContract(v1)
-  assert.deepEqual(viaCatalog.ok, r.ok)
-  const viaPack = packContractMayEnable(viaCatalog)
-  assert.equal(viaPack.ok, true)
-  assert.equal(viaPack.contract, viaCatalog)
-  const viaAdmission = admitPluginForTaskRun(viaCatalog)
+  // Task-run admission consumes the same result object, never a re-parse.
+  const viaAdmission = admitPluginForTaskRun(r)
   assert.equal(viaAdmission.admitted, true)
-  assert.equal(viaAdmission.contract, viaCatalog)
+  assert.equal(viaAdmission.contract, r)
 })
 
 await test('unknown major version is incompatible with clear message', () => {
@@ -182,15 +176,71 @@ await test('minor version forward compat: 1.2.0 accepted with warning', () => {
   assert.equal((r as { kind: string }).kind, 'v1')
 })
 
-await test('catalog validates once; packs and admission consume the shared result', () => {
+await test('the shipped catalog carries the contract verdict, and nobody re-infers it', () => {
+  // The index is the single validation point: it runs the authoritative parser.
+  const indexerSrc = fs.readFileSync(path.join(appRoot, 'scripts/open-design-inventory.mts'), 'utf8')
+  assert.match(indexerSrc, /parseOpenDesignPluginManifest/)
+  // The old capability sniff must not come back.
+  assert.doesNotMatch(indexerSrc, /governedScenario/)
+
+  // Catalog and admission read that verdict; neither re-parses a manifest.
   const catalogSrc = fs.readFileSync(path.join(appRoot, 'src/agent/openDesign/catalog.ts'), 'utf8')
-  assert.match(catalogSrc, /parseOpenDesignPluginManifest|validatePluginContract/)
-  assert.match(catalogSrc, /pluginContract\.ts/)
+  assert.doesNotMatch(catalogSrc, /parseOpenDesignPluginManifest/)
+  assert.match(catalogSrc, /contractStatus/)
   const packsSrc = fs.readFileSync(path.join(appRoot, 'src/agent/openDesign/packs.ts'), 'utf8')
   assert.doesNotMatch(packsSrc, /parseOpenDesignPluginManifest/)
-  assert.match(packsSrc, /packContractMayEnable/)
   const admissionSrc = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/pluginAdmission.ts'), 'utf8')
   assert.doesNotMatch(admissionSrc, /parseOpenDesignPluginManifest/)
+
+  // Behavioural, not textual: a rejected contract reaches the catalog as
+  // `invalid` with a readable reason, and is never downgraded to content-only.
+  const index = parseOpenDesignInventory({
+    version: 1,
+    records: [
+      {
+        id: 'x', kind: 'template', sourcePath: 'a/b', executionStatus: 'ready',
+        contractStatus: 'malformed', contractReason: 'inputs[1].default 必須是 options 之一。',
+      },
+      {
+        id: 'y', kind: 'template', sourcePath: 'a/c', executionStatus: 'ready',
+        contractStatus: 'v1-compatible', specVersion: '1.0.0',
+      },
+    ],
+  })
+  const [bad, good] = index.records
+  assert.equal(bad.executionStatus, 'invalid')
+  assert.equal(bad.contractStatus, 'malformed')
+  assert.match(bad.parseWarnings.join(' '), /格式錯誤.*options/)
+  assert.equal(good.executionStatus, 'ready')
+  assert.equal(good.specVersion, '1.0.0')
+  assert.match(openDesignContractLabel('incompatible', '不支援的 specVersion 2.0.0'), /不相容.*2\.0\.0/)
+})
+
+await test('the real vendor index fails a malformed manifest closed', async () => {
+  const inventory = parseOpenDesignInventory(
+    JSON.parse(fs.readFileSync(path.join(appRoot, 'public/open-design/OPEN_DESIGN_INVENTORY.json'), 'utf8')),
+  )
+  assert.ok(inventory.records.length > 0)
+  // Every record carries a verdict, and v1 records name their spec version.
+  for (const record of inventory.records) {
+    assert.ok(record.contractStatus, `${record.id} 缺少 contractStatus`)
+    if (record.contractStatus === 'v1-compatible') assert.ok(record.specVersion)
+    if (record.contractStatus === 'malformed' || record.contractStatus === 'incompatible') {
+      assert.equal(record.executionStatus, 'invalid')
+      assert.ok(record.contractReason)
+    }
+  }
+  // `ready` on a legacy record means renderable content, never pipeline
+  // execution — only a v1 contract can name a spec version, and only v1
+  // reaches admission (see pluginExecutionPreparation).
+  assert.ok(inventory.records.some((item) => item.contractStatus === 'v1-compatible' && item.executionStatus === 'ready'))
+  assert.ok(inventory.records.every((item) => item.contractStatus === 'v1-compatible' || !item.specVersion))
+  for (const legacy of inventory.records.filter((item) => item.contractStatus === 'legacy-compatible')) {
+    assert.equal(admitPluginForTaskRun({
+      ok: true, kind: 'legacy', compatible: true, executionStatus: 'legacy-compatible',
+      manifest: { specVersion: null, raw: {} }, warnings: [],
+    }).admitted, true, `${legacy.id} legacy 仍可被 catalog 採用`)
+  }
 })
 
 await test('no new daemon/runner/renderer execution owner is introduced', () => {

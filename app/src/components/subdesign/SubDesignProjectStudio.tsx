@@ -2,16 +2,26 @@ import { useEffect, useMemo, useState } from 'react'
 import type { DesignSystemSummary, SubDesignArtifact, SubDesignBrief, SubDesignCritique } from '../../agent/subdesign/types'
 import type { SubDesignWorkspaceViewModel } from '../../agent/subdesign/workspace'
 import type { Thread } from '../../store/threadStore'
+import { useProjectStore } from '../../store/projectStore'
+import { useRunActivityStore } from '../../store/runActivityStore'
 import { Icon } from '../Icon'
 import { ArtifactDeliveryPanel } from './ArtifactDeliveryPanel'
 import { ArtifactPreview } from './ArtifactPreview'
 import { ArtifactTweakPanel } from './ArtifactTweakPanel'
 import { CritiquePanel } from './CritiquePanel'
 import { CritiqueTheater } from './CritiqueTheater'
+import { McpAppSurface } from './McpAppSurface'
+import { SURFACE_STATUS_LABELS } from '../../agent/subdesign/surfaceStatus.ts'
+import { PluginInputForm } from './PluginInputForm'
+import { PluginTrustPanel } from './PluginTrustPanel'
 import { SubDesignConversationPane } from './SubDesignConversationPane'
+import { ExperimentalSurfaceControl } from './ExperimentalSurfaceControl'
 import { StorybookContextControl } from './StorybookContextControl'
-import type { StorybookProviderSettings } from '../../agent/subdesign/providers/providerSettings.ts'
+import type { ExperimentalSurfaceSettings, StorybookProviderSettings } from '../../agent/subdesign/providers/providerSettings.ts'
 import type { SubDesignPluginExecutionProjection } from '../../agent/subdesign/pluginExecution.ts'
+import type { StreamingEnvelope } from '../../agent/subdesign/streamingEnvelope.ts'
+import type { PluginInputValues } from '../../agent/subdesign/pluginInputs.ts'
+import type { PluginInput } from '../../agent/openDesign/pluginContract.ts'
 
 type StudioTab = 'files' | 'edit' | 'critique' | 'deliver'
 
@@ -37,6 +47,16 @@ type SubDesignProjectStudioProps = {
   onSelectDirection: (directionId: string) => void
   storybookSettings: StorybookProviderSettings
   latestStorybookRun: SubDesignPluginExecutionProjection | null
+  /** Experimental surface support, shown so users can see what degrades. */
+  experimentalSettings?: ExperimentalSurfaceSettings
+  onSaveExperimentalSettings?: (
+    value: Pick<ExperimentalSurfaceSettings, 'mcpApps' | 'streaming'>,
+  ) => Promise<{ ok: boolean; reason?: string }>
+  /** Stream projection for the selected artifact, recovered from Host state. */
+  artifactStream?: StreamingEnvelope | null
+  /** The plugin's declared inputs, shown when a run is blocked on them. */
+  pluginDeclaredInputs?: readonly PluginInput[]
+  onSubmitPluginInputs?: (values: PluginInputValues) => void
   onSaveStorybookSettings: (value: Pick<StorybookProviderSettings, 'enabled' | 'endpoint'>) => Promise<{ ok: boolean; reason?: string }>
 }
 
@@ -95,11 +115,19 @@ export function SubDesignProjectStudio({
   onSelectDirection,
   storybookSettings,
   latestStorybookRun,
+  artifactStream,
+  experimentalSettings,
+  onSaveExperimentalSettings,
+  pluginDeclaredInputs,
+  onSubmitPluginInputs,
   onSaveStorybookSettings,
 }: SubDesignProjectStudioProps) {
+  const projectRoot = useProjectStore((state) => state.root)
   const [tab, setTab] = useState<StudioTab>('files')
   const [previewMode, setPreviewMode] = useState<'preview' | 'source'>('preview')
   const [candidateDirectionId, setCandidateDirectionId] = useState(brief.selectedDirectionId || '')
+  const directionSurfaceId = `subdesign-direction-${brief.id}`
+  const pushRunActivity = useRunActivityStore((state) => state.push)
 
   useEffect(() => {
     setCandidateDirectionId(brief.selectedDirectionId || '')
@@ -152,6 +180,13 @@ export function SubDesignProjectStudio({
           disabled={runIsLive || startingRun}
           onSave={onSaveStorybookSettings}
         />
+        {experimentalSettings && onSaveExperimentalSettings ? (
+          <ExperimentalSurfaceControl
+            settings={experimentalSettings}
+            disabled={runIsLive || startingRun}
+            onSave={onSaveExperimentalSettings}
+          />
+        ) : null}
       </header>
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[350px_minmax(0,1fr)]">
@@ -238,7 +273,7 @@ export function SubDesignProjectStudio({
             {tab === 'files' ? (
               <div className="mx-auto flex min-h-full w-full max-w-[1180px] flex-col">
                 {selectedArtifact ? (
-                  <ArtifactPreview artifact={selectedArtifact} mode={previewMode} />
+                  <ArtifactPreview artifact={selectedArtifact} mode={previewMode} envelope={artifactStream} />
                 ) : (
                   <section className="grid min-h-[420px] flex-1 place-items-center bg-surface-container-low/20 px-6 text-center">
                     <div className="max-w-[360px]">
@@ -253,31 +288,65 @@ export function SubDesignProjectStudio({
 
                 {brief.directions.length ? (
                   <section className="mt-3 border-t border-white/[0.07] pt-3" aria-label="Visual directions">
-                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                      {brief.directions.map((direction, index) => {
-                        const selected = direction.id === candidateDirectionId
-                        const committed = direction.id === brief.selectedDirectionId
-                        return (
-                          <button
-                            key={direction.id}
-                            type="button"
-                            aria-pressed={selected}
-                            onClick={() => setCandidateDirectionId(direction.id)}
-                            className={`min-h-[92px] rounded-xl px-3 py-3 text-left transition-colors ${
-                              selected ? 'bg-primary/[0.09] text-on-surface' : 'bg-white/[0.025] text-on-surface-variant hover:bg-white/[0.045]'
-                            }`}
-                          >
-                            <span className="flex items-center gap-2 text-[10px]">
-                              <span className={`grid h-5 w-5 place-items-center rounded-full ${selected ? 'bg-primary/18 text-primary' : 'bg-white/[0.05] text-outline'}`}>
-                                {committed ? <Icon name="check" size={11} /> : index + 1}
-                              </span>
-                              <span className="font-semibold">{direction.title}</span>
-                            </span>
-                            <span className="mt-2 line-clamp-2 block text-[10px] leading-relaxed text-outline">{direction.summary}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
+                    {/*
+                      Direction choice runs as a sandboxed MCP Apps surface when
+                      that flag is on. Unavailable, invalid, expired or crashed,
+                      it falls back to this native grid — either way the choice
+                      backfills the brief's direction.
+                    */}
+                    <McpAppSurface
+                      surfaceId={directionSurfaceId}
+                      declaration={{ kind: 'choice', scope: 'conversation', allowlist: [] }}
+                      runId={runId || undefined}
+                      threadId={brief.threadId}
+                      projectRoot={projectRoot || undefined}
+                      choiceOptions={brief.directions.map((direction) => ({
+                        id: direction.id,
+                        label: direction.title,
+                        summary: direction.summary,
+                      }))}
+                      onChoice={(directionId) => {
+                        if (!brief.directions.some((direction) => direction.id === directionId)) return
+                        setCandidateDirectionId(directionId)
+                        onSelectDirection(directionId)
+                      }}
+                      onStatusChange={(status, detail) => {
+                        // Real execution messages, not one blanket spinner.
+                        pushRunActivity({
+                          runId: runId || undefined,
+                          kind: status === 'error' || status === 'invalid' ? 'error' : 'status',
+                          title: `方向選擇介面：${SURFACE_STATUS_LABELS[status]}`,
+                          detail,
+                        })
+                      }}
+                      fallback={(
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {brief.directions.map((direction, index) => {
+                            const selected = direction.id === candidateDirectionId
+                            const committed = direction.id === brief.selectedDirectionId
+                            return (
+                              <button
+                                key={direction.id}
+                                type="button"
+                                aria-pressed={selected}
+                                onClick={() => setCandidateDirectionId(direction.id)}
+                                className={`min-h-[92px] rounded-xl px-3 py-3 text-left transition-colors ${
+                                  selected ? 'bg-primary/[0.09] text-on-surface' : 'bg-white/[0.025] text-on-surface-variant hover:bg-white/[0.045]'
+                                }`}
+                              >
+                                <span className="flex items-center gap-2 text-[10px]">
+                                  <span className={`grid h-5 w-5 place-items-center rounded-full ${selected ? 'bg-primary/18 text-primary' : 'bg-white/[0.05] text-outline'}`}>
+                                    {committed ? <Icon name="check" size={11} /> : index + 1}
+                                  </span>
+                                  <span className="font-semibold">{direction.title}</span>
+                                </span>
+                                <span className="mt-2 line-clamp-2 block text-[10px] leading-relaxed text-outline">{direction.summary}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    />
                     <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <p className="min-w-0 text-[10px] leading-relaxed text-outline">
                         {selectedDirection?.rationale || selectedDirection?.summary || '比較訊息、受眾與延展性後再鎖定方向。'}
@@ -308,7 +377,23 @@ export function SubDesignProjectStudio({
             ) : null}
 
             {tab === 'edit' ? <div className="mx-auto max-w-[920px]"><ArtifactTweakPanel artifact={selectedArtifact} /></div> : null}
-            {tab === 'critique' ? <div className="mx-auto max-w-[1040px] space-y-4"><CritiqueTheater brief={brief} artifact={selectedArtifact} critique={critique} /><CritiquePanel critique={critique} /></div> : null}
+            {tab === 'critique' ? (
+              <div className="mx-auto max-w-[1040px] space-y-4">
+                <PluginTrustPanel brief={brief} projectRoot={projectRoot || undefined} />
+                {pluginDeclaredInputs?.length ? (
+                  <PluginInputForm
+                    briefId={brief.id}
+                    threadId={brief.threadId}
+                    runId={runId || undefined}
+                    projectRoot={projectRoot || undefined}
+                    inputs={pluginDeclaredInputs}
+                    onSubmit={(values) => onSubmitPluginInputs?.(values)}
+                  />
+                ) : null}
+                <CritiqueTheater brief={brief} artifact={selectedArtifact} critique={critique} />
+                <CritiquePanel critique={critique} />
+              </div>
+            ) : null}
             {tab === 'deliver' ? <div className="mx-auto max-w-[920px]"><ArtifactDeliveryPanel artifact={selectedArtifact} critique={critique} critiquePassed={critiquePassed} /></div> : null}
           </div>
         </main>

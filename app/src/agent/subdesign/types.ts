@@ -1,6 +1,16 @@
 import type { OpenDesignProvenance } from '../openDesign/catalog.ts'
 
-export type SubDesignSurface = 'prototype' | 'dashboard' | 'design-system' | 'deck' | 'video'
+/**
+ * The one runtime list of surfaces. Derive the type from it so adding a
+ * surface is a single edit instead of a hunt through parallel literals.
+ */
+export const SUBDESIGN_SURFACES = ['prototype', 'dashboard', 'design-system', 'deck', 'video'] as const
+
+export type SubDesignSurface = (typeof SUBDESIGN_SURFACES)[number]
+
+export function isSubDesignSurface(value: unknown): value is SubDesignSurface {
+  return SUBDESIGN_SURFACES.includes(value as SubDesignSurface)
+}
 
 export type SubDesignStage = 'brief' | 'direction' | 'build' | 'critique' | 'deliver'
 

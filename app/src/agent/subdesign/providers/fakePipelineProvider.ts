@@ -1,8 +1,14 @@
 /**
- * Deterministic SubDesign pipeline provider for the ticket 03 test seam.
+ * Deterministic SubDesign pipeline provider.
  *
- * Implements ProviderContract for a single pipeline stage.
- * All data is deterministic and budget/timeout/cancel aware.
+ * This is the SHIPPED default whenever no external provider is enabled, not a
+ * test-only double: with Storybook / DevTools / Harness off, a contract-driven
+ * stage still runs, produces a real artifact and adapter-issued evidence, and
+ * settles through the normal path. It performs no external I/O, so its output
+ * is reproducible — which is also why the smokes use it.
+ *
+ * Implements ProviderContract for a single pipeline stage, budget/timeout/
+ * cancel aware. Provider success is never DoD met (see runners contract).
  */
 import {
   type ProviderExecutionReceipt,
@@ -19,6 +25,8 @@ export type FakePipelineInput = {
   stageId: string
   atoms?: string[]
   objective?: string
+  /** Host-resolved plugin inputs; already validated against the contract. */
+  inputs?: Record<string, string | number | boolean>
 }
 
 export function createFakePipelineProvider() {

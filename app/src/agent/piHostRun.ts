@@ -1,4 +1,5 @@
 import type { LoopType, RunContextPolicy } from './types.ts'
+import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from './subdesign/pluginExecution.ts'
 
 export type PiHostRunConfigInput = {
   forceLoopType?: LoopType
@@ -56,12 +57,13 @@ export type PiHostRunnerApi = {
     createChild?: (input: { title?: string; parentSessionId: string; role: string; profile: Record<string, unknown>; context: { objective: string; facts: string[]; constraints: string[] }; depth: number }) => Promise<{ sessionId: string; sessions: unknown[] }>
   }
   turn: {
-    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean }) => Promise<{
+    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => Promise<{
       sessionId: string
       runId: string
       settlement: string
       items?: unknown[]
       orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
+      pluginExecution?: SubDesignPluginExecutionProjection
     }>
   }
 }
@@ -78,6 +80,7 @@ export type SubmitPiHostRunInput = {
   pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
   maxIterations?: number
   definitionOfDone?: string
+  pluginExecution?: SubDesignPluginExecutionRequest
 }
 
 export type SubmitPiHostRunResult = {
@@ -87,6 +90,7 @@ export type SubmitPiHostRunResult = {
   result: string
   items: unknown[]
   orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
+  pluginExecution?: SubDesignPluginExecutionProjection
 }
 
 function asSession(value: unknown): PiHostSession | undefined {
@@ -137,6 +141,7 @@ export async function submitPiHostRun(
     pattern: input.pattern,
     maxIterations: input.maxIterations,
     definitionOfDone: input.definitionOfDone,
+    pluginExecution: input.pluginExecution,
   })
   const items = Array.isArray(turn.items) ? turn.items : []
   return {
@@ -148,5 +153,6 @@ export async function submitPiHostRun(
     result: assistantText(items),
     items,
     orchestration: turn.orchestration,
+    pluginExecution: turn.pluginExecution,
   }
 }

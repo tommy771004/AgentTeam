@@ -1,7 +1,12 @@
 import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignExportRecord } from './types.ts'
 import type { OpenDesignContentPackManifest } from '../openDesign/packs.ts'
+import type { PluginResolvedSnapshot } from './pluginSnapshot.ts'
+import type { SubDesignPluginExecutionProjection } from './pluginExecution.ts'
+import type { ChromeDevToolsProviderSettings, ExperimentalSurfaceSettings, HarnessProviderSettings, StorybookProviderSettings } from './providers/providerSettings.ts'
 
-export type SubDesignMetadataKind = 'brief' | 'artifact' | 'critique' | 'export' | 'open-design-pack'
+import type { SubDesignMetadataKind } from './metadataKinds.ts'
+
+export { SUBDESIGN_METADATA_KINDS, isSubDesignMetadataKind, type SubDesignMetadataKind } from './metadataKinds.ts'
 
 export type SubDesignMetadataSnapshot = {
   briefs: unknown[]
@@ -9,9 +14,12 @@ export type SubDesignMetadataSnapshot = {
   critiques: unknown[]
   exports: unknown[]
   openDesignPacks: unknown[]
+  openDesignSnapshots: unknown[]
+  openDesignProviderSettings: unknown[]
+  openDesignProviderRuns: unknown[]
 }
 
-type MetadataPayload = SubDesignBrief | SubDesignArtifact | SubDesignCritique | SubDesignExportRecord | OpenDesignContentPackManifest
+type MetadataPayload = SubDesignBrief | SubDesignArtifact | SubDesignCritique | SubDesignExportRecord | OpenDesignContentPackManifest | PluginResolvedSnapshot | StorybookProviderSettings | ChromeDevToolsProviderSettings | HarnessProviderSettings | ExperimentalSurfaceSettings | SubDesignPluginExecutionProjection
 
 export async function readSubDesignMetadata(projectRoot?: string): Promise<SubDesignMetadataSnapshot | null> {
   const api = typeof window === 'undefined' ? undefined : window.subagents?.subdesign
@@ -24,11 +32,19 @@ export async function readSubDesignMetadata(projectRoot?: string): Promise<SubDe
     critiques: Array.isArray(result.critiques) ? result.critiques : [],
     exports: Array.isArray(result.exports) ? result.exports : [],
     openDesignPacks: Array.isArray(result.openDesignPacks) ? result.openDesignPacks : [],
+    openDesignSnapshots: Array.isArray(result.openDesignSnapshots) ? result.openDesignSnapshots : [],
+    openDesignProviderSettings: Array.isArray(result.openDesignProviderSettings) ? result.openDesignProviderSettings : [],
+    openDesignProviderRuns: Array.isArray(result.openDesignProviderRuns) ? result.openDesignProviderRuns : [],
   }
 }
 
-export function persistSubDesignMetadata(kind: SubDesignMetadataKind, payload: MetadataPayload, projectRoot?: string): void {
+export async function persistSubDesignMetadata(kind: SubDesignMetadataKind, payload: MetadataPayload, projectRoot?: string): Promise<boolean> {
   const api = typeof window === 'undefined' ? undefined : window.subagents?.subdesign
-  if (!projectRoot || !api?.writeMetadata) return
-  void api.writeMetadata({ kind, payload, projectRoot })
+  if (!projectRoot || !api?.writeMetadata) return false
+  try {
+    const result = await api.writeMetadata({ kind, payload, projectRoot })
+    return result.ok
+  } catch {
+    return false
+  }
 }

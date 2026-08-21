@@ -10,6 +10,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { deriveSubDesignWorkspace } from '../src/agent/subdesign/workspace.ts'
 import { critiqueAllowsDeliver } from '../src/agent/subdesign/critique.ts'
+import { parseOpenDesignInventory } from '../src/agent/openDesign/catalog.ts'
+import {
+  getOpenDesignExploreTemplates,
+  openDesignRecordToTemplate,
+} from '../src/agent/subdesign/templateCatalog.ts'
 import type { SubDesignBrief } from '../src/agent/subdesign/types.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -40,7 +45,6 @@ function brief(partial: Partial<SubDesignBrief> & Pick<SubDesignBrief, 'id' | 's
     platform: partial.platform || 'responsive',
     constraints: partial.constraints || [],
     acceptanceCriteria: partial.acceptanceCriteria || [],
-    directions,
     selectedDirectionId: partial.selectedDirectionId,
     designSystemId: partial.designSystemId,
     createdAt: partial.createdAt || '2026-01-01T00:00:00.000Z',
@@ -137,6 +141,52 @@ await test('route + Variant A studio wiring (static)', () => {
   assert.match(page, /SubDesignFlowPrototype/)
 })
 
+await test('OpenDesign explore collection is ordered by the inventory, not a second list', () => {
+  const inventory = JSON.parse(
+    fs.readFileSync(path.join(appRoot, 'public/open-design/OPEN_DESIGN_INVENTORY.json'), 'utf8'),
+  )
+  const catalog = parseOpenDesignInventory(inventory)
+  const templates = catalog.records
+    .filter((record) => record.kind === 'template')
+    .map(openDesignRecordToTemplate)
+  const explore = getOpenDesignExploreTemplates(templates)
+
+  // ADR-0001: the inventory is the single source of truth for what content is
+  // available. The renderer must not keep its own copy of the collection.
+  const catalogSrc = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/templateCatalog.ts'), 'utf8')
+  assert.doesNotMatch(catalogSrc, /OPEN_DESIGN_EXPLORE_TEMPLATE_IDS/)
+  assert.match(catalogSrc, /exploreRank/)
+
+  assert.ok(explore.length > 0)
+  // Ordered by the rank the indexer assigned, contiguous from 0, no duplicates.
+  const ranks = explore.map((template) => template.exploreRank)
+  assert.deepEqual(ranks, [...ranks].sort((a, b) => (a ?? 0) - (b ?? 0)))
+  assert.deepEqual(ranks, ranks.map((_, index) => index))
+  assert.equal(new Set(explore.map((template) => template.id)).size, explore.length)
+
+  assert.ok(explore.every((template) => template.availability === 'ready'))
+  assert.ok(explore.every((template) => template.surface))
+  assert.ok(explore.every((template) => !template.contractNotice))
+
+  const records = new Map(catalog.records.map((record) => [record.id, record]))
+  for (const template of explore) {
+    const record = records.get(template.id)
+    assert.ok(record, `missing official explore record: ${template.id}`)
+    assert.match(record.upstreamCommit, /^b032abed00ab/)
+    assert.ok(record.digest.length >= 64)
+    assert.ok(record.licensePaths.length > 0)
+  }
+})
+
+await test('SubDesign picker exposes official explore and full catalog views', () => {
+  const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
+  assert.match(page, /探索全部資源/)
+  assert.match(page, /getOpenDesignExploreTemplates/)
+  assert.match(page, /setTemplateCollection/)
+  assert.match(page, /官方精選/)
+  assert.match(page, /本機全部/)
+})
+
 await test('studio components: nav, inspector, delivery lock surface', () => {
   const studio = fs.readFileSync(
     path.join(appRoot, 'src/components/subdesign/SubDesignProjectStudio.tsx'),
@@ -155,6 +205,32 @@ await test('studio components: nav, inspector, delivery lock surface', () => {
     'utf8',
   )
   assert.match(nav, /export function SubDesignStudioNav/)
+})
+
+await test('conversation lifecycle keeps steer/queue, reply, and Stop available', () => {
+  const conversation = fs.readFileSync(
+    path.join(appRoot, 'src/components/subdesign/SubDesignConversationPane.tsx'),
+    'utf8',
+  )
+  assert.match(conversation, /const canSubmit = Boolean\(draft\.trim\(\)\) && !submitting/)
+  assert.match(conversation, /disabled=\{submitting\}/)
+  assert.match(conversation, /runIsLive \? \(/)
+  assert.match(conversation, /onClick=\{onStopRun\}/)
+  assert.match(conversation, /輸入可轉向或排隊的後續指令/)
+  const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
+  assert.doesNotMatch(page, /if \(runIsLive && !awaitingUser\) return/)
+})
+
+await test('visual QA fixture controls have real state transitions', () => {
+  const fixture = fs.readFileSync(
+    path.join(appRoot, 'src/components/subdesign/SubDesignUnified.fixture.tsx'),
+    'utf8',
+  )
+  assert.match(fixture, /setRunIsLive\(true\)/)
+  assert.match(fixture, /setRunIsLive\(false\)/)
+  assert.match(fixture, /setSelectedArtifact/)
+  assert.match(fixture, /setFixtureBrief/)
+  assert.match(fixture, /setFixtureThread/)
 })
 
 await test('responsive discoverability classes on studio shell', () => {

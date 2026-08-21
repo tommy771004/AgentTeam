@@ -4,10 +4,12 @@
  * the renderer as a small, digestable catalog.  Keep this module free of Node
  * APIs so the browser preview and Electron renderer share the same parser.
  *
- * Plugin contract validation is owned by ./pluginContract.ts — catalog
- * presentation must consume its result instead of re-parsing contract fields.
+ * Plugin contract validation is owned by ./pluginContract.ts. Its verdict is
+ * resolved once at index time (scripts/open-design-inventory.mts) and carried
+ * on every record as `contractStatus`; catalog presentation reads that field
+ * instead of re-parsing contract fields here.
  */
-import { parseOpenDesignPluginManifest, type PluginContractResult } from './pluginContract.ts'
+import { isSubDesignSurface, type SubDesignSurface } from '../subdesign/types.ts'
 
 export const OPEN_DESIGN_INVENTORY_VERSION = 1
 export const OPEN_DESIGN_UPSTREAM_COMMIT = '4567a0d'
@@ -15,6 +17,17 @@ export const OPEN_DESIGN_SOURCE_URL = 'https://open-design.ai/zh/plugins/'
 
 export type OpenDesignCatalogKind = 'template' | 'skill' | 'design-system' | 'prompt' | 'craft' | 'media'
 export type OpenDesignExecutionStatus = 'ready' | 'content-only' | 'invalid'
+/**
+ * Verdict of the authoritative parser (./pluginContract.ts), decided once at
+ * index time. Catalog, plugin detail and Task-run admission all read this —
+ * none of them re-infers contract fields.
+ */
+export type OpenDesignContractStatus =
+  | 'v1-compatible'
+  | 'legacy-compatible'
+  | 'incompatible'
+  | 'malformed'
+  | 'absent'
 
 export type OpenDesignProvenance = {
   source: 'open-design'
@@ -38,10 +51,15 @@ export type OpenDesignCatalogRecord = OpenDesignProvenance & {
   assetPaths: string[]
   entryPaths: string[]
   tags: string[]
-  surface?: 'prototype' | 'dashboard' | 'design-system' | 'deck' | 'video'
+  surface?: SubDesignSurface
   icon?: string
   suggestedObjective?: string
   executionStatus: OpenDesignExecutionStatus
+  contractStatus: OpenDesignContractStatus
+  contractReason?: string
+  specVersion?: string
+  /** Position in the official 「探索全部資源」 collection, or undefined if not in it. */
+  exploreRank?: number
   parseWarnings: string[]
 }
 
@@ -52,6 +70,31 @@ export type OpenDesignCatalogIndex = {
   sourceUrl: string
   records: OpenDesignCatalogRecord[]
   warnings: string[]
+}
+
+const CONTRACT_STATUSES: OpenDesignContractStatus[] = [
+  'v1-compatible',
+  'legacy-compatible',
+  'incompatible',
+  'malformed',
+  'absent',
+]
+
+/** Explicit incompatibility copy — a rejected contract is never downgraded silently. */
+export function openDesignContractLabel(status: OpenDesignContractStatus, reason?: string): string {
+  const detail = reason ? `：${reason}` : '。'
+  switch (status) {
+    case 'incompatible':
+      return `Plugin contract 版本不相容，無法執行${detail}`
+    case 'malformed':
+      return `Plugin contract 格式錯誤，已 fail closed${detail}`
+    case 'v1-compatible':
+      return 'Plugin Contract v1（相容）'
+    case 'legacy-compatible':
+      return 'Legacy 契約（可作為內容來源）'
+    case 'absent':
+      return '此內容沒有 plugin manifest。'
+  }
 }
 
 const MAX_RECORDS = 2500
@@ -86,14 +129,16 @@ function normalizeRecord(value: unknown, _index: number): OpenDesignCatalogRecor
   }
   const assetPaths = Array.isArray(raw.assetPaths) ? raw.assetPaths.map(cleanPath).filter(Boolean).slice(0, 240) : []
   const hasDesignSystemDocument = kind !== 'design-system' || assetPaths.some((item) => /(^|\/)DESIGN\.md$/i.test(item))
-  const status = !hasDesignSystemDocument
+  const contractStatus = CONTRACT_STATUSES.includes(String(raw.contractStatus) as OpenDesignContractStatus)
+    ? (String(raw.contractStatus) as OpenDesignContractStatus)
+    : 'absent'
+  const contractRejected = contractStatus === 'incompatible' || contractStatus === 'malformed'
+  const status = !hasDesignSystemDocument || contractRejected
     ? 'invalid'
     : ['ready', 'content-only', 'invalid'].includes(String(raw.executionStatus))
     ? (String(raw.executionStatus) as OpenDesignExecutionStatus)
     : 'content-only'
-  const surface = ['prototype', 'dashboard', 'design-system', 'deck', 'video'].includes(String(raw.surface))
-    ? (String(raw.surface) as OpenDesignCatalogRecord['surface'])
-    : undefined
+  const surface = isSubDesignSurface(raw.surface) ? raw.surface : undefined
   return {
     source: 'open-design',
     sourceUrl: cleanText(raw.sourceUrl, 500) || OPEN_DESIGN_SOURCE_URL,
@@ -114,9 +159,16 @@ function normalizeRecord(value: unknown, _index: number): OpenDesignCatalogRecor
     icon: cleanText(raw.icon, 64) || undefined,
     suggestedObjective: cleanText(raw.suggestedObjective, 400) || undefined,
     executionStatus: status,
+    contractStatus,
+    exploreRank: Number.isInteger(raw.exploreRank) && (raw.exploreRank as number) >= 0
+      ? (raw.exploreRank as number)
+      : undefined,
+    contractReason: cleanText(raw.contractReason, 300) || undefined,
+    specVersion: cleanText(raw.specVersion, 40) || undefined,
     parseWarnings: [
       ...(Array.isArray(raw.parseWarnings) ? raw.parseWarnings.map((item) => cleanText(item, 300)).filter(Boolean) : []),
       ...(!hasDesignSystemDocument ? ['design-system pack 缺少 DESIGN.md，已標記 invalid。'] : []),
+      ...(contractRejected ? [openDesignContractLabel(contractStatus, cleanText(raw.contractReason, 300))] : []),
     ].slice(0, 16),
   }
 }
@@ -184,14 +236,3 @@ export async function readOpenDesignText(assetPath: string, maxBytes = 512_000):
     return null
   }
 }
-
-// ── Contract seam: authoritative validation result ────────────────────
-// Catalog presentation, pack install, and Task-run admission must all
-// consume the same PluginContractResult instead of re-inferring fields.
-
-export function validatePluginContract(value: unknown): PluginContractResult {
-  return parseOpenDesignPluginManifest(value)
-}
-
-// Re-export for shipped-module smoke convenience
-export type { PluginContractResult as CatalogPluginContractResult }
