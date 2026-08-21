@@ -3,10 +3,7 @@ import { v4 as uuid } from 'uuid'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { critiqueAllowsDeliver } from '../agent/subdesign/critique'
 import { buildSubDesignPrompt } from '../agent/subdesign/prompt'
-import { prepareSubDesignRun } from '../agent/subdesign/pluginExecutionPreparation'
-import type { PluginInputValues } from '../agent/subdesign/pluginInputs'
-import { hydrateProviderFlags } from '../agent/subdesign/providers/providerFlags'
-import type { PluginInput } from '../agent/openDesign/pluginContract'
+import { prepareSubDesignPluginExecution } from '../agent/subdesign/pluginExecutionPreparation'
 import {
   OPEN_DESIGN_EXPLORE_SOURCE,
   OPEN_DESIGN_TEMPLATE_SOURCE,
@@ -35,7 +32,6 @@ import { SubDesignWorkspaceHeader } from '../components/subdesign/SubDesignWorks
 import { SubDesignRunInspector } from '../components/subdesign/SubDesignRunInspector'
 import { SubDesignProjectStudio } from '../components/subdesign/SubDesignProjectStudio'
 import { SubDesignStudioNav } from '../components/subdesign/SubDesignStudioNav'
-import { SubDesignConversationLanding } from '../components/subdesign/SubDesignConversationLanding'
 import { deriveSubDesignWorkspace } from '../agent/subdesign/workspace'
 import { runTask } from '../agent/taskRunCoordinator'
 import { useAgentStore } from '../store/agentStore'
@@ -54,12 +50,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import type { ThreadRunner } from '../store/threadStore'
 import {
   DEFAULT_STORYBOOK_PROVIDER_SETTINGS,
-  DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
-  loadAllProviderRuns,
-  loadExperimentalSurfaceSettings,
   loadStorybookProviderState,
-  saveExperimentalSurfaceSettings,
-  type ExperimentalSurfaceSettings,
   saveStorybookProviderSettings,
   type StorybookProviderSettings,
 } from '../agent/subdesign/providers/providerSettings.ts'
@@ -176,48 +167,12 @@ export function SubDesignPage() {
   const [startingRun, setStartingRun] = useState(false)
   const [storybookSettings, setStorybookSettings] = useState<StorybookProviderSettings>(DEFAULT_STORYBOOK_PROVIDER_SETTINGS)
   const [storybookRuns, setStorybookRuns] = useState<SubDesignPluginExecutionProjection[]>([])
-  const [providerRuns, setProviderRuns] = useState<SubDesignPluginExecutionProjection[]>([])
-  const [experimentalSettings, setExperimentalSettings] = useState<ExperimentalSurfaceSettings>(
-    DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
-  )
-  // Values collected by the plugin input form, and whatever the contract still
-  // requires. A blocked run surfaces the form rather than starting without them.
-  const [pluginInputs, setPluginInputs] = useState<PluginInputValues>({})
-  const [pluginDeclaredInputs, setPluginDeclaredInputs] = useState<PluginInput[]>([])
 
   const refreshStorybookState = useCallback(async () => {
-    const [state, runs, experimental] = await Promise.all([
-      loadStorybookProviderState(projectRoot || undefined),
-      loadAllProviderRuns(projectRoot || undefined),
-      loadExperimentalSurfaceSettings(projectRoot || undefined),
-    ])
+    const state = await loadStorybookProviderState(projectRoot || undefined)
     setStorybookSettings(state.settings)
     setStorybookRuns(state.runs)
-    setProviderRuns(runs)
-    setExperimentalSettings(experimental)
-    // Apply the project's choice to the synchronous render-path gate.
-    hydrateProviderFlags(experimental)
   }, [projectRoot])
-
-  // Plugin inputs belong to one brief's plugin. Switching briefs must not carry
-  // the previous plugin's answers into a different contract.
-  useEffect(() => {
-    setPluginInputs({})
-    setPluginDeclaredInputs([])
-  }, [routeBriefId])
-
-  /**
-   * Wraps the shared preparation so a block on unfilled inputs surfaces the
-   * form. Keeps the recording in one place instead of at each run start.
-   */
-  const prepareSubDesignRunTracked = useCallback(
-    async (input: Parameters<typeof prepareSubDesignRun>[0]) => {
-      const prepared = await prepareSubDesignRun(input)
-      setPluginDeclaredInputs(prepared.declaredInputs ?? [])
-      return prepared
-    },
-    [],
-  )
 
   const activeSurface = useMemo(
     () => SURFACES.find((surface) => surface.id === surfaceId) || SURFACES[0],
@@ -253,6 +208,7 @@ export function SubDesignPage() {
     for (const template of collectionTemplates) counts.set(template.category, (counts.get(template.category) || 0) + 1)
     return counts
   }, [collectionTemplates])
+  const missingExploreTemplates = 0
   const visibleArtifacts = activeBrief
     ? artifacts.filter((artifact) => artifact.briefId === activeBrief.id)
     : []
@@ -428,8 +384,7 @@ export function SubDesignPage() {
     setShowRunPanel(false)
     try {
       const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignRunTracked({
-        pluginInputs,
+      const pluginExecution = await prepareSubDesignPluginExecution({
         brief: created,
         runId,
         projectRoot: projectRoot || undefined,
@@ -443,7 +398,7 @@ export function SubDesignPage() {
         sourceKind: 'composer',
         reuseThreadId: threadId,
         runner,
-        overrides: pluginExecution.overrides,
+        overrides: pluginExecution.ready ? { subDesignPluginExecution: pluginExecution.request } : undefined,
       })
     } finally {
       setStartingRun(false)
@@ -467,8 +422,7 @@ export function SubDesignPage() {
     setShowRunPanel(false)
     try {
       const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignRunTracked({
-        pluginInputs,
+      const pluginExecution = await prepareSubDesignPluginExecution({
         brief: activeBrief,
         runId,
         projectRoot: projectRoot || undefined,
@@ -480,7 +434,7 @@ export function SubDesignPage() {
         reuseThreadId: activeBrief.threadId,
         runner: linkedThread?.runner || 'builtin',
         loopType: linkedThread?.loopType || undefined,
-        overrides: pluginExecution.overrides,
+        overrides: pluginExecution.ready ? { subDesignPluginExecution: pluginExecution.request } : undefined,
       })
     } finally {
       setStartingRun(false)
@@ -494,8 +448,7 @@ export function SubDesignPage() {
     setShowRunPanel(false)
     try {
       const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignRunTracked({
-        pluginInputs,
+      const pluginExecution = await prepareSubDesignPluginExecution({
         brief: activeBrief,
         runId,
         projectRoot: projectRoot || undefined,
@@ -507,7 +460,7 @@ export function SubDesignPage() {
         reuseThreadId: activeBrief.threadId,
         runner: linkedThread?.runner || 'builtin',
         loopType: linkedThread?.loopType || undefined,
-        overrides: pluginExecution.overrides,
+        overrides: pluginExecution.ready ? { subDesignPluginExecution: pluginExecution.request } : undefined,
       })
     } finally {
       setStartingRun(false)
@@ -555,25 +508,6 @@ export function SubDesignPage() {
         onSelectDirection={(directionId) => { selectDirection(activeBrief.id, directionId, undefined, projectRoot || undefined) }}
         storybookSettings={storybookSettings}
         latestStorybookRun={storybookRuns.find((item) => item.briefId === activeBrief.id) || storybookRuns[0] || null}
-        experimentalSettings={experimentalSettings}
-        onSaveExperimentalSettings={async (value) => {
-          const result = await saveExperimentalSurfaceSettings(value, projectRoot || undefined)
-          if (result.ok) {
-            setExperimentalSettings(result.settings)
-            hydrateProviderFlags(result.settings)
-          }
-          return result
-        }}
-        pluginDeclaredInputs={pluginDeclaredInputs}
-        onSubmitPluginInputs={(values) => {
-          setPluginInputs(values)
-          setPluginDeclaredInputs([])
-        }}
-        artifactStream={
-          selectedArtifact
-            ? providerRuns.find((run) => run.artifact?.id === selectedArtifact.id)?.stream ?? null
-            : null
-        }
         onSaveStorybookSettings={async (value) => {
           const result = await saveStorybookProviderSettings(value, projectRoot || undefined)
           if (result.ok) {
@@ -586,19 +520,16 @@ export function SubDesignPage() {
     )
   }
 
-  const isLanding = !activeBrief
   return (
-    <div className={`h-full min-w-0 overflow-auto ${isLanding ? 'bg-[#fdfcfa] text-[#111111]' : 'bg-background text-on-background'}`}>
-      <main className={`mx-auto w-full ${isLanding ? 'max-w-[980px] px-4 pb-12 pt-6 md:px-6' : 'max-w-[1240px] px-5 pb-16 pt-8 md:px-8 lg:pt-12'}`}>
-        {!isLanding && (
-          <SubDesignStudioNav
-            active="studio"
-            studioHref={activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign'}
-            systemsHref={`/design-systems?returnTo=${encodeURIComponent(activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign')}${activeBrief ? `&briefId=${encodeURIComponent(activeBrief.id)}` : ''}`}
-            contextLabel={activeBrief ? activeBrief.objective : '從 brief 選擇品牌契約，再生成與驗證產物'}
-            onNavigate={navigate}
-          />
-        )}
+    <div className="h-full min-w-0 overflow-auto bg-background text-on-background">
+      <main className="mx-auto w-full max-w-[1240px] px-5 pb-16 pt-8 md:px-8 lg:pt-12">
+        <SubDesignStudioNav
+          active="studio"
+          studioHref={activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign'}
+          systemsHref={`/design-systems?returnTo=${encodeURIComponent(activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign')}${activeBrief ? `&briefId=${encodeURIComponent(activeBrief.id)}` : ''}`}
+          contextLabel={activeBrief ? activeBrief.objective : '從 brief 選擇品牌契約，再生成與驗證產物'}
+          onNavigate={navigate}
+        />
         {routeBriefId && briefs.length > 0 && !activeBrief ? (
           <section className="mx-auto mb-6 max-w-[820px] rounded-2xl border border-error/25 bg-error/10 px-4 py-3 text-[12px] text-error">
             找不到這個 SubDesign brief：<span className="font-mono">{routeBriefId}</span>。請回到 SubDesign 首頁選擇既有設計。
@@ -621,69 +552,100 @@ export function SubDesignPage() {
             onOpenTranscript={openTranscript}
           />
         ) : null}
-        {!activeBrief ? (
-          <SubDesignConversationLanding
-            brief={brief}
-            onBriefChange={setBrief}
-            template={selectedCatalogRecord ? allTemplates.find((t) => t.id === selectedCatalogRecord.id) || null : null}
-            onClearTemplate={() => setTemplateId(undefined)}
-            onPickTemplate={(t) => {
-              setTemplateId(t.id)
-              if (t.surface) setSurfaceId(t.surface)
-              setBrief((v) => v || t.suggestedObjective)
-            }}
-            templates={allTemplates}
-            examples={exploreTemplates.slice(0, 8)}
-            designSystemLabel={selectedSystem?.title || 'No design system'}
-            designSystemOptions={systems.map((s) => ({ id: s.id, title: s.title }))}
-            workingDirectoryLabel={projectRoot ? projectRoot.split(/[\\/]/).filter(Boolean).pop()! : 'Select working directory'}
-            onBrowseDesignSystems={() => navigate(`/design-systems?returnTo=${encodeURIComponent('/subdesign')}`)}
-            onSelectDesignSystem={(id) => {
-              setDesignSystemId(id)
-            }}
-            onPickWorkingDirectory={() => void useProjectStore.getState().pickFolder()}
-            activeCategory={templateCategory === 'all' ? 'all' : templateCategory === 'prototype' ? 'creative' : templateCategory === 'deck' ? 'pitch' : templateCategory === 'live-artifact' ? 'engineering' : templateCategory === 'hyperframes' ? 'course' : 'all'}
-            onSelectCategory={(id) => {
-              const map: Record<string, SubDesignTemplateCategory> = {
-                all: 'all',
-                creative: 'prototype',
-                engineering: 'live-artifact',
-                pitch: 'deck',
-                course: 'hyperframes',
-                reports: 'deck',
-                product: 'prototype',
-              }
-              setTemplateCategory(map[id] || 'all')
-            }}
-            canSend={Boolean(brief.trim())}
-            onSend={startSubDesign}
-            onStartWithPrompt={(prompt, tmpl) => {
-              setBrief(prompt)
-              if (tmpl) {
-                setTemplateId(tmpl.id)
-                if (tmpl.surface) setSurfaceId(tmpl.surface)
-              }
-              setTimeout(() => {
-                if (prompt.trim()) void startSubDesign()
-              }, 0)
-            }}
-          />
-        ) : (
-          <section className="mx-auto max-w-[820px] text-center">
-            <h1 className="font-[family-name:var(--font-sora)] text-[34px] font-semibold tracking-tight text-on-surface md:text-[42px]">建立另一個設計</h1>
-            <p className="mt-3 text-[14px] text-outline">目前專案狀態保留在上方；你可以從新的 brief 開始另一個設計。</p>
-            <div className="mx-auto mt-6 max-w-[820px] overflow-hidden rounded-[18px] border border-[#e2c5b8] bg-white">
-              <textarea value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="Turn my notes into a presentation" rows={3} className="w-full resize-none bg-transparent px-6 py-5 text-[15px] leading-relaxed text-[#1a1a1a] outline-none placeholder:text-[#b8b0a8]" />
-              <div className="flex items-center justify-end gap-2 border-t border-[#f0e6df] px-4 py-3">
-                <button type="button" onClick={startSubDesign} disabled={!brief.trim()} className="inline-flex items-center gap-1.5 rounded-full bg-[#c07a56] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40">
-                  <Icon name="send" size={14} /> Send
-                </button>
+        <section className="mx-auto max-w-[820px] text-center">
+          <h1 className="font-[family-name:var(--font-sora)] text-[34px] font-semibold tracking-tight text-on-surface md:text-[42px]">
+            {activeBrief ? '建立另一個設計' : '你今天想設計什麼？'}
+          </h1>
+          <p className="mt-3 text-[14px] text-outline">{activeBrief ? '目前專案狀態保留在上方；你可以從新的 brief 開始另一個設計。' : '從一個 brief 開始，交給 SubAgents 完成設計流程。'}</p>
+        </section>
+
+        <section className="mx-auto mt-7 max-w-[820px]">
+          <div className="overflow-hidden rounded-[22px] border border-primary/40 bg-surface-container-low shadow-raised">
+            <label htmlFor="subdesign-brief" className="sr-only">設計目標</label>
+            <textarea
+              id="subdesign-brief"
+              value={brief}
+              onChange={(event) => setBrief(event.target.value)}
+              placeholder="例如：設計一個商品詳情頁"
+              className="min-h-[172px] w-full resize-y bg-transparent px-6 py-5 text-[17px] leading-relaxed text-on-surface outline-none placeholder:text-outline/70"
+            />
+            <div className="flex flex-col gap-3 border-t border-white/[0.08] px-4 py-4 sm:flex-row sm:flex-wrap sm:items-center">
+              <div className="relative sm:w-[160px]">
+                <select
+                  value={surfaceId}
+                  onChange={(event) => setSurfaceId(event.target.value as DesignSurface['id'])}
+                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
+                  aria-label="設計範本"
+                >
+                  {SURFACES.map((surface) => <option key={surface.id} value={surface.id}>{surface.title}</option>)}
+                </select>
+                <SelectChevron />
               </div>
+              <div className="relative sm:w-[145px]">
+                <select
+                  value={platform}
+                  onChange={(event) => setPlatform(event.target.value as SubDesignPlatform)}
+                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
+                  aria-label="設計平台"
+                >
+                  {PLATFORMS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                </select>
+                <SelectChevron />
+              </div>
+              <div className="relative sm:w-[170px]">
+                <select
+                  value={designSystemId}
+                  onChange={(event) => {
+                    const nextId = event.target.value
+                    setDesignSystemId(nextId)
+                    if (activeBrief) updateBrief(activeBrief.id, { designSystemId: nextId || undefined }, projectRoot || undefined)
+                  }}
+                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
+                  aria-label="Design system"
+                >
+                  <option value="">Neutral / project default</option>
+                  {systems.map((system) => <option key={system.id} value={system.id}>{system.title}</option>)}
+                </select>
+                <SelectChevron />
+              </div>
+              <div className="relative sm:w-[145px]">
+                <select
+                  value={runner}
+                  onChange={(event) => setRunner(event.target.value as ThreadRunner)}
+                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
+                  aria-label="Design agent"
+                >
+                  {availableRunners.map((item) => <option key={item} value={item}>{RUNNER_LABELS[item] || item}</option>)}
+                </select>
+                <SelectChevron />
+              </div>
+              <span className="hidden flex-1 sm:block" />
+              <button
+                type="button"
+                onClick={startSubDesign}
+                disabled={!brief.trim()}
+                className="macos-btn inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary-container focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Icon name="send" size={17} />建立設計
+              </button>
             </div>
-          </section>
-        )}
-        {!isLanding && (
-          <>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-[12px] text-outline">
+            <span className="inline-flex items-center gap-1.5"><Icon name="palette" size={15} className="text-primary" /><strong className="font-semibold text-on-surface-variant">{selectedSystem?.title || 'Project default'}</strong><span className="text-outline">將套用到下一次生成</span></span>
+            <button type="button" onClick={() => navigate(`/design-systems?returnTo=${encodeURIComponent(activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign')}${activeBrief ? `&briefId=${encodeURIComponent(activeBrief.id)}` : ''}`)} className="inline-flex items-center gap-1 text-[11px] text-outline hover:text-primary" aria-label="瀏覽與套用 Design system"><Icon name="tune" size={13} />瀏覽與套用</button>
+            <span className="h-4 w-px bg-white/10" aria-hidden />
+            <span className="inline-flex items-center gap-1.5 truncate"><Icon name="folder" size={15} />{projectRoot ? projectRoot.split(/[\\/]/).filter(Boolean).pop() : '尚未選擇工作目錄'}</span>
+            <button
+              type="button"
+              onClick={() => void refreshSystems(projectRoot || undefined)}
+              className="ml-auto inline-flex items-center gap-1 text-[12px] text-outline hover:text-primary"
+            >
+              <Icon name="refresh" size={14} />{systemsLoading ? '掃描中…' : '更新'}
+            </button>
+          </div>
+        </section>
+
         {surfaceId === 'design-system' ? (
           <section className="mx-auto mt-8 max-w-[820px]">
             <div className="flex items-center justify-between gap-3">
@@ -819,6 +781,11 @@ export function SubDesignPage() {
               })}
             </div>
           </div>
+          {missingExploreTemplates > 0 && templateCollection === 'explore' ? (
+            <p className="mt-4 text-[11px] font-medium text-secondary" role="status">
+              有 {missingExploreTemplates} 個官方精選範本尚未同步到本機，已暫時隱藏，避免產生無內容的選項。
+            </p>
+          ) : null}
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {visibleTemplates.map((template, index) => {
               const selected = template.id === templateId
@@ -849,20 +816,9 @@ export function SubDesignPage() {
                   </span>
                   <span className="mt-5 block text-[15px] font-semibold leading-snug text-on-surface">{template.title}</span>
                   <span className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-outline">{template.summary}</span>
-                  {template.contractNotice ? (
-                    <span className="mt-3 line-clamp-2 text-[10px] leading-relaxed text-error">{template.contractNotice}</span>
-                  ) : null}
                   <span className="mt-auto flex items-end justify-between gap-3 pt-4 text-[10px] text-outline">
                     <span>{categoryLabel}</span>
-                    <span>
-                      {template.contractNotice
-                        ? '契約不相容'
-                        : unavailable
-                          ? '需要額外 capability'
-                          : selected
-                            ? '已選取'
-                            : '可直接選用'}
-                    </span>
+                    <span>{unavailable ? '需要額外 capability' : selected ? '已選取' : '可直接選用'}</span>
                   </span>
                 </button>
               )
@@ -977,8 +933,6 @@ export function SubDesignPage() {
             </div>
           </section>
         ) : null}
-          </>
-        )}
       </main>
     </div>
   )
