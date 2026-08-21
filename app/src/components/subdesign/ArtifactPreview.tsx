@@ -1,7 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { SubDesignArtifact } from '../../agent/subdesign/types'
 import { useProjectStore } from '../../store/projectStore'
 import { Icon } from '../Icon'
+import type { StreamingEnvelope, RendererCapabilities } from '../../agent/subdesign/streamingEnvelope.ts'
+import { canRender as canRenderStreaming, reconcileUpdates } from '../../agent/subdesign/streamingEnvelope.ts'
+
+export const ARTIFACT_RENDERER_CAPABILITIES: Record<SubDesignArtifact['renderer'], RendererCapabilities> = {
+  html: { supportedKinds: ['html'], streaming: true, sandbox: "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';", export: ['html', 'pdf', 'zip'] },
+  'deck-html': { supportedKinds: ['deck'], streaming: false, sandbox: "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';", export: ['pptx', 'pdf'] },
+  markdown: { supportedKinds: ['markdown-document'], streaming: true, sandbox: "default-src 'none';", export: ['md'] },
+  svg: { supportedKinds: ['svg'], streaming: false, sandbox: "default-src 'none';", export: ['svg'] },
+  code: { supportedKinds: ['react-component'], streaming: false, sandbox: "default-src 'none';", export: ['jsx'] },
+  'design-system': { supportedKinds: ['design-system'], streaming: false, sandbox: "default-src 'none';", export: ['md'] },
+}
 
 function withPreviewCsp(content: string): string {
   const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">`
@@ -9,17 +20,64 @@ function withPreviewCsp(content: string): string {
   return `<!doctype html><html><head>${csp}</head><body>${content}</body></html>`
 }
 
-export function ArtifactPreview({ artifact, mode = 'preview' }: { artifact: SubDesignArtifact | null; mode?: 'preview' | 'source' }) {
+export function ArtifactPreview({
+  artifact,
+  mode = 'preview',
+  envelope,
+}: {
+  artifact: SubDesignArtifact | null
+  mode?: 'preview' | 'source'
+  envelope?: StreamingEnvelope | null
+}) {
   const projectRoot = useProjectStore((state) => state.root)
+  const deckContainerRef = useRef<HTMLDivElement>(null)
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [deckScale, setDeckScale] = useState(1)
+  const [streamContent, setStreamContent] = useState<string>('')
 
+  // Streaming envelope is the secondary source — manifest remains canonical
+  useEffect(() => {
+    if (!envelope) {
+      setStreamContent('')
+      return
+    }
+    const reconciled = reconcileUpdates(envelope.updates)
+    const assembled = reconciled.map((u) => u.content || '').join('')
+    setStreamContent(assembled)
+  }, [envelope])
+
+  // Renderer capability gate — unsupported streaming is rejected before render
+  const streamingGate: { ok: true } | { ok: false; reason: string } = (() => {
+    if (!envelope || !artifact) return { ok: true as const }
+    const caps = ARTIFACT_RENDERER_CAPABILITIES[artifact.renderer]
+    if (!caps) return { ok: false as const, reason: '未知 renderer' }
+    return canRenderStreaming(caps, envelope)
+  })()
+
+  useEffect(() => {
+    const container = deckContainerRef.current
+    if (!container || artifact?.renderer !== 'deck-html' || mode !== 'preview') return
+    const updateScale = () => setDeckScale(Math.min(1, container.clientWidth / 1600))
+    updateScale()
+    const observer = new ResizeObserver(updateScale)
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [artifact?.renderer, content, streamContent, mode])
+
+  // Host snapshot is source of truth for recovery — envelope content is projected onto Host-stored artifact
   useEffect(() => {
     let cancelled = false
     if (!artifact) {
       setContent('')
       setError(null)
+      return
+    }
+    // If we have a live streaming envelope, prefer its assembled content over disk read
+    if (envelope && envelope.updates.length > 0) {
+      // Do not create second canonical artifact state — envelope is ephemeral projection
+      setLoading(false)
       return
     }
     setLoading(true)
@@ -32,7 +90,13 @@ export function ArtifactPreview({ artifact, mode = 'preview' }: { artifact: SubD
           ? await subdesignApi.readArtifact({ entry: artifact.entry, projectRoot: projectRoot || undefined })
           : workspaceApi?.workspaceRead
             ? await workspaceApi.workspaceRead(artifact.entry, projectRoot || undefined)
-            : { ok: false, content: '', error: 'Preview 需要 Electron artifact API。' }
+            : import.meta.env.DEV && artifact.entry.startsWith('/')
+              ? await fetch(artifact.entry).then(async (response) => ({
+                  ok: response.ok,
+                  content: await response.text(),
+                  error: response.ok ? undefined : `HTTP ${response.status}`,
+                }))
+              : { ok: false, content: '', error: 'Preview 需要 Electron artifact API。' }
         if (!result.ok) throw new Error(result.content || ('error' in result ? String(result.error || '') : '') || '讀取 artifact 失敗。')
         if (!cancelled) setContent(result.content)
       } catch (cause) {
@@ -44,21 +108,50 @@ export function ArtifactPreview({ artifact, mode = 'preview' }: { artifact: SubD
     return () => {
       cancelled = true
     }
-  }, [artifact, projectRoot])
+  }, [artifact, projectRoot, envelope])
+
+  // Content is visible by default — never gate on entrance animation (opacity 0)
+  const displayContent = envelope && envelope.updates.length > 0 ? streamContent : content
+  const statusBadge = (() => {
+    if (!envelope) return artifact ? 'complete' : null
+    return envelope.status
+  })()
 
   return (
-    <section className="app-panel min-h-[260px] overflow-hidden">
-      <div className="flex items-center justify-between border-b border-white/[0.08] px-4 py-3"><div className="flex min-w-0 items-center gap-2 text-[12px] font-semibold text-on-surface"><Icon name="preview" size={16} className="text-primary" /><span className="truncate">{artifact?.title || 'Artifact preview'}</span></div>{artifact ? <span className="text-[11px] text-outline">sandboxed · revision {artifact.revision}</span> : null}</div>
-      {!artifact ? <div className="grid min-h-[220px] place-items-center px-4 text-center text-[12px] text-outline">選擇一個 artifact 查看安全 preview。</div> : null}
-      {loading ? <div className="grid min-h-[220px] place-items-center text-[12px] text-outline">讀取 artifact…</div> : null}
+    <section className={`${artifact?.renderer === 'deck-html' ? '' : 'min-h-[420px]'} overflow-hidden rounded-xl bg-surface-container-low/25`} aria-label={artifact?.title || 'Artifact preview'}>
+      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-2 text-[10px] font-semibold text-on-surface"><Icon name="preview" size={15} className="text-primary" /><span className="truncate">{artifact?.title || 'Artifact preview'}</span></div>
+        <div className="flex items-center gap-2">
+          {statusBadge ? <span className="rounded-full border border-white/10 px-2 py-0.5 text-[9px] text-outline">{statusBadge}</span> : null}
+          {artifact ? <span className="text-[9px] text-outline">sandboxed · revision {artifact.revision}</span> : null}
+        </div>
+      </div>
+      {!artifact ? <div className="grid min-h-[380px] place-items-center px-4 text-center text-[12px] text-outline">選擇一個 artifact 查看安全 preview。</div> : null}
+      {streamingGate && 'ok' in streamingGate && !streamingGate.ok ? (
+        <div className="m-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-[12px] text-amber-700">
+          {streamingGate.reason} — 已顯示靜態備援預覽。
+        </div>
+      ) : null}
+      {envelope && envelope.status === 'error' ? <div className="m-4 rounded-xl border border-error/30 bg-error/10 px-3 py-3 text-[12px] text-error">{envelope.error || '串流失敗'}</div> : null}
+      {loading ? <div className="grid min-h-[500px] place-items-center text-[11px] text-outline">讀取 artifact…</div> : null}
       {error ? <div className="m-4 rounded-xl border border-error/30 bg-error/10 px-3 py-3 text-[12px] text-error">{error}</div> : null}
-      {!loading && !error && artifact && content ? (
+      {!loading && !error && artifact && displayContent ? (
         mode === 'source' ? (
-          <pre className="max-h-[620px] min-h-[360px] overflow-auto whitespace-pre-wrap break-words bg-surface-container-lowest p-4 font-mono text-[11px] leading-relaxed text-on-surface-variant custom-scrollbar">{content}</pre>
-        ) : artifact.renderer === 'html' || artifact.renderer === 'deck-html' ? (
-          <iframe title={`${artifact.title} preview`} sandbox="allow-scripts" srcDoc={withPreviewCsp(content)} className="h-[360px] w-full border-0 bg-white" />
+          <pre className="max-h-[680px] min-h-[500px] overflow-auto whitespace-pre-wrap break-words bg-surface-container-lowest p-4 font-mono text-[11px] leading-relaxed text-on-surface-variant custom-scrollbar">{displayContent}</pre>
+        ) : artifact.renderer === 'deck-html' ? (
+          <div ref={deckContainerRef} className="w-full overflow-hidden bg-black" style={{ height: `${900 * deckScale}px` }}>
+            <iframe
+              title={`${artifact.title} preview`}
+              sandbox="allow-scripts"
+              srcDoc={withPreviewCsp(displayContent)}
+              className="block h-[900px] w-[1600px] origin-top-left border-0 bg-white"
+              style={{ transform: `scale(${deckScale})` }}
+            />
+          </div>
+        ) : artifact.renderer === 'html' ? (
+          <iframe title={`${artifact.title} preview`} sandbox="allow-scripts" srcDoc={withPreviewCsp(displayContent)} className="h-[min(54vh,560px)] min-h-[460px] w-full border-0 bg-white" />
         ) : (
-          <pre className="m-4 max-h-[340px] overflow-auto whitespace-pre-wrap rounded-xl bg-surface-container-lowest p-3 text-[12px] leading-relaxed text-on-surface-variant">{content}</pre>
+          <pre className="m-4 max-h-[620px] min-h-[460px] overflow-auto whitespace-pre-wrap rounded-lg bg-surface-container-lowest p-3 text-[12px] leading-relaxed text-on-surface-variant">{displayContent}</pre>
         )
       ) : null}
     </section>

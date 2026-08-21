@@ -1,11 +1,10 @@
 /**
- * Deterministic fake pipeline provider for ticket 03 highest-level seam.
+ * Deterministic SubDesign pipeline provider for the ticket 03 test seam.
  *
  * Implements ProviderContract for a single pipeline stage.
  * All data is deterministic and budget/timeout/cancel aware.
  */
 import {
-  type ProviderEvidence,
   type ProviderExecutionReceipt,
   type ProviderHandle,
   type ProviderOptions,
@@ -13,6 +12,7 @@ import {
   checkOutputBudget,
   DEFAULT_OUTPUT_BUDGET_BYTES,
   DEFAULT_PROVIDER_TIMEOUT_MS,
+  issueProviderEvidence,
 } from './providerContract.ts'
 
 export type FakePipelineInput = {
@@ -122,8 +122,9 @@ export function createFakePipelineProvider() {
       }, workMs)
     })
 
-    const evidence: ProviderEvidence[] = [
-      {
+    const evidence = promise.then((receipt) => {
+      if (receipt.kind !== 'success' || input.stageId === 'malformed-evidence') return []
+      return [issueProviderEvidence({
         evidenceId: `ev_${opts.runId}_${input.stageId}`,
         runId: opts.runId,
         stageId: input.stageId,
@@ -132,10 +133,9 @@ export function createFakePipelineProvider() {
         summary: `adapter-issued evidence for ${input.stageId}`,
         capturedAt: new Date().toISOString(),
         projectRelativeLocator: `evidence/${opts.runId}/${input.stageId}.json`,
-        adapterIssued: true as const,
         severity: 'info',
-      },
-    ]
+      })]
+    })
 
     const handle: ProviderHandle = {
       providerId: 'fake-pipeline',

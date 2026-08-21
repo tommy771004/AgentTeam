@@ -16,7 +16,7 @@ import {
 } from '../src/agent/openDesign/pluginContract.ts'
 import { validatePluginContract } from '../src/agent/openDesign/catalog.ts'
 import { packContractMayEnable } from '../src/agent/openDesign/packs.ts'
-import { admitPluginForTaskRun } from '../src/agent/openDesign/contractAdmission.ts'
+import { admitPluginForTaskRun } from '../src/agent/subdesign/pluginAdmission.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.resolve(__dirname, '..')
@@ -88,31 +88,12 @@ await test('v1 success: full spec fields are accepted', () => {
   // catalog / packs / admission must use same parser
   const viaCatalog = validatePluginContract(v1)
   assert.deepEqual(viaCatalog.ok, r.ok)
-  const viaPack = packContractMayEnable(
-    {
-      id: 'open-design:test',
-      name: 'test',
-      version: 'x',
-      kind: 'template',
-      enabled: false,
-      trustState: 'bundled',
-      sourcePath: 'a',
-      sourceUrl: '',
-      upstreamCommit: '',
-      digest: 'd',
-      licensePaths: [],
-      assetPaths: [],
-      entryPaths: [],
-      executionStatus: 'ready',
-      installedAt: '',
-      customTools: [],
-      mcpServers: [],
-    },
-    v1,
-  )
+  const viaPack = packContractMayEnable(viaCatalog)
   assert.equal(viaPack.ok, true)
-  const viaAdmission = admitPluginForTaskRun(v1)
+  assert.equal(viaPack.contract, viaCatalog)
+  const viaAdmission = admitPluginForTaskRun(viaCatalog)
   assert.equal(viaAdmission.admitted, true)
+  assert.equal(viaAdmission.contract, viaCatalog)
 })
 
 await test('unknown major version is incompatible with clear message', () => {
@@ -201,22 +182,22 @@ await test('minor version forward compat: 1.2.0 accepted with warning', () => {
   assert.equal((r as { kind: string }).kind, 'v1')
 })
 
-await test('catalog / packs / admission share the same parser (drift guard)', () => {
+await test('catalog validates once; packs and admission consume the shared result', () => {
   const catalogSrc = fs.readFileSync(path.join(appRoot, 'src/agent/openDesign/catalog.ts'), 'utf8')
   assert.match(catalogSrc, /parseOpenDesignPluginManifest|validatePluginContract/)
   assert.match(catalogSrc, /pluginContract\.ts/)
   const packsSrc = fs.readFileSync(path.join(appRoot, 'src/agent/openDesign/packs.ts'), 'utf8')
-  assert.match(packsSrc, /parseOpenDesignPluginManifest/)
+  assert.doesNotMatch(packsSrc, /parseOpenDesignPluginManifest/)
   assert.match(packsSrc, /packContractMayEnable/)
-  const admissionSrc = fs.readFileSync(path.join(appRoot, 'src/agent/openDesign/contractAdmission.ts'), 'utf8')
-  assert.match(admissionSrc, /parseOpenDesignPluginManifest/)
+  const admissionSrc = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/pluginAdmission.ts'), 'utf8')
+  assert.doesNotMatch(admissionSrc, /parseOpenDesignPluginManifest/)
 })
 
 await test('no new daemon/runner/renderer execution owner is introduced', () => {
   const pluginContractSrc = fs.readFileSync(path.join(appRoot, 'src/agent/openDesign/pluginContract.ts'), 'utf8')
   // Contract module must be pure parser — no process spawn, daemon, or renderer imports
   assert.doesNotMatch(pluginContractSrc, /spawn|exec\(|daemon|renderer.*execution/)
-  const admissionSrc = fs.readFileSync(path.join(appRoot, 'src/agent/openDesign/contractAdmission.ts'), 'utf8')
+  const admissionSrc = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/pluginAdmission.ts'), 'utf8')
   assert.doesNotMatch(admissionSrc, /dispatchThreadTask|startExecution/)
 })
 

@@ -8,6 +8,7 @@ const surfaceLabels: Record<SubDesignBrief['surface'], string> = {
   dashboard: '資料儀表板',
   'design-system': 'Design System',
   deck: '簡報與報告',
+  video: '動態影像',
 }
 
 function directionTable(directions: SubDesignDirection[]): string {

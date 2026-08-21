@@ -1,11 +1,12 @@
 /**
- * Harness goal-based UX testing — optional, macOS permission-sensitive.
+ * SubDesign Harness goal-based UX testing — optional, macOS permission-sensitive.
  * Session is adapter-owned, never Task-run owner. Stop cancels targeted.
  */
 import { isProviderEnabled } from './providerFlags.ts'
-import type { ProviderAvailability, ProviderEvidence } from './providerContract.ts'
+import { issueProviderEvidence, type ProviderAvailability, type ProviderEvidence } from './providerContract.ts'
 
-export const HARNESS_PINNED_VERSION = '0.1.0-alpha'
+/** Reviewed upstream harness-mcp standalone protocol identity. */
+export const HARNESS_PINNED_VERSION = '0.7.0'
 
 export type HarnessGoalOutcome = 'success' | 'failure' | 'blocked'
 
@@ -14,17 +15,22 @@ export type HarnessStep = {
   action: string
   observation: string
   friction?: string
+  capturedAt: string
 }
 
 export type HarnessResult = {
   outcome: HarnessGoalOutcome
   steps: HarnessStep[]
-  frictionEvents: Array<{ type: string; detail: string }>
+  frictionEvents: Array<{ type: string; detail: string; step?: number; capturedAt: string }>
   screenshotLocators: string[]
   startedAt: string
   finishedAt: string
   runId: string
   stageId: string
+  artifactId: string
+  goal: string
+  persona: string
+  providerId: 'harness'
 }
 
 export function harnessAvailability(opts?: { platform?: string; hasPermission?: boolean }): ProviderAvailability {
@@ -34,17 +40,24 @@ export function harnessAvailability(opts?: { platform?: string; hasPermission?: 
   return { available: true }
 }
 
-export function normalizeHarnessFixture(raw: unknown, runId: string, stageId: string): HarnessResult {
+function cleanText(value: unknown, max = 500): string {
+  return String(value || '')
+    .replace(/(authorization|cookie|set-cookie)\s*[:=]\s*[^\s,;]+/gi, '$1: [redacted]')
+    .replace(/\b(?:sk|pk|api|token|secret)[-_][a-zA-Z0-9_-]{12,}\b/g, '[redacted-token]')
+    .slice(0, max)
+}
+
+export function normalizeHarnessFixture(raw: unknown, runId: string, stageId: string, scope?: { artifactId?: string; goal?: string; persona?: string }): HarnessResult {
   const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const outcome = (['success', 'failure', 'blocked'].includes(String(obj.outcome)) ? String(obj.outcome) : 'failure') as HarnessGoalOutcome
   const stepsRaw = Array.isArray(obj.steps) ? obj.steps : []
   const steps: HarnessStep[] = stepsRaw.slice(0, 50).map((s, i) => {
     const r = (s && typeof s === 'object' ? s : {}) as Record<string, unknown>
-    return { index: i, action: String(r.action || `step ${i}`), observation: String(r.observation || ''), friction: r.friction ? String(r.friction) : undefined }
+    return { index: i + 1, action: cleanText(r.action || `step ${i + 1}`), observation: cleanText(r.observation), friction: r.friction ? cleanText(r.friction) : undefined, capturedAt: typeof r.capturedAt === 'string' ? r.capturedAt : new Date().toISOString() }
   })
   const frictionEvents = Array.isArray(obj.frictionEvents) ? obj.frictionEvents.slice(0, 20).map((e) => {
     const r = (e && typeof e === 'object' ? e : {}) as Record<string, unknown>
-    return { type: String(r.type || 'friction'), detail: String(r.detail || '') }
+    return { type: cleanText(r.type || 'friction', 80), detail: cleanText(r.detail), ...(typeof r.step === 'number' ? { step: r.step } : {}), capturedAt: typeof r.capturedAt === 'string' ? r.capturedAt : new Date().toISOString() }
   }) : []
   const screenshotLocators = Array.isArray(obj.screenshots) ? obj.screenshots.slice(0, 10).map((s) => String(s).slice(0, 500)).filter(Boolean) : []
   return {
@@ -56,11 +69,15 @@ export function normalizeHarnessFixture(raw: unknown, runId: string, stageId: st
     finishedAt: typeof obj.finishedAt === 'string' ? obj.finishedAt : new Date().toISOString(),
     runId,
     stageId,
+    artifactId: cleanText(scope?.artifactId || 'unknown-artifact', 160),
+    goal: cleanText(scope?.goal, 1_000),
+    persona: cleanText(scope?.persona, 1_000),
+    providerId: 'harness',
   }
 }
 
 export function harnessToEvidence(result: HarnessResult): ProviderEvidence {
-  return {
+  return issueProviderEvidence({
     evidenceId: `har_${result.runId}_${result.stageId}`,
     runId: result.runId,
     stageId: result.stageId,
@@ -69,7 +86,21 @@ export function harnessToEvidence(result: HarnessResult): ProviderEvidence {
     summary: `Harness ${result.outcome}: ${result.steps.length} steps, ${result.frictionEvents.length} frictions`,
     capturedAt: result.finishedAt,
     projectRelativeLocator: result.screenshotLocators[0],
-    adapterIssued: true as const,
     severity: result.outcome === 'success' ? 'info' : result.outcome === 'blocked' ? 'warning' : 'blocker',
+  })
+}
+
+/** Deterministic session seam used by smokes to prove cancel/late-event rules. */
+export function createHarnessFakeSession(scope: { runId: string; stageId: string; artifactId: string; goal: string; persona: string }) {
+  const raw: { outcome: HarnessGoalOutcome; steps: unknown[]; frictionEvents: unknown[]; screenshots: string[] } = { outcome: 'blocked', steps: [], frictionEvents: [], screenshots: [] }
+  let terminal: 'cancelled' | 'completed' | null = null
+  return {
+    pushStep(step: unknown) { if (!terminal) raw.steps.push(step) },
+    pushFriction(event: unknown) { if (!terminal) raw.frictionEvents.push(event) },
+    pushScreenshot(locator: string) { if (!terminal) raw.screenshots.push(locator) },
+    complete(outcome: HarnessGoalOutcome) { if (!terminal) { raw.outcome = outcome; terminal = 'completed' } },
+    timeout() { if (!terminal) { raw.outcome = 'blocked'; terminal = 'completed' } },
+    cancel() { if (!terminal) terminal = 'cancelled' },
+    snapshot() { return { terminal, result: normalizeHarnessFixture(raw, scope.runId, scope.stageId, scope) } },
   }
 }

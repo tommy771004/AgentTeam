@@ -1,6 +1,6 @@
 import type { OpenDesignProvenance } from '../openDesign/catalog.ts'
 
-export type SubDesignSurface = 'prototype' | 'dashboard' | 'design-system' | 'deck'
+export type SubDesignSurface = 'prototype' | 'dashboard' | 'design-system' | 'deck' | 'video'
 
 export type SubDesignStage = 'brief' | 'direction' | 'build' | 'critique' | 'deliver'
 

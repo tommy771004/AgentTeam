@@ -1,13 +1,14 @@
 /**
- * Storybook component context provider — read-only, bounded, cacheable.
+ * SubDesign Storybook component context provider — read-only, bounded, cacheable.
  * Upstream is experimental; we normalize to internal ComponentEvidence.
  * Flag-gated: isProviderEnabled('storybook') must be true to activate.
  */
 import { isProviderEnabled } from './providerFlags.ts'
-import type { ProviderAvailability, ProviderEvidence } from './providerContract.ts'
+import { issueProviderEvidence, type ProviderAvailability, type ProviderEvidence } from './providerContract.ts'
 
-export const STORYBOOK_PINNED_VERSION = '8.6.0-alpha' // illustrative pinned
+export const STORYBOOK_PINNED_VERSION = '8.6.0'
 export const STORYBOOK_CONTEXT_BUDGET_BYTES = 64 * 1024
+export const STORYBOOK_CACHE_LIMIT = 24
 
 export type ComponentEvidence = {
   provider: 'storybook'
@@ -36,8 +37,8 @@ export function normalizeStorybookResponse(raw: RawStorybookResponse, opts: { pr
   const comps = Array.isArray(raw.components) ? raw.components.slice(0, 100) : []
   const normalized = comps
     .filter((c): c is Record<string, unknown> => Boolean(c && typeof c === 'object'))
-    .map((c) => ({
-      id: String((c as Record<string, unknown>).id || '').slice(0, 80) || `comp_${Math.random().toString(36).slice(2, 6)}`,
+    .map((c, index) => ({
+      id: String((c as Record<string, unknown>).id || '').slice(0, 80) || `comp_${index + 1}`,
       title: String((c as Record<string, unknown>).title || 'Untitled').slice(0, 120),
       docs: typeof (c as Record<string, unknown>).docs === 'string' ? String((c as Record<string, unknown>).docs).slice(0, 2000) : undefined,
       controls: Array.isArray((c as Record<string, unknown>).controls) ? ((c as Record<string, unknown>).controls as unknown[]).map((x) => String(x).slice(0, 80)).slice(0, 20) : undefined,
@@ -68,8 +69,16 @@ export function getStorybookContext(projectId: string, raw: RawStorybookResponse
   const key = `${projectId}:${fingerprint}`
   const hit = cache.get(key)
   if (hit && hit.fp === fingerprint) return { evidence: hit.evidence, fromCache: true }
+  for (const existing of cache.keys()) {
+    if (existing.startsWith(`${projectId}:`) && existing !== key) cache.delete(existing)
+  }
   const evidence = normalizeStorybookResponse(raw, { projectId, fingerprint })
   cache.set(key, { fp: fingerprint, evidence })
+  while (cache.size > STORYBOOK_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value
+    if (!oldest) break
+    cache.delete(oldest)
+  }
   return { evidence, fromCache: false }
 }
 
@@ -78,7 +87,7 @@ export function clearStorybookCache(): void {
 }
 
 export function toProviderEvidence(ev: ComponentEvidence, runId: string): ProviderEvidence {
-  return {
+  return issueProviderEvidence({
     evidenceId: `sb_${runId}_${Date.now()}`,
     runId,
     stageId: 'context',
@@ -86,6 +95,5 @@ export function toProviderEvidence(ev: ComponentEvidence, runId: string): Provid
     kind: 'context',
     summary: ev.summary,
     capturedAt: ev.capturedAt,
-    adapterIssued: true as const,
-  }
+  })
 }

@@ -1,5 +1,5 @@
 /**
- * Pipeline stage states projected to conversation activity.
+ * SubDesign pipeline stage states projected to conversation activity.
  * queued → running → completed | failed | blocked | cancelled
  */
 

@@ -74,6 +74,17 @@ export type PreviewMeta = {
 
 export type ProvenanceMeta = Record<string, unknown>
 
+export type InteractiveSurfaceKind = 'choice' | 'form' | 'confirmation'
+export type InteractiveSurfaceScope = 'run' | 'conversation' | 'project'
+
+export type InteractiveSurfaceDeclaration = {
+  id: string
+  kind: InteractiveSurfaceKind
+  scope: InteractiveSurfaceScope
+  allowlist?: string[]
+  title?: string
+}
+
 export type V1Manifest = {
   specVersion: string
   name?: string
@@ -88,6 +99,7 @@ export type V1Manifest = {
   evals?: Evaluation[]
   preview?: PreviewMeta | null
   provenance?: ProvenanceMeta | null
+  surfaces?: InteractiveSurfaceDeclaration[]
   raw: unknown
 }
 
@@ -475,6 +487,38 @@ function parseV1(rawObj: Record<string, unknown>, warnings: string[]): PluginCon
     provenance = provenanceRaw
   }
 
+  // surfaces — interactive MCP Apps surfaces
+  let surfaces: InteractiveSurfaceDeclaration[] | undefined
+  const surfacesRaw = (od as Record<string, unknown>).surfaces ?? (od as Record<string, unknown>).interactiveSurfaces ?? rawObj.surfaces
+  if (surfacesRaw != null) {
+    if (!Array.isArray(surfacesRaw)) return { ok: false, kind: 'malformed', reason: 'surfaces 必須是陣列。', field: 'od.surfaces', raw: rawObj }
+    if (surfacesRaw.length > 8) return { ok: false, kind: 'malformed', reason: 'surfaces 最多 8 項。', field: 'od.surfaces', raw: rawObj }
+    surfaces = []
+    const seenIds = new Set<string>()
+    for (let i = 0; i < surfacesRaw.length; i++) {
+      const entry = surfacesRaw[i]
+      if (!isObject(entry)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}] 必須是 object。`, field: `od.surfaces[${i}]`, raw: rawObj }
+      const id = cleanText(entry.id, 80)
+      if (!id || !/^[a-zA-Z][a-zA-Z0-9._-]{1,79}$/.test(id)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].id 不合法。`, field: `od.surfaces[${i}].id`, raw: rawObj }
+      if (seenIds.has(id)) return { ok: false, kind: 'malformed', reason: `surfaces id 重複：${id}`, field: `od.surfaces[${i}].id`, raw: rawObj }
+      seenIds.add(id)
+      const kindRaw = cleanText(entry.kind, 20)
+      if (!['choice', 'form', 'confirmation'].includes(kindRaw)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].kind 必須是 choice/form/confirmation。`, field: `od.surfaces[${i}].kind`, raw: rawObj }
+      const scopeRaw = cleanText(entry.scope, 20) || 'run'
+      if (!['run', 'conversation', 'project'].includes(scopeRaw)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].scope 不合法。`, field: `od.surfaces[${i}].scope`, raw: rawObj }
+      let allowlist: string[] | undefined
+      if (entry.allowlist != null) {
+        if (!Array.isArray(entry.allowlist)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].allowlist 必須是字串陣列。`, field: `od.surfaces[${i}].allowlist`, raw: rawObj }
+        allowlist = entry.allowlist.map((v) => cleanText(v, 64)).filter(Boolean)
+        if (allowlist.length > 16) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].allowlist 最多 16。`, field: `od.surfaces[${i}].allowlist`, raw: rawObj }
+        for (const a of allowlist) {
+          if (!/^[a-z_][a-z0-9_.-]{1,63}$/.test(a)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].allowlist 含非法 tool：${a}`, field: `od.surfaces[${i}].allowlist`, raw: rawObj }
+        }
+      }
+      surfaces.push({ id, kind: kindRaw as InteractiveSurfaceKind, scope: scopeRaw as InteractiveSurfaceScope, allowlist, title: cleanText(entry.title, 120) || undefined })
+    }
+  }
+
   // Accept unknown non-security metadata: we already ignore extra fields; collect warnings if extra keys present that look like capabilities?
   // No further checks: unknown fields do not grant authority.
 
@@ -492,6 +536,7 @@ function parseV1(rawObj: Record<string, unknown>, warnings: string[]): PluginCon
     evals,
     preview,
     provenance,
+    surfaces,
     raw: rawObj,
   }
 
@@ -583,6 +628,8 @@ export function parseOpenDesignPluginManifest(value: unknown): PluginContractRes
     'evaluations',
     'preview',
     'provenance',
+    'surfaces',
+    'interactiveSurfaces',
   ])
   for (const k of Object.keys(rawObj)) {
     if (!knownTopKeys.has(k)) {

@@ -137,7 +137,8 @@ export function normalizeBrief(raw: unknown): SubDesignBrief | null {
     surface !== 'prototype' &&
     surface !== 'dashboard' &&
     surface !== 'design-system' &&
-    surface !== 'deck'
+    surface !== 'deck' &&
+    surface !== 'video'
   ) {
     return null
   }

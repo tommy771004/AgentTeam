@@ -1,152 +1,97 @@
-/**
- * Smoke: Plugin resolved snapshot & capability grants (02)
- * Run: node --experimental-strip-types scripts/smoke-open-design-snapshot.mts
- */
+/** Smoke: Plugin resolved snapshot, scoped grants, and persistence (02). */
 import assert from 'node:assert/strict'
 import {
-  hashContent,
-  fingerprintCapabilities,
-  createResolvedSnapshot,
-  validateProjectRelativePath,
-  isSnapshotPathValid,
-  revokeGrants,
-  grantCapabilities,
-  needsReapproval,
-  snapshotContainsNoRawToken,
-  DENY_BY_DEFAULT,
-  SNAPSHOT_DIR,
-} from '../src/agent/openDesign/pluginSnapshot.ts'
+  DENY_BY_DEFAULT, SNAPSHOT_DIR, createResolvedSnapshot, fingerprintCapabilities,
+  grantCapabilities, isCapabilityGranted, isSnapshotPathValid, needsReapproval,
+  revokeGrants, sha256Hex, snapshotContainsNoRawToken, validateProjectRelativePath,
+} from '../src/agent/subdesign/pluginSnapshot.ts'
+import { loadPluginSnapshots, persistPluginSnapshot } from '../src/agent/subdesign/pluginSnapshotStore.ts'
 
 let passed = 0
 let total = 0
 async function test(name: string, fn: () => void | Promise<void>) {
   total++
-  try {
-    await fn()
-    passed++
-    console.log(`  ✓ ${name}`)
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(e)
-    process.exitCode = 1
-  }
+  try { await fn(); passed++; console.log(`  ✓ ${name}`) }
+  catch (error) { console.error(`  ✗ ${name}`); console.error(error); process.exitCode = 1 }
 }
+
+const manifest = (capabilities: string[] = ['fs:write']) => ({ specVersion: '1.0.0', od: { kind: 'scenario', capabilities } })
+async function snapshot(pluginId: string, capabilities?: string[]) {
+  const result = await createResolvedSnapshot({
+    pluginId, source: { sourcePath: 'plugins/example/SKILL.md' },
+    rawManifest: manifest(capabilities), projectRoot: '/tmp/proj',
+  })
+  assert.ok(!('error' in result), 'snapshot should resolve')
+  return result
+}
+
 console.log('smoke-open-design-snapshot')
 
-await test('deterministic hash: same content same hash', () => {
-  const a = hashContent('hello world')
-  const b = hashContent('hello world')
-  assert.equal(a, b)
-  assert.equal(a.length, 64)
+await test('SHA-256 content hash is deterministic and collision-resistant length', async () => {
+  assert.equal(await sha256Hex('hello world'), await sha256Hex('hello world'))
+  assert.equal((await sha256Hex('hello world')).length, 64)
+  assert.notEqual(await sha256Hex('hello world'), await sha256Hex('hello world!'))
 })
 
-await test('changed fingerprint triggers re-approval', () => {
-  const s = createResolvedSnapshot({
-    pluginId: 'test:plugin',
-    source: { sourcePath: 'plugins/a/SKILL.md' },
-    rawManifest: { specVersion: '1.0.0', od: { kind: 'scenario', capabilities: ['fs:write'] } },
-    projectRoot: '/tmp/proj',
-  }) as any
-  assert.ok(s.contentHash)
-  assert.equal(needsReapproval(s, { contentHash: s.contentHash, fingerprint: s.capabilityFingerprint }), false)
-  // mutate capability -> new fingerprint
-  const newFp = fingerprintCapabilities(['fs:write', 'network'])
-  assert.equal(needsReapproval(s, { contentHash: s.contentHash, fingerprint: newFp }), true)
-  // mutate content hash
-  assert.equal(needsReapproval(s, { contentHash: hashContent('different'), fingerprint: s.capabilityFingerprint }), true)
+await test('content or capability change triggers re-approval', async () => {
+  const current = await snapshot('test:reapproval')
+  assert.equal(needsReapproval(current, { contentHash: current.contentHash, fingerprint: current.capabilityFingerprint }), false)
+  assert.equal(needsReapproval(current, { contentHash: current.contentHash, fingerprint: await fingerprintCapabilities(['fs:write', 'network']) }), true)
+  assert.equal(needsReapproval(current, { contentHash: await sha256Hex('different'), fingerprint: current.capabilityFingerprint }), true)
 })
 
-await test('deny-by-default: fs:write not granted unless explicit', () => {
-  const s = createResolvedSnapshot({
-    pluginId: 'test:deny',
-    source: { sourcePath: 'plugins/b/SKILL.md' },
-    rawManifest: { specVersion: '1.0.0', od: { kind: 'scenario', capabilities: ['fs:write', 'network'] } },
-    projectRoot: '/tmp/proj',
-  }) as any
+await test('deny-by-default grants are explicit and scoped to run/thread', async () => {
+  const current = await snapshot('test:scope', ['fs:write', 'network'])
   assert.ok(DENY_BY_DEFAULT.has('fs:write'))
-  assert.equal(s.grantedCapabilities.length, 0)
-  const g = grantCapabilities(s, ['fs:write'])
-  assert.ok(g.grantedCapabilities.includes('fs:write'))
-  // cannot grant capability not requested
-  const g2 = grantCapabilities(s, ['bash'])
-  assert.equal(g2.grantedCapabilities.includes('bash'), false)
+  assert.deepEqual(current.grantedCapabilities, [])
+  const scope = { runId: 'run_1', threadId: 'thread_1' }
+  const granted = grantCapabilities(current, ['fs:write', 'bash'], scope)
+  assert.deepEqual(granted.grantedCapabilities, ['fs:write'])
+  assert.equal(isCapabilityGranted(granted, 'fs:write', scope), true)
+  assert.equal(isCapabilityGranted(granted, 'fs:write', { runId: 'run_2', threadId: 'thread_1' }), false)
+  assert.equal(isCapabilityGranted(granted, 'fs:write', { runId: 'run_1', threadId: 'thread_2' }), false)
+  assert.equal(granted.grantDecisions[0]?.runId, 'run_1')
+  const nextScope = grantCapabilities(granted, ['network'], { runId: 'run_2', threadId: 'thread_1' })
+  assert.deepEqual(nextScope.grantedCapabilities, ['network'])
+  assert.equal(isCapabilityGranted(nextScope, 'fs:write', { runId: 'run_2', threadId: 'thread_1' }), false)
 })
 
-await test('denied grant requires re-approval', () => {
-  const s = createResolvedSnapshot({
-    pluginId: 'test:deny2',
-    source: { sourcePath: 'plugins/c/SKILL.md' },
-    rawManifest: { specVersion: '1.0.0', od: { kind: 'scenario', capabilities: ['network'] } },
-    projectRoot: '/tmp/proj',
-  }) as any
-  // no grant yet => not authorized
-  assert.equal(s.grantedCapabilities.includes('network'), false)
-})
-
-await test('revocation clears grants and next run needs approval', () => {
-  const s = createResolvedSnapshot({
-    pluginId: 'test:revoke',
-    source: { sourcePath: 'plugins/d/SKILL.md' },
-    rawManifest: { specVersion: '1.0.0', od: { kind: 'scenario', capabilities: ['fs:write'] } },
-    projectRoot: '/tmp/proj',
-    grantedCapabilities: ['fs:write'],
-  }) as any
-  // create with granted still filtered to requested, so should have fs:write
-  const withGrant = grantCapabilities(s, ['fs:write'])
-  assert.ok(withGrant.grantedCapabilities.includes('fs:write'))
-  const revoked = revokeGrants(withGrant)
-  assert.equal(revoked.grantedCapabilities.length, 0)
+await test('revocation clears grants and scope', async () => {
+  const current = await snapshot('test:revoke')
+  const revoked = revokeGrants(grantCapabilities(current, ['fs:write'], { runId: 'run_revoke' }))
+  assert.deepEqual(revoked.grantedCapabilities, [])
+  assert.equal(revoked.grantScope, undefined)
   assert.ok(revoked.revokedAt)
 })
 
-await test('absolute path and traversal rejected', () => {
-  const bad1 = validateProjectRelativePath('/tmp/proj', '/etc/passwd')
-  assert.equal(bad1.ok, false)
-  const bad2 = validateProjectRelativePath('/tmp/proj', '../outside.json')
-  assert.equal(bad2.ok, false)
-  const bad3 = validateProjectRelativePath('/tmp/proj', '.subagents/../evil')
-  assert.equal(bad3.ok, false)
-  const ok = validateProjectRelativePath('/tmp/proj', `${SNAPSHOT_DIR}/a.json`)
-  assert.equal(ok.ok, true)
-})
-
-await test('snapshot path must be under snapshot dir', () => {
+await test('absolute, traversal, and outside snapshot paths are rejected', () => {
+  assert.equal(validateProjectRelativePath('/tmp/proj', '/etc/passwd').ok, false)
+  assert.equal(validateProjectRelativePath('/tmp/proj', '../outside.json').ok, false)
+  assert.equal(validateProjectRelativePath('/tmp/proj', '.subagents/../evil').ok, false)
   assert.equal(isSnapshotPathValid('/tmp/proj', `${SNAPSHOT_DIR}/x.json`), true)
   assert.equal(isSnapshotPathValid('/tmp/proj', 'evil/x.json'), false)
-  assert.equal(isSnapshotPathValid('/tmp/proj', '/absolute/x.json'), false)
 })
 
-await test('restart recovery: snapshot is serializable and contains no raw token', () => {
-  const s = createResolvedSnapshot({
-    pluginId: 'test:serial',
-    source: { sourcePath: 'plugins/e/SKILL.md', sourceUrl: 'https://example.com', upstreamCommit: 'abc' },
-    resolvedVersion: '1.0.0',
-    rawManifest: { specVersion: '1.0.0', od: { kind: 'scenario', capabilities: ['fs:read'] } },
-    projectRoot: '/tmp/proj',
-  }) as any
-  const json = JSON.stringify(s)
-  const restored = JSON.parse(json)
-  assert.equal(restored.pluginId, s.pluginId)
-  assert.equal(restored.contentHash, s.contentHash)
-  assert.equal(snapshotContainsNoRawToken(s), true)
-  // inject fake token should be detected
-  const evil: any = { ...s, credentialRefs: [{ kind: 'token', ref: 'ghp_1234567890abcdefghijklmnopqrstuvwxyz' }] }
-  // still no raw token string in snapshot? Our check is heuristic on raw token patterns
-  // credentialRefs are refs, so ok, but direct token field would fail
-  const evil2: any = { ...s, rawToken: 'sk-12345678901234567890' }
-  assert.equal(snapshotContainsNoRawToken(evil2), false)
+await test('snapshot persists through project metadata and reloads after restart', async () => {
+  const current = await snapshot('test:persist')
+  let written: unknown = null
+  const host = globalThis as unknown as { window?: unknown }
+  const priorWindow = host.window
+  host.window = { subagents: { subdesign: {
+    writeMetadata: async (input: unknown) => { written = input; return { ok: true } },
+    readMetadata: async () => ({ ok: true, briefs: [], artifacts: [], critiques: [], exports: [], openDesignPacks: [], openDesignSnapshots: [current] }),
+  } } }
+  try {
+    assert.equal(await persistPluginSnapshot(current, '/tmp/proj'), true)
+    assert.deepEqual(written, { kind: 'open-design-snapshot', payload: current, projectRoot: '/tmp/proj' })
+    assert.equal((await loadPluginSnapshots('/tmp/proj'))[0]?.snapshotId, current.snapshotId)
+  } finally { host.window = priorWindow }
 })
 
-await test('remote update does not silently replace: needs re-approval', () => {
-  const s = createResolvedSnapshot({
-    pluginId: 'test:remote',
-    source: { sourcePath: 'plugins/f/SKILL.md' },
-    rawManifest: { specVersion: '1.0.0', od: { kind: 'scenario', capabilities: ['fs:write'] } },
-    rawContentForHash: 'v1',
-    projectRoot: '/tmp/proj',
-  }) as any
-  const nextHash = hashContent('v2')
-  assert.equal(needsReapproval(s, { contentHash: nextHash, fingerprint: s.capabilityFingerprint }), true)
+await test('serialized snapshot contains no raw token', async () => {
+  const current = await snapshot('test:redaction')
+  assert.equal(snapshotContainsNoRawToken(current), true)
+  assert.equal(snapshotContainsNoRawToken({ ...current, rawToken: 'sk-12345678901234567890' } as typeof current), false)
 })
 
 console.log(`\n${passed}/${total} tests passed`)

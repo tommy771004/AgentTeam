@@ -1,5 +1,5 @@
 /**
- * Experimental provider feature flags — all off by default.
+ * Experimental SubDesign provider feature flags — all off by default.
  * Enables qualified evaluation without committing product to unstable upstreams.
  */
 export type ProviderFlag = 'storybook' | 'chrome-devtools' | 'harness' | 'mcp-apps' | 'streaming'

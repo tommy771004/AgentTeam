@@ -1,6 +1,6 @@
 import type { PluginManifest } from '../hermes/plugins.ts'
 import type { OpenDesignCatalogRecord, OpenDesignExecutionStatus } from './catalog.ts'
-import { parseOpenDesignPluginManifest, type PluginContractResult } from './pluginContract.ts'
+import { type PluginContractResult } from './pluginContract.ts'
 
 export type OpenDesignPackKind = 'template' | 'skill' | 'design-system' | 'prompt' | 'craft' | 'media'
 export type OpenDesignTrustState = 'bundled' | 'community-reviewed' | 'local-user' | 'remote-unverified'
@@ -139,10 +139,8 @@ export function packMayEnable(pack: OpenDesignContentPackManifest): { ok: true }
 
 /** Contract-aware gate: pack may enable only if its embedded contract (if any) is compatible. */
 export function packContractMayEnable(
-  pack: OpenDesignContentPackManifest,
-  rawManifest: unknown,
+  contract: PluginContractResult,
 ): { ok: true; contract: PluginContractResult } | { ok: false; reason: string; contract: PluginContractResult } {
-  const contract = parseOpenDesignPluginManifest(rawManifest)
   if (!contract.ok) {
     return { ok: false, reason: contract.reason, contract }
   }

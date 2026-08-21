@@ -10,7 +10,7 @@
  * Path confinement: absolute, traversal, or outside-root => reject.
  */
 
-import { parseOpenDesignPluginManifest, type PluginContractResult } from './pluginContract.ts'
+import { parseOpenDesignPluginManifest, type PluginContractResult } from '../openDesign/pluginContract.ts'
 
 export const SNAPSHOT_DIR = '.subagents/open-design/snapshots'
 export const SNAPSHOT_VERSION = 1
@@ -43,6 +43,8 @@ export type PluginResolvedSnapshot = {
   capabilityFingerprint: string
   requestedCapabilities: string[]
   grantedCapabilities: string[]
+  grantDecisions: GrantDecision[]
+  grantScope?: GrantScope
   grantedAt?: string
   revokedAt?: string
   createdAt: string
@@ -62,6 +64,10 @@ export type GrantDecision = {
   threadId?: string
 }
 
+export type GrantScope =
+  | { runId: string; threadId?: string }
+  | { runId?: string; threadId: string }
+
 export type CapabilityGrantState = {
   snapshotId: string
   pluginId: string
@@ -70,38 +76,27 @@ export type CapabilityGrantState = {
   updatedAt: string
 }
 
-// ── Hash & fingerprint (deterministic, FNV-like or sha256) ───────────────
-// Use Web Crypto subtle when available, fallback to simple deterministic
-// hash for Node smokes. Must be consistent across runs for same input.
+// ── Collision-resistant content hash & capability fingerprint ────────────
 
-export function hashContent(text: string): string {
-  // Deterministic synchronous hash — use djb2-ish with hex for smoke portability
-  // For production determinism we also expose async sha256 helper.
-  let h = 5381
-  for (let i = 0; i < text.length; i++) {
-    h = ((h << 5) + h + text.charCodeAt(i)) | 0
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
   }
-  // Expand to 64 hex chars deterministically (not crypto-strong, but stable)
-  const hex = (h >>> 0).toString(16).padStart(8, '0')
-  return (hex + hex + hex + hex + hex + hex + hex + hex).slice(0, 64)
+  return JSON.stringify(value) ?? 'null'
 }
 
 export async function sha256Hex(text: string): Promise<string> {
   const enc = new TextEncoder().encode(text)
-  // Node: use crypto if available; otherwise fallback
-  try {
-    // @ts-ignore global crypto
-    const buf = await crypto.subtle.digest('SHA-256', enc)
-    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
-  } catch {
-    const { createHash } = await import('node:crypto')
-    return createHash('sha256').update(text, 'utf8').digest('hex')
-  }
+  if (!globalThis.crypto?.subtle) throw new Error('SHA-256 runtime unavailable')
+  const buf = await globalThis.crypto.subtle.digest('SHA-256', enc)
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-export function fingerprintCapabilities(capabilities: string[]): string {
+export async function fingerprintCapabilities(capabilities: string[]): Promise<string> {
   const sorted = [...new Set(capabilities.map((c) => c.trim()).filter(Boolean))].sort()
-  return hashContent(sorted.join('|'))
+  return sha256Hex(sorted.join('|'))
 }
 
 // ── Path confinement ────────────────────────────────────────────────────
@@ -148,24 +143,20 @@ export type CreateSnapshotInput = {
   rawManifest: unknown
   rawContentForHash?: string
   projectRoot: string
-  grantedCapabilities?: string[]
+  /** Reuse the catalog validation result when available; do not reparse. */
+  contract?: PluginContractResult
 }
 
-export function createResolvedSnapshot(input: CreateSnapshotInput): PluginResolvedSnapshot | { error: string } {
+export async function createResolvedSnapshot(input: CreateSnapshotInput): Promise<PluginResolvedSnapshot | { error: string }> {
   const pluginId = input.pluginId.trim().slice(0, 220)
   if (!pluginId) return { error: 'pluginId 必填。' }
-  const contract: PluginContractResult = parseOpenDesignPluginManifest(input.rawManifest)
+  const contract: PluginContractResult = input.contract ?? parseOpenDesignPluginManifest(input.rawManifest)
   if (!contract.ok) return { error: contract.reason }
 
   const requested = contract.kind === 'v1' ? [...contract.manifest.capabilities] : []
-  // Grant defaults: deny-by-default capabilities are NOT granted unless explicitly listed
-  const grantedInput = (input.grantedCapabilities || []).map((c) => c.trim()).filter(Boolean)
-  // Only grant what is requested; extra grants outside requested are ignored
-  const granted = grantedInput.filter((c) => requested.includes(c))
-
-  const contentText = input.rawContentForHash ?? JSON.stringify(input.rawManifest)
-  const contentHash = hashContent(contentText)
-  const fingerprint = fingerprintCapabilities(requested)
+  const contentText = input.rawContentForHash ?? canonicalJson(input.rawManifest)
+  const contentHash = await sha256Hex(contentText)
+  const fingerprint = await fingerprintCapabilities(requested)
 
   const relPath = snapshotFilePath(pluginId)
   const validated = validateProjectRelativePath(input.projectRoot, relPath)
@@ -191,7 +182,8 @@ export function createResolvedSnapshot(input: CreateSnapshotInput): PluginResolv
     contentHash,
     capabilityFingerprint: fingerprint,
     requestedCapabilities: requested,
-    grantedCapabilities: granted,
+    grantedCapabilities: [],
+    grantDecisions: [],
     createdAt: now,
     updatedAt: now,
     projectRelativePath: validated.normalized,
@@ -210,6 +202,7 @@ export function revokeGrants(snapshot: PluginResolvedSnapshot): PluginResolvedSn
   return {
     ...snapshot,
     grantedCapabilities: [],
+    grantScope: undefined,
     revokedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
@@ -218,23 +211,43 @@ export function revokeGrants(snapshot: PluginResolvedSnapshot): PluginResolvedSn
 export function grantCapabilities(
   snapshot: PluginResolvedSnapshot,
   toGrant: string[],
-  opts?: { runId?: string; threadId?: string },
+  scope: GrantScope,
 ): PluginResolvedSnapshot {
   const allowed = new Set(snapshot.requestedCapabilities)
-  const granted = [...new Set([...snapshot.grantedCapabilities, ...toGrant.filter((c) => allowed.has(c))])]
+  const sameScope = Boolean(
+    snapshot.grantScope
+    && snapshot.grantScope.runId === scope.runId
+    && snapshot.grantScope.threadId === scope.threadId,
+  )
+  // Grants from another run/thread must never bleed into the new scope.
+  const existing = sameScope ? snapshot.grantedCapabilities : []
+  const granted = [...new Set([...existing, ...toGrant.filter((c) => allowed.has(c))])]
   return {
     ...snapshot,
     grantedCapabilities: granted,
+    grantScope: { ...scope },
+    grantDecisions: [
+      ...snapshot.grantDecisions,
+      ...toGrant.filter((capability) => allowed.has(capability)).map((capability) => ({
+        capability,
+        granted: true,
+        decidedAt: new Date().toISOString(),
+        runId: scope.runId,
+        threadId: scope.threadId,
+      })),
+    ],
     grantedAt: new Date().toISOString(),
     revokedAt: undefined,
     updatedAt: new Date().toISOString(),
-    // store run/thread scope for audit (not raw token)
     credentialRefs: snapshot.credentialRefs,
   }
 }
 
-export function isCapabilityGranted(snapshot: PluginResolvedSnapshot, capability: string): boolean {
-  return snapshot.grantedCapabilities.includes(capability)
+export function isCapabilityGranted(snapshot: PluginResolvedSnapshot, capability: string, scope: GrantScope): boolean {
+  if (!snapshot.grantedCapabilities.includes(capability) || !snapshot.grantScope) return false
+  if (snapshot.grantScope.runId && snapshot.grantScope.runId !== scope.runId) return false
+  if (snapshot.grantScope.threadId && snapshot.grantScope.threadId !== scope.threadId) return false
+  return true
 }
 
 export function isSnapshotPathValid(projectRoot: string, relPath: string): boolean {
@@ -250,6 +263,6 @@ export function snapshotContainsNoRawToken(snapshot: PluginResolvedSnapshot): bo
   // Heuristic: raw token patterns — long base64-ish or sk- / ghp_ etc
   if (/sk-[a-zA-Z0-9]{20,}/.test(json)) return false
   if (/ghp_[a-zA-Z0-9]{30,}/.test(json)) return false
-  if (/\"token\"\s*:\s*\"[^"]{20,}\"/.test(json)) return false
+  if (/"token"\s*:\s*"[^"]{20,}"/.test(json)) return false
   return true
 }

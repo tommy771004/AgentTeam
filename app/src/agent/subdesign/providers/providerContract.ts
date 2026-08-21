@@ -1,5 +1,5 @@
 /**
- * Internal provider contracts — normalises all external systems into
+ * SubDesign provider contracts — normalises external systems into
  * product-owned vocabulary (context, evidence, surface, streaming).
  *
  * Every provider implements:
@@ -35,6 +35,9 @@ export type ProviderExecutionReceipt = {
   truncated?: boolean
 }
 
+const ADAPTER_EVIDENCE_BRAND: unique symbol = Symbol('subdesign.adapter-evidence')
+const issuedAdapterEvidence = new WeakSet<object>()
+
 export type ProviderEvidence = {
   evidenceId: string
   runId: string
@@ -44,10 +47,13 @@ export type ProviderEvidence = {
   summary: string
   capturedAt: string
   projectRelativeLocator?: string
-  /** Only adapter (trusted) may set true; model text never accepted */
+  /** Serializable diagnostic only. Runtime trust comes from the private brand. */
   adapterIssued: true
   severity?: 'info' | 'warning' | 'blocker'
+  readonly [ADAPTER_EVIDENCE_BRAND]: true
 }
+
+export type ProviderEvidenceInput = Omit<ProviderEvidence, 'adapterIssued' | typeof ADAPTER_EVIDENCE_BRAND>
 
 export type ProviderHandle = {
   providerId: ProviderId
@@ -59,7 +65,8 @@ export type ProviderHandle = {
 export type ProviderSession = {
   handle: ProviderHandle
   promise: Promise<ProviderExecutionReceipt>
-  evidence: ProviderEvidence[]
+  /** Evidence is unavailable until the adapter has actually observed completion. */
+  evidence: Promise<readonly ProviderEvidence[]>
 }
 
 export type ProviderOptions = {
@@ -86,11 +93,41 @@ export function isProviderCancellationError(e: unknown): boolean {
   return e instanceof Error && (e.name === 'AbortError' || e.message.includes('cancelled') || e.message.includes('aborted'))
 }
 
-// Adapter-issued evidence guard
+/**
+ * Trusted adapter boundary. The non-enumerable private brand and WeakSet
+ * membership do not survive JSON/IPC/model payload construction, so a caller
+ * cannot gain trust by setting `adapterIssued: true` on plain data.
+ */
+export function issueProviderEvidence(input: ProviderEvidenceInput): ProviderEvidence {
+  const evidence = {
+    ...input,
+    adapterIssued: true as const,
+  } as ProviderEvidence
+  Object.defineProperty(evidence, ADAPTER_EVIDENCE_BRAND, {
+    value: true,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  })
+  issuedAdapterEvidence.add(evidence)
+  return Object.freeze(evidence)
+}
+
 export function isAdapterEvidence(value: unknown): value is ProviderEvidence {
   if (!value || typeof value !== 'object') return false
   const v = value as Record<string, unknown>
-  return v.adapterIssued === true && typeof v.evidenceId === 'string' && typeof v.runId === 'string' && typeof v.providerId === 'string'
+  return issuedAdapterEvidence.has(value)
+    && v.adapterIssued === true
+    && typeof v.evidenceId === 'string'
+    && Boolean(v.evidenceId)
+    && typeof v.runId === 'string'
+    && Boolean(v.runId)
+    && typeof v.stageId === 'string'
+    && Boolean(v.stageId)
+    && ['storybook', 'chrome-devtools', 'harness', 'mcp-apps', 'fake-pipeline'].includes(String(v.providerId))
+    && ['context', 'execution', 'goal', 'surface', 'stream'].includes(String(v.kind))
+    && typeof v.capturedAt === 'string'
+    && !Number.isNaN(Date.parse(v.capturedAt))
 }
 
 export function rejectModelAttestedEvidence(value: unknown): { accepted: false; reason: string } | { accepted: true; evidence: ProviderEvidence } {

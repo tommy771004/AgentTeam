@@ -1,5 +1,5 @@
 /**
- * MCP Apps interactive surfaces — choice / form / confirmation.
+ * SubDesign MCP Apps interactive surfaces — choice / form / confirmation.
  * Sandboxed iframe + CSP + versioned schema validation + allowlist.
  * Always has native fallback.
  */

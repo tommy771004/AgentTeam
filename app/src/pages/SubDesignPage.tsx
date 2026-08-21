@@ -1,16 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { v4 as uuid } from 'uuid'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { critiqueAllowsDeliver } from '../agent/subdesign/critique'
 import { buildSubDesignPrompt } from '../agent/subdesign/prompt'
+import { prepareSubDesignPluginExecution } from '../agent/subdesign/pluginExecutionPreparation'
 import {
+  OPEN_DESIGN_EXPLORE_SOURCE,
+  OPEN_DESIGN_EXPLORE_TEMPLATE_IDS,
   OPEN_DESIGN_TEMPLATE_SOURCE,
   SUBDESIGN_TEMPLATE_CATEGORIES,
+  getOpenDesignExploreTemplates,
   openDesignRecordToTemplate,
   setSubDesignTemplateCache,
   type SubDesignTemplateCategory,
+  type SubDesignTemplateCollection,
 } from '../agent/subdesign/templateCatalog'
 import { loadOpenDesignCatalog, type OpenDesignCatalogRecord } from '../agent/openDesign/catalog'
-import type { SubDesignPlatform } from '../agent/subdesign/types'
+import type { SubDesignPlatform, SubDesignSurface } from '../agent/subdesign/types'
 import { stageLabel } from '../agent/subdesign/types'
 import { findLatestPassedSubDesignPreference } from '../agent/subdesign/preference'
 import { Icon } from '../components/Icon'
@@ -22,6 +28,7 @@ import { CritiqueTheater } from '../components/subdesign/CritiqueTheater'
 import { ArtifactTweakPanel } from '../components/subdesign/ArtifactTweakPanel'
 import { ReferenceImportPanel } from '../components/subdesign/ReferenceImportPanel'
 import { SubDesignFlowPrototype } from '../components/subdesign/SubDesignFlow.prototype'
+import { SubDesignUnifiedFixture } from '../components/subdesign/SubDesignUnified.fixture'
 import { SubDesignWorkspaceHeader } from '../components/subdesign/SubDesignWorkspaceHeader'
 import { SubDesignRunInspector } from '../components/subdesign/SubDesignRunInspector'
 import { SubDesignProjectStudio } from '../components/subdesign/SubDesignProjectStudio'
@@ -42,9 +49,16 @@ import { useRunActivityStore } from '../store/runActivityStore'
 import { useOpenDesignPackStore } from '../store/openDesignPackStore'
 import { useSettingsStore } from '../store/settingsStore'
 import type { ThreadRunner } from '../store/threadStore'
+import {
+  DEFAULT_STORYBOOK_PROVIDER_SETTINGS,
+  loadStorybookProviderState,
+  saveStorybookProviderSettings,
+  type StorybookProviderSettings,
+} from '../agent/subdesign/providers/providerSettings.ts'
+import type { SubDesignPluginExecutionProjection } from '../agent/subdesign/pluginExecution.ts'
 
 type DesignSurface = {
-  id: 'prototype' | 'dashboard' | 'design-system' | 'deck'
+  id: SubDesignSurface
   title: string
   description: string
   icon: string
@@ -55,6 +69,7 @@ const SURFACES: readonly DesignSurface[] = [
   { id: 'dashboard', title: '即時看板', description: '資料與決策工作台', icon: 'dashboard' },
   { id: 'design-system', title: 'Design System', description: '品牌規則與元件語言', icon: 'palette' },
   { id: 'deck', title: '簡報與報告', description: '可交付的敘事內容', icon: 'slideshow' },
+  { id: 'video', title: '動態影像', description: '影片幀與動效敘事', icon: 'movie' },
 ]
 
 const PLATFORMS: ReadonlyArray<{ id: SubDesignPlatform; label: string }> = [
@@ -96,6 +111,7 @@ export function SubDesignPage() {
   const hydrateThreads = useThreadStore((state) => state.hydrate)
   const threads = useThreadStore((state) => state.threads)
   const getRunIdForThread = useAgentStore((state) => state.getRunIdForThread)
+  const stopExecution = useAgentStore((state) => state.stopExecution)
   const projectRoot = useProjectStore((state) => state.root)
   const cliProviders = useSettingsStore((state) => state.settings.cliProviders)
   const briefs = useSubDesignStore((state) => state.briefs)
@@ -141,6 +157,7 @@ export function SubDesignPage() {
   const [designSystemId, setDesignSystemId] = useState('')
   const [runner, setRunner] = useState<ThreadRunner>('builtin')
   const [templateCategory, setTemplateCategory] = useState<SubDesignTemplateCategory>('all')
+  const [templateCollection, setTemplateCollection] = useState<SubDesignTemplateCollection>('explore')
   const [templateId, setTemplateId] = useState<string | undefined>()
   const [templateQuery, setTemplateQuery] = useState('')
   const [designSystemPackId, setDesignSystemPackId] = useState<string | undefined>()
@@ -149,6 +166,14 @@ export function SubDesignPage() {
   const [catalogWarning, setCatalogWarning] = useState('')
   const [selectedArtifactKey, setSelectedArtifactKey] = useState<string | null>(null)
   const [startingRun, setStartingRun] = useState(false)
+  const [storybookSettings, setStorybookSettings] = useState<StorybookProviderSettings>(DEFAULT_STORYBOOK_PROVIDER_SETTINGS)
+  const [storybookRuns, setStorybookRuns] = useState<SubDesignPluginExecutionProjection[]>([])
+
+  const refreshStorybookState = useCallback(async () => {
+    const state = await loadStorybookProviderState(projectRoot || undefined)
+    setStorybookSettings(state.settings)
+    setStorybookRuns(state.runs)
+  }, [projectRoot])
 
   const activeSurface = useMemo(
     () => SURFACES.find((surface) => surface.id === surfaceId) || SURFACES[0],
@@ -168,15 +193,23 @@ export function SubDesignPage() {
   useEffect(() => {
     setSubDesignTemplateCache(allTemplates)
   }, [allTemplates])
-  const visibleTemplates = allTemplates.filter((template) =>
-    (templateCategory === 'all' || template.category === templateCategory) &&
-    `${template.title} ${template.summary}`.toLowerCase().includes(templateQuery.trim().toLowerCase()),
+  const exploreTemplates = useMemo(
+    () => getOpenDesignExploreTemplates(allTemplates),
+    [allTemplates],
+  )
+  const collectionTemplates = templateCollection === 'explore' ? exploreTemplates : allTemplates
+  const visibleTemplates = useMemo(() => collectionTemplates.filter((template) =>
+      (templateCategory === 'all' || template.category === templateCategory) &&
+      `${template.title} ${template.summary}`.toLowerCase().includes(templateQuery.trim().toLowerCase()),
+    ),
+    [collectionTemplates, templateCategory, templateQuery],
   )
   const categoryCounts = useMemo(() => {
     const counts = new Map<SubDesignTemplateCategory, number>()
-    for (const template of allTemplates) counts.set(template.category, (counts.get(template.category) || 0) + 1)
+    for (const template of collectionTemplates) counts.set(template.category, (counts.get(template.category) || 0) + 1)
     return counts
-  }, [allTemplates])
+  }, [collectionTemplates])
+  const missingExploreTemplates = OPEN_DESIGN_EXPLORE_TEMPLATE_IDS.length - exploreTemplates.length
   const visibleArtifacts = activeBrief
     ? artifacts.filter((artifact) => artifact.briefId === activeBrief.id)
     : []
@@ -263,9 +296,11 @@ export function SubDesignPage() {
     setExportProjectRoot(projectRoot || '')
     setOpenDesignPackProjectRoot(projectRoot || '')
     void hydrateSubDesignStores(projectRoot || undefined)
+    void refreshStorybookState()
     void refreshSystems(projectRoot || undefined)
   }, [
     projectRoot,
+    refreshStorybookState,
     refreshSystems,
     setArtifactProjectRoot,
     setCritiqueProjectRoot,
@@ -298,6 +333,13 @@ export function SubDesignPage() {
   }, [activeBriefDesignSystemId, activeBriefId, activeBriefSurface, activeBriefTemplateId])
 
   useEffect(() => {
+    if (!routeBriefId) return
+    // SubDesign owns the live thread presentation on this route. The global
+    // transcript remains available through the explicit「執行摘要」action.
+    setShowRunPanel(false)
+  }, [linkedThreadRunId, routeBriefId, setShowRunPanel])
+
+  useEffect(() => {
     const requestedDesignSystemId = new URLSearchParams(location.search).get('designSystemId')
     if (!requestedDesignSystemId || !systems.some((system) => system.id === requestedDesignSystemId)) return
     setDesignSystemId(requestedDesignSystemId)
@@ -312,7 +354,8 @@ export function SubDesignPage() {
     if (!templateId && latestPassedPreference.templateId) setTemplateId(latestPassedPreference.templateId)
   }, [designSystemId, latestPassedPreference, templateId])
 
-  const startSubDesign = () => {
+  const startSubDesign = async () => {
+    if (!brief.trim() || startingRun) return
     const preferredDesignSystemId = designSystemId || latestPassedPreference?.designSystemId
     const preferredTemplateId = templateId || latestPassedPreference?.templateId
     const threadId = createThread({
@@ -338,6 +381,30 @@ export function SubDesignPage() {
     setSubDesignBriefId(threadId, created.id)
     selectBrief(created.id)
     navigate(`/subdesign/${created.id}`)
+    setStartingRun(true)
+    setShowRunPanel(false)
+    try {
+      const runId = `run_${uuid().slice(0, 12)}`
+      const pluginExecution = await prepareSubDesignPluginExecution({
+        brief: created,
+        runId,
+        projectRoot: projectRoot || undefined,
+      })
+      await runTask({
+        runId,
+        objective: buildSubDesignPrompt(
+          created,
+          systems.find((system) => system.id === preferredDesignSystemId),
+        ),
+        sourceKind: 'composer',
+        reuseThreadId: threadId,
+        runner,
+        overrides: pluginExecution.ready ? { subDesignPluginExecution: pluginExecution.request } : undefined,
+      })
+    } finally {
+      setStartingRun(false)
+      void refreshStorybookState()
+    }
   }
 
   const resumeBrief = (id: string) => {
@@ -355,12 +422,46 @@ export function SubDesignPage() {
     setStartingRun(true)
     setShowRunPanel(false)
     try {
+      const runId = `run_${uuid().slice(0, 12)}`
+      const pluginExecution = await prepareSubDesignPluginExecution({
+        brief: activeBrief,
+        runId,
+        projectRoot: projectRoot || undefined,
+      })
       await runTask({
+        runId,
         objective: buildSubDesignPrompt(activeBrief, selectedSystem),
         sourceKind: 'composer',
         reuseThreadId: activeBrief.threadId,
         runner: linkedThread?.runner || 'builtin',
         loopType: linkedThread?.loopType || undefined,
+        overrides: pluginExecution.ready ? { subDesignPluginExecution: pluginExecution.request } : undefined,
+      })
+    } finally {
+      setStartingRun(false)
+      void refreshStorybookState()
+    }
+  }
+
+  const submitStudioFollowUp = async (value: string) => {
+    if (!activeBrief || startingRun || !value.trim()) return
+    setStartingRun(true)
+    setShowRunPanel(false)
+    try {
+      const runId = `run_${uuid().slice(0, 12)}`
+      const pluginExecution = await prepareSubDesignPluginExecution({
+        brief: activeBrief,
+        runId,
+        projectRoot: projectRoot || undefined,
+      })
+      await runTask({
+        runId,
+        objective: value.trim(),
+        sourceKind: 'composer',
+        reuseThreadId: activeBrief.threadId,
+        runner: linkedThread?.runner || 'builtin',
+        loopType: linkedThread?.loopType || undefined,
+        overrides: pluginExecution.ready ? { subDesignPluginExecution: pluginExecution.request } : undefined,
       })
     } finally {
       setStartingRun(false)
@@ -379,6 +480,9 @@ export function SubDesignPage() {
   if (import.meta.env.DEV && new URLSearchParams(location.search).get('prototype') === 'subdesign-flow') {
     return <SubDesignFlowPrototype />
   }
+  if (import.meta.env.DEV && new URLSearchParams(location.search).get('prototype') === 'subdesign-unified') {
+    return <SubDesignUnifiedFixture />
+  }
 
   if (routeBriefId && activeBrief && workspace) {
     const activeSystem = systems.find((system) => system.id === activeBrief.designSystemId) || null
@@ -387,20 +491,32 @@ export function SubDesignPage() {
         brief={activeBrief}
         workspace={workspace}
         designSystem={activeSystem}
+        thread={linkedThread || null}
         artifacts={visibleArtifacts}
         selectedArtifact={selectedArtifact}
         critique={latestCritique}
         critiquePassed={Boolean(latestCritique && critiqueAllowsDeliver(latestCritique))}
         runIsLive={runIsLive}
         runId={linkedThreadRunId}
-        executionKind={linkedAgent?.executionKind}
         startingRun={startingRun}
         onBack={() => navigate('/subdesign')}
         onOpenDesignSystems={() => navigate(`/design-systems?returnTo=${encodeURIComponent(`/subdesign/${activeBrief.id}`)}&briefId=${encodeURIComponent(activeBrief.id)}`)}
         onStartRun={() => void startBriefRun()}
+        onStopRun={() => { if (linkedThreadRunId) stopExecution(linkedThreadRunId) }}
+        onSubmitFollowUp={submitStudioFollowUp}
         onOpenTranscript={openTranscript}
         onSelectArtifact={(artifact) => setSelectedArtifactKey(`${artifact.id}:${artifact.revision}`)}
         onSelectDirection={(directionId) => { selectDirection(activeBrief.id, directionId, undefined, projectRoot || undefined) }}
+        storybookSettings={storybookSettings}
+        latestStorybookRun={storybookRuns.find((item) => item.briefId === activeBrief.id) || storybookRuns[0] || null}
+        onSaveStorybookSettings={async (value) => {
+          const result = await saveStorybookProviderSettings(value, projectRoot || undefined)
+          if (result.ok) {
+            setStorybookSettings(result.settings)
+            return { ok: true }
+          }
+          return { ok: false, reason: result.reason }
+        }}
       />
     )
   }
@@ -509,7 +625,7 @@ export function SubDesignPage() {
                 type="button"
                 onClick={startSubDesign}
                 disabled={!brief.trim()}
-                className="macos-btn inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-[13px] font-semibold text-on-primary shadow-[0_8px_22px_rgba(43,184,217,0.18)] hover:bg-primary-container focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
+                className="macos-btn inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary-container focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Icon name="send" size={17} />建立設計
               </button>
@@ -591,43 +707,91 @@ export function SubDesignPage() {
         ) : null}
 
         <section className="mx-auto mt-10 max-w-[1120px]">
-          <div className="flex flex-col items-center gap-3">
-            <h2 className="text-center text-[13px] font-semibold text-outline">從範本開始</h2>
-            <label className="relative w-full max-w-[420px]">
+          <div className="flex flex-col gap-5 border-b border-white/[0.08] pb-4">
+            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="text-[22px] font-semibold tracking-tight text-on-surface">探索全部資源</h2>
+                <p className="mt-1 max-w-[620px] text-[12px] leading-relaxed text-outline">
+                  先瀏覽 OpenDesign 官網精選的 24 個範本，也可切換到完整本機 catalog。選定後會保留來源、digest 與授權證據。
+                </p>
+              </div>
+              <div className="flex items-center gap-5" role="group" aria-label="範本資源集合">
+                {([
+                  { id: 'explore', label: `官方精選 ${exploreTemplates.length}` },
+                  { id: 'all', label: `本機全部 ${allTemplates.length}` },
+                ] as const).map((collection) => {
+                  const selected = collection.id === templateCollection
+                  return (
+                    <button
+                      key={collection.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => {
+                        setTemplateCollection(collection.id)
+                        setTemplateCategory('all')
+                      }}
+                      className={`border-b-2 py-2 text-[12px] font-medium transition-colors ${
+                        selected
+                          ? 'border-primary text-on-surface'
+                          : 'border-transparent text-outline hover:text-on-surface'
+                      }`}
+                    >
+                      {collection.label}
+                    </button>
+                  )
+                })}
+                <a
+                  href={templateCollection === 'explore' ? OPEN_DESIGN_EXPLORE_SOURCE : OPEN_DESIGN_TEMPLATE_SOURCE}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] text-outline transition-colors hover:text-primary"
+                >
+                  查看來源 <Icon name="open_in_new" size={13} />
+                </a>
+              </div>
+            </div>
+            <label className="relative w-full max-w-[460px]">
               <span className="sr-only">搜尋 Open Design template</span>
               <Icon name="search" size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
               <input
                 value={templateQuery}
                 onChange={(event) => setTemplateQuery(event.target.value)}
-                placeholder="搜尋本機 Open Design template…"
+                placeholder={templateCollection === 'explore' ? '搜尋 24 個官方精選範本…' : '搜尋完整本機 OpenDesign catalog…'}
                 className="h-10 w-full rounded-xl border border-white/10 bg-surface-container-low pl-9 pr-3 text-[12px] text-on-surface outline-none placeholder:text-outline/70 focus:border-primary/40"
               />
             </label>
-            <div className="flex w-full gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+            <div className="flex w-full gap-5 overflow-x-auto [scrollbar-width:none]" aria-label="範本類型">
               {SUBDESIGN_TEMPLATE_CATEGORIES.map((category) => {
                 const selected = category.id === templateCategory
-                const count = category.id === 'all' ? allTemplates.length : categoryCounts.get(category.id) || 0
+                const count = category.id === 'all' ? collectionTemplates.length : categoryCounts.get(category.id) || 0
                 return (
                   <button
                     key={category.id}
                     type="button"
+                    aria-pressed={selected}
                     onClick={() => setTemplateCategory(category.id)}
-                    className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] transition-colors ${
+                    className={`shrink-0 border-b-2 py-2 text-[12px] transition-colors ${
                       selected
-                        ? 'border-primary bg-primary text-on-primary'
-                        : 'border-white/10 bg-surface-container-low text-outline hover:border-primary/35 hover:text-on-surface'
+                        ? 'border-primary text-on-surface'
+                        : 'border-transparent text-outline hover:text-on-surface'
                     }`}
                   >
-                    {category.label} <span className="opacity-70">{count}</span>
+                    {category.label} <span className="ml-1 text-[10px] opacity-65">{count}</span>
                   </button>
                 )
               })}
             </div>
           </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {visibleTemplates.map((template) => {
+          {missingExploreTemplates > 0 && templateCollection === 'explore' ? (
+            <p className="mt-4 text-[11px] font-medium text-secondary" role="status">
+              有 {missingExploreTemplates} 個官方精選範本尚未同步到本機，已暫時隱藏，避免產生無內容的選項。
+            </p>
+          ) : null}
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {visibleTemplates.map((template, index) => {
               const selected = template.id === templateId
               const unavailable = template.availability === 'requires-capability'
+              const categoryLabel = SUBDESIGN_TEMPLATE_CATEGORIES.find((category) => category.id === template.category)?.label || template.category
               return (
                 <button
                   key={template.id}
@@ -639,7 +803,7 @@ export function SubDesignPage() {
                     setSurfaceId(template.surface)
                     setBrief((current) => current || template.suggestedObjective)
                   }}
-                  className={`group min-h-[166px] rounded-2xl border text-left transition-all ${
+                  className={`group flex min-h-[176px] flex-col rounded-2xl border p-4 text-left transition-colors ${
                     selected
                       ? 'border-primary/45 bg-primary/[0.08]'
                       : unavailable
@@ -647,20 +811,25 @@ export function SubDesignPage() {
                         : 'border-white/10 bg-surface-container-low hover:border-primary/30 hover:bg-white/[0.04]'
                   }`}
                 >
-                  <span className={`grid h-[92px] place-items-center border-b ${selected ? 'border-primary/20 text-primary' : 'border-white/[0.07] text-outline group-hover:text-primary'}`}>
-                    <Icon name={template.icon} size={34} />
+                  <span className="flex items-center justify-between text-[11px] text-outline">
+                    <span className="tabular-nums">{String(index + 1).padStart(2, '0')}</span>
+                    <Icon name={template.icon} size={19} className={selected ? 'text-primary' : 'text-outline group-hover:text-on-surface'} />
                   </span>
-                  <span className="block px-4 pb-4 pt-3">
-                    <span className="flex items-center justify-between gap-2 text-[14px] font-semibold text-on-surface">
-                      <span>{template.title}</span>
-                      {unavailable ? <span className="text-[10px] font-medium text-outline">尚未啟用</span> : null}
-                    </span>
-                    <span className="mt-1 block text-[12px] text-outline">{template.summary}</span>
+                  <span className="mt-5 block text-[15px] font-semibold leading-snug text-on-surface">{template.title}</span>
+                  <span className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-outline">{template.summary}</span>
+                  <span className="mt-auto flex items-end justify-between gap-3 pt-4 text-[10px] text-outline">
+                    <span>{categoryLabel}</span>
+                    <span>{unavailable ? '需要額外 capability' : selected ? '已選取' : '可直接選用'}</span>
                   </span>
                 </button>
               )
             })}
           </div>
+          {!catalogLoading && visibleTemplates.length === 0 ? (
+            <p className="mt-5 rounded-xl bg-surface-container-low px-4 py-5 text-center text-[12px] text-outline" role="status">
+              找不到符合目前類型與關鍵字的範本。
+            </p>
+          ) : null}
           {selectedCatalogRecord ? (
             <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/[0.05] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
@@ -668,7 +837,7 @@ export function SubDesignPage() {
                 <p className="mt-1 truncate text-[11px] text-outline">{selectedCatalogRecord.sourcePath} · digest {selectedCatalogRecord.digest.slice(0, 12)}… · {selectedCatalogRecord.licensePaths.length ? '已找到授權檔' : '未找到授權檔'}</p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <span className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-outline">{selectedCatalogRecord.kind}</span>
+                <span className="text-[10px] text-outline">內容類型：{selectedCatalogRecord.kind}</span>
                 <button
                   type="button"
                   disabled={openDesignPackBusyId === `open-design:${selectedCatalogRecord.id}`}
@@ -686,8 +855,8 @@ export function SubDesignPage() {
           {openDesignPackError ? <p className="mt-2 text-[11px] text-error">Content pack：{openDesignPackError}</p> : null}
           <p className="mt-4 text-center text-[11px] text-outline">
             {catalogLoading ? '正在讀取本機 Open Design inventory…' : catalogWarning ? `Inventory fallback：${catalogWarning}` : `已索引 ${allTemplates.length} 個本機 vendor template。`}
-            {' '}圖像、影片、HyperFrames 與音訊需先啟用對應 capability。參考來源：{' '}
-            <a href={OPEN_DESIGN_TEMPLATE_SOURCE} target="_blank" rel="noreferrer" className="text-primary hover:underline">Open Design templates</a>
+            {' '}不具相容 surface 或 runtime 的項目會標示所需 capability。參考來源：{' '}
+            <a href={OPEN_DESIGN_TEMPLATE_SOURCE} target="_blank" rel="noreferrer" className="text-primary transition-colors hover:text-on-surface">Open Design templates</a>
           </p>
         </section>
 

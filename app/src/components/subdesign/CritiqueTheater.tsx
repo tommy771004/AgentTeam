@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { v4 as uuid } from 'uuid'
 import { runTask } from '../../agent/taskRunCoordinator'
 import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignCritiquePanelist, SubDesignCritiqueRound } from '../../agent/subdesign/types'
 import { Icon } from '../Icon'
@@ -7,6 +8,20 @@ import { useProjectStore } from '../../store/projectStore'
 import { useRunActivityStore } from '../../store/runActivityStore'
 import { useSubDesignCritiqueStore } from '../../store/subDesignCritiqueStore'
 import { useSubDesignCritiqueSessionStore } from '../../store/subDesignCritiqueSessionStore'
+import { prepareSubDesignPluginExecution } from '../../agent/subdesign/pluginExecutionPreparation.ts'
+import {
+  DEFAULT_CHROME_DEVTOOLS_PROVIDER_SETTINGS,
+  loadChromeDevToolsProviderState,
+  saveChromeDevToolsProviderSettings,
+  validateChromeDevToolsProviderEndpoint,
+  type ChromeDevToolsProviderSettings,
+  DEFAULT_HARNESS_PROVIDER_SETTINGS,
+  loadHarnessProviderState,
+  saveHarnessProviderSettings,
+  type HarnessProviderSettings,
+} from '../../agent/subdesign/providers/providerSettings.ts'
+import type { SubDesignPluginExecutionProjection } from '../../agent/subdesign/pluginExecution.ts'
+import { chromeDevToolsEvidenceAllowsPass } from '../../agent/subdesign/providers/chromeDevToolsProvider.ts'
 
 /** Tools blocked in both Critique Theater rounds: it's read-only against the artifact. */
 const CRITIQUE_BLOCKED_TOOLS = [
@@ -106,13 +121,42 @@ export function CritiqueTheater({
   const latestForArtifact = useSubDesignCritiqueStore((state) => state.latestForArtifact)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [cdtSettings, setCdtSettings] = useState<ChromeDevToolsProviderSettings>(DEFAULT_CHROME_DEVTOOLS_PROVIDER_SETTINGS)
+  const [cdtEndpoint, setCdtEndpoint] = useState(DEFAULT_CHROME_DEVTOOLS_PROVIDER_SETTINGS.endpoint)
+  const [cdtRuns, setCdtRuns] = useState<SubDesignPluginExecutionProjection[]>([])
+  const [providerMessage, setProviderMessage] = useState('')
+  const [harnessSettings, setHarnessSettings] = useState<HarnessProviderSettings>(DEFAULT_HARNESS_PROVIDER_SETTINGS)
+  const [harnessGoal, setHarnessGoal] = useState('完成此設計的主要任務，並指出任何卡住或不清楚的操作。')
+  const [harnessPersona, setHarnessPersona] = useState('第一次使用此產品、沒有受過操作訓練的使用者。')
+  const [harnessRuns, setHarnessRuns] = useState<SubDesignPluginExecutionProjection[]>([])
+  const [harnessStatus, setHarnessStatus] = useState<{ available: boolean; platform: string; version: string | null; reason: string | null; screenRecording: string; accessibility: string } | null>(null)
   const capacity = canStartRun(undefined, brief?.threadId || undefined)
   const isRunning = Boolean(threadRunId) || !capacity.allowed
+
+  const refreshCdtState = useCallback(async () => {
+    const [cdtState, harnessState] = await Promise.all([
+      loadChromeDevToolsProviderState(projectRoot || undefined),
+      loadHarnessProviderState(projectRoot || undefined),
+    ])
+    setCdtSettings(cdtState.settings)
+    setCdtEndpoint(cdtState.settings.endpoint)
+    setCdtRuns(cdtState.runs)
+    setHarnessSettings(harnessState.settings)
+    setHarnessRuns(harnessState.runs)
+    const status = await window.subagents?.subdesign.harnessStatus?.(harnessState.settings.binaryPath)
+    if (status) setHarnessStatus(status)
+  }, [projectRoot])
+
+  useEffect(() => {
+    void refreshCdtState()
+  }, [refreshCdtState])
 
   const latestActivity = useMemo(() => {
     const event = activity?.events[activity.events.length - 1]
     return activity?.statusLine || event?.title || event?.detail || ''
   }, [activity])
+  const latestCdtRun = useMemo(() => cdtRuns.find((run) => run.briefId === brief?.id), [brief?.id, cdtRuns])
+  const latestHarnessRun = useMemo(() => harnessRuns.find((run) => run.briefId === brief?.id), [brief?.id, harnessRuns])
 
   const runCritique = async () => {
     if (!brief || !artifact || busy || isRunning) return
@@ -121,8 +165,68 @@ export function CritiqueTheater({
     const baselineRevision = latestForArtifact(artifact.id, artifact.revision)?.revision || 0
     startSession({ briefId: brief.id, artifactId: artifact.id, artifactRevision: artifact.revision })
     try {
+      let harnessGateReason = ''
+      if (harnessSettings.enabled) {
+        setMessage('正在執行 Harness goal-based UX check…')
+        const harnessRunId = `run_${uuid().slice(0, 12)}`
+        const preparedHarness = await prepareSubDesignPluginExecution({
+          brief,
+          runId: harnessRunId,
+          projectRoot: projectRoot || undefined,
+          providerOverride: {
+            providerId: 'harness',
+            failurePolicy: 'continue-on-blocked',
+            providerConfig: {
+              enabled: true,
+              resolvedVersion: harnessSettings.resolvedVersion,
+              binaryPath: harnessSettings.binaryPath,
+              targetUrl: harnessSettings.targetUrl,
+              platform: 'web',
+              goal: harnessGoal,
+              persona: harnessPersona,
+              artifactId: artifact.id,
+              stepBudget: 20,
+            },
+          },
+        })
+        if (preparedHarness.ready) {
+          await runTask({
+            runId: harnessRunId,
+            objective: `執行 Harness UX check：${harnessGoal}`,
+            sourceKind: 'composer',
+            reuseThreadId: brief.threadId,
+            runner: 'builtin',
+            loopType: 'Goal-based',
+            projectRoot: projectRoot || undefined,
+            overrides: { agentMode: 'plan', maxIterations: 1, maxToolRounds: 1, blockedTools: CRITIQUE_BLOCKED_TOOLS, subDesignPluginExecution: preparedHarness.request, extraSystemContext: 'Harness is optional execution evidence. Summarize its Host projection only; do not manufacture steps, screenshots, friction, or a passing verdict.' },
+          })
+          const state = await loadHarnessProviderState(projectRoot || undefined)
+          setHarnessRuns(state.runs)
+          const projection = state.runs.find((run) => run.runId === harnessRunId)
+          if (!projection?.goalResult || projection.goalResult.outcome !== 'success') harnessGateReason = projection?.summary || 'Harness 沒有可信的 success goal result。'
+        } else harnessGateReason = preparedHarness.reason
+      }
       startRound(1)
+      const round1RunId = `run_${uuid().slice(0, 12)}`
+      const round1Provider = cdtSettings.enabled
+        ? await prepareSubDesignPluginExecution({
+            brief,
+            runId: round1RunId,
+            projectRoot: projectRoot || undefined,
+            providerOverride: {
+              providerId: 'chrome-devtools',
+              failurePolicy: 'continue-on-blocked',
+              providerConfig: {
+                enabled: true,
+                endpoint: cdtSettings.endpoint,
+                resolvedVersion: cdtSettings.resolvedVersion,
+                artifactId: artifact.id,
+              },
+            },
+          })
+        : null
       const round1 = await runTask({
+        runId: round1RunId,
         objective: buildRound1Objective(brief, artifact),
         sourceKind: 'composer',
         reuseThreadId: brief.threadId,
@@ -134,7 +238,8 @@ export function CritiqueTheater({
           maxIterations: 3,
           maxToolRounds: 10,
           blockedTools: [...CRITIQUE_BLOCKED_TOOLS, 'design_critique'],
-          extraSystemContext: 'Critique Theater round 1: independent review. Write exactly three design_critique_note calls (round=1), one per panelist, each with its own reasoning. Do not call design_critique yet — that only happens after round 2.',
+          extraSystemContext: `Critique Theater round 1: independent review. Write exactly three design_critique_note calls (round=1), one per panelist, each with its own reasoning. Do not call design_critique yet — that only happens after round 2.${cdtSettings.enabled && !round1Provider?.ready ? ` Browser runtime evidence was requested but unavailable (${round1Provider?.reason || 'unknown'}); do not treat it as passed evidence.` : ''}`,
+          ...(round1Provider?.ready ? { subDesignPluginExecution: round1Provider.request } : {}),
         },
       })
       if (round1.queued || round1.skipped) {
@@ -152,7 +257,26 @@ export function CritiqueTheater({
 
       setMessage('正在啟動第二輪交叉核對…')
       startRound(2)
+      const round2RunId = `run_${uuid().slice(0, 12)}`
+      const round2Provider = cdtSettings.enabled
+        ? await prepareSubDesignPluginExecution({
+            brief,
+            runId: round2RunId,
+            projectRoot: projectRoot || undefined,
+            providerOverride: {
+              providerId: 'chrome-devtools',
+              failurePolicy: 'continue-on-blocked',
+              providerConfig: {
+                enabled: true,
+                endpoint: cdtSettings.endpoint,
+                resolvedVersion: cdtSettings.resolvedVersion,
+                artifactId: artifact.id,
+              },
+            },
+          })
+        : null
       const round2 = await runTask({
+        runId: round2RunId,
         objective: buildRound2Objective(brief, artifact, round1Notes),
         sourceKind: 'composer',
         reuseThreadId: brief.threadId,
@@ -164,7 +288,8 @@ export function CritiqueTheater({
           maxIterations: 4,
           maxToolRounds: 14,
           blockedTools: CRITIQUE_BLOCKED_TOOLS,
-          extraSystemContext: 'Critique Theater round 2: cross-check round 1 blockers specifically (do not just restate them), write three design_critique_note calls (round=2), then call design_critique exactly once with the final synthesis.',
+          extraSystemContext: `Critique Theater round 2: cross-check round 1 blockers specifically (do not just restate them), write three design_critique_note calls (round=2), then call design_critique exactly once with the final synthesis.${cdtSettings.enabled && !round2Provider?.ready ? ` Browser runtime evidence was requested but unavailable (${round2Provider?.reason || 'unknown'}); final verdict cannot pass based on missing runtime evidence.` : ''}`,
+          ...(round2Provider?.ready ? { subDesignPluginExecution: round2Provider.request } : {}),
         },
       })
       if (round2.queued || round2.skipped) {
@@ -179,6 +304,24 @@ export function CritiqueTheater({
         setMessage('Agent run 完成，但沒有寫入新的 evidence-based critique。')
         return
       }
+      if (cdtSettings.enabled) {
+        const providerState = await loadChromeDevToolsProviderState(projectRoot || undefined)
+        const runtimeGate = chromeDevToolsEvidenceAllowsPass(
+          providerState.runs.find((run) => run.runId === round2RunId),
+          { runId: round2RunId, artifactId: artifact.id },
+        )
+        if (!runtimeGate.allowed) {
+          failSession(`Browser runtime evidence 未通過：${runtimeGate.reason}`)
+          setMessage(`Browser runtime evidence 未通過：${runtimeGate.reason}`)
+          setCdtRuns(providerState.runs)
+          return
+        }
+      }
+      if (harnessGateReason) {
+        failSession(`Harness UX check 未通過：${harnessGateReason}`)
+        setMessage(`靜態與 browser evidence 已完成，但 Harness UX check 未通過：${harnessGateReason}`)
+        return
+      }
       finishSession(nextCritique)
       setMessage(nextCritique ? `Critique 完成 · ${nextCritique.verdict}` : 'Agent run 完成，但沒有可驗證 critique。')
     } catch (error) {
@@ -187,6 +330,7 @@ export function CritiqueTheater({
       setMessage(`Critique 失敗：${detail}`)
     } finally {
       setBusy(false)
+      void refreshCdtState()
     }
   }
 
@@ -203,7 +347,7 @@ export function CritiqueTheater({
     : null)
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-primary/20 bg-surface-container-low/55 shadow-[0_12px_35px_rgba(0,0,0,0.14)]">
+    <section className="overflow-hidden rounded-2xl border border-primary/20 bg-surface-container-low/55">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/8 px-4 py-3.5">
         <div className="flex min-w-0 items-start gap-2.5">
           <span className={`grid h-9 w-9 shrink-0 place-items-center ${sessionRunning ? 'text-secondary' : 'text-primary'}`}>
@@ -212,7 +356,7 @@ export function CritiqueTheater({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-[13px] font-semibold text-on-surface">Critique Theater</h3>
-              <span className="rounded-full border border-primary/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">2 rounds · 3 panelists</span>
+              <span className="text-[11px] text-on-surface-variant">2 rounds · 3 panelists</span>
             </div>
             <p className="mt-1 text-[11px] text-outline">即時 evidence review · 只讀 · threshold {session?.threshold || 70}</p>
           </div>
@@ -227,6 +371,124 @@ export function CritiqueTheater({
           </button>
         )}
       </div>
+
+      <div className="flex flex-wrap items-center gap-3 border-b border-white/8 px-4 py-2.5">
+        <label className="flex shrink-0 items-center gap-2 text-[11px] font-medium text-on-surface">
+          <input
+            type="checkbox"
+            checked={cdtSettings.enabled}
+            disabled={busy || sessionRunning}
+            onChange={async (event) => {
+              const enabled = event.target.checked
+              const result = await saveChromeDevToolsProviderSettings({ enabled, endpoint: cdtEndpoint }, projectRoot || undefined)
+              if (result.ok) {
+                setCdtSettings(result.settings)
+                setProviderMessage(enabled ? 'Browser runtime evidence 已啟用。' : '維持靜態 critique。')
+              } else setProviderMessage(result.reason)
+            }}
+            className="h-4 w-4 accent-primary"
+          />
+          Browser runtime evidence
+        </label>
+        {cdtSettings.enabled ? (
+          <>
+            <label className="min-w-[190px] flex-1">
+              <span className="sr-only">Chrome DevTools endpoint</span>
+              <input
+                type="url"
+                value={cdtEndpoint}
+                disabled={busy || sessionRunning}
+                onChange={(event) => setCdtEndpoint(event.target.value)}
+                className="h-8 w-full rounded-lg bg-background/50 px-2.5 text-[11px] text-on-surface outline-none ring-1 ring-white/10 focus:ring-primary/55"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={busy || sessionRunning}
+              onClick={async () => {
+                const validation = validateChromeDevToolsProviderEndpoint(cdtEndpoint)
+                if (validation) return setProviderMessage(validation)
+                const result = await saveChromeDevToolsProviderSettings({ enabled: true, endpoint: cdtEndpoint }, projectRoot || undefined)
+                if (result.ok) {
+                  setCdtSettings(result.settings)
+                  setProviderMessage('CDP endpoint 已儲存。')
+                } else setProviderMessage(result.reason)
+              }}
+              className="h-8 rounded-lg px-3 text-[10px] font-semibold text-primary transition-colors hover:bg-primary/10 disabled:opacity-40"
+            >
+              儲存 endpoint
+            </button>
+          </>
+        ) : null}
+        <span className="min-w-0 truncate text-[11px] text-on-surface-variant" aria-live="polite" title={providerMessage || latestCdtRun?.summary}>
+          {providerMessage || (latestCdtRun ? `Last: ${latestCdtRun.findings?.length || 0} findings${latestCdtRun.partial ? ' · partial' : ''}` : 'Optional · CDP 1.3 · localhost only')}
+        </span>
+      </div>
+
+      {latestCdtRun ? (
+        <div className="border-b border-white/8 px-4 py-3" data-testid="cdt-evidence-summary">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <p className="text-[11px] font-semibold text-on-surface">Browser evidence · {latestCdtRun.state}</p>
+            <p className="text-[10px] text-on-surface-variant">chrome-devtools · {latestCdtRun.stageId}{latestCdtRun.partial ? ' · partial' : ''}</p>
+          </div>
+          <p className="mt-1 text-[10px] leading-4 text-on-surface-variant">{latestCdtRun.summary}</p>
+          {latestCdtRun.findings?.length ? (
+            <ul className="mt-2 space-y-1.5">
+              {latestCdtRun.findings.slice(0, 3).map((finding, index) => (
+                <li key={`${finding.kind}-${finding.capturedAt}-${index}`} className="grid grid-cols-[64px_1fr] gap-2 text-[10px] leading-4">
+                  <span className={finding.severity === 'blocker' ? 'font-semibold text-error' : finding.severity === 'warning' ? 'font-semibold text-secondary' : 'text-on-surface-variant'}>{finding.severity}</span>
+                  <span className="min-w-0 text-on-surface-variant"><span className="font-medium text-on-surface">{finding.kind}</span> · {finding.message}{finding.path ? ` · ${finding.path}` : ''}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {latestCdtRun.attachments?.length ? (
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              {latestCdtRun.attachments.map((attachment) => (
+                <button
+                  key={attachment.locator}
+                  type="button"
+                  title={attachment.locator}
+                  onClick={async () => {
+                    const result = await window.subagents?.subdesign.revealProviderAttachment({ locator: attachment.locator, projectRoot: projectRoot || undefined })
+                    setProviderMessage(result?.ok ? `已在 Finder 顯示 ${attachment.kind}。` : result?.error || '無法開啟附件。')
+                  }}
+                  className="text-[10px] font-medium text-primary transition-colors hover:text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/45"
+                >
+                  顯示 {attachment.kind} · {Math.max(1, Math.ceil(attachment.bytes / 1024))} KB
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <details className="border-b border-white/8 px-4 py-3">
+        <summary className="cursor-pointer text-[11px] font-semibold text-on-surface">Goal-based UX check <span className="ml-2 font-normal text-on-surface-variant">Harness {harnessSettings.enabled ? 'On' : 'Off'} · web · {harnessStatus ? (harnessStatus.available ? `${harnessStatus.version} ready` : harnessStatus.reason) : 'desktop status unavailable'}</span></summary>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <label className="text-[10px] text-on-surface-variant">Goal
+            <textarea value={harnessGoal} disabled={busy || sessionRunning} onChange={(event) => setHarnessGoal(event.target.value)} rows={2} className="mt-1 w-full resize-none rounded-lg bg-background/50 px-2.5 py-2 text-[11px] leading-4 text-on-surface outline-none ring-1 ring-white/10 focus:ring-primary/55" />
+          </label>
+          <label className="text-[10px] text-on-surface-variant">Persona
+            <textarea value={harnessPersona} disabled={busy || sessionRunning} onChange={(event) => setHarnessPersona(event.target.value)} rows={2} className="mt-1 w-full resize-none rounded-lg bg-background/50 px-2.5 py-2 text-[11px] leading-4 text-on-surface outline-none ring-1 ring-white/10 focus:ring-primary/55" />
+          </label>
+          <label className="text-[10px] text-on-surface-variant">Local web target
+            <input value={harnessSettings.targetUrl} disabled={busy || sessionRunning} onChange={(event) => setHarnessSettings((current) => ({ ...current, targetUrl: event.target.value }))} className="mt-1 h-8 w-full rounded-lg bg-background/50 px-2.5 text-[11px] text-on-surface outline-none ring-1 ring-white/10 focus:ring-primary/55" />
+          </label>
+          <label className="text-[10px] text-on-surface-variant">harness-mcp 0.7.0 binary
+            <input value={harnessSettings.binaryPath} disabled={busy || sessionRunning} onChange={(event) => setHarnessSettings((current) => ({ ...current, binaryPath: event.target.value }))} className="mt-1 h-8 w-full rounded-lg bg-background/50 px-2.5 text-[11px] text-on-surface outline-none ring-1 ring-white/10 focus:ring-primary/55" />
+          </label>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-[11px] font-medium text-on-surface"><input type="checkbox" checked={harnessSettings.enabled} disabled={busy || sessionRunning} onChange={(event) => setHarnessSettings((current) => ({ ...current, enabled: event.target.checked }))} className="h-4 w-4 accent-primary" />Run before Critique</label>
+          <button type="button" disabled={busy || sessionRunning} onClick={async () => {
+            const result = await saveHarnessProviderSettings({ enabled: harnessSettings.enabled, binaryPath: harnessSettings.binaryPath, targetUrl: harnessSettings.targetUrl }, projectRoot || undefined)
+            if (result.ok) { setHarnessSettings(result.settings); setProviderMessage('Harness project settings 已儲存。') } else setProviderMessage(result.reason)
+          }} className="text-[10px] font-semibold text-primary hover:text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/45">儲存 Harness 設定</button>
+        </div>
+        <p className="mt-2 text-[10px] leading-4 text-on-surface-variant">Target platform: web. Web run 不需要 Screen Recording / Accessibility；macOS app run 才需要（目前狀態：Screen Recording {harnessStatus?.screenRecording || 'unknown'} / Accessibility {harnessStatus?.accessibility || 'unknown'}）。</p>
+        {latestHarnessRun ? <div className="mt-3 text-[10px] leading-4 text-on-surface-variant"><p><span className="font-semibold text-on-surface">Latest · {latestHarnessRun.goalResult?.outcome || latestHarnessRun.state}</span> · {latestHarnessRun.goalResult?.steps.length || 0} steps · {latestHarnessRun.goalResult?.frictionEvents.length || 0} friction</p><p>{latestHarnessRun.summary}</p>{latestHarnessRun.goalResult?.steps.at(-1) ? <p>Last: {latestHarnessRun.goalResult.steps.at(-1)?.action} · {latestHarnessRun.goalResult.steps.at(-1)?.observation}</p> : null}{latestHarnessRun.goalResult?.frictionEvents.at(-1) ? <p>Friction: {latestHarnessRun.goalResult.frictionEvents.at(-1)?.type} · {latestHarnessRun.goalResult.frictionEvents.at(-1)?.detail}</p> : null}{latestHarnessRun.attachments?.length ? <div className="mt-1 flex flex-wrap gap-x-4">{latestHarnessRun.attachments.map((attachment) => <button key={attachment.locator} type="button" title={attachment.locator} onClick={async () => { const result = await window.subagents?.subdesign.revealProviderAttachment({ locator: attachment.locator, projectRoot: projectRoot || undefined }); setProviderMessage(result?.ok ? `已在 Finder 顯示 ${attachment.kind}。` : result?.error || '無法開啟附件。') }} className="font-medium text-primary hover:text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/45">顯示 {attachment.kind}</button>)}</div> : null}</div> : null}
+      </details>
 
       {!artifact || !brief ? (
         <div className="px-4 py-6 text-center text-[12px] text-outline">選擇一個 artifact 後，才能啟動 Critique Theater。</div>

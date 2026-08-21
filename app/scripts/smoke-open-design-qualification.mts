@@ -5,15 +5,15 @@
  */
 import assert from 'node:assert/strict'
 import { parseOpenDesignPluginManifest } from '../src/agent/openDesign/pluginContract.ts'
-import { createResolvedSnapshot, grantCapabilities, needsReapproval, hashContent } from '../src/agent/openDesign/pluginSnapshot.ts'
-import { createFakePipelineProvider } from '../src/agent/openDesign/fakePipelineProvider.ts'
-import { rejectModelAttestedEvidence } from '../src/agent/openDesign/providerContract.ts'
-import { getStorybookContext } from '../src/agent/openDesign/storybookProvider.ts'
-import { normalizeCdtFixtureraw } from '../src/agent/openDesign/chromeDevToolsProvider.ts'
-import { normalizeHarnessFixture } from '../src/agent/openDesign/harnessProvider.ts'
-import { validateBridgeMessage } from '../src/agent/openDesign/mcpAppsProvider.ts'
-import { createStreamingEnvelope, appendStreamingUpdate, finalizeEnvelope } from '../src/agent/openDesign/streamingEnvelope.ts'
-import { setProviderFlag, resetProviderFlags } from '../src/agent/openDesign/providerFlags.ts'
+import { createResolvedSnapshot, grantCapabilities, needsReapproval, sha256Hex } from '../src/agent/subdesign/pluginSnapshot.ts'
+import { createFakePipelineProvider } from '../src/agent/subdesign/providers/fakePipelineProvider.ts'
+import { rejectModelAttestedEvidence } from '../src/agent/subdesign/providers/providerContract.ts'
+import { getStorybookContext } from '../src/agent/subdesign/providers/storybookProvider.ts'
+import { normalizeCdtFixtureRaw } from '../src/agent/subdesign/providers/chromeDevToolsProvider.ts'
+import { normalizeHarnessFixture } from '../src/agent/subdesign/providers/harnessProvider.ts'
+import { validateBridgeMessage } from '../src/agent/subdesign/providers/mcpAppsProvider.ts'
+import { createStreamingEnvelope, appendStreamingUpdate, finalizeEnvelope } from '../src/agent/subdesign/streamingEnvelope.ts'
+import { setProviderFlag, resetProviderFlags } from '../src/agent/subdesign/providers/providerFlags.ts'
 
 let p=0,t=0
 async function test(n:string,fn:()=>Promise<void>|void){t++;try{await fn();p++;console.log(`  ✓ ${n}`)}catch(e){console.error(`  ✗ ${n}`);console.error(e);process.exitCode=1}}
@@ -26,13 +26,13 @@ await test('contract loading: legacy + v1 + unknown major + malformed via shippe
   assert.equal(parseOpenDesignPluginManifest({specVersion:'1.0.0',od:{kind:'scenario',capabilities:['evil']}}).ok,false)
 })
 
-await test('snapshot + grant lifecycle: deterministic hash, fingerprint, revocation',()=>{
-  const a=createResolvedSnapshot({pluginId:'q:plugin',source:{sourcePath:'plugins/x/SKILL.md'},rawManifest:{specVersion:'1.0.0',od:{kind:'scenario',capabilities:['fs:write']}},projectRoot:'/tmp/proj'}) as any
-  const b=createResolvedSnapshot({pluginId:'q:plugin',source:{sourcePath:'plugins/x/SKILL.md'},rawManifest:{specVersion:'1.0.0',od:{kind:'scenario',capabilities:['fs:write']}},projectRoot:'/tmp/proj'}) as any
+await test('snapshot + grant lifecycle: deterministic hash, fingerprint, scoped grant',async()=>{
+  const a=await createResolvedSnapshot({pluginId:'q:plugin',source:{sourcePath:'plugins/x/SKILL.md'},rawManifest:{specVersion:'1.0.0',od:{kind:'scenario',capabilities:['fs:write']}},projectRoot:'/tmp/proj'}) as any
+  const b=await createResolvedSnapshot({pluginId:'q:plugin',source:{sourcePath:'plugins/x/SKILL.md'},rawManifest:{specVersion:'1.0.0',od:{kind:'scenario',capabilities:['fs:write']}},projectRoot:'/tmp/proj'}) as any
   assert.equal(a.contentHash,b.contentHash)
-  const g=grantCapabilities(a,['fs:write'])
+  const g=grantCapabilities(a,['fs:write'],{runId:'qual_run',threadId:'qual_thread'})
   assert.ok(g.grantedCapabilities.includes('fs:write'))
-  const nextHash=hashContent('changed')
+  const nextHash=await sha256Hex('changed')
   assert.equal(needsReapproval(g,{contentHash:nextHash,fingerprint:g.capabilityFingerprint}),true)
 })
 
@@ -43,7 +43,9 @@ await test('task run seam: fake pipeline success produces evidence + artifact, D
   const receipt=await sess.promise
   assert.equal(receipt.kind,'success')
   assert.ok(receipt.artifactLocator?.startsWith('artifacts/qual_run'))
-  assert.equal(sess.evidence[0].adapterIssued,true)
+  const evidence=await sess.evidence
+  assert.equal(evidence[0]?.adapterIssued,true)
+  assert.equal(rejectModelAttestedEvidence(evidence[0]).accepted,true)
   assert.equal(rejectModelAttestedEvidence({evidenceId:'x',runId:'r',stageId:'s',providerId:'fake-pipeline',adapterIssued:false}).accepted,false)
 })
 
@@ -51,7 +53,7 @@ await test('context/evidence providers normalize without leaking raw secrets',()
   resetProviderFlags(); setProviderFlag('storybook',true)
   const {evidence}=getStorybookContext('proj', {components:[{id:'c',title:'T'}]},'fp')
   assert.equal(evidence.provider,'storybook')
-  const {findings}=normalizeCdtFixtureraw({console:[{level:'error',message:'err'}]},'r','s')
+  const {findings}=normalizeCdtFixtureRaw({console:[{level:'error',message:'err'}]},'r','s')
   assert.ok(findings.length>0)
   const h=normalizeHarnessFixture({outcome:'success',steps:[]},'r','s')
   assert.equal(h.outcome,'success')
@@ -68,10 +70,10 @@ await test('interactive surface validation + streaming envelope',()=>{
 })
 
 await test('security: path confinement + no raw token + unknown capability fail-closed',async()=>{
-  const a=createResolvedSnapshot({pluginId:'sec',source:{sourcePath:'plugins/a/SKILL.md'},rawManifest:{specVersion:'1.0.0',od:{kind:'scenario',capabilities:['fs:write']}},projectRoot:'/tmp/proj'}) as any
+  const a=await createResolvedSnapshot({pluginId:'sec',source:{sourcePath:'plugins/a/SKILL.md'},rawManifest:{specVersion:'1.0.0',od:{kind:'scenario',capabilities:['fs:write']}},projectRoot:'/tmp/proj'}) as any
   assert.ok(a.projectRelativePath.startsWith('.subagents/open-design/snapshots/'))
   // try absolute path should error
-  const bad=createResolvedSnapshot({pluginId:'sec',source:{sourcePath:'/etc/passwd'},rawManifest:{specVersion:'1.0.0',od:{kind:'scenario'}},projectRoot:'/tmp/proj'}) as any
+  const bad=await createResolvedSnapshot({pluginId:'sec',source:{sourcePath:'/etc/passwd'},rawManifest:{specVersion:'1.0.0',od:{kind:'scenario'}},projectRoot:'/tmp/proj'}) as any
   assert.ok(bad.error && bad.error.includes('絕對'))
   const mal=parseOpenDesignPluginManifest({specVersion:'1.0.0',od:{kind:'scenario',capabilities:['unknown:cap']}})
   assert.equal(mal.ok,false)
