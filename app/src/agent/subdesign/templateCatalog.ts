@@ -91,7 +91,8 @@ export function openDesignRecordToTemplate(record: OpenDesignCatalogRecord): Sub
     category === 'deck' ? 'deck' :
       category === 'live-artifact' ? 'dashboard' :
         category === 'prototype' ? 'prototype' :
-          category === 'video' ? 'video' : undefined
+          category === 'video' ? 'video' :
+            category === 'image' ? 'prototype' : undefined
   )
   // Preview mapping: prefer local asset path via openDesignAssetUrl, fallback to remote URL
   const previewImage = record.previewImage
@@ -107,7 +108,7 @@ export function openDesignRecordToTemplate(record: OpenDesignCatalogRecord): Sub
     suggestedObjective: record.suggestedObjective || (surface === 'deck' ? '製作一份可交付的敘事簡報。' : '建立一個可驗證、可交付的設計產物。'),
     sourcePath: record.sourcePath,
     previewImage,
-    availability: record.executionStatus === 'ready' && Boolean(surface) ? 'ready' : 'requires-capability',
+    availability: (record.kind === 'prompt' && Boolean(previewImage)) || (record.executionStatus === 'ready' && Boolean(surface)) ? 'ready' : 'requires-capability',
     exploreRank: record.exploreRank,
     contractStatus: record.contractStatus,
     contractNotice: record.contractStatus === 'incompatible' || record.contractStatus === 'malformed'

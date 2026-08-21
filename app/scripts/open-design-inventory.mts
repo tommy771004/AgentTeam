@@ -257,13 +257,15 @@ function buildRecord(relative, entries, indexedAt, fallbackLicenses) {
   const localPreviewRel = foundPreview?.relative
   const previewImage = localPreviewRel || (typeof parsed?.previewImageUrl === 'string' ? String(parsed.previewImageUrl).slice(0, 500) : undefined) || (typeof parsed?.preview === 'string' ? String(parsed.preview).slice(0, 500) : undefined)
   const declaredSurface = parsed?.surface || parsed?.od?.mode
+  // Prompt-templates are file-based; sourcePath must be the actual json file for correct template code mapping
+  const sourcePathValue = kind === 'prompt' && jsonEntry ? jsonEntry.relative : relative
   return {
     id,
     kind,
     category,
     title: titleFor(id, parsed, relative),
     summary: text(parsed?.summary || parsed?.description || parsed?.description_i18n?.en, `${kind === 'skill' ? 'Skill' : 'Open Design'} vendor content：需由現有 capability runtime 受治理載入。`),
-    sourcePath: relative,
+    sourcePath: sourcePathValue,
     assetPaths,
     entryPaths,
     tags: arrayStrings(parsed?.tags || parsed?.od?.tags),

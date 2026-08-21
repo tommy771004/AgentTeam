@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-21T12:02:50.895Z",
+  "generatedAt": "2026-08-21T12:10:19.080Z",
   "upstreamCommit": "4567a0d",
   "sourceUrl": "https://open-design.ai/zh/plugins/",
   "records": [
@@ -34,7 +34,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:audio-jingle:skill",
@@ -63,7 +63,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:blog-post",
@@ -96,7 +96,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:blog-post:skill",
@@ -126,7 +126,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:clinical-case-report",
@@ -158,7 +158,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:clinical-case-report:skill",
@@ -185,7 +185,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:contact-widget",
@@ -214,7 +214,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:contact-widget:skill",
@@ -241,7 +241,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:critique",
@@ -270,7 +270,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:critique:skill",
@@ -297,7 +297,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:dashboard",
@@ -330,7 +330,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:dashboard:skill",
@@ -360,7 +360,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:dating-web",
@@ -389,7 +389,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:dating-web:skill",
@@ -416,7 +416,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:dcf-valuation",
@@ -444,7 +444,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:dcf-valuation:skill",
@@ -471,7 +471,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:digital-eguide",
@@ -500,7 +500,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:digital-eguide:skill",
@@ -527,7 +527,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:docs-page",
@@ -560,7 +560,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:docs-page:skill",
@@ -590,7 +590,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:email-marketing",
@@ -623,7 +623,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:email-marketing:skill",
@@ -653,7 +653,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:eng-runbook",
@@ -686,7 +686,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:eng-runbook:skill",
@@ -716,7 +716,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:finance-report",
@@ -749,7 +749,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:finance-report:skill",
@@ -779,7 +779,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:flowai-live-dashboard-template",
@@ -814,7 +814,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:flowai-live-dashboard-template:skill",
@@ -844,7 +844,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:gamified-app",
@@ -873,7 +873,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:gamified-app:skill",
@@ -900,7 +900,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:github-dashboard",
@@ -938,7 +938,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:github-dashboard:skill",
@@ -968,7 +968,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:guizang-ppt",
@@ -1011,7 +1011,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:guizang-ppt:skill",
@@ -1042,7 +1042,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:hr-onboarding",
@@ -1071,7 +1071,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:hr-onboarding:skill",
@@ -1098,7 +1098,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-course-module",
@@ -1127,7 +1127,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-course-module:skill",
@@ -1154,7 +1154,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-graphify-dark-graph",
@@ -1183,7 +1183,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-graphify-dark-graph:skill",
@@ -1210,7 +1210,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-hermes-cyber-terminal",
@@ -1239,7 +1239,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-hermes-cyber-terminal:skill",
@@ -1266,7 +1266,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-knowledge-arch-blueprint",
@@ -1295,7 +1295,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-knowledge-arch-blueprint:skill",
@@ -1322,7 +1322,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-obsidian-claude-gradient",
@@ -1351,7 +1351,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-obsidian-claude-gradient:skill",
@@ -1378,7 +1378,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-pitch-deck",
@@ -1411,7 +1411,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-pitch-deck:skill",
@@ -1441,7 +1441,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-presenter-mode-reveal",
@@ -1470,7 +1470,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-presenter-mode-reveal:skill",
@@ -1497,7 +1497,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-product-launch",
@@ -1526,7 +1526,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-product-launch:skill",
@@ -1553,7 +1553,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-taste-brutalist",
@@ -1582,7 +1582,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-taste-brutalist:skill",
@@ -1609,7 +1609,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-taste-editorial",
@@ -1638,7 +1638,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-taste-editorial:skill",
@@ -1665,7 +1665,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-tech-sharing",
@@ -1694,7 +1694,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-tech-sharing:skill",
@@ -1721,7 +1721,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-testing-safety-alert",
@@ -1750,7 +1750,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-testing-safety-alert:skill",
@@ -1777,7 +1777,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-weekly-report",
@@ -1806,7 +1806,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-weekly-report:skill",
@@ -1833,7 +1833,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-pastel-card",
@@ -1862,7 +1862,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-pastel-card:skill",
@@ -1889,7 +1889,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-white-editorial",
@@ -1918,7 +1918,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-xhs-white-editorial:skill",
@@ -1945,7 +1945,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-8-bit-orbit",
@@ -1977,7 +1977,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-8-bit-orbit:skill",
@@ -2005,7 +2005,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-biennale-yellow",
@@ -2037,7 +2037,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-biennale-yellow:skill",
@@ -2065,7 +2065,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-block-frame",
@@ -2097,7 +2097,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-block-frame:skill",
@@ -2125,7 +2125,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-blue-professional",
@@ -2157,7 +2157,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-blue-professional:skill",
@@ -2185,7 +2185,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-bold-poster",
@@ -2217,7 +2217,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-bold-poster:skill",
@@ -2245,7 +2245,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-broadside",
@@ -2277,7 +2277,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-broadside:skill",
@@ -2305,7 +2305,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-capsule",
@@ -2337,7 +2337,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-capsule:skill",
@@ -2365,7 +2365,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cartesian",
@@ -2397,7 +2397,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cartesian:skill",
@@ -2425,7 +2425,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cobalt-grid",
@@ -2457,7 +2457,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-cobalt-grid:skill",
@@ -2485,7 +2485,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-coral",
@@ -2517,7 +2517,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-coral:skill",
@@ -2545,7 +2545,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-creative-mode",
@@ -2578,7 +2578,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-creative-mode:skill",
@@ -2606,7 +2606,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-daisy-days",
@@ -2638,7 +2638,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-daisy-days:skill",
@@ -2666,7 +2666,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-editorial-tri-tone",
@@ -2699,7 +2699,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-editorial-tri-tone:skill",
@@ -2727,7 +2727,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-grove",
@@ -2759,7 +2759,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-grove:skill",
@@ -2787,7 +2787,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-long-table",
@@ -2819,7 +2819,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-long-table:skill",
@@ -2847,7 +2847,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-mat",
@@ -2879,7 +2879,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-mat:skill",
@@ -2907,7 +2907,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-monochrome",
@@ -2939,7 +2939,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-monochrome:skill",
@@ -2967,7 +2967,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-neo-grid-bold",
@@ -3000,7 +3000,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-neo-grid-bold:skill",
@@ -3028,7 +3028,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-peoples-platform",
@@ -3061,7 +3061,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-peoples-platform:skill",
@@ -3089,7 +3089,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pin-and-paper",
@@ -3123,7 +3123,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pin-and-paper:skill",
@@ -3151,7 +3151,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pink-script",
@@ -3184,7 +3184,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-pink-script:skill",
@@ -3212,7 +3212,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-playful",
@@ -3244,7 +3244,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-playful:skill",
@@ -3272,7 +3272,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-raw-grid",
@@ -3304,7 +3304,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-raw-grid:skill",
@@ -3332,7 +3332,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-windows",
@@ -3364,7 +3364,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-windows:skill",
@@ -3392,7 +3392,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-zine",
@@ -3424,7 +3424,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-retro-zine:skill",
@@ -3452,7 +3452,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-sakura-chroma",
@@ -3484,7 +3484,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-sakura-chroma:skill",
@@ -3512,7 +3512,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-scatterbrain",
@@ -3544,7 +3544,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-scatterbrain:skill",
@@ -3572,7 +3572,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-signal",
@@ -3604,7 +3604,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-signal:skill",
@@ -3632,7 +3632,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-soft-editorial",
@@ -3665,7 +3665,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-soft-editorial:skill",
@@ -3693,7 +3693,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-stencil-tablet",
@@ -3726,7 +3726,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-stencil-tablet:skill",
@@ -3754,7 +3754,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-studio",
@@ -3786,7 +3786,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-studio:skill",
@@ -3814,7 +3814,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-vellum",
@@ -3846,7 +3846,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt-zhangzara-vellum:skill",
@@ -3874,7 +3874,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt",
@@ -4142,7 +4142,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:html-ppt:skill",
@@ -4170,7 +4170,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:hyperframes",
@@ -4240,7 +4240,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:hyperframes:skill",
@@ -4269,7 +4269,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:ib-pitch-book",
@@ -4304,7 +4304,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:ib-pitch-book:skill",
@@ -4332,7 +4332,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:image-poster",
@@ -4364,7 +4364,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:image-poster:skill",
@@ -4393,7 +4393,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:invoice",
@@ -4422,7 +4422,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:invoice:skill",
@@ -4449,7 +4449,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:kami-deck",
@@ -4483,7 +4483,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:kami-deck:skill",
@@ -4513,7 +4513,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:kami-landing",
@@ -4543,7 +4543,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:kami-landing:skill",
@@ -4570,7 +4570,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:kanban-board",
@@ -4599,7 +4599,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:kanban-board:skill",
@@ -4626,7 +4626,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:last30days",
@@ -4729,7 +4729,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:last30days:skill",
@@ -4758,7 +4758,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:live-artifact",
@@ -4805,7 +4805,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:live-artifact:skill",
@@ -4835,7 +4835,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:live-dashboard",
@@ -4873,7 +4873,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:live-dashboard:skill",
@@ -4903,7 +4903,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:magazine-poster",
@@ -4932,7 +4932,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:magazine-poster:skill",
@@ -4959,7 +4959,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:meeting-notes",
@@ -4988,7 +4988,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:meeting-notes:skill",
@@ -5015,7 +5015,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:mobile-app",
@@ -5051,7 +5051,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:mobile-app:skill",
@@ -5081,7 +5081,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:mobile-onboarding",
@@ -5114,7 +5114,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:mobile-onboarding:skill",
@@ -5144,7 +5144,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:motion-frames",
@@ -5173,7 +5173,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:motion-frames:skill",
@@ -5200,7 +5200,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:open-design-landing-deck",
@@ -5233,7 +5233,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:open-design-landing-deck:skill",
@@ -5260,7 +5260,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:open-design-landing",
@@ -5324,7 +5324,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:open-design-landing:skill",
@@ -5351,7 +5351,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:orbit-general",
@@ -5380,7 +5380,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:orbit-general:skill",
@@ -5407,7 +5407,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:orbit-github",
@@ -5436,7 +5436,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:orbit-github:skill",
@@ -5463,7 +5463,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:orbit-gmail",
@@ -5492,7 +5492,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:orbit-gmail:skill",
@@ -5519,7 +5519,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:orbit-linear",
@@ -5548,7 +5548,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:orbit-linear:skill",
@@ -5575,7 +5575,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:orbit-notion",
@@ -5604,7 +5604,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:orbit-notion:skill",
@@ -5631,7 +5631,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:pm-spec",
@@ -5664,7 +5664,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:pm-spec:skill",
@@ -5694,7 +5694,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:pricing-page",
@@ -5723,7 +5723,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:pricing-page:skill",
@@ -5750,7 +5750,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:replit-deck",
@@ -5787,7 +5787,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:replit-deck:skill",
@@ -5814,7 +5814,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:saas-landing",
@@ -5847,7 +5847,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:saas-landing:skill",
@@ -5877,7 +5877,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:simple-deck",
@@ -5913,7 +5913,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:simple-deck:skill",
@@ -5943,7 +5943,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:social-carousel",
@@ -5975,7 +5975,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:social-carousel:skill",
@@ -6004,7 +6004,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:social-media-dashboard",
@@ -6033,7 +6033,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:social-media-dashboard:skill",
@@ -6060,7 +6060,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:social-media-matrix-tracker-template",
@@ -6091,7 +6091,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:social-media-matrix-tracker-template:skill",
@@ -6118,7 +6118,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:sprite-animation",
@@ -6147,7 +6147,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:sprite-animation:skill",
@@ -6174,7 +6174,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:team-okrs",
@@ -6207,7 +6207,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:team-okrs:skill",
@@ -6237,7 +6237,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:trading-analysis-dashboard-template",
@@ -6268,7 +6268,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:trading-analysis-dashboard-template:skill",
@@ -6295,7 +6295,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:tweaks",
@@ -6325,7 +6325,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:tweaks:skill",
@@ -6352,7 +6352,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:video-shortform",
@@ -6384,7 +6384,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:video-shortform:skill",
@@ -6413,7 +6413,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:waitlist-page",
@@ -6444,7 +6444,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:waitlist-page:skill",
@@ -6471,7 +6471,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:web-prototype-taste-brutalist",
@@ -6500,7 +6500,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:web-prototype-taste-brutalist:skill",
@@ -6527,7 +6527,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:web-prototype-taste-editorial",
@@ -6556,7 +6556,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:web-prototype-taste-editorial:skill",
@@ -6583,7 +6583,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:web-prototype-taste-soft",
@@ -6612,7 +6612,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:web-prototype-taste-soft:skill",
@@ -6639,7 +6639,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:web-prototype",
@@ -6675,7 +6675,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:web-prototype:skill",
@@ -6705,7 +6705,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:webgl-experience",
@@ -6734,7 +6734,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:webgl-experience:skill",
@@ -6761,7 +6761,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:weekly-update",
@@ -6794,7 +6794,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:weekly-update:skill",
@@ -6824,7 +6824,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:wireframe-annotated",
@@ -6853,7 +6853,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:wireframe-annotated:skill",
@@ -6880,7 +6880,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:wireframe-greybox",
@@ -6909,7 +6909,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:wireframe-greybox:skill",
@@ -6936,7 +6936,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:wireframe-mobile-flow",
@@ -6965,7 +6965,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:wireframe-mobile-flow:skill",
@@ -6992,7 +6992,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:wireframe-sketch",
@@ -7021,7 +7021,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:wireframe-sketch:skill",
@@ -7048,7 +7048,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:worker-visualizer",
@@ -7081,7 +7081,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:worker-visualizer:skill",
@@ -7111,7 +7111,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:x-research",
@@ -7138,7 +7138,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "design-templates:x-research:skill",
@@ -7165,7 +7165,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:blog-post",
@@ -7213,7 +7213,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:blog-post:skill",
@@ -7258,7 +7258,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:clinical-case-report",
@@ -7309,7 +7309,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:clinical-case-report:skill",
@@ -7355,7 +7355,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:codex-interactive-capability-map",
@@ -7403,7 +7403,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:codex-interactive-capability-map:skill",
@@ -7448,7 +7448,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:critique",
@@ -7498,7 +7498,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:critique:skill",
@@ -7545,7 +7545,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:dashboard",
@@ -7591,7 +7591,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:dashboard:skill",
@@ -7634,7 +7634,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:dating-web",
@@ -7682,7 +7682,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:dating-web:skill",
@@ -7727,7 +7727,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:dcf-valuation",
@@ -7774,7 +7774,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:dcf-valuation:skill",
@@ -7819,7 +7819,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:fs-editorial-forest",
@@ -7877,7 +7877,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:fs-editorial-forest:skill",
@@ -7931,7 +7931,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-course-module",
@@ -7982,7 +7982,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-course-module:skill",
@@ -8030,7 +8030,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-testing-safety-alert",
@@ -8087,7 +8087,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-testing-safety-alert:skill",
@@ -8141,7 +8141,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-zhangzara-biennale-yellow",
@@ -8204,7 +8204,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-zhangzara-biennale-yellow:skill",
@@ -8264,7 +8264,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-zhangzara-editorial-tri-tone",
@@ -8327,7 +8327,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-zhangzara-editorial-tri-tone:skill",
@@ -8386,7 +8386,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-zhangzara-neo-grid-bold",
@@ -8450,7 +8450,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-zhangzara-neo-grid-bold:skill",
@@ -8510,7 +8510,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-zhangzara-studio",
@@ -8572,7 +8572,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt-zhangzara-studio:skill",
@@ -8631,7 +8631,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt",
@@ -8698,7 +8698,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:html-ppt:skill",
@@ -8755,7 +8755,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:huashu-pentagram-grid",
@@ -8811,7 +8811,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:huashu-pentagram-grid:skill",
@@ -8863,7 +8863,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:huashu-takram-soft-tech",
@@ -8922,7 +8922,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:huashu-takram-soft-tech:skill",
@@ -8977,7 +8977,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:webgl-aurora-veil",
@@ -9023,7 +9023,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:webgl-aurora-veil:skill",
@@ -9066,7 +9066,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:webgl-caustic-pool",
@@ -9112,7 +9112,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:examples:webgl-caustic-pool:skill",
@@ -9155,7 +9155,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:3d-stone-staircase-evolution-infographic",
@@ -9189,7 +9189,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:anime-martial-arts-battle-illustration",
@@ -9224,7 +9224,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:e-commerce-live-stream-ui-mockup",
@@ -9260,7 +9260,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-anime-fighting-game-captain-ryuuga-vs-kaze-renshin",
@@ -9301,7 +9301,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-three-kingdoms-guanyu-slaying-yanliang",
@@ -9342,7 +9342,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-three-kingdoms-lyubu-yuanmen-archery",
@@ -9382,7 +9382,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:game-screenshot-three-kingdoms-zhaoyun-cradle-escape",
@@ -9424,7 +9424,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:game-ui-ancient-china-open-world-mmo-hud",
@@ -9463,7 +9463,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:illustrated-city-food-map",
@@ -9498,7 +9498,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:illustration-crayon-kid-drawing-rework",
@@ -9540,7 +9540,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:infographic-otaku-dance-choreography-breakdown-gokurakujodo-16-panels",
@@ -9584,7 +9584,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:momotaro-explainer-slide-in-hybrid-style",
@@ -9617,7 +9617,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:notion-team-dashboard-live-artifact",
@@ -9654,7 +9654,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-anime-girl-to-cinematic-photo",
@@ -9690,7 +9690,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-casual-fashion-grid-photoshoot",
@@ -9726,7 +9726,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-cinematic-south-asian-male-portrait-with-vultures",
@@ -9762,7 +9762,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-cyberpunk-anime-portrait-with-neon-face-text",
@@ -9799,7 +9799,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-elegant-fantasy-girl-in-violet-garden",
@@ -9836,7 +9836,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-ethereal-blue-haired-fantasy-portrait",
@@ -9873,7 +9873,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-glamorous-woman-in-black-portrait",
@@ -9908,7 +9908,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-hyper-realistic-selfie-texture-prompts",
@@ -9943,7 +9943,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-lavender-fantasy-mage-portrait",
@@ -9980,7 +9980,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-monochrome-studio-portrait",
@@ -10015,7 +10015,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-old-photo-restoration-to-dslr-portrait",
@@ -10050,7 +10050,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-poetic-woman-in-garden-portrait",
@@ -10085,7 +10085,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-professional-identity-portrait-wallpaper",
@@ -10122,7 +10122,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-realistically-imperfect-ai-selfie",
@@ -10157,7 +10157,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-signed-marker-portrait-on-shikishi",
@@ -10193,7 +10193,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snow-rabbit-empress-portrait",
@@ -10230,7 +10230,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snow-rabbit-mask-hanfu-portrait",
@@ -10267,7 +10267,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snowy-rabbit-hanfu-portrait",
@@ -10303,7 +10303,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-snowy-rabbit-spirit-portrait",
@@ -10339,7 +10339,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:profile-avatar-song-dynasty-hanfu-portrait",
@@ -10373,7 +10373,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-anime-pokemon-shop-outfit-teaser-poster",
@@ -10410,7 +10410,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-cinematic-elevator-scene",
@@ -10444,7 +10444,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-confused-elf-girl-at-pastel-desk",
@@ -10479,7 +10479,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-editorial-fashion-photography",
@@ -10512,7 +10512,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-fashion-editorial-collage",
@@ -10548,7 +10548,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-psg-transfer-announcement-poster",
@@ -10583,7 +10583,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-sensational-girl-dance-storyboard-8-shots",
@@ -10624,7 +10624,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-showa-day-retro-culture-magazine-cover",
@@ -10660,7 +10660,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-social-media-fashion-outfit-generation",
@@ -10694,7 +10694,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-travel-snapshot-collage-prompt",
@@ -10729,7 +10729,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:social-media-post-vintage-sign-painter-sketch",
@@ -10763,7 +10763,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:image-templates:vr-headset-exploded-view-poster",
@@ -10799,7 +10799,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:3d-animated-boy-building-lego",
@@ -10833,7 +10833,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:a-decade-of-refinement-glow-up",
@@ -10870,7 +10870,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:ancient-guardian-dragon-rescue",
@@ -10906,7 +10906,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:ancient-indian-kingdom-fpv-video",
@@ -10942,7 +10942,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:animation-transfer-and-camera-tracking-prompt",
@@ -10976,7 +10976,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:beat-synced-outfit-transformation-dance",
@@ -11011,7 +11011,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:character-intro-motion-graphics-sequence",
@@ -11048,7 +11048,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-birthday-celebration-sequence",
@@ -11084,7 +11084,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-dragon-interaction-flight",
@@ -11120,7 +11120,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-east-asian-woman-hand-dance",
@@ -11155,7 +11155,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-emotional-face-close-up",
@@ -11191,7 +11191,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-marine-biologist-exploration",
@@ -11225,7 +11225,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-music-podcast-and-guitar-technique",
@@ -11261,7 +11261,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-route-navigation-guide",
@@ -11297,7 +11297,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-street-racing-sequence-for-seedance-2",
@@ -11333,7 +11333,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:cinematic-vampire-alley-fight-sequence",
@@ -11368,7 +11368,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:crimson-horizon-sci-fi-cinematic-sequence",
@@ -11402,7 +11402,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:cyberpunk-game-trailer-script",
@@ -11439,7 +11439,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:forbidden-city-cat-satire",
@@ -11474,7 +11474,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-poster",
@@ -11536,7 +11536,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-poster:skill",
@@ -11584,7 +11584,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-signal",
@@ -11641,7 +11641,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-bold-signal:skill",
@@ -11687,7 +11687,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-build-minimal",
@@ -11742,7 +11742,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-build-minimal:skill",
@@ -11788,7 +11788,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-creative-voltage",
@@ -11848,7 +11848,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-creative-voltage:skill",
@@ -11893,7 +11893,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-chart-nyt",
@@ -11957,7 +11957,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-chart-nyt:skill",
@@ -12001,7 +12001,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-rollup",
@@ -12056,7 +12056,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-data-rollup:skill",
@@ -12103,7 +12103,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-decision-tree",
@@ -12155,7 +12155,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-decision-tree:skill",
@@ -12197,7 +12197,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-electric-studio",
@@ -12250,7 +12250,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-electric-studio:skill",
@@ -12294,7 +12294,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-glitch-title",
@@ -12350,7 +12350,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-glitch-title:skill",
@@ -12394,7 +12394,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-kinetic-type",
@@ -12453,7 +12453,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-kinetic-type:skill",
@@ -12496,7 +12496,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-light-leak-cinema",
@@ -12560,7 +12560,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-light-leak-cinema:skill",
@@ -12604,7 +12604,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-liquid-bg-hero",
@@ -12662,7 +12662,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-liquid-bg-hero:skill",
@@ -12706,7 +12706,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-logo-outro",
@@ -12762,7 +12762,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-logo-outro:skill",
@@ -12806,7 +12806,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-nyt-graph",
@@ -12861,7 +12861,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-nyt-graph:skill",
@@ -12904,7 +12904,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-pentagram-stat",
@@ -12958,7 +12958,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-pentagram-stat:skill",
@@ -13003,7 +13003,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-play-mode",
@@ -13058,7 +13058,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-play-mode:skill",
@@ -13101,7 +13101,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo-30s",
@@ -13186,7 +13186,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo-30s:skill",
@@ -13231,7 +13231,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo",
@@ -13289,7 +13289,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-product-promo:skill",
@@ -13332,7 +13332,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-swiss-grid",
@@ -13385,7 +13385,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-swiss-grid:skill",
@@ -13428,7 +13428,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-takram-organic",
@@ -13482,7 +13482,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-takram-organic:skill",
@@ -13527,7 +13527,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-vignelli",
@@ -13578,7 +13578,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-vignelli:skill",
@@ -13621,7 +13621,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-warm-grain",
@@ -13677,7 +13677,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:frame-warm-grain:skill",
@@ -13720,7 +13720,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:hollywood-haute-couture-fantasy-video-prompt",
@@ -13757,7 +13757,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:hunched-character-animation",
@@ -13791,7 +13791,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:live-action-anime-adaptation-water-vs-thunder-breathing-duel",
@@ -13827,7 +13827,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:luxury-supercar-cinematic-narrative",
@@ -13863,7 +13863,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:magical-academy-storyboard-sequence",
@@ -13898,7 +13898,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:modern-rural-aesthetics-healing-short-film-video-prompt",
@@ -13934,7 +13934,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:nightclub-flyer-atmospheric-animation",
@@ -13970,7 +13970,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:retro-hk-wuxia-film-aesthetic",
@@ -14005,7 +14005,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:seedance-2-0-15-second-cinematic-japanese-romance-short-film",
@@ -14040,7 +14040,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:seedance-2-0-80-year-old-rapper-mv",
@@ -14076,7 +14076,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:sequence-and-movement-instruction-for-martial-arts-video",
@@ -14112,7 +14112,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:soul-switching-mirror-magic-sequence",
@@ -14147,7 +14147,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:toaster-rocket-jumpscare",
@@ -14182,7 +14182,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:traditional-dance-performance",
@@ -14219,7 +14219,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:vfx-text-cursor",
@@ -14275,7 +14275,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:vfx-text-cursor:skill",
@@ -14319,7 +14319,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-desk-hologram-ar-realdesk",
@@ -14362,7 +14362,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-three-kingdoms-guanyu-slaying-yanliang",
@@ -14406,7 +14406,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-three-kingdoms-lyubu-yuanmen-archery",
@@ -14450,7 +14450,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:video-seedance-three-kingdoms-zhaoyun-cradle-escape",
@@ -14495,7 +14495,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:vintage-disney-style-pirate-crocodile-animation",
@@ -14529,7 +14529,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:viral-k-pop-dance-choreography",
@@ -14565,7 +14565,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "plugins:_official:video-templates:wasteland-factory-chase",
@@ -14600,7 +14600,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:3d-stone-staircase-evolution-infographic",
@@ -14608,7 +14608,7 @@
       "category": "Infographic",
       "title": "3D Stone Staircase Evolution Infographic",
       "summary": "Transforms a flat evolutionary timeline into a realistic 3D stone staircase infographic with detailed organism renders and structured side panels.",
-      "sourcePath": "prompt-templates/image/3d-stone-staircase-evolution-infographic",
+      "sourcePath": "prompt-templates/image/3d-stone-staircase-evolution-infographic.json",
       "assetPaths": [
         "prompt-templates/image/3d-stone-staircase-evolution-infographic.json"
       ],
@@ -14628,7 +14628,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:anime-martial-arts-battle-illustration",
@@ -14636,7 +14636,7 @@
       "category": "Anime / Manga",
       "title": "Anime Martial Arts Battle Illustration",
       "summary": "Generates a dynamic, high-impact anime illustration of two female characters fighting in a traditional dojo with elemental energy effects.",
-      "sourcePath": "prompt-templates/image/anime-martial-arts-battle-illustration",
+      "sourcePath": "prompt-templates/image/anime-martial-arts-battle-illustration.json",
       "assetPaths": [
         "prompt-templates/image/anime-martial-arts-battle-illustration.json"
       ],
@@ -14657,7 +14657,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:e-commerce-live-stream-ui-mockup",
@@ -14665,7 +14665,7 @@
       "category": "App / Web Design",
       "title": "E-commerce Live Stream UI Mockup",
       "summary": "Generates a realistic social media live stream interface overlaying a portrait, featuring customizable chat messages, gift popups, and a product purchase card.",
-      "sourcePath": "prompt-templates/image/e-commerce-live-stream-ui-mockup",
+      "sourcePath": "prompt-templates/image/e-commerce-live-stream-ui-mockup.json",
       "assetPaths": [
         "prompt-templates/image/e-commerce-live-stream-ui-mockup.json"
       ],
@@ -14687,7 +14687,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:game-screenshot-anime-fighting-game-captain-ryuuga-vs-kaze-renshin",
@@ -14695,7 +14695,7 @@
       "category": "Game UI",
       "title": "Game Screenshot - Anime Fighting Game: Captain Ryuuga vs Kaze Renshin",
       "summary": "An in-game fighting game key visual / combat screenshot in the style of Street Fighter 6 or Tekken 8 intro art. Two anime-style male warriors square off in the center of a dramatic nighttime Chinese temple courtyard — a shirtless straw-hat pirate with a warm orange-red fire aura on the left, and a spiky-haired martial artist in an orange gi charging a massive crackling blue lightning energy sphere on the right. Ships with a complete fighting-game HUD (dual health bars, round timer, P1/P2 portrait panels with named fighters and emblems, per-side combo counters and max gauges). Warm-orange vs cool-blue split color grading matches the rival-fighter convention of the genre. Tuned for gpt-image-2 at 16:9.",
-      "sourcePath": "prompt-templates/image/game-screenshot-anime-fighting-game-captain-ryuuga-vs-kaze-renshin",
+      "sourcePath": "prompt-templates/image/game-screenshot-anime-fighting-game-captain-ryuuga-vs-kaze-renshin.json",
       "assetPaths": [
         "prompt-templates/image/game-screenshot-anime-fighting-game-captain-ryuuga-vs-kaze-renshin.json"
       ],
@@ -14723,7 +14723,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:game-screenshot-three-kingdoms-guanyu-slaying-yanliang",
@@ -14731,7 +14731,7 @@
       "category": "Game UI",
       "title": "Game Screenshot - Three Kingdoms ARPG: Guan Yu Slaying Yan Liang",
       "summary": "An in-game action-RPG screenshot of the iconic Three Kingdoms scene where Guan Yu rides his Red Hare warhorse through a torrential-rain battlefield and charges toward the enemy general Yan Liang. Rendered in the cinematic photoreal style of Black Myth: Wukong, Unreal Engine 5, third-person tracking camera from behind-and-left of the mounted hero. Full boss-fight HUD (portrait, minimap with dense enemy dots, skill hotbar with a finisher prompt, floating boss HP bar on the enemy general) turns the scene into a AAA ARPG combat moment. Tuned for gpt-image-2 at 16:9.",
-      "sourcePath": "prompt-templates/image/game-screenshot-three-kingdoms-guanyu-slaying-yanliang",
+      "sourcePath": "prompt-templates/image/game-screenshot-three-kingdoms-guanyu-slaying-yanliang.json",
       "assetPaths": [
         "prompt-templates/image/game-screenshot-three-kingdoms-guanyu-slaying-yanliang.json"
       ],
@@ -14759,7 +14759,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:game-screenshot-three-kingdoms-lyubu-yuanmen-archery",
@@ -14767,7 +14767,7 @@
       "category": "Game UI",
       "title": "Game Screenshot - Three Kingdoms ARPG: Lü Bu's Yuanmen Archery",
       "summary": "An in-game action-RPG screenshot of the famous Three Kingdoms scene where Lü Bu shoots down a distant halberd at the camp gate to stop a battle. Rendered in the cinematic photoreal style of Black Myth: Wukong, Unreal Engine 5 Nanite/Lumen, third-person over-the-shoulder gameplay camera. Full in-game HUD overlay (HP + qi bars, minimap, skill hotbar, lock-on target marker with distance readout to the far halberd) makes it read as a real next-gen ARPG capture rather than a cutscene. Tuned for gpt-image-2 at 16:9.",
-      "sourcePath": "prompt-templates/image/game-screenshot-three-kingdoms-lyubu-yuanmen-archery",
+      "sourcePath": "prompt-templates/image/game-screenshot-three-kingdoms-lyubu-yuanmen-archery.json",
       "assetPaths": [
         "prompt-templates/image/game-screenshot-three-kingdoms-lyubu-yuanmen-archery.json"
       ],
@@ -14794,7 +14794,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:game-screenshot-three-kingdoms-zhaoyun-cradle-escape",
@@ -14802,7 +14802,7 @@
       "category": "Game UI",
       "title": "Game Screenshot - Three Kingdoms ARPG: Zhao Yun's Cradle Escape at Changbanpo",
       "summary": "An in-game action-RPG screenshot of the legendary Three Kingdoms scene where Zhao Yun cradles the infant Liu Chan in one arm and fights his way through enemy lines with a spear in the other at Changbanpo. Rendered in the cinematic photoreal style of Black Myth: Wukong combined with Elden Ring, Unreal Engine 5 with full Nanite, Lumen ray-tracing, and volumetric god-rays. The emotional core — one arm protecting the swaddled baby, one arm fighting for life — is reinforced by a full HUD overlay including a dedicated ESCORT protection bar for the baby, a combo counter, and mid-air damage-number popups on flung enemies. Tuned for gpt-image-2 at 16:9.",
-      "sourcePath": "prompt-templates/image/game-screenshot-three-kingdoms-zhaoyun-cradle-escape",
+      "sourcePath": "prompt-templates/image/game-screenshot-three-kingdoms-zhaoyun-cradle-escape.json",
       "assetPaths": [
         "prompt-templates/image/game-screenshot-three-kingdoms-zhaoyun-cradle-escape.json"
       ],
@@ -14831,7 +14831,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:game-ui-ancient-china-open-world-mmo-hud",
@@ -14839,7 +14839,7 @@
       "category": "Game UI",
       "title": "Game UI - Ancient China Open-World MMO HUD",
       "summary": "Generates an in-game HUD screenshot mockup for a AAA ancient-China open-world MMO, in the cinematic photoreal style of Black Myth: Wukong. A beautiful female swordswoman protagonist anchors the center of the frame in a misty mountain ancient-shrine scene, surrounded by a complete MMO HUD: top-left character portrait with HP/MP/stamina bars and buff icons, bottom-center skill hotbar with Chinese-calligraphy skill icons, top-right minimap with quest markers, right-side quest tracker panel, bottom-left scrolling chat window, floating world-space NPC nameplates and quest exclamation mark. Rendered as a realistic monitor screenshot, 16:9, suitable for pitch decks, gamescom-style key art, and Xiaohongshu/bilibili game teasers.",
-      "sourcePath": "prompt-templates/image/game-ui-ancient-china-open-world-mmo-hud",
+      "sourcePath": "prompt-templates/image/game-ui-ancient-china-open-world-mmo-hud.json",
       "assetPaths": [
         "prompt-templates/image/game-ui-ancient-china-open-world-mmo-hud.json"
       ],
@@ -14865,7 +14865,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:illustrated-city-food-map",
@@ -14873,7 +14873,7 @@
       "category": "Illustration",
       "title": "Illustrated City Food Map",
       "summary": "Generates a hand-drawn, watercolor-style tourist map featuring numbered local food specialties, landmarks, and a legend.",
-      "sourcePath": "prompt-templates/image/illustrated-city-food-map",
+      "sourcePath": "prompt-templates/image/illustrated-city-food-map.json",
       "assetPaths": [
         "prompt-templates/image/illustrated-city-food-map.json"
       ],
@@ -14894,7 +14894,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:illustration-crayon-kid-drawing-rework",
@@ -14902,7 +14902,7 @@
       "category": "Illustration",
       "title": "Illustration - Crayon Kid-Drawing Rework",
       "summary": "A style-transfer prompt that reworks any reference image (product shot, screenshot, portrait, UI mockup) into a hand-drawn crayon illustration that feels like it was made by a 10-year-old. Replaces the original palette with bright playful crayon colors on clean white paper, and sprinkles childlike whimsy — castles, candy, stars, clouds, rainbows — to amplify the innocent storybook vibe. Works as an image-to-image edit in GPT-image-2 (requires uploading a reference image alongside the prompt); well-suited to website screenshots, brand key art, product photos, and portraits.",
-      "sourcePath": "prompt-templates/image/illustration-crayon-kid-drawing-rework",
+      "sourcePath": "prompt-templates/image/illustration-crayon-kid-drawing-rework.json",
       "assetPaths": [
         "prompt-templates/image/illustration-crayon-kid-drawing-rework.json"
       ],
@@ -14929,7 +14929,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:infographic-otaku-dance-choreography-breakdown-gokurakujodo-16-panels",
@@ -14937,7 +14937,7 @@
       "category": "Infographic",
       "title": "Infographic - Otaku Dance Choreography Breakdown (Gokuraku Jodo, 16 Panels)",
       "summary": "A single vertical 2:3 poster composed as a 4×4 grid of 16 connected square panels, forming a full choreography breakdown chart for the famous Japanese otaku dance song 極楽浄土 (Gokuraku Jodo). Each panel shows the same cute half-realistic anime idol girl (pink twin-tails, sailor-collar school-idol uniform) performing one signature pose from the dance, full-body, on a pastel-pink background with a small Japanese caption strip at the bottom and a numbered circle at the top-left. Explicitly engineered as a POSE REFERENCE sheet for AI video generation — every silhouette is crisp and unambiguous, no motion lines or background clutter. Tuned for gpt-image-2, aspect 2:3. Category: Infographic.",
-      "sourcePath": "prompt-templates/image/infographic-otaku-dance-choreography-breakdown-gokurakujodo-16-panels",
+      "sourcePath": "prompt-templates/image/infographic-otaku-dance-choreography-breakdown-gokurakujodo-16-panels.json",
       "assetPaths": [
         "prompt-templates/image/infographic-otaku-dance-choreography-breakdown-gokurakujodo-16-panels.json"
       ],
@@ -14966,7 +14966,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:momotaro-explainer-slide-in-hybrid-style",
@@ -14974,7 +14974,7 @@
       "category": "Illustration",
       "title": "Momotaro Explainer Slide in Hybrid Style",
       "summary": "A prompt that combines the simple, warm aesthetic of Irasutoya illustrations with the high-information density characteristic of Japanese government slides.",
-      "sourcePath": "prompt-templates/image/momotaro-explainer-slide-in-hybrid-style",
+      "sourcePath": "prompt-templates/image/momotaro-explainer-slide-in-hybrid-style.json",
       "assetPaths": [
         "prompt-templates/image/momotaro-explainer-slide-in-hybrid-style.json"
       ],
@@ -14992,7 +14992,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:notion-team-dashboard-live-artifact",
@@ -15000,7 +15000,7 @@
       "category": "Live Artifact",
       "title": "Notion-style Team Dashboard (Live Artifact)",
       "summary": "Single-screen Notion-native team dashboard mockup — KPI grid, 7-day sparkline, activity feed, and linked-database task table. Visual companion to the live-artifact skill; pair with it for refreshable / connector-backed runs, or use standalone as a still mockup.",
-      "sourcePath": "prompt-templates/image/notion-team-dashboard-live-artifact",
+      "sourcePath": "prompt-templates/image/notion-team-dashboard-live-artifact.json",
       "assetPaths": [
         "prompt-templates/image/notion-team-dashboard-live-artifact.json",
         "prompt-templates/image/notion-team-dashboard-live-artifact.preview.png"
@@ -15023,7 +15023,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-anime-girl-to-cinematic-photo",
@@ -15031,7 +15031,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Anime Girl to Cinematic Photo",
       "summary": "This prompt turns a character reference illustration into a realistic, warm-toned vintage interior portrait while preserving the original outfit, pose, and cat.",
-      "sourcePath": "prompt-templates/image/profile-avatar-anime-girl-to-cinematic-photo",
+      "sourcePath": "prompt-templates/image/profile-avatar-anime-girl-to-cinematic-photo.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-anime-girl-to-cinematic-photo.json"
       ],
@@ -15053,7 +15053,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-casual-fashion-grid-photoshoot",
@@ -15061,7 +15061,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Casual Fashion Grid Photoshoot",
       "summary": "A structured JSON prompt for a 4-photo collage of a casual fashion photoshoot with detailed subject and lighting parameters.",
-      "sourcePath": "prompt-templates/image/profile-avatar-casual-fashion-grid-photoshoot",
+      "sourcePath": "prompt-templates/image/profile-avatar-casual-fashion-grid-photoshoot.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-casual-fashion-grid-photoshoot.json"
       ],
@@ -15083,7 +15083,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-cinematic-south-asian-male-portrait-with-vultures",
@@ -15091,7 +15091,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Cinematic South Asian Male Portrait with Vultures",
       "summary": "A detailed cinematic portrait of a young South Asian man in a moody, dark fantasy setting surrounded by vultures and ravens.",
-      "sourcePath": "prompt-templates/image/profile-avatar-cinematic-south-asian-male-portrait-with-vultures",
+      "sourcePath": "prompt-templates/image/profile-avatar-cinematic-south-asian-male-portrait-with-vultures.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-cinematic-south-asian-male-portrait-with-vultures.json"
       ],
@@ -15113,7 +15113,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-cyberpunk-anime-portrait-with-neon-face-text",
@@ -15121,7 +15121,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Cyberpunk Anime Portrait with Neon Face Text",
       "summary": "A stylish neon-soaked anime portrait for posters, social media art, or futuristic branding visuals.",
-      "sourcePath": "prompt-templates/image/profile-avatar-cyberpunk-anime-portrait-with-neon-face-text",
+      "sourcePath": "prompt-templates/image/profile-avatar-cyberpunk-anime-portrait-with-neon-face-text.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-cyberpunk-anime-portrait-with-neon-face-text.json"
       ],
@@ -15144,7 +15144,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-elegant-fantasy-girl-in-violet-garden",
@@ -15152,7 +15152,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Elegant Fantasy Girl in Violet Garden",
       "summary": "This prompt generates a polished anime-style fantasy portrait of an elegant woman with glossy styled hair, ornate violet-black clothing, and a flower-filled magical garden setting, ideal for character",
-      "sourcePath": "prompt-templates/image/profile-avatar-elegant-fantasy-girl-in-violet-garden",
+      "sourcePath": "prompt-templates/image/profile-avatar-elegant-fantasy-girl-in-violet-garden.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-elegant-fantasy-girl-in-violet-garden.json"
       ],
@@ -15175,7 +15175,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-ethereal-blue-haired-fantasy-portrait",
@@ -15183,7 +15183,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Ethereal Blue-Haired Fantasy Portrait",
       "summary": "This prompt generates a soft, luminous anime-style fantasy character portrait, ideal for creating elegant vertical key art or character illustrations with flowing hair and a dreamy spring atmosphere.",
-      "sourcePath": "prompt-templates/image/profile-avatar-ethereal-blue-haired-fantasy-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-ethereal-blue-haired-fantasy-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-ethereal-blue-haired-fantasy-portrait.json"
       ],
@@ -15206,7 +15206,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-glamorous-woman-in-black-portrait",
@@ -15214,7 +15214,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Glamorous Woman in Black Portrait",
       "summary": "This prompt generates a photorealistic luxury-style portrait of an elegant woman in a plunging black outfit, ideal for fashion editorial or beauty imagery.",
-      "sourcePath": "prompt-templates/image/profile-avatar-glamorous-woman-in-black-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-glamorous-woman-in-black-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-glamorous-woman-in-black-portrait.json"
       ],
@@ -15235,7 +15235,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-hyper-realistic-selfie-texture-prompts",
@@ -15243,7 +15243,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Hyper-Realistic Selfie Texture Prompts",
       "summary": "Detailed prompt snippets for generating realistic skin textures and authentic phone selfie framing, focusing on visible pores and natural lighting.",
-      "sourcePath": "prompt-templates/image/profile-avatar-hyper-realistic-selfie-texture-prompts",
+      "sourcePath": "prompt-templates/image/profile-avatar-hyper-realistic-selfie-texture-prompts.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-hyper-realistic-selfie-texture-prompts.json"
       ],
@@ -15264,7 +15264,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-lavender-fantasy-mage-portrait",
@@ -15272,7 +15272,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Lavender Fantasy Mage Portrait",
       "summary": "This prompt generates a polished anime-style fantasy portrait of an elegant mage princess with glossy blonde hair, purple flowers, and ornate crystal attire, ideal for character art or magical illustr",
-      "sourcePath": "prompt-templates/image/profile-avatar-lavender-fantasy-mage-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-lavender-fantasy-mage-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-lavender-fantasy-mage-portrait.json"
       ],
@@ -15295,7 +15295,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-monochrome-studio-portrait",
@@ -15303,7 +15303,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Monochrome Studio Portrait",
       "summary": "A high-end commercial photography prompt for a monochrome portrait with a distinctive split-background and dramatic studio lighting.",
-      "sourcePath": "prompt-templates/image/profile-avatar-monochrome-studio-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-monochrome-studio-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-monochrome-studio-portrait.json"
       ],
@@ -15324,7 +15324,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-old-photo-restoration-to-dslr-portrait",
@@ -15332,7 +15332,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Old Photo Restoration to DSLR Portrait",
       "summary": "This prompt restores a damaged vintage 4-person family photo into a clean, colorized, high-resolution realistic portrait for photo repair and enhancement.",
-      "sourcePath": "prompt-templates/image/profile-avatar-old-photo-restoration-to-dslr-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-old-photo-restoration-to-dslr-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-old-photo-restoration-to-dslr-portrait.json"
       ],
@@ -15353,7 +15353,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-poetic-woman-in-garden-portrait",
@@ -15361,7 +15361,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Poetic Woman in Garden Portrait",
       "summary": "This prompt generates a realistic editorial-style portrait of a bookish young woman in a sunlit garden, ideal for lifestyle photography, literary branding, or elegant character imagery.",
-      "sourcePath": "prompt-templates/image/profile-avatar-poetic-woman-in-garden-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-poetic-woman-in-garden-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-poetic-woman-in-garden-portrait.json"
       ],
@@ -15382,7 +15382,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-professional-identity-portrait-wallpaper",
@@ -15390,7 +15390,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Professional Identity Portrait Wallpaper",
       "summary": "Generates a high-resolution, premium wallpaper featuring a subject in professional attire with career-related activities and typography.",
-      "sourcePath": "prompt-templates/image/profile-avatar-professional-identity-portrait-wallpaper",
+      "sourcePath": "prompt-templates/image/profile-avatar-professional-identity-portrait-wallpaper.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-professional-identity-portrait-wallpaper.json"
       ],
@@ -15413,7 +15413,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-realistically-imperfect-ai-selfie",
@@ -15421,7 +15421,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Realistically Imperfect AI Selfie",
       "summary": "A creative prompt used with GPT Image 2 to generate a 'failed' selfie that looks like an accidental, low-quality smartphone snapshot.",
-      "sourcePath": "prompt-templates/image/profile-avatar-realistically-imperfect-ai-selfie",
+      "sourcePath": "prompt-templates/image/profile-avatar-realistically-imperfect-ai-selfie.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-realistically-imperfect-ai-selfie.json"
       ],
@@ -15442,7 +15442,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-seedream-high-fashion-dreamy-portrait",
@@ -15450,7 +15450,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Seedream High-Fashion Dreamy Portrait",
       "summary": "A Seedream 5.0 Pro portrait prompt for a dark, dreamy high-fashion editorial image with refined lighting, detailed makeup, and a vertical full-body composition.",
-      "sourcePath": "prompt-templates/image/profile-avatar-seedream-high-fashion-dreamy-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-seedream-high-fashion-dreamy-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-seedream-high-fashion-dreamy-portrait.json"
       ],
@@ -15474,7 +15474,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-signed-marker-portrait-on-shikishi",
@@ -15482,7 +15482,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Signed Marker Portrait on Shikishi",
       "summary": "This generates a lively signed marker-style portrait on a square shikishi board, useful for fan-art autographs, commemorative illustration posts, and personalized thank-you visuals.",
-      "sourcePath": "prompt-templates/image/profile-avatar-signed-marker-portrait-on-shikishi",
+      "sourcePath": "prompt-templates/image/profile-avatar-signed-marker-portrait-on-shikishi.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-signed-marker-portrait-on-shikishi.json"
       ],
@@ -15504,7 +15504,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-snow-rabbit-empress-portrait",
@@ -15512,7 +15512,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Snow Rabbit Empress Portrait",
       "summary": "A realistic fantasy portrait prompt for generating a regal rabbit-themed woman in ornate winter hanfu standing in a snowy mountain temple setting.",
-      "sourcePath": "prompt-templates/image/profile-avatar-snow-rabbit-empress-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-snow-rabbit-empress-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-snow-rabbit-empress-portrait.json"
       ],
@@ -15535,7 +15535,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-snow-rabbit-mask-hanfu-portrait",
@@ -15543,7 +15543,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Snow Rabbit Mask Hanfu Portrait",
       "summary": "This prompt generates a cinematic winter fantasy portrait of a masked woman in a rabbit-themed white Hanfu, ideal for elegant character art and atmospheric AI showcase imagery.",
-      "sourcePath": "prompt-templates/image/profile-avatar-snow-rabbit-mask-hanfu-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-snow-rabbit-mask-hanfu-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-snow-rabbit-mask-hanfu-portrait.json"
       ],
@@ -15566,7 +15566,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-snowy-rabbit-hanfu-portrait",
@@ -15574,7 +15574,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Snowy Rabbit Hanfu Portrait",
       "summary": "This prompt generates an ultra-detailed fantasy beauty portrait of a rabbit-eared woman in embroidered hanfu, ideal for elegant character art, costume design, or cinematic AI portrait showcases.",
-      "sourcePath": "prompt-templates/image/profile-avatar-snowy-rabbit-hanfu-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-snowy-rabbit-hanfu-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-snowy-rabbit-hanfu-portrait.json"
       ],
@@ -15596,7 +15596,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-snowy-rabbit-spirit-portrait",
@@ -15604,7 +15604,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Snowy Rabbit Spirit Portrait",
       "summary": "This prompt generates a serene fantasy portrait of an anonymous rabbit-eared woman in winter, ideal for atmospheric character art and stylized profile illustrations.",
-      "sourcePath": "prompt-templates/image/profile-avatar-snowy-rabbit-spirit-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-snowy-rabbit-spirit-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-snowy-rabbit-spirit-portrait.json"
       ],
@@ -15626,7 +15626,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:profile-avatar-song-dynasty-hanfu-portrait",
@@ -15634,7 +15634,7 @@
       "category": "Profile / Avatar",
       "title": "Profile / Avatar - Song Dynasty Hanfu Portrait",
       "summary": "An optimized prompt for generating a detailed and realistic portrait of a beauty in Song Dynasty traditional Hanfu within an ancient courtyard.",
-      "sourcePath": "prompt-templates/image/profile-avatar-song-dynasty-hanfu-portrait",
+      "sourcePath": "prompt-templates/image/profile-avatar-song-dynasty-hanfu-portrait.json",
       "assetPaths": [
         "prompt-templates/image/profile-avatar-song-dynasty-hanfu-portrait.json"
       ],
@@ -15654,7 +15654,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-anime-pokemon-shop-outfit-teaser-poster",
@@ -15662,7 +15662,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - Anime Pokémon Shop Outfit Teaser Poster",
       "summary": "This prompt generates a soft pastel anime fashion announcement poster featuring a blurred-face girl in a blue dress inside a Pokémon store, ideal for outfit reveal teasers and character promo visuals.",
-      "sourcePath": "prompt-templates/image/social-media-post-anime-pokemon-shop-outfit-teaser-poster",
+      "sourcePath": "prompt-templates/image/social-media-post-anime-pokemon-shop-outfit-teaser-poster.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-anime-pokemon-shop-outfit-teaser-poster.json"
       ],
@@ -15685,7 +15685,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-cinematic-elevator-scene",
@@ -15693,7 +15693,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - Cinematic Elevator Scene",
       "summary": "A prompt for generating a moody, cinematic scene of a woman inside a metallic elevator with realistic lighting and reflections.",
-      "sourcePath": "prompt-templates/image/social-media-post-cinematic-elevator-scene",
+      "sourcePath": "prompt-templates/image/social-media-post-cinematic-elevator-scene.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-cinematic-elevator-scene.json"
       ],
@@ -15713,7 +15713,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-confused-elf-girl-at-pastel-desk",
@@ -15721,7 +15721,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - Confused Elf Girl at Pastel Desk",
       "summary": "This prompt generates a soft pastel anime illustration of an elf girl typing at her computer in a cozy kawaii workspace, ideal for social posts, wallpapers, or streamer-themed art.",
-      "sourcePath": "prompt-templates/image/social-media-post-confused-elf-girl-at-pastel-desk",
+      "sourcePath": "prompt-templates/image/social-media-post-confused-elf-girl-at-pastel-desk.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-confused-elf-girl-at-pastel-desk.json"
       ],
@@ -15742,7 +15742,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-editorial-fashion-photography",
@@ -15750,7 +15750,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - Editorial Fashion Photography",
       "summary": "A moody, fashion-focused prompt for a minimalist studio scene with soft lighting and warm tones.",
-      "sourcePath": "prompt-templates/image/social-media-post-editorial-fashion-photography",
+      "sourcePath": "prompt-templates/image/social-media-post-editorial-fashion-photography.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-editorial-fashion-photography.json"
       ],
@@ -15768,7 +15768,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-fashion-editorial-collage",
@@ -15776,7 +15776,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - Fashion Editorial Collage",
       "summary": "A highly detailed 2x2 photo collage prompt for fashion editorial shots, focusing on consistent styling, specific lighting, and facial features from a reference photo.",
-      "sourcePath": "prompt-templates/image/social-media-post-fashion-editorial-collage",
+      "sourcePath": "prompt-templates/image/social-media-post-fashion-editorial-collage.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-fashion-editorial-collage.json"
       ],
@@ -15798,7 +15798,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-psg-transfer-announcement-poster",
@@ -15806,7 +15806,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - PSG Transfer Announcement Poster",
       "summary": "A bold, professional football signing poster for announcing a player's move to Paris Saint-Germain on social media or sports promo graphics.",
-      "sourcePath": "prompt-templates/image/social-media-post-psg-transfer-announcement-poster",
+      "sourcePath": "prompt-templates/image/social-media-post-psg-transfer-announcement-poster.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-psg-transfer-announcement-poster.json"
       ],
@@ -15827,7 +15827,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-seedream-squishcraft-kids-clay-ad",
@@ -15835,7 +15835,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - Seedream Squishcraft Kids Clay Ad",
       "summary": "A production-ready kids craft product ad prompt for Seedream 5.0 Pro, featuring a playful clay set, cheerful product typography, and warm commercial lighting.",
-      "sourcePath": "prompt-templates/image/social-media-post-seedream-squishcraft-kids-clay-ad",
+      "sourcePath": "prompt-templates/image/social-media-post-seedream-squishcraft-kids-clay-ad.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-seedream-squishcraft-kids-clay-ad.json"
       ],
@@ -15859,7 +15859,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-sensational-girl-dance-storyboard-8-shots",
@@ -15867,7 +15867,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - Sensational Girl Dance Storyboard (8 Shots)",
       "summary": "A full 8-shot storyboard prompt set for generating a coherent frame-by-frame dance sequence of a stylish character. Includes shared global style tokens, a reusable negative prompt, and eight per-shot prompts (opening pose, hip groove, body wave, beat-drop waist twist, side hip sway, hair flick, power stance, finishing pose). Tuned for GPT-Image-2 tier models: concise vocabulary, no sensitive phrasing, consistent framing and lighting language across shots so the frames feel like one continuous choreography.",
-      "sourcePath": "prompt-templates/image/social-media-post-sensational-girl-dance-storyboard-8-shots",
+      "sourcePath": "prompt-templates/image/social-media-post-sensational-girl-dance-storyboard-8-shots.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-sensational-girl-dance-storyboard-8-shots.json"
       ],
@@ -15892,7 +15892,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-showa-day-retro-culture-magazine-cover",
@@ -15900,7 +15900,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - Showa Day Retro Culture Magazine Cover",
       "summary": "A warm editorial-style Japanese holiday feature page combining anime character art, nostalgic Showa-era street imagery, and magazine-style informational layout for seasonal cultural promotions.",
-      "sourcePath": "prompt-templates/image/social-media-post-showa-day-retro-culture-magazine-cover",
+      "sourcePath": "prompt-templates/image/social-media-post-showa-day-retro-culture-magazine-cover.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-showa-day-retro-culture-magazine-cover.json"
       ],
@@ -15922,7 +15922,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-social-media-fashion-outfit-generation",
@@ -15930,7 +15930,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - Social Media Fashion Outfit Generation",
       "summary": "A prompt to generate a week's worth of fashion blogger-style outfit recommendations based on a character profile, complete with item labels and prices.",
-      "sourcePath": "prompt-templates/image/social-media-post-social-media-fashion-outfit-generation",
+      "sourcePath": "prompt-templates/image/social-media-post-social-media-fashion-outfit-generation.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-social-media-fashion-outfit-generation.json"
       ],
@@ -15950,7 +15950,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-travel-snapshot-collage-prompt",
@@ -15958,7 +15958,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - Travel Snapshot Collage Prompt",
       "summary": "A detailed prompt for creating a nostalgic, 12-frame collage of smartphone-style travel photos depicting a solo journey.",
-      "sourcePath": "prompt-templates/image/social-media-post-travel-snapshot-collage-prompt",
+      "sourcePath": "prompt-templates/image/social-media-post-travel-snapshot-collage-prompt.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-travel-snapshot-collage-prompt.json"
       ],
@@ -15979,7 +15979,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:social-media-post-vintage-sign-painter-sketch",
@@ -15987,7 +15987,7 @@
       "category": "Social Media Post",
       "title": "Social Media Post - Vintage Sign-Painter Sketch",
       "summary": "Generates a hand-drawn marker sketch on paper with realistic details like graphite lines and ink bleed, perfect for vintage lettering styles.",
-      "sourcePath": "prompt-templates/image/social-media-post-vintage-sign-painter-sketch",
+      "sourcePath": "prompt-templates/image/social-media-post-vintage-sign-painter-sketch.json",
       "assetPaths": [
         "prompt-templates/image/social-media-post-vintage-sign-painter-sketch.json"
       ],
@@ -16007,7 +16007,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:vr-headset-exploded-view-poster",
@@ -16015,7 +16015,7 @@
       "category": "Social Media Post",
       "title": "VR Headset Exploded View Poster",
       "summary": "Generates a high-tech exploded view diagram of a VR headset with detailed component callouts and promotional text.",
-      "sourcePath": "prompt-templates/image/vr-headset-exploded-view-poster",
+      "sourcePath": "prompt-templates/image/vr-headset-exploded-view-poster.json",
       "assetPaths": [
         "prompt-templates/image/vr-headset-exploded-view-poster.json"
       ],
@@ -16037,7 +16037,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:image:zelda-style-forbidden-city-game-screenshot",
@@ -16045,7 +16045,7 @@
       "category": "Game UI",
       "title": "Zelda-Style Forbidden City Game Screenshot",
       "summary": "Generates a 16:9 original-gameplay-screenshot-style image prompt inspired by The Legend of Zelda: Breath of the Wild / Tears of the Kingdom, with Link and Zelda exploring a real-world landmark such as Beijing's Forbidden City. The template keeps the prompt concise, anchors the Nintendo Switch in-game look, adds natural BOTW/TOTK-style HUD hints, and localizes all readable UI text in Chinese.",
-      "sourcePath": "prompt-templates/image/zelda-style-forbidden-city-game-screenshot",
+      "sourcePath": "prompt-templates/image/zelda-style-forbidden-city-game-screenshot.json",
       "assetPaths": [
         "prompt-templates/image/zelda-style-forbidden-city-game-screenshot.json"
       ],
@@ -16071,7 +16071,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:3d-animated-boy-building-lego",
@@ -16079,7 +16079,7 @@
       "category": "General",
       "title": "3D Animated Boy Building Lego",
       "summary": "A multi-shot video prompt in 3D animation style describing a boy carefully assembling Lego pieces in a room, featuring time-lapse effects.",
-      "sourcePath": "prompt-templates/video/3d-animated-boy-building-lego",
+      "sourcePath": "prompt-templates/video/3d-animated-boy-building-lego.json",
       "assetPaths": [
         "prompt-templates/video/3d-animated-boy-building-lego.json"
       ],
@@ -16098,7 +16098,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:a-decade-of-refinement-glow-up",
@@ -16106,7 +16106,7 @@
       "category": "Advertising",
       "title": "A Decade of Refinement Glow-Up",
       "summary": "A transformation prompt for Seedance 2.0 showing a man's transition from a casual 2016 setting to a luxurious 2026 Dubai lifestyle while maintaining character consistency.",
-      "sourcePath": "prompt-templates/video/a-decade-of-refinement-glow-up",
+      "sourcePath": "prompt-templates/video/a-decade-of-refinement-glow-up.json",
       "assetPaths": [
         "prompt-templates/video/a-decade-of-refinement-glow-up.json"
       ],
@@ -16129,7 +16129,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:ancient-guardian-dragon-rescue",
@@ -16137,7 +16137,7 @@
       "category": "General",
       "title": "Ancient Guardian Dragon Rescue",
       "summary": "A detailed multi-shot cinematic prompt for a story about a girl in a rainy village saved by an emerging dragon, focusing on VFX and atmospheric sound.",
-      "sourcePath": "prompt-templates/video/ancient-guardian-dragon-rescue",
+      "sourcePath": "prompt-templates/video/ancient-guardian-dragon-rescue.json",
       "assetPaths": [
         "prompt-templates/video/ancient-guardian-dragon-rescue.json"
       ],
@@ -16159,7 +16159,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:ancient-indian-kingdom-fpv-video",
@@ -16167,7 +16167,7 @@
       "category": "General",
       "title": "Ancient Indian Kingdom FPV Video",
       "summary": "A fast-paced FPV drone-style cinematic prompt depicting a mystical Indian kingdom with temples and jungles.",
-      "sourcePath": "prompt-templates/video/ancient-indian-kingdom-fpv-video",
+      "sourcePath": "prompt-templates/video/ancient-indian-kingdom-fpv-video.json",
       "assetPaths": [
         "prompt-templates/video/ancient-indian-kingdom-fpv-video.json"
       ],
@@ -16189,7 +16189,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:animation-transfer-and-camera-tracking-prompt",
@@ -16197,7 +16197,7 @@
       "category": "General",
       "title": "Animation transfer and camera tracking prompt",
       "summary": "A technical prompt for Seedance 2.0 that applies a specific motion reference to a character while maintaining fixed camera tracking.",
-      "sourcePath": "prompt-templates/video/animation-transfer-and-camera-tracking-prompt",
+      "sourcePath": "prompt-templates/video/animation-transfer-and-camera-tracking-prompt.json",
       "assetPaths": [
         "prompt-templates/video/animation-transfer-and-camera-tracking-prompt.json"
       ],
@@ -16216,7 +16216,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:beat-synced-outfit-transformation-dance",
@@ -16224,7 +16224,7 @@
       "category": "General",
       "title": "Beat-Synced Outfit Transformation Dance",
       "summary": "A prompt for Seedance 2.0 that coordinates a character dance following breakdown frames while performing a beat-synced outfit change.",
-      "sourcePath": "prompt-templates/video/beat-synced-outfit-transformation-dance",
+      "sourcePath": "prompt-templates/video/beat-synced-outfit-transformation-dance.json",
       "assetPaths": [
         "prompt-templates/video/beat-synced-outfit-transformation-dance.json"
       ],
@@ -16245,7 +16245,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:character-intro-motion-graphics-sequence",
@@ -16253,7 +16253,7 @@
       "category": "Motion Graphics",
       "title": "Character Intro Motion Graphics Sequence",
       "summary": "A complex, multi-stage motion graphics prompt for introducing a team of characters with specific UI overlays and transitions, designed for the Seedance 2.0 model.",
-      "sourcePath": "prompt-templates/video/character-intro-motion-graphics-sequence",
+      "sourcePath": "prompt-templates/video/character-intro-motion-graphics-sequence.json",
       "assetPaths": [
         "prompt-templates/video/character-intro-motion-graphics-sequence.json"
       ],
@@ -16276,7 +16276,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:cinematic-birthday-celebration-sequence",
@@ -16284,7 +16284,7 @@
       "category": "Cinematic",
       "title": "Cinematic Birthday Celebration Sequence",
       "summary": "A highly detailed multi-shot video prompt for a birthday sequence, focusing on character consistency and emotional storytelling.",
-      "sourcePath": "prompt-templates/video/cinematic-birthday-celebration-sequence",
+      "sourcePath": "prompt-templates/video/cinematic-birthday-celebration-sequence.json",
       "assetPaths": [
         "prompt-templates/video/cinematic-birthday-celebration-sequence.json"
       ],
@@ -16307,7 +16307,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:cinematic-dragon-interaction-flight",
@@ -16315,7 +16315,7 @@
       "category": "Cinematic",
       "title": "Cinematic Dragon Interaction & Flight",
       "summary": "A detailed storyboard-style prompt for a video featuring a woman's emotional interaction with a dragon followed by a cinematic flight sequence.",
-      "sourcePath": "prompt-templates/video/cinematic-dragon-interaction-flight",
+      "sourcePath": "prompt-templates/video/cinematic-dragon-interaction-flight.json",
       "assetPaths": [
         "prompt-templates/video/cinematic-dragon-interaction-flight.json"
       ],
@@ -16338,7 +16338,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:cinematic-east-asian-woman-hand-dance",
@@ -16346,7 +16346,7 @@
       "category": "Cinematic",
       "title": "Cinematic East Asian Woman Hand Dance",
       "summary": "A highly detailed multi-shot cinematic video prompt for a stylized hand dance, featuring time-coded instructions for camera movement and character actions.",
-      "sourcePath": "prompt-templates/video/cinematic-east-asian-woman-hand-dance",
+      "sourcePath": "prompt-templates/video/cinematic-east-asian-woman-hand-dance.json",
       "assetPaths": [
         "prompt-templates/video/cinematic-east-asian-woman-hand-dance.json"
       ],
@@ -16368,7 +16368,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:cinematic-emotional-face-close-up",
@@ -16376,7 +16376,7 @@
       "category": "Cinematic",
       "title": "Cinematic Emotional Face Close-up",
       "summary": "A highly detailed technical prompt for Seedance 2.0 focusing on realistic skin textures and a series of complex emotional facial transitions.",
-      "sourcePath": "prompt-templates/video/cinematic-emotional-face-close-up",
+      "sourcePath": "prompt-templates/video/cinematic-emotional-face-close-up.json",
       "assetPaths": [
         "prompt-templates/video/cinematic-emotional-face-close-up.json"
       ],
@@ -16399,7 +16399,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:cinematic-marine-biologist-exploration",
@@ -16407,7 +16407,7 @@
       "category": "Cinematic",
       "title": "Cinematic Marine Biologist Exploration",
       "summary": "A detailed cinematic video prompt for an underwater scene featuring a marine biologist discovering an ancient shipwreck in a coral reef.",
-      "sourcePath": "prompt-templates/video/cinematic-marine-biologist-exploration",
+      "sourcePath": "prompt-templates/video/cinematic-marine-biologist-exploration.json",
       "assetPaths": [
         "prompt-templates/video/cinematic-marine-biologist-exploration.json"
       ],
@@ -16428,7 +16428,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:cinematic-music-podcast-and-guitar-technique",
@@ -16436,7 +16436,7 @@
       "category": "Cinematic",
       "title": "Cinematic Music Podcast and Guitar Technique",
       "summary": "An advanced cinematic prompt for generating a 4K music podcast video, with specific focus on guitar technique, pinch harmonics, and studio aesthetics.",
-      "sourcePath": "prompt-templates/video/cinematic-music-podcast-and-guitar-technique",
+      "sourcePath": "prompt-templates/video/cinematic-music-podcast-and-guitar-technique.json",
       "assetPaths": [
         "prompt-templates/video/cinematic-music-podcast-and-guitar-technique.json"
       ],
@@ -16459,7 +16459,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:cinematic-route-navigation-guide",
@@ -16467,7 +16467,7 @@
       "category": "Cinematic",
       "title": "Cinematic Route Navigation Guide",
       "summary": "A structured multi-scene prompt designed for Seedance to create a consistent walking navigation video featuring a recurring tour guide character and smooth transitions between real-world locations.",
-      "sourcePath": "prompt-templates/video/cinematic-route-navigation-guide",
+      "sourcePath": "prompt-templates/video/cinematic-route-navigation-guide.json",
       "assetPaths": [
         "prompt-templates/video/cinematic-route-navigation-guide.json"
       ],
@@ -16490,7 +16490,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:cinematic-street-racing-sequence-for-seedance-2",
@@ -16498,7 +16498,7 @@
       "category": "Cinematic",
       "title": "Cinematic Street Racing Sequence for Seedance 2",
       "summary": "A detailed, multi-shot prompt designed for Seedance 2 to generate a cinematic street racing sequence at night, focusing on intense driver focus, dynamic camera work, and explosive acceleration, struct",
-      "sourcePath": "prompt-templates/video/cinematic-street-racing-sequence-for-seedance-2",
+      "sourcePath": "prompt-templates/video/cinematic-street-racing-sequence-for-seedance-2.json",
       "assetPaths": [
         "prompt-templates/video/cinematic-street-racing-sequence-for-seedance-2.json"
       ],
@@ -16521,7 +16521,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:cinematic-vampire-alley-fight-sequence",
@@ -16529,7 +16529,7 @@
       "category": "Cinematic",
       "title": "Cinematic vampire alley fight sequence",
       "summary": "A comprehensive action prompt for a short film scene involving dynamic camera movements and high-speed combat in a neon-lit alley.",
-      "sourcePath": "prompt-templates/video/cinematic-vampire-alley-fight-sequence",
+      "sourcePath": "prompt-templates/video/cinematic-vampire-alley-fight-sequence.json",
       "assetPaths": [
         "prompt-templates/video/cinematic-vampire-alley-fight-sequence.json"
       ],
@@ -16551,7 +16551,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:crimson-horizon-sci-fi-cinematic-sequence",
@@ -16559,7 +16559,7 @@
       "category": "Cinematic",
       "title": "Crimson Horizon Sci-Fi Cinematic Sequence",
       "summary": "A comprehensive 9-shot cinematic video sequence for a sci-fi film titled 'Crimson Horizon', detailing everything from a rocket launch to an eerie alien encounter on Mars.",
-      "sourcePath": "prompt-templates/video/crimson-horizon-sci-fi-cinematic-sequence",
+      "sourcePath": "prompt-templates/video/crimson-horizon-sci-fi-cinematic-sequence.json",
       "assetPaths": [
         "prompt-templates/video/crimson-horizon-sci-fi-cinematic-sequence.json"
       ],
@@ -16580,7 +16580,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:cyberpunk-game-trailer-script",
@@ -16588,7 +16588,7 @@
       "category": "General",
       "title": "Cyberpunk Game Trailer Script",
       "summary": "An extensive video generation prompt for a cyberpunk game trailer, detailing character design, UI animations, and environmental transitions from a white void to a favela.",
-      "sourcePath": "prompt-templates/video/cyberpunk-game-trailer-script",
+      "sourcePath": "prompt-templates/video/cyberpunk-game-trailer-script.json",
       "assetPaths": [
         "prompt-templates/video/cyberpunk-game-trailer-script.json"
       ],
@@ -16611,7 +16611,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:forbidden-city-cat-satire",
@@ -16619,7 +16619,7 @@
       "category": "General",
       "title": "Forbidden City Cat Satire",
       "summary": "A complex dark comedy prompt for Seedance 2.0 featuring an orange cat official and a hyena emperor in a satirical Qing dynasty setting.",
-      "sourcePath": "prompt-templates/video/forbidden-city-cat-satire",
+      "sourcePath": "prompt-templates/video/forbidden-city-cat-satire.json",
       "assetPaths": [
         "prompt-templates/video/forbidden-city-cat-satire.json"
       ],
@@ -16640,7 +16640,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hollywood-haute-couture-fantasy-video-prompt",
@@ -16648,7 +16648,7 @@
       "category": "VFX / Fantasy",
       "title": "Hollywood Haute Couture Fantasy Video Prompt",
       "summary": "A detailed, multi-scene video generation prompt for Seedance 2.0, designed to create a Hollywood Haute Couture Fantasy film. The prompt specifies style, resolution (8K), rendering engine (Unreal Engin",
-      "sourcePath": "prompt-templates/video/hollywood-haute-couture-fantasy-video-prompt",
+      "sourcePath": "prompt-templates/video/hollywood-haute-couture-fantasy-video-prompt.json",
       "assetPaths": [
         "prompt-templates/video/hollywood-haute-couture-fantasy-video-prompt.json"
       ],
@@ -16671,7 +16671,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hunched-character-animation",
@@ -16679,7 +16679,7 @@
       "category": "General",
       "title": "Hunched Character Animation",
       "summary": "Instruction for Seedance 2 to create an in-place walking animation for a specific character reference.",
-      "sourcePath": "prompt-templates/video/hunched-character-animation",
+      "sourcePath": "prompt-templates/video/hunched-character-animation.json",
       "assetPaths": [
         "prompt-templates/video/hunched-character-animation.json"
       ],
@@ -16698,7 +16698,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-app-showcase-three-phones",
@@ -16706,7 +16706,7 @@
       "category": "Product",
       "title": "HyperFrames: 12-Second App Showcase — Three Floating Phones",
       "summary": "A 12-second 16:9 app showcase composition — three floating iPhone screens hover in 3D space, each rotating in turn to surface a different feature, beat-synced label callouts, end logo lockup. Built directly on the HyperFrames `app-showcase` catalog block.",
-      "sourcePath": "prompt-templates/video/hyperframes-app-showcase-three-phones",
+      "sourcePath": "prompt-templates/video/hyperframes-app-showcase-three-phones.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-app-showcase-three-phones.json"
       ],
@@ -16731,7 +16731,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-brand-sizzle-reel",
@@ -16739,7 +16739,7 @@
       "category": "Marketing",
       "title": "HyperFrames: 30-Second Brand Sizzle Reel",
       "summary": "A 30-second 16:9 HyperFrames sizzle reel — fast cuts, beat-synced kinetic typography, audio-reactive scale on display words, shader transitions between five scenes, end-card with logo bloom. Modelled on the aisoc-hype archetype from the student kit.",
-      "sourcePath": "prompt-templates/video/hyperframes-brand-sizzle-reel",
+      "sourcePath": "prompt-templates/video/hyperframes-brand-sizzle-reel.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-brand-sizzle-reel.json"
       ],
@@ -16764,7 +16764,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-data-bar-chart-race",
@@ -16772,7 +16772,7 @@
       "category": "Data",
       "title": "HyperFrames: Animated Bar-Chart Race (NYT-style)",
       "summary": "A 12-second 16:9 data infographic — animated bar + line chart with staggered category reveal, NYT-style serif headline, footnote source, kinetic value labels. Built directly on the HyperFrames `data-chart` catalog block.",
-      "sourcePath": "prompt-templates/video/hyperframes-data-bar-chart-race",
+      "sourcePath": "prompt-templates/video/hyperframes-data-bar-chart-race.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-data-bar-chart-race.json"
       ],
@@ -16797,7 +16797,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-flight-map-route",
@@ -16805,7 +16805,7 @@
       "category": "Travel",
       "title": "HyperFrames: Apple-Style Flight Map (Origin → Destination)",
       "summary": "An 8-second 16:9 cinematic flight-route map — realistic terrain zoom, animated plane gliding from origin to destination along a curved path, labelled cities, kinetic distance counter. Built directly on the HyperFrames `nyc-paris-flight` catalog block, repurposable for any city pair.",
-      "sourcePath": "prompt-templates/video/hyperframes-flight-map-route",
+      "sourcePath": "prompt-templates/video/hyperframes-flight-map-route.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-flight-map-route.json"
       ],
@@ -16830,7 +16830,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-html-in-canvas-iphone-device",
@@ -16838,7 +16838,7 @@
       "category": "VFX / HTML-in-Canvas",
       "title": "HyperFrames HTML-in-Canvas: 3D iPhone + MacBook Product Demo",
       "summary": "A 15-second product demo where a real GLTF iPhone 15 Pro Max and MacBook Pro float on a clean stage with the actual app UI rendering live on their screens via drawElementImage. Morphing glass lens flare + 360° turntable. Built on the vfx-iphone-device catalog block.",
-      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-iphone-device",
+      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-iphone-device.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-html-in-canvas-iphone-device.json"
       ],
@@ -16864,7 +16864,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-html-in-canvas-liquid-background",
@@ -16872,7 +16872,7 @@
       "category": "VFX / HTML-in-Canvas",
       "title": "HyperFrames HTML-in-Canvas: Liquid Background Hero",
       "summary": "A 12-second hero with HTML content floating above an organic liquid surface — vertex-displaced subdivided plane, real-time wave dynamics, captured DOM rides on top crisp and readable. Built on the vfx-liquid-background catalog block.",
-      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-liquid-background",
+      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-liquid-background.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-html-in-canvas-liquid-background.json"
       ],
@@ -16897,7 +16897,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-html-in-canvas-liquid-glass",
@@ -16905,7 +16905,7 @@
       "category": "VFX / HTML-in-Canvas",
       "title": "HyperFrames HTML-in-Canvas: Liquid Glass Landing Reveal",
       "summary": "A 20-second voronoi liquid-glass reveal of a real product landing page — DOM is captured live via drawElementImage, shattered into refracting glass cells, then settles into a clean hero shot. Built on the vfx-liquid-glass catalog block.",
-      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-liquid-glass",
+      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-liquid-glass.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-html-in-canvas-liquid-glass.json"
       ],
@@ -16930,7 +16930,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-html-in-canvas-magnetic",
@@ -16938,7 +16938,7 @@
       "category": "VFX / HTML-in-Canvas",
       "title": "HyperFrames HTML-in-Canvas: Magnetic Field Visualisation",
       "summary": "A 15-second magnetic-field particle visualisation reacting to a live DOM heatmap or chart — particles trace field lines that bend around the captured HTML, ideal for ML/data products. Built on the vfx-magnetic catalog block.",
-      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-magnetic",
+      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-magnetic.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-html-in-canvas-magnetic.json"
       ],
@@ -16963,7 +16963,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-html-in-canvas-portal-reveal",
@@ -16971,7 +16971,7 @@
       "category": "VFX / HTML-in-Canvas",
       "title": "HyperFrames HTML-in-Canvas: Portal Reveal Dashboard",
       "summary": "A 10-second dimensional portal opens onto a live data dashboard — DOM captured in real time, volumetric light spill, portal-edge particles. Built on the vfx-portal catalog block. Designed for keynote-style data hero shots.",
-      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-portal-reveal",
+      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-portal-reveal.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-html-in-canvas-portal-reveal.json"
       ],
@@ -16996,7 +16996,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-html-in-canvas-shatter",
@@ -17004,7 +17004,7 @@
       "category": "VFX / HTML-in-Canvas",
       "title": "HyperFrames HTML-in-Canvas: Glass Shatter Outro",
       "summary": "A 12-second HTML shatter outro — a real product page or pricing card holds for a beat, then explodes into refracting glass fragments with depth blur and chromatic dispersion. Built on the vfx-shatter catalog block. Pairs as an end-card after a longer composition.",
-      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-shatter",
+      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-shatter.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-html-in-canvas-shatter.json"
       ],
@@ -17029,7 +17029,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-html-in-canvas-text-cursor",
@@ -17037,7 +17037,7 @@
       "category": "VFX / HTML-in-Canvas",
       "title": "HyperFrames HTML-in-Canvas: Cinematic Text Cursor Reveal",
       "summary": "An 8-second dramatic text reveal with cursor glow, chromatic shadow rays, and directional lighting on a black stage. Real DOM typography under live shader post-processing. Built on the vfx-text-cursor catalog block.",
-      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-text-cursor",
+      "sourcePath": "prompt-templates/video/hyperframes-html-in-canvas-text-cursor.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-html-in-canvas-text-cursor.json"
       ],
@@ -17062,7 +17062,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-logo-outro-cinematic",
@@ -17070,7 +17070,7 @@
       "category": "Branding",
       "title": "HyperFrames: 4-Second Cinematic Logo Outro",
       "summary": "A 4-second 16:9 logo outro — piece-by-piece wordmark assembly with bloom, shimmer sweep across the final lockup, soft grain overlay, single-line CTA. Built on the HyperFrames `logo-outro`, `shimmer-sweep`, and `grain-overlay` blocks.",
-      "sourcePath": "prompt-templates/video/hyperframes-logo-outro-cinematic",
+      "sourcePath": "prompt-templates/video/hyperframes-logo-outro-cinematic.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-logo-outro-cinematic.json"
       ],
@@ -17095,7 +17095,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-money-counter-hype",
@@ -17103,7 +17103,7 @@
       "category": "Short Form",
       "title": "HyperFrames: $0 → $10K Money Counter Hype (9:16)",
       "summary": "A 6-second vertical 1080×1920 HyperFrames hype clip — Apple-style $0 → $10,000 counter with green flash, money burst particles, cash-stack icon, kicker headline. Built on the HyperFrames `apple-money-count` catalog block.",
-      "sourcePath": "prompt-templates/video/hyperframes-money-counter-hype",
+      "sourcePath": "prompt-templates/video/hyperframes-money-counter-hype.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-money-counter-hype.json"
       ],
@@ -17128,7 +17128,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-product-reveal-minimal",
@@ -17136,7 +17136,7 @@
       "category": "Cinematic",
       "title": "HyperFrames: 5-Second Minimal Product Reveal",
       "summary": "A 5-second HyperFrames composition for a high-end product reveal — dark canvas, single warm accent, slow push-in title card, kinetic kicker line, restrained motion. The agent renders MP4 from HTML+GSAP via puppeteer; no stock footage needed.",
-      "sourcePath": "prompt-templates/video/hyperframes-product-reveal-minimal",
+      "sourcePath": "prompt-templates/video/hyperframes-product-reveal-minimal.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-product-reveal-minimal.json"
       ],
@@ -17160,7 +17160,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-saas-product-promo-30s",
@@ -17168,7 +17168,7 @@
       "category": "Marketing",
       "title": "HyperFrames: 30-Second SaaS Product Promo (Linear-style)",
       "summary": "A 30-second HyperFrames composition modelled on Linear/ClickUp-style product films — UI 3D reveals, beat-synced kinetic typography, animated UI screenshots, end-card with logo outro. Built from HF catalog blocks (ui-3d-reveal, app-showcase, logo-outro) plus shader transitions between scenes.",
-      "sourcePath": "prompt-templates/video/hyperframes-saas-product-promo-30s",
+      "sourcePath": "prompt-templates/video/hyperframes-saas-product-promo-30s.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-saas-product-promo-30s.json"
       ],
@@ -17193,7 +17193,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-social-overlay-stack",
@@ -17201,7 +17201,7 @@
       "category": "Short Form",
       "title": "HyperFrames: 9:16 Social Overlay Stack (X · Reddit · Spotify · Instagram)",
       "summary": "A 15-second vertical 1080×1920 HyperFrames composition that stacks four animated social cards over a face-cam loop — an X post, a Reddit reaction, a Spotify now-playing card, and an Instagram-follow CTA at the end. Each card is a HyperFrames catalog block; the choreography is the value-add.",
-      "sourcePath": "prompt-templates/video/hyperframes-social-overlay-stack",
+      "sourcePath": "prompt-templates/video/hyperframes-social-overlay-stack.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-social-overlay-stack.json"
       ],
@@ -17226,7 +17226,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-tiktok-karaoke-talking-head",
@@ -17234,7 +17234,7 @@
       "category": "Short Form",
       "title": "HyperFrames: 9:16 TikTok Talking-Head with Karaoke Captions",
       "summary": "A vertical 1080×1920 HyperFrames short — TTS-narrated talking-head over a face-cam loop, with karaoke-style word-synced captions, animated lower third, and a tiktok-follow overlay at the end. Mirrors the may-shorts-19 archetype from the HyperFrames student kit.",
-      "sourcePath": "prompt-templates/video/hyperframes-tiktok-karaoke-talking-head",
+      "sourcePath": "prompt-templates/video/hyperframes-tiktok-karaoke-talking-head.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-tiktok-karaoke-talking-head.json"
       ],
@@ -17260,7 +17260,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:hyperframes-website-to-video-promo",
@@ -17268,7 +17268,7 @@
       "category": "Marketing",
       "title": "HyperFrames: Website-to-Video Pipeline (15-Second Marketing Cut)",
       "summary": "A 15-second 16:9 HyperFrames composition that captures a live website at three viewport sizes, then animates between them with a chromatic radial split between scenes. Mirrors the hyperframes-sizzle student-kit archetype where the site is the source asset.",
-      "sourcePath": "prompt-templates/video/hyperframes-website-to-video-promo",
+      "sourcePath": "prompt-templates/video/hyperframes-website-to-video-promo.json",
       "assetPaths": [
         "prompt-templates/video/hyperframes-website-to-video-promo.json"
       ],
@@ -17292,7 +17292,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:live-action-anime-adaptation-water-vs-thunder-breathing-duel",
@@ -17300,7 +17300,7 @@
       "category": "Anime",
       "title": "Live-Action Anime Adaptation: Water vs. Thunder Breathing Duel",
       "summary": "A highly detailed, 15-second prompt for generating a live-action adaptation of an anime-style duel, featuring 'Water Breathing' (blue water dragon) versus 'Thunder Breathing' (golden lightning). The p",
-      "sourcePath": "prompt-templates/video/live-action-anime-adaptation-water-vs-thunder-breathing-duel",
+      "sourcePath": "prompt-templates/video/live-action-anime-adaptation-water-vs-thunder-breathing-duel.json",
       "assetPaths": [
         "prompt-templates/video/live-action-anime-adaptation-water-vs-thunder-breathing-duel.json"
       ],
@@ -17323,7 +17323,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:luxury-supercar-cinematic-narrative",
@@ -17331,7 +17331,7 @@
       "category": "Cinematic",
       "title": "Luxury Supercar Cinematic Narrative",
       "summary": "A highly detailed multi-shot cinematic prompt for Seedance 2.0 involving a stylish man, Dobermans, and a vintage supercar in a misty mountain setting.",
-      "sourcePath": "prompt-templates/video/luxury-supercar-cinematic-narrative",
+      "sourcePath": "prompt-templates/video/luxury-supercar-cinematic-narrative.json",
       "assetPaths": [
         "prompt-templates/video/luxury-supercar-cinematic-narrative.json"
       ],
@@ -17354,7 +17354,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:magical-academy-storyboard-sequence",
@@ -17362,7 +17362,7 @@
       "category": "Advertising",
       "title": "Magical Academy Storyboard Sequence",
       "summary": "A detailed storyboard-style prompt for a cinematic sequence depicting a magical girl at an academy, covering arrival, discovery of power, and a magical duel.",
-      "sourcePath": "prompt-templates/video/magical-academy-storyboard-sequence",
+      "sourcePath": "prompt-templates/video/magical-academy-storyboard-sequence.json",
       "assetPaths": [
         "prompt-templates/video/magical-academy-storyboard-sequence.json"
       ],
@@ -17383,7 +17383,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:modern-rural-aesthetics-healing-short-film-video-prompt",
@@ -17391,7 +17391,7 @@
       "category": "Cinematic",
       "title": "Modern Rural Aesthetics Healing Short Film Video Prompt",
       "summary": "A detailed, three-shot prompt for Seedance 2.0 to generate a healing, cinematic short film in the Modern Rural Aesthetics style. It specifies the style (Cinematic Commercial, 4K/8K, Extreme Macro, nat",
-      "sourcePath": "prompt-templates/video/modern-rural-aesthetics-healing-short-film-video-prompt",
+      "sourcePath": "prompt-templates/video/modern-rural-aesthetics-healing-short-film-video-prompt.json",
       "assetPaths": [
         "prompt-templates/video/modern-rural-aesthetics-healing-short-film-video-prompt.json"
       ],
@@ -17414,7 +17414,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:nightclub-flyer-atmospheric-animation",
@@ -17422,7 +17422,7 @@
       "category": "General",
       "title": "Nightclub Flyer Atmospheric Animation",
       "summary": "A subtle animation prompt for Seedance 2.0 to bring background and lighting elements to life while keeping the subject locked",
-      "sourcePath": "prompt-templates/video/nightclub-flyer-atmospheric-animation",
+      "sourcePath": "prompt-templates/video/nightclub-flyer-atmospheric-animation.json",
       "assetPaths": [
         "prompt-templates/video/nightclub-flyer-atmospheric-animation.json"
       ],
@@ -17444,7 +17444,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:retro-hk-wuxia-film-aesthetic",
@@ -17452,7 +17452,7 @@
       "category": "Cinematic",
       "title": "Retro HK Wuxia Film Aesthetic",
       "summary": "A complex multi-part video prompt recreating 80s-90s Hong Kong Wuxia film aesthetics, featuring a character transformation from a cat to a human with stylized shots.",
-      "sourcePath": "prompt-templates/video/retro-hk-wuxia-film-aesthetic",
+      "sourcePath": "prompt-templates/video/retro-hk-wuxia-film-aesthetic.json",
       "assetPaths": [
         "prompt-templates/video/retro-hk-wuxia-film-aesthetic.json"
       ],
@@ -17474,7 +17474,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:seedance-2-0-15-second-cinematic-japanese-romance-short-film",
@@ -17482,7 +17482,7 @@
       "category": "Cinematic",
       "title": "Seedance 2.0: 15-Second Cinematic Japanese Romance Short Film",
       "summary": "A highly detailed, 15-second multi-scene prompt for Seedance 2.0, designed to generate a cinematic, ultra-realistic Japanese high school pure love short film. The prompt specifies scene setting (empty",
-      "sourcePath": "prompt-templates/video/seedance-2-0-15-second-cinematic-japanese-romance-short-film",
+      "sourcePath": "prompt-templates/video/seedance-2-0-15-second-cinematic-japanese-romance-short-film.json",
       "assetPaths": [
         "prompt-templates/video/seedance-2-0-15-second-cinematic-japanese-romance-short-film.json"
       ],
@@ -17504,7 +17504,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:seedance-2-0-80-year-old-rapper-mv",
@@ -17512,7 +17512,7 @@
       "category": "General",
       "title": "Seedance 2.0: 80-Year-Old Rapper MV",
       "summary": "A detailed, 15-second prompt for Seedance 2.0 to generate a 16:9 horizontal street rap music video (MV) featuring an 80-year-old woman. The prompt specifies the style (neon purple/blue cool tones, exp",
-      "sourcePath": "prompt-templates/video/seedance-2-0-80-year-old-rapper-mv",
+      "sourcePath": "prompt-templates/video/seedance-2-0-80-year-old-rapper-mv.json",
       "assetPaths": [
         "prompt-templates/video/seedance-2-0-80-year-old-rapper-mv.json"
       ],
@@ -17534,7 +17534,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:sequence-and-movement-instruction-for-martial-arts-video",
@@ -17542,7 +17542,7 @@
       "category": "General",
       "title": "Sequence and Movement Instruction for Martial Arts Video",
       "summary": "A video prompt for Seedance 2.0 that instructs the model to animate a sequence based on a character sheet, focusing on specific movements and steps.",
-      "sourcePath": "prompt-templates/video/sequence-and-movement-instruction-for-martial-arts-video",
+      "sourcePath": "prompt-templates/video/sequence-and-movement-instruction-for-martial-arts-video.json",
       "assetPaths": [
         "prompt-templates/video/sequence-and-movement-instruction-for-martial-arts-video.json"
       ],
@@ -17564,7 +17564,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:soul-switching-mirror-magic-sequence",
@@ -17572,7 +17572,7 @@
       "category": "VFX / Fantasy",
       "title": "Soul-Switching Mirror Magic Sequence",
       "summary": "A narrative video prompt describing a magical soul-switching event at a mirror, with specific camera instructions and emotional cues for each segment.",
-      "sourcePath": "prompt-templates/video/soul-switching-mirror-magic-sequence",
+      "sourcePath": "prompt-templates/video/soul-switching-mirror-magic-sequence.json",
       "assetPaths": [
         "prompt-templates/video/soul-switching-mirror-magic-sequence.json"
       ],
@@ -17593,7 +17593,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:toaster-rocket-jumpscare",
@@ -17601,7 +17601,7 @@
       "category": "General",
       "title": "Toaster Rocket Jumpscare",
       "summary": "A prompt for a realistic home-video style shot of an old man being jumpscared by a toaster launching bread like a rocket.",
-      "sourcePath": "prompt-templates/video/toaster-rocket-jumpscare",
+      "sourcePath": "prompt-templates/video/toaster-rocket-jumpscare.json",
       "assetPaths": [
         "prompt-templates/video/toaster-rocket-jumpscare.json"
       ],
@@ -17622,7 +17622,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:traditional-dance-performance",
@@ -17630,7 +17630,7 @@
       "category": "Advertising",
       "title": "Traditional Dance Performance",
       "summary": "A comprehensive video prompt for Seedance 2.0 to generate a graceful traditional dance based on choreography and identity reference images.",
-      "sourcePath": "prompt-templates/video/traditional-dance-performance",
+      "sourcePath": "prompt-templates/video/traditional-dance-performance.json",
       "assetPaths": [
         "prompt-templates/video/traditional-dance-performance.json"
       ],
@@ -17653,7 +17653,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:video-seedance-desk-hologram-ar-realdesk",
@@ -17661,7 +17661,7 @@
       "category": "Product",
       "title": "Video - Desk Hologram AR on Real Workspace (Seedance 2.0)",
       "summary": "A two-phase Seedance 2.0 workflow for the viral desk-hologram format: first lock a photoreal keyframe on a real developer desk (Open Design UI on the monitor, a cobalt-blue extraterrestrial hunter standing on the keyboard), then animate that still into a ~15s 9:16 image-to-video clip. Tuned for believable AR passthrough — medium-strength VFX, real desk clutter, monitor glow spill on the character, and light physical interactions (open mug, keyboard step, bow draw). Inspired by the desk-hologram Seedance 2.0 trend; no copyrighted character names in the prompt.",
-      "sourcePath": "prompt-templates/video/video-seedance-desk-hologram-ar-realdesk",
+      "sourcePath": "prompt-templates/video/video-seedance-desk-hologram-ar-realdesk.json",
       "assetPaths": [
         "prompt-templates/video/video-seedance-desk-hologram-ar-realdesk.json"
       ],
@@ -17691,7 +17691,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:video-seedance-three-kingdoms-guanyu-slaying-yanliang",
@@ -17699,7 +17699,7 @@
       "category": "Cinematic",
       "title": "Video - Three Kingdoms ARPG - Guan Yu Slays Yan Liang (Seedance 2.0)",
       "summary": "A ~10s in-engine cinematic action sequence bringing the companion image template game-screenshot-three-kingdoms-guanyu-slaying-yanliang to life. Guan Yu (关羽) rides his Red Hare horse straight into an enemy battle line, raises the Green Dragon Crescent Blade, and executes a single clean cleave of the opposing general Yan Liang. Tuned for Seedance 2.0 — tight camera discipline, one decisive strike, clean horse-and-blade physics, photoreal lighting, absolutely no gore on-screen (the strike is implied by a gold qi flash, not by any blood). Designed as the direct video companion to the matching image template so the still and the clip can be served as a pair. Reference image: the Guan Yu slaying-Yan-Liang screenshot template.",
-      "sourcePath": "prompt-templates/video/video-seedance-three-kingdoms-guanyu-slaying-yanliang",
+      "sourcePath": "prompt-templates/video/video-seedance-three-kingdoms-guanyu-slaying-yanliang.json",
       "assetPaths": [
         "prompt-templates/video/video-seedance-three-kingdoms-guanyu-slaying-yanliang.json"
       ],
@@ -17729,7 +17729,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:video-seedance-three-kingdoms-lyubu-yuanmen-archery",
@@ -17737,7 +17737,7 @@
       "category": "Cinematic",
       "title": "Video - Three Kingdoms ARPG - Lyu Bu Yuanmen Archery (Seedance 2.0)",
       "summary": "A ~10s in-engine cinematic action sequence bringing the companion image template game-screenshot-three-kingdoms-lyubu-yuanmen-archery to life. Lyu Bu (吕布) stands at the center of a dusty military encampment between two facing armies, draws a red-lacquered longbow, holds a bead-on-draw, then looses a single gold-glowing qi-imbued arrow down the range toward a distant halberd planted in the ground. Tuned for Seedance 2.0 — tight camera discipline, a single decisive beat, crisp HUD-safe framing, clean bow/arrow physics, wind + dust + banner motion, and in-game-screenshot color grading. Designed as the direct video companion to the matching image template so the still and the clip can be served as a pair. Reference image: the Lyu Bu yuanmen-archery screenshot template.",
-      "sourcePath": "prompt-templates/video/video-seedance-three-kingdoms-lyubu-yuanmen-archery",
+      "sourcePath": "prompt-templates/video/video-seedance-three-kingdoms-lyubu-yuanmen-archery.json",
       "assetPaths": [
         "prompt-templates/video/video-seedance-three-kingdoms-lyubu-yuanmen-archery.json"
       ],
@@ -17767,7 +17767,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:video-seedance-three-kingdoms-zhaoyun-cradle-escape",
@@ -17775,7 +17775,7 @@
       "category": "Cinematic",
       "title": "Video - Three Kingdoms ARPG - Zhao Yun Cradle Escape (Seedance 2.0)",
       "summary": "A ~12s in-engine cinematic action sequence bringing the companion image template game-screenshot-three-kingdoms-zhaoyun-cradle-escape to life. Zhao Yun (赵云) rides his warhorse through a broken Changban battlefield, cradling the infant heir A Dou in the crook of his left arm and wielding his spear in the right, parrying an incoming strike with a single PERFECT DODGE and vaulting past a fallen war-chariot to clear a path. Tuned for Seedance 2.0 — tight camera discipline, single continuous beat, believable one-arm spearwork, clean horse physics, and absolutely no visible harm to the infant. Designed as the direct video companion to the matching image template so the still and the clip can be served as a pair. Reference image: the Zhao Yun cradle-escape screenshot template.",
-      "sourcePath": "prompt-templates/video/video-seedance-three-kingdoms-zhaoyun-cradle-escape",
+      "sourcePath": "prompt-templates/video/video-seedance-three-kingdoms-zhaoyun-cradle-escape.json",
       "assetPaths": [
         "prompt-templates/video/video-seedance-three-kingdoms-zhaoyun-cradle-escape.json"
       ],
@@ -17806,7 +17806,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:vintage-disney-style-pirate-crocodile-animation",
@@ -17814,7 +17814,7 @@
       "category": "General",
       "title": "Vintage Disney Style Pirate Crocodile Animation",
       "summary": "A multi-scene narrative prompt for a classic vintage Disney-style animation featuring a crocodile pirate and bird pirates on a ship.",
-      "sourcePath": "prompt-templates/video/vintage-disney-style-pirate-crocodile-animation",
+      "sourcePath": "prompt-templates/video/vintage-disney-style-pirate-crocodile-animation.json",
       "assetPaths": [
         "prompt-templates/video/vintage-disney-style-pirate-crocodile-animation.json"
       ],
@@ -17833,7 +17833,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:viral-k-pop-dance-choreography",
@@ -17841,7 +17841,7 @@
       "category": "Social / Meme",
       "title": "Viral K-pop Dance Choreography",
       "summary": "A detailed prompt for Seedance 2.0 to animate a character performing a dance based on a 16-panel storyboard reference.",
-      "sourcePath": "prompt-templates/video/viral-k-pop-dance-choreography",
+      "sourcePath": "prompt-templates/video/viral-k-pop-dance-choreography.json",
       "assetPaths": [
         "prompt-templates/video/viral-k-pop-dance-choreography.json"
       ],
@@ -17863,7 +17863,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     },
     {
       "id": "prompt-templates:video:wasteland-factory-chase",
@@ -17871,7 +17871,7 @@
       "category": "General",
       "title": "Wasteland Factory Chase",
       "summary": "A cinematic prompt for a high-speed desert wasteland scene featuring a moving industrial factory on legs and a rebel bike chase.",
-      "sourcePath": "prompt-templates/video/wasteland-factory-chase",
+      "sourcePath": "prompt-templates/video/wasteland-factory-chase.json",
       "assetPaths": [
         "prompt-templates/video/wasteland-factory-chase.json"
       ],
@@ -17892,7 +17892,7 @@
         "LICENSE",
         "NOTICE.md"
       ],
-      "indexedAt": "2026-08-21T12:02:50.895Z"
+      "indexedAt": "2026-08-21T12:10:19.080Z"
     }
   ],
   "warnings": []
