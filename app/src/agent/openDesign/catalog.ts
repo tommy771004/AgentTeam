@@ -3,7 +3,11 @@
  * The inventory is generated offline from app/public/open-design and loaded by
  * the renderer as a small, digestable catalog.  Keep this module free of Node
  * APIs so the browser preview and Electron renderer share the same parser.
+ *
+ * Plugin contract validation is owned by ./pluginContract.ts — catalog
+ * presentation must consume its result instead of re-parsing contract fields.
  */
+import { parseOpenDesignPluginManifest, type PluginContractResult } from './pluginContract.ts'
 
 export const OPEN_DESIGN_INVENTORY_VERSION = 1
 export const OPEN_DESIGN_UPSTREAM_COMMIT = '4567a0d'
@@ -34,7 +38,7 @@ export type OpenDesignCatalogRecord = OpenDesignProvenance & {
   assetPaths: string[]
   entryPaths: string[]
   tags: string[]
-  surface?: 'prototype' | 'dashboard' | 'design-system' | 'deck'
+  surface?: 'prototype' | 'dashboard' | 'design-system' | 'deck' | 'video'
   icon?: string
   suggestedObjective?: string
   executionStatus: OpenDesignExecutionStatus
@@ -87,7 +91,7 @@ function normalizeRecord(value: unknown, _index: number): OpenDesignCatalogRecor
     : ['ready', 'content-only', 'invalid'].includes(String(raw.executionStatus))
     ? (String(raw.executionStatus) as OpenDesignExecutionStatus)
     : 'content-only'
-  const surface = ['prototype', 'dashboard', 'design-system', 'deck'].includes(String(raw.surface))
+  const surface = ['prototype', 'dashboard', 'design-system', 'deck', 'video'].includes(String(raw.surface))
     ? (String(raw.surface) as OpenDesignCatalogRecord['surface'])
     : undefined
   return {
@@ -180,3 +184,14 @@ export async function readOpenDesignText(assetPath: string, maxBytes = 512_000):
     return null
   }
 }
+
+// ── Contract seam: authoritative validation result ────────────────────
+// Catalog presentation, pack install, and Task-run admission must all
+// consume the same PluginContractResult instead of re-inferring fields.
+
+export function validatePluginContract(value: unknown): PluginContractResult {
+  return parseOpenDesignPluginManifest(value)
+}
+
+// Re-export for shipped-module smoke convenience
+export type { PluginContractResult as CatalogPluginContractResult }
