@@ -27,6 +27,7 @@ export type SubDesignTemplate = {
   icon: string
   suggestedObjective: string
   sourcePath: string
+  previewImage?: string
   availability: SubDesignTemplateAvailability
   /** Position in the official 「探索全部資源」 collection, or undefined. */
   exploreRank?: number
@@ -84,13 +85,18 @@ const CATEGORY_ICONS: Record<string, string> = {
 }
 
 export function openDesignRecordToTemplate(record: OpenDesignCatalogRecord): SubDesignTemplate {
-  const category = CATEGORY_LABELS[record.category] || 'prototype'
+  const rawCategory = record.category.trim().toLowerCase()
+  const category = CATEGORY_LABELS[record.category] || CATEGORY_LABELS[rawCategory] || (rawCategory === 'live artifact' ? 'live-artifact' : 'prototype')
   const surface: SubDesignSurface | undefined = record.surface || (
     category === 'deck' ? 'deck' :
       category === 'live-artifact' ? 'dashboard' :
         category === 'prototype' ? 'prototype' :
           category === 'video' ? 'video' : undefined
   )
+  // Preview mapping: prefer local asset path via openDesignAssetUrl, fallback to remote URL
+  const previewImage = record.previewImage
+    ? (record.previewImage.startsWith('http') ? record.previewImage : `/open-design/${record.previewImage}`)
+    : undefined
   return {
     id: record.id,
     title: record.title,
@@ -100,6 +106,7 @@ export function openDesignRecordToTemplate(record: OpenDesignCatalogRecord): Sub
     icon: record.icon || CATEGORY_ICONS[record.category] || 'extension',
     suggestedObjective: record.suggestedObjective || (surface === 'deck' ? '製作一份可交付的敘事簡報。' : '建立一個可驗證、可交付的設計產物。'),
     sourcePath: record.sourcePath,
+    previewImage,
     availability: record.executionStatus === 'ready' && Boolean(surface) ? 'ready' : 'requires-capability',
     exploreRank: record.exploreRank,
     contractStatus: record.contractStatus,

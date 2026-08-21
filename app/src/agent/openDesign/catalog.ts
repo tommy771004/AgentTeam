@@ -54,6 +54,8 @@ export type OpenDesignCatalogRecord = OpenDesignProvenance & {
   surface?: SubDesignSurface
   icon?: string
   suggestedObjective?: string
+  /** Local preview image (e.g. prompt-templates preview.png) or remote previewImageUrl */
+  previewImage?: string
   executionStatus: OpenDesignExecutionStatus
   contractStatus: OpenDesignContractStatus
   contractReason?: string
@@ -139,6 +141,7 @@ function normalizeRecord(value: unknown, _index: number): OpenDesignCatalogRecor
     ? (String(raw.executionStatus) as OpenDesignExecutionStatus)
     : 'content-only'
   const surface = isSubDesignSurface(raw.surface) ? raw.surface : undefined
+  const previewImage = cleanPath(raw.previewImage) || (typeof raw.previewImageUrl === 'string' ? cleanText(raw.previewImageUrl, 500) : undefined) || undefined
   return {
     source: 'open-design',
     sourceUrl: cleanText(raw.sourceUrl, 500) || OPEN_DESIGN_SOURCE_URL,
@@ -158,6 +161,7 @@ function normalizeRecord(value: unknown, _index: number): OpenDesignCatalogRecor
     surface,
     icon: cleanText(raw.icon, 64) || undefined,
     suggestedObjective: cleanText(raw.suggestedObjective, 400) || undefined,
+    previewImage: previewImage || undefined,
     executionStatus: status,
     contractStatus,
     exploreRank: Number.isInteger(raw.exploreRank) && (raw.exploreRank as number) >= 0

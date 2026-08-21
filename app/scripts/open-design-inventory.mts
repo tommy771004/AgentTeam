@@ -51,7 +51,7 @@ function parseBoundedJson(file, warnings) {
     const value = JSON.parse(fs.readFileSync(file, 'utf8'))
     const visit = (item, depth) => {
       if (depth > MAX_DEPTH) throw new Error('JSON nesting exceeds limit')
-      if (typeof item === 'string' && item.length > 4000) throw new Error('JSON string exceeds limit')
+      if (typeof item === 'string' && item.length > 20000) throw new Error('JSON string exceeds limit')
       if (Array.isArray(item)) item.slice(0, 100).forEach((child) => visit(child, depth + 1))
       else if (item && typeof item === 'object') Object.values(item).slice(0, 100).forEach((child) => visit(child, depth + 1))
     }
@@ -197,16 +197,20 @@ function sourceDirectories(files) {
     if (relative.endsWith('OPEN_DESIGN_INVENTORY.json')) continue
     const parts = relative.split('/')
     let dir = parts.slice(0, -1).join('/')
-    if (parts[0] === 'prompt-templates') dir = parts.slice(0, -1).join('/')
-    else if (parts[0] === 'design-templates') dir = parts.slice(0, 2).join('/')
+    if (parts[0] === 'prompt-templates') {
+      // Each prompt-template is a standalone file; group its json with its preview image
+      const base = relative.replace(/\.(json|preview\.png|preview\.jpg)$/i, '')
+      // Use base path as dir so json + preview.png share same record
+      dir = base
+    } else if (parts[0] === 'design-templates') dir = parts.slice(0, 2).join('/')
     else if (parts[0] === 'design-systems') dir = parts.slice(0, 2).join('/')
     else if (parts[0] === 'plugins' && parts[1] === '_official') dir = parts.slice(0, 4).join('/')
     if (!dir) continue
-    // A root-level documentation file such as design-templates/AGENTS.md is
-    // vendor guidance, not an installable content pack. Never let a file path
-    // masquerade as a source directory in the catalog.
-    const dirPath = path.join(vendorRoot, dir)
-    if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) continue
+    // Prompt-templates are file-based packs; skip directory existence check for them
+    if (parts[0] !== 'prompt-templates') {
+      const dirPath = path.join(vendorRoot, dir)
+      if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) continue
+    }
     if (!dirs.has(dir)) dirs.set(dir, [])
     dirs.get(dir).push({ file, relative })
   }
@@ -216,7 +220,11 @@ function sourceDirectories(files) {
 function buildRecord(relative, entries, indexedAt, fallbackLicenses) {
   const warnings = []
   const files = entries.map((entry) => entry.relative)
-  const jsonEntry = entries.find((entry) => /(^|\/)(template|open-design)\.json$/.test(entry.relative))
+  let jsonEntry = entries.find((entry) => /(^|\/)(template|open-design)\.json$/.test(entry.relative))
+  // prompt-templates are single-file packs named *.json
+  if (!jsonEntry && relative.startsWith('prompt-templates/')) {
+    jsonEntry = entries.find((entry) => entry.relative.endsWith('.json'))
+  }
   const parsed = jsonEntry ? parseBoundedJson(jsonEntry.file, warnings) : null
   const kind = recordKind(relative, files)
   const category = categoryFor(relative, parsed)
@@ -244,6 +252,10 @@ function buildRecord(relative, entries, indexedAt, fallbackLicenses) {
     ?? statusOverride
     ?? (kind === 'template' && category === 'prototype' && entries.some((entry) => /example\.html$/i.test(entry.relative)) ? 'ready' : 'content-only')
   const id = relative.replace(/\//g, ':')
+  // Preview mapping: prompt-templates carry previewImageUrl and a local .preview.png
+  const foundPreview = entries.find((e) => e.relative.endsWith('.preview.png') || e.relative.endsWith('.preview.jpg'))
+  const localPreviewRel = foundPreview?.relative
+  const previewImage = localPreviewRel || (typeof parsed?.previewImageUrl === 'string' ? String(parsed.previewImageUrl).slice(0, 500) : undefined) || (typeof parsed?.preview === 'string' ? String(parsed.preview).slice(0, 500) : undefined)
   const declaredSurface = parsed?.surface || parsed?.od?.mode
   return {
     id,
@@ -269,6 +281,7 @@ function buildRecord(relative, entries, indexedAt, fallbackLicenses) {
     contractStatus: contractView.contractStatus,
     contractReason: contractView.reason,
     specVersion: contractView.specVersion,
+    previewImage: previewImage || undefined,
     parseWarnings: warnings,
     source: 'open-design',
     sourceUrl: SOURCE_URL,

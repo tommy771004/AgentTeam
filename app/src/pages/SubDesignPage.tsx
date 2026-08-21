@@ -230,7 +230,10 @@ export function SubDesignPage() {
   const activeBriefTemplateId = activeBrief?.templateId
   const selectedSystem = systems.find((system) => system.id === designSystemId)
   const allTemplates = useMemo(
-    () => catalogRecords.filter((record) => record.kind === 'template').map(openDesignRecordToTemplate),
+    () =>
+      catalogRecords
+        .filter((record) => record.kind === 'template' || record.kind === 'prompt')
+        .map(openDesignRecordToTemplate),
     [catalogRecords],
   )
   useEffect(() => {
@@ -861,7 +864,7 @@ export function SubDesignPage() {
                     setSurfaceId(template.surface)
                     setBrief((current) => current || template.suggestedObjective)
                   }}
-                  className={`group flex min-h-[176px] flex-col rounded-2xl border p-4 text-left transition-colors ${
+                  className={`group flex min-h-[176px] flex-col overflow-hidden rounded-2xl border text-left transition-colors ${
                     selected
                       ? 'border-primary/45 bg-primary/[0.08]'
                       : unavailable
@@ -869,27 +872,40 @@ export function SubDesignPage() {
                         : 'border-white/10 bg-surface-container-low hover:border-primary/30 hover:bg-white/[0.04]'
                   }`}
                 >
-                  <span className="flex items-center justify-between text-[11px] text-outline">
-                    <span className="tabular-nums">{String(index + 1).padStart(2, '0')}</span>
-                    <Icon name={template.icon} size={19} className={selected ? 'text-primary' : 'text-outline group-hover:text-on-surface'} />
-                  </span>
-                  <span className="mt-5 block text-[15px] font-semibold leading-snug text-on-surface">{template.title}</span>
-                  <span className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-outline">{template.summary}</span>
-                  {template.contractNotice ? (
-                    <span className="mt-3 line-clamp-2 text-[10px] leading-relaxed text-error">{template.contractNotice}</span>
+                  {template.previewImage ? (
+                    <img
+                      src={template.previewImage}
+                      alt={`${template.title} 預覽`}
+                      className="h-28 w-full object-cover border-b border-white/10"
+                      loading="lazy"
+                      onError={(e) => {
+                        ;(e.target as HTMLImageElement).style.display = 'none'
+                      }}
+                    />
                   ) : null}
-                  <span className="mt-auto flex items-end justify-between gap-3 pt-4 text-[10px] text-outline">
-                    <span>{categoryLabel}</span>
-                    <span>
-                      {template.contractNotice
-                        ? '契約不相容'
-                        : unavailable
-                          ? '需要額外 capability'
-                          : selected
-                            ? '已選取'
-                            : '可直接選用'}
+                  <div className="flex flex-1 flex-col p-4">
+                    <span className="flex items-center justify-between text-[11px] text-outline">
+                      <span className="tabular-nums">{String(index + 1).padStart(2, '0')}</span>
+                      <Icon name={template.icon} size={19} className={selected ? 'text-primary' : 'text-outline group-hover:text-on-surface'} />
                     </span>
-                  </span>
+                    <span className="mt-3 block text-[15px] font-semibold leading-snug text-on-surface">{template.title}</span>
+                    <span className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-outline">{template.summary}</span>
+                    {template.contractNotice ? (
+                      <span className="mt-3 line-clamp-2 text-[10px] leading-relaxed text-error">{template.contractNotice}</span>
+                    ) : null}
+                    <span className="mt-auto flex items-end justify-between gap-3 pt-4 text-[10px] text-outline">
+                      <span>{categoryLabel}</span>
+                      <span>
+                        {template.contractNotice
+                          ? '契約不相容'
+                          : unavailable
+                            ? '需要額外 capability'
+                            : selected
+                              ? '已選取'
+                              : '可直接選用'}
+                      </span>
+                    </span>
+                  </div>
                 </button>
               )
             })}
