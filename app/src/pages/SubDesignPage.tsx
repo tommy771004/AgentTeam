@@ -635,9 +635,13 @@ export function SubDesignPage() {
             templates={allTemplates}
             examples={exploreTemplates.slice(0, 8)}
             designSystemLabel={selectedSystem?.title || 'No design system'}
+            designSystemOptions={systems.map((s) => ({ id: s.id, title: s.title }))}
             workingDirectoryLabel={projectRoot ? projectRoot.split(/[\\/]/).filter(Boolean).pop()! : 'Select working directory'}
             onBrowseDesignSystems={() => navigate(`/design-systems?returnTo=${encodeURIComponent('/subdesign')}`)}
-            onRefreshSystems={() => void refreshSystems(projectRoot || undefined)}
+            onSelectDesignSystem={(id) => {
+              setDesignSystemId(id)
+            }}
+            onPickWorkingDirectory={() => void useProjectStore.getState().pickFolder()}
             activeCategory={templateCategory === 'all' ? 'all' : templateCategory === 'prototype' ? 'creative' : templateCategory === 'deck' ? 'pitch' : templateCategory === 'live-artifact' ? 'engineering' : templateCategory === 'hyperframes' ? 'course' : 'all'}
             onSelectCategory={(id) => {
               const map: Record<string, SubDesignTemplateCategory> = {

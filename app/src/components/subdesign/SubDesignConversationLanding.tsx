@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Icon } from '../Icon'
 import type { SubDesignTemplate } from '../../agent/subdesign/templateCatalog'
 
@@ -22,9 +22,11 @@ export type LandingProps = {
   templates: SubDesignTemplate[]
   examples: SubDesignTemplate[]
   designSystemLabel: string
+  designSystemOptions: Array<{ id: string; title: string }>
   workingDirectoryLabel: string
   onBrowseDesignSystems: () => void
-  onRefreshSystems: () => void
+  onSelectDesignSystem: (id: string) => void
+  onPickWorkingDirectory: () => void
   activeCategory: string
   onSelectCategory: (id: string) => void
   canSend: boolean
@@ -53,6 +55,22 @@ function TemplateThumb({ template }: { template: SubDesignTemplate }) {
 export function SubDesignConversationLanding(props: LandingProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { brief, onBriefChange, template, examples, designSystemLabel, workingDirectoryLabel, activeCategory } = props
+  const templateMenuRef = useRef<HTMLDivElement>(null)
+  const designMenuRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [showTemplates, setShowTemplates] = useState(false)
+  const [showDesignSystems, setShowDesignSystems] = useState(false)
+  const [attachName, setAttachName] = useState<string | null>(null)
+
+  // Close menus on outside click
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (templateMenuRef.current && !templateMenuRef.current.contains(e.target as Node)) setShowTemplates(false)
+      if (designMenuRef.current && !designMenuRef.current.contains(e.target as Node)) setShowDesignSystems(false)
+    }
+    window.addEventListener('mousedown', h)
+    return () => window.removeEventListener('mousedown', h)
+  }, [])
 
   return (
     <section className="mx-auto w-full max-w-[880px] px-4 pb-10">
@@ -84,13 +102,18 @@ export function SubDesignConversationLanding(props: LandingProps) {
           />
         </div>
         <div className="flex items-center gap-2 px-3 pb-3 pt-2">
-          <button
-            type="button"
-            aria-label="Add attachment"
-            className="grid h-8 w-8 place-items-center rounded-full border border-[#e8ddd5] bg-white text-[#8a8580] hover:text-[#111111] transition-colors"
-          >
-            <Icon name="add" size={16} />
-          </button>
+          <div className="relative" ref={templateMenuRef}>
+            <button
+              type="button"
+              aria-label="Add attachment"
+              onClick={() => fileInputRef.current?.click()}
+              className="grid h-8 w-8 place-items-center rounded-full border border-[#e8ddd5] bg-white text-[#8a8580] hover:text-[#111111] transition-colors"
+            >
+              <Icon name="add" size={16} />
+            </button>
+            <input ref={fileInputRef} type="file" className="hidden" accept="image/*,.md,.txt" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setAttachName(f.name); onBriefChange(brief ? `${brief}\n[附件: ${f.name}]` : `[附件: ${f.name}]`); } }} />
+            {attachName && <span className="absolute -top-6 left-0 whitespace-nowrap rounded-full bg-[#111111] px-2 py-1 text-[10px] text-white">{attachName}</span>}
+          </div>
 
           {template ? (
             <span className="inline-flex items-center gap-2 rounded-full bg-[#fdf2ec] border border-[#e8ddd5] px-2.5 py-1.5">
@@ -103,7 +126,23 @@ export function SubDesignConversationLanding(props: LandingProps) {
                 <Icon name="close" size={14} />
               </button>
             </span>
-          ) : null}
+          ) : (
+            <div className="relative">
+              <button type="button" onClick={() => setShowTemplates((v) => !v)} className="inline-flex items-center gap-1.5 rounded-full border border-[#e8ddd5] bg-white px-3 py-1.5 text-[12px] text-[#6b6560] hover:text-[#111111]">
+                <Icon name="slideshow" size={14} className="text-[#b8b0a8]" /> Template <Icon name="expand_more" size={14} />
+              </button>
+              {showTemplates && (
+                <div className="absolute left-0 top-full mt-2 z-20 max-h-64 w-64 overflow-auto rounded-xl border border-[#e8ddd5] bg-white shadow-[0_8px_24px_rgba(0,0,0,0.08)] p-1">
+                  {props.templates.slice(0, 20).map((t) => (
+                    <button key={t.id} type="button" onClick={() => { props.onPickTemplate(t); setShowTemplates(false); textareaRef.current?.focus(); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-[#fdf2ec]">
+                      <Icon name={t.icon as never} size={14} className="text-[#b8b0a8]" />
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-[#111111]">{t.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <span className="flex-1" />
 
@@ -127,13 +166,27 @@ export function SubDesignConversationLanding(props: LandingProps) {
 
       {/* Meta row — design system + working directory */}
       <div className="mt-3 flex flex-wrap items-center gap-3 px-1 text-[12px] text-[#8a8580]">
-        <button type="button" onClick={props.onBrowseDesignSystems} className="inline-flex items-center gap-1.5 hover:text-[#111111] transition-colors">
-          <Icon name="palette" size={14} className="text-[#b8b0a8]" />
-          <span className="text-[#6b6560]">{designSystemLabel}</span>
-          <Icon name="expand_more" size={14} />
-        </button>
+        <div className="relative" ref={designMenuRef}>
+          <button type="button" onClick={() => setShowDesignSystems((v) => !v)} className="inline-flex items-center gap-1.5 hover:text-[#111111] transition-colors">
+            <Icon name="palette" size={14} className="text-[#b8b0a8]" />
+            <span className="text-[#6b6560]">{designSystemLabel}</span>
+            <Icon name="expand_more" size={14} />
+          </button>
+          {showDesignSystems && (
+            <div className="absolute left-0 top-full mt-2 z-20 w-56 rounded-xl border border-[#e8ddd5] bg-white shadow-[0_8px_24px_rgba(0,0,0,0.08)] p-1">
+              {props.designSystemOptions.map((ds) => (
+                <button key={ds.id} type="button" onClick={() => { props.onSelectDesignSystem(ds.id); setShowDesignSystems(false); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-[#fdf2ec]">
+                  <span className="min-w-0 flex-1 truncate text-[12px] text-[#111111]">{ds.title}</span>
+                </button>
+              ))}
+              <button type="button" onClick={() => { props.onBrowseDesignSystems(); setShowDesignSystems(false); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[#c07a56] hover:bg-[#fdf2ec] text-[12px]">
+                管理全部 Design Systems
+              </button>
+            </div>
+          )}
+        </div>
         <span className="h-3 w-px bg-[#e8ddd5]" aria-hidden />
-        <button type="button" className="inline-flex items-center gap-1.5 hover:text-[#111111] transition-colors" onClick={props.onRefreshSystems}>
+        <button type="button" className="inline-flex items-center gap-1.5 hover:text-[#111111] transition-colors" onClick={props.onPickWorkingDirectory}>
           <Icon name="folder" size={14} className="text-[#b8b0a8]" />
           {workingDirectoryLabel}
           <Icon name="expand_more" size={14} />
