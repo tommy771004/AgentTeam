@@ -3,7 +3,10 @@ import { v4 as uuid } from 'uuid'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { critiqueAllowsDeliver } from '../agent/subdesign/critique'
 import { buildSubDesignPrompt } from '../agent/subdesign/prompt'
-import { prepareSubDesignPluginExecution } from '../agent/subdesign/pluginExecutionPreparation'
+import { prepareSubDesignRun } from '../agent/subdesign/pluginExecutionPreparation'
+import type { PluginInputValues } from '../agent/subdesign/pluginInputs'
+import { hydrateProviderFlags } from '../agent/subdesign/providers/providerFlags'
+import type { PluginInput } from '../agent/openDesign/pluginContract'
 import {
   OPEN_DESIGN_EXPLORE_SOURCE,
   OPEN_DESIGN_TEMPLATE_SOURCE,
@@ -50,7 +53,12 @@ import { useSettingsStore } from '../store/settingsStore'
 import type { ThreadRunner } from '../store/threadStore'
 import {
   DEFAULT_STORYBOOK_PROVIDER_SETTINGS,
+  DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
+  loadAllProviderRuns,
+  loadExperimentalSurfaceSettings,
   loadStorybookProviderState,
+  saveExperimentalSurfaceSettings,
+  type ExperimentalSurfaceSettings,
   saveStorybookProviderSettings,
   type StorybookProviderSettings,
 } from '../agent/subdesign/providers/providerSettings.ts'
@@ -167,12 +175,48 @@ export function SubDesignPage() {
   const [startingRun, setStartingRun] = useState(false)
   const [storybookSettings, setStorybookSettings] = useState<StorybookProviderSettings>(DEFAULT_STORYBOOK_PROVIDER_SETTINGS)
   const [storybookRuns, setStorybookRuns] = useState<SubDesignPluginExecutionProjection[]>([])
+  const [providerRuns, setProviderRuns] = useState<SubDesignPluginExecutionProjection[]>([])
+  const [experimentalSettings, setExperimentalSettings] = useState<ExperimentalSurfaceSettings>(
+    DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
+  )
+  // Values collected by the plugin input form, and whatever the contract still
+  // requires. A blocked run surfaces the form rather than starting without them.
+  const [pluginInputs, setPluginInputs] = useState<PluginInputValues>({})
+  const [pluginDeclaredInputs, setPluginDeclaredInputs] = useState<PluginInput[]>([])
 
   const refreshStorybookState = useCallback(async () => {
-    const state = await loadStorybookProviderState(projectRoot || undefined)
+    const [state, runs, experimental] = await Promise.all([
+      loadStorybookProviderState(projectRoot || undefined),
+      loadAllProviderRuns(projectRoot || undefined),
+      loadExperimentalSurfaceSettings(projectRoot || undefined),
+    ])
     setStorybookSettings(state.settings)
     setStorybookRuns(state.runs)
+    setProviderRuns(runs)
+    setExperimentalSettings(experimental)
+    // Apply the project's choice to the synchronous render-path gate.
+    hydrateProviderFlags(experimental)
   }, [projectRoot])
+
+  // Plugin inputs belong to one brief's plugin. Switching briefs must not carry
+  // the previous plugin's answers into a different contract.
+  useEffect(() => {
+    setPluginInputs({})
+    setPluginDeclaredInputs([])
+  }, [routeBriefId])
+
+  /**
+   * Wraps the shared preparation so a block on unfilled inputs surfaces the
+   * form. Keeps the recording in one place instead of at each run start.
+   */
+  const prepareSubDesignRunTracked = useCallback(
+    async (input: Parameters<typeof prepareSubDesignRun>[0]) => {
+      const prepared = await prepareSubDesignRun(input)
+      setPluginDeclaredInputs(prepared.declaredInputs ?? [])
+      return prepared
+    },
+    [],
+  )
 
   const activeSurface = useMemo(
     () => SURFACES.find((surface) => surface.id === surfaceId) || SURFACES[0],
@@ -208,7 +252,6 @@ export function SubDesignPage() {
     for (const template of collectionTemplates) counts.set(template.category, (counts.get(template.category) || 0) + 1)
     return counts
   }, [collectionTemplates])
-  const missingExploreTemplates = 0
   const visibleArtifacts = activeBrief
     ? artifacts.filter((artifact) => artifact.briefId === activeBrief.id)
     : []
@@ -384,7 +427,8 @@ export function SubDesignPage() {
     setShowRunPanel(false)
     try {
       const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignPluginExecution({
+      const pluginExecution = await prepareSubDesignRunTracked({
+        pluginInputs,
         brief: created,
         runId,
         projectRoot: projectRoot || undefined,
@@ -398,7 +442,7 @@ export function SubDesignPage() {
         sourceKind: 'composer',
         reuseThreadId: threadId,
         runner,
-        overrides: pluginExecution.ready ? { subDesignPluginExecution: pluginExecution.request } : undefined,
+        overrides: pluginExecution.overrides,
       })
     } finally {
       setStartingRun(false)
@@ -422,7 +466,8 @@ export function SubDesignPage() {
     setShowRunPanel(false)
     try {
       const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignPluginExecution({
+      const pluginExecution = await prepareSubDesignRunTracked({
+        pluginInputs,
         brief: activeBrief,
         runId,
         projectRoot: projectRoot || undefined,
@@ -434,7 +479,7 @@ export function SubDesignPage() {
         reuseThreadId: activeBrief.threadId,
         runner: linkedThread?.runner || 'builtin',
         loopType: linkedThread?.loopType || undefined,
-        overrides: pluginExecution.ready ? { subDesignPluginExecution: pluginExecution.request } : undefined,
+        overrides: pluginExecution.overrides,
       })
     } finally {
       setStartingRun(false)
@@ -448,7 +493,8 @@ export function SubDesignPage() {
     setShowRunPanel(false)
     try {
       const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignPluginExecution({
+      const pluginExecution = await prepareSubDesignRunTracked({
+        pluginInputs,
         brief: activeBrief,
         runId,
         projectRoot: projectRoot || undefined,
@@ -460,7 +506,7 @@ export function SubDesignPage() {
         reuseThreadId: activeBrief.threadId,
         runner: linkedThread?.runner || 'builtin',
         loopType: linkedThread?.loopType || undefined,
-        overrides: pluginExecution.ready ? { subDesignPluginExecution: pluginExecution.request } : undefined,
+        overrides: pluginExecution.overrides,
       })
     } finally {
       setStartingRun(false)
@@ -508,6 +554,25 @@ export function SubDesignPage() {
         onSelectDirection={(directionId) => { selectDirection(activeBrief.id, directionId, undefined, projectRoot || undefined) }}
         storybookSettings={storybookSettings}
         latestStorybookRun={storybookRuns.find((item) => item.briefId === activeBrief.id) || storybookRuns[0] || null}
+        experimentalSettings={experimentalSettings}
+        onSaveExperimentalSettings={async (value) => {
+          const result = await saveExperimentalSurfaceSettings(value, projectRoot || undefined)
+          if (result.ok) {
+            setExperimentalSettings(result.settings)
+            hydrateProviderFlags(result.settings)
+          }
+          return result
+        }}
+        pluginDeclaredInputs={pluginDeclaredInputs}
+        onSubmitPluginInputs={(values) => {
+          setPluginInputs(values)
+          setPluginDeclaredInputs([])
+        }}
+        artifactStream={
+          selectedArtifact
+            ? providerRuns.find((run) => run.artifact?.id === selectedArtifact.id)?.stream ?? null
+            : null
+        }
         onSaveStorybookSettings={async (value) => {
           const result = await saveStorybookProviderSettings(value, projectRoot || undefined)
           if (result.ok) {
@@ -645,7 +710,6 @@ export function SubDesignPage() {
             </button>
           </div>
         </section>
-
         {surfaceId === 'design-system' ? (
           <section className="mx-auto mt-8 max-w-[820px]">
             <div className="flex items-center justify-between gap-3">
@@ -781,11 +845,6 @@ export function SubDesignPage() {
               })}
             </div>
           </div>
-          {missingExploreTemplates > 0 && templateCollection === 'explore' ? (
-            <p className="mt-4 text-[11px] font-medium text-secondary" role="status">
-              有 {missingExploreTemplates} 個官方精選範本尚未同步到本機，已暫時隱藏，避免產生無內容的選項。
-            </p>
-          ) : null}
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {visibleTemplates.map((template, index) => {
               const selected = template.id === templateId
@@ -816,9 +875,20 @@ export function SubDesignPage() {
                   </span>
                   <span className="mt-5 block text-[15px] font-semibold leading-snug text-on-surface">{template.title}</span>
                   <span className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-outline">{template.summary}</span>
+                  {template.contractNotice ? (
+                    <span className="mt-3 line-clamp-2 text-[10px] leading-relaxed text-error">{template.contractNotice}</span>
+                  ) : null}
                   <span className="mt-auto flex items-end justify-between gap-3 pt-4 text-[10px] text-outline">
                     <span>{categoryLabel}</span>
-                    <span>{unavailable ? '需要額外 capability' : selected ? '已選取' : '可直接選用'}</span>
+                    <span>
+                      {template.contractNotice
+                        ? '契約不相容'
+                        : unavailable
+                          ? '需要額外 capability'
+                          : selected
+                            ? '已選取'
+                            : '可直接選用'}
+                    </span>
                   </span>
                 </button>
               )
