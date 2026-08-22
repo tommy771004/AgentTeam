@@ -245,8 +245,9 @@ await test('controller restoreArtifactRevision delegates when not live', async (
   assert.equal(restoreCalls, 1)
 })
 
-await test('diffRevisions reports added / removed / changed per file from snapshot hashes', async () => {
+await test('diffRevisions reads any two snapshots and returns UI-ready line changes', async () => {
   const { computeRevisionDiff } = await import('../src/agent/subdesign/artifactSnapshots.ts')
+  const restore = resetStore()
   const index = {
     artifact_diff_qa: [
       { revision: 1, createdAt: 't1', files: [
@@ -254,24 +255,72 @@ await test('diffRevisions reports added / removed / changed per file from snapsh
         { path: 'b.css', sha256: 'bb' },
         { path: 'old.js', sha256: 'cc' },
       ] },
-      { revision: 2, createdAt: 't2', files: [
+      { revision: 4, createdAt: 't4', files: [
         { path: 'a.html', sha256: 'aa' },
         { path: 'b.css', sha256: 'zz' },
         { path: 'new.js', sha256: 'dd' },
       ] },
     ],
   }
-  const diff = computeRevisionDiff(index as never, 'artifact_diff_qa', 1, 2)
+  const diff = computeRevisionDiff(index as never, 'artifact_diff_qa', 1, 4)
   assert.deepEqual(diff.files.map((file) => [file.path, file.status]).sort(), [
     ['a.html', 'unchanged'],
     ['b.css', 'changed'],
     ['new.js', 'added'],
     ['old.js', 'removed'],
   ])
-  const storeDiff = await useSubDesignArtifactStore.getState().diffRevisions('artifact_diff_qa', 1, 2)
-  assert.equal(storeDiff.ok, false)
-  if (storeDiff.ok) return
-  assert.match(storeDiff.reason, /快照/)
+  try {
+    const readPaths: string[] = []
+    const historical = new Map([
+      ['.subagents/subdesign/snapshots/artifact_diff_qa/r1/a.html', '<h1>Same</h1>'],
+      ['.subagents/subdesign/snapshots/artifact_diff_qa/r4/a.html', '<h1>Same</h1>'],
+      ['.subagents/subdesign/snapshots/artifact_diff_qa/r1/b.css', 'body {\n  color: red;\n  padding: 8px;\n}'],
+      ['.subagents/subdesign/snapshots/artifact_diff_qa/r4/b.css', 'body {\n  color: green;\n  gap: 12px;\n  padding: 8px;\n}'],
+      ['.subagents/subdesign/snapshots/artifact_diff_qa/r1/old.js', 'legacy()'],
+      ['.subagents/subdesign/snapshots/artifact_diff_qa/r4/new.js', 'modern()'],
+    ])
+    ;(globalThis as { window?: unknown }).window = {
+      subagents: {
+        tools: {
+          workspaceRead: async (relativePath: string) => {
+            readPaths.push(relativePath)
+            return historical.has(relativePath)
+              ? { ok: true, content: historical.get(relativePath) }
+              : { ok: false, error: 'missing fixture' }
+          },
+        },
+      },
+    }
+    useSubDesignArtifactStore.setState({ snapshots: index as never })
+    const storeDiff = await useSubDesignArtifactStore.getState().diffRevisions('artifact_diff_qa', 1, 4)
+    assert.equal(storeDiff.ok, true)
+    if (!storeDiff.ok) return
+    assert.equal(storeDiff.diff.revisionA, 1)
+    assert.equal(storeDiff.diff.revisionB, 4)
+    assert.equal(readPaths.some((path) => path.endsWith('/a.html')), false)
+    const css = storeDiff.diff.files.find((file) => file.path === 'b.css')
+    assert.deepEqual(css?.rows.map((row) => [row.kind, row.left?.content, row.right?.content]), [
+      ['context', 'body {', 'body {'],
+      ['changed', '  color: red;', '  color: green;'],
+      ['added', undefined, '  gap: 12px;'],
+      ['context', '  padding: 8px;', '  padding: 8px;'],
+      ['context', '}', '}'],
+    ])
+    assert.deepEqual(
+      storeDiff.diff.files.find((file) => file.path === 'new.js')?.rows.map((row) => row.kind),
+      ['added'],
+    )
+    assert.deepEqual(
+      storeDiff.diff.files.find((file) => file.path === 'old.js')?.rows.map((row) => row.kind),
+      ['removed'],
+    )
+    const unavailable = await useSubDesignArtifactStore.getState().diffRevisions('artifact_diff_qa', 1, 3)
+    assert.equal(unavailable.ok, false)
+    if (!unavailable.ok) assert.match(unavailable.reason, /沒有快照|無法比較/)
+  } finally {
+    useSubDesignArtifactStore.setState(restore)
+    ;(globalThis as { window?: unknown }).window = priorWindow
+  }
 })
 
 await test('pinned comment payload validation is fail-closed', async () => {

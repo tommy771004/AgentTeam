@@ -8,6 +8,7 @@ import { useRunActivityStore } from '../../store/runActivityStore'
 import { Icon } from '../Icon'
 import { ArtifactDeliveryPanel } from './ArtifactDeliveryPanel'
 import { ArtifactPreview } from './ArtifactPreview'
+import { ArtifactRevisionDiff } from './ArtifactRevisionDiff'
 import { useSubDesignPinnedCommentsStore } from '../../store/subDesignPinnedCommentsStore'
 import { ArtifactTweakPanel } from './ArtifactTweakPanel'
 import { CritiquePanel } from './CritiquePanel'
@@ -124,7 +125,7 @@ export function SubDesignProjectStudio({
 }: SubDesignProjectStudioProps) {
   const projectRoot = useProjectStore((state) => state.root)
   const [tab, setTab] = useState<StudioTab>('files')
-  const [previewMode, setPreviewMode] = useState<'preview' | 'source'>('preview')
+  const [previewMode, setPreviewMode] = useState<'preview' | 'source' | 'diff'>('preview')
   const [candidateDirectionId, setCandidateDirectionId] = useState(brief.selectedDirectionId || '')
   const directionSurfaceId = `subdesign-direction-${brief.id}`
   const pushRunActivity = useRunActivityStore((state) => state.push)
@@ -262,6 +263,14 @@ export function SubDesignProjectStudio({
                   >
                     Code
                   </button>
+                  <button
+                    type="button"
+                    disabled={!selectedArtifact}
+                    onClick={() => setPreviewMode('diff')}
+                    className={`rounded-md px-2 py-1 text-[9px] font-semibold disabled:opacity-35 ${previewMode === 'diff' ? 'bg-white/[0.08] text-on-surface' : 'text-outline'}`}
+                  >
+                    Diff
+                  </button>
                 </div>
               </div>
             ) : null}
@@ -270,10 +279,12 @@ export function SubDesignProjectStudio({
           <div className="min-h-0 flex-1 overflow-auto p-3 custom-scrollbar lg:p-4">
             {tab === 'files' ? (
               <div className="mx-auto flex min-h-full w-full max-w-[1180px] flex-col">
-                {selectedArtifact ? (
+                {selectedArtifact && previewMode === 'diff' ? (
+                  <ArtifactRevisionDiff artifactId={selectedArtifact.id} projectRoot={projectRoot || undefined} />
+                ) : selectedArtifact ? (
                   <ArtifactPreview
                     artifact={selectedArtifact}
-                    mode={previewMode}
+                    mode={previewMode === 'source' ? 'source' : 'preview'}
                     envelope={artifactStream}
                     onSubmitPinnedComments={onSubmitPinnedComments && !runIsLive ? async (pins) => {
                       const result = await onSubmitPinnedComments({ artifact: { id: selectedArtifact.id, title: selectedArtifact.title, revision: selectedArtifact.revision }, pins })

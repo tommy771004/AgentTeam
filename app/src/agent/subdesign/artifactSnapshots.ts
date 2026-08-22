@@ -58,6 +58,18 @@ export function appendSnapshot(
 export type RevisionDiffFile = {
   path: string
   status: 'added' | 'removed' | 'changed' | 'unchanged'
+  rows: RevisionDiffRow[]
+}
+
+export type RevisionDiffLine = {
+  lineNumber: number
+  content: string
+}
+
+export type RevisionDiffRow = {
+  kind: 'context' | 'added' | 'removed' | 'changed'
+  left?: RevisionDiffLine
+  right?: RevisionDiffLine
 }
 
 export type RevisionDiffResult = {
@@ -66,9 +78,115 @@ export type RevisionDiffResult = {
   files: RevisionDiffFile[]
 }
 
+type LineOperation = {
+  kind: 'context' | 'added' | 'removed'
+  left?: RevisionDiffLine
+  right?: RevisionDiffLine
+}
+
+const MAX_LCS_CELLS = 4_000_000
+
+function contentLines(content: string): string[] {
+  if (!content) return []
+  return content.replace(/\r\n?/g, '\n').split('\n')
+}
+
+function positionalLineOperations(left: string[], right: string[]): LineOperation[] {
+  const rows: LineOperation[] = []
+  const length = Math.max(left.length, right.length)
+  for (let index = 0; index < length; index += 1) {
+    const leftContent = left[index]
+    const rightContent = right[index]
+    if (leftContent !== undefined && rightContent !== undefined && leftContent === rightContent) {
+      rows.push({
+        kind: 'context',
+        left: { lineNumber: index + 1, content: leftContent },
+        right: { lineNumber: index + 1, content: rightContent },
+      })
+    } else {
+      if (leftContent !== undefined) rows.push({ kind: 'removed', left: { lineNumber: index + 1, content: leftContent } })
+      if (rightContent !== undefined) rows.push({ kind: 'added', right: { lineNumber: index + 1, content: rightContent } })
+    }
+  }
+  return rows
+}
+
+function lcsLineOperations(left: string[], right: string[]): LineOperation[] {
+  const columns = right.length + 1
+  if ((left.length + 1) * columns > MAX_LCS_CELLS) return positionalLineOperations(left, right)
+  const table = new Uint32Array((left.length + 1) * columns)
+  for (let leftIndex = left.length - 1; leftIndex >= 0; leftIndex -= 1) {
+    for (let rightIndex = right.length - 1; rightIndex >= 0; rightIndex -= 1) {
+      const offset = leftIndex * columns + rightIndex
+      table[offset] = left[leftIndex] === right[rightIndex]
+        ? table[(leftIndex + 1) * columns + rightIndex + 1] + 1
+        : Math.max(table[(leftIndex + 1) * columns + rightIndex], table[offset + 1])
+    }
+  }
+  const operations: LineOperation[] = []
+  let leftIndex = 0
+  let rightIndex = 0
+  while (leftIndex < left.length && rightIndex < right.length) {
+    if (left[leftIndex] === right[rightIndex]) {
+      operations.push({
+        kind: 'context',
+        left: { lineNumber: leftIndex + 1, content: left[leftIndex] },
+        right: { lineNumber: rightIndex + 1, content: right[rightIndex] },
+      })
+      leftIndex += 1
+      rightIndex += 1
+    } else if (table[(leftIndex + 1) * columns + rightIndex] >= table[leftIndex * columns + rightIndex + 1]) {
+      operations.push({ kind: 'removed', left: { lineNumber: leftIndex + 1, content: left[leftIndex] } })
+      leftIndex += 1
+    } else {
+      operations.push({ kind: 'added', right: { lineNumber: rightIndex + 1, content: right[rightIndex] } })
+      rightIndex += 1
+    }
+  }
+  while (leftIndex < left.length) {
+    operations.push({ kind: 'removed', left: { lineNumber: leftIndex + 1, content: left[leftIndex] } })
+    leftIndex += 1
+  }
+  while (rightIndex < right.length) {
+    operations.push({ kind: 'added', right: { lineNumber: rightIndex + 1, content: right[rightIndex] } })
+    rightIndex += 1
+  }
+  return operations
+}
+
+/** Pair one contiguous edit block into side-by-side rows suitable for the Studio. */
+export function computeRevisionLineDiff(leftContent: string, rightContent: string): RevisionDiffRow[] {
+  const operations = lcsLineOperations(contentLines(leftContent), contentLines(rightContent))
+  const rows: RevisionDiffRow[] = []
+  let index = 0
+  while (index < operations.length) {
+    const operation = operations[index]
+    if (operation.kind === 'context') {
+      rows.push(operation)
+      index += 1
+      continue
+    }
+    const removed: RevisionDiffLine[] = []
+    const added: RevisionDiffLine[] = []
+    while (index < operations.length && operations[index].kind !== 'context') {
+      const edit = operations[index]
+      if (edit.kind === 'removed' && edit.left) removed.push(edit.left)
+      if (edit.kind === 'added' && edit.right) added.push(edit.right)
+      index += 1
+    }
+    const paired = Math.min(removed.length, added.length)
+    for (let pair = 0; pair < paired; pair += 1) {
+      rows.push({ kind: 'changed', left: removed[pair], right: added[pair] })
+    }
+    for (const line of removed.slice(paired)) rows.push({ kind: 'removed', left: line })
+    for (const line of added.slice(paired)) rows.push({ kind: 'added', right: line })
+  }
+  return rows
+}
+
 /**
  * 兩個 revision 的逐檔差異。以快照索引中的 sha256 比對（快照本體目錄保存
- * 兩份歷史內容），回傳 UI-ready 的結構化差異；行級檢視由 UI 以 path 讀取。
+ * 兩份歷史內容），先回傳逐檔狀態；store 再從快照副本補上行級內容。
  */
 export function computeRevisionDiff(
   index: SubDesignArtifactSnapshotIndex,
@@ -83,11 +201,11 @@ export function computeRevisionDiff(
   const shaByPathA = new Map(snapshotA.files.map((file) => [file.path, file.sha256]))
   for (const file of snapshotB.files) {
     const shaA = shaByPathA.get(file.path)
-    if (shaA == null) files.set(file.path, { path: file.path, status: 'added' })
-    else files.set(file.path, { path: file.path, status: shaA === file.sha256 ? 'unchanged' : 'changed' })
+    if (shaA == null) files.set(file.path, { path: file.path, status: 'added', rows: [] })
+    else files.set(file.path, { path: file.path, status: shaA === file.sha256 ? 'unchanged' : 'changed', rows: [] })
   }
   for (const file of snapshotA.files) {
-    if (!files.has(file.path)) files.set(file.path, { path: file.path, status: 'removed' })
+    if (!files.has(file.path)) files.set(file.path, { path: file.path, status: 'removed', rows: [] })
   }
   return {
     revisionA,

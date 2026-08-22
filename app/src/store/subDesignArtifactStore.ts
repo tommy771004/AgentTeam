@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   appendSnapshot,
   computeRevisionDiff,
+  computeRevisionLineDiff,
   computeSnapshotFile,
   findSnapshot,
   isSafeSnapshotPath,
@@ -188,10 +189,38 @@ export const useSubDesignArtifactStore = create<SubDesignArtifactStore>((set, ge
   },
 
   diffRevisions: async (artifactId, revisionA, revisionB, projectRoot) => {
-    void projectRoot
     try {
       const diff = computeRevisionDiff(get().snapshots, artifactId, revisionA, revisionB)
-      return { ok: true, diff }
+      const snapshotA = findSnapshot(get().snapshots, artifactId, revisionA)
+      const snapshotB = findSnapshot(get().snapshots, artifactId, revisionB)
+      if (!snapshotA || !snapshotB) return { ok: false, reason: '這個 revision 沒有快照，無法比較。' }
+      const api = workspaceTools()
+      if (!api?.workspaceRead) return { ok: false, reason: '版本比較需要 Electron workspace API。' }
+      const pathsA = new Set(snapshotA.files.map((file) => file.path))
+      const pathsB = new Set(snapshotB.files.map((file) => file.path))
+      const readHistorical = async (revision: number, filePath: string): Promise<string> => {
+        const historical = await api.workspaceRead(snapshotCopyPath(artifactId, revision, filePath), projectRoot || get().projectRoot)
+        if (!historical.ok || typeof historical.content !== 'string') {
+          throw new Error(`快照內容遺失：${filePath}（revision ${revision}）`)
+        }
+        return historical.content
+      }
+      const files = []
+      for (const file of diff.files) {
+        if (file.status === 'unchanged') {
+          files.push(file)
+          continue
+        }
+        const [leftContent, rightContent] = await Promise.all([
+          pathsA.has(file.path) ? readHistorical(revisionA, file.path) : Promise.resolve(''),
+          pathsB.has(file.path) ? readHistorical(revisionB, file.path) : Promise.resolve(''),
+        ])
+        files.push({
+          ...file,
+          rows: computeRevisionLineDiff(leftContent, rightContent),
+        })
+      }
+      return { ok: true, diff: { ...diff, files } }
     } catch (error) {
       return { ok: false, reason: error instanceof Error ? error.message : String(error) }
     }
