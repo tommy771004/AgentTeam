@@ -7,12 +7,9 @@
  * production supervisor registry, and renderer IPC-shaped API are real.
  */
 import assert from 'node:assert/strict'
-import {
-  ExternalCliRunSession,
-  FakeExternalCliClock,
-  type ExternalCliLifecycleEvent,
-} from '../src/agent/externalCliRunSession.ts'
-import { externalCliSupervisor } from '../electron/externalCliSupervisor.ts'
+import { FakeExternalCliClock, type ExternalCliClock } from '../src/agent/externalCliRunSession.ts'
+import { runLocalCliAgent, type LocalCliRunInput } from '../electron/localCliRunner.ts'
+import type { BashResult } from '../electron/shellBridge.ts'
 
 if (typeof globalThis.localStorage === 'undefined') {
   const values = new Map<string, string>()
@@ -34,9 +31,9 @@ type FakeCliRequest = {
   runId: string
   conversationId: string
   prompt: string
-  session: ExternalCliRunSession
   clock: FakeExternalCliClock
-  resolve: (value: Record<string, unknown>) => void
+  started: boolean
+  release: (result?: BashResult) => void
 }
 
 const originalWindow = (globalThis as { window?: Window }).window
@@ -44,25 +41,6 @@ const originalSettings = useSettingsStore.getState().settings
 const requests = new Map<string, FakeCliRequest>()
 const streamSubscribers = new Set<(event: Record<string, unknown>) => void>()
 const terminalOrder: string[] = []
-
-function streamEvent(event: ExternalCliLifecycleEvent): Record<string, unknown> {
-  const terminal = event.type === 'process_exit'
-  return {
-    runId: event.runId,
-    kind: terminal ? (event.detail === 'success' ? 'done' : 'error') : event.type === 'tool_started' || event.type === 'tool_completed' ? 'tool' : 'status',
-    title: event.type,
-    detail: event.detail,
-    tool: 'fake-tool',
-    ok: !terminal || event.detail === 'success',
-    sequence: event.sequence,
-    sessionPhase: event.phase,
-    terminalClassification: terminal ? event.detail : undefined,
-  }
-}
-
-function release(request: FakeCliRequest, code = 0) {
-  request.session.observe({ type: 'process_exit', code, detail: code === 0 ? undefined : 'fake provider failure' })
-}
 
 function fakeRunAgent(input: {
   runId?: string
@@ -73,52 +51,51 @@ function fakeRunAgent(input: {
   const runId = String(input.runId)
   const conversationId = String(input.conversationId || runId)
   const clock = new FakeExternalCliClock()
-  let resolveResult!: (value: Record<string, unknown>) => void
-  const result = new Promise<Record<string, unknown>>((resolve) => { resolveResult = resolve })
-  const session = externalCliSupervisor.create({
+  let resolveProcess: ((result: BashResult) => void) | undefined
+  let pendingResult: BashResult | undefined
+  const request: FakeCliRequest = {
     runId,
     conversationId,
-    adapter: 'codex',
+    prompt: input.prompt,
     clock,
-    policy: input.externalCliPolicy,
-    transport: {
-      processId: `fake-process:${runId}`,
-      terminateTree: () => ({ confirmed: true }),
+    started: false,
+    release: (result = { ok: true, code: 0, stdout: '{"type":"text","data":"fake output"}\n', stderr: '' }) => {
+      if (resolveProcess) resolveProcess(result)
+      else pendingResult = result
     },
-    onEvent: (event) => {
-      for (const subscriber of streamSubscribers) subscriber(streamEvent(event))
+  }
+  requests.set(runId, request)
+  const run = runLocalCliAgent({
+    ...(input as LocalCliRunInput),
+    binary: process.execPath,
+    kind: 'codex',
+    conversationId,
+    runId,
+    onStream: (event) => {
+      for (const subscriber of streamSubscribers) subscriber(event as unknown as Record<string, unknown>)
     },
-    onSettlement: (settlement) => {
-      terminalOrder.push(runId)
-      resolveResult({
-        ok: settlement.classification === 'success',
-        output: `fake output for ${runId}`,
-        command: 'codex exec --json [prompt omitted]',
-        kind: 'codex',
-        code: settlement.classification === 'success' ? 0 : 1,
-        runId,
-        terminalClassification: settlement.classification,
-        externalRun: {
-          provider: 'codex',
-          adapter: 'codex',
-          runId,
-          conversationId,
-          processId: session.snapshot().processId,
-          sessionId: session.snapshot().providerSessionId,
-          status: settlement.classification === 'success' ? 'success' : 'failed',
-          terminalClassification: settlement.classification,
-          eventCursor: session.snapshot().eventCursor,
-        },
+  }, {
+    clock,
+    runArgv: async (options) => {
+      request.started = true
+      options.onStarted?.(`fake-process:${runId}`)
+      options.onStdout?.('{"type":"text","data":"fake model activity"}\n')
+      return new Promise<BashResult>((resolve) => {
+        resolveProcess = resolve
+        if (pendingResult) {
+          const result = pendingResult
+          pendingResult = undefined
+          resolve(result)
+        }
       })
     },
+    cancelRun: async () => {
+      request.release({ ok: false, code: null, stdout: '', stderr: '[cancelled]', cancelled: true })
+      return { confirmed: true }
+    },
+    writeInput: () => true,
   })
-  requests.set(runId, { runId, conversationId, prompt: input.prompt, session, clock, resolve: resolveResult })
-  session.start()
-  session.observe({ type: 'process_started', processId: `fake-process:${runId}`, providerSessionId: `provider:${runId}` })
-  session.observe({ type: 'model_activity', detail: 'fake model activity' })
-  session.observe({ type: 'tool_started', tool: 'fake-tool', operation: 'fake operation' })
-  session.observe({ type: 'tool_completed', tool: 'fake-tool', operation: 'fake operation', ok: true })
-  return result
+  return run.finally(() => { terminalOrder.push(runId) })
 }
 
 try {
@@ -152,19 +129,19 @@ try {
   const queued = await runTask({ objective: 'primary seam same thread second', sourceKind: 'schedule', runner: 'codex', runId: 'primary-same-2', reuseThreadId: threadA, loopType: 'Goal-based' })
   assert.equal(queued.queued, true)
   assert.equal(requests.has('primary-same-2'), false, 'same-thread follow-up remains ordered')
-  release(requests.get('primary-same-1')!)
+  requests.get('primary-same-1')!.release()
   await first
   for (let i = 0; i < 100 && !requests.has('primary-same-2'); i += 1) await new Promise((resolve) => setTimeout(resolve, 0))
   assert.ok(requests.has('primary-same-2'))
-  release(requests.get('primary-same-2')!)
+  requests.get('primary-same-2')!.release()
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const concurrentA = runTask({ objective: 'primary seam concurrent A', sourceKind: 'composer', runner: 'codex', runId: 'primary-concurrent-a', reuseThreadId: threadA })
   const concurrentB = runTask({ objective: 'primary seam concurrent B', sourceKind: 'composer', runner: 'codex', runId: 'primary-concurrent-b', reuseThreadId: threadB })
   for (let i = 0; i < 100 && (!requests.has('primary-concurrent-a') || !requests.has('primary-concurrent-b')); i += 1) await new Promise((resolve) => setTimeout(resolve, 0))
   assert.ok(requests.has('primary-concurrent-a') && requests.has('primary-concurrent-b'), 'different threads execute concurrently')
-  release(requests.get('primary-concurrent-b')!)
-  release(requests.get('primary-concurrent-a')!)
+  requests.get('primary-concurrent-b')!.release()
+  requests.get('primary-concurrent-a')!.release()
   await Promise.all([concurrentA, concurrentB])
 
   const timeoutThread = useThreadStore.getState().createThread({ title: 'primary seam timeout', runner: 'codex' })
@@ -175,13 +152,13 @@ try {
   const timeoutResult = await timeout
   assert.equal(timeoutResult.path, 'cli')
   assert.equal(timeoutResult.status, 'failed')
-  assert.equal(timeoutRequest.session.snapshot().terminal?.classification, 'idle-timeout')
+  assert.equal(timeoutResult.terminalClassification, 'idle-timeout')
   assert.equal(new Set(terminalOrder).size, terminalOrder.length, 'every primary-seam run settles once')
   assert.ok(streamSubscribers.size >= 0)
   console.log('primary-seam qualification passed: coordinator, real supervisor registry, stream, ordering, concurrency, timeout telemetry')
 } finally {
   for (const request of requests.values()) {
-    if (!request.session.snapshot().terminal) request.session.markInterrupted('qualification cleanup')
+    if (!request.started) request.release({ ok: false, code: null, stdout: '', stderr: '[cleanup]', cancelled: true })
   }
   requests.clear()
   streamSubscribers.clear()

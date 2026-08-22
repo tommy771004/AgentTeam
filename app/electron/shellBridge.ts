@@ -12,7 +12,7 @@ import {
   shellCommandSpec,
   spawnCommandSpec,
   terminateProcessTree,
-} from './platformProcess'
+} from './platformProcess.ts'
 
 export type BashResult = {
   ok: boolean

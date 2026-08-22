@@ -34,9 +34,11 @@ import {
 } from './runners/types.ts'
 import { resolveRunSettingsOverrides, snapshotRunSettings } from './runSettingsSnapshot.ts'
 import { normalizeExternalCliRunPolicy } from './externalCliRunSession.ts'
+import { snapshotExternalCliConnectorRequirements } from './externalCliConnectorSnapshot.ts'
 
 import { v4 as uuid } from 'uuid'
 import {
+  getJournalEntry,
   recordRunAdmitted,
   recordRunStarted,
   recordRunTerminal,
@@ -49,6 +51,7 @@ export type TaskRunResult = ExternalRunResult
 
 /** Prevent re-entrant callers from starting the same lifecycle twice. */
 const coordinatingRunIds = new Set<string>()
+const recoveredFinalizationClaims = new Set<string>()
 
 /**
  * Normalize only the canonical ingress field; preserve the caller object and
@@ -362,6 +365,10 @@ export function buildRunDispatchSnapshot(parts: {
         unattendedWaitMs:
           parts.overrides.externalCliPolicy?.unattendedWaitMs ?? parts.overrides.hitlTimeoutMs,
       }),
+      externalCliRequiredConnectors: snapshotExternalCliConnectorRequirements(
+        parts.settings,
+        parts.overrides,
+      ),
     },
   }
 }
@@ -767,6 +774,64 @@ export async function finalizeTaskRun(
   drainOnce()
 
   return finalResult
+}
+
+/**
+ * Reconstruct the coordinator-owned terminal effects after Host process loss.
+ *
+ * The old renderer promise/callback is gone after reload, so recovery cannot
+ * merely paint an interrupted label. A durable journal terminal marker is the
+ * idempotency key; the normal finalizer then owns summary, archive, release,
+ * and queue-drain effects exactly as it does for a live adapter.
+ */
+export async function finalizeRecoveredExternalRun(input: {
+  runId: string
+  threadId?: string
+  conversationId?: string
+  adapter: string
+  reason?: string
+}): Promise<ExternalRunResult | null> {
+  const runId = input.runId.trim()
+  if (!runId || recoveredFinalizationClaims.has(runId)) return null
+  const existing = getJournalEntry('run', runId)
+  if (existing && ['success', 'failed', 'cancelled'].includes(existing.status)) return null
+  recoveredFinalizationClaims.add(runId)
+  try {
+    const [{ useSettingsStore }, { emptyAgentLike }] = await Promise.all([
+      import('../store/settingsStore.ts'),
+      import('./localCliRun.ts'),
+    ])
+    const threadId = input.threadId || input.conversationId || runId
+    const objective = '外部 CLI 執行於 Host 重啟時中斷'
+    const reason = (input.reason || 'Electron host restart; process ownership was lost').slice(0, 300)
+    const agent = emptyAgentLike({
+      id: runId,
+      objective,
+      status: 'failed',
+      executionKind: 'external',
+      externalRunnerKind: input.adapter,
+      haltReason: `interrupted · ${reason}`,
+      result: `外部 CLI 已中斷：${reason}`,
+      steps: [{
+        step: 1,
+        action: 'external-cli-recovery',
+        description: `外部 CLI · ${input.adapter}（Host recovery）`,
+        status: 'FAILED',
+        result: `需要手動重新執行 · ${reason}`,
+      }],
+    })
+    return await finalizeTaskRun({
+      runId,
+      threadId,
+      objective,
+      sourceKind: 'retry',
+      settings: useSettingsStore.getState().settings,
+      early: { error: `外部 CLI 執行已中斷：${reason}`, path: 'cli', agent },
+    })
+  } catch (error) {
+    recoveredFinalizationClaims.delete(runId)
+    throw error
+  }
 }
 
 async function pushRunProcessSummary(args: {
@@ -1246,6 +1311,46 @@ async function coordinateTaskRun(
     )
   }
 
+  // Freeze the selected/configured connector capability set before the first
+  // capacity branch. Queued and admitted runs therefore carry the same
+  // fail-closed auth context instead of deriving it from later stderr.
+  const existingAdmissionThread = opts.reuseThreadId
+    ? useThreadStore.getState().threads.find((thread) => thread.id === opts.reuseThreadId)
+    : undefined
+  const selectedRunner = opts.runner || existingAdmissionThread?.runner
+  const selectedMcpAgentId =
+    opts.overrides?.mcpAgentId || opts.overrides?.agentMode || existingAdmissionThread?.agentMode
+  if (!opts.runner && selectedRunner && selectedRunner !== 'builtin') {
+    // Persist the resolved runner with a queued request; otherwise a restart
+    // would hydrate an external conversation as the builtin adapter.
+    opts = { ...opts, runner: selectedRunner }
+  }
+  const admissionSettings = useSettingsStore.getState().settings
+  if (opts.runner && opts.runner !== 'builtin') {
+    if (opts._fromQueue && !Array.isArray(opts.overrides?.externalCliRequiredConnectors)) {
+      const rejected: ExternalRunResult = {
+        path: 'cli',
+        status: 'failed',
+        error: '佇列項目缺少 external CLI connector capability snapshot，已停止不安全補跑；請手動重新提交。',
+        threadId: opts.reuseThreadId || null,
+        runId,
+      }
+      try { await opts.onSettled?.(rejected) } catch { /* callback is non-fatal */ }
+      return rejected
+    }
+    opts = {
+      ...opts,
+      overrides: {
+        ...(opts.overrides || {}),
+        mcpAgentId: selectedMcpAgentId,
+        externalCliRequiredConnectors: snapshotExternalCliConnectorRequirements(
+          admissionSettings,
+          opts.overrides,
+        ),
+      },
+    }
+  }
+
   // Coordinator owns capacity: check once, then reserve once.
   const agent = useAgentStore.getState()
   let capacity = await checkRunCapacity(runId, opts.reuseThreadId)
@@ -1350,7 +1455,7 @@ async function coordinateTaskRun(
     scheduleJobId: opts.meta?.scheduleJobId,
   })
 
-  const settings = useSettingsStore.getState().settings
+  const settings = admissionSettings
   const thr = useThreadStore.getState()
   let boundThreadId = opts.reuseThreadId || ''
 

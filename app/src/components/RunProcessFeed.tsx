@@ -9,6 +9,7 @@ import { emptyAgentLike } from '../agent/localCliRun'
 import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
 import { deriveRunLifecycle } from '../agent/runLifecycle'
 import { useAgentStore } from '../store/agentStore'
+import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import {
   useRunActivityStore,
@@ -211,6 +212,89 @@ export function RunProcessFeed({
   const messageCount = draftText.trim() ? 1 : events.some((event) => event.kind === 'text') ? 1 : 0
   const completedTasks = tasks.filter((task) => task.status === 'done').length
   const taskSummary = tasks.length ? ` · ${completedTasks}/${tasks.length} 任務` : ''
+  const recovery = activity?.recovery || null
+  const interaction = activity?.interaction || null
+  const recoveryThread = useThreadStore((state) =>
+    recovery?.conversationId
+      ? state.threads.find((thread) => thread.id === recovery.conversationId)
+      : undefined,
+  )
+  const [recoveryActionStatus, setRecoveryActionStatus] = useState('')
+  const [interactionInput, setInteractionInput] = useState('')
+  const [interactionStatus, setInteractionStatus] = useState('')
+
+  useEffect(() => {
+    setRecoveryActionStatus('')
+    setInteractionInput('')
+    setInteractionStatus('')
+  }, [runId])
+
+  const submitExternalCliInteraction = async (approved?: boolean) => {
+    const api = window.subagents?.cli
+    if (!api) {
+      setInteractionStatus('目前環境沒有 external CLI interaction bridge')
+      return
+    }
+    try {
+      const ok = interaction?.kind === 'user'
+        ? await api.sessionInput?.({ runId, value: interactionInput, providerSessionId: interaction.providerSessionId })
+        : await api.sessionApproval?.({ runId, approved: approved === true, providerSessionId: interaction?.providerSessionId })
+      if (!ok) {
+        setInteractionStatus('Host 未確認 provider 收到這次回覆')
+        return
+      }
+      setInteractionInput('')
+      setInteractionStatus('已送出，等待 external CLI 更新')
+      useRunActivityStore.getState().setInteraction(null, runId)
+    } catch (error) {
+      setInteractionStatus(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const runRecoveryAction = async (action: 'resume' | 'retry') => {
+    const api = window.subagents?.cli
+    if (!api?.sessionRecoveryAction) {
+      setRecoveryActionStatus('目前環境沒有 recovery action bridge')
+      return
+    }
+    try {
+      const decision = await api.sessionRecoveryAction({ runId, action })
+      if (!decision.ok) {
+        setRecoveryActionStatus(decision.reason || '此 run 不具備安全恢復條件')
+        return
+      }
+      if (action === 'resume') {
+        setRecoveryActionStatus('此 shipped adapter 不支援自動 resume；請使用手動重新執行')
+        return
+      }
+      const objective = recoveryThread?.bubbles.filter((bubble) => bubble.role === 'user').at(-1)?.content?.trim()
+      if (!objective || !recovery?.conversationId) {
+        setRecoveryActionStatus('找不到可重播的使用者任務；請重新提交原任務')
+        return
+      }
+      const supportedRunner = new Set<ThreadRunner>(['codex', 'claude', 'grok', 'opencode', 'gemini', 'cursor'])
+      const runner = supportedRunner.has(recovery.adapter as ThreadRunner)
+        ? recovery.adapter as ThreadRunner
+        : recoveryThread?.runner && recoveryThread.runner !== 'builtin'
+          ? recoveryThread.runner
+          : null
+      if (!runner) {
+        setRecoveryActionStatus('找不到原 external CLI adapter；請重新選擇 runner 後執行')
+        return
+      }
+      const { runTask } = await import('../agent/taskRunCoordinator')
+      const result = await runTask({
+        objective,
+        sourceKind: 'retry',
+        runner,
+        reuseThreadId: recovery.conversationId,
+        runId: `retry_${Date.now().toString(36)}_${runId.slice(-8)}`,
+      })
+      setRecoveryActionStatus(result.queued ? '已加入佇列' : result.error || '已重新送出任務')
+    } catch (error) {
+      setRecoveryActionStatus(error instanceof Error ? error.message : String(error))
+    }
+  }
 
   const allFiles = useMemo(() => {
     const map = new Map<string, { path: string; action: string; added?: number; removed?: number }>()
@@ -294,6 +378,67 @@ export function RunProcessFeed({
 
       <Reveal open={processOpen}>
         <div className="space-y-3">
+          {recovery ? (
+            <div className="agent-process-recovery space-y-2 text-[12px] text-ink-2" role="status">
+              <div>
+                <span className="font-medium">這次外部 CLI 在 Host 重啟時中斷。</span>{' '}
+                <span className="text-ink-3">目前不會自動重播舊 prompt；請明確選擇下一步。</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {recovery.resumable ? (
+                  <button
+                    type="button"
+                    className="agent-process-link"
+                    onClick={() => { void runRecoveryAction('resume') }}
+                  >
+                    嘗試恢復
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="agent-process-link"
+                  onClick={() => { void runRecoveryAction('retry') }}
+                >
+                  手動重新執行
+                </button>
+              </div>
+              {recoveryActionStatus ? <div className="text-[11px] text-ink-3">{recoveryActionStatus}</div> : null}
+            </div>
+          ) : null}
+          {interaction ? (
+            <div className="agent-process-interaction space-y-2 text-[12px] text-ink-2" role="group" aria-label={interaction.kind === 'user' ? 'External CLI 回覆' : 'External CLI 核准'}>
+              <div className="font-medium">{interaction.kind === 'user' ? 'External CLI 需要你的回覆' : 'External CLI 等待核准'}</div>
+              {interaction.detail ? <div className="text-ink-3">{interaction.detail}</div> : null}
+              {interaction.kind === 'user' ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    value={interactionInput}
+                    onChange={(event) => setInteractionInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && interactionInput.trim()) void submitExternalCliInteraction()
+                    }}
+                    aria-label="External CLI 回覆內容"
+                    className="min-w-48 border-b border-line bg-transparent px-1 py-1 text-[12px] text-ink outline-none"
+                    placeholder="輸入回覆"
+                  />
+                  <button
+                    type="button"
+                    className="agent-process-link"
+                    disabled={!interactionInput.trim()}
+                    onClick={() => { void submitExternalCliInteraction() }}
+                  >
+                    送出回覆
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" className="agent-process-link" onClick={() => { void submitExternalCliInteraction(true) }}>核准</button>
+                  <button type="button" className="agent-process-link" onClick={() => { void submitExternalCliInteraction(false) }}>拒絕</button>
+                </div>
+              )}
+              {interactionStatus ? <div className="text-[11px] text-ink-3">{interactionStatus}</div> : null}
+            </div>
+          ) : null}
           {/* Task Rows keep a structured plan readable without turning the
               process feed into a second full task-management panel. */}
           {tasks.length > 0 ? (

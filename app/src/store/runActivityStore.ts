@@ -8,6 +8,10 @@ import {
   phaseFromStatusLine,
   type RunLifecyclePhase,
 } from '../agent/runLifecycle.ts'
+import type {
+  ExternalCliRunPhase,
+  ExternalCliTerminalClassification,
+} from '../agent/externalCliRunSession.ts'
 
 export type RunActivityKind =
   | 'status'
@@ -74,6 +78,24 @@ export type TerminalRunDigest = {
   phase: RunActivityPhase
 }
 
+/** Renderer-safe recovery projection; no objective, prompt, or credentials. */
+export type ExternalCliRecoveryProjection = {
+  runId: string
+  conversationId?: string
+  adapter: string
+  interruptedAt: number
+  reason: string
+  resumable: boolean
+  automaticRetry: boolean
+  providerSessionId?: string
+}
+
+export type ExternalCliInteractionProjection = {
+  kind: 'user' | 'approval'
+  detail?: string
+  providerSessionId?: string
+}
+
 /** One run's isolated live presentation or bounded terminal digest. */
 export type RunPresentation = {
   runId: string
@@ -88,6 +110,8 @@ export type RunPresentation = {
   tasks: RunTaskItem[]
   phase: RunActivityPhase
   terminal: TerminalRunDigest | null
+  recovery: ExternalCliRecoveryProjection | null
+  interaction: ExternalCliInteractionProjection | null
 }
 
 /** IPC payload from main → renderer during CLI stream */
@@ -109,8 +133,9 @@ export type CliStreamPayload = {
   /** kind=plan：完整任務清單快照 */
   todos?: Array<{ text: string; status?: string }>
   sequence?: number
-  sessionPhase?: string
-  terminalClassification?: string
+  sessionPhase?: ExternalCliRunPhase
+  terminalClassification?: ExternalCliTerminalClassification
+  providerSessionId?: string
 }
 
 export interface RunActivityStore {
@@ -137,6 +162,8 @@ export interface RunActivityStore {
   appendThought: (delta: string, runId?: string) => void
   appendText: (delta: string, runId?: string) => void
   setStatus: (line: string, runId?: string) => void
+  setRecovery: (recovery: ExternalCliRecoveryProjection, runId?: string) => void
+  setInteraction: (interaction: ExternalCliInteractionProjection | null, runId?: string) => void
   recordFileChange: (f: Omit<FileChangeRecord, 'at'> & { at?: number }, runId?: string) => void
   /** 以完整快照取代任務清單（結構化 plan 事件） */
   setTasks: (todos: Array<{ text: string; status?: string }>, runId?: string) => void
@@ -191,6 +218,8 @@ function emptyPresentation(runId: string, now = Date.now()): RunPresentation {
     tasks: [],
     phase: 'starting',
     terminal: null,
+    recovery: null,
+    interaction: null,
   }
 }
 
@@ -222,6 +251,8 @@ function clonePresentation(p: RunPresentation): RunPresentation {
           tasks: [...p.terminal.tasks],
         }
       : null,
+    recovery: p.recovery ? { ...p.recovery } : null,
+    interaction: p.interaction ? { ...p.interaction } : null,
   }
 }
 
@@ -540,6 +571,35 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     )
   },
 
+  setRecovery: (recovery, runId) => {
+    const target = runId || recovery.runId || get().runId
+    if (!target) return
+    set((s) =>
+      applyRunUpdate(s, target, (presentation) => ({
+        ...presentation,
+        active: true,
+        recovery: { ...recovery, runId: target, reason: recovery.reason.slice(0, 300) },
+        statusLine: 'CLI 已中斷，需要手動重新執行',
+        updatedAt: Date.now(),
+        phase: 'manual_intervention',
+      })),
+    )
+  },
+
+  setInteraction: (interaction, runId) => {
+    const target = runId || get().runId
+    if (!target) return
+    set((s) =>
+      applyRunUpdate(s, target, (presentation) => ({
+        ...presentation,
+        interaction: interaction
+          ? { ...interaction, detail: interaction.detail?.slice(0, 400) }
+          : null,
+        updatedAt: Date.now(),
+      })),
+    )
+  },
+
   setTasks: (todos, runId) => {
     const target = runId || get().runId
     if (!target) return
@@ -665,6 +725,16 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     if (!streamRunId) return
     const existing = s.presentations[streamRunId]
     if (existing?.terminal && !existing.active) return
+
+    if (payload.sessionPhase === 'waiting_for_user' || payload.sessionPhase === 'waiting_for_approval') {
+      get().setInteraction({
+        kind: payload.sessionPhase === 'waiting_for_user' ? 'user' : 'approval',
+        detail: payload.detail || payload.title,
+        providerSessionId: payload.providerSessionId,
+      }, streamRunId)
+    } else if (payload.kind === 'status' && payload.sessionPhase === 'running') {
+      get().setInteraction(null, streamRunId)
+    }
 
     // 結構化任務清單（TodoWrite / update_plan / todo_list）→ 完整快照取代
     if (payload.kind === 'plan') {

@@ -12,6 +12,9 @@ import { createServer } from 'node:net'
 import { spawnCommandSpec, terminateProcessTree } from './platformProcess'
 import { getVaultSecret } from './secretsVault'
 import { normalizeExternalCliRunPolicy, type ExternalCliRunPhase } from '../src/agent/externalCliRunSession'
+import { safeOpenCodeServerOrigin } from '../src/agent/opencodeServerSafety'
+
+export { safeOpenCodeServerOrigin }
 
 export type OpenCodeServerMode = 'auto' | 'cli' | 'server'
 
@@ -59,7 +62,7 @@ function loopbackUrl(raw?: string): string | null {
   try {
     const parsed = new URL(value)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
-    if (!['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname)) return null
+    if (!safeOpenCodeServerOrigin(value)) return null
     parsed.pathname = parsed.pathname.replace(/\/$/, '')
     parsed.search = ''
     parsed.hash = ''
@@ -121,7 +124,7 @@ async function jsonRequest<T>(
 
 export async function checkOpenCodeServer(rawUrl?: string) {
   const baseUrl = loopbackUrl(rawUrl)
-  if (!baseUrl) return { ok: false, baseUrl: rawUrl || '', error: 'OpenCode server 只允許 localhost / 127.0.0.1 / ::1' }
+  if (!baseUrl) return { ok: false, baseUrl: '', error: 'OpenCode server 只允許 credential-free localhost / 127.0.0.1 / ::1' }
   const health = await jsonRequest<ServerHealth>(baseUrl, '/global/health')
   if (!health.ok || health.value?.healthy === false) {
     return { ok: false, baseUrl, version: health.value?.version, error: health.error || `health HTTP ${health.status}` }

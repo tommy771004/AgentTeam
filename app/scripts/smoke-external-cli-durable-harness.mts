@@ -557,6 +557,94 @@ await test('registry isolates conversations and serializes one session interacti
   assert.equal(registry.get('run-b')?.conversationId, 'thread-b')
 })
 
+await test('terminal sessions stay replayable until an explicit bounded ack', () => {
+  const records: Array<Record<string, unknown>> = []
+  const registry = new ExternalCliRunSessionRegistry({
+    terminalRetentionMs: 100,
+    telemetrySink: { record: (record: Record<string, unknown>) => records.push(record) },
+  })
+  const session = registry.create({
+    runId: 'run-terminal-retention',
+    conversationId: 'thread-retention',
+    adapter: 'codex',
+    clock: new FakeExternalCliClock(),
+  })
+  session.start()
+  session.observe({ type: 'process_started', providerSessionId: 'provider-retention' })
+  session.observe({ type: 'model_activity', detail: 'safe activity' })
+  session.observe({ type: 'process_exit', code: 0 })
+
+  assert.equal(registry.get('run-terminal-retention')?.snapshot().terminal?.classification, 'success')
+  assert.equal(registry.reconnect('run-terminal-retention', 0)?.snapshot.terminal?.classification, 'success')
+  assert.equal(records[0]?.settlement, 'success')
+  assert.equal(records[0]?.eventCount && Number(records[0]?.eventCount) > 0, true)
+  registry.acknowledgeTerminal('run-terminal-retention')
+  assert.equal(registry.get('run-terminal-retention'), undefined)
+
+  const retained = registry.create({
+    runId: 'run-terminal-expiry',
+    conversationId: 'thread-retention',
+    adapter: 'codex',
+  })
+  retained.start()
+  retained.observe({ type: 'process_started' })
+  retained.observe({ type: 'process_exit', code: 0 })
+  registry.pruneTerminalSessions(Date.now() + 101)
+  assert.equal(registry.get('run-terminal-expiry'), undefined)
+})
+
+await test('queued external connector requirements survive renderer restart exactly', async () => {
+  const values = new Map<string, string>()
+  ;(globalThis as typeof globalThis & { localStorage: Storage }).localStorage = {
+    getItem: (key: string) => values.get(key) || null,
+    setItem: (key: string, value: string) => { values.set(key, value) },
+    removeItem: (key: string) => { values.delete(key) },
+    clear: () => { values.clear() },
+    key: (index: number) => [...values.keys()][index] || null,
+    get length() { return values.size },
+  }
+  const queue = await import('../src/agent/runQueue.ts')
+  queue.resetRunQueueForTests()
+  const requirements = [{ connector: 'Cloudflare', server: 'Cloudflare MCP', operation: 'search' }]
+  const item = queue.enqueueExternalRun({
+    runId: 'run-queued-required-connector',
+    objective: 'queued auth snapshot',
+    runner: 'codex',
+    overrides: { externalCliRequiredConnectors: requirements },
+  })
+  assert.deepEqual(item?.overrides?.externalCliRequiredConnectors, requirements)
+  queue.resetRunQueueForTests()
+  queue.hydrateRunQueue()
+  assert.deepEqual(queue.listQueuedRuns()[0]?.overrides?.externalCliRequiredConnectors, requirements)
+  queue.clearRunQueue()
+})
+
+await test('connector requirements are produced from the selected configured capability snapshot', async () => {
+  const { resolveExternalCliRequiredConnectors } = await import('../src/agent/externalCliConnectorSnapshot.ts')
+  const settings = {
+    mcpEnabled: true,
+    mcpServers: [
+      { id: 'global', name: 'Global MCP', enabled: true, transport: 'http' as const },
+      { id: 'selected', name: 'Selected MCP', enabled: true, transport: 'http' as const, pluginId: 'connector-selected' },
+      { id: 'disabled', name: 'Disabled MCP', enabled: false, transport: 'http' as const },
+    ],
+    mcpAgentServers: { build: ['selected'] },
+  }
+  assert.deepEqual(resolveExternalCliRequiredConnectors(settings, { agentMode: 'build' }), [
+    { connector: 'connector-selected', server: 'Selected MCP' },
+  ])
+  // An explicit empty selection is authoritative and must not be replaced by
+  // a later settings read or an inferred stderr connector name.
+  assert.deepEqual(resolveExternalCliRequiredConnectors(settings, { externalCliRequiredConnectors: [] }), [])
+})
+
+await test('OpenCode server origin metadata rejects credential-bearing loopback URLs', async () => {
+  const { safeOpenCodeServerOrigin } = await import('../src/agent/opencodeServerSafety.ts')
+  assert.equal(safeOpenCodeServerOrigin('http://user:secret@127.0.0.1:4096/api'), null)
+  assert.equal(safeOpenCodeServerOrigin('https://127.0.0.1:4096/api'), 'https://127.0.0.1:4096')
+  assert.equal(safeOpenCodeServerOrigin('http://127.0.0.1:4096/api?token=secret'), 'http://127.0.0.1:4096')
+})
+
 await test('shipped adapters retain the coordinator and Host ownership boundaries', () => {
   const localRunner = fs.readFileSync(path.join(appRoot, 'electron/localCliRunner.ts'), 'utf8')
   const rendererProjection = fs.readFileSync(path.join(appRoot, 'src/agent/externalCliProjection.ts'), 'utf8')

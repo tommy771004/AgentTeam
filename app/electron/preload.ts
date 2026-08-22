@@ -3,6 +3,11 @@ import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
 import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
 import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from '../src/agent/subdesign/pluginExecution'
 import type { SubDesignMetadataKind } from '../src/agent/subdesign/metadataKinds'
+import type {
+  ExternalCliConnectorRequirement,
+  ExternalCliRunPhase,
+  ExternalCliTerminalClassification,
+} from '../src/agent/externalCliRunSession'
 
 type PiHostThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 type PiHostSettings = {
@@ -948,7 +953,7 @@ const api = {
       runId?: string
       conversationId?: string
       externalCliPolicy?: Record<string, number>
-      requiredConnectors?: Array<{ connector?: string; server?: string; operation?: string }>
+      requiredConnectors?: ExternalCliConnectorRequirement[]
       configSnapshot?: unknown
       /** Chat attachments (images as data URL) — written to disk for the CLI */
       attachments?: Array<{
@@ -980,7 +985,7 @@ const api = {
         error?: string
         runId?: string
         externalRun?: unknown
-        terminalClassification?: string
+        terminalClassification?: ExternalCliTerminalClassification
       }>,
     /** Live CLI process events (thought / text / tool / log) for center feed */
     onStream: (
@@ -1001,8 +1006,9 @@ const api = {
         /** kind=plan 時的任務清單快照（右側面板同步） */
         todos?: Array<{ text: string; status?: 'pending' | 'active' | 'done' }>
         sequence?: number
-        sessionPhase?: string
-        terminalClassification?: string
+        sessionPhase?: ExternalCliRunPhase
+        terminalClassification?: ExternalCliTerminalClassification
+        providerSessionId?: string
       }) => void,
     ) => {
       const handler = (_: unknown, ev: unknown) => cb(ev as Parameters<typeof cb>[0])
@@ -1029,6 +1035,14 @@ const api = {
       ipcRenderer.invoke('cli:sessionInput', input) as Promise<boolean>,
     sessionApproval: (input: { runId: string; approved: boolean; providerSessionId?: string }) =>
       ipcRenderer.invoke('cli:sessionApproval', input) as Promise<boolean>,
+    sessionAck: (runId: string) =>
+      ipcRenderer.invoke('cli:sessionAck', runId) as Promise<boolean>,
+    sessionRecoveryAction: (input: { runId: string; action: 'resume' | 'retry' }) =>
+      ipcRenderer.invoke('cli:sessionRecoveryAction', input) as Promise<{
+        ok: boolean
+        mode?: 'manual-retry'
+        reason?: string
+      }>,
   },
   /** Persist / reload chat attachments on disk */
   attachments: {

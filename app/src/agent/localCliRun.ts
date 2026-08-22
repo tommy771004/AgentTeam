@@ -3,7 +3,11 @@
  */
 
 import type { AgentState, ApprovalMode, CliConfigSnapshot, ExternalRunRef, RuntimeOverrides } from './types.ts'
-import type { ExternalCliConnectorRequirement, ExternalCliRunPolicy } from './externalCliRunSession.ts'
+import type {
+  ExternalCliConnectorRequirement,
+  ExternalCliRunPolicy,
+  ExternalCliTerminalClassification,
+} from './externalCliRunSession.ts'
 import { emptyKnowledge } from './knowledge.ts'
 import { resolveCliApproval } from './cliApproval.ts'
 import {
@@ -63,7 +67,7 @@ export async function runPromptViaLocalCli(opts: {
   output: string
   command: string
   error?: string
-  terminalClassification?: string
+  terminalClassification?: ExternalCliTerminalClassification
   runId?: string
   externalRun?: ExternalRunRef
 }> {

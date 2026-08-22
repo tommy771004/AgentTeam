@@ -4,11 +4,22 @@ import type {
   ExternalCliSessionSnapshot,
   ExternalCliTerminalClassification,
 } from './externalCliRunSession.ts'
-import type { CliStreamPayload } from '../store/runActivityStore.ts'
+
+export type ExternalCliStreamKind =
+  | 'status'
+  | 'thought'
+  | 'text'
+  | 'tool'
+  | 'file'
+  | 'log'
+  | 'error'
+  | 'done'
+  | 'chunk'
+  | 'plan'
 
 export type ExternalCliStreamProjection = {
   runId: string
-  kind: CliStreamPayload['kind']
+  kind: ExternalCliStreamKind
   title?: string
   detail?: string
   tool?: string
@@ -16,10 +27,14 @@ export type ExternalCliStreamProjection = {
   channel?: 'thought' | 'text' | 'stdout' | 'stderr'
   sessionPhase?: ExternalCliRunPhase
   terminalClassification?: ExternalCliTerminalClassification
+  providerSessionId?: string
 }
 
 export function externalLifecycleToStream(event: ExternalCliLifecycleEvent): ExternalCliStreamProjection {
-  const base = { runId: event.runId, sessionPhase: event.phase }
+  const providerSessionId = 'providerSessionId' in event && typeof event.providerSessionId === 'string'
+    ? event.providerSessionId
+    : undefined
+  const base = { runId: event.runId, sessionPhase: event.phase, providerSessionId }
   switch (event.type) {
     case 'process_started':
       return { ...base, kind: 'status', title: 'CLI 程序已啟動', detail: event.detail }

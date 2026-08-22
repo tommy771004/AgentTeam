@@ -231,6 +231,41 @@ function RecoveryBootstrap() {
           .filter((conversationId): conversationId is string => typeof conversationId === 'string' && conversationId.length > 0),
       )
 
+      // Host checkpoints survive a renderer promise disappearing. Re-run the
+      // coordinator's one-shot finalization owner before presenting recovery,
+      // so archive/summary/release/queue-drain effects cannot be lost.
+      const recoveredExternal = await window.subagents?.cli?.sessionRecovery?.()
+      if (Array.isArray(recoveredExternal) && recoveredExternal.length) {
+        const { finalizeRecoveredExternalRun } = await import('./agent/taskRunCoordinator')
+        for (const candidate of recoveredExternal) {
+          if (!candidate || typeof candidate !== 'object') continue
+          const record = candidate as {
+            runId?: unknown
+            conversationId?: unknown
+            adapter?: unknown
+            phase?: unknown
+            recovery?: { reason?: unknown }
+          }
+          if (record.phase !== 'interrupted' || typeof record.runId !== 'string' || typeof record.adapter !== 'string') continue
+          try {
+            await finalizeRecoveredExternalRun({
+              runId: record.runId,
+              threadId: typeof record.conversationId === 'string' ? record.conversationId : undefined,
+              conversationId: typeof record.conversationId === 'string' ? record.conversationId : undefined,
+              adapter: record.adapter,
+              reason: typeof record.recovery?.reason === 'string' ? record.recovery.reason : undefined,
+            })
+          } catch (error) {
+            journal.recordRecoveryNotice({
+              kind: 'run',
+              id: record.runId,
+              action: 'quarantined',
+              detail: `外部 CLI 終態復原失敗，已停止隱性重跑：${error instanceof Error ? error.message : String(error)}`.slice(0, 300),
+            })
+          }
+        }
+      }
+
       // A legacy/partially-written journal may be absent while the persisted
       // thread still says running; reconcile that visible state as a fallback.
       const threadStore = useThreadStore.getState()

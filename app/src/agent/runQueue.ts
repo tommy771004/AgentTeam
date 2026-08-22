@@ -10,6 +10,7 @@ import type {
   ScheduleKind,
 } from './types.ts'
 import type { ExternalRunOpts, ExternalRunResult } from './taskRunCoordinator.ts'
+import type { ExternalCliConnectorRequirement } from './externalCliRunSession.ts'
 import type { ThreadRunner } from '../store/threadStore.ts'
 import {
   getJournalEntry,
@@ -86,6 +87,7 @@ export type PersistedQueueItem = {
     | 'nextState'
     | 'webhookTarget'
     | 'externalCliPolicy'
+    | 'externalCliRequiredConnectors'
   >
 }
 
@@ -136,8 +138,22 @@ function dedupeKey(opts: ExternalRunOpts): string {
     opts.overrides?.webhookTarget || '',
     opts.overrides?.triggerSource || '',
     opts.overrides?.classificationReason || '',
+    JSON.stringify(opts.overrides?.externalCliRequiredConnectors || []),
     opts.reuseThreadId || '',
   ].join('|')
+}
+
+function persistConnectorRequirements(
+  requirements: ExternalCliConnectorRequirement[] | undefined,
+): ExternalCliConnectorRequirement[] | undefined {
+  if (!requirements) return undefined
+  return requirements
+    .map((requirement) => ({
+      connector: typeof requirement.connector === 'string' ? requirement.connector.trim().slice(0, 120) : undefined,
+      server: typeof requirement.server === 'string' ? requirement.server.trim().slice(0, 160) : undefined,
+      operation: typeof requirement.operation === 'string' ? requirement.operation.trim().slice(0, 160) : undefined,
+    }))
+    .filter((requirement) => Boolean(requirement.connector || requirement.server || requirement.operation))
 }
 
 function persistAttachments(
@@ -202,6 +218,7 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
           nextState: o.nextState,
           webhookTarget: o.webhookTarget,
           externalCliPolicy: o.externalCliPolicy,
+          externalCliRequiredConnectors: persistConnectorRequirements(o.externalCliRequiredConnectors),
         }
       : undefined,
   }
@@ -230,7 +247,12 @@ function fromPersisted(p: PersistedQueueItem): QueuedExternalRun {
     skipUserBubble: p.skipUserBubble,
     enqueueWhenBusy: p.enqueueWhenBusy,
     attachments: p.attachments,
-    overrides: p.overrides,
+    overrides: p.overrides
+      ? {
+          ...p.overrides,
+          externalCliRequiredConnectors: persistConnectorRequirements(p.overrides.externalCliRequiredConnectors),
+        }
+      : undefined,
     meta:
       p.scheduleJobId || p.scheduleTriggeredAt || p.scheduleKind || p.eventTrigger
         ? {
@@ -432,6 +454,20 @@ function parsePersistedQueue(raw: string | null): { items: PersistedQueueItem[] 
       typeof (item as PersistedQueueItem).enqueuedAt !== 'string'
     ) {
       throw new Error('queue item schema invalid')
+    }
+    const overrides = (item as PersistedQueueItem).overrides
+    if (
+      overrides &&
+      'externalCliRequiredConnectors' in overrides &&
+      overrides.externalCliRequiredConnectors !== undefined &&
+      (!Array.isArray(overrides.externalCliRequiredConnectors) ||
+        overrides.externalCliRequiredConnectors.some((requirement) =>
+          !requirement ||
+          typeof requirement !== 'object' ||
+          !Object.values(requirement).some((value) => typeof value === 'string' && value.trim()),
+        ))
+    ) {
+      throw new Error('queue connector snapshot invalid')
     }
   }
   return { items: data.items as PersistedQueueItem[] }

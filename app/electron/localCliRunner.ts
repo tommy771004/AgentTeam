@@ -9,34 +9,35 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { cancelBashAndWait, runArgv, runBash, writeRunStdin } from './shellBridge'
+import { cancelBashAndWait, runArgv, runBash, writeRunStdin, type BashResult } from './shellBridge.ts'
 import {
   executableLookupCommand,
   firstExecutablePath,
   quoteShellArg,
-} from './platformProcess'
-import { resolveCliApproval } from '../src/agent/cliApproval'
-import { materializeAttachments } from './attachmentStore'
-import { wrapCommandInSandbox } from './cliFilesystemSandbox'
-import type { CliConfigSnapshot, ExternalRunRef } from '../src/agent/types'
-import { redactCliDisplayArgs, redactCliTelemetryText } from '../src/agent/cliCommandTelemetry'
+} from './platformProcess.ts'
+import { resolveCliApproval } from '../src/agent/cliApproval.ts'
+import { materializeAttachments } from './attachmentStore.ts'
+import { wrapCommandInSandbox } from './cliFilesystemSandbox.ts'
+import type { CliConfigSnapshot, ExternalRunRef } from '../src/agent/types.ts'
+import { redactCliDisplayArgs, redactCliTelemetryText } from '../src/agent/cliCommandTelemetry.ts'
+import { externalLifecycleToStream } from '../src/agent/externalCliLifecycleProjection.ts'
 import {
   ExternalCliRunSession,
   classifyExternalCliDiagnostic,
   formatExternalCliTerminal,
   normalizeExternalCliRunPolicy,
-  type ExternalCliLifecycleEvent,
   type ExternalCliConnectorRequirement,
+  type ExternalCliClock,
   type ExternalCliRunPhase,
   type ExternalCliTerminalClassification,
   type ExternalCliRunPolicy,
-} from '../src/agent/externalCliRunSession'
+} from '../src/agent/externalCliRunSession.ts'
 import {
   cancelExternalCliSession as cancelSupervisedExternalCliSession,
   externalCliSupervisor,
   getExternalCliSession as getSupervisedExternalCliSession,
   interruptExternalCliSessions as interruptSupervisedExternalCliSessions,
-} from './externalCliSupervisor'
+} from './externalCliSupervisor.ts'
 
 export type LocalCliKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
 export type CliApprovalMode = 'always' | 'auto' | 'full'
@@ -78,6 +79,7 @@ export type LocalCliStreamEvent = {
   sequence?: number
   sessionPhase?: ExternalCliRunPhase
   terminalClassification?: ExternalCliTerminalClassification
+  providerSessionId?: string
 }
 
 export type LocalCliRunInput = {
@@ -138,14 +140,30 @@ export type LocalCliRunResult = {
   terminalClassification?: ExternalCliTerminalClassification
 }
 
+/** Injectable only at the shipped process boundary; production defaults to shellBridge. */
+export type LocalCliRunDependencies = {
+  runArgv?: (input: Parameters<typeof runArgv>[0]) => Promise<BashResult>
+  cancelRun?: (runId: string) => Promise<{ confirmed: boolean; detail?: string }>
+  writeInput?: (runId: string, value: string) => boolean
+  clock?: ExternalCliClock
+}
+
 /** Main-process registry; renderer never owns canonical session state. */
 export const externalCliSessions = externalCliSupervisor
 
-export async function cancelExternalCliSession(runId: string): Promise<{ ok: boolean; classification?: string }> {
+export async function cancelExternalCliSession(runId: string): Promise<{
+  ok: boolean
+  classification?: ExternalCliTerminalClassification
+  confirmed?: boolean
+}> {
   const session = getSupervisedExternalCliSession(runId)
   if (!session) return { ok: false }
   const settlement = await cancelSupervisedExternalCliSession(runId)
-  return { ok: settlement.classification === 'user-cancelled', classification: settlement.classification }
+  return {
+    ok: settlement.classification === 'user-cancelled' && settlement.terminationConfirmed === true,
+    classification: settlement.classification,
+    confirmed: settlement.terminationConfirmed === true,
+  }
 }
 
 export function getExternalCliSession(runId: string) {
@@ -426,7 +444,10 @@ async function preflightBinary(
   return { ok: true, path: found }
 }
 
-export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCliRunResult> {
+export async function runLocalCliAgent(
+  input: LocalCliRunInput,
+  dependencies: LocalCliRunDependencies = {},
+): Promise<LocalCliRunResult> {
   const kind = input.kind
   const bin = resolveBinary(kind, input.binary)
   const runId = input.runId || randomUUID()
@@ -441,6 +462,7 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
         runId,
         sequence: ev.sequence ?? projection?.eventCursor,
         sessionPhase: ev.sessionPhase ?? projection?.phase,
+        providerSessionId: ev.providerSessionId ?? projection?.providerSessionId,
       })
     } catch {
       /* ignore */
@@ -572,6 +594,7 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
     runId,
     conversationId: input.conversationId || runId,
     adapter: kind,
+    clock: dependencies.clock,
     policy,
     unattended: input.unattended,
     processId: `cli:${runId}`,
@@ -579,38 +602,20 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
     transport: {
       processId: `cli:${runId}`,
       terminateTree: async () => {
-        const result = await cancelBashAndWait({ runId })
+        const result = dependencies.cancelRun
+          ? await dependencies.cancelRun(runId)
+          : await cancelBashAndWait({ runId })
         return { confirmed: result.confirmed, detail: result.detail }
       },
-      sendInput: (value) => writeRunStdin(runId, value),
-      sendApproval: (approved) => writeRunStdin(runId, approved ? 'yes' : 'no'),
+      sendInput: (value) => dependencies.writeInput ? dependencies.writeInput(runId, value) : writeRunStdin(runId, value),
+      sendApproval: (approved) => dependencies.writeInput
+        ? dependencies.writeInput(runId, approved ? 'yes' : 'no')
+        : writeRunStdin(runId, approved ? 'yes' : 'no'),
     },
     onEvent: (event) => {
-      const terminalClassification =
-        event.type === 'process_exit' ? String(event.detail || '') as ExternalCliTerminalClassification : undefined
-      const isTerminal = event.type === 'process_exit'
       emit({
-        kind: isTerminal ? (terminalClassification === 'success' ? 'done' : 'error') : event.type === 'diagnostic' ? 'log' : 'status',
-        title: isTerminal
-          ? terminalClassification
-            ? formatExternalCliTerminal({
-                classification: terminalClassification as never,
-                phase: terminalClassification === 'success' ? 'completed' : 'failed',
-                at: event.at,
-              })
-            : 'CLI 結束'
-          : event.type === 'connector_authentication_required'
-            ? 'Connector authentication required'
-            : event.type === 'diagnostic'
-              ? 'CLI 診斷'
-              : event.type === 'provider_activity'
-                ? 'CLI session activity'
-                : undefined,
-        detail: event.detail,
-        ok: isTerminal ? terminalClassification === 'success' : event.type !== 'diagnostic' || event.severity !== 'error',
+        ...externalLifecycleToStream(event),
         sequence: event.sequence,
-        sessionPhase: event.phase,
-        terminalClassification,
       })
     },
   })
@@ -620,7 +625,7 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
   // Direct argv spawn — do NOT wrap in cmd.exe (breaks CJK/multiline, can hang)
   let r
   try {
-    r = await runArgv({
+    r = await (dependencies.runArgv || runArgv)({
       file: spawnFile,
       args: spawnArgs,
       cwd,

@@ -38,10 +38,18 @@ export function configureExternalCliPersistence(store: Parameters<ExternalCliRun
   externalCliSupervisor.configurePersistence(store)
 }
 
+export function configureExternalCliTelemetry(sink: Parameters<ExternalCliRunSessionRegistry['configureTelemetry']>[0]) {
+  externalCliSupervisor.configureTelemetry(sink)
+}
+
 export function recoverExternalCliSessions(reason?: string) {
   return externalCliSupervisor.recoverPersistedSessions(reason)
 }
 
 export function listExternalCliRecovery() {
   return externalCliSupervisor.recoverySnapshots()
+}
+
+export function externalCliRecoveryAction(input: { runId: string; action: 'resume' | 'retry' }) {
+  return externalCliSupervisor.recoveryAction(input.runId, input.action)
 }

@@ -320,6 +320,7 @@ export async function dispatchThreadTask(
       status: a.status || 'failed',
       result: a.result,
       error: a.haltReason || (a.status === 'failed' ? a.result : undefined),
+      terminalClassification: a.externalRun?.terminalClassification,
       postState: a.postState,
     }
   }

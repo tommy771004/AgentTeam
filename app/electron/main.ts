@@ -142,10 +142,13 @@ import {
 } from './localCliRunner'
 import {
   configureExternalCliPersistence,
+  configureExternalCliTelemetry,
   recoverExternalCliSessions,
   listExternalCliRecovery,
+  externalCliRecoveryAction,
 } from './externalCliSupervisor'
 import { JsonExternalCliCheckpointStore } from './externalCliCheckpointStore'
+import { JsonExternalCliTelemetrySink } from './externalCliTelemetrySink'
 import {
   executableLookupCommand,
   firstExecutablePath,
@@ -226,6 +229,7 @@ import {
   stopOpenCodeServers,
   type OpenCodeServerMode,
 } from './opencodeServerBridge'
+import { safeOpenCodeServerOrigin } from '../src/agent/opencodeServerSafety'
 import { PiHostSupervisor } from './piHostSupervisor'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -733,6 +737,9 @@ app.whenReady().then(async () => {
   // interrupted before the renderer starts projecting them.
   configureExternalCliPersistence(
     new JsonExternalCliCheckpointStore(path.join(app.getPath('userData'), 'external-cli', 'checkpoints.json')),
+  )
+  configureExternalCliTelemetry(
+    new JsonExternalCliTelemetrySink(path.join(app.getPath('userData'), 'external-cli', 'telemetry.json')),
   )
   const recoveredExternalSessions = recoverExternalCliSessions()
   if (recoveredExternalSessions.length) {
@@ -1876,18 +1883,17 @@ ipcMain.handle(
               const detail = event.detail || event.title || 'OpenCode server error'
               const diagnostic = classifyExternalCliDiagnostic(detail, {
                 adapter: 'opencode',
-                server: 'OpenCode server',
                 operation: event.tool,
-                required: serverSession.isRequiredConnector({ server: 'OpenCode server', operation: event.tool }),
                 headless: true,
               })
               if (diagnostic.kind === 'connector-authentication-required') {
+                const required = diagnostic.required === true || serverSession.isRequiredConnector(diagnostic)
                 serverSession.observe({
                   type: 'connector_authentication_required',
                   connector: diagnostic.connector,
                   server: diagnostic.server,
                   operation: diagnostic.operation,
-                  required: diagnostic.required,
+                  required,
                   detail: diagnostic.detail,
                 })
               } else {
@@ -1899,7 +1905,13 @@ ipcMain.handle(
             const cursor = serverSession.snapshot().eventCursor
             try {
               const target = mainWindow?.webContents
-              if (target && !target.isDestroyed()) target.send('cli:stream', { ...event, runId: serverRunId, sequence: cursor, sessionPhase: serverSession.snapshot().phase })
+              if (target && !target.isDestroyed()) target.send('cli:stream', {
+                ...event,
+                runId: serverRunId,
+                sequence: cursor,
+                sessionPhase: serverSession.snapshot().phase,
+                providerSessionId: serverSession.snapshot().providerSessionId,
+              })
             } catch {
               /* ignore */
             }
@@ -1909,11 +1921,10 @@ ipcMain.handle(
         const detail = error instanceof Error ? error.message : String(error)
         if (!serverSession.snapshot().terminal) serverSession.failTransport(detail)
         const sessionSnapshot = serverSession.snapshot()
-        externalCliSessions.remove(serverRunId)
         return {
           ok: false,
           output: sessionSnapshot.output.head,
-          command: `opencode server ${input.serverUrl || ''}`,
+          command: `opencode server ${safeOpenCodeServerOrigin(input.serverUrl) || 'loopback'}`,
           kind: 'opencode' as const,
           code: 1,
           error: formatExternalCliTerminal(sessionSnapshot.terminal || {
@@ -1956,6 +1967,7 @@ ipcMain.handle(
         else if (!serverSession.snapshot().terminal) serverSession.observe({ type: 'process_exit', code: server.ok ? 0 : 1, detail: server.error })
         const sessionSnapshot = serverSession.snapshot()
         const terminal = sessionSnapshot.terminal
+        const safeServerOrigin = safeOpenCodeServerOrigin(server.baseUrl || input.serverUrl) || 'loopback'
         // The Host session classification wins over an adapter's raw HTTP
         // result, including a provider that exits zero after required auth or
         // cancellation has already settled the run.
@@ -1963,7 +1975,7 @@ ipcMain.handle(
         const result = {
           ok: resultOk,
           output: server.output,
-          command: `opencode server ${server.baseUrl || input.serverUrl || ''} session=${server.sessionId || '—'}`,
+          command: `opencode server ${safeServerOrigin} session=${server.sessionId || '—'}`,
           kind: 'opencode' as const,
           code: resultOk ? 0 : 1,
           timedOut: server.timedOut,
@@ -1974,7 +1986,7 @@ ipcMain.handle(
           configSnapshot: input.configSnapshot,
           externalRun: {
             provider: 'opencode' as const,
-            serverUrl: server.baseUrl,
+            serverUrl: safeServerOrigin,
             sessionId: server.sessionId,
             version: server.version,
             configFingerprint: input.configSnapshot
@@ -1993,13 +2005,15 @@ ipcMain.handle(
             finishedAt: new Date().toISOString(),
           },
         }
-        externalCliSessions.remove(serverRunId)
         return result
       }
       if (!serverSession.snapshot().terminal) {
         serverSession.failTransport(server.error || 'OpenCode server unavailable; falling back to CLI')
       }
-      externalCliSessions.remove(serverRunId)
+      // This terminal session represents only the failed server attempt; the
+      // same run id is handed to the one-shot CLI adapter below. Explicitly
+      // acknowledge that internal attempt before replacing its live owner.
+      externalCliSessions.acknowledgeTerminal(serverRunId)
     }
     return runLocalCliAgent({
       ...input,
@@ -2024,7 +2038,7 @@ ipcMain.handle(
 ipcMain.handle('cli:cancel', async (_evt, runId?: string) => {
   if (runId) {
     const sessionCancel = await cancelExternalCliSession(runId)
-    if (sessionCancel.ok) return { ok: true, killed: 1 }
+    if (sessionCancel.ok) return { ok: true, killed: 1, confirmed: sessionCancel.confirmed === true }
   }
   const [cli, server] = await Promise.all([
     cancelBashAndWait(runId ? { runId } : { tag: 'cli-agent' }),
@@ -2035,18 +2049,33 @@ ipcMain.handle('cli:cancel', async (_evt, runId?: string) => {
 
 /** Reconnect to a Host-owned external session after renderer reload. */
 ipcMain.handle('cli:sessionSnapshot', async (_evt, runId: string) => {
+  externalCliSessions.pruneTerminalSessions()
   const session = getExternalCliSession(String(runId || ''))
   return session?.snapshot() || null
 })
 
-ipcMain.handle('cli:sessionSnapshots', async () => listExternalCliSessions())
+ipcMain.handle('cli:sessionSnapshots', async () => {
+  externalCliSessions.pruneTerminalSessions()
+  return listExternalCliSessions()
+})
 
 ipcMain.handle('cli:sessionRecovery', async () => listExternalCliRecovery())
 
 ipcMain.handle('cli:sessionEvents', async (_evt, input: { runId: string; cursor?: number }) => {
-  const session = getExternalCliSession(String(input?.runId || ''))
-  return session ? session.reconnect(Number(input?.cursor || 0)) : null
+  externalCliSessions.pruneTerminalSessions()
+  return externalCliSessions.reconnect(String(input?.runId || ''), Number(input?.cursor || 0)) || null
 })
+
+ipcMain.handle('cli:sessionAck', async (_evt, runId: string) =>
+  externalCliSessions.acknowledgeTerminal(String(runId || '')),
+)
+
+ipcMain.handle('cli:sessionRecoveryAction', async (_evt, input: { runId: string; action: 'resume' | 'retry' }) =>
+  externalCliRecoveryAction({
+    runId: String(input?.runId || ''),
+    action: input?.action === 'resume' ? 'resume' : 'retry',
+  }),
+)
 
 ipcMain.handle('cli:sessionYield', async (_evt, runId: string) => {
   const session = getExternalCliSession(String(runId || ''))

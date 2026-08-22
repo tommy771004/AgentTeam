@@ -13,6 +13,7 @@ import {
   externalTerminalStatus,
   type ExternalCliStreamProjection,
 } from './externalCliLifecycleProjection.ts'
+import type { ExternalCliRecoveryProjection } from '../store/runActivityStore.ts'
 
 const reconnectedExternalSessionCursors = new Map<string, number>()
 
@@ -33,7 +34,16 @@ export async function reconnectExternalCliSessions(): Promise<number> {
   } catch {
     return 0
   }
-  if (!rawSnapshots.length) return 0
+  let rawRecovery: unknown[] = []
+  if (api.sessionRecovery) {
+    try {
+      const result = await api.sessionRecovery()
+      rawRecovery = Array.isArray(result) ? result : []
+    } catch {
+      rawRecovery = []
+    }
+  }
+  if (!rawSnapshots.length && !rawRecovery.length) return 0
 
   const [{ useRunActivityStore }, { useThreadStore }] = await Promise.all([
     import('../store/runActivityStore.ts'),
@@ -97,6 +107,55 @@ export async function reconnectExternalCliSessions(): Promise<number> {
       finishedAt: snapshot.terminal ? new Date(snapshot.terminal.at).toISOString() : undefined,
     })
     reconnectedExternalSessionCursors.set(snapshot.runId, snapshot.eventCursor)
+    restored += 1
+  }
+  for (const raw of rawRecovery) {
+    if (!raw || typeof raw !== 'object') continue
+    const record = raw as {
+      runId?: unknown
+      conversationId?: unknown
+      adapter?: unknown
+      phase?: unknown
+      recovery?: {
+        interruptedAt?: unknown
+        reason?: unknown
+        resumable?: unknown
+        automaticRetry?: unknown
+      }
+      providerSessionId?: unknown
+    }
+    if (
+      typeof record.runId !== 'string' ||
+      typeof record.adapter !== 'string' ||
+      record.phase !== 'interrupted' ||
+      !record.recovery
+    ) continue
+    const runId = record.runId
+    const recovery: ExternalCliRecoveryProjection = {
+      runId,
+      conversationId: typeof record.conversationId === 'string' ? record.conversationId : undefined,
+      adapter: record.adapter,
+      interruptedAt: typeof record.recovery.interruptedAt === 'number' ? record.recovery.interruptedAt : Date.now(),
+      reason: typeof record.recovery.reason === 'string' ? record.recovery.reason.slice(0, 300) : 'Host process loss',
+      resumable: record.recovery.resumable === true,
+      automaticRetry: record.recovery.automaticRetry === true,
+      providerSessionId: typeof record.providerSessionId === 'string' ? record.providerSessionId : undefined,
+    }
+    const activity = useRunActivityStore.getState()
+    const existing = activity.getPresentation(runId)
+    if (!existing || existing.terminal) activity.begin(runId)
+    activity.setRecovery(recovery, runId)
+    if (typeof record.conversationId === 'string' && record.conversationId) {
+      useThreadStore.getState().setExternalRun(record.conversationId, {
+        provider: record.adapter,
+        adapter: record.adapter,
+        runId,
+        conversationId: record.conversationId,
+        sessionId: recovery.providerSessionId,
+        status: 'interrupted',
+        completionReason: recovery.reason,
+      })
+    }
     restored += 1
   }
   return restored

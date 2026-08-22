@@ -2,6 +2,12 @@ import {
   checkpointFromSnapshot,
   type ExternalCliCheckpointStore,
 } from './externalCliCheckpoint.ts'
+import type {
+  ExternalCliTelemetryRecord,
+  ExternalCliTelemetrySink,
+} from './externalCliTelemetry.ts'
+
+export type { ExternalCliTelemetryRecord, ExternalCliTelemetrySink } from './externalCliTelemetry.ts'
 
 /**
  * Host-neutral contract for a durable external CLI run.
@@ -1048,11 +1054,25 @@ export function evaluateExternalCliRecovery(input: {
 export class ExternalCliRunSessionRegistry {
   private readonly sessions = new Map<string, ExternalCliRunSession>()
   private readonly interactions = new Map<string, Promise<unknown>>()
+  private readonly terminalRetention = new Map<string, number>()
+  private readonly retentionTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly telemetry = new Map<string, {
+    eventCount: number
+    phaseChanges: Array<{ phase: ExternalCliRunPhase; at: number }>
+  }>()
   private checkpointStore?: ExternalCliCheckpointStore
+  private telemetrySink?: ExternalCliTelemetrySink
+  private readonly terminalRetentionMs: number
   private recoveryRecords: ReturnType<ExternalCliCheckpointStore['list']> = []
 
-  constructor(options?: { checkpointStore?: ExternalCliCheckpointStore }) {
+  constructor(options?: {
+    checkpointStore?: ExternalCliCheckpointStore
+    telemetrySink?: ExternalCliTelemetrySink
+    terminalRetentionMs?: number
+  }) {
     this.checkpointStore = options?.checkpointStore
+    this.telemetrySink = options?.telemetrySink
+    this.terminalRetentionMs = Math.max(1, Math.min(30 * 60_000, Math.round(options?.terminalRetentionMs || 5 * 60_000)))
   }
 
   configurePersistence(store: ExternalCliCheckpointStore): void {
@@ -1060,18 +1080,34 @@ export class ExternalCliRunSessionRegistry {
     for (const session of this.sessions.values()) this.persist(session)
   }
 
+  configureTelemetry(sink: ExternalCliTelemetrySink): void {
+    this.telemetrySink = sink
+  }
+
   create(options: ExternalCliRunSessionOptions): ExternalCliRunSession {
     let session: ExternalCliRunSession
+    const telemetry = {
+      eventCount: 0,
+      phaseChanges: [] as Array<{ phase: ExternalCliRunPhase; at: number }>,
+    }
+    this.telemetry.set(options.runId, telemetry)
     const persist = () => {
       if (session) this.persist(session)
     }
     session = new ExternalCliRunSession({
       ...options,
       onEvent: (event) => {
+        telemetry.eventCount += 1
+        const previous = telemetry.phaseChanges.at(-1)?.phase
+        if (previous !== event.phase) telemetry.phaseChanges.push({ phase: event.phase, at: event.at })
         try { options.onEvent?.(event) } finally { persist() }
       },
       onSettlement: (settlement) => {
-        try { options.onSettlement?.(settlement) } finally { persist() }
+        try { options.onSettlement?.(settlement) } finally {
+          this.retainTerminal(options.runId)
+          this.recordTelemetry(session, telemetry, settlement.classification)
+          persist()
+        }
       },
     })
     this.sessions.set(options.runId, session)
@@ -1089,6 +1125,40 @@ export class ExternalCliRunSessionRegistry {
   remove(runId: string): void {
     this.sessions.delete(runId)
     this.interactions.delete(runId)
+    this.terminalRetention.delete(runId)
+    const timer = this.retentionTimers.get(runId)
+    if (timer) clearTimeout(timer)
+    this.retentionTimers.delete(runId)
+    this.telemetry.delete(runId)
+  }
+
+  /** Host reload endpoint: return an ordered snapshot/replay from one owner. */
+  reconnect(runId: string, cursor = 0) {
+    return this.sessions.get(runId)?.reconnect(cursor)
+  }
+
+  /** A renderer may acknowledge a terminal digest after it no longer needs replay. */
+  acknowledgeTerminal(runId: string): boolean {
+    const session = this.sessions.get(runId)
+    if (!session || session.snapshot().active) return false
+    this.remove(runId)
+    return true
+  }
+
+  /** Bound terminal history even when a renderer never sends an acknowledgement. */
+  pruneTerminalSessions(now = Date.now()): number {
+    let removed = 0
+    for (const [runId, expiresAt] of this.terminalRetention) {
+      if (expiresAt > now) continue
+      const session = this.sessions.get(runId)
+      if (session && session.snapshot().active) {
+        this.terminalRetention.delete(runId)
+        continue
+      }
+      this.remove(runId)
+      removed += 1
+    }
+    return removed
   }
 
   forConversation(conversationId: string): ExternalCliSessionSnapshot[] {
@@ -1119,7 +1189,12 @@ export class ExternalCliRunSessionRegistry {
     if (!this.checkpointStore) return []
     const recovered: ReturnType<ExternalCliCheckpointStore['list']> = []
     for (const record of this.checkpointStore.list()) {
-      if (!record.active) continue
+      if (!record.active) {
+        // Interrupted records remain durable so a renderer created after a
+        // full Electron restart can still project the manual recovery action.
+        if (record.recovery) recovered.push(record)
+        continue
+      }
       const decision = evaluateExternalCliRecovery({
         providerSessionId: record.providerSessionId,
         adapterSupportsResume: record.adapterSupportsResume,
@@ -1137,6 +1212,26 @@ export class ExternalCliRunSessionRegistry {
     return this.recoverySnapshots()
   }
 
+  recoveryAction(runId: string, action: 'resume' | 'retry'): {
+    ok: boolean
+    mode?: 'manual-retry'
+    reason?: string
+  } {
+    const record = this.recoveryRecords.find((candidate) => candidate.runId === runId)
+    if (!record?.recovery) return { ok: false, reason: '找不到可恢復的 external CLI checkpoint' }
+    if (action === 'resume') {
+      return {
+        ok: false,
+        reason: record.recovery.automaticRetry
+          ? '目前 shipped adapter 沒有安全 provider resume transport；請手動重新執行。'
+          : '此 external CLI checkpoint 不具備安全自動恢復條件；請手動重新執行。',
+      }
+    }
+    // Retry is an explicit renderer action. Host never replays the old prompt
+    // or launches a provider implicitly after restart.
+    return { ok: true, mode: 'manual-retry' }
+  }
+
   private persist(session: ExternalCliRunSession) {
     if (!this.checkpointStore) return
     try {
@@ -1145,6 +1240,52 @@ export class ExternalCliRunSessionRegistry {
       }))
     } catch {
       /* Checkpoint persistence cannot become a run settlement authority. */
+    }
+  }
+
+  private retainTerminal(runId: string): void {
+    const previous = this.retentionTimers.get(runId)
+    if (previous) clearTimeout(previous)
+    const expiresAt = Date.now() + this.terminalRetentionMs
+    this.terminalRetention.set(runId, expiresAt)
+    const timer = setTimeout(() => {
+      this.retentionTimers.delete(runId)
+      this.pruneTerminalSessions()
+    }, this.terminalRetentionMs)
+    const unref = (timer as unknown as { unref?: () => void }).unref
+    unref?.call(timer)
+    this.retentionTimers.set(runId, timer)
+  }
+
+  private recordTelemetry(
+    session: ExternalCliRunSession,
+    telemetry: { eventCount: number; phaseChanges: Array<{ phase: ExternalCliRunPhase; at: number }> },
+    settlement: ExternalCliTerminalClassification,
+  ): void {
+    const snapshot = session.snapshot()
+    const terminal = snapshot.terminal
+    if (!terminal || !this.telemetrySink) return
+    const timeoutClass =
+      settlement === 'startup-timeout' || settlement === 'idle-timeout' || settlement === 'absolute-timeout' || settlement === 'operation-timeout'
+        ? settlement
+        : undefined
+    const record: ExternalCliTelemetryRecord = {
+      schemaVersion: 1,
+      runId: snapshot.runId,
+      adapter: snapshot.adapter,
+      startedAt: snapshot.startedAt,
+      firstValidLifecycleAt: snapshot.firstValidLifecycleAt,
+      finishedAt: terminal.at,
+      durationMs: Math.max(0, terminal.at - snapshot.startedAt),
+      eventCount: telemetry.eventCount,
+      phaseChanges: telemetry.phaseChanges.map((change) => ({ ...change })),
+      timeoutClass,
+      settlement,
+    }
+    try {
+      void Promise.resolve(this.telemetrySink.record(record)).catch(() => undefined)
+    } catch {
+      /* Telemetry must never become a settlement authority. */
     }
   }
 

@@ -4,6 +4,7 @@
  */
 import type { PostStateOutcome } from './types.ts'
 import type { LocalRunnerKind } from './localCliRun.ts'
+import type { ExternalCliTerminalClassification } from './externalCliRunSession.ts'
 
 export type DispatchResult = {
   path: 'builtin' | 'cli'
@@ -13,5 +14,7 @@ export type DispatchResult = {
   status: string
   result?: string
   error?: string
+  /** Host-owned external settlement evidence; retained through coordinator finalization. */
+  terminalClassification?: ExternalCliTerminalClassification
   postState?: PostStateOutcome
 }
