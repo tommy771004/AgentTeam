@@ -157,6 +157,11 @@ await test('workspace presentation seam owns workflow readings', () => {
   assert.match(workspace, /readPresentation|subscribePresentation/)
   assert.match(integration, /subscribePresentation|readPresentation/)
   assert.doesNotMatch(page, /use(?:Agent|Learning|Project|SubDesign|Thread|RunActivity|OpenDesignPack|Settings)Store/)
+  assert.doesNotMatch(page, /loadStorybookProviderState|loadAllProviderRuns|loadExperimentalSurfaceSettings/)
+  assert.doesNotMatch(page, /(?<!workspaceController\.)\b(?:saveStorybookProviderSettings|saveExperimentalSurfaceSettings)\s*\(/)
+  assert.match(workspace, /saveStorybookProviderSettings|saveExperimentalSurfaceSettings/)
+  assert.match(integration, /loadStorybookProviderState|loadAllProviderRuns|loadExperimentalSurfaceSettings/)
+  assert.match(integration, /saveStorybookProviderSettings|saveExperimentalSurfaceSettings/)
 })
 
 await test('OpenDesign explore collection is ordered by the inventory, not a second list', () => {

@@ -1,4 +1,5 @@
 import type { SubDesignRunPreparation } from './pluginExecutionPreparation.ts'
+import type { SubDesignPluginExecutionProjection } from './pluginExecution.ts'
 import type { PluginInput } from '../openDesign/pluginContract.ts'
 import type { OpenDesignCatalogRecord, OpenDesignProvenance } from '../openDesign/catalog.ts'
 import type { ExternalRunOpts, ExternalRunResult } from '../taskRunTypes.ts'
@@ -24,6 +25,12 @@ import type {
 import type { PluginInputValues } from './pluginInputs.ts'
 import type { OpenDesignContentPackManifest } from '../openDesign/packs.ts'
 import type { SubDesignPreference } from './preference.ts'
+import {
+  DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
+  DEFAULT_STORYBOOK_PROVIDER_SETTINGS,
+  type ExperimentalSurfaceSettings,
+  type StorybookProviderSettings,
+} from './providers/providerSettings.ts'
 import { deriveSubDesignWorkspace, type SubDesignWorkspaceViewModel } from './workspaceProjection.ts'
 import type { SubDesignWorkspaceHostEventListener } from './workspaceHostEvents.ts'
 
@@ -108,6 +115,17 @@ export type SubDesignWorkspaceRunProjection = {
   reason?: string
 }
 
+export type SubDesignWorkspaceProviderProjection = {
+  storybookSettings: StorybookProviderSettings
+  storybookRuns: SubDesignPluginExecutionProjection[]
+  providerRuns: SubDesignPluginExecutionProjection[]
+  experimentalSettings: ExperimentalSurfaceSettings
+}
+
+export type SubDesignWorkspaceProviderSaveResult<T> =
+  | { ok: true; settings: T }
+  | { ok: false; reason: string }
+
 export type SubDesignWorkspacePresentation = {
   projectRoot: string
   activeBrief: SubDesignBrief | null
@@ -132,6 +150,10 @@ export type SubDesignWorkspacePresentation = {
   openDesignPackBusyId: string | null
   openDesignPackError: string | null
   latestPassedPreference: SubDesignPreference | null
+  storybookSettings: StorybookProviderSettings
+  storybookRuns: SubDesignPluginExecutionProjection[]
+  providerRuns: SubDesignPluginExecutionProjection[]
+  experimentalSettings: ExperimentalSurfaceSettings
 }
 
 export type SubDesignWorkspaceProjection = {
@@ -194,7 +216,15 @@ export type SubDesignWorkspaceDependencies = {
   buildPrompt: (brief: SubDesignBrief, designSystem: DesignSystemSummary | null) => string
   navigate: (path: string) => void
   hydrateProject?: (request: SubDesignWorkspaceHydrationRequest) => Promise<void>
-  refreshProviderState?: () => Promise<void>
+  refreshProviderState?: (projectRoot?: string, isCurrent?: () => boolean) => Promise<SubDesignWorkspaceProviderProjection>
+  saveStorybookProviderSettings?: (
+    value: Pick<StorybookProviderSettings, 'enabled' | 'endpoint'>,
+    projectRoot?: string,
+  ) => Promise<SubDesignWorkspaceProviderSaveResult<StorybookProviderSettings>>
+  saveExperimentalSurfaceSettings?: (
+    value: Pick<ExperimentalSurfaceSettings, 'mcpApps' | 'streaming'>,
+    projectRoot?: string,
+  ) => Promise<SubDesignWorkspaceProviderSaveResult<ExperimentalSurfaceSettings>>
   loadCatalog?: () => Promise<{ records: OpenDesignCatalogRecord[]; warnings?: string[] }>
   onCatalogLoaded?: (records: readonly OpenDesignCatalogRecord[]) => Promise<void> | void
   discoverModels?: () => Promise<SubDesignModelDiscovery | null>
@@ -229,6 +259,7 @@ type WorkspaceState = {
   modelDiscoveryWarning?: string
   streams: Record<string, StreamingEnvelope>
   selectedArtifactKey: string | null
+  provider: SubDesignWorkspaceProviderProjection
 }
 
 const EMPTY_PLUGIN_INPUTS: PluginInputValues = {}
@@ -278,6 +309,10 @@ function emptyPresentation(projectRoot: string): SubDesignWorkspacePresentation 
     openDesignPackBusyId: null,
     openDesignPackError: null,
     latestPassedPreference: null,
+    storybookSettings: { ...DEFAULT_STORYBOOK_PROVIDER_SETTINGS },
+    storybookRuns: [],
+    providerRuns: [],
+    experimentalSettings: { ...DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS },
   }
 }
 
@@ -303,6 +338,14 @@ export type SubDesignWorkspaceController = {
   selectThread: (id: string) => void
   stopExecution: (runId?: string) => void
   setSelectedArtifact: (key: string | null) => void
+  saveStorybookProviderSettings: (
+    value: Pick<StorybookProviderSettings, 'enabled' | 'endpoint'>,
+    projectRoot?: string,
+  ) => Promise<SubDesignWorkspaceProviderSaveResult<StorybookProviderSettings>>
+  saveExperimentalSurfaceSettings: (
+    value: Pick<ExperimentalSurfaceSettings, 'mcpApps' | 'streaming'>,
+    projectRoot?: string,
+  ) => Promise<SubDesignWorkspaceProviderSaveResult<ExperimentalSurfaceSettings>>
 }
 
 export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): SubDesignWorkspaceController {
@@ -320,6 +363,12 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
     modelDiscoveryStatus: 'idle',
     streams: {},
     selectedArtifactKey: null,
+    provider: {
+      storybookSettings: { ...DEFAULT_STORYBOOK_PROVIDER_SETTINGS },
+      storybookRuns: [],
+      providerRuns: [],
+      experimentalSettings: { ...DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS },
+    },
   }
 
   let projection: SubDesignWorkspaceProjection = makeProjection()
@@ -391,6 +440,10 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       memoryEntries: [...basePresentation.memoryEntries],
       cliProviders: [...basePresentation.cliProviders],
       installedOpenDesignPacks: [...basePresentation.installedOpenDesignPacks],
+      storybookSettings: { ...state.provider.storybookSettings },
+      storybookRuns: [...state.provider.storybookRuns],
+      providerRuns: [...state.provider.providerRuns],
+      experimentalSettings: { ...state.provider.experimentalSettings },
     }
     return {
       routeBriefId: state.routeBriefId,
@@ -553,7 +606,12 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
     } finally {
       if (deps.refreshProviderState) {
         try {
-          await deps.refreshProviderState()
+          const provider = await deps.refreshProviderState(
+            runProjectRoot || undefined,
+            () => state.projectRoot === runProjectRoot,
+          )
+          state.provider = provider
+          publish()
         } catch {
           // Provider refresh is disposable presentation state and never turns
           // an already-admitted Task run into a second failure.
@@ -600,12 +658,26 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       const generation = ++hydrationGeneration
       state.projectRoot = projectRoot
       resetPluginContext(state, state.routeBriefId)
+      // Do not carry the previous project's provider records through a
+      // pending bind or a failed refresh. The integration will replace this
+      // disposable projection only after the current project is confirmed.
+      state.provider = {
+        storybookSettings: { ...DEFAULT_STORYBOOK_PROVIDER_SETTINGS },
+        storybookRuns: [],
+        providerRuns: [],
+        experimentalSettings: { ...DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS },
+      }
       state.hydration = { status: 'loading' }
       publish()
       const isCurrent = () => generation === hydrationGeneration && state.projectRoot === projectRoot
       try {
         await deps.hydrateProject?.({ projectRoot, isCurrent })
         if (!isCurrent()) return projection
+        if (deps.refreshProviderState) {
+          const provider = await deps.refreshProviderState(projectRoot, isCurrent)
+          if (!isCurrent()) return projection
+          state.provider = provider
+        }
         state.hydration = { status: 'ready' }
       } catch (error) {
         if (!isCurrent()) return projection
@@ -789,6 +861,26 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       if (state.selectedArtifactKey === key) return
       state.selectedArtifactKey = key
       publish()
+    },
+
+    saveStorybookProviderSettings: async (value, projectRoot = state.projectRoot || undefined) => {
+      const result = await deps.saveStorybookProviderSettings?.(value, projectRoot)
+        || { ok: false as const, reason: 'Storybook provider adapter 尚未提供。' }
+      if (result.ok) {
+        state.provider = { ...state.provider, storybookSettings: result.settings }
+        publish()
+      }
+      return result
+    },
+
+    saveExperimentalSurfaceSettings: async (value, projectRoot = state.projectRoot || undefined) => {
+      const result = await deps.saveExperimentalSurfaceSettings?.(value, projectRoot)
+        || { ok: false as const, reason: 'Experimental provider adapter 尚未提供。' }
+      if (result.ok) {
+        state.provider = { ...state.provider, experimentalSettings: result.settings }
+        publish()
+      }
+      return result
     },
   }
 

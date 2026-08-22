@@ -71,8 +71,11 @@ await test('feature flags default off, descriptions visible',()=>{
 
   // And it is actually wired to the product, not only to smokes.
   const page = fs.readFileSync(path.join(appRoot,'src/pages/SubDesignPage.tsx'),'utf8')
-  assert.match(page,/hydrateProviderFlags/)
-  assert.match(page,/saveExperimentalSurfaceSettings/)
+  const workspaceIntegration = fs.readFileSync(path.join(appRoot,'src/agent/subdesign/workspaceIntegration.ts'),'utf8')
+  assert.doesNotMatch(page,/hydrateProviderFlags/)
+  assert.doesNotMatch(page,/(?<!workspaceController\.)\bsaveExperimentalSurfaceSettings\s*\(/)
+  assert.match(workspaceIntegration,/hydrateProviderFlags/)
+  assert.match(workspaceIntegration,/saveExperimentalSurfaceSettings/)
   const control = fs.readFileSync(path.join(appRoot,'src/components/subdesign/ExperimentalSurfaceControl.tsx'),'utf8')
   assert.match(control,/providerFlagDescription/)
 })

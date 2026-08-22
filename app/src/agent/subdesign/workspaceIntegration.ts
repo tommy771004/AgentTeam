@@ -7,8 +7,22 @@ import {
   createSubDesignHostEventSubscription,
   type SubDesignWorkspaceHydrationRequest,
   type SubDesignWorkspaceDependencies,
+  type SubDesignWorkspaceProviderProjection,
+  type SubDesignWorkspaceProviderSaveResult,
 } from './workspace.ts'
 import { findLatestPassedSubDesignPreference } from './preference.ts'
+import { hydrateProviderFlags } from './providers/providerFlags.ts'
+import {
+  DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
+  DEFAULT_STORYBOOK_PROVIDER_SETTINGS,
+  loadAllProviderRuns,
+  loadExperimentalSurfaceSettings,
+  loadStorybookProviderState,
+  saveExperimentalSurfaceSettings,
+  saveStorybookProviderSettings,
+  type ExperimentalSurfaceSettings,
+  type StorybookProviderSettings,
+} from './providers/providerSettings.ts'
 import { runTask } from '../taskRunCoordinator.ts'
 import { hydrateSubDesignStores } from '../../store/subDesignPersistence.ts'
 import { useProjectStore } from '../../store/projectStore.ts'
@@ -26,22 +40,71 @@ import { useSettingsStore } from '../../store/settingsStore.ts'
 
 export type SubDesignWorkspaceIntegrationOptions = {
   navigate: (path: string) => void
-  refreshProviderState?: (projectRoot?: string) => Promise<void>
-  refreshProjectProviderState?: (projectRoot: string, isCurrent?: () => boolean) => Promise<void>
 }
 
 /**
  * Renderer integration boundary for the workspace seam.
  *
- * The page supplies presentation-only callbacks (router and provider-state
- * projection updates). Store coordination, Pi Host feature detection and the
- * typed event adapter stay here so the page does not become another workflow
- * owner.
+ * The page supplies only the router. Store coordination, provider settings and
+ * runs, Pi Host feature detection, and the typed event adapter stay here so the
+ * page does not become another workflow owner.
  */
 export function createSubDesignWorkspaceDependencies(
   options: SubDesignWorkspaceIntegrationOptions,
 ): SubDesignWorkspaceDependencies {
   const hostApi = typeof window !== 'undefined' ? window.subagents?.piHost : undefined
+  let providerProjection: SubDesignWorkspaceProviderProjection = {
+    storybookSettings: { ...DEFAULT_STORYBOOK_PROVIDER_SETTINGS },
+    storybookRuns: [],
+    providerRuns: [],
+    experimentalSettings: { ...DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS },
+  }
+  const readProviderProjection = (): SubDesignWorkspaceProviderProjection => ({
+    storybookSettings: { ...providerProjection.storybookSettings },
+    storybookRuns: [...providerProjection.storybookRuns],
+    providerRuns: [...providerProjection.providerRuns],
+    experimentalSettings: { ...providerProjection.experimentalSettings },
+  })
+  const refreshProviderState = async (
+    projectRoot?: string,
+    isCurrent?: () => boolean,
+  ): Promise<SubDesignWorkspaceProviderProjection> => {
+    const [storybook, providerRuns, experimentalSettings] = await Promise.all([
+      loadStorybookProviderState(projectRoot),
+      loadAllProviderRuns(projectRoot),
+      loadExperimentalSurfaceSettings(projectRoot),
+    ])
+    if (isCurrent && !isCurrent()) return readProviderProjection()
+    providerProjection = {
+      storybookSettings: storybook.settings,
+      storybookRuns: [...storybook.runs],
+      providerRuns: [...providerRuns],
+      experimentalSettings,
+    }
+    hydrateProviderFlags(experimentalSettings)
+    return readProviderProjection()
+  }
+  const saveStorybookSettings = async (
+    value: Pick<StorybookProviderSettings, 'enabled' | 'endpoint'>,
+    projectRoot?: string,
+  ): Promise<SubDesignWorkspaceProviderSaveResult<StorybookProviderSettings>> => {
+    const result = await saveStorybookProviderSettings(value, projectRoot)
+    if (result.ok) {
+      providerProjection = { ...providerProjection, storybookSettings: result.settings }
+    }
+    return result
+  }
+  const saveExperimentalSettings = async (
+    value: Pick<ExperimentalSurfaceSettings, 'mcpApps' | 'streaming'>,
+    projectRoot?: string,
+  ): Promise<SubDesignWorkspaceProviderSaveResult<ExperimentalSurfaceSettings>> => {
+    const result = await saveExperimentalSurfaceSettings(value, projectRoot)
+    if (result.ok) {
+      providerProjection = { ...providerProjection, experimentalSettings: result.settings }
+      hydrateProviderFlags(result.settings)
+    }
+    return result
+  }
   return {
     findBrief: (id) => useSubDesignStore.getState().findById(id),
     getThread: (id) => {
@@ -94,6 +157,10 @@ export function createSubDesignWorkspaceDependencies(
           projectRoot,
           memoryEntries: useLearningStore.getState().memory.entries,
         }),
+        storybookSettings: providerProjection.storybookSettings,
+        storybookRuns: [...providerProjection.storybookRuns],
+        providerRuns: [...providerProjection.providerRuns],
+        experimentalSettings: providerProjection.experimentalSettings,
       }
     },
     subscribePresentation: (listener) => {
@@ -123,6 +190,9 @@ export function createSubDesignWorkspaceDependencies(
       }
     },
     subscribeModelChanges: (listener) => useSettingsStore.subscribe(listener),
+    refreshProviderState,
+    saveStorybookProviderSettings: saveStorybookSettings,
+    saveExperimentalSurfaceSettings: saveExperimentalSettings,
     updateBrief: (id, patch, projectRoot) => useSubDesignStore.getState().updateBrief(id, patch, projectRoot),
     selectDirection: (id, directionId, projectRoot) => useSubDesignStore.getState().selectDirection(id, directionId, undefined, projectRoot),
     refreshSystems: (projectRoot, options) => useSubDesignStore.getState().refreshSystems(projectRoot, options),
@@ -148,11 +218,7 @@ export function createSubDesignWorkspaceDependencies(
       if (!isCurrent()) return
       await Promise.all([
         useSubDesignStore.getState().refreshSystems(projectRoot || undefined, { isCurrent }),
-        options.refreshProjectProviderState?.(projectRoot, isCurrent),
       ])
-    },
-    refreshProviderState: async () => {
-      await options.refreshProviderState?.(useProjectStore.getState().root)
     },
     loadCatalog: async () => loadOpenDesignCatalog(),
     onCatalogLoaded: async (records) => {

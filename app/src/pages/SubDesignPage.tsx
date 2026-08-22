@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { critiqueAllowsDeliver } from '../agent/subdesign/critique'
-import { hydrateProviderFlags } from '../agent/subdesign/providers/providerFlags'
 import {
   OPEN_DESIGN_EXPLORE_SOURCE,
   OPEN_DESIGN_TEMPLATE_SOURCE,
@@ -32,18 +31,6 @@ import { SubDesignStudioNav } from '../components/subdesign/SubDesignStudioNav'
 import { createSubDesignWorkspace } from '../agent/subdesign/workspace'
 import { createSubDesignWorkspaceDependencies } from '../agent/subdesign/workspaceIntegration'
 import type { ThreadRunner } from '../store/threadStore'
-import {
-  DEFAULT_STORYBOOK_PROVIDER_SETTINGS,
-  DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
-  loadAllProviderRuns,
-  loadExperimentalSurfaceSettings,
-  loadStorybookProviderState,
-  saveExperimentalSurfaceSettings,
-  type ExperimentalSurfaceSettings,
-  saveStorybookProviderSettings,
-  type StorybookProviderSettings,
-} from '../agent/subdesign/providers/providerSettings.ts'
-import type { SubDesignPluginExecutionProjection } from '../agent/subdesign/pluginExecution.ts'
 
 type DesignSurface = {
   id: SubDesignSurface
@@ -105,36 +92,11 @@ export function SubDesignPage() {
   const [templateId, setTemplateId] = useState<string | undefined>()
   const [templateQuery, setTemplateQuery] = useState('')
   const [designSystemPackId, setDesignSystemPackId] = useState<string | undefined>()
-  const [storybookSettings, setStorybookSettings] = useState<StorybookProviderSettings>(DEFAULT_STORYBOOK_PROVIDER_SETTINGS)
-  const [storybookRuns, setStorybookRuns] = useState<SubDesignPluginExecutionProjection[]>([])
-  const [providerRuns, setProviderRuns] = useState<SubDesignPluginExecutionProjection[]>([])
-  const [experimentalSettings, setExperimentalSettings] = useState<ExperimentalSurfaceSettings>(
-    DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
-  )
-
-  const refreshStorybookState = useCallback(async (requestedProjectRoot = '', isCurrent?: () => boolean) => {
-    const currentProjectRoot = requestedProjectRoot
-    const [state, runs, experimental] = await Promise.all([
-      loadStorybookProviderState(currentProjectRoot || undefined),
-      loadAllProviderRuns(currentProjectRoot || undefined),
-      loadExperimentalSurfaceSettings(currentProjectRoot || undefined),
-    ])
-    if (isCurrent && !isCurrent()) return
-    setStorybookSettings(state.settings)
-    setStorybookRuns(state.runs)
-    setProviderRuns(runs)
-    setExperimentalSettings(experimental)
-    // Apply the project's choice to the synchronous render-path gate.
-    hydrateProviderFlags(experimental)
-  }, [])
-
   const workspaceDependencies = useMemo(
     () => createSubDesignWorkspaceDependencies({
       navigate,
-      refreshProviderState: refreshStorybookState,
-      refreshProjectProviderState: refreshStorybookState,
     }),
-    [navigate, refreshStorybookState],
+    [navigate],
   )
   const workspaceController = useMemo(
     () => createSubDesignWorkspace(workspaceDependencies),
@@ -151,6 +113,10 @@ export function SubDesignPage() {
   const systems = presentation.systems
   const systemsLoading = presentation.systemsLoading
   const cliProviders = presentation.cliProviders
+  const storybookSettings = presentation.storybookSettings
+  const storybookRuns = presentation.storybookRuns
+  const providerRuns = presentation.providerRuns
+  const experimentalSettings = presentation.experimentalSettings
   const linkedThread = presentation.linkedThread
   const linkedThreadRunId = presentation.linkedThreadRunId
   const linkedAgent = presentation.linkedAgent
@@ -428,14 +394,7 @@ export function SubDesignPage() {
         storybookSettings={storybookSettings}
         latestStorybookRun={storybookRuns.find((item) => item.briefId === activeBrief.id) || storybookRuns[0] || null}
         experimentalSettings={experimentalSettings}
-        onSaveExperimentalSettings={async (value) => {
-          const result = await saveExperimentalSurfaceSettings(value, projectRoot || undefined)
-          if (result.ok) {
-            setExperimentalSettings(result.settings)
-            hydrateProviderFlags(result.settings)
-          }
-          return result
-        }}
+        onSaveExperimentalSettings={(value) => workspaceController.saveExperimentalSurfaceSettings(value, projectRoot || undefined)}
         pluginDeclaredInputs={pluginDeclaredInputs}
         onSubmitPluginInputs={(values) => workspaceController.setPluginInputs(values)}
         artifactStream={
@@ -445,14 +404,7 @@ export function SubDesignPage() {
               || null
             : null
         }
-        onSaveStorybookSettings={async (value) => {
-          const result = await saveStorybookProviderSettings(value, projectRoot || undefined)
-          if (result.ok) {
-            setStorybookSettings(result.settings)
-            return { ok: true }
-          }
-          return { ok: false, reason: result.reason }
-        }}
+        onSaveStorybookSettings={(value) => workspaceController.saveStorybookProviderSettings(value, projectRoot || undefined)}
       />
       </>
     )
