@@ -51,12 +51,16 @@ await test('runtime providers live under SubDesign and cannot bypass runTask', (
   const openDesignFiles = fs.readdirSync(path.join(root, 'src/agent/openDesign'))
   assert.ok(openDesignFiles.every((file) => !/Provider|Snapshot|Admission|streaming/i.test(file)))
   const subDesignWorkspace = fs.readFileSync(path.join(root, 'src/agent/subdesign/workspace.ts'), 'utf8')
+  const subDesignPage = fs.readFileSync(path.join(root, 'src/pages/SubDesignPage.tsx'), 'utf8')
   const piHostRun = fs.readFileSync(path.join(root, 'src/agent/piHostRun.ts'), 'utf8')
   // Every SubDesign run start goes through the preparation seam and hands the
   // result to runTask; the renderer never dispatches or starts execution itself.
   assert.match(subDesignWorkspace, /prepareRun\(/)
+  assert.match(subDesignWorkspace, /const overrides = [\s\S]*prepared\.overrides/)
+  assert.match(subDesignWorkspace, /\.\.\.\(overrides \? \{ overrides \} : \{\}\)/)
   assert.match(subDesignWorkspace, /runTask\(request\)/)
   assert.doesNotMatch(subDesignWorkspace, /dispatchThreadTask|startExecution/)
+  assert.doesNotMatch(subDesignPage, /dispatchThreadTask|startExecution/)
   const critiqueTheater = fs.readFileSync(path.join(root, 'src/components/subdesign/CritiqueTheater.tsx'), 'utf8')
   assert.match(critiqueTheater, /prepareSubDesignRun/)
   assert.doesNotMatch(critiqueTheater, /dispatchThreadTask|startExecution/)

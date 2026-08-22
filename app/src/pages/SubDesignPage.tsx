@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { v4 as uuid } from 'uuid'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { critiqueAllowsDeliver } from '../agent/subdesign/critique'
-import { buildSubDesignPrompt } from '../agent/subdesign/prompt'
-import { prepareSubDesignRun } from '../agent/subdesign/pluginExecutionPreparation'
-import { hydrateProviderFlags, isProviderEnabled } from '../agent/subdesign/providers/providerFlags'
+import { hydrateProviderFlags } from '../agent/subdesign/providers/providerFlags'
 import {
   OPEN_DESIGN_EXPLORE_SOURCE,
   OPEN_DESIGN_TEMPLATE_SOURCE,
@@ -15,8 +12,7 @@ import {
   type SubDesignTemplateCategory,
   type SubDesignTemplateCollection,
 } from '../agent/subdesign/templateCatalog'
-import { loadOpenDesignCatalog, type OpenDesignCatalogRecord } from '../agent/openDesign/catalog'
-import type { DesignSystemSummary, SubDesignBrief, SubDesignPlatform, SubDesignSurface } from '../agent/subdesign/types'
+import type { SubDesignPlatform, SubDesignSurface } from '../agent/subdesign/types'
 import { stageLabel } from '../agent/subdesign/types'
 import { findLatestPassedSubDesignPreference } from '../agent/subdesign/preference'
 import { Icon } from '../components/Icon'
@@ -34,15 +30,13 @@ import { SubDesignRunInspector } from '../components/subdesign/SubDesignRunInspe
 import { SubDesignProjectStudio } from '../components/subdesign/SubDesignProjectStudio'
 import { SubDesignStudioNav } from '../components/subdesign/SubDesignStudioNav'
 import { createSubDesignWorkspace, deriveSubDesignWorkspace } from '../agent/subdesign/workspace'
-import { runTask } from '../agent/taskRunCoordinator'
+import { createSubDesignWorkspaceDependencies } from '../agent/subdesign/workspaceIntegration'
 import { useAgentStore } from '../store/agentStore'
 import { useLearningStore } from '../store/learningStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSubDesignArtifactStore } from '../store/subDesignArtifactStore'
 import { useSubDesignCritiqueStore } from '../store/subDesignCritiqueStore'
 import { useSubDesignCritiqueSessionStore } from '../store/subDesignCritiqueSessionStore'
-import { useSubDesignExportStore } from '../store/subDesignExportStore'
-import { hydrateSubDesignStores } from '../store/subDesignPersistence'
 import { useSubDesignStore } from '../store/subDesignStore'
 import { useThreadStore } from '../store/threadStore'
 import { useRunActivityStore } from '../store/runActivityStore'
@@ -61,14 +55,6 @@ import {
   type StorybookProviderSettings,
 } from '../agent/subdesign/providers/providerSettings.ts'
 import type { SubDesignPluginExecutionProjection } from '../agent/subdesign/pluginExecution.ts'
-import {
-  createStreamingEnvelope,
-  mergeStreamingUpdate,
-  pluginRunArtifactId,
-  type StreamingEnvelope,
-  type StreamingUpdate,
-} from '../agent/subdesign/streamingEnvelope.ts'
-import { collectSubDesignModels, readHostModelSettings } from '../agent/subdesign/modelDiscovery.ts'
 
 type DesignSurface = {
   id: SubDesignSurface
@@ -119,37 +105,25 @@ export function SubDesignPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { briefId: routeBriefId } = useParams<{ briefId?: string }>()
-  const createThread = useThreadStore((state) => state.createThread)
-  const setSubDesignBriefId = useThreadStore((state) => state.setSubDesignBriefId)
-  const hydrateThreads = useThreadStore((state) => state.hydrate)
   const threads = useThreadStore((state) => state.threads)
   const getRunIdForThread = useAgentStore((state) => state.getRunIdForThread)
   const stopExecution = useAgentStore((state) => state.stopExecution)
   const projectRoot = useProjectStore((state) => state.root)
   const cliProviders = useSettingsStore((state) => state.settings.cliProviders)
   const briefs = useSubDesignStore((state) => state.briefs)
-  const selectBrief = useSubDesignStore((state) => state.selectBrief)
-  const setProjectRoot = useSubDesignStore((state) => state.setProjectRoot)
   const systems = useSubDesignStore((state) => state.systems)
   const systemsLoading = useSubDesignStore((state) => state.systemsLoading)
   const refreshSystems = useSubDesignStore((state) => state.refreshSystems)
-  const createBrief = useSubDesignStore((state) => state.createBrief)
   const updateBrief = useSubDesignStore((state) => state.updateBrief)
   const selectDirection = useSubDesignStore((state) => state.selectDirection)
   const artifacts = useSubDesignArtifactStore((state) => state.artifacts)
   const critiques = useSubDesignCritiqueStore((state) => state.critiques)
   const critiqueSession = useSubDesignCritiqueSessionStore((state) => state.current)
   const memoryEntries = useLearningStore((state) => state.memory.entries)
-  const setArtifactProjectRoot = useSubDesignArtifactStore((state) => state.setProjectRoot)
-  const setCritiqueProjectRoot = useSubDesignCritiqueStore((state) => state.setProjectRoot)
-  const setExportProjectRoot = useSubDesignExportStore((state) => state.setProjectRoot)
   const installOpenDesignPack = useOpenDesignPackStore((state) => state.install)
   const setOpenDesignPackEnabled = useOpenDesignPackStore((state) => state.setEnabled)
   const openDesignPackBusyId = useOpenDesignPackStore((state) => state.busyId)
   const openDesignPackError = useOpenDesignPackStore((state) => state.error)
-  const rehydrateOpenDesignPacks = useOpenDesignPackStore((state) => state.rehydrateEnabled)
-  const reindexOpenDesignPacks = useOpenDesignPackStore((state) => state.reindex)
-  const setOpenDesignPackProjectRoot = useOpenDesignPackStore((state) => state.setProjectRoot)
   const runningThreadIds = useThreadStore((state) => state.runningThreadIds)
   const setShowRunPanel = useThreadStore((state) => state.setShowRunPanel)
   const linkedThread = useThreadStore((state) =>
@@ -173,9 +147,6 @@ export function SubDesignPage() {
   const [templateId, setTemplateId] = useState<string | undefined>()
   const [templateQuery, setTemplateQuery] = useState('')
   const [designSystemPackId, setDesignSystemPackId] = useState<string | undefined>()
-  const [catalogRecords, setCatalogRecords] = useState<OpenDesignCatalogRecord[]>([])
-  const [catalogLoading, setCatalogLoading] = useState(true)
-  const [catalogWarning, setCatalogWarning] = useState('')
   const [selectedArtifactKey, setSelectedArtifactKey] = useState<string | null>(null)
   const [storybookSettings, setStorybookSettings] = useState<StorybookProviderSettings>(DEFAULT_STORYBOOK_PROVIDER_SETTINGS)
   const [storybookRuns, setStorybookRuns] = useState<SubDesignPluginExecutionProjection[]>([])
@@ -183,10 +154,6 @@ export function SubDesignPage() {
   const [experimentalSettings, setExperimentalSettings] = useState<ExperimentalSurfaceSettings>(
     DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
   )
-  // Live streaming envelopes keyed by deterministic artifactId (plugin_<runId>_<stageId>)
-  const [liveStreams, setLiveStreams] = useState<Record<string, StreamingEnvelope>>({})
-  // Model discovery — aggregated from CLI providers + host settings
-  const [modelDiscovery, setModelDiscovery] = useState<ReturnType<typeof collectSubDesignModels> | null>(null)
 
   const refreshStorybookState = useCallback(async (requestedProjectRoot?: string) => {
     const currentProjectRoot = requestedProjectRoot ?? useProjectStore.getState().root
@@ -203,55 +170,14 @@ export function SubDesignPage() {
     hydrateProviderFlags(experimental)
   }, [])
 
-  const workspaceDependencies = useMemo(() => ({
-    findBrief: (id: string) => useSubDesignStore.getState().findById(id),
-    getThread: (id: string) => {
-      const thread = useThreadStore.getState().threads.find((item) => item.id === id)
-      return thread ? { runner: thread.runner, loopType: thread.loopType } : null
-    },
-    createThread: (opts: Parameters<typeof createThread>[0]) => createThread(opts),
-    bindBriefToThread: (threadId: string, briefId: string) => setSubDesignBriefId(threadId, briefId),
-    createBrief: (input: Parameters<typeof createBrief>[0]) => createBrief(input),
-    selectBrief: (id: string | null) => selectBrief(id),
-    getDesignSystem: (id?: string) => useSubDesignStore.getState().systems.find((system) => system.id === id) || null,
-    prepareRun: (input: Parameters<typeof prepareSubDesignRun>[0]) => prepareSubDesignRun(input),
-    runTask,
-    buildPrompt: (brief: SubDesignBrief, system: DesignSystemSummary | null) =>
-      // Keep the prompt builder behind the workspace boundary.
-      buildSubDesignPrompt(brief, system || undefined),
-    navigate,
-    hydrateProject: async (root: string) => {
-      hydrateThreads()
-      setProjectRoot(root)
-      setArtifactProjectRoot(root)
-      setCritiqueProjectRoot(root)
-      setExportProjectRoot(root)
-      setOpenDesignPackProjectRoot(root)
-      await hydrateSubDesignStores(root || undefined)
-      await Promise.all([refreshStorybookState(root), refreshSystems(root || undefined)])
-    },
-    refreshProviderState: () => refreshStorybookState(),
-    createRunId: () => `run_${uuid().slice(0, 12)}`,
-    getProjectRoot: () => useProjectStore.getState().root,
-    getCapabilities: () => ({
-      electron: typeof window !== 'undefined' && Boolean(window.subagents?.piHost),
-      hostEvents: typeof window !== 'undefined' && Boolean(window.subagents?.piHost?.onEvent),
+  const workspaceDependencies = useMemo(
+    () => createSubDesignWorkspaceDependencies({
+      navigate,
+      refreshProviderState: () => refreshStorybookState(),
+      refreshProjectProviderState: refreshStorybookState,
     }),
-  }), [
-    createBrief,
-    createThread,
-    hydrateThreads,
-    navigate,
-    refreshStorybookState,
-    refreshSystems,
-    selectBrief,
-    setArtifactProjectRoot,
-    setCritiqueProjectRoot,
-    setExportProjectRoot,
-    setOpenDesignPackProjectRoot,
-    setProjectRoot,
-    setSubDesignBriefId,
-  ])
+    [navigate, refreshStorybookState],
+  )
   const workspaceController = useMemo(
     () => createSubDesignWorkspace(workspaceDependencies),
     [workspaceDependencies],
@@ -264,48 +190,13 @@ export function SubDesignPage() {
   const startingRun = workspaceProjection.run.phase === 'starting'
   const pluginDeclaredInputs = workspaceProjection.pluginDeclaredInputs
   const selectedModelId = workspaceProjection.selectedModelId
-
-  // Live pipeline streaming — host/pipeline-stream → liveStreams (typed events)
-  useEffect(() => {
-    const api = window.subagents?.piHost?.onEvent
-    if (!api) return
-    const unsub = api((event) => {
-      if (event.event !== 'host/pipeline-stream') return
-      if (!isProviderEnabled('streaming')) return
-      const payload = event.payload as { runId: string; sessionId: string; stageId: string; providerId: string; update: StreamingUpdate }
-      if (!payload?.update || !payload.runId || !payload.stageId) return
-      const artifactId = pluginRunArtifactId(payload.runId, payload.stageId)
-      setLiveStreams((prev) => {
-        const existing = prev[artifactId]
-        const base = existing || createStreamingEnvelope({ artifactId, artifactKind: 'html', runId: payload.runId, stageId: payload.stageId })
-        const merged = mergeStreamingUpdate(base, payload.update)
-        return merged.envelope === base ? prev : { ...prev, [artifactId]: merged.envelope }
-      })
-    })
-    return () => { try { (unsub as unknown as () => void)?.() } catch { /* ignore */ } }
-  }, [])
-
-  // Model discovery — aggregate CLI providers + discovered + host current
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      const host = await readHostModelSettings()
-      if (cancelled) return
-      const settings = useSettingsStore.getState().settings
-      const discovery = collectSubDesignModels({
-        cliProviders: settings.cliProviders,
-        discoveredModels: settings.discoveredModels,
-        host,
-      })
-      if (cancelled) return
-      setModelDiscovery(discovery)
-      if (!workspaceController.getProjection().selectedModelId) workspaceController.setModel(discovery.current.model)
-    }
-    void load()
-    // Re-collect when settings change (cliProviders/discoveredModels)
-    const unsub = useSettingsStore.subscribe(() => { void load() })
-    return () => { cancelled = true; (unsub as unknown as () => void)?.() }
-  }, [workspaceController])
+  const catalogRecords = workspaceProjection.catalog.records
+  const catalogLoading = workspaceProjection.catalog.status === 'loading' || workspaceProjection.catalog.status === 'idle'
+  const catalogWarning = workspaceProjection.catalog.warning || ''
+  const modelDiscovery = workspaceProjection.modelDiscovery
+  const modelDiscoveryStatus = workspaceProjection.modelDiscoveryStatus
+  const modelDiscoveryWarning = workspaceProjection.modelDiscoveryWarning || ''
+  const liveStreams = workspaceProjection.streams
 
   const activeSurface = useMemo(
     () => SURFACES.find((surface) => surface.id === surfaceId) || SURFACES[0],
@@ -416,6 +307,13 @@ export function SubDesignPage() {
         )),
   )
 
+  const workspaceHydrationError = workspaceProjection.hydration.status === 'failed'
+    ? workspaceProjection.hydration.reason || 'SubDesign 專案狀態載入失敗。'
+    : null
+  const workspaceCapabilityNotice = !workspaceProjection.capabilities.electron || !workspaceProjection.capabilities.hostEvents
+    ? '目前是 browser-safe preview：Pi Host live event 不可用，會保留完成後的靜態 artifact 與可用的 SubDesign workflow。'
+    : null
+
   useEffect(() => {
     workspaceController.sync({ routeBriefId, projectRoot })
   }, [briefs, projectRoot, routeBriefId, workspaceController])
@@ -425,20 +323,11 @@ export function SubDesignPage() {
   }, [projectRoot, workspaceController])
 
   useEffect(() => {
-    let active = true
-    setCatalogLoading(true)
-    void loadOpenDesignCatalog().then((index) => {
-      if (!active) return
-      setCatalogRecords(index.records)
-      setCatalogWarning(index.warnings[0] || '')
-      setCatalogLoading(false)
-      reindexOpenDesignPacks(index.records)
-      void rehydrateOpenDesignPacks(index.records)
-    })
-    return () => {
-      active = false
-    }
-  }, [reindexOpenDesignPacks, rehydrateOpenDesignPacks])
+    void workspaceController.refreshCatalog()
+    void workspaceController.refreshModels()
+    const unsubscribe = useSettingsStore.subscribe(() => { void workspaceController.refreshModels() })
+    return unsubscribe
+  }, [workspaceController])
 
   useEffect(() => {
     if (!activeBriefId || !activeBriefSurface) return
@@ -526,7 +415,17 @@ export function SubDesignPage() {
 
   if (routeBriefId && activeBrief && workspace) {
     const activeSystem = systems.find((system) => system.id === activeBrief.designSystemId) || null
-    const modelBar = modelDiscovery && modelDiscovery.models.length > 0 ? (
+    const modelBar = modelDiscoveryStatus === 'loading' ? (
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.06] bg-surface-container-low/20 px-3 text-[10px] text-outline" role="status">
+        <Icon name="neurology" size={13} className="text-primary" />
+        <span>正在發現可用模型…</span>
+      </div>
+    ) : modelDiscoveryStatus === 'failed' ? (
+      <div className="flex min-h-9 shrink-0 items-center gap-2 border-b border-error/25 bg-error/10 px-3 py-1.5 text-[10px] text-error" role="alert">
+        <Icon name="warning" size={13} />
+        <span>模型發現失敗：{modelDiscoveryWarning || '目前無法讀取 Host 或 CLI 模型。'}</span>
+      </div>
+    ) : modelDiscovery && modelDiscovery.models.length > 0 ? (
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.06] bg-surface-container-low/20 px-3 text-[10px]">
         <Icon name="neurology" size={13} className="text-primary" />
         <span className="font-medium text-outline">模型</span>
@@ -563,6 +462,8 @@ export function SubDesignPage() {
     ) : null
     return (
       <>
+        {workspaceHydrationError ? <div role="alert" className="border-b border-error/25 bg-error/10 px-4 py-2 text-[11px] text-error">{workspaceHydrationError}</div> : null}
+        {workspaceCapabilityNotice ? <div className="border-b border-white/[0.08] bg-surface-container-low/40 px-4 py-2 text-[11px] text-outline">{workspaceCapabilityNotice}</div> : null}
         {modelBar}
         <SubDesignProjectStudio
         brief={activeBrief}
@@ -627,6 +528,8 @@ export function SubDesignPage() {
           contextLabel={activeBrief ? activeBrief.objective : '從 brief 選擇品牌契約，再生成與驗證產物'}
           onNavigate={navigate}
         />
+        {workspaceHydrationError ? <section role="alert" className="mx-auto mb-6 max-w-[820px] rounded-2xl border border-error/25 bg-error/10 px-4 py-3 text-[12px] text-error">{workspaceHydrationError}</section> : null}
+        {workspaceCapabilityNotice ? <section className="mx-auto mb-6 max-w-[820px] rounded-2xl border border-white/[0.08] bg-surface-container-low px-4 py-3 text-[12px] text-outline">{workspaceCapabilityNotice}</section> : null}
         {routeBriefId && briefs.length > 0 && !activeBrief ? (
           <section className="mx-auto mb-6 max-w-[820px] rounded-2xl border border-error/25 bg-error/10 px-4 py-3 text-[12px] text-error">
             找不到這個 SubDesign brief：<span className="font-mono">{routeBriefId}</span>。請回到 SubDesign 首頁選擇既有設計。

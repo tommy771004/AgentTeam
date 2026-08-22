@@ -1,10 +1,19 @@
 import { critiqueAllowsDeliver } from './critique.ts'
 import type { SubDesignRunPreparation } from './pluginExecutionPreparation.ts'
 import type { PluginInput } from '../openDesign/pluginContract.ts'
-import type { OpenDesignProvenance } from '../openDesign/catalog.ts'
+import type { OpenDesignCatalogRecord, OpenDesignProvenance } from '../openDesign/catalog.ts'
 import type { ExternalRunOpts, ExternalRunResult } from '../taskRunTypes.ts'
 import type { LoopType } from '../types.ts'
 import type { ThreadRunner } from '../../store/threadStore.ts'
+import type { SubDesignModelDiscovery } from './modelDiscovery.ts'
+import {
+  createStreamingEnvelope,
+  mergeStreamingUpdate,
+  pluginRunArtifactId,
+  type StreamingEnvelope,
+  type StreamingUpdate,
+} from './streamingEnvelope.ts'
+import { isProviderEnabled } from './providers/providerFlags.ts'
 import {
   SUBDESIGN_STAGES,
   stageLabel,
@@ -263,7 +272,82 @@ export type SubDesignWorkspaceCapabilities = {
   hostEvents: boolean
 }
 
+export type SubDesignWorkspaceCatalog = {
+  status: 'idle' | 'loading' | 'ready' | 'failed'
+  records: OpenDesignCatalogRecord[]
+  warning?: string
+}
+
+export type SubDesignWorkspaceHostEvent = {
+  event: 'host/pipeline-stream'
+  payload: {
+    runId: string
+    sessionId: string
+    stageId: string
+    providerId: string
+    update: StreamingUpdate
+  }
+}
+
+type SubDesignWorkspaceRawHostEvent = {
+  event: string
+  payload: unknown
+}
+
+type SubDesignWorkspaceHostEventListener = (event: SubDesignWorkspaceHostEvent) => void
+type SubDesignWorkspaceRawHostEventSubscription = (
+  listener: (event: SubDesignWorkspaceRawHostEvent) => void,
+) => () => void
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function adaptPipelineStreamEvent(event: SubDesignWorkspaceRawHostEvent): SubDesignWorkspaceHostEvent | null {
+  if (event.event !== 'host/pipeline-stream') return null
+  const payload = asRecord(event.payload)
+  const runId = asNonEmptyString(payload?.runId)
+  const sessionId = asNonEmptyString(payload?.sessionId)
+  const stageId = asNonEmptyString(payload?.stageId)
+  const providerId = asNonEmptyString(payload?.providerId)
+  const update = asRecord(payload?.update)
+  if (!runId || !sessionId || !stageId || !providerId || !update) return null
+  return {
+    event: 'host/pipeline-stream',
+    payload: {
+      runId,
+      sessionId,
+      stageId,
+      providerId,
+      update: update as StreamingUpdate,
+    },
+  }
+}
+
+/** Adapt the untyped preload event boundary before it reaches presentation. */
+export function createSubDesignHostEventSubscription(
+  subscribe?: SubDesignWorkspaceRawHostEventSubscription,
+): (listener: SubDesignWorkspaceHostEventListener) => () => void {
+  return (listener) => {
+    if (!subscribe) return () => undefined
+    return subscribe((event) => {
+      const adapted = adaptPipelineStreamEvent(event)
+      if (adapted) listener(adapted)
+    })
+  }
+}
+
 export type SubDesignWorkspaceRunPhase = 'idle' | 'starting' | 'blocked' | 'failed'
+
+export type SubDesignWorkspaceRunProjection = {
+  phase: SubDesignWorkspaceRunPhase
+  runId?: string
+  reason?: string
+}
 
 export type SubDesignWorkspaceProjection = {
   routeBriefId: string | null
@@ -272,15 +356,17 @@ export type SubDesignWorkspaceProjection = {
   pluginInputs: PluginInputValues
   pluginDeclaredInputs: PluginInput[]
   selectedModelId: string
-  run: {
-    phase: SubDesignWorkspaceRunPhase
-    runId?: string
-    reason?: string
-  }
+  run: SubDesignWorkspaceRunProjection
+  runsByBriefId: Record<string, SubDesignWorkspaceRunProjection>
   hydration: {
     status: 'idle' | 'loading' | 'ready' | 'failed'
     reason?: string
   }
+  catalog: SubDesignWorkspaceCatalog
+  modelDiscovery: SubDesignModelDiscovery | null
+  modelDiscoveryStatus: 'idle' | 'loading' | 'ready' | 'failed'
+  modelDiscoveryWarning?: string
+  streams: Record<string, StreamingEnvelope>
   capabilities: SubDesignWorkspaceCapabilities
 }
 
@@ -319,6 +405,10 @@ export type SubDesignWorkspaceDependencies = {
   navigate: (path: string) => void
   hydrateProject?: (projectRoot: string) => Promise<void>
   refreshProviderState?: () => Promise<void>
+  loadCatalog?: () => Promise<{ records: OpenDesignCatalogRecord[]; warnings?: string[] }>
+  onCatalogLoaded?: (records: readonly OpenDesignCatalogRecord[]) => Promise<void> | void
+  discoverModels?: () => Promise<SubDesignModelDiscovery | null>
+  subscribeHostEvents?: (listener: SubDesignWorkspaceHostEventListener) => () => void
   createRunId: () => string
   getProjectRoot: () => string
   getCapabilities: () => SubDesignWorkspaceCapabilities
@@ -328,13 +418,31 @@ type WorkspaceState = {
   routeBriefId: string | null
   projectRoot: string
   pluginInputs: PluginInputValues
-  pluginDeclaredInputs: PluginInput[]
+  pluginDeclaredInputsByBriefId: Record<string, PluginInput[]>
   selectedModelId: string
-  run: SubDesignWorkspaceProjection['run']
+  runsByBriefId: Record<string, SubDesignWorkspaceRunProjection>
   hydration: SubDesignWorkspaceProjection['hydration']
+  catalog: SubDesignWorkspaceCatalog
+  modelDiscovery: SubDesignModelDiscovery | null
+  modelDiscoveryStatus: 'idle' | 'loading' | 'ready' | 'failed'
+  modelDiscoveryWarning?: string
+  streams: Record<string, StreamingEnvelope>
 }
 
 const EMPTY_PLUGIN_INPUTS: PluginInputValues = {}
+
+function idleRun(): SubDesignWorkspaceRunProjection {
+  return { phase: 'idle' }
+}
+
+function resetPluginContext(
+  state: WorkspaceState,
+  briefId?: string | null,
+  clearDeclaredInputs = true,
+): void {
+  state.pluginInputs = { ...EMPTY_PLUGIN_INPUTS }
+  if (briefId && clearDeclaredInputs) state.pluginDeclaredInputsByBriefId[briefId] = []
+}
 
 function commandFailure(
   kind: SubDesignWorkspaceActionFailure['kind'],
@@ -355,6 +463,8 @@ export type SubDesignWorkspaceController = {
   followUp: (value: string) => Promise<SubDesignWorkspaceActionResult>
   setPluginInputs: (values: PluginInputValues) => void
   setModel: (modelId: string) => void
+  refreshCatalog: () => Promise<SubDesignWorkspaceProjection>
+  refreshModels: () => Promise<SubDesignWorkspaceProjection>
 }
 
 export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): SubDesignWorkspaceController {
@@ -363,25 +473,44 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
     routeBriefId: null,
     projectRoot: deps.getProjectRoot() || '',
     pluginInputs: { ...EMPTY_PLUGIN_INPUTS },
-    pluginDeclaredInputs: [],
+    pluginDeclaredInputsByBriefId: {},
     selectedModelId: '',
-    run: { phase: 'idle' },
+    runsByBriefId: {},
     hydration: { status: 'idle' },
+    catalog: { status: 'idle', records: [] },
+    modelDiscovery: null,
+    modelDiscoveryStatus: 'idle',
+    streams: {},
   }
 
   let projection: SubDesignWorkspaceProjection = makeProjection()
 
   function makeProjection(): SubDesignWorkspaceProjection {
     const activeBrief = state.routeBriefId ? deps.findBrief(state.routeBriefId) : null
+    const activeRun = activeBrief ? state.runsByBriefId[activeBrief.id] || idleRun() : idleRun()
+    const activePluginDeclaredInputs = activeBrief ? state.pluginDeclaredInputsByBriefId[activeBrief.id] || [] : []
     return {
       routeBriefId: state.routeBriefId,
       activeBrief,
       projectRoot: state.projectRoot,
       pluginInputs: { ...state.pluginInputs },
-      pluginDeclaredInputs: [...state.pluginDeclaredInputs],
+      pluginDeclaredInputs: [...activePluginDeclaredInputs],
       selectedModelId: state.selectedModelId,
-      run: { ...state.run },
+      run: { ...activeRun },
+      runsByBriefId: Object.fromEntries(Object.entries(state.runsByBriefId).map(([briefId, run]) => [briefId, { ...run }])),
       hydration: { ...state.hydration },
+      catalog: { ...state.catalog, records: [...state.catalog.records] },
+      modelDiscovery: state.modelDiscovery
+        ? {
+            ...state.modelDiscovery,
+            models: [...state.modelDiscovery.models],
+            sourceCounts: { ...state.modelDiscovery.sourceCounts },
+            current: { ...state.modelDiscovery.current },
+          }
+        : null,
+      modelDiscoveryStatus: state.modelDiscoveryStatus,
+      modelDiscoveryWarning: state.modelDiscoveryWarning,
+      streams: { ...state.streams },
       capabilities: { ...deps.getCapabilities() },
     }
   }
@@ -391,9 +520,36 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
     for (const listener of listeners) listener()
   }
 
-  function setRun(run: WorkspaceState['run']) {
-    state.run = run
+  function setRun(briefId: string, run: SubDesignWorkspaceRunProjection) {
+    state.runsByBriefId[briefId] = run
     publish()
+  }
+
+  let unsubscribeHostEvents: (() => void) | undefined
+
+  function startHostEvents() {
+    if (unsubscribeHostEvents || !deps.subscribeHostEvents) return
+    unsubscribeHostEvents = deps.subscribeHostEvents((event) => {
+      if (!isProviderEnabled('streaming')) return
+      const { runId, stageId, update } = event.payload
+      const artifactId = pluginRunArtifactId(runId, stageId)
+      const existing = state.streams[artifactId]
+      const base = existing || createStreamingEnvelope({
+        artifactId,
+        artifactKind: 'html',
+        runId,
+        stageId,
+      })
+      const merged = mergeStreamingUpdate(base, update)
+      if (merged.envelope === base) return
+      state.streams = { ...state.streams, [artifactId]: merged.envelope }
+      publish()
+    })
+  }
+
+  function stopHostEvents() {
+    unsubscribeHostEvents?.()
+    unsubscribeHostEvents = undefined
   }
 
   async function runBrief(
@@ -401,38 +557,40 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
     objective: string,
     runner?: ThreadRunner,
   ): Promise<SubDesignWorkspaceActionResult> {
-    if (state.run.phase === 'starting') return commandFailure('busy', 'SubDesign 已有一個 run 正在準備中。')
+    if (state.runsByBriefId[brief.id]?.phase === 'starting') return commandFailure('busy', 'SubDesign 已有一個 run 正在準備中。')
 
     const runId = deps.createRunId()
-    setRun({ phase: 'starting', runId })
+    const runProjectRoot = state.projectRoot
+    const runPluginInputs = { ...state.pluginInputs }
+    const runModelId = state.selectedModelId.trim()
+    setRun(brief.id, { phase: 'starting', runId })
     let prepared: SubDesignRunPreparation
     try {
       prepared = await deps.prepareRun({
         brief,
         runId,
-        projectRoot: state.projectRoot || undefined,
-        pluginInputs: state.pluginInputs,
+        projectRoot: runProjectRoot || undefined,
+        pluginInputs: runPluginInputs,
       })
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'SubDesign run preparation 失敗。'
-      setRun({ phase: 'failed', runId, reason })
+      setRun(brief.id, { phase: 'failed', runId, reason })
       return commandFailure('failed', reason)
     }
 
-    state.pluginDeclaredInputs = prepared.declaredInputs ? [...prepared.declaredInputs] : []
+    state.pluginDeclaredInputsByBriefId[brief.id] = prepared.declaredInputs ? [...prepared.declaredInputs] : []
     // Missing provenance/project capability is an advisory fallback: the
     // brief can still run through the built-in workflow without a provider.
     // Trust decisions and declared inputs are hard blocks because forwarding
     // an incomplete plugin request would silently violate its contract.
     if (prepared.blockedReason && (prepared.declaredInputs?.length || prepared.trust)) {
-      setRun({ phase: 'blocked', runId, reason: prepared.blockedReason })
+      setRun(brief.id, { phase: 'blocked', runId, reason: prepared.blockedReason })
       return commandFailure('blocked', prepared.blockedReason, prepared.declaredInputs)
     }
 
     const thread = deps.getThread(brief.threadId)
-    const selectedModel = state.selectedModelId.trim()
-    const overrides = selectedModel
-      ? { ...(prepared.overrides || {}), model: selectedModel }
+    const overrides = runModelId
+      ? { ...(prepared.overrides || {}), model: runModelId }
       : prepared.overrides
     const request: ExternalRunOpts = {
       runId,
@@ -442,21 +600,21 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       runner: runner || thread?.runner || 'builtin',
       loopType: thread?.loopType || undefined,
       ...(overrides ? { overrides } : {}),
-      ...(state.projectRoot ? { projectRoot: state.projectRoot } : {}),
+      ...(runProjectRoot ? { projectRoot: runProjectRoot } : {}),
     }
 
     try {
       const result = await deps.runTask(request)
       if (result.skipped || result.error) {
         const reason = result.error || 'SubDesign run 未被 coordinator admission 接受。'
-        setRun({ phase: 'failed', runId, reason })
+        setRun(brief.id, { phase: 'failed', runId, reason })
         return commandFailure('failed', reason)
       }
-      setRun({ phase: 'idle' })
+      setRun(brief.id, idleRun())
       return { ok: true, brief, run: result }
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'SubDesign run 失敗。'
-      setRun({ phase: 'failed', runId, reason })
+      setRun(brief.id, { phase: 'failed', runId, reason })
       return commandFailure('failed', reason)
     } finally {
       if (deps.refreshProviderState) {
@@ -475,30 +633,33 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
 
     subscribe: (listener) => {
       listeners.add(listener)
-      return () => listeners.delete(listener)
+      startHostEvents()
+      return () => {
+        listeners.delete(listener)
+        if (!listeners.size) stopHostEvents()
+      }
     },
 
     sync: ({ routeBriefId, projectRoot }) => {
       const nextRoute = routeBriefId === undefined ? state.routeBriefId : routeBriefId || null
       if (nextRoute !== state.routeBriefId) {
         state.routeBriefId = nextRoute
-        state.pluginInputs = { ...EMPTY_PLUGIN_INPUTS }
-        state.pluginDeclaredInputs = []
-        if (state.run.phase === 'blocked') state.run = { phase: 'idle' }
+        // Switching conversations resets only the editable draft. Keep each
+        // brief's declared contract visible when the user returns to a
+        // blocked brief; the projection is already scoped by active brief.
+        resetPluginContext(state, nextRoute, false)
         if (nextRoute && deps.findBrief(nextRoute)) deps.selectBrief(nextRoute)
       }
       if (projectRoot !== undefined && projectRoot !== state.projectRoot) {
         state.projectRoot = projectRoot
-        state.pluginInputs = { ...EMPTY_PLUGIN_INPUTS }
-        state.pluginDeclaredInputs = []
+        resetPluginContext(state, state.routeBriefId)
       }
       publish()
     },
 
     hydrate: async (projectRoot = deps.getProjectRoot() || '') => {
       state.projectRoot = projectRoot
-      state.pluginInputs = { ...EMPTY_PLUGIN_INPUTS }
-      state.pluginDeclaredInputs = []
+      resetPluginContext(state, state.routeBriefId)
       state.hydration = { status: 'loading' }
       publish()
       try {
@@ -514,10 +675,51 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       return projection
     },
 
+    refreshCatalog: async () => {
+      if (!deps.loadCatalog) return projection
+      state.catalog = { ...state.catalog, status: 'loading' }
+      publish()
+      try {
+        const index = await deps.loadCatalog()
+        state.catalog = {
+          status: 'ready',
+          records: [...index.records],
+          warning: index.warnings?.[0],
+        }
+        await deps.onCatalogLoaded?.(index.records)
+      } catch (error) {
+        state.catalog = {
+          status: 'failed',
+          records: [],
+          warning: error instanceof Error ? error.message : 'OpenDesign catalog 載入失敗。',
+        }
+      }
+      publish()
+      return projection
+    },
+
+    refreshModels: async () => {
+      if (!deps.discoverModels) return projection
+      state.modelDiscoveryStatus = 'loading'
+      state.modelDiscoveryWarning = undefined
+      publish()
+      try {
+        const discovery = await deps.discoverModels()
+        state.modelDiscovery = discovery
+        state.modelDiscoveryStatus = 'ready'
+        if (!state.selectedModelId && discovery?.current.model) state.selectedModelId = discovery.current.model
+      } catch (error) {
+        state.modelDiscovery = null
+        state.modelDiscoveryStatus = 'failed'
+        state.modelDiscoveryWarning = error instanceof Error ? error.message : '模型發現失敗。'
+      }
+      publish()
+      return projection
+    },
+
     create: async (input) => {
       const objective = input.objective.trim()
       if (!objective) return commandFailure('invalid', '請先輸入 SubDesign brief。')
-      if (state.run.phase === 'starting') return commandFailure('busy', 'SubDesign 已有一個 run 正在準備中。')
 
       const threadId = deps.createThread({
         title: `SubDesign · ${input.surface}`,
@@ -541,6 +743,7 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       deps.bindBriefToThread(threadId, brief.id)
       deps.selectBrief(brief.id)
       state.routeBriefId = brief.id
+      resetPluginContext(state, brief.id)
       publish()
       deps.navigate(`/subdesign/${brief.id}`)
       const prompt = deps.buildPrompt(brief, deps.getDesignSystem(brief.designSystemId))
@@ -551,8 +754,7 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       const brief = deps.findBrief(briefId)
       if (!brief) return commandFailure('missing-brief', `找不到這個 SubDesign brief：${briefId}。`)
       state.routeBriefId = brief.id
-      state.pluginInputs = { ...EMPTY_PLUGIN_INPUTS }
-      state.pluginDeclaredInputs = []
+      resetPluginContext(state, brief.id)
       deps.selectBrief(brief.id)
       publish()
       deps.navigate(`/subdesign/${brief.id}`)
@@ -576,8 +778,10 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
 
     setPluginInputs: (values) => {
       state.pluginInputs = { ...values }
-      state.pluginDeclaredInputs = []
-      if (state.run.phase === 'blocked') state.run = { phase: 'idle' }
+      if (state.routeBriefId) state.pluginDeclaredInputsByBriefId[state.routeBriefId] = []
+      if (state.routeBriefId && state.runsByBriefId[state.routeBriefId]?.phase === 'blocked') {
+        state.runsByBriefId[state.routeBriefId] = idleRun()
+      }
       publish()
     },
 

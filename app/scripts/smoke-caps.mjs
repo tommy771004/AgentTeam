@@ -626,7 +626,7 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
     'src/pages/LogsPage.tsx',
     'src/pages/RecordsPage.tsx',
     'src/pages/SuccessPage.tsx',
-    'src/pages/SubDesignPage.tsx',
+    'src/agent/subdesign/workspaceIntegration.ts',
     'src/components/RunContinuationActions.tsx',
     'src/components/subdesign/CritiqueTheater.tsx',
     'src/agent/hermes/backgroundJobs.ts',
@@ -662,6 +662,8 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
     )
     assert.match(source, /taskRunCoordinator/)
   }
+  const subDesignPage = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
+  assert.doesNotMatch(subDesignPage, /dispatchThreadTask|startExecution/)
 })
 
 await test('Task run deepening: coordinator owns orchestration; runExternal shell gone', async () => {
@@ -1143,6 +1145,7 @@ await test('SubDesign R3: deep brief route, in-page run feed, and return link', 
   const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
   const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
   const workspace = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/workspace.ts'), 'utf8')
+  const integration = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/workspaceIntegration.ts'), 'utf8')
   const inspector = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/SubDesignRunInspector.tsx'), 'utf8')
   const studio = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/SubDesignProjectStudio.tsx'), 'utf8')
   const conversation = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/SubDesignConversationPane.tsx'), 'utf8')
@@ -1169,7 +1172,7 @@ await test('SubDesign R3: deep brief route, in-page run feed, and return link', 
   assert.match(page, /runningThreadId/)
   assert.match(page, /useRunActivityStore/)
   assert.match(page, /startingRun/)
-  assert.match(page, /hydrateThreads/)
+  assert.match(integration, /useThreadStore\.getState\(\)\.hydrate\(\)/)
   assert.match(workspace, /runTask\(/)
   assert.match(page, /setShowRunPanel/)
   assert.match(page, /navigate\(`\/\?thread=/)
@@ -1967,6 +1970,7 @@ await test('Open Design Phase 0/1/2: inventory, safe pack boundary, project copy
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
   const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
+  const integration = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/workspaceIntegration.ts'), 'utf8')
   assert.match(catalog, /parseOpenDesignInventory/)
   assert.match(catalog, /readOpenDesignText/)
   assert.match(packs, /customTools: \[\]/)
@@ -1978,7 +1982,8 @@ await test('Open Design Phase 0/1/2: inventory, safe pack boundary, project copy
   assert.match(main, /design-system pack 必須包含 DESIGN\.md/)
   assert.match(preload, /copyVendorPack/)
   assert.match(preload, /designSystemPath/)
-  assert.match(page, /loadOpenDesignCatalog/)
+  assert.match(integration, /loadOpenDesignCatalog/)
+  assert.match(page, /catalogRecords/)
   assert.match(page, /provenance: selectedCatalogRecord/)
 })
 
