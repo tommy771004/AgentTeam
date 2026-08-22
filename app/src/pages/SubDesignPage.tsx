@@ -1,13 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { critiqueAllowsDeliver } from '../agent/subdesign/critique'
 import { buildSubDesignPrompt } from '../agent/subdesign/prompt'
 import { prepareSubDesignRun } from '../agent/subdesign/pluginExecutionPreparation'
-import type { RuntimeOverrides } from '../agent/types'
-import type { PluginInputValues } from '../agent/subdesign/pluginInputs'
 import { hydrateProviderFlags, isProviderEnabled } from '../agent/subdesign/providers/providerFlags'
-import type { PluginInput } from '../agent/openDesign/pluginContract'
 import {
   OPEN_DESIGN_EXPLORE_SOURCE,
   OPEN_DESIGN_TEMPLATE_SOURCE,
@@ -19,7 +16,7 @@ import {
   type SubDesignTemplateCollection,
 } from '../agent/subdesign/templateCatalog'
 import { loadOpenDesignCatalog, type OpenDesignCatalogRecord } from '../agent/openDesign/catalog'
-import type { SubDesignPlatform, SubDesignSurface } from '../agent/subdesign/types'
+import type { DesignSystemSummary, SubDesignBrief, SubDesignPlatform, SubDesignSurface } from '../agent/subdesign/types'
 import { stageLabel } from '../agent/subdesign/types'
 import { findLatestPassedSubDesignPreference } from '../agent/subdesign/preference'
 import { Icon } from '../components/Icon'
@@ -36,7 +33,7 @@ import { SubDesignWorkspaceHeader } from '../components/subdesign/SubDesignWorks
 import { SubDesignRunInspector } from '../components/subdesign/SubDesignRunInspector'
 import { SubDesignProjectStudio } from '../components/subdesign/SubDesignProjectStudio'
 import { SubDesignStudioNav } from '../components/subdesign/SubDesignStudioNav'
-import { deriveSubDesignWorkspace } from '../agent/subdesign/workspace'
+import { createSubDesignWorkspace, deriveSubDesignWorkspace } from '../agent/subdesign/workspace'
 import { runTask } from '../agent/taskRunCoordinator'
 import { useAgentStore } from '../store/agentStore'
 import { useLearningStore } from '../store/learningStore'
@@ -131,7 +128,6 @@ export function SubDesignPage() {
   const projectRoot = useProjectStore((state) => state.root)
   const cliProviders = useSettingsStore((state) => state.settings.cliProviders)
   const briefs = useSubDesignStore((state) => state.briefs)
-  const selectedBriefId = useSubDesignStore((state) => state.selectedBriefId)
   const selectBrief = useSubDesignStore((state) => state.selectBrief)
   const setProjectRoot = useSubDesignStore((state) => state.setProjectRoot)
   const systems = useSubDesignStore((state) => state.systems)
@@ -181,28 +177,23 @@ export function SubDesignPage() {
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogWarning, setCatalogWarning] = useState('')
   const [selectedArtifactKey, setSelectedArtifactKey] = useState<string | null>(null)
-  const [startingRun, setStartingRun] = useState(false)
   const [storybookSettings, setStorybookSettings] = useState<StorybookProviderSettings>(DEFAULT_STORYBOOK_PROVIDER_SETTINGS)
   const [storybookRuns, setStorybookRuns] = useState<SubDesignPluginExecutionProjection[]>([])
   const [providerRuns, setProviderRuns] = useState<SubDesignPluginExecutionProjection[]>([])
   const [experimentalSettings, setExperimentalSettings] = useState<ExperimentalSurfaceSettings>(
     DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
   )
-  // Values collected by the plugin input form, and whatever the contract still
-  // requires. A blocked run surfaces the form rather than starting without them.
-  const [pluginInputs, setPluginInputs] = useState<PluginInputValues>({})
-  const [pluginDeclaredInputs, setPluginDeclaredInputs] = useState<PluginInput[]>([])
   // Live streaming envelopes keyed by deterministic artifactId (plugin_<runId>_<stageId>)
   const [liveStreams, setLiveStreams] = useState<Record<string, StreamingEnvelope>>({})
   // Model discovery — aggregated from CLI providers + host settings
   const [modelDiscovery, setModelDiscovery] = useState<ReturnType<typeof collectSubDesignModels> | null>(null)
-  const [selectedModelId, setSelectedModelId] = useState<string>('')
 
-  const refreshStorybookState = useCallback(async () => {
+  const refreshStorybookState = useCallback(async (requestedProjectRoot?: string) => {
+    const currentProjectRoot = requestedProjectRoot ?? useProjectStore.getState().root
     const [state, runs, experimental] = await Promise.all([
-      loadStorybookProviderState(projectRoot || undefined),
-      loadAllProviderRuns(projectRoot || undefined),
-      loadExperimentalSurfaceSettings(projectRoot || undefined),
+      loadStorybookProviderState(currentProjectRoot || undefined),
+      loadAllProviderRuns(currentProjectRoot || undefined),
+      loadExperimentalSurfaceSettings(currentProjectRoot || undefined),
     ])
     setStorybookSettings(state.settings)
     setStorybookRuns(state.runs)
@@ -210,7 +201,69 @@ export function SubDesignPage() {
     setExperimentalSettings(experimental)
     // Apply the project's choice to the synchronous render-path gate.
     hydrateProviderFlags(experimental)
-  }, [projectRoot])
+  }, [])
+
+  const workspaceDependencies = useMemo(() => ({
+    findBrief: (id: string) => useSubDesignStore.getState().findById(id),
+    getThread: (id: string) => {
+      const thread = useThreadStore.getState().threads.find((item) => item.id === id)
+      return thread ? { runner: thread.runner, loopType: thread.loopType } : null
+    },
+    createThread: (opts: Parameters<typeof createThread>[0]) => createThread(opts),
+    bindBriefToThread: (threadId: string, briefId: string) => setSubDesignBriefId(threadId, briefId),
+    createBrief: (input: Parameters<typeof createBrief>[0]) => createBrief(input),
+    selectBrief: (id: string | null) => selectBrief(id),
+    getDesignSystem: (id?: string) => useSubDesignStore.getState().systems.find((system) => system.id === id) || null,
+    prepareRun: (input: Parameters<typeof prepareSubDesignRun>[0]) => prepareSubDesignRun(input),
+    runTask,
+    buildPrompt: (brief: SubDesignBrief, system: DesignSystemSummary | null) =>
+      // Keep the prompt builder behind the workspace boundary.
+      buildSubDesignPrompt(brief, system || undefined),
+    navigate,
+    hydrateProject: async (root: string) => {
+      hydrateThreads()
+      setProjectRoot(root)
+      setArtifactProjectRoot(root)
+      setCritiqueProjectRoot(root)
+      setExportProjectRoot(root)
+      setOpenDesignPackProjectRoot(root)
+      await hydrateSubDesignStores(root || undefined)
+      await Promise.all([refreshStorybookState(root), refreshSystems(root || undefined)])
+    },
+    refreshProviderState: () => refreshStorybookState(),
+    createRunId: () => `run_${uuid().slice(0, 12)}`,
+    getProjectRoot: () => useProjectStore.getState().root,
+    getCapabilities: () => ({
+      electron: typeof window !== 'undefined' && Boolean(window.subagents?.piHost),
+      hostEvents: typeof window !== 'undefined' && Boolean(window.subagents?.piHost?.onEvent),
+    }),
+  }), [
+    createBrief,
+    createThread,
+    hydrateThreads,
+    navigate,
+    refreshStorybookState,
+    refreshSystems,
+    selectBrief,
+    setArtifactProjectRoot,
+    setCritiqueProjectRoot,
+    setExportProjectRoot,
+    setOpenDesignPackProjectRoot,
+    setProjectRoot,
+    setSubDesignBriefId,
+  ])
+  const workspaceController = useMemo(
+    () => createSubDesignWorkspace(workspaceDependencies),
+    [workspaceDependencies],
+  )
+  const workspaceProjection = useSyncExternalStore(
+    workspaceController.subscribe,
+    workspaceController.getProjection,
+    workspaceController.getProjection,
+  )
+  const startingRun = workspaceProjection.run.phase === 'starting'
+  const pluginDeclaredInputs = workspaceProjection.pluginDeclaredInputs
+  const selectedModelId = workspaceProjection.selectedModelId
 
   // Live pipeline streaming — host/pipeline-stream → liveStreams (typed events)
   useEffect(() => {
@@ -246,47 +299,19 @@ export function SubDesignPage() {
       })
       if (cancelled) return
       setModelDiscovery(discovery)
-      setSelectedModelId((current) => current || discovery.current.model)
+      if (!workspaceController.getProjection().selectedModelId) workspaceController.setModel(discovery.current.model)
     }
     void load()
     // Re-collect when settings change (cliProviders/discoveredModels)
     const unsub = useSettingsStore.subscribe(() => { void load() })
     return () => { cancelled = true; (unsub as unknown as () => void)?.() }
-  }, [])
-
-  // Plugin inputs belong to one brief's plugin. Switching briefs must not carry
-  // the previous plugin's answers into a different contract.
-  useEffect(() => {
-    setPluginInputs({})
-    setPluginDeclaredInputs([])
-  }, [routeBriefId])
-
-  /**
-   * Wraps the shared preparation so a block on unfilled inputs surfaces the
-   * form. Keeps the recording in one place instead of at each run start.
-   */
-  const prepareSubDesignRunTracked = useCallback(
-    async (input: Parameters<typeof prepareSubDesignRun>[0]) => {
-      const prepared = await prepareSubDesignRun(input)
-      setPluginDeclaredInputs(prepared.declaredInputs ?? [])
-      return prepared
-    },
-    [],
-  )
-
-  const mergeModelOverrides = useCallback(
-    (base: RuntimeOverrides | undefined): RuntimeOverrides | undefined => {
-      if (!selectedModelId) return base
-      return { ...(base || {}), model: selectedModelId }
-    },
-    [selectedModelId],
-  )
+  }, [workspaceController])
 
   const activeSurface = useMemo(
     () => SURFACES.find((surface) => surface.id === surfaceId) || SURFACES[0],
     [surfaceId],
   )
-  const routeBrief = routeBriefId ? briefs.find((item) => item.id === routeBriefId) || null : null
+  const routeBrief = workspaceProjection.activeBrief
   const activeBrief = routeBriefId ? routeBrief : null
   const activeBriefId = activeBrief?.id
   const activeBriefSurface = activeBrief?.surface
@@ -392,36 +417,12 @@ export function SubDesignPage() {
   )
 
   useEffect(() => {
-    hydrateThreads()
-  }, [hydrateThreads])
+    workspaceController.sync({ routeBriefId, projectRoot })
+  }, [briefs, projectRoot, routeBriefId, workspaceController])
 
   useEffect(() => {
-    if (routeBriefId) {
-      if (briefs.some((item) => item.id === routeBriefId) && selectedBriefId !== routeBriefId) selectBrief(routeBriefId)
-      return
-    }
-    if (!selectedBriefId && briefs[0]) selectBrief(briefs[0].id)
-  }, [briefs, routeBriefId, selectBrief, selectedBriefId])
-
-  useEffect(() => {
-    setProjectRoot(projectRoot || '')
-    setArtifactProjectRoot(projectRoot || '')
-    setCritiqueProjectRoot(projectRoot || '')
-    setExportProjectRoot(projectRoot || '')
-    setOpenDesignPackProjectRoot(projectRoot || '')
-    void hydrateSubDesignStores(projectRoot || undefined)
-    void refreshStorybookState()
-    void refreshSystems(projectRoot || undefined)
-  }, [
-    projectRoot,
-    refreshStorybookState,
-    refreshSystems,
-    setArtifactProjectRoot,
-    setCritiqueProjectRoot,
-    setExportProjectRoot,
-    setOpenDesignPackProjectRoot,
-    setProjectRoot,
-  ])
+    void workspaceController.hydrate(projectRoot || '')
+  }, [projectRoot, workspaceController])
 
   useEffect(() => {
     let active = true
@@ -469,19 +470,12 @@ export function SubDesignPage() {
   }, [designSystemId, latestPassedPreference, templateId])
 
   const startSubDesign = async () => {
-    if (!brief.trim() || startingRun) return
     const preferredDesignSystemId = designSystemId || latestPassedPreference?.designSystemId
     const preferredTemplateId = templateId || latestPassedPreference?.templateId
-    const threadId = createThread({
-      title: `SubDesign · ${activeSurface.title}`,
-      agentMode: 'plan',
-      thinkingDepth: 'deep',
-      runner,
-    })
-    const created = createBrief({
-      threadId,
-      surface: activeSurface.id,
+    setShowRunPanel(false)
+    await workspaceController.create({
       objective: brief,
+      surface: activeSurface.id,
       platform,
       fidelity: 'high-fidelity',
       designSystemId: preferredDesignSystemId,
@@ -490,99 +484,28 @@ export function SubDesignPage() {
         ? [selectedCatalogRecord.id]
         : latestPassedPreference?.skillIds,
       provenance: selectedCatalogRecord ? [selectedCatalogRecord] : latestPassedPreference?.provenance,
-      projectRoot: projectRoot || undefined,
+      runner,
     })
-    setSubDesignBriefId(threadId, created.id)
-    selectBrief(created.id)
-    navigate(`/subdesign/${created.id}`)
-    setStartingRun(true)
-    setShowRunPanel(false)
-    try {
-      const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignRunTracked({
-        pluginInputs,
-        brief: created,
-        runId,
-        projectRoot: projectRoot || undefined,
-      })
-      await runTask({
-        runId,
-        objective: buildSubDesignPrompt(
-          created,
-          systems.find((system) => system.id === preferredDesignSystemId),
-        ),
-        sourceKind: 'composer',
-        reuseThreadId: threadId,
-        runner,
-        overrides: mergeModelOverrides(pluginExecution.overrides),
-      })
-    } finally {
-      setStartingRun(false)
-      void refreshStorybookState()
-    }
   }
 
   const resumeBrief = (id: string) => {
-    const item = briefs.find((briefItem) => briefItem.id === id)
-    if (!item) return
-    selectBrief(item.id)
-    setSurfaceId(item.surface)
-    setDesignSystemId(item.designSystemId || '')
-    setTemplateId(item.templateId)
-    navigate(`/subdesign/${item.id}`)
+    const result = workspaceController.resume(id)
+    if (!result.ok) return
+    setSurfaceId(result.brief.surface)
+    setDesignSystemId(result.brief.designSystemId || '')
+    setTemplateId(result.brief.templateId)
   }
 
   const startBriefRun = async () => {
-    if (!activeBrief || startingRun || runIsLive) return
-    setStartingRun(true)
+    if (!activeBrief || runIsLive) return
     setShowRunPanel(false)
-    try {
-      const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignRunTracked({
-        pluginInputs,
-        brief: activeBrief,
-        runId,
-        projectRoot: projectRoot || undefined,
-      })
-      await runTask({
-        runId,
-        objective: buildSubDesignPrompt(activeBrief, selectedSystem),
-        sourceKind: 'composer',
-        reuseThreadId: activeBrief.threadId,
-        runner: linkedThread?.runner || 'builtin' as ThreadRunner,
-        loopType: linkedThread?.loopType || undefined,
-        overrides: mergeModelOverrides(pluginExecution.overrides),
-      })
-    } finally {
-      setStartingRun(false)
-      void refreshStorybookState()
-    }
+    await workspaceController.start()
   }
 
   const submitStudioFollowUp = async (value: string) => {
-    if (!activeBrief || startingRun || !value.trim()) return
-    setStartingRun(true)
+    if (!activeBrief || !value.trim()) return
     setShowRunPanel(false)
-    try {
-      const runId = `run_${uuid().slice(0, 12)}`
-      const pluginExecution = await prepareSubDesignRunTracked({
-        pluginInputs,
-        brief: activeBrief,
-        runId,
-        projectRoot: projectRoot || undefined,
-      })
-      await runTask({
-        runId,
-        objective: value.trim(),
-        sourceKind: 'composer',
-        reuseThreadId: activeBrief.threadId,
-        runner: linkedThread?.runner || 'builtin' as ThreadRunner,
-        loopType: linkedThread?.loopType || undefined,
-        overrides: mergeModelOverrides(pluginExecution.overrides),
-      })
-    } finally {
-      setStartingRun(false)
-    }
+    await workspaceController.followUp(value)
   }
 
   const openTranscript = () => {
@@ -611,7 +534,7 @@ export function SubDesignPage() {
           <span className="sr-only">選擇模型</span>
           <select
             value={selectedModelId}
-            onChange={(e) => setSelectedModelId(e.target.value)}
+            onChange={(e) => workspaceController.setModel(e.target.value)}
             disabled={runIsLive || startingRun}
             className="h-7 max-w-[260px] appearance-none rounded-lg bg-white/[0.06] pl-2.5 pr-7 text-[11px] text-on-surface outline-none hover:bg-white/[0.08] disabled:opacity-40"
           >
@@ -673,10 +596,7 @@ export function SubDesignPage() {
           return result
         }}
         pluginDeclaredInputs={pluginDeclaredInputs}
-        onSubmitPluginInputs={(values) => {
-          setPluginInputs(values)
-          setPluginDeclaredInputs([])
-        }}
+        onSubmitPluginInputs={(values) => workspaceController.setPluginInputs(values)}
         artifactStream={
           selectedArtifact
             ? liveStreams[selectedArtifact.id]

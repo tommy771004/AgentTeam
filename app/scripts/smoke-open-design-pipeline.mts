@@ -50,13 +50,13 @@ await test('runtime providers live under SubDesign and cannot bypass runTask', (
   assert.doesNotMatch(providerSource, /dispatchThreadTask|startExecution/)
   const openDesignFiles = fs.readdirSync(path.join(root, 'src/agent/openDesign'))
   assert.ok(openDesignFiles.every((file) => !/Provider|Snapshot|Admission|streaming/i.test(file)))
-  const subDesignPage = fs.readFileSync(path.join(root, 'src/pages/SubDesignPage.tsx'), 'utf8')
+  const subDesignWorkspace = fs.readFileSync(path.join(root, 'src/agent/subdesign/workspace.ts'), 'utf8')
   const piHostRun = fs.readFileSync(path.join(root, 'src/agent/piHostRun.ts'), 'utf8')
   // Every SubDesign run start goes through the preparation seam and hands the
   // result to runTask; the renderer never dispatches or starts execution itself.
-  assert.match(subDesignPage, /prepareSubDesignRun/)
-  assert.match(subDesignPage, /runTask\([\s\S]*overrides: mergeModelOverrides\(pluginExecution\.overrides\)/)
-  assert.doesNotMatch(subDesignPage, /dispatchThreadTask|startExecution/)
+  assert.match(subDesignWorkspace, /prepareRun\(/)
+  assert.match(subDesignWorkspace, /runTask\(request\)/)
+  assert.doesNotMatch(subDesignWorkspace, /dispatchThreadTask|startExecution/)
   const critiqueTheater = fs.readFileSync(path.join(root, 'src/components/subdesign/CritiqueTheater.tsx'), 'utf8')
   assert.match(critiqueTheater, /prepareSubDesignRun/)
   assert.doesNotMatch(critiqueTheater, /dispatchThreadTask|startExecution/)
@@ -658,9 +658,9 @@ await test('the plugin input form is mounted and drafts survive a reload',()=>{
   assert.match(form, /clearDraft/)
   const studio = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/SubDesignProjectStudio.tsx'), 'utf8')
   assert.match(studio, /<PluginInputForm/)
-  const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
-  assert.match(page, /pluginInputs/)
-  assert.match(page, /setPluginDeclaredInputs/)
+  const workspace = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/workspace.ts'), 'utf8')
+  assert.match(workspace, /pluginInputs/)
+  assert.match(workspace, /pluginDeclaredInputs/)
 })
 
 // ── Top-level seam: a SubDesign action, end to end ──────────────────────
