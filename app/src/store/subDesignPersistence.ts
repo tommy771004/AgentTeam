@@ -6,10 +6,14 @@ import { useSubDesignExportStore } from './subDesignExportStore.ts'
 import { useSubDesignStore } from './subDesignStore.ts'
 
 /** Hydrate all SubDesign caches from the project-scoped canonical metadata files. */
-export async function hydrateSubDesignStores(projectRoot?: string): Promise<void> {
-  if (!projectRoot) return
+export async function hydrateSubDesignStores(
+  projectRoot?: string,
+  options: { isCurrent?: () => boolean } = {},
+): Promise<void> {
+  const isCurrent = options.isCurrent || (() => true)
+  if (!projectRoot || !isCurrent()) return
   const snapshot = await readSubDesignMetadata(projectRoot)
-  if (!snapshot) return
+  if (!snapshot || !isCurrent()) return
   useSubDesignStore.getState().setProjectRoot(projectRoot)
   useSubDesignArtifactStore.getState().setProjectRoot(projectRoot)
   useSubDesignCritiqueStore.getState().setProjectRoot(projectRoot)

@@ -1,229 +1,31 @@
-import { critiqueAllowsDeliver } from './critique.ts'
 import type { SubDesignRunPreparation } from './pluginExecutionPreparation.ts'
 import type { PluginInput } from '../openDesign/pluginContract.ts'
 import type { OpenDesignCatalogRecord, OpenDesignProvenance } from '../openDesign/catalog.ts'
 import type { ExternalRunOpts, ExternalRunResult } from '../taskRunTypes.ts'
-import type { LoopType } from '../types.ts'
-import type { ThreadRunner } from '../../store/threadStore.ts'
+import type { AgentState, LoopType } from '../types.ts'
+import type { MemoryEntry } from '../hermes/types.ts'
+import type { CliProviderConfig } from '../cliProviders.ts'
+import type { Thread, ThreadRunner } from '../../store/threadStore.ts'
 import type { SubDesignModelDiscovery } from './modelDiscovery.ts'
-import {
-  createStreamingEnvelope,
-  mergeStreamingUpdate,
-  pluginRunArtifactId,
-  type StreamingEnvelope,
-  type StreamingUpdate,
-} from './streamingEnvelope.ts'
+import { createStreamingEnvelope, mergeStreamingUpdate, pluginRunArtifactId, type StreamingEnvelope } from './streamingEnvelope.ts'
 import { isProviderEnabled } from './providers/providerFlags.ts'
-import {
-  SUBDESIGN_STAGES,
-  stageLabel,
-} from './types.ts'
 import type {
   DesignSystemSummary,
-  SubDesignArtifact,
   SubDesignBrief,
+  SubDesignBriefPatch,
+  SubDesignArtifact,
   SubDesignCritique,
   SubDesignCritiqueSession,
   SubDesignFidelity,
   SubDesignPlatform,
   SubDesignReference,
-  SubDesignStage,
   SubDesignSurface,
 } from './types.ts'
 import type { PluginInputValues } from './pluginInputs.ts'
-
-export type SubDesignWorkspaceRunStatus = 'idle' | 'active' | 'success' | 'failed' | 'halted' | 'awaiting-user'
-export type SubDesignWorkspaceCritiqueStatus = 'not-started' | 'running' | 'passed' | 'needs-revision' | 'interrupted' | 'failed'
-export type SubDesignWorkspaceStageState = 'completed' | 'active' | 'pending' | 'locked'
-export type SubDesignWorkspaceGateStatus = 'ready' | 'blocked' | 'complete'
-export type SubDesignWorkspaceAction = 'complete-brief' | 'choose-direction' | 'start-build' | 'review-critique' | 'deliver' | 'inspect'
-
-export type SubDesignWorkspaceStage = {
-  id: SubDesignStage
-  label: string
-  state: SubDesignWorkspaceStageState
-  description: string
-}
-
-export type SubDesignWorkspaceGate = {
-  id: SubDesignStage
-  label: string
-  status: SubDesignWorkspaceGateStatus
-  title: string
-  reason?: string
-  action: SubDesignWorkspaceAction
-}
-
-export type SubDesignWorkspaceViewModel = {
-  briefId: string
-  objective: string
-  currentStage: SubDesignStage
-  stages: SubDesignWorkspaceStage[]
-  nextGate: SubDesignWorkspaceGate
-  runStatus: SubDesignWorkspaceRunStatus
-  critiqueStatus: SubDesignWorkspaceCritiqueStatus
-  hasCompleteArtifact: boolean
-  latestArtifact: SubDesignArtifact | null
-  selectedDirectionTitle?: string
-}
-
-export type SubDesignWorkspaceInput = {
-  brief: SubDesignBrief
-  artifacts?: SubDesignArtifact[]
-  selectedArtifact?: SubDesignArtifact | null
-  critique?: SubDesignCritique | null
-  critiqueSession?: SubDesignCritiqueSession | null
-  runStatus?: string
-}
-
-const ACTIVE_RUN_STATUSES = new Set(['parsing', 'running', 'manual_intervention'])
-
-function deriveRunStatus(value: string | undefined): SubDesignWorkspaceRunStatus {
-  if (!value || value === 'idle') return 'idle'
-  if (ACTIVE_RUN_STATUSES.has(value)) return 'active'
-  if (value === 'awaiting_user') return 'awaiting-user'
-  if (value === 'success') return 'success'
-  if (value === 'halted' || value === 'aborted') return 'halted'
-  if (value === 'failed') return 'failed'
-  return 'idle'
-}
-
-function deriveCritiqueStatus(critique: SubDesignCritique | null | undefined, session: SubDesignCritiqueSession | null | undefined): SubDesignWorkspaceCritiqueStatus {
-  if (session?.status === 'running') return 'running'
-  if (session?.status === 'interrupted') return 'interrupted'
-  if (session?.status === 'failed') return 'failed'
-  if (critique?.verdict === 'pass') return 'passed'
-  if (critique?.verdict === 'needs-revision') return 'needs-revision'
-  return 'not-started'
-}
-
-function latestArtifactOf(artifacts: SubDesignArtifact[], selectedArtifact?: SubDesignArtifact | null): SubDesignArtifact | null {
-  if (selectedArtifact) return selectedArtifact
-  return [...artifacts]
-    .filter((artifact) => artifact.status !== 'error')
-    .sort((a, b) => {
-      if (b.revision !== a.revision) return b.revision - a.revision
-      return b.updatedAt.localeCompare(a.updatedAt)
-    })[0] || null
-}
-
-function describeStage(stage: SubDesignStage, state: SubDesignWorkspaceStageState): string {
-  if (state === 'completed') return '已完成'
-  if (state === 'active') return '目前階段'
-  if (state === 'locked') return '尚未開放'
-  if (stage === 'direction') return '等待方向選擇'
-  if (stage === 'build') return '等待開始建置'
-  if (stage === 'critique') return '等待 artifact 完成'
-  if (stage === 'deliver') return '等待 critique pass'
-  return '等待 brief'
-}
-
-function stageState(currentStage: SubDesignStage, stage: SubDesignStage, hasDirection: boolean, hasPassingCritique: boolean): SubDesignWorkspaceStageState {
-  const currentIndex = SUBDESIGN_STAGES.indexOf(currentStage)
-  const stageIndex = SUBDESIGN_STAGES.indexOf(stage)
-  if (stageIndex < currentIndex) return 'completed'
-  if (stageIndex === currentIndex) return 'active'
-  if (stage === 'build' && !hasDirection) return 'locked'
-  if (stage === 'deliver' && !hasPassingCritique) return 'locked'
-  return stageIndex === currentIndex + 1 ? 'pending' : 'locked'
-}
-
-function makeGate(input: {
-  brief: SubDesignBrief
-  runStatus: SubDesignWorkspaceRunStatus
-  critiqueStatus: SubDesignWorkspaceCritiqueStatus
-  hasCompleteArtifact: boolean
-  hasPassingCritique: boolean
-}): SubDesignWorkspaceGate {
-  const { brief, runStatus, critiqueStatus, hasCompleteArtifact, hasPassingCritique } = input
-  if (brief.stage === 'brief') {
-    return {
-      id: 'direction',
-      label: stageLabel('direction'),
-      status: brief.selectedDirectionId ? 'ready' : 'blocked',
-      title: brief.selectedDirectionId ? '準備進入 Direction' : '等待選擇 design direction',
-      reason: brief.selectedDirectionId ? undefined : '尚未選定 design direction，不能進入 Build。',
-      action: brief.selectedDirectionId ? 'start-build' : 'choose-direction',
-    }
-  }
-  if (brief.stage === 'direction') {
-    return {
-      id: 'build',
-      label: stageLabel('build'),
-      status: brief.selectedDirectionId ? 'ready' : 'blocked',
-      title: runStatus === 'active' ? 'Build 正在執行' : '準備開始 Build',
-      reason: brief.selectedDirectionId ? undefined : '請先完成 direction gate。',
-      action: runStatus === 'active' ? 'inspect' : brief.selectedDirectionId ? 'start-build' : 'choose-direction',
-    }
-  }
-  if (brief.stage === 'build') {
-    if (runStatus === 'active' || runStatus === 'awaiting-user') {
-      return { id: 'build', label: stageLabel('build'), status: 'ready', title: runStatus === 'awaiting-user' ? 'Build 等待你的決定' : 'Build 正在執行', action: 'inspect' }
-    }
-    if ((runStatus === 'failed' || runStatus === 'halted') && !hasCompleteArtifact) {
-      return { id: 'build', label: stageLabel('build'), status: 'ready', title: runStatus === 'failed' ? '上一次 Build 失敗，可重新執行' : 'Build 已中止，可重新執行', reason: '尚未產生完整 artifact。', action: 'start-build' }
-    }
-    return {
-      id: hasCompleteArtifact ? 'critique' : 'build',
-      label: hasCompleteArtifact ? stageLabel('critique') : stageLabel('build'),
-      status: hasCompleteArtifact ? 'ready' : 'blocked',
-      title: hasCompleteArtifact ? 'Artifact 已完成，開始 Critique' : '等待 artifact 產生完成',
-      reason: hasCompleteArtifact ? undefined : '目前還沒有可供 review 的完整 artifact。',
-      action: hasCompleteArtifact ? 'review-critique' : 'start-build',
-    }
-  }
-  if (brief.stage === 'critique') {
-    if (critiqueStatus === 'running') return { id: 'critique', label: stageLabel('critique'), status: 'ready', title: 'Critique 正在執行', action: 'inspect' }
-    if (critiqueStatus === 'passed' || hasPassingCritique) return { id: 'deliver', label: stageLabel('deliver'), status: 'ready', title: 'Critique 已通過，可以交付', action: 'deliver' }
-    return {
-      id: 'critique',
-      label: stageLabel('critique'),
-      status: hasCompleteArtifact ? 'ready' : 'blocked',
-      title: critiqueStatus === 'needs-revision' ? '需要依 Critique 調整 artifact' : '等待 Critique review',
-      reason: hasCompleteArtifact ? undefined : '需要先有完整 artifact 才能開始 Critique。',
-      action: hasCompleteArtifact ? 'review-critique' : 'start-build',
-    }
-  }
-  return {
-    id: 'deliver',
-    label: stageLabel('deliver'),
-    status: hasPassingCritique ? 'ready' : 'blocked',
-    title: hasPassingCritique ? 'Artifact 已通過，可以交付' : '交付已鎖定',
-    reason: hasPassingCritique ? undefined : '只有通過 Critique 的 artifact 才能交付。',
-    action: hasPassingCritique ? 'deliver' : 'review-critique',
-  }
-}
-
-export function deriveSubDesignWorkspace(input: SubDesignWorkspaceInput): SubDesignWorkspaceViewModel {
-  const artifacts = (input.artifacts || []).filter((artifact) => artifact.briefId === input.brief.id)
-  const selectedArtifact = input.selectedArtifact?.briefId === input.brief.id ? input.selectedArtifact : null
-  const latestArtifact = latestArtifactOf(artifacts, selectedArtifact)
-  const hasCompleteArtifact = artifacts.some((artifact) => artifact.status === 'complete')
-  const critique = input.critique && (!selectedArtifact || input.critique.artifactId === selectedArtifact.id) ? input.critique : null
-  const critiqueSession = input.critiqueSession && input.critiqueSession.briefId === input.brief.id && (!selectedArtifact || input.critiqueSession.artifactId === selectedArtifact.id)
-    ? input.critiqueSession
-    : null
-  const critiqueStatus = deriveCritiqueStatus(critique, critiqueSession)
-  const hasPassingCritique = Boolean(latestArtifact?.status === 'complete' && critique && critiqueAllowsDeliver(critique))
-  const runStatus = deriveRunStatus(input.runStatus)
-  const hasDirection = Boolean(input.brief.selectedDirectionId)
-  const stages = SUBDESIGN_STAGES.map((stage) => {
-    const state = stageState(input.brief.stage, stage, hasDirection, hasPassingCritique)
-    return { id: stage, label: stageLabel(stage), state, description: describeStage(stage, state) }
-  })
-  return {
-    briefId: input.brief.id,
-    objective: input.brief.objective,
-    currentStage: input.brief.stage,
-    stages,
-    nextGate: makeGate({ brief: input.brief, runStatus, critiqueStatus, hasCompleteArtifact, hasPassingCritique }),
-    runStatus,
-    critiqueStatus,
-    hasCompleteArtifact,
-    latestArtifact,
-    selectedDirectionTitle: input.brief.directions.find((direction) => direction.id === input.brief.selectedDirectionId)?.title,
-  }
-}
+import type { OpenDesignContentPackManifest } from '../openDesign/packs.ts'
+import type { SubDesignPreference } from './preference.ts'
+import { deriveSubDesignWorkspace, type SubDesignWorkspaceViewModel } from './workspaceProjection.ts'
+import type { SubDesignWorkspaceHostEventListener } from './workspaceHostEvents.ts'
 
 /**
  * The renderer-side workflow seam for SubDesign.
@@ -272,74 +74,31 @@ export type SubDesignWorkspaceCapabilities = {
   hostEvents: boolean
 }
 
+export type SubDesignWorkspaceHydrationRequest = {
+  projectRoot: string
+  /** False once a newer project hydration has superseded this request. */
+  isCurrent: () => boolean
+}
+
 export type SubDesignWorkspaceCatalog = {
   status: 'idle' | 'loading' | 'ready' | 'failed'
   records: OpenDesignCatalogRecord[]
   warning?: string
 }
 
-export type SubDesignWorkspaceHostEvent = {
-  event: 'host/pipeline-stream'
-  payload: {
-    runId: string
-    sessionId: string
-    stageId: string
-    providerId: string
-    update: StreamingUpdate
-  }
-}
-
-type SubDesignWorkspaceRawHostEvent = {
-  event: string
-  payload: unknown
-}
-
-type SubDesignWorkspaceHostEventListener = (event: SubDesignWorkspaceHostEvent) => void
-type SubDesignWorkspaceRawHostEventSubscription = (
-  listener: (event: SubDesignWorkspaceRawHostEvent) => void,
-) => () => void
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : null
-}
-
-function asNonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value : null
-}
-
-function adaptPipelineStreamEvent(event: SubDesignWorkspaceRawHostEvent): SubDesignWorkspaceHostEvent | null {
-  if (event.event !== 'host/pipeline-stream') return null
-  const payload = asRecord(event.payload)
-  const runId = asNonEmptyString(payload?.runId)
-  const sessionId = asNonEmptyString(payload?.sessionId)
-  const stageId = asNonEmptyString(payload?.stageId)
-  const providerId = asNonEmptyString(payload?.providerId)
-  const update = asRecord(payload?.update)
-  if (!runId || !sessionId || !stageId || !providerId || !update) return null
-  return {
-    event: 'host/pipeline-stream',
-    payload: {
-      runId,
-      sessionId,
-      stageId,
-      providerId,
-      update: update as StreamingUpdate,
-    },
-  }
-}
-
-/** Adapt the untyped preload event boundary before it reaches presentation. */
-export function createSubDesignHostEventSubscription(
-  subscribe?: SubDesignWorkspaceRawHostEventSubscription,
-): (listener: SubDesignWorkspaceHostEventListener) => () => void {
-  return (listener) => {
-    if (!subscribe) return () => undefined
-    return subscribe((event) => {
-      const adapted = adaptPipelineStreamEvent(event)
-      if (adapted) listener(adapted)
-    })
-  }
-}
+export { createSubDesignHostEventSubscription, type SubDesignWorkspaceHostEvent } from './workspaceHostEvents.ts'
+export {
+  deriveSubDesignWorkspace,
+  type SubDesignWorkspaceAction,
+  type SubDesignWorkspaceCritiqueStatus,
+  type SubDesignWorkspaceGate,
+  type SubDesignWorkspaceGateStatus,
+  type SubDesignWorkspaceInput,
+  type SubDesignWorkspaceRunStatus,
+  type SubDesignWorkspaceStage,
+  type SubDesignWorkspaceStageState,
+  type SubDesignWorkspaceViewModel,
+} from './workspaceProjection.ts'
 
 export type SubDesignWorkspaceRunPhase = 'idle' | 'starting' | 'blocked' | 'failed'
 
@@ -347,6 +106,32 @@ export type SubDesignWorkspaceRunProjection = {
   phase: SubDesignWorkspaceRunPhase
   runId?: string
   reason?: string
+}
+
+export type SubDesignWorkspacePresentation = {
+  projectRoot: string
+  activeBrief: SubDesignBrief | null
+  briefs: SubDesignBrief[]
+  systems: DesignSystemSummary[]
+  systemsLoading: boolean
+  systemsError: string | null
+  threads: Thread[]
+  runningThreadIds: string[]
+  linkedThread: Thread | null
+  linkedThreadRunId: string | null
+  linkedAgent: Pick<AgentState, 'status' | 'executionKind'> | null
+  activityActive: boolean
+  /** Derived by the workspace from the brief-scoped run and live inputs. */
+  runIsLive: boolean
+  artifacts: SubDesignArtifact[]
+  critiques: SubDesignCritique[]
+  critiqueSession: SubDesignCritiqueSession | null
+  memoryEntries: MemoryEntry[]
+  cliProviders: CliProviderConfig[]
+  installedOpenDesignPacks: OpenDesignContentPackManifest[]
+  openDesignPackBusyId: string | null
+  openDesignPackError: string | null
+  latestPassedPreference: SubDesignPreference | null
 }
 
 export type SubDesignWorkspaceProjection = {
@@ -368,6 +153,11 @@ export type SubDesignWorkspaceProjection = {
   modelDiscoveryWarning?: string
   streams: Record<string, StreamingEnvelope>
   capabilities: SubDesignWorkspaceCapabilities
+  presentation: SubDesignWorkspacePresentation
+  workspace: SubDesignWorkspaceViewModel | null
+  selectedArtifact: SubDesignArtifact | null
+  latestCritique: SubDesignCritique | null
+  workspacesByBriefId: Record<string, SubDesignWorkspaceViewModel>
 }
 
 export type SubDesignWorkspaceActionFailure = {
@@ -403,11 +193,22 @@ export type SubDesignWorkspaceDependencies = {
   runTask: (input: ExternalRunOpts) => Promise<ExternalRunResult>
   buildPrompt: (brief: SubDesignBrief, designSystem: DesignSystemSummary | null) => string
   navigate: (path: string) => void
-  hydrateProject?: (projectRoot: string) => Promise<void>
+  hydrateProject?: (request: SubDesignWorkspaceHydrationRequest) => Promise<void>
   refreshProviderState?: () => Promise<void>
   loadCatalog?: () => Promise<{ records: OpenDesignCatalogRecord[]; warnings?: string[] }>
   onCatalogLoaded?: (records: readonly OpenDesignCatalogRecord[]) => Promise<void> | void
   discoverModels?: () => Promise<SubDesignModelDiscovery | null>
+  readPresentation?: (routeBriefId: string | null) => SubDesignWorkspacePresentation
+  subscribePresentation?: (listener: () => void) => () => void
+  subscribeModelChanges?: (listener: () => void) => () => void
+  updateBrief?: (id: string, patch: SubDesignBriefPatch, projectRoot?: string) => SubDesignBrief | null
+  selectDirection?: (id: string, directionId: string, projectRoot?: string) => { ok: boolean; error?: string; brief: SubDesignBrief }
+  refreshSystems?: (projectRoot?: string, options?: { isCurrent?: () => boolean }) => Promise<DesignSystemSummary[]>
+  installOpenDesignPack?: (record: OpenDesignCatalogRecord, projectRoot?: string) => Promise<OpenDesignContentPackManifest | null>
+  setOpenDesignPackEnabled?: (record: OpenDesignCatalogRecord, enabled: boolean) => Promise<boolean>
+  setRunPanel?: (visible: boolean) => void
+  selectThread?: (id: string) => void
+  stopExecution?: (runId?: string) => void
   subscribeHostEvents?: (listener: SubDesignWorkspaceHostEventListener) => () => void
   createRunId: () => string
   getProjectRoot: () => string
@@ -427,6 +228,7 @@ type WorkspaceState = {
   modelDiscoveryStatus: 'idle' | 'loading' | 'ready' | 'failed'
   modelDiscoveryWarning?: string
   streams: Record<string, StreamingEnvelope>
+  selectedArtifactKey: string | null
 }
 
 const EMPTY_PLUGIN_INPUTS: PluginInputValues = {}
@@ -452,6 +254,33 @@ function commandFailure(
   return { ok: false, kind, reason, ...(declaredInputs ? { declaredInputs } : {}) }
 }
 
+function emptyPresentation(projectRoot: string): SubDesignWorkspacePresentation {
+  return {
+    projectRoot,
+    activeBrief: null,
+    briefs: [],
+    systems: [],
+    systemsLoading: false,
+    systemsError: null,
+    threads: [],
+    runningThreadIds: [],
+    linkedThread: null,
+    linkedThreadRunId: null,
+    linkedAgent: null,
+    activityActive: false,
+    runIsLive: false,
+    artifacts: [],
+    critiques: [],
+    critiqueSession: null,
+    memoryEntries: [],
+    cliProviders: [],
+    installedOpenDesignPacks: [],
+    openDesignPackBusyId: null,
+    openDesignPackError: null,
+    latestPassedPreference: null,
+  }
+}
+
 export type SubDesignWorkspaceController = {
   getProjection: () => SubDesignWorkspaceProjection
   subscribe: (listener: () => void) => () => void
@@ -465,6 +294,15 @@ export type SubDesignWorkspaceController = {
   setModel: (modelId: string) => void
   refreshCatalog: () => Promise<SubDesignWorkspaceProjection>
   refreshModels: () => Promise<SubDesignWorkspaceProjection>
+  refreshSystems: () => Promise<DesignSystemSummary[]>
+  updateBrief: (id: string, patch: SubDesignBriefPatch, projectRoot?: string) => SubDesignBrief | null
+  selectDirection: (id: string, directionId: string, projectRoot?: string) => { ok: boolean; error?: string; brief: SubDesignBrief }
+  installOpenDesignPack: (record: OpenDesignCatalogRecord, projectRoot?: string) => Promise<OpenDesignContentPackManifest | null>
+  setOpenDesignPackEnabled: (record: OpenDesignCatalogRecord, enabled: boolean) => Promise<boolean>
+  setRunPanel: (visible: boolean) => void
+  selectThread: (id: string) => void
+  stopExecution: (runId?: string) => void
+  setSelectedArtifact: (key: string | null) => void
 }
 
 export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): SubDesignWorkspaceController {
@@ -481,14 +319,79 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
     modelDiscovery: null,
     modelDiscoveryStatus: 'idle',
     streams: {},
+    selectedArtifactKey: null,
   }
 
   let projection: SubDesignWorkspaceProjection = makeProjection()
+  let hydrationGeneration = 0
 
   function makeProjection(): SubDesignWorkspaceProjection {
-    const activeBrief = state.routeBriefId ? deps.findBrief(state.routeBriefId) : null
+    const basePresentation = deps.readPresentation?.(state.routeBriefId) || emptyPresentation(state.projectRoot)
+    const activeBrief = basePresentation.activeBrief || (state.routeBriefId ? deps.findBrief(state.routeBriefId) : null)
     const activeRun = activeBrief ? state.runsByBriefId[activeBrief.id] || idleRun() : idleRun()
     const activePluginDeclaredInputs = activeBrief ? state.pluginDeclaredInputsByBriefId[activeBrief.id] || [] : []
+    const visibleArtifacts = activeBrief
+      ? basePresentation.artifacts.filter((artifact) => artifact.briefId === activeBrief.id)
+      : []
+    const selectedArtifact = state.selectedArtifactKey
+      ? visibleArtifacts.find((artifact) => `${artifact.id}:${artifact.revision}` === state.selectedArtifactKey) || null
+      : null
+    const projectedArtifact = selectedArtifact || visibleArtifacts[0] || null
+    const latestCritique = projectedArtifact
+      ? basePresentation.critiques
+          .filter((critique) => critique.artifactId === projectedArtifact.id && critique.revision === projectedArtifact.revision)
+          .sort((left, right) => (right.createdAt || '').localeCompare(left.createdAt || ''))[0] || null
+      : null
+    const deriveBriefWorkspace = (brief: SubDesignBrief, selected?: SubDesignArtifact | null) => {
+      const artifacts = basePresentation.artifacts.filter((artifact) => artifact.briefId === brief.id)
+      const artifact = selected || [...artifacts]
+        .filter((item) => item.status !== 'error')
+        .sort((left, right) => right.revision - left.revision || right.updatedAt.localeCompare(left.updatedAt))[0] || null
+      const critique = artifact
+        ? basePresentation.critiques
+            .filter((item) => item.artifactId === artifact.id && item.revision === artifact.revision)
+            .sort((left, right) => (right.createdAt || '').localeCompare(left.createdAt || ''))[0] || null
+        : null
+      const thread = basePresentation.threads.find((item) => item.id === brief.threadId)
+      const runStatus = brief.id === activeBrief?.id
+        ? (activeRun.phase === 'starting' ? 'running' : basePresentation.linkedAgent?.status)
+        : basePresentation.runningThreadIds.includes(brief.threadId) ? 'running' : thread?.lastStatus
+      return deriveSubDesignWorkspace({
+        brief,
+        artifacts,
+        selectedArtifact: artifact,
+        critique,
+        critiqueSession: basePresentation.critiqueSession?.briefId === brief.id ? basePresentation.critiqueSession : null,
+        runStatus,
+      })
+    }
+    const workspacesByBriefId = Object.fromEntries(
+      basePresentation.briefs.map((brief) => [brief.id, deriveBriefWorkspace(brief, brief.id === activeBrief?.id ? projectedArtifact : null)]),
+    )
+    const workspace = activeBrief ? workspacesByBriefId[activeBrief.id] || null : null
+    const runIsLive = Boolean(
+      activeBrief &&
+      (activeRun.phase === 'starting' || basePresentation.runningThreadIds.includes(activeBrief.threadId)) &&
+      (activeRun.phase === 'starting' ||
+        Boolean(basePresentation.linkedThreadRunId) ||
+        basePresentation.activityActive ||
+        ['running', 'parsing', 'manual_intervention', 'awaiting_user'].includes(basePresentation.linkedAgent?.status || 'idle')),
+    )
+    const presentation: SubDesignWorkspacePresentation = {
+      ...basePresentation,
+      projectRoot: state.projectRoot,
+      activeBrief,
+      runIsLive,
+      briefs: [...basePresentation.briefs],
+      systems: [...basePresentation.systems],
+      threads: [...basePresentation.threads],
+      runningThreadIds: [...basePresentation.runningThreadIds],
+      artifacts: [...basePresentation.artifacts],
+      critiques: [...basePresentation.critiques],
+      memoryEntries: [...basePresentation.memoryEntries],
+      cliProviders: [...basePresentation.cliProviders],
+      installedOpenDesignPacks: [...basePresentation.installedOpenDesignPacks],
+    }
     return {
       routeBriefId: state.routeBriefId,
       activeBrief,
@@ -512,6 +415,11 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       modelDiscoveryWarning: state.modelDiscoveryWarning,
       streams: { ...state.streams },
       capabilities: { ...deps.getCapabilities() },
+      presentation,
+      workspace,
+      selectedArtifact: projectedArtifact,
+      latestCritique,
+      workspacesByBriefId,
     }
   }
 
@@ -526,6 +434,25 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
   }
 
   let unsubscribeHostEvents: (() => void) | undefined
+  let unsubscribePresentation: (() => void) | undefined
+  let unsubscribeModelChanges: (() => void) | undefined
+
+  function startPresentation() {
+    if (unsubscribePresentation || !deps.subscribePresentation) return
+    unsubscribePresentation = deps.subscribePresentation(() => {
+      const projectRoot = deps.getProjectRoot() || ''
+      if (projectRoot !== state.projectRoot) {
+        state.projectRoot = projectRoot
+        resetPluginContext(state, state.routeBriefId)
+      }
+      publish()
+    })
+  }
+
+  function startModelChanges() {
+    if (unsubscribeModelChanges || !deps.subscribeModelChanges) return
+    unsubscribeModelChanges = deps.subscribeModelChanges(() => { void controller.refreshModels() })
+  }
 
   function startHostEvents() {
     if (unsubscribeHostEvents || !deps.subscribeHostEvents) return
@@ -550,6 +477,13 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
   function stopHostEvents() {
     unsubscribeHostEvents?.()
     unsubscribeHostEvents = undefined
+  }
+
+  function stopPresentation() {
+    unsubscribePresentation?.()
+    unsubscribePresentation = undefined
+    unsubscribeModelChanges?.()
+    unsubscribeModelChanges = undefined
   }
 
   async function runBrief(
@@ -634,9 +568,14 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
     subscribe: (listener) => {
       listeners.add(listener)
       startHostEvents()
+      startPresentation()
+      startModelChanges()
       return () => {
         listeners.delete(listener)
-        if (!listeners.size) stopHostEvents()
+        if (!listeners.size) {
+          stopHostEvents()
+          stopPresentation()
+        }
       }
     },
 
@@ -658,14 +597,18 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
     },
 
     hydrate: async (projectRoot = deps.getProjectRoot() || '') => {
+      const generation = ++hydrationGeneration
       state.projectRoot = projectRoot
       resetPluginContext(state, state.routeBriefId)
       state.hydration = { status: 'loading' }
       publish()
+      const isCurrent = () => generation === hydrationGeneration && state.projectRoot === projectRoot
       try {
-        await deps.hydrateProject?.(projectRoot)
+        await deps.hydrateProject?.({ projectRoot, isCurrent })
+        if (!isCurrent()) return projection
         state.hydration = { status: 'ready' }
       } catch (error) {
+        if (!isCurrent()) return projection
         state.hydration = {
           status: 'failed',
           reason: error instanceof Error ? error.message : 'SubDesign project hydration 失敗。',
@@ -789,6 +732,62 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       const next = modelId.trim()
       if (next === state.selectedModelId) return
       state.selectedModelId = next
+      publish()
+    },
+
+    refreshSystems: async () => {
+      if (!deps.refreshSystems) return []
+      const systems = await deps.refreshSystems(state.projectRoot || undefined)
+      publish()
+      return systems
+    },
+
+    updateBrief: (id, patch, projectRoot) => {
+      const brief = deps.updateBrief?.(id, patch, projectRoot)
+      publish()
+      return brief || null
+    },
+
+    selectDirection: (id, directionId, projectRoot) => {
+      const result = deps.selectDirection?.(id, directionId, projectRoot) || {
+        ok: false,
+        error: 'SubDesign direction adapter 尚未提供。',
+        brief: deps.findBrief(id) as SubDesignBrief,
+      }
+      publish()
+      return result
+    },
+
+    installOpenDesignPack: async (record, projectRoot) => {
+      const installed = await deps.installOpenDesignPack?.(record, projectRoot)
+      publish()
+      return installed || null
+    },
+
+    setOpenDesignPackEnabled: async (record, enabled) => {
+      const result = await deps.setOpenDesignPackEnabled?.(record, enabled)
+      publish()
+      return result || false
+    },
+
+    setRunPanel: (visible) => {
+      deps.setRunPanel?.(visible)
+      publish()
+    },
+
+    selectThread: (id) => {
+      deps.selectThread?.(id)
+      publish()
+    },
+
+    stopExecution: (runId) => {
+      deps.stopExecution?.(runId)
+      publish()
+    },
+
+    setSelectedArtifact: (key) => {
+      if (state.selectedArtifactKey === key) return
+      state.selectedArtifactKey = key
       publish()
     },
   }

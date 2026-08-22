@@ -148,6 +148,17 @@ await test('route + Variant A studio wiring (static)', () => {
   assert.match(page, /SubDesignFlowPrototype/)
 })
 
+await test('workspace presentation seam owns workflow readings', () => {
+  const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
+  const workspace = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/workspace.ts'), 'utf8')
+  const integration = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/workspaceIntegration.ts'), 'utf8')
+  assert.match(page, /workspaceProjection\.presentation/)
+  assert.match(page, /workspaceProjection\.workspacesByBriefId/)
+  assert.match(workspace, /readPresentation|subscribePresentation/)
+  assert.match(integration, /subscribePresentation|readPresentation/)
+  assert.doesNotMatch(page, /use(?:Agent|Learning|Project|SubDesign|Thread|RunActivity|OpenDesignPack|Settings)Store/)
+})
+
 await test('OpenDesign explore collection is ordered by the inventory, not a second list', () => {
   const inventory = JSON.parse(
     fs.readFileSync(path.join(appRoot, 'public/open-design/OPEN_DESIGN_INVENTORY.json'), 'utf8'),

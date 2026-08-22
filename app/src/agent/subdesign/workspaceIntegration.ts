@@ -5,23 +5,29 @@ import { collectSubDesignModels, readHostModelSettings } from './modelDiscovery.
 import { loadOpenDesignCatalog } from '../openDesign/catalog.ts'
 import {
   createSubDesignHostEventSubscription,
+  type SubDesignWorkspaceHydrationRequest,
   type SubDesignWorkspaceDependencies,
 } from './workspace.ts'
+import { findLatestPassedSubDesignPreference } from './preference.ts'
 import { runTask } from '../taskRunCoordinator.ts'
 import { hydrateSubDesignStores } from '../../store/subDesignPersistence.ts'
 import { useProjectStore } from '../../store/projectStore.ts'
 import { useSubDesignArtifactStore } from '../../store/subDesignArtifactStore.ts'
 import { useSubDesignCritiqueStore } from '../../store/subDesignCritiqueStore.ts'
+import { useSubDesignCritiqueSessionStore } from '../../store/subDesignCritiqueSessionStore.ts'
 import { useSubDesignExportStore } from '../../store/subDesignExportStore.ts'
 import { useSubDesignStore } from '../../store/subDesignStore.ts'
 import { useThreadStore } from '../../store/threadStore.ts'
+import { useAgentStore } from '../../store/agentStore.ts'
+import { useRunActivityStore } from '../../store/runActivityStore.ts'
+import { useLearningStore } from '../../store/learningStore.ts'
 import { useOpenDesignPackStore } from '../../store/openDesignPackStore.ts'
 import { useSettingsStore } from '../../store/settingsStore.ts'
 
 export type SubDesignWorkspaceIntegrationOptions = {
   navigate: (path: string) => void
-  refreshProviderState?: () => Promise<void>
-  refreshProjectProviderState?: (projectRoot: string) => Promise<void>
+  refreshProviderState?: (projectRoot?: string) => Promise<void>
+  refreshProjectProviderState?: (projectRoot: string, isCurrent?: () => boolean) => Promise<void>
 }
 
 /**
@@ -47,25 +53,107 @@ export function createSubDesignWorkspaceDependencies(
     createBrief: (input) => useSubDesignStore.getState().createBrief(input),
     selectBrief: (id) => useSubDesignStore.getState().selectBrief(id),
     getDesignSystem: (id) => useSubDesignStore.getState().systems.find((system) => system.id === id) || null,
+    readPresentation: (routeBriefId) => {
+      const projectRoot = useProjectStore.getState().root
+      const subDesign = useSubDesignStore.getState()
+      const threadState = useThreadStore.getState()
+      const linkedThread = routeBriefId
+        ? threadState.threads.find((thread) => thread.subDesignBriefId === routeBriefId) || null
+        : null
+      const linkedThreadRunId = linkedThread ? useAgentStore.getState().getRunIdForThread(linkedThread.id) : null
+      const linkedAgent = linkedThreadRunId ? useAgentStore.getState().runStates[linkedThreadRunId] : null
+      const activityActive = linkedThreadRunId
+        ? useRunActivityStore.getState().getPresentation(linkedThreadRunId)?.active || false
+        : false
+      const artifacts = [...useSubDesignArtifactStore.getState().artifacts]
+      const critiques = [...useSubDesignCritiqueStore.getState().critiques]
+      const briefs = [...subDesign.briefs]
+      return {
+        projectRoot,
+        activeBrief: routeBriefId ? subDesign.findById(routeBriefId) : null,
+        briefs,
+        systems: [...subDesign.systems],
+        systemsLoading: subDesign.systemsLoading,
+        systemsError: subDesign.systemsError,
+        threads: [...threadState.threads],
+        runningThreadIds: [...threadState.runningThreadIds],
+        linkedThread,
+        linkedThreadRunId,
+        linkedAgent: linkedAgent ? { status: linkedAgent.status, executionKind: linkedAgent.executionKind } : null,
+        activityActive,
+        runIsLive: false,
+        artifacts,
+        critiques,
+        critiqueSession: useSubDesignCritiqueSessionStore.getState().current,
+        memoryEntries: [...useLearningStore.getState().memory.entries],
+        cliProviders: [...useSettingsStore.getState().settings.cliProviders],
+        installedOpenDesignPacks: [...useOpenDesignPackStore.getState().packs],
+        openDesignPackBusyId: useOpenDesignPackStore.getState().busyId,
+        openDesignPackError: useOpenDesignPackStore.getState().error,
+        latestPassedPreference: findLatestPassedSubDesignPreference(briefs, artifacts, critiques, {
+          projectRoot,
+          memoryEntries: useLearningStore.getState().memory.entries,
+        }),
+      }
+    },
+    subscribePresentation: (listener) => {
+      const unsubscribeProject = useProjectStore.subscribe(listener)
+      const unsubscribeThreads = useThreadStore.subscribe(listener)
+      const unsubscribeAgents = useAgentStore.subscribe(listener)
+      const unsubscribeActivity = useRunActivityStore.subscribe(listener)
+      const unsubscribeSubDesign = useSubDesignStore.subscribe(listener)
+      const unsubscribeArtifacts = useSubDesignArtifactStore.subscribe(listener)
+      const unsubscribeCritiques = useSubDesignCritiqueStore.subscribe(listener)
+      const unsubscribeCritiqueSession = useSubDesignCritiqueSessionStore.subscribe(listener)
+      const unsubscribeLearning = useLearningStore.subscribe(listener)
+      const unsubscribePacks = useOpenDesignPackStore.subscribe(listener)
+      const unsubscribeSettings = useSettingsStore.subscribe(listener)
+      return () => {
+        unsubscribeProject()
+        unsubscribeThreads()
+        unsubscribeAgents()
+        unsubscribeActivity()
+        unsubscribeSubDesign()
+        unsubscribeArtifacts()
+        unsubscribeCritiques()
+        unsubscribeCritiqueSession()
+        unsubscribeLearning()
+        unsubscribePacks()
+        unsubscribeSettings()
+      }
+    },
+    subscribeModelChanges: (listener) => useSettingsStore.subscribe(listener),
+    updateBrief: (id, patch, projectRoot) => useSubDesignStore.getState().updateBrief(id, patch, projectRoot),
+    selectDirection: (id, directionId, projectRoot) => useSubDesignStore.getState().selectDirection(id, directionId, undefined, projectRoot),
+    refreshSystems: (projectRoot, options) => useSubDesignStore.getState().refreshSystems(projectRoot, options),
+    installOpenDesignPack: (record, projectRoot) => useOpenDesignPackStore.getState().install(record, projectRoot),
+    setOpenDesignPackEnabled: (record, enabled) => useOpenDesignPackStore.getState().setEnabled(record, enabled),
+    setRunPanel: (visible) => useThreadStore.getState().setShowRunPanel(visible),
+    selectThread: (id) => useThreadStore.getState().selectThread(id),
+    stopExecution: (runId) => useAgentStore.getState().stopExecution(runId),
     prepareRun: (input) => prepareSubDesignRun(input),
     runTask,
     buildPrompt: (brief, system) => buildSubDesignPrompt(brief, system || undefined),
     navigate: options.navigate,
-    hydrateProject: async (projectRoot) => {
+    hydrateProject: async ({ projectRoot, isCurrent }: SubDesignWorkspaceHydrationRequest) => {
+      if (!isCurrent()) return
       useThreadStore.getState().hydrate()
-      await useProjectStore.getState().setRoot(projectRoot)
+      if (!isCurrent()) return
       useSubDesignStore.getState().setProjectRoot(projectRoot)
       useSubDesignArtifactStore.getState().setProjectRoot(projectRoot)
       useSubDesignCritiqueStore.getState().setProjectRoot(projectRoot)
       useSubDesignExportStore.getState().setProjectRoot(projectRoot)
       useOpenDesignPackStore.getState().setProjectRoot(projectRoot)
-      await hydrateSubDesignStores(projectRoot || undefined)
+      await hydrateSubDesignStores(projectRoot || undefined, { isCurrent })
+      if (!isCurrent()) return
       await Promise.all([
-        useSubDesignStore.getState().refreshSystems(projectRoot || undefined),
-        options.refreshProjectProviderState?.(projectRoot),
+        useSubDesignStore.getState().refreshSystems(projectRoot || undefined, { isCurrent }),
+        options.refreshProjectProviderState?.(projectRoot, isCurrent),
       ])
     },
-    refreshProviderState: options.refreshProviderState,
+    refreshProviderState: async () => {
+      await options.refreshProviderState?.(useProjectStore.getState().root)
+    },
     loadCatalog: async () => loadOpenDesignCatalog(),
     onCatalogLoaded: async (records) => {
       const catalog = [...records]

@@ -3,6 +3,7 @@ import {
   createSubDesignWorkspace,
   type SubDesignWorkspaceHostEvent,
   type SubDesignWorkspaceDependencies,
+  type SubDesignWorkspacePresentation,
 } from '../src/agent/subdesign/workspace.ts'
 import { hydrateProviderFlags } from '../src/agent/subdesign/providers/providerFlags.ts'
 import type { SubDesignRunPreparation } from '../src/agent/subdesign/pluginExecutionPreparation.ts'
@@ -91,6 +92,40 @@ assert.equal(first.runs[0]?.reuseThreadId, first.briefs[0]?.threadId)
 assert.equal(first.runs[0]?.objective, 'PROMPT:設計商品詳情頁')
 assert.deepEqual(first.runs[0]?.overrides, { marker: 'prepared', model: 'model-selected' })
 assert.deepEqual(first.navigations, ['/subdesign/brief_1'])
+
+const presentationBrief = makeBrief({ id: 'brief_presentation', threadId: 'thread_presentation', stage: 'direction' })
+const presentationWorkspace = createSubDesignWorkspace({
+  ...dependencies({
+    findBrief: (id) => id === presentationBrief.id ? presentationBrief : null,
+    readPresentation: () => ({
+      projectRoot: '/project',
+      activeBrief: presentationBrief,
+      briefs: [presentationBrief],
+      systems: [],
+      systemsLoading: false,
+      systemsError: null,
+      threads: [],
+      runningThreadIds: [],
+      linkedThread: null,
+      linkedThreadRunId: null,
+      linkedAgent: null,
+      activityActive: false,
+      runIsLive: false,
+      artifacts: [],
+      critiques: [],
+      critiqueSession: null,
+      memoryEntries: [],
+      cliProviders: [],
+      installedOpenDesignPacks: [],
+      openDesignPackBusyId: null,
+      openDesignPackError: null,
+      latestPassedPreference: null,
+    } satisfies SubDesignWorkspacePresentation),
+  }).deps,
+})
+presentationWorkspace.sync({ routeBriefId: presentationBrief.id, projectRoot: '/project' })
+assert.equal(presentationWorkspace.getProjection().presentation.activeBrief?.id, 'brief_presentation')
+assert.equal(presentationWorkspace.getProjection().workspace?.briefId, 'brief_presentation')
 
 const missingWorkspace = createSubDesignWorkspace(dependencies().deps)
 const missing = missingWorkspace.resume('brief_missing')
@@ -260,13 +295,48 @@ await runOne
 
 let hydratedRoot = ''
 const hydration = dependencies({
-  hydrateProject: async (root) => { hydratedRoot = root },
+  hydrateProject: async ({ projectRoot: root }) => { hydratedRoot = root },
 })
 const hydrationWorkspace = createSubDesignWorkspace(hydration.deps)
 await hydrationWorkspace.hydrate('/new/project')
 assert.equal(hydratedRoot, '/new/project')
 assert.equal(hydrationWorkspace.getProjection().hydration.status, 'ready')
 assert.deepEqual(hydrationWorkspace.getProjection().capabilities, { electron: false, hostEvents: false })
+
+async function assertHydrationLatestRequestWins(oldRequestOutcome: 'failed' | 'success') {
+  let releaseA!: () => void
+  let releaseB!: () => void
+  const gateA = new Promise<void>((resolve) => { releaseA = resolve })
+  const gateB = new Promise<void>((resolve) => { releaseB = resolve })
+  const appliedRoots: string[] = []
+  const raceWorkspace = createSubDesignWorkspace(dependencies({
+    hydrateProject: async ({ projectRoot: root, isCurrent }) => {
+      if (root === '/project-a') {
+        await gateA
+        if (oldRequestOutcome === 'failed') throw new Error('stale project A failed')
+      } else {
+        await gateB
+      }
+      if (isCurrent()) appliedRoots.push(root)
+    },
+  }).deps)
+  const hydrateA = raceWorkspace.hydrate('/project-a')
+  await Promise.resolve()
+  const hydrateB = raceWorkspace.hydrate('/project-b')
+  await Promise.resolve()
+  releaseB()
+  await hydrateB
+  assert.deepEqual(appliedRoots, ['/project-b'])
+  assert.equal(raceWorkspace.getProjection().projectRoot, '/project-b')
+  assert.equal(raceWorkspace.getProjection().hydration.status, 'ready')
+  releaseA()
+  await hydrateA
+  assert.equal(raceWorkspace.getProjection().projectRoot, '/project-b')
+  assert.equal(raceWorkspace.getProjection().hydration.status, 'ready')
+}
+
+await assertHydrationLatestRequestWins('failed')
+await assertHydrationLatestRequestWins('success')
 
 const hydrationFailure = dependencies({
   hydrateProject: async () => { throw new Error('project unavailable') },

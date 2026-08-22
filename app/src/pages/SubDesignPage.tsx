@@ -12,9 +12,9 @@ import {
   type SubDesignTemplateCategory,
   type SubDesignTemplateCollection,
 } from '../agent/subdesign/templateCatalog'
+import { openDesignPackId } from '../agent/openDesign/packs'
 import type { SubDesignPlatform, SubDesignSurface } from '../agent/subdesign/types'
 import { stageLabel } from '../agent/subdesign/types'
-import { findLatestPassedSubDesignPreference } from '../agent/subdesign/preference'
 import { Icon } from '../components/Icon'
 import { ArtifactDeliveryPanel } from '../components/subdesign/ArtifactDeliveryPanel'
 import { ArtifactPreview } from '../components/subdesign/ArtifactPreview'
@@ -29,19 +29,8 @@ import { SubDesignWorkspaceHeader } from '../components/subdesign/SubDesignWorks
 import { SubDesignRunInspector } from '../components/subdesign/SubDesignRunInspector'
 import { SubDesignProjectStudio } from '../components/subdesign/SubDesignProjectStudio'
 import { SubDesignStudioNav } from '../components/subdesign/SubDesignStudioNav'
-import { createSubDesignWorkspace, deriveSubDesignWorkspace } from '../agent/subdesign/workspace'
+import { createSubDesignWorkspace } from '../agent/subdesign/workspace'
 import { createSubDesignWorkspaceDependencies } from '../agent/subdesign/workspaceIntegration'
-import { useAgentStore } from '../store/agentStore'
-import { useLearningStore } from '../store/learningStore'
-import { useProjectStore } from '../store/projectStore'
-import { useSubDesignArtifactStore } from '../store/subDesignArtifactStore'
-import { useSubDesignCritiqueStore } from '../store/subDesignCritiqueStore'
-import { useSubDesignCritiqueSessionStore } from '../store/subDesignCritiqueSessionStore'
-import { useSubDesignStore } from '../store/subDesignStore'
-import { useThreadStore } from '../store/threadStore'
-import { useRunActivityStore } from '../store/runActivityStore'
-import { useOpenDesignPackStore } from '../store/openDesignPackStore'
-import { useSettingsStore } from '../store/settingsStore'
 import type { ThreadRunner } from '../store/threadStore'
 import {
   DEFAULT_STORYBOOK_PROVIDER_SETTINGS,
@@ -105,37 +94,6 @@ export function SubDesignPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { briefId: routeBriefId } = useParams<{ briefId?: string }>()
-  const threads = useThreadStore((state) => state.threads)
-  const getRunIdForThread = useAgentStore((state) => state.getRunIdForThread)
-  const stopExecution = useAgentStore((state) => state.stopExecution)
-  const projectRoot = useProjectStore((state) => state.root)
-  const cliProviders = useSettingsStore((state) => state.settings.cliProviders)
-  const briefs = useSubDesignStore((state) => state.briefs)
-  const systems = useSubDesignStore((state) => state.systems)
-  const systemsLoading = useSubDesignStore((state) => state.systemsLoading)
-  const refreshSystems = useSubDesignStore((state) => state.refreshSystems)
-  const updateBrief = useSubDesignStore((state) => state.updateBrief)
-  const selectDirection = useSubDesignStore((state) => state.selectDirection)
-  const artifacts = useSubDesignArtifactStore((state) => state.artifacts)
-  const critiques = useSubDesignCritiqueStore((state) => state.critiques)
-  const critiqueSession = useSubDesignCritiqueSessionStore((state) => state.current)
-  const memoryEntries = useLearningStore((state) => state.memory.entries)
-  const installOpenDesignPack = useOpenDesignPackStore((state) => state.install)
-  const setOpenDesignPackEnabled = useOpenDesignPackStore((state) => state.setEnabled)
-  const openDesignPackBusyId = useOpenDesignPackStore((state) => state.busyId)
-  const openDesignPackError = useOpenDesignPackStore((state) => state.error)
-  const runningThreadIds = useThreadStore((state) => state.runningThreadIds)
-  const setShowRunPanel = useThreadStore((state) => state.setShowRunPanel)
-  const linkedThread = useThreadStore((state) =>
-    routeBriefId ? state.threads.find((thread) => thread.subDesignBriefId === routeBriefId) : null,
-  )
-  const linkedThreadRunId = linkedThread?.id ? getRunIdForThread(linkedThread.id) : null
-  const linkedAgent = useAgentStore((state) =>
-    linkedThreadRunId ? state.runStates[linkedThreadRunId] : null,
-  )
-  const activityActive = useRunActivityStore((state) =>
-    linkedThreadRunId ? state.getPresentation(linkedThreadRunId)?.active || false : false,
-  )
 
   const [surfaceId, setSurfaceId] = useState<DesignSurface['id']>('prototype')
   const [platform, setPlatform] = useState<SubDesignPlatform>('responsive')
@@ -147,7 +105,6 @@ export function SubDesignPage() {
   const [templateId, setTemplateId] = useState<string | undefined>()
   const [templateQuery, setTemplateQuery] = useState('')
   const [designSystemPackId, setDesignSystemPackId] = useState<string | undefined>()
-  const [selectedArtifactKey, setSelectedArtifactKey] = useState<string | null>(null)
   const [storybookSettings, setStorybookSettings] = useState<StorybookProviderSettings>(DEFAULT_STORYBOOK_PROVIDER_SETTINGS)
   const [storybookRuns, setStorybookRuns] = useState<SubDesignPluginExecutionProjection[]>([])
   const [providerRuns, setProviderRuns] = useState<SubDesignPluginExecutionProjection[]>([])
@@ -155,13 +112,14 @@ export function SubDesignPage() {
     DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS,
   )
 
-  const refreshStorybookState = useCallback(async (requestedProjectRoot?: string) => {
-    const currentProjectRoot = requestedProjectRoot ?? useProjectStore.getState().root
+  const refreshStorybookState = useCallback(async (requestedProjectRoot = '', isCurrent?: () => boolean) => {
+    const currentProjectRoot = requestedProjectRoot
     const [state, runs, experimental] = await Promise.all([
       loadStorybookProviderState(currentProjectRoot || undefined),
       loadAllProviderRuns(currentProjectRoot || undefined),
       loadExperimentalSurfaceSettings(currentProjectRoot || undefined),
     ])
+    if (isCurrent && !isCurrent()) return
     setStorybookSettings(state.settings)
     setStorybookRuns(state.runs)
     setProviderRuns(runs)
@@ -173,7 +131,7 @@ export function SubDesignPage() {
   const workspaceDependencies = useMemo(
     () => createSubDesignWorkspaceDependencies({
       navigate,
-      refreshProviderState: () => refreshStorybookState(),
+      refreshProviderState: refreshStorybookState,
       refreshProjectProviderState: refreshStorybookState,
     }),
     [navigate, refreshStorybookState],
@@ -187,6 +145,19 @@ export function SubDesignPage() {
     workspaceController.getProjection,
     workspaceController.getProjection,
   )
+  const presentation = workspaceProjection.presentation
+  const projectRoot = workspaceProjection.projectRoot
+  const briefs = presentation.briefs
+  const systems = presentation.systems
+  const systemsLoading = presentation.systemsLoading
+  const cliProviders = presentation.cliProviders
+  const linkedThread = presentation.linkedThread
+  const linkedThreadRunId = presentation.linkedThreadRunId
+  const linkedAgent = presentation.linkedAgent
+  const artifacts = presentation.artifacts
+  const openDesignPackBusyId = presentation.openDesignPackBusyId
+  const openDesignPackError = presentation.openDesignPackError
+  const runIsLive = presentation.runIsLive
   const startingRun = workspaceProjection.run.phase === 'starting'
   const pluginDeclaredInputs = workspaceProjection.pluginDeclaredInputs
   const selectedModelId = workspaceProjection.selectedModelId
@@ -243,13 +214,8 @@ export function SubDesignPage() {
   const visibleArtifacts = activeBrief
     ? artifacts.filter((artifact) => artifact.briefId === activeBrief.id)
     : []
-  const selectedArtifact =
-    visibleArtifacts.find((artifact) => `${artifact.id}:${artifact.revision}` === selectedArtifactKey) ||
-    visibleArtifacts[0] ||
-    null
-  const latestCritique = useSubDesignCritiqueStore((state) =>
-    selectedArtifact ? state.latestForArtifact(selectedArtifact.id, selectedArtifact.revision) : null,
-  )
+  const selectedArtifact = workspaceProjection.selectedArtifact
+  const latestCritique = workspaceProjection.latestCritique
   const availableRunners = useMemo(() => {
     const values: ThreadRunner[] = ['builtin']
     for (const provider of cliProviders || []) {
@@ -265,24 +231,12 @@ export function SubDesignPage() {
     }
     return values
   }, [cliProviders])
-  const workspace = activeBrief
-    ? deriveSubDesignWorkspace({
-        brief: activeBrief,
-        artifacts: visibleArtifacts,
-        selectedArtifact,
-        critique: latestCritique,
-        critiqueSession,
-        runStatus: startingRun ? 'running' : linkedAgent?.status,
-      })
-    : null
+  const workspace = workspaceProjection.workspace
   const selectedCatalogRecord = catalogRecords.find((record) => record.id === templateId) || null
-  const latestPassedPreference = useMemo(
-    () => findLatestPassedSubDesignPreference(briefs, artifacts, critiques, { projectRoot, memoryEntries }),
-    [artifacts, briefs, critiques, memoryEntries, projectRoot],
-  )
-  const installedOpenDesignPack = useOpenDesignPackStore((state) =>
-    selectedCatalogRecord ? state.installed(selectedCatalogRecord) : null,
-  )
+  const latestPassedPreference = presentation.latestPassedPreference
+  const installedOpenDesignPack = selectedCatalogRecord
+    ? presentation.installedOpenDesignPacks.find((pack) => pack.id === openDesignPackId(selectedCatalogRecord)) || null
+    : null
   // Design System Packs are vendor DESIGN.md content (kind:'design-system'), distinct from the
   // project-owned Design Systems scanned by refreshSystems() — see CONTEXT.md and
   // docs/adr/0001-opendesign-catalog-is-source-of-truth.md. Installing one copies it into
@@ -292,20 +246,9 @@ export function SubDesignPage() {
     [catalogRecords],
   )
   const selectedDesignSystemPackRecord = designSystemPackRecords.find((record) => record.id === designSystemPackId) || null
-  const installedDesignSystemPack = useOpenDesignPackStore((state) =>
-    selectedDesignSystemPackRecord ? state.installed(selectedDesignSystemPackRecord) : null,
-  )
-
-  const runIsLive = Boolean(
-      activeBrief &&
-      (startingRun || runningThreadIds.includes(activeBrief.threadId)) &&
-      (startingRun ||
-        Boolean(linkedThreadRunId) ||
-        activityActive ||
-        ['running', 'parsing', 'manual_intervention', 'awaiting_user'].includes(
-          linkedAgent?.status || 'idle',
-        )),
-  )
+  const installedDesignSystemPack = selectedDesignSystemPackRecord
+    ? presentation.installedOpenDesignPacks.find((pack) => pack.id === openDesignPackId(selectedDesignSystemPackRecord)) || null
+    : null
 
   const workspaceHydrationError = workspaceProjection.hydration.status === 'failed'
     ? workspaceProjection.hydration.reason || 'SubDesign 專案狀態載入失敗。'
@@ -315,8 +258,8 @@ export function SubDesignPage() {
     : null
 
   useEffect(() => {
-    workspaceController.sync({ routeBriefId, projectRoot })
-  }, [briefs, projectRoot, routeBriefId, workspaceController])
+    workspaceController.sync({ routeBriefId })
+  }, [routeBriefId, workspaceController])
 
   useEffect(() => {
     void workspaceController.hydrate(projectRoot || '')
@@ -325,8 +268,6 @@ export function SubDesignPage() {
   useEffect(() => {
     void workspaceController.refreshCatalog()
     void workspaceController.refreshModels()
-    const unsubscribe = useSettingsStore.subscribe(() => { void workspaceController.refreshModels() })
-    return unsubscribe
   }, [workspaceController])
 
   useEffect(() => {
@@ -340,17 +281,17 @@ export function SubDesignPage() {
     if (!routeBriefId) return
     // SubDesign owns the live thread presentation on this route. The global
     // transcript remains available through the explicit「執行摘要」action.
-    setShowRunPanel(false)
-  }, [linkedThreadRunId, routeBriefId, setShowRunPanel])
+    workspaceController.setRunPanel(false)
+  }, [linkedThreadRunId, routeBriefId, workspaceController])
 
   useEffect(() => {
     const requestedDesignSystemId = new URLSearchParams(location.search).get('designSystemId')
     if (!requestedDesignSystemId || !systems.some((system) => system.id === requestedDesignSystemId)) return
     setDesignSystemId(requestedDesignSystemId)
     if (activeBrief && activeBrief.designSystemId !== requestedDesignSystemId) {
-      updateBrief(activeBrief.id, { designSystemId: requestedDesignSystemId }, projectRoot || undefined)
+      workspaceController.updateBrief(activeBrief.id, { designSystemId: requestedDesignSystemId }, projectRoot || undefined)
     }
-  }, [activeBrief, location.search, projectRoot, systems, updateBrief])
+  }, [activeBrief, location.search, projectRoot, systems, workspaceController])
 
   useEffect(() => {
     if (!latestPassedPreference) return
@@ -361,7 +302,7 @@ export function SubDesignPage() {
   const startSubDesign = async () => {
     const preferredDesignSystemId = designSystemId || latestPassedPreference?.designSystemId
     const preferredTemplateId = templateId || latestPassedPreference?.templateId
-    setShowRunPanel(false)
+    workspaceController.setRunPanel(false)
     await workspaceController.create({
       objective: brief,
       surface: activeSurface.id,
@@ -387,21 +328,20 @@ export function SubDesignPage() {
 
   const startBriefRun = async () => {
     if (!activeBrief || runIsLive) return
-    setShowRunPanel(false)
+    workspaceController.setRunPanel(false)
     await workspaceController.start()
   }
 
   const submitStudioFollowUp = async (value: string) => {
     if (!activeBrief || !value.trim()) return
-    setShowRunPanel(false)
+    workspaceController.setRunPanel(false)
     await workspaceController.followUp(value)
   }
 
   const openTranscript = () => {
     if (!activeBrief) return
-    const threadStore = useThreadStore.getState()
-    threadStore.selectThread(activeBrief.threadId)
-    threadStore.setShowRunPanel(true)
+    workspaceController.selectThread(activeBrief.threadId)
+    workspaceController.setRunPanel(true)
     navigate(`/?thread=${encodeURIComponent(activeBrief.threadId)}`)
   }
 
@@ -480,11 +420,11 @@ export function SubDesignPage() {
         onBack={() => navigate('/subdesign')}
         onOpenDesignSystems={() => navigate(`/design-systems?returnTo=${encodeURIComponent(`/subdesign/${activeBrief.id}`)}&briefId=${encodeURIComponent(activeBrief.id)}`)}
         onStartRun={() => void startBriefRun()}
-        onStopRun={() => { if (linkedThreadRunId) stopExecution(linkedThreadRunId) }}
+        onStopRun={() => { if (linkedThreadRunId) workspaceController.stopExecution(linkedThreadRunId) }}
         onSubmitFollowUp={submitStudioFollowUp}
         onOpenTranscript={openTranscript}
-        onSelectArtifact={(artifact) => setSelectedArtifactKey(`${artifact.id}:${artifact.revision}`)}
-        onSelectDirection={(directionId) => { selectDirection(activeBrief.id, directionId, undefined, projectRoot || undefined) }}
+        onSelectArtifact={(artifact) => workspaceController.setSelectedArtifact(`${artifact.id}:${artifact.revision}`)}
+        onSelectDirection={(directionId) => { workspaceController.selectDirection(activeBrief.id, directionId, projectRoot || undefined) }}
         storybookSettings={storybookSettings}
         latestStorybookRun={storybookRuns.find((item) => item.briefId === activeBrief.id) || storybookRuns[0] || null}
         experimentalSettings={experimentalSettings}
@@ -598,7 +538,7 @@ export function SubDesignPage() {
                   onChange={(event) => {
                     const nextId = event.target.value
                     setDesignSystemId(nextId)
-                    if (activeBrief) updateBrief(activeBrief.id, { designSystemId: nextId || undefined }, projectRoot || undefined)
+                    if (activeBrief) workspaceController.updateBrief(activeBrief.id, { designSystemId: nextId || undefined }, projectRoot || undefined)
                   }}
                   className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
                   aria-label="Design system"
@@ -638,7 +578,7 @@ export function SubDesignPage() {
             <span className="inline-flex items-center gap-1.5 truncate"><Icon name="folder" size={15} />{projectRoot ? projectRoot.split(/[\\/]/).filter(Boolean).pop() : '尚未選擇工作目錄'}</span>
             <button
               type="button"
-              onClick={() => void refreshSystems(projectRoot || undefined)}
+              onClick={() => void workspaceController.refreshSystems()}
               className="ml-auto inline-flex items-center gap-1 text-[12px] text-outline hover:text-primary"
             >
               <Icon name="refresh" size={14} />{systemsLoading ? '掃描中…' : '更新'}
@@ -688,11 +628,11 @@ export function SubDesignPage() {
                   disabled={openDesignPackBusyId === `open-design:${selectedDesignSystemPackRecord.id}` || !projectRoot}
                   onClick={async () => {
                     if (installedDesignSystemPack) {
-                      await setOpenDesignPackEnabled(selectedDesignSystemPackRecord, !installedDesignSystemPack.enabled)
+                      await workspaceController.setOpenDesignPackEnabled(selectedDesignSystemPackRecord, !installedDesignSystemPack.enabled)
                       return
                     }
-                    const installed = await installOpenDesignPack(selectedDesignSystemPackRecord, projectRoot || undefined)
-                    if (installed) void refreshSystems(projectRoot || undefined)
+                    const installed = await workspaceController.installOpenDesignPack(selectedDesignSystemPackRecord, projectRoot || undefined)
+                    if (installed) void workspaceController.refreshSystems()
                   }}
                   className="shrink-0 rounded-lg border border-primary/35 px-3 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/10 disabled:opacity-50"
                 >
@@ -874,8 +814,8 @@ export function SubDesignPage() {
                   type="button"
                   disabled={openDesignPackBusyId === `open-design:${selectedCatalogRecord.id}`}
                   onClick={() => {
-                    if (installedOpenDesignPack) void setOpenDesignPackEnabled(selectedCatalogRecord, !installedOpenDesignPack.enabled)
-                    else void installOpenDesignPack(selectedCatalogRecord, projectRoot || undefined)
+                    if (installedOpenDesignPack) void workspaceController.setOpenDesignPackEnabled(selectedCatalogRecord, !installedOpenDesignPack.enabled)
+                    else void workspaceController.installOpenDesignPack(selectedCatalogRecord, projectRoot || undefined)
                   }}
                   className="rounded-lg border border-primary/35 px-3 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/10 disabled:opacity-50"
                 >
@@ -901,25 +841,7 @@ export function SubDesignPage() {
             <div className="mt-3 divide-y divide-white/[0.08] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
               {briefs.slice(0, 4).map((item) => {
                 const surface = SURFACES.find((candidate) => candidate.id === item.surface) || SURFACES[0]
-                const itemArtifacts = artifacts.filter((artifact) => artifact.briefId === item.id)
-                const itemLatestArtifact = [...itemArtifacts].sort((left, right) => {
-                  if (right.revision !== left.revision) return right.revision - left.revision
-                  return right.updatedAt.localeCompare(left.updatedAt)
-                })[0]
-                const itemCritique = itemLatestArtifact
-                  ? critiques
-                      .filter((critique) => critique.artifactId === itemLatestArtifact.id && critique.revision === itemLatestArtifact.revision)
-                      .sort((left, right) => (right.createdAt || '').localeCompare(left.createdAt || ''))[0]
-                  : null
-                const itemThread = threads.find((thread) => thread.id === item.threadId)
-                const itemRunStatus = runningThreadIds.includes(item.threadId) ? 'running' : itemThread?.lastStatus
-                const itemWorkspace = deriveSubDesignWorkspace({
-                  brief: item,
-                  artifacts: itemArtifacts,
-                  selectedArtifact: itemLatestArtifact,
-                  critique: itemCritique,
-                  runStatus: itemRunStatus,
-                })
+                const itemWorkspace = workspaceProjection.workspacesByBriefId[item.id]
                 return (
                   <button
                     key={item.id}
@@ -948,7 +870,7 @@ export function SubDesignPage() {
               <ArtifactRail
                 artifacts={visibleArtifacts}
                 selectedKey={`${selectedArtifact.id}:${selectedArtifact.revision}`}
-                onSelect={(artifact) => setSelectedArtifactKey(`${artifact.id}:${artifact.revision}`)}
+                onSelect={(artifact) => workspaceController.setSelectedArtifact(`${artifact.id}:${artifact.revision}`)}
               />
               <ArtifactPreview artifact={selectedArtifact} />
             </div>

@@ -65,7 +65,7 @@ interface SubDesignStore {
   selectBrief: (id: string | null) => void
   findByThreadId: (threadId: string) => SubDesignBrief | null
   findById: (id: string) => SubDesignBrief | null
-  refreshSystems: (projectRoot?: string) => Promise<DesignSystemSummary[]>
+  refreshSystems: (projectRoot?: string, options?: { isCurrent?: () => boolean }) => Promise<DesignSystemSummary[]>
   setSystems: (systems: DesignSystemSummary[]) => void
 }
 
@@ -142,13 +142,17 @@ export const useSubDesignStore = create<SubDesignStore>((set, get) => ({
 
   findById: (id) => get().briefs.find((brief) => brief.id === id) || null,
 
-  refreshSystems: async (projectRoot) => {
+  refreshSystems: async (projectRoot, options = {}) => {
+    const isCurrent = options.isCurrent || (() => true)
+    if (!isCurrent()) return []
     set({ systemsLoading: true, systemsError: null })
     try {
       const systems = await scanDesignSystems(projectRoot)
+      if (!isCurrent()) return []
       set({ systems, systemsLoading: false })
       return systems
     } catch (error) {
+      if (!isCurrent()) return []
       const message = error instanceof Error ? error.message : String(error)
       set({ systemsLoading: false, systemsError: message })
       return []
