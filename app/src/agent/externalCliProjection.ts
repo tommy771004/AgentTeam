@@ -7,62 +7,14 @@
  * disposable activity/thread projections.
  */
 
-import type {
-  ExternalCliLifecycleEvent,
-  ExternalCliSessionSnapshot,
-} from './externalCliRunSession.ts'
-import type { CliStreamPayload } from '../store/runActivityStore.ts'
-
-type ReconnectedCliStream = {
-  runId: string
-  kind: CliStreamPayload['kind']
-  title?: string
-  detail?: string
-  tool?: string
-  ok?: boolean
-  channel?: 'thought' | 'text' | 'stdout' | 'stderr'
-  sessionPhase?: string
-  terminalClassification?: string
-}
+import type { ExternalCliLifecycleEvent, ExternalCliSessionSnapshot } from './externalCliRunSession.ts'
+import {
+  externalLifecycleToStream,
+  externalTerminalStatus,
+  type ExternalCliStreamProjection,
+} from './externalCliLifecycleProjection.ts'
 
 const reconnectedExternalSessionCursors = new Map<string, number>()
-
-function externalLifecycleToStream(event: ExternalCliLifecycleEvent): ReconnectedCliStream {
-  const base = { runId: event.runId, sessionPhase: event.phase }
-  switch (event.type) {
-    case 'process_started':
-      return { ...base, kind: 'status', title: 'CLI 程序已啟動', detail: event.detail }
-    case 'model_activity':
-      return { ...base, kind: 'status', title: 'CLI 模型活動', detail: event.detail || event.delta }
-    case 'provider_activity':
-      return { ...base, kind: 'status', title: 'CLI session activity', detail: event.detail }
-    case 'tool_started':
-      return { ...base, kind: 'tool', title: `開始 ${event.tool || event.operation || '工具操作'}`, tool: event.tool, detail: event.detail }
-    case 'tool_completed':
-      return { ...base, kind: 'tool', title: `完成 ${event.tool || event.operation || '工具操作'}`, tool: event.tool, detail: event.detail, ok: event.ok !== false }
-    case 'process_output':
-      return { ...base, kind: 'chunk', title: event.channel === 'stderr' ? 'stderr' : 'stdout', detail: event.detail, channel: event.channel }
-    case 'diagnostic':
-      return { ...base, kind: event.severity === 'error' ? 'error' : 'log', title: 'CLI 診斷', detail: event.detail, ok: event.severity !== 'error' }
-    case 'connector_authentication_required':
-      return { ...base, kind: event.required ? 'error' : 'log', title: event.required ? 'Connector 驗證阻擋執行' : 'Connector 驗證提醒', detail: event.detail, ok: !event.required }
-    case 'waiting_for_user':
-      return { ...base, kind: 'status', title: '等待你的回覆', detail: event.detail }
-    case 'waiting_for_approval':
-      return { ...base, kind: 'status', title: '等待核准', detail: event.detail }
-    case 'input_received':
-      return { ...base, kind: 'status', title: '已收到使用者回覆', detail: event.detail }
-    case 'approval_received':
-      return { ...base, kind: 'status', title: event.approved ? '已核准' : '已拒絕', detail: event.detail, ok: event.approved }
-    case 'operation_timeout':
-      return { ...base, kind: 'error', title: 'CLI 工具操作逾時', detail: event.detail, ok: false, terminalClassification: 'operation-timeout' }
-    case 'process_exit': {
-      const classification = event.detail || undefined
-      const ok = classification === 'success' || (event.code === 0 && !event.signal)
-      return { ...base, kind: ok ? 'done' : 'error', title: ok ? 'CLI 完成' : 'CLI 結束', detail: event.detail, ok, terminalClassification: classification }
-    }
-  }
-}
 
 function isExternalCliSessionSnapshot(value: unknown): value is ExternalCliSessionSnapshot {
   if (!value || typeof value !== 'object') return false
@@ -93,30 +45,40 @@ export async function reconnectExternalCliSessions(): Promise<number> {
     const previousCursor = reconnectedExternalSessionCursors.get(raw.runId) || 0
     let snapshot = raw
     let events = raw.events || []
+    let replayGap = false
     if (api.sessionEvents) {
       try {
         const response = await api.sessionEvents({ runId: raw.runId, cursor: previousCursor }) as { snapshot?: unknown; events?: unknown[]; replayGap?: boolean } | null
         if (isExternalCliSessionSnapshot(response?.snapshot)) snapshot = response.snapshot
-        const replay = response?.replayGap && isExternalCliSessionSnapshot(response?.snapshot)
+        replayGap = response?.replayGap === true
+        const replay = replayGap && isExternalCliSessionSnapshot(response?.snapshot)
           ? response.snapshot.events
           : response?.events
-        if (Array.isArray(replay)) events = replay.filter((event): event is ExternalCliLifecycleEvent => Boolean(event && typeof event === 'object' && typeof (event as { type?: unknown }).type === 'string'))
+        events = Array.isArray(replay)
+          ? replay.filter((event): event is ExternalCliLifecycleEvent => Boolean(event && typeof event === 'object' && typeof (event as { type?: unknown }).type === 'string'))
+          : []
       } catch {
-        /* The bounded snapshot remains usable when replay is unavailable. */
+        // If the Host replay endpoint is temporarily unavailable, only apply
+        // events newer than the acknowledged cursor. Replaying the complete
+        // snapshot on every poll would duplicate renderer activity.
+        events = events.filter((event) => event.sequence > previousCursor)
       }
+    } else {
+      events = events.filter((event) => event.sequence > previousCursor)
     }
     const activity = useRunActivityStore.getState()
-    if (previousCursor === 0) activity.begin(snapshot.runId)
+    // A replay gap is a state reconstruction, not an append. Reset the
+    // disposable projection before applying the retained event window.
+    if (previousCursor === 0 || replayGap) activity.begin(snapshot.runId)
+    const seen = new Set<number>()
     for (const event of events) {
       if (!event || typeof event !== 'object' || typeof event.type !== 'string') continue
-      activity.handleCliStream(externalLifecycleToStream(event))
+      if (seen.has(event.sequence)) continue
+      seen.add(event.sequence)
+      activity.handleCliStream(externalLifecycleToStream(event) as ExternalCliStreamProjection)
     }
-    const status = snapshot.phase === 'waiting_for_user'
-      ? '等待你的回覆'
-      : snapshot.phase === 'waiting_for_approval'
-        ? '等待核准'
-        : '外部 CLI 執行中'
-    activity.setStatus(status, snapshot.runId)
+    const terminalProjection = externalTerminalStatus(snapshot)
+    activity.setStatus(terminalProjection.status, snapshot.runId)
     useThreadStore.getState().setExternalRun(snapshot.conversationId, {
       provider: snapshot.adapter,
       adapter: snapshot.adapter,
@@ -124,16 +86,44 @@ export async function reconnectExternalCliSessions(): Promise<number> {
       conversationId: snapshot.conversationId,
       processId: snapshot.processId,
       sessionId: snapshot.providerSessionId,
-      status: 'running',
+      status: terminalProjection.externalStatus,
+      completionReason: snapshot.terminal?.reason || snapshot.terminal?.classification,
       eventCursor: snapshot.eventCursor,
       lastActivityAt: snapshot.lastMeaningfulActivityAt !== undefined
         ? new Date(snapshot.lastMeaningfulActivityAt).toISOString()
         : undefined,
       outputOmittedBytes: snapshot.output.omittedBytes,
       startedAt: new Date(snapshot.startedAt).toISOString(),
+      finishedAt: snapshot.terminal ? new Date(snapshot.terminal.at).toISOString() : undefined,
     })
     reconnectedExternalSessionCursors.set(snapshot.runId, snapshot.eventCursor)
     restored += 1
   }
   return restored
+}
+
+/**
+ * Cursor-poll Host state until every observed session is terminal.  This is
+ * intentionally polling rather than holding an Electron sender callback, so
+ * a renderer reload cannot leave a stale webContents subscription behind.
+ */
+export function startExternalCliSessionProjection(intervalMs = 750): () => void {
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let inFlight = false
+  const poll = async () => {
+    if (stopped || inFlight) return
+    inFlight = true
+    try {
+      await reconnectExternalCliSessions()
+    } finally {
+      inFlight = false
+      if (!stopped) timer = setTimeout(() => { void poll() }, Math.max(250, intervalMs))
+    }
+  }
+  void poll()
+  return () => {
+    stopped = true
+    if (timer !== undefined) clearTimeout(timer)
+  }
 }

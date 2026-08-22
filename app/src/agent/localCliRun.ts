@@ -3,7 +3,7 @@
  */
 
 import type { AgentState, ApprovalMode, CliConfigSnapshot, ExternalRunRef, RuntimeOverrides } from './types.ts'
-import type { ExternalCliRunPolicy } from './externalCliRunSession.ts'
+import type { ExternalCliConnectorRequirement, ExternalCliRunPolicy } from './externalCliRunSession.ts'
 import { emptyKnowledge } from './knowledge.ts'
 import { resolveCliApproval } from './cliApproval.ts'
 import {
@@ -56,6 +56,7 @@ export async function runPromptViaLocalCli(opts: {
   externalCliContract?: RuntimeOverrides['externalCliContract']
   /** Host-owned timing policy captured with the immutable task snapshot. */
   externalCliPolicy?: Partial<ExternalCliRunPolicy>
+  requiredConnectors?: ExternalCliConnectorRequirement[]
   onLog?: (line: string) => void
 }): Promise<{
   ok: boolean
@@ -209,6 +210,7 @@ export async function runPromptViaLocalCli(opts: {
     sandboxWrap,
     effectiveMode,
     externalCliPolicy: opts.externalCliPolicy,
+    requiredConnectors: opts.requiredConnectors,
     conversationId: opts.conversationId || opts.threadId,
     runId: opts.runId,
     attachments: (gated.attachments as typeof opts.attachments) ?? opts.attachments,

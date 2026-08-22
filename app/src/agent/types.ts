@@ -2,7 +2,7 @@
 export type LoopType = 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
 
 import type { ExternalCliDelegateContract } from './runners/types.ts'
-import type { ExternalCliRunPolicy } from './externalCliRunSession.ts'
+import type { ExternalCliConnectorRequirement, ExternalCliRunPolicy, ExternalCliTerminalClassification } from './externalCliRunSession.ts'
 
 /** Chat composer attachment (images / text files) — pure type, no DOM */
 export type ChatAttachmentKind = 'image' | 'text' | 'binary'
@@ -254,6 +254,7 @@ export interface RuntimeOverrides {
   timeoutMs?: number
   /** Immutable External CLI supervision policy captured at task admission. */
   externalCliPolicy?: Partial<ExternalCliRunPolicy>
+  externalCliRequiredConnectors?: ExternalCliConnectorRequirement[]
   useLlm?: boolean
   /** Per-conversation model override (does not change global settings permanently) */
   model?: string
@@ -487,7 +488,7 @@ export interface ExternalRunRef {
   configFingerprint?: string
   status?: ExternalRunStatus
   completionReason?: string
-  terminalClassification?: string
+  terminalClassification?: ExternalCliTerminalClassification
   eventCursor?: number
   lastActivityAt?: string
   outputOmittedBytes?: number

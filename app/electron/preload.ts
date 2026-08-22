@@ -948,6 +948,7 @@ const api = {
       runId?: string
       conversationId?: string
       externalCliPolicy?: Record<string, number>
+      requiredConnectors?: Array<{ connector?: string; server?: string; operation?: string }>
       configSnapshot?: unknown
       /** Chat attachments (images as data URL) — written to disk for the CLI */
       attachments?: Array<{
@@ -1012,12 +1013,14 @@ const api = {
     },
     /** Stop in-flight CLI agent (and tagged cli-agent bash) */
     cancel: (runId?: string) =>
-      ipcRenderer.invoke('cli:cancel', runId) as Promise<{ ok: boolean; killed: number }>,
+      ipcRenderer.invoke('cli:cancel', runId) as Promise<{ ok: boolean; killed: number; confirmed?: boolean }>,
     /** Host-owned session reconstruction after a bounded yield or reload. */
     sessionSnapshot: (runId: string) =>
       ipcRenderer.invoke('cli:sessionSnapshot', runId) as Promise<unknown>,
     sessionSnapshots: () =>
       ipcRenderer.invoke('cli:sessionSnapshots') as Promise<unknown[]>,
+    sessionRecovery: () =>
+      ipcRenderer.invoke('cli:sessionRecovery') as Promise<unknown[]>,
     sessionEvents: (input: { runId: string; cursor?: number }) =>
       ipcRenderer.invoke('cli:sessionEvents', input) as Promise<unknown>,
     sessionYield: (runId: string) =>

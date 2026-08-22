@@ -1,3 +1,8 @@
+import {
+  checkpointFromSnapshot,
+  type ExternalCliCheckpointStore,
+} from './externalCliCheckpoint.ts'
+
 /**
  * Host-neutral contract for a durable external CLI run.
  *
@@ -179,6 +184,12 @@ export type ExternalCliProcessTransport = {
   sendApproval?: (approved: boolean) => Promise<boolean> | boolean
 }
 
+export type ExternalCliConnectorRequirement = {
+  connector?: string
+  server?: string
+  operation?: string
+}
+
 export type ExternalCliLifecycleEventInput =
   | { type: 'process_started'; processId?: string; providerSessionId?: string; detail?: string }
   | { type: 'model_activity'; detail?: string; delta?: string }
@@ -199,6 +210,9 @@ export type ExternalCliLifecycleEventInput =
   | { type: 'waiting_for_approval'; detail?: string }
   | { type: 'input_received'; detail?: string }
   | { type: 'approval_received'; approved: boolean; detail?: string }
+  | { type: 'cancellation_requested'; detail?: string }
+  | { type: 'cancellation_confirmed'; detail?: string }
+  | { type: 'cancellation_unconfirmed'; detail?: string }
   | { type: 'operation_timeout'; operation?: string; detail?: string }
   | { type: 'process_exit'; code: number | null; signal?: string; detail?: string }
 
@@ -258,6 +272,9 @@ export type ExternalCliRunSessionOptions = {
   clock?: ExternalCliClock
   policy?: Partial<ExternalCliRunPolicy>
   unattended?: boolean
+  requiredConnectors?: ExternalCliConnectorRequirement[]
+  adapterSupportsResume?: boolean
+  replaySafeCheckpoint?: boolean
   processId?: string
   providerSessionId?: string
   transport?: ExternalCliProcessTransport
@@ -268,13 +285,18 @@ export type ExternalCliRunSessionOptions = {
 const MAX_EVENTS = 1_000
 const MAX_DETAIL = 600
 
-function safeText(value: unknown, max = MAX_DETAIL): string | undefined {
+function redactText(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const text = value
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
-    .replace(/(token|secret|password|api[_ -]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+    .replace(/(token|secret|password|api[_ -]?key|authorization)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
     .trim()
-  return text ? text.slice(0, max) : undefined
+  return text || undefined
+}
+
+function redactedBoundedText(value: unknown, max = MAX_DETAIL): string | undefined {
+  const text = redactText(value)
+  return text ? takeUtf8Bytes(text, max) : undefined
 }
 
 function classifyTerminalPhase(classification: ExternalCliTerminalClassification): ExternalCliTerminal['phase'] {
@@ -298,6 +320,9 @@ function isMeaningful(event: ExternalCliLifecycleEventInput): boolean {
     case 'connector_authentication_required':
     case 'input_received':
     case 'approval_received':
+    case 'cancellation_requested':
+    case 'cancellation_confirmed':
+    case 'cancellation_unconfirmed':
     case 'operation_timeout':
     case 'process_exit':
       return true
@@ -382,6 +407,9 @@ export class ExternalCliRunSession {
   private readonly conversationId: string
   private readonly adapter: ExternalCliAdapter
   private readonly unattended: boolean
+  private readonly requiredConnectors: ExternalCliConnectorRequirement[]
+  private readonly adapterSupportsResume: boolean
+  private readonly replaySafeCheckpoint: boolean
   private output = ''
   private outputTotalBytes = 0
   private phase: ExternalCliRunPhase = 'starting'
@@ -411,6 +439,13 @@ export class ExternalCliRunSession {
     this.conversationId = options.conversationId
     this.adapter = options.adapter
     this.unattended = options.unattended === true
+    this.requiredConnectors = (options.requiredConnectors || []).map((requirement) => ({
+      connector: redactedBoundedText(requirement.connector, 120)?.toLowerCase(),
+      server: redactedBoundedText(requirement.server, 160)?.toLowerCase(),
+      operation: redactedBoundedText(requirement.operation, 160)?.toLowerCase(),
+    }))
+    this.adapterSupportsResume = options.adapterSupportsResume === true
+    this.replaySafeCheckpoint = options.replaySafeCheckpoint === true
     this.processId = options.processId || options.transport?.processId
     this.providerSessionId = options.providerSessionId || options.transport?.providerSessionId
     this.startedAt = this.clock.now()
@@ -440,17 +475,17 @@ export class ExternalCliRunSession {
     if (isValidLifecycle(input)) this.markStarted()
 
     if (input.type === 'process_started') {
-      this.processId = safeText(input.processId, 160) || this.processId
-      this.providerSessionId = safeText(input.providerSessionId, 200) || this.providerSessionId
+      this.processId = redactedBoundedText(input.processId, 160) || this.processId
+      this.providerSessionId = redactedBoundedText(input.providerSessionId, 200) || this.providerSessionId
     }
     if (input.type === 'provider_activity' && input.providerSessionId) {
-      this.providerSessionId = safeText(input.providerSessionId, 200) || this.providerSessionId
+      this.providerSessionId = redactedBoundedText(input.providerSessionId, 200) || this.providerSessionId
     }
     if (input.type === 'waiting_for_user' || input.type === 'waiting_for_approval') {
-      this.waitingDetail = safeText(input.detail)
+      this.waitingDetail = redactedBoundedText(input.detail)
       this.phase = input.type === 'waiting_for_user' ? 'waiting_for_user' : 'waiting_for_approval'
       this.clearDeadline()
-      this.emit({ ...input, detail: safeText(input.detail) })
+      this.emit({ ...input, detail: redactedBoundedText(input.detail) })
       if (this.unattended) this.scheduleUnattendedDenial()
       return this.snapshot()
     }
@@ -460,23 +495,25 @@ export class ExternalCliRunSession {
       this.clearUnattendedWait()
       this.phase = 'running'
       this.markMeaningfulActivity()
-      this.emit({ ...input, detail: safeText(input.detail) })
+      this.emit({ ...input, detail: redactedBoundedText(input.detail) })
       this.scheduleDeadline(this.policy.idleMs)
       return this.snapshot()
     }
 
     if (input.type === 'connector_authentication_required') {
+      const required = input.required === true || this.isRequiredConnector(input)
       this.markMeaningfulActivity()
       this.emit({
         ...input,
-        connector: safeText(input.connector, 120),
-        server: safeText(input.server, 160),
-        operation: safeText(input.operation, 160),
-        detail: safeText(input.detail),
+        connector: redactedBoundedText(input.connector, 120),
+        server: redactedBoundedText(input.server, 160),
+        operation: redactedBoundedText(input.operation, 160),
+        detail: redactedBoundedText(input.detail),
+        required,
       })
-      if (input.required) {
+      if (required) {
         this.settle('connector-authentication-required', {
-          reason: safeText(input.detail || input.server || input.connector),
+          reason: redactedBoundedText(input.detail || input.server || input.connector),
         })
       } else {
         this.scheduleActivityDeadline()
@@ -486,15 +523,16 @@ export class ExternalCliRunSession {
 
     if (input.type === 'process_output') {
       const rawDetail = typeof input.detail === 'string' ? input.detail : ''
-      const detail = safeText(rawDetail, 20_000) || ''
-      // Keep the retained text bounded and redacted, but count the original
-      // UTF-8 payload so truncation evidence remains honest even when one
-      // provider chunk is larger than the redaction/detail bound.
-      this.appendOutput(detail, utf8ByteLength(rawDetail))
+      // Redact the complete chunk before retaining it.  Truncating first
+      // loses the original tail and makes a single large provider chunk look
+      // like a head-only stream.  The output ring then applies the explicit
+      // head/tail policy and omission metadata.
+      const detail = redactText(rawDetail) || ''
+      this.appendOutput(detail, utf8ByteLength(detail))
       if (isMeaningful({ ...input, detail })) this.markMeaningfulActivity()
-      // Streamed parser events carry the full bounded chunk separately; the
-      // durable session log keeps only a short redacted diagnostic excerpt.
-      this.emit({ ...input, detail: safeText(detail) || '' })
+      // The lifecycle log is still bounded; outputSnapshot carries the
+      // separately retained head and tail for reconstruction.
+      this.emit({ ...input, detail: redactedBoundedText(detail) || '' })
       if (this.phase === 'starting') this.phase = 'running'
       if (this.phase !== 'waiting_for_user' && this.phase !== 'waiting_for_approval') {
         this.scheduleActivityDeadline()
@@ -504,46 +542,59 @@ export class ExternalCliRunSession {
 
     if (isMeaningful(input)) this.markMeaningfulActivity()
     if (input.type === 'operation_timeout') {
-      this.emit({ ...input, operation: safeText(input.operation, 160), detail: safeText(input.detail) })
-      this.settle('operation-timeout', { reason: safeText(input.detail || input.operation) })
+      this.emit({ ...input, operation: redactedBoundedText(input.operation, 160), detail: redactedBoundedText(input.detail) })
+      this.settle('operation-timeout', { reason: redactedBoundedText(input.detail || input.operation) })
       return this.snapshot()
     }
     if (input.type === 'process_exit') {
       if (input.code === 0 && !input.signal) this.settle('success', { code: 0 })
-      else this.settle('process-exit-failure', { code: input.code, signal: safeText(input.signal, 80), reason: safeText(input.detail) })
+      else this.settle('process-exit-failure', { code: input.code, signal: redactedBoundedText(input.signal, 80), reason: redactedBoundedText(input.detail) })
       return this.snapshot()
     }
     if (input.type === 'diagnostic') {
-      this.emit({ ...input, detail: safeText(input.detail) || 'diagnostic' })
+      this.emit({ ...input, detail: redactedBoundedText(input.detail) || 'diagnostic' })
     } else if (input.type === 'process_started') {
       this.emit({
         ...input,
-        processId: safeText(input.processId, 160),
-        providerSessionId: safeText(input.providerSessionId, 200),
-        detail: safeText(input.detail),
+        processId: redactedBoundedText(input.processId, 160),
+        providerSessionId: redactedBoundedText(input.providerSessionId, 200),
+        detail: redactedBoundedText(input.detail),
       })
     } else if (input.type === 'provider_activity') {
       this.emit({
         ...input,
-        providerSessionId: safeText(input.providerSessionId, 200),
-        detail: safeText(input.detail),
+        providerSessionId: redactedBoundedText(input.providerSessionId, 200),
+        detail: redactedBoundedText(input.detail),
       })
     } else if (input.type === 'model_activity') {
       this.emit({
         ...input,
-        detail: safeText(input.detail),
-        delta: safeText(input.delta, MAX_DETAIL),
+        detail: redactedBoundedText(input.detail),
+        delta: redactedBoundedText(input.delta, MAX_DETAIL),
       })
     } else if (input.type === 'tool_started' || input.type === 'tool_completed') {
       this.emit({
         ...input,
-        tool: safeText(input.tool, 160),
-        operation: safeText(input.operation, 160),
-        detail: safeText(input.detail),
+        tool: redactedBoundedText(input.tool, 160),
+        operation: redactedBoundedText(input.operation, 160),
+        detail: redactedBoundedText(input.detail),
       })
     }
     this.scheduleActivityDeadline()
     return this.snapshot()
+  }
+
+  /** Whether this auth event matches a connector capability selected at admission. */
+  isRequiredConnector(input: ExternalCliConnectorRequirement): boolean {
+    const connector = redactedBoundedText(input.connector, 120)?.toLowerCase()
+    const server = redactedBoundedText(input.server, 160)?.toLowerCase()
+    const operation = redactedBoundedText(input.operation, 160)?.toLowerCase()
+    return this.requiredConnectors.some((required) => {
+      if (required.connector && required.connector !== connector) return false
+      if (required.server && required.server !== server) return false
+      if (required.operation && required.operation !== operation) return false
+      return Boolean(required.connector || required.server || required.operation)
+    })
   }
 
   /** Return a bounded observation snapshot. This never terminates the process. */
@@ -594,9 +645,11 @@ export class ExternalCliRunSession {
     // The value is sent only through the Host transport. Do not persist or
     // echo it in lifecycle metadata, but do preserve a user's actual answer
     // (including strings that merely resemble credentials).
-    const safe = typeof input === 'string' ? input.slice(0, 4_000) : ''
+    const boundedInput = typeof input === 'string' ? input.slice(0, 4_000) : ''
     const send = this.transport?.sendInput
-    const result = send ? send(safe) : true
+    // A UI acknowledgement is never evidence that a provider received the
+    // answer.  Missing transport capability is an explicit fail-closed false.
+    const result = send ? send(boundedInput) : false
     return Promise.resolve(result).then((ok) => {
       if (ok) this.observe({ type: 'input_received', detail: 'user input delivered' })
       return ok
@@ -609,7 +662,7 @@ export class ExternalCliRunSession {
       return Promise.resolve(false)
     }
     const send = this.transport?.sendApproval
-    const result = send ? send(approved) : true
+    const result = send ? send(approved) : false
     return Promise.resolve(result).then((ok) => {
       if (ok) this.observe({ type: 'approval_received', approved })
       return ok
@@ -622,7 +675,7 @@ export class ExternalCliRunSession {
     let active = true
     const handle = this.clock.setTimeout(() => {
       if (!active || this.terminal || this.cancellationRequested) return
-      this.observe({ type: 'operation_timeout', operation: safeText(operation, 160), detail: 'operation timeout' })
+      this.observe({ type: 'operation_timeout', operation: redactedBoundedText(operation, 160), detail: 'operation timeout' })
     }, boundedNumber(timeoutMs, this.policy.operationMs, POLICY_LIMITS.operationMs))
     return () => {
       active = false
@@ -640,21 +693,28 @@ export class ExternalCliRunSession {
     this.cancellationRequested = true
     this.clearAllTimers()
     this.cancellationPromise = (async () => {
-      let termination: ExternalCliProcessTermination = { confirmed: true }
+      this.emit({ type: 'cancellation_requested', detail: redactedBoundedText(reason) })
+      let termination: ExternalCliProcessTermination = {
+        confirmed: false,
+        detail: 'process termination confirmation unavailable',
+      }
       try {
         this.terminationRequested = true
-        const result = await this.transport?.terminateTree()
-        if (result) termination = result
+        if (this.transport) {
+          termination = await this.transport.terminateTree()
+        }
       } catch (error) {
         termination = { confirmed: false, detail: error instanceof Error ? error.message : String(error) }
       }
       if (!termination.confirmed) {
+        this.emit({ type: 'cancellation_unconfirmed', detail: redactedBoundedText(termination.detail || reason) })
         this.settle('transport-failure', {
-          reason: safeText(termination.detail || reason),
+          reason: redactedBoundedText(termination.detail || reason),
           terminationConfirmed: false,
         })
       } else {
-        this.settle('user-cancelled', { reason: safeText(reason), terminationConfirmed: true })
+        this.emit({ type: 'cancellation_confirmed', detail: redactedBoundedText(termination.detail || 'process tree closed') })
+        this.settle('user-cancelled', { reason: redactedBoundedText(reason), terminationConfirmed: true })
       }
       return this.settlementValue()
     })()
@@ -667,7 +727,9 @@ export class ExternalCliRunSession {
     this.cancellationRequested = true
     this.clearAllTimers()
     this.terminationRequested = true
-    this.settle('user-cancelled', { reason: safeText(reason), terminationConfirmed: true })
+    this.emit({ type: 'cancellation_requested', detail: redactedBoundedText(reason) })
+    this.emit({ type: 'cancellation_confirmed', detail: 'host reported process tree closed' })
+    this.settle('user-cancelled', { reason: redactedBoundedText(reason), terminationConfirmed: true })
     return this.settlementValue()
   }
 
@@ -676,7 +738,7 @@ export class ExternalCliRunSession {
     if (this.terminal) return this.settlementValue()
     this.clearAllTimers()
     this.requestTermination()
-    this.settle('interrupted', { reason: safeText(reason) })
+    this.settle('interrupted', { reason: redactedBoundedText(reason) })
     return this.settlementValue()
   }
 
@@ -686,6 +748,13 @@ export class ExternalCliRunSession {
       adapterSupportsResume: input.adapterSupportsResume,
       replaySafeCheckpoint: input.replaySafeCheckpoint,
     })
+  }
+
+  recoveryCapabilities(): { adapterSupportsResume: boolean; replaySafeCheckpoint: boolean } {
+    return {
+      adapterSupportsResume: this.adapterSupportsResume,
+      replaySafeCheckpoint: this.replaySafeCheckpoint,
+    }
   }
 
   forceTimeout(classification: Extract<ExternalCliTerminalClassification, 'startup-timeout' | 'idle-timeout' | 'absolute-timeout'>): ExternalCliSettlement {
@@ -701,7 +770,7 @@ export class ExternalCliRunSession {
     if (this.terminal) return this.settlementValue()
     this.clearAllTimers()
     this.requestTermination()
-    this.settle('transport-failure', { reason: safeText(reason), terminationConfirmed: false })
+    this.settle('transport-failure', { reason: redactedBoundedText(reason), terminationConfirmed: false })
     return this.settlementValue()
   }
 
@@ -915,16 +984,20 @@ export function classifyExternalCliDiagnostic(
   line: string,
   context: { adapter: ExternalCliAdapter; connector?: string; server?: string; operation?: string; required?: boolean; headless?: boolean },
 ): ExternalCliDiagnostic {
-  const detail = safeText(line, MAX_DETAIL) || 'external CLI diagnostic'
+  const detail = redactedBoundedText(line, MAX_DETAIL) || 'external CLI diagnostic'
   const auth = /authrequired|authentication\s+required|oauth|bearer\s+realm/i.test(detail)
   if (auth) {
+    const mcp = detail.match(/([A-Za-z0-9][A-Za-z0-9_.-]*)\s+MCP\b/i)
+    const connector = context.connector || mcp?.[1]?.toLowerCase()
+    const server = context.server || (mcp ? `${mcp[1]} MCP` : undefined)
+    const operation = context.operation || detail.match(/operation\s*[:=]\s*([A-Za-z0-9_.-]+)/i)?.[1]
     return {
       kind: 'connector-authentication-required',
       severity: context.required ? 'error' : 'warning',
       detail,
-      connector: safeText(context.connector, 120),
-      server: safeText(context.server, 160),
-      operation: safeText(context.operation, 160),
+      connector: redactedBoundedText(connector, 120),
+      server: redactedBoundedText(server, 160),
+      operation: redactedBoundedText(operation, 160),
       required: context.required === true,
       headlessHint: false,
     }
@@ -975,9 +1048,32 @@ export function evaluateExternalCliRecovery(input: {
 export class ExternalCliRunSessionRegistry {
   private readonly sessions = new Map<string, ExternalCliRunSession>()
   private readonly interactions = new Map<string, Promise<unknown>>()
+  private checkpointStore?: ExternalCliCheckpointStore
+  private recoveryRecords: ReturnType<ExternalCliCheckpointStore['list']> = []
+
+  constructor(options?: { checkpointStore?: ExternalCliCheckpointStore }) {
+    this.checkpointStore = options?.checkpointStore
+  }
+
+  configurePersistence(store: ExternalCliCheckpointStore): void {
+    this.checkpointStore = store
+    for (const session of this.sessions.values()) this.persist(session)
+  }
 
   create(options: ExternalCliRunSessionOptions): ExternalCliRunSession {
-    const session = new ExternalCliRunSession(options)
+    let session: ExternalCliRunSession
+    const persist = () => {
+      if (session) this.persist(session)
+    }
+    session = new ExternalCliRunSession({
+      ...options,
+      onEvent: (event) => {
+        try { options.onEvent?.(event) } finally { persist() }
+      },
+      onSettlement: (settlement) => {
+        try { options.onSettlement?.(settlement) } finally { persist() }
+      },
+    })
     this.sessions.set(options.runId, session)
     return session
   }
@@ -1008,6 +1104,48 @@ export class ExternalCliRunSessionRegistry {
   /** Host reloads only need live sessions; terminal history is already settled. */
   activeSnapshots(): ExternalCliSessionSnapshot[] {
     return this.snapshots().filter((snapshot) => snapshot.active)
+  }
+
+  recoverySnapshots() {
+    return this.recoveryRecords.map((record) => structuredClone(record))
+  }
+
+  /**
+   * Host startup turns checkpoints with a live bit into interrupted records.
+   * No provider retry is launched here; callers must make an explicit
+   * replay-safe decision using the returned evidence.
+   */
+  recoverPersistedSessions(reason = 'Electron host restart; process ownership was lost') {
+    if (!this.checkpointStore) return []
+    const recovered: ReturnType<ExternalCliCheckpointStore['list']> = []
+    for (const record of this.checkpointStore.list()) {
+      if (!record.active) continue
+      const decision = evaluateExternalCliRecovery({
+        providerSessionId: record.providerSessionId,
+        adapterSupportsResume: record.adapterSupportsResume,
+        replaySafeCheckpoint: record.replaySafeCheckpoint,
+      })
+      const interrupted = this.checkpointStore.markInterrupted(record.runId, {
+        at: Date.now(),
+        reason,
+        resumable: decision.resumable,
+        automaticRetry: decision.automaticRetry,
+      })
+      if (interrupted) recovered.push(interrupted)
+    }
+    this.recoveryRecords = recovered
+    return this.recoverySnapshots()
+  }
+
+  private persist(session: ExternalCliRunSession) {
+    if (!this.checkpointStore) return
+    try {
+      this.checkpointStore.save(checkpointFromSnapshot(session.snapshot(), {
+        ...session.recoveryCapabilities(),
+      }))
+    } catch {
+      /* Checkpoint persistence cannot become a run settlement authority. */
+    }
   }
 
   async interact<T>(runId: string, operation: (session: ExternalCliRunSession) => Promise<T> | T): Promise<T> {

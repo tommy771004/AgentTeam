@@ -9,7 +9,7 @@
 import {
   ExternalCliRunSessionRegistry,
   type ExternalCliRunSessionOptions,
-} from '../src/agent/externalCliRunSession'
+} from '../src/agent/externalCliRunSession.ts'
 
 export const externalCliSupervisor = new ExternalCliRunSessionRegistry()
 
@@ -32,4 +32,16 @@ export function interruptExternalCliSessions(reason = 'Electron host stopped') {
     .filter((snapshot) => snapshot.active)
     .map((snapshot) => externalCliSupervisor.get(snapshot.runId)?.markInterrupted(reason))
     .filter(Boolean)
+}
+
+export function configureExternalCliPersistence(store: Parameters<ExternalCliRunSessionRegistry['configurePersistence']>[0]) {
+  externalCliSupervisor.configurePersistence(store)
+}
+
+export function recoverExternalCliSessions(reason?: string) {
+  return externalCliSupervisor.recoverPersistedSessions(reason)
+}
+
+export function listExternalCliRecovery() {
+  return externalCliSupervisor.recoverySnapshots()
 }

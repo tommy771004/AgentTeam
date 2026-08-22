@@ -60,7 +60,7 @@ import {
   stopTelegramGateway,
   type GatewayInbound,
 } from './messagingGateway'
-import { cancelBash, runBash } from './shellBridge'
+import { cancelBashAndWait, runBash } from './shellBridge'
 import {
   clearRewindEntries,
   listRewindEntries,
@@ -136,10 +136,16 @@ import {
   externalCliSessions,
   getExternalCliSession,
   interruptExternalCliSessions,
-  listActiveExternalCliSessions,
+  listExternalCliSessions,
   runLocalCliAgent,
   type LocalCliKind,
 } from './localCliRunner'
+import {
+  configureExternalCliPersistence,
+  recoverExternalCliSessions,
+  listExternalCliRecovery,
+} from './externalCliSupervisor'
+import { JsonExternalCliCheckpointStore } from './externalCliCheckpointStore'
 import {
   executableLookupCommand,
   firstExecutablePath,
@@ -194,6 +200,8 @@ import type { CliConfigSnapshot } from '../src/agent/types'
 import {
   formatExternalCliTerminal,
   normalizeExternalCliRunPolicy,
+  classifyExternalCliDiagnostic,
+  type ExternalCliConnectorRequirement,
 } from '../src/agent/externalCliRunSession'
 import {
   captureMigrationSnapshot,
@@ -720,6 +728,16 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Durable external-session checkpoints are Host metadata only: no prompt,
+  // credential, or event body is written.  Mark process-owned records
+  // interrupted before the renderer starts projecting them.
+  configureExternalCliPersistence(
+    new JsonExternalCliCheckpointStore(path.join(app.getPath('userData'), 'external-cli', 'checkpoints.json')),
+  )
+  const recoveredExternalSessions = recoverExternalCliSessions()
+  if (recoveredExternalSessions.length) {
+    console.warn('[external-cli] recovered interrupted sessions', recoveredExternalSessions.map((record) => record.runId))
+  }
   // Windows taskbar grouping + correct Jump List icon identity
   if (process.platform === 'win32') {
     app.setAppUserModelId('ai.subagents.desktop')
@@ -1666,6 +1684,7 @@ ipcMain.handle(
       runId?: string
       conversationId?: string
       externalCliPolicy?: Record<string, number>
+      requiredConnectors?: ExternalCliConnectorRequirement[]
       configSnapshot?: CliConfigSnapshot
       attachments?: Array<{
         name: string
@@ -1814,6 +1833,7 @@ ipcMain.handle(
         adapter: 'opencode',
         policy: serverPolicy,
         unattended: input.unattended,
+        requiredConnectors: input.requiredConnectors,
         processId: `opencode-server:${serverRunId}`,
         transport: {
           processId: `opencode-server:${serverRunId}`,
@@ -1824,7 +1844,6 @@ ipcMain.handle(
         },
       })
       serverSession.start()
-      serverSession.observe({ type: 'process_started', processId: `opencode-server:${serverRunId}` })
       let server
       try {
         server = await runOpenCodeServerPrompt({
@@ -1836,19 +1855,51 @@ ipcMain.handle(
           agent: input.agentMode === 'plan' ? 'plan' : 'build',
           runId: serverRunId,
           timeoutMs: serverPolicy.absoluteMs,
+          onStarted: (providerSessionId) => {
+            // A server health check is not a provider lifecycle event.  Only
+            // the created session identity proves this run has started.
+            serverSession.observe({
+              type: 'process_started',
+              processId: `opencode-server:${serverRunId}`,
+              providerSessionId,
+              detail: 'OpenCode provider session created',
+            })
+          },
           onEvent: (event) => {
-            if (event.kind === 'text') {
+            if (event.sessionPhase === 'waiting_for_user' || event.sessionPhase === 'waiting_for_approval') {
+              serverSession.observe({ type: event.sessionPhase, detail: event.detail || event.title })
+            } else if (event.kind === 'text') {
               serverSession.observe({ type: 'model_activity', detail: event.delta || event.detail })
             } else if (event.kind === 'tool' || event.kind === 'file') {
               serverSession.observe({ type: 'tool_completed', tool: event.tool, detail: event.detail, ok: event.ok })
             } else if (event.kind === 'error') {
-              serverSession.observe({ type: 'diagnostic', detail: event.detail || event.title || 'OpenCode server error', severity: 'error' })
+              const detail = event.detail || event.title || 'OpenCode server error'
+              const diagnostic = classifyExternalCliDiagnostic(detail, {
+                adapter: 'opencode',
+                server: 'OpenCode server',
+                operation: event.tool,
+                required: serverSession.isRequiredConnector({ server: 'OpenCode server', operation: event.tool }),
+                headless: true,
+              })
+              if (diagnostic.kind === 'connector-authentication-required') {
+                serverSession.observe({
+                  type: 'connector_authentication_required',
+                  connector: diagnostic.connector,
+                  server: diagnostic.server,
+                  operation: diagnostic.operation,
+                  required: diagnostic.required,
+                  detail: diagnostic.detail,
+                })
+              } else {
+                serverSession.observe({ type: 'diagnostic', detail, severity: 'error' })
+              }
             } else {
               serverSession.observe({ type: 'provider_activity', detail: event.detail || event.title })
             }
             const cursor = serverSession.snapshot().eventCursor
             try {
-              if (!evt.sender.isDestroyed()) evt.sender.send('cli:stream', { ...event, runId: serverRunId, sequence: cursor, sessionPhase: serverSession.snapshot().phase })
+              const target = mainWindow?.webContents
+              if (target && !target.isDestroyed()) target.send('cli:stream', { ...event, runId: serverRunId, sequence: cursor, sessionPhase: serverSession.snapshot().phase })
             } catch {
               /* ignore */
             }
@@ -1898,17 +1949,23 @@ ipcMain.handle(
             detail: 'OpenCode provider session identity observed',
           })
         }
-        if (server.timedOut && !serverSession.snapshot().terminal) serverSession.forceTimeout('absolute-timeout')
+        if (server.timedOut && !serverSession.snapshot().terminal) {
+          serverSession.forceTimeout(serverSession.snapshot().firstValidLifecycleAt === undefined ? 'startup-timeout' : 'absolute-timeout')
+        }
         else if (server.cancelled && !serverSession.snapshot().terminal) serverSession.cancelObserved('使用者取消')
         else if (!serverSession.snapshot().terminal) serverSession.observe({ type: 'process_exit', code: server.ok ? 0 : 1, detail: server.error })
         const sessionSnapshot = serverSession.snapshot()
         const terminal = sessionSnapshot.terminal
+        // The Host session classification wins over an adapter's raw HTTP
+        // result, including a provider that exits zero after required auth or
+        // cancellation has already settled the run.
+        const resultOk = terminal ? terminal.classification === 'success' : server.ok
         const result = {
-          ok: server.ok,
+          ok: resultOk,
           output: server.output,
           command: `opencode server ${server.baseUrl || input.serverUrl || ''} session=${server.sessionId || '—'}`,
           kind: 'opencode' as const,
-          code: server.ok ? 0 : 1,
+          code: resultOk ? 0 : 1,
           timedOut: server.timedOut,
           cancelled: server.cancelled,
           error: terminal ? formatExternalCliTerminal(terminal, { headless: true }) : server.error,
@@ -1939,16 +1996,21 @@ ipcMain.handle(
         externalCliSessions.remove(serverRunId)
         return result
       }
+      if (!serverSession.snapshot().terminal) {
+        serverSession.failTransport(server.error || 'OpenCode server unavailable; falling back to CLI')
+      }
       externalCliSessions.remove(serverRunId)
     }
     return runLocalCliAgent({
       ...input,
       cwd,
+      requiredConnectors: input.requiredConnectors,
       attachments,
       onStream: (ev) => {
         try {
-          if (!evt.sender.isDestroyed()) {
-            evt.sender.send('cli:stream', ev)
+            const target = mainWindow?.webContents
+            if (target && !target.isDestroyed()) {
+            target.send('cli:stream', ev)
           }
         } catch {
           /* ignore */
@@ -1965,10 +2027,10 @@ ipcMain.handle('cli:cancel', async (_evt, runId?: string) => {
     if (sessionCancel.ok) return { ok: true, killed: 1 }
   }
   const [cli, server] = await Promise.all([
-    Promise.resolve(runId ? cancelBash({ runId }) : cancelBash({ tag: 'cli-agent' })),
+    cancelBashAndWait(runId ? { runId } : { tag: 'cli-agent' }),
     abortOpenCodeRun(runId),
   ])
-  return { ok: cli.ok || server.ok, killed: cli.killed + server.killed }
+  return { ok: cli.ok || server.ok, killed: cli.killed + server.killed, confirmed: cli.confirmed || server.ok }
 })
 
 /** Reconnect to a Host-owned external session after renderer reload. */
@@ -1977,7 +2039,9 @@ ipcMain.handle('cli:sessionSnapshot', async (_evt, runId: string) => {
   return session?.snapshot() || null
 })
 
-ipcMain.handle('cli:sessionSnapshots', async () => listActiveExternalCliSessions())
+ipcMain.handle('cli:sessionSnapshots', async () => listExternalCliSessions())
+
+ipcMain.handle('cli:sessionRecovery', async () => listExternalCliRecovery())
 
 ipcMain.handle('cli:sessionEvents', async (_evt, input: { runId: string; cursor?: number }) => {
   const session = getExternalCliSession(String(input?.runId || ''))

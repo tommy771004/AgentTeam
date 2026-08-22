@@ -8,7 +8,7 @@ import type {
   PostStateOutcome,
   RuntimeOverrides,
 } from '../agent/types.ts'
-import type { ExternalCliRunPolicy } from '../agent/externalCliRunSession.ts'
+import type { ExternalCliConnectorRequirement, ExternalCliRunPolicy } from '../agent/externalCliRunSession.ts'
 import { isElectronPiProduction } from '../agent/piProduction.ts'
 import { piThinkingLevelForDepth } from '../agent/thinking.ts'
 import { runCapacity } from '../agent/runConcurrency.ts'
@@ -83,6 +83,7 @@ interface AgentStore {
     externalCliContract?: RuntimeOverrides['externalCliContract']
     /** Immutable Host supervision policy for the external session. */
     externalCliPolicy?: Partial<ExternalCliRunPolicy>
+    requiredConnectors?: ExternalCliConnectorRequirement[]
     /** Chat attachments for CLI (written to disk in Electron) */
     attachments?: Array<{
       name: string

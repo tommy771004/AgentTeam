@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:net'
 import { spawnCommandSpec, terminateProcessTree } from './platformProcess'
 import { getVaultSecret } from './secretsVault'
-import { normalizeExternalCliRunPolicy } from '../src/agent/externalCliRunSession'
+import { normalizeExternalCliRunPolicy, type ExternalCliRunPhase } from '../src/agent/externalCliRunSession'
 
 export type OpenCodeServerMode = 'auto' | 'cli' | 'server'
 
@@ -26,6 +26,7 @@ export type OpenCodeServerEvent = {
   paths?: string[]
   action?: 'edit' | 'create' | 'delete' | 'write' | 'read'
   todos?: Array<{ text: string; status: 'pending' | 'active' | 'done' }>
+  sessionPhase?: ExternalCliRunPhase
 }
 
 export type OpenCodeServerResult = {
@@ -220,8 +221,11 @@ function parseServerEvent(raw: Record<string, unknown>, sessionId: string): Open
   const props = raw.properties && typeof raw.properties === 'object' ? (raw.properties as Record<string, unknown>) : raw
   const part = props.part && typeof props.part === 'object' ? (props.part as Record<string, unknown>) : props
   const text = String(part.text ?? part.delta ?? props.content ?? '').trim()
+  if (type.includes('question') || type.includes('input') || type.includes('ask_user') || type.includes('user.wait')) {
+    return { kind: 'status', title: 'OpenCode 等待你的回覆', detail: text || String(props.message ?? props.reason ?? '').slice(0, 400), sessionPhase: 'waiting_for_user' }
+  }
   if (type.includes('permission')) {
-    return { kind: 'error', title: 'OpenCode 權限要求', detail: String(props.reason ?? props.permission ?? props.message ?? text ?? 'permission request').slice(0, 400), ok: false }
+    return { kind: 'error', title: 'OpenCode 權限要求', detail: String(props.reason ?? props.permission ?? props.message ?? text ?? 'permission request').slice(0, 400), ok: false, sessionPhase: 'waiting_for_approval' }
   }
   if (type.includes('error') || props.error) {
     return { kind: 'error', title: 'OpenCode 錯誤', detail: String(props.message ?? props.error ?? text ?? 'server error').slice(0, 400), ok: false }
@@ -256,7 +260,7 @@ async function streamEvents(
   baseUrl: string,
   sessionId: string,
   signal: AbortSignal,
-  onEvent: (event: OpenCodeServerEvent) => void,
+  onEvent: (event: OpenCodeServerEvent) => boolean | void,
   timeoutMs: number,
 ) {
   const timer = setTimeout(() => (signal as AbortSignal & { abort?: () => void }).abort?.(), timeoutMs)
@@ -277,8 +281,10 @@ async function streamEvents(
         if (!data) continue
         try {
           const event = parseServerEvent(JSON.parse(data) as Record<string, unknown>, sessionId)
-          if (event) onEvent(event)
-          if (event?.kind === 'done' || event?.kind === 'error') return
+          if (event) {
+            const stop = onEvent(event)
+            if (stop === true || event.kind === 'done') return
+          }
         } catch {
           /* ignore malformed compatibility events */
         }
@@ -317,6 +323,8 @@ export async function runOpenCodeServerPrompt(opts: {
   runId: string
   timeoutMs?: number
   onEvent?: (event: OpenCodeServerEvent) => void
+  /** Called only after a real provider session has been created. */
+  onStarted?: (providerSessionId: string) => void
 }): Promise<OpenCodeServerResult> {
   if (opts.mode === 'cli') return { used: false, ok: false, output: '' }
   const activeBaseUrl = opts.baseUrl || [...servers.values()].at(-1)?.baseUrl
@@ -340,10 +348,16 @@ export async function runOpenCodeServerPrompt(opts: {
     return { used: true, ok: false, output: '', baseUrl, version: info.version, error: session.error || 'OpenCode session 建立失敗' }
   }
   sessions.set(opts.runId, { runId: opts.runId, baseUrl, sessionId, abort: controller })
+  opts.onStarted?.(sessionId)
   let lastError = ''
   const stream = streamEvents(baseUrl, sessionId, controller.signal, (event) => {
-    if (event.kind === 'error') lastError = event.detail || 'OpenCode server error'
+    const connectorAuth = event.kind === 'error' && /authrequired|authentication\s+required|oauth|bearer\s+realm/i.test(event.detail || '')
+    if (event.kind === 'error' && !connectorAuth) lastError = event.detail || 'OpenCode server error'
     opts.onEvent?.(event)
+    // Connector authentication is a structured warning/terminal decision in
+    // the Host session. It is not enough evidence to tear down an otherwise
+    // healthy optional connector stream here.
+    return event.kind === 'error' && !connectorAuth
   }, timeoutMs)
   const prompt = await jsonRequest(baseUrl, `/session/${encodeURIComponent(sessionId)}/prompt_async`, {
     method: 'POST',

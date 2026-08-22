@@ -138,14 +138,22 @@ function PiHostEventBootstrap() {
 function ExternalCliSessionBootstrap() {
   useEffect(() => {
     let cancelled = false
+    let stopProjection: (() => void) | undefined
     void (async () => {
       await waitForStartupRecovery()
       if (cancelled) return
       if (!window.subagents?.cli?.sessionSnapshots) return
-      const { reconnectExternalCliSessions } = await import('./agent/externalCliProjection')
-      if (!cancelled) await reconnectExternalCliSessions()
+      const { startExternalCliSessionProjection } = await import('./agent/externalCliProjection')
+      if (!cancelled) {
+        // Keep the polling owner bound to this renderer lifecycle. The
+        // cleanup below stops new polls before a reload can race stale UI.
+        stopProjection = startExternalCliSessionProjection()
+      }
     })()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      stopProjection?.()
+    }
   }, [])
   return null
 }
@@ -210,13 +218,15 @@ function RecoveryBootstrap() {
         (item) => item.kind === 'run' && item.action === 'marked-interrupted',
       )
       const activeExternalSessions = await window.subagents?.cli?.sessionSnapshots?.()
+      const liveExternalSessions = (Array.isArray(activeExternalSessions) ? activeExternalSessions : [])
+        .filter((session) => session && typeof session === 'object' && (session as { active?: unknown }).active === true)
       const activeExternalRunIds = new Set(
-        (Array.isArray(activeExternalSessions) ? activeExternalSessions : [])
+        liveExternalSessions
           .map((session) => (session && typeof session === 'object' ? (session as { runId?: unknown }).runId : undefined))
           .filter((runId): runId is string => typeof runId === 'string' && runId.length > 0),
       )
       const activeExternalConversations = new Set(
-        (Array.isArray(activeExternalSessions) ? activeExternalSessions : [])
+        liveExternalSessions
           .map((session) => (session && typeof session === 'object' ? (session as { conversationId?: unknown }).conversationId : undefined))
           .filter((conversationId): conversationId is string => typeof conversationId === 'string' && conversationId.length > 0),
       )

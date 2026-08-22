@@ -18,6 +18,8 @@ import {
   evaluateExternalCliRecovery,
   type ExternalCliProcessTransport,
 } from '../src/agent/externalCliRunSession.ts'
+import { redactCliDisplayArgs, redactCliTelemetryText } from '../src/agent/cliCommandTelemetry.ts'
+import { MemoryExternalCliCheckpointStore } from '../src/agent/externalCliCheckpoint.ts'
 
 let passed = 0
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -42,6 +44,8 @@ function fakeTransport() {
       return { confirmed: true }
     },
     isAlive: () => alive,
+    sendInput: () => true,
+    sendApproval: () => true,
   }
   return { transport, calls, isAlive: () => alive }
 }
@@ -196,7 +200,7 @@ await test('terminal process exit is represented once and output evidence stays 
     conversationId: 'conversation-b',
     adapter: 'claude',
     clock,
-    policy: { outputHeadBytes: 4, outputTailBytes: 4 },
+    policy: { outputHeadBytes: 8, outputTailBytes: 8 },
   })
   session.start()
   session.observe({ type: 'process_started' })
@@ -212,12 +216,14 @@ await test('terminal process exit is represented once and output evidence stays 
     runId: 'run-large-chunk',
     conversationId: 'conversation-b',
     adapter: 'claude',
-    policy: { outputHeadBytes: 4, outputTailBytes: 4 },
+    policy: { outputHeadBytes: 8, outputTailBytes: 8 },
   })
   large.start()
   large.observe({ type: 'process_started' })
-  large.observe({ type: 'process_output', channel: 'stdout', detail: 'x'.repeat(30_000) })
-  assert.ok(large.snapshot().output.omittedBytes >= 29_992)
+  large.observe({ type: 'process_output', channel: 'stdout', detail: `HEAD-${'x'.repeat(29_980)}-TAIL` })
+  assert.ok(large.snapshot().output.omittedBytes > 0)
+  assert.match(large.snapshot().output.head, /^HEAD-/)
+  assert.match(large.snapshot().output.tail, /-TAIL$/)
 })
 
 await test('failed provider exit reaches one failed settlement through the same seam', () => {
@@ -311,6 +317,82 @@ await test('cancellation wins a delayed process-exit race', async () => {
   releaseTermination?.({ confirmed: true })
   assert.equal((await pending).classification, 'user-cancelled')
   assert.deepEqual(settlements, ['user-cancelled'])
+  assert.ok(session.snapshot().events.some((event) => event.type === 'cancellation_requested'))
+  assert.ok(session.snapshot().events.some((event) => event.type === 'cancellation_confirmed'))
+})
+
+await test('input and approval fail closed without a real process capability', async () => {
+  const session = new ExternalCliRunSession({
+    runId: 'run-no-interaction-transport',
+    conversationId: 'conversation-c',
+    adapter: 'codex',
+  })
+  session.start()
+  session.observe({ type: 'process_started', providerSessionId: 'provider-input' })
+  session.observe({ type: 'waiting_for_user' })
+  assert.equal(await session.provideInput('answer', 'provider-input'), false)
+  session.observe({ type: 'waiting_for_approval' })
+  assert.equal(await session.provideApproval(true, 'provider-input'), false)
+  assert.equal(session.snapshot().events.some((event) => event.type === 'input_received'), false)
+  assert.equal(session.snapshot().events.some((event) => event.type === 'approval_received'), false)
+})
+
+await test('cancellation reports uncertain termination instead of claiming confirmation', async () => {
+  const session = new ExternalCliRunSession({
+    runId: 'run-cancel-uncertain',
+    conversationId: 'conversation-c',
+    adapter: 'codex',
+    transport: { terminateTree: () => ({ confirmed: false, detail: 'child close not observed' }) },
+  })
+  session.start()
+  session.observe({ type: 'process_started' })
+  const settlement = await session.cancel('uncertain stop')
+  assert.equal(settlement.classification, 'transport-failure')
+  assert.equal(settlement.terminationConfirmed, false)
+  assert.ok(session.snapshot().events.some((event) => event.type === 'cancellation_unconfirmed'))
+  assert.equal(session.snapshot().events.some((event) => event.type === 'cancellation_confirmed'), false)
+})
+
+await test('configured required connector context blocks only the selected capability', () => {
+  const required = new ExternalCliRunSession({
+    runId: 'run-required-connector',
+    conversationId: 'conversation-c',
+    adapter: 'codex',
+    requiredConnectors: [{ connector: 'cloudflare', server: 'Cloudflare MCP', operation: 'search' }],
+  })
+  required.start()
+  required.observe({ type: 'process_started', providerSessionId: 'provider-auth' })
+  required.observe({
+    type: 'connector_authentication_required',
+    connector: 'cloudflare',
+    server: 'Cloudflare MCP',
+    operation: 'search',
+    detail: 'AuthRequired: Cloudflare MCP',
+  })
+  assert.equal(required.snapshot().terminal?.classification, 'connector-authentication-required')
+  assert.equal(required.snapshot().events.at(-2)?.type, 'connector_authentication_required')
+  const optional = new ExternalCliRunSession({
+    runId: 'run-optional-connector',
+    conversationId: 'conversation-c',
+    adapter: 'codex',
+    requiredConnectors: [{ connector: 'cloudflare', operation: 'deploy' }],
+  })
+  optional.start()
+  optional.observe({ type: 'process_started' })
+  optional.observe({ type: 'connector_authentication_required', connector: 'cloudflare', operation: 'search', detail: 'AuthRequired' })
+  assert.equal(optional.snapshot().terminal, null)
+})
+
+await test('CLI telemetry redacts prompt material from command display', () => {
+  const prompt = 'PRIVATE PROMPT should-never-appear token=super-secret-value'
+  const realArgs = ['exec', '--json', prompt]
+  const displayArgs = redactCliDisplayArgs(realArgs, prompt)
+  assert.doesNotMatch(displayArgs.join(' '), /PRIVATE PROMPT|super-secret-value/)
+  assert.match(displayArgs.at(-1) || '', /prompt omitted/i)
+  assert.equal(realArgs.at(-1), prompt)
+  const credentialArgs = redactCliDisplayArgs(['--api-key', 'super-secret-key', '--json'], prompt)
+  assert.equal(credentialArgs[1], '[credential omitted]')
+  assert.doesNotMatch(redactCliTelemetryText('adapter error authorization=Bearer secret-token token=second-secret'), /secret-token|second-secret/)
 })
 
 await test('connector auth and benign stdin diagnostics remain separate from root cause', () => {
@@ -320,11 +402,13 @@ await test('connector auth and benign stdin diagnostics remain separate from roo
   })
   assert.equal(diagnostic.kind, 'diagnostic')
   assert.equal(diagnostic.severity, 'info')
-  assert.equal(classifyExternalCliDiagnostic('AuthRequired: Cloudflare MCP', {
+  const authDiagnostic = classifyExternalCliDiagnostic('AuthRequired: Cloudflare MCP operation=search', {
     adapter: 'codex',
-    connector: 'cloudflare',
-    required: false,
-  }).kind, 'connector-authentication-required')
+  })
+  assert.equal(authDiagnostic.kind, 'connector-authentication-required')
+  assert.equal(authDiagnostic.connector, 'cloudflare')
+  assert.equal(authDiagnostic.server, 'Cloudflare MCP')
+  assert.equal(authDiagnostic.operation, 'search')
   assert.equal(classifyExternalCliDiagnostic('timed out', {
     adapter: 'codex',
     headless: false,
@@ -397,6 +481,28 @@ await test('recovery is fail-closed and only automatic with replay-safe evidence
   assert.equal(DEFAULT_EXTERNAL_CLI_RUN_POLICY.absoluteMs, 3_600_000)
 })
 
+await test('durable checkpoint restart marks process loss interrupted without auto retry', () => {
+  const store = new MemoryExternalCliCheckpointStore()
+  const firstHost = new ExternalCliRunSessionRegistry({ checkpointStore: store })
+  const session = firstHost.create({
+    runId: 'run-durable-restart',
+    conversationId: 'conversation-recovery',
+    adapter: 'codex',
+    providerSessionId: 'provider-resume-id',
+    adapterSupportsResume: true,
+    replaySafeCheckpoint: false,
+  })
+  session.start()
+  session.observe({ type: 'process_started', providerSessionId: 'provider-resume-id' })
+  const afterRestart = new ExternalCliRunSessionRegistry({ checkpointStore: store }).recoverPersistedSessions('host process lost')
+  assert.equal(afterRestart.length, 1)
+  assert.equal(afterRestart[0]?.phase, 'interrupted')
+  assert.equal(afterRestart[0]?.terminal?.classification, 'interrupted')
+  assert.equal(afterRestart[0]?.recovery?.resumable, true)
+  assert.equal(afterRestart[0]?.recovery?.automaticRetry, false)
+  assert.doesNotMatch(JSON.stringify(afterRestart[0]), /provider prompt|credentials|token=/i)
+})
+
 await test('host interruption terminates owned transport and stays non-success', () => {
   const fake = fakeTransport()
   const session = new ExternalCliRunSession({
@@ -464,8 +570,13 @@ await test('shipped adapters retain the coordinator and Host ownership boundarie
   assert.match(main, /cli:sessionSnapshot/)
   assert.match(main, /cli:sessionSnapshots/)
   assert.match(rendererProjection, /reconnectExternalCliSessions/)
+  assert.match(rendererProjection, /startExternalCliSessionProjection/)
+  assert.match(rendererProjection, /sessionEvents/)
+  assert.match(rendererProjection, /setTimeout/)
   assert.match(app, /<ExternalCliSessionBootstrap\s*\/>/)
   assert.match(main, /interruptExternalCliSessions/)
+  assert.doesNotMatch(main, /serverSession\.observe\(\{ type: 'process_started'/)
 })
 
 console.log(`\n${passed} tests passed`)
+await import('./smoke-external-cli-primary-seam.mts')

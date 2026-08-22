@@ -290,6 +290,7 @@ export async function dispatchThreadTask(
       webhookTarget: snapshot.overrides.webhookTarget,
       externalCliContract: snapshot.overrides.externalCliContract,
       externalCliPolicy: snapshot.overrides.externalCliPolicy,
+      requiredConnectors: snapshot.overrides.externalCliRequiredConnectors,
     })
     const a =
       useAgentStore.getState().getRunState(snapshot.runId) || useAgentStore.getState().agent

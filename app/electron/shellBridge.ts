@@ -39,18 +39,8 @@ export function listActiveBashRuns(): Array<{ runId: string; tag?: string }> {
 export function cancelBash(opts?: {
   runId?: string
   tag?: string
-  onStarted?: (processId: string) => void
 }): { ok: boolean; killed: number } {
-  const targets: string[] = []
-  if (opts?.runId) {
-    if (activeRuns.has(opts.runId)) targets.push(opts.runId)
-  } else if (opts?.tag) {
-    for (const [id, r] of activeRuns) {
-      if (r.tag === opts.tag) targets.push(id)
-    }
-  } else {
-    targets.push(...activeRuns.keys())
-  }
+  const targets = resolveActiveRunIds(opts)
 
   let killed = 0
   for (const id of targets) {
@@ -67,6 +57,101 @@ export function cancelBash(opts?: {
     }
   }
   return { ok: killed > 0, killed }
+}
+
+function resolveActiveRunIds(opts?: { runId?: string; tag?: string }): string[] {
+  const targets: string[] = []
+  if (opts?.runId) {
+    if (activeRuns.has(opts.runId)) targets.push(opts.runId)
+  } else if (opts?.tag) {
+    for (const [id, r] of activeRuns) {
+      if (r.tag === opts.tag) targets.push(id)
+    }
+  } else {
+    targets.push(...activeRuns.keys())
+  }
+  return targets
+}
+
+function waitForRunsClosed(runIds: string[], timeoutMs: number): Promise<boolean> {
+  const pending = () => runIds.some((runId) => activeRuns.has(runId))
+  if (!pending()) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (confirmed: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(confirmed)
+    }
+    const timer = setTimeout(() => finish(!pending()), timeoutMs)
+    for (const runId of runIds) {
+      activeRuns.get(runId)?.child.once('close', () => finish(!pending()))
+      activeRuns.get(runId)?.child.once('error', () => finish(!pending()))
+    }
+  })
+}
+
+export type BashCancellationResult = {
+  ok: boolean
+  killed: number
+  confirmed: boolean
+  detail?: string
+}
+
+/**
+ * Terminate and wait for every owned child in the selected tree.  Returning
+ * before `close` is observed would let the session claim cancellation while
+ * descendants are still running, so the durable session uses this path.
+ */
+export async function cancelBashAndWait(opts?: {
+  runId?: string
+  tag?: string
+  graceMs?: number
+}): Promise<BashCancellationResult> {
+  const targets = resolveActiveRunIds(opts)
+  if (!targets.length) {
+    return { ok: false, killed: 0, confirmed: false, detail: 'process already exited or was not registered' }
+  }
+  let killed = 0
+  await Promise.all(targets.map(async (runId) => {
+    const active = activeRuns.get(runId)
+    if (!active) return
+    try {
+      await terminateProcessTree(active.child)
+      killed += 1
+    } catch {
+      /* The close/force pass below is the source of truth. */
+    }
+  }))
+  const graceMs = Math.max(100, Math.min(opts?.graceMs ?? 2_000, 10_000))
+  let confirmed = await waitForRunsClosed(targets, graceMs)
+  if (!confirmed) {
+    await Promise.all(targets.map(async (runId) => {
+      const active = activeRuns.get(runId)
+      if (!active) return
+      try { await terminateProcessTree(active.child, true) } catch { /* best effort */ }
+    }))
+    confirmed = await waitForRunsClosed(targets, graceMs)
+  }
+  return {
+    ok: killed > 0,
+    killed,
+    confirmed,
+    detail: confirmed ? undefined : 'process tree close was not observed before the bounded grace period',
+  }
+}
+
+/** Deliver interactive input to the matching child stdin, fail-closed. */
+export function writeRunStdin(runId: string, value: string): boolean {
+  const stdin = activeRuns.get(runId)?.child.stdin
+  if (!stdin || stdin.destroyed || !stdin.writable) return false
+  try {
+    stdin.write(value.endsWith('\n') ? value : `${value}\n`)
+    return true
+  } catch {
+    return false
+  }
 }
 
 type RunProcessCore = {
@@ -110,7 +195,7 @@ function runSpawnedProcess(
         NO_COLOR: '1',
         TERM: process.env.TERM || 'dumb',
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       detached: !isWindows,
       windowsHide: true,
       windowsVerbatimArguments: opts.windowsVerbatimArguments,
