@@ -335,6 +335,47 @@ await test('connector auth and benign stdin diagnostics remain separate from roo
   }).headlessHint, false)
 })
 
+await test('captured provider trace keeps connector warnings separate from clean or timed-out settlement', () => {
+  const clock = new FakeExternalCliClock()
+  const clean = new ExternalCliRunSession({
+    runId: 'run-codex-trace-clean',
+    conversationId: 'conversation-c',
+    adapter: 'codex',
+    clock,
+    policy: { idleMs: 100, absoluteMs: 1_000 },
+  })
+  clean.start()
+  clean.observe({ type: 'process_started', providerSessionId: 'provider-codex' })
+  clean.observe({ type: 'diagnostic', detail: 'Reading additional input from stdin…', severity: 'info' })
+  clean.observe({
+    type: 'connector_authentication_required',
+    connector: 'cloudflare',
+    server: 'Cloudflare MCP',
+    operation: 'search',
+    required: false,
+    detail: 'AuthRequired: Bearer secret-token-value',
+  })
+  clean.observe({ type: 'model_activity', delta: 'model output' })
+  clean.observe({ type: 'process_exit', code: 0 })
+  assert.equal(clean.snapshot().terminal?.classification, 'success')
+  assert.ok(clean.snapshot().events.some((event) => event.type === 'connector_authentication_required'))
+  assert.doesNotMatch(JSON.stringify(clean.snapshot()), /secret-token-value/)
+
+  const timed = new ExternalCliRunSession({
+    runId: 'run-codex-trace-timeout',
+    conversationId: 'conversation-c',
+    adapter: 'codex',
+    clock,
+    policy: { idleMs: 100, absoluteMs: 1_000 },
+  })
+  timed.start()
+  timed.observe({ type: 'process_started' })
+  timed.observe({ type: 'connector_authentication_required', required: false, detail: 'AuthRequired: optional connector' })
+  clock.advance(101)
+  assert.equal(timed.snapshot().terminal?.classification, 'idle-timeout')
+  assert.ok(timed.snapshot().events.some((event) => event.type === 'connector_authentication_required'))
+})
+
 await test('recovery is fail-closed and only automatic with replay-safe evidence', () => {
   assert.deepEqual(
     evaluateExternalCliRecovery({

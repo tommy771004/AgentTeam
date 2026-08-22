@@ -522,7 +522,37 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
   })
 
   // Parse NDJSON (Grok streaming-json) and plain lines into process events
-  const streamState = createCliStreamParser(kind, emit, (providerSessionId) => {
+  // while also feeding typed model/tool lifecycle activity into the durable
+  // session. Raw process output remains a separate activity source.
+  const operationTimeouts = new Map<string, Array<() => void>>()
+  const emitParsedEvent = (event: Omit<LocalCliStreamEvent, 'runId'>) => {
+    if (activeSession) {
+      if (event.kind === 'text' || event.kind === 'thought') {
+        activeSession.observe({ type: 'model_activity', detail: event.detail, delta: event.delta })
+      } else if (event.kind === 'tool') {
+        const operation = `${event.tool || 'tool'}:${(event.detail || event.title || '').slice(0, 120)}`
+        const starts = Boolean(event.title && (/開始|執行/.test(event.title) && !/已執行|完成/.test(event.title)))
+        if (starts) {
+          activeSession.observe({ type: 'tool_started', tool: event.tool, operation, detail: event.detail })
+          const cancel = activeSession.armOperationTimeout(operation)
+          operationTimeouts.set(operation, [...(operationTimeouts.get(operation) || []), cancel])
+        } else {
+          activeSession.observe({ type: 'tool_completed', tool: event.tool, operation, detail: event.detail, ok: event.ok })
+          const pending = operationTimeouts.get(operation)
+          pending?.shift()?.()
+          if (pending?.length === 0) operationTimeouts.delete(operation)
+        }
+      } else if (event.kind === 'file') {
+        activeSession.observe({ type: 'tool_completed', tool: event.tool || 'file', operation: event.path, detail: event.detail || event.title, ok: event.ok })
+      } else if (event.kind === 'error') {
+        activeSession.observe({ type: 'diagnostic', detail: event.detail || event.title || 'CLI error', severity: 'error' })
+      } else if (event.kind === 'status' || event.kind === 'plan' || event.kind === 'done') {
+        activeSession.observe({ type: 'provider_activity', detail: event.detail || event.title })
+      }
+    }
+    emit(event)
+  }
+  const streamState = createCliStreamParser(kind, emitParsedEvent, (providerSessionId) => {
     activeSession?.observe({ type: 'provider_activity', providerSessionId, detail: 'provider session identity observed' })
   })
   let assembledText = ''
@@ -631,6 +661,7 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
 
   // Flush residual line buffer
   streamState.flush()
+  for (const cancel of [...operationTimeouts.values()].flat()) cancel()
 
   if (r.timedOut && !session.snapshot().terminal) session.forceTimeout('absolute-timeout')
   else if (r.cancelled && !session.snapshot().terminal) session.cancelObserved('使用者取消')
