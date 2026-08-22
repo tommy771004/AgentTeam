@@ -4,7 +4,7 @@ import type { OpenDesignProvenance } from '../openDesign/catalog.ts'
  * The one runtime list of surfaces. Derive the type from it so adding a
  * surface is a single edit instead of a hunt through parallel literals.
  */
-export const SUBDESIGN_SURFACES = ['prototype', 'dashboard', 'design-system', 'deck', 'video'] as const
+export const SUBDESIGN_SURFACES = ['prototype', 'dashboard', 'deck', 'video'] as const
 
 export type SubDesignSurface = (typeof SUBDESIGN_SURFACES)[number]
 
@@ -38,7 +38,6 @@ export type SubDesignReference = {
   title?: string
   importedAt: string
   sha256: string
-  designSystemId?: string
 }
 
 export type SubDesignBrief = {
@@ -49,7 +48,6 @@ export type SubDesignBrief = {
   audience?: string
   platform?: SubDesignPlatform
   fidelity?: SubDesignFidelity
-  designSystemId?: string
   templateId?: string
   skillIds?: string[]
   provenance?: OpenDesignProvenance[]
@@ -63,30 +61,12 @@ export type SubDesignBrief = {
   updatedAt: string
 }
 
-export type DesignSystemSummary = {
-  id: string
-  title: string
-  category?: string
-  description?: string
-  sourcePath: string
-  colors: string[]
-  typography?: string
-  tokenPaths: string[]
-  sections: string[]
-  updatedAt?: string
-}
-
-export type DesignSystemDocument = DesignSystemSummary & {
-  content: string
-}
-
 export type SubDesignArtifactKind =
   | 'html'
   | 'deck'
   | 'react-component'
   | 'markdown-document'
   | 'svg'
-  | 'design-system'
 
 export type SubDesignArtifactRenderer =
   | 'html'
@@ -94,7 +74,6 @@ export type SubDesignArtifactRenderer =
   | 'markdown'
   | 'svg'
   | 'code'
-  | 'design-system'
 
 export type SubDesignArtifactExport = 'html' | 'pdf' | 'zip' | 'pptx' | 'mp4' | 'jsx' | 'md' | 'svg' | 'txt'
 
@@ -125,7 +104,6 @@ export type SubDesignArtifact = {
   exports: SubDesignArtifactExport[]
   supportingFiles: string[]
   tweaks?: SubDesignArtifactTweak[]
-  designSystemId?: string
   status: 'streaming' | 'complete' | 'error'
   revision: number
   createdAt: string
@@ -146,7 +124,7 @@ export type SubDesignCritiqueFinding = {
 }
 
 export type SubDesignCritiqueEvidence = {
-  kind: 'screenshot' | 'dom' | 'lint' | 'build' | 'manual' | 'template-attribution' | 'design-system' | 'asset-license'
+  kind: 'screenshot' | 'dom' | 'lint' | 'build' | 'manual' | 'template-attribution' | 'asset-license'
   summary: string
   path?: string
   capturedAt?: string
@@ -244,7 +222,6 @@ export type SubDesignBriefPatch = Partial<
     | 'audience'
     | 'platform'
     | 'fidelity'
-    | 'designSystemId'
     | 'templateId'
     | 'skillIds'
     | 'provenance'

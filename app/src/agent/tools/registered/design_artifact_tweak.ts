@@ -30,7 +30,7 @@ register({
     if (!applyTweak) return { ok: false, output: 'structured artifact tweak 需要 Electron workspace API。' }
     const result = await applyTweak({ artifact, tweakId: String(input.tweakId || ''), value: String(input.value ?? ''), projectRoot })
     if (!result.ok || !result.artifact) return { ok: false, output: result.error || 'structured tweak 失敗。', data: result }
-    const updated = useSubDesignArtifactStore.getState().register(result.artifact, { briefId: artifact.briefId, designSystemId: artifact.designSystemId }, projectRoot)
+    const updated = useSubDesignArtifactStore.getState().register(result.artifact, { briefId: artifact.briefId }, projectRoot)
     if (!updated.ok) return { ok: false, output: `tweak revision invalid：${updated.errors.join('；')}` }
     const brief = useSubDesignStore.getState().findById(artifact.briefId)
     if (brief && brief.stage !== 'critique') useSubDesignStore.getState().setStage(brief.id, 'critique', projectRoot)

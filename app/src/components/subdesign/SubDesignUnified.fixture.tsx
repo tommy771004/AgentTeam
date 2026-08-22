@@ -3,7 +3,7 @@
  * It supplies deterministic state without bypassing the real component tree.
  */
 import { useState } from 'react'
-import type { DesignSystemSummary, SubDesignArtifact, SubDesignBrief } from '../../agent/subdesign/types'
+import type { SubDesignArtifact, SubDesignBrief } from '../../agent/subdesign/types'
 import { deriveSubDesignWorkspace } from '../../agent/subdesign/workspace'
 import type { Thread } from '../../store/threadStore'
 import { SubDesignProjectStudio } from './SubDesignProjectStudio'
@@ -70,7 +70,6 @@ export function SubDesignUnifiedFixture() {
   const [fixtureThread, setFixtureThread] = useState(thread)
   const [runIsLive, setRunIsLive] = useState(false)
   const [selectedArtifact, setSelectedArtifact] = useState<SubDesignArtifact | null>(artifact)
-  const [designSystem, setDesignSystem] = useState<DesignSystemSummary | null>(null)
   const workspace = deriveSubDesignWorkspace({
     brief: fixtureBrief,
     artifacts: [artifact],
@@ -81,7 +80,6 @@ export function SubDesignUnifiedFixture() {
     <SubDesignProjectStudio
       brief={fixtureBrief}
       workspace={workspace}
-      designSystem={designSystem}
       thread={fixtureThread}
       artifacts={[artifact]}
       selectedArtifact={selectedArtifact}
@@ -91,14 +89,6 @@ export function SubDesignUnifiedFixture() {
       runId={runIsLive ? 'run_visual_qa' : null}
       startingRun={false}
       onBack={() => window.history.back()}
-      onOpenDesignSystems={() => setDesignSystem((current) => current ? null : {
-        id: 'fixture-system',
-        title: 'Fixture Design System',
-        sourcePath: '.subagents/subdesign/design-systems/fixture/DESIGN.md',
-        colors: ['#151713', '#c8d4b8'],
-        tokenPaths: [],
-        sections: ['Color', 'Typography'],
-      })}
       onStartRun={() => setRunIsLive(true)}
       onStopRun={() => setRunIsLive(false)}
       onSubmitFollowUp={async (value) => {

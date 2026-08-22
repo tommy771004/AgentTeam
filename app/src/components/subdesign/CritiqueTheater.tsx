@@ -30,8 +30,6 @@ const CRITIQUE_BLOCKED_TOOLS = [
   'workspace_mkdir',
   'workspace_move',
   'workspace_delete',
-  'design_system_create',
-  'design_system_update',
   'design_artifact_register',
   'design_artifact_patch',
   'design_artifact_tweak',

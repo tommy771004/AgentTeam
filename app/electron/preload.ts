@@ -509,7 +509,6 @@ const api = {
       ipcRenderer.invoke('subdesign:importReference', input) as Promise<{
         ok: boolean
         reference?: unknown
-        designSystem?: { id: string; path: string; content: string }
         error?: string
       }>,
     exportCapabilities: () => ipcRenderer.invoke('subdesign:exportCapabilities') as Promise<{
@@ -523,12 +522,11 @@ const api = {
       assetPaths: string[]
       targetId: string
       digest: string
-      kind?: 'template' | 'skill' | 'design-system' | 'prompt' | 'craft' | 'media'
+      kind?: 'template' | 'skill' | 'prompt' | 'craft' | 'media'
       projectRoot?: string
     }) => ipcRenderer.invoke('subdesign:copyVendorPack', input) as Promise<{
       ok: boolean
       path?: string
-      designSystemPath?: string
       files?: number
       bytes?: number
       error?: string

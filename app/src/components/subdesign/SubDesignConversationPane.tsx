@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { DesignSystemSummary, SubDesignBrief } from '../../agent/subdesign/types'
+import type { SubDesignBrief } from '../../agent/subdesign/types'
 import type { SubDesignWorkspaceViewModel } from '../../agent/subdesign/workspace'
 import type { Thread, ThreadBubble } from '../../store/threadStore'
 import { Icon } from '../Icon'
@@ -11,12 +11,10 @@ import { ReferenceImportPanel } from './ReferenceImportPanel'
 type SubDesignConversationPaneProps = {
   brief: SubDesignBrief
   workspace: SubDesignWorkspaceViewModel
-  designSystem: DesignSystemSummary | null
   thread: Thread | null
   runIsLive: boolean
   runId: string | null
   startingRun: boolean
-  onOpenDesignSystems: () => void
   onOpenTranscript: () => void
   onStartRun: () => void
   onStopRun: () => void
@@ -26,7 +24,6 @@ type SubDesignConversationPaneProps = {
 const SURFACE_LABEL: Record<SubDesignBrief['surface'], string> = {
   prototype: 'Prototype',
   dashboard: 'Dashboard',
-  'design-system': 'Design System',
   deck: 'Deck',
   video: 'Video',
 }
@@ -64,12 +61,10 @@ function ConversationMessage({ bubble, latest, brief }: { bubble: ThreadBubble; 
 export function SubDesignConversationPane({
   brief,
   workspace,
-  designSystem,
   thread,
   runIsLive,
   runId,
   startingRun,
-  onOpenDesignSystems,
   onOpenTranscript,
   onStartRun,
   onStopRun,
@@ -180,14 +175,6 @@ export function SubDesignConversationPane({
             <Icon name={brief.surface === 'deck' ? 'slideshow' : 'design_services'} size={13} />
             {SURFACE_LABEL[brief.surface]}
           </span>
-          <button
-            type="button"
-            onClick={onOpenDesignSystems}
-            className="inline-flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-white/[0.045] px-2 text-outline transition-colors hover:text-on-surface"
-          >
-            <Icon name="palette" size={13} />
-            <span className="truncate">{designSystem?.title || 'Project default'}</span>
-          </button>
           <span className={`shrink-0 text-[9px] font-medium ${waitingForUser ? 'text-secondary' : activelyComputing ? 'text-primary' : 'text-outline'}`}>
             {waitingForUser ? '等待回覆' : activelyComputing ? '執行中' : '可輸入'}
           </span>

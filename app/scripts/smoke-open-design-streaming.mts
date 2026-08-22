@@ -120,7 +120,7 @@ await test('the renderer capability table declares kinds the envelope can carry'
   // Renderer declarations and artifact kinds must speak the same vocabulary,
   // or the gate silently rejects everything (the bug this smoke now guards).
   const declaredKinds = new Set(Object.values(ARTIFACT_RENDERER_CAPABILITIES).flatMap((capability) => capability.supportedKinds))
-  for (const kind of ['html', 'deck', 'markdown-document', 'svg', 'react-component', 'design-system']) {
+  for (const kind of ['html', 'deck', 'markdown-document', 'svg', 'react-component']) {
     assert.ok(declaredKinds.has(kind as SubDesignArtifact['kind']), `renderer 能力表缺少 ${kind}`)
   }
   // Every renderer declares a sandbox policy and its export capability.

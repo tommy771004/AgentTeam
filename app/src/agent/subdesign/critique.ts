@@ -32,7 +32,7 @@ export function normalizeEvidence(value: unknown): SubDesignCritiqueEvidence[] {
   if (!Array.isArray(value)) return []
   const allowed = new Set<SubDesignCritiqueEvidence['kind']>([
     'screenshot', 'dom', 'lint', 'build', 'manual',
-    'template-attribution', 'design-system', 'asset-license',
+    'template-attribution', 'asset-license',
   ])
   return value
     .map((item): SubDesignCritiqueEvidence | null => {

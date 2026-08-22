@@ -1,13 +1,10 @@
 import type { SubDesignWorkspaceViewModel } from '../../agent/subdesign/workspace'
-import type { DesignSystemSummary } from '../../agent/subdesign/types'
 import { Icon } from '../Icon'
 
 type SubDesignWorkspaceHeaderProps = {
   workspace: SubDesignWorkspaceViewModel
   onPrimaryAction?: () => void
   primaryActionLabel?: string
-  designSystem?: DesignSystemSummary | null
-  onOpenDesignSystem?: () => void
 }
 
 const stageIcons: Record<string, string> = {
@@ -43,7 +40,7 @@ function critiqueLabel(status: SubDesignWorkspaceViewModel['critiqueStatus']): s
   }[status]
 }
 
-export function SubDesignWorkspaceHeader({ workspace, onPrimaryAction, primaryActionLabel, designSystem, onOpenDesignSystem }: SubDesignWorkspaceHeaderProps) {
+export function SubDesignWorkspaceHeader({ workspace, onPrimaryAction, primaryActionLabel }: SubDesignWorkspaceHeaderProps) {
   const gate = workspace.nextGate
   const canAct = Boolean(onPrimaryAction) && gate.status === 'ready'
   const runLabel = workspace.runStatus === 'active'
@@ -71,9 +68,6 @@ export function SubDesignWorkspaceHeader({ workspace, onPrimaryAction, primaryAc
           <p className="mt-1 text-[11px] text-outline">brief {workspace.briefId} · 目前階段 {workspace.currentStage.toUpperCase()}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={onOpenDesignSystem} className="inline-flex h-8 max-w-[210px] items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.025] px-2.5 text-[10px] font-semibold text-outline hover:border-primary/30 hover:text-primary">
-            <Icon name="palette" size={13} /><span className="truncate">{designSystem?.title || 'Project default'}</span><Icon name="expand_more" size={13} />
-          </button>
           <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${runTone}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${workspace.runStatus === 'active' ? 'bg-secondary' : workspace.runStatus === 'failed' || workspace.runStatus === 'halted' ? 'bg-error' : 'bg-outline/60'}`} />
             {runLabel}

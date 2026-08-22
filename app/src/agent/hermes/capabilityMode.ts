@@ -28,8 +28,6 @@ const WRITE_TOOLS = [
   'message_send',
   'design_brief_update',
   'design_direction_select',
-  'design_system_create',
-  'design_system_update',
   'design_artifact_register',
   'design_artifact_patch',
   'design_artifact_tweak',

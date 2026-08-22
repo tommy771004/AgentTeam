@@ -20,8 +20,6 @@ export function deniedToolsFromPolicy(policy: PermissionPolicy | undefined): str
   if (!policy) return []
   const all = [
     'workspace_write',
-    'design_system_create',
-    'design_system_update',
     'design_artifact_export',
     'skill_save',
     'bash',

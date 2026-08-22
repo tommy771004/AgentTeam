@@ -19,7 +19,7 @@
 export const SUPPORTED_SPEC_MAJOR = 1
 export const CURRENT_SPEC_VERSION = '1.0.0'
 
-export type PluginKind = 'scenario' | 'template' | 'skill' | 'prompt' | 'craft' | 'media' | 'design-system'
+export type PluginKind = 'scenario' | 'template' | 'skill' | 'prompt' | 'craft' | 'media'
 export type TaskKind =
   | 'new-generation'
   | 'refine'
@@ -32,7 +32,7 @@ export type TaskKind =
   | 'critique'
   | 'edit'
   | 'review'
-export type PluginMode = 'prototype' | 'dashboard' | 'deck' | 'video' | 'hyperframes' | 'design-system' | 'prompt' | 'landing' | 'other'
+export type PluginMode = 'prototype' | 'dashboard' | 'deck' | 'video' | 'hyperframes' | 'prompt' | 'landing' | 'other'
 
 export type PluginInputType = 'string' | 'text' | 'select' | 'number' | 'boolean'
 
@@ -155,7 +155,6 @@ const KNOWN_PLUGIN_KINDS = new Set<string>([
   'prompt',
   'craft',
   'media',
-  'design-system',
 ])
 
 const KNOWN_TASK_KINDS = new Set<string>([

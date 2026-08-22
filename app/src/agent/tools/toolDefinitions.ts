@@ -871,9 +871,6 @@ export const TOOL_DEFINITIONS = {
             "high-fidelity"
           ]
         },
-        "designSystemId": {
-          "type": "string"
-        },
         "constraints": {
           "type": "array",
           "items": {
@@ -960,85 +957,6 @@ export const TOOL_DEFINITIONS = {
     },
     owningCapability: 'subdesign-workflow',
   },
-  design_system_list: {
-    description: "List project DESIGN.md and SubDesign design systems.",
-    keywords: ["design system list","design systems","design.md","brand rules","tokens"],
-    parameters: {
-      "type": "object",
-      "properties": {}
-    },
-    owningCapability: 'subdesign-workflow',
-  },
-  design_system_read: {
-    description: "Read a selected DESIGN.md design system and return its parsed summary.",
-    keywords: ["read design system","read design.md","design tokens","brand system"],
-    parameters: {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "project or a safe design-system id"
-        }
-      },
-      "required": [
-        "id"
-      ]
-    },
-    owningCapability: 'subdesign-workflow',
-  },
-  design_system_create: {
-    description: "Create a versioned SubDesign DESIGN.md under the project workspace.",
-    keywords: ["create design system","new design system","write design.md","brand contract"],
-    parameters: {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Safe folder id, e.g. editorial-light"
-        },
-        "title": {
-          "type": "string"
-        },
-        "category": {
-          "type": "string"
-        },
-        "content": {
-          "type": "string",
-          "description": "Complete DESIGN.md content; omit to use the starter contract"
-        }
-      },
-      "required": [
-        "id",
-        "title"
-      ]
-    },
-    owningCapability: 'subdesign-workflow',
-  },
-  design_system_update: {
-    description: "Update a versioned SubDesign DESIGN.md under the project workspace.",
-    keywords: ["update design system","update design.md","edit brand rules","write tokens"],
-    parameters: {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "content": {
-          "type": "string",
-          "description": "Complete DESIGN.md content"
-        },
-        "title": {
-          "type": "string",
-          "description": "Used only when content is omitted"
-        }
-      },
-      "required": [
-        "id",
-        "content"
-      ]
-    },
-    owningCapability: 'subdesign-workflow',
-  },
   design_artifact_register: {
     description: "Register a validated project-relative SubDesign artifact manifest for preview and revision tracking.",
     keywords: ["artifact manifest","register artifact","preview artifact","design output","revision"],
@@ -1062,8 +980,7 @@ export const TOOL_DEFINITIONS = {
                 "deck",
                 "react-component",
                 "markdown-document",
-                "svg",
-                "design-system"
+                "svg"
               ]
             },
             "title": {
@@ -1079,8 +996,7 @@ export const TOOL_DEFINITIONS = {
                 "deck-html",
                 "markdown",
                 "svg",
-                "code",
-                "design-system"
+                "code"
               ]
             },
             "exports": {
@@ -1169,9 +1085,6 @@ export const TOOL_DEFINITIONS = {
                   "replaceTemplate"
                 ]
               }
-            },
-            "designSystemId": {
-              "type": "string"
             },
             "status": {
               "type": "string",
@@ -1423,7 +1336,6 @@ export const TOOL_DEFINITIONS = {
                   "build",
                   "manual",
                   "template-attribution",
-                  "design-system",
                   "asset-license"
                 ]
               },
@@ -1506,7 +1418,6 @@ export const TOOL_DEFINITIONS = {
                       "build",
                       "manual",
                       "template-attribution",
-                      "design-system",
                       "asset-license"
                     ]
                   },

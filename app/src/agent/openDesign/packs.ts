@@ -1,7 +1,7 @@
 import type { PluginManifest } from '../hermes/plugins.ts'
 import type { OpenDesignCatalogRecord, OpenDesignExecutionStatus } from './catalog.ts'
 
-export type OpenDesignPackKind = 'template' | 'skill' | 'design-system' | 'prompt' | 'craft' | 'media'
+export type OpenDesignPackKind = 'template' | 'skill' | 'prompt' | 'craft' | 'media'
 export type OpenDesignTrustState = 'bundled' | 'community-reviewed' | 'local-user' | 'remote-unverified'
 
 export type OpenDesignContentPackManifest = {
@@ -69,7 +69,7 @@ export function normalizeOpenDesignContentPack(value: unknown): OpenDesignConten
   const digest = typeof raw.digest === 'string' ? raw.digest.trim() : ''
   if (!id.startsWith('open-design:') || !name || !sourcePath || !digest) return null
   const kind = raw.kind
-  if (!['template', 'skill', 'design-system', 'prompt', 'craft', 'media'].includes(String(kind))) return null
+  if (!['template', 'skill', 'prompt', 'craft', 'media'].includes(String(kind))) return null
   const trustState = raw.trustState
   if (!['bundled', 'community-reviewed', 'local-user', 'remote-unverified'].includes(String(trustState))) return null
   return {

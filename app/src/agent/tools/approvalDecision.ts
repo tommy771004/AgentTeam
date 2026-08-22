@@ -112,8 +112,6 @@ const SUBDESIGN_WRITE_TOOLS = new Set([
   'workspace_mkdir',
   'workspace_move',
   'workspace_delete',
-  'design_system_create',
-  'design_system_update',
   'design_artifact_export',
   'design_artifact_patch',
   'design_artifact_tweak',

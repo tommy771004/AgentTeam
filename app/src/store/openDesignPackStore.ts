@@ -100,7 +100,7 @@ export const useOpenDesignPackStore = create<OpenDesignPackStore>((set, get) => 
           projectRoot,
         })
         if (!copied.ok) throw new Error(copied.error || '無法複製 Open Design project-owned pack')
-        pack = { ...pack, projectPath: record.kind === 'design-system' ? (copied.designSystemPath || copied.path) : copied.path }
+        pack = { ...pack, projectPath: copied.path }
       }
 
       const packs = [pack, ...get().packs.filter((item) => item.id !== id)].slice(0, 500)

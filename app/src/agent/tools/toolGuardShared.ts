@@ -26,8 +26,6 @@ export const SIDE_EFFECT_TOOLS = new Set([
   'bash',
   'monitor',
   'workspace_write',
-  'design_system_create',
-  'design_system_update',
   'design_artifact_export',
   'design_artifact_patch',
   'design_artifact_tweak',

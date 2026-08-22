@@ -127,7 +127,6 @@ class LearningLoop {
     projectRoot?: string
     surface: string
     platform?: string
-    designSystemId?: string
     templateId?: string
     selectedDirectionId?: string
     memoryEnabled?: boolean
@@ -138,7 +137,6 @@ class LearningLoop {
     const details = [
       `surface=${input.surface}`,
       input.platform ? `platform=${input.platform}` : '',
-      input.designSystemId ? `designSystem=${input.designSystemId}` : '',
       input.templateId ? `template=${input.templateId}` : '',
       input.selectedDirectionId ? `direction=${input.selectedDirectionId}` : '',
     ].filter(Boolean).join(', ')

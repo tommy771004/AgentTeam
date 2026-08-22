@@ -24,6 +24,7 @@ import { ArtifactTweakPanel } from '../components/subdesign/ArtifactTweakPanel'
 import { ReferenceImportPanel } from '../components/subdesign/ReferenceImportPanel'
 import { SubDesignFlowPrototype } from '../components/subdesign/SubDesignFlow.prototype'
 import { SubDesignUnifiedFixture } from '../components/subdesign/SubDesignUnified.fixture'
+import { SubDesignDocsUiPrototype } from '../components/subdesign/SubDesignDocsUi.prototype'
 import { SubDesignWorkspaceHeader } from '../components/subdesign/SubDesignWorkspaceHeader'
 import { SubDesignRunInspector } from '../components/subdesign/SubDesignRunInspector'
 import { SubDesignProjectStudio } from '../components/subdesign/SubDesignProjectStudio'
@@ -42,7 +43,6 @@ type DesignSurface = {
 const SURFACES: readonly DesignSurface[] = [
   { id: 'prototype', title: '產品原型', description: '網頁、桌面或行動介面', icon: 'web' },
   { id: 'dashboard', title: '即時看板', description: '資料與決策工作台', icon: 'dashboard' },
-  { id: 'design-system', title: 'Design System', description: '品牌規則與元件語言', icon: 'palette' },
   { id: 'deck', title: '簡報與報告', description: '可交付的敘事內容', icon: 'slideshow' },
   { id: 'video', title: '動態影像', description: '影片幀與動效敘事', icon: 'movie' },
 ]
@@ -85,13 +85,11 @@ export function SubDesignPage() {
   const [surfaceId, setSurfaceId] = useState<DesignSurface['id']>('prototype')
   const [platform, setPlatform] = useState<SubDesignPlatform>('responsive')
   const [brief, setBrief] = useState('')
-  const [designSystemId, setDesignSystemId] = useState('')
   const [runner, setRunner] = useState<ThreadRunner>('builtin')
   const [templateCategory, setTemplateCategory] = useState<SubDesignTemplateCategory>('all')
   const [templateCollection, setTemplateCollection] = useState<SubDesignTemplateCollection>('explore')
   const [templateId, setTemplateId] = useState<string | undefined>()
   const [templateQuery, setTemplateQuery] = useState('')
-  const [designSystemPackId, setDesignSystemPackId] = useState<string | undefined>()
   const workspaceDependencies = useMemo(
     () => createSubDesignWorkspaceDependencies({
       navigate,
@@ -110,8 +108,6 @@ export function SubDesignPage() {
   const presentation = workspaceProjection.presentation
   const projectRoot = workspaceProjection.projectRoot
   const briefs = presentation.briefs
-  const systems = presentation.systems
-  const systemsLoading = presentation.systemsLoading
   const cliProviders = presentation.cliProviders
   const storybookSettings = presentation.storybookSettings
   const storybookRuns = presentation.storybookRuns
@@ -143,9 +139,7 @@ export function SubDesignPage() {
   const activeBrief = routeBriefId ? routeBrief : null
   const activeBriefId = activeBrief?.id
   const activeBriefSurface = activeBrief?.surface
-  const activeBriefDesignSystemId = activeBrief?.designSystemId
   const activeBriefTemplateId = activeBrief?.templateId
-  const selectedSystem = systems.find((system) => system.id === designSystemId)
   const allTemplates = useMemo(
     () =>
       catalogRecords
@@ -203,19 +197,6 @@ export function SubDesignPage() {
   const installedOpenDesignPack = selectedCatalogRecord
     ? presentation.installedOpenDesignPacks.find((pack) => pack.id === openDesignPackId(selectedCatalogRecord)) || null
     : null
-  // Design System Packs are vendor DESIGN.md content (kind:'design-system'), distinct from the
-  // project-owned Design Systems scanned by refreshSystems() — see CONTEXT.md and
-  // docs/adr/0001-opendesign-catalog-is-source-of-truth.md. Installing one copies it into
-  // .subagents/subdesign/design-systems/<id>/ via the same copyVendorPack IPC templates use.
-  const designSystemPackRecords = useMemo(
-    () => catalogRecords.filter((record) => record.kind === 'design-system'),
-    [catalogRecords],
-  )
-  const selectedDesignSystemPackRecord = designSystemPackRecords.find((record) => record.id === designSystemPackId) || null
-  const installedDesignSystemPack = selectedDesignSystemPackRecord
-    ? presentation.installedOpenDesignPacks.find((pack) => pack.id === openDesignPackId(selectedDesignSystemPackRecord)) || null
-    : null
-
   const workspaceHydrationError = workspaceProjection.hydration.status === 'failed'
     ? workspaceProjection.hydration.reason || 'SubDesign 專案狀態載入失敗。'
     : null
@@ -239,9 +220,8 @@ export function SubDesignPage() {
   useEffect(() => {
     if (!activeBriefId || !activeBriefSurface) return
     setSurfaceId(activeBriefSurface)
-    setDesignSystemId(activeBriefDesignSystemId || '')
     setTemplateId(activeBriefTemplateId)
-  }, [activeBriefDesignSystemId, activeBriefId, activeBriefSurface, activeBriefTemplateId])
+  }, [activeBriefId, activeBriefSurface, activeBriefTemplateId])
 
   useEffect(() => {
     if (!routeBriefId) return
@@ -251,22 +231,11 @@ export function SubDesignPage() {
   }, [linkedThreadRunId, routeBriefId, workspaceController])
 
   useEffect(() => {
-    const requestedDesignSystemId = new URLSearchParams(location.search).get('designSystemId')
-    if (!requestedDesignSystemId || !systems.some((system) => system.id === requestedDesignSystemId)) return
-    setDesignSystemId(requestedDesignSystemId)
-    if (activeBrief && activeBrief.designSystemId !== requestedDesignSystemId) {
-      workspaceController.updateBrief(activeBrief.id, { designSystemId: requestedDesignSystemId }, projectRoot || undefined)
-    }
-  }, [activeBrief, location.search, projectRoot, systems, workspaceController])
-
-  useEffect(() => {
     if (!latestPassedPreference) return
-    if (!designSystemId && latestPassedPreference.designSystemId) setDesignSystemId(latestPassedPreference.designSystemId)
     if (!templateId && latestPassedPreference.templateId) setTemplateId(latestPassedPreference.templateId)
-  }, [designSystemId, latestPassedPreference, templateId])
+  }, [latestPassedPreference, templateId])
 
   const startSubDesign = async () => {
-    const preferredDesignSystemId = designSystemId || latestPassedPreference?.designSystemId
     const preferredTemplateId = templateId || latestPassedPreference?.templateId
     workspaceController.setRunPanel(false)
     await workspaceController.create({
@@ -274,7 +243,6 @@ export function SubDesignPage() {
       surface: activeSurface.id,
       platform,
       fidelity: 'high-fidelity',
-      designSystemId: preferredDesignSystemId,
       templateId: preferredTemplateId,
       skillIds: selectedCatalogRecord?.entryPaths.some((entry) => /SKILL\.md$/i.test(entry))
         ? [selectedCatalogRecord.id]
@@ -288,7 +256,6 @@ export function SubDesignPage() {
     const result = workspaceController.resume(id)
     if (!result.ok) return
     setSurfaceId(result.brief.surface)
-    setDesignSystemId(result.brief.designSystemId || '')
     setTemplateId(result.brief.templateId)
   }
 
@@ -318,9 +285,11 @@ export function SubDesignPage() {
   if (import.meta.env.DEV && new URLSearchParams(location.search).get('prototype') === 'subdesign-unified') {
     return <SubDesignUnifiedFixture />
   }
+  if (import.meta.env.DEV && new URLSearchParams(location.search).get('prototype') === 'subdesign-docsui') {
+    return <SubDesignDocsUiPrototype />
+  }
 
   if (routeBriefId && activeBrief && workspace) {
-    const activeSystem = systems.find((system) => system.id === activeBrief.designSystemId) || null
     const modelBar = modelDiscoveryStatus === 'loading' ? (
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.06] bg-surface-container-low/20 px-3 text-[10px] text-outline" role="status">
         <Icon name="neurology" size={13} className="text-primary" />
@@ -374,7 +343,6 @@ export function SubDesignPage() {
         <SubDesignProjectStudio
         brief={activeBrief}
         workspace={workspace}
-        designSystem={activeSystem}
         thread={linkedThread || null}
         artifacts={visibleArtifacts}
         selectedArtifact={selectedArtifact}
@@ -384,7 +352,6 @@ export function SubDesignPage() {
         runId={linkedThreadRunId}
         startingRun={startingRun}
         onBack={() => navigate('/subdesign')}
-        onOpenDesignSystems={() => navigate(`/design-systems?returnTo=${encodeURIComponent(`/subdesign/${activeBrief.id}`)}&briefId=${encodeURIComponent(activeBrief.id)}`)}
         onStartRun={() => void startBriefRun()}
         onStopRun={() => { if (linkedThreadRunId) workspaceController.stopExecution(linkedThreadRunId) }}
         onSubmitFollowUp={submitStudioFollowUp}
@@ -416,8 +383,7 @@ export function SubDesignPage() {
         <SubDesignStudioNav
           active="studio"
           studioHref={activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign'}
-          systemsHref={`/design-systems?returnTo=${encodeURIComponent(activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign')}${activeBrief ? `&briefId=${encodeURIComponent(activeBrief.id)}` : ''}`}
-          contextLabel={activeBrief ? activeBrief.objective : '從 brief 選擇品牌契約，再生成與驗證產物'}
+          contextLabel={activeBrief ? activeBrief.objective : '從 brief 開始生成與驗證設計產物'}
           onNavigate={navigate}
         />
         {workspaceHydrationError ? <section role="alert" className="mx-auto mb-6 max-w-[820px] rounded-2xl border border-error/25 bg-error/10 px-4 py-3 text-[12px] text-error">{workspaceHydrationError}</section> : null}
@@ -430,8 +396,6 @@ export function SubDesignPage() {
         {workspace ? (
           <SubDesignWorkspaceHeader
             workspace={workspace}
-            designSystem={systems.find((system) => system.id === activeBrief?.designSystemId) || null}
-            onOpenDesignSystem={() => navigate(`/design-systems?returnTo=${encodeURIComponent(activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign')}${activeBrief ? `&briefId=${encodeURIComponent(activeBrief.id)}` : ''}`)}
             onPrimaryAction={workspace.nextGate.action === 'start-build' && !runIsLive ? () => void startBriefRun() : undefined}
             primaryActionLabel={startingRun ? '啟動中…' : '在此頁開始 Build'}
           />
@@ -484,22 +448,6 @@ export function SubDesignPage() {
                 </select>
                 <SelectChevron />
               </div>
-              <div className="relative sm:w-[170px]">
-                <select
-                  value={designSystemId}
-                  onChange={(event) => {
-                    const nextId = event.target.value
-                    setDesignSystemId(nextId)
-                    if (activeBrief) workspaceController.updateBrief(activeBrief.id, { designSystemId: nextId || undefined }, projectRoot || undefined)
-                  }}
-                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
-                  aria-label="Design system"
-                >
-                  <option value="">Neutral / project default</option>
-                  {systems.map((system) => <option key={system.id} value={system.id}>{system.title}</option>)}
-                </select>
-                <SelectChevron />
-              </div>
               <div className="relative sm:w-[145px]">
                 <select
                   value={runner}
@@ -524,77 +472,9 @@ export function SubDesignPage() {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-[12px] text-outline">
-            <span className="inline-flex items-center gap-1.5"><Icon name="palette" size={15} className="text-primary" /><strong className="font-semibold text-on-surface-variant">{selectedSystem?.title || 'Project default'}</strong><span className="text-outline">將套用到下一次生成</span></span>
-            <button type="button" onClick={() => navigate(`/design-systems?returnTo=${encodeURIComponent(activeBrief ? `/subdesign/${activeBrief.id}` : '/subdesign')}${activeBrief ? `&briefId=${encodeURIComponent(activeBrief.id)}` : ''}`)} className="inline-flex items-center gap-1 text-[11px] text-outline hover:text-primary" aria-label="瀏覽與套用 Design system"><Icon name="tune" size={13} />瀏覽與套用</button>
-            <span className="h-4 w-px bg-white/10" aria-hidden />
             <span className="inline-flex items-center gap-1.5 truncate"><Icon name="folder" size={15} />{projectRoot ? projectRoot.split(/[\\/]/).filter(Boolean).pop() : '尚未選擇工作目錄'}</span>
-            <button
-              type="button"
-              onClick={() => void workspaceController.refreshSystems()}
-              className="ml-auto inline-flex items-center gap-1 text-[12px] text-outline hover:text-primary"
-            >
-              <Icon name="refresh" size={14} />{systemsLoading ? '掃描中…' : '更新'}
-            </button>
           </div>
         </section>
-        {surfaceId === 'design-system' ? (
-          <section className="mx-auto mt-8 max-w-[820px]">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-[13px] font-semibold text-outline">或從 Design System Pack 安裝</h2>
-              <span className="text-[11px] text-outline">{designSystemPackRecords.length} 個本機收錄的 pack</span>
-            </div>
-            {designSystemPackRecords.length ? (
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {designSystemPackRecords.map((record) => {
-                  const selected = record.id === designSystemPackId
-                  return (
-                    <button
-                      key={record.id}
-                      type="button"
-                      onClick={() => setDesignSystemPackId(record.id)}
-                      className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                        selected
-                          ? 'border-primary/45 bg-primary/[0.08]'
-                          : 'border-white/10 bg-surface-container-low hover:border-primary/30 hover:bg-white/[0.04]'
-                      }`}
-                    >
-                      <span className="block text-[13px] font-medium text-on-surface">{record.title}</span>
-                      <span className="mt-0.5 block text-[11px] text-outline">{record.summary}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
-              <p className="mt-3 rounded-xl border border-dashed border-white/12 bg-white/[0.02] px-4 py-3 text-[11px] text-outline">
-                目前本機 Open Design vendor 目錄尚未收錄任何 design-system pack（沒有 DESIGN.md）。可直接在下方建立全新 brief，或先到「管理」建立第一份 Design System。
-              </p>
-            )}
-            {selectedDesignSystemPackRecord ? (
-              <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/[0.05] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-[12px] font-semibold text-on-surface">{installedDesignSystemPack ? '已安裝為專案 Design System' : '安裝這個 pack 到目前專案？'}</p>
-                  <p className="mt-1 truncate text-[11px] text-outline">{selectedDesignSystemPackRecord.sourcePath} · digest {selectedDesignSystemPackRecord.digest.slice(0, 12)}… · {selectedDesignSystemPackRecord.licensePaths.length ? '已找到授權檔' : '未找到授權檔'}</p>
-                </div>
-                <button
-                  type="button"
-                  disabled={openDesignPackBusyId === `open-design:${selectedDesignSystemPackRecord.id}` || !projectRoot}
-                  onClick={async () => {
-                    if (installedDesignSystemPack) {
-                      await workspaceController.setOpenDesignPackEnabled(selectedDesignSystemPackRecord, !installedDesignSystemPack.enabled)
-                      return
-                    }
-                    const installed = await workspaceController.installOpenDesignPack(selectedDesignSystemPackRecord, projectRoot || undefined)
-                    if (installed) void workspaceController.refreshSystems()
-                  }}
-                  className="shrink-0 rounded-lg border border-primary/35 px-3 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/10 disabled:opacity-50"
-                >
-                  {openDesignPackBusyId === `open-design:${selectedDesignSystemPackRecord.id}` ? '處理中…' : installedDesignSystemPack?.enabled ? '停用 pack' : installedDesignSystemPack ? '啟用 pack' : '安裝為 Design System'}
-                </button>
-              </div>
-            ) : null}
-            {!projectRoot ? <p className="mt-2 text-[11px] text-secondary">安裝需要先選擇工作目錄。</p> : null}
-          </section>
-        ) : null}
 
         <section className="mx-auto mt-10 max-w-[1120px]">
           <div className="flex flex-col gap-5 border-b border-white/[0.08] pb-4">

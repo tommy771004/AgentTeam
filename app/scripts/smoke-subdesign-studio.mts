@@ -46,7 +46,6 @@ function brief(partial: Partial<SubDesignBrief> & Pick<SubDesignBrief, 'id' | 's
     constraints: partial.constraints || [],
     acceptanceCriteria: partial.acceptanceCriteria || [],
     selectedDirectionId: partial.selectedDirectionId,
-    designSystemId: partial.designSystemId,
     createdAt: partial.createdAt || '2026-01-01T00:00:00.000Z',
     updatedAt: partial.updatedAt || '2026-01-01T00:00:00.000Z',
     ...partial,

@@ -46,8 +46,6 @@ const PLAN_DENY_TOOLS = new Set([
   'mcp_call',
   'delegate_task',
   'skill_save',
-  'design_system_create',
-  'design_system_update',
   'design_artifact_export',
   'design_artifact_patch',
   'design_artifact_tweak',

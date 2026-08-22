@@ -75,9 +75,7 @@ function recordKind(relative, files) {
   if (relative.startsWith('prompt-templates/')) return 'prompt'
   if (relative.startsWith('plugins/_official/video-templates/')) return 'template'
   if (relative.startsWith('plugins/_official/examples/')) return 'template'
-  if (relative.startsWith('design-systems/')) return 'design-system'
   if (relative.startsWith('design-templates/')) return 'template'
-  if (files.some((file) => file.endsWith('/DESIGN.md'))) return 'design-system'
   if (files.some((file) => file.endsWith('/SKILL.md'))) return 'skill'
   return 'media'
 }
@@ -86,7 +84,7 @@ function categoryFor(relative, parsed) {
   if (typeof parsed?.category === 'string' && parsed.category.trim()) return parsed.category.trim()
   const surface = parsed?.surface || parsed?.od?.mode || parsed?.od?.surface
   if (surface === 'video') return 'video'
-  if (surface === 'prototype' || surface === 'dashboard' || surface === 'design-system' || surface === 'deck') return surface
+  if (surface === 'prototype' || surface === 'dashboard' || surface === 'deck') return surface
   if (relative.startsWith('design-templates/')) {
     if (/deck|ppt|pitch|weekly-report|presentation|kami/i.test(relative)) return 'deck'
     if (/dashboard|tracker|okrs|finance|github|kanban|invoice|valuation|meeting-notes/i.test(relative)) return 'dashboard'
@@ -203,7 +201,6 @@ function sourceDirectories(files) {
       // Use base path as dir so json + preview.png share same record
       dir = base
     } else if (parts[0] === 'design-templates') dir = parts.slice(0, 2).join('/')
-    else if (parts[0] === 'design-systems') dir = parts.slice(0, 2).join('/')
     else if (parts[0] === 'plugins' && parts[1] === '_official') dir = parts.slice(0, 4).join('/')
     if (!dir) continue
     // Prompt-templates are file-based packs; skip directory existence check for them

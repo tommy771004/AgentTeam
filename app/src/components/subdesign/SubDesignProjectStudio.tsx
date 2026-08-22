@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { DesignSystemSummary, SubDesignArtifact, SubDesignBrief, SubDesignCritique } from '../../agent/subdesign/types'
+import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique } from '../../agent/subdesign/types'
 import type { SubDesignWorkspaceViewModel } from '../../agent/subdesign/workspace'
 import type { Thread } from '../../store/threadStore'
 import { useProjectStore } from '../../store/projectStore'
@@ -28,7 +28,6 @@ type StudioTab = 'files' | 'edit' | 'critique' | 'deliver'
 type SubDesignProjectStudioProps = {
   brief: SubDesignBrief
   workspace: SubDesignWorkspaceViewModel
-  designSystem: DesignSystemSummary | null
   thread: Thread | null
   artifacts: SubDesignArtifact[]
   selectedArtifact: SubDesignArtifact | null
@@ -38,7 +37,6 @@ type SubDesignProjectStudioProps = {
   runId: string | null
   startingRun: boolean
   onBack: () => void
-  onOpenDesignSystems: () => void
   onStartRun: () => void
   onStopRun: () => void
   onSubmitFollowUp: (value: string) => Promise<void>
@@ -96,7 +94,6 @@ function LifecycleRoute({ workspace }: { workspace: SubDesignWorkspaceViewModel 
 export function SubDesignProjectStudio({
   brief,
   workspace,
-  designSystem,
   thread,
   artifacts,
   selectedArtifact,
@@ -106,7 +103,6 @@ export function SubDesignProjectStudio({
   runId,
   startingRun,
   onBack,
-  onOpenDesignSystems,
   onStartRun,
   onStopRun,
   onSubmitFollowUp,
@@ -193,12 +189,10 @@ export function SubDesignProjectStudio({
         <SubDesignConversationPane
           brief={brief}
           workspace={workspace}
-          designSystem={designSystem}
           thread={thread}
           runIsLive={runIsLive}
           runId={runId}
           startingRun={startingRun}
-          onOpenDesignSystems={onOpenDesignSystems}
           onOpenTranscript={onOpenTranscript}
           onStartRun={onStartRun}
           onStopRun={onStopRun}

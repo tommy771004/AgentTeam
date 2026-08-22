@@ -84,7 +84,7 @@ function cleanReferences(value: unknown): SubDesignReference[] {
     const storedPath = cleanText(raw.storedPath, 1000).replaceAll('\\', '/')
     const sha256 = cleanText(raw.sha256, 128)
     if (!id || !kind || !source || !storedPath || !sha256) return null
-    return { id, kind, source, storedPath, sha256, title: cleanText(raw.title, 240) || undefined, importedAt: cleanText(raw.importedAt, 40) || new Date().toISOString(), designSystemId: cleanText(raw.designSystemId, 120) || undefined }
+    return { id, kind, source, storedPath, sha256, title: cleanText(raw.title, 240) || undefined, importedAt: cleanText(raw.importedAt, 40) || new Date().toISOString() }
   }).filter((item): item is SubDesignReference => Boolean(item)).slice(0, 12)
 }
 
@@ -95,7 +95,6 @@ export function createSubDesignBrief(input: {
   audience?: string
   platform?: SubDesignBrief['platform']
   fidelity?: SubDesignBrief['fidelity']
-  designSystemId?: string
   templateId?: string
   skillIds?: string[]
   provenance?: OpenDesignProvenance[]
@@ -112,7 +111,6 @@ export function createSubDesignBrief(input: {
     audience: cleanText(input.audience, 500) || undefined,
     platform: input.platform,
     fidelity: input.fidelity,
-    designSystemId: cleanText(input.designSystemId, 120) || undefined,
     templateId: cleanText(input.templateId, 120) || undefined,
     skillIds: cleanList(input.skillIds).slice(0, 12),
     provenance: cleanProvenance(input.provenance),
@@ -148,7 +146,6 @@ export function normalizeBrief(raw: unknown): SubDesignBrief | null {
         ? value.platform
         : undefined,
     fidelity: value.fidelity === 'wireframe' || value.fidelity === 'high-fidelity' ? value.fidelity : undefined,
-    designSystemId: cleanText(value.designSystemId, 120) || undefined,
     templateId: cleanText(value.templateId, 120) || undefined,
     skillIds: cleanList(value.skillIds).slice(0, 12),
     provenance: cleanProvenance(value.provenance),
@@ -173,8 +170,6 @@ export function updateSubDesignBrief(
     audience: patch.audience == null ? brief.audience : cleanText(patch.audience, 500) || undefined,
     platform: patch.platform ?? brief.platform,
     fidelity: patch.fidelity ?? brief.fidelity,
-    designSystemId:
-      patch.designSystemId == null ? brief.designSystemId : cleanText(patch.designSystemId, 120) || undefined,
     templateId: patch.templateId == null ? brief.templateId : cleanText(patch.templateId, 120) || undefined,
     skillIds: patch.skillIds == null ? brief.skillIds : cleanList(patch.skillIds).slice(0, 12),
     provenance: patch.provenance == null ? brief.provenance : cleanProvenance(patch.provenance),

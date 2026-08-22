@@ -12,7 +12,6 @@ const KINDS: readonly SubDesignArtifactKind[] = [
   'react-component',
   'markdown-document',
   'svg',
-  'design-system',
 ]
 const RENDERERS: readonly SubDesignArtifactRenderer[] = [
   'html',
@@ -20,7 +19,6 @@ const RENDERERS: readonly SubDesignArtifactRenderer[] = [
   'markdown',
   'svg',
   'code',
-  'design-system',
 ]
 const EXPORTS: readonly SubDesignArtifactExport[] = ['html', 'pdf', 'zip', 'pptx', 'mp4', 'jsx', 'md', 'svg', 'txt']
 
@@ -84,7 +82,7 @@ function safeTweaks(value: unknown): SubDesignArtifactTweak[] {
 
 export function validateSubDesignArtifactManifest(
   input: unknown,
-  defaults?: { briefId?: string; designSystemId?: string },
+  defaults?: { briefId?: string },
 ): { ok: true; manifest: SubDesignArtifact } | { ok: false; errors: string[] } {
   if (!input || typeof input !== 'object') return { ok: false, errors: ['manifest 必須是 object。'] }
   const raw = input as Record<string, unknown>
@@ -126,7 +124,6 @@ export function validateSubDesignArtifactManifest(
       exports,
       supportingFiles,
       tweaks: tweaks.length ? tweaks : undefined,
-      designSystemId: text(raw.designSystemId, 120) || defaults?.designSystemId || undefined,
       status,
       revision,
       createdAt: text(raw.createdAt, 40) || now,

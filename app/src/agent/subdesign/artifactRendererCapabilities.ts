@@ -9,7 +9,6 @@ export const ARTIFACT_RENDERER_CAPABILITIES: Record<SubDesignArtifact['renderer'
   markdown: { supportedKinds: ['markdown-document'], streaming: true, sandbox: "default-src 'none';", export: ['md'] },
   svg: { supportedKinds: ['svg'], streaming: false, sandbox: "default-src 'none';", export: ['svg'] },
   code: { supportedKinds: ['react-component'], streaming: false, sandbox: "default-src 'none';", export: ['jsx'] },
-  'design-system': { supportedKinds: ['design-system'], streaming: false, sandbox: "default-src 'none';", export: ['md'] },
 }
 
 export function withPreviewCsp(content: string, renderer: SubDesignArtifact['renderer']): string {

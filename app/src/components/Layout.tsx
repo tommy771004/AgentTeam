@@ -68,7 +68,7 @@ function navItemActive(to: string, pathname: string, search: string, end?: boole
     return new URLSearchParams(search).get('tab') !== 'plugins'
   }
   if (path === '/subdesign') {
-    return pathname === '/subdesign' || pathname.startsWith('/subdesign/') || pathname === '/design-systems' || pathname.startsWith('/design-systems/')
+    return pathname === '/subdesign' || pathname.startsWith('/subdesign/')
   }
   return pathname === path || pathname.startsWith(`${path}/`)
 }

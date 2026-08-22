@@ -932,7 +932,6 @@ async function pushRunProcessSummary(args: {
           briefId: subDesignBrief.id,
           stage: subDesignBrief.stage,
           selectedDirectionId: subDesignBrief.selectedDirectionId,
-          designSystemId: subDesignBrief.designSystemId,
           artifactId: subDesignArtifact?.id,
           artifactRevision: subDesignArtifact?.revision,
           critique: subDesignCritique

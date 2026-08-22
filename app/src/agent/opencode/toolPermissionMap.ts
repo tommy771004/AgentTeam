@@ -21,16 +21,12 @@ export function toolPermissionKey(toolName: string): PermissionKey {
   }
   switch (toolName) {
     case 'workspace_write':
-    case 'design_system_create':
-    case 'design_system_update':
     case 'design_artifact_export':
     case 'skill_save':
     case 'bash':
       return 'edit'
     case 'workspace_read':
     case 'workspace_list':
-    case 'design_system_list':
-    case 'design_system_read':
     case 'datetime_now':
     case 'json_extract_lite':
       return 'read'

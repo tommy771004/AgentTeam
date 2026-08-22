@@ -54,8 +54,5 @@ _Avoid_: "secret" alone (credentials are one subset), or "prompt filtering" / "t
 
 ## Naming traps
 
-**Design System** is the project-owned brand/token contract — a project-relative `DESIGN.md` (plus optional `tokens.css`, `assets/`) at the project root or under `.subagents/subdesign/design-systems/<id>/`, and the only form the SubDesign loop reads. A **Design System Pack** is a read-only vendor record under `app/public/open-design/`, inert until installed into a project, where it becomes a Design System.
-_Avoid_: "design system" alone for catalog content — the two were previously conflated in the codebase.
-
-**SubDesign** is the in-app design workflow (brief → direction → build → critique → deliver) on the same `runTask` lifecycle as every other task; **OpenDesign** (`agent/openDesign/*`) is the read-only indexer for vendored content, never a runtime.
+**SubDesign** is the in-app design workflow (brief → direction → build → critique → deliver) on the same `runTask` lifecycle as every other task; **OpenDesign** (`agent/openDesign/*`) is the read-only indexer for vendored content, never a runtime. The former **Design System** feature (project-owned `DESIGN.md` contract, picker, and `design_system_*` tools) was removed on 2026-08-22; references to it are historical.
 _Avoid_: "Open Design" (capital, two words) for the in-repo layer; that spelling is the upstream product.

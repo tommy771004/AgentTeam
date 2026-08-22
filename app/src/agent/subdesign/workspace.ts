@@ -11,7 +11,6 @@ import type { SubDesignModelDiscovery } from './modelDiscovery.ts'
 import { createStreamingEnvelope, mergeStreamingUpdate, pluginRunArtifactId, type StreamingEnvelope } from './streamingEnvelope.ts'
 import { isProviderEnabled } from './providers/providerFlags.ts'
 import type {
-  DesignSystemSummary,
   SubDesignBrief,
   SubDesignBriefPatch,
   SubDesignArtifact,
@@ -48,7 +47,6 @@ export type SubDesignWorkspaceCreateInput = {
   surface: SubDesignSurface
   platform?: SubDesignPlatform
   fidelity?: SubDesignFidelity
-  designSystemId?: string
   templateId?: string
   skillIds?: string[]
   provenance?: OpenDesignProvenance[]
@@ -130,9 +128,6 @@ export type SubDesignWorkspacePresentation = {
   projectRoot: string
   activeBrief: SubDesignBrief | null
   briefs: SubDesignBrief[]
-  systems: DesignSystemSummary[]
-  systemsLoading: boolean
-  systemsError: string | null
   threads: Thread[]
   runningThreadIds: string[]
   linkedThread: Thread | null
@@ -210,10 +205,9 @@ export type SubDesignWorkspaceDependencies = {
   bindBriefToThread: (threadId: string, briefId: string) => void
   createBrief: (input: SubDesignWorkspaceBriefInput) => SubDesignBrief
   selectBrief: (id: string | null) => void
-  getDesignSystem: (id?: string) => DesignSystemSummary | null
   prepareRun: (input: SubDesignWorkspacePreparationInput) => Promise<SubDesignRunPreparation>
   runTask: (input: ExternalRunOpts) => Promise<ExternalRunResult>
-  buildPrompt: (brief: SubDesignBrief, designSystem: DesignSystemSummary | null) => string
+  buildPrompt: (brief: SubDesignBrief) => string
   navigate: (path: string) => void
   hydrateProject?: (request: SubDesignWorkspaceHydrationRequest) => Promise<void>
   refreshProviderState?: (projectRoot?: string, isCurrent?: () => boolean) => Promise<SubDesignWorkspaceProviderProjection>
@@ -233,7 +227,6 @@ export type SubDesignWorkspaceDependencies = {
   subscribeModelChanges?: (listener: () => void) => () => void
   updateBrief?: (id: string, patch: SubDesignBriefPatch, projectRoot?: string) => SubDesignBrief | null
   selectDirection?: (id: string, directionId: string, projectRoot?: string) => { ok: boolean; error?: string; brief: SubDesignBrief }
-  refreshSystems?: (projectRoot?: string, options?: { isCurrent?: () => boolean }) => Promise<DesignSystemSummary[]>
   installOpenDesignPack?: (record: OpenDesignCatalogRecord, projectRoot?: string) => Promise<OpenDesignContentPackManifest | null>
   setOpenDesignPackEnabled?: (record: OpenDesignCatalogRecord, enabled: boolean) => Promise<boolean>
   setRunPanel?: (visible: boolean) => void
@@ -290,9 +283,6 @@ function emptyPresentation(projectRoot: string): SubDesignWorkspacePresentation 
     projectRoot,
     activeBrief: null,
     briefs: [],
-    systems: [],
-    systemsLoading: false,
-    systemsError: null,
     threads: [],
     runningThreadIds: [],
     linkedThread: null,
@@ -329,7 +319,6 @@ export type SubDesignWorkspaceController = {
   setModel: (modelId: string) => void
   refreshCatalog: () => Promise<SubDesignWorkspaceProjection>
   refreshModels: () => Promise<SubDesignWorkspaceProjection>
-  refreshSystems: () => Promise<DesignSystemSummary[]>
   updateBrief: (id: string, patch: SubDesignBriefPatch, projectRoot?: string) => SubDesignBrief | null
   selectDirection: (id: string, directionId: string, projectRoot?: string) => { ok: boolean; error?: string; brief: SubDesignBrief }
   installOpenDesignPack: (record: OpenDesignCatalogRecord, projectRoot?: string) => Promise<OpenDesignContentPackManifest | null>
@@ -432,7 +421,6 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       activeBrief,
       runIsLive,
       briefs: [...basePresentation.briefs],
-      systems: [...basePresentation.systems],
       threads: [...basePresentation.threads],
       runningThreadIds: [...basePresentation.runningThreadIds],
       artifacts: [...basePresentation.artifacts],
@@ -749,7 +737,6 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
         objective,
         platform: input.platform,
         fidelity: input.fidelity || 'high-fidelity',
-        designSystemId: input.designSystemId,
         templateId: input.templateId,
         skillIds: input.skillIds,
         provenance: input.provenance,
@@ -761,7 +748,7 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       resetPluginContext(state, brief.id)
       publish()
       deps.navigate(`/subdesign/${brief.id}`)
-      const prompt = deps.buildPrompt(brief, deps.getDesignSystem(brief.designSystemId))
+      const prompt = deps.buildPrompt(brief)
       return runBrief(brief, prompt, input.runner)
     },
 
@@ -779,7 +766,7 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
     start: async () => {
       const brief = state.routeBriefId ? deps.findBrief(state.routeBriefId) : null
       if (!brief) return commandFailure('missing-brief', '目前沒有可執行的 SubDesign brief。')
-      const prompt = deps.buildPrompt(brief, deps.getDesignSystem(brief.designSystemId))
+      const prompt = deps.buildPrompt(brief)
       return runBrief(brief, prompt)
     },
 
@@ -805,13 +792,6 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       if (next === state.selectedModelId) return
       state.selectedModelId = next
       publish()
-    },
-
-    refreshSystems: async () => {
-      if (!deps.refreshSystems) return []
-      const systems = await deps.refreshSystems(state.projectRoot || undefined)
-      publish()
-      return systems
     },
 
     updateBrief: (id, patch, projectRoot) => {

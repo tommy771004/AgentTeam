@@ -35,7 +35,7 @@ interface SubDesignArtifactStore {
   projectRoot: string
   setProjectRoot: (root: string) => void
   hydrateCanonical: (items: unknown[]) => void
-  register: (input: unknown, defaults?: { briefId?: string; designSystemId?: string }, projectRoot?: string) =>
+  register: (input: unknown, defaults?: { briefId?: string }, projectRoot?: string) =>
     | { ok: true; artifact: SubDesignArtifact }
     | { ok: false; errors: string[] }
   remove: (id: string) => void

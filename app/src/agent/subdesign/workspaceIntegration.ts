@@ -115,7 +115,6 @@ export function createSubDesignWorkspaceDependencies(
     bindBriefToThread: (threadId, briefId) => useThreadStore.getState().setSubDesignBriefId(threadId, briefId),
     createBrief: (input) => useSubDesignStore.getState().createBrief(input),
     selectBrief: (id) => useSubDesignStore.getState().selectBrief(id),
-    getDesignSystem: (id) => useSubDesignStore.getState().systems.find((system) => system.id === id) || null,
     readPresentation: (routeBriefId) => {
       const projectRoot = useProjectStore.getState().root
       const subDesign = useSubDesignStore.getState()
@@ -135,9 +134,6 @@ export function createSubDesignWorkspaceDependencies(
         projectRoot,
         activeBrief: routeBriefId ? subDesign.findById(routeBriefId) : null,
         briefs,
-        systems: [...subDesign.systems],
-        systemsLoading: subDesign.systemsLoading,
-        systemsError: subDesign.systemsError,
         threads: [...threadState.threads],
         runningThreadIds: [...threadState.runningThreadIds],
         linkedThread,
@@ -195,7 +191,6 @@ export function createSubDesignWorkspaceDependencies(
     saveExperimentalSurfaceSettings: saveExperimentalSettings,
     updateBrief: (id, patch, projectRoot) => useSubDesignStore.getState().updateBrief(id, patch, projectRoot),
     selectDirection: (id, directionId, projectRoot) => useSubDesignStore.getState().selectDirection(id, directionId, undefined, projectRoot),
-    refreshSystems: (projectRoot, options) => useSubDesignStore.getState().refreshSystems(projectRoot, options),
     installOpenDesignPack: (record, projectRoot) => useOpenDesignPackStore.getState().install(record, projectRoot),
     setOpenDesignPackEnabled: (record, enabled) => useOpenDesignPackStore.getState().setEnabled(record, enabled),
     setRunPanel: (visible) => useThreadStore.getState().setShowRunPanel(visible),
@@ -203,7 +198,7 @@ export function createSubDesignWorkspaceDependencies(
     stopExecution: (runId) => useAgentStore.getState().stopExecution(runId),
     prepareRun: (input) => prepareSubDesignRun(input),
     runTask,
-    buildPrompt: (brief, system) => buildSubDesignPrompt(brief, system || undefined),
+    buildPrompt: (brief) => buildSubDesignPrompt(brief),
     navigate: options.navigate,
     hydrateProject: async ({ projectRoot, isCurrent }: SubDesignWorkspaceHydrationRequest) => {
       if (!isCurrent()) return
@@ -215,10 +210,6 @@ export function createSubDesignWorkspaceDependencies(
       useSubDesignExportStore.getState().setProjectRoot(projectRoot)
       useOpenDesignPackStore.getState().setProjectRoot(projectRoot)
       await hydrateSubDesignStores(projectRoot || undefined, { isCurrent })
-      if (!isCurrent()) return
-      await Promise.all([
-        useSubDesignStore.getState().refreshSystems(projectRoot || undefined, { isCurrent }),
-      ])
     },
     loadCatalog: async () => loadOpenDesignCatalog(),
     onCatalogLoaded: async (records) => {

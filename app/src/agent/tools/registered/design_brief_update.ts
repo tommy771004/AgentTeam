@@ -11,7 +11,7 @@ register({
   toolset: "subdesign-workflow",
   description: "Update the linked SubDesign brief metadata, direction cards, or stage.",
   keywords: ["subdesign","design brief","design brief update","audience","constraints","acceptance criteria","direction cards"],
-  schemaParams: {"type":"object","properties":{"briefId":{"type":"string","description":"Linked SubDesign brief id (optional in a linked thread)"},"objective":{"type":"string"},"audience":{"type":"string"},"platform":{"type":"string","enum":["responsive","web-desktop","mobile-ios","desktop-app"]},"fidelity":{"type":"string","enum":["wireframe","high-fidelity"]},"designSystemId":{"type":"string"},"constraints":{"type":"array","items":{"type":"string"}},"acceptanceCriteria":{"type":"array","items":{"type":"string"}},"directions":{"type":"array","maxItems":3,"items":{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"},"rationale":{"type":"string"},"risk":{"type":"string"}},"required":["title","summary"]}},"stage":{"type":"string","enum":["brief","direction","build","critique","deliver"]}}} as Record<string, unknown>,
+  schemaParams: {"type":"object","properties":{"briefId":{"type":"string","description":"Linked SubDesign brief id (optional in a linked thread)"},"objective":{"type":"string"},"audience":{"type":"string"},"platform":{"type":"string","enum":["responsive","web-desktop","mobile-ios","desktop-app"]},"fidelity":{"type":"string","enum":["wireframe","high-fidelity"]},"constraints":{"type":"array","items":{"type":"string"}},"acceptanceCriteria":{"type":"array","items":{"type":"string"}},"directions":{"type":"array","maxItems":3,"items":{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"},"rationale":{"type":"string"},"risk":{"type":"string"}},"required":["title","summary"]}},"stage":{"type":"string","enum":["brief","direction","build","critique","deliver"]}}} as Record<string, unknown>,
   owningCapability: "subdesign-workflow",
   handler: async (args, ctx) => {
     const input = args
@@ -35,7 +35,6 @@ register({
       'audience',
       'platform',
       'fidelity',
-      'designSystemId',
       'constraints',
       'acceptanceCriteria',
       'directions',

@@ -24,7 +24,7 @@ import {
 } from './opencode/agentRegistry.ts'
 import { buildIntentPreloadIds } from './intentPreload.ts'
 import { buildSubDesignRuntimeContext } from './subdesign/prompt.ts'
-import { getSubDesignBriefForThread, useSubDesignStore } from '../store/subDesignStore.ts'
+import { getSubDesignBriefForThread } from '../store/subDesignStore.ts'
 import {
   attachmentsToTextAppendix,
   attachmentsPathAppendix,
@@ -176,11 +176,8 @@ export async function dispatchThreadTask(
   const model = snapshot.overrides.model || thread?.model || settings.model
   const speed = snapshot.overrides.speed || thread?.speed || 'standard'
   const subDesignBrief = tid ? getSubDesignBriefForThread(tid) : null
-  const subDesignSystem = subDesignBrief?.designSystemId
-    ? useSubDesignStore.getState().systems.find((system) => system.id === subDesignBrief.designSystemId)
-    : undefined
   const subDesignContext = subDesignBrief
-    ? buildSubDesignRuntimeContext(subDesignBrief, subDesignSystem)
+    ? buildSubDesignRuntimeContext(subDesignBrief)
     : ''
   // Intent preload v2: builtins + skills + enabled plugins/MCP + project packs
   const preloadCandidates = buildIntentPreloadIds(text, settings, projectRoot, {

@@ -15,7 +15,7 @@ export const OPEN_DESIGN_INVENTORY_VERSION = 1
 export const OPEN_DESIGN_UPSTREAM_COMMIT = '4567a0d'
 export const OPEN_DESIGN_SOURCE_URL = 'https://open-design.ai/zh/plugins/'
 
-export type OpenDesignCatalogKind = 'template' | 'skill' | 'design-system' | 'prompt' | 'craft' | 'media'
+export type OpenDesignCatalogKind = 'template' | 'skill' | 'prompt' | 'craft' | 'media'
 export type OpenDesignExecutionStatus = 'ready' | 'content-only' | 'invalid'
 /**
  * Verdict of the authoritative parser (./pluginContract.ts), decided once at
@@ -126,16 +126,15 @@ function normalizeRecord(value: unknown, _index: number): OpenDesignCatalogRecor
   const id = cleanText(raw.id, 160)
   const sourcePath = cleanPath(raw.sourcePath)
   const kind = raw.kind
-  if (!id || !sourcePath || !['template', 'skill', 'design-system', 'prompt', 'craft', 'media'].includes(String(kind))) {
+  if (!id || !sourcePath || !['template', 'skill', 'prompt', 'craft', 'media'].includes(String(kind))) {
     return null
   }
   const assetPaths = Array.isArray(raw.assetPaths) ? raw.assetPaths.map(cleanPath).filter(Boolean).slice(0, 240) : []
-  const hasDesignSystemDocument = kind !== 'design-system' || assetPaths.some((item) => /(^|\/)DESIGN\.md$/i.test(item))
   const contractStatus = CONTRACT_STATUSES.includes(String(raw.contractStatus) as OpenDesignContractStatus)
     ? (String(raw.contractStatus) as OpenDesignContractStatus)
     : 'absent'
   const contractRejected = contractStatus === 'incompatible' || contractStatus === 'malformed'
-  const status = !hasDesignSystemDocument || contractRejected
+  const status = contractRejected
     ? 'invalid'
     : ['ready', 'content-only', 'invalid'].includes(String(raw.executionStatus))
     ? (String(raw.executionStatus) as OpenDesignExecutionStatus)
@@ -171,7 +170,6 @@ function normalizeRecord(value: unknown, _index: number): OpenDesignCatalogRecor
     specVersion: cleanText(raw.specVersion, 40) || undefined,
     parseWarnings: [
       ...(Array.isArray(raw.parseWarnings) ? raw.parseWarnings.map((item) => cleanText(item, 300)).filter(Boolean) : []),
-      ...(!hasDesignSystemDocument ? ['design-system pack 缺少 DESIGN.md，已標記 invalid。'] : []),
       ...(contractRejected ? [openDesignContractLabel(contractStatus, cleanText(raw.contractReason, 300))] : []),
     ].slice(0, 16),
   }

@@ -109,7 +109,7 @@ export function ArtifactTweakPanel({ artifact }: { artifact: SubDesignArtifact |
         ? await api.patchArtifact({ artifact, operations: [{ path: tweak.path, find: tweak.find, replace: tweak.replaceTemplate.replaceAll('{{value}}', value), expectedMatches: 1 }], projectRoot: projectRoot || undefined })
         : await api.applyTweak?.({ artifact, tweakId: tweak.id, value, projectRoot: projectRoot || undefined })
       if (!result?.ok || !result.artifact) throw new Error(result?.error || 'structured tweak 失敗。')
-      const stored = registerArtifact(result.artifact, { briefId: artifact.briefId, designSystemId: artifact.designSystemId }, projectRoot || undefined)
+      const stored = registerArtifact(result.artifact, { briefId: artifact.briefId }, projectRoot || undefined)
       if (!stored.ok) throw new Error(`patch revision invalid：${stored.errors.join('；')}`)
       setStage(artifact.briefId, 'critique', projectRoot || undefined)
       setMessage(`已套用「${tweak.label}」：revision ${stored.artifact.revision}。Preview 已刷新，舊 critique 需重新驗證。`)
@@ -130,7 +130,7 @@ export function ArtifactTweakPanel({ artifact }: { artifact: SubDesignArtifact |
       if (decision !== 'allow') { setMessage('Patch 已取消或未獲核准。'); return }
       const result = await window.subagents?.subdesign?.patchArtifact?.({ artifact, operations: [{ path: advancedPath, find, replace, expectedMatches: Math.max(1, Math.min(12, Number(expectedMatches) || 1)) }], projectRoot: projectRoot || undefined })
       if (!result?.ok || !result.artifact) throw new Error(result?.error || 'artifact patch 失敗。')
-      const stored = registerArtifact(result.artifact, { briefId: artifact.briefId, designSystemId: artifact.designSystemId }, projectRoot || undefined)
+      const stored = registerArtifact(result.artifact, { briefId: artifact.briefId }, projectRoot || undefined)
       if (!stored.ok) throw new Error(`patch revision invalid：${stored.errors.join('；')}`)
       setStage(artifact.briefId, 'critique', projectRoot || undefined)
       setMessage(`已完成 exact patch：revision ${stored.artifact.revision}。`)

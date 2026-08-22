@@ -6,10 +6,8 @@ import {
   transitionSubDesignStage,
   updateSubDesignBrief,
 } from '../agent/subdesign/brief.ts'
-import { scanDesignSystems } from '../agent/subdesign/designSystem.ts'
 import { persistSubDesignMetadata } from '../agent/subdesign/metadata.ts'
 import type {
-  DesignSystemSummary,
   SubDesignBrief,
   SubDesignBriefPatch,
   SubDesignDirection,
@@ -46,9 +44,6 @@ interface SubDesignStore {
   briefs: SubDesignBrief[]
   selectedBriefId: string | null
   projectRoot: string
-  systems: DesignSystemSummary[]
-  systemsLoading: boolean
-  systemsError: string | null
 
   hydrate: () => void
   hydrateCanonical: (items: unknown[]) => void
@@ -65,8 +60,6 @@ interface SubDesignStore {
   selectBrief: (id: string | null) => void
   findByThreadId: (threadId: string) => SubDesignBrief | null
   findById: (id: string) => SubDesignBrief | null
-  refreshSystems: (projectRoot?: string, options?: { isCurrent?: () => boolean }) => Promise<DesignSystemSummary[]>
-  setSystems: (systems: DesignSystemSummary[]) => void
 }
 
 function replaceBrief(set: (value: { briefs: SubDesignBrief[] }) => void, briefs: SubDesignBrief[], next: SubDesignBrief) {
@@ -80,9 +73,6 @@ export const useSubDesignStore = create<SubDesignStore>((set, get) => ({
   briefs: loadBriefs(),
   selectedBriefId: null,
   projectRoot: '',
-  systems: [],
-  systemsLoading: false,
-  systemsError: null,
 
   hydrate: () => {
     const briefs = loadBriefs()
@@ -142,24 +132,6 @@ export const useSubDesignStore = create<SubDesignStore>((set, get) => ({
 
   findById: (id) => get().briefs.find((brief) => brief.id === id) || null,
 
-  refreshSystems: async (projectRoot, options = {}) => {
-    const isCurrent = options.isCurrent || (() => true)
-    if (!isCurrent()) return []
-    set({ systemsLoading: true, systemsError: null })
-    try {
-      const systems = await scanDesignSystems(projectRoot)
-      if (!isCurrent()) return []
-      set({ systems, systemsLoading: false })
-      return systems
-    } catch (error) {
-      if (!isCurrent()) return []
-      const message = error instanceof Error ? error.message : String(error)
-      set({ systemsLoading: false, systemsError: message })
-      return []
-    }
-  },
-
-  setSystems: (systems) => set({ systems, systemsError: null }),
 }))
 
 export function getSubDesignBriefForThread(threadId: string): SubDesignBrief | null {

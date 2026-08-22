@@ -34,7 +34,6 @@ register({
     if (!result.ok || !result.artifact) return { ok: false, output: result.error || 'artifact patch 失敗。', data: result }
     const updated = useSubDesignArtifactStore.getState().register(result.artifact, {
       briefId: artifact.briefId,
-      designSystemId: artifact.designSystemId,
     }, projectRoot)
     if (!updated.ok) return { ok: false, output: `patch revision invalid：${updated.errors.join('；')}` }
     const linkedBrief = useSubDesignStore.getState().findById(artifact.briefId)

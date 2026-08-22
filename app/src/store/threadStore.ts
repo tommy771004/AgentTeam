@@ -55,7 +55,6 @@ export type ThreadRunSummary = {
     briefId: string
     stage: string
     selectedDirectionId?: string
-    designSystemId?: string
     artifactId?: string
     artifactRevision?: number
     critique?: {
@@ -779,7 +778,6 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
               briefId: summary.subDesign.briefId.slice(0, 120),
               stage: summary.subDesign.stage.slice(0, 40),
               selectedDirectionId: summary.subDesign.selectedDirectionId?.slice(0, 80),
-              designSystemId: summary.subDesign.designSystemId?.slice(0, 120),
               artifactId: summary.subDesign.artifactId?.slice(0, 120),
               artifactRevision: summary.subDesign.artifactRevision,
               critique: summary.subDesign.critique

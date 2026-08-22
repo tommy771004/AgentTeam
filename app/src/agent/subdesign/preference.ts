@@ -3,7 +3,7 @@ import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignPla
 
 export type SubDesignPreference = Pick<
   SubDesignBrief,
-  'surface' | 'platform' | 'designSystemId' | 'templateId' | 'skillIds' | 'provenance' | 'selectedDirectionId'
+  'surface' | 'platform' | 'templateId' | 'skillIds' | 'provenance' | 'selectedDirectionId'
 > & {
   briefId: string
   artifactId: string
@@ -30,14 +30,13 @@ function parseMemoryPreference(entry: MemoryEntry, projectRoot?: string): SubDes
   ) as Record<string, string>
   const surface = values.surface as SubDesignSurface
   const platform = values.platform as SubDesignPlatform | undefined
-  if (!['prototype', 'dashboard', 'design-system', 'deck'].includes(surface)) return null
+  if (!['prototype', 'dashboard', 'deck'].includes(surface)) return null
   if (platform && !['responsive', 'web-desktop', 'mobile-ios', 'desktop-app'].includes(platform)) return null
   return {
     briefId: `memory:${entry.id}`,
     artifactId: `memory:${entry.id}`,
     surface,
     platform,
-    designSystemId: values.designSystem || undefined,
     templateId: values.template || undefined,
     selectedDirectionId: values.direction || undefined,
     updatedAt: entry.createdAt,
@@ -77,7 +76,6 @@ export function findLatestPassedSubDesignPreference(
       artifactId,
       surface: brief.surface,
       platform: brief.platform,
-      designSystemId: brief.designSystemId,
       templateId: brief.templateId,
       skillIds: brief.skillIds,
       provenance: brief.provenance,

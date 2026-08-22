@@ -82,7 +82,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
               <Icon name="open_in_new" size={13} />查看設計
             </button>
           </div>
-          <div className="mt-1 text-ink-3">brief {summary.subDesign.briefId}{summary.subDesign.selectedDirectionId ? ` · direction ${summary.subDesign.selectedDirectionId}` : ' · 尚未選定 direction'}{summary.subDesign.designSystemId ? ` · system ${summary.subDesign.designSystemId}` : ''}</div>
+          <div className="mt-1 text-ink-3">brief {summary.subDesign.briefId}{summary.subDesign.selectedDirectionId ? ` · direction ${summary.subDesign.selectedDirectionId}` : ' · 尚未選定 direction'}</div>
           {summary.subDesign.critique ? <div className="mt-1 text-ink-3">critique r{summary.subDesign.critique.revision} · {summary.subDesign.critique.verdict} · {summary.subDesign.critique.blockerCount} blockers</div> : null}
           {summary.subDesign.exports?.length ? <div className="mt-1 text-ink-3">exports · {summary.subDesign.exports.map((item) => `${item.format.toUpperCase()} r${item.revision}`).join(' · ')}</div> : null}
         </div>

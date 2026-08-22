@@ -12,9 +12,6 @@ import { OpsPage } from './pages/OpsPage'
 import { RecordsPage } from './pages/RecordsPage'
 import { LearningPage } from './pages/LearningPage'
 import { SubDesignPage } from './pages/SubDesignPage'
-import { DesignSystemsPage } from './pages/DesignSystemsPage'
-import { DesignSystemCreatePage } from './pages/DesignSystemCreatePage'
-import { DesignSystemDetailPage } from './pages/DesignSystemDetailPage'
 import { ContentPublishingPage } from './pages/ContentPublishingPage'
 import { useSettingsStore } from './store/settingsStore'
 import { useLearningStore } from './store/learningStore'
@@ -1050,9 +1047,6 @@ export default function App() {
           <Route element={<Layout />}>
             <Route index element={<ProtocolsPage />} />
             <Route path="subdesign/:briefId?" element={<SubDesignPage />} />
-            <Route path="design-systems/create" element={<DesignSystemCreatePage />} />
-            <Route path="design-systems/:id" element={<DesignSystemDetailPage />} />
-            <Route path="design-systems" element={<DesignSystemsPage />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="ops" element={<OpsPage />} />
             <Route path="content-publishing" element={<ContentPublishingPage />} />

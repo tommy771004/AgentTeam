@@ -57,7 +57,6 @@ function dependencies(overrides: Partial<SubDesignWorkspaceDependencies> = {}) {
       return brief
     },
     selectBrief: () => undefined,
-    getDesignSystem: () => null,
     prepareRun: async () => ({ overrides: { marker: 'prepared' } } as unknown as SubDesignRunPreparation),
     runTask: async (input) => {
       runs.push(input)
@@ -85,7 +84,6 @@ const created = await workspace.create({
   surface: 'prototype',
   platform: 'responsive',
   runner: 'builtin',
-  designSystemId: 'ds_01',
   templateId: 'template_01',
 })
 assert.equal(created.ok, true)
@@ -481,8 +479,7 @@ async function assertIntegrationHydrationLatestRequestWins() {
         workspaceList: async (relative: string, projectRoot?: string) => {
           const root = rootFor(projectRoot)
           await (root === '/project-a' ? systemsA.promise : systemsB.promise)
-          if (relative === '.') return { ok: true, entries: [{ name: 'DESIGN.md', dir: false }] }
-          if (relative === '.subagents/subdesign/design-systems') return { ok: true, entries: [{ name: `system-${root.slice(-1)}`, dir: true }] }
+          if (relative === '.') return { ok: true, entries: [] }
           return { ok: true, entries: [{ name: 'DESIGN.md', dir: false }] }
         },
         workspaceRead: async (_relative: string, projectRoot?: string) => {
@@ -513,7 +510,6 @@ async function assertIntegrationHydrationLatestRequestWins() {
     assert.equal(useOpenDesignPackStore.getState().projectRoot, '/project-b')
     assert.deepEqual(integrationWorkspace.getProjection().presentation.storybookSettings.endpoint, storybookB.endpoint)
     assert.deepEqual(integrationWorkspace.getProjection().presentation.providerRuns.map((run) => run.runId), [providerRunB.runId])
-    assert.equal(integrationWorkspace.getProjection().presentation.systems[0]?.title, 'System b')
 
     metadataA.release()
     systemsA.release()
