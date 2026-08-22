@@ -20,6 +20,17 @@ import { usePermissionAskStore } from '../src/store/permissionAskStore.ts'
 import { createPiHostServer } from '../electron/piHostProtocol.ts'
 import { STORYBOOK_PINNED_VERSION } from '../src/agent/subdesign/providers/storybookProvider.ts'
 import { CDT_PINNED_VERSION } from '../src/agent/subdesign/providers/chromeDevToolsProvider.ts'
+import {
+  canRender,
+  createStreamingEnvelope,
+  mergeStreamingUpdate,
+  reconcileUpdates,
+} from '../src/agent/subdesign/streamingEnvelope.ts'
+import {
+  ARTIFACT_RENDERER_CAPABILITIES,
+  isArtifactExportEligible,
+  withPreviewCsp,
+} from '../src/agent/subdesign/artifactRendererCapabilities.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -44,7 +55,7 @@ await test('runtime providers live under SubDesign and cannot bypass runTask', (
   // Every SubDesign run start goes through the preparation seam and hands the
   // result to runTask; the renderer never dispatches or starts execution itself.
   assert.match(subDesignPage, /prepareSubDesignRun/)
-  assert.match(subDesignPage, /runTask\([\s\S]*overrides: pluginExecution\.overrides/)
+  assert.match(subDesignPage, /runTask\([\s\S]*overrides: mergeModelOverrides\(pluginExecution\.overrides\)/)
   assert.doesNotMatch(subDesignPage, /dispatchThreadTask|startExecution/)
   const critiqueTheater = fs.readFileSync(path.join(root, 'src/components/subdesign/CritiqueTheater.tsx'), 'utf8')
   assert.match(critiqueTheater, /prepareSubDesignRun/)
@@ -100,6 +111,47 @@ await test('output budget truncates oversized summaries', () => {
   const result = checkOutputBudget('x'.repeat(1_000), 100)
   assert.equal(result.ok, false)
   assert.match(result.truncated ?? '', /truncated/)
+})
+
+await test('stream replay reconciles duplicate and out-of-order events deterministically', () => {
+  const initial = createStreamingEnvelope({ artifactId: 'artifact_replay', artifactKind: 'html', runId: 'run_replay' })
+  const doneFirst = mergeStreamingUpdate(initial, { seq: 2, kind: 'done', text: '完成' }).envelope
+  assert.equal(doneFirst.status, 'streaming')
+  assert.deepEqual(reconcileUpdates(doneFirst.updates), [])
+
+  const completed = mergeStreamingUpdate(doneFirst, { seq: 1, kind: 'text-delta', content: '<main>ready</main>' }).envelope
+  assert.equal(completed.status, 'complete')
+  assert.deepEqual(completed.updates.map((update) => update.seq), [1, 2])
+  assert.equal(reconcileUpdates(completed.updates).map((update) => update.content || '').join(''), '<main>ready</main>')
+
+  const replayed = mergeStreamingUpdate(completed, { seq: 1, kind: 'text-delta', content: '<main>ready</main>' })
+  assert.equal(replayed.envelope, completed)
+  const late = mergeStreamingUpdate(completed, { seq: 3, kind: 'text-delta', content: 'late' })
+  assert.match(late.rejected || '', /已終止/)
+  assert.equal(late.envelope, completed)
+})
+
+await test('error, blocked, and cancel remain distinct terminal streams', () => {
+  const terminal = (kind: 'error' | 'blocked' | 'cancelled') => mergeStreamingUpdate(
+    createStreamingEnvelope({ artifactId: `artifact_${kind}`, artifactKind: 'html', runId: `run_${kind}` }),
+    { seq: 1, kind, text: kind },
+  ).envelope
+  assert.equal(terminal('error').status, 'error')
+  assert.equal(terminal('blocked').status, 'blocked')
+  const cancelled = terminal('cancelled')
+  assert.equal(cancelled.status, 'cancelled')
+  assert.match(mergeStreamingUpdate(cancelled, { seq: 2, kind: 'done' }).rejected || '', /已終止/)
+})
+
+await test('renderer capabilities fail closed for streaming, sandbox, and export', () => {
+  const svgStream = createStreamingEnvelope({ artifactId: 'artifact_svg', artifactKind: 'svg', runId: 'run_svg' })
+  assert.equal(canRender(ARTIFACT_RENDERER_CAPABILITIES.svg, svgStream).ok, false)
+  const document = withPreviewCsp('<script>fetch("https://example.com")</script>', 'html')
+  assert.match(document, /default-src 'none'/)
+  assert.match(document, /connect-src 'none'/)
+  assert.match(document, /form-action 'none'/)
+  assert.equal(isArtifactExportEligible('html', 'html'), true)
+  assert.equal(isArtifactExportEligible('html', 'svg'), false)
 })
 
 const runtimeManifest = (capabilities: string[] = []) => ({
@@ -180,6 +232,9 @@ await test('Host cancellation is run-targeted and cannot be revived by a late pr
     assert.equal(result.state, 'cancelled')
     assert.equal(states.at(-1), 'cancelled')
     assert.equal(result.artifactLocator, undefined)
+    assert.equal(result.stream?.status, 'cancelled')
+    assert.equal(result.stream?.updates.at(-1)?.kind, 'cancelled')
+    assert.ok(!result.stream?.updates.some((update) => update.kind === 'done'))
   } finally {
     await fsPromises.rm(projectRoot, { recursive: true, force: true })
   }
@@ -730,6 +785,10 @@ await test('SubDesign action drives the whole lifecycle: admission → trust →
       assert.equal(projection.stream?.status, 'complete')
       assert.equal(projection.stream?.artifactKind, 'html')
       assert.equal(projection.stream?.artifactId, projection.artifact?.id)
+      const previewContent = reconcileUpdates(projection.stream?.updates ?? [])
+        .map((update) => update.content || '')
+        .join('')
+      assert.match(previewContent, /<!doctype html>/i)
 
       // 7. Provider success is not DoD met.
       assert.equal(shouldStopForProviderProjection(projection), false)

@@ -7,7 +7,7 @@
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
-    "dev": "npm run build:pi-host && vite",
+    "dev": "npm run open-design:index && npm run build:pi-host && vite",
     "build:pi-vendor": "node --experimental-strip-types scripts/smoke-build-pi-vendor-invocation.mts && node --experimental-strip-types scripts/smoke-pi-build-workspace-links.mts && node --experimental-strip-types scripts/build-pi-vendor.mts",
     "build:pi-host": "npm run build:pi-vendor && vite build --config scripts/vite.pi-host.config.ts",
     "open-design:index": "node --experimental-strip-types scripts/open-design-inventory.mts",

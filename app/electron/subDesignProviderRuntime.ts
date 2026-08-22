@@ -26,9 +26,13 @@ import {
 } from '../src/agent/subdesign/pluginInputs.ts'
 import type { SubDesignArtifact } from '../src/agent/subdesign/types.ts'
 import {
-  appendStreamingUpdate,
-  envelopeForArtifact,
+  appendStreamingEvent,
+  createStreamingEnvelope,
   finalizeEnvelope,
+  pluginRunArtifactId,
+  type StreamingEnvelope,
+  type StreamingEventInput,
+  type StreamingUpdate,
 } from '../src/agent/subdesign/streamingEnvelope.ts'
 import { executeStorybookContextAdapter } from './subDesignStorybookAdapter.ts'
 import { executeChromeDevToolsEvidenceAdapter } from './subDesignChromeDevToolsAdapter.ts'
@@ -44,7 +48,14 @@ export type SubDesignProviderStageEvent = {
   at: string
 }
 
-type ActiveStage = { controller: AbortController; terminal: boolean }
+export type SubDesignProviderStreamEvent = {
+  runId: string
+  stageId: string
+  providerId: string
+  update: StreamingUpdate
+}
+
+type ActiveStage = { controller: AbortController; terminal: boolean; cancelled: boolean }
 const activeStages = new Map<string, ActiveStage>()
 
 function cleanId(value: unknown, max = 180): string {
@@ -154,7 +165,7 @@ async function persistTrustedResult(
   evidence: readonly ProviderEvidence[],
   createArtifact: boolean,
   attachments: readonly ProviderAttachmentPayload[] = [],
-): Promise<Pick<SubDesignPluginExecutionProjection, 'evidenceLocator' | 'artifactLocator' | 'manifestLocator' | 'artifact' | 'attachments' | 'stream'>> {
+): Promise<Pick<SubDesignPluginExecutionProjection, 'evidenceLocator' | 'artifactLocator' | 'manifestLocator' | 'artifact' | 'attachments'>> {
   const base = `.subagents/open-design/runs/${runId}/${request.stageId}`
   const evidenceLocator = `${base}/evidence.json`
   const artifactLocator = `${base}/artifact/index.html`
@@ -183,7 +194,7 @@ async function persistTrustedResult(
   await writeFile(artifactPath, `<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>SubDesign pipeline artifact</title><body><main><h1>${request.pluginId}</h1><p>${receipt.summary}</p></main></body></html>`, 'utf8')
   const createdAt = receipt.finishedAt
   const artifact: SubDesignArtifact = {
-    id: `plugin_${runId}_${request.stageId}`.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120),
+    id: pluginRunArtifactId(runId, request.stageId),
     briefId: request.briefId,
     kind: 'html',
     title: `${request.pluginId} · ${request.stageId}`,
@@ -205,23 +216,18 @@ async function persistTrustedResult(
     providerId: request.providerId,
     evidence: evidenceLocator,
   }, null, 2), 'utf8')
-  // Project the finished artifact as a terminal stream so the preview and the
-  // conversation read one consistent status. Providers that produce content
-  // incrementally append updates before finalizing; this one completes at once.
-  const stream = finalizeEnvelope(
-    appendStreamingUpdate(
-      envelopeForArtifact(artifact, runId, request.stageId),
-      await readFile(artifactPath, 'utf8'),
-    ).envelope,
-    'complete',
-  )
-  return { evidenceLocator, artifactLocator, manifestLocator, artifact, stream, ...(persistedAttachments.length ? { attachments: persistedAttachments } : {}) }
+  return { evidenceLocator, artifactLocator, manifestLocator, artifact, ...(persistedAttachments.length ? { attachments: persistedAttachments } : {}) }
 }
 
 /**
  * Host-owned provider lifecycle. This is the single execution seam used by
  * Pi Host orchestration; callers can observe projections but cannot execute
  * or attest provider output themselves.
+ *
+ * Streaming contract: every provider run produces a live StreamingEnvelope
+ * with typed events (thinking / tool-call / tool-result / text-delta /
+ * file-write / error / done) forwarded via onStreamEvent as
+ * host/pipeline-stream. Preview and activity read one consistent status.
  */
 export async function executeSubDesignProviderStage(input: {
   request: unknown
@@ -229,6 +235,7 @@ export async function executeSubDesignProviderStage(input: {
   threadId: string
   projectRoot: string
   onEvent?: (event: SubDesignProviderStageEvent) => void
+  onStreamEvent?: (event: SubDesignProviderStreamEvent) => void
 }): Promise<SubDesignPluginExecutionProjection> {
   const request = parseRequest(input.request)
   if (!request) throw new Error('Invalid SubDesign plugin execution request.')
@@ -255,9 +262,34 @@ export async function executeSubDesignProviderStage(input: {
   }
 
   const controller = new AbortController()
-  const active: ActiveStage = { controller, terminal: false }
+  const active: ActiveStage = { controller, terminal: false, cancelled: false }
   activeStages.set(input.runId, active)
+
+  // Live streaming envelope — deterministic id so updates before persist can be reconciled.
+  let liveEnvelope: StreamingEnvelope = createStreamingEnvelope({
+    artifactId: pluginRunArtifactId(input.runId, request.stageId),
+    artifactKind: 'html',
+    runId: input.runId,
+    stageId: request.stageId,
+  })
+
+  const emitStream = (event: StreamingEventInput) => {
+    if (active.terminal && event.kind !== 'error' && event.kind !== 'blocked' && event.kind !== 'cancelled' && event.kind !== 'done') return
+    const result = appendStreamingEvent(liveEnvelope, event)
+    if (result.rejected) return
+    liveEnvelope = result.envelope
+    if (result.update) {
+      input.onStreamEvent?.({
+        runId: input.runId,
+        stageId: request.stageId,
+        providerId: request.providerId,
+        update: result.update,
+      })
+    }
+  }
+
   emit('running', `Pi Host 正在執行 ${request.providerId}/${request.stageId}。`)
+  emitStream({ kind: 'tool-call', tool: request.providerId, callId: `${input.runId}:${request.stageId}`, text: `開始 ${request.providerId}/${request.stageId}` })
   try {
     const timeoutMs = request.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS
     const outcome = request.providerId === 'storybook'
@@ -265,7 +297,17 @@ export async function executeSubDesignProviderStage(input: {
       : request.providerId === 'chrome-devtools'
         ? await executeChromeDevToolsEvidenceAdapter({ request, runId: input.runId, signal: controller.signal, timeoutMs })
       : request.providerId === 'harness'
-        ? await executeHarnessGoalAdapter({ request, runId: input.runId, projectRoot: input.projectRoot, signal: controller.signal, timeoutMs, onProgress: (summary) => emit('running', summary) })
+        ? await executeHarnessGoalAdapter({
+            request,
+            runId: input.runId,
+            projectRoot: input.projectRoot,
+            signal: controller.signal,
+            timeoutMs,
+            onProgress: (summary) => {
+              emit('running', summary)
+              emitStream({ kind: 'thinking', text: summary })
+            },
+          })
       : await (async () => {
           const session = fakePipelineProvider.execute({
             stageId: request.stageId,
@@ -296,19 +338,76 @@ export async function executeSubDesignProviderStage(input: {
     const providerGoalResult = 'goalResult' in outcome
       ? outcome.goalResult as SubDesignPluginExecutionProjection['goalResult']
       : undefined
-    if (active.terminal) {
+    if (active.cancelled) {
+      emitStream({ kind: 'cancelled', text: '已取消（late result ignored）' })
+      liveEnvelope = finalizeEnvelope(liveEnvelope, 'cancelled')
       const cancelled: SubDesignPluginExecutionProjection = {
         ...blockedProjection(request, input.runId, 'Provider result arrived after terminal cancellation and was ignored.', startedAt),
         state: 'cancelled',
         providerKind: 'cancelled',
+        stream: liveEnvelope,
       }
       emit('cancelled', cancelled.summary)
       return cancelled
     }
+    emitStream({ kind: 'tool-result', tool: request.providerId, callId: `${input.runId}:${request.stageId}`, ok: receipt.kind === 'success', text: receipt.summary })
+
+    let locators: Pick<SubDesignPluginExecutionProjection, 'evidenceLocator' | 'artifactLocator' | 'manifestLocator' | 'artifact' | 'attachments'> = {}
+    let stream: StreamingEnvelope | undefined
+
+    if (receipt.kind === 'success') {
+      locators = await persistTrustedResult(input.projectRoot, request, input.runId, receipt, evidence, request.providerId === 'fake-pipeline', providerAttachments)
+      if (active.cancelled) {
+        emitStream({ kind: 'cancelled', text: '已取消（late result ignored）' })
+        liveEnvelope = finalizeEnvelope(liveEnvelope, 'cancelled')
+        const cancelled: SubDesignPluginExecutionProjection = {
+          ...blockedProjection(request, input.runId, 'Provider result arrived after terminal cancellation and was ignored.', startedAt),
+          state: 'cancelled',
+          providerKind: 'cancelled',
+          stream: liveEnvelope,
+        }
+        emit('cancelled', cancelled.summary)
+        return cancelled
+      }
+      if (locators.evidenceLocator) emitStream({ kind: 'file-write', path: locators.evidenceLocator, text: 'evidence 已寫入' })
+      if (locators.manifestLocator) emitStream({ kind: 'file-write', path: locators.manifestLocator, text: 'manifest 已寫入' })
+      if (locators.artifactLocator) emitStream({ kind: 'file-write', path: locators.artifactLocator, text: 'artifact 已寫入' })
+      for (const att of (locators.attachments || [])) {
+        emitStream({ kind: 'file-write', path: att.locator, text: `attachment ${att.kind}` })
+      }
+      // Terminal content projection — keeps preview and stream consistent
+      if (locators.artifact) {
+        try {
+          const artifactPath = confinedPath(input.projectRoot, locators.artifact.entry)
+          const html = await readFile(artifactPath, 'utf8')
+          if (active.cancelled) {
+            emitStream({ kind: 'cancelled', text: '已取消（late result ignored）' })
+            liveEnvelope = finalizeEnvelope(liveEnvelope, 'cancelled')
+            const cancelled: SubDesignPluginExecutionProjection = {
+              ...blockedProjection(request, input.runId, 'Provider result arrived after terminal cancellation and was ignored.', startedAt),
+              state: 'cancelled',
+              providerKind: 'cancelled',
+              stream: liveEnvelope,
+            }
+            emit('cancelled', cancelled.summary)
+            return cancelled
+          }
+          emitStream({ kind: 'text-delta', content: html })
+        } catch {
+          /* artifact read is best-effort for stream; disk copy remains canonical */
+        }
+      }
+      emitStream({ kind: 'done', text: receipt.summary })
+      liveEnvelope = finalizeEnvelope(liveEnvelope, 'complete')
+      stream = liveEnvelope
+    } else {
+      const terminalKind = receipt.kind === 'blocked' ? 'blocked' : receipt.kind === 'cancelled' ? 'cancelled' : 'error'
+      emitStream({ kind: terminalKind, text: receipt.summary, ok: false })
+      liveEnvelope = finalizeEnvelope(liveEnvelope, terminalKind, receipt.summary)
+      stream = liveEnvelope
+    }
     active.terminal = true
-    const locators = receipt.kind === 'success'
-      ? await persistTrustedResult(input.projectRoot, request, input.runId, receipt, evidence, request.providerId === 'fake-pipeline', providerAttachments)
-      : {}
+
     const result: SubDesignPluginExecutionProjection = {
       schemaVersion: 1,
       runId: input.runId,
@@ -323,6 +422,7 @@ export async function executeSubDesignProviderStage(input: {
       startedAt: receipt.startedAt,
       finishedAt: receipt.finishedAt,
       ...locators,
+      ...(stream ? { stream } : {}),
       ...(providerContext ? { context: providerContext } : {}),
       ...(providerFindings ? { findings: providerFindings } : {}),
       ...(providerGoalResult ? { goalResult: providerGoalResult } : {}),
@@ -332,6 +432,11 @@ export async function executeSubDesignProviderStage(input: {
     return result
   } catch (error) {
     const summary = error instanceof Error ? error.message : 'Provider stage failed.'
+    const isCancelled = controller.signal.aborted
+    const terminalKind = isCancelled ? 'cancelled' : 'error'
+    emitStream({ kind: terminalKind, text: summary, ok: false })
+    liveEnvelope = finalizeEnvelope(liveEnvelope, terminalKind, summary)
+    active.terminal = true
     const failed: SubDesignPluginExecutionProjection = {
       schemaVersion: 1,
       runId: input.runId,
@@ -339,12 +444,13 @@ export async function executeSubDesignProviderStage(input: {
       pluginId: request.pluginId,
       providerId: request.providerId,
       stageId: request.stageId,
-      state: controller.signal.aborted ? 'cancelled' : 'failed',
-      providerKind: controller.signal.aborted ? 'cancelled' : 'failure',
+      state: isCancelled ? 'cancelled' : 'failed',
+      providerKind: isCancelled ? 'cancelled' : 'failure',
       failurePolicy: request.failurePolicy === 'continue-on-blocked' ? 'continue-on-blocked' : 'stop',
       summary,
       startedAt,
       finishedAt: new Date().toISOString(),
+      stream: liveEnvelope,
     }
     emit(failed.state, failed.summary)
     return failed
@@ -356,6 +462,7 @@ export async function executeSubDesignProviderStage(input: {
 export function cancelSubDesignProviderRun(runId: string): boolean {
   const active = activeStages.get(runId)
   if (!active || active.terminal) return false
+  active.cancelled = true
   active.terminal = true
   active.controller.abort()
   return true

@@ -5,12 +5,21 @@
 
 import type { SubDesignArtifact, SubDesignArtifactKind } from './types.ts'
 
-export type StreamingStatus = 'streaming' | 'complete' | 'error' | 'cancelled'
+export type StreamingStatus = 'streaming' | 'complete' | 'error' | 'blocked' | 'cancelled'
+
+export type StreamingEventKind = 'thinking' | 'tool-call' | 'tool-result' | 'text-delta' | 'file-write' | 'error' | 'blocked' | 'cancelled' | 'done'
 
 export type StreamingUpdate = {
   seq: number
+  kind?: StreamingEventKind
   patch?: unknown
   content?: string
+  text?: string
+  tool?: string
+  callId?: string
+  path?: string
+  ok?: boolean
+  at?: string
 }
 
 export type StreamingEnvelope = {
@@ -35,6 +44,10 @@ export type RendererCapabilities = {
   streaming: boolean
   sandbox: string // CSP
   export?: string[]
+}
+
+export function pluginRunArtifactId(runId: string, stageId: string): string {
+  return `plugin_${runId}_${stageId}`.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120)
 }
 
 export function createStreamingEnvelope(input: {
@@ -75,13 +88,82 @@ export function envelopeForArtifact(
   })
 }
 
-export function appendStreamingUpdate(env: StreamingEnvelope, text: string): { envelope: StreamingEnvelope; rejected?: string } {
+export type StreamingEventInput = {
+  kind: StreamingEventKind
+  content?: string
+  text?: string
+  tool?: string
+  callId?: string
+  path?: string
+  ok?: boolean
+  patch?: unknown
+}
+
+export function appendStreamingEvent(
+  env: StreamingEnvelope,
+  input: StreamingEventInput,
+): { envelope: StreamingEnvelope; rejected?: string; update?: StreamingUpdate } {
   if (env.status !== 'streaming') return { envelope: env, rejected: `artifact stream 已終止：${env.status}` }
   const nextSeq = env.updates.length ? env.updates[env.updates.length - 1].seq + 1 : 1
-  // Enforce ordered updates; duplicate seq rejected
   if (env.updates.some((u) => u.seq === nextSeq)) return { envelope: env, rejected: 'duplicate seq' }
-  const next: StreamingEnvelope = { ...env, updates: [...env.updates, { seq: nextSeq, content: text.slice(0, 64 * 1024) }] }
-  return { envelope: next }
+  const at = new Date().toISOString()
+  const update: StreamingUpdate = {
+    seq: nextSeq,
+    kind: input.kind,
+    at,
+    ...(input.content !== undefined ? { content: input.content.slice(0, 64 * 1024) } : {}),
+    ...(input.text !== undefined ? { text: input.text.slice(0, 4 * 1024) } : {}),
+    ...(input.tool !== undefined ? { tool: input.tool.slice(0, 120) } : {}),
+    ...(input.callId !== undefined ? { callId: input.callId.slice(0, 180) } : {}),
+    ...(input.path !== undefined ? { path: input.path.slice(0, 512) } : {}),
+    ...(input.ok !== undefined ? { ok: input.ok } : {}),
+    ...(input.patch !== undefined ? { patch: input.patch } : {}),
+  }
+  const next: StreamingEnvelope = { ...env, updates: [...env.updates, update] }
+  return { envelope: next, update }
+}
+
+export function appendStreamingUpdate(env: StreamingEnvelope, text: string): { envelope: StreamingEnvelope; rejected?: string } {
+  const result = appendStreamingEvent(env, { kind: 'text-delta', content: text.slice(0, 64 * 1024) })
+  return { envelope: result.envelope, rejected: result.rejected }
+}
+
+/**
+ * Merge an update projected by Pi Host. Updates may be replayed or arrive out
+ * of order; terminal state is derived only from the contiguous prefix.
+ */
+export function mergeStreamingUpdate(
+  env: StreamingEnvelope,
+  update: StreamingUpdate,
+): { envelope: StreamingEnvelope; rejected?: string } {
+  if (!Number.isSafeInteger(update.seq) || update.seq < 1) {
+    return { envelope: env, rejected: 'invalid seq' }
+  }
+  const duplicate = env.updates.find((candidate) => candidate.seq === update.seq)
+  if (duplicate) {
+    return JSON.stringify(duplicate) === JSON.stringify(update)
+      ? { envelope: env }
+      : { envelope: env, rejected: 'conflicting duplicate seq' }
+  }
+  if (env.status !== 'streaming') {
+    return { envelope: env, rejected: `artifact stream 已終止：${env.status}` }
+  }
+  const updates = [...env.updates, update].sort((left, right) => left.seq - right.seq)
+  const contiguous = reconcileUpdates(updates)
+  const terminal = contiguous.at(-1)
+  const status: StreamingStatus = terminal?.kind === 'done'
+    ? 'complete'
+    : terminal?.kind === 'error'
+      ? 'error'
+      : terminal?.kind === 'blocked'
+        ? 'blocked'
+        : terminal?.kind === 'cancelled'
+          ? 'cancelled'
+          : 'streaming'
+  const error = status === 'error' || status === 'blocked' || status === 'cancelled'
+    ? terminal?.text?.slice(0, 1000)
+    : undefined
+  return { envelope: { ...env, updates, status, ...(error ? { error } : {}) } }
 }
 
 export function finalizeEnvelope(env: StreamingEnvelope, status: Exclude<StreamingStatus, 'streaming'>, error?: string): StreamingEnvelope {

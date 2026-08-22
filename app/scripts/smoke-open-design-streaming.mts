@@ -15,6 +15,7 @@ import {
   reconcileUpdates,
 } from '../src/agent/subdesign/streamingEnvelope.ts'
 import type { SubDesignArtifact } from '../src/agent/subdesign/types.ts'
+import { ARTIFACT_RENDERER_CAPABILITIES } from '../src/agent/subdesign/artifactRendererCapabilities.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 let p = 0
@@ -118,14 +119,15 @@ await test('terminal append and unsupported artifact kind are rejected', () => {
 await test('the renderer capability table declares kinds the envelope can carry', () => {
   // Renderer declarations and artifact kinds must speak the same vocabulary,
   // or the gate silently rejects everything (the bug this smoke now guards).
-  const preview = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/ArtifactPreview.tsx'), 'utf8')
-  assert.match(preview, /ARTIFACT_RENDERER_CAPABILITIES/)
+  const declaredKinds = new Set(Object.values(ARTIFACT_RENDERER_CAPABILITIES).flatMap((capability) => capability.supportedKinds))
   for (const kind of ['html', 'deck', 'markdown-document', 'svg', 'react-component', 'design-system']) {
-    assert.match(preview, new RegExp(`'${kind}'`), `renderer 能力表缺少 ${kind}`)
+    assert.ok(declaredKinds.has(kind as SubDesignArtifact['kind']), `renderer 能力表缺少 ${kind}`)
   }
   // Every renderer declares a sandbox policy and its export capability.
-  assert.match(preview, /sandbox:/)
-  assert.match(preview, /export:/)
+  for (const capability of Object.values(ARTIFACT_RENDERER_CAPABILITIES)) {
+    assert.ok(capability.sandbox)
+    assert.ok(capability.export?.length)
+  }
 })
 
 await test('sandboxed HTML cannot access filesystem/network/token', () => {

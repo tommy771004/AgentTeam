@@ -91,6 +91,10 @@ export type PiHostEvent =
       payload: { runId: string; sessionId: string; stageId: string; providerId: string; state: 'queued' | 'running' | 'completed' | 'failed' | 'blocked' | 'cancelled'; summary: string; at: string }
     }
   | {
+      event: 'host/pipeline-stream'
+      payload: { runId: string; sessionId: string; stageId: string; providerId: string; update: StreamingUpdate }
+    }
+  | {
       event: 'host/extension'
       payload: { action: 'installed' | 'updated' | 'enabled' | 'disabled' | 'uninstalled'; extension: PiExtension }
     }
@@ -98,6 +102,7 @@ export type PiHostEvent =
 export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
+import type { StreamingUpdate } from '../src/agent/subdesign/streamingEnvelope.ts'
 import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, piCoreRuntimeStatus, runPiTurn, steerPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
 import { cancelPiCodeMode, runPiCodeMode } from './piCodeMode.ts'
 import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
@@ -749,6 +754,20 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           projectRoot: cwd,
           onEvent: (stageEvent) => {
             const event: PiHostEvent = { event: 'host/pipeline-stage', payload: { ...stageEvent, sessionId } }
+            if (emit) emit(event)
+            else turnEvents.push(event)
+          },
+          onStreamEvent: (streamEvent) => {
+            const event: PiHostEvent = {
+              event: 'host/pipeline-stream',
+              payload: {
+                runId: streamEvent.runId,
+                sessionId,
+                stageId: streamEvent.stageId,
+                providerId: streamEvent.providerId,
+                update: streamEvent.update,
+              },
+            }
             if (emit) emit(event)
             else turnEvents.push(event)
           },

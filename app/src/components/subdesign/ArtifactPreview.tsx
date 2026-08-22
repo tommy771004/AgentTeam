@@ -1,24 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SubDesignArtifact } from '../../agent/subdesign/types'
 import { useProjectStore } from '../../store/projectStore'
 import { Icon } from '../Icon'
-import type { StreamingEnvelope, RendererCapabilities } from '../../agent/subdesign/streamingEnvelope.ts'
+import type { StreamingEnvelope } from '../../agent/subdesign/streamingEnvelope.ts'
 import { canRender as canRenderStreaming, reconcileUpdates } from '../../agent/subdesign/streamingEnvelope.ts'
-
-export const ARTIFACT_RENDERER_CAPABILITIES: Record<SubDesignArtifact['renderer'], RendererCapabilities> = {
-  html: { supportedKinds: ['html'], streaming: true, sandbox: "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';", export: ['html', 'pdf', 'zip'] },
-  'deck-html': { supportedKinds: ['deck'], streaming: false, sandbox: "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';", export: ['pptx', 'pdf'] },
-  markdown: { supportedKinds: ['markdown-document'], streaming: true, sandbox: "default-src 'none';", export: ['md'] },
-  svg: { supportedKinds: ['svg'], streaming: false, sandbox: "default-src 'none';", export: ['svg'] },
-  code: { supportedKinds: ['react-component'], streaming: false, sandbox: "default-src 'none';", export: ['jsx'] },
-  'design-system': { supportedKinds: ['design-system'], streaming: false, sandbox: "default-src 'none';", export: ['md'] },
-}
-
-function withPreviewCsp(content: string): string {
-  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">`
-  if (/<head[^>]*>/i.test(content)) return content.replace(/<head[^>]*>/i, (head) => `${head}${csp}`)
-  return `<!doctype html><html><head>${csp}</head><body>${content}</body></html>`
-}
+import { ARTIFACT_RENDERER_CAPABILITIES, withPreviewCsp } from '../../agent/subdesign/artifactRendererCapabilities.ts'
 
 export function ArtifactPreview({
   artifact,
@@ -35,17 +21,12 @@ export function ArtifactPreview({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deckScale, setDeckScale] = useState(1)
-  const [streamContent, setStreamContent] = useState<string>('')
 
   // Streaming envelope is the secondary source — manifest remains canonical
-  useEffect(() => {
-    if (!envelope) {
-      setStreamContent('')
-      return
-    }
+  const streamContent = useMemo(() => {
+    if (!envelope) return ''
     const reconciled = reconcileUpdates(envelope.updates)
-    const assembled = reconciled.map((u) => u.content || '').join('')
-    setStreamContent(assembled)
+    return reconciled.map((update) => update.content || '').join('')
   }, [envelope])
 
   // Renderer capability gate — unsupported streaming is rejected before render
@@ -75,7 +56,7 @@ export function ArtifactPreview({
       return
     }
     // If we have a live streaming envelope, prefer its assembled content over disk read
-    if (envelope && envelope.updates.length > 0) {
+    if (streamingGate.ok && streamContent) {
       // Do not create second canonical artifact state — envelope is ephemeral projection
       setLoading(false)
       return
@@ -108,10 +89,10 @@ export function ArtifactPreview({
     return () => {
       cancelled = true
     }
-  }, [artifact, projectRoot, envelope])
+  }, [artifact, projectRoot, streamContent, streamingGate.ok])
 
   // Content is visible by default — never gate on entrance animation (opacity 0)
-  const displayContent = envelope && envelope.updates.length > 0 ? streamContent : content
+  const displayContent = streamingGate.ok && streamContent ? streamContent : content
   const statusBadge = (() => {
     if (!envelope) return artifact ? 'complete' : null
     return envelope.status
@@ -143,13 +124,13 @@ export function ArtifactPreview({
             <iframe
               title={`${artifact.title} preview`}
               sandbox="allow-scripts"
-              srcDoc={withPreviewCsp(displayContent)}
+              srcDoc={withPreviewCsp(displayContent, artifact.renderer)}
               className="block h-[900px] w-[1600px] origin-top-left border-0 bg-white"
               style={{ transform: `scale(${deckScale})` }}
             />
           </div>
         ) : artifact.renderer === 'html' ? (
-          <iframe title={`${artifact.title} preview`} sandbox="allow-scripts" srcDoc={withPreviewCsp(displayContent)} className="h-[min(54vh,560px)] min-h-[460px] w-full border-0 bg-white" />
+          <iframe title={`${artifact.title} preview`} sandbox="allow-scripts" srcDoc={withPreviewCsp(displayContent, artifact.renderer)} className="h-[min(54vh,560px)] min-h-[460px] w-full border-0 bg-white" />
         ) : (
           <pre className="m-4 max-h-[620px] min-h-[460px] overflow-auto whitespace-pre-wrap rounded-lg bg-surface-container-lowest p-3 text-[12px] leading-relaxed text-on-surface-variant">{displayContent}</pre>
         )

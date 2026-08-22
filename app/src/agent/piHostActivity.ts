@@ -169,6 +169,37 @@ export function mapPiHostEventToActivity(event: PiHostEventLike): PiHostActivity
     }
   }
 
+  if (event.event === 'host/pipeline-stream') {
+    const stageId = asText(payload?.stageId) || 'stage'
+    const providerId = asText(payload?.providerId) || 'provider'
+    const update = asRecord(payload?.update)
+    const kind = asText(update?.kind) || 'text-delta'
+    // Collapse noisy text-delta bursts into the preview; keep control events in the feed
+    if (kind === 'text-delta') return null
+    const text = asText(update?.text) || asText(update?.content) || ''
+    const titleMap: Record<string, string> = {
+      'thinking': `思考中 · ${providerId}`,
+      'tool-call': `呼叫 ${asText(update?.tool) || providerId}`,
+      'tool-result': asText(update?.ok) === 'false' || update?.ok === false ? `${asText(update?.tool) || providerId} 失敗` : `${asText(update?.tool) || providerId} 完成`,
+      'file-write': `寫入 ${asText(update?.path) || 'artifact'}`,
+      'error': `串流錯誤 · ${providerId}`,
+      'blocked': `已阻擋 · ${providerId}`,
+      'cancelled': `已取消 · ${providerId}`,
+      'done': `${providerId} 完成`,
+    }
+    const title = titleMap[kind] || `${providerId} / ${stageId} · ${kind}`
+    const isError = kind === 'error' || kind === 'blocked' || kind === 'cancelled' || (kind === 'tool-result' && update?.ok === false)
+    return {
+      kind: isError ? 'error' : kind === 'done' ? 'tool' : 'status',
+      runId,
+      title,
+      detail: text.slice(0, 2_000) || asText(update?.path),
+      tool: providerId,
+      ok: !isError,
+      eventId: `pi-pipeline-stream-${stageId}-${String(update?.seq || '')}-${kind}`,
+    }
+  }
+
   const tool = asText(payload?.tool)
   const callId = asText(payload?.callId)
   if (event.event === 'host/tool-start' && tool) {

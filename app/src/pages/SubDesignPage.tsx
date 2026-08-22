@@ -4,8 +4,9 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { critiqueAllowsDeliver } from '../agent/subdesign/critique'
 import { buildSubDesignPrompt } from '../agent/subdesign/prompt'
 import { prepareSubDesignRun } from '../agent/subdesign/pluginExecutionPreparation'
+import type { RuntimeOverrides } from '../agent/types'
 import type { PluginInputValues } from '../agent/subdesign/pluginInputs'
-import { hydrateProviderFlags } from '../agent/subdesign/providers/providerFlags'
+import { hydrateProviderFlags, isProviderEnabled } from '../agent/subdesign/providers/providerFlags'
 import type { PluginInput } from '../agent/openDesign/pluginContract'
 import {
   OPEN_DESIGN_EXPLORE_SOURCE,
@@ -63,6 +64,14 @@ import {
   type StorybookProviderSettings,
 } from '../agent/subdesign/providers/providerSettings.ts'
 import type { SubDesignPluginExecutionProjection } from '../agent/subdesign/pluginExecution.ts'
+import {
+  createStreamingEnvelope,
+  mergeStreamingUpdate,
+  pluginRunArtifactId,
+  type StreamingEnvelope,
+  type StreamingUpdate,
+} from '../agent/subdesign/streamingEnvelope.ts'
+import { collectSubDesignModels, readHostModelSettings } from '../agent/subdesign/modelDiscovery.ts'
 
 type DesignSurface = {
   id: SubDesignSurface
@@ -183,6 +192,11 @@ export function SubDesignPage() {
   // requires. A blocked run surfaces the form rather than starting without them.
   const [pluginInputs, setPluginInputs] = useState<PluginInputValues>({})
   const [pluginDeclaredInputs, setPluginDeclaredInputs] = useState<PluginInput[]>([])
+  // Live streaming envelopes keyed by deterministic artifactId (plugin_<runId>_<stageId>)
+  const [liveStreams, setLiveStreams] = useState<Record<string, StreamingEnvelope>>({})
+  // Model discovery — aggregated from CLI providers + host settings
+  const [modelDiscovery, setModelDiscovery] = useState<ReturnType<typeof collectSubDesignModels> | null>(null)
+  const [selectedModelId, setSelectedModelId] = useState<string>('')
 
   const refreshStorybookState = useCallback(async () => {
     const [state, runs, experimental] = await Promise.all([
@@ -197,6 +211,48 @@ export function SubDesignPage() {
     // Apply the project's choice to the synchronous render-path gate.
     hydrateProviderFlags(experimental)
   }, [projectRoot])
+
+  // Live pipeline streaming — host/pipeline-stream → liveStreams (typed events)
+  useEffect(() => {
+    const api = window.subagents?.piHost?.onEvent
+    if (!api) return
+    const unsub = api((event) => {
+      if (event.event !== 'host/pipeline-stream') return
+      if (!isProviderEnabled('streaming')) return
+      const payload = event.payload as { runId: string; sessionId: string; stageId: string; providerId: string; update: StreamingUpdate }
+      if (!payload?.update || !payload.runId || !payload.stageId) return
+      const artifactId = pluginRunArtifactId(payload.runId, payload.stageId)
+      setLiveStreams((prev) => {
+        const existing = prev[artifactId]
+        const base = existing || createStreamingEnvelope({ artifactId, artifactKind: 'html', runId: payload.runId, stageId: payload.stageId })
+        const merged = mergeStreamingUpdate(base, payload.update)
+        return merged.envelope === base ? prev : { ...prev, [artifactId]: merged.envelope }
+      })
+    })
+    return () => { try { (unsub as unknown as () => void)?.() } catch { /* ignore */ } }
+  }, [])
+
+  // Model discovery — aggregate CLI providers + discovered + host current
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      const host = await readHostModelSettings()
+      if (cancelled) return
+      const settings = useSettingsStore.getState().settings
+      const discovery = collectSubDesignModels({
+        cliProviders: settings.cliProviders,
+        discoveredModels: settings.discoveredModels,
+        host,
+      })
+      if (cancelled) return
+      setModelDiscovery(discovery)
+      setSelectedModelId((current) => current || discovery.current.model)
+    }
+    void load()
+    // Re-collect when settings change (cliProviders/discoveredModels)
+    const unsub = useSettingsStore.subscribe(() => { void load() })
+    return () => { cancelled = true; (unsub as unknown as () => void)?.() }
+  }, [])
 
   // Plugin inputs belong to one brief's plugin. Switching briefs must not carry
   // the previous plugin's answers into a different contract.
@@ -216,6 +272,14 @@ export function SubDesignPage() {
       return prepared
     },
     [],
+  )
+
+  const mergeModelOverrides = useCallback(
+    (base: RuntimeOverrides | undefined): RuntimeOverrides | undefined => {
+      if (!selectedModelId) return base
+      return { ...(base || {}), model: selectedModelId }
+    },
+    [selectedModelId],
   )
 
   const activeSurface = useMemo(
@@ -244,6 +308,11 @@ export function SubDesignPage() {
     [allTemplates],
   )
   const collectionTemplates = templateCollection === 'explore' ? exploreTemplates : allTemplates
+  // Catalog loaded and has templates, but not one carries an exploreRank —
+  // that is a stale/ungenerated index, not an empty search result.
+  const exploreIndexMissing = templateCollection === 'explore'
+    && allTemplates.length > 0
+    && exploreTemplates.length === 0
   const visibleTemplates = useMemo(() => collectionTemplates.filter((template) =>
       (templateCategory === 'all' || template.category === templateCategory) &&
       `${template.title} ${template.summary}`.toLowerCase().includes(templateQuery.trim().toLowerCase()),
@@ -445,7 +514,7 @@ export function SubDesignPage() {
         sourceKind: 'composer',
         reuseThreadId: threadId,
         runner,
-        overrides: pluginExecution.overrides,
+        overrides: mergeModelOverrides(pluginExecution.overrides),
       })
     } finally {
       setStartingRun(false)
@@ -480,9 +549,9 @@ export function SubDesignPage() {
         objective: buildSubDesignPrompt(activeBrief, selectedSystem),
         sourceKind: 'composer',
         reuseThreadId: activeBrief.threadId,
-        runner: linkedThread?.runner || 'builtin',
+        runner: linkedThread?.runner || 'builtin' as ThreadRunner,
         loopType: linkedThread?.loopType || undefined,
-        overrides: pluginExecution.overrides,
+        overrides: mergeModelOverrides(pluginExecution.overrides),
       })
     } finally {
       setStartingRun(false)
@@ -507,9 +576,9 @@ export function SubDesignPage() {
         objective: value.trim(),
         sourceKind: 'composer',
         reuseThreadId: activeBrief.threadId,
-        runner: linkedThread?.runner || 'builtin',
+        runner: linkedThread?.runner || 'builtin' as ThreadRunner,
         loopType: linkedThread?.loopType || undefined,
-        overrides: pluginExecution.overrides,
+        overrides: mergeModelOverrides(pluginExecution.overrides),
       })
     } finally {
       setStartingRun(false)
@@ -534,8 +603,45 @@ export function SubDesignPage() {
 
   if (routeBriefId && activeBrief && workspace) {
     const activeSystem = systems.find((system) => system.id === activeBrief.designSystemId) || null
+    const modelBar = modelDiscovery && modelDiscovery.models.length > 0 ? (
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.06] bg-surface-container-low/20 px-3 text-[10px]">
+        <Icon name="neurology" size={13} className="text-primary" />
+        <span className="font-medium text-outline">模型</span>
+        <label className="relative ml-1">
+          <span className="sr-only">選擇模型</span>
+          <select
+            value={selectedModelId}
+            onChange={(e) => setSelectedModelId(e.target.value)}
+            disabled={runIsLive || startingRun}
+            className="h-7 max-w-[260px] appearance-none rounded-lg bg-white/[0.06] pl-2.5 pr-7 text-[11px] text-on-surface outline-none hover:bg-white/[0.08] disabled:opacity-40"
+          >
+            {modelDiscovery.models.map((m) => (
+              <option key={`${m.providerId}:${m.id}`} value={m.id}>
+                {m.providerName} · {m.label}
+              </option>
+            ))}
+          </select>
+          <Icon name="expand_more" size={13} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-outline" />
+        </label>
+        <span className="hidden text-[9px] text-outline sm:inline">
+          共 {modelDiscovery.models.length} 個可用模型 · {modelDiscovery.sourceCounts.cli} CLI 已授權
+        </span>
+        <span className="ml-auto hidden items-center gap-1 text-[9px] text-outline sm:inline-flex">
+          <span className={`h-1.5 w-1.5 rounded-full ${runIsLive ? 'bg-primary' : 'bg-outline/40'}`} />
+          {runIsLive ? '執行中使用此模型' : '下一輪生效'}
+        </span>
+      </div>
+    ) : modelDiscovery ? (
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.06] bg-amber-500/10 px-3 text-[10px] text-amber-700">
+        <Icon name="info" size={13} />
+        <span>尚未發現可用模型；在 設定 中授權 CLI 或在 /models 完成探測後，此處會顯示可選清單。</span>
+        <span className="ml-auto text-[9px] opacity-70">當前 Host：{modelDiscovery.current.model || '未設定'}</span>
+      </div>
+    ) : null
     return (
-      <SubDesignProjectStudio
+      <>
+        {modelBar}
+        <SubDesignProjectStudio
         brief={activeBrief}
         workspace={workspace}
         designSystem={activeSystem}
@@ -573,7 +679,9 @@ export function SubDesignPage() {
         }}
         artifactStream={
           selectedArtifact
-            ? providerRuns.find((run) => run.artifact?.id === selectedArtifact.id)?.stream ?? null
+            ? liveStreams[selectedArtifact.id]
+              || providerRuns.find((run) => run.artifact?.id === selectedArtifact.id)?.stream
+              || null
             : null
         }
         onSaveStorybookSettings={async (value) => {
@@ -585,6 +693,7 @@ export function SubDesignPage() {
           return { ok: false, reason: result.reason }
         }}
       />
+      </>
     )
   }
 
@@ -911,9 +1020,24 @@ export function SubDesignPage() {
             })}
           </div>
           {!catalogLoading && visibleTemplates.length === 0 ? (
-            <p className="mt-5 rounded-xl bg-surface-container-low px-4 py-5 text-center text-[12px] text-outline" role="status">
-              找不到符合目前類型與關鍵字的範本。
-            </p>
+            exploreIndexMissing ? (
+              /*
+               * The collection's membership and order live on the inventory's
+               * `exploreRank`, which only exists once the index has been
+               * generated. Without this the picker just shows an empty grid and
+               * the cause is invisible — say what is wrong and how to fix it.
+               */
+              <p className="mt-5 rounded-xl border border-secondary/25 bg-secondary/[0.08] px-4 py-5 text-center text-[12px] leading-relaxed text-secondary" role="status">
+                本機索引沒有官方精選標記（exploreRank），所以這個集合是空的。
+                <br />
+                請執行 <code className="font-mono">npm run open-design:index</code> 重新產生
+                <code className="font-mono"> public/open-design/OPEN_DESIGN_INVENTORY.json</code>，或先切換到「本機全部」。
+              </p>
+            ) : (
+              <p className="mt-5 rounded-xl bg-surface-container-low px-4 py-5 text-center text-[12px] text-outline" role="status">
+                找不到符合目前類型與關鍵字的範本。
+              </p>
+            )
           ) : null}
           {selectedCatalogRecord ? (
             <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/[0.05] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">

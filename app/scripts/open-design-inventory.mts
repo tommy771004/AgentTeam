@@ -330,5 +330,27 @@ function buildInventory() {
   return { version: 1, generatedAt: indexedAt, upstreamCommit: UPSTREAM_COMMIT, sourceUrl: SOURCE_URL, records, warnings: [...new Set(warnings)].slice(0, 100) }
 }
 
-fs.writeFileSync(outputPath, `${JSON.stringify(buildInventory(), null, 2)}\n`, 'utf8')
-console.log(`Open Design inventory written: ${path.relative(appRoot, outputPath)}`)
+/**
+ * Timestamps change on every run, so a naive write dirties the tree each time
+ * the indexer runs — and it now runs on `npm run dev` too. Compare on content
+ * alone and keep the existing file when nothing real changed.
+ */
+function sameContent(next: unknown, previousRaw: string | null): boolean {
+  if (!previousRaw) return false
+  const strip = (value: unknown) => JSON.stringify(value, (key, item) =>
+    key === 'generatedAt' || key === 'indexedAt' ? undefined : item)
+  try {
+    return strip(next) === strip(JSON.parse(previousRaw))
+  } catch {
+    return false
+  }
+}
+
+const inventory = buildInventory()
+const previous = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : null
+if (sameContent(inventory, previous)) {
+  console.log(`Open Design inventory unchanged: ${path.relative(appRoot, outputPath)}`)
+} else {
+  fs.writeFileSync(outputPath, `${JSON.stringify(inventory, null, 2)}\n`, 'utf8')
+  console.log(`Open Design inventory written: ${path.relative(appRoot, outputPath)}`)
+}
