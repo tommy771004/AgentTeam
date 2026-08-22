@@ -85,6 +85,7 @@ export type PersistedQueueItem = {
     | 'classificationReason'
     | 'nextState'
     | 'webhookTarget'
+    | 'externalCliPolicy'
   >
 }
 
@@ -200,6 +201,7 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
           classificationReason: o.classificationReason,
           nextState: o.nextState,
           webhookTarget: o.webhookTarget,
+          externalCliPolicy: o.externalCliPolicy,
         }
       : undefined,
   }

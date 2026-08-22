@@ -108,6 +108,9 @@ export type CliStreamPayload = {
   action?: FileChangeRecord['action']
   /** kind=plan：完整任務清單快照 */
   todos?: Array<{ text: string; status?: string }>
+  sequence?: number
+  sessionPhase?: string
+  terminalClassification?: string
 }
 
 export interface RunActivityStore {

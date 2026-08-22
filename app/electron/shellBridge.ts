@@ -39,6 +39,7 @@ export function listActiveBashRuns(): Array<{ runId: string; tag?: string }> {
 export function cancelBash(opts?: {
   runId?: string
   tag?: string
+  onStarted?: (processId: string) => void
 }): { ok: boolean; killed: number } {
   const targets: string[] = []
   if (opts?.runId) {
@@ -71,9 +72,12 @@ export function cancelBash(opts?: {
 type RunProcessCore = {
   cwd?: string
   timeoutMs?: number
+  /** External CLI session owns startup/idle/absolute deadlines. */
+  externalSession?: boolean
   env?: Record<string, string>
   runId?: string
   tag?: string
+  onStarted?: (processId: string) => void
   onStdout?: (chunk: string) => void
   onStderr?: (chunk: string) => void
 }
@@ -83,7 +87,11 @@ function runSpawnedProcess(
   args: string[],
   opts: RunProcessCore & { windowsVerbatimArguments?: boolean },
 ): Promise<BashResult> {
-  const timeoutMs = Math.min(Math.max(opts.timeoutMs || 60_000, 1000), 600_000)
+  // External CLI sessions use their own startup/idle/absolute policy. Their
+  // shell guard remains a generous absolute backstop; ordinary shell calls
+  // retain the existing bounded five-minute cap.
+  const maxTimeoutMs = opts.externalSession ? 14_400_000 : 600_000
+  const timeoutMs = Math.min(Math.max(opts.timeoutMs || 60_000, 1000), maxTimeoutMs)
   const cwd = opts.cwd && path.isAbsolute(opts.cwd) ? opts.cwd : process.cwd()
   const runId = opts.runId || randomUUID()
 
@@ -109,6 +117,11 @@ function runSpawnedProcess(
     })
 
     activeRuns.set(runId, { child, tag: opts.tag })
+    try {
+      opts.onStarted?.(runId)
+    } catch {
+      /* lifecycle projections cannot abort process ownership */
+    }
 
     const finish = (result: BashResult) => {
       if (settled) return
@@ -205,9 +218,11 @@ export async function runArgv(input: {
   args: string[]
   cwd?: string
   timeoutMs?: number
+  externalSession?: boolean
   env?: Record<string, string>
   runId?: string
   tag?: string
+  onStarted?: (processId: string) => void
   onStdout?: (chunk: string) => void
   onStderr?: (chunk: string) => void
 }): Promise<BashResult> {

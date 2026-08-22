@@ -946,6 +946,8 @@ const api = {
       unattended?: boolean
       timeoutMs?: number
       runId?: string
+      conversationId?: string
+      externalCliPolicy?: Record<string, number>
       configSnapshot?: unknown
       /** Chat attachments (images as data URL) — written to disk for the CLI */
       attachments?: Array<{
@@ -977,6 +979,7 @@ const api = {
         error?: string
         runId?: string
         externalRun?: unknown
+        terminalClassification?: string
       }>,
     /** Live CLI process events (thought / text / tool / log) for center feed */
     onStream: (
@@ -996,6 +999,9 @@ const api = {
         action?: 'edit' | 'create' | 'delete' | 'write' | 'read'
         /** kind=plan 時的任務清單快照（右側面板同步） */
         todos?: Array<{ text: string; status?: 'pending' | 'active' | 'done' }>
+        sequence?: number
+        sessionPhase?: string
+        terminalClassification?: string
       }) => void,
     ) => {
       const handler = (_: unknown, ev: unknown) => cb(ev as Parameters<typeof cb>[0])
@@ -1007,6 +1013,17 @@ const api = {
     /** Stop in-flight CLI agent (and tagged cli-agent bash) */
     cancel: (runId?: string) =>
       ipcRenderer.invoke('cli:cancel', runId) as Promise<{ ok: boolean; killed: number }>,
+    /** Host-owned session reconstruction after a bounded yield or reload. */
+    sessionSnapshot: (runId: string) =>
+      ipcRenderer.invoke('cli:sessionSnapshot', runId) as Promise<unknown>,
+    sessionEvents: (input: { runId: string; cursor?: number }) =>
+      ipcRenderer.invoke('cli:sessionEvents', input) as Promise<unknown>,
+    sessionYield: (runId: string) =>
+      ipcRenderer.invoke('cli:sessionYield', runId) as Promise<unknown>,
+    sessionInput: (input: { runId: string; value: string; providerSessionId?: string }) =>
+      ipcRenderer.invoke('cli:sessionInput', input) as Promise<boolean>,
+    sessionApproval: (input: { runId: string; approved: boolean; providerSessionId?: string }) =>
+      ipcRenderer.invoke('cli:sessionApproval', input) as Promise<boolean>,
   },
   /** Persist / reload chat attachments on disk */
   attachments: {

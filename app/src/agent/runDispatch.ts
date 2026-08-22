@@ -274,6 +274,7 @@ export async function dispatchThreadTask(
       nextState: snapshot.overrides.nextState,
       webhookTarget: snapshot.overrides.webhookTarget,
       externalCliContract: snapshot.overrides.externalCliContract,
+      externalCliPolicy: snapshot.overrides.externalCliPolicy,
     })
     const a =
       useAgentStore.getState().getRunState(snapshot.runId) || useAgentStore.getState().agent

@@ -3,6 +3,7 @@
  */
 
 import type { AgentState, ApprovalMode, CliConfigSnapshot, ExternalRunRef, RuntimeOverrides } from './types.ts'
+import type { ExternalCliRunPolicy } from './externalCliRunSession.ts'
 import { emptyKnowledge } from './knowledge.ts'
 import { resolveCliApproval } from './cliApproval.ts'
 import {
@@ -44,17 +45,24 @@ export async function runPromptViaLocalCli(opts: {
   approvalMode?: ApprovalMode
   unattended?: boolean
   runId?: string
+  /** Conversation/thread identity for session isolation and reconnect. */
+  conversationId?: string
+  /** Legacy name retained at the renderer store boundary. */
+  threadId?: string
   configSnapshot?: LocalCliConfigSnapshot
   /** Materialized on disk by Electron for CLI vision/file tools */
   attachments?: LocalCliAttachmentPayload[]
   /** External CLI delegate/continue contract; contains no parent transcript. */
   externalCliContract?: RuntimeOverrides['externalCliContract']
+  /** Host-owned timing policy captured with the immutable task snapshot. */
+  externalCliPolicy?: Partial<ExternalCliRunPolicy>
   onLog?: (line: string) => void
 }): Promise<{
   ok: boolean
   output: string
   command: string
   error?: string
+  terminalClassification?: string
   runId?: string
   externalRun?: ExternalRunRef
 }> {
@@ -200,7 +208,8 @@ export async function runPromptViaLocalCli(opts: {
     unattended: opts.unattended,
     sandboxWrap,
     effectiveMode,
-    timeoutMs: 300_000,
+    externalCliPolicy: opts.externalCliPolicy,
+    conversationId: opts.conversationId || opts.threadId,
     runId: opts.runId,
     attachments: (gated.attachments as typeof opts.attachments) ?? opts.attachments,
     configSnapshot: opts.configSnapshot,
@@ -218,6 +227,7 @@ export async function runPromptViaLocalCli(opts: {
     command: r.command,
     error: r.error,
     runId: r.runId,
+    terminalClassification: r.terminalClassification,
     externalRun: r.externalRun as ExternalRunRef | undefined,
   }
 }

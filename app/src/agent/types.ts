@@ -2,6 +2,7 @@
 export type LoopType = 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
 
 import type { ExternalCliDelegateContract } from './runners/types.ts'
+import type { ExternalCliRunPolicy } from './externalCliRunSession.ts'
 
 /** Chat composer attachment (images / text files) — pure type, no DOM */
 export type ChatAttachmentKind = 'image' | 'text' | 'binary'
@@ -251,6 +252,8 @@ export interface RuntimeOverrides {
   maxToolRounds?: number
   minConfidence?: number
   timeoutMs?: number
+  /** Immutable External CLI supervision policy captured at task admission. */
+  externalCliPolicy?: Partial<ExternalCliRunPolicy>
   useLlm?: boolean
   /** Per-conversation model override (does not change global settings permanently) */
   model?: string
@@ -464,10 +467,15 @@ export interface ArchiveRecord {
   postState?: PostStateOutcome
 }
 
-export type ExternalRunStatus = 'starting' | 'running' | 'success' | 'failed' | 'aborted'
+export type ExternalRunStatus = 'starting' | 'running' | 'success' | 'failed' | 'aborted' | 'interrupted'
 
 export interface ExternalRunRef {
-  provider: 'opencode'
+  /** Adapter/provider id; opencode keeps its existing session lineage fields. */
+  provider: string
+  adapter?: string
+  runId?: string
+  conversationId?: string
+  processId?: string
   serverUrl?: string
   sessionId?: string
   parentSessionId?: string
@@ -479,6 +487,10 @@ export interface ExternalRunRef {
   configFingerprint?: string
   status?: ExternalRunStatus
   completionReason?: string
+  terminalClassification?: string
+  eventCursor?: number
+  lastActivityAt?: string
+  outputOmittedBytes?: number
   startedAt?: string
   finishedAt?: string
 }

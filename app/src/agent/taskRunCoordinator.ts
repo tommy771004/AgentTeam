@@ -33,6 +33,7 @@ import {
   capabilitiesForRunner,
 } from './runners/types.ts'
 import { resolveRunSettingsOverrides, snapshotRunSettings } from './runSettingsSnapshot.ts'
+import { normalizeExternalCliRunPolicy } from './externalCliRunSession.ts'
 
 import { v4 as uuid } from 'uuid'
 import {
@@ -352,6 +353,15 @@ export function buildRunDispatchSnapshot(parts: {
       loopTypeMode: forceLoopType
         ? 'force'
         : parts.overrides.loopTypeMode || 'auto',
+      // Capture the complete Host supervision policy at admission so a run
+      // never re-reads mutable settings while the external process is live.
+      externalCliPolicy: normalizeExternalCliRunPolicy({
+        ...parts.overrides.externalCliPolicy,
+        // Preserve the existing bounded unattended HITL policy when callers
+        // have not supplied an external-session-specific value.
+        unattendedWaitMs:
+          parts.overrides.externalCliPolicy?.unattendedWaitMs ?? parts.overrides.hitlTimeoutMs,
+      }),
     },
   }
 }

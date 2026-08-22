@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:net'
 import { spawnCommandSpec, terminateProcessTree } from './platformProcess'
 import { getVaultSecret } from './secretsVault'
+import { normalizeExternalCliRunPolicy } from '../src/agent/externalCliRunSession'
 
 export type OpenCodeServerMode = 'auto' | 'cli' | 'server'
 
@@ -325,7 +326,9 @@ export async function runOpenCodeServerPrompt(opts: {
     return { used: false, ok: false, output: '' }
   }
   const baseUrl = info.baseUrl
-  const timeoutMs = Math.min(Math.max(opts.timeoutMs || 300_000, 10_000), 600_000)
+  // This is only the server adapter's absolute backstop. Idle/startup and
+  // connector waits are owned by ExternalCliRunSession, not this HTTP helper.
+  const timeoutMs = normalizeExternalCliRunPolicy({ absoluteMs: opts.timeoutMs }).absoluteMs
   const controller = new AbortController()
   const session = await jsonRequest<{ id?: string }>(baseUrl, '/session', {
     method: 'POST',

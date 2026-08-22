@@ -131,7 +131,14 @@ import {
   listTermSessions,
   writeTerm,
 } from './ptyBridge'
-import { runLocalCliAgent, type LocalCliKind } from './localCliRunner'
+import {
+  cancelExternalCliSession,
+  externalCliSessions,
+  getExternalCliSession,
+  interruptExternalCliSessions,
+  runLocalCliAgent,
+  type LocalCliKind,
+} from './localCliRunner'
 import {
   executableLookupCommand,
   firstExecutablePath,
@@ -183,6 +190,10 @@ import type {
   SubDesignExportFormat,
 } from '../src/agent/subdesign/types'
 import type { CliConfigSnapshot } from '../src/agent/types'
+import {
+  formatExternalCliTerminal,
+  normalizeExternalCliRunPolicy,
+} from '../src/agent/externalCliRunSession'
 import {
   captureMigrationSnapshot,
   deferUpdate,
@@ -797,6 +808,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  interruptExternalCliSessions('Electron host stopping; external session requires recovery')
   piHostSupervisor.stop()
   void stopOpenCodeServers()
   isQuitting = true
@@ -1651,6 +1663,8 @@ ipcMain.handle(
       unattended?: boolean
       timeoutMs?: number
       runId?: string
+      conversationId?: string
+      externalCliPolicy?: Record<string, number>
       configSnapshot?: CliConfigSnapshot
       attachments?: Array<{
         name: string
@@ -1792,6 +1806,24 @@ ipcMain.handle(
     if (input.kind === 'opencode' && input.serverMode !== 'cli' && attachments.length === 0) {
       const serverRunId = input.runId || `oc_${Date.now().toString(36)}`
       const externalStartedAt = new Date().toISOString()
+      const serverPolicy = normalizeExternalCliRunPolicy(input.externalCliPolicy)
+      const serverSession = externalCliSessions.create({
+        runId: serverRunId,
+        conversationId: input.conversationId || serverRunId,
+        adapter: 'opencode',
+        policy: serverPolicy,
+        unattended: input.unattended,
+        processId: `opencode-server:${serverRunId}`,
+        transport: {
+          processId: `opencode-server:${serverRunId}`,
+          terminateTree: async () => {
+            const result = await abortOpenCodeRun(serverRunId)
+            return { confirmed: result.ok }
+          },
+        },
+      })
+      serverSession.start()
+      serverSession.observe({ type: 'process_started', processId: `opencode-server:${serverRunId}` })
       const server = await runOpenCodeServerPrompt({
         mode: input.serverMode || 'auto',
         baseUrl: input.serverUrl,
@@ -1800,16 +1832,38 @@ ipcMain.handle(
         model: input.model,
         agent: input.agentMode === 'plan' ? 'plan' : 'build',
         runId: serverRunId,
-        timeoutMs: input.timeoutMs,
+        timeoutMs: serverPolicy.absoluteMs,
         onEvent: (event) => {
+          if (event.kind === 'text') {
+            serverSession.observe({ type: 'model_activity', detail: event.delta || event.detail })
+          } else if (event.kind === 'tool' || event.kind === 'file') {
+            serverSession.observe({ type: 'tool_completed', tool: event.tool, detail: event.detail, ok: event.ok })
+          } else if (event.kind === 'error') {
+            serverSession.observe({ type: 'diagnostic', detail: event.detail || event.title || 'OpenCode server error', severity: 'error' })
+          } else {
+            serverSession.observe({ type: 'provider_activity', detail: event.detail || event.title })
+          }
+          const cursor = serverSession.snapshot().eventCursor
           try {
-            if (!evt.sender.isDestroyed()) evt.sender.send('cli:stream', { ...event, runId: serverRunId })
+            if (!evt.sender.isDestroyed()) evt.sender.send('cli:stream', { ...event, runId: serverRunId, sequence: cursor, sessionPhase: serverSession.snapshot().phase })
           } catch {
             /* ignore */
           }
         },
       })
       if (server.used) {
+        if (server.sessionId) {
+          serverSession.observe({
+            type: 'provider_activity',
+            providerSessionId: server.sessionId,
+            detail: 'OpenCode provider session identity observed',
+          })
+        }
+        if (server.timedOut && !serverSession.snapshot().terminal) serverSession.forceTimeout('absolute-timeout')
+        else if (server.cancelled && !serverSession.snapshot().terminal) serverSession.cancelObserved('使用者取消')
+        else if (!serverSession.snapshot().terminal) serverSession.observe({ type: 'process_exit', code: server.ok ? 0 : 1, detail: server.error })
+        const sessionSnapshot = serverSession.snapshot()
+        const terminal = sessionSnapshot.terminal
         return {
           ok: server.ok,
           output: server.output,
@@ -1818,8 +1872,9 @@ ipcMain.handle(
           code: server.ok ? 0 : 1,
           timedOut: server.timedOut,
           cancelled: server.cancelled,
-          error: server.error,
+          error: terminal ? formatExternalCliTerminal(terminal, { headless: true }) : server.error,
           runId: serverRunId,
+          terminalClassification: terminal?.classification,
           configSnapshot: input.configSnapshot,
           externalRun: {
             provider: 'opencode' as const,
@@ -1829,13 +1884,21 @@ ipcMain.handle(
             configFingerprint: input.configSnapshot
               ? createHash('sha256').update(JSON.stringify(input.configSnapshot)).digest('hex').slice(0, 16)
               : undefined,
-            status: server.ok ? 'success' as const : server.cancelled ? 'aborted' as const : 'failed' as const,
+            status: terminal?.classification === 'success' ? 'success' as const : terminal?.classification === 'user-cancelled' ? 'aborted' as const : terminal?.classification === 'interrupted' ? 'interrupted' as const : 'failed' as const,
             completionReason: server.completionReason,
+            runId: serverRunId,
+            adapter: 'opencode',
+            conversationId: input.conversationId || serverRunId,
+            processId: sessionSnapshot.processId,
+            terminalClassification: terminal?.classification,
+            eventCursor: sessionSnapshot.eventCursor,
+            outputOmittedBytes: sessionSnapshot.output.omittedBytes,
             startedAt: externalStartedAt,
             finishedAt: new Date().toISOString(),
           },
         }
       }
+      externalCliSessions.remove(serverRunId)
     }
     return runLocalCliAgent({
       ...input,
@@ -1856,12 +1919,44 @@ ipcMain.handle(
 
 /** Cancel one CLI specialist run; legacy no-arg calls still cancel the tagged group. */
 ipcMain.handle('cli:cancel', async (_evt, runId?: string) => {
+  if (runId) {
+    const sessionCancel = await cancelExternalCliSession(runId)
+    if (sessionCancel.ok) return { ok: true, killed: 1 }
+  }
   const [cli, server] = await Promise.all([
     Promise.resolve(runId ? cancelBash({ runId }) : cancelBash({ tag: 'cli-agent' })),
     abortOpenCodeRun(runId),
   ])
   return { ok: cli.ok || server.ok, killed: cli.killed + server.killed }
 })
+
+/** Reconnect to a Host-owned external session after renderer reload. */
+ipcMain.handle('cli:sessionSnapshot', async (_evt, runId: string) => {
+  const session = getExternalCliSession(String(runId || ''))
+  return session?.snapshot() || null
+})
+
+ipcMain.handle('cli:sessionEvents', async (_evt, input: { runId: string; cursor?: number }) => {
+  const session = getExternalCliSession(String(input?.runId || ''))
+  return session ? session.reconnect(Number(input?.cursor || 0)) : null
+})
+
+ipcMain.handle('cli:sessionYield', async (_evt, runId: string) => {
+  const session = getExternalCliSession(String(runId || ''))
+  return session?.yieldObservation() || null
+})
+
+ipcMain.handle('cli:sessionInput', async (_evt, input: { runId: string; value: string; providerSessionId?: string }) =>
+  externalCliSessions.interact(String(input?.runId || ''), (session) =>
+    session.provideInput(String(input?.value || ''), input?.providerSessionId),
+  ),
+)
+
+ipcMain.handle('cli:sessionApproval', async (_evt, input: { runId: string; approved: boolean; providerSessionId?: string }) =>
+  externalCliSessions.interact(String(input?.runId || ''), (session) =>
+    session.provideApproval(input?.approved === true, input?.providerSessionId),
+  ),
+)
 
 // ── Chat attachments (disk materialize for bubbles / queue / vision) ──
 ipcMain.handle(

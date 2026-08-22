@@ -8,6 +8,7 @@ import type {
   PostStateOutcome,
   RuntimeOverrides,
 } from '../agent/types.ts'
+import type { ExternalCliRunPolicy } from '../agent/externalCliRunSession.ts'
 import { isElectronPiProduction } from '../agent/piProduction.ts'
 import { piThinkingLevelForDepth } from '../agent/thinking.ts'
 import { runCapacity } from '../agent/runConcurrency.ts'
@@ -80,6 +81,8 @@ interface AgentStore {
     webhookTarget?: RuntimeOverrides['webhookTarget']
     /** External CLI delegate/continue contract; no parent transcript. */
     externalCliContract?: RuntimeOverrides['externalCliContract']
+    /** Immutable Host supervision policy for the external session. */
+    externalCliPolicy?: Partial<ExternalCliRunPolicy>
     /** Chat attachments for CLI (written to disk in Electron) */
     attachments?: Array<{
       name: string
@@ -665,6 +668,12 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             removed: ev.removed,
             action: ev.action,
           })
+          if (ev.sessionPhase === 'waiting_for_user' || ev.sessionPhase === 'waiting_for_approval') {
+            useRunActivityStore.getState().setStatus(
+              ev.sessionPhase === 'waiting_for_user' ? '等待你的回覆' : '等待核准',
+              runId,
+            )
+          }
           if ((ev.kind === 'tool' || ev.kind === 'file') && (ev.tool || ev.path)) {
             toolCalls = [
               ...toolCalls,
@@ -786,7 +795,14 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         const final = emptyAgentLike({
           id: runId,
           objective: prompt,
-          status: r.ok ? 'success' : r.error === '使用者取消' ? 'halted' : 'failed',
+          status:
+            r.ok
+              ? 'success'
+              : r.terminalClassification === 'interrupted'
+                ? 'interrupted'
+                : r.error === '使用者取消' || r.terminalClassification === 'user-cancelled'
+                  ? 'halted'
+                  : 'failed',
           progress: 100,
           result: r.output,
           knowledge,
@@ -823,7 +839,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
               level: r.ok ? 'SUCCESS' : 'ERROR',
               message: r.ok
                 ? '外部 CLI 結束（未驗證內建 DoD）'
-                : r.error || 'failed',
+                : [r.terminalClassification, r.error || 'failed'].filter(Boolean).join(' · '),
             },
           ],
           steps: [
@@ -849,7 +865,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             apiCredits: 0,
             executionMs: Date.now() - t0,
           },
-          haltReason: r.ok ? undefined : r.error,
+          haltReason: r.ok ? undefined : [r.terminalClassification, r.error].filter(Boolean).join(' · '),
           cliConfigSnapshot: opts.configSnapshot,
           externalRun: r.externalRun,
           scheduleTrigger: opts.scheduleTrigger,

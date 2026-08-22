@@ -9,7 +9,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { runArgv, runBash } from './shellBridge'
+import { cancelBash, runArgv, runBash } from './shellBridge'
 import {
   executableLookupCommand,
   firstExecutablePath,
@@ -19,6 +19,20 @@ import { resolveCliApproval } from '../src/agent/cliApproval'
 import { materializeAttachments } from './attachmentStore'
 import { wrapCommandInSandbox } from './cliFilesystemSandbox'
 import type { CliConfigSnapshot, ExternalRunRef } from '../src/agent/types'
+import {
+  ExternalCliRunSession,
+  classifyExternalCliDiagnostic,
+  formatExternalCliTerminal,
+  normalizeExternalCliRunPolicy,
+  type ExternalCliLifecycleEvent,
+  type ExternalCliRunPolicy,
+} from '../src/agent/externalCliRunSession'
+import {
+  cancelExternalCliSession as cancelSupervisedExternalCliSession,
+  externalCliSupervisor,
+  getExternalCliSession as getSupervisedExternalCliSession,
+  interruptExternalCliSessions as interruptSupervisedExternalCliSessions,
+} from './externalCliSupervisor'
 
 export type LocalCliKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
 export type CliApprovalMode = 'always' | 'auto' | 'full'
@@ -56,6 +70,10 @@ export type LocalCliStreamEvent = {
   action?: 'edit' | 'create' | 'delete' | 'write' | 'read'
   /** kind=plan 時的完整任務清單快照 */
   todos?: LocalCliPlanItem[]
+  /** Durable External CLI Run Session cursor and phase. */
+  sequence?: number
+  sessionPhase?: string
+  terminalClassification?: string
 }
 
 export type LocalCliRunInput = {
@@ -77,6 +95,9 @@ export type LocalCliRunInput = {
   approvalMode?: CliApprovalMode
   /** Automation must never receive permissive CLI flags. */
   unattended?: boolean
+  conversationId?: string
+  /** Immutable Host supervision policy; timeoutMs is operation-scoped only. */
+  externalCliPolicy?: Partial<ExternalCliRunPolicy>
   timeoutMs?: number
   runId?: string
   /** Safe OpenCode config lineage captured before dispatch. */
@@ -109,6 +130,25 @@ export type LocalCliRunResult = {
   runId?: string
   configSnapshot?: CliConfigSnapshot
   externalRun?: ExternalRunRef
+  terminalClassification?: string
+}
+
+/** Main-process registry; renderer never owns canonical session state. */
+export const externalCliSessions = externalCliSupervisor
+
+export async function cancelExternalCliSession(runId: string): Promise<{ ok: boolean; classification?: string }> {
+  const session = getSupervisedExternalCliSession(runId)
+  if (!session) return { ok: false }
+  const settlement = await cancelSupervisedExternalCliSession(runId)
+  return { ok: settlement.classification === 'user-cancelled', classification: settlement.classification }
+}
+
+export function getExternalCliSession(runId: string) {
+  return getSupervisedExternalCliSession(runId)
+}
+
+export function interruptExternalCliSessions(reason?: string) {
+  return interruptSupervisedExternalCliSessions(reason)
 }
 
 function depthToCodexEffort(depth?: string): string {
@@ -377,10 +417,17 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
   const bin = resolveBinary(kind, input.binary)
   const runId = input.runId || randomUUID()
   const cwd = input.cwd && path.isAbsolute(input.cwd) ? input.cwd : undefined
-  const timeoutMs = input.timeoutMs || 300_000
+  const policy = normalizeExternalCliRunPolicy(input.externalCliPolicy)
+  let activeSession: ExternalCliRunSession | undefined
   const emit = (ev: Omit<LocalCliStreamEvent, 'runId'>) => {
     try {
-      input.onStream?.({ ...ev, runId })
+      const projection = activeSession?.snapshot()
+      input.onStream?.({
+        ...ev,
+        runId,
+        sequence: ev.sequence ?? projection?.eventCursor,
+        sessionPhase: ev.sessionPhase ?? projection?.phase,
+      })
     } catch {
       /* ignore */
     }
@@ -470,8 +517,56 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
   })
 
   // Parse NDJSON (Grok streaming-json) and plain lines into process events
-  const streamState = createCliStreamParser(kind, emit)
+  const streamState = createCliStreamParser(kind, emit, (providerSessionId) => {
+    activeSession?.observe({ type: 'provider_activity', providerSessionId, detail: 'provider session identity observed' })
+  })
   let assembledText = ''
+
+  const session = externalCliSessions.create({
+    runId,
+    conversationId: input.conversationId || runId,
+    adapter: kind,
+    policy,
+    unattended: input.unattended,
+    processId: `cli:${runId}`,
+    transport: {
+      processId: `cli:${runId}`,
+      terminateTree: () => {
+        const result = cancelBash({ runId })
+        return { confirmed: result.ok, detail: result.ok ? undefined : 'process already exited or was not registered' }
+      },
+    },
+    onEvent: (event) => {
+      const terminalClassification =
+        event.type === 'process_exit' ? String(event.detail || '') : undefined
+      const isTerminal = event.type === 'process_exit'
+      emit({
+        kind: isTerminal ? (terminalClassification === 'success' ? 'done' : 'error') : event.type === 'diagnostic' ? 'log' : 'status',
+        title: isTerminal
+          ? terminalClassification
+            ? formatExternalCliTerminal({
+                classification: terminalClassification as never,
+                phase: terminalClassification === 'success' ? 'completed' : 'failed',
+                at: event.at,
+              })
+            : 'CLI 結束'
+          : event.type === 'connector_authentication_required'
+            ? 'Connector authentication required'
+            : event.type === 'diagnostic'
+              ? 'CLI 診斷'
+              : event.type === 'provider_activity'
+                ? 'CLI session activity'
+                : undefined,
+        detail: event.detail,
+        ok: isTerminal ? terminalClassification === 'success' : event.type !== 'diagnostic' || event.severity !== 'error',
+        sequence: event.sequence,
+        sessionPhase: event.phase,
+        terminalClassification,
+      })
+    },
+  })
+  activeSession = session
+  session.start()
 
   // Direct argv spawn — do NOT wrap in cmd.exe (breaks CJK/multiline, can hang)
   let r
@@ -480,16 +575,44 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
       file: spawnFile,
       args: spawnArgs,
       cwd,
-      timeoutMs,
       runId,
+      onStarted: (processId) => session.observe({ type: 'process_started', processId: `cli:${processId}` }),
       tag: 'cli-agent',
       onStdout: (chunk) => {
+        session.observe({ type: 'process_output', channel: 'stdout', detail: chunk })
+        const stdoutDiagnostic = classifyExternalCliDiagnostic(chunk, { adapter: kind, headless: true })
+        if (stdoutDiagnostic.kind === 'connector-authentication-required') {
+          session.observe({
+            type: 'connector_authentication_required',
+            connector: stdoutDiagnostic.connector,
+            server: stdoutDiagnostic.server,
+            operation: stdoutDiagnostic.operation,
+            required: false,
+            detail: stdoutDiagnostic.detail,
+          })
+        }
         const parsed = streamState.push(chunk, 'stdout')
         if (parsed.textDelta) assembledText += parsed.textDelta
       },
       onStderr: (chunk) => {
+        session.observe({ type: 'process_output', channel: 'stderr', detail: chunk })
+        const diagnostic = classifyExternalCliDiagnostic(chunk, { adapter: kind, headless: true })
+        if (diagnostic.kind === 'connector-authentication-required') {
+          session.observe({
+            type: 'connector_authentication_required',
+            connector: diagnostic.connector,
+            server: diagnostic.server,
+            operation: diagnostic.operation,
+            required: false,
+            detail: diagnostic.detail,
+          })
+        } else {
+          session.observe({ type: 'diagnostic', detail: diagnostic.detail, severity: diagnostic.severity })
+        }
         streamState.push(chunk, 'stderr')
       },
+      externalSession: true,
+      timeoutMs: policy.absoluteMs,
     })
   } finally {
     if (profilePath) {
@@ -504,6 +627,10 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
   // Flush residual line buffer
   streamState.flush()
 
+  if (r.timedOut && !session.snapshot().terminal) session.forceTimeout('absolute-timeout')
+  else if (r.cancelled && !session.snapshot().terminal) session.cancelObserved('使用者取消')
+  else if (!session.snapshot().terminal) session.observe({ type: 'process_exit', code: r.code, detail: r.stderr })
+
   // TUI CLIs may still leak CSI/OSC sequences into captured pipes
   const rawJoined = stripAnsi([r.stdout, r.stderr].filter(Boolean).join('\n\n')).trim()
   // Prefer assembled assistant text from streaming-json over raw NDJSON dump
@@ -517,13 +644,28 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
   const cleanErr = stripAnsi(r.stderr || '').trim()
   const permissionError = streamState.getPermissionRequest()
 
+  const terminal = session.snapshot().terminal
+  const terminalClassification = terminal?.classification || (r.ok ? 'success' : cancelled ? 'user-cancelled' : 'process-exit-failure')
   emit({
     kind: r.ok ? 'done' : 'error',
-    title: r.ok ? 'CLI 完成' : permissionError ? 'OpenCode 權限要求' : cancelled ? '已取消' : r.timedOut ? '逾時' : 'CLI 失敗',
-    detail: r.ok ? undefined : permissionError || cleanErr || undefined,
+    title: r.ok
+      ? 'CLI 完成'
+      : terminal
+          ? formatExternalCliTerminal(terminal)
+          : permissionError
+            ? 'OpenCode 權限要求'
+            : cancelled
+              ? '已取消'
+              : 'CLI 失敗',
+    detail: r.ok ? undefined : terminal ? cleanErr || permissionError || undefined : permissionError || cleanErr || undefined,
     ok: r.ok,
+    terminalClassification,
+    sequence: session.snapshot().eventCursor,
+    sessionPhase: session.snapshot().phase,
   })
 
+  const sessionSnapshot = session.snapshot()
+  const lastActivityAt = sessionSnapshot.lastMeaningfulActivityAt
   return {
     ok: r.ok,
     output:
@@ -537,15 +679,34 @@ export async function runLocalCliAgent(input: LocalCliRunInput): Promise<LocalCl
     cancelled,
     error: r.ok
       ? undefined
-      : permissionError
-        ? permissionError
-        : cancelled
-          ? '使用者取消'
-          : r.timedOut
-            ? '逾時（CLI 未在時限內結束；請確認使用 headless：codex exec / claude -p / grok -p / gemini -p / cursor -p / opencode run）'
+      : terminal
+        ? formatExternalCliTerminal(terminal, { headless: true })
+        : permissionError
+          ? permissionError
+          : cancelled
+            ? '使用者取消'
             : cleanErr || `exit ${r.code}`,
     runId,
     configSnapshot: input.configSnapshot,
+    terminalClassification,
+    externalRun: {
+      provider: kind,
+      adapter: kind,
+      runId,
+      conversationId: input.conversationId || runId,
+      processId: sessionSnapshot.processId,
+      sessionId: sessionSnapshot.providerSessionId,
+      status: terminal?.classification === 'success' ? 'success' : terminal?.classification === 'user-cancelled' ? 'aborted' : terminal?.classification === 'interrupted' ? 'interrupted' : 'failed',
+      completionReason: terminal?.reason || terminalClassification,
+      terminalClassification,
+      eventCursor: sessionSnapshot.eventCursor,
+      lastActivityAt: lastActivityAt !== undefined
+        ? new Date(lastActivityAt).toISOString()
+        : undefined,
+      outputOmittedBytes: sessionSnapshot.output.omittedBytes,
+      startedAt: new Date(sessionSnapshot.startedAt).toISOString(),
+      finishedAt: terminal ? new Date(terminal.at).toISOString() : undefined,
+    },
   }
 }
 
@@ -657,6 +818,7 @@ export function normalizeOpenCodeEvent(raw: Record<string, unknown>): OpenCodeNo
 function createCliStreamParser(
   kind: LocalCliKind,
   emit: (ev: Omit<LocalCliStreamEvent, 'runId'>) => void,
+  onProviderSession?: (providerSessionId: string) => void,
 ) {
   let buf = ''
   let assembledText = ''
@@ -701,6 +863,10 @@ function createCliStreamParser(
         const j = JSON.parse(clean) as Record<string, unknown>
         const type = String(j.type || j.event || '')
         const subtype = String(j.subtype || '')
+        const providerSessionId = String(
+          j.session_id ?? j.sessionId ?? j.thread_id ?? j.threadId ?? j.conversation_id ?? '',
+        ).trim()
+        if (providerSessionId) onProviderSession?.(providerSessionId.slice(0, 200))
 
         if (kind === 'opencode') {
           const normalized = normalizeOpenCodeEvent(j)
