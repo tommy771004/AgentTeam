@@ -117,6 +117,11 @@ const SUBDESIGN_WRITE_TOOLS = new Set([
   'design_artifact_tweak',
   'design_artifact_capture',
   'design_artifact_lint',
+  'design_gate_contrast',
+  'design_gate_console_error',
+  'design_gate_build_success',
+  'design_gate_responsive_overflow',
+  'design_gate_token_consistency',
 ])
 
 // Permission checks: shared pure leaf toolPermissionMap (same as FC path).

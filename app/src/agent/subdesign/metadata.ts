@@ -4,6 +4,7 @@ import type { PluginResolvedSnapshot } from './pluginSnapshot.ts'
 import type { SubDesignPluginExecutionProjection } from './pluginExecution.ts'
 import type { ChromeDevToolsProviderSettings, ExperimentalSurfaceSettings, HarnessProviderSettings, StorybookProviderSettings } from './providers/providerSettings.ts'
 
+import type { SubDesignPinnedCommentAuditRecord } from './pinnedComments.ts'
 import type { SubDesignMetadataKind } from './metadataKinds.ts'
 
 export { SUBDESIGN_METADATA_KINDS, isSubDesignMetadataKind, type SubDesignMetadataKind } from './metadataKinds.ts'
@@ -19,7 +20,7 @@ export type SubDesignMetadataSnapshot = {
   openDesignProviderRuns: unknown[]
 }
 
-type MetadataPayload = SubDesignBrief | SubDesignArtifact | SubDesignCritique | SubDesignExportRecord | OpenDesignContentPackManifest | PluginResolvedSnapshot | StorybookProviderSettings | ChromeDevToolsProviderSettings | HarnessProviderSettings | ExperimentalSurfaceSettings | SubDesignPluginExecutionProjection
+type MetadataPayload = SubDesignBrief | SubDesignArtifact | SubDesignCritique | SubDesignExportRecord | OpenDesignContentPackManifest | PluginResolvedSnapshot | StorybookProviderSettings | ChromeDevToolsProviderSettings | HarnessProviderSettings | ExperimentalSurfaceSettings | SubDesignPluginExecutionProjection | SubDesignPinnedCommentAuditRecord
 
 export async function readSubDesignMetadata(projectRoot?: string): Promise<SubDesignMetadataSnapshot | null> {
   const api = typeof window === 'undefined' ? undefined : window.subagents?.subdesign

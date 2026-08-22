@@ -191,6 +191,7 @@ export function createSubDesignWorkspaceDependencies(
     saveExperimentalSurfaceSettings: saveExperimentalSettings,
     updateBrief: (id, patch, projectRoot) => useSubDesignStore.getState().updateBrief(id, patch, projectRoot),
     selectDirection: (id, directionId, projectRoot) => useSubDesignStore.getState().selectDirection(id, directionId, undefined, projectRoot),
+    restoreArtifact: (artifactId, revision, projectRoot) => useSubDesignArtifactStore.getState().restoreRevision(artifactId, revision, projectRoot),
     installOpenDesignPack: (record, projectRoot) => useOpenDesignPackStore.getState().install(record, projectRoot),
     setOpenDesignPackEnabled: (record, enabled) => useOpenDesignPackStore.getState().setEnabled(record, enabled),
     setRunPanel: (visible) => useThreadStore.getState().setShowRunPanel(visible),

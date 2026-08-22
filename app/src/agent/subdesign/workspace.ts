@@ -30,6 +30,7 @@ import {
   type ExperimentalSurfaceSettings,
   type StorybookProviderSettings,
 } from './providers/providerSettings.ts'
+import { buildPinnedCommentContext, parsePinnedCommentPayload } from './pinnedComments.ts'
 import { deriveSubDesignWorkspace, type SubDesignWorkspaceViewModel } from './workspaceProjection.ts'
 import type { SubDesignWorkspaceHostEventListener } from './workspaceHostEvents.ts'
 
@@ -188,6 +189,8 @@ export type SubDesignWorkspaceActionSuccess = {
   ok: true
   brief: SubDesignBrief
   run?: ExternalRunResult
+  /** restoreArtifactRevision 成功時的新 revision artifact。 */
+  restoredArtifact?: SubDesignArtifact
 }
 
 export type SubDesignWorkspaceActionResult = SubDesignWorkspaceActionSuccess | SubDesignWorkspaceActionFailure
@@ -210,6 +213,7 @@ export type SubDesignWorkspaceDependencies = {
   buildPrompt: (brief: SubDesignBrief) => string
   navigate: (path: string) => void
   hydrateProject?: (request: SubDesignWorkspaceHydrationRequest) => Promise<void>
+  restoreArtifact?: (artifactId: string, revision: number, projectRoot?: string) => Promise<{ ok: true; artifact: SubDesignArtifact } | { ok: false; errors: string[] }>
   refreshProviderState?: (projectRoot?: string, isCurrent?: () => boolean) => Promise<SubDesignWorkspaceProviderProjection>
   saveStorybookProviderSettings?: (
     value: Pick<StorybookProviderSettings, 'enabled' | 'endpoint'>,
@@ -325,6 +329,8 @@ export type SubDesignWorkspaceController = {
   setOpenDesignPackEnabled: (record: OpenDesignCatalogRecord, enabled: boolean) => Promise<boolean>
   setRunPanel: (visible: boolean) => void
   selectThread: (id: string) => void
+  restoreArtifactRevision: (input: { artifactId: string; revision: number; projectRoot?: string }) => Promise<SubDesignWorkspaceActionResult>
+  submitPinnedComments: (input: { artifact: { id: string; title?: string; revision: number }; pins: unknown }) => Promise<SubDesignWorkspaceActionResult>
   stopExecution: (runId?: string) => void
   setSelectedArtifact: (key: string | null) => void
   saveStorybookProviderSettings: (
@@ -841,6 +847,37 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       if (state.selectedArtifactKey === key) return
       state.selectedArtifactKey = key
       publish()
+    },
+
+    submitPinnedComments: async (input) => {
+      const parsed = parsePinnedCommentPayload({ pins: input.pins })
+      if (!parsed.ok) return commandFailure('invalid', parsed.errors.join('；'))
+      const briefId = state.routeBriefId
+      const brief = briefId ? deps.findBrief(briefId) : null
+      if (!brief) return commandFailure('missing-brief', '目前沒有可執行的 SubDesign brief。')
+      if (state.runsByBriefId[brief.id]?.phase === 'starting') {
+        return commandFailure('busy', 'SubDesign 已有一個 run 正在準備中。')
+      }
+      const objective = buildPinnedCommentContext(input.artifact, parsed.pins)
+      return runBrief(brief, objective)
+    },
+
+    restoreArtifactRevision: async (input) => {
+      const briefId = state.routeBriefId
+      const runPhase = briefId ? state.runsByBriefId[briefId]?.phase : undefined
+      // Live guard：run 起始中，或 presentation 判定 live（running thread / activity）
+      // 時拒絕還原——live → terminal 只走一次，寫性操作不得插隊。
+      const presentationLive = briefId ? deps.readPresentation?.(briefId)?.runIsLive === true : false
+      if (runPhase === 'starting' || presentationLive) {
+        return commandFailure('busy', 'Run 進行中，無法還原 artifact revision；請先停止或等待完成。')
+      }
+      if (!deps.restoreArtifact) return commandFailure('failed', '還原需要 Electron workspace API。')
+      const result = await deps.restoreArtifact(input.artifactId, input.revision, input.projectRoot || (state.projectRoot || undefined))
+      if (!result.ok) return commandFailure('failed', result.errors.join('；'))
+      publish()
+      const brief = briefId ? deps.findBrief(briefId) : null
+      if (!brief) return commandFailure('missing-brief', '目前沒有可執行的 SubDesign brief。')
+      return { ok: true, brief, restoredArtifact: result.artifact }
     },
 
     saveStorybookProviderSettings: async (value, projectRoot = state.projectRoot || undefined) => {

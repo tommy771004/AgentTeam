@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique } from '../../agent/subdesign/types'
+import type { SubDesignPinnedComment } from '../../agent/subdesign/pinnedComments.ts'
 import type { SubDesignWorkspaceViewModel } from '../../agent/subdesign/workspace'
 import type { Thread } from '../../store/threadStore'
 import { useProjectStore } from '../../store/projectStore'
@@ -7,6 +8,7 @@ import { useRunActivityStore } from '../../store/runActivityStore'
 import { Icon } from '../Icon'
 import { ArtifactDeliveryPanel } from './ArtifactDeliveryPanel'
 import { ArtifactPreview } from './ArtifactPreview'
+import { useSubDesignPinnedCommentsStore } from '../../store/subDesignPinnedCommentsStore'
 import { ArtifactTweakPanel } from './ArtifactTweakPanel'
 import { CritiquePanel } from './CritiquePanel'
 import { CritiqueTheater } from './CritiqueTheater'
@@ -40,6 +42,7 @@ type SubDesignProjectStudioProps = {
   onStartRun: () => void
   onStopRun: () => void
   onSubmitFollowUp: (value: string) => Promise<void>
+  onSubmitPinnedComments?: (input: { artifact: { id: string; title?: string; revision: number }; pins: SubDesignPinnedComment[] }) => Promise<{ ok: boolean; runId?: string }>
   onOpenTranscript: () => void
   onSelectArtifact: (artifact: SubDesignArtifact) => void
   onSelectDirection: (directionId: string) => void
@@ -106,6 +109,7 @@ export function SubDesignProjectStudio({
   onStartRun,
   onStopRun,
   onSubmitFollowUp,
+  onSubmitPinnedComments,
   onOpenTranscript,
   onSelectArtifact,
   onSelectDirection,
@@ -267,7 +271,23 @@ export function SubDesignProjectStudio({
             {tab === 'files' ? (
               <div className="mx-auto flex min-h-full w-full max-w-[1180px] flex-col">
                 {selectedArtifact ? (
-                  <ArtifactPreview artifact={selectedArtifact} mode={previewMode} envelope={artifactStream} />
+                  <ArtifactPreview
+                    artifact={selectedArtifact}
+                    mode={previewMode}
+                    envelope={artifactStream}
+                    onSubmitPinnedComments={onSubmitPinnedComments && !runIsLive ? async (pins) => {
+                      const result = await onSubmitPinnedComments({ artifact: { id: selectedArtifact.id, title: selectedArtifact.title, revision: selectedArtifact.revision }, pins })
+                      if (!result.ok) return false
+                      useSubDesignPinnedCommentsStore.getState().recordSubmission({
+                        artifactId: selectedArtifact.id,
+                        revision: selectedArtifact.revision,
+                        briefId: selectedArtifact.briefId,
+                        runId: result.runId,
+                        pins,
+                      })
+                      return true
+                    } : undefined}
+                  />
                 ) : (
                   <section className="grid min-h-[420px] flex-1 place-items-center bg-surface-container-low/20 px-6 text-center">
                     <div className="max-w-[360px]">

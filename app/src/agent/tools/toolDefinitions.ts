@@ -957,6 +957,30 @@ export const TOOL_DEFINITIONS = {
     },
     owningCapability: 'subdesign-workflow',
   },
+  design_gate_console_error: {
+    description: "Load the artifact and collect console errors during render as attested gate evidence.",
+    keywords: ["console errors","runtime errors","verification gate","執行期錯誤"],
+    parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
+    owningCapability: 'subdesign-workflow',
+  },
+  design_gate_build_success: {
+    description: "Verify the artifact entry builds/loads with complete structure and produce attested gate evidence.",
+    keywords: ["build success","structure gate","建構驗證"],
+    parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
+    owningCapability: 'subdesign-workflow',
+  },
+  design_gate_responsive_overflow: {
+    description: "Render at narrow viewports and detect horizontal overflow, producing attested gate evidence.",
+    keywords: ["responsive overflow","horizontal scroll","responsive gate","響應式檢查"],
+    parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
+    owningCapability: 'subdesign-workflow',
+  },
+  design_gate_token_consistency: {
+    description: "Compare colors used in the artifact against the project DTCG palette when present.",
+    keywords: ["token consistency","design tokens","palette gate","色彩一致性"],
+    parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
+    owningCapability: 'subdesign-workflow',
+  },
   design_artifact_register: {
     description: "Register a validated project-relative SubDesign artifact manifest for preview and revision tracking.",
     keywords: ["artifact manifest","register artifact","preview artifact","design output","revision"],
@@ -1241,6 +1265,23 @@ export const TOOL_DEFINITIONS = {
   design_artifact_lint: {
     description: "Run deterministic semantic lint against the registered artifact and create attested lint evidence.",
     keywords: ["artifact lint","semantic lint","accessibility lint","evidence lint","語意檢查"],
+    parameters: {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "description": "Registered SubDesign artifact id"
+        }
+      },
+      "required": [
+        "artifactId"
+      ]
+    },
+    owningCapability: 'subdesign-workflow',
+  },
+  design_gate_contrast: {
+    description: "Run the state-aware WCAG contrast verification gate and create attested gate evidence for critique.",
+    keywords: ["contrast gate","wcag","verification gate","對比度檢查","可及性閘門"],
     parameters: {
       "type": "object",
       "properties": {

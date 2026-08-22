@@ -505,6 +505,41 @@ const api = {
         findings?: unknown[]
         error?: string
       }>,
+    contrastGate: (input: { artifact: unknown; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:contrastGate', input) as Promise<{
+        ok: boolean
+        evidence?: unknown
+        violations?: unknown[]
+        error?: string
+      }>,
+    consoleErrorGate: (input: { artifact: unknown; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:consoleErrorGate', input) as Promise<{
+        ok: boolean
+        evidence?: unknown
+        errors?: unknown[]
+        error?: string
+      }>,
+    buildSuccessGate: (input: { artifact: unknown; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:buildSuccessGate', input) as Promise<{
+        ok: boolean
+        evidence?: unknown
+        problems?: unknown[]
+        error?: string
+      }>,
+    responsiveOverflowGate: (input: { artifact: unknown; widths?: number[]; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:responsiveOverflowGate', input) as Promise<{
+        ok: boolean
+        evidence?: unknown
+        violations?: unknown[]
+        error?: string
+      }>,
+    tokenConsistencyGate: (input: { artifact: unknown; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:tokenConsistencyGate', input) as Promise<{
+        ok: boolean
+        evidence?: unknown
+        violations?: unknown[]
+        error?: string
+      }>,
     importReference: (input: { briefId: string; kind: 'screenshot' | 'url'; source: string; suggestedTitle?: string; projectRoot?: string }) =>
       ipcRenderer.invoke('subdesign:importReference', input) as Promise<{
         ok: boolean

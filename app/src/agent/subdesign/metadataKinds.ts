@@ -14,6 +14,7 @@ export const SUBDESIGN_METADATA_KINDS = [
   'open-design-snapshot',
   'open-design-provider-settings',
   'open-design-provider-run',
+  'pinned-comment',
 ] as const
 
 export type SubDesignMetadataKind = (typeof SUBDESIGN_METADATA_KINDS)[number]

@@ -1,4 +1,5 @@
 import type { SubDesignCritique } from '../../agent/subdesign/types'
+import { SUBDESIGN_SCORE_GATE_MAP } from '../../agent/subdesign/critique.ts'
 import { Icon } from '../Icon'
 
 const SCORE_FIELDS: Array<{ key: keyof Pick<SubDesignCritique, 'briefCoverage' | 'brandConformance' | 'accessibility' | 'implementationReadiness'>; label: string }> = [
@@ -7,6 +8,14 @@ const SCORE_FIELDS: Array<{ key: keyof Pick<SubDesignCritique, 'briefCoverage' |
   { key: 'accessibility', label: 'Accessibility' },
   { key: 'implementationReadiness', label: 'Readiness' },
 ]
+
+function gateProvenanceFor(critique: SubDesignCritique, scoreKey: keyof Pick<SubDesignCritique, 'briefCoverage' | 'brandConformance' | 'accessibility' | 'implementationReadiness'>): Array<{ gateId: string; capturedAt?: string }> {
+  const allowed = new Set(SUBDESIGN_SCORE_GATE_MAP[scoreKey])
+  const gates = critique.evidence
+    .filter((item) => item.kind === 'gate' && item.gateId && allowed.has(item.gateId))
+    .map((item) => ({ gateId: item.gateId as string, capturedAt: item.capturedAt }))
+  return gates
+}
 
 export function CritiquePanel({ critique }: { critique: SubDesignCritique | null }) {
   return (
@@ -20,7 +29,22 @@ export function CritiquePanel({ critique }: { critique: SubDesignCritique | null
           <div className="grid grid-cols-2 gap-x-4 gap-y-3">
             {SCORE_FIELDS.map(({ key, label }) => {
               const score = critique[key]
-              return <div key={key}><div className="flex justify-between text-[11px] text-outline"><span>{label}</span><span className="font-mono text-on-surface">{score}</span></div><div className="mt-1.5 h-1.5 rounded-full bg-white/[0.08]"><div className={`h-1.5 rounded-full ${score >= 70 ? 'bg-primary' : score >= 45 ? 'bg-secondary' : 'bg-error'}`} style={{ width: `${score}%` }} /></div></div>
+              const provenance = gateProvenanceFor(critique, key)
+              return (
+                <div key={key}>
+                  <div className="flex justify-between text-[11px] text-outline"><span>{label}</span><span className="font-mono text-on-surface">{score}</span></div>
+                  <div className="mt-1.5 h-1.5 rounded-full bg-white/[0.08]"><div className={`h-1.5 rounded-full ${score >= 70 ? 'bg-primary' : score >= 45 ? 'bg-secondary' : 'bg-error'}`} style={{ width: `${score}%` }} /></div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1 text-[9px]">
+                    {provenance.length ? provenance.map((gate) => (
+                      <span key={gate.gateId} className="inline-flex items-center gap-0.5 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 font-mono text-primary" title={`由 ${gate.gateId} gate 量測${gate.capturedAt ? ` · ${gate.capturedAt}` : ''}`}>
+                        <Icon name="verified" size={10} />{gate.gateId}
+                      </span>
+                    )) : (
+                      <span className="text-outline">not verified — 尚無對應的 gate 量測</span>
+                    )}
+                  </div>
+                </div>
+              )
             })}
           </div>
           <div className="border-t border-white/[0.08] pt-3"><div className="mb-2 text-[11px] font-semibold text-on-surface">Evidence</div><div className="flex flex-wrap gap-1.5">{critique.evidence?.length ? critique.evidence.map((item, index) => <span key={`${item.kind}:${index}`} className="rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-[11px] text-primary">{item.kind}</span>) : <span className="text-[11px] text-error">尚未提供 screenshot / DOM / lint evidence</span>}</div></div>

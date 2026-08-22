@@ -355,6 +355,14 @@ export function SubDesignPage() {
         onStartRun={() => void startBriefRun()}
         onStopRun={() => { if (linkedThreadRunId) workspaceController.stopExecution(linkedThreadRunId) }}
         onSubmitFollowUp={submitStudioFollowUp}
+        onSubmitPinnedComments={async (input) => {
+          if (!activeBrief || !selectedArtifact) return { ok: false }
+          const result = await workspaceController.submitPinnedComments({
+            artifact: { id: selectedArtifact.id, title: selectedArtifact.title, revision: selectedArtifact.revision },
+            pins: input.pins,
+          })
+          return result.ok ? { ok: true, runId: result.run?.runId } : { ok: false }
+        }}
         onOpenTranscript={openTranscript}
         onSelectArtifact={(artifact) => workspaceController.setSelectedArtifact(`${artifact.id}:${artifact.revision}`)}
         onSelectDirection={(directionId) => { workspaceController.selectDirection(activeBrief.id, directionId, projectRoot || undefined) }}

@@ -124,7 +124,7 @@ export type SubDesignCritiqueFinding = {
 }
 
 export type SubDesignCritiqueEvidence = {
-  kind: 'screenshot' | 'dom' | 'lint' | 'build' | 'manual' | 'template-attribution' | 'asset-license'
+  kind: 'screenshot' | 'dom' | 'lint' | 'build' | 'manual' | 'template-attribution' | 'asset-license' | 'gate'
   summary: string
   path?: string
   capturedAt?: string
@@ -133,6 +133,10 @@ export type SubDesignCritiqueEvidence = {
   source?: string
   artifactId?: string
   revision?: number
+  /** Gate-only：哪個已註冊的 verification gate 產生此證據。 */
+  gateId?: string
+  /** Gate-only：量測通過（false = gate 執行但未過）。 */
+  passed?: boolean
 }
 
 export type SubDesignCritique = {

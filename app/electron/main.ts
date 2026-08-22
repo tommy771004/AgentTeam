@@ -2817,7 +2817,7 @@ function readAndVerifyEvidenceAttestation(root: string, artifact: SubDesignArtif
   const signature = createHmac('sha256', evidenceSecret()).update(JSON.stringify(payload)).digest('hex')
   if (signature !== parsed.signature) throw new Error('attestation signature 不正確')
   if (payload.artifactId !== artifact.id || payload.revision !== artifact.revision || payload.kind !== kind || payload.path !== relativePath) throw new Error('attestation 與目前 artifact revision/kind/path 不一致')
-  if (!['subdesign:captureEvidence', 'subdesign:lintArtifact'].includes(payload.source)) throw new Error('evidence source 不可信')
+  if (!['subdesign:captureEvidence', 'subdesign:lintArtifact', 'subdesign:contrastGate'].includes(payload.source)) throw new Error('evidence source 不可信')
   const actualHash = sha256File(file)
   if (actualHash !== payload.sha256) throw new Error('evidence sha256 與檔案內容不一致')
   return { ...payload, signature: String(parsed.signature) }
@@ -2840,6 +2840,14 @@ function verifySubDesignEvidenceContent(kind: string, file: string): void {
   if (text.length < 3) throw new Error('文字 evidence 內容過短')
   if (kind === 'dom' && !/(?:<!doctype\s+html|<html[\s>])/i.test(text)) {
     throw new Error('dom evidence 不是 HTML snapshot')
+  }
+  if (kind === 'gate') {
+    try {
+      const gate = JSON.parse(text) as Record<string, unknown>
+      if (!gate || typeof gate.gateId !== 'string' || !gate.gateId) throw new Error('missing gateId')
+    } catch {
+      throw new Error('gate evidence 不是有效的 JSON 或缺少 gateId')
+    }
   }
 }
 
@@ -2932,6 +2940,11 @@ function verifySubDesignEvidence(input: {
       const candidateKind = String(item.kind || 'evidence')
       if (isPathInside(evidenceDir, realFile)) readAndVerifyEvidenceAttestation(root, artifact, candidateKind, relativePath, realFile)
       verifySubDesignEvidenceContent(candidateKind, realFile)
+      if (candidateKind === 'gate') {
+        const gate = JSON.parse(fs.readFileSync(realFile, 'utf8')) as Record<string, unknown>
+        const entryFile = artifactFile(root, artifact.entry)
+        verifyGateEvidenceSemantics(gate, artifact, entryFile)
+      }
     } catch (error) {
       errors.push(`${String(item.kind || 'evidence')} path ${relativePath} 無效：${error instanceof Error ? error.message : String(error)}`)
     }
@@ -2987,6 +3000,397 @@ async function captureSubDesignEvidence(input: {
     } finally {
       if (!previewWindow.isDestroyed()) previewWindow.destroy()
     }
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/**
+ * 共用的 hidden preview runner：載入 artifact entry、等待 fonts ready，
+ * 執行量測腳本後銷毀視窗。所有渲染型 gates 走同一條路，避免各自開窗。
+ */
+async function runArtifactPreviewMeasurement(
+  input: { artifact: unknown; projectRoot?: string; width?: number; height?: number },
+  measure: (previewWindow: BrowserWindow, context: { artifact: SubDesignArtifact; root: string; entryFile: string }) => Promise<Record<string, unknown>>,
+): Promise<{ ok: true; result: Record<string, unknown>; artifact: SubDesignArtifact; entrySha256: string } | { ok: false; error: string }> {
+  const validation = validateSubDesignArtifactManifest(input.artifact)
+  if (!validation.ok) return { ok: false, error: `artifact manifest invalid：${validation.errors.join('；')}` }
+  const previewWindow = new BrowserWindow({
+    show: false,
+    width: Math.max(320, Math.min(2400, Math.floor(Number(input.width) || 1440))),
+    height: Math.max(240, Math.min(1800, Math.floor(Number(input.height) || 900))),
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  })
+  try {
+    const root = workspaceRootFor(input.projectRoot)
+    const artifact = validation.manifest
+    const entryFile = artifactFile(root, artifact.entry)
+    const content = fs.readFileSync(entryFile, 'utf8').slice(0, 200_000)
+    await previewWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlDocumentForPdf(artifact, content))}`)
+    await previewWindow.webContents.executeJavaScript('document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true')
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    const result = await measure(previewWindow, { artifact, root, entryFile })
+    return { ok: true, result, artifact, entrySha256: sha256File(entryFile) }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  } finally {
+    if (!previewWindow.isDestroyed()) previewWindow.destroy()
+  }
+}
+
+function writeGateEvidence(
+  artifact: SubDesignArtifact,
+  root: string,
+  entrySha256: string,
+  gateId: string,
+  passed: boolean,
+  summary: string,
+  extra: Record<string, unknown>,
+): { path: string; attestation: SubDesignEvidenceAttestation; payload: Record<string, unknown> } {
+  const checkedAt = new Date().toISOString()
+  const evidenceDir = resolveWorkspacePath(`${SUBDESIGN_EVIDENCE_ROOT}/${artifact.id}/evidence`, root)
+  fs.mkdirSync(evidenceDir, { recursive: true })
+  const evidenceFile = path.join(evidenceDir, `${artifact.id}-r${artifact.revision}-gate-${gateId}.json`)
+  const payload = {
+    kind: 'gate',
+    gateId,
+    source: `subdesign:${gateId}Gate`,
+    artifactId: artifact.id,
+    revision: artifact.revision,
+    entrySha256,
+    checkedAt,
+    passed,
+    summary,
+    ...extra,
+  }
+  fs.writeFileSync(evidenceFile, JSON.stringify(payload, null, 2), 'utf8')
+  const attestation = attestSubDesignEvidence({ root, artifact, kind: 'gate', file: evidenceFile, source: `subdesign:${gateId}Gate`, createdAt: checkedAt })
+  return { path: path.relative(root, evidenceFile).replaceAll(path.sep, '/'), attestation, payload }
+}
+
+
+const CONTRAST_GATE_SOURCES: Record<string, string> = {
+  contrast: 'subdesign:contrastGate',
+  'console-error': 'subdesign:console-errorGate',
+  'build-success': 'subdesign:build-successGate',
+  'responsive-overflow': 'subdesign:responsive-overflowGate',
+  'token-consistency': 'subdesign:token-consistencyGate',
+}
+
+/**
+ * State-aware WCAG 對比量測：量測可見文字的 base 狀態，再從 stylesheets 抽出
+ * :hover/:focus/:active 的 color 宣告，對相同元素量測該狀態下的前/背景對比。
+ * 回傳 JSON 字串 { measured, violations[] }；任何單點失敗不中斷整體量測。
+ */
+const CONTRAST_GATE_SCRIPT = `
+(() => {
+  function parseColor(value) {
+    const m = /rgba?\\(([^)]+)\\)/i.exec(String(value || ''))
+    if (!m) return null
+    const parts = m[1].split(',').map((p) => parseFloat(p))
+    if (parts.length < 3 || parts.some((n) => Number.isNaN(n))) return null
+    return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 }
+  }
+  function channel(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }
+  function luminance(c) { if (!c || c.a <= 0) return null; return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b) }
+  function ratio(fg, bg) {
+    const l1 = luminance(fg); const l2 = luminance(bg)
+    if (l1 == null || l2 == null) return null
+    const hi = Math.max(l1, l2); const lo = Math.min(l1, l2)
+    return (hi + 0.05) / (lo + 0.05)
+  }
+  function effectiveBg(el) {
+    let node = el.parentElement
+    while (node) {
+      const c = parseColor(getComputedStyle(node).backgroundColor)
+      if (c && c.a > 0.85) return c
+      node = node.parentElement
+    }
+    return { r: 255, g: 255, b: 255, a: 1 }
+  }
+  function describe(el) {
+    const id = el.id ? '#' + el.id : ''
+    const cls = el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).slice(0, 2).join('.') : ''
+    return el.tagName.toLowerCase() + id + cls
+  }
+  function thresholdFor(style) {
+    const size = parseFloat(style.fontSize) || 16
+    const weight = parseInt(style.fontWeight, 10) || 400
+    const large = size >= 24 || (size >= 18.66 && weight >= 700)
+    return large ? 3 : 4.5
+  }
+  const stateRules = []
+  try {
+    for (const sheet of document.styleSheets) {
+      let rules
+      try { rules = sheet.cssRules } catch { continue }
+      if (!rules) continue
+      for (const rule of rules) {
+        if (!rule.selectorText || !rule.style || !rule.style.color) continue
+        const m = /^([^:]+):(?:hover|focus|active)\\b/i.exec(rule.selectorText)
+        if (!m) continue
+        const state = (/:(hover|focus|active)/i.exec(rule.selectorText) || [])[1] || 'state'
+        stateRules.push({ baseSelector: m[1].trim(), state: state.toLowerCase(), color: rule.style.color })
+      }
+    }
+  } catch {}
+  const seen = new Set()
+  const violations = []
+  let measured = 0
+  let elements = document.body ? document.body.querySelectorAll('*') : []
+  for (const el of elements) {
+    if (measured >= 400) break
+    try {
+      const hasText = Array.from(el.childNodes || []).some((n) => n.nodeType === 3 && n.textContent && n.textContent.trim())
+      if (!hasText) continue
+      const style = getComputedStyle(el)
+      if (style.visibility === 'hidden' || style.display === 'none' || parseFloat(style.opacity) === 0) continue
+      const rect = el.getBoundingClientRect()
+      if (!rect.width && !rect.height) continue
+      const bg = effectiveBg(el)
+      const threshold = thresholdFor(style)
+      const desc = describe(el)
+      const fgBase = parseColor(style.color)
+      if (fgBase) {
+        measured++
+        const r = ratio(fgBase, bg)
+        const key = desc + '|base|' + style.color
+        if (r != null && !seen.has(key)) {
+          seen.add(key)
+          if (r < threshold) violations.push({ selector: desc, state: 'base', ratio: Math.round(r * 100) / 100, threshold, sample: (el.textContent || '').trim().slice(0, 40) })
+        }
+      }
+      for (const rule of stateRules) {
+        if (measured >= 400) break
+        let matches = false
+        try { matches = el.matches(rule.baseSelector) } catch { continue }
+        if (!matches) continue
+        const fgState = parseColor(rule.color)
+        if (!fgState) continue
+        const key = desc + '|' + rule.state + '|' + rule.color
+        if (seen.has(key)) continue
+        seen.add(key)
+        measured++
+        const r = ratio(fgState, bg)
+        if (r != null && r < threshold) violations.push({ selector: desc, state: rule.state, ratio: Math.round(r * 100) / 100, threshold, sample: (el.textContent || '').trim().slice(0, 40) })
+      }
+    } catch {}
+  }
+  return JSON.stringify({ measured, violations })
+})()
+`
+
+function verifyGateEvidenceSemantics(gate: Record<string, unknown>, artifact: SubDesignArtifact, entryFile: string): void {
+  if (gate.kind !== 'gate' || typeof gate.gateId !== 'string' || !gate.gateId) throw new Error('gate evidence 語意欄位不一致')
+  const trustedSource = CONTRAST_GATE_SOURCES[gate.gateId]
+  if (!trustedSource || gate.source !== trustedSource) throw new Error('gate evidence source 不可信')
+  if (gate.artifactId !== artifact.id || Number(gate.revision) !== artifact.revision) throw new Error('gate evidence 與目前 artifact revision 不一致')
+  if (gate.entrySha256 !== sha256File(entryFile)) throw new Error('gate evidence 對應的 artifact entry 已變更')
+}
+
+async function contrastGateSubDesignArtifact(input: { artifact: unknown; projectRoot?: string }) {
+  const validation = validateSubDesignArtifactManifest(input.artifact)
+  if (!validation.ok) return { ok: false as const, error: `artifact manifest invalid：${validation.errors.join('；')}` }
+  const previewWindow = new BrowserWindow({
+    show: false,
+    width: 1440,
+    height: 900,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  })
+  try {
+    const root = workspaceRootFor(input.projectRoot)
+    const artifact = validation.manifest
+    const entryFile = artifactFile(root, artifact.entry)
+    const content = fs.readFileSync(entryFile, 'utf8').slice(0, 200_000)
+    await previewWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlDocumentForPdf(artifact, content))}`)
+    await previewWindow.webContents.executeJavaScript('document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true')
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    const raw = await previewWindow.webContents.executeJavaScript(CONTRAST_GATE_SCRIPT) as { measured?: unknown; violations?: unknown }
+    const measured = Math.max(0, Math.floor(Number(raw?.measured) || 0))
+    const violations = Array.isArray(raw?.violations)
+      ? raw.violations
+          .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+          .slice(0, 50)
+          .map((item) => ({
+            selector: String(item.selector || '').slice(0, 200),
+            state: String(item.state || 'base').slice(0, 20),
+            ratio: Number(item.ratio) || 0,
+            threshold: Number(item.threshold) || 4.5,
+            sample: String(item.sample || '').slice(0, 80),
+          }))
+      : []
+    if (!measured && !violations.length) return { ok: false as const, error: '對比度 gate 沒有量測到任何可見文字。' }
+    const checkedAt = new Date().toISOString()
+    const passed = violations.length === 0
+    const evidenceDir = resolveWorkspacePath(`${SUBDESIGN_EVIDENCE_ROOT}/${artifact.id}/evidence`, root)
+    fs.mkdirSync(evidenceDir, { recursive: true })
+    const evidenceFile = path.join(evidenceDir, `${artifact.id}-r${artifact.revision}-gate-contrast.json`)
+    const payload = {
+      kind: 'gate',
+      gateId: 'contrast',
+      source: 'subdesign:contrastGate',
+      artifactId: artifact.id,
+      revision: artifact.revision,
+      entrySha256: sha256File(entryFile),
+      checkedAt,
+      passed,
+      measured,
+      violations,
+      summary: passed
+        ? `對比度 gate 通過：${measured} 個量測、0 個違規（含 hover/focus/active 狀態）。`
+        : `對比度 gate 未通過：${violations.length} 個違規（共 ${measured} 個量測，含 hover/focus/active 狀態）。`,
+    }
+    fs.writeFileSync(evidenceFile, JSON.stringify(payload, null, 2), 'utf8')
+    const attestation = attestSubDesignEvidence({ root, artifact, kind: 'gate', file: evidenceFile, source: 'subdesign:contrastGate', createdAt: checkedAt })
+    return {
+      ok: true as const,
+      evidence: { summary: payload.summary, capturedAt: checkedAt, gateId: 'contrast', passed, ...attestation },
+      violations,
+    }
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+  } finally {
+    if (!previewWindow.isDestroyed()) previewWindow.destroy()
+  }
+}
+
+
+async function consoleErrorGateSubDesignArtifact(input: { artifact: unknown; projectRoot?: string }) {
+  const validation = validateSubDesignArtifactManifest(input.artifact)
+  if (!validation.ok) return { ok: false as const, error: `artifact manifest invalid：${validation.errors.join('；')}` }
+  const previewWindow = new BrowserWindow({
+    show: false,
+    width: 1440,
+    height: 900,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  })
+  try {
+    const root = workspaceRootFor(input.projectRoot)
+    const artifact = validation.manifest
+    const entryFile = artifactFile(root, artifact.entry)
+    const content = fs.readFileSync(entryFile, 'utf8').slice(0, 200_000)
+    const errors: Array<{ message: string; line?: number }> = []
+    previewWindow.webContents.on('console-message', (_event, level, message, line) => {
+      if (level === 3 && errors.length < 20) errors.push({ message: String(message || '').slice(0, 300), line })
+    })
+    await previewWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlDocumentForPdf(artifact, content))}`)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    const passed = errors.length === 0
+    const summary = passed
+      ? 'console-error gate 通過：載入期間沒有 console error。'
+      : `console-error gate 未通過：${errors.length} 個 console error。`
+    const evidence = writeGateEvidence(artifact, root, sha256File(entryFile), 'console-error', passed, summary, {
+      errors,
+    })
+    return { ok: true as const, evidence: { summary, capturedAt: evidence.attestation.createdAt, gateId: 'console-error', passed, ...evidence.attestation }, errors }
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+  } finally {
+    if (!previewWindow.isDestroyed()) previewWindow.destroy()
+  }
+}
+
+async function buildSuccessGateSubDesignArtifact(input: { artifact: unknown; projectRoot?: string }) {
+  try {
+    const root = workspaceRootFor(input.projectRoot)
+    const validation = validateSubDesignArtifactManifest(input.artifact)
+    if (!validation.ok) return { ok: false as const, error: `artifact manifest invalid：${validation.errors.join('；')}` }
+    const artifact = validation.manifest
+    const entryFile = artifactFile(root, artifact.entry)
+    const content = fs.readFileSync(entryFile, 'utf8').slice(0, 500_000).trim()
+    const problems: string[] = []
+    if (!content) problems.push('entry 是空的。')
+    const isHtmlLike = ['html', 'deck-html'].includes(artifact.renderer) || ['html', 'deck'].includes(artifact.kind)
+    if (isHtmlLike && !/<\s*html[\s>]/i.test(content)) problems.push('HTML 缺少 html 根節點。')
+    if (artifact.renderer === 'svg' && !/<svg[\s>]/i.test(content)) problems.push('SVG 缺少 svg 根節點。')
+    const passed = problems.length === 0
+    const summary = passed
+      ? 'build-success gate 通過：entry 存在且結構完整。'
+      : `build-success gate 未通過：${problems.join(' ')}`
+    const evidence = writeGateEvidence(artifact, root, sha256File(entryFile), 'build-success', passed, summary, { problems })
+    return { ok: true as const, evidence: { summary, capturedAt: evidence.attestation.createdAt, gateId: 'build-success', passed, ...evidence.attestation }, problems }
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+const OVERFLOW_SCRIPT = `
+(() => {
+  const doc = document.documentElement
+  const body = document.body
+  const scrollWidth = Math.max(doc.scrollWidth || 0, body ? body.scrollWidth : 0)
+  const innerWidth = window.innerWidth
+  return JSON.stringify({ scrollWidth, innerWidth, overflow: scrollWidth > innerWidth + 1 })
+})()
+`
+
+async function responsiveOverflowGateSubDesignArtifact(input: { artifact: unknown; widths?: number[]; projectRoot?: string }) {
+  const widths = (input.widths && input.widths.length ? input.widths : [320, 768]).map((width) => Math.max(280, Math.min(2400, Math.floor(Number(width))))).slice(0, 4)
+  const measurements: Array<{ width: number; scrollWidth: number; innerWidth: number }> = []
+  for (const width of widths) {
+    const run = await runArtifactPreviewMeasurement({ artifact: input.artifact, projectRoot: input.projectRoot, width, height: 900 }, async (previewWindow) => {
+      const raw = await previewWindow.webContents.executeJavaScript(OVERFLOW_SCRIPT)
+      return JSON.parse(String(raw || '{}')) as Record<string, unknown>
+    })
+    if (!run.ok) return { ok: false as const, error: run.error }
+    measurements.push({
+      width,
+      scrollWidth: Math.floor(Number(run.result.scrollWidth) || 0),
+      innerWidth: Math.floor(Number(run.result.innerWidth) || width),
+    })
+  }
+  try {
+    const root = workspaceRootFor(input.projectRoot)
+    const validation = validateSubDesignArtifactManifest(input.artifact)
+    if (!validation.ok) return { ok: false as const, error: `artifact manifest invalid：${validation.errors.join('；')}` }
+    const violations = measurements.filter((item) => item.scrollWidth > item.innerWidth + 1)
+    const passed = violations.length === 0
+    const summary = passed
+      ? `responsive-overflow gate 通過：${measurements.map((item) => item.width + 'px').join('/')} 無水平溢出。`
+      : `responsive-overflow gate 未通過：${violations.map((item) => item.width + 'px 溢出').join('、')}。`
+    const entryFile = artifactFile(root, validation.manifest.entry)
+    const evidence = writeGateEvidence(validation.manifest, root, sha256File(entryFile), 'responsive-overflow', passed, summary, { measurements })
+    return { ok: true as const, evidence: { summary, capturedAt: evidence.attestation.createdAt, gateId: 'responsive-overflow', passed, ...evidence.attestation }, violations }
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function tokenConsistencyGateSubDesignArtifact(input: { artifact: unknown; projectRoot?: string }) {
+  try {
+    const root = workspaceRootFor(input.projectRoot)
+    const validation = validateSubDesignArtifactManifest(input.artifact)
+    if (!validation.ok) return { ok: false as const, error: `artifact manifest invalid：${validation.errors.join('；')}` }
+    const artifact = validation.manifest
+    const entryFile = artifactFile(root, artifact.entry)
+    const content = fs.readFileSync(entryFile, 'utf8').slice(0, 500_000)
+    // DTCG tokens 檔案存在時，artifact 內的 hex 色彩必須收錄於 palette；不存在則 not-applicable 通過並註記。
+    let palette: string[] | null = null
+    for (const candidate of ['subdesign/tokens.json', 'tokens.json']) {
+      try {
+        const file = artifactFile(root, candidate)
+        const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>
+        const colors = Array.isArray(parsed.palette) ? parsed.palette : null
+        if (colors) {
+          palette = colors.map((value) => String(value).toLowerCase())
+          break
+        }
+      } catch {}
+    }
+    const usedColors = [...new Set((content.match(/#[0-9a-f]{3,8}\b/gi) || []).map((value) => value.toLowerCase()))].slice(0, 60)
+    const violations = palette ? usedColors.filter((color) => !palette.includes(color)) : []
+    const passed = !palette || violations.length === 0
+    const summary = !palette
+      ? 'token-consistency gate 不適用：專案沒有 tokens.json palette；已視為通過並註記。'
+      : passed
+        ? `token-consistency gate 通過：${usedColors.length} 個色彩全部收錄於 palette。`
+        : `token-consistency gate 未通過：${violations.length} 個色彩不在 palette（${violations.slice(0, 5).join('、')}…）。`
+    const evidence = writeGateEvidence(artifact, root, sha256File(entryFile), 'token-consistency', passed, summary, {
+      applicable: Boolean(palette),
+      usedColors,
+      violations,
+    })
+    return { ok: true as const, evidence: { summary, capturedAt: evidence.attestation.createdAt, gateId: 'token-consistency', passed, ...evidence.attestation }, violations }
   } catch (error) {
     return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
   }
@@ -3327,6 +3731,26 @@ ipcMain.handle('subdesign:captureEvidence', async (_evt, input: Parameters<typeo
 
 ipcMain.handle('subdesign:lintEvidence', async (_evt, input: Parameters<typeof lintSubDesignArtifact>[0]) => {
   return lintSubDesignArtifact(input)
+})
+
+ipcMain.handle('subdesign:contrastGate', async (_evt, input: Parameters<typeof contrastGateSubDesignArtifact>[0]) => {
+  return contrastGateSubDesignArtifact(input)
+})
+
+ipcMain.handle('subdesign:consoleErrorGate', async (_evt, input: Parameters<typeof consoleErrorGateSubDesignArtifact>[0]) => {
+  return consoleErrorGateSubDesignArtifact(input)
+})
+
+ipcMain.handle('subdesign:buildSuccessGate', async (_evt, input: Parameters<typeof buildSuccessGateSubDesignArtifact>[0]) => {
+  return buildSuccessGateSubDesignArtifact(input)
+})
+
+ipcMain.handle('subdesign:responsiveOverflowGate', async (_evt, input: Parameters<typeof responsiveOverflowGateSubDesignArtifact>[0]) => {
+  return responsiveOverflowGateSubDesignArtifact(input)
+})
+
+ipcMain.handle('subdesign:tokenConsistencyGate', async (_evt, input: Parameters<typeof tokenConsistencyGateSubDesignArtifact>[0]) => {
+  return tokenConsistencyGateSubDesignArtifact(input)
 })
 
 ipcMain.handle('subdesign:importReference', async (_evt, input: Parameters<typeof importSubDesignReference>[0]) => {
