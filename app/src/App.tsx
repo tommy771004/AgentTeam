@@ -134,6 +134,22 @@ function PiHostEventBootstrap() {
   return null
 }
 
+/** Rebuild live external CLI activity from Host snapshots after renderer reload. */
+function ExternalCliSessionBootstrap() {
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await waitForStartupRecovery()
+      if (cancelled) return
+      if (!window.subagents?.cli?.sessionSnapshots) return
+      const { reconnectExternalCliSessions } = await import('./agent/externalCliProjection')
+      if (!cancelled) await reconnectExternalCliSessions()
+    })()
+    return () => { cancelled = true }
+  }, [])
+  return null
+}
+
 /** Reconcile durable run markers before schedulers/queues are allowed to drain. */
 function RecoveryBootstrap() {
   useEffect(() => {
@@ -193,12 +209,29 @@ function RecoveryBootstrap() {
       const hasRunRecovery = (journalReport?.items || []).some(
         (item) => item.kind === 'run' && item.action === 'marked-interrupted',
       )
+      const activeExternalSessions = await window.subagents?.cli?.sessionSnapshots?.()
+      const activeExternalRunIds = new Set(
+        (Array.isArray(activeExternalSessions) ? activeExternalSessions : [])
+          .map((session) => (session && typeof session === 'object' ? (session as { runId?: unknown }).runId : undefined))
+          .filter((runId): runId is string => typeof runId === 'string' && runId.length > 0),
+      )
+      const activeExternalConversations = new Set(
+        (Array.isArray(activeExternalSessions) ? activeExternalSessions : [])
+          .map((session) => (session && typeof session === 'object' ? (session as { conversationId?: unknown }).conversationId : undefined))
+          .filter((conversationId): conversationId is string => typeof conversationId === 'string' && conversationId.length > 0),
+      )
 
       // A legacy/partially-written journal may be absent while the persisted
       // thread still says running; reconcile that visible state as a fallback.
       const threadStore = useThreadStore.getState()
       for (const thread of threadStore.threads) {
         if (thread.lastStatus !== 'running') continue
+        // A renderer reload must not mark a still-live Host session as
+        // interrupted. The Electron registry is the authority for this case.
+        if (
+          activeExternalConversations.has(thread.id) ||
+          (thread.externalRun?.runId && activeExternalRunIds.has(thread.externalRun.runId))
+        ) continue
         threadStore.setThreadStatus(thread.id, 'interrupted')
         if (!hasRunRecovery) {
           journal.recordRecoveryNotice({
@@ -1032,6 +1065,7 @@ export default function App() {
         <PreferencesBootstrap />
         <PiHostProjectionBootstrap />
         <PiHostEventBootstrap />
+        <ExternalCliSessionBootstrap />
         <RunQueueBootstrap />
         <SkillCuratorBootstrap />
         <SchedulerBootstrap />

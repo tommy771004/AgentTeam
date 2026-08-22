@@ -169,6 +169,26 @@ await test('yield and reconnect return ordered bounded snapshots without killing
   )
 })
 
+await test('reconnect reports a bounded event-log gap and returns retained replay state', () => {
+  const session = new ExternalCliRunSession({
+    runId: 'run-replay-gap',
+    conversationId: 'conversation-b',
+    adapter: 'opencode',
+    clock: new FakeExternalCliClock(),
+  })
+  session.start()
+  session.observe({ type: 'process_started' })
+  for (let index = 0; index < 1_005; index += 1) {
+    session.observe({ type: 'provider_activity', detail: `provider-event-${index}` })
+  }
+  const replay = session.reconnect(0)
+  assert.equal(replay.replayGap, true)
+  assert.equal(replay.events.length, 0)
+  assert.equal(replay.snapshot.events.length, 1_000)
+  assert.ok(replay.snapshot.oldestEventCursor > 1)
+  assert.equal(replay.snapshot.events[0]?.sequence, replay.snapshot.oldestEventCursor)
+})
+
 await test('terminal process exit is represented once and output evidence stays bounded', () => {
   const clock = new FakeExternalCliClock()
   const session = new ExternalCliRunSession({
@@ -187,6 +207,17 @@ await test('terminal process exit is represented once and output evidence stays 
   assert.equal(snapshot.output.omitted, true)
   assert.ok(snapshot.output.omittedBytes > 0)
   assert.ok(snapshot.output.head.length > 0 || snapshot.output.tail.length > 0)
+
+  const large = new ExternalCliRunSession({
+    runId: 'run-large-chunk',
+    conversationId: 'conversation-b',
+    adapter: 'claude',
+    policy: { outputHeadBytes: 4, outputTailBytes: 4 },
+  })
+  large.start()
+  large.observe({ type: 'process_started' })
+  large.observe({ type: 'process_output', channel: 'stdout', detail: 'x'.repeat(30_000) })
+  assert.ok(large.snapshot().output.omittedBytes >= 29_992)
 })
 
 await test('failed provider exit reaches one failed settlement through the same seam', () => {
@@ -202,6 +233,18 @@ await test('failed provider exit reaches one failed settlement through the same 
   observed.observe({ type: 'process_exit', code: 2, detail: 'provider failed' })
   assert.equal(observed.snapshot().terminal?.classification, 'process-exit-failure')
   assert.deepEqual(settlements, ['process-exit-failure'])
+
+  const transport = fakeTransport()
+  const broken = new ExternalCliRunSession({
+    runId: 'run-transport-failure',
+    conversationId: 'conversation-b',
+    adapter: 'gemini',
+    transport: transport.transport,
+  })
+  broken.start()
+  broken.observe({ type: 'process_started' })
+  assert.equal(broken.failTransport('SSE disconnected').classification, 'transport-failure')
+  assert.deepEqual(transport.calls, ['terminate'])
 })
 
 await test('interactive wait pauses idle, unattended wait auto-denies, and cancellation settles once', async () => {
@@ -246,6 +289,28 @@ await test('interactive wait pauses idle, unattended wait auto-denies, and cance
   unattendedClock.advance(501)
   assert.equal(unattendedSession.snapshot().terminal?.classification, 'permission-denied')
   assert.deepEqual(unattended.calls, ['terminate'])
+})
+
+await test('cancellation wins a delayed process-exit race', async () => {
+  let releaseTermination: ((result: { confirmed: boolean }) => void) | undefined
+  const settlements: string[] = []
+  const session = new ExternalCliRunSession({
+    runId: 'run-cancel-race',
+    conversationId: 'conversation-c',
+    adapter: 'codex',
+    transport: {
+      terminateTree: () => new Promise((resolve) => { releaseTermination = resolve }),
+    },
+    onSettlement: (value) => settlements.push(value.classification),
+  })
+  session.start()
+  session.observe({ type: 'process_started' })
+  const pending = session.cancel('race stop')
+  session.observe({ type: 'process_exit', code: 0 })
+  assert.equal(session.snapshot().terminal, null)
+  releaseTermination?.({ confirmed: true })
+  assert.equal((await pending).classification, 'user-cancelled')
+  assert.deepEqual(settlements, ['user-cancelled'])
 })
 
 await test('connector auth and benign stdin diagnostics remain separate from root cause', () => {
@@ -347,6 +412,8 @@ await test('registry isolates conversations and serializes one session interacti
 
 await test('shipped adapters retain the coordinator and Host ownership boundaries', () => {
   const localRunner = fs.readFileSync(path.join(appRoot, 'electron/localCliRunner.ts'), 'utf8')
+  const rendererProjection = fs.readFileSync(path.join(appRoot, 'src/agent/externalCliProjection.ts'), 'utf8')
+  const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   assert.match(localRunner, /ExternalCliRunSession/)
@@ -354,6 +421,9 @@ await test('shipped adapters retain the coordinator and Host ownership boundarie
   assert.doesNotMatch(localRunner, /timeoutMs:\s*300_000/)
   assert.match(coordinator, /externalCliPolicy:\s*normalizeExternalCliRunPolicy/)
   assert.match(main, /cli:sessionSnapshot/)
+  assert.match(main, /cli:sessionSnapshots/)
+  assert.match(rendererProjection, /reconnectExternalCliSessions/)
+  assert.match(app, /<ExternalCliSessionBootstrap\s*\/>/)
   assert.match(main, /interruptExternalCliSessions/)
 })
 

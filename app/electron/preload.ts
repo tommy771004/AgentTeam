@@ -1016,6 +1016,8 @@ const api = {
     /** Host-owned session reconstruction after a bounded yield or reload. */
     sessionSnapshot: (runId: string) =>
       ipcRenderer.invoke('cli:sessionSnapshot', runId) as Promise<unknown>,
+    sessionSnapshots: () =>
+      ipcRenderer.invoke('cli:sessionSnapshots') as Promise<unknown[]>,
     sessionEvents: (input: { runId: string; cursor?: number }) =>
       ipcRenderer.invoke('cli:sessionEvents', input) as Promise<unknown>,
     sessionYield: (runId: string) =>

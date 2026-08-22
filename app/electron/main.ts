@@ -136,6 +136,7 @@ import {
   externalCliSessions,
   getExternalCliSession,
   interruptExternalCliSessions,
+  listActiveExternalCliSessions,
   runLocalCliAgent,
   type LocalCliKind,
 } from './localCliRunner'
@@ -1824,33 +1825,71 @@ ipcMain.handle(
       })
       serverSession.start()
       serverSession.observe({ type: 'process_started', processId: `opencode-server:${serverRunId}` })
-      const server = await runOpenCodeServerPrompt({
-        mode: input.serverMode || 'auto',
-        baseUrl: input.serverUrl,
-        prompt: input.prompt,
-        cwd,
-        model: input.model,
-        agent: input.agentMode === 'plan' ? 'plan' : 'build',
-        runId: serverRunId,
-        timeoutMs: serverPolicy.absoluteMs,
-        onEvent: (event) => {
-          if (event.kind === 'text') {
-            serverSession.observe({ type: 'model_activity', detail: event.delta || event.detail })
-          } else if (event.kind === 'tool' || event.kind === 'file') {
-            serverSession.observe({ type: 'tool_completed', tool: event.tool, detail: event.detail, ok: event.ok })
-          } else if (event.kind === 'error') {
-            serverSession.observe({ type: 'diagnostic', detail: event.detail || event.title || 'OpenCode server error', severity: 'error' })
-          } else {
-            serverSession.observe({ type: 'provider_activity', detail: event.detail || event.title })
-          }
-          const cursor = serverSession.snapshot().eventCursor
-          try {
-            if (!evt.sender.isDestroyed()) evt.sender.send('cli:stream', { ...event, runId: serverRunId, sequence: cursor, sessionPhase: serverSession.snapshot().phase })
-          } catch {
-            /* ignore */
-          }
-        },
-      })
+      let server
+      try {
+        server = await runOpenCodeServerPrompt({
+          mode: input.serverMode || 'auto',
+          baseUrl: input.serverUrl,
+          prompt: input.prompt,
+          cwd,
+          model: input.model,
+          agent: input.agentMode === 'plan' ? 'plan' : 'build',
+          runId: serverRunId,
+          timeoutMs: serverPolicy.absoluteMs,
+          onEvent: (event) => {
+            if (event.kind === 'text') {
+              serverSession.observe({ type: 'model_activity', detail: event.delta || event.detail })
+            } else if (event.kind === 'tool' || event.kind === 'file') {
+              serverSession.observe({ type: 'tool_completed', tool: event.tool, detail: event.detail, ok: event.ok })
+            } else if (event.kind === 'error') {
+              serverSession.observe({ type: 'diagnostic', detail: event.detail || event.title || 'OpenCode server error', severity: 'error' })
+            } else {
+              serverSession.observe({ type: 'provider_activity', detail: event.detail || event.title })
+            }
+            const cursor = serverSession.snapshot().eventCursor
+            try {
+              if (!evt.sender.isDestroyed()) evt.sender.send('cli:stream', { ...event, runId: serverRunId, sequence: cursor, sessionPhase: serverSession.snapshot().phase })
+            } catch {
+              /* ignore */
+            }
+          },
+        })
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        if (!serverSession.snapshot().terminal) serverSession.failTransport(detail)
+        const sessionSnapshot = serverSession.snapshot()
+        externalCliSessions.remove(serverRunId)
+        return {
+          ok: false,
+          output: sessionSnapshot.output.head,
+          command: `opencode server ${input.serverUrl || ''}`,
+          kind: 'opencode' as const,
+          code: 1,
+          error: formatExternalCliTerminal(sessionSnapshot.terminal || {
+            classification: 'transport-failure',
+            phase: 'failed',
+            at: Date.now(),
+            reason: detail,
+          }, { headless: true }),
+          runId: serverRunId,
+          terminalClassification: sessionSnapshot.terminal?.classification || 'transport-failure',
+          configSnapshot: input.configSnapshot,
+          externalRun: {
+            provider: 'opencode' as const,
+            adapter: 'opencode',
+            runId: serverRunId,
+            conversationId: input.conversationId || serverRunId,
+            processId: sessionSnapshot.processId,
+            status: 'failed' as const,
+            completionReason: detail,
+            terminalClassification: sessionSnapshot.terminal?.classification || 'transport-failure',
+            eventCursor: sessionSnapshot.eventCursor,
+            outputOmittedBytes: sessionSnapshot.output.omittedBytes,
+            startedAt: externalStartedAt,
+            finishedAt: new Date().toISOString(),
+          },
+        }
+      }
       if (server.used) {
         if (server.sessionId) {
           serverSession.observe({
@@ -1864,7 +1903,7 @@ ipcMain.handle(
         else if (!serverSession.snapshot().terminal) serverSession.observe({ type: 'process_exit', code: server.ok ? 0 : 1, detail: server.error })
         const sessionSnapshot = serverSession.snapshot()
         const terminal = sessionSnapshot.terminal
-        return {
+        const result = {
           ok: server.ok,
           output: server.output,
           command: `opencode server ${server.baseUrl || input.serverUrl || ''} session=${server.sessionId || '—'}`,
@@ -1897,6 +1936,8 @@ ipcMain.handle(
             finishedAt: new Date().toISOString(),
           },
         }
+        externalCliSessions.remove(serverRunId)
+        return result
       }
       externalCliSessions.remove(serverRunId)
     }
@@ -1935,6 +1976,8 @@ ipcMain.handle('cli:sessionSnapshot', async (_evt, runId: string) => {
   const session = getExternalCliSession(String(runId || ''))
   return session?.snapshot() || null
 })
+
+ipcMain.handle('cli:sessionSnapshots', async () => listActiveExternalCliSessions())
 
 ipcMain.handle('cli:sessionEvents', async (_evt, input: { runId: string; cursor?: number }) => {
   const session = getExternalCliSession(String(input?.runId || ''))

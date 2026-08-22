@@ -147,6 +147,11 @@ export function getExternalCliSession(runId: string) {
   return getSupervisedExternalCliSession(runId)
 }
 
+/** Return only live Host sessions for renderer projection rebuild after reload. */
+export function listActiveExternalCliSessions() {
+  return externalCliSupervisor.activeSnapshots()
+}
+
 export function interruptExternalCliSessions(reason?: string) {
   return interruptSupervisedExternalCliSessions(reason)
 }

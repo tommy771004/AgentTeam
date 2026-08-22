@@ -9,6 +9,7 @@
 import type {
   AgentMode,
   CliConfigSnapshot,
+  ExternalRunRef,
   LlmSettings,
   RuntimeOverrides,
 } from './types.ts'
@@ -216,6 +217,20 @@ export async function dispatchThreadTask(
       textContent: a.filePath ? undefined : a.textContent,
       filePath: a.filePath,
     }))
+    const initialExternalRun: ExternalRunRef = {
+      provider: kind,
+      adapter: kind,
+      runId: snapshot.runId,
+      conversationId: tid || snapshot.runId,
+      processId: `cli:${snapshot.runId}`,
+      status: 'starting',
+      completionReason: 'session-admitted',
+      eventCursor: 0,
+      startedAt: new Date().toISOString(),
+    }
+    // Persist the identity before process creation so a renderer reload can
+    // associate the Host-owned live session with this conversation.
+    if (tid) useThreadStore.getState().setExternalRun(tid, initialExternalRun)
     // Keep CLI follow-ups coherent with builtin runs. The current request is
     // deliberately first, so the runner's prompt cap never cuts it off.
     let cliPrompt = subDesignContext ? `${subDesignContext}\n\n## Current request\n${text}` : text
@@ -278,8 +293,24 @@ export async function dispatchThreadTask(
     })
     const a =
       useAgentStore.getState().getRunState(snapshot.runId) || useAgentStore.getState().agent
-    if (tid && a.externalRun) {
-      useThreadStore.getState().setExternalRun(tid, a.externalRun)
+    if (tid) {
+      const fallbackStatus: ExternalRunRef['status'] =
+        a.status === 'success'
+          ? 'success'
+          : a.status === 'halted'
+            ? 'aborted'
+            : a.status === 'interrupted'
+              ? 'interrupted'
+              : 'failed'
+      useThreadStore.getState().setExternalRun(
+        tid,
+        a.externalRun || {
+          ...initialExternalRun,
+          status: fallbackStatus,
+          completionReason: a.haltReason || fallbackStatus,
+          finishedAt: new Date().toISOString(),
+        },
+      )
     }
     return {
       path: 'cli',

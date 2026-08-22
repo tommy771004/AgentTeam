@@ -398,6 +398,7 @@ export class ExternalCliRunSession {
   private absoluteHandle: unknown
   private unattendedWaitHandle: unknown
   private terminationRequested = false
+  private cancellationRequested = false
   private cancellationPromise?: Promise<ExternalCliSettlement>
 
   constructor(options: ExternalCliRunSessionOptions) {
@@ -427,7 +428,10 @@ export class ExternalCliRunSession {
 
   /** Feed one provider/process lifecycle event into the Host-owned session. */
   observe(input: ExternalCliLifecycleEventInput): ExternalCliSessionSnapshot {
-    if (this.terminal) return this.snapshot()
+    // Once cancellation has been requested, provider/process callbacks may
+    // still arrive while the host waits for tree termination. They cannot win
+    // the cancellation race or settle the run as a late success.
+    if (this.terminal || this.cancellationRequested) return this.snapshot()
     if (!this.started) this.start()
 
     // Meaningful provider/process lifecycle signals cross the first-valid-
@@ -481,8 +485,12 @@ export class ExternalCliRunSession {
     }
 
     if (input.type === 'process_output') {
-      const detail = safeText(input.detail, 20_000) || ''
-      this.appendOutput(detail)
+      const rawDetail = typeof input.detail === 'string' ? input.detail : ''
+      const detail = safeText(rawDetail, 20_000) || ''
+      // Keep the retained text bounded and redacted, but count the original
+      // UTF-8 payload so truncation evidence remains honest even when one
+      // provider chunk is larger than the redaction/detail bound.
+      this.appendOutput(detail, utf8ByteLength(rawDetail))
       if (isMeaningful({ ...input, detail })) this.markMeaningfulActivity()
       // Streamed parser events carry the full bounded chunk separately; the
       // durable session log keeps only a short redacted diagnostic excerpt.
@@ -540,7 +548,9 @@ export class ExternalCliRunSession {
 
   /** Return a bounded observation snapshot. This never terminates the process. */
   yieldObservation(): ExternalCliSessionSnapshot & { live: boolean; observationExpiresAt: number } {
-    this.emit({ type: 'provider_activity', detail: 'observation yielded' })
+    if (!this.terminal && !this.cancellationRequested) {
+      this.emit({ type: 'provider_activity', detail: 'observation yielded' })
+    }
     const snapshot = this.snapshot()
     return {
       ...snapshot,
@@ -554,18 +564,30 @@ export class ExternalCliRunSession {
     return this.eventLog.filter((event) => event.sequence > acknowledged).map((event) => ({ ...event }))
   }
 
-  reconnect(cursor = 0): { snapshot: ExternalCliSessionSnapshot; events: ExternalCliLifecycleEvent[] } {
+  reconnect(cursor = 0): {
+    snapshot: ExternalCliSessionSnapshot
+    events: ExternalCliLifecycleEvent[]
+    replayGap: boolean
+  } {
     const acknowledged = Number.isFinite(cursor) ? Math.max(0, cursor) : 0
     const snapshot = this.snapshot()
+    const oldest = this.eventLog[0]?.sequence
+    const replayGap = oldest !== undefined && acknowledged < oldest - 1
+    if (replayGap) {
+      // The acknowledged cursor predates the bounded event log. Returning the
+      // retained snapshot as the replay source is the only honest way to
+      // rebuild current state without duplicating a partial prefix.
+      return { snapshot, events: [], replayGap: true }
+    }
     // The projection is the state at reconnect time; retain only events the
     // caller already acknowledged so merging snapshot.events with replay does
     // not duplicate a lifecycle record.
     snapshot.events = snapshot.events.filter((event) => event.sequence <= acknowledged)
-    return { snapshot, events: this.eventsAfter(acknowledged) }
+    return { snapshot, events: this.eventsAfter(acknowledged), replayGap: false }
   }
 
   provideInput(input: string, expectedProviderSessionId?: string): Promise<boolean> {
-    if (this.terminal || this.phase !== 'waiting_for_user') return Promise.resolve(false)
+    if (this.terminal || this.cancellationRequested || this.phase !== 'waiting_for_user') return Promise.resolve(false)
     if (expectedProviderSessionId && expectedProviderSessionId !== this.providerSessionId) {
       return Promise.resolve(false)
     }
@@ -582,7 +604,7 @@ export class ExternalCliRunSession {
   }
 
   provideApproval(approved: boolean, expectedProviderSessionId?: string): Promise<boolean> {
-    if (this.terminal || this.phase !== 'waiting_for_approval') return Promise.resolve(false)
+    if (this.terminal || this.cancellationRequested || this.phase !== 'waiting_for_approval') return Promise.resolve(false)
     if (expectedProviderSessionId && expectedProviderSessionId !== this.providerSessionId) {
       return Promise.resolve(false)
     }
@@ -596,10 +618,10 @@ export class ExternalCliRunSession {
 
   /** Arm one scoped tool/MCP timeout without changing the session's idle clock. */
   armOperationTimeout(operation: string, timeoutMs = this.policy.operationMs): () => void {
-    if (this.terminal) return () => undefined
+    if (this.terminal || this.cancellationRequested) return () => undefined
     let active = true
     const handle = this.clock.setTimeout(() => {
-      if (!active || this.terminal) return
+      if (!active || this.terminal || this.cancellationRequested) return
       this.observe({ type: 'operation_timeout', operation: safeText(operation, 160), detail: 'operation timeout' })
     }, boundedNumber(timeoutMs, this.policy.operationMs, POLICY_LIMITS.operationMs))
     return () => {
@@ -612,6 +634,10 @@ export class ExternalCliRunSession {
   async cancel(reason = 'user cancellation'): Promise<ExternalCliSettlement> {
     if (this.terminal) return this.settlementValue()
     if (this.cancellationPromise) return this.cancellationPromise
+    // Set this before invoking the transport. A fake or platform transport
+    // may synchronously deliver a final process-exit callback while asking it
+    // to terminate; cancellation must remain the authoritative outcome.
+    this.cancellationRequested = true
     this.clearAllTimers()
     this.cancellationPromise = (async () => {
       let termination: ExternalCliProcessTermination = { confirmed: true }
@@ -638,6 +664,7 @@ export class ExternalCliRunSession {
   /** Record a cancellation already performed by the host kill path. */
   cancelObserved(reason = 'user cancellation'): ExternalCliSettlement {
     if (this.terminal) return this.settlementValue()
+    this.cancellationRequested = true
     this.clearAllTimers()
     this.terminationRequested = true
     this.settle('user-cancelled', { reason: safeText(reason), terminationConfirmed: true })
@@ -666,6 +693,15 @@ export class ExternalCliRunSession {
     this.clearAllTimers()
     this.requestTermination()
     this.settle(classification, { reason: classification })
+    return this.settlementValue()
+  }
+
+  /** Settle an adapter/transport fault without mislabeling it as provider exit. */
+  failTransport(reason = 'external CLI transport failed'): ExternalCliSettlement {
+    if (this.terminal) return this.settlementValue()
+    this.clearAllTimers()
+    this.requestTermination()
+    this.settle('transport-failure', { reason: safeText(reason), terminationConfirmed: false })
     return this.settlementValue()
   }
 
@@ -703,8 +739,8 @@ export class ExternalCliRunSession {
     this.lastMeaningfulActivityAt = this.clock.now()
   }
 
-  private appendOutput(detail: string) {
-    this.outputTotalBytes += utf8ByteLength(detail)
+  private appendOutput(detail: string, sourceBytes = utf8ByteLength(detail)) {
+    this.outputTotalBytes += Math.max(sourceBytes, utf8ByteLength(detail))
     const retainedLimit = this.policy.outputHeadBytes + this.policy.outputTailBytes
     if (retainedLimit <= 0) {
       this.output = ''
@@ -820,6 +856,7 @@ export class ExternalCliRunSession {
       classification === 'operation-timeout' ||
       classification === 'connector-authentication-required' ||
       classification === 'permission-denied' ||
+      classification === 'transport-failure' ||
       classification === 'interrupted'
     ) {
       this.requestTermination()
@@ -966,6 +1003,11 @@ export class ExternalCliRunSessionRegistry {
 
   snapshots(): ExternalCliSessionSnapshot[] {
     return [...this.sessions.values()].map((session) => session.snapshot())
+  }
+
+  /** Host reloads only need live sessions; terminal history is already settled. */
+  activeSnapshots(): ExternalCliSessionSnapshot[] {
+    return this.snapshots().filter((snapshot) => snapshot.active)
   }
 
   async interact<T>(runId: string, operation: (session: ExternalCliRunSession) => Promise<T> | T): Promise<T> {
