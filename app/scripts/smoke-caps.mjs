@@ -942,7 +942,10 @@ await test('Phase 1: run activity is run-scoped with bounded terminal retention'
   // Stream adapters keep the feed live through summary/archive finalization;
   // the coordinator is the single owner of terminalization.
   assert.match(activity, /get\(\)\.setStatus\(payload\.title \|\| 'CLI 完成', streamRunId\)/)
-  assert.match(coordinator, /useRunActivityStore\.getState\(\)\.end\(runId, terminalLabel\)/)
+  // The terminal call now also carries the settled outcome the shell announces;
+  // ownership is unchanged — the coordinator remains the only caller of end().
+  assert.match(coordinator, /useRunActivityStore\.getState\(\)\.end\(runId, terminalLabel, \{/)
+  assert.match(coordinator, /status:\s*\n\s*String\(status\) === 'failed' \? 'failed' : String\(status\) === 'halted' \? 'halted' : 'success',/)
   assert.match(activity, /clearDraft: \(runId\)/)
 })
 

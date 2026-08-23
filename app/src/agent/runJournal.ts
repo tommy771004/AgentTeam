@@ -17,6 +17,19 @@ export type JournalStatus =
   | 'cancelled'
   | 'interrupted'
 
+/**
+ * Whether a terminal run's outcome actually reached the user.
+ *
+ * `delivered` — the finalizer wrote the outcome into the owning thread while a
+ * renderer was on screen to show it.
+ * `pending-delivery` — the run is terminal but nobody has been told yet.
+ * `consumed` — a pending outcome has since been narrated (live toast or the
+ * startup redelivery pass) and must never be narrated again.
+ */
+export type JournalDelivery = 'delivered' | 'pending-delivery' | 'consumed'
+
+const JOURNAL_DELIVERIES = new Set<JournalDelivery>(['delivered', 'pending-delivery', 'consumed'])
+
 export type JournalEntry = {
   id: string
   kind: JournalKind
@@ -31,13 +44,29 @@ export type JournalEntry = {
   startedAt: string
   updatedAt: string
   finishedAt?: string
+  /** Set on terminal run entries only; see `classifyRunDelivery`. */
+  delivery?: JournalDelivery
+  /** `external` runs may never claim a Definition of Done. */
+  executionKind?: 'loop' | 'external'
+  /** Bounded settlement evidence — counters only, never prompts or payloads. */
+  dodMet?: boolean
+  iterations?: number
+  maxIterations?: number
 }
 
 export type RecoveryItem = {
   kind: JournalKind | 'storage'
   id: string
   previousStatus?: JournalStatus
-  action: 'marked-interrupted' | 'resume-once' | 'restored' | 'quarantined'
+  action:
+    | 'marked-interrupted'
+    | 'resume-once'
+    | 'restored'
+    | 'quarantined'
+    /** A terminal outcome the user never saw was narrated after restart. */
+    | 'redelivered'
+    /** Terminal, but the owning thread is gone — no claim either way. */
+    | 'result-unknown'
   detail?: string
 }
 
@@ -95,6 +124,12 @@ function bounded(value: unknown, max: number): string | undefined {
   return text ? text.slice(0, max) : undefined
 }
 
+/** Bounded non-negative counter; anything else is simply absent. */
+function counter(value: unknown): number | undefined {
+  const parsed = Math.floor(Number(value))
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 10_000 ? parsed : undefined
+}
+
 function emptyState(): JournalState {
   return { version: 1, entries: [], updatedAt: now() }
 }
@@ -121,6 +156,18 @@ function parseState(raw: string | null): JournalState | null {
         startedAt: bounded(entry.startedAt, 40) || now(),
         updatedAt: bounded(entry.updatedAt, 40) || now(),
         finishedAt: bounded(entry.finishedAt, 40),
+        // Unknown or malformed delivery metadata drops the field rather than
+        // the entry: a bad enum must never quarantine a whole valid journal.
+        delivery: JOURNAL_DELIVERIES.has(entry.delivery as JournalDelivery)
+          ? (entry.delivery as JournalDelivery)
+          : undefined,
+        executionKind:
+          entry.executionKind === 'loop' || entry.executionKind === 'external'
+            ? entry.executionKind
+            : undefined,
+        dodMet: typeof entry.dodMet === 'boolean' ? entry.dodMet : undefined,
+        iterations: counter(entry.iterations),
+        maxIterations: counter(entry.maxIterations),
       }))
       .filter(
         (entry) =>
@@ -137,12 +184,26 @@ function parseState(raw: string | null): JournalState | null {
 
 function retainedEntries(entries: JournalEntry[]): JournalEntry[] {
   if (entries.length <= MAX_ENTRIES) return entries
-  const active = entries.filter((entry) =>
-    ['queued', 'dispatching', 'admitted', 'running'].includes(entry.status),
-  )
+  // An outcome nobody has been told about is as unfinished as a running run:
+  // both survive eviction so a completion cannot vanish before it is narrated.
+  const protectedEntry = (entry: JournalEntry) =>
+    ['queued', 'dispatching', 'admitted', 'running'].includes(entry.status) ||
+    entry.delivery === 'pending-delivery'
+  const active = entries.filter(protectedEntry)
   const terminal = entries.filter((entry) => !active.includes(entry))
   const keptActive = active.slice(-MAX_ENTRIES)
   const terminalBudget = Math.max(0, MAX_ENTRIES - keptActive.length)
+  // Past the cap even after protection, the drop is reported instead of silent.
+  for (const dropped of active.slice(0, active.length - keptActive.length)) {
+    if (dropped.delivery !== 'pending-delivery') continue
+    appendRecoveryReport({
+      kind: dropped.kind,
+      id: dropped.id,
+      previousStatus: dropped.status,
+      action: 'result-unknown',
+      detail: `執行紀錄已達上限，未送達的結果被淘汰${dropped.objective ? `：${dropped.objective}` : ''}`,
+    })
+  }
   return [...terminal.slice(-terminalBudget), ...keptActive]
 }
 
@@ -270,8 +331,43 @@ export function recordRunStarted(input: { runId: string; threadId?: string }): v
   upsert({ id: input.runId, kind: 'run', status: 'running', runId: input.runId, threadId: bounded(input.threadId, 160) })
 }
 
-export function recordRunTerminal(input: { runId: string; threadId?: string; status: string }): void {
+export type RunDeliveryFacts = {
+  /** The run is bound to a conversation thread that still exists. */
+  hasOwningThread: boolean
+  /** The finalizer wrote this run's outcome into that thread. */
+  resultWrittenToThread: boolean
+  /** A renderer was mounted and on screen to present it. */
+  rendererPresent: boolean
+}
+
+/**
+ * The single rule for "did this outcome actually reach the user".
+ *
+ * UI never re-decides this: a surface that guesses would disagree with the
+ * startup redelivery pass and either drop a completion or narrate it twice.
+ */
+export function classifyRunDelivery(facts: RunDeliveryFacts): JournalDelivery {
+  return facts.hasOwningThread && facts.resultWrittenToThread && facts.rendererPresent
+    ? 'delivered'
+    : 'pending-delivery'
+}
+
+export type RunTerminalSettlement = {
+  executionKind?: 'loop' | 'external'
+  dodMet?: boolean
+  iterations?: number
+  maxIterations?: number
+}
+
+export function recordRunTerminal(input: {
+  runId: string
+  threadId?: string
+  status: string
+  delivery?: RunDeliveryFacts
+  settlement?: RunTerminalSettlement
+}): void {
   const finishedAt = now()
+  const external = input.settlement?.executionKind === 'external'
   upsert({
     id: input.runId,
     kind: 'run',
@@ -279,7 +375,52 @@ export function recordRunTerminal(input: { runId: string; threadId?: string; sta
     runId: input.runId,
     threadId: bounded(input.threadId, 160),
     finishedAt,
+    // Written in the same synchronous statement as the terminal marker: there
+    // is no second write point that could disagree about delivery.
+    delivery: input.delivery ? classifyRunDelivery(input.delivery) : 'pending-delivery',
+    executionKind: input.settlement?.executionKind,
+    // An external CLI exit is never a DoD claim, so its settlement carries no
+    // DoD verdict at all rather than an unmet one.
+    dodMet: external ? undefined : input.settlement?.dodMet,
+    iterations: external ? undefined : counter(input.settlement?.iterations),
+    maxIterations: external ? undefined : counter(input.settlement?.maxIterations),
   })
+}
+
+/**
+ * Mark a pending outcome as told, without changing the terminal status.
+ *
+ * Used by the live completion notice, so a run the user was shown while the app
+ * was open is not narrated again as news on the next restart.
+ */
+export function markRunDelivered(runId: string): void {
+  const state = loadState()
+  const entry = state.entries.find((item) => item.kind === 'run' && item.id === runId)
+  if (!entry || entry.delivery !== 'pending-delivery') return
+  entry.delivery = 'delivered'
+  entry.updatedAt = now()
+  persistState(state)
+}
+
+/**
+ * Claim every terminal run outcome the user was never told about.
+ *
+ * Claiming marks each entry `consumed` in the same pass that returns it, so a
+ * repeated startup — or a second caller — can never narrate the same
+ * completion twice.
+ */
+export function claimPendingRunDeliveries(): JournalEntry[] {
+  const state = loadState()
+  const claimed: JournalEntry[] = []
+  for (const entry of state.entries) {
+    if (entry.kind !== 'run' || entry.delivery !== 'pending-delivery') continue
+    if (['queued', 'dispatching', 'admitted', 'running'].includes(entry.status)) continue
+    claimed.push({ ...entry })
+    entry.delivery = 'consumed'
+    entry.updatedAt = now()
+  }
+  if (claimed.length) persistState(state)
+  return claimed
 }
 
 export function recordQueueEnqueued(input: {

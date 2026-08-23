@@ -815,7 +815,7 @@ export function SettingsPage() {
             <SettingsGroup title="通知">
               <SettingsRow
                 title="任務完成通知"
-                description="執行結束時顯示桌面通知"
+                description="任一任務結束時發出系統通知。關閉只會停掉系統通知，對話內的訊息與 app 內的完成提示不受影響。"
                 control={
                   <SettingsToggle
                     checked={settings.notifyOnComplete !== false}

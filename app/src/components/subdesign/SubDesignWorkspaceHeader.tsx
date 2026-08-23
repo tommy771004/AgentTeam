@@ -45,22 +45,16 @@ function critiqueLabel(status: SubDesignWorkspaceViewModel['critiqueStatus']): s
 export function SubDesignWorkspaceHeader({ workspace, onPrimaryAction, primaryActionLabel }: SubDesignWorkspaceHeaderProps) {
   const gate = workspace.nextGate
   const canAct = Boolean(onPrimaryAction) && gate.status === 'ready'
-  const runLabel = workspace.runStatus === 'active'
-    ? 'LIVE'
-    : workspace.runStatus === 'awaiting-user'
-      ? 'ACTION NEEDED'
-      : workspace.runStatus === 'failed'
-        ? 'FAILED'
-        : workspace.runStatus === 'halted'
-          ? 'HALTED'
-          : workspace.currentStage === 'deliver'
-            ? 'READY'
-            : 'IDLE'
+  // Wording is owned by the workspace projection (shared with the process feed
+  // and the run summary card), so this header never decides what a run means.
+  const runLabel = workspace.runStatusLabel
   const runTone = workspace.runStatus === 'active' || workspace.runStatus === 'awaiting-user'
     ? 'border-secondary/35 bg-secondary/10 text-secondary'
     : workspace.runStatus === 'failed' || workspace.runStatus === 'halted'
       ? 'border-error/25 bg-error/10 text-error'
-      : 'border-white/10 text-outline'
+      : workspace.runStatus === 'exhausted'
+        ? 'border-tertiary/30 bg-tertiary/10 text-tertiary'
+        : 'border-white/10 text-outline'
   return (
     <section className="mx-auto mb-7 max-w-[1120px] overflow-hidden rounded-3xl border border-primary/20 bg-primary/[0.04]">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 px-5 py-5">
@@ -73,6 +67,8 @@ export function SubDesignWorkspaceHeader({ workspace, onPrimaryAction, primaryAc
           <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${runTone}`}>
             {workspace.runStatus === 'active' ? (
               <AgentThinking variant={thinkingVariantForStage(workspace.currentStage)} />
+            ) : workspace.runStatus === 'exhausted' ? (
+              <Icon name="timer_off" size={13} className="shrink-0" />
             ) : (
               <span className={`h-1.5 w-1.5 rounded-full ${workspace.runStatus === 'failed' || workspace.runStatus === 'halted' ? 'bg-error' : 'bg-outline/60'}`} />
             )}

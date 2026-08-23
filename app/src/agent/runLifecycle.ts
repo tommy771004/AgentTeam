@@ -38,6 +38,19 @@ export type RunLifecycleTone =
   | 'success'
   | 'danger'
 
+/**
+ * Optional orchestration evidence carried by a Pi Host settlement.
+ *
+ * Only the builtin loop claims a Definition of Done; an external CLI run never
+ * does, so `executionKind: 'external'` can never reach the exhausted wording.
+ */
+export type RunOrchestrationSnapshot = {
+  iterations?: number
+  maxIterations?: number
+  dodMet?: boolean
+  executionKind?: 'loop' | 'external'
+}
+
 export type RunLifecycleInput = {
   /** Activity phase is the most precise signal while the run is live. */
   phase?: RunLifecyclePhase
@@ -51,6 +64,8 @@ export type RunLifecycleInput = {
   /** Optional adapter hint for a question surface. */
   questionPending?: boolean
   objective?: string
+  /** Iteration/DoD evidence; drives the honest exhausted terminal wording. */
+  orchestration?: RunOrchestrationSnapshot
 }
 
 export type RunLifecycleView = {
@@ -63,6 +78,8 @@ export type RunLifecycleView = {
   terminal: boolean
   needsAttention: boolean
   canStop: boolean
+  /** Ran out of iteration budget with the DoD still unmet — not a plain success. */
+  iterationExhausted: boolean
 }
 
 const LIVE_PHASES = new Set<RunLifecyclePhase>([
@@ -134,6 +151,51 @@ function phaseFromAgentStatus(status: RunLifecycleStatus | undefined): RunLifecy
   }
 }
 
+/**
+ * The one place that decides a `success` run was actually truncated.
+ *
+ * Every surface (process feed, run summary card, SubDesign header, startup
+ * redelivery copy) asks this instead of re-reading iteration counters, so the
+ * user cannot see "已完成" on one screen and a truncation notice on another.
+ */
+export function isIterationExhausted(orchestration?: RunOrchestrationSnapshot): boolean {
+  if (!orchestration) return false
+  // External CLI never claims a DoD, so it can never fail one (ADR-0045).
+  if (orchestration.executionKind === 'external') return false
+  if (orchestration.dodMet !== false) return false
+  const { iterations, maxIterations } = orchestration
+  if (!Number.isFinite(iterations) || !Number.isFinite(maxIterations)) return false
+  if ((maxIterations as number) < 1 || (iterations as number) < 1) return false
+  return (iterations as number) >= (maxIterations as number)
+}
+
+/**
+ * Lift the iteration evidence off an agent snapshot in one place.
+ *
+ * Structural on purpose: `AgentState` must not have to import this
+ * presentation module, and the settlement fields are the same three
+ * everywhere they travel (Pi Host turn, archive record, run summary).
+ */
+export function orchestrationFromAgent(agent: {
+  executionKind?: 'loop' | 'external'
+  currentIteration?: number
+  loopConfig?: { maxIterations?: number }
+  orchestration?: { iterations?: number; maxIterations?: number; dodMet?: boolean }
+} | null | undefined): RunOrchestrationSnapshot | undefined {
+  if (!agent) return undefined
+  const iterations = agent.orchestration?.iterations ?? agent.currentIteration
+  const maxIterations = agent.orchestration?.maxIterations ?? agent.loopConfig?.maxIterations
+  const dodMet = agent.orchestration?.dodMet
+  if (iterations === undefined && maxIterations === undefined && dodMet === undefined) return undefined
+  return { iterations, maxIterations, dodMet, executionKind: agent.executionKind }
+}
+
+/** Honest terminal wording for a run that spent its whole iteration budget. */
+export function iterationExhaustedLabel(iterations?: number): string {
+  const rounds = Number.isFinite(iterations) && (iterations as number) > 0 ? (iterations as number) : 0
+  return rounds ? `已完成（未達 DoD · 用盡 ${rounds} 輪）` : '已完成（未達 DoD）'
+}
+
 function phaseLabel(phase: RunLifecyclePhase | 'idle', statusLine: string, objective: string) {
   if (phase === 'idle') return objective ? '準備執行' : '已待命'
   if (phase === 'starting') return statusLine || (objective ? '正在準備任務' : '正在啟動')
@@ -187,10 +249,15 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
   const terminalPhase = phase !== 'idle' && TERMINAL_PHASES.has(phase)
   const terminal = Boolean(input.terminal) || (terminalPhase && !live)
   const needsAttention = phase === 'awaiting_user' || phase === 'manual_intervention'
+  // A truncated run still settles as `completed`; only its wording, tone and
+  // icon change, so HITL and activity-phase precedence above stay untouched.
+  const iterationExhausted = phase === 'completed' && isIterationExhausted(input.orchestration)
 
   const tone: RunLifecycleTone =
     phase === 'completed'
-      ? 'success'
+      ? iterationExhausted
+        ? 'attention'
+        : 'success'
       : phase === 'failed'
         ? 'danger'
         : phase === 'cancelled'
@@ -203,7 +270,9 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
 
   const icon =
     phase === 'completed'
-      ? 'check_circle'
+      ? iterationExhausted
+        ? 'timer_off'
+        : 'check_circle'
       : phase === 'failed'
         ? 'error'
         : phase === 'cancelled'
@@ -218,12 +287,15 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
 
   return {
     phase,
-    label: phaseLabel(phase, input.statusLine?.trim() || '', input.objective?.trim() || ''),
+    label: iterationExhausted
+      ? iterationExhaustedLabel(input.orchestration?.iterations)
+      : phaseLabel(phase, input.statusLine?.trim() || '', input.objective?.trim() || ''),
     tone,
     icon,
     live,
     terminal,
     needsAttention,
+    iterationExhausted,
     // Once the runner has returned, finalization is an atomic hand-off; the
     // stop affordance must not suggest that archive/queue settlement is abortable.
     canStop: live && phase !== 'finalizing',

@@ -294,6 +294,9 @@ export function emptyAgentLike(partial: Partial<AgentState> & { objective: strin
       partial.runnerCapabilities ??
       (isExternal ? { ...EXTERNAL_CLI_RUNNER_CAPABILITIES } : undefined),
     externalRunnerKind: partial.externalRunnerKind,
+    // A CLI exit is never a DoD claim, so the settlement evidence is dropped
+    // for external runs instead of travelling as an unmet DoD.
+    orchestration: isExternal ? undefined : partial.orchestration,
     externalRun: partial.externalRun,
     cliConfigSnapshot: partial.cliConfigSnapshot,
     scheduleTrigger: partial.scheduleTrigger,

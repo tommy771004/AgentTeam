@@ -1,4 +1,10 @@
-import { deriveRunLifecycle } from '../src/agent/runLifecycle.ts'
+import {
+  deriveRunLifecycle,
+  isIterationExhausted,
+  iterationExhaustedLabel,
+  orchestrationFromAgent,
+} from '../src/agent/runLifecycle.ts'
+import { deriveSubDesignWorkspace } from '../src/agent/subdesign/workspaceProjection.ts'
 import { useRunActivityStore } from '../src/store/runActivityStore.ts'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -51,5 +57,75 @@ const eventCount = presentation?.events.length || 0
 store.push({ kind: 'tool', runId: 'lifecycle_smoke', title: 'late event', callId: 'late' })
 assert(useRunActivityStore.getState().getPresentation('lifecycle_smoke')?.events.length === eventCount, 'late events must not reopen a terminal run')
 
+// ── Iteration-exhausted terminal vocabulary (issue 01) ──
+const exhausted = { iterations: 5, maxIterations: 5, dodMet: false, executionKind: 'loop' as const }
+view = deriveRunLifecycle({ status: 'success', terminal: true, orchestration: exhausted })
+assert(view.iterationExhausted, 'a spent iteration budget with an unmet DoD must be flagged')
+assert(view.label === '已完成（未達 DoD · 用盡 5 輪）', `exhausted label must be honest, got ${view.label}`)
+assert(view.tone === 'attention', 'exhausted runs must not use the success tone')
+assert(view.icon !== 'check_circle', 'exhausted runs must not reuse the success check mark')
+assert(view.label === iterationExhaustedLabel(5), 'label must come from the shared wording helper')
+
+view = deriveRunLifecycle({ status: 'success', terminal: true, orchestration: { ...exhausted, dodMet: true } })
+assert(!view.iterationExhausted && view.tone === 'success' && view.icon === 'check_circle', 'a met DoD stays a plain success')
+
+view = deriveRunLifecycle({ status: 'success', terminal: true, orchestration: { iterations: 2, maxIterations: 5, dodMet: false } })
+assert(!view.iterationExhausted, 'an unmet DoD with budget left is not exhaustion')
+
+view = deriveRunLifecycle({ status: 'success', terminal: true })
+assert(!view.iterationExhausted && view.tone === 'success', 'runs without settlement evidence stay unchanged')
+
+// External CLI never claims a DoD, so it can never read as failing one.
+assert(!isIterationExhausted({ ...exhausted, executionKind: 'external' }), 'external CLI runs must never claim or fail a DoD')
+view = deriveRunLifecycle({ status: 'success', terminal: true, orchestration: { ...exhausted, executionKind: 'external' } })
+assert(!view.iterationExhausted && view.label === '已完成', 'external CLI terminal wording is unaffected')
+
+// HITL precedence and the live activity phase must be untouched by the new field.
+view = deriveRunLifecycle({ phase: 'executing', status: 'success', active: true, approvalPending: true, orchestration: exhausted })
+assert(view.label === '等待核准' && view.tone === 'attention' && !view.iterationExhausted, 'HITL must still outrank a terminal snapshot')
+view = deriveRunLifecycle({ phase: 'awaiting_user', status: 'success', active: true, orchestration: exhausted })
+assert(view.label === '等待你的回覆' && !view.iterationExhausted, 'awaiting_user must still outrank a terminal snapshot')
+view = deriveRunLifecycle({ phase: 'finalizing', status: 'success', active: true, orchestration: exhausted })
+assert(view.live && !view.iterationExhausted, 'an active finalizing phase still wins over the terminal snapshot')
+
+// The three consuming surfaces read one projection, not three judgements.
+const fromAgent = orchestrationFromAgent({
+  executionKind: 'loop',
+  currentIteration: 5,
+  loopConfig: { maxIterations: 5 },
+  orchestration: { iterations: 5, maxIterations: 5, dodMet: false },
+})
+assert(
+  deriveRunLifecycle({ status: 'success', terminal: true, orchestration: fromAgent }).label === view.label ||
+    deriveRunLifecycle({ status: 'success', terminal: true, orchestration: fromAgent }).label === iterationExhaustedLabel(5),
+  'an agent snapshot must project the same exhausted wording',
+)
+assert(orchestrationFromAgent({ executionKind: 'loop' }) === undefined, 'an agent with no settlement evidence projects nothing')
+
+const brief = {
+  id: 'brief_exhausted',
+  threadId: 'thread_exhausted',
+  objective: '設計一個登入頁',
+  stage: 'build' as const,
+  directions: [],
+  selectedDirectionId: undefined,
+}
+const workspace = deriveSubDesignWorkspace({
+  brief: brief as never,
+  runStatus: 'success',
+  orchestration: { iterations: 5, maxIterations: 5, dodMet: false, executionKind: 'loop' },
+})
+assert(workspace.runStatus === 'exhausted', 'SubDesign must surface the exhausted terminal state')
+assert(
+  workspace.runStatusLabel === iterationExhaustedLabel(5),
+  `SubDesign must render the shared wording, got ${workspace.runStatusLabel}`,
+)
+const metWorkspace = deriveSubDesignWorkspace({
+  brief: brief as never,
+  runStatus: 'success',
+  orchestration: { iterations: 5, maxIterations: 5, dodMet: true, executionKind: 'loop' },
+})
+assert(metWorkspace.runStatus === 'success', 'a met DoD keeps the plain SubDesign success state')
+
 store.clear()
-console.log('run activity lifecycle phases and terminal digest are coherent')
+console.log('run activity lifecycle phases, terminal digest and iteration-exhausted wording are coherent')

@@ -51,6 +51,15 @@ export type ThreadRunSummary = {
   /** Terminal lifecycle state shared with the live process feed. */
   status?: 'success' | 'failed' | 'halted'
   durationMs?: number
+  /**
+   * How the run actually settled, retained so the archived card can still tell
+   * a met DoD from a spent iteration budget long after the live feed is gone.
+   * Absent for external CLI runs, which never claim a DoD.
+   */
+  dodMet?: boolean
+  iterations?: number
+  maxIterations?: number
+  executionKind?: 'loop' | 'external'
   subDesign?: {
     briefId: string
     stage: string

@@ -6,7 +6,7 @@ import { AgentThinking } from './primitives/AgentThinking'
 import { ShimmerLabel } from './primitives/ShimmerLabel'
 import { SpinnerRing } from './primitives/SpinnerRing'
 import { emptyAgentLike } from '../agent/localCliRun'
-import { deriveRunLifecycle, lifecycleToneClass } from '../agent/runLifecycle'
+import { deriveRunLifecycle, lifecycleToneClass, orchestrationFromAgent } from '../agent/runLifecycle'
 import {
   EXTERNAL_CLI_UI_LABEL,
   capabilitiesForRunner,
@@ -155,6 +155,7 @@ export function InlineRunPanel({
     approvalPending,
     terminal: Boolean(activity.terminal),
     objective: agent.objective,
+    orchestration: orchestrationFromAgent(agent),
   })
   const live = lifecycle.live
 

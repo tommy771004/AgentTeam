@@ -66,10 +66,27 @@ export type RunTaskItem = {
  * The snapshot is intentionally smaller than the live buffers so a completed
  * run can still render a useful digest without retaining an unbounded stream.
  */
+/**
+ * How a run actually settled, recorded once when it leaves the live path.
+ *
+ * The shell reads this to announce a completion, so there is no second store
+ * tracking which runs have finished.
+ */
+export type RunTerminalOutcome = {
+  status: 'success' | 'failed' | 'halted'
+  objective?: string
+  executionKind?: 'loop' | 'external'
+  iterations?: number
+  maxIterations?: number
+  dodMet?: boolean
+}
+
 export type TerminalRunDigest = {
   runId: string
   finishedAt: number
   statusLine: string
+  /** Absent when a run was terminalized without a coordinator settlement. */
+  outcome?: RunTerminalOutcome
   events: RunActivityEvent[]
   thought: string
   draftText: string
@@ -99,6 +116,8 @@ export type ExternalCliInteractionProjection = {
 /** One run's isolated live presentation or bounded terminal digest. */
 export type RunPresentation = {
   runId: string
+  /** Conversation that owns this run; stamped at begin() so a completion can be routed. */
+  threadId?: string
   active: boolean
   startedAt: number
   updatedAt: number
@@ -153,8 +172,8 @@ export interface RunActivityStore {
   /** Run-scoped source of truth; flat fields above are a selected-run projection. */
   presentations: Record<string, RunPresentation>
 
-  begin: (runId?: string) => void
-  end: (runId?: string, statusLine?: string) => void
+  begin: (runId?: string, threadId?: string) => void
+  end: (runId?: string, statusLine?: string, outcome?: RunTerminalOutcome) => void
   clear: (runId?: string) => void
   selectRun: (runId?: string | null) => void
   getPresentation: (runId?: string | null) => RunPresentation | null
@@ -246,6 +265,7 @@ function clonePresentation(p: RunPresentation): RunPresentation {
     terminal: p.terminal
       ? {
           ...p.terminal,
+          outcome: p.terminal.outcome ? { ...p.terminal.outcome } : undefined,
           events: [...p.terminal.events],
           fileChanges: [...p.terminal.fileChanges],
           tasks: [...p.terminal.tasks],
@@ -305,12 +325,14 @@ function terminalizePresentation(
   presentation: RunPresentation,
   statusLine: string | undefined,
   finishedAt: number,
+  outcome?: RunTerminalOutcome,
 ): RunPresentation {
   const phase = terminalPhase(statusLine || presentation.statusLine)
   const digest: TerminalRunDigest = {
     runId: presentation.runId,
     finishedAt,
     statusLine: (statusLine || presentation.statusLine || '完成').slice(0, 200),
+    outcome: outcome ? { ...outcome, objective: outcome.objective?.slice(0, 200) } : undefined,
     events: presentation.events.slice(-MAX_TERMINAL_EVENTS),
     thought: presentation.thought.slice(-MAX_TERMINAL_THOUGHT),
     draftText: presentation.draftText.slice(-MAX_TERMINAL_DRAFT),
@@ -418,7 +440,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
   tasks: [],
   presentations: {},
 
-  begin: (runId) => {
+  begin: (runId, threadId) => {
     const target = runId || nid('run')
     const now = Date.now()
     resetTaskLineBuf(target)
@@ -433,6 +455,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       }
       const presentation: RunPresentation = {
         ...emptyPresentation(target, now),
+        threadId: threadId || existing?.threadId,
         active: true,
         statusLine: '啟動中…',
       }
@@ -448,14 +471,14 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     })
   },
 
-  end: (runId, statusLine) => {
+  end: (runId, statusLine, outcome) => {
     const target = runId || get().runId
     if (!target) return
     resetTaskLineBuf(target)
     set((s) => {
       const current = s.presentations[target]
       if (!current || (current.terminal && !current.active)) return s
-      const completed = terminalizePresentation(current, statusLine, Date.now())
+      const completed = terminalizePresentation(current, statusLine, Date.now(), outcome)
       const presentations = trimPresentations({ ...s.presentations, [target]: completed }, s.runId)
       const selected = s.runId === target ? completed : presentations[s.runId || '']
       return { presentations, ...projectPresentation(selected) }

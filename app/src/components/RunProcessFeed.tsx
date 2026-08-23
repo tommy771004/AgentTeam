@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { emptyAgentLike } from '../agent/localCliRun'
 import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
-import { deriveRunLifecycle } from '../agent/runLifecycle'
+import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
@@ -200,6 +200,7 @@ export function RunProcessFeed({
     approvalPending,
     terminal: Boolean(activity?.terminal),
     objective: agent.objective,
+    orchestration: orchestrationFromAgent(agent),
   })
   const phase = lifecycle.label
   const toolCount = new Set(

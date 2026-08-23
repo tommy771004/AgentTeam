@@ -408,6 +408,18 @@ export interface AgentState {
   }
   /** External CLI kind when executionKind=external (codex / claude / …). */
   externalRunnerKind?: string
+  /**
+   * Pi Host orchestration settlement for this run.
+   *
+   * `dodMet: false` with a spent iteration budget is a truncated run, not a
+   * plain success — every surface reads it through `deriveRunLifecycle`.
+   * Never populated for `executionKind: 'external'`: a CLI never claims a DoD.
+   */
+  orchestration?: {
+    iterations: number
+    maxIterations: number
+    dodMet?: boolean
+  }
   /** Canonical trigger snapshot retained for audit/archive. */
   scheduleTrigger?: ScheduleTriggerSnapshot
   /** Canonical matcher evidence retained for audit/archive. */

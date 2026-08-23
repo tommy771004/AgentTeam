@@ -325,11 +325,22 @@ async function executePiHostTurn(
     }
     const success = result.settlement === 'success'
     const halted = result.settlement === 'cancelled' || result.settlement === 'interrupted'
+    // Iteration/DoD evidence travels with the run so a truncated success reads
+    // as truncated on every surface instead of as a plain check mark.
+    const orchestration = result.orchestration
+      ? {
+          iterations: Math.max(0, Math.floor(Number(result.orchestration.iterations) || 0)),
+          maxIterations: Math.max(0, Math.floor(Number(result.orchestration.maxIterations) || 0)),
+          dodMet: result.orchestration.dodMet,
+        }
+      : undefined
     const final = emptyAgentLike({
       id: runId,
       objective: text,
       status: success ? 'success' : halted ? 'halted' : 'failed',
       progress: 100,
+      currentIteration: orchestration?.iterations || undefined,
+      orchestration,
       result: result.result || (success ? 'Pi Core 完成（無文字輸出）' : `Pi Core ${result.settlement}`),
       confidence: success ? 0.9 : 0.3,
       loopConfig,
@@ -470,7 +481,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       if (window.subagents?.piHost?.sessions?.list && overrides?.threadId) {
         try {
           const { useRunActivityStore } = await import('./runActivityStore.ts')
-          useRunActivityStore.getState().begin(runId)
+          useRunActivityStore.getState().begin(runId, overrides.threadId)
           useRunActivityStore.getState().setStatus('Pi Core Host 執行中…', runId)
         } catch {
           /* optional renderer activity */
@@ -489,7 +500,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         // Center process feed (Codex-style)
         try {
           const { useRunActivityStore } = await import('./runActivityStore.ts')
-          useRunActivityStore.getState().begin(runId)
+          useRunActivityStore.getState().begin(runId, overrides?.threadId)
           useRunActivityStore.getState().setStatus('內建引擎執行中…', runId)
         } catch {
           /* ignore */

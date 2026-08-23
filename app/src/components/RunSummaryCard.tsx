@@ -27,6 +27,12 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
   const lifecycle = deriveRunLifecycle({
     status: summary.status || 'idle',
     terminal: Boolean(summary.status),
+    orchestration: {
+      iterations: summary.iterations,
+      maxIterations: summary.maxIterations,
+      dodMet: summary.dodMet,
+      executionKind: summary.executionKind,
+    },
   })
   const outcome = summary.status ? lifecycle.label : ''
   const label = summary.files.length

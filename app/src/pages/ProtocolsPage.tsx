@@ -16,7 +16,7 @@ import { useSlashExecutor } from '../hooks/useSlashExecutor'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { inferRunnerFromModel } from '../agent/localCliRun'
-import { deriveRunLifecycle } from '../agent/runLifecycle'
+import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
 import type { AgentMode, LoopType } from '../agent/types'
 import type { ThinkingDepth } from '../agent/thinking'
 import { getThinkingDepth } from '../agent/thinking'
@@ -122,6 +122,7 @@ export function ProtocolsPage() {
     approvalPending,
     terminal: Boolean(activity?.terminal),
     objective: presentationAgent.objective,
+    orchestration: orchestrationFromAgent(presentationAgent),
   })
   const composerApprovalMode = activeId ? composerApprovalModes[activeId] : undefined
   // Ticket 17: stage deliverables are read from the persisted artifact index,

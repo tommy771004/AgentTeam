@@ -35,6 +35,7 @@ import {
 import { resolveRunSettingsOverrides, snapshotRunSettings } from './runSettingsSnapshot.ts'
 import { normalizeExternalCliRunPolicy } from './externalCliRunSession.ts'
 import { snapshotExternalCliConnectorRequirements } from './externalCliConnectorSnapshot.ts'
+import { orchestrationFromAgent } from './runLifecycle.ts'
 
 import { v4 as uuid } from 'uuid'
 import {
@@ -48,6 +49,17 @@ import {
 export type { ExternalRunOpts, ExternalRunResult, RunSourceKind }
 export type TaskRunInput = ExternalRunOpts
 export type TaskRunResult = ExternalRunResult
+
+/**
+ * A renderer must be mounted AND on screen for an in-thread outcome to count
+ * as seen. A backgrounded window still writes the bubble, but the user has not
+ * been told, so the journal keeps that outcome pending until something narrates
+ * it (the live completion notice, or the startup redelivery pass).
+ */
+function rendererPresent(): boolean {
+  if (typeof document === 'undefined') return false
+  return document.visibilityState === 'visible'
+}
 
 /** Prevent re-entrant callers from starting the same lifecycle twice. */
 const coordinatingRunIds = new Set<string>()
@@ -469,10 +481,21 @@ export async function finalizeTaskRun(
 
   // ── Early terminal (hook deny / exception before or during dispatch) ──
   if (input.early) {
-    recordRunTerminal({ runId, threadId: tid, status: 'failed' })
     thr.setThreadStatus(tid, 'failed')
     thr.setThreadRunning(tid, false, runId)
     thr.pushBubble(tid, 'system', input.early.error)
+    // Marked terminal only after the reason is in the thread, so the delivery
+    // fact recorded alongside it is the truth and not an intention.
+    recordRunTerminal({
+      runId,
+      threadId: tid,
+      status: 'failed',
+      delivery: {
+        hasOwningThread: useThreadStore.getState().threads.some((thread) => thread.id === tid),
+        resultWrittenToThread: true,
+        rendererPresent: rendererPresent(),
+      },
+    })
     try {
       const { collectHookRules, evaluateHooks } = await import('./hooks.ts')
       const ev = evaluateHooks(collectHookRules(settings), {
@@ -720,7 +743,18 @@ export async function finalizeTaskRun(
   // archive evidence have been attempted. A crash before this point remains
   // conservatively recoverable as interrupted instead of claiming a complete
   // run without its evidence.
-  recordRunTerminal({ runId, threadId: tid, status: String(status) })
+  recordRunTerminal({
+    runId,
+    threadId: tid,
+    status: String(status),
+    delivery: {
+      hasOwningThread: useThreadStore.getState().threads.some((thread) => thread.id === tid),
+      // The assistant answer / failure line above is this run's outcome in-thread.
+      resultWrittenToThread: true,
+      rendererPresent: rendererPresent(),
+    },
+    settlement: orchestrationFromAgent(finalAgent),
+  })
 
   try {
     const { useRunActivityStore } = await import('../store/runActivityStore.ts')
@@ -730,7 +764,18 @@ export async function finalizeTaskRun(
         : String(status) === 'halted'
           ? '已停止'
           : '完成'
-    useRunActivityStore.getState().end(runId, terminalLabel)
+    // The settled outcome rides the same registry entry the shell watches, so
+    // the completion notice reads one record instead of reconstructing state.
+    const outcomeSettlement = orchestrationFromAgent(finalAgent)
+    useRunActivityStore.getState().end(runId, terminalLabel, {
+      status:
+        String(status) === 'failed' ? 'failed' : String(status) === 'halted' ? 'halted' : 'success',
+      objective,
+      executionKind: outcomeSettlement?.executionKind || finalAgent.executionKind,
+      iterations: outcomeSettlement?.iterations,
+      maxIterations: outcomeSettlement?.maxIterations,
+      dodMet: outcomeSettlement?.dodMet,
+    })
   } catch {
     /* renderer activity is optional for headless / recovery paths */
   }
@@ -998,10 +1043,15 @@ async function pushRunProcessSummary(args: {
   const subDesignExports = subDesignArtifact
     ? useSubDesignExportStore.getState().findByArtifactId(subDesignArtifact.id)
     : []
+  const settlement = orchestrationFromAgent(finalAgent)
   thr.pushRunSummary(tid, {
     status:
       status === 'failed' ? 'failed' : status === 'halted' ? 'halted' : 'success',
     durationMs: finalAgent.metrics?.executionMs,
+    dodMet: settlement?.dodMet,
+    iterations: settlement?.iterations,
+    maxIterations: settlement?.maxIterations,
+    executionKind: settlement?.executionKind,
     subDesign: subDesignBrief
       ? {
           briefId: subDesignBrief.id,
@@ -1508,7 +1558,7 @@ async function coordinateTaskRun(
   // decide when the visible run is terminal.
   try {
     const { useRunActivityStore } = await import('../store/runActivityStore.ts')
-    useRunActivityStore.getState().begin(runId)
+    useRunActivityStore.getState().begin(runId, tid)
     useRunActivityStore.getState().setStatus('啟動中…', runId)
   } catch {
     /* renderer activity is optional for headless / recovery paths */

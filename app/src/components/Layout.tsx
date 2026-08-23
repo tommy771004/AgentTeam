@@ -9,6 +9,8 @@ import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts'
 import { requestFocusComposer } from '../store/commandHistoryStore'
 import { getElectronBridgeStatus } from '../lib/electronBridge'
 import { PiHostStatusPill } from './PiHostStatusPill'
+import { RunCompletionToasts } from './primitives/RunCompletionToasts'
+import { useRunCompletionNotices } from '../hooks/useRunCompletionNotices'
 // Vite-bundled brand mark (always in the JS asset graph — no public/ relative-path 404)
 import brandIconUrl from '../assets/subagents-icon-64.png'
 
@@ -100,6 +102,9 @@ export function Layout() {
   const selectThread = useThreadStore((s) => s.selectThread)
   const runningThreadIds = useThreadStore((s) => s.runningThreadIds)
   useGlobalShortcuts()
+  // Shell-level completion reachability: a run that ends while the user is
+  // elsewhere still reaches them, on every route including the bare shell.
+  const { notices, dismiss } = useRunCompletionNotices()
   const bridge = useMemo(() => getElectronBridgeStatus(), [])
   const isMac = useIsMacDesktop()
   const primaryKey = isMac ? '⌘' : 'Ctrl+'
@@ -110,6 +115,19 @@ export function Layout() {
     if (runningThreadIds[0]) selectThread(runningThreadIds[0])
     setShowRunPanel(true)
   }
+
+  const openCompletedRun = (notice: { runId: string; threadId?: string }) => {
+    navigate('/')
+    if (notice.threadId) selectThread(notice.threadId)
+    setShowRunPanel(true)
+    // Acting on the card is the end of its job; leaving it over the thread it
+    // just opened would only cover the answer the user came to read.
+    dismiss(notice.runId)
+  }
+
+  const completionToasts = (
+    <RunCompletionToasts notices={notices} onDismiss={dismiss} onOpen={openCompletedRun} />
+  )
 
   const bareShell =
     location.pathname.startsWith('/execution') ||
@@ -128,6 +146,7 @@ export function Layout() {
         )}
         <Outlet />
         <FloatingConsole />
+        {completionToasts}
       </div>
     )
   }
@@ -303,6 +322,7 @@ export function Layout() {
           <Outlet />
         </main>
         <FloatingConsole />
+        {completionToasts}
       </div>
     </div>
   )
