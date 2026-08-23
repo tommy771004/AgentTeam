@@ -67,10 +67,9 @@ await test('toolLoop gated path uses invokeGatedTool + registry only', async () 
   assert.match(loop, /invokeGatedTool/)
   assert.match(loop, /dispatchRegistered/)
   assert.doesNotMatch(loop, /from '\.\/executor'|from \"\.\/executor\"/)
-  // Loop Runner deepening: stepStrategies.ts relocated to agent/loop/strategies.ts (ticket 02), shim removed (ticket 04).
-  const strategies = fs.readFileSync(path.join(appRoot, 'src/agent/loop/strategies.ts'), 'utf8')
-  assert.match(strategies, /dispatchRegistered/)
-  assert.doesNotMatch(strategies, /from '\.\/tools\/executor'|from \"\.\/tools\/executor\"/)
+  // The step strategies that also dispatched tools went with agent/loop; the
+  // tool loop above is now the single dispatcher, and no executor shim exists.
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/loop')), false)
   const regDir = path.join(appRoot, 'src/agent/tools/registered')
   const files = fs.readdirSync(regDir).filter((f) => f.endsWith('.ts') && f !== 'index.ts')
   assert.ok(files.length >= 40, `expected many per-tool modules, got ${files.length}`)

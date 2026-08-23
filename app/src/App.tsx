@@ -23,7 +23,6 @@ import {
   useGatewayStore,
 } from './store/gatewayStore'
 import { PermissionAskModal } from './components/PermissionAskModal'
-import { InterventionOverlay } from './components/InterventionOverlay'
 import { QuestionAskModal } from './components/QuestionAskModal'
 import type { ScheduledJob } from './agent/types'
 import { createScheduleTriggerSnapshot } from './agent/scheduler'
@@ -1108,7 +1107,6 @@ export default function App() {
         <PluginTokenRefreshBootstrap />
         <PluginProjectRebindBootstrap />
         <PermissionAskModal />
-        <InterventionOverlay />
         <QuestionAskModal />
         <Routes>
           <Route element={<Layout />}>

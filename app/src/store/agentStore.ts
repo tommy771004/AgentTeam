@@ -9,7 +9,6 @@ import type {
   RuntimeOverrides,
 } from '../agent/types.ts'
 import type { ExternalCliConnectorRequirement, ExternalCliRunPolicy } from '../agent/externalCliRunSession.ts'
-import { isElectronPiProduction } from '../agent/piProduction.ts'
 import { piThinkingLevelForDepth } from '../agent/thinking.ts'
 import { runCapacity } from '../agent/runConcurrency.ts'
 import { emptyKnowledge, extractKnowledge } from '../agent/knowledge.ts'
@@ -95,11 +94,6 @@ interface AgentStore {
     }>
   }) => Promise<void>
   stopExecution: (runId?: string) => void
-  continueTurn: (runId?: string) => void
-  resolveIntervention: (decision: {
-    action: 'approve' | 'reject' | 'abort'
-    payloadJson?: string
-  }, runId?: string) => void
   reset: () => void
   loadArchive: () => Promise<void>
   saveToArchive: (agentOverride?: AgentState, runId?: string) => Promise<void>
@@ -153,29 +147,6 @@ function toArchiveStatus(s: AgentState['status']): ArchiveRecord['status'] {
   return 'warning'
 }
 
-type LegacyEngineInstance = {
-  subscribe: (listener: (state: AgentState) => void) => () => void
-  start: (raw: string, force?: LoopType, overrides?: RuntimeOverrides) => Promise<AgentState>
-}
-type LegacyEngine = {
-  getState: () => AgentState
-  create: (runId?: string) => LegacyEngineInstance
-  configure: (settings: unknown) => void
-  release: (runId: string) => void
-  stop: (runId?: string) => void
-  continueTurn: (runId?: string) => void
-  resolveIntervention: (decision: { action: 'approve' | 'reject' | 'abort'; payloadJson?: string }, runId?: string) => void
-}
-let legacyEnginePromise: Promise<LegacyEngine> | undefined
-function loadLegacyEngine(): Promise<LegacyEngine> {
-  if (isElectronPiProduction()) {
-    return Promise.reject(new Error('Legacy renderer engine is disabled when Pi Host is available'))
-  }
-  legacyEnginePromise ||= import('../agent/engine.ts').then(({ agentEngine }) => agentEngine as unknown as LegacyEngine)
-  return legacyEnginePromise
-}
-
-const liveEngines = new Map<string, LegacyEngineInstance>()
 const runAgentStates = new Map<string, AgentState>()
 const reservedRuns = new Map<string, { threadId?: string; kind: 'builtin' | 'cli' }>()
 const lastRunIdByThread = new Map<string, string>()
@@ -441,8 +412,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
 
     releaseRun: (runId) => {
       reservedRuns.delete(runId)
-      liveEngines.delete(runId)
-      void loadLegacyEngine().then((engine) => engine.release(runId)).catch(() => {})
       publishRun(set, get, runId, runAgentStates.get(runId) || emptyAgent())
     },
 
@@ -500,83 +469,10 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         await executePiHostTurn(set, get, text, runId, overrides)
         return
       }
-      const settings = useSettingsStore.getState().settings
-      const legacy = await loadLegacyEngine()
-      legacy.configure(settings)
-      const engine = legacy.create(runId)
-      liveEngines.set(runId, engine)
-      const unsub = engine.subscribe((state) => publishRun(set, get, runId, state))
-      set({ showReport: false })
-      try {
-        // Center process feed (Codex-style)
-        try {
-          const { useRunActivityStore } = await import('./runActivityStore.ts')
-          useRunActivityStore.getState().begin(runId, overrides?.threadId)
-          useRunActivityStore.getState().setStatus('內建引擎執行中…', runId)
-        } catch {
-          /* ignore */
-        }
-        // Per-run HITL counters for Archive
-        try {
-          const { usePermissionAskStore } = await import('./permissionAskStore.ts')
-          usePermissionAskStore.getState().beginRunAudit(runId, overrides?.threadId)
-        } catch {
-          /* ignore */
-        }
-        // Prefer overrides from runTask/dispatch; selectedLoopType is sticky UI pin only when force.
-        const forceFromOverrides =
-          overrides?.loopTypeMode === 'force'
-            ? overrides.forceLoopType || get().selectedLoopType || undefined
-            : overrides?.loopTypeMode === 'auto'
-              ? undefined
-              : get().selectedLoopType ?? undefined
-        const final = await engine.start(text, forceFromOverrides, { ...overrides, runId })
-        unsub()
-        publishRun(set, get, runId, final)
-        const postState = await consumeNextState(
-          final.loopConfig.nextState,
-          {
-            runId,
-            objective: final.objective || text,
-            status: final.status,
-            loopType: final.loopConfig.loopType,
-            result: final.result,
-            finishedAt: final.finishedAt,
-            webhookTarget: overrides?.webhookTarget || settings.webhookTarget,
-            scheduleTrigger: final.scheduleTrigger,
-            eventTrigger: final.eventTrigger,
-          },
-        )
-        get().applyPostState(runId, postState)
-        const settled = get().getRunState(runId) || { ...final, postState }
-        try {
-          const { useRunActivityStore } = await import('./runActivityStore.ts')
-          useRunActivityStore.getState().setStatus(
-            settled.status === 'success' ? '完成' : settled.status,
-            runId,
-          )
-        } catch {
-          /* ignore */
-        }
-        // End of run: clear sticky "代我核准" for this conversation only.
-        try {
-          const { usePermissionAskStore } = await import('./permissionAskStore.ts')
-          usePermissionAskStore.getState().setSessionAllow(false, overrides?.threadId)
-        } catch {
-          /* ignore */
-        }
-
-      } catch (e) {
-        unsub()
-        publishRun(set, get, runId, runAgentStates.get(runId) || emptyAgent())
-        try {
-          const { usePermissionAskStore } = await import('./permissionAskStore.ts')
-          usePermissionAskStore.getState().setSessionAllow(false, overrides?.threadId)
-        } catch {
-          /* ignore */
-        }
-        throw e
-      }
+      // Pi Core Host is the only execution owner (ADR-0045/ADR-0046). The
+      // browser-compatibility engine is gone, so a missing Host is an honest
+      // failure rather than a second runtime with its own abort semantics.
+      throw new Error('Pi Core Host bridge is unavailable for an Electron run')
     },
 
     startLocalCliExecution: async (opts) => {
@@ -982,7 +878,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
     stopExecution: (runId) => {
       const target = runId
       if (!target) return
-      void loadLegacyEngine().then((engine) => engine.stop(target)).catch(() => {})
       // Safe park, not a hard cut: the Host stops at its next tool boundary so
       // a write or shell command already running still finishes and reports.
       const interruptPiHostTurn = window.subagents?.piHost?.turn?.interrupt
@@ -1018,23 +913,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       // wait for coordinator finalization.
     },
 
-    continueTurn: (runId) => {
-      if (!runId) return
-      void loadLegacyEngine().then((engine) => engine.continueTurn(runId)).catch(() => {})
-    },
-
-    resolveIntervention: (decision, runId) => {
-      if (!runId) return
-      void loadLegacyEngine().then((engine) => engine.resolveIntervention(decision, runId)).catch(() => {})
-    },
-
     reset: () => {
-      void loadLegacyEngine().then((engine) => {
-        engine.stop()
-        for (const runId of reservedRuns.keys()) engine.release(runId)
-      }).catch(() => {})
       reservedRuns.clear()
-      liveEngines.clear()
       runAgentStates.clear()
       lastRunIdByThread.clear()
       set({

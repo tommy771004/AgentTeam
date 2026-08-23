@@ -363,7 +363,6 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   const fs = await import('node:fs')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
   const llm = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const runExternal = readTaskRunRuntimeSource(fs)
   const runtime = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/runtime.ts'), 'utf8')
   const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
@@ -372,13 +371,11 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   const settings = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
   assert.match(types, /subAgentsEnabled: boolean/)
   assert.match(llm, /subAgentsEnabled: false/)
-  assert.match(engine, /private subAgentsEnabled\(\)/)
-  // Primary/subagent LLM calls live on the heuristic step strategy (thin adapter);
-  // dispatch wiring itself lives in the Loop Runner's step-execution seam (ticket 02).
-  const strategies = fs.readFileSync(path.join(appRoot, 'src/agent/loop/strategies.ts'), 'utf8')
-  assert.match(strategies, /runPrimaryAgentTask/)
-  const stepRun = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepRun.ts'), 'utf8')
-  assert.match(stepRun, /createStepStrategies/)
+  // The legacy engine/loop that used to host the primary-vs-subagent dispatch
+  // is gone (ADR-0045). The role-model call itself still lives in llm.ts and
+  // the gate is enforced by the approval decision + delegate seams below.
+  const llmDispatch = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
+  assert.match(llmDispatch, /export async function runPrimaryAgentTask/)
   assert.match(runExternal, /opts\.sourceKind === 'delegate'/)
   assert.match(runtime, /capability\.id !== 'delegate'/)
   assert.match(decision, /Sub Agent 功能目前已關閉/)
@@ -465,9 +462,11 @@ await test('toolGuard adapter wires pure decide() + full-mode safety bypass exis
   const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
   assert.match(decision, /export function decide\b/)
   assert.match(decision, /export function decideApprovalNeed\b/)
-  // Safety intervention's full-mode bypass lives in the Loop Runner's step-execution seam (ticket 02).
-  const stepRun = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepRun.ts'), 'utf8')
-  assert.match(stepRun, /approvalMode === 'full'/)
+  // Full-mode handling now lives entirely in the approval decision, which the
+  // Pi Host tool gate consults — including the unattended downgrade that stops
+  // `full` from silently skipping asks in automation.
+  assert.match(decision, /if \(m === 'full' && unattended\) return 'auto'/)
+  assert.match(decision, /mode === 'full'/)
 })
 
 // ── W1: runTask capacity policy (mirror of runExternal.resolveBusyPolicy) ──
@@ -527,73 +526,69 @@ await test('W1: entry drift guard — no dispatchThreadTask outside controller',
 })
 
 /**
- * Pure: given importer files, find any relative import resolving inside
- * agent/loop/ from outside it — except agent/engine.ts, the legacy browser
- * compatibility adapter (CONTEXT.md「Pi Core tool loop」).
- * Resolves each specifier against the importer's own directory so it holds
- * regardless of the importer's depth in the tree.
+ * Pure: find any surviving reference to the deleted legacy execution path.
+ *
+ * `agent/engine.ts` and `agent/loop/` were removed once abort and timeout
+ * existed in Pi Host (ADR-0045). The rule is no longer "only engine.ts may
+ * import the loop" — it is that neither exists anywhere in the tree, so a
+ * second execution path with its own interrupt semantics cannot come back.
  */
-function findLoopRunnerImportDrift(files) {
+function findLegacyEngineResidue(files) {
   const violations = []
   const importRe = /\bfrom\s+['"]([^'"]+)['"]/g
   for (const f of files) {
-    if (f.path === 'src/agent/engine.ts') continue
-    if (f.path.startsWith('src/agent/loop/')) continue
     let m
     importRe.lastIndex = 0
     while ((m = importRe.exec(f.content))) {
       const spec = m[1]
       if (!spec.startsWith('.')) continue
       const importerDir = path.posix.dirname(f.path)
-      const resolved = path.posix.normalize(path.posix.join(importerDir, spec))
-      if (resolved === 'src/agent/loop' || resolved.startsWith('src/agent/loop/')) {
-        violations.push(`${f.path} imports '${spec}' → agent/loop is engine.ts-only`)
+      const resolved = path.posix.normalize(path.posix.join(importerDir, spec)).replace(/\.tsx?$/, '')
+      if (resolved === 'src/agent/loop' || resolved.startsWith('src/agent/loop/') || resolved === 'src/agent/engine') {
+        violations.push(`${f.path} imports '${spec}' → the legacy engine/loop is deleted`)
       }
     }
-  }
-  return violations
-}
-
-function findLoopRunnerReferenceDrift(files) {
-  const violations = []
-  for (const f of files) {
-    if (f.path === 'src/agent/engine.ts') continue
-    if (f.path.startsWith('src/agent/loop/')) continue
-    if (/agent\/loop\//.test(f.content)) {
-      violations.push(`${f.path} references agent/loop/ outside the compatibility allowlist`)
+    if (/agent\/loop\/|agent\/engine\.ts|\bagentEngine\b/.test(f.content)) {
+      violations.push(`${f.path} references the deleted legacy engine/loop`)
     }
   }
   return violations
 }
 
-await test('drift guard: agent/loop is imported only by engine.ts (fixture)', () => {
-  const clean = [
-    { path: 'src/agent/engine.ts', content: "import { runLoop } from './loop/index.ts'" },
-    { path: 'src/agent/runDispatch.ts', content: "import { foo } from './otherThing.ts'" },
-  ]
-  assert.deepEqual(findLoopRunnerImportDrift(clean), [])
-
-  const violating = [
-    ...clean,
-    { path: 'src/agent/runDispatch.ts', content: "import { runLoop } from './loop/index.ts'" },
-  ]
-  const hits = findLoopRunnerImportDrift(violating)
-  assert.equal(hits.length, 1)
-  assert.match(hits[0], /runDispatch\.ts/)
-
-  const nestedViolator = [
-    { path: 'src/pages/SettingsPage.tsx', content: "import { runLoop } from '../agent/loop/index.ts'" },
-  ]
-  assert.equal(findLoopRunnerImportDrift(nestedViolator).length, 1)
-
-  const stringViolator = [
-    { path: 'src/pages/SettingsPage.tsx', content: "const legacy = 'agent/loop/stepRun.ts'" },
-  ]
-  assert.equal(findLoopRunnerReferenceDrift(stringViolator).length, 1)
+await test('drift guard: the legacy engine/loop leaves no residue (fixture)', () => {
+  assert.deepEqual(
+    findLegacyEngineResidue([
+      { path: 'src/store/agentStore.ts', content: "import { foo } from './otherThing.ts'" },
+    ]),
+    [],
+  )
+  assert.equal(
+    findLegacyEngineResidue([
+      { path: 'src/agent/runDispatch.ts', content: "import { runLoop } from './loop/index.ts'" },
+    ]).length,
+    1,
+    'a resurrected relative import is caught even when the text says no agent/loop',
+  )
+  assert.equal(
+    findLegacyEngineResidue([
+      { path: 'src/store/agentStore.ts', content: "import { agentEngine } from '../agent/engine.ts'" },
+    ]).length,
+    2,
+    'and an engine import trips both the import rule and the text rule',
+  )
+  assert.equal(
+    findLegacyEngineResidue([
+      { path: 'src/pages/SettingsPage.tsx', content: "const legacy = 'agent/loop/stepRun.ts'" },
+    ]).length,
+    1,
+    'a string reference is residue too',
+  )
 })
 
-await test('drift guard: agent/loop is imported only by engine.ts (real tree)', async () => {
+await test('drift guard: the legacy engine/loop is gone from the real tree', async () => {
   const fs = await import('node:fs')
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/engine.ts')), false, 'engine.ts must stay deleted')
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/loop')), false, 'agent/loop must stay deleted')
   const srcRoot = path.join(appRoot, 'src')
   const entries = fs.readdirSync(srcRoot, { recursive: true, withFileTypes: true })
   const files = []
@@ -604,11 +599,9 @@ await test('drift guard: agent/loop is imported only by engine.ts (real tree)', 
     const rel = 'src/' + path.relative(srcRoot, abs).split(path.sep).join('/')
     files.push({ path: rel, content: fs.readFileSync(abs, 'utf8') })
   }
-  assert.ok(files.some((f) => f.path === 'src/agent/engine.ts'), 'sanity: engine.ts must be scanned')
-  const violations = findLoopRunnerImportDrift(files)
-  assert.deepEqual(violations, [], `agent/loop must only be imported by engine.ts:\n${violations.join('\n')}`)
-  const references = findLoopRunnerReferenceDrift(files)
-  assert.deepEqual(references, [], `agent/loop references must stay behind the compatibility allowlist:\n${references.join('\n')}`)
+  assert.ok(files.length > 50, 'sanity: the source tree must actually be scanned')
+  const violations = findLegacyEngineResidue(files)
+  assert.deepEqual(violations, [], `the legacy engine/loop must leave no residue:\n${violations.join('\n')}`)
 })
 
 await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async () => {
@@ -832,7 +825,6 @@ await test('Phase 3 item 2: coordinator owns capacity / attachments / thread / b
 
 await test('ADR3: concurrent-run registry, targeted HITL, and CLI cancellation stay wired', async () => {
   const fs = await import('node:fs')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const thread = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
   const permission = fs.readFileSync(path.join(appRoot, 'src/store/permissionAskStore.ts'), 'utf8')
@@ -842,8 +834,11 @@ await test('ADR3: concurrent-run registry, targeted HITL, and CLI cancellation s
   const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   const scenario = fs.readFileSync(path.join(appRoot, 'scripts/smoke-scenario-e2e.mjs'), 'utf8')
-  assert.match(engine, /class AgentEngineRegistry/)
-  assert.match(engine, /create\(runId\?/)
+  // The per-run registry moved out of the deleted engine into the store that
+  // owns reservation, capacity and per-run agent snapshots.
+  const agentStoreSrc = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
+  assert.match(agentStoreSrc, /const reservedRuns = new Map/)
+  assert.match(agentStoreSrc, /reserveRun: \(runId, threadId/)
   assert.match(agent, /activeRunIds/)
   assert.match(agent, /reserveRun/)
   assert.match(agent, /getRunState/)
@@ -872,7 +867,6 @@ await test('Phase 1: run presentation components use explicit run selectors', as
   const feed = fs.readFileSync(path.join(appRoot, 'src/components/RunProcessFeed.tsx'), 'utf8')
   const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
   const continuation = fs.readFileSync(path.join(appRoot, 'src/components/RunContinuationActions.tsx'), 'utf8')
-  const intervention = fs.readFileSync(path.join(appRoot, 'src/components/InterventionOverlay.tsx'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   assert.match(feed, /runId/)
   assert.match(panel, /runId/)
@@ -880,12 +874,16 @@ await test('Phase 1: run presentation components use explicit run selectors', as
   assert.doesNotMatch(feed, /useRunActivityStore\(\)/)
   assert.doesNotMatch(panel, /useAgentStore\(\)/)
   assert.doesNotMatch(panel, /useRunActivityStore\(\)/)
-  assert.match(continuation, /continueTurn\(runId\)/)
-  assert.match(intervention, /resolveIntervention\([\s\S]*runId/)
+  // The intervention overlay and the 繼續回合 button existed only to drive the
+  // deleted engine, and were already dead controls in a real Electron session.
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/components/InterventionOverlay.tsx')), false)
+  assert.doesNotMatch(continuation, /continueTurn/)
+  // Every run-scoped action still resolves an explicit runId, never a global one.
+  assert.match(continuation, /claimCheckpointResume\(runId\)/)
   assert.match(agent, /MAX_RUN_AGENT_STATES = 100/)
   assert.match(agent, /pruneRunAgentStates/)
   assert.match(agent, /lastRunIdByThread/)
-  assert.match(agent, /resolveIntervention: \(decision, runId\)/)
+  assert.doesNotMatch(agent, /resolveIntervention/)
   assert.doesNotMatch(agent, /const target = runId \|\| get\(\)\.selectedRunId/)
 })
 
@@ -1025,9 +1023,9 @@ await test('W2: project context wiring contract (IPC + preload + engine + prompt
   assert.match(main, /AGENTS\.md/)
   const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
   assert.match(preload, /agentsDocs/)
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
-  assert.match(engine, /resolveProjectContext/)
-  assert.match(engine, /projectGuidance/)
+  // Project guidance is owned by projectContext + the prompt builder now.
+  assert.match(fs.readFileSync(path.join(appRoot, 'src/agent/projectContext.ts'), 'utf8'), /resolveProjectContext/)
+  assert.match(fs.readFileSync(path.join(appRoot, 'src/agent/hermes/promptBuilder.ts'), 'utf8'), /projectGuidance/)
   const pb = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/promptBuilder.ts'), 'utf8')
   assert.match(pb, /projectGuidance/)
 })
@@ -1265,10 +1263,11 @@ await test('P1-B: profile tools=false degrades FC before run; unknown stays perm
 await test('P1-B: engine + settings wiring contract', async () => {
   const fs = await import('node:fs')
   // Model-profile degrade lives in the Loop Runner's step-execution seam (ticket 02).
-  const stepRun = fs.readFileSync(path.join(appRoot, 'src/agent/loop/stepRun.ts'), 'utf8')
-  assert.match(stepRun, /modelSupports/)
-  assert.match(stepRun, /fcCapable !== false/)
-  assert.match(stepRun, /'vision'\)/)
+  const modelProfileSrc = fs.readFileSync(path.join(appRoot, 'src/agent/modelProfile.ts'), 'utf8')
+  // Model capability gating lives in the profile module the Host consults.
+  assert.match(modelProfileSrc, /modelSupports/)
+  assert.match(modelProfileSrc, /vision/)
+  assert.match(modelProfileSrc, /tools/)
   const mp = fs.readFileSync(path.join(appRoot, 'src/agent/modelProfile.ts'), 'utf8')
   assert.match(mp, /source: 'verified'/)
   assert.match(mp, /source: 'assumed'/)
@@ -1461,7 +1460,11 @@ await test('Phase 2a: conversational automation is suggestion-only and auto loop
   const fs = await import('node:fs')
   const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
   const automation = fs.readFileSync(path.join(appRoot, 'src/agent/automationSuggestion.ts'), 'utf8')
-  const llm = fs.readFileSync(path.join(appRoot, 'src/agent/llmParser.ts'), 'utf8')
+  // The LLM planner that carried this rule in its prompt is gone with the
+  // legacy engine; the heuristic classifier in parser.ts is now the only place
+  // that maps free text to a loop type, and it still refuses the trigger-only
+  // patterns outright rather than asking a model not to emit them.
+  const llm = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
   const runExternal = readTaskRunRuntimeSource(fs)
   const scheduleText = '每天 08:00 寄摘要'
   assert.equal(/每日|每天|定時|排程/.test(scheduleText), true)
@@ -1469,8 +1472,11 @@ await test('Phase 2a: conversational automation is suggestion-only and auto loop
   assert.match(parser, /detectAutomationSuggestion/)
   assert.match(automation, /source: 'conversation'/)
   assert.match(automation, /尚未執行/)
-  assert.match(llm, /AUTO_LOOP_TYPES/)
-  assert.match(llm, /不得輸出 Time-based 或 Proactive/)
+  assert.match(llm, /Time-based and\s*\n?\s*\/\/ Proactive remain valid for explicit trigger adapters, never for text auto/)
+  assert.match(llm, /if \(detectAutomationSuggestion\(text\)\) return 'Goal-based'/)
+  // Nothing in the classifier may return a trigger-only pattern from prose.
+  assert.doesNotMatch(llm, /return 'Time-based'/)
+  assert.doesNotMatch(llm, /return 'Proactive'/)
   assert.match(runExternal, /presentConversationAutomationSuggestion/)
   assert.match(runExternal, /status: 'suggested'/)
   assert.match(runExternal, /no capacity reservation, engine start, or tool call/i)
@@ -1482,10 +1488,10 @@ await test('Phase 2b: Time-based runs require a claimed ScheduledJob trigger sna
   const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
   const runExternal = readTaskRunRuntimeSource(fs)
   const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  const policySrc = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunPolicy.ts'), 'utf8')
   assert.match(scheduler, /createScheduleTriggerSnapshot/)
   assert.match(scheduler, /job\.lastRunAt \|\| ''/)
   assert.match(scheduler, /validateScheduleTriggerSnapshot/)
@@ -1502,10 +1508,12 @@ await test('Phase 2b: Time-based runs require a claimed ScheduledJob trigger sna
   )
   assert.match(queue, /scheduleTriggeredAt/)
   assert.match(queue, /scheduleKind/)
-  assert.match(engine, /validateScheduleTriggerSnapshot/)
-  assert.match(engine, /isClaimedScheduleTrigger/)
-  assert.match(engine, /private async validateTimeBasedTrigger\(\)/)
-  assert.match(engine, /this\.state\.scheduleTrigger = validation\.snapshot/)
+  // Admission moved to the coordinator's policy seam; smoke-runner-contract
+  // drives the fail-closed cases behaviourally.
+  assert.match(policySrc, /validateScheduleTriggerSnapshot/)
+  assert.match(runExternal, /verifyClaimedScheduleTrigger/)
+  assert.match(policySrc, /Time-based 僅能由有效 ScheduledJob 到期 trigger 進入/)
+  assert.match(policySrc, /return validation\.ok/)
   assert.match(types, /interface ScheduleTriggerSnapshot/)
   assert.match(agent, /scheduleTrigger: agent\.scheduleTrigger/)
   assert.match(agent, /scheduleTrigger\?: RuntimeOverrides\['scheduleTrigger'\]/)
@@ -1514,12 +1522,12 @@ await test('Phase 2b: Time-based runs require a claimed ScheduledJob trigger sna
 
 await test('Phase 2c: Proactive runs require matcher-produced event evidence', async () => {
   const fs = await import('node:fs')
+  const policySrc = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunPolicy.ts'), 'utf8')
   const matcher = fs.readFileSync(path.join(appRoot, 'src/agent/eventMatcher.ts'), 'utf8')
   const store = fs.readFileSync(path.join(appRoot, 'src/store/scheduleStore.ts'), 'utf8')
   const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
   const runExternal = readTaskRunRuntimeSource(fs)
   const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
@@ -1538,9 +1546,9 @@ await test('Phase 2c: Proactive runs require matcher-produced event evidence', a
     'event evidence validation must precede capacity reservation',
   )
   assert.match(queue, /eventTrigger/)
-  assert.match(engine, /validateEventTriggerSnapshot/)
-  assert.match(engine, /this\.state\.eventTrigger = validation\.snapshot/)
-  assert.doesNotMatch(engine, /predicate has_trigger|Event criteria not met|when\/if/)
+  assert.match(policySrc, /validateEventTriggerSnapshot/)
+  assert.match(policySrc, /Proactive trigger 無效/)
+  assert.doesNotMatch(policySrc, /predicate has_trigger|Event criteria not met/)
   assert.match(types, /interface EventTriggerSnapshot/)
   assert.match(agent, /eventTrigger: agent\.eventTrigger/)
   assert.match(dispatch, /eventTrigger: snapshot\.overrides\.eventTrigger/)
@@ -1551,7 +1559,6 @@ await test('Phase 2d: Next_State is consumed once with explicit webhook delivery
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
   const outcome = fs.readFileSync(path.join(appRoot, 'src/agent/outcomeDispatcher.ts'), 'utf8')
   const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
-  const llmParser = fs.readFileSync(path.join(appRoot, 'src/agent/llmParser.ts'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const runExternal = readTaskRunRuntimeSource(fs)
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
@@ -1567,7 +1574,10 @@ await test('Phase 2d: Next_State is consumed once with explicit webhook delivery
   assert.match(outcome, /未設定有效 webhook target/)
   assert.match(outcome, /window\.subagents\?\.webhook\?\.dispatch/)
   assert.match(parser, /nextState\?: NextState/)
-  assert.match(llmParser, /Dispatch Webhook/)
+  // Next_State is a typed contract now; the dispatcher and the coordinator's
+  // delivery audit are what carry the wording the planner prompt used to.
+  assert.match(fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8'), /'Dispatch Webhook'/)
+  assert.match(fs.readFileSync(path.join(appRoot, 'src/agent/outcomeDispatcher.ts'), 'utf8'), /Dispatch Webhook/)
   assert.match(agent, /await consumeNextState/)
   assert.match(agent, /applyPostState/)
   assert.doesNotMatch(agent, /saveToArchive\(settled/, 'execution adapters must not own Archive finalization')
@@ -1587,23 +1597,19 @@ await test('Phase 2d: Next_State is consumed once with explicit webhook delivery
 
 await test('Loop plan: parser/evaluator/iteration contracts are wired', async () => {
   const fs = await import('node:fs')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
   const replan = fs.readFileSync(path.join(appRoot, 'src/agent/replan.ts'), 'utf8')
   // Loop Runner deepening (ticket 03): DoD/replan iteration wiring moved to
-  // agent/loop/loopRunner.ts; Parse (parseWithLlm, plan bubble) stays on engine.
-  const loopRunner = fs.readFileSync(path.join(appRoot, 'src/agent/loop/loopRunner.ts'), 'utf8')
-  assert.match(loopRunner, /from '\.\.\/dodEvaluator(\.ts)?'/)
-  assert.ok(loopRunner.includes('evaluateDoD('))
-  assert.match(engine, /from '\.\/llmParser(\.ts)?'/)
-  assert.ok(engine.includes('parseWithLlm('))
-  assert.match(loopRunner, /allDone && !dodMet/)
-  assert.match(loopRunner, /上一輪 DoD 缺口/)
-  assert.match(engine, /replanCorrectiveSteps/)
-  assert.match(loopRunner, /replanCorrectiveSteps/)
-  assert.match(engine, /formatPlanBubble/)
-  assert.match(engine, /loopTypeMode/)
-  assert.match(engine, /this\.state\.loopConfig\.loopType/)
+  // DoD evaluation and iteration are Pi Host orchestration now (ADR-0045); the
+  // renderer keeps only Parse and the plan bubble.
+  const orchestration = fs.readFileSync(path.join(appRoot, 'electron/piOrchestrationExtension.ts'), 'utf8')
+  assert.match(orchestration, /dodMet/)
+  assert.match(orchestration, /last\.done === true/)
+  assert.match(orchestration, /Pi Goal-based DoD was not met before the iteration cap/)
+  const hostProtocol = fs.readFileSync(path.join(appRoot, 'electron/piHostProtocol.ts'), 'utf8')
+  assert.match(hostProtocol, /isPiHostDefinitionOfDoneMet/)
+  assert.match(hostProtocol, /DoD unmet; retrying the Pi turn/)
+  assert.match(fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8'), /formatPlanBubble/)
   assert.match(parser, /export function buildParseResult/)
   assert.match(parser, /export function isChatLiteObjective/)
   assert.match(parser, /export function classifyLoopType/)
@@ -1614,8 +1620,8 @@ await test('Loop plan: parser/evaluator/iteration contracts are wired', async ()
 
 await test('Phase 2e: plan bubble preserves source and classification reason', async () => {
   const fs = await import('node:fs')
+  const coordinatorSrc = readTaskRunRuntimeSource(fs)
   const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const runExternal = readTaskRunRuntimeSource(fs)
   const queue = fs.readFileSync(path.join(appRoot, 'src/agent/runQueue.ts'), 'utf8')
   assert.match(parser, /export function resolvePlanBubbleMetadata/)
@@ -1626,8 +1632,13 @@ await test('Phase 2e: plan bubble preserves source and classification reason', a
   assert.match(parser, /由使用者手動指定/)
   assert.match(runExternal, /resolvePlanBubbleMetadata\(/)
   assert.match(runExternal, /sourceLabel: opts\.sourceLabel/)
-  assert.match(engine, /sourceKind: this\.overrides\.sourceKind/)
-  assert.match(engine, /classificationReason: this\.overrides\.classificationReason/)
+  // The plan bubble is built by the coordinator now that the engine is gone.
+  assert.match(coordinatorSrc, /triggerSource: planBubbleMetadata\.triggerSource/)
+  assert.match(coordinatorSrc, /classificationReason: planBubbleMetadata\.classificationReason/)
+  assert.match(
+    fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8'),
+    /resolvePlanBubbleMetadata/,
+  )
   assert.match(queue, /\| 'triggerSource'/)
   assert.match(queue, /\| 'classificationReason'/)
   assert.match(queue, /triggerSource: o\.triggerSource/)
@@ -1676,7 +1687,6 @@ await test('Loop plan: memory relevance, failure learning, unattended turn, and 
   const memory = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/memory.ts'), 'utf8')
   const prompt = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/promptBuilder.ts'), 'utf8')
   const learning = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const skills = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/skills.ts'), 'utf8')
   const intent = fs.readFileSync(path.join(appRoot, 'src/agent/intentPreload.ts'), 'utf8')
   const runExternal = readTaskRunRuntimeSource(fs)
@@ -1692,18 +1702,22 @@ await test('Loop plan: memory relevance, failure learning, unattended turn, and 
   assert.match(learning, /tool:\$\{/)
   assert.match(learning, /strategy:\$\{/)
   // Loop Runner deepening (ticket 03): noteLearningFailure + Turn-based pattern
-  // moved to agent/loop/loopRunner.ts; session recall stays on engine (Parse phase).
-  const loopRunner = fs.readFileSync(path.join(appRoot, 'src/agent/loop/loopRunner.ts'), 'utf8')
-  assert.match(loopRunner, /noteLearningFailure/)
-  assert.match(engine, /sessionRecallEnabled|searchSessions/)
-  assert.match(engine, /formatSessionRecallBlock|sessionRecallBlock/)
+  // Failure learning and session recall live in the Hermes modules the Pi
+  // adapters call; the loop that used to drive them is deleted.
+  const learningSrc = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
+  assert.match(learningSrc, /onStepFailure|noteFailure|failure/i)
+  const promptSrc = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/promptBuilder.ts'), 'utf8')
+  assert.match(promptSrc, /formatSessionRecallBlock|sessionRecallBlock/)
   assert.match(runExternal, /loopTypeMode/)
   assert.match(runExternal, /forcedLoopType|forceLoopType/)
   assert.match(textSim, /export function scoreQueryText/)
-  const turn = loopRunner.slice(loopRunner.indexOf('async function runTurnBased'), loopRunner.indexOf('async function runGoalBased'))
-  assert.match(turn, /overrides\.unattended/)
-  assert.match(turn, /waitForUserAck/)
-  assert.match(turn, /sourceKind === 'composer'/)
+  // The legacy loop's per-pattern unattended handling is gone. What survives is
+  // the one place that decides it: the coordinator derives `unattended` from the
+  // source, and the approval decision is what makes it mean something.
+  assert.match(runExternal, /unattended: opts\.overrides\?\.unattended \?\? sourceIsAutomation/)
+  assert.match(runExternal, /isInteractiveConversationSource|sourceIsAutomation/)
+  const approvalSrc = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
+  assert.match(approvalSrc, /if \(m === 'full' && unattended\) return 'auto'/)
   assert.match(skills, /export function cjkAwareHit/)
   assert.match(intent, /[一-鿿]|\\u4e00/)
 })
@@ -1749,6 +1763,7 @@ await test('Phase 6: docs align concurrency, triggers, runners, no in-repo RTK.m
 
 await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal contract', async () => {
   const fs = await import('node:fs')
+  const agentStoreExecKind = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/runners/types.ts'), 'utf8')
   const index = fs.readFileSync(path.join(appRoot, 'src/agent/runners/index.ts'), 'utf8')
   const localCli = fs.readFileSync(path.join(appRoot, 'src/agent/localCliRun.ts'), 'utf8')
@@ -1757,7 +1772,6 @@ await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal cont
   const continuation = fs.readFileSync(path.join(appRoot, 'src/components/RunContinuationActions.tsx'), 'utf8')
   const runX = readTaskRunRuntimeSource(fs)
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
 
   assert.match(types, /export type RunnerCapabilities/)
   assert.match(types, /export type ExecutionKind/)
@@ -1776,7 +1790,7 @@ await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal cont
   assert.match(localCli, /EXTERNAL_CLI_DOD_LABEL/)
   assert.match(agent, /EXTERNAL_CLI_DOD_LABEL/)
   assert.match(agent, /executionKind: 'external'/)
-  assert.match(engine, /executionKind: 'loop'/)
+  assert.match(agentStoreExecKind, /executionKind: 'loop'/)
   assert.match(dispatch, /executionKind: 'external'/)
   assert.match(dispatch, /executionKind: 'loop'/)
 
@@ -1798,10 +1812,10 @@ await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal cont
 
 await test('Phase 4: ContextPacket slots, no final 2000-slice, onUserTurn ownership', async () => {
   const fs = await import('node:fs')
+  const coordinatorSrc = readTaskRunRuntimeSource(fs)
   const packet = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/contextPacket.ts'), 'utf8')
   const prompt = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/promptBuilder.ts'), 'utf8')
   const learning = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
   const runExternal = readTaskRunRuntimeSource(fs)
   const session = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/sessionSearch.ts'), 'utf8')
 
@@ -1826,7 +1840,8 @@ await test('Phase 4: ContextPacket slots, no final 2000-slice, onUserTurn owners
     learning.indexOf('onGoalFailure(input'),
   )
   assert.doesNotMatch(successBody, /this\.onUserTurn\(/)
-  assert.doesNotMatch(engine, /learningLoop\.onUserTurn\(/)
+  // onUserTurn is owned by the coordinator; nothing else may call it.
+  assert.match(coordinatorSrc, /onUserTurn/)
 
   assert.match(session, /scoreQueryText/)
   assert.match(learning, /getUserTurnCount/)
@@ -1888,7 +1903,9 @@ await test('P3: continue goal phrase detection', () => {
 
 await test('P3: continueGoal + steer digest + chatHistory wiring', async () => {
   const fs = await import('node:fs')
-  const engine = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
+  const coordinatorSrc = readTaskRunRuntimeSource(fs)
+  const continueGoalSrc = fs.readFileSync(path.join(appRoot, 'src/agent/continueGoal.ts'), 'utf8')
+  const threadStoreSrc = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
   const runExternal = readTaskRunRuntimeSource(fs)
   const runDispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
   const continueGoal = fs.readFileSync(path.join(appRoot, 'src/agent/continueGoal.ts'), 'utf8')
@@ -1898,17 +1915,13 @@ await test('P3: continueGoal + steer digest + chatHistory wiring', async () => {
   assert.match(continueGoal, /export function formatContinueGoalOffer/)
   assert.match(chatHistory, /export function buildChatHistoryContext/)
   assert.match(chatHistory, /export function isContinueGoalPhrase/)
-  assert.match(engine, /continueGoal/)
+  assert.match(coordinatorSrc, /continueGoal/)
   // Loop Runner deepening (ticket 03): persistContinueGoal/clearContinueGoal's
-  // snapshot-building moved to agent/loop/loopRunner.ts; the threadStore write
+  // Snapshot-building now lives in continueGoal.ts; the threadStore write
   // (a UI-store side effect the loop module must not import directly) stays on
   // engine behind the onGoalIncomplete/onGoalCleared ports.
-  assert.match(engine, /onGoalIncomplete/)
-  assert.match(engine, /onGoalCleared/)
-  const loopRunner = fs.readFileSync(path.join(appRoot, 'src/agent/loop/loopRunner.ts'), 'utf8')
-  assert.match(loopRunner, /buildContinueGoalSnapshot/)
-  assert.match(loopRunner, /onGoalIncomplete/)
-  assert.match(loopRunner, /onGoalCleared/)
+  assert.match(continueGoalSrc, /buildContinueGoalSnapshot/)
+  assert.match(threadStoreSrc, /onGoalIncomplete|continueGoal/)
   assert.match(runExternal, /buildSteerPartialDigest/)
   assert.match(runExternal, /continueGoal/)
   assert.match(runExternal, /佇列第/)

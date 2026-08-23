@@ -13,9 +13,12 @@ const learning = await read('src/store/learningStore.ts')
 const app = await read('src/App.tsx')
 const hostEntry = await read('electron/piHostEntry.ts')
 
-assert.doesNotMatch(agentStore, /import\s+\{\s*agentEngine\s*\}\s+from\s+['"]\.\.\/agent\/engine['"]/, 'renderer store must not statically own legacy engine')
-assert.match(agentStore, /loadLegacyEngine\(\)/)
-assert.match(agentStore, /Legacy renderer engine is disabled when Pi Host is available/)
+// The legacy renderer engine is deleted, not merely gated: the store cannot
+// own a second runtime because there is no second runtime to own. A missing
+// Host is now an honest failure rather than a silent fallback.
+assert.doesNotMatch(agentStore, /agentEngine|loadLegacyEngine|agent\/engine/, 'the renderer store must not own any legacy engine')
+assert.match(agentStore, /Pi Core Host bridge is unavailable for an Electron run/)
+assert.doesNotMatch(settingsStore, /agentEngine/, 'settings must not configure a deleted engine')
 assert.match(settingsStore, /stripPiOwnedSettings/)
 assert.match(settingsStore, /isElectronPiProduction\(\)/)
 assert.match(settingsStore, /piSettingsPatchFromLlmSettings/)
@@ -32,4 +35,4 @@ assert.match(app, /isElectronPiProduction\(\)/)
 assert.match(hostEntry, /pi-settings-migration\.json/)
 assert.match(hostEntry, /credentialPersisted/)
 
-console.log('Pi production owner contract passed: renderer fallback is browser-only and Electron is Pi-owned')
+console.log('Pi production owner contract passed: Pi Host is the only execution owner and the legacy engine is gone')

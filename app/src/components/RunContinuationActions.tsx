@@ -21,7 +21,6 @@ export function RunContinuationActions({
   runId?: string | null
 }) {
   const thread = useThreadStore((state) => state.threads.find((item) => item.id === threadId))
-  const continueTurn = useAgentStore((state) => state.continueTurn)
   const activeRunIds = useAgentStore((state) => state.activeRunIds)
   const runState = useAgentStore((state) => (runId ? state.runStates[runId] : undefined))
   const [startingGoal, setStartingGoal] = useState(false)
@@ -59,13 +58,12 @@ export function RunContinuationActions({
         runState?.status === 'manual_intervention'),
   )
   const continueGoal = thread?.continueGoal || null
-  const canContinueTurn = Boolean(!live && runId && (thread?.awaitingReply || runState?.status === 'awaiting_user'))
   const canContinueGoal = Boolean(
     !live && continueGoal && capabilitiesForRunner(thread?.runner || 'builtin').continueGoal,
   )
   const hasPendingGoal = Boolean(!live && continueGoal)
 
-  if (!canContinueTurn && !hasPendingGoal && !resume) return null
+  if (!hasPendingGoal && !resume) return null
 
   const onContinueGoal = async () => {
     if (!canContinueGoal || !continueGoal || startingGoal) return
@@ -160,20 +158,6 @@ export function RunContinuationActions({
         <p className="text-[10px] leading-relaxed text-ink-3">{resume.detail}</p>
       ) : null}
       {resumeError ? <p className="text-[10px] leading-relaxed text-red">{resumeError}</p> : null}
-
-      {canContinueTurn ? (
-        <button
-          type="button"
-          onClick={() => runId && continueTurn(runId)}
-          className="agent-result-action"
-        >
-          <span className="min-w-0 flex-1 text-left">
-            <span className="block text-[12px] font-medium text-ink">繼續回合</span>
-            <span className="mt-0.5 block text-[10px] text-ink-3">回到 agent 的下一個回覆</span>
-          </span>
-          <Icon name="arrow_forward" size={15} className="shrink-0 text-ink-3" />
-        </button>
-      ) : null}
 
       {hasPendingGoal && continueGoal ? (
         <button

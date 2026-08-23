@@ -258,15 +258,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     }
     set({ settings: next })
     saveLocal(next)
-    // Pi Host is the only runtime owner in Electron. The legacy engine path is
-    // browser-only; renderer-owned preferences still use the legacy bridge below.
+    // Pi Host is the only runtime owner (ADR-0045/ADR-0046). Nothing in the
+    // renderer executes settings any more; the bridge only persists them.
     if (!isElectronPiProduction()) {
-      try {
-        const { agentEngine } = await import('../agent/engine.ts')
-        agentEngine.configure(next)
-      } catch {
-        /* ignore if engine unavailable */
-      }
       if (window.subagents?.settings?.set) await window.subagents.settings.set(next)
     } else if (window.subagents?.settings?.set) {
       // Pi Host owns runtime settings, but the legacy bridge still persists
