@@ -305,7 +305,7 @@ export class PiHostSupervisor {
     return response.result.builtinTools
   }
 
-  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: unknown }): Promise<NonNullable<PiHostResponse['result']>> {
+  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: unknown }): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}), ...(profile ? { profile } : {}), ...(orchestration || {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')
     return response.result
@@ -314,6 +314,18 @@ export class PiHostSupervisor {
   async cancelTurn(runId: string): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/cancel', { runId })
     if (response.error || response.result?.settlement !== 'cancelled') throw new Error(response.error?.message || 'Pi turn cancellation failed')
+    return response.result
+  }
+
+  /**
+   * Ask a turn to park at its next tool boundary.
+   *
+   * Unlike `cancelTurn` this never severs a tool that is already running, so a
+   * write or a shell command completes and reports its own evidence.
+   */
+  async interruptTurn(runId: string, reason: 'user' | 'timeout' = 'user'): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('turn/interrupt', { runId, reason })
+    if (response.error || response.result?.settlement !== 'interrupted') throw new Error(response.error?.message || 'Pi turn interrupt failed')
     return response.result
   }
 

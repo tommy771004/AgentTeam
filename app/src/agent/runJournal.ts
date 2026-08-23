@@ -52,7 +52,35 @@ export type JournalEntry = {
   dodMet?: boolean
   iterations?: number
   maxIterations?: number
+  /** Why a stopped run stopped: a user press or a spent time budget. */
+  interruptReason?: 'user' | 'timeout'
+  /**
+   * Every context compaction this run performed: when, and how much of the
+   * transcript it covered. Counts only — the pre-compaction text itself lives
+   * in the durable checkpoint, never here.
+   */
+  compactions?: JournalCompaction[]
+  /**
+   * Proof that this run's knowledge digest reached the project's memory
+   * directory. Absent means it did not — a model claiming otherwise is wrong
+   * by construction (ADR-0048).
+   */
+  memorySink?: { at: string; path: string; bytes: number }
 }
+
+export type JournalCompaction = {
+  at: string
+  /** How many earlier messages the summary replaced. */
+  replacedMessages: number
+  /** Transcript length after the replacement, so the range is reconstructable. */
+  remainingMessages: number
+  summaryChars: number
+  /** Estimated tokens that triggered the preflight, and the window it neared. */
+  estimatedTokens?: number
+  contextWindow?: number
+}
+
+const MAX_COMPACTIONS_PER_RUN = 40
 
 export type RecoveryItem = {
   kind: JournalKind | 'storage'
@@ -124,11 +152,19 @@ function bounded(value: unknown, max: number): string | undefined {
   return text ? text.slice(0, max) : undefined
 }
 
-/** Bounded non-negative counter; anything else is simply absent. */
-function counter(value: unknown): number | undefined {
+/**
+ * Bounded non-negative counter; anything else is simply absent.
+ *
+ * `max` differs by field on purpose: iteration counts are single digits, while
+ * a token estimate is six. One shared ceiling would silently drop the latter.
+ */
+function counter(value: unknown, max = 10_000): number | undefined {
   const parsed = Math.floor(Number(value))
-  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 10_000 ? parsed : undefined
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= max ? parsed : undefined
 }
+
+/** Token counts and window sizes run far past the iteration ceiling. */
+const MAX_TOKEN_COUNT = 100_000_000
 
 function emptyState(): JournalState {
   return { version: 1, entries: [], updatedAt: now() }
@@ -168,6 +204,21 @@ function parseState(raw: string | null): JournalState | null {
         dodMet: typeof entry.dodMet === 'boolean' ? entry.dodMet : undefined,
         iterations: counter(entry.iterations),
         maxIterations: counter(entry.maxIterations),
+        interruptReason:
+          entry.interruptReason === 'user' || entry.interruptReason === 'timeout'
+            ? entry.interruptReason
+            : undefined,
+        memorySink:
+          entry.memorySink
+          && typeof entry.memorySink === 'object'
+          && typeof (entry.memorySink as { path?: unknown }).path === 'string'
+            ? (entry.memorySink as JournalEntry['memorySink'])
+            : undefined,
+        compactions: Array.isArray(entry.compactions)
+          ? (entry.compactions as JournalCompaction[])
+              .filter((item) => item && typeof item === 'object' && typeof item.at === 'string')
+              .slice(-MAX_COMPACTIONS_PER_RUN)
+          : undefined,
       }))
       .filter(
         (entry) =>
@@ -305,7 +356,10 @@ function upsert(entry: Omit<JournalEntry, 'attempt' | 'startedAt' | 'updatedAt'>
 
 function terminalStatus(status: string): JournalStatus {
   if (status === 'success') return 'success'
-  if (status === 'cancelled' || status === 'skipped') return 'cancelled'
+  // `halted` is the agent-side word for a run that was stopped, not one that
+  // failed. Recording it as a failure would make the durable record disagree
+  // with what the user was shown.
+  if (status === 'cancelled' || status === 'skipped' || status === 'halted') return 'cancelled'
   if (status === 'interrupted') return 'interrupted'
   return 'failed'
 }
@@ -357,6 +411,7 @@ export type RunTerminalSettlement = {
   dodMet?: boolean
   iterations?: number
   maxIterations?: number
+  interruptReason?: 'user' | 'timeout'
 }
 
 export function recordRunTerminal(input: {
@@ -384,6 +439,7 @@ export function recordRunTerminal(input: {
     dodMet: external ? undefined : input.settlement?.dodMet,
     iterations: external ? undefined : counter(input.settlement?.iterations),
     maxIterations: external ? undefined : counter(input.settlement?.maxIterations),
+    interruptReason: input.settlement?.interruptReason,
   })
 }
 
@@ -393,6 +449,51 @@ export function recordRunTerminal(input: {
  * Used by the live completion notice, so a run the user was shown while the app
  * was open is not narrated again as news on the next restart.
  */
+/**
+ * Record one context compaction against its run.
+ *
+ * The event is what tells a later reader that the agent's view of the
+ * conversation was rewritten, and when. It is deliberately counts-only: the
+ * text it replaced is retrievable from the durable checkpoint instead.
+ */
+export function recordRunCompaction(runId: string, event: Omit<JournalCompaction, 'at'>): void {
+  if (!runId) return
+  const state = loadState()
+  const entry = state.entries.find((item) => item.kind === 'run' && item.id === runId)
+  if (!entry) return
+  const compaction: JournalCompaction = {
+    at: now(),
+    replacedMessages: Math.max(0, Math.floor(Number(event.replacedMessages) || 0)),
+    remainingMessages: Math.max(0, Math.floor(Number(event.remainingMessages) || 0)),
+    summaryChars: Math.max(0, Math.floor(Number(event.summaryChars) || 0)),
+    estimatedTokens: counter(event.estimatedTokens, MAX_TOKEN_COUNT),
+    contextWindow: counter(event.contextWindow, MAX_TOKEN_COUNT),
+  }
+  entry.compactions = [...(entry.compactions || []), compaction].slice(-MAX_COMPACTIONS_PER_RUN)
+  entry.updatedAt = compaction.at
+  persistState(state)
+}
+
+/**
+ * Record that a run's knowledge digest was written to the project.
+ *
+ * Called only with a real write result; there is no path that records a sink
+ * from an intention or from a model's own account of what it did.
+ */
+export function recordRunMemorySink(runId: string, input: { path: string; bytes: number }): void {
+  if (!runId || !input?.path) return
+  const state = loadState()
+  const entry = state.entries.find((item) => item.kind === 'run' && item.id === runId)
+  if (!entry) return
+  entry.memorySink = {
+    at: now(),
+    path: bounded(input.path, 400) || input.path.slice(0, 400),
+    bytes: Math.max(0, Math.floor(Number(input.bytes) || 0)),
+  }
+  entry.updatedAt = entry.memorySink.at
+  persistState(state)
+}
+
 export function markRunDelivered(runId: string): void {
   const state = loadState()
   const entry = state.entries.find((item) => item.kind === 'run' && item.id === runId)

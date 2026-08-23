@@ -4,12 +4,12 @@
 
 **Blocked by:** 03 — Durable checkpoint storage(壓縮前原文需要權威儲存)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] preflight 在每個 turn 送出前檢查估算 token 量,超閾值觸發 compaction
-- [ ] 截斷層先於 compaction:未達摘要閾值前行為與現況相同
-- [ ] 壓縮器以介面注入,預設實作走既有 LLM provider
-- [ ] journal 記錄每次壓縮事件(時間、範圍)
-- [ ] 壓縮前原文可從 checkpoint 取回
-- [ ] UI 出現可展開的 compaction marker item kind
-- [ ] 測試:超量 context 輸入 → 斷言觸發、journal 事件、marker、原文可回查
+- [x] preflight 在每個 turn 送出前檢查估算 token 量,超閾值觸發 compaction
+- [x] 截斷層先於 compaction:未達摘要閾值前行為與現況相同
+- [x] 壓縮器以介面注入,預設實作走既有 LLM provider
+- [x] journal 記錄每次壓縮事件(時間、範圍)
+- [x] 壓縮前原文可從 checkpoint 取回
+- [x] UI 出現可展開的 compaction marker item kind
+- [x] 測試:超量 context 輸入 → 斷言觸發、journal 事件、marker、原文可回查

@@ -36,6 +36,7 @@ import { resolveRunSettingsOverrides, snapshotRunSettings } from './runSettingsS
 import { normalizeExternalCliRunPolicy } from './externalCliRunSession.ts'
 import { snapshotExternalCliConnectorRequirements } from './externalCliConnectorSnapshot.ts'
 import { orchestrationFromAgent } from './runLifecycle.ts'
+import { resolveTurnTimeout } from './turnTimeout.ts'
 
 import { v4 as uuid } from 'uuid'
 import {
@@ -739,6 +740,46 @@ export async function finalizeTaskRun(
     /* archive must not block release/drain */
   }
 
+  // A parked run leaves a resume point. Replay safety is asserted only for an
+  // interrupt, because that is the one stop that happens at a tool boundary
+  // with nothing mid-execution — the state ADR-0042 requires before a resume
+  // may skip already-completed work.
+  if (finalAgent.interruptReason) {
+    try {
+      const { saveCompactionCheckpoint } = await import('./compactionCheckpoint.ts')
+      const effects = (finalAgent.toolCalls || [])
+        .filter((tool) => tool.ok !== false && /write|edit|create|patch|bash|shell|send|post|publish|delete/i.test(tool.tool))
+        .map((tool) => `${tool.tool}${tool.input?.path ? ` · ${String(tool.input.path)}` : ''}`)
+      await saveCompactionCheckpoint(runId, {
+        threadId: tid,
+        objective,
+        summary: buildResumeSummary(finalAgent),
+        messages: [],
+        parkedAtToolBoundary: true,
+        replaySafe: true,
+        effects,
+      })
+    } catch {
+      /* No checkpoint means no resume offer; never block finalization. */
+    }
+  }
+
+  // Sediment what this run learned into the project, before the terminal
+  // marker: the journal entry then either carries write evidence or does not,
+  // and nothing in between can claim the knowledge was kept.
+  try {
+    await persistRunMemoryDigest({
+      runId,
+      threadId: tid,
+      objective,
+      finalAgent,
+      status: String(status),
+      projectRoot: input.projectRoot,
+    })
+  } catch {
+    /* A missing digest is reported by its absence, never by a failed run. */
+  }
+
   // Persist the terminal marker only after the user-visible summary and
   // archive evidence have been attempted. A crash before this point remains
   // conservatively recoverable as interrupted instead of claiming a complete
@@ -753,7 +794,10 @@ export async function finalizeTaskRun(
       resultWrittenToThread: true,
       rendererPresent: rendererPresent(),
     },
-    settlement: orchestrationFromAgent(finalAgent),
+    settlement: {
+      ...orchestrationFromAgent(finalAgent),
+      interruptReason: finalAgent.interruptReason,
+    },
   })
 
   try {
@@ -762,7 +806,11 @@ export async function finalizeTaskRun(
       String(status) === 'failed'
         ? '失敗'
         : String(status) === 'halted'
-          ? '已停止'
+          ? finalAgent.interruptReason === 'timeout'
+            ? '已逾時中止'
+            : finalAgent.interruptReason === 'user'
+              ? '已中止'
+              : '已停止'
           : '完成'
     // The settled outcome rides the same registry entry the shell watches, so
     // the completion notice reads one record instead of reconstructing state.
@@ -775,6 +823,7 @@ export async function finalizeTaskRun(
       iterations: outcomeSettlement?.iterations,
       maxIterations: outcomeSettlement?.maxIterations,
       dodMet: outcomeSettlement?.dodMet,
+      interruptReason: finalAgent.interruptReason,
     })
   } catch {
     /* renderer activity is optional for headless / recovery paths */
@@ -877,6 +926,99 @@ export async function finalizeRecoveredExternalRun(input: {
     recoveredFinalizationClaims.delete(runId)
     throw error
   }
+}
+
+/** How many past digests a new run on the same thread is reminded of. */
+const PRIOR_CONTEXT_DIGESTS = 3
+
+/**
+ * The prior-context block for a new run on an existing thread.
+ *
+ * Read from the journal's own write evidence, so a thread only carries forward
+ * digests that provably reached disk — never ones a model said it wrote.
+ */
+async function loadThreadPriorContext(threadId: string, projectRoot?: string): Promise<string> {
+  try {
+    const [{ listJournalEntries }, { parseRunMemoryDigest }, { buildPriorContextBlock }] = await Promise.all([
+      import('./runJournal.ts'),
+      import('./runMemoryDigest.ts'),
+      import('./runMemorySink.ts'),
+    ])
+    const sinks = listJournalEntries()
+      .filter((entry) => entry.kind === 'run' && entry.threadId === threadId && entry.memorySink)
+      .slice(-PRIOR_CONTEXT_DIGESTS)
+    if (!sinks.length) return ''
+    const digests = []
+    for (const entry of sinks) {
+      const read = await window.subagents?.tools?.workspaceRead?.(entry.memorySink!.path, projectRoot)
+      const content = typeof read === 'string' ? read : read?.content
+      if (!content) continue
+      const digest = parseRunMemoryDigest(content, {
+        runId: entry.id,
+        threadId,
+        at: entry.memorySink!.at,
+      })
+      if (digest) digests.push(digest)
+    }
+    return digests.length ? buildPriorContextBlock(digests, PRIOR_CONTEXT_DIGESTS) : ''
+  } catch {
+    // Prior context is a courtesy; a missing one must never block a run.
+    return ''
+  }
+}
+
+/**
+ * Write this run's four-section digest into the project's memory directory.
+ *
+ * Everything in the digest comes from recorded execution — plan steps, failed
+ * steps, halt reasons — never from the model narrating its own competence.
+ */
+async function persistRunMemoryDigest(args: {
+  runId: string
+  threadId: string
+  objective: string
+  finalAgent: import('./types.ts').AgentState
+  status: string
+  projectRoot?: string
+}): Promise<void> {
+  const [{ buildRunMemoryDigestFromRun }, { renderRunMemoryDigest, runMemoryRelativePath, isWorthPersisting }] =
+    await Promise.all([import('./runMemoryDigest.ts'), import('./runMemorySink.ts')])
+  const digest = buildRunMemoryDigestFromRun({
+    runId: args.runId,
+    threadId: args.threadId,
+    objective: args.objective,
+    agent: args.finalAgent,
+    status: args.status,
+  })
+  if (!isWorthPersisting(digest)) return
+  const relativePath = runMemoryRelativePath(digest)
+  const written = await window.subagents?.learning?.export?.({
+    relativePath,
+    content: renderRunMemoryDigest(digest),
+    projectRoot: args.projectRoot,
+    overwrite: true,
+  })
+  if (!written?.ok || !written.path) return
+  const { recordRunMemorySink } = await import('./runJournal.ts')
+  recordRunMemorySink(args.runId, { path: written.path, bytes: written.bytes || 0 })
+}
+
+/**
+ * What a resumed run is told about where the previous attempt got to.
+ *
+ * Built from the run's own recorded steps and partial answer — never from a
+ * model claim about its own progress (ADR-0048).
+ */
+function buildResumeSummary(agent: import('./types.ts').AgentState): string {
+  const steps = (agent.steps || [])
+    .filter((step) => step.status === 'COMPLETED')
+    .slice(-12)
+    .map((step) => `- ${step.description || step.action || `步驟 ${step.step}`}`)
+  const partial = (agent.result || '').trim().slice(0, 2_000)
+  return [
+    steps.length ? `已完成的步驟：\n${steps.join('\n')}` : '沒有記錄到已完成的步驟。',
+    partial ? `\n中斷前的部分輸出：\n${partial}` : '',
+  ].join('\n').trim()
 }
 
 async function pushRunProcessSummary(args: {
@@ -1052,6 +1194,7 @@ async function pushRunProcessSummary(args: {
     iterations: settlement?.iterations,
     maxIterations: settlement?.maxIterations,
     executionKind: settlement?.executionKind,
+    interruptReason: finalAgent.interruptReason,
     subDesign: subDesignBrief
       ? {
           briefId: subDesignBrief.id,
@@ -1627,8 +1770,14 @@ async function coordinateTaskRun(
     })
   }
 
+  // A conversation that forgets everything between runs makes the user repeat
+  // themselves. The last few digests from this thread ride in as background,
+  // never as instructions that could outrank the request being made now.
+  const priorContext = await loadThreadPriorContext(tid, opts.projectRoot?.trim() || opts.overrides?.projectRoot)
+
   const extraSystem = [
     opts.overrides?.extraSystemContext,
+    priorContext,
     opts.extraContext?.trim()
       ? `## External event / channel context\n${opts.extraContext.trim().slice(0, 12_000)}`
       : '',
@@ -1650,9 +1799,23 @@ async function coordinateTaskRun(
   // When resuming, engine objective is the original goal (not the "繼續" phrase)
   const dispatchObjective = continueSnap ? continueSnap.objective : objective
 
+  // Admission owns the patience budget: one decision per run, inherited by
+  // every ingress, instead of each caller inventing its own deadline.
+  const admittedTurnTimeoutMs = resolveTurnTimeout({
+    runner: (opts.runner || thr.threads.find((thread) => thread.id === tid)?.runner || 'builtin') === 'builtin'
+      ? 'builtin'
+      : 'external',
+    pattern: (forcedLoopType || 'Turn-based') as Parameters<typeof resolveTurnTimeout>[0]['pattern'],
+    settingsTimeoutMs: settings.turnTimeoutMs,
+    threadTimeoutMs: thr.threads.find((thread) => thread.id === tid)?.turnTimeoutMs,
+    runTimeoutMs: opts.overrides?.turnTimeoutMs,
+    unattended: opts.overrides?.unattended ?? sourceIsAutomation,
+  })
+
   const overrides: RuntimeOverrides = {
     ...admittedSettings,
     ...(opts.overrides || {}),
+    turnTimeoutMs: admittedTurnTimeoutMs,
     runId,
     sourceKind: opts.sourceKind || opts.overrides?.sourceKind,
     triggerSource: planBubbleMetadata.triggerSource,

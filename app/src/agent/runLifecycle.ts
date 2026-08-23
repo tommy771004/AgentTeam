@@ -31,6 +31,9 @@ export type RunLifecycleStatus =
   | 'halted'
   | string
 
+/** Why a terminal run stopped short of its own settlement. */
+export type RunInterruptReason = 'user' | 'timeout'
+
 export type RunLifecycleTone =
   | 'muted'
   | 'active'
@@ -66,6 +69,18 @@ export type RunLifecycleInput = {
   objective?: string
   /** Iteration/DoD evidence; drives the honest exhausted terminal wording. */
   orchestration?: RunOrchestrationSnapshot
+  /**
+   * Set when the run was parked rather than allowed to settle. A stop the user
+   * pressed and a spent time budget are different events and must not share
+   * one word with each other or with a failure.
+   */
+  interruptReason?: RunInterruptReason
+  /**
+   * The user pressed stop and the runner has not settled yet. The press must
+   * be answered on screen immediately, so the projection stops the spinner and
+   * withdraws the stop affordance without waiting for the Host.
+   */
+  stopping?: boolean
 }
 
 export type RunLifecycleView = {
@@ -80,6 +95,10 @@ export type RunLifecycleView = {
   canStop: boolean
   /** Ran out of iteration budget with the DoD still unmet — not a plain success. */
   iterationExhausted: boolean
+  /** Present when the run was parked; distinguishes a user stop from a timeout. */
+  interruptReason?: RunInterruptReason
+  /** A stop has been acknowledged and the runner is parking. */
+  stopping: boolean
 }
 
 const LIVE_PHASES = new Set<RunLifecyclePhase>([
@@ -196,7 +215,12 @@ export function iterationExhaustedLabel(iterations?: number): string {
   return rounds ? `已完成（未達 DoD · 用盡 ${rounds} 輪）` : '已完成（未達 DoD）'
 }
 
-function phaseLabel(phase: RunLifecyclePhase | 'idle', statusLine: string, objective: string) {
+function phaseLabel(
+  phase: RunLifecyclePhase | 'idle',
+  statusLine: string,
+  objective: string,
+  interruptReason?: RunInterruptReason,
+) {
   if (phase === 'idle') return objective ? '準備執行' : '已待命'
   if (phase === 'starting') return statusLine || (objective ? '正在準備任務' : '正在啟動')
   if (phase === 'planning') return statusLine || '正在整理任務'
@@ -208,6 +232,8 @@ function phaseLabel(phase: RunLifecyclePhase | 'idle', statusLine: string, objec
   if (phase === 'finalizing') return '正在整理執行摘要…'
   if (phase === 'completed') return statusLine || '已完成'
   if (phase === 'failed') return statusLine || '執行失敗'
+  if (interruptReason === 'timeout') return '已逾時中止'
+  if (interruptReason === 'user') return '已中止'
   return statusLine || '已停止'
 }
 
@@ -252,6 +278,10 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
   // A truncated run still settles as `completed`; only its wording, tone and
   // icon change, so HITL and activity-phase precedence above stay untouched.
   const iterationExhausted = phase === 'completed' && isIterationExhausted(input.orchestration)
+  // Only a parked run carries a reason; a plain stop keeps the neutral wording.
+  const interruptReason = phase === 'cancelled' ? input.interruptReason : undefined
+
+  const stopping = Boolean(input.stopping) && !input.terminal && phase !== 'idle' && !TERMINAL_PHASES.has(phase)
 
   const tone: RunLifecycleTone =
     phase === 'completed'
@@ -261,7 +291,8 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
       : phase === 'failed'
         ? 'danger'
         : phase === 'cancelled'
-          ? 'muted'
+        // A stop the user pressed needs no alarm; a spent time budget does.
+          ? interruptReason === 'timeout' ? 'attention' : 'muted'
           : needsAttention
             ? 'attention'
             : live
@@ -276,29 +307,37 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
       : phase === 'failed'
         ? 'error'
         : phase === 'cancelled'
-          ? 'stop_circle'
+          ? interruptReason === 'timeout' ? 'hourglass_disabled' : 'stop_circle'
           : phase === 'manual_intervention'
             ? 'shield'
             : phase === 'awaiting_user'
               ? 'question_mark'
-              : live
-                ? 'progress_activity'
-                : 'play_circle'
+              // A stop already registered must not keep spinning as if nothing
+              // happened; `progress_activity` is what the surfaces animate.
+              : stopping
+                ? 'pause_circle'
+                : live
+                  ? 'progress_activity'
+                  : 'play_circle'
 
   return {
     phase,
     label: iterationExhausted
       ? iterationExhaustedLabel(input.orchestration?.iterations)
-      : phaseLabel(phase, input.statusLine?.trim() || '', input.objective?.trim() || ''),
+      : stopping
+        ? '正在安全停車…'
+        : phaseLabel(phase, input.statusLine?.trim() || '', input.objective?.trim() || '', interruptReason),
     tone,
     icon,
     live,
     terminal,
     needsAttention,
     iterationExhausted,
+    interruptReason,
+    stopping,
     // Once the runner has returned, finalization is an atomic hand-off; the
     // stop affordance must not suggest that archive/queue settlement is abortable.
-    canStop: live && phase !== 'finalizing',
+    canStop: live && phase !== 'finalizing' && !stopping,
   }
 }
 

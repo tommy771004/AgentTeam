@@ -4,11 +4,11 @@
 
 **Blocked by:** 01 — Abortable turn 協定(共用同一條安全停車路徑)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] turn 逾時觸發 abort 路徑,settlement 成因為 `interrupted(timeout)`
-- [ ] timeout 用假 clock 測試驅動,不靠真實等待
-- [ ] 預設值依 runner/pattern 在 admission 決定,thread 設定可覆寫
-- [ ] 設定介面可調整 timeout 額度
-- [ ] 「已逾時中止」語彙出現在 feed 終態列與 run summary,與手動中止、失敗三種說法互不相同
-- [ ] journal terminal 記錄含 timeout 成因
+- [x] turn 逾時觸發 abort 路徑,settlement 成因為 `interrupted(timeout)`
+- [x] timeout 用假 clock 測試驅動,不靠真實等待
+- [x] 預設值依 runner/pattern 在 admission 決定,thread 設定可覆寫
+- [x] 設定介面可調整 timeout 額度
+- [x] 「已逾時中止」語彙出現在 feed 終態列與 run summary,與手動中止、失敗三種說法互不相同
+- [x] journal terminal 記錄含 timeout 成因

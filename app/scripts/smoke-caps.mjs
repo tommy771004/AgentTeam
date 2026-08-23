@@ -2277,8 +2277,14 @@ await test('drift guard: toolLoop wires checkpoint + memory flush + post-compact
   const fs = await import('node:fs')
   const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
   const gov = fs.readFileSync(path.join(appRoot, 'src/agent/tools/contextGovernor.ts'), 'utf8')
-  assert.match(loop, /saveCompactionCheckpoint/)
+  assert.match(loop, /await saveCompactionCheckpoint/)
   assert.match(loop, /onPreCompactionFlush/)
+  // Checkpoints are durable main-process state now; the renderer must not keep
+  // a localStorage copy that a quota or LRU could silently reduce.
+  const checkpoint = fs.readFileSync(path.join(appRoot, 'src/agent/compactionCheckpoint.ts'), 'utf8')
+  assert.doesNotMatch(checkpoint, /localStorage/, 'compaction checkpoints must not fall back to renderer storage')
+  assert.doesNotMatch(checkpoint, /MAX_BYTES|MAX_RUNS/, 'durable checkpoints have no quota/LRU degradation path')
+  assert.match(checkpoint, /subagents\?\.checkpoints/, 'checkpoints go through the main-process bridge')
   assert.match(gov, /壓縮後記憶召回/)
   assert.match(gov, /onContextUsage/)
   assert.match(loop, /onContextUsage/)

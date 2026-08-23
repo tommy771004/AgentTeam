@@ -20,7 +20,12 @@ assert.match(settingsStore, /stripPiOwnedSettings/)
 assert.match(settingsStore, /isElectronPiProduction\(\)/)
 assert.match(settingsStore, /piSettingsPatchFromLlmSettings/)
 assert.match(dispatch, /Pi Core Host bridge is unavailable/)
-assert.match(checkpoint, /Pi SessionManager owns transcript history and compaction/)
+// Checkpoints moved from renderer storage to the main-process durable layer.
+// The ownership claim is unchanged — the renderer still owns none of it — but
+// the owner it defers to is now the Host store rather than a skipped write.
+assert.doesNotMatch(checkpoint, /localStorage/, 'the renderer must not own checkpoint persistence')
+assert.match(checkpoint, /it lives in the main process alongside the durable journal/)
+assert.match(checkpoint, /subagents\?\.checkpoints/)
 assert.match(plugins, /Pi Host extensions are the only executable resource\/tool owner/)
 assert.match(learning, /Pi Host owns durable memories\/extensions/)
 assert.match(app, /isElectronPiProduction\(\)/)

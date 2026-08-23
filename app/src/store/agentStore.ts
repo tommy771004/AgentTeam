@@ -308,6 +308,7 @@ async function executePiHostTurn(
       pattern: loopType,
       maxIterations,
       definitionOfDone,
+      timeoutMs: overrides.turnTimeoutMs,
       pluginExecution: overrides.subDesignPluginExecution,
     })
     if (result.pluginExecution) {
@@ -325,6 +326,8 @@ async function executePiHostTurn(
     }
     const success = result.settlement === 'success'
     const halted = result.settlement === 'cancelled' || result.settlement === 'interrupted'
+    // A parked turn is a stop, not a failure — and the reason decides the word.
+    const interruptReason = result.settlement === 'interrupted' ? result.interruptReason || 'user' : undefined
     // Iteration/DoD evidence travels with the run so a truncated success reads
     // as truncated on every surface instead of as a plain check mark.
     const orchestration = result.orchestration
@@ -341,13 +344,21 @@ async function executePiHostTurn(
       progress: 100,
       currentIteration: orchestration?.iterations || undefined,
       orchestration,
-      result: result.result || (success ? 'Pi Core 完成（無文字輸出）' : `Pi Core ${result.settlement}`),
+      interruptReason,
+      result: result.result
+        || (success
+          ? 'Pi Core 完成（無文字輸出）'
+          : interruptReason === 'timeout'
+            ? '任務已逾時中止，沒有產出可保留的部分回覆。'
+            : interruptReason === 'user'
+              ? '任務已中止，沒有產出可保留的部分回覆。'
+              : `Pi Core ${result.settlement}`),
       confidence: success ? 0.9 : 0.3,
       loopConfig,
       executionKind: 'loop',
       startedAt,
       finishedAt: new Date().toISOString(),
-      logs: [{ id: 'pi-host-end', timestamp: new Date().toISOString(), level: success ? 'SUCCESS' : halted ? 'HALT' : 'ERROR', message: `Pi Core Host settlement=${result.settlement}` }],
+      logs: [{ id: 'pi-host-end', timestamp: new Date().toISOString(), level: success ? 'SUCCESS' : halted ? 'HALT' : 'ERROR', message: `Pi Core Host settlement=${result.settlement}${interruptReason ? `(${interruptReason})` : ''}` }],
       steps: [{ step: 1, action: 'pi-host-turn', description: 'Pi Core Host turn', status: success ? 'COMPLETED' : halted ? 'SKIPPED' : 'FAILED', result: result.result || result.settlement, durationMs: Date.now() - t0, modelSource: 'primary' }],
     })
     publishRun(set, get, runId, final)
@@ -972,14 +983,20 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       const target = runId
       if (!target) return
       void loadLegacyEngine().then((engine) => engine.stop(target)).catch(() => {})
+      // Safe park, not a hard cut: the Host stops at its next tool boundary so
+      // a write or shell command already running still finishes and reports.
+      const interruptPiHostTurn = window.subagents?.piHost?.turn?.interrupt
       const cancelPiHostTurn = window.subagents?.piHost?.turn?.cancel
-      if (cancelPiHostTurn) void cancelPiHostTurn(target).catch(() => {})
+      if (interruptPiHostTurn) void interruptPiHostTurn({ runId: target, reason: 'user' }).catch(() => {})
+      else if (cancelPiHostTurn) void cancelPiHostTurn(target).catch(() => {})
       // Cancel only the selected run's CLI / bash processes.
       const cancelCliRun = window.subagents?.cli?.cancel
       if (cancelCliRun) void cancelCliRun(target).catch(() => {})
+      // Immediate feedback: the status line and spinner must answer the press
+      // now, not when the Host eventually settles.
       try {
         void import('./runActivityStore.ts').then(({ useRunActivityStore }) => {
-          useRunActivityStore.getState().push({ kind: 'status', title: '使用者停止', runId: target })
+          useRunActivityStore.getState().markStopping(target, '正在安全停車…')
         })
       } catch {
         /* ignore */

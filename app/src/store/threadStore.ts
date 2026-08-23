@@ -60,6 +60,8 @@ export type ThreadRunSummary = {
   iterations?: number
   maxIterations?: number
   executionKind?: 'loop' | 'external'
+  /** Set when the run was parked; keeps a user stop distinct from a timeout. */
+  interruptReason?: 'user' | 'timeout'
   subDesign?: {
     briefId: string
     stage: string
@@ -120,6 +122,11 @@ export type Thread = {
   /** 執行引擎：內建 or 本機 CLI */
   runner: ThreadRunner
   loopType: LoopType | null
+  /**
+   * Per-conversation turn deadline override in ms; absent uses the Settings
+   * value, and that in turn falls back to the per-pattern default.
+   */
+  turnTimeoutMs?: number
   bubbles: ThreadBubble[]
   /** Latest structured plan snapshot from update_plan / CLI plan events. */
   runPlan?: ThreadPlanItem[]

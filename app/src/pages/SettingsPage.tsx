@@ -811,6 +811,23 @@ export function SettingsPage() {
                   </PillSelect>
                 }
               />
+              <SettingsRow
+                title="單一任務時間上限"
+                description="超過這個時間仍沒有進展的任務會安全停車，收尾寫成「已逾時中止」而不是失敗。每次有新進展都會重新計時；「依任務型態」會用內建預設（一般對話 10 分鐘、Goal-based 45 分鐘）。"
+                control={
+                  <PillSelect
+                    value={String(settings.turnTimeoutMs || 0)}
+                    onChange={(v) => set({ turnTimeoutMs: Number(v) })}
+                  >
+                    <option value="0">依任務型態</option>
+                    <option value="300000">5 分鐘</option>
+                    <option value="900000">15 分鐘</option>
+                    <option value="1800000">30 分鐘</option>
+                    <option value="3600000">1 小時</option>
+                    <option value="10800000">3 小時</option>
+                  </PillSelect>
+                }
+              />
             </SettingsGroup>
             <SettingsGroup title="通知">
               <SettingsRow

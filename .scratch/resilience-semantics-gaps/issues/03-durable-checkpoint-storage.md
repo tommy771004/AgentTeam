@@ -4,10 +4,10 @@
 
 **Blocked by:** None — can start immediately(04 與 05 的地基/prefactor)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] checkpoint 寫讀走主進程儲存層,重啟後可取回
-- [ ] 無 LRU 上限與容量降級路徑
-- [ ] localStorage 版本的寫入/讀取程式碼移除,不留 fallback
-- [ ] kill-and-restart 測試:checkpoint 後殺掉 Host,重啟後 checkpoint 完整可讀
-- [ ] 既有 smoke(drift guards)改指新 owner 後全綠
+- [x] checkpoint 寫讀走主進程儲存層,重啟後可取回
+- [x] 無 LRU 上限與容量降級路徑
+- [x] localStorage 版本的寫入/讀取程式碼移除,不留 fallback
+- [x] kill-and-restart 測試:checkpoint 後殺掉 Host,重啟後 checkpoint 完整可讀
+- [x] 既有 smoke(drift guards)改指新 owner 後全綠

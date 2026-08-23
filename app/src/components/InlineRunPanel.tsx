@@ -156,6 +156,8 @@ export function InlineRunPanel({
     terminal: Boolean(activity.terminal),
     objective: agent.objective,
     orchestration: orchestrationFromAgent(agent),
+    interruptReason: agent.interruptReason,
+    stopping: activity.stopping,
   })
   const live = lifecycle.live
 

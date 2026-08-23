@@ -11,6 +11,7 @@ function iconFor(kind: string) {
   if (kind === 'file') return 'edit'
   if (kind === 'error') return 'error'
   if (kind === 'done') return 'check_circle'
+  if (kind === 'compaction') return 'unfold_less'
   return 'terminal'
 }
 
@@ -33,6 +34,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
       dodMet: summary.dodMet,
       executionKind: summary.executionKind,
     },
+    interruptReason: summary.interruptReason,
   })
   const outcome = summary.status ? lifecycle.label : ''
   const label = summary.files.length

@@ -4,11 +4,11 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] submit 後觸發 abort,settlement 成因為 `interrupted(by user)`,不是 failed
-- [ ] Host 在 tool boundary 停車,不在 tool 執行中途硬切(以假工具驗證停車點)
-- [ ] feed 中未完成的 text delta 以中斷標記封口,已完成的部分輸出保留
-- [ ] journal 有 terminal 記錄,lifecycle 投影顯示「已中止」語彙(tone 與 failed 不同)
-- [ ] UI 中止操作有立即回饋,不等待 settlement 才反應
-- [ ] 測試從 taskRunCoordinator.runTask 與 Pi Host 協定邊界驅動,不測內部私有函式
+- [x] submit 後觸發 abort,settlement 成因為 `interrupted(by user)`,不是 failed
+- [x] Host 在 tool boundary 停車,不在 tool 執行中途硬切(以假工具驗證停車點)
+- [x] feed 中未完成的 text delta 以中斷標記封口,已完成的部分輸出保留
+- [x] journal 有 terminal 記錄,lifecycle 投影顯示「已中止」語彙(tone 與 failed 不同)
+- [x] UI 中止操作有立即回饋,不等待 settlement 才反應
+- [x] 測試從 taskRunCoordinator.runTask 與 Pi Host 協定邊界驅動,不測內部私有函式

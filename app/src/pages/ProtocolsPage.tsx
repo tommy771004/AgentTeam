@@ -123,6 +123,8 @@ export function ProtocolsPage() {
     terminal: Boolean(activity?.terminal),
     objective: presentationAgent.objective,
     orchestration: orchestrationFromAgent(presentationAgent),
+    interruptReason: presentationAgent.interruptReason,
+    stopping: activity?.stopping,
   })
   const composerApprovalMode = activeId ? composerApprovalModes[activeId] : undefined
   // Ticket 17: stage deliverables are read from the persisted artifact index,

@@ -43,6 +43,8 @@ function kindIcon(kind: string): string {
       return 'edit'
     case 'thought':
       return 'psychology'
+    case 'compaction':
+      return 'unfold_less'
     case 'error':
       return 'error'
     case 'done':
@@ -201,11 +203,15 @@ export function RunProcessFeed({
     terminal: Boolean(activity?.terminal),
     objective: agent.objective,
     orchestration: orchestrationFromAgent(agent),
+    interruptReason: agent.interruptReason,
+    stopping: activity?.stopping,
   })
   const phase = lifecycle.label
   const toolCount = new Set(
     [
-      ...agent.toolCalls.map((tool) => tool.id),
+      // Guarded like every other access in this file: a run snapshot without a
+      // tool list must degrade to an empty trace, never blank the whole app.
+      ...(agent.toolCalls || []).map((tool) => tool.id),
       ...events
         .filter((event) => event.kind === 'tool')
         .map((event) => event.callId || event.id),
@@ -555,9 +561,13 @@ export function RunProcessFeed({
                       onClick={() => hasDetail && setExpanded((id) => (id === group.id ? null : group.id))}
                     >
                       <Icon
-                        name={active ? 'progress_activity' : kindIcon(row.kind)}
+                        name={active && row.kind !== 'compaction' ? 'progress_activity' : kindIcon(row.kind)}
                         size={15}
-                        className={active ? 'shrink-0 animate-spin text-ink' : 'shrink-0 text-ink-3'}
+                        className={
+                          active && row.kind !== 'compaction'
+                            ? 'shrink-0 animate-spin text-ink'
+                            : 'shrink-0 text-ink-3'
+                        }
                       />
                       <span className="shrink-0 font-medium">{row.title}</span>
                       {hasDetail ? (

@@ -46,8 +46,28 @@ type PiSessionRuntime = {
   }
 }
 export type PiHostHistoryMessage = { role: 'user' | 'assistant'; content: string }
+/** Why a turn stopped short of its own settlement. */
+export type PiTurnInterruptReason = 'user' | 'timeout'
+
+/**
+ * One in-flight turn.
+ *
+ * `cancelled` is the hard teardown (abort now, kill in-flight tools).
+ * `interrupt` is the safe park: the request is remembered and the session is
+ * aborted only once no tool is mid-execution, so a write or a shell command
+ * that already started is allowed to finish and report its evidence instead of
+ * being severed halfway.
+ */
+type PiActiveTurn = {
+  session?: PiSessionRuntime['session']
+  cancelled: boolean
+  interrupt?: PiTurnInterruptReason
+  toolsInFlight: number
+  parked: boolean
+}
+
 const sessionRuntimes = new Map<string, PiSessionRuntime>()
-const activeTurns = new Map<string, { session?: PiSessionRuntime['session']; cancelled: boolean }>()
+const activeTurns = new Map<string, PiActiveTurn>()
 const activeToolRuns = new Map<string, Set<{ controller: AbortController; cancelled: boolean }>>()
 
 const TOOL_FACTORIES = {
@@ -283,6 +303,79 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   return runtime
 }
 
+/**
+ * Whether this moment is a safe place to stop.
+ *
+ * Pure so the rule can be driven directly by tests: a park happens only when a
+ * stop is pending, nothing is mid-execution, and we have not parked already.
+ */
+export function shouldParkTurn(state: {
+  interrupt?: PiTurnInterruptReason
+  toolsInFlight: number
+  parked: boolean
+}): boolean {
+  return Boolean(state.interrupt) && state.toolsInFlight === 0 && !state.parked
+}
+
+/** Abort exactly once, and only from a tool boundary. */
+function parkInterruptedTurn(turn: PiActiveTurn): void {
+  if (!shouldParkTurn(turn)) return
+  turn.parked = true
+  void turn.session?.abort?.()
+}
+
+/**
+ * An interrupted turn keeps whatever the assistant had already produced.
+ *
+ * The partial answer is real work the user paid for; discarding it would make
+ * a stop indistinguishable from a failure. The caller seals it in the feed.
+ */
+function interruptedTurnResult(
+  turn: PiActiveTurn,
+  messages: Array<{ role?: string; content?: unknown }>,
+) {
+  const partial = messages
+    .filter((message) => message.role === 'assistant')
+    .map((message) => (Array.isArray(message.content)
+      ? message.content
+          .filter((part): part is { type: string; text: string } => Boolean(
+            part && typeof part === 'object'
+            && (part as { type?: unknown }).type === 'text'
+            && typeof (part as { text?: unknown }).text === 'string',
+          ))
+          .map((part) => part.text)
+          .join('')
+      : typeof message.content === 'string' ? message.content : ''))
+    .join('\n')
+    .trim()
+  return {
+    settlement: 'interrupted' as const,
+    interruptReason: turn.interrupt || ('user' as PiTurnInterruptReason),
+    items: partial ? [{ type: 'assistant_message', content: partial }] : [],
+  }
+}
+
+/**
+ * Ask a turn to stop at its next tool boundary.
+ *
+ * Returns false when the run is not active, so the protocol can answer
+ * honestly instead of acknowledging a stop that never reached anything.
+ */
+export function interruptPiTurn(runId: string, reason: PiTurnInterruptReason = 'user'): boolean {
+  const turn = activeTurns.get(runId)
+  if (!turn) return false
+  if (!turn.interrupt) turn.interrupt = reason
+  // No tool is mid-flight, so this call site already is the boundary.
+  if (turn.toolsInFlight === 0) parkInterruptedTurn(turn)
+  return true
+}
+
+/** Whether a turn has been asked to park (Host-side assertion seam). */
+export function piTurnInterruptState(runId: string): { interrupt?: PiTurnInterruptReason; toolsInFlight: number; parked: boolean } | undefined {
+  const turn = activeTurns.get(runId)
+  return turn ? { interrupt: turn.interrupt, toolsInFlight: turn.toolsInFlight, parked: turn.parked } : undefined
+}
+
 export async function runPiTurn(
   sessionId: string,
   cwd: string,
@@ -296,7 +389,7 @@ export async function runPiTurn(
   referenceChatHistory = true,
   onRuntimeReady?: (contextWindowTokens?: number) => void,
 ) {
-  const turn: { session?: PiSessionRuntime['session']; cancelled: boolean } = { cancelled: false }
+  const turn: PiActiveTurn = { cancelled: false, toolsInFlight: 0, parked: false }
   if (runId) {
     if (activeTurns.has(runId)) throw new Error(`Pi run is already active: ${runId}`)
     activeTurns.set(runId, turn)
@@ -309,6 +402,10 @@ export async function runPiTurn(
     throw error
   }
   turn.session = runtime.session
+  if (turn.interrupt) {
+    if (runId) activeTurns.delete(runId)
+    return interruptedTurnResult(turn, [])
+  }
   if (turn.cancelled) {
     if (runId) activeTurns.delete(runId)
     return { settlement: 'cancelled' as const, items: [] }
@@ -324,6 +421,13 @@ export async function runPiTurn(
     if (event.type === 'agent_end' && Array.isArray(event.messages)) {
       completedMessages = event.messages as Array<{ role?: string; content?: unknown }>
     }
+    // Tool boundaries are the only safe place to stop: between calls the agent
+    // owns no half-applied edit and no orphaned child process.
+    if (event.type === 'tool_execution_start') turn.toolsInFlight += 1
+    if (event.type === 'tool_execution_end') {
+      turn.toolsInFlight = Math.max(0, turn.toolsInFlight - 1)
+      if (turn.interrupt && turn.toolsInFlight === 0) parkInterruptedTurn(turn)
+    }
     onEvent?.(event)
   })
   try {
@@ -332,6 +436,7 @@ export async function runPiTurn(
       runtime.requestContext.includeHistory = referenceChatHistory
     }
     await runtime.session.prompt(runtime.requestContext || !requestContext ? prompt : `${requestContext}\n## Current request\n${prompt}`)
+    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages)
     if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
     return {
       settlement: 'success' as const,
@@ -346,6 +451,8 @@ export async function runPiTurn(
         })),
     }
   } catch (error) {
+    // An aborted prompt throws; an interrupt is a deliberate stop, never a failure.
+    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages)
     if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
     return {
       settlement: 'failed' as const,

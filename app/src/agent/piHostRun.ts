@@ -12,6 +12,9 @@ export type PiHostRunConfig = {
   definitionOfDone: string
 }
 
+/** Why a turn stopped short of its own settlement (Pi Host `turn/interrupt`). */
+export type PiTurnInterruptReason = 'user' | 'timeout'
+
 /** The renderer's default DoD is the Host settlement, not response text. */
 export const PI_CORE_SETTLEMENT_DEFINITION_OF_DONE = 'Pi Core settlement returned'
 
@@ -57,11 +60,12 @@ export type PiHostRunnerApi = {
     createChild?: (input: { title?: string; parentSessionId: string; role: string; profile: Record<string, unknown>; context: { objective: string; facts: string[]; constraints: string[] }; depth: number }) => Promise<{ sessionId: string; sessions: unknown[] }>
   }
   turn: {
-    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => Promise<{
+    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => Promise<{
       sessionId: string
       runId: string
       settlement: string
       items?: unknown[]
+      interruptReason?: PiTurnInterruptReason
       orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
       pluginExecution?: SubDesignPluginExecutionProjection
     }>
@@ -80,6 +84,8 @@ export type SubmitPiHostRunInput = {
   pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
   maxIterations?: number
   definitionOfDone?: string
+  /** Per-turn deadline decided at admission; absent means the Host arms none. */
+  timeoutMs?: number
   pluginExecution?: SubDesignPluginExecutionRequest
 }
 
@@ -87,6 +93,8 @@ export type SubmitPiHostRunResult = {
   sessionId: string
   runId: string
   settlement: 'success' | 'failed' | 'cancelled' | 'interrupted'
+  /** Present only on `interrupted`; distinguishes a user stop from a timeout. */
+  interruptReason?: PiTurnInterruptReason
   result: string
   items: unknown[]
   orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
@@ -141,6 +149,7 @@ export async function submitPiHostRun(
     pattern: input.pattern,
     maxIterations: input.maxIterations,
     definitionOfDone: input.definitionOfDone,
+    timeoutMs: input.timeoutMs,
     pluginExecution: input.pluginExecution,
   })
   const items = Array.isArray(turn.items) ? turn.items : []
@@ -150,6 +159,9 @@ export async function submitPiHostRun(
     settlement: (['success', 'failed', 'cancelled', 'interrupted'].includes(turn.settlement)
       ? turn.settlement
       : 'failed') as SubmitPiHostRunResult['settlement'],
+    ...(turn.interruptReason === 'user' || turn.interruptReason === 'timeout'
+      ? { interruptReason: turn.interruptReason }
+      : {}),
     result: assistantText(items),
     items,
     orchestration: turn.orchestration,

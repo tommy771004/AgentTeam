@@ -4,11 +4,11 @@
 
 **Blocked by:** 05 — Summary compaction + preflight(避免 compaction 對 context 組裝的改動與前情提要注入撞同一區)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] run 完成後,memory 目錄出現一份四段結構的沉澱檔案
-- [ ] 摘要為人話(zh-TW 混英文技術詞),非內部術語
-- [ ] 寫入以 project 檔案橋接完成,路徑可被 git 追蹤
-- [ ] 同 thread 新任務的 prompt 含最近 N 份沉澱作為前情提要
-- [ ] 模型宣稱沉澱但無 journal 寫入證據的情境必須 fail
-- [ ] journal 記錄每次沉澱寫入事件
+- [x] run 完成後,memory 目錄出現一份四段結構的沉澱檔案
+- [x] 摘要為人話(zh-TW 混英文技術詞),非內部術語
+- [x] 寫入以 project 檔案橋接完成,路徑可被 git 追蹤
+- [x] 同 thread 新任務的 prompt 含最近 N 份沉澱作為前情提要
+- [x] 模型宣稱沉澱但無 journal 寫入證據的情境必須 fail
+- [x] journal 記錄每次沉澱寫入事件

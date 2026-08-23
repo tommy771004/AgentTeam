@@ -252,6 +252,11 @@ export interface RuntimeOverrides {
   maxToolRounds?: number
   minConfidence?: number
   timeoutMs?: number
+  /**
+   * Per-turn deadline resolved at admission (`agent/turnTimeout.ts`).
+   * Absent for external CLI runs, whose supervision policy owns their lifetime.
+   */
+  turnTimeoutMs?: number
   /** Immutable External CLI supervision policy captured at task admission. */
   externalCliPolicy?: Partial<ExternalCliRunPolicy>
   externalCliRequiredConnectors?: ExternalCliConnectorRequirement[]
@@ -408,6 +413,13 @@ export interface AgentState {
   }
   /** External CLI kind when executionKind=external (codex / claude / …). */
   externalRunnerKind?: string
+  /**
+   * Why this run was parked instead of settling on its own.
+   *
+   * Only ever set alongside `status: 'halted'`. A stop the user pressed and a
+   * spent time budget are different events and never share one word.
+   */
+  interruptReason?: 'user' | 'timeout'
   /**
    * Pi Host orchestration settlement for this run.
    *
@@ -751,6 +763,11 @@ export interface LlmSettings {
   concurrentRunsEnabled: boolean
   /** Concurrent-run ceiling, clamped to a small fixed range by runtime. */
   maxConcurrentRuns: number
+  /**
+   * General · How long one turn may run before it is parked as
+   * `interrupted(timeout)`. 0 keeps the per-pattern defaults.
+   */
+  turnTimeoutMs: number
   /** General · Desktop notification when a run finishes */
   notifyOnComplete: boolean
   /** General · Soft sound on complete (where supported) */

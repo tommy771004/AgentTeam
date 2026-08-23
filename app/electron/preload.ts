@@ -105,8 +105,10 @@ const api = {
         uninstall: (id: string) => ipcRenderer.invoke('pi-host:extensions:uninstall', id) as Promise<{ removed?: boolean }>,
       },
       turn: {
-        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: { memoryEnabled: boolean; memoryWriteEnabled: boolean; referenceChatHistory: boolean; temporary: boolean; project?: string; contextWindowTokens?: number }; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }; pluginExecution?: SubDesignPluginExecutionProjection }>,
+        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: { memoryEnabled: boolean; memoryWriteEnabled: boolean; referenceChatHistory: boolean; temporary: boolean; project?: string; contextWindowTokens?: number }; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }; pluginExecution?: SubDesignPluginExecutionProjection }>,
         cancel: (runId: string) => ipcRenderer.invoke('pi-host:turn:cancel', runId) as Promise<{ runId: string; settlement: string }>,
+        interrupt: (input: { runId: string; reason?: 'user' | 'timeout' }) =>
+          ipcRenderer.invoke('pi-host:turn:interrupt', input) as Promise<{ runId: string; settlement: string; interruptReason?: 'user' | 'timeout' }>,
       },
       tools: {
       list: () => ipcRenderer.invoke('pi-host:tools:list') as Promise<{ builtinTools: string[] }>,
@@ -180,6 +182,15 @@ const api = {
       }>,
     clear: (threadId: string) =>
       ipcRenderer.invoke('rewind:clear', threadId) as Promise<boolean>,
+  },
+  checkpoints: {
+    save: (input: { runId: string; threadId?: string; summary: string; messages: unknown[] }) =>
+      ipcRenderer.invoke('checkpoints:save', input) as Promise<{ ok: boolean; checkpoint?: unknown; error?: string }>,
+    load: (runId: string) => ipcRenderer.invoke('checkpoints:load', runId) as Promise<unknown>,
+    list: (runId?: string) => ipcRenderer.invoke('checkpoints:list', runId) as Promise<unknown[]>,
+    remove: (runId: string) => ipcRenderer.invoke('checkpoints:remove', runId) as Promise<{ ok: boolean }>,
+    claimResume: (runId: string) =>
+      ipcRenderer.invoke('checkpoints:claim-resume', runId) as Promise<{ ok: boolean; checkpoint?: unknown; reason?: string }>,
   },
   notify: (title: string, body: string) =>
     ipcRenderer.invoke('app:notify', title, body) as Promise<{ ok: boolean }>,

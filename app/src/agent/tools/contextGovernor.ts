@@ -71,6 +71,22 @@ export type ContextGovernorDeps = {
   notify: (title: string, body: string) => void
   log: (level: string, message: string) => void
   onContextUsage?: (usage: { tokens: number; contextWindow: number; ratio: number }) => void
+  /**
+   * Called once per compaction, after the summary replaced earlier messages.
+   *
+   * Injected so the governor stays a pure context policy: the journal record
+   * and the on-screen marker are both effects of this one event, and neither
+   * is reconstructed by guessing at the transcript afterwards.
+   */
+  onCompacted?: (event: {
+    runId?: string
+    threadId?: string
+    summary: string
+    replacedMessages: number
+    remainingMessages: number
+    estimatedTokens: number
+    contextWindow: number
+  }) => void | Promise<void>
   /** Flatten multimodal content for compaction input. */
   contentToPlainText: (content: unknown) => string | null
 }
@@ -196,7 +212,7 @@ export function createContextGovernor(deps: ContextGovernorDeps): ContextGoverno
           )
         }
 
-        // Six post-compaction effects — independently fault-isolated.
+        // Post-compaction effects — independently fault-isolated.
         // Naming quirk preserved: "beforeCompaction" fires after compaction is decided.
 
         // 1) beforeCompaction hook
@@ -220,7 +236,22 @@ export function createContextGovernor(deps: ContextGovernorDeps): ContextGoverno
           /* non-fatal */
         }
 
-        // 3) memory flush
+        // 3) compaction event — the record that the agent's view was rewritten
+        try {
+          await deps.onCompacted?.({
+            runId,
+            threadId,
+            summary: c.summary || '',
+            replacedMessages: Math.max(0, flat.length - c.messages.length + 1),
+            remainingMessages: c.messages.length,
+            estimatedTokens: estTokens,
+            contextWindow,
+          })
+        } catch {
+          /* non-fatal */
+        }
+
+        // 4) memory flush
         try {
           const flushed = await deps.memoryFlush({
             objective: objective || '',
@@ -235,7 +266,7 @@ export function createContextGovernor(deps: ContextGovernorDeps): ContextGoverno
         }
       }
 
-      // 4) message replacement (compaction OR prune-only)
+      // 5) message replacement (compaction OR prune-only)
       if (c.compacted || c.pruneStats?.changed) {
         messages = c.messages.map((m) => ({
           role: m.role,
@@ -254,7 +285,7 @@ export function createContextGovernor(deps: ContextGovernorDeps): ContextGoverno
       }
 
       if (c.compacted) {
-        // 5) memory recall
+        // 6) memory recall
         if (settings.memoryEnabled !== false) {
           try {
             const related = await deps.memoryRecall(objective || '', 3)
@@ -279,7 +310,7 @@ export function createContextGovernor(deps: ContextGovernorDeps): ContextGoverno
           }
         }
 
-        // 6) metrics + afterCompaction hook + notify
+        // 7) metrics + afterCompaction hook + notify
         deps.log('INFO', 'Context compacted (OpenCode-style)')
         try {
           await deps.bumpMetric(runId, 'compactions')

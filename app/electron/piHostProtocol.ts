@@ -18,7 +18,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -36,6 +36,8 @@ export type PiHostResponse = {
     sessionId?: string
     runId?: string
     settlement?: 'success' | 'failed' | 'cancelled' | 'interrupted'
+    /** Why an `interrupted` settlement stopped short; absent for other settlements. */
+    interruptReason?: PiTurnInterruptReason
     items?: unknown[]
     queue?: PiQueuedRun[]
     run?: PiQueuedRun
@@ -103,8 +105,9 @@ export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
 import type { StreamingUpdate } from '../src/agent/subdesign/streamingEnvelope.ts'
-import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, persistPiLegacyCredential, persistPiLegacyModelConfig, piCoreRuntimeStatus, piProviderDefaultBaseUrl, runPiTurn, steerPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
+import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, interruptPiTurn, persistPiLegacyCredential, persistPiLegacyModelConfig, piCoreRuntimeStatus, piProviderDefaultBaseUrl, runPiTurn, steerPiTurn, type PiBuiltinToolName, type PiTurnInterruptReason } from './piCoreRuntime.ts'
 import { cancelPiCodeMode, runPiCodeMode } from './piCodeMode.ts'
+import { armTurnDeadline, clampTurnTimeout, systemTurnDeadlineClock, type TurnDeadlineClock } from './piTurnDeadline.ts'
 import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
@@ -160,7 +163,7 @@ const errorResponse = (
 ): PiHostResponse => ({ id, error: { code, message } })
 
 /** A session is the serialization boundary for Pi turns. */
-const activeSessionRuns = new Map<string, { runId: string; cancelled: boolean }>()
+const activeSessionRuns = new Map<string, { runId: string; cancelled: boolean; interrupt?: PiTurnInterruptReason }>()
 const PI_HOST_TOOL_UPDATE_MAX_BYTES = 16_384
 
 function isWithinProject(cwd: string, target: string): boolean {
@@ -219,6 +222,16 @@ function approvalOutcome(params: Record<string, unknown>, requiresApproval: bool
     return { decision: 'ask', reason: 'Tool requires approval before execution' }
   }
   return { decision: 'allow', reason: 'Pi approval policy' }
+}
+
+/**
+ * Clock used to arm per-turn deadlines. Swapped by the deadline smoke so the
+ * timeout path is driven by a fake clock instead of by real waiting.
+ */
+let turnDeadlineClock: TurnDeadlineClock = systemTurnDeadlineClock
+
+export function setPiTurnDeadlineClock(clock: TurnDeadlineClock = systemTurnDeadlineClock): void {
+  turnDeadlineClock = clock
 }
 
 export function handlePiHostRequest(state: HostState, request: unknown, emit?: (message: PiHostMessage) => void): PiHostMessage[] | Promise<PiHostMessage[]> {
@@ -658,6 +671,20 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       return [{ id, result: { sessionId, sessions: [session] } }]
     })
   }
+  if (input.method === 'turn/interrupt') {
+    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+    if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
+    const reason: PiTurnInterruptReason = input.params?.reason === 'timeout' ? 'timeout' : 'user'
+    // Safe park: the orchestration loop stops after the current iteration and
+    // the session aborts at its next tool boundary. In-flight tools are never
+    // severed, so anything already started still reports its own evidence.
+    const orchestrationRun = [...activeSessionRuns.values()].find((run) => run.runId === runId)
+    if (orchestrationRun) orchestrationRun.interrupt = reason
+    const parked = interruptPiTurn(runId, reason)
+    return parked || orchestrationRun
+      ? [{ id, result: { runId, settlement: 'interrupted' as const, interruptReason: reason } }]
+      : [errorResponse(id, 'invalid_request', `Unknown Pi run: ${runId}`)]
+  }
   if (input.method === 'turn/cancel') {
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
     if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
@@ -740,6 +767,22 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     let contextPreflightComplete = false
     let resolvedContextWindow = contextPolicy.contextWindowTokens
     activeSessionRuns.set(sessionId, { runId, cancelled: false })
+    // A stuck turn must not hold the conversation forever. Expiry walks the
+    // same safe-park path as a user's stop, so an in-flight tool still lands.
+    const timeoutMs = clampTurnTimeout(input.params?.timeoutMs)
+    const deadline = timeoutMs
+      ? armTurnDeadline(timeoutMs, () => {
+          const run = activeSessionRuns.get(sessionId)
+          if (run?.runId === runId && !run.interrupt) run.interrupt = 'timeout'
+          interruptPiTurn(runId, 'timeout')
+          const event: PiHostEvent = {
+            event: 'host/orchestration',
+            payload: { runId, sessionId, phase: 'cancelled', pattern, detail: 'interrupted:timeout' },
+          }
+          if (emit) emit(event)
+          else turnEvents.push(event)
+        }, turnDeadlineClock)
+      : undefined
     const publishOrchestration = (phase: 'parse' | 'iterate' | 'dod' | 'replan' | 'settlement' | 'cancelled', iteration?: number, detail?: string) => {
       const event: PiHostEvent = { event: 'host/orchestration', payload: { runId, sessionId, phase, iteration, pattern, detail } }
       if (emit) emit(event)
@@ -797,11 +840,19 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       pattern,
       prompt: orchestrationPrompt,
       maxIterations,
+      interrupted: () => activeSessionRuns.get(sessionId)?.interrupt,
       turn: async (iterationPrompt, iteration) => {
-        if (activeSessionRuns.get(sessionId)?.cancelled) return { settlement: 'cancelled' as const, result: '' }
+        const activeRunState = activeSessionRuns.get(sessionId)
+        if (activeRunState?.interrupt) {
+          return { settlement: 'interrupted' as const, interruptReason: activeRunState.interrupt, result: '' }
+        }
+        if (activeRunState?.cancelled) return { settlement: 'cancelled' as const, result: '' }
         publishOrchestration('iterate', iteration)
         const turn = await runPiTurn(sessionId, cwd, iterationPrompt, session.messages, (event) => {
           /* Events are collected below so the response remains ordered after them. */
+          // Real progress resets the budget: a turn still emitting work is
+          // working, not stuck, and long tasks are the point of this feature.
+          deadline?.extend()
           const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event, iteration } }
           if (emit) emit(turnEvent)
           else turnEvents.push(turnEvent)
@@ -883,10 +934,22 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           }
           return { settlement: 'success' as const, result: assistant?.content ?? '', ...(done === undefined ? {} : { done }) }
         }
-        return { settlement: turn.settlement, result: turn.items.map((item) => typeof item?.content === 'string' ? item.content : '').join('\n') }
+        return {
+          settlement: turn.settlement,
+          ...(turn.settlement === 'interrupted' && 'interruptReason' in turn
+            ? { interruptReason: (turn as { interruptReason?: PiTurnInterruptReason }).interruptReason }
+            : {}),
+          result: turn.items.map((item) => typeof item?.content === 'string' ? item.content : '').join('\n'),
+        }
       },
       }).then((orchestration) => {
-      publishOrchestration(orchestration.settlement === 'cancelled' ? 'cancelled' : 'settlement', orchestration.iterations, orchestration.settlement)
+      publishOrchestration(
+        orchestration.settlement === 'cancelled' || orchestration.settlement === 'interrupted' ? 'cancelled' : 'settlement',
+        orchestration.iterations,
+        orchestration.settlement === 'interrupted'
+          ? `interrupted:${orchestration.interruptReason || 'user'}`
+          : orchestration.settlement,
+      )
       state.snapshot.cursor += 1
       return [...turnEvents, {
         id,
@@ -894,6 +957,9 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           sessionId,
           runId,
           settlement: orchestration.settlement,
+          ...(orchestration.settlement === 'interrupted'
+            ? { interruptReason: orchestration.interruptReason || ('user' as PiTurnInterruptReason) }
+            : {}),
           items: orchestration.result ? [{ type: 'assistant_message', content: orchestration.result }] : [],
           orchestration: {
             pattern: orchestration.pattern,
@@ -907,6 +973,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       }]
       })
     }).finally(() => {
+      deadline?.cancel()
       if (activeSessionRuns.get(sessionId)?.runId === runId) activeSessionRuns.delete(sessionId)
     })
   }

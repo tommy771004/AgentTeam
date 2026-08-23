@@ -4,11 +4,11 @@
 
 **Blocked by:** 01 — Abortable turn 協定;03 — Durable checkpoint storage
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] interrupted(by user/timeout)的 run 在 UI 上有「續跑」入口
-- [ ] 續跑後從最後 checkpoint 的 step 接續,已完成步驟不重跑
-- [ ] kill-and-restart 情境:checkpoint 後殺掉 Host、重啟、續跑成功
-- [ ] side-effect 工具以 execution evidence 計數驗證不被重放
-- [ ] 無法證明 side effect 未發生的情境 fail-closed 拒絕續跑,並向使用者說明原因
-- [ ] 同一 checkpoint 重複觸發只生效一次(idempotent resume)
+- [x] interrupted(by user/timeout)的 run 在 UI 上有「續跑」入口
+- [x] 續跑後從最後 checkpoint 的 step 接續,已完成步驟不重跑
+- [x] kill-and-restart 情境:checkpoint 後殺掉 Host、重啟、續跑成功
+- [x] side-effect 工具以 execution evidence 計數驗證不被重放
+- [x] 無法證明 side effect 未發生的情境 fail-closed 拒絕續跑,並向使用者說明原因
+- [x] 同一 checkpoint 重複觸發只生效一次(idempotent resume)
