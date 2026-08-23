@@ -4,8 +4,8 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type { PiThinkingLevel } from './piAgentProfile.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
-import { classifyPiTurnSettlement, piTurnFinalAnswer, piTurnProviderError, piTurnStopReason, PI_TURN_TRUNCATED_NOTICE } from '../src/agent/piHostRun.ts'
-import type { PiRecordedMessage } from '../src/agent/turnRecord.ts'
+import { classifyPiTurnSettlement, piTurnProviderError, piTurnStopReason, PI_TURN_TRUNCATED_NOTICE } from '../src/agent/piHostRun.ts'
+import type { PiRecordedMessage, PiStepTiming } from '../src/agent/turnRecord.ts'
 
 const vendorCandidates = [
   process.env.SUBAGENTS_PI_VENDOR_DIR,
@@ -447,6 +447,9 @@ export async function runPiTurn(
   // What the user has watched arrive, kept one message at a time so a stop can
   // hand back the message being written without the ones before it.
   const streamedSegments: string[] = ['']
+  // Measured at the boundary that makes the request, so nobody downstream has
+  // to infer a duration from timestamps that were never its edges.
+  const timing: PiStepTiming = { requestAt: Date.now(), completedAt: 0 }
   const unsubscribe = runtime.session.subscribe((event) => {
     if (event.type === 'agent_end' && Array.isArray(event.messages)) {
       completedMessages = event.messages as Array<{ role?: string; content?: unknown }>
@@ -454,7 +457,25 @@ export async function runPiTurn(
     if (event.type === 'message_start' || event.type === 'tool_execution_start') streamedSegments.push('')
     const streamed = (event as { assistantMessageEvent?: { type?: unknown; delta?: unknown } }).assistantMessageEvent
     if (streamed?.type === 'text_delta' && typeof streamed.delta === 'string') {
+      // The moment the model stopped thinking and started writing.
+      timing.firstTokenAt ??= Date.now()
       streamedSegments[streamedSegments.length - 1] += streamed.delta
+    }
+    if (event.type === 'agent_end' && Array.isArray(event.messages)) {
+      const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+      const usage = event.messages.reduce(
+        (running: { input: number; output: number; total: number }, message) => {
+          const reported = (message as { usage?: Record<string, unknown> }).usage
+          if (!reported || typeof reported !== 'object') return running
+          return {
+            input: running.input + count(reported.input),
+            output: running.output + count(reported.output),
+            total: running.total + count(reported.totalTokens),
+          }
+        },
+        { input: 0, output: 0, total: 0 },
+      )
+      if (usage.total > 0 || usage.input > 0 || usage.output > 0) timing.usage = usage
     }
     // Tool boundaries are the only safe place to stop: between calls the agent
     // owns no half-applied edit and no orphaned child process.
@@ -471,13 +492,13 @@ export async function runPiTurn(
       runtime.requestContext.includeHistory = referenceChatHistory
     }
     await runtime.session.prompt(runtime.requestContext || !requestContext ? prompt : `${requestContext}\n## Current request\n${prompt}`)
-    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages, streamedSegments)
-    if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
+    if (turn.interrupt) return { ...interruptedTurnResult(turn, completedMessages, streamedSegments), timing }
+    if (turn.cancelled) return { settlement: 'cancelled' as const, items: [], timing }
     // A rejected request never throws here: Pi records it as an empty assistant
     // message carrying the provider's error, so a failed call must not be
     // mistaken for a turn that simply produced nothing.
     const providerError = piTurnProviderError(completedMessages as ReadonlyArray<{ role?: string; stopReason?: string; errorMessage?: string }>)
-    if (providerError) return { settlement: 'failed' as const, items: [{ type: 'error', content: providerError }] }
+    if (providerError) return { settlement: 'failed' as const, items: [{ type: 'error', content: providerError }], timing }
     const items = assistantMessageItems(completedMessages)
     // A clean provider call that carried no text is `empty`, not `answered`:
     // the run finished without producing anything for the user to read. One
@@ -488,18 +509,20 @@ export async function runPiTurn(
     const stopReason = piTurnStopReason(completedMessages as ReadonlyArray<{ role?: string; stopReason?: string }>)
     const settlement = classifyPiTurnSettlement(items, stopReason)
     if (settlement === 'truncated') {
-      return { settlement, items: [...items, { type: 'truncation_notice', content: PI_TURN_TRUNCATED_NOTICE }] }
+      return { settlement, items: [...items, { type: 'truncation_notice', content: PI_TURN_TRUNCATED_NOTICE }], timing }
     }
-    return { settlement, items }
+    return { settlement, items, timing }
   } catch (error) {
     // An aborted prompt throws; an interrupt is a deliberate stop, never a failure.
-    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages, streamedSegments)
-    if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
+    if (turn.interrupt) return { ...interruptedTurnResult(turn, completedMessages, streamedSegments), timing }
+    if (turn.cancelled) return { settlement: 'cancelled' as const, items: [], timing }
     return {
+      timing,
       settlement: 'failed' as const,
       items: [{ type: 'error', content: error instanceof Error ? error.message : 'Pi turn failed' }],
     }
   } finally {
+    timing.completedAt = Date.now()
     if (runtime.requestContext) {
       runtime.requestContext.value = ''
       runtime.requestContext.includeHistory = true

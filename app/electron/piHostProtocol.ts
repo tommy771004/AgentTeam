@@ -1024,7 +1024,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           if (turn.settlement === 'answered') {
             recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: answer })
           }
-          recordTurnEntry(sessionId, { kind: 'step-end', source: 'host' })
+          recordTurnEntry(sessionId, { kind: 'step-end', source: 'host', ...('timing' in turn && turn.timing ? { timing: turn.timing } : {}) })
           // History is derived from the record, never accumulated beside it:
           // one write path means the model's context and the record cannot
           // drift apart. Derived AFTER this round's entries, so the next round
@@ -1057,7 +1057,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
         if (turn.settlement === 'interrupted' && stoppedText) {
           recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: stoppedText })
         }
-        recordTurnEntry(sessionId, { kind: 'step-end', source: 'host' })
+        recordTurnEntry(sessionId, { kind: 'step-end', source: 'host', ...('timing' in turn && turn.timing ? { timing: turn.timing } : {}) })
         return {
           settlement: turn.settlement,
           ...(turn.settlement === 'interrupted' && 'interruptReason' in turn

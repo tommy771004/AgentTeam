@@ -20,6 +20,24 @@ import type { PiTurnInterruptReason, PiTurnSettlement } from './piHostRun.ts'
  */
 export const TURN_RECORD_FORMAT_VERSION = 1
 
+/**
+ * What one model request actually cost, measured at the boundary that made it.
+ *
+ * `firstTokenAt` is the moment the model stopped thinking and started writing.
+ * Splitting it out is the difference between "the provider is stalled" and
+ * "the answer is long" — one total number cannot tell those apart. It is
+ * absent when the request produced no text at all.
+ */
+export type PiStepTiming = {
+  /** When the request left for the provider. */
+  requestAt: number
+  /** When the first token of text arrived; absent if none ever did. */
+  firstTokenAt?: number
+  /** When the request finished, successfully or not. */
+  completedAt: number
+  usage?: { input?: number; output?: number; total?: number }
+}
+
 /** Who is accountable for an entry's content (ADR-0048). */
 export type TurnRecordSource =
   /** The person driving the conversation. */
@@ -51,7 +69,17 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         interruptReason?: PiTurnInterruptReason
       }
     | { kind: 'step-start'; source: 'host' }
-    | { kind: 'step-end'; source: 'host' }
+    | {
+        kind: 'step-end'
+        source: 'host'
+        /**
+         * Measured, never inferred. A reader must not subtract one entry's
+         * timestamp from another's to invent a duration: entries are appended
+         * around work, not at its exact edges, and a turn can wait on tools
+         * between them.
+         */
+        timing?: PiStepTiming
+      }
     | { kind: 'user-text'; source: 'user'; content: string }
     | { kind: 'assistant-text'; source: 'model'; content: string }
     | {
@@ -231,6 +259,58 @@ export function derivePiHistory(record: TurnRecord | undefined): PiRecordedMessa
     }
   }
   return messages
+}
+
+/** One step's timing, as a reader needs it. */
+export type PiStepTimingView = {
+  turn: number
+  step: number
+  /** Present only once the step has ended. */
+  waitingMs?: number
+  generatingMs?: number
+  totalMs?: number
+  usage?: PiStepTiming['usage']
+  /** True while the step has started and not yet ended. */
+  running: boolean
+}
+
+/**
+ * Per-step timing for a record.
+ *
+ * A step still running reports `running: true` and NO durations. Inventing one
+ * — by measuring against "now", or by subtracting the previous entry — would
+ * put a number on screen that was never measured, which is the same class of
+ * mistake as publishing an answer nobody wrote.
+ */
+export function stepTimings(record: TurnRecord | undefined): PiStepTimingView[] {
+  const views = new Map<string, PiStepTimingView>()
+  for (const entry of turnRecordEntries(record)) {
+    if (entry.kind !== 'step-start' && entry.kind !== 'step-end') continue
+    const key = `${entry.turn}:${entry.step}`
+    if (entry.kind === 'step-start') {
+      views.set(key, { turn: entry.turn, step: entry.step, running: true })
+      continue
+    }
+    const view = views.get(key) || { turn: entry.turn, step: entry.step, running: true }
+    const timing = entry.timing
+    views.set(key, {
+      ...view,
+      running: false,
+      ...(timing
+        ? {
+            ...(timing.firstTokenAt === undefined
+              ? {}
+              : {
+                  waitingMs: Math.max(0, timing.firstTokenAt - timing.requestAt),
+                  generatingMs: Math.max(0, timing.completedAt - timing.firstTokenAt),
+                }),
+            totalMs: Math.max(0, timing.completedAt - timing.requestAt),
+            ...(timing.usage ? { usage: timing.usage } : {}),
+          }
+        : {}),
+    })
+  }
+  return [...views.values()]
 }
 
 /** Entries in the order they happened, decided by `seq` and never by position. */
