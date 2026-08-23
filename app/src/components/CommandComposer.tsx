@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { Icon } from './Icon'
 import { SlashCommandMenu } from './SlashCommandMenu'
+import { ComposerLoader } from './primitives/ComposerLoader'
 import {
   filterSlashCommands,
   parseSlashLine,
@@ -549,6 +550,7 @@ export function CommandComposer({
       onDragLeave={() => setDragOver(false)}
       onDrop={onDrop}
     >
+      <ComposerLoader active={running} />
       {showMentionMenu && (
         <div
           className="absolute bottom-full left-0 right-0 z-[80] mb-2 overflow-hidden rounded-card bg-surface p-1 shadow-raised"

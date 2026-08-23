@@ -583,6 +583,29 @@ html[data-theme='light'] .app-panel {
   }
 }
 
+/* AgentThinking「stars」:四角星交錯明滅(縮放 + 淡入淡出)。 */
+@keyframes star-twinkle {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: scale(0.55);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* AgentThinking「infinity」:彗尾沿 8 字軌道連續繞行。 */
+@keyframes infinity-comet {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 /* Live status label — dim at rest, one bright band travelling through it. */
 .agent-shimmer {
   background-image: linear-gradient(
@@ -596,6 +619,61 @@ html[data-theme='light'] .app-panel {
   -webkit-background-clip: text;
   color: transparent;
   animation: shimmer-text 1.4s linear infinite;
+}
+
+/* ── Composer Loader ──────────────────────────────────────
+   BoardUI「Composer Loader」:一道彩虹光帶等速繞行輸入框邊框,
+   折射線在前、柔光向內暈開;active 切換整體淡入淡出。
+   疊在輸入框根元素內側,inset:0 沿用父層圓角。 */
+.composer-loader-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 420ms ease;
+}
+.composer-loader-overlay.composer-loader-on {
+  opacity: 1;
+}
+.composer-loader-band {
+  position: absolute;
+  inset: -150%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    color-mix(in srgb, var(--color-accent-ink) 85%, transparent) 40deg,
+    var(--color-primary) 75deg,
+    var(--color-tertiary) 100deg,
+    color-mix(in srgb, var(--color-accent) 70%, #7fd7c4) 120deg,
+    transparent 160deg,
+    transparent 360deg
+  );
+  animation: composer-loader-orbit 4.5s linear infinite;
+}
+/* 折射線本體:細環,只讓光帶的亮段落在邊框上。 */
+.composer-loader-ring {
+  inset: -50%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  padding: 1.5px;
+  filter: saturate(1.15);
+}
+/* 向內暈開的柔光:同一道光帶放大模糊,從邊框往內滲。 */
+.composer-loader-bloom {
+  filter: blur(14px);
+  opacity: 0.3;
+}
+@keyframes composer-loader-orbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ── Agent conversation primitives ────────────────────────

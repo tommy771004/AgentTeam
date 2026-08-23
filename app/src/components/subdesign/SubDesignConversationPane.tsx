@@ -5,6 +5,9 @@ import type { Thread, ThreadBubble } from '../../store/threadStore'
 import { Icon } from '../Icon'
 import { MarkdownBody } from '../MarkdownBody'
 import { RunProcessFeed } from '../RunProcessFeed'
+import { AgentThinking } from '../primitives/AgentThinking'
+import { thinkingVariantForStage } from '../primitives/agentThinkingVariant'
+import { ComposerLoader } from '../primitives/ComposerLoader'
 import { RunSummaryCard } from '../RunSummaryCard'
 import { ReferenceImportPanel } from './ReferenceImportPanel'
 
@@ -175,12 +178,14 @@ export function SubDesignConversationPane({
             <Icon name={brief.surface === 'deck' ? 'slideshow' : 'design_services'} size={13} />
             {SURFACE_LABEL[brief.surface]}
           </span>
-          <span className={`shrink-0 text-[9px] font-medium ${waitingForUser ? 'text-secondary' : activelyComputing ? 'text-primary' : 'text-outline'}`}>
+          <span className={`inline-flex shrink-0 items-center gap-1.5 text-[9px] font-medium ${waitingForUser ? 'text-secondary' : activelyComputing ? 'text-primary' : 'text-outline'}`}>
+            {activelyComputing ? <AgentThinking variant={thinkingVariantForStage(workspace.currentStage)} /> : null}
             {waitingForUser ? '等待回覆' : activelyComputing ? '執行中' : '可輸入'}
           </span>
         </div>
 
-        <div className="rounded-xl bg-white/[0.035] p-2.5 focus-within:bg-white/[0.05]">
+        <div className="relative rounded-xl bg-white/[0.035] p-2.5 focus-within:bg-white/[0.05]">
+          <ComposerLoader active={activelyComputing} />
           <textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}

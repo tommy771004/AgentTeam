@@ -1,6 +1,6 @@
 import type { ExecutionStep, ModelSource } from '../agent/types'
 import { Icon } from './Icon'
-import { PixelLoader } from './primitives/PixelLoader'
+import { AgentThinking } from './primitives/AgentThinking'
 import { ShimmerLabel } from './primitives/ShimmerLabel'
 import { SpinnerRing } from './primitives/SpinnerRing'
 
@@ -118,7 +118,7 @@ export function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
               )}
               {isActive && (
                 <p className="mt-1 flex items-center gap-2 text-[12px] text-ink-2">
-                  <PixelLoader className="text-ink" />
+                  <AgentThinking variant="wave" className="text-ink" />
                   <ShimmerLabel active className="text-accent-ink">處理中…</ShimmerLabel>
                 </p>
               )}

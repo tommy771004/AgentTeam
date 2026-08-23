@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { LogViewer } from './LogViewer'
 import { ElapsedTime } from './primitives/ElapsedTime'
-import { PixelLoader } from './primitives/PixelLoader'
+import { AgentThinking } from './primitives/AgentThinking'
 import { ShimmerLabel } from './primitives/ShimmerLabel'
 import { SpinnerRing } from './primitives/SpinnerRing'
 import { emptyAgentLike } from '../agent/localCliRun'
@@ -300,7 +300,7 @@ export function InlineRunPanel({
             <CompactStepList steps={agent.steps} />
           ) : live && agent.loopConfig.trigger === 'local-cli' ? (
             <p className="flex items-center gap-2 text-[12px] text-ink-3">
-              <PixelLoader className="text-accent-ink" />
+              <AgentThinking variant="spin" className="text-accent-ink" />
               <ShimmerLabel active>正在分析任務…</ShimmerLabel>
             </p>
           ) : (

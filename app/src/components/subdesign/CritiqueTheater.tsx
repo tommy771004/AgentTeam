@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid'
 import { runTask } from '../../agent/taskRunCoordinator'
 import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignCritiquePanelist, SubDesignCritiqueRound } from '../../agent/subdesign/types'
 import { Icon } from '../Icon'
+import { AgentThinking } from '../primitives/AgentThinking'
 import { useAgentStore } from '../../store/agentStore'
 import { useProjectStore } from '../../store/projectStore'
 import { useRunActivityStore } from '../../store/runActivityStore'
@@ -349,7 +350,7 @@ export function CritiqueTheater({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/8 px-4 py-3.5">
         <div className="flex min-w-0 items-start gap-2.5">
           <span className={`grid h-9 w-9 shrink-0 place-items-center ${sessionRunning ? 'text-secondary' : 'text-primary'}`}>
-            <Icon name={sessionRunning ? 'radar' : 'fact_check'} size={19} />
+            {sessionRunning ? <AgentThinking variant="wave" /> : <Icon name="fact_check" size={19} />}
           </span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">

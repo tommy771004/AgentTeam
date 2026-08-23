@@ -1,4 +1,6 @@
 import type { SubDesignWorkspaceViewModel } from '../../agent/subdesign/workspace'
+import { AgentThinking } from '../primitives/AgentThinking'
+import { thinkingVariantForStage } from '../primitives/agentThinkingVariant'
 import { Icon } from '../Icon'
 
 type SubDesignWorkspaceHeaderProps = {
@@ -69,7 +71,11 @@ export function SubDesignWorkspaceHeader({ workspace, onPrimaryAction, primaryAc
         </div>
         <div className="flex items-center gap-2">
           <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${runTone}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${workspace.runStatus === 'active' ? 'bg-secondary' : workspace.runStatus === 'failed' || workspace.runStatus === 'halted' ? 'bg-error' : 'bg-outline/60'}`} />
+            {workspace.runStatus === 'active' ? (
+              <AgentThinking variant={thinkingVariantForStage(workspace.currentStage)} />
+            ) : (
+              <span className={`h-1.5 w-1.5 rounded-full ${workspace.runStatus === 'failed' || workspace.runStatus === 'halted' ? 'bg-error' : 'bg-outline/60'}`} />
+            )}
             {runLabel}
           </span>
           {canAct ? <button type="button" onClick={onPrimaryAction} className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-[11px] font-semibold text-on-primary"><Icon name="arrow_forward" size={14} />{primaryActionLabel || gate.title}</button> : null}

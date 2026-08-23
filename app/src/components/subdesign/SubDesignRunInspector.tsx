@@ -1,5 +1,7 @@
 import type { SubDesignWorkspaceViewModel } from '../../agent/subdesign/workspace'
 import { RunProcessFeed } from '../RunProcessFeed'
+import { AgentThinking } from '../primitives/AgentThinking'
+import { thinkingVariantForStage } from '../primitives/agentThinkingVariant'
 import { Icon } from '../Icon'
 
 type SubDesignRunInspectorProps = {
@@ -14,7 +16,13 @@ export function SubDesignRunInspector({ workspace, runId, executionKind, onOpenT
   return (
     <section className="mx-auto mb-7 max-w-[1120px] overflow-hidden rounded-2xl border border-secondary/25 bg-secondary/[0.04]" aria-live="polite">
       <div className="flex flex-wrap items-center gap-3 border-b border-secondary/15 px-4 py-3">
-        <span className="grid h-8 w-8 place-items-center text-secondary"><Icon name={waitingForUser ? 'front_hand' : 'progress_activity'} size={17} className={waitingForUser ? '' : 'animate-spin'} /></span>
+        <span className="grid h-8 w-8 place-items-center text-secondary">
+          {waitingForUser ? (
+            <Icon name="front_hand" size={17} />
+          ) : (
+            <AgentThinking variant={thinkingVariantForStage(workspace.currentStage)} />
+          )}
+        </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[12px] font-semibold text-on-surface">{waitingForUser ? 'Build 等待你的決定' : 'Build 正在執行'}</p>
           <p className="truncate text-[11px] text-outline">{executionKind === 'external' ? '外部 CLI 執行中；不會宣稱內建 DoD 已完成。' : `完成後將進入 ${workspace.nextGate.label} gate。`}</p>

@@ -21,7 +21,8 @@ import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
 import { ContextCards } from './ContextCards'
 import { ElapsedTime } from './primitives/ElapsedTime'
-import { PixelLoader } from './primitives/PixelLoader'
+import { AgentThinking } from './primitives/AgentThinking'
+import { thinkingVariantForPhase } from './primitives/agentThinkingVariant'
 import { Reveal } from './primitives/Reveal'
 import { ShimmerLabel } from './primitives/ShimmerLabel'
 import {
@@ -347,7 +348,7 @@ export function RunProcessFeed({
           {lifecycle.needsAttention ? (
             <Icon name={lifecycle.icon} size={16} className="shrink-0 text-orange" />
           ) : (
-            <PixelLoader className="shrink-0 text-ink" />
+            <AgentThinking variant={thinkingVariantForPhase(lifecycle.phase)} className="shrink-0 text-ink" />
           )}
           <span className="min-w-0 flex-1">
             <ShimmerLabel active={!lifecycle.needsAttention} className="block truncate font-medium">
