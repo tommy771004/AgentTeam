@@ -942,11 +942,37 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
         if (activeRunState?.cancelled) return { settlement: 'cancelled' as const, result: '' }
         publishOrchestration('iterate', iteration)
         recorder.step = iteration
+        // Whether this step recorded any assistant message of its own; if the
+        // stream carried none, the settled answer stands in for them.
+        let spokenThisStep = false
         recordTurnEntry(sessionId, { kind: 'step-start', source: 'host' })
         recordTurnEntry(sessionId, { kind: 'user-text', source: 'user', content: iteration === 1 ? prompt : iterationPrompt })
         const turn = await runPiTurn(sessionId, cwd, iterationPrompt, session.messages, (event) => {
           // A tool call is the model asking; the audit records what the Host
           // then decided and did (ADR-0048).
+          // Each assistant message is recorded where it happened, so the
+          // opening narration keeps its place before the tool it preceded.
+          // Recording only the settled answer left everything the model said
+          // on the way there unreconstructable from the record (ADR-0049).
+          if (event.type === 'message_end') {
+            const message = (event as { message?: { role?: unknown; content?: unknown } }).message
+            if (message?.role === 'assistant') {
+              const text = Array.isArray(message.content)
+                ? message.content
+                    .filter((part): part is { type: string; text: string } => Boolean(
+                      part && typeof part === 'object'
+                      && (part as { type?: unknown }).type === 'text'
+                      && typeof (part as { text?: unknown }).text === 'string',
+                    ))
+                    .map((part) => part.text)
+                    .join('')
+                : typeof message.content === 'string' ? message.content : ''
+              if (text.trim()) {
+                spokenThisStep = true
+                recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: text })
+              }
+            }
+          }
           if (event.type === 'tool_execution_start') {
             recordTurnEntry(sessionId, {
               kind: 'tool-call',
@@ -1034,7 +1060,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
             }
           }
           const answer = piTurnFinalAnswer(turn.items)
-          if (turn.settlement === 'answered') {
+          if (turn.settlement === 'answered' && !spokenThisStep) {
             recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: answer })
           }
           recordTurnEntry(sessionId, { kind: 'step-end', source: 'host', ...('timing' in turn && turn.timing ? { timing: turn.timing } : {}) })
@@ -1067,7 +1093,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           return { settlement: turn.settlement, result: answer, ...(done === undefined ? {} : { done }) }
         }
         const stoppedText = piTurnResultText(turn.settlement, turn.items)
-        if (turn.settlement === 'interrupted' && stoppedText) {
+        if (turn.settlement === 'interrupted' && stoppedText && !spokenThisStep) {
           recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: stoppedText })
         }
         recordTurnEntry(sessionId, { kind: 'step-end', source: 'host', ...('timing' in turn && turn.timing ? { timing: turn.timing } : {}) })

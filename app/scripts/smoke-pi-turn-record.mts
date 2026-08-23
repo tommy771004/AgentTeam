@@ -212,6 +212,7 @@ try {
   // well as its prose, in the order they happened.
   assert.deepEqual(projected.messages, [
     { role: 'user', content: '分析這個專案' },
+    { role: 'assistant', content: '先看看檔案。' },
     { role: 'tool', content: '→ grep(call_grep_1)' },
     { role: 'tool', content: '← grep(call_grep_1) success' },
     { role: 'assistant', content: '結論 2' },
