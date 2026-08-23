@@ -1041,7 +1041,6 @@ async function pushRunProcessSummary(args: {
   projectRoot?: string
 }): Promise<void> {
   const { thr, tid, runId, finalAgent, result, status } = args
-  const { useRunActivityStore } = await import('../store/runActivityStore.ts')
   const {
     useSubDesignStore,
   } = await import('../store/subDesignStore.ts')
@@ -1049,129 +1048,29 @@ async function pushRunProcessSummary(args: {
   const { useSubDesignCritiqueStore } = await import('../store/subDesignCritiqueStore.ts')
   const { useSubDesignExportStore } = await import('../store/subDesignExportStore.ts')
 
-  const presentation = useRunActivityStore.getState().getPresentation(runId)
-  const activityOperations = (presentation?.events || [])
-    .filter((event) => event.kind !== 'thought' && event.kind !== 'text')
-    .map((event) => ({
-      id: event.id,
-      kind: event.kind,
-      title: event.title || event.kind,
-      detail: event.detail,
-      path: event.path,
-      ok: event.ok,
-    }))
-  const fallbackOperations = (finalAgent.toolCalls || []).map((tool) => ({
-    id: tool.id,
-    kind: /write|edit|create|patch/i.test(tool.tool) ? 'file' : 'tool',
-    title: /bash|shell/i.test(tool.tool) ? '已執行指令' : `已執行 ${tool.tool}`,
-    detail:
-      typeof tool.input?.command === 'string'
-        ? tool.input.command
-        : tool.output?.slice(0, 400),
-    path:
-      String(tool.input?.path ?? tool.input?.file ?? tool.input?.filePath ?? '') ||
-      undefined,
-    ok: tool.ok,
+  // The execution process is derived from the Turn Record and from nothing
+  // else. The four-source fallback ladder (live activity → Host tool audit →
+  // toolCalls → steps+logs) is gone: none of those shapes was canonical, and
+  // the live cache's 120/40 caps meant a long run lost its earliest operations
+  // exactly when it finished. The record has no such cap — its entries are the
+  // durable history — so the summary now shows every operation a run did.
+  const { projectRunOperations, projectProducedFiles } = await import('./runOperationsProjection.ts')
+  const operations = projectRunOperations(finalAgent.turnRecord).map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    detail: row.detail,
+    path: row.path,
+    ok: row.ok,
   }))
-  const piHostAudits: Array<Record<string, unknown>> = []
-  try {
-    const listed = await window.subagents?.piHost?.sessions?.list?.()
-    const session = (listed?.sessions || []).find((candidate) => {
-      if (!candidate || typeof candidate !== 'object') return false
-      return (candidate as { threadId?: unknown }).threadId === tid
-    })
-    const audits = session && typeof session === 'object' ? (session as { toolAudit?: unknown }).toolAudit : undefined
-    if (Array.isArray(audits)) {
-      for (const audit of audits) {
-        if (audit && typeof audit === 'object') piHostAudits.push(audit as Record<string, unknown>)
-      }
-    }
-  } catch {
-    /* Pi Host evidence is optional; the run result remains authoritative. */
-  }
-  const piHostOperations = piHostAudits
-    .filter((audit) => audit.phase === 'start')
-    .map((audit, index) => {
-      const tool = String(audit.tool || 'tool')
-      const filePath = typeof audit.path === 'string' && audit.path ? audit.path : undefined
-      const result = piHostAudits.find((candidate) => candidate.phase === 'result' && candidate.callId === audit.callId)
-      return {
-        id: `pi_${String(audit.callId || index)}`,
-        kind: /write|edit/i.test(tool) ? 'file' : 'tool',
-        title: filePath ? `已處理 ${filePath.split(/[\\/]/).pop()}` : `已執行 ${tool}`,
-        detail: filePath || `Pi Host ${tool}`,
-        path: filePath,
-        ok: result ? result.settlement === 'success' : undefined,
-      }
-    })
-  const fileMap = new Map<
-    string,
-    { path: string; action: string; added?: number; removed?: number }
-  >()
-  for (const file of presentation?.fileChanges || []) {
-    fileMap.set(file.path, file)
-  }
-  for (const tool of finalAgent.toolCalls || []) {
-    if (!/write|edit|create|patch/i.test(tool.tool)) continue
-    const path = String(tool.input?.path ?? tool.input?.file ?? tool.input?.filePath ?? '')
-    if (path && !fileMap.has(path)) {
-      fileMap.set(path, {
-        path,
-        action: /write|create/i.test(tool.tool) ? 'create' : 'edit',
-      })
-    }
-  }
-  for (const audit of piHostAudits) {
-    if (audit.phase !== 'start' || typeof audit.path !== 'string' || !/write|edit/i.test(String(audit.tool || ''))) continue
-    const path = audit.path.trim()
-    if (!path || fileMap.has(path)) continue
-    fileMap.set(path, {
-      path,
-      action: /write/i.test(String(audit.tool || '')) ? 'create' : 'edit',
-    })
-  }
-  const stepOps = (finalAgent.steps || []).map((step, index) => ({
-    id: `step_${step.step}_${index}`,
-    kind: step.status === 'FAILED' ? 'error' : 'status',
-    title: step.description || step.action || `步驟 ${step.step}`,
-    detail:
-      step.status === 'COMPLETED'
-        ? '完成'
-        : step.status === 'FAILED'
-          ? (step.result || '失敗').slice(0, 400)
-          : step.status,
-    ok: step.status !== 'FAILED',
-  }))
-  const logOps = (finalAgent.logs || [])
-    .filter((line) => {
-      const m = line.message || ''
-      return m && !m.startsWith('$ ') && m.length < 240
-    })
-    .slice(-16)
-    .map((line) => ({
-      id: line.id,
-      kind: line.level === 'ERROR' ? 'error' : line.level === 'SUCCESS' ? 'done' : 'status',
-      title: line.message.slice(0, 200),
-      detail: line.message.slice(0, 400),
-      ok: line.level !== 'ERROR',
-    }))
-  const operations =
-    activityOperations.length > 0
-      ? activityOperations
-      : piHostOperations.length > 0
-        ? piHostOperations
-      : fallbackOperations.length > 0
-        ? fallbackOperations
-        : stepOps.length > 0
-          ? [...stepOps, ...logOps].slice(-40)
-          : logOps
+  const producedFiles = projectProducedFiles(finalAgent.turnRecord)
   let diff: string | undefined
-  if (fileMap.size > 0) {
+  if (producedFiles.length > 0) {
     try {
       const { useProjectStore } = await import('../store/projectStore.ts')
       const projectRoot = args.projectRoot || useProjectStore.getState().root || undefined
       const diffResult = await window.subagents?.tools?.workspaceDiff?.(
-        [...fileMap.keys()],
+        producedFiles.map((file) => file.path),
         projectRoot,
       )
       if (diffResult?.ok && diffResult.diff.trim()) {
@@ -1259,7 +1158,7 @@ async function pushRunProcessSummary(args: {
               ok: status === 'success',
             },
           ],
-    files: [...fileMap.values()],
+    files: producedFiles.map((file) => ({ path: file.path, action: file.action })),
   })
 
   await persistArtifactIndexForRun({

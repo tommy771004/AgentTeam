@@ -947,15 +947,20 @@ await test('Phase 1: run activity is run-scoped with bounded terminal retention'
   assert.match(activity, /clearDraft: \(runId\)/)
 })
 
-await test('Phase 1: finalization summary consumes the explicit run presentation', async () => {
+await test('Phase 1: finalization summary derives from the Turn Record, never the live cache', async () => {
   const fs = await import('node:fs')
-  // Phase 3 item 4: process summary moved into coordinator finalizeTaskRun
+  // The four-source fallback ladder (live activity → Host audit → toolCalls →
+  // steps+logs) is deleted: the execution-process record projects from the
+  // Turn Record through runOperationsProjection and from nothing else, so a
+  // memory cap can never bound durable history.
   const controller = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
-  assert.match(controller, /getState\(\)\.getPresentation\(runId\)/)
-  assert.match(controller, /const presentation = useRunActivityStore\.getState\(\)\.getPresentation\(runId\)/)
-  assert.match(controller, /presentation\?\.events/)
-  assert.match(controller, /presentation\?\.fileChanges/)
-  assert.doesNotMatch(controller, /const activity = useRunActivityStore\.getState\(\)[\s\S]{0,120}activity\.events/)
+  const projection = fs.readFileSync(path.join(appRoot, 'src/agent/runOperationsProjection.ts'), 'utf8')
+  assert.match(controller, /projectRunOperations\(finalAgent\.turnRecord\)/)
+  assert.match(controller, /projectProducedFiles\(finalAgent\.turnRecord\)/)
+  // The live activity store is written for in-flight rendering but is no
+  // longer an input to anything the summary persists.
+  assert.doesNotMatch(controller, /getPresentation\(runId\)/)
+  assert.match(projection, /sort\(\(left, right\) => left\.seq - right\.seq\)/)
 })
 
 // ── W3: config candidates — every field temporary / review / unsupported ──
