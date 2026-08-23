@@ -26,7 +26,7 @@ export type PiTurnInterruptReason = 'user' | 'timeout'
  * difference unrepresentable-by-accident: every consumer switches on this
  * union and the switch does not compile until all five are handled.
  */
-export const PI_TURN_SETTLEMENTS = ['answered', 'empty', 'interrupted', 'failed', 'cancelled'] as const
+export const PI_TURN_SETTLEMENTS = ['answered', 'empty', 'truncated', 'interrupted', 'failed', 'cancelled'] as const
 
 export type PiTurnSettlement = (typeof PI_TURN_SETTLEMENTS)[number]
 
@@ -44,9 +44,43 @@ function unreachableSettlement(value: never): never {
  *
  * A provider call that finished cleanly but carried no assistant text is
  * `empty`, not `answered` — the run produced nothing for the user to read.
+ * A call the provider cut off mid-generation (`stopReason: 'length'`) is
+ * `truncated`, not `empty`: retrying an identical prompt hits the identical
+ * budget wall, so a truncated turn is terminal in a way emptiness is not.
  */
-export function classifyPiTurnSettlement(items: unknown[]): 'answered' | 'empty' {
-  return piTurnFinalAnswer(items) ? 'answered' : 'empty'
+export function classifyPiTurnSettlement(items: unknown[], stopReason?: string): 'answered' | 'empty' | 'truncated' {
+  if (piTurnFinalAnswer(items)) return 'answered'
+  return stopReason === 'length' ? 'truncated' : 'empty'
+}
+
+/** The human-readable verdict a truncated turn reports, with the knob that fixes it. */
+export const PI_TURN_TRUNCATED_NOTICE =
+  '模型的輸出在完成前被 maxTokens 上限截斷（思考或長文吃光了輸出預算），這次沒有產出可保留。' +
+  '調高此模型的 maxTokens、降低 thinking 等級，或把任務拆小後再試。'
+
+/**
+ * The provider's finish reason on the turn's last assistant message.
+ *
+ * Pi records it on the message, so this reads the record instead of guessing
+ * from absent content — one reading shared by every truncation consumer, so
+ * two paths can never classify the same turn differently.
+ */
+export function piTurnStopReason(
+  messages: ReadonlyArray<{ role?: string; stopReason?: string }>,
+): string | undefined {
+  return [...messages].reverse().find((message) => message?.role === 'assistant')?.stopReason
+}
+
+/**
+ * Whether the turn's final assistant message was cut off by the output cap.
+ *
+ * A genuinely silent model (`stopReason: 'stop'`, no text) must not be misfiled
+ * as truncated.
+ */
+export function isLengthTruncatedTurn(
+  messages: ReadonlyArray<{ role?: string; stopReason?: string }>,
+): boolean {
+  return piTurnStopReason(messages) === 'length'
 }
 
 /**
@@ -115,6 +149,16 @@ export function piTurnOutcome(
         logLevel: 'ERROR',
         stepStatus: 'FAILED',
       }
+    case 'truncated':
+      // A budget wall is not retryable with the same inputs, so this reads as
+      // a failure with the knob that fixes it, not as a blank.
+      return {
+        status: 'failed',
+        text: PI_TURN_TRUNCATED_NOTICE,
+        confidence: 0.2,
+        logLevel: 'ERROR',
+        stepStatus: 'FAILED',
+      }
     case 'interrupted': {
       const reason = input.interruptReason || 'user'
       return {
@@ -150,6 +194,9 @@ export function isCompletedModelCall(settlement: PiTurnSettlement): boolean {
     case 'answered':
     case 'empty':
       return true
+    // A truncated call did reach the model, but its wall is deterministic:
+    // the goal loop must not spend remaining iterations on the same prompt.
+    case 'truncated':
     case 'interrupted':
     case 'failed':
     case 'cancelled':
@@ -326,6 +373,8 @@ export function piTurnResultText(settlement: PiTurnSettlement, items: unknown[])
     case 'empty':
     case 'interrupted':
       return piTurnFinalAnswer(items)
+    case 'truncated':
+      return PI_TURN_TRUNCATED_NOTICE
     case 'failed':
     case 'cancelled':
       return items

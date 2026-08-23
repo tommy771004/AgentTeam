@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type { PiThinkingLevel } from './piAgentProfile.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
-import { classifyPiTurnSettlement, piTurnProviderError } from '../src/agent/piHostRun.ts'
+import { classifyPiTurnSettlement, piTurnFinalAnswer, piTurnProviderError, piTurnStopReason, PI_TURN_TRUNCATED_NOTICE } from '../src/agent/piHostRun.ts'
 import type { PiRecordedMessage } from '../src/agent/turnRecord.ts'
 
 const vendorCandidates = [
@@ -480,10 +480,17 @@ export async function runPiTurn(
     if (providerError) return { settlement: 'failed' as const, items: [{ type: 'error', content: providerError }] }
     const items = assistantMessageItems(completedMessages)
     // A clean provider call that carried no text is `empty`, not `answered`:
-    // the run finished without producing anything for the user to read. The
-    // items travel either way — the settlement describes them, it does not
-    // discard them.
-    return { settlement: classifyPiTurnSettlement(items), items }
+    // the run finished without producing anything for the user to read. One
+    // cut off by the output budget (`stopReason: 'length'`) is `truncated`
+    // instead — a wall the same prompt will hit again, so it must read as a
+    // failure with the knob that fixes it. Items travel either way; one
+    // classification decides both the settlement and the notice.
+    const stopReason = piTurnStopReason(completedMessages as ReadonlyArray<{ role?: string; stopReason?: string }>)
+    const settlement = classifyPiTurnSettlement(items, stopReason)
+    if (settlement === 'truncated') {
+      return { settlement, items: [...items, { type: 'truncation_notice', content: PI_TURN_TRUNCATED_NOTICE }] }
+    }
+    return { settlement, items }
   } catch (error) {
     // An aborted prompt throws; an interrupt is a deliberate stop, never a failure.
     if (turn.interrupt) return interruptedTurnResult(turn, completedMessages, streamedSegments)

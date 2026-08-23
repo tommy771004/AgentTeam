@@ -16,19 +16,23 @@ import {
 
 /**
  * A turn that called the model successfully and produced no text is not a
- * success. The settlement vocabulary is a closed union so the five outcomes
+ * success. The settlement vocabulary is a closed union so the six outcomes
  * cannot collapse into one another on the way to the user.
  */
 
 // ── Part A: the closed union and its projection (pure) ──────────────────────
 assert.deepEqual(
   [...PI_TURN_SETTLEMENTS].sort(),
-  ['answered', 'cancelled', 'empty', 'failed', 'interrupted'],
+  ['answered', 'cancelled', 'empty', 'failed', 'interrupted', 'truncated'],
 )
 
 assert.equal(classifyPiTurnSettlement([{ type: 'assistant_message', content: '結論' }]), 'answered')
 assert.equal(classifyPiTurnSettlement([{ type: 'assistant_message', content: '   ' }]), 'empty')
 assert.equal(classifyPiTurnSettlement([]), 'empty')
+// A call cut off by the output budget is `truncated`, not `empty`: the same
+// prompt will hit the same wall, so it must read as a terminal failure.
+assert.equal(classifyPiTurnSettlement([], 'length'), 'truncated')
+assert.equal(classifyPiTurnSettlement([{ type: 'assistant_message', content: '結論' }], 'length'), 'answered')
 
 // A rejected request arrives in-band as an empty assistant message; it is a
 // failure, never a turn that merely said nothing.
