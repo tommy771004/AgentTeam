@@ -313,7 +313,6 @@ export function ExecutionPage() {
                 </div>
               </div>
             </div>
-
           </div>
         </div>
       </main>
