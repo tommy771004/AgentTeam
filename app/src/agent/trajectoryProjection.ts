@@ -8,7 +8,7 @@
  * pure so live rendering and replay produce the same rows.
  */
 import { projectConversationRows, type ConversationRow } from './conversationProjection.ts'
-import { stepTimings, type PiStepTimingView, type TurnRecord, type TurnRecordPage } from './turnRecord.ts'
+import { recordRunnerDeclaration, stepTimings, type PiStepTimingView, type TurnRecord, type TurnRecordPage } from './turnRecord.ts'
 
 export type TrajectoryRow = ConversationRow & {
   /** The step this row belongs to, so a reader can locate it rather than scroll for it. */
@@ -28,6 +28,12 @@ export type TrajectoryView = {
   nextBefore?: number
   /** Steps covered by this page, whether or not they have finished. */
   steps: PiStepTimingView[]
+  /**
+   * The runner that drove the turn, when it declared itself. Present so a view
+   * can say what this path did NOT do — identical rows never imply identical
+   * guarantees.
+   */
+  runner?: { runner: string; capabilities?: { parse: boolean; validateDoD: boolean; iterate: boolean } }
 }
 
 /**
@@ -51,8 +57,10 @@ export function projectTrajectory(page: TurnRecordPage): TrajectoryView {
       ...(timing && !timing.running ? { timing } : {}),
     }
   })
+  const runner = recordRunnerDeclaration(record)
   return {
     rows,
+    ...(runner ? { runner } : {}),
     unloadedBefore: Math.max(0, page.total - page.entries.length),
     ...(page.nextBefore === undefined ? {} : { nextBefore: page.nextBefore }),
     steps,

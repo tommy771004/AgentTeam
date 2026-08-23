@@ -61,7 +61,19 @@ export type TurnRecordCoordinates = {
 
 export type TurnRecordEntry = TurnRecordCoordinates &
   (
-    | { kind: 'turn-start'; source: 'host' }
+    | {
+        kind: 'turn-start'
+        source: 'host'
+        /** Which runner drove the turn; absent means the builtin Pi Core loop. */
+        runner?: string
+        /**
+         * What that runner actually does. Carried on the record so identical
+         * presentation can never be read as identical guarantees: an external
+         * CLI produces the same rows while still declaring that it ran no
+         * builtin Parse, no DoD validation and no iterate.
+         */
+        capabilities?: { parse: boolean; validateDoD: boolean; iterate: boolean }
+      }
     | {
         kind: 'turn-end'
         source: 'host'
@@ -355,6 +367,18 @@ export function stepTimings(record: TurnRecord | undefined): PiStepTimingView[] 
     })
   }
   return [...views.values()]
+}
+
+/** What the record says about the runner that drove it. */
+export function recordRunnerDeclaration(
+  record: TurnRecord | undefined,
+): { runner: string; capabilities?: { parse: boolean; validateDoD: boolean; iterate: boolean } } | undefined {
+  for (const entry of turnRecordEntries(record)) {
+    if (entry.kind !== 'turn-start') continue
+    if (!entry.runner) continue
+    return { runner: entry.runner, ...(entry.capabilities ? { capabilities: entry.capabilities } : {}) }
+  }
+  return undefined
 }
 
 /** Entries in the order they happened, decided by `seq` and never by position. */

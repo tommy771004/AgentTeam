@@ -17,6 +17,7 @@ import { useSettingsStore } from './settingsStore.ts'
 import { useLearningStore } from './learningStore.ts'
 import { consumeNextState } from '../agent/outcomeDispatcher.ts'
 import { buildPiHostRunConfig, piTurnOutcome, submitPiHostRun } from '../agent/piHostRun.ts'
+import { buildExternalCliRecord, type ExternalCliRecordEvent } from '../agent/externalCliRecord.ts'
 import {
   emptyAgentLike,
   runPromptViaLocalCli,
@@ -574,6 +575,9 @@ export const useAgentStore = create<AgentStore>((set, get) => {
 
       // Codex-style center feed
       let unsubStream: (() => void) | undefined
+      // The same events the feed renders also build this run's Turn Record, so
+      // an external run projects through one seam like a builtin one.
+      const recordEvents: ExternalCliRecordEvent[] = []
       try {
         const { useRunActivityStore } = await import('./runActivityStore.ts')
         useRunActivityStore.getState().begin(runId)
@@ -593,6 +597,15 @@ export const useAgentStore = create<AgentStore>((set, get) => {
               ev.sessionPhase === 'waiting_for_user' ? '等待你的回覆' : '等待核准',
               runId,
             )
+          }
+          if (ev.kind === 'tool' || ev.kind === 'file') {
+            recordEvents.push({
+              kind: ev.kind,
+              ...(ev.tool ? { tool: ev.tool } : {}),
+              ...(ev.path ? { path: ev.path } : {}),
+              ...(ev.detail ? { detail: ev.detail } : {}),
+              ...(ev.ok === undefined ? {} : { ok: ev.ok }),
+            })
           }
           if ((ev.kind === 'tool' || ev.kind === 'file') && (ev.tool || ev.path)) {
             toolCalls = [
@@ -715,6 +728,20 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         const final = emptyAgentLike({
           id: runId,
           objective: prompt,
+          turnRecord: buildExternalCliRecord({
+            runner: opts.kind,
+            prompt,
+            events: recordEvents,
+            answer: r.output || '',
+            settlement: r.ok
+              ? (r.output || '').trim() ? 'answered' : 'empty'
+              : r.terminalClassification === 'interrupted'
+                ? 'interrupted'
+                : r.error === '使用者取消' || r.terminalClassification === 'user-cancelled'
+                  ? 'cancelled'
+                  : 'failed',
+            startedAt: t0,
+          }),
           status:
             r.ok
               ? 'success'

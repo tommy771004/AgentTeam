@@ -108,6 +108,11 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
         <span>執行軌跡</span>
         {view ? <span>{view.rows.length} 列</span> : null}
         {view && view.unloadedBefore > 0 ? <span>· 尚有 {view.unloadedBefore} 筆更早</span> : null}
+        {view?.runner?.capabilities && !view.runner.capabilities.validateDoD ? (
+          <span title="外部 CLI 不執行內建 Parse／DoD 驗證／iterate">
+            · {view.runner.runner}（未驗證 DoD）
+          </span>
+        ) : null}
       </header>
 
       <div
