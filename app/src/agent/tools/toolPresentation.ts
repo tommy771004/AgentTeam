@@ -14,6 +14,8 @@
  * view (ADR-0050).
  */
 
+import { TOOL_DEFINITIONS } from './toolDefinitions.ts'
+
 /** Where a tool touched the world, so produced files can be derived from intent. */
 export type ToolLocation = { path: string; line?: number }
 
@@ -51,21 +53,6 @@ const asText = (value: unknown): string | undefined =>
 function asPath(value: unknown): string | undefined {
   const path = asText(value)
   return path && path.trim() ? path.trim() : undefined
-}
-
-function asLocations(value: unknown): ToolLocation[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  const locations = value
-    .map((entry) => {
-      const record = asRecord(entry)
-      if (!record) return undefined
-      const path = asPath(record.path)
-      if (!path) return undefined
-      const line = typeof record.line === 'number' && Number.isFinite(record.line) ? record.line : undefined
-      return line === undefined ? { path } : { path, line }
-    })
-    .filter((entry): entry is ToolLocation => Boolean(entry))
-  return locations.length > 0 ? locations : undefined
 }
 
 /** Edits arrive as `{edits:[{oldText,newText}]}` or a single `{oldText,newText}` pair. */
@@ -144,6 +131,79 @@ export function searchMatchesCard(queryField: 'pattern' | 'query' = 'pattern') {
   }
 }
 
+/** A read: the file it opened, so an editor can follow along. */
+export function readCard(pathField = 'path', label = '讀取') {
+  return (args: unknown): ToolPresentation | undefined => {
+    const record = asRecord(args)
+    const path = record ? asPath(record[pathField]) : undefined
+    if (!path) return undefined
+    return { card: 'generic', kind: 'read', title: `${label} ${path.split(/[\\/]/).pop()}`, locations: [{ path }] }
+  }
+}
+
+/** A discovery that answers with paths rather than matches. */
+export function pathsCard(queryField: string, label: string) {
+  return (args: unknown): ToolPresentation | undefined => {
+    const record = asRecord(args)
+    const query = record ? asText(record[queryField]) : undefined
+    return {
+      card: 'search',
+      shape: 'paths',
+      title: query ? `${label} ${query}` : label,
+      ...(query ? { query } : {}),
+      truncated: false,
+    }
+  }
+}
+
+/**
+ * A call that changes a file at a path it names.
+ *
+ * `kind: 'edit'` is what puts its locations on the produced-files list, so it
+ * belongs only to calls that genuinely produce or modify something — never to
+ * a read, and never to a delete.
+ */
+export function mutationCard(pathField: string, label: string) {
+  return (args: unknown): ToolPresentation | undefined => {
+    const record = asRecord(args)
+    const path = record ? asPath(record[pathField]) : undefined
+    if (!path) return undefined
+    return { card: 'generic', kind: 'edit', title: `${label} ${path.split(/[\\/]/).pop()}`, locations: [{ path }] }
+  }
+}
+
+/**
+ * A call that touches paths without producing them — a delete, a move's source.
+ *
+ * Locations without `kind: 'edit'`: an editor can still follow along, while the
+ * produced-files list stays a list of what the run actually made.
+ */
+export function touchCard(label: string, ...pathFields: string[]) {
+  return (args: unknown): ToolPresentation | undefined => {
+    const record = asRecord(args)
+    if (!record) return undefined
+    const locations = pathFields
+      .map((field) => asPath(record[field]))
+      .filter((path): path is string => Boolean(path))
+      .map((path) => ({ path }))
+    if (locations.length === 0) return undefined
+    return { card: 'generic', title: `${label} ${locations.map((location) => location.path).join(' → ')}`, locations }
+  }
+}
+
+/** A call whose subject is a short string rather than a file. */
+export function labelledCard(field: string, label: string, kind?: Extract<ToolPresentation, { card: 'generic' }>['kind']) {
+  return (args: unknown): ToolPresentation | undefined => {
+    const record = asRecord(args)
+    const subject = record ? asText(record[field]) : undefined
+    return {
+      card: 'generic',
+      title: subject ? `${label} ${subject.slice(0, 80)}` : label,
+      ...(kind ? { kind } : {}),
+    }
+  }
+}
+
 /**
  * Presentations for the tools that flow through the Turn Record.
  *
@@ -212,8 +272,21 @@ const PI_BUILTIN_PRESENTATIONS: Record<string, ToolPresenter> = {
  * An unknown tool has nothing to declare (`undefined`); a malformed argument
  * must degrade to the same generic fallback rather than break replay.
  */
+/**
+ * The presenter a tool declared, wherever it declared it.
+ *
+ * Catalog tools declare beside their schema; Pi Core's builtin loop tools
+ * declare in the stand-in table above, because their schemas live in the
+ * vendored package. One lookup so a declaration is never merely decorative.
+ */
+function presenterFor(tool: string): ToolPresenter | undefined {
+  const declared = (TOOL_DEFINITIONS as Record<string, ToolPresenter | undefined>)[tool]
+  if (declared?.presentCall || declared?.presentResult) return declared
+  return PI_BUILTIN_PRESENTATIONS[tool]
+}
+
 export function presentToolCall(tool: string, args: unknown): ToolPresentation | undefined {
-  const present = PI_BUILTIN_PRESENTATIONS[tool]?.presentCall
+  const present = presenterFor(tool)?.presentCall
   if (!present) return undefined
   try {
     return present(args) ?? undefined
@@ -224,7 +297,7 @@ export function presentToolCall(tool: string, args: unknown): ToolPresentation |
 
 /** Look up a result's declared presentation under the same contract. */
 export function presentToolResult(tool: string, args: unknown, result: ToolResultInput): ToolPresentation | undefined {
-  const present = PI_BUILTIN_PRESENTATIONS[tool]?.presentResult
+  const present = presenterFor(tool)?.presentResult
   if (!present) return undefined
   try {
     return present(args, result) ?? undefined
