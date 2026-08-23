@@ -6,6 +6,7 @@
  * are derived views — orphan tools cannot exist (compile error via satisfies).
  */
 import type { BuiltinCapabilityId } from '../capabilities/capabilityIds.ts'
+import { searchMatchesCard, terminalCard, writeCard, type ToolPresenter } from './toolPresentation.ts'
 
 export type ToolDefinition = {
   description: string
@@ -18,6 +19,14 @@ export type ToolDefinition = {
    * Ownership for gating remains owningCapability only.
    */
   alsoListedIn?: BuiltinCapabilityId[]
+  /**
+   * How this tool presents in a feed, declared here instead of guessed from
+   * its name elsewhere (ADR-0050). Both presenters must be pure functions of
+   * their inputs — they replay on recorded ledgers — and must return
+   * undefined rather than throw on malformed arguments.
+   */
+  presentCall?: ToolPresenter['presentCall']
+  presentResult?: ToolPresenter['presentResult']
 }
 
 export const TOOL_DEFINITIONS = {
@@ -111,6 +120,8 @@ export const TOOL_DEFINITIONS = {
       "required": ["query"]
     },
     owningCapability: 'workspace',
+    // Declared here, next to the schema (ADR-0050): the tool says it searches.
+    presentCall: searchMatchesCard('query'),
   },
   workspace_glob: {
     description: "Find files by glob under the run-scoped workspace root",
@@ -178,6 +189,8 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'workspace',
+    // Declared here, next to the schema (ADR-0050): the tool says it writes.
+    presentCall: writeCard,
   },
   workspace_download: {
     description: "Download an HTTP(S) URL to the sandboxed workspace",
@@ -308,6 +321,8 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'shell',
+    // Declared here, next to the schema (ADR-0050): the tool says it's a shell.
+    presentCall: terminalCard,
   },
   codegraph_explore: {
     description: "Query local CodeGraph index for symbols/call paths (surgical code context). Requires codegraph CLI + project init.",

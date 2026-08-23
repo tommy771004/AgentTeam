@@ -940,6 +940,10 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
               source: 'model',
               tool: typeof event.toolName === 'string' ? event.toolName : 'tool',
               callId: typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`,
+              // The arguments travel with the call so a replay can re-derive
+              // the tool's declared presentation (ADR-0050) — a diff card
+              // needs the edit pairs, not the tool's name.
+              ...(event.args !== undefined ? { args: event.args } : {}),
             })
           }
           if (event.type === 'tool_execution_end') {

@@ -54,7 +54,15 @@ export type TurnRecordEntry = TurnRecordCoordinates &
     | { kind: 'step-end'; source: 'host' }
     | { kind: 'user-text'; source: 'user'; content: string }
     | { kind: 'assistant-text'; source: 'model'; content: string }
-    | { kind: 'tool-call'; source: 'model'; tool: string; callId: string; path?: string }
+    | {
+        kind: 'tool-call'
+        source: 'model'
+        tool: string
+        callId: string
+        /** The arguments as recorded, so a replay re-presents identically (ADR-0050). */
+        args?: unknown
+        path?: string
+      }
     | {
         kind: 'tool-result'
         source: 'host'

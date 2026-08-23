@@ -16,13 +16,13 @@ type ToolPresentation =
 
 **Blocked by:** 06
 
-**Status:** 可交給代理
+**Status:** done
 
-- [ ] 工具定義新增選填的 `presentCall` / `presentResult` 與 `locations`；兩者為 replay-pure：無 I/O、不讀 session、不用時鐘或亂數
-- [ ] 參考工具接上：改檔類 → `diff`、shell → `terminal`、搜尋類 → `search`、其餘 → `generic`
-- [ ] 未宣告呈現的工具安全退回通用卡；畸形或較舊的已記錄參數回傳 undefined 走通用卡，**不得**丟例外
-- [ ] 產出檔案由 `diff` 卡與 `locations` 推導；只讀與失敗的呼叫不貢獻；同一檔案每回合只出現一次
-- [ ] 中央的檔名正則（`/write|edit|create|patch/i`）與檔案 map 啟發式刪除
-- [ ] UI-only 的格式（console 圍欄、渲染後的 diff、相對化路徑）不得進入模型可見結果
-- [ ] 新增 ADR：呈現是工具定義的一部分，且必須 replay-pure
-- [ ] Seam 2 smoke：各卡片型別以 fixture 斷言；產出檔案清單含「模型未提及但確實改過」的檔案
+- [x] 工具定義新增選填的 `presentCall` / `presentResult` 與 `locations`；兩者為 replay-pure：無 I/O、不讀 session、不用時鐘或亂數
+- [x] 參考工具接上：改檔類 → `diff`、shell → `terminal`、搜尋類 → `search`、其餘 → `generic`
+- [x] 未宣告呈現的工具安全退回通用卡；畸形或較舊的已記錄參數回傳 undefined 走通用卡，**不得**丟例外
+- [x] 產出檔案由 `diff` 卡與 `locations` 推導；只讀與失敗的呼叫不貢獻；同一檔案每回合只出現一次
+- [x] 中央的檔名正則（`/write|edit|create|patch/i`）與檔案 map 啟發式刪除
+- [x] UI-only 的格式（console 圍欄、渲染後的 diff、相對化路徑）不得進入模型可見結果
+- [x] 新增 ADR：呈現是工具定義的一部分，且必須 replay-pure
+- [x] Seam 2 smoke：各卡片型別以 fixture 斷言；產出檔案清單含「模型未提及但確實改過」的檔案

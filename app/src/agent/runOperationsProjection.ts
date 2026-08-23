@@ -9,9 +9,16 @@
  *
  * Pure by contract — no I/O, no store reads, no clock, no randomness — because
  * it runs on live turns and on replayed records alike. Ordering comes from
- * `seq` and from nothing else.
+ * `seq` and from nothing else. Card shapes come from each tool's own declared
+ * presentation (ADR-0050), never from a filename regex.
  */
 import { turnRecordEntries, type TurnRecord, type TurnRecordEntry } from './turnRecord.ts'
+import {
+  diffPaths,
+  presentToolCall,
+  presentToolResult,
+  type ToolPresentation,
+} from './tools/toolPresentation.ts'
 
 export type RunOperationRow = {
   id: string
@@ -24,6 +31,8 @@ export type RunOperationRow = {
   path?: string
   callId?: string
   ok?: boolean
+  /** The tool's declared presentation, when this build and the record agree. */
+  card?: ToolPresentation
 }
 
 export type ProducedFile = { path: string; action: 'create' | 'edit'; seq: number }
@@ -32,12 +41,41 @@ function base(entry: TurnRecordEntry) {
   return { id: `e${entry.seq}`, seq: entry.seq, turn: entry.turn, step: entry.step }
 }
 
+/** Row text from a declared card; falls back to the recorded names alone. */
+/** Row text from a declared card; the caller owns the fallback title. */
+function rowFromCard(
+  card: ToolPresentation | undefined,
+  fallbackTitle: string,
+): { title?: string; detail?: string; path?: string } {
+  if (!card) return {}
+  switch (card.card) {
+    case 'generic': {
+      const firstPath = card.locations?.[0]?.path
+      return {
+        title: card.title || fallbackTitle,
+        ...(card.content ? { detail: card.content } : {}),
+        ...(firstPath ? { path: firstPath } : {}),
+      }
+    }
+    case 'terminal':
+      return { title: card.title || fallbackTitle, ...(card.description ? { detail: card.description } : {}) }
+    case 'diff': {
+      const firstPath = card.diffs[0]?.path
+      return { title: card.title || fallbackTitle, ...(firstPath ? { path: firstPath } : {}) }
+    }
+    case 'search':
+      return { title: card.title || fallbackTitle }
+  }
+}
+
 /**
  * Operation rows for one record, in recorded order.
  *
- * Tool calls and their results merge into one row per callId; boundary,
- * approval, and compaction entries render as status or notice rows. An entry
- * this build cannot present becomes a notice, never an exception or a gap.
+ * Tool calls and their results merge into one row per callId, presented by
+ * the tool's own declaration; boundary, approval, and compaction entries
+ * render as status or notice rows. An entry this build cannot present — an
+ * undeclared tool, malformed or older recorded arguments — becomes a plain
+ * row, never an exception or a gap.
  */
 export function projectRunOperations(record: TurnRecord | undefined): RunOperationRow[] {
   const rows: RunOperationRow[] = []
@@ -46,14 +84,27 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
     const pair = open.get(callId)
     if (!pair?.call) return
     const result = pair.result
+    const args = 'args' in pair.call ? pair.call.args : undefined
+    const card =
+      result
+        ? (presentToolResult(pair.call.tool, args, {
+            content: result.detail ?? '',
+            isError: result.settlement !== 'success',
+          }) ?? presentToolCall(pair.call.tool, args))
+        : presentToolCall(pair.call.tool, args)
+    const presented = rowFromCard(card, result ? `已執行 ${pair.call.tool}` : `執行 ${pair.call.tool}…`)
+    const failed = Boolean(result && result.settlement !== 'success')
     rows.push({
       ...base(pair.call),
-      kind: result && result.settlement !== 'success' ? 'error' : 'tool',
-      title: result ? `已執行 ${pair.call.tool}` : `執行 ${pair.call.tool}…`,
+      kind: failed ? 'error' : 'tool',
+      title: presented.title ?? (result ? `已執行 ${pair.call.tool}` : `執行 ${pair.call.tool}…`),
       callId: pair.call.callId,
+      ...('path' in pair.call && pair.call.path ? { path: pair.call.path } : {}),
+      ...(presented.path ? { path: presented.path } : {}),
       ...(result?.detail ? { detail: result.detail } : {}),
-      ...(pair.call.path ? { path: pair.call.path } : {}),
-      ...(result ? { ok: result.settlement === 'success' } : {}),
+      ...(presented.detail ? { detail: presented.detail } : {}),
+      ...(result ? { ok: !failed } : {}),
+      ...(card ? { card } : {}),
     })
     open.delete(callId)
   }
@@ -112,15 +163,21 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
 }
 
 /**
- * Files a run produced, from mutating results only.
+ * Files a run produced, from what tools declare they mutate.
  *
- * A write/edit whose result settled successfully contributes its path once;
- * reads and failed calls contribute nothing, so the list reflects what
- * happened rather than what was said.
+ * Only a successful declared mutation contributes its paths — a diff card's
+ * diffs, or a generic card that declares `kind: 'edit'` with locations. Reads
+ * and failed calls contribute nothing, so the list reflects what happened
+ * rather than what was said. A file appears once per turn, at its first
+ * mutation.
  */
 export function projectProducedFiles(record: TurnRecord | undefined): ProducedFile[] {
   const files = new Map<string, ProducedFile>()
   const calls = new Map<string, Extract<TurnRecordEntry, { kind: 'tool-call' }>>()
+  const pushMutation = (path: string, action: 'create' | 'edit', seq: number) => {
+    if (!path.trim() || files.has(path)) return
+    files.set(path, { path, action, seq })
+  }
   for (const entry of turnRecordEntries(record)) {
     if (entry.kind === 'tool-call') {
       calls.set(entry.callId, entry)
@@ -129,11 +186,18 @@ export function projectProducedFiles(record: TurnRecord | undefined): ProducedFi
     if (entry.kind !== 'tool-result') continue
     if (entry.settlement !== 'success') continue
     const call = calls.get(entry.callId)
-    const isMutation = call ? /write|edit|create|patch/i.test(call.tool) : false
-    const path = call?.path
-    if (!isMutation || !path || !path.trim()) continue
-    const action = call && /write|create/i.test(call.tool) ? 'create' : 'edit'
-    if (!files.has(path)) files.set(path, { path, action, seq: entry.seq })
+    if (!call) continue
+    const args = 'args' in call ? call.args : undefined
+    const card = presentToolCall(call.tool, args)
+    if (!card) continue
+    for (const mutation of diffPaths(card) ?? []) {
+      pushMutation(mutation.path, mutation.action, entry.seq)
+    }
+    if (card.card === 'generic' && card.kind === 'edit') {
+      for (const location of card.locations ?? []) {
+        pushMutation(location.path, 'edit', entry.seq)
+      }
+    }
   }
   return [...files.values()].sort((left, right) => left.seq - right.seq)
 }
