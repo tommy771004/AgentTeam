@@ -56,7 +56,7 @@ const api = {
         settings: PiHostSettings
         config?: PiHostConfigStatus
       }>,
-      update: (patch: { provider?: string; model?: string; thinkingLevel?: PiHostThinkingLevel; activeTools?: string[]; compaction?: 'auto' | 'manual'; approvalMode?: 'always' | 'auto' | 'full'; bashRequireAsk?: boolean; unattended?: boolean }) =>
+      update: (patch: { provider?: string; baseUrl?: string; apiKey?: string; model?: string; thinkingLevel?: PiHostThinkingLevel; activeTools?: string[]; compaction?: 'auto' | 'manual'; approvalMode?: 'always' | 'auto' | 'full'; bashRequireAsk?: boolean; unattended?: boolean }) =>
         ipcRenderer.invoke('pi-host:settings:update', patch) as Promise<{
           settings: PiHostSettings
           config?: PiHostConfigStatus

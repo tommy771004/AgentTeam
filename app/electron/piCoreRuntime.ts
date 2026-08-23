@@ -14,6 +14,18 @@ const vendorDir = vendorCandidates.find((candidate) => existsSync(join(candidate
 if (!vendorDir) throw new Error('Vendored Pi Core directory is not configured')
 const piCodingAgent = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/index.js')).href)
 const piConfig = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/config.js')).href)
+const piAuthStorage = await import(
+  /* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/core/auth-storage.js')).href
+) as {
+  AuthStorage: {
+    create: (authPath: string) => {
+      modify: (
+        provider: string,
+        update: (current: unknown) => Promise<{ type: 'api_key'; key: string }>,
+      ) => Promise<unknown>
+    }
+  }
+}
 
 type PiSessionRuntime = {
   activeToolsKey: string
@@ -107,6 +119,12 @@ export type PiLegacyModelConfig = {
   baseUrl: string
 }
 
+/** Official endpoints that let Pi register models newer than its vendored catalog. */
+export function piProviderDefaultBaseUrl(provider: string): string | undefined {
+  if (provider.trim().toLowerCase() === 'openrouter') return 'https://openrouter.ai/api/v1'
+  return undefined
+}
+
 /** Merge a legacy OpenAI-compatible endpoint into Pi's credential-blind models config. */
 export function mergePiLegacyModelConfig(input: unknown, patch: PiLegacyModelConfig): Record<string, unknown> {
   const root = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {}
@@ -169,11 +187,11 @@ export async function persistPiLegacyModelConfig(patch: PiLegacyModelConfig | nu
 export async function persistPiLegacyCredential(provider: string, apiKey: string): Promise<void> {
   const agentDir = resolvePiAgentDir()
   if (!agentDir || !provider.trim() || !apiKey.trim()) return
-  const modelRuntime = await piCodingAgent.ModelRuntime.create({
-    authPath: join(agentDir, 'auth.json'),
-    modelsPath: join(agentDir, 'models.json'),
-  })
-  await modelRuntime.setRuntimeApiKey(provider.trim(), apiKey.trim())
+  const authStorage = piAuthStorage.AuthStorage.create(join(agentDir, 'auth.json'))
+  await authStorage.modify(
+    provider.trim(),
+    async () => ({ type: 'api_key', key: apiKey.trim() }),
+  )
 }
 
 async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string, settings: PiRuntimeSettings = {}) {

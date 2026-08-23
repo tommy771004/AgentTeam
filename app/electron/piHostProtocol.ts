@@ -56,7 +56,7 @@ export type PiHostResponse = {
     pluginExecution?: SubDesignPluginExecutionProjection
   }
   error?: {
-    code: 'invalid_request' | 'protocol_mismatch' | 'not_initialized' | 'unknown_method'
+    code: 'invalid_request' | 'protocol_mismatch' | 'not_initialized' | 'unknown_method' | 'runtime_error'
     message: string
   }
 }
@@ -103,7 +103,7 @@ export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
 import type { StreamingUpdate } from '../src/agent/subdesign/streamingEnvelope.ts'
-import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, piCoreRuntimeStatus, runPiTurn, steerPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
+import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, persistPiLegacyCredential, persistPiLegacyModelConfig, piCoreRuntimeStatus, piProviderDefaultBaseUrl, runPiTurn, steerPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
 import { cancelPiCodeMode, runPiCodeMode } from './piCodeMode.ts'
 import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
@@ -912,8 +912,23 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
   }
   if (input.method === 'settings/get') return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config } }]
   if (input.method === 'settings/update') {
-    try {
+    return (async () => {
       const patch = validatePiSettingsPatch(input.params || {})
+      const provider = patch.provider ?? state.snapshot.settings.provider
+      const model = patch.model ?? state.snapshot.settings.model
+      const settingsParams = input.params || {}
+      const explicitBaseUrl = typeof settingsParams.baseUrl === 'string' ? settingsParams.baseUrl.trim() : ''
+      const connectionChanged = 'provider' in settingsParams || 'model' in settingsParams
+      const baseUrl = explicitBaseUrl || (connectionChanged ? piProviderDefaultBaseUrl(provider) : '') || ''
+      const apiKey = typeof input.params?.apiKey === 'string' ? input.params.apiKey.trim() : ''
+      if (baseUrl) {
+        const persisted = await persistPiLegacyModelConfig({ provider, model, baseUrl })
+        if (!persisted) throw new Error('Pi model endpoint requires provider, model, and baseUrl')
+      }
+      if (apiKey) {
+        if (!provider) throw new Error('Pi credential requires a provider')
+        await persistPiLegacyCredential(provider, apiKey)
+      }
       state.snapshot.settings = {
         ...state.snapshot.settings,
         ...patch,
@@ -923,9 +938,9 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       if (state.snapshot.config) state.snapshot.config = { ...state.snapshot.config, settingsSource: 'managed' }
       state.snapshot.cursor += 1
       return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config } }]
-    } catch (error) {
+    })().catch((error) => {
       return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid settings')]
-    }
+    })
   }
   if (input.method === 'settings/profile') {
     const params = input.params || {}
@@ -960,10 +975,17 @@ export function createPiHostServer(
   const state: HostState = { initialized: false, snapshot, capabilities: new PiCapabilityCatalog(DEFAULT_PI_CAPABILITIES), extensions: new PiExtensionRegistry(snapshot.extensions) }
   return {
     async handle(request: unknown) {
-      const messages = await handlePiHostRequest(state, request, send)
-      const method = (request as { method?: string } | null)?.method
-      if (method?.startsWith('settings/') || method?.startsWith('sessions/') || method?.startsWith('runs/') || method?.startsWith('resources/') || method?.startsWith('memory/') || method?.startsWith('extensions/') || method === 'turn/submit') onStateChange?.(state.snapshot)
-      for (const message of messages) send(message)
+      const input = request && typeof request === 'object' ? request as Partial<PiHostRequest> : undefined
+      const id = typeof input?.id === 'string' || typeof input?.id === 'number' ? input.id : ''
+      try {
+        const messages = await handlePiHostRequest(state, request, send)
+        const method = input?.method
+        if (method?.startsWith('settings/') || method?.startsWith('sessions/') || method?.startsWith('runs/') || method?.startsWith('resources/') || method?.startsWith('memory/') || method?.startsWith('extensions/') || method === 'turn/submit') onStateChange?.(state.snapshot)
+        for (const message of messages) send(message)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Pi Core Host request failed'
+        send(errorResponse(id, 'runtime_error', message))
+      }
     },
   }
 }

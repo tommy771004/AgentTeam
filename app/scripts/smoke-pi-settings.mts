@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { once } from 'node:events'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
@@ -15,8 +15,15 @@ type Message = {
 }
 
 const stateDir = await mkdtemp(join(tmpdir(), 'subagents-pi-settings-'))
+const agentDir = join(stateDir, 'agent')
+const statePath = join(stateDir, 'state.json')
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
-  env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json') },
+  env: {
+    ...process.env,
+    SUBAGENTS_PI_HOST_STATE_PATH: statePath,
+    SUBAGENTS_PI_AGENT_DIR: agentDir,
+    SUBAGENTS_PI_NATIVE_AGENT_DIR: join(stateDir, 'native-agent'),
+  },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 const output = createInterface({ input: host.stdout })
@@ -60,13 +67,31 @@ try {
   assert.equal(updated.result?.settings?.approvalMode, 'full')
   assert.equal(updated.result?.settings?.unattended, true)
 
+  send(6, 'settings/update', {
+    provider: 'openrouter',
+    model: 'stealth/ox-alpha',
+    apiKey: 'openrouter-smoke-secret',
+  })
+  const connected = await waitFor((message) => message.id === 6)
+  assert.equal(connected.result?.settings?.provider, 'openrouter')
+  assert.equal(connected.result?.settings?.model, 'stealth/ox-alpha')
+  assert.equal('apiKey' in (connected.result?.settings || {}), false)
+  const models = JSON.parse(await readFile(join(agentDir, 'models.json'), 'utf8')) as {
+    providers?: Record<string, { baseUrl?: string; models?: Array<{ id?: string }> }>
+  }
+  assert.equal(models.providers?.openrouter?.baseUrl, 'https://openrouter.ai/api/v1')
+  assert.equal(models.providers?.openrouter?.models?.some((model) => model.id === 'stealth/ox-alpha'), true)
+  const auth = JSON.parse(await readFile(join(agentDir, 'auth.json'), 'utf8')) as Record<string, unknown>
+  assert.deepEqual(auth.openrouter, { type: 'api_key', key: 'openrouter-smoke-secret' })
+  assert.doesNotMatch(await readFile(statePath, 'utf8'), /openrouter-smoke-secret/)
+
   send(5, 'settings/profile', {
     role: { model: 'pi-writer-model', thinkingLevel: 'low', activeTools: ['write'] },
     taskOverride: { thinkingLevel: 'high' },
   })
   const profile = await waitFor((message) => message.id === 5)
   assert.deepEqual(profile.result?.profile, {
-    provider: '',
+    provider: 'openrouter',
     model: 'pi-writer-model',
     thinkingLevel: 'high',
     activeTools: ['write'],

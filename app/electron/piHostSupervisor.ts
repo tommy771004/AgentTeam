@@ -1,4 +1,4 @@
-import type { PiHostEvent, PiHostRequest, PiHostResponse } from './piHostProtocol.ts'
+import type { PiHostEvent, PiHostMessage, PiHostRequest, PiHostResponse } from './piHostProtocol.ts'
 
 export type PiHostStatus =
   | { state: 'stopped' }
@@ -13,9 +13,23 @@ type PiHostChild = {
   kill(): void
 }
 type PiHostFork = () => PiHostChild
+type PiHostSupervisorOptions = {
+  requestTimeoutMs?: number
+  turnIdleTimeoutMs?: number
+}
+type PendingRequest = {
+  resolve: (response: PiHostResponse) => void
+  reject: (error: Error) => void
+  method: PiHostRequest['method']
+  runId?: string
+  timeoutMs: number
+  timer?: ReturnType<typeof setTimeout>
+}
 
 export class PiHostSupervisor {
   private readonly fork: PiHostFork
+  private readonly requestTimeoutMs: number
+  private readonly turnIdleTimeoutMs: number
   private child: PiHostChild | null = null
   private nextRequestId = 1
   private statusValue: PiHostStatus = { state: 'stopped' }
@@ -23,13 +37,12 @@ export class PiHostSupervisor {
   private restartAttempts = 0
   private restartTimer: ReturnType<typeof setTimeout> | undefined
   private readonly eventListeners = new Set<(event: PiHostEvent) => void>()
-  private readonly pending = new Map<
-    string | number,
-    { resolve: (response: PiHostResponse) => void; reject: (error: Error) => void }
-  >()
+  private readonly pending = new Map<string | number, PendingRequest>()
 
-  constructor(fork: PiHostFork) {
+  constructor(fork: PiHostFork, options: PiHostSupervisorOptions = {}) {
     this.fork = fork
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000
+    this.turnIdleTimeoutMs = options.turnIdleTimeoutMs ?? 5 * 60_000
   }
 
   status(): PiHostStatus {
@@ -51,14 +64,19 @@ export class PiHostSupervisor {
     this.statusValue = { state: 'starting' }
     const child = this.fork()
     this.child = child
-    child.on('message', (message: PiHostResponse & { event?: string }) => {
-      if (message.event) {
+    child.on('message', (message: PiHostMessage) => {
+      if ('event' in message) {
+        const runId = typeof message.payload === 'object' && message.payload && 'runId' in message.payload
+          ? String((message.payload as { runId?: unknown }).runId || '')
+          : ''
+        if (runId) this.refreshTurnDeadline(runId)
         this.eventListeners.forEach((listener) => listener(message as unknown as PiHostEvent))
         return
       }
       const waiter = this.pending.get(message.id)
       if (!waiter) return
       this.pending.delete(message.id)
+      if (waiter.timer) clearTimeout(waiter.timer)
       waiter.resolve(message)
     })
     child.on('exit', (code: number | null, signal?: number) => {
@@ -68,7 +86,10 @@ export class PiHostSupervisor {
         return
       }
       this.statusValue = { state: 'crashed', exitCode: code, signal }
-      for (const waiter of this.pending.values()) waiter.reject(new Error('Pi Core Host exited'))
+      for (const waiter of this.pending.values()) {
+        if (waiter.timer) clearTimeout(waiter.timer)
+        waiter.reject(new Error('Pi Core Host exited'))
+      }
       this.pending.clear()
       this.scheduleRestart()
     })
@@ -302,7 +323,10 @@ export class PiHostSupervisor {
       clearTimeout(this.restartTimer)
       this.restartTimer = undefined
     }
-    for (const waiter of this.pending.values()) waiter.reject(new Error('Pi Core Host stopped'))
+    for (const waiter of this.pending.values()) {
+      if (waiter.timer) clearTimeout(waiter.timer)
+      waiter.reject(new Error('Pi Core Host stopped'))
+    }
     this.pending.clear()
     this.child?.kill()
     this.child = null
@@ -326,8 +350,39 @@ export class PiHostSupervisor {
     if (!child) return Promise.reject(new Error('Pi Core Host is not running'))
     const id = this.nextRequestId++
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
+      const timeoutMs = method === 'turn/submit' ? this.turnIdleTimeoutMs : this.requestTimeoutMs
+      const waiter: PendingRequest = {
+        resolve,
+        reject,
+        method,
+        runId: typeof params.runId === 'string' ? params.runId : undefined,
+        timeoutMs,
+      }
+      this.pending.set(id, waiter)
+      this.armDeadline(id, waiter)
       child.postMessage({ id, method, params })
     })
+  }
+
+  private armDeadline(id: string | number, waiter: PendingRequest): void {
+    if (waiter.timer) clearTimeout(waiter.timer)
+    waiter.timer = setTimeout(() => {
+      if (this.pending.get(id) !== waiter) return
+      this.pending.delete(id)
+      waiter.reject(new Error(`Pi Core Host ${waiter.method} timed out after ${waiter.timeoutMs}ms`))
+      if (waiter.method === 'turn/submit' && waiter.runId && this.child) {
+        this.child.postMessage({
+          id: this.nextRequestId++,
+          method: 'turn/cancel',
+          params: { runId: waiter.runId },
+        })
+      }
+    }, waiter.timeoutMs)
+  }
+
+  private refreshTurnDeadline(runId: string): void {
+    for (const [id, waiter] of this.pending) {
+      if (waiter.method === 'turn/submit' && waiter.runId === runId) this.armDeadline(id, waiter)
+    }
   }
 }

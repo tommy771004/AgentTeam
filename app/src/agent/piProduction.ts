@@ -47,6 +47,8 @@ export function stripPiOwnedSettings(input: Partial<LlmSettings>): Partial<LlmSe
 
 export type PiSettingsPatch = {
   provider?: string
+  baseUrl?: string
+  apiKey?: string
   model?: string
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   activeTools?: string[]
@@ -61,6 +63,8 @@ export function piSettingsPatchFromLlmSettings(
 ): PiSettingsPatch {
   const patch: PiSettingsPatch = {}
   if (settings.apiProvider) patch.provider = settings.apiProvider
+  if (settings.baseUrl != null) patch.baseUrl = settings.baseUrl
+  if (settings.apiKey != null) patch.apiKey = settings.apiKey
   if (settings.model != null) patch.model = settings.model
   if (settings.approvalMode != null) patch.approvalMode = settings.approvalMode
   if (settings.bashRequireAsk != null) patch.bashRequireAsk = settings.bashRequireAsk

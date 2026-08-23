@@ -45,8 +45,11 @@ try {
   assert.equal(models.providers?.custom?.baseUrl, 'http://127.0.0.1:4318/v1')
   assert.equal(models.providers?.custom?.models?.[0]?.id, 'legacy-model')
   assert.equal(models.providers?.custom?.models?.[0]?.baseUrl, 'http://127.0.0.1:4318/v1')
-  const migration = JSON.parse(await readFile(migrationPath, 'utf8')) as { modelConfigPersisted?: boolean }
+  const auth = JSON.parse(await readFile(join(agentDir, 'auth.json'), 'utf8')) as Record<string, unknown>
+  assert.deepEqual(auth.custom, { type: 'api_key', key: 'legacy-secret' })
+  const migration = JSON.parse(await readFile(migrationPath, 'utf8')) as { modelConfigPersisted?: boolean; credentialPersisted?: boolean }
   assert.equal(migration.modelConfigPersisted, true)
+  assert.equal(migration.credentialPersisted, true)
 } finally {
   host.stdin.end()
   await once(host, 'exit')

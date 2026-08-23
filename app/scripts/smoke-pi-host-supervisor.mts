@@ -21,6 +21,13 @@ class FakeChild {
   exit(code = 1) { this.listeners.get('exit')?.forEach((listener) => listener(code, undefined)) }
 }
 
+class HangingTurnChild extends FakeChild {
+  override postMessage(message: { id: number; method: string }) {
+    if (message.method === 'turn/submit' || message.method === 'turn/cancel') return
+    super.postMessage(message)
+  }
+}
+
 let spawnCount = 0
 let firstChild: FakeChild | undefined
 const supervisor = new PiHostSupervisor(() => {
@@ -43,4 +50,15 @@ assert.equal(spawnCount, 2)
 assert.equal(supervisor.status().state, 'ready')
 supervisor.stop()
 assert.equal(supervisor.status().state, 'stopped')
+
+const boundedSupervisor = new PiHostSupervisor(
+  () => new HangingTurnChild(),
+  { requestTimeoutMs: 50, turnIdleTimeoutMs: 50 },
+)
+await boundedSupervisor.start()
+await assert.rejects(
+  boundedSupervisor.submitTurn('session-timeout', 'never settles', 'run-timeout'),
+  /Pi Core Host turn\/submit timed out after 50ms/,
+)
+boundedSupervisor.stop()
 console.log('Pi Host Supervisor exposes cancellation to Electron callers')

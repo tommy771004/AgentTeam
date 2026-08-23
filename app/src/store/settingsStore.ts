@@ -276,7 +276,16 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       await window.subagents.settings.set(stripPiOwnedSettings(next))
     }
     if (window.subagents?.piHost?.settings?.update) {
-      const piPatch = piSettingsPatchFromLlmSettings(patch)
+      const connectionChanged = ['apiProvider', 'baseUrl', 'apiKey', 'model']
+        .some((key) => Object.prototype.hasOwnProperty.call(patch, key))
+      const piPatch = piSettingsPatchFromLlmSettings(connectionChanged
+        ? {
+            ...patch,
+            apiProvider: next.apiProvider,
+            baseUrl: next.baseUrl,
+            model: next.model,
+          }
+        : patch)
       if (Object.keys(piPatch).length) await window.subagents.piHost.settings.update(piPatch)
     }
   },
