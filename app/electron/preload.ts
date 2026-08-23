@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
 import type { PiTurnSettlement } from '../src/agent/piHostRun'
+import type { TurnRecordPage } from '../src/agent/turnRecord'
 import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
 import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from '../src/agent/subdesign/pluginExecution'
 import type { SubDesignMetadataKind } from '../src/agent/subdesign/metadataKinds'
@@ -69,6 +70,8 @@ const api = {
         create: (title?: string, threadId?: string) => ipcRenderer.invoke('pi-host:sessions:create', title, threadId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         createChild: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:sessions:create-child', input) as Promise<{ sessionId: string; sessions: unknown[] }>,
         list: () => ipcRenderer.invoke('pi-host:sessions:list') as Promise<{ sessions: unknown[] }>,
+        record: (sessionId: string, before?: number, limit?: number) =>
+          ipcRenderer.invoke('pi-host:sessions:record', sessionId, before, limit) as Promise<{ page: TurnRecordPage }>,
         fork: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:fork', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         reset: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:reset', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         archive: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:archive', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,

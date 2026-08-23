@@ -162,6 +162,17 @@ export class PiHostSupervisor {
     return response.result
   }
 
+  /** One bounded page of a session's Turn Record, addressed by `seq`. */
+  async readSessionRecord(sessionId: string, before?: number, limit?: number): Promise<NonNullable<PiHostResponse['result']>['page']> {
+    const response = await this.request('sessions/record', {
+      sessionId,
+      ...(before === undefined ? {} : { before }),
+      ...(limit === undefined ? {} : { limit }),
+    })
+    if (response.error || !response.result?.page) throw new Error(response.error?.message || 'Pi record page failed')
+    return response.result.page
+  }
+
   async listSessions(): Promise<NonNullable<PiHostResponse['result']>['sessions']> {
     const response = await this.request('sessions/list', {})
     if (response.error || !response.result?.sessions) throw new Error(response.error?.message || 'Pi session listing failed')

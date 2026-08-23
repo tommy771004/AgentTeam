@@ -24,7 +24,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -51,6 +51,7 @@ export type PiHostResponse = {
     settlement?: PiTurnSettlement | 'success' | 'denied'
     /** Why an `interrupted` settlement stopped short; absent for other settlements. */
     interruptReason?: PiTurnInterruptReason
+    page?: import('../src/agent/turnRecord.ts').TurnRecordPage
     items?: unknown[]
     /** The entries this turn appended to the session's Turn Record. */
     record?: TurnRecord
@@ -141,7 +142,7 @@ import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
 import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
 import { callPiMcpTool, listPiMcpTools, stopPiMcp } from './piMcpClient.ts'
 import { isCompletedModelCall, isPiHostDefinitionOfDoneMet, isPiTurnSettlement, piTurnFinalAnswer, piTurnResultText, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
-import { appendTurnRecord, derivePiHistory, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft } from '../src/agent/turnRecord.ts'
+import { appendTurnRecord, derivePiHistory, pageTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft } from '../src/agent/turnRecord.ts'
 import { cancelSubDesignProviderRun, executeSubDesignProviderStage } from './subDesignProviderRuntime.ts'
 import { shouldStopForProviderProjection, type SubDesignPluginExecutionProjection } from '../src/agent/subdesign/pluginExecution.ts'
 
@@ -489,11 +490,23 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
   if (input.method === 'state/snapshot') {
     return [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions], queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })), resources: state.snapshot.resources.map((resource) => ({ ...resource })), memories: new PiMemoryExtension(state.snapshot.memories).export() } }]
   }
-  if (input.method === 'sessions/list') return [{ id, result: { sessions: state.snapshot.sessions.map((session) => ({
+  // The list carries what a session IS, not everything it did: a long run's
+  // record is read a page at a time through `sessions/record`, so listing
+  // sessions cannot grow with the length of their history.
+  if (input.method === 'sessions/list') return [{ id, result: { sessions: state.snapshot.sessions.map(({ record, ...session }) => ({
     ...session,
     messages: [...session.messages],
     ...(session.toolAudit ? { toolAudit: [...session.toolAudit] } : {}),
+    ...(record ? { recordSummary: { version: record.version, entries: record.entries.length, latestSeq: record.entries[record.entries.length - 1]?.seq ?? 0 } } : {}),
   })) } }]
+  if (input.method === 'sessions/record') {
+    const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
+    const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
+    if (!session) return [errorResponse(id, 'invalid_request', 'Unknown Pi session')]
+    const before = typeof input.params?.before === 'number' ? input.params.before : undefined
+    const limit = typeof input.params?.limit === 'number' ? input.params.limit : undefined
+    return [{ id, result: { sessionId, page: pageTurnRecord(session.record, { before, limit }) } }]
+  }
   if (input.method === 'resources/list') return [{ id, result: { resources: state.snapshot.resources.map((resource) => ({ ...resource })) } }]
   if (input.method === 'resources/reload') {
     const resources = input.params?.resources

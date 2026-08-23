@@ -176,8 +176,15 @@ try {
   first.send(5, 'sessions/list')
   const listed = await first.waitFor((message) => message.id === 5, 'sessions')
   const projected = listed.result.sessions.find((candidate: { id: string }) => candidate.id === sessionId)
-  const entries = turnRecordEntries(projected.record)
-  assert.equal(projected.record.version, TURN_RECORD_FORMAT_VERSION)
+  // Listing sessions reports that a record exists; reading it is paged, so a
+  // long history cannot ride along with every list.
+  assert.equal(projected.record, undefined)
+  assert.equal(projected.recordSummary.version, TURN_RECORD_FORMAT_VERSION)
+  assert.ok(projected.recordSummary.entries > 0)
+  first.send(6, 'sessions/record', { sessionId })
+  const paged = await first.waitFor((message) => message.id === 6, 'record page')
+  const entries = turnRecordEntries({ version: TURN_RECORD_FORMAT_VERSION, entries: paged.result.page.entries })
+  assert.equal(paged.result.page.hasOlder, false, 'this run fits in one page')
 
   const kinds = entries.map((entry) => entry.kind)
   assert.equal(kinds[0], 'turn-start', 'the record opens with the turn')
@@ -209,7 +216,11 @@ try {
     { role: 'tool', content: '← grep(call_grep_1) success' },
     { role: 'assistant', content: '結論 2' },
   ])
-  assert.deepEqual(derivePiHistory(projected.record), projected.messages, 'the stored history IS the derivation')
+  assert.deepEqual(
+    derivePiHistory({ version: TURN_RECORD_FORMAT_VERSION, entries: paged.result.page.entries }),
+    projected.messages,
+    'the stored history IS the derivation',
+  )
   await first.stop()
 
   // ── The record survives a Host restart and keeps counting ────────────────
@@ -221,9 +232,9 @@ try {
   await second.waitFor((message) => message.id === 1, 'initialize (restarted)')
   second.send(2, 'turn/submit', { sessionId, runId: 'record-run-2', cwd: workspace, prompt: '再一次', profile })
   assert.equal((await second.waitFor((message) => message.id === 2, 'second settlement')).result?.settlement, 'answered')
-  second.send(3, 'sessions/list')
-  const relisted = await second.waitFor((message) => message.id === 3, 'sessions (restarted)')
-  const after = turnRecordEntries(relisted.result.sessions.find((candidate: { id: string }) => candidate.id === sessionId).record)
+  second.send(3, 'sessions/record', { sessionId })
+  const relisted = await second.waitFor((message) => message.id === 3, 'record page (restarted)')
+  const after = turnRecordEntries({ version: TURN_RECORD_FORMAT_VERSION, entries: relisted.result.page.entries })
 
   assert.ok(after.length > entries.length, 'the second turn appended rather than replaced')
   assert.deepEqual(after.slice(0, entries.length).map((entry) => entry.seq), entries.map((entry) => entry.seq))

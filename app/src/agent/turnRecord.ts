@@ -261,6 +261,50 @@ export function derivePiHistory(record: TurnRecord | undefined): PiRecordedMessa
   return messages
 }
 
+/** One bounded page of a record, addressed by sequence. */
+export type TurnRecordPage = {
+  /** The page's entries in ascending `seq`, oldest first. */
+  entries: TurnRecordEntry[]
+  /**
+   * Ask for the page before this one by passing it as `before`. Absent when
+   * the page reaches the beginning of the record.
+   */
+  nextBefore?: number
+  /** Whether older entries remain unloaded ahead of this page. */
+  hasOlder: boolean
+  /** Entries in the whole record, so a view can say what it has not loaded. */
+  total: number
+}
+
+/** How many entries one page carries unless a caller asks for fewer. */
+export const TURN_RECORD_PAGE_SIZE = 100
+
+/**
+ * One page of a record, newest end first.
+ *
+ * A long run's earliest steps used to be the first thing the product forgot,
+ * because the whole record travelled at once and memory bounded what survived.
+ * Paging by `seq` — never by array position — means a view holds what it is
+ * showing and can always ask for the page before it.
+ */
+export function pageTurnRecord(
+  record: TurnRecord | undefined,
+  options: { before?: number; limit?: number } = {},
+): TurnRecordPage {
+  const ordered = turnRecordEntries(record)
+  const limit = Math.max(1, Math.min(TURN_RECORD_PAGE_SIZE, Math.floor(options.limit ?? TURN_RECORD_PAGE_SIZE)))
+  const before = typeof options.before === 'number' && Number.isFinite(options.before) ? options.before : undefined
+  const eligible = before === undefined ? ordered : ordered.filter((entry) => entry.seq < before)
+  const entries = eligible.slice(-limit)
+  const hasOlder = entries.length < eligible.length
+  return {
+    entries,
+    ...(hasOlder && entries.length > 0 ? { nextBefore: entries[0].seq } : {}),
+    hasOlder,
+    total: ordered.length,
+  }
+}
+
 /** One step's timing, as a reader needs it. */
 export type PiStepTimingView = {
   turn: number
