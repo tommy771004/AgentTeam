@@ -134,6 +134,38 @@ const startupRecoveryReady = new Promise<void>((resolve) => {
   resolveStartupRecovery = resolve
 })
 
+/**
+ * Main-process durability bridge (feature-detected as `window.subagents.journal`).
+ *
+ * localStorage can be evicted under quota pressure and has no torn-write
+ * protection, so every persisted state is also mirrored to userData through
+ * the main process. The bridge is injected — never imported — so this module
+ * stays importable in Node smokes and the renderer keeps feature-detecting.
+ */
+export type RunJournalMirrorBridge = {
+  read: () => Promise<{ state: string } | null | undefined>
+  write: (state: string) => Promise<unknown>
+}
+
+let mirrorBridge: RunJournalMirrorBridge | null = null
+
+/** Wire the durable mirror; pass null to detach (tests). Idempotent. */
+export function setRunJournalMirrorBridge(bridge: RunJournalMirrorBridge | null): void {
+  mirrorBridge = bridge
+}
+
+function queueMirrorWrite(payload: string): void {
+  const bridge = mirrorBridge
+  if (!bridge) return
+  // Fire-and-forget: a mirror failure must never block or fail the primary
+  // write path. localStorage remains the read source; the mirror is recovery.
+  try {
+    void Promise.resolve(bridge.write(payload)).catch(() => { /* best effort */ })
+  } catch {
+    /* best effort */
+  }
+}
+
 function storage(preferred?: Storage): Storage | null {
   if (preferred) return preferred
   try {
@@ -258,6 +290,45 @@ function retainedEntries(entries: JournalEntry[]): JournalEntry[] {
   return [...terminal.slice(-terminalBudget), ...keptActive]
 }
 
+/**
+ * Restore the journal from the durable main-process mirror when local storage
+ * holds no usable entries.
+ *
+ * This covers the quiet failure mode where the browser evicted localStorage:
+ * pending deliveries and interrupted runs still exist in the mirror, and the
+ * startup redelivery pass needs them. Must run BEFORE `reconcileStartup()` so
+ * recovery sees restored state rather than an empty journal. Returns whether a
+ * restore happened.
+ */
+export async function hydrateRunJournalFromDurable(): Promise<boolean> {
+  const store = storage()
+  if (!store || !mirrorBridge) return false
+  const existing = loadState(store)
+  if (existing.entries.length > 0) return false
+  let mirrored: { state?: unknown } | null | undefined
+  try {
+    mirrored = await mirrorBridge.read()
+  } catch {
+    return false
+  }
+  const raw = typeof mirrored?.state === 'string' ? mirrored.state : ''
+  if (!raw) return false
+  const restored = parseState(raw)
+  if (!restored || restored.entries.length === 0) return false
+  try {
+    store.setItem(JOURNAL_KEY, raw)
+  } catch {
+    return false
+  }
+  appendRecoveryReport({
+    kind: 'storage',
+    id: JOURNAL_KEY,
+    action: 'restored',
+    detail: '本機 localStorage 已無可用執行紀錄，已從主程序日誌鏡像還原。',
+  })
+  return true
+}
+
 function loadState(preferred?: Storage): JournalState {
   const store = storage(preferred)
   if (!store) return emptyState()
@@ -312,13 +383,17 @@ function persistState(state: JournalState): void {
     entries: retainedEntries(state.entries),
     updatedAt: now(),
   }
+  const payload = JSON.stringify(next)
   try {
     const current = store.getItem(JOURNAL_KEY)
     if (current) store.setItem(JOURNAL_BACKUP_KEY, current)
-    store.setItem(JOURNAL_KEY, JSON.stringify(next))
+    store.setItem(JOURNAL_KEY, payload)
   } catch {
     /* localStorage may be unavailable or full; execution must continue */
   }
+  // Mirror even when the primary write threw: an evicted/full localStorage is
+  // exactly the case the durable copy exists for.
+  queueMirrorWrite(payload)
 }
 
 function appendRecoveryReport(item: RecoveryItem): void {

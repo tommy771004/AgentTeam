@@ -149,6 +149,7 @@ import {
 } from './externalCliSupervisor'
 import { JsonExternalCliCheckpointStore } from './externalCliCheckpointStore'
 import { JsonCompactionCheckpointStore } from './compactionCheckpointStore'
+import { JournalMirrorStore } from './journalMirrorStore'
 import { JsonExternalCliTelemetrySink } from './externalCliTelemetrySink'
 import {
   executableLookupCommand,
@@ -232,6 +233,7 @@ import {
 } from './opencodeServerBridge'
 import { safeOpenCodeServerOrigin } from '../src/agent/opencodeServerSafety'
 import { PiHostSupervisor } from './piHostSupervisor'
+import type { PiTurnSettlement } from '../src/agent/piHostRun'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const piHostSupervisor = new PiHostSupervisor(() =>
@@ -2372,7 +2374,7 @@ ipcMain.handle('pi-host:runs:list', async () => ({ queue: await piHostSupervisor
 ipcMain.handle('pi-host:runs:enqueue', async (_evt, input: Record<string, unknown>) => ({ queue: await piHostSupervisor.enqueueRun(input || {}) }))
 ipcMain.handle('pi-host:runs:cancel', async (_evt, runId: string) => ({ queue: await piHostSupervisor.cancelQueuedRun(runId) }))
 ipcMain.handle('pi-host:runs:claim', async (_evt, runId?: string) => piHostSupervisor.claimQueuedRun(runId))
-ipcMain.handle('pi-host:runs:settle', async (_evt, runId: string, settlement: 'success' | 'failed' | 'cancelled' | 'interrupted') => piHostSupervisor.settleQueuedRun(runId, settlement))
+ipcMain.handle('pi-host:runs:settle', async (_evt, runId: string, settlement: PiTurnSettlement) => piHostSupervisor.settleQueuedRun(runId, settlement))
 ipcMain.handle('pi-host:resources:list', async () => ({ resources: await piHostSupervisor.listResources() }))
 ipcMain.handle('pi-host:resources:reload', async (_evt, resources: unknown[]) => ({ resources: await piHostSupervisor.reloadResources(resources || []) }))
 ipcMain.handle('pi-host:memory:list', async () => ({ memories: await piHostSupervisor.listMemories() }))
@@ -2409,6 +2411,16 @@ ipcMain.handle('checkpoints:load', async (_evt, runId: string) => compactionChec
 ipcMain.handle('checkpoints:list', async (_evt, runId?: string) => compactionCheckpoints.list(runId))
 ipcMain.handle('checkpoints:remove', async (_evt, runId: string) => compactionCheckpoints.remove(runId))
 ipcMain.handle('checkpoints:claim-resume', async (_evt, runId: string) => compactionCheckpoints.claimResume(runId))
+
+// ── Durable run-journal mirror (localStorage eviction / torn-write recovery) ──
+// The renderer journal stays the schema owner; this only mirrors its serialized
+// state into userData so an evicted localStorage can be restored at startup.
+const runJournalMirror = new JournalMirrorStore(path.join(app.getPath('userData'), 'journal'))
+ipcMain.handle('journal:mirror:write', (_evt, state: unknown) => {
+  if (typeof state !== 'string') return { ok: false, error: 'state must be a string' }
+  return runJournalMirror.save(state)
+})
+ipcMain.handle('journal:mirror:read', () => runJournalMirror.read())
 
 // ── Signed Beta updates + N-1→N migration transaction ─────────
 // The channel is deliberately opt-in through SUBAGENTS_UPDATE_PUBLIC_KEY;

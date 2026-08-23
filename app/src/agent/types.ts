@@ -363,6 +363,12 @@ export interface ToolCallRecord {
 }
 
 export interface AgentState {
+  /**
+   * What the Host recorded for this run's turn. The renderer projects the
+   * conversation from it rather than authoring one (ADR-0039 / ADR-0049);
+   * absent for runners that do not write a record yet.
+   */
+  turnRecord?: import('./turnRecord.ts').TurnRecord
   id: string
   objective: string
   loopConfig: LoopConfiguration

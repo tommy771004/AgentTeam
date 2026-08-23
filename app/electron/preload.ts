@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
+import type { PiTurnSettlement } from '../src/agent/piHostRun'
 import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
 import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from '../src/agent/subdesign/pluginExecution'
 import type { SubDesignMetadataKind } from '../src/agent/subdesign/metadataKinds'
@@ -78,7 +79,7 @@ const api = {
         enqueue: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:runs:enqueue', input) as Promise<{ queue: unknown[] }>,
         cancel: (runId: string) => ipcRenderer.invoke('pi-host:runs:cancel', runId) as Promise<{ queue: unknown[] }>,
         claim: (runId?: string) => ipcRenderer.invoke('pi-host:runs:claim', runId) as Promise<{ run?: unknown; queue: unknown[] }>,
-        settle: (runId: string, settlement: 'success' | 'failed' | 'cancelled' | 'interrupted') => ipcRenderer.invoke('pi-host:runs:settle', runId, settlement) as Promise<{ run?: unknown; queue: unknown[]; settlement: string }>,
+        settle: (runId: string, settlement: PiTurnSettlement) => ipcRenderer.invoke('pi-host:runs:settle', runId, settlement) as Promise<{ run?: unknown; queue: unknown[]; settlement: string }>,
       },
       resources: {
         list: () => ipcRenderer.invoke('pi-host:resources:list') as Promise<{ resources: unknown[] }>,
@@ -115,6 +116,11 @@ const api = {
         execute: (tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash' | 'code' | 'mcp', params: Record<string, unknown>) =>
         ipcRenderer.invoke('pi-host:tools:execute', { tool, params }) as Promise<{ tool: string; content: unknown }>,
     },
+  },
+  journal: {
+    /** Durable main-process mirror of the renderer run journal. */
+    read: () => ipcRenderer.invoke('journal:mirror:read') as Promise<{ state: string; savedAt?: string; fromBackup?: boolean } | null>,
+    write: (state: string) => ipcRenderer.invoke('journal:mirror:write', state) as Promise<{ ok: boolean; error?: string }>,
   },
   updates: {
     state: () => ipcRenderer.invoke('updates:state') as Promise<{

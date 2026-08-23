@@ -190,7 +190,7 @@ export function InlineRunPanel({
           <Icon
             name={lifecycle.icon}
             size={17}
-            className={`${lifecycleToneClass(lifecycle.tone)} shrink-0 ${live && !lifecycle.needsAttention ? 'animate-spin' : ''}`}
+            className={`${lifecycleToneClass(lifecycle.tone)} shrink-0 ${live && !lifecycle.needsAttention && !lifecycle.stopping ? 'animate-spin' : ''}`}
           />
           <div className="min-w-0">
             <div className="flex items-center gap-2">

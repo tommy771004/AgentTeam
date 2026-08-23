@@ -16,7 +16,7 @@ import { learningLoop } from '../agent/hermes/learning.ts'
 import { useSettingsStore } from './settingsStore.ts'
 import { useLearningStore } from './learningStore.ts'
 import { consumeNextState } from '../agent/outcomeDispatcher.ts'
-import { buildPiHostRunConfig, submitPiHostRun } from '../agent/piHostRun.ts'
+import { buildPiHostRunConfig, piTurnOutcome, submitPiHostRun } from '../agent/piHostRun.ts'
 import {
   emptyAgentLike,
   runPromptViaLocalCli,
@@ -295,10 +295,17 @@ async function executePiHostTurn(
       )
       if (!registered.ok) throw new Error(`Pi Host artifact projection invalid: ${registered.errors.join('；')}`)
     }
-    const success = result.settlement === 'success'
-    const halted = result.settlement === 'cancelled' || result.settlement === 'interrupted'
-    // A parked turn is a stop, not a failure — and the reason decides the word.
-    const interruptReason = result.settlement === 'interrupted' ? result.interruptReason || 'user' : undefined
+    // One reading owns what every surface says about this settlement, so an
+    // empty turn cannot look like a success on one surface and a non-success on
+    // another. The answer comes from the Host's items only: ADR-0039 keeps Host
+    // state canonical, and the renderer's feed cache never decides whether a
+    // turn produced something (the Host already rebuilds an answer from its own
+    // streamed deltas when no assistant message text survives).
+    const settled = piTurnOutcome(result.settlement, {
+      answer: result.result,
+      interruptReason: result.interruptReason,
+    })
+    const interruptReason = settled.interruptReason
     // Iteration/DoD evidence travels with the run so a truncated success reads
     // as truncated on every surface instead of as a plain check mark.
     const orchestration = result.orchestration
@@ -311,26 +318,20 @@ async function executePiHostTurn(
     const final = emptyAgentLike({
       id: runId,
       objective: text,
-      status: success ? 'success' : halted ? 'halted' : 'failed',
+      ...(result.record ? { turnRecord: result.record } : {}),
+      status: settled.status,
       progress: 100,
       currentIteration: orchestration?.iterations || undefined,
       orchestration,
       interruptReason,
-      result: result.result
-        || (success
-          ? 'Pi Core 完成（無文字輸出）'
-          : interruptReason === 'timeout'
-            ? '任務已逾時中止，沒有產出可保留的部分回覆。'
-            : interruptReason === 'user'
-              ? '任務已中止，沒有產出可保留的部分回覆。'
-              : `Pi Core ${result.settlement}`),
-      confidence: success ? 0.9 : 0.3,
+      result: settled.text,
+      confidence: settled.confidence,
       loopConfig,
       executionKind: 'loop',
       startedAt,
       finishedAt: new Date().toISOString(),
-      logs: [{ id: 'pi-host-end', timestamp: new Date().toISOString(), level: success ? 'SUCCESS' : halted ? 'HALT' : 'ERROR', message: `Pi Core Host settlement=${result.settlement}${interruptReason ? `(${interruptReason})` : ''}` }],
-      steps: [{ step: 1, action: 'pi-host-turn', description: 'Pi Core Host turn', status: success ? 'COMPLETED' : halted ? 'SKIPPED' : 'FAILED', result: result.result || result.settlement, durationMs: Date.now() - t0, modelSource: 'primary' }],
+      logs: [{ id: 'pi-host-end', timestamp: new Date().toISOString(), level: settled.logLevel, message: `Pi Core Host settlement=${result.settlement}${interruptReason ? `(${interruptReason})` : ''}` }],
+      steps: [{ step: 1, action: 'pi-host-turn', description: 'Pi Core Host turn', status: settled.stepStatus, result: settled.text, durationMs: Date.now() - t0, modelSource: 'primary' }],
     })
     publishRun(set, get, runId, final)
     const postState = await consumeNextState(loopConfig.nextState, {

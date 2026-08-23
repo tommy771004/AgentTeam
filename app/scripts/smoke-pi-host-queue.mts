@@ -25,7 +25,7 @@ const waitFor = async (id: number) => {
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 
 try {
-  send(1, 'initialize', { protocolVersion: 1 })
+  send(1, 'initialize', { protocolVersion: 2 })
   await waitFor(1)
   send(2, 'runs/enqueue', { runId: 'queued-run-1', sessionId: 'session-1', prompt: 'queued prompt', trigger: 'time', evidence: 'schedule-claim', profile: { model: 'm1' } })
   const enqueued = await waitFor(2)

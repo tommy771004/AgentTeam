@@ -9,7 +9,7 @@ for (const pattern of ['Turn-based', 'Goal-based', 'Time-based', 'Proactive'] as
     maxIterations: 3,
     turn: async (_prompt, iteration) => {
       calls.push(iteration)
-      return { settlement: 'success', result: `${pattern}-${iteration}` }
+      return { settlement: 'answered', result: `${pattern}-${iteration}` }
     },
   })
   assert.equal(result.pattern, pattern)
@@ -24,7 +24,7 @@ const unmet = await runPiOrchestration({
   pattern: 'Goal-based',
   prompt: 'unmet',
   maxIterations: 2,
-  turn: async () => ({ settlement: 'success', result: '', done: false }),
+  turn: async () => ({ settlement: 'answered', result: '', done: false }),
 })
 assert.equal(unmet.settlement, 'failed')
 assert.equal(unmet.iterations, 2)

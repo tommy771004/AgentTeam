@@ -19,6 +19,13 @@ export type RunLifecyclePhase =
   | 'completed'
   | 'failed'
   | 'cancelled'
+  /**
+   * A stop has been acknowledged and the runner is parking (hermes
+   * `CANCEL_REQUESTED`). A request to cancel is not yet a cancellation: the
+   * phase is formal vocabulary so every surface names the same state instead
+   * of each inventing its own "stopping" flag.
+   */
+  | 'cancel_requested'
 
 export type RunLifecycleStatus =
   | 'idle'
@@ -110,6 +117,7 @@ const LIVE_PHASES = new Set<RunLifecyclePhase>([
   'manual_intervention',
   'responding',
   'finalizing',
+  'cancel_requested',
 ])
 
 const TERMINAL_PHASES = new Set<RunLifecyclePhase>([
@@ -228,8 +236,9 @@ function phaseLabel(
   if (phase === 'executing') return statusLine || '正在執行任務'
   if (phase === 'awaiting_user') return '等待你的回覆'
   if (phase === 'manual_intervention') return '等待核准'
-  if (phase === 'responding') return '正在撰寫回覆'
+  if (phase === 'responding') return statusLine || '正在撰寫回覆'
   if (phase === 'finalizing') return '正在整理執行摘要…'
+  if (phase === 'cancel_requested') return '正在安全停車…'
   if (phase === 'completed') return statusLine || '已完成'
   if (phase === 'failed') return statusLine || '執行失敗'
   if (interruptReason === 'timeout') return '已逾時中止'
@@ -281,7 +290,18 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
   // Only a parked run carries a reason; a plain stop keeps the neutral wording.
   const interruptReason = phase === 'cancelled' ? input.interruptReason : undefined
 
-  const stopping = Boolean(input.stopping) && !input.terminal && phase !== 'idle' && !TERMINAL_PHASES.has(phase)
+  // A park is named either by the explicit flag or by the phase itself — a
+  // surface that only sees `cancel_requested` must get the same view.
+  const stopping =
+    (Boolean(input.stopping) || phase === 'cancel_requested')
+    && !input.terminal
+    && phase !== 'idle'
+    && !TERMINAL_PHASES.has(phase)
+  // Formalize the park: once acknowledged, the phase itself becomes
+  // `cancel_requested`, so every surface derives the same state from one field.
+  if (stopping && LIVE_PHASES.has(phase as RunLifecyclePhase)) {
+    phase = 'cancel_requested'
+  }
 
   const tone: RunLifecycleTone =
     phase === 'completed'
@@ -298,7 +318,6 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
             : live
               ? 'active'
               : 'muted'
-
   const icon =
     phase === 'completed'
       ? iterationExhausted
@@ -337,7 +356,7 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
     stopping,
     // Once the runner has returned, finalization is an atomic hand-off; the
     // stop affordance must not suggest that archive/queue settlement is abortable.
-    canStop: live && phase !== 'finalizing' && !stopping,
+    canStop: live && phase !== 'finalizing' && phase !== 'cancel_requested' && !stopping,
   }
 }
 

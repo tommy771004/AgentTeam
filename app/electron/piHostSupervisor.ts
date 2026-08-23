@@ -1,4 +1,5 @@
 import type { PiHostEvent, PiHostMessage, PiHostRequest, PiHostResponse } from './piHostProtocol.ts'
+import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
 
 export type PiHostStatus =
   | { state: 'stopped' }
@@ -97,7 +98,7 @@ export class PiHostSupervisor {
       this.statusValue = { state: 'error', message: error.message }
     })
 
-    const response = await this.request('initialize', { protocolVersion: 1, client: 'subagents-electron' })
+    const response = await this.request('initialize', { protocolVersion: 2, client: 'subagents-electron' })
     if (response.error || !response.result) {
       const message = response.error?.message || 'Pi Core Host did not initialize'
       this.statusValue = { state: 'error', message }
@@ -191,7 +192,7 @@ export class PiHostSupervisor {
     return response.result
   }
 
-  async settleQueuedRun(runId: string, settlement: 'success' | 'failed' | 'cancelled' | 'interrupted'): Promise<NonNullable<PiHostResponse['result']>> {
+  async settleQueuedRun(runId: string, settlement: PiTurnSettlement): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('runs/settle', { runId, settlement })
     if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queue settlement failed')
     return response.result

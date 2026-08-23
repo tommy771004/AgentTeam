@@ -126,7 +126,9 @@ function PiHostEventBootstrap() {
         callId: update.callId,
         ok: update.ok,
       })
-      activity.setStatus(update.title, update.runId)
+      // Structured phase rides along when the Host named what it is doing;
+      // otherwise setStatus falls back to deriving the phase from the copy.
+      activity.setStatus(update.title, update.runId, update.phase)
     })
     return () => { unsubscribe?.() }
   }, [push])
@@ -212,7 +214,18 @@ function RecoveryBootstrap() {
         ))
         useThreadStore.getState().hydrateFromPiHost(projected)
       }
-      const journalReport = journal.reconcileStartup()
+      const journalReport = await (async () => {
+        if (!journal) return null
+        // Durable mirror must be wired and hydrated BEFORE reconcileStartup:
+        // an evicted localStorage would otherwise mark runs interrupted from
+        // an empty journal instead of the restored one.
+        const mirrorApi = window.subagents?.journal
+        if (mirrorApi) {
+          journal.setRunJournalMirrorBridge({ read: () => mirrorApi.read(), write: (state: string) => mirrorApi.write(state) })
+          try { await journal.hydrateRunJournalFromDurable() } catch { /* best effort */ }
+        }
+        return journal.reconcileStartup()
+      })()
       const hasRunRecovery = (journalReport?.items || []).some(
         (item) => item.kind === 'run' && item.action === 'marked-interrupted',
       )

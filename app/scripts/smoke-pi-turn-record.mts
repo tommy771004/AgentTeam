@@ -1,0 +1,239 @@
+import { strict as assert } from 'node:assert'
+import { createServer } from 'node:http'
+import { createInterface } from 'node:readline'
+import { once } from 'node:events'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { spawn } from 'node:child_process'
+import { readFile as readSource } from 'node:fs/promises'
+import {
+  TURN_RECORD_FORMAT_VERSION,
+  derivePiHistory,
+  TurnRecordCorruptError,
+  TurnRecordVersionError,
+  appendTurnRecord,
+  parseTurnRecord,
+  turnRecordEntries,
+} from '../src/agent/turnRecord.ts'
+
+/**
+ * The Turn Record is the Host's ordered account of one turn. This asserts the
+ * account exists, is ordered by its own sequence, survives a Host restart, and
+ * refuses loudly rather than quietly starting from nothing.
+ */
+
+// ── The record's own rules (pure) ──────────────────────────────────────────
+const seeded = appendTurnRecord(undefined, [
+  { kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'user-text', source: 'user', content: '你好', turn: 1, step: 1, at: 2 },
+])
+assert.deepEqual(seeded.entries.map((entry) => entry.seq), [1, 2])
+const continued = appendTurnRecord(seeded, [{ kind: 'turn-end', source: 'host', settlement: 'answered', turn: 1, step: 1, at: 3 }])
+assert.deepEqual(continued.entries.map((entry) => entry.seq), [1, 2, 3], 'sequence continues, never restarts')
+
+// Order comes from `seq`, never from position in the array.
+const shuffled = { version: TURN_RECORD_FORMAT_VERSION, entries: [continued.entries[2], continued.entries[0], continued.entries[1]] }
+assert.deepEqual(turnRecordEntries(shuffled).map((entry) => entry.seq), [1, 2, 3])
+
+// A version this build cannot read is refused, not silently emptied.
+assert.throws(() => parseTurnRecord({ version: 99, entries: [] }), TurnRecordVersionError)
+// A damaged entry in the middle is refused for the same reason.
+assert.throws(
+  () => parseTurnRecord({ version: TURN_RECORD_FORMAT_VERSION, entries: [{ kind: 'nope' }, continued.entries[0]] }),
+  TurnRecordCorruptError,
+)
+// A damaged FINAL entry is a torn append: keep the good prefix, report the loss.
+const torn = parseTurnRecord({ version: TURN_RECORD_FORMAT_VERSION, entries: [continued.entries[0], { kind: 'turn-en' }] })
+assert.equal(torn.tornTail, true)
+assert.equal(torn.record.entries.length, 1)
+// Absent is not damaged.
+assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
+
+// Derived history keeps the agent's actions, in order, and replays a
+// compaction as the drop it performed rather than re-growing the context.
+const derived = derivePiHistory(appendTurnRecord(undefined, [
+  { kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'user-text', source: 'user', content: '第一題', turn: 1, step: 1, at: 2 },
+  { kind: 'tool-call', source: 'model', tool: 'grep', callId: 'c1', turn: 1, step: 1, at: 3 },
+  { kind: 'tool-result', source: 'host', tool: 'grep', callId: 'c1', settlement: 'success', turn: 1, step: 1, at: 4 },
+  { kind: 'assistant-text', source: 'model', content: '第一答', turn: 1, step: 1, at: 5 },
+  { kind: 'compaction', source: 'host', replaced: 2, turn: 2, step: 1, at: 6 },
+  { kind: 'user-text', source: 'user', content: '第二題', turn: 2, step: 1, at: 7 },
+]))
+assert.deepEqual(derived, [
+  { role: 'tool', content: '← grep(c1) success' },
+  { role: 'assistant', content: '第一答' },
+  { role: 'user', content: '第二題' },
+])
+
+// ── No consumer outside the derivation module picks the answer itself ──────
+// The defect that started this effort was one `.find()` over a turn's items.
+for (const path of ['../electron/piHostProtocol.ts', '../src/store/agentStore.ts', '../electron/piCoreRuntime.ts']) {
+  const source = await readSource(resolve(import.meta.dirname, path), 'utf8')
+  assert.doesNotMatch(source, /items\s*\.\s*(find|at|\[0\])/, `${path} must derive the answer, never pick it out of the items`)
+  assert.doesNotMatch(source, /turn\.items\[/, `${path} must not index a turn's items`)
+}
+
+// ── The Host writes one for a real, tool-using turn ────────────────────────
+const agentDir = await mkdtemp(join(tmpdir(), 'pi-record-agent-'))
+const stateDir = await mkdtemp(join(tmpdir(), 'pi-record-state-'))
+const workspace = await mkdtemp(join(tmpdir(), 'pi-record-cwd-'))
+await writeFile(join(workspace, 'notes.md'), '# Notes\nPi Core is active\n')
+const statePath = join(stateDir, 'state.json')
+
+let completions = 0
+const chunk = (delta: unknown, finish: string | null) => `data: ${JSON.stringify({
+  id: 'record-completion',
+  object: 'chat.completion.chunk',
+  model: 'smoke-model',
+  choices: [{ index: 0, delta, finish_reason: finish }],
+})}\n\n`
+const modelServer = createServer(async (request, response) => {
+  if (request.url !== '/v1/chat/completions' || request.method !== 'POST') {
+    response.writeHead(404).end()
+    return
+  }
+  for await (const part of request) void part
+  completions += 1
+  response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive', 'cache-control': 'no-cache' })
+  if (completions === 1) {
+    response.write(chunk({ role: 'assistant', content: '先看看檔案。' }, null))
+    response.write(chunk({
+      tool_calls: [{ index: 0, id: 'call_grep_1', type: 'function', function: { name: 'grep', arguments: JSON.stringify({ pattern: 'Pi Core', path: '.' }) } }],
+    }, null))
+    response.write(chunk({}, 'tool_calls'))
+  } else {
+    response.write(chunk({ role: 'assistant', content: `結論 ${completions}` }, null))
+    response.write(chunk({}, 'stop'))
+  }
+  response.end('data: [DONE]\n\n')
+})
+await new Promise<void>((resolveListen) => modelServer.listen(0, '127.0.0.1', resolveListen))
+const address = modelServer.address()
+if (!address || typeof address === 'string') throw new Error('Loopback model server did not bind')
+await writeFile(join(agentDir, 'models.json'), JSON.stringify({
+  providers: {
+    loopback: {
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      api: 'openai-completions',
+      apiKey: 'test-key',
+      models: [{ id: 'smoke-model', name: 'Smoke Model', reasoning: false, input: ['text'], contextWindow: 4096, maxTokens: 256 }],
+    },
+  },
+}))
+await writeFile(join(agentDir, 'auth.json'), JSON.stringify({ loopback: { type: 'api_key', key: 'test-key' } }))
+await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'loopback', defaultModel: 'smoke-model', defaultThinkingLevel: 'off' }))
+
+const env = { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: statePath, SUBAGENTS_PI_AGENT_DIR: agentDir }
+const hostPath = resolve(import.meta.dirname, '../dist-electron/pi-host.js')
+const profile = {
+  provider: 'loopback',
+  model: 'smoke-model',
+  thinkingLevel: 'off',
+  activeTools: ['grep'],
+  compaction: 'manual',
+  approvalMode: 'full',
+  unattended: true,
+}
+
+async function startHost() {
+  const host = spawn(process.execPath, [hostPath], { env, stdio: ['pipe', 'pipe', 'inherit'] })
+  const output = createInterface({ input: host.stdout })
+  const messages: Array<Record<string, any>> = []
+  output.on('line', (line) => messages.push(JSON.parse(line) as Record<string, any>))
+  const waitFor = async (predicate: (message: Record<string, any>) => boolean, label = 'message') => {
+    for (;;) {
+      const current = messages.find(predicate)
+      if (current) return current
+      await Promise.race([
+        once(output, 'line'),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), 20_000)),
+      ])
+    }
+  }
+  const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+  const stop = async () => {
+    host.stdin.end()
+    await once(host, 'exit')
+  }
+  return { host, waitFor, send, stop }
+}
+
+let sessionId = ''
+try {
+  const first = await startHost()
+  first.send(1, 'initialize', { protocolVersion: 2 })
+  await first.waitFor((message) => message.id === 1, 'initialize')
+  first.send(2, 'sessions/create', { title: 'Turn record smoke' })
+  sessionId = String((await first.waitFor((message) => message.id === 2, 'session')).result.sessionId)
+  first.send(3, 'settings/update', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: ['grep'] })
+  await first.waitFor((message) => message.id === 3, 'settings')
+  first.send(4, 'turn/submit', { sessionId, runId: 'record-run-1', cwd: workspace, prompt: '分析這個專案', profile })
+  const settled = await first.waitFor((message) => message.id === 4, 'settlement')
+  assert.equal(settled.result?.settlement, 'answered')
+
+  first.send(5, 'sessions/list')
+  const listed = await first.waitFor((message) => message.id === 5, 'sessions')
+  const projected = listed.result.sessions.find((candidate: { id: string }) => candidate.id === sessionId)
+  const entries = turnRecordEntries(projected.record)
+  assert.equal(projected.record.version, TURN_RECORD_FORMAT_VERSION)
+
+  const kinds = entries.map((entry) => entry.kind)
+  assert.equal(kinds[0], 'turn-start', 'the record opens with the turn')
+  assert.equal(kinds[kinds.length - 1], 'turn-end', 'and closes with it')
+  assert.ok(kinds.includes('user-text'), 'the prompt is on the record')
+  assert.ok(kinds.includes('assistant-text'), 'so is the answer')
+  assert.ok(kinds.includes('tool-call'), 'so is the tool the model asked for')
+
+  // Sequence is monotonic, and every entry knows where it sits.
+  assert.deepEqual(entries.map((entry) => entry.seq), entries.map((_, index) => index + 1))
+  assert.ok(entries.every((entry) => entry.turn === 1), 'one turn, all entries')
+  assert.ok(entries.every((entry) => entry.step >= 1))
+  assert.ok(entries.every((entry) => typeof entry.at === 'number' && entry.at > 0))
+
+  // ADR-0048: who is accountable is part of the record.
+  const toolCall = entries.find((entry) => entry.kind === 'tool-call')
+  assert.equal(toolCall?.source, 'model', 'a tool call is the model asking')
+  const answer = entries.find((entry) => entry.kind === 'assistant-text')
+  assert.equal(answer?.source, 'model')
+  assert.equal(entries.find((entry) => entry.kind === 'turn-end')?.source, 'host')
+  const closing = entries.find((entry) => entry.kind === 'turn-end')
+  assert.equal(closing && 'settlement' in closing ? closing.settlement : undefined, 'answered')
+
+  // History is derived from the record, so it carries the agent's actions as
+  // well as its prose, in the order they happened.
+  assert.deepEqual(projected.messages, [
+    { role: 'user', content: '分析這個專案' },
+    { role: 'tool', content: '→ grep(call_grep_1)' },
+    { role: 'tool', content: '← grep(call_grep_1) success' },
+    { role: 'assistant', content: '結論 2' },
+  ])
+  assert.deepEqual(derivePiHistory(projected.record), projected.messages, 'the stored history IS the derivation')
+  await first.stop()
+
+  // ── The record survives a Host restart and keeps counting ────────────────
+  const persisted = JSON.parse(await readFile(statePath, 'utf8'))
+  assert.ok(persisted.sessions.find((candidate: { id: string }) => candidate.id === sessionId)?.record?.entries?.length > 0)
+
+  const second = await startHost()
+  second.send(1, 'initialize', { protocolVersion: 2 })
+  await second.waitFor((message) => message.id === 1, 'initialize (restarted)')
+  second.send(2, 'turn/submit', { sessionId, runId: 'record-run-2', cwd: workspace, prompt: '再一次', profile })
+  assert.equal((await second.waitFor((message) => message.id === 2, 'second settlement')).result?.settlement, 'answered')
+  second.send(3, 'sessions/list')
+  const relisted = await second.waitFor((message) => message.id === 3, 'sessions (restarted)')
+  const after = turnRecordEntries(relisted.result.sessions.find((candidate: { id: string }) => candidate.id === sessionId).record)
+
+  assert.ok(after.length > entries.length, 'the second turn appended rather than replaced')
+  assert.deepEqual(after.slice(0, entries.length).map((entry) => entry.seq), entries.map((entry) => entry.seq))
+  assert.deepEqual(after.map((entry) => entry.seq), after.map((_, index) => index + 1), 'no gap and no restart across the boundary')
+  assert.deepEqual([...new Set(after.map((entry) => entry.turn))], [1, 2], 'the second turn is turn 2')
+  await second.stop()
+} finally {
+  modelServer.close()
+  await rm(agentDir, { recursive: true, force: true })
+  await rm(stateDir, { recursive: true, force: true })
+  await rm(workspace, { recursive: true, force: true })
+}
+console.log('The Pi Host writes an ordered Turn Record that survives a restart')

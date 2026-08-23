@@ -19,7 +19,7 @@ const api = {
       return {
         sessionId: input.sessionId,
         runId: input.runId || 'generated',
-        settlement: 'success',
+        settlement: 'answered',
         items: [{ type: 'assistant_message', content: `answer for ${input.prompt}` }],
       }
     },

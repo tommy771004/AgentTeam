@@ -44,8 +44,48 @@ assert.deepEqual(tool, {
   title: '執行 read…',
   detail: '/tmp/example.txt',
   tool: 'read',
+  phase: 'executing',
   eventId: 'pi-call-1-start',
   callId: 'call-1',
 })
+
+// ── Structured phase: the Host's stage vocabulary wins over copy regexes ──
+const orchestrationParse = mapPiHostEventToActivity({
+  event: 'host/orchestration',
+  payload: { runId: 'run-1', phase: 'parse' },
+})
+assert.equal(orchestrationParse?.phase, 'planning')
+
+const orchestrationIterate = mapPiHostEventToActivity({
+  event: 'host/orchestration',
+  payload: { runId: 'run-1', phase: 'iterate', iteration: 2 },
+})
+assert.equal(orchestrationIterate?.phase, 'executing')
+
+const orchestrationSettlement = mapPiHostEventToActivity({
+  event: 'host/orchestration',
+  payload: { runId: 'run-1', phase: 'settlement', detail: '完成' },
+})
+assert.equal(orchestrationSettlement?.phase, 'finalizing')
+
+const orchestrationCancelled = mapPiHostEventToActivity({
+  event: 'host/orchestration',
+  payload: { runId: 'run-1', phase: 'cancelled' },
+})
+assert.equal(orchestrationCancelled?.phase, 'cancelled')
+assert.equal(orchestrationCancelled?.kind, 'error')
+
+// A pending permission decision is the HITL phase, not just a status line.
+const decisionPending = mapPiHostEventToActivity({
+  event: 'host/tool-decision',
+  payload: { runId: 'run-1', tool: 'bash', callId: 'c9', decision: 'pending' },
+})
+assert.equal(decisionPending?.phase, 'manual_intervention')
+
+const turnEnd = mapPiHostEventToActivity({
+  event: 'host/turn-item',
+  payload: { runId: 'run-1', item: { type: 'turn_end' } },
+})
+assert.equal(turnEnd?.phase, 'finalizing')
 
 console.log('pi host activity events map to renderer progress updates')

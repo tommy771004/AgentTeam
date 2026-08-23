@@ -35,7 +35,7 @@ const start = () => {
 }
 
 const request = (child: ChildProcessWithoutNullStreams, id: number, method: string) => {
-  child.stdin.write(`${JSON.stringify({ id, method, params: { protocolVersion: 1 } })}\n`)
+  child.stdin.write(`${JSON.stringify({ id, method, params: { protocolVersion: 2 } })}\n`)
 }
 
 try {

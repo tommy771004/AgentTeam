@@ -4,6 +4,8 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type { PiThinkingLevel } from './piAgentProfile.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
+import { classifyPiTurnSettlement, piTurnProviderError } from '../src/agent/piHostRun.ts'
+import type { PiRecordedMessage } from '../src/agent/turnRecord.ts'
 
 const vendorCandidates = [
   process.env.SUBAGENTS_PI_VENDOR_DIR,
@@ -45,7 +47,7 @@ type PiSessionRuntime = {
     dispose?: () => Promise<void> | void
   }
 }
-export type PiHostHistoryMessage = { role: 'user' | 'assistant'; content: string }
+export type PiHostHistoryMessage = PiRecordedMessage
 /** Why a turn stopped short of its own settlement. */
 export type PiTurnInterruptReason = 'user' | 'timeout'
 
@@ -330,28 +332,53 @@ function parkInterruptedTurn(turn: PiActiveTurn): void {
  * The partial answer is real work the user paid for; discarding it would make
  * a stop indistinguishable from a failure. The caller seals it in the feed.
  */
+/** One assistant message, projected into the item shape the protocol carries. */
+function assistantMessageItems(messages: Array<{ role?: string; content?: unknown }>) {
+  return messages
+    .filter((message) => message.role === 'assistant')
+    .map((message) => ({
+      type: 'assistant_message',
+      content: Array.isArray(message.content)
+        ? message.content
+            .filter((part): part is { type: string; text: string } => Boolean(
+              part && typeof part === 'object'
+              && (part as { type?: unknown }).type === 'text'
+              && typeof (part as { text?: unknown }).text === 'string',
+            ))
+            .map((part) => part.text)
+            .join('')
+        : typeof message.content === 'string' ? message.content : '',
+      message,
+    }))
+}
+
+/**
+ * An interrupted turn keeps whatever the assistant had already produced.
+ *
+ * The partial answer is real work the user paid for; discarding it would make
+ * a stop indistinguishable from a failure. Each assistant message stays its own
+ * item, so the message the model was writing when it stopped remains separable
+ * from the narration it opened with — welding them together is what made a
+ * stop return the preamble as if it were the answer. When a stop lands before
+ * any message completes, the text the user watched stream in stands in, still
+ * one item per message.
+ */
 function interruptedTurnResult(
   turn: PiActiveTurn,
   messages: Array<{ role?: string; content?: unknown }>,
+  streamedSegments: string[] = [],
 ) {
-  const partial = messages
-    .filter((message) => message.role === 'assistant')
-    .map((message) => (Array.isArray(message.content)
-      ? message.content
-          .filter((part): part is { type: string; text: string } => Boolean(
-            part && typeof part === 'object'
-            && (part as { type?: unknown }).type === 'text'
-            && typeof (part as { text?: unknown }).text === 'string',
-          ))
-          .map((part) => part.text)
-          .join('')
-      : typeof message.content === 'string' ? message.content : ''))
-    .join('\n')
-    .trim()
+  const completed = assistantMessageItems(messages)
+  const items = completed.some((item) => item.content.trim())
+    ? completed
+    : streamedSegments
+        .map((segment) => segment.trim())
+        .filter((segment) => segment.length > 0)
+        .map((segment) => ({ type: 'assistant_message', content: segment, message: undefined }))
   return {
     settlement: 'interrupted' as const,
     interruptReason: turn.interrupt || ('user' as PiTurnInterruptReason),
-    items: partial ? [{ type: 'assistant_message', content: partial }] : [],
+    items,
   }
 }
 
@@ -417,9 +444,17 @@ export async function runPiTurn(
     throw error
   }
   let completedMessages: Array<{ role?: string; content?: unknown }> = []
+  // What the user has watched arrive, kept one message at a time so a stop can
+  // hand back the message being written without the ones before it.
+  const streamedSegments: string[] = ['']
   const unsubscribe = runtime.session.subscribe((event) => {
     if (event.type === 'agent_end' && Array.isArray(event.messages)) {
       completedMessages = event.messages as Array<{ role?: string; content?: unknown }>
+    }
+    if (event.type === 'message_start' || event.type === 'tool_execution_start') streamedSegments.push('')
+    const streamed = (event as { assistantMessageEvent?: { type?: unknown; delta?: unknown } }).assistantMessageEvent
+    if (streamed?.type === 'text_delta' && typeof streamed.delta === 'string') {
+      streamedSegments[streamedSegments.length - 1] += streamed.delta
     }
     // Tool boundaries are the only safe place to stop: between calls the agent
     // owns no half-applied edit and no orphaned child process.
@@ -436,23 +471,22 @@ export async function runPiTurn(
       runtime.requestContext.includeHistory = referenceChatHistory
     }
     await runtime.session.prompt(runtime.requestContext || !requestContext ? prompt : `${requestContext}\n## Current request\n${prompt}`)
-    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages)
+    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages, streamedSegments)
     if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
-    return {
-      settlement: 'success' as const,
-      items: completedMessages
-        .filter((message) => message.role === 'assistant')
-        .map((message) => ({
-          type: 'assistant_message',
-          content: Array.isArray(message.content)
-            ? message.content.filter((part): part is { type: string; text: string } => Boolean(part && typeof part === 'object' && (part as { type?: unknown }).type === 'text' && typeof (part as { text?: unknown }).text === 'string')).map((part) => part.text).join('')
-            : typeof message.content === 'string' ? message.content : '',
-          message,
-        })),
-    }
+    // A rejected request never throws here: Pi records it as an empty assistant
+    // message carrying the provider's error, so a failed call must not be
+    // mistaken for a turn that simply produced nothing.
+    const providerError = piTurnProviderError(completedMessages as ReadonlyArray<{ role?: string; stopReason?: string; errorMessage?: string }>)
+    if (providerError) return { settlement: 'failed' as const, items: [{ type: 'error', content: providerError }] }
+    const items = assistantMessageItems(completedMessages)
+    // A clean provider call that carried no text is `empty`, not `answered`:
+    // the run finished without producing anything for the user to read. The
+    // items travel either way — the settlement describes them, it does not
+    // discard them.
+    return { settlement: classifyPiTurnSettlement(items), items }
   } catch (error) {
     // An aborted prompt throws; an interrupt is a deliberate stop, never a failure.
-    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages)
+    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages, streamedSegments)
     if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
     return {
       settlement: 'failed' as const,

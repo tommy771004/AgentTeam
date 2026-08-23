@@ -24,7 +24,7 @@ const waitFor = async (id: number) => {
 }
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 try {
-  send(1, 'initialize', { protocolVersion: 1 })
+  send(1, 'initialize', { protocolVersion: 2 })
   await waitFor(1)
   for (const [id, runId] of [[2, 'run-a'], [3, 'run-b']] as const) {
     send(id, 'runs/enqueue', { runId, sessionId: 'session-1', prompt: runId, trigger: 'interactive', profile: {} })
@@ -34,7 +34,7 @@ try {
   const claimed = (await waitFor(4)).result?.run
   assert.equal(claimed?.runId, 'run-a')
   assert.equal(claimed?.status, 'running')
-  send(5, 'runs/settle', { runId: 'run-a', settlement: 'success' })
+  send(5, 'runs/settle', { runId: 'run-a', settlement: 'answered' })
   assert.equal((await waitFor(5)).result?.queue?.find((item) => item.runId === 'run-a')?.status, 'settled')
   send(6, 'runs/claim', { runId: 'run-b' })
   assert.equal((await waitFor(6)).result?.run?.status, 'running')

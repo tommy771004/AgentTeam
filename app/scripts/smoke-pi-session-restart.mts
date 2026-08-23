@@ -62,20 +62,20 @@ const closeHost = async (host: ChildProcess) => {
 
 try {
   const first = spawnHost()
-  first.send(1, 'initialize', { protocolVersion: 1 })
+  first.send(1, 'initialize', { protocolVersion: 2 })
   await first.waitFor((message) => message.id === 1)
   first.send(2, 'sessions/create', { title: 'Restart smoke' })
   const created = await first.waitFor((message) => message.id === 2)
   const sessionId = String(created.result.sessionId)
   first.send(3, 'turn/submit', { sessionId, runId: 'restart-first', cwd: process.cwd(), prompt: 'first prompt' })
   const firstTurn = await first.waitFor((message) => message.id === 3)
-  assert.equal(firstTurn.result.settlement, 'success')
+  assert.equal(firstTurn.result.settlement, 'answered')
   await closeHost(first.host)
   const persistedPiFiles = await readdir(agentDir, { recursive: true })
   assert.ok(persistedPiFiles.some((file) => String(file).endsWith('.jsonl')), 'Pi must persist a canonical session file')
 
   const second = spawnHost()
-  second.send(4, 'initialize', { protocolVersion: 1 })
+  second.send(4, 'initialize', { protocolVersion: 2 })
   await second.waitFor((message) => message.id === 4)
   second.send(5, 'sessions/list')
   const restored = await second.waitFor((message) => message.id === 5)
@@ -86,7 +86,7 @@ try {
   ])
   second.send(6, 'turn/submit', { sessionId, runId: 'restart-second', cwd: process.cwd(), prompt: 'second prompt' })
   const secondTurn = await second.waitFor((message) => message.id === 6)
-  assert.equal(secondTurn.result.settlement, 'success')
+  assert.equal(secondTurn.result.settlement, 'answered')
   assert.equal(requests.length, 2)
   assert.deepEqual(requests[1].messages?.filter((message) => message.role !== 'system').slice(-3), [
     { role: 'user', content: [{ type: 'text', text: 'first prompt' }] },

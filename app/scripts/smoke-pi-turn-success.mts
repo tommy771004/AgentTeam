@@ -59,7 +59,7 @@ const waitFor = async (predicate: (message: Record<string, any>) => boolean) => 
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 
 try {
-  send(1, 'initialize', { protocolVersion: 1 })
+  send(1, 'initialize', { protocolVersion: 2 })
   await waitFor((message) => message.id === 1)
   send(2, 'sessions/create', { title: 'Success smoke' })
   const created = await waitFor((message) => message.id === 2)
@@ -82,7 +82,7 @@ try {
     },
   })
   const settled = await waitFor((message) => message.id === 4)
-  assert.equal(settled.result.settlement, 'success')
+  assert.equal(settled.result.settlement, 'answered')
   assert.equal(settled.result.items[0].type, 'assistant_message')
   assert.equal(settled.result.items[0].content, 'hello from Pi')
   assert.equal(requestSeen, true)

@@ -14,7 +14,7 @@ const api = {
   turn: {
     submit: async (input: { sessionId: string; prompt: string }) => {
       calls.push(`turn:${input.sessionId}`)
-      return { sessionId: input.sessionId, runId: 'run-child', settlement: 'success', items: [{ type: 'assistant_message', content: 'child result' }] }
+      return { sessionId: input.sessionId, runId: 'run-child', settlement: 'answered', items: [{ type: 'assistant_message', content: 'child result' }] }
     },
   },
 }

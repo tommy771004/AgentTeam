@@ -11,6 +11,7 @@
  * stay importable without pulling the full renderer graph.
  */
 
+import { conversationAnswer } from './conversationProjection.ts'
 import type {
   AgentState,
   ChatAttachment,
@@ -37,6 +38,7 @@ import { normalizeExternalCliRunPolicy } from './externalCliRunSession.ts'
 import { snapshotExternalCliConnectorRequirements } from './externalCliConnectorSnapshot.ts'
 import { orchestrationFromAgent } from './runLifecycle.ts'
 import { resolveTurnTimeout } from './turnTimeout.ts'
+import { clampContinueFreshnessMs, isSnapshotFresh } from './autoContinueFreshness.ts'
 
 import { v4 as uuid } from 'uuid'
 import {
@@ -678,8 +680,15 @@ export async function finalizeTaskRun(
     .slice(-3)
     .map((step) => step.result)
     .join('\n\n')
+  // The answer is projected from the Host's record, not composed here: the
+  // renderer stopped authoring the conversation (ADR-0039). The older chain
+  // stays as the fallback for runners that do not write a record yet.
   const finalAnswer =
-    finalAgent.result || stepsTail || result.result || `狀態：${status}`
+    conversationAnswer(finalAgent.turnRecord)
+    || finalAgent.result
+    || stepsTail
+    || result.result
+    || `狀態：${status}`
   const hasFinalAnswer = !(result.error && result.status === 'failed' && !result.result)
   if (!hasFinalAnswer) {
     thr.pushBubble(tid, 'system', result.error || finalAgent.haltReason || '執行失敗')
@@ -1362,7 +1371,7 @@ async function coordinateTaskRun(
     { enqueueExternalRun, listQueuedRuns, queueLength },
     { isContinueGoalPhrase },
     { detectAutomationSuggestion },
-    { resolvePlanBubbleMetadata },
+    { resolvePlanBubbleMetadata, classifyLoopType },
     lifecycleHelpers,
   ] = await Promise.all([
     import('../store/agentStore.ts'),
@@ -1672,6 +1681,21 @@ async function coordinateTaskRun(
       wantContinue = false
       continueBlockedNote =
         '目前 runner 為外部 CLI（或不支援 continueGoal）。「補齊缺口繼續」僅適用內建引擎；已改為一般任務執行。請切換 runner 為 builtin 後再試，或重新描述任務。'
+    } else {
+      // Freshness gate (hermes auto-continue lesson): a stale snapshot would
+      // replay corrective work against a world that already moved on. Past
+      // the window the run degrades to a fresh parse instead of zombie-resuming.
+      const snapshotAgeMs = existingSnap?.at ? Date.now() - Date.parse(existingSnap.at) : NaN
+      const freshWindowMs = clampContinueFreshnessMs(undefined)
+      if (!isSnapshotFresh({ at: existingSnap?.at })) {
+        wantContinue = false
+        const staleMinutes = Number.isFinite(snapshotAgeMs)
+          ? Math.max(1, Math.round(snapshotAgeMs / 60_000))
+          : 0
+        continueBlockedNote = Number.isFinite(snapshotAgeMs)
+          ? `先前的 Goal 快照已過期（超過 ${Math.round(freshWindowMs / 60_000)} 分鐘窗口，距今約 ${staleMinutes} 分鐘）。為避免在過期狀態上殭屍續跑，已改為重新解析任務；如需保留原 DoD，請重新貼上目標與缺口。`
+          : '先前的 Goal 快照缺少時間戳，無法證明新鮮度；已改為重新解析任務。如需保留原 DoD，請重新貼上目標與缺口。'
+      }
     }
   }
   const continueSnap = wantContinue ? existingSnap : undefined
@@ -1682,6 +1706,17 @@ async function coordinateTaskRun(
     ? ('Goal-based' as LoopType)
     : opts.loopType
   const loopTypeMode: 'force' | 'auto' = forcedLoopType ? 'force' : 'auto'
+  // Auto mode must actually classify. The heuristic parser is the only owner
+  // of that decision (Chat-lite → Turn-based, otherwise Goal-based); without
+  // it every "自動" message silently ran the Goal pipeline. Classification
+  // applies to interactive conversation only — automation sources without an
+  // explicit pin keep the Goal-based default. The classified result feeds run
+  // config but never pins the thread: the thread stays auto per message.
+  const effectiveLoopType: LoopType | undefined = forcedLoopType
+    ? forcedLoopType
+    : objective.trim() && isInteractiveConversationSource(opts)
+      ? classifyLoopType(objective)
+      : undefined
 
   // Coordinator owns thread bind once after capacity is reserved.
   const { threadId: tid } = await bindRunThread({
@@ -1839,7 +1874,7 @@ async function coordinateTaskRun(
       ? attachments
       : opts.overrides?.userAttachments,
     loopTypeMode,
-    forceLoopType: forcedLoopType,
+    forceLoopType: effectiveLoopType,
     threadId: tid,
     continueGoal: continueSnap
       ? {

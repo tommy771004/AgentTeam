@@ -31,7 +31,7 @@ const waitForEvent = async (event: string, runId: string) => {
 }
 const send = (id: number, method: string, params: Record<string, unknown>) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 try {
-  send(1, 'initialize', { protocolVersion: 1 })
+  send(1, 'initialize', { protocolVersion: 2 })
   await waitFor(1)
   send(2, 'tools/write', { cwd: root, path: 'draft.txt', content: 'should not write' })
   const denied = await waitFor(2)

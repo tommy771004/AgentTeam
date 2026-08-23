@@ -213,7 +213,7 @@ export interface RunActivityStore {
   push: (ev: Omit<RunActivityEvent, 'id' | 'at'> & { id?: string }) => void
   appendThought: (delta: string, runId?: string) => void
   appendText: (delta: string, runId?: string) => void
-  setStatus: (line: string, runId?: string) => void
+  setStatus: (line: string, runId?: string, phase?: RunActivityPhase) => void
   setRecovery: (recovery: ExternalCliRecoveryProjection, runId?: string) => void
   setInteraction: (interaction: ExternalCliInteractionProjection | null, runId?: string) => void
   recordFileChange: (f: Omit<FileChangeRecord, 'at'> & { at?: number }, runId?: string) => void
@@ -522,6 +522,9 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       const stopped: RunPresentation = {
         ...current,
         stopping: true,
+        // Formal park phase (hermes CANCEL_REQUESTED): a requested stop is its
+        // own live state until the Host settles, not a reworded executing.
+        phase: 'cancel_requested',
         updatedAt: Date.now(),
         statusLine: statusLine || '正在安全停車…',
       }
@@ -640,7 +643,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     )
   },
 
-  setStatus: (line, runId) => {
+  setStatus: (line, runId, phase) => {
     const target = runId || get().runId
     if (!target) return
     const statusLine = line.slice(0, 200)
@@ -649,7 +652,9 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         ...presentation,
         statusLine,
         updatedAt: Date.now(),
-        phase: phaseFromStatus(statusLine, presentation.phase),
+        // A structured phase from the Host wins; the status-line regex is
+        // only a fallback for adapters that carry no structured signal.
+        phase: phase ?? phaseFromStatus(statusLine, presentation.phase),
       })),
     )
   },

@@ -44,20 +44,27 @@ assert.equal(goal.loopType, 'Goal-based')
 assert.equal(goal.maxIterations, 5)
 assert.equal(goal.definitionOfDone, PI_CORE_SETTLEMENT_DEFINITION_OF_DONE)
 
-// A successful Pi turn may legitimately have no assistant text (for example,
-// a tool-only turn). The renderer's default DoD is the Host settlement, not
-// the presence of a text bubble.
-assert.equal(isPiHostDefinitionOfDoneMet(PI_CORE_SETTLEMENT_DEFINITION_OF_DONE, 'success', ''), true)
+// The renderer's default DoD is the Host settlement, not the presence of a
+// text bubble — but only an ANSWERED turn settled it. A turn that ran tools and
+// said nothing settles `empty` and satisfies nothing.
+assert.equal(isPiHostDefinitionOfDoneMet(PI_CORE_SETTLEMENT_DEFINITION_OF_DONE, 'answered', ''), true)
+assert.equal(isPiHostDefinitionOfDoneMet(PI_CORE_SETTLEMENT_DEFINITION_OF_DONE, 'empty', ''), false)
 assert.equal(isPiHostDefinitionOfDoneMet(PI_CORE_SETTLEMENT_DEFINITION_OF_DONE, 'failed', ''), false)
-assert.equal(isPiHostDefinitionOfDoneMet('non-empty assistant result', 'success', ''), false)
-assert.equal(isPiHostDefinitionOfDoneMet('non-empty assistant result', 'success', 'done'), true)
+assert.equal(isPiHostDefinitionOfDoneMet('non-empty assistant result', 'answered', ''), false)
+assert.equal(isPiHostDefinitionOfDoneMet('non-empty assistant result', 'answered', 'done'), true)
 
-const emptyTextSuccess = await runPiOrchestration({
+// A turn that ran tools and said nothing settles `empty`, and an empty turn
+// never satisfies a settlement-shaped DoD: it produced nothing to satisfy it
+// with. Previously this same case settled `success` with `dodMet: true` after
+// one iteration, which is how a run with no output reached the archive as a
+// completed goal. Now the goal keeps iterating — an empty round is what another
+// iteration exists to fix — and a goal that is still empty at the cap fails.
+const emptyText = await runPiOrchestration({
   pattern: 'Goal-based',
   prompt: 'tool-only task',
   maxIterations: 5,
   turn: async () => {
-    const settlement = 'success' as const
+    const settlement = 'empty' as const
     const result = ''
     return {
       settlement,
@@ -66,15 +73,42 @@ const emptyTextSuccess = await runPiOrchestration({
     }
   },
 })
-assert.equal(emptyTextSuccess.settlement, 'success')
-assert.equal(emptyTextSuccess.iterations, 1)
-assert.equal(emptyTextSuccess.dodMet, true)
+assert.equal(emptyText.settlement, 'failed')
+assert.equal(emptyText.iterations, 5)
+assert.equal(emptyText.dodMet, false)
+
+// An answered turn still meets it and still stops the loop at one iteration.
+const answeredText = await runPiOrchestration({
+  pattern: 'Goal-based',
+  prompt: 'answered task',
+  maxIterations: 5,
+  turn: async () => {
+    const settlement = 'answered' as const
+    const result = '結論'
+    return {
+      settlement,
+      result,
+      done: isPiHostDefinitionOfDoneMet(PI_CORE_SETTLEMENT_DEFINITION_OF_DONE, settlement, result),
+    }
+  },
+})
+assert.equal(answeredText.settlement, 'answered')
+assert.equal(answeredText.iterations, 1)
+assert.equal(answeredText.dodMet, true)
 
 const turn = buildPiHostRunConfig({ forceLoopType: 'Turn-based' })
 assert.equal(turn.loopType, 'Turn-based')
 assert.equal(turn.maxIterations, 1)
 
 const bounded = buildPiHostRunConfig({ forceLoopType: 'Goal-based', maxIterations: 99 })
-assert.equal(bounded.maxIterations, 8)
+assert.equal(bounded.maxIterations, 32)
+
+// Renderer and Host must clamp with the same shared bounds — a divergence
+// would let the UI promise a budget the Host silently shrinks.
+const { PI_MAX_ITERATIONS, clampPiIterations } = await import('../src/agent/loopBounds.ts')
+assert.equal(bounded.maxIterations, PI_MAX_ITERATIONS)
+assert.equal(clampPiIterations('NaN'), 1)
+assert.equal(clampPiIterations(0), 1)
+assert.equal(clampPiIterations(8), 8)
 
 console.log('Pi Host renderer run config preserves Goal-based retry budget')

@@ -33,10 +33,10 @@ const waitFor = async (predicate: (message: HostMessage) => boolean): Promise<Ho
 }
 
 try {
-  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 1, client: 'smoke' } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 2, client: 'smoke' } })}\n`)
   const initialized = await waitFor((message) => message.id === 1)
   assert.deepEqual(initialized.result, {
-    protocolVersion: 1,
+    protocolVersion: 2,
     capabilities: ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'events', 'automation', 'resources', 'memory', 'capabilities'],
     status: 'ready',
   })

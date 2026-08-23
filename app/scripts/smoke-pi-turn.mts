@@ -23,7 +23,7 @@ const waitFor = async (predicate: (message: Record<string, any>) => boolean) => 
 }
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 try {
-  send(1, 'initialize', { protocolVersion: 1 })
+  send(1, 'initialize', { protocolVersion: 2 })
   await waitFor((message) => message.id === 1)
   send(2, 'sessions/create', { title: 'Smoke' })
   const created = await waitFor((message) => message.id === 2)

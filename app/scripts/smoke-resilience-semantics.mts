@@ -150,7 +150,7 @@ const { isSafeLearningExportPath } = await import('../src/agent/hermes/learningE
       started.push(iteration)
       // The stop arrives while iteration 2 is running; it must not start a 3rd.
       if (iteration === 2) interrupt = 'user'
-      return { settlement: 'success', result: `iteration ${iteration}`, done: false }
+      return { settlement: 'answered', result: `iteration ${iteration}`, done: false }
     },
   })
   assert.deepEqual(started, [1, 2], 'no iteration may start after an interrupt is pending')
@@ -163,7 +163,7 @@ const { isSafeLearningExportPath } = await import('../src/agent/hermes/learningE
     pattern: 'Goal-based',
     prompt: 'keep going',
     maxIterations: 2,
-    turn: async () => ({ settlement: 'success', result: 'partial', done: false }),
+    turn: async () => ({ settlement: 'answered', result: 'partial', done: false }),
   })
   assert.equal(exhausted.settlement, 'failed', 'an unmet DoD at the cap is not an interrupt')
 }

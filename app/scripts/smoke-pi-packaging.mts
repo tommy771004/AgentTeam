@@ -71,7 +71,7 @@ async function hostRound(label: string, hostEntry: string, vendorDir: string, st
   }
   const first = start()
   const firstClient = client(first)
-  const initialized = await firstClient.request(1, 'initialize', { protocolVersion: 1 })
+  const initialized = await firstClient.request(1, 'initialize', { protocolVersion: 2 })
   assert.equal(initialized.result?.sessionId, undefined)
   const created = await firstClient.request(2, 'sessions/create', { title: `${label} packaged session` })
   const sessionId = created.result?.sessionId
@@ -82,7 +82,7 @@ async function hostRound(label: string, hostEntry: string, vendorDir: string, st
 
   const restarted = start()
   const restartedClient = client(restarted)
-  await restartedClient.request(3, 'initialize', { protocolVersion: 1 })
+  await restartedClient.request(3, 'initialize', { protocolVersion: 2 })
   const listed = await restartedClient.request(4, 'sessions/list', {})
   assert.ok(listed.result?.sessions?.some((session) => session.id === sessionId), `${label}: session did not survive restart`)
   restarted.stdin.end()

@@ -24,7 +24,7 @@ const waitFor = async (id: number) => {
   }
 }
 try {
-  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 1 } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 2 } })}\n`)
   await waitFor(1)
   host.stdin.write(`${JSON.stringify({ id: 2, method: 'tools/read', params: { cwd: root, path: 'hello.txt' } })}\n`)
   const response = await waitFor(2)

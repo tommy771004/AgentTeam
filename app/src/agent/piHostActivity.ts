@@ -4,7 +4,14 @@
  * Pi Host remains the execution/history authority. This module only translates
  * its typed stream into the existing presentation vocabulary used by the
  * center process feed.
+ *
+ * Structured phase: whenever the Host names WHAT it is doing (orchestration
+ * stage, tool execution, turn boundaries), the update carries the lifecycle
+ * phase explicitly. `phaseFromStatusLine`'s regex over Chinese status copy is
+ * then only a fallback for adapters that have no structured signal — copy
+ * changes upstream can no longer derail the phase display.
  */
+import type { RunLifecyclePhase } from './runLifecycle.ts'
 
 export type PiHostEventLike = {
   event: string
@@ -23,6 +30,8 @@ export type PiHostActivityUpdate =
       ok?: boolean
       eventId?: string
       callId?: string
+      /** Structured lifecycle signal; wins over status-line regex derivation. */
+      phase?: RunLifecyclePhase
     }
 
 type RecordValue = Record<string, unknown>
@@ -95,6 +104,7 @@ function mapTurnItem(runId: string, item: unknown): PiHostActivityUpdate | null 
       title: `執行 ${tool}…`,
       detail: summarize(record.args),
       tool,
+      phase: 'executing',
       eventId: callEventId(record.toolCallId, 'start'),
       callId: asText(record.toolCallId),
     }
@@ -110,6 +120,7 @@ function mapTurnItem(runId: string, item: unknown): PiHostActivityUpdate | null 
       detail: summarize(record.result),
       tool,
       ok: !isError,
+      phase: 'executing',
       eventId: callEventId(record.toolCallId, 'result'),
       callId: asText(record.toolCallId),
     }
@@ -123,14 +134,15 @@ function mapTurnItem(runId: string, item: unknown): PiHostActivityUpdate | null 
       title: `${tool} 執行中…`,
       detail: summarize(record.partialResult),
       tool,
+      phase: 'executing',
       callId: asText(record.toolCallId),
     }
   }
 
-  if (type === 'agent_start') return { kind: 'status', runId, title: 'Pi Core 已啟動' }
-  if (type === 'turn_start') return { kind: 'status', runId, title: '開始回合' }
-  if (type === 'turn_end') return { kind: 'status', runId, title: '回合完成' }
-  if (type === 'agent_end') return { kind: 'status', runId, title: 'Pi Core 回合完成' }
+  if (type === 'agent_start') return { kind: 'status', runId, title: 'Pi Core 已啟動', phase: 'starting' }
+  if (type === 'turn_start') return { kind: 'status', runId, title: '開始回合', phase: 'thinking' }
+  if (type === 'turn_end') return { kind: 'status', runId, title: '回合完成', phase: 'finalizing' }
+  if (type === 'agent_end') return { kind: 'status', runId, title: 'Pi Core 回合完成', phase: 'finalizing' }
 
   return null
 }
@@ -165,6 +177,7 @@ export function mapPiHostEventToActivity(event: PiHostEventLike): PiHostActivity
       detail: asText(payload?.summary),
       tool: providerId,
       ok: !failed,
+      phase: state === 'running' ? 'executing' : undefined,
       eventId: `pi-pipeline-${stageId}-${state || 'unknown'}`,
     }
   }
@@ -209,6 +222,7 @@ export function mapPiHostEventToActivity(event: PiHostEventLike): PiHostActivity
       title: `執行 ${tool}…`,
       detail: summarize(payload?.item),
       tool,
+      phase: 'executing',
       eventId: callEventId(callId, 'start'),
       callId,
     }
@@ -221,6 +235,7 @@ export function mapPiHostEventToActivity(event: PiHostEventLike): PiHostActivity
       title: `${tool} 執行中…`,
       detail: summarize(payload?.item),
       tool,
+      phase: 'executing',
       callId,
     }
   }
@@ -235,6 +250,9 @@ export function mapPiHostEventToActivity(event: PiHostEventLike): PiHostActivity
       detail: asText(payload?.reason),
       tool,
       ok: decision !== 'deny',
+      // A pending permission ask is the HITL phase, not just copy — this is
+      // the same signal the approval surfaces key off.
+      phase: decision === 'allow' ? 'executing' : decision === 'deny' ? undefined : 'manual_intervention',
       callId,
     }
   }
@@ -249,6 +267,7 @@ export function mapPiHostEventToActivity(event: PiHostEventLike): PiHostActivity
       detail: asText(payload?.reason) || summarize(payload?.item),
       tool,
       ok: !failed,
+      phase: 'executing',
       eventId: callEventId(callId, 'result'),
       callId,
     }
@@ -277,6 +296,18 @@ export function mapPiHostEventToActivity(event: PiHostEventLike): PiHostActivity
       title,
       detail,
       ok: phase !== 'cancelled',
+      // The Host literally names its orchestration stage here — trust it over
+      // any wording heuristic.
+      phase:
+        phase === 'parse' || phase === 'replan'
+          ? 'planning'
+          : phase === 'iterate'
+            ? 'executing'
+            : phase === 'settlement'
+              ? 'finalizing'
+              : phase === 'cancelled'
+                ? 'cancelled'
+                : undefined,
       eventId: `pi-orchestration-${phase || 'unknown'}-${payload?.iteration ?? 0}`,
     }
   }

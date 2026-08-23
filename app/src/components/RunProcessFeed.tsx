@@ -21,6 +21,7 @@ import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
 import { ContextCards } from './ContextCards'
 import { ElapsedTime } from './primitives/ElapsedTime'
+import { useStallNotice } from '../hooks/useStallNotice'
 import { AgentThinking } from './primitives/AgentThinking'
 import { thinkingVariantForPhase } from './primitives/agentThinkingVariant'
 import { Reveal } from './primitives/Reveal'
@@ -207,6 +208,8 @@ export function RunProcessFeed({
     stopping: activity?.stopping,
   })
   const phase = lifecycle.label
+  // One honest notice when a live run goes quiet — never a repeated alarm.
+  const stall = useStallNotice(runId)
   const toolCount = new Set(
     [
       // Guarded like every other access in this file: a run snapshot without a
@@ -354,6 +357,10 @@ export function RunProcessFeed({
         >
           {lifecycle.needsAttention ? (
             <Icon name={lifecycle.icon} size={16} className="shrink-0 text-orange" />
+          ) : lifecycle.stopping ? (
+            // A stop already registered must not keep spinning as if nothing
+            // happened; the pause mark is the immediate answer to the press.
+            <Icon name={lifecycle.icon} size={16} className="shrink-0 text-ink" />
           ) : (
             <AgentThinking variant={thinkingVariantForPhase(lifecycle.phase)} className="shrink-0 text-ink" />
           )}
@@ -383,6 +390,17 @@ export function RunProcessFeed({
           </button>
         ) : null}
       </div>
+
+      {stall.stalled && !lifecycle.needsAttention ? (
+        <div
+          className="agent-process-stall flex items-center gap-2 rounded-md border border-line-strong/60 bg-surface-2 px-3 py-2 text-[11px] text-ink-3"
+          role="status"
+          data-stall-idle-ms={stall.idleMs}
+        >
+          <Icon name="hourglass_top" size={14} className="shrink-0 text-orange" />
+          <span>{stall.label}</span>
+        </div>
+      ) : null}
 
       <Reveal open={processOpen}>
         <div className="space-y-3">

@@ -26,7 +26,7 @@ const waitFor = async (id: number) => {
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 
 try {
-  send(1, 'initialize', { protocolVersion: 1 }); await waitFor(1)
+  send(1, 'initialize', { protocolVersion: 2 }); await waitFor(1)
   send(2, 'sessions/create', { title: 'Parent' }); const parent = await waitFor(2)
   const parentSessionId = parent.result?.sessionId
   assert.ok(parentSessionId)

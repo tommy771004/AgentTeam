@@ -127,5 +127,12 @@ const metWorkspace = deriveSubDesignWorkspace({
 })
 assert(metWorkspace.runStatus === 'success', 'a met DoD keeps the plain SubDesign success state')
 
+// ── cancel_requested: a requested stop is formal live vocabulary (item 5) ──
+view = deriveRunLifecycle({ phase: 'executing', status: 'running', active: true, stopping: true })
+assert(view.phase === 'cancel_requested', 'an acknowledged stop becomes the cancel_requested phase')
+assert(view.label === '正在安全停車…' && !view.canStop && view.live, 'the park answers immediately but stays live')
+view = deriveRunLifecycle({ phase: 'cancel_requested', status: 'running', active: true })
+assert(view.stopping && !view.canStop, 'the phase alone implies stopping — callers need not repeat the flag')
+
 store.clear()
 console.log('run activity lifecycle phases, terminal digest and iteration-exhausted wording are coherent')
