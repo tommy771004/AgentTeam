@@ -129,9 +129,9 @@ const waitForEvent = async (event: string, predicate: (payload: Record<string, a
   }
 }
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
-const submitTurn = (id: number, runId: string, prompt: string, profile: Record<string, unknown>, sessionId: string, script?: { tool: string; args: Record<string, unknown> }) => {
+const submitTurn = (id: number, runId: string, prompt: string, profile: Record<string, unknown>, sessionId: string, script?: { tool: string; args: Record<string, unknown> }, preloadedCapabilities?: string[]) => {
   if (script) pendingScript = script
-  send(id, 'turn/submit', { sessionId, runId, cwd: workspace, prompt, profile })
+  send(id, 'turn/submit', { sessionId, runId, cwd: workspace, prompt, profile, ...(preloadedCapabilities ? { preloadedCapabilities } : {}) })
 }
 
 try {
@@ -146,8 +146,15 @@ try {
   assert.equal(entry.pack, 'integrations')
   assert.equal(entry.source, 'discovered')
   assert.equal(typeof entry.active, 'boolean')
-  // The legacy flat list still holds the Pi builtins exactly.
-  assert.deepEqual([...listed.result.builtinTools].sort(), ['bash', 'edit', 'find', 'grep', 'ls', 'read', 'write'])
+  // The legacy flat list holds the Pi builtins plus every ALWAYS-ON pack
+  // tool (interaction, planning, core-utils, framework verbs) — those are
+  // genuinely callable right now. Capability-gated tools stay out until
+  // their capability loads.
+  assert.deepEqual([...listed.result.builtinTools].sort(), [
+    'ask_user', 'bash', 'datetime_now', 'edit', 'find', 'grep', 'json_extract_lite',
+    'load_capability', 'ls', 'read', 'run_code', 'table_parse', 'tool_output_read',
+    'tool_search', 'update_plan', 'write',
+  ])
 
   // Direct execution through tools/pack returns structured results and is
   // audited like any builtin call: start → decision → result.
@@ -173,7 +180,7 @@ try {
   send(5, 'sessions/create', { title: 'Pack seam smoke' })
   const created = await waitFor(5)
   const sessionId = String(created.result.sessionId)
-  submitTurn(6, 'pack-seam-run', '請抓取這個網頁並告訴我內容', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'full', unattended: true }, sessionId, { tool: 'http_fetch', args: { url: webUrl } })
+  submitTurn(6, 'pack-seam-run', '請抓取這個網頁並告訴我內容', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'full', unattended: true }, sessionId, { tool: 'http_fetch', args: { url: webUrl } }, ['web-research'])
 
   const settled = await waitFor(6)
   assert.equal(settled.result.settlement, 'answered', `turn should answer — round-2 request was: ${requests[1]?.slice(0, 300)}`)
@@ -198,7 +205,7 @@ try {
   // ── The Approval Decision on the same seam ──
   // An unattended run that asks for an OUTBOUND send is refused without an
   // approval: fail-closed, and the refusal settles as `denied`, not failed.
-  submitTurn(7, 'pack-seam-unapproved', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: true }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } })
+  submitTurn(7, 'pack-seam-unapproved', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: true, activeTools: ['grep'] }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } }, ['messaging'])
   const deniedSettled = await waitFor(7)
   assert.equal(deniedSettled.result.settlement, 'answered', 'a denied tool does not end the turn; the loop continues and answers')
   const denyDecision = messages.find((message) => message.event === 'host/tool-decision' && message.payload?.tool === 'message_send' && message.payload?.runId === 'pack-seam-unapproved')
@@ -212,7 +219,7 @@ try {
 
   // ── Attended ask: the HITL path ──
   // An attended auto-mode run raises `host/approval-requested` and WAITS.
-  submitTurn(8, 'pack-ask-allow', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: false }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } })
+  submitTurn(8, 'pack-ask-allow', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: false }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } }, ['messaging'])
   const askEvent = await waitForEvent('host/approval-requested', (payload) => payload.runId === 'pack-ask-allow')
   assert.equal(askEvent.payload.tool, 'message_send')
   assert.ok(Number(askEvent.payload.timeoutMs) > 0, 'the ask carries its own timeout budget')
@@ -227,7 +234,7 @@ try {
   assert.equal(allowedResult.settlement, 'success', 'approval lets the tool run')
 
   // A deny resolution blocks the same tool on the same path.
-  submitTurn(10, 'pack-ask-deny', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'always', unattended: false }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } })
+  submitTurn(10, 'pack-ask-deny', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'always', unattended: false }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } }, ['messaging'])
   const denyAsk = await waitForEvent('host/approval-requested', (payload) => payload.runId === 'pack-ask-deny')
   send(11, 'approvals/resolve', { runId: denyAsk.payload.runId, callId: denyAsk.payload.callId, decision: 'deny' })
   await waitFor(11)
@@ -238,7 +245,7 @@ try {
   assert.equal(userDeniedResult.settlement, 'denied')
 
   // An ask nobody resolves expires into a denial at the ask's own timeout.
-  submitTurn(12, 'pack-ask-timeout', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: false }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } })
+  submitTurn(12, 'pack-ask-timeout', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: false }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } }, ['messaging'])
   await waitForEvent('host/approval-requested', (payload) => payload.runId === 'pack-ask-timeout')
   const timeoutSettled = await waitFor(12)
   assert.equal(timeoutSettled.result.settlement, 'answered', 'an expired ask does not hang the run forever')
