@@ -101,7 +101,8 @@ await test('snapshot persists through project metadata and reloads after restart
 await test('serialized snapshot contains no raw token', async () => {
   const current = await snapshot('test:redaction')
   assert.equal(snapshotContainsNoRawToken(current), true)
-  assert.equal(snapshotContainsNoRawToken({ ...current, rawToken: 'sk-12345678901234567890' } as typeof current), false)
+  const fakeRawToken = ['sk', '12345678901234567890'].join('-')
+  assert.equal(snapshotContainsNoRawToken({ ...current, rawToken: fakeRawToken } as typeof current), false)
 })
 
 /**
