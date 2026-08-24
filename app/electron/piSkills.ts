@@ -22,7 +22,7 @@ export type PiSyncedSkill = {
 }
 
 export type PiSkillSyncResult =
-  | { name: string; ok: true; status: PiSkillStatus; filePath: string }
+  | { name: string; ok: true; status: PiSkillStatus; filePath: string; /** The on-disk (slugified) skill name. */ slug: string }
   | { name: string; ok: false; error: string }
 
 export function resolvePiSkillsDir(agentDir: string | undefined): string | undefined {
@@ -36,6 +36,24 @@ export function resolvePiSkillsDir(agentDir: string | undefined): string | undef
 function safeSegment(name: string): string {
   const segment = name.trim().replace(/[^\p{L}\p{N}_-]+/gu, '-')
   return segment && segment !== '.' && segment !== '..' ? segment : 'skill'
+}
+
+/**
+ * Pi's loader only accepts skill names of lowercase a-z / 0-9 / hyphens, so a
+ * renderer name like 「部署檢查」 must become a slug for the frontmatter. A
+ * name with no ASCII at all gets a deterministic hashed slug so two runs
+ * migrate to the SAME file instead of drifting apart.
+ */
+function slugifyPiSkillName(name: string): string {
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '')
+  const trimmed = slug.slice(0, 64).replace(/^-+|-+$/g, '')
+  if (trimmed) return trimmed
+  let hash = 2166136261
+  for (let index = 0; index < name.length; index += 1) {
+    hash ^= name.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `skill-${(hash >>> 0).toString(36)}`
 }
 
 /**
@@ -57,7 +75,7 @@ export function serializePiSkill(input: { name: string; description: string; bod
   return lines.join('\n')
 }
 
-export type PiSkillsState = { version: 1; skills: Record<string, { status: PiSkillStatus }> }
+export type PiSkillsState = { version: 1; skills: Record<string, { status: PiSkillStatus; displayName?: string }> }
 
 async function readSkillsState(skillsDir: string): Promise<PiSkillsState> {
   try {
@@ -75,10 +93,50 @@ async function writeSkillsState(skillsDir: string, state: PiSkillsState): Promis
 
 /** The pinned names the turn should expand up front (issue 16). */
 export async function loadPinnedPiSkills(agentDir: string | undefined): Promise<string[]> {
+  const state = await readSkillsStateSafely(agentDir)
+  return Object.entries(state.skills).filter(([, meta]) => meta.status === 'pinned').map(([name]) => name)
+}
+
+async function readSkillsStateSafely(agentDir: string | undefined): Promise<PiSkillsState> {
+  const dir = resolvePiSkillsDir(agentDir)
+  if (!dir) return { version: 1, skills: {} }
+  return readSkillsState(dir)
+}
+
+/** Split Pi-style frontmatter off a SKILL.md body. */
+function stripFrontmatter(raw: string): string {
+  if (!raw.startsWith('---')) return raw
+  const end = raw.indexOf('\n---', 3)
+  if (end < 0) return raw
+  return raw.slice(raw.indexOf('\n', end + 1) + 1)
+}
+
+/**
+ * Full bodies for every pinned skill, read from the same directory Pi's
+ * loader discovers.
+ *
+ * Pinned is the one case catalog-only advertisement does not cover: the user
+ * pinned the skill precisely so it applies whether or not this objective
+ * happens to match its keywords (user story 4), so its body is expanded up
+ * front — the way Pi's own `/skill:<name>` expansion works, and through the
+ * SAME files on disk, never a second discovery path.
+ */
+export async function loadPinnedPiSkillBodies(agentDir: string | undefined): Promise<Array<{ name: string; body: string }>> {
   const dir = resolvePiSkillsDir(agentDir)
   if (!dir) return []
   const state = await readSkillsState(dir)
-  return Object.entries(state.skills).filter(([, meta]) => meta.status === 'pinned').map(([name]) => name)
+  const bodies: Array<{ name: string; body: string }> = []
+  for (const [name, meta] of Object.entries(state.skills)) {
+    if (meta.status !== 'pinned') continue
+    try {
+      const raw = await readFile(join(dir, safeSegment(name), 'SKILL.md'), 'utf8')
+      const body = stripFrontmatter(raw).trim()
+      if (body) bodies.push({ name: meta.displayName || name, body: `### 技能：${meta.displayName || name}\n\n${body}` })
+    } catch {
+      /* a missing file must not fail the turn; the loader reports its own diagnostic */
+    }
+  }
+  return bodies
 }
 
 /**
@@ -97,20 +155,31 @@ export async function syncPiSkillsFromRenderer(
   const state = await readSkillsState(dir)
   const results: PiSkillSyncResult[] = []
   const synced: PiSyncedSkill[] = []
+  // Slugs claimed during this run, so two different display names colliding
+  // on one slug is REPORTED instead of one silently overwriting the other.
+  const claimed = new Map<string, string>()
   for (const [index, candidate] of payload.entries()) {
     const fallbackName = typeof candidate?.name === 'string' && candidate.name.trim() ? candidate.name.trim() : `skill-${index + 1}`
     try {
-      const name = fallbackName
+      const displayName = fallbackName
+      const name = slugifyPiSkillName(displayName)
       const description = typeof candidate.description === 'string' ? candidate.description : ''
       const body = typeof candidate.body === 'string' ? candidate.body : ''
       const rawStatus = candidate.status === 'pinned' || candidate.status === 'archived' ? candidate.status : 'active'
-      if (!name || (!description && !body)) throw new Error('skill requires a description or a body')
+      if (!description && !body) throw new Error('skill requires a description or a body')
+      const previousOwner = claimed.get(name)
+      if (previousOwner && previousOwner !== displayName) throw new Error(`skill slug ${name} collides between "${previousOwner}" and "${displayName}"`)
+      const existing = state.skills[name]
+      if (existing?.displayName && existing.displayName !== displayName && !claimed.has(name)) {
+        throw new Error(`skill name collides with an existing skill: ${name}`)
+      }
+      claimed.set(name, displayName)
       const skillDir = join(dir, safeSegment(name))
       const filePath = join(skillDir, 'SKILL.md')
       await mkdir(skillDir, { recursive: true })
       await writeFile(filePath, serializePiSkill({ name, description, body, status: rawStatus }), 'utf8')
-      state.skills[name] = { status: rawStatus }
-      results.push({ name, ok: true, status: rawStatus, filePath })
+      state.skills[name] = { status: rawStatus, displayName }
+      results.push({ name: displayName, ok: true, status: rawStatus, filePath, slug: name })
       synced.push({ name, description, status: rawStatus, filePath })
     } catch (error) {
       results.push({ name: fallbackName, ok: false, error: error instanceof Error ? error.message : String(error) })
@@ -129,6 +198,16 @@ export async function deletePiSkill(agentDir: string | undefined, name: string):
   delete state.skills[name]
   await writeSkillsState(dir, state)
   return true
+}
+
+/**
+ * The system-prompt block that expands pinned skill bodies up front, or an
+ * empty string when nothing is pinned.
+ */
+export async function buildPinnedPiSkillsPromptBlock(agentDir: string | undefined): Promise<string> {
+  const bodies = await loadPinnedPiSkillBodies(agentDir)
+  if (!bodies.length) return ''
+  return `## 已釘選技能\n\n以下技能由使用者釘選，無論當前任務是否提及關鍵字都必須套用：\n\n${bodies.map((skill) => skill.body).join('\n\n')}`
 }
 
 /* ── Loader discovery capture ─────────────────────────────────────────── */

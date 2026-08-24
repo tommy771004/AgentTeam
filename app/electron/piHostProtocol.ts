@@ -109,7 +109,7 @@ export type PiHostEvent =
     }
   | {
       event: 'host/context'
-      payload: { runId: string; sessionId: string; phase: 'memory-recalled' | 'memory-written' | 'compacted' | 'model-switched'; recalled?: number; written?: number; previousModel?: string; model?: string; provider?: string; contextWindowTokens?: number }
+      payload: { runId: string; sessionId: string; phase: 'memory-recalled' | 'memory-written' | 'compacted' | 'model-switched' | 'skills-unavailable'; recalled?: number; written?: number; previousModel?: string; model?: string; provider?: string; contextWindowTokens?: number }
     }
   | {
       event: 'host/pipeline-stage'
@@ -609,9 +609,19 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     // array (issue 02). A skill archived via disable-model-invocation stays
     // listed here while staying out of <available_skills>.
     const found = discoveredPiSkills()
-    const skillResources: PiResource[] = found.skills
+    // Each skill entry carries its own availability fact (issue 03/17):
+    // with `read` disabled the whole advertised block disappears from the
+    // prompt, and the projection says exactly that per entry.
+    const readActive = state.snapshot.settings.activeTools.length === 0 || state.snapshot.settings.activeTools.includes('read')
+    const skillResources: Array<PiResource & { reason?: string }> = found.skills
       .filter((skill) => skill.name)
-      .map((skill) => ({ id: skill.name, kind: 'skill' as const, source: skill.filePath, enabled: !skill.disableModelInvocation }))
+      .map((skill) => ({
+        id: skill.name,
+        kind: 'skill' as const,
+        source: skill.filePath,
+        enabled: !skill.disableModelInvocation,
+        ...(!readActive && !skill.disableModelInvocation ? { reason: 'read 工具未啟用：此技能在 run 中不可用' } : {}),
+      }))
     return [{ id, result: { resources: [...skillResources, ...state.snapshot.resources.map((resource) => ({ ...resource }))].sort((left, right) => left.id.localeCompare(right.id)), ...(found.diagnostics.length ? { diagnostics: found.diagnostics.map((diagnostic) => ({ path: diagnostic.path, message: diagnostic.message })) } : {}) } }]
   }
   if (input.method === 'resources/reload') {
@@ -955,6 +965,24 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     }
     let profileCommitted = false
     const memory = new PiMemoryExtension(state.snapshot.memories)
+    // Skills ride Pi's `<available_skills>` block, which is only appended
+    // when the `read` tool is active. A capability configuration that turns
+    // `read` off would otherwise make EVERY skill vanish silently — exactly
+    // the failure mode this effort exists to kill (issue 17), so the
+    // dependency is reported instead.
+    const visibleSkills = discoveredPiSkills().skills.filter((skill) => skill.name && !skill.disableModelInvocation)
+    const readActive = turnSettings.activeTools.length === 0 || turnSettings.activeTools.includes('read')
+    if (visibleSkills.length > 0 && !readActive) {
+      recordTurnEntry(sessionId, {
+        kind: 'notice',
+        source: 'host',
+        topic: 'skills-unavailable',
+        text: `技能在此 run 不可用：read 工具未啟用，系統提示無法列出 ${visibleSkills.length} 個技能（${visibleSkills.slice(0, 3).map((skill) => skill.name).join('、')}${visibleSkills.length > 3 ? ' 等' : ''}）。重新啟用 read 後即自動恢復。`,
+      })
+      const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'skills-unavailable', recalled: visibleSkills.length } }
+      if (emit) emit(event)
+      else turnEvents.push(event)
+    }
     const recalled = contextPolicy.memoryEnabled && !contextPolicy.temporary
       ? memory.recall(prompt, contextPolicy.project, 5)
       : []

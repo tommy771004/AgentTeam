@@ -113,6 +113,13 @@ export type TurnRecordEntry = TurnRecordCoordinates &
       }
     | { kind: 'approval'; source: 'host'; tool: string; callId: string; decision: string; reason?: string }
     | { kind: 'compaction'; source: 'host'; replaced: number; tokens?: number }
+    | {
+        /** A fact the user must see that is not a tool call or a message. */
+        kind: 'notice'
+        source: 'host'
+        topic: string
+        text: string
+      }
   )
 
 /**
@@ -167,6 +174,7 @@ const KINDS = new Set([
   'tool-result',
   'approval',
   'compaction',
+  'notice',
 ])
 
 function isEntry(value: unknown): value is TurnRecordEntry {
@@ -181,6 +189,7 @@ function isEntry(value: unknown): value is TurnRecordEntry {
   if ((entry.kind === 'user-text' || entry.kind === 'assistant-text') && typeof entry.content !== 'string') return false
   if ((entry.kind === 'tool-call' || entry.kind === 'tool-result' || entry.kind === 'approval')
     && (typeof entry.tool !== 'string' || typeof entry.callId !== 'string')) return false
+  if (entry.kind === 'notice' && (typeof entry.topic !== 'string' || typeof entry.text !== 'string')) return false
   return true
 }
 

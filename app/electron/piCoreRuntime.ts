@@ -8,7 +8,7 @@ import { classifyPiTurnSettlement, piTurnProviderError, piTurnStopReason, PI_TUR
 import type { PiRecordedMessage, PiStepTiming } from '../src/agent/turnRecord.ts'
 import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
 import { piPackExtensionFactories } from './piToolHost.ts'
-import { captureDiscoveredPiSkills, resolvePiSkillsDir } from './piSkills.ts'
+import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, resolvePiSkillsDir } from './piSkills.ts'
 
 const vendorCandidates = [
   process.env.SUBAGENTS_PI_VENDOR_DIR,
@@ -269,6 +269,19 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
       additionalSkillPaths: piSkillsDir ? [piSkillsDir] : undefined,
       extensionFactories: [
         ...piPackExtensionFactories({ sessionId, cwd, temporaryChat: settings.temporaryChat }),
+        // Pinned skills expand up front (issue 16): the same files the loader
+        // discovered, read into the system prompt before the agent starts.
+        {
+          name: 'subagents-pinned-skills',
+          hidden: true,
+          factory: (pi: { on: (event: string, handler: (input: Record<string, unknown>) => unknown) => void }) => {
+            pi.on('before_agent_start', async (event) => {
+              const block = await buildPinnedPiSkillsPromptBlock(agentDir)
+              if (!block || typeof event.systemPrompt !== 'string') return undefined
+              return { systemPrompt: `${event.systemPrompt}\n\n${block}` }
+            })
+          },
+        },
         {
         name: 'subagents-session-context',
         hidden: true,
