@@ -31,6 +31,7 @@ import {
   attachmentsPathAppendix,
   defaultGoalForAttachments,
 } from '../lib/chatAttachments.ts'
+import { buildPiTurnContext, withPiTurnContext } from './piTurnContext.ts'
 import type { RunDispatchSnapshot } from './taskRunCoordinator.ts'
 
 export type { DispatchResult } from './dispatchResult.ts'
@@ -139,7 +140,22 @@ export async function dispatchThreadTask(
       attachmentsToTextAppendix(attachments),
       attachmentsPathAppendix(attachments),
     ].filter(Boolean).join('\n\n')
-    const piText = appendix ? `${raw}\n\n${appendix}`.slice(0, 120_000) : raw
+    const request = appendix ? `${raw}\n\n${appendix}` : raw
+    // Pi Host cannot read renderer-owned skills, project guidance or chat
+    // history, and has no tool to fetch them. They travel with the prompt or
+    // the turn simply never sees them.
+    const piContext = await buildPiTurnContext({
+      objective: raw,
+      settings,
+      projectRoot: snapshot.overrides.projectRoot?.trim() || undefined,
+      bubbles: thread?.bubbles,
+      temporary: snapshot.overrides.temporary === true,
+      archive: useAgentStore.getState().archive,
+    })
+    const piText = withPiTurnContext(request, piContext.assembled)
+    if (piContext.projectGuidanceSummary) {
+      thr.pushBubble(tid, 'system', `專案指引：${piContext.projectGuidanceSummary}`)
+    }
     await useAgentStore.getState().startExecution(piText, {
       ...snapshot.overrides,
       runId: snapshot.runId,
