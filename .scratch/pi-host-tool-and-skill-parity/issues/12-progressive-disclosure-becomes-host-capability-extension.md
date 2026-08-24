@@ -8,10 +8,12 @@
 
 **Status:** 可交給代理
 
-- [ ] Host 的 `PiCapabilityCatalog` 納入 14 個 capability 定義，驅動 `pi.setActiveTools()` 與 Dynamic Tool Loading
-- [ ] `deferLoading` 的 capability 只顯示一行目錄；`capabilities/load` 後 `tools/list` 隨之改變
-- [ ] `load_capability` / `tool_search` / `run_code` 維持保留字
-- [ ] 超過 `toolSearchThreshold` 後非核心 schema 藏在 `tool_search` 之後，且 `tool_search` 找得到
-- [ ] 每個 thread 上次載入的 capability id 與解鎖工具在下一輪預載（renderer 端的持久化已由 thread prefs sidecar 保住，本回合 active 的權威在 Host）
-- [ ] 未註冊工具所屬的 capability 誠實回報，不假裝可用
-- [ ] 測試在單一接縫：`capabilities/list` → `load` → `tools/list` 變化 → 跨 turn 預載
+- [x] Host 的 `PiCapabilityCatalog` 納入 14 個 capability 定義，驅動 `pi.setActiveTools()` 與 Dynamic Tool Loading
+- [x] `deferLoading` 的 capability 只顯示一行目錄；`capabilities/load` 後 `tools/list` 隨之改變
+- [x] `load_capability` / `tool_search` / `run_code` 維持保留字
+- [x] 超過 `toolSearchThreshold` 後非核心 schema 藏在 `tool_search` 之後，且 `tool_search` 找得到
+- [x] 每個 thread 上次載入的 capability id 與解鎖工具在下一輪預載（renderer 端的持久化已由 thread prefs sidecar 保住，本回合 active 的權威在 Host）
+- [x] 未註冊工具所屬的 capability 誠實回報，不假裝可用
+- [x] 測試在單一接縫：`capabilities/list` → `load` → `tools/list` 變化 → 跨 turn 預載
+
+> 落地註記：threshold 的「數量觸發」在 Host 端由**結構性**揭露取代——非核心 schema 一律預設 deferred（一行目錄、`tool_search` 找得到、`load_capability` 揭露），不論目錄大小；核心（always-on）工具不受影響。揭露權威集中在 `piActivePackToolNames()`，投影／session runtime／Code Mode 三處共用同一公式。

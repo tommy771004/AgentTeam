@@ -8,8 +8,8 @@ codegraph 那組需要接到 app 自己索引的那張圖（Host 既有的 codeg
 
 **Status:** 可交給代理
 
-- [ ] `codegraph_explore` / `codegraph_status` / `codegraph_impact` / `codegraph_callers` 註冊為 extension tools，讀 app 索引的同一張圖
-- [ ] `table_parse` / `json_extract_lite` / `tool_output_read` / `datetime_now` 註冊為 extension tools
-- [ ] codegraph 工具在專案未索引時回可讀的狀態，而非錯誤
-- [ ] `tool_output_read` 能取回被截斷的工具輸出
-- [ ] 測試在單一接縫
+- [x] `codegraph_explore` / `codegraph_status` / `codegraph_impact` / `codegraph_callers` 註冊為 extension tools，讀 app 索引的同一張圖
+- [x] `table_parse` / `json_extract_lite` / `tool_output_read` / `datetime_now` 註冊為 extension tools
+- [x] codegraph 工具在專案未索引時回可讀的狀態，而非錯誤
+- [x] `tool_output_read` 能取回被截斷的工具輸出
+- [x] 測試在單一接縫

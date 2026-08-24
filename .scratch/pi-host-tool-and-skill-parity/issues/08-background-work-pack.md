@@ -8,9 +8,9 @@ Host 已經有 child session 支援（`sessions/createChild`、`piDelegationExte
 
 **Status:** 可交給代理
 
-- [ ] `delegate_task` / `delegate_status` 註冊為 extension tools，走 Host 既有的 child session 路徑
-- [ ] child session 帶 role、profile、context、depth，缺任一項 fail closed
-- [ ] worktree isolation 的既有行為保持
-- [ ] `monitor` 註冊並可回報背景工作狀態
-- [ ] 子 run 的 Turn Record 有正確的 parent 關聯
-- [ ] 測試在單一接縫：建立 child、查詢狀態、深度上限拒絕
+- [x] `delegate_task` / `delegate_status` 註冊為 extension tools，走 Host 既有的 child session 路徑
+- [x] child session 帶 role、profile、context、depth，缺任一項 fail closed
+- [x] worktree isolation 的既有行為保持
+- [x] `monitor` 註冊並可回報背景工作狀態
+- [x] 子 run 的 Turn Record 有正確的 parent 關聯
+- [x] 測試在單一接縫：建立 child、查詢狀態、深度上限拒絕

@@ -10,11 +10,11 @@
 
 **Status:** 可交給代理
 
-- [ ] Host 端的 extension factory 用 `pi.registerTool()` 註冊工具，與既有的 `subagents-session-context` hidden factory 一起交給 `DefaultResourceLoader`
-- [ ] `tools/list` 回報該工具，帶 id、所屬 pack、本回合是否 active
-- [ ] 在一個真的 turn 裡被模型呼叫並回傳結果；失敗時回結構化失敗而非 throw
-- [ ] 走既有的 Approval Decision：需要核准時未核准會被拒絕、核准後放行；三種 Approval Mode 與 unattended 降級都涵蓋
-- [ ] 走既有的 Outbound Data Gate；protection active 時綁定 Restricted Project View
-- [ ] Turn Record 出現對應的 tool-call / tool-result 配對，座標正確
-- [ ] run 取消時停在 tool boundary（比照既有 `toolsInFlight` park 邏輯）
-- [ ] 測試在單一接縫：spawn `dist-electron/pi-host.js` 走 Pi Host Protocol，比照 `scripts/smoke-pi-host-capabilities.mts`
+- [x] Host 端的 extension factory 用 `pi.registerTool()` 註冊工具，與既有的 `subagents-session-context` hidden factory 一起交給 `DefaultResourceLoader`
+- [x] `tools/list` 回報該工具，帶 id、所屬 pack、本回合是否 active
+- [x] 在一個真的 turn 裡被模型呼叫並回傳結果；失敗時回結構化失敗而非 throw
+- [x] 走既有的 Approval Decision：需要核准時未核准會被拒絕、核准後放行；三種 Approval Mode 與 unattended 降級都涵蓋
+- [x] 走既有的 Outbound Data Gate；protection active 時綁定 Restricted Project View
+- [x] Turn Record 出現對應的 tool-call / tool-result 配對，座標正確
+- [x] run 取消時停在 tool boundary（比照既有 `toolsInFlight` park 邏輯）
+- [x] 測試在單一接縫：spawn `dist-electron/pi-host.js` 走 Pi Host Protocol，比照 `scripts/smoke-pi-host-capabilities.mts`

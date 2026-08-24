@@ -10,9 +10,9 @@
 
 **Status:** 可交給代理
 
-- [ ] 設定頁的工具清單由 Host catalog 投影而來，不再讀 `toolDefinitions.ts`
-- [ ] 清單同時涵蓋 Host 自動探索的工具與使用者已安裝來源提供的工具，每筆標示來源
-- [ ] 每筆帶自己的可用狀態；不可用時附可讀的原因（尚未由 Host 提供 / 被 active tools 停用 / 來源未啟用）
-- [ ] 沒有「整批不可用」的呈現：pack 還在陸續落地期間，已落地與未落地的項目並列
-- [ ] Host 無法產生目錄時 fail closed：明確告知目錄不可用，**不得**回退到 renderer 目錄
-- [ ] 測試在單一接縫：`tools/list` 與 `extensions/list` 的投影結果，含 fail-closed 路徑
+- [x] 設定頁的工具清單由 Host catalog 投影而來，不再讀 `toolDefinitions.ts`
+- [x] 清單同時涵蓋 Host 自動探索的工具與使用者已安裝來源提供的工具，每筆標示來源
+- [x] 每筆帶自己的可用狀態；不可用時附可讀的原因（尚未由 Host 提供 / 被 active tools 停用 / 來源未啟用）
+- [x] 沒有「整批不可用」的呈現：pack 還在陸續落地期間，已落地與未落地的項目並列
+- [x] Host 無法產生目錄時 fail closed：明確告知目錄不可用，**不得**回退到 renderer 目錄
+- [x] 測試在單一接縫：`tools/list` 與 `extensions/list` 的投影結果，含 fail-closed 路徑

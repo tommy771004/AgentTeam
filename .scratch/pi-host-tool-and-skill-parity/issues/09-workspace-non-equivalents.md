@@ -10,9 +10,9 @@ Pi 的 `withFileMutationQueue()` 是這裡的關鍵：`edit` 與 `write` 已經�
 
 **Status:** 可交給代理
 
-- [ ] `workspace_diff` / `workspace_move` / `workspace_delete` / `workspace_mkdir` / `workspace_download` 註冊為獨立命名的 extension tools
-- [ ] 所有會變更檔案的工具用 `withFileMutationQueue()`，且傳入解析後的絕對目標路徑（非原始參數）
-- [ ] 整段 read-modify-write 都在 queue 內，不只最後那次寫入
-- [ ] 專案範圍限制：逃出 root 的路徑被拒絕
-- [ ] 變更檔案的工具走 Approval Decision
-- [ ] 測試在單一接縫，含「同 turn 兩個工具動同一檔案不互相覆蓋」的斷言
+- [x] `workspace_diff` / `workspace_move` / `workspace_delete` / `workspace_mkdir` / `workspace_download` 註冊為獨立命名的 extension tools
+- [x] 所有會變更檔案的工具用 `withFileMutationQueue()`，且傳入解析後的絕對目標路徑（非原始參數）
+- [x] 整段 read-modify-write 都在 queue 內，不只最後那次寫入
+- [x] 專案範圍限制：逃出 root 的路徑被拒絕
+- [x] 變更檔案的工具走 Approval Decision
+- [x] 測試在單一接縫，含「同 turn 兩個工具動同一檔案不互相覆蓋」的斷言

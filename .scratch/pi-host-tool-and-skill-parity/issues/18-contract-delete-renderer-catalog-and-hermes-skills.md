@@ -10,9 +10,9 @@
 
 **Status:** 可交給代理
 
-- [ ] 刪除 `hermes/skills.ts` 與 renderer 的 `skill_list` / `skill_load` / `skill_save`
-- [ ] 刪除 `piTurnContext` 的技能分支；專案指引與對話歷史注入保留
-- [ ] 刪除 renderer 端已被 Host 取代的工具註冊與 `toolDefinitions.ts` 的目錄角色
-- [ ] Drift guard：`agent/tools/registered/` 出現新檔案時 build 失敗
-- [ ] Drift guard：新增對 `hermes/skills.ts` 的 import 或字串引用時 build 失敗
-- [ ] `npm run build` 與 `npm run smoke` 全綠
+- [x] 刪除 `hermes/skills.ts` 與 renderer 的 `skill_list` / `skill_load` / `skill_save`
+- [x] 刪除 `piTurnContext` 的技能分支；專案指引與對話歷史注入保留
+- [x] 刪除 renderer 端已被 Host 取代的工具註冊與 `toolDefinitions.ts` 的目錄角色
+- [x] Drift guard：`agent/tools/registered/` 出現新檔案時 build 失敗
+- [x] Drift guard：新增對 `hermes/skills.ts` 的 import 或字串引用時 build 失敗
+- [x] `npm run build` 與 `npm run smoke` 全綠

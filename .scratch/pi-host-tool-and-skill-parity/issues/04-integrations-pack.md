@@ -8,9 +8,9 @@
 
 **Status:** 可交給代理
 
-- [ ] `web_search` 與 `message_send` 以 `pi.registerTool()` 註冊在 Integrations pack
-- [ ] 兩者在真的 turn 裡可被呼叫並回傳結果
-- [ ] 走同一套 Approval Decision 與 Outbound Data Gate
-- [ ] `tools/list` 回報它們與所屬 pack
-- [ ] Turn Record 留下座標正確的 tool-call / tool-result
-- [ ] 測試在單一接縫
+- [x] `web_search` 與 `message_send` 以 `pi.registerTool()` 註冊在 Integrations pack
+- [x] 兩者在真的 turn 裡可被呼叫並回傳結果
+- [x] 走同一套 Approval Decision 與 Outbound Data Gate
+- [x] `tools/list` 回報它們與所屬 pack
+- [x] Turn Record 留下座標正確的 tool-call / tool-result
+- [x] 測試在單一接縫

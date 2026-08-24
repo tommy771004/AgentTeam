@@ -8,9 +8,9 @@ Host 已經有 `subDesignProviderRuntime` 與 plugin execution 路徑，這張�
 
 **Status:** 可交給代理
 
-- [ ] 12 個 `design_*` 工具註冊為 SubDesign pack 的 extension tools
-- [ ] brief / direction / artifact / critique / gate / export 各階段在一個真的 turn 裡串得起來
-- [ ] artifact 註冊與 revision 走 Host 既有的 artifact 路徑，不新增第二份 store
-- [ ] gate 與 critique 的 fail-closed 語意保持（證據不足不得通過）
-- [ ] 會產出檔案的工具走 Approval Decision 與 file mutation queue
-- [ ] 測試在單一接縫，比照既有的 open-design qualification pattern
+- [x] 12 個 `design_*` 工具註冊為 SubDesign pack 的 extension tools
+- [x] brief / direction / artifact / critique / gate / export 各階段在一個真的 turn 裡串得起來
+- [x] artifact 註冊與 revision 走 Host 既有的 artifact 路徑，不新增第二份 store
+- [x] gate 與 critique 的 fail-closed 語意保持（證據不足不得通過）
+- [x] 會產出檔案的工具走 Approval Decision 與 file mutation queue
+- [x] 測試在單一接縫，比照既有的 open-design qualification pattern

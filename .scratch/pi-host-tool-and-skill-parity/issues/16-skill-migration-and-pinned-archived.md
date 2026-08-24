@@ -8,9 +8,9 @@
 
 **Status:** 可交給代理
 
-- [ ] 新版首次啟動時，renderer `skillsStore` 的技能寫入 Host 的技能目錄
-- [ ] 每個技能一筆遷移結果；格式錯誤的技能被回報，不是靜默丟棄
-- [ ] localStorage 副本保留唯讀一個 release 作為回退
-- [ ] pinned 技能的 body 事前展開（比照 Pi 既有的 `/skill:<name>` 展開），不另建第二條 discovery
-- [ ] archived 技能對應 `disable-model-invocation`：不出現在 `<available_skills>`，但仍在 `resources/list` 裡
-- [ ] 測試在單一接縫：餵一份 fixture localStorage payload，斷言產生的檔案與逐筆報告
+- [x] 新版首次啟動時，renderer `skillsStore` 的技能寫入 Host 的技能目錄
+- [x] 每個技能一筆遷移結果；格式錯誤的技能被回報，不是靜默丟棄
+- [x] localStorage 副本保留唯讀一個 release 作為回退
+- [x] pinned 技能的 body 事前展開（比照 Pi 既有的 `/skill:<name>` 展開），不另建第二條 discovery
+- [x] archived 技能對應 `disable-model-invocation`：不出現在 `<available_skills>`，但仍在 `resources/list` 裡
+- [x] 測試在單一接縫：餵一份 fixture localStorage payload，斷言產生的檔案與逐筆報告

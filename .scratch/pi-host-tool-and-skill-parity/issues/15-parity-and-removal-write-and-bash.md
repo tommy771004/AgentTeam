@@ -8,9 +8,9 @@
 
 **Status:** 可交給代理
 
-- [ ] `workspace_write` → `write` 與 `bash` → `bash` 各自逐項證明 parity（schema、成功、錯誤、streaming、取消、專案範圍、session recording）
-- [ ] `write` 參與既有的 per-file mutation queue
-- [ ] `bash` 在 Outbound Guard `required` 下維持 fail-closed（ADR-0047），且不被誤納入 external CLI sandbox 範圍
-- [ ] 危險／不可分割的指令仍然一律 ask（既有 `bashRequireAsk` 語意）
-- [ ] parity 通過後刪除兩個 renderer 工具與其註冊
-- [ ] 測試在單一接縫，含 Outbound Guard `required` 的 fail-closed 斷言
+- [x] `workspace_write` → `write` 與 `bash` → `bash` 各自逐項證明 parity（schema、成功、錯誤、streaming、取消、專案範圍、session recording）
+- [x] `write` 參與既有的 per-file mutation queue
+- [x] `bash` 在 Outbound Guard `required` 下維持 fail-closed（ADR-0047），且不被誤納入 external CLI sandbox 範圍
+- [x] 危險／不可分割的指令仍然一律 ask（既有 `bashRequireAsk` 語意）
+- [x] parity 通過後刪除兩個 renderer 工具與其註冊
+- [x] 測試在單一接縫，含 Outbound Guard `required` 的 fail-closed 斷言

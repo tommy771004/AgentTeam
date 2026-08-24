@@ -8,8 +8,8 @@
 
 **Status:** 可交給代理
 
-- [ ] `memory_set` / `memory_get` / `memory_append` / `memory_search` 註冊為 extension tools，讀寫 Host 的 `PiMemoryExtension`
-- [ ] 一個 turn 寫入的記憶，在後續 turn 的 `memory/recall` 與 `memory_search` 都取得到
-- [ ] 既有的 decay / staleness 語意（自動記憶衰減、手寫與 curated 不衰減）在 Host 端保持一致
-- [ ] temporary chat 不讀不寫記憶
-- [ ] 測試在單一接縫：跨兩個 turn 斷言寫入與召回
+- [x] `memory_set` / `memory_get` / `memory_append` / `memory_search` 註冊為 extension tools，讀寫 Host 的 `PiMemoryExtension`
+- [x] 一個 turn 寫入的記憶，在後續 turn 的 `memory/recall` 與 `memory_search` 都取得到
+- [x] 既有的 decay / staleness 語意（自動記憶衰減、手寫與 curated 不衰減）在 Host 端保持一致
+- [x] temporary chat 不讀不寫記憶
+- [x] 測試在單一接縫：跨兩個 turn 斷言寫入與召回
