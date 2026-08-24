@@ -15,7 +15,7 @@ export type PiTurnContextPolicy = {
   project?: string
   contextWindowTokens?: number
   /** Outbound shell posture for this run (ADR-0047); absent never denies. */
-  outboundShellMode?: 'required' | 'optional' | 'off'
+  outboundShellMode?: 'required' | 'optional' | 'demo' | 'off'
   shellIsolationVerified?: boolean
   viewRoot?: string
 }
@@ -34,7 +34,10 @@ export function parsePiTurnContextPolicy(value: unknown): PiTurnContextPolicy {
     ...(typeof input.contextWindowTokens === 'number' && Number.isFinite(input.contextWindowTokens)
       ? { contextWindowTokens: Math.max(1, Math.floor(input.contextWindowTokens)) }
       : {}),
-    ...(input.outboundShellMode === 'required' || input.outboundShellMode === 'optional' || input.outboundShellMode === 'off'
+    // `demo` must survive the crossing: dropping an unrecognised mode would
+    // silently turn the ADR-0047 shell gate off for that run.
+    ...(input.outboundShellMode === 'required' || input.outboundShellMode === 'optional'
+      || input.outboundShellMode === 'demo' || input.outboundShellMode === 'off'
       ? { outboundShellMode: input.outboundShellMode }
       : {}),
     ...(input.shellIsolationVerified === true ? { shellIsolationVerified: true } : {}),

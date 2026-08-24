@@ -1,4 +1,5 @@
-import { registerPiExtensionPack, executePiPackTool, findPiPackTool, piAllPackToolNames, piPackSessionHandle, type PiPackTool } from '../piToolHost.ts'
+import { registerPiExtensionPack, findPiPackTool, piAllPackToolNames, piPackSessionHandle, type PiPackTool } from '../piToolHost.ts'
+import { jsonOk, structuredFailure } from './packResults.ts'
 
 /**
  * Framework pack（框架保留工具）— progressive disclosure's model-facing verbs.
@@ -126,17 +127,7 @@ function piCodeModeExecutor() {
   return codeModeExecutor
 }
 
-function jsonOk(data: Record<string, unknown>) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], details: { ok: true, ...data } }
-}
 
-function structuredFailure(error: string) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error }) }], details: { ok: false, error } }
-}
-
-// executePiPackTool is imported for re-export symmetry with other packs;
-// the framework tools resolve their own collaborators through bridges.
-void executePiPackTool
 
 export function buildFrameworkPack() {
   return {

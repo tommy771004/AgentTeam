@@ -1,4 +1,5 @@
 import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
+import { jsonOk, structuredFailure } from './packResults.ts'
 
 /**
  * MCP bridge pack（MCP 橋接包）— the model-facing door to configured servers.
@@ -90,13 +91,7 @@ const mcpCall: PiPackTool = {
   },
 }
 
-function jsonOk(data: Record<string, unknown>) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], details: { ok: true, ...data } }
-}
 
-function structuredFailure(error: string) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error }) }], details: { ok: false, error } }
-}
 
 export function buildMcpBridgePack() {
   return {

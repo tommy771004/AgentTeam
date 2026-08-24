@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { registerPiExtensionPack, type PiPackTool, type PiToolContext } from '../piToolHost.ts'
 import { withFileMutationQueue } from '../piVendor.ts'
+import { structuredFailure, structuredOk } from './packResults.ts'
 
 /**
  * Workspace non-equivalents（工作區非等價工具）.
@@ -65,7 +66,7 @@ const workspaceDiff: PiPackTool = {
         }
       }
       const same = left === right
-      return structuredOk(same ? '兩個檔案內容相同' : `${changes.length} 處差異`, { ok: true, same, changes })
+      return structuredOk(same ? '兩個檔案內容相同' : `${changes.length} 處差異`, { same, changes })
     } catch (error) {
       return structuredFailure(error instanceof Error ? error.message : String(error))
     }
@@ -175,13 +176,7 @@ const workspaceDownload: PiPackTool = {
   },
 }
 
-function structuredOk(text: string, data: Record<string, unknown>) {
-  return { content: [{ type: 'text' as const, text }], details: data }
-}
 
-function structuredFailure(error: string) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error }) }], details: { ok: false, error } }
-}
 
 export function buildWorkspaceExtraPack() {
   return {

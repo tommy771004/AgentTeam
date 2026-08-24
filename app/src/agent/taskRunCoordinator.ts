@@ -33,7 +33,7 @@ import {
   buildExternalCliDelegateContract,
   capabilitiesForRunner,
 } from './runners/types.ts'
-import { resolveRunSettingsOverrides, snapshotRunSettings } from './runSettingsSnapshot.ts'
+import { buildRunContextPolicy, resolveRunSettingsOverrides, snapshotRunSettings, withRunShellPolicy } from './runSettingsSnapshot.ts'
 import { normalizeExternalCliRunPolicy } from './externalCliRunSession.ts'
 import { snapshotExternalCliConnectorRequirements } from './externalCliConnectorSnapshot.ts'
 import { orchestrationFromAgent } from './runLifecycle.ts'
@@ -1897,6 +1897,12 @@ async function coordinateTaskRun(
       decideRestrictedViewAdmission,
     } = await import('./outbound/outboundGate.ts')
     const mode = effectiveOutboundGuardFromSettings(settings)
+    // ADR-0047: the builtin shell is gated Host-side, from THIS run's posture.
+    // Pinning it here — not in buildRunContextPolicy — keeps one derivation of
+    // the mode shared with the Restricted View admission below.
+    const admittedPolicy = overrides.contextPolicySnapshot
+      ?? buildRunContextPolicy(settings, { model: overrides.model, temporary, project: overrides.projectRoot })
+    overrides.contextPolicySnapshot = withRunShellPolicy(admittedPolicy, { effectiveMode: mode })
     if (isProtectionActive(mode)) {
       const bridgeAvailable = typeof window.subagents?.outbound?.prepareRunView === 'function'
       const projectRoot = (overrides.projectRoot || '').trim()
@@ -1958,6 +1964,12 @@ async function coordinateTaskRun(
       }
       if (admission.action === 'use-view' && prepare && prepare.ok) {
         overrides.projectRoot = admission.viewRoot
+        // The shell gate refuses absolute paths escaping this view, and under
+        // `required` refuses entirely until isolation is proven main-side.
+        overrides.contextPolicySnapshot = withRunShellPolicy(admittedPolicy, {
+          effectiveMode: mode,
+          viewRoot: admission.viewRoot,
+        })
         // Ticket 18: pin local view root so tools resolve via single truth
         // even when a call site omits explicit projectRoot (main remains owner).
         try {

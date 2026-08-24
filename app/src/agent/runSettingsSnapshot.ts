@@ -1,3 +1,4 @@
+import type { OutboundGuardMode } from './outbound/outboundGate.ts'
 import type { ApprovalMode, LlmSettings, RunContextPolicy, RuntimeOverrides } from './types.ts'
 
 /** Clone Settings once at coordinator admission so queued/in-flight runs cannot drift. */
@@ -21,6 +22,29 @@ export function buildRunContextPolicy(
     ...(input.project?.trim() ? { project: input.project.trim() } : {}),
     contextWindowTokens: settings.modelProfiles?.[model]?.contextWindow
       || settings.defaultContextWindowTokens,
+  }
+}
+
+/**
+ * Pin this run's builtin-shell posture into the frozen context policy (ADR-0047).
+ *
+ * The mode and the Restricted Project View are only known once the Outbound Data
+ * Gate has admitted the run, so they arrive after buildRunContextPolicy rather
+ * than inside it. Two rules hold here: the posture is the mode the gate actually
+ * admitted under (never re-derived, so the shell gate and the view cannot
+ * disagree), and isolation is never claimed from the renderer — only main-side
+ * proof may set `shellIsolationVerified`, so `required` without a verified
+ * sandbox stays a denial on the Host.
+ */
+export function withRunShellPolicy(
+  policy: RunContextPolicy,
+  input: { effectiveMode: OutboundGuardMode; viewRoot?: string },
+): RunContextPolicy {
+  const viewRoot = (input.viewRoot || '').trim()
+  return {
+    ...policy,
+    outboundShellMode: input.effectiveMode,
+    ...(viewRoot ? { viewRoot } : {}),
   }
 }
 

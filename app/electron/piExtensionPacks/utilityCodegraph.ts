@@ -1,5 +1,6 @@
 import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
 import { storePiToolOutput, readPiStoredOutput } from '../piPackBridges.ts'
+import { jsonOk, structuredFailure } from './packResults.ts'
 import {
   codegraphStatus,
   codegraphExplore,
@@ -18,13 +19,7 @@ import {
  * agent can act on.
  */
 
-function jsonOk(data: Record<string, unknown>) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], details: { ok: true, ...data } }
-}
 
-function structuredFailure(error: string) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error }) }], details: { ok: false, error } }
-}
 
 const codegraphExploreTool: PiPackTool = {
   name: 'codegraph_explore',

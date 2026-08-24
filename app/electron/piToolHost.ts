@@ -164,7 +164,7 @@ type PiRunBinding = {
   approvalMode: 'always' | 'auto' | 'full'
   unattended: boolean
   temporaryChat?: boolean
-  shellPolicy?: { effectiveMode: 'required' | 'optional' | 'off'; shellIsolationVerified?: boolean; viewRoot?: string }
+  shellPolicy?: { effectiveMode: 'required' | 'optional' | 'demo' | 'off'; shellIsolationVerified?: boolean; viewRoot?: string }
 }
 const sessionRuns = new Map<string, PiRunBinding>()
 

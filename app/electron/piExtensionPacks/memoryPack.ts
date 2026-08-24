@@ -1,6 +1,7 @@
 import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
 import { piMemoryBridge } from '../piPackBridges.ts'
 import { memoryDecayFactor, memoryStalenessNote } from '../../src/agent/hermes/memory.ts'
+import { structuredFailure, structuredOk } from './packResults.ts'
 
 /**
  * Memory pack（記憶包）— the model-facing half of ONE memory store.
@@ -115,13 +116,7 @@ const memorySearch: PiPackTool = {
   },
 }
 
-function structuredOk(text: string, data: Record<string, unknown>) {
-  return { content: [{ type: 'text' as const, text }], details: { ok: true, ...data } }
-}
 
-function structuredFailure(error: string) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error }) }], details: { ok: false, error } }
-}
 
 export function buildMemoryPack() {
   return {

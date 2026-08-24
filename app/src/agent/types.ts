@@ -1,6 +1,7 @@
 /** Loop patterns from 02_Execution_Rules */
 export type LoopType = 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
 
+import type { OutboundGuardMode } from './outbound/outboundGate.ts'
 import type { ExternalCliDelegateContract } from './runners/types.ts'
 import type { ExternalCliConnectorRequirement, ExternalCliRunPolicy, ExternalCliTerminalClassification } from './externalCliRunSession.ts'
 
@@ -226,12 +227,18 @@ export interface RunContextPolicy {
   project?: string
   contextWindowTokens?: number
   /**
-   * Outbound Guard posture for THIS run's builtin shell (ADR-0047). The
-   * renderer derives it from entitlement + policy and ships it per run;
-   * absent information cannot prove `required`, so the gate only denies on
+   * Outbound Guard posture for THIS run's builtin shell (ADR-0047). Pinned by
+   * taskRunCoordinator from the SAME mode the Outbound Data Gate admitted the
+   * run under, so the Host gate and the Restricted View can never disagree.
+   * Absent information cannot prove `required`, so the gate only denies on
    * explicit evidence.
    */
-  outboundShellMode?: 'required' | 'optional' | 'off'
+  outboundShellMode?: OutboundGuardMode
+  /**
+   * Only main-side proof of a filesystem sandbox may set this. The renderer
+   * never claims it: under `required` an unset flag is a denial, which is the
+   * posture ADR-0047 asks for.
+   */
   shellIsolationVerified?: boolean
   /** The Restricted Project View root this run is bound to, when pinned. */
   viewRoot?: string

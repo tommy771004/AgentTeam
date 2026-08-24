@@ -18,6 +18,7 @@ import {
   normalizeSubDesignCritique,
 } from '../../src/agent/subdesign/critique.ts'
 import { validateSubDesignArtifactManifest } from '../../src/agent/subdesign/artifactManifest.ts'
+import { jsonOk, structuredFailure } from './packResults.ts'
 
 /**
  * SubDesign pack（設計流程包）— brief → direction → build → critique →
@@ -69,13 +70,7 @@ async function loadManifest(ctx: PiToolContext, artifactId: string) {
   return validation
 }
 
-function jsonOk(data: Record<string, unknown>) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], details: { ok: true, ...data } }
-}
 
-function structuredFailure(error: string) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error }) }], details: { ok: false, error } }
-}
 
 /* ── Brief / direction / stage ─────────────────────────────────────────── */
 

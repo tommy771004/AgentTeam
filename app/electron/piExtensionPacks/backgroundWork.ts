@@ -1,5 +1,6 @@
 import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
 import { piDelegationBridge, type PiDelegatedRunView } from '../piPackBridges.ts'
+import { structuredFailure, structuredOk } from './packResults.ts'
 
 /**
  * Background work pack（背景工作包）— delegation and monitoring.
@@ -99,13 +100,7 @@ const monitor: PiPackTool = {
   },
 }
 
-function structuredOk(text: string, data: Record<string, unknown>) {
-  return { content: [{ type: 'text' as const, text }], details: { ok: true, ...data } }
-}
 
-function structuredFailure(error: string) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error }) }], details: { ok: false, error } }
-}
 
 export function buildBackgroundWorkPack() {
   return {
