@@ -15,7 +15,7 @@ output.on('line', (line) => messages.push(JSON.parse(line) as Record<string, any
 const waitFor = async (predicate: (message: Record<string, any>) => boolean) => { for (;;) { const found = messages.find(predicate); if (found) return found; await once(output, 'line') } }
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 try {
-  send(1, 'initialize', { protocolVersion: 1 }); await waitFor((m) => m.id === 1)
+  send(1, 'initialize', { protocolVersion: 2 }); await waitFor((m) => m.id === 1)
   send(2, 'extensions/install', { id: 'demo-package', name: 'Demo Package', version: '1.0.0', kind: 'package', source: 'marketplace:demo-package', trusted: true, tools: ['demo_lookup'], credentialRefs: ['demo-token'] })
   const installed = await waitFor((m) => m.id === 2)
   assert.equal(installed.result?.extension?.id, 'demo-package')

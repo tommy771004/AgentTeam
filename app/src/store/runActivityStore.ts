@@ -22,6 +22,13 @@ export type RunActivityKind =
   | 'log'
   | 'error'
   | 'done'
+  /**
+   * Earlier conversation was summarised away to stay inside the context
+   * window. It is its own kind because the user has to be able to see that it
+   * happened — an agent that silently forgot is indistinguishable from one
+   * that is making things up.
+   */
+  | 'compaction'
 
 /** Compatibility name; the lifecycle vocabulary is shared by every UI surface. */
 export type RunActivityPhase = RunLifecyclePhase
@@ -66,10 +73,46 @@ export type RunTaskItem = {
  * The snapshot is intentionally smaller than the live buffers so a completed
  * run can still render a useful digest without retaining an unbounded stream.
  */
+/**
+ * How a run actually settled, recorded once when it leaves the live path.
+ *
+ * The shell reads this to announce a completion, so there is no second store
+ * tracking which runs have finished.
+ */
+export type RunTerminalOutcome = {
+  status: 'success' | 'failed' | 'halted'
+  objective?: string
+  executionKind?: 'loop' | 'external'
+  iterations?: number
+  maxIterations?: number
+  dodMet?: boolean
+  /** Set when the run was parked; seals the draft and names the reason. */
+  interruptReason?: 'user' | 'timeout'
+}
+
+/**
+ * Closing mark for a reply that was cut off mid-sentence.
+ *
+ * The partial text is real output and stays, but it must never read as a
+ * finished answer — the seal is what tells the user where the agent stopped.
+ */
+export const INTERRUPTED_DRAFT_SEAL = {
+  user: '\n\n⌁ 已在此中止（你按下停止）',
+  timeout: '\n\n⌁ 已在此中止（逾時）',
+} as const
+
+export function sealInterruptedDraft(draft: string, reason: 'user' | 'timeout'): string {
+  const seal = INTERRUPTED_DRAFT_SEAL[reason]
+  if (!draft.trim()) return draft
+  return draft.endsWith(seal) ? draft : `${draft.trimEnd()}${seal}`
+}
+
 export type TerminalRunDigest = {
   runId: string
   finishedAt: number
   statusLine: string
+  /** Absent when a run was terminalized without a coordinator settlement. */
+  outcome?: RunTerminalOutcome
   events: RunActivityEvent[]
   thought: string
   draftText: string
@@ -99,6 +142,8 @@ export type ExternalCliInteractionProjection = {
 /** One run's isolated live presentation or bounded terminal digest. */
 export type RunPresentation = {
   runId: string
+  /** Conversation that owns this run; stamped at begin() so a completion can be routed. */
+  threadId?: string
   active: boolean
   startedAt: number
   updatedAt: number
@@ -109,6 +154,11 @@ export type RunPresentation = {
   fileChanges: FileChangeRecord[]
   tasks: RunTaskItem[]
   phase: RunActivityPhase
+  /**
+   * The user has asked this run to stop and the Host has not settled yet.
+   * Drives immediate feedback so the button answers the press, not the Host.
+   */
+  stopping: boolean
   terminal: TerminalRunDigest | null
   recovery: ExternalCliRecoveryProjection | null
   interaction: ExternalCliInteractionProjection | null
@@ -153,15 +203,17 @@ export interface RunActivityStore {
   /** Run-scoped source of truth; flat fields above are a selected-run projection. */
   presentations: Record<string, RunPresentation>
 
-  begin: (runId?: string) => void
-  end: (runId?: string, statusLine?: string) => void
+  begin: (runId?: string, threadId?: string) => void
+  /** Immediate stop acknowledgement, before the Host reaches a tool boundary. */
+  markStopping: (runId: string, statusLine?: string) => void
+  end: (runId?: string, statusLine?: string, outcome?: RunTerminalOutcome) => void
   clear: (runId?: string) => void
   selectRun: (runId?: string | null) => void
   getPresentation: (runId?: string | null) => RunPresentation | null
   push: (ev: Omit<RunActivityEvent, 'id' | 'at'> & { id?: string }) => void
   appendThought: (delta: string, runId?: string) => void
   appendText: (delta: string, runId?: string) => void
-  setStatus: (line: string, runId?: string) => void
+  setStatus: (line: string, runId?: string, phase?: RunActivityPhase) => void
   setRecovery: (recovery: ExternalCliRecoveryProjection, runId?: string) => void
   setInteraction: (interaction: ExternalCliInteractionProjection | null, runId?: string) => void
   recordFileChange: (f: Omit<FileChangeRecord, 'at'> & { at?: number }, runId?: string) => void
@@ -217,6 +269,7 @@ function emptyPresentation(runId: string, now = Date.now()): RunPresentation {
     fileChanges: [],
     tasks: [],
     phase: 'starting',
+    stopping: false,
     terminal: null,
     recovery: null,
     interaction: null,
@@ -246,6 +299,7 @@ function clonePresentation(p: RunPresentation): RunPresentation {
     terminal: p.terminal
       ? {
           ...p.terminal,
+          outcome: p.terminal.outcome ? { ...p.terminal.outcome } : undefined,
           events: [...p.terminal.events],
           fileChanges: [...p.terminal.fileChanges],
           tasks: [...p.terminal.tasks],
@@ -305,15 +359,22 @@ function terminalizePresentation(
   presentation: RunPresentation,
   statusLine: string | undefined,
   finishedAt: number,
+  outcome?: RunTerminalOutcome,
 ): RunPresentation {
   const phase = terminalPhase(statusLine || presentation.statusLine)
+  // A parked run keeps the partial reply it already streamed, sealed so it
+  // cannot be mistaken for a completed answer.
+  const draftText = outcome?.interruptReason
+    ? sealInterruptedDraft(presentation.draftText, outcome.interruptReason)
+    : presentation.draftText
   const digest: TerminalRunDigest = {
     runId: presentation.runId,
     finishedAt,
     statusLine: (statusLine || presentation.statusLine || '完成').slice(0, 200),
+    outcome: outcome ? { ...outcome, objective: outcome.objective?.slice(0, 200) } : undefined,
     events: presentation.events.slice(-MAX_TERMINAL_EVENTS),
     thought: presentation.thought.slice(-MAX_TERMINAL_THOUGHT),
-    draftText: presentation.draftText.slice(-MAX_TERMINAL_DRAFT),
+    draftText: draftText.slice(-MAX_TERMINAL_DRAFT),
     fileChanges: presentation.fileChanges.slice(-MAX_TERMINAL_FILES),
     tasks: presentation.tasks.slice(-MAX_TERMINAL_TASKS),
     phase,
@@ -321,6 +382,7 @@ function terminalizePresentation(
   return {
     ...presentation,
     active: false,
+    stopping: false,
     updatedAt: finishedAt,
     statusLine: digest.statusLine,
     events: digest.events,
@@ -347,6 +409,9 @@ function phaseFromEvent(
   if (kind === 'thought') return 'thinking'
   if (kind === 'text') return 'responding'
   if (kind === 'tool' || kind === 'file') return 'executing'
+  // Compaction is housekeeping between rounds; it must not move the phase and
+  // make the run look like it changed what it was doing.
+  if (kind === 'compaction') return fallback
   if (kind === 'status') return phaseFromStatus(label, fallback)
   return fallback
 }
@@ -418,7 +483,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
   tasks: [],
   presentations: {},
 
-  begin: (runId) => {
+  begin: (runId, threadId) => {
     const target = runId || nid('run')
     const now = Date.now()
     resetTaskLineBuf(target)
@@ -433,6 +498,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       }
       const presentation: RunPresentation = {
         ...emptyPresentation(target, now),
+        threadId: threadId || existing?.threadId,
         active: true,
         statusLine: '啟動中…',
       }
@@ -448,14 +514,34 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     })
   },
 
-  end: (runId, statusLine) => {
+  markStopping: (runId, statusLine) => {
+    if (!runId) return
+    set((s) => {
+      const current = s.presentations[runId]
+      if (!current || current.terminal || current.stopping) return s
+      const stopped: RunPresentation = {
+        ...current,
+        stopping: true,
+        // Formal park phase (hermes CANCEL_REQUESTED): a requested stop is its
+        // own live state until the Host settles, not a reworded executing.
+        phase: 'cancel_requested',
+        updatedAt: Date.now(),
+        statusLine: statusLine || '正在安全停車…',
+      }
+      const presentations = { ...s.presentations, [runId]: stopped }
+      const selected = s.runId === runId ? stopped : presentations[s.runId || '']
+      return { presentations, ...projectPresentation(selected) }
+    })
+  },
+
+  end: (runId, statusLine, outcome) => {
     const target = runId || get().runId
     if (!target) return
     resetTaskLineBuf(target)
     set((s) => {
       const current = s.presentations[target]
       if (!current || (current.terminal && !current.active)) return s
-      const completed = terminalizePresentation(current, statusLine, Date.now())
+      const completed = terminalizePresentation(current, statusLine, Date.now(), outcome)
       const presentations = trimPresentations({ ...s.presentations, [target]: completed }, s.runId)
       const selected = s.runId === target ? completed : presentations[s.runId || '']
       return { presentations, ...projectPresentation(selected) }
@@ -557,7 +643,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     )
   },
 
-  setStatus: (line, runId) => {
+  setStatus: (line, runId, phase) => {
     const target = runId || get().runId
     if (!target) return
     const statusLine = line.slice(0, 200)
@@ -566,7 +652,9 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         ...presentation,
         statusLine,
         updatedAt: Date.now(),
-        phase: phaseFromStatus(statusLine, presentation.phase),
+        // A structured phase from the Host wins; the status-line regex is
+        // only a fallback for adapters that carry no structured signal.
+        phase: phase ?? phaseFromStatus(statusLine, presentation.phase),
       })),
     )
   },

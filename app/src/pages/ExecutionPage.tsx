@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import { LogViewer } from '../components/LogViewer'
 import { StepTimeline } from '../components/StepTimeline'
-import { InterventionPanel } from '../components/InterventionPanel'
 import { ForkFromCheckpoint } from '../components/ForkFromCheckpoint'
 import { useAgentStore } from '../store/agentStore'
 import { loopTypeZh } from '../i18n/zh'
@@ -15,8 +14,6 @@ export function ExecutionPage() {
     isRunning,
     activeRunIds,
     stopExecution,
-    continueTurn,
-    resolveIntervention,
   } = useAgentStore()
   const runId = activeRunIds[0] || null
 
@@ -316,35 +313,9 @@ export function ExecutionPage() {
                 </div>
               </div>
             </div>
-
-            {agent.status === 'awaiting_user' && (
-              <div className="glass-panel rounded-xl p-4 border border-secondary/30 flex items-center justify-between gap-4">
-                <div>
-                  <p className="font-semibold text-secondary text-sm">等待使用者確認</p>
-                  <p className="text-sm text-on-surface-variant">
-                    回合制模式需明確確認後才會結束。
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => runId && continueTurn(runId)}
-                  className="bg-primary-container text-on-primary-container px-4 py-2 rounded font-semibold text-xs tracking-wider uppercase hover:brightness-110 shrink-0"
-                >
-                  確認 / ACK
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </main>
-
-      <InterventionPanel
-        intervention={agent.intervention}
-        onApprove={(payloadJson) =>
-          runId && resolveIntervention({ action: 'approve', payloadJson }, runId)
-        }
-        onReject={() => runId && resolveIntervention({ action: 'reject' }, runId)}
-      />
     </div>
   )
 }

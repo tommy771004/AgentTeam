@@ -101,6 +101,7 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   followUpMode: 'steer',
   concurrentRunsEnabled: true,
   maxConcurrentRuns: 4,
+  turnTimeoutMs: 0,
   notifyOnComplete: true,
   soundOnComplete: false,
   preventSleepWhileRunning: false,

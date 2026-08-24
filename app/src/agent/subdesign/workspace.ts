@@ -32,6 +32,7 @@ import {
 } from './providers/providerSettings.ts'
 import { buildPinnedCommentContext, parsePinnedCommentPayload } from './pinnedComments.ts'
 import { deriveSubDesignWorkspace, type SubDesignWorkspaceViewModel } from './workspaceProjection.ts'
+import { orchestrationFromAgent } from '../runLifecycle.ts'
 import type { SubDesignWorkspaceHostEventListener } from './workspaceHostEvents.ts'
 
 /**
@@ -133,7 +134,7 @@ export type SubDesignWorkspacePresentation = {
   runningThreadIds: string[]
   linkedThread: Thread | null
   linkedThreadRunId: string | null
-  linkedAgent: Pick<AgentState, 'status' | 'executionKind'> | null
+  linkedAgent: Pick<AgentState, 'status' | 'executionKind' | 'currentIteration' | 'orchestration'> | null
   activityActive: boolean
   /** Derived by the workspace from the brief-scoped run and live inputs. */
   runIsLive: boolean
@@ -397,7 +398,8 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
             .sort((left, right) => (right.createdAt || '').localeCompare(left.createdAt || ''))[0] || null
         : null
       const thread = basePresentation.threads.find((item) => item.id === brief.threadId)
-      const runStatus = brief.id === activeBrief?.id
+      const isActiveBrief = brief.id === activeBrief?.id
+      const runStatus = isActiveBrief
         ? (activeRun.phase === 'starting' ? 'running' : basePresentation.linkedAgent?.status)
         : basePresentation.runningThreadIds.includes(brief.threadId) ? 'running' : thread?.lastStatus
       return deriveSubDesignWorkspace({
@@ -407,6 +409,9 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
         critique,
         critiqueSession: basePresentation.critiqueSession?.briefId === brief.id ? basePresentation.critiqueSession : null,
         runStatus,
+        // Only the linked run carries settlement evidence; a stale thread status
+        // has none, so it stays a plain terminal state rather than guessing.
+        orchestration: isActiveBrief ? orchestrationFromAgent(basePresentation.linkedAgent) : undefined,
       })
     }
     const workspacesByBriefId = Object.fromEntries(

@@ -6,6 +6,7 @@
  * are derived views — orphan tools cannot exist (compile error via satisfies).
  */
 import type { BuiltinCapabilityId } from '../capabilities/capabilityIds.ts'
+import { labelledCard, mutationCard, pathsCard, readCard, searchMatchesCard, terminalCard, touchCard, writeCard, type ToolPresenter } from './toolPresentation.ts'
 
 export type ToolDefinition = {
   description: string
@@ -18,6 +19,14 @@ export type ToolDefinition = {
    * Ownership for gating remains owningCapability only.
    */
   alsoListedIn?: BuiltinCapabilityId[]
+  /**
+   * How this tool presents in a feed, declared here instead of guessed from
+   * its name elsewhere (ADR-0050). Both presenters must be pure functions of
+   * their inputs — they replay on recorded ledgers — and must return
+   * undefined rather than throw on malformed arguments.
+   */
+  presentCall?: ToolPresenter['presentCall']
+  presentResult?: ToolPresenter['presentResult']
 }
 
 export const TOOL_DEFINITIONS = {
@@ -42,6 +51,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'web-research',
+    presentCall: searchMatchesCard('query'),
   },
   http_fetch: {
     description: "Fetch a public HTTP(S) URL as text",
@@ -64,6 +74,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'web-research',
+    presentCall: labelledCard('url', '取得', 'web'),
   },
   workspace_list: {
     description: "List files in the sandboxed workspace",
@@ -79,6 +90,7 @@ export const TOOL_DEFINITIONS = {
       }
     },
     owningCapability: 'workspace',
+    presentCall: pathsCard('path', '列出'),
   },
   workspace_read: {
     description: "Read a file from the sandboxed workspace",
@@ -96,6 +108,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'workspace',
+    presentCall: readCard(),
   },
   workspace_grep: {
     description: "Search text in files under the run-scoped workspace root",
@@ -111,6 +124,8 @@ export const TOOL_DEFINITIONS = {
       "required": ["query"]
     },
     owningCapability: 'workspace',
+    // Declared here, next to the schema (ADR-0050): the tool says it searches.
+    presentCall: searchMatchesCard('query'),
   },
   workspace_glob: {
     description: "Find files by glob under the run-scoped workspace root",
@@ -125,6 +140,7 @@ export const TOOL_DEFINITIONS = {
       "required": ["pattern"]
     },
     owningCapability: 'workspace',
+    presentCall: pathsCard('pattern', '比對'),
   },
   tool_output_read: {
     description: "Read a bounded region of a spilled tool output for this run",
@@ -139,6 +155,7 @@ export const TOOL_DEFINITIONS = {
       "required": ["locator"]
     },
     owningCapability: 'workspace',
+    presentCall: readCard('locator', '讀取輸出'),
   },
   workspace_diff: {
     description: "Read the current Git working-tree diff for selected workspace files.",
@@ -156,6 +173,7 @@ export const TOOL_DEFINITIONS = {
       }
     },
     owningCapability: 'workspace',
+    presentCall: labelledCard('paths', '檢視差異', 'read'),
   },
   workspace_write: {
     description: "Write a file into the sandboxed workspace",
@@ -178,6 +196,8 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'workspace',
+    // Declared here, next to the schema (ADR-0050): the tool says it writes.
+    presentCall: writeCard,
   },
   workspace_download: {
     description: "Download an HTTP(S) URL to the sandboxed workspace",
@@ -200,6 +220,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'workspace',
+    presentCall: mutationCard('path', '下載到'),
   },
   workspace_mkdir: {
     description: "Create a directory in the sandboxed workspace",
@@ -217,6 +238,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'workspace',
+    presentCall: mutationCard('path', '建立目錄'),
   },
   workspace_move: {
     description: "Move or rename a workspace file or directory",
@@ -237,6 +259,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'workspace',
+    presentCall: mutationCard('to', '移動到'),
   },
   workspace_delete: {
     description: "Delete a workspace file or directory",
@@ -257,6 +280,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'workspace',
+    presentCall: touchCard('刪除', 'path'),
   },
   table_parse: {
     description: "Parse CSV or TSV text into structured rows",
@@ -287,6 +311,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'workspace',
+    presentCall: labelledCard('delimiter', '解析表格'),
   },
   bash: {
     description: "Run a shell command in Electron (bash / cmd)",
@@ -308,6 +333,8 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'shell',
+    // Declared here, next to the schema (ADR-0050): the tool says it's a shell.
+    presentCall: terminalCard,
   },
   codegraph_explore: {
     description: "Query local CodeGraph index for symbols/call paths (surgical code context). Requires codegraph CLI + project init.",
@@ -329,6 +356,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'codegraph',
+    presentCall: searchMatchesCard('query'),
   },
   codegraph_status: {
     description: "Check whether CodeGraph CLI is installed and project is indexed",
@@ -343,6 +371,7 @@ export const TOOL_DEFINITIONS = {
       }
     },
     owningCapability: 'codegraph',
+    presentCall: labelledCard('projectRoot', '程式圖狀態', 'search'),
   },
   codegraph_impact: {
     description: "Blast radius: what is affected if symbol changes (CodeGraph impact)",
@@ -368,6 +397,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'codegraph',
+    presentCall: labelledCard('symbol', '影響範圍', 'search'),
   },
   codegraph_callers: {
     description: "Find callers of a symbol via CodeGraph",
@@ -388,6 +418,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'codegraph',
+    presentCall: labelledCard('symbol', '呼叫者', 'search'),
   },
   datetime_now: {
     description: "Get current local datetime",
@@ -402,6 +433,7 @@ export const TOOL_DEFINITIONS = {
       }
     },
     owningCapability: 'core-utils',
+    presentCall: labelledCard('timezone', '目前時間', 'read'),
   },
   memory_set: {
     description: "Store a key/value in session memory",
@@ -422,6 +454,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'memory',
+    presentCall: labelledCard('key', '記住'),
   },
   memory_get: {
     description: "Read a key from session memory",
@@ -438,6 +471,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'memory',
+    presentCall: labelledCard('key', '取回記憶', 'read'),
   },
   memory_append: {
     description: "Append a durable memory entry (Hermes-style)",
@@ -461,6 +495,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'memory',
+    presentCall: labelledCard('text', '追加記憶'),
   },
   memory_search: {
     description: "Search persistent memory entries",
@@ -481,6 +516,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'memory',
+    presentCall: searchMatchesCard('query'),
   },
   skill_list: {
     description: "List available skills (procedural memory)",
@@ -490,6 +526,7 @@ export const TOOL_DEFINITIONS = {
       "properties": {}
     },
     owningCapability: 'skills',
+    presentCall: labelledCard('name', '列出技能', 'read'),
   },
   skill_load: {
     description: "Load full SKILL.md content by name",
@@ -507,6 +544,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'skills',
+    presentCall: labelledCard('name', '載入技能', 'read'),
   },
   skill_save: {
     description: "Save or update a skill document",
@@ -531,6 +569,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'skills',
+    presentCall: mutationCard('name', '儲存技能'),
   },
   mcp_list_tools: {
     description: "List tools from configured MCP servers",
@@ -545,6 +584,7 @@ export const TOOL_DEFINITIONS = {
       }
     },
     owningCapability: 'mcp-bridge',
+    presentCall: labelledCard('serverId', '列出 MCP 工具', 'read'),
   },
   mcp_call: {
     description: "Call a tool on an MCP server",
@@ -568,6 +608,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'mcp-bridge',
+    presentCall: labelledCard('toolName', '呼叫 MCP'),
   },
   delegate_task: {
     description: "Spawn isolated leaf subagent with separate context (supports background + notify)",
@@ -622,6 +663,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'delegate',
+    presentCall: labelledCard('goal', '委派'),
   },
   delegate_status: {
     description: "List or query background delegate jobs",
@@ -656,6 +698,7 @@ export const TOOL_DEFINITIONS = {
       }
     },
     owningCapability: 'delegate',
+    presentCall: labelledCard('jobId', '委派狀態', 'read'),
   },
   monitor: {
     description: "Stream a long-running command; each output line becomes a Proactive event",
@@ -690,6 +733,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'monitoring',
+    presentCall: labelledCard('command', '監看', 'shell'),
   },
   message_send: {
     description: "Send a message via messaging gateway (Telegram etc.)",
@@ -719,6 +763,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'messaging',
+    presentCall: labelledCard('chatId', '送出訊息'),
   },
   json_extract_lite: {
     description: "json_extract_lite: simple title/items/summary heuristic, not arbitrary schema extraction",
@@ -743,6 +788,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'core-utils',
+    presentCall: labelledCard('text', '擷取 JSON'),
   },
   update_plan: {
     description: "Update the current task plan with ordered items and statuses. Use for multi-step work.",
@@ -785,6 +831,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'planning',
+    presentCall: labelledCard('text', '更新計畫', 'plan'),
   },
   ask_user: {
     description: "Ask the user a structured question with optional choices before continuing.",
@@ -838,6 +885,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'interaction',
+    presentCall: labelledCard('question', '詢問使用者'),
   },
   design_brief_update: {
     description: "Update the linked SubDesign brief metadata, direction cards, or stage.",
@@ -924,6 +972,7 @@ export const TOOL_DEFINITIONS = {
       }
     },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('briefId', '更新 brief'),
   },
   design_direction_select: {
     description: "Record the user-selected SubDesign direction and unlock Build stage.",
@@ -956,30 +1005,35 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('directionId', '選定方向'),
   },
   design_gate_console_error: {
     description: "Load the artifact and collect console errors during render as attested gate evidence.",
     keywords: ["console errors","runtime errors","verification gate","執行期錯誤"],
     parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('artifactId', 'Gate：console error', 'read'),
   },
   design_gate_build_success: {
     description: "Verify the artifact entry builds/loads with complete structure and produce attested gate evidence.",
     keywords: ["build success","structure gate","建構驗證"],
     parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('artifactId', 'Gate：build', 'read'),
   },
   design_gate_responsive_overflow: {
     description: "Render at narrow viewports and detect horizontal overflow, producing attested gate evidence.",
     keywords: ["responsive overflow","horizontal scroll","responsive gate","響應式檢查"],
     parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('artifactId', 'Gate：responsive', 'read'),
   },
   design_gate_token_consistency: {
     description: "Compare colors used in the artifact against the project DTCG palette when present.",
     keywords: ["token consistency","design tokens","palette gate","色彩一致性"],
     parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('artifactId', 'Gate：tokens', 'read'),
   },
   design_artifact_register: {
     description: "Register a validated project-relative SubDesign artifact manifest for preview and revision tracking.",
@@ -1140,6 +1194,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'subdesign-workflow',
+    presentCall: mutationCard('path', '註冊產出'),
   },
   design_artifact_patch: {
     description: "Apply a bounded in-place text patch to an already registered SubDesign artifact file.",
@@ -1191,6 +1246,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'subdesign-workflow',
+    presentCall: mutationCard('path', '修補產出'),
   },
   design_artifact_tweak: {
     description: "Apply one declared structured live-control tweak to an already registered artifact.",
@@ -1218,6 +1274,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('tweakId', '調整產出'),
   },
   design_artifact_capture: {
     description: "Capture a sandboxed screenshot or DOM snapshot for a registered SubDesign artifact.",
@@ -1260,6 +1317,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('kind', '擷取產出'),
     alsoListedIn: ["design-critique"],
   },
   design_artifact_lint: {
@@ -1278,6 +1336,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('artifactId', '檢查產出', 'read'),
   },
   design_gate_contrast: {
     description: "Run the state-aware WCAG contrast verification gate and create attested gate evidence for critique.",
@@ -1295,6 +1354,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('artifactId', 'Gate：contrast', 'read'),
     alsoListedIn: ["design-critique"],
   },
   design_critique_note: {
@@ -1406,6 +1466,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('severity', '評審意見'),
     alsoListedIn: ["design-critique"],
   },
   design_critique: {
@@ -1530,6 +1591,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('kind', '評審'),
     alsoListedIn: ["design-critique"],
   },
   design_artifact_export: {
@@ -1562,6 +1624,7 @@ export const TOOL_DEFINITIONS = {
       ]
     },
     owningCapability: 'subdesign-workflow',
+    presentCall: labelledCard('format', '匯出產出'),
   },
 } as const satisfies Record<string, ToolDefinition>
 

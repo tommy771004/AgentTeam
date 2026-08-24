@@ -396,6 +396,34 @@ html[data-theme='light'] .app-panel {
   animation: macos-sheet-up 0.5s var(--ease-spring) both;
 }
 
+/*
+ * Completion toast entrance. Position only — never opacity — so a skipped or
+ * throttled animation still leaves a fully readable card on screen.
+ *
+ * The offset is deliberately smaller than the stack's 16px gutter: a
+ * backgrounded tab pauses the document timeline and holds the first frame, so
+ * the displaced card must still land inside the viewport rather than hanging
+ * over the edge. Reduced motion drops the entrance entirely.
+ */
+@keyframes run-complete-toast-in {
+  from {
+    transform: translateX(10px);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.run-complete-toast {
+  animation: run-complete-toast-in 0.42s var(--ease-spring) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-complete-toast {
+    animation: none;
+  }
+}
+
 /* Stagger children (use with animate-macos-enter on parent children) */
 .stagger-children > * {
   animation: macos-enter 0.48s var(--ease-spring) both;

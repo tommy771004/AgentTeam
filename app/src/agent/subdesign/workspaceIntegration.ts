@@ -138,7 +138,14 @@ export function createSubDesignWorkspaceDependencies(
         runningThreadIds: [...threadState.runningThreadIds],
         linkedThread,
         linkedThreadRunId,
-        linkedAgent: linkedAgent ? { status: linkedAgent.status, executionKind: linkedAgent.executionKind } : null,
+        linkedAgent: linkedAgent
+          ? {
+              status: linkedAgent.status,
+              executionKind: linkedAgent.executionKind,
+              currentIteration: linkedAgent.currentIteration,
+              orchestration: linkedAgent.orchestration,
+            }
+          : null,
         activityActive,
         runIsLive: false,
         artifacts,

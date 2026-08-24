@@ -42,7 +42,7 @@ const send = (id: number, method: string, params: Record<string, unknown> = {}) 
 }
 
 try {
-  send(1, 'initialize', { protocolVersion: 1 })
+  send(1, 'initialize', { protocolVersion: 2 })
   await waitFor((message) => message.id === 1)
   send(2, 'settings/get')
   const defaults = await waitFor((message) => message.id === 2)

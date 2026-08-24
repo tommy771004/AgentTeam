@@ -148,6 +148,8 @@ import {
   externalCliRecoveryAction,
 } from './externalCliSupervisor'
 import { JsonExternalCliCheckpointStore } from './externalCliCheckpointStore'
+import { JsonCompactionCheckpointStore } from './compactionCheckpointStore'
+import { JournalMirrorStore } from './journalMirrorStore'
 import { JsonExternalCliTelemetrySink } from './externalCliTelemetrySink'
 import {
   executableLookupCommand,
@@ -231,6 +233,7 @@ import {
 } from './opencodeServerBridge'
 import { safeOpenCodeServerOrigin } from '../src/agent/opencodeServerSafety'
 import { PiHostSupervisor } from './piHostSupervisor'
+import type { PiTurnSettlement } from '../src/agent/piHostRun'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const piHostSupervisor = new PiHostSupervisor(() =>
@@ -2371,7 +2374,7 @@ ipcMain.handle('pi-host:runs:list', async () => ({ queue: await piHostSupervisor
 ipcMain.handle('pi-host:runs:enqueue', async (_evt, input: Record<string, unknown>) => ({ queue: await piHostSupervisor.enqueueRun(input || {}) }))
 ipcMain.handle('pi-host:runs:cancel', async (_evt, runId: string) => ({ queue: await piHostSupervisor.cancelQueuedRun(runId) }))
 ipcMain.handle('pi-host:runs:claim', async (_evt, runId?: string) => piHostSupervisor.claimQueuedRun(runId))
-ipcMain.handle('pi-host:runs:settle', async (_evt, runId: string, settlement: 'success' | 'failed' | 'cancelled' | 'interrupted') => piHostSupervisor.settleQueuedRun(runId, settlement))
+ipcMain.handle('pi-host:runs:settle', async (_evt, runId: string, settlement: PiTurnSettlement) => piHostSupervisor.settleQueuedRun(runId, settlement))
 ipcMain.handle('pi-host:resources:list', async () => ({ resources: await piHostSupervisor.listResources() }))
 ipcMain.handle('pi-host:resources:reload', async (_evt, resources: unknown[]) => ({ resources: await piHostSupervisor.reloadResources(resources || []) }))
 ipcMain.handle('pi-host:memory:list', async () => ({ memories: await piHostSupervisor.listMemories() }))
@@ -2394,8 +2397,30 @@ ipcMain.handle('pi-host:sessions:reset', async (_evt, sessionId: string) => piHo
 ipcMain.handle('pi-host:sessions:archive', async (_evt, sessionId: string) => piHostSupervisor.archiveSession(sessionId))
 ipcMain.handle('pi-host:sessions:compact', async (_evt, sessionId: string) => piHostSupervisor.compactSession(sessionId))
 ipcMain.handle('pi-host:tools:execute', async (_evt, input: { tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash' | 'code' | 'mcp'; params?: Record<string, unknown> }) => piHostSupervisor.executeTool(input.tool, input.params || {}))
-ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: unknown }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { contextPolicy: input.contextPolicy, pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, mode: input.mode, queue: input.queue, pluginExecution: input.pluginExecution }))
+ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: unknown }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { contextPolicy: input.contextPolicy, pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, timeoutMs: input.timeoutMs, mode: input.mode, queue: input.queue, pluginExecution: input.pluginExecution }))
 ipcMain.handle('pi-host:turn:cancel', async (_evt, runId: string) => piHostSupervisor.cancelTurn(runId))
+ipcMain.handle('pi-host:turn:interrupt', async (_evt, input: { runId: string; reason?: 'user' | 'timeout' }) => piHostSupervisor.interruptTurn(input.runId, input.reason))
+
+// ── Durable compaction checkpoints (ADR-0040 storage layer, ADR-0042 resume) ──
+const compactionCheckpoints = new JsonCompactionCheckpointStore(
+  path.join(app.getPath('userData'), 'run-checkpoints'),
+)
+ipcMain.handle('checkpoints:save', async (_evt, input: { runId: string; threadId?: string; summary: string; messages: unknown[] }) =>
+  compactionCheckpoints.save(input || { runId: '', summary: '', messages: [] }))
+ipcMain.handle('checkpoints:load', async (_evt, runId: string) => compactionCheckpoints.load(runId))
+ipcMain.handle('checkpoints:list', async (_evt, runId?: string) => compactionCheckpoints.list(runId))
+ipcMain.handle('checkpoints:remove', async (_evt, runId: string) => compactionCheckpoints.remove(runId))
+ipcMain.handle('checkpoints:claim-resume', async (_evt, runId: string) => compactionCheckpoints.claimResume(runId))
+
+// ── Durable run-journal mirror (localStorage eviction / torn-write recovery) ──
+// The renderer journal stays the schema owner; this only mirrors its serialized
+// state into userData so an evicted localStorage can be restored at startup.
+const runJournalMirror = new JournalMirrorStore(path.join(app.getPath('userData'), 'journal'))
+ipcMain.handle('journal:mirror:write', (_evt, state: unknown) => {
+  if (typeof state !== 'string') return { ok: false, error: 'state must be a string' }
+  return runJournalMirror.save(state)
+})
+ipcMain.handle('journal:mirror:read', () => runJournalMirror.read())
 
 // ── Signed Beta updates + N-1→N migration transaction ─────────
 // The channel is deliberately opt-in through SUBAGENTS_UPDATE_PUBLIC_KEY;

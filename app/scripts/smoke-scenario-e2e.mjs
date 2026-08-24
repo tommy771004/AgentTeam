@@ -1094,8 +1094,8 @@ await test('§7 wiring contract: production sources pass sourceKind into hooks',
   const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
   assert.match(loop, /sourceKind: ctx\.sourceKind/)
   assert.match(loop, /objective: ctx\.objective/)
-  const eng = fs.readFileSync(path.join(appRoot, 'src/agent/engine.ts'), 'utf8')
-  assert.match(eng, /sourceKind: this\.overrides\.sourceKind/)
+  // The engine that used to forward sourceKind is deleted; the coordinator is
+  // now the only producer, asserted just below.
   const runX = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(runX, /sourceKind: opts\.sourceKind/)
   // put into RuntimeOverrides for tool layer

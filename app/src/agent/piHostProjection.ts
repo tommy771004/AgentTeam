@@ -1,4 +1,9 @@
-export type PiProjectedMessage = { role: 'user' | 'assistant'; content: string }
+/**
+ * One message as the Host holds it. `tool` entries are the agent's own action
+ * trace: real history the model reads, but not a chat bubble — the renderer
+ * drops them until the Turn Record gets a row of its own.
+ */
+export type PiProjectedMessage = { role: 'user' | 'assistant' | 'tool'; content: string }
 
 export type PiSessionProjection = {
   id: string
@@ -25,7 +30,9 @@ export function projectPiSession(session: PiSessionProjection): ProjectedThreadV
   return {
     threadId: session.threadId,
     title: session.title,
-    bubbles: session.messages.map((message, index) => ({
+    bubbles: session.messages
+      .filter((message): message is { role: 'user' | 'assistant'; content: string } => message.role !== 'tool')
+      .map((message, index) => ({
       id: `${session.id}:${index}`,
       role: message.role,
       content: message.content,

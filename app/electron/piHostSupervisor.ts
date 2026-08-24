@@ -1,4 +1,5 @@
 import type { PiHostEvent, PiHostMessage, PiHostRequest, PiHostResponse } from './piHostProtocol.ts'
+import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
 
 export type PiHostStatus =
   | { state: 'stopped' }
@@ -97,7 +98,7 @@ export class PiHostSupervisor {
       this.statusValue = { state: 'error', message: error.message }
     })
 
-    const response = await this.request('initialize', { protocolVersion: 1, client: 'subagents-electron' })
+    const response = await this.request('initialize', { protocolVersion: 2, client: 'subagents-electron' })
     if (response.error || !response.result) {
       const message = response.error?.message || 'Pi Core Host did not initialize'
       this.statusValue = { state: 'error', message }
@@ -191,7 +192,7 @@ export class PiHostSupervisor {
     return response.result
   }
 
-  async settleQueuedRun(runId: string, settlement: 'success' | 'failed' | 'cancelled' | 'interrupted'): Promise<NonNullable<PiHostResponse['result']>> {
+  async settleQueuedRun(runId: string, settlement: PiTurnSettlement): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('runs/settle', { runId, settlement })
     if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queue settlement failed')
     return response.result
@@ -305,7 +306,7 @@ export class PiHostSupervisor {
     return response.result.builtinTools
   }
 
-  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: unknown }): Promise<NonNullable<PiHostResponse['result']>> {
+  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: unknown }): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}), ...(profile ? { profile } : {}), ...(orchestration || {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')
     return response.result
@@ -314,6 +315,18 @@ export class PiHostSupervisor {
   async cancelTurn(runId: string): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/cancel', { runId })
     if (response.error || response.result?.settlement !== 'cancelled') throw new Error(response.error?.message || 'Pi turn cancellation failed')
+    return response.result
+  }
+
+  /**
+   * Ask a turn to park at its next tool boundary.
+   *
+   * Unlike `cancelTurn` this never severs a tool that is already running, so a
+   * write or a shell command completes and reports its own evidence.
+   */
+  async interruptTurn(runId: string, reason: 'user' | 'timeout' = 'user'): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('turn/interrupt', { runId, reason })
+    if (response.error || response.result?.settlement !== 'interrupted') throw new Error(response.error?.message || 'Pi turn interrupt failed')
     return response.result
   }
 

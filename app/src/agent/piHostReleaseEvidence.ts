@@ -15,7 +15,7 @@ export function isCompletePiHostReleaseEvidence(value: unknown): value is PiHost
     && evidence.utilityProcess === true
     && evidence.sessions === true
     && evidence.extensions === true
-    && evidence.protocolVersion === 1
+    && evidence.protocolVersion === 2
     && Array.isArray(evidence.capabilities)
     && evidence.capabilities.includes('sessions')
     && evidence.capabilities.includes('resources')

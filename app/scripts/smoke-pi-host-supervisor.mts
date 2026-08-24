@@ -8,7 +8,7 @@ class FakeChild {
   }
   postMessage(message: { id: number; method: string }) {
     const result = message.method === 'initialize'
-      ? { protocolVersion: 1, capabilities: ['turns'], status: 'ready' }
+      ? { protocolVersion: 2, capabilities: ['turns'], status: 'ready' }
       : message.method === 'tools/read'
         ? { tool: 'read', content: [{ type: 'text', text: 'hello' }] }
       : { runId: 'supervised-run', settlement: 'cancelled' }

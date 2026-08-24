@@ -535,7 +535,7 @@ await test('Pi Host blocks stale scoped grants before model execution', async ()
     const stale = grantCapabilities(created, ['fs:write'], { runId: 'another-run', threadId: 'thread_host_deny' })
     const messages: unknown[] = []
     const host = createPiHostServer((message) => messages.push(message))
-    await host.handle({ id: 1, method: 'initialize', params: { protocolVersion: 1 } })
+    await host.handle({ id: 1, method: 'initialize', params: { protocolVersion: 2 } })
     await host.handle({ id: 2, method: 'sessions/create', params: { title: 'deny', threadId: 'thread_host_deny' } })
     const sessionResponse = messages.find((item): item is Record<string, any> => Boolean(item && typeof item === 'object' && 'id' in item && (item as { id?: unknown }).id === 2))
     assert.ok(sessionResponse && 'result' in sessionResponse && sessionResponse.result?.sessionId)

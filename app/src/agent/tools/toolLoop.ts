@@ -525,12 +525,41 @@ export async function runFunctionCallingLoop(
     },
     saveCheckpoint: async (id, payload) => {
       const { saveCompactionCheckpoint } = await import('../compactionCheckpoint.ts')
-      saveCompactionCheckpoint(id, {
+      // Durable now: a false return means no checkpoint exists for this run,
+      // which the resume path must treat as "cannot prove", never as success.
+      await saveCompactionCheckpoint(id, {
         summary: payload.summary,
         messages: payload.messages as Parameters<
           typeof saveCompactionCheckpoint
         >[1]['messages'],
       })
+    },
+    onCompacted: async (event) => {
+      // Two records, one event: a durable journal line for audit, and a
+      // visible marker so the user knows the agent did not simply forget.
+      try {
+        const { recordRunCompaction } = await import('../runJournal.ts')
+        recordRunCompaction(event.runId || '', {
+          replacedMessages: event.replacedMessages,
+          remainingMessages: event.remainingMessages,
+          summaryChars: event.summary.length,
+          estimatedTokens: event.estimatedTokens,
+          contextWindow: event.contextWindow,
+        })
+      } catch {
+        /* journal is best effort; never break the round */
+      }
+      try {
+        const { useRunActivityStore } = await import('../../store/runActivityStore.ts')
+        useRunActivityStore.getState().push({
+          kind: 'compaction',
+          runId: event.runId,
+          title: `已收納前面 ${event.replacedMessages} 則對話`,
+          detail: event.summary.slice(0, 2_000) || '（沒有可顯示的摘要）',
+        })
+      } catch {
+        /* renderer activity is optional for headless paths */
+      }
     },
     memoryFlush: async (o) => {
       const { learningLoop } = await import('../hermes/learning.ts')

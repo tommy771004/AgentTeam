@@ -19,6 +19,13 @@ export type RunLifecyclePhase =
   | 'completed'
   | 'failed'
   | 'cancelled'
+  /**
+   * A stop has been acknowledged and the runner is parking (hermes
+   * `CANCEL_REQUESTED`). A request to cancel is not yet a cancellation: the
+   * phase is formal vocabulary so every surface names the same state instead
+   * of each inventing its own "stopping" flag.
+   */
+  | 'cancel_requested'
 
 export type RunLifecycleStatus =
   | 'idle'
@@ -31,12 +38,28 @@ export type RunLifecycleStatus =
   | 'halted'
   | string
 
+/** Why a terminal run stopped short of its own settlement. */
+export type RunInterruptReason = 'user' | 'timeout'
+
 export type RunLifecycleTone =
   | 'muted'
   | 'active'
   | 'attention'
   | 'success'
   | 'danger'
+
+/**
+ * Optional orchestration evidence carried by a Pi Host settlement.
+ *
+ * Only the builtin loop claims a Definition of Done; an external CLI run never
+ * does, so `executionKind: 'external'` can never reach the exhausted wording.
+ */
+export type RunOrchestrationSnapshot = {
+  iterations?: number
+  maxIterations?: number
+  dodMet?: boolean
+  executionKind?: 'loop' | 'external'
+}
 
 export type RunLifecycleInput = {
   /** Activity phase is the most precise signal while the run is live. */
@@ -51,6 +74,20 @@ export type RunLifecycleInput = {
   /** Optional adapter hint for a question surface. */
   questionPending?: boolean
   objective?: string
+  /** Iteration/DoD evidence; drives the honest exhausted terminal wording. */
+  orchestration?: RunOrchestrationSnapshot
+  /**
+   * Set when the run was parked rather than allowed to settle. A stop the user
+   * pressed and a spent time budget are different events and must not share
+   * one word with each other or with a failure.
+   */
+  interruptReason?: RunInterruptReason
+  /**
+   * The user pressed stop and the runner has not settled yet. The press must
+   * be answered on screen immediately, so the projection stops the spinner and
+   * withdraws the stop affordance without waiting for the Host.
+   */
+  stopping?: boolean
 }
 
 export type RunLifecycleView = {
@@ -63,6 +100,12 @@ export type RunLifecycleView = {
   terminal: boolean
   needsAttention: boolean
   canStop: boolean
+  /** Ran out of iteration budget with the DoD still unmet — not a plain success. */
+  iterationExhausted: boolean
+  /** Present when the run was parked; distinguishes a user stop from a timeout. */
+  interruptReason?: RunInterruptReason
+  /** A stop has been acknowledged and the runner is parking. */
+  stopping: boolean
 }
 
 const LIVE_PHASES = new Set<RunLifecyclePhase>([
@@ -74,6 +117,7 @@ const LIVE_PHASES = new Set<RunLifecyclePhase>([
   'manual_intervention',
   'responding',
   'finalizing',
+  'cancel_requested',
 ])
 
 const TERMINAL_PHASES = new Set<RunLifecyclePhase>([
@@ -134,7 +178,57 @@ function phaseFromAgentStatus(status: RunLifecycleStatus | undefined): RunLifecy
   }
 }
 
-function phaseLabel(phase: RunLifecyclePhase | 'idle', statusLine: string, objective: string) {
+/**
+ * The one place that decides a `success` run was actually truncated.
+ *
+ * Every surface (process feed, run summary card, SubDesign header, startup
+ * redelivery copy) asks this instead of re-reading iteration counters, so the
+ * user cannot see "已完成" on one screen and a truncation notice on another.
+ */
+export function isIterationExhausted(orchestration?: RunOrchestrationSnapshot): boolean {
+  if (!orchestration) return false
+  // External CLI never claims a DoD, so it can never fail one (ADR-0045).
+  if (orchestration.executionKind === 'external') return false
+  if (orchestration.dodMet !== false) return false
+  const { iterations, maxIterations } = orchestration
+  if (!Number.isFinite(iterations) || !Number.isFinite(maxIterations)) return false
+  if ((maxIterations as number) < 1 || (iterations as number) < 1) return false
+  return (iterations as number) >= (maxIterations as number)
+}
+
+/**
+ * Lift the iteration evidence off an agent snapshot in one place.
+ *
+ * Structural on purpose: `AgentState` must not have to import this
+ * presentation module, and the settlement fields are the same three
+ * everywhere they travel (Pi Host turn, archive record, run summary).
+ */
+export function orchestrationFromAgent(agent: {
+  executionKind?: 'loop' | 'external'
+  currentIteration?: number
+  loopConfig?: { maxIterations?: number }
+  orchestration?: { iterations?: number; maxIterations?: number; dodMet?: boolean }
+} | null | undefined): RunOrchestrationSnapshot | undefined {
+  if (!agent) return undefined
+  const iterations = agent.orchestration?.iterations ?? agent.currentIteration
+  const maxIterations = agent.orchestration?.maxIterations ?? agent.loopConfig?.maxIterations
+  const dodMet = agent.orchestration?.dodMet
+  if (iterations === undefined && maxIterations === undefined && dodMet === undefined) return undefined
+  return { iterations, maxIterations, dodMet, executionKind: agent.executionKind }
+}
+
+/** Honest terminal wording for a run that spent its whole iteration budget. */
+export function iterationExhaustedLabel(iterations?: number): string {
+  const rounds = Number.isFinite(iterations) && (iterations as number) > 0 ? (iterations as number) : 0
+  return rounds ? `已完成（未達 DoD · 用盡 ${rounds} 輪）` : '已完成（未達 DoD）'
+}
+
+function phaseLabel(
+  phase: RunLifecyclePhase | 'idle',
+  statusLine: string,
+  objective: string,
+  interruptReason?: RunInterruptReason,
+) {
   if (phase === 'idle') return objective ? '準備執行' : '已待命'
   if (phase === 'starting') return statusLine || (objective ? '正在準備任務' : '正在啟動')
   if (phase === 'planning') return statusLine || '正在整理任務'
@@ -142,10 +236,13 @@ function phaseLabel(phase: RunLifecyclePhase | 'idle', statusLine: string, objec
   if (phase === 'executing') return statusLine || '正在執行任務'
   if (phase === 'awaiting_user') return '等待你的回覆'
   if (phase === 'manual_intervention') return '等待核准'
-  if (phase === 'responding') return '正在撰寫回覆'
+  if (phase === 'responding') return statusLine || '正在撰寫回覆'
   if (phase === 'finalizing') return '正在整理執行摘要…'
+  if (phase === 'cancel_requested') return '正在安全停車…'
   if (phase === 'completed') return statusLine || '已完成'
   if (phase === 'failed') return statusLine || '執行失敗'
+  if (interruptReason === 'timeout') return '已逾時中止'
+  if (interruptReason === 'user') return '已中止'
   return statusLine || '已停止'
 }
 
@@ -187,46 +284,79 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
   const terminalPhase = phase !== 'idle' && TERMINAL_PHASES.has(phase)
   const terminal = Boolean(input.terminal) || (terminalPhase && !live)
   const needsAttention = phase === 'awaiting_user' || phase === 'manual_intervention'
+  // A truncated run still settles as `completed`; only its wording, tone and
+  // icon change, so HITL and activity-phase precedence above stay untouched.
+  const iterationExhausted = phase === 'completed' && isIterationExhausted(input.orchestration)
+  // Only a parked run carries a reason; a plain stop keeps the neutral wording.
+  const interruptReason = phase === 'cancelled' ? input.interruptReason : undefined
+
+  // A park is named either by the explicit flag or by the phase itself — a
+  // surface that only sees `cancel_requested` must get the same view.
+  const stopping =
+    (Boolean(input.stopping) || phase === 'cancel_requested')
+    && !input.terminal
+    && phase !== 'idle'
+    && !TERMINAL_PHASES.has(phase)
+  // Formalize the park: once acknowledged, the phase itself becomes
+  // `cancel_requested`, so every surface derives the same state from one field.
+  if (stopping && LIVE_PHASES.has(phase as RunLifecyclePhase)) {
+    phase = 'cancel_requested'
+  }
 
   const tone: RunLifecycleTone =
     phase === 'completed'
-      ? 'success'
+      ? iterationExhausted
+        ? 'attention'
+        : 'success'
       : phase === 'failed'
         ? 'danger'
         : phase === 'cancelled'
-          ? 'muted'
+        // A stop the user pressed needs no alarm; a spent time budget does.
+          ? interruptReason === 'timeout' ? 'attention' : 'muted'
           : needsAttention
             ? 'attention'
             : live
               ? 'active'
               : 'muted'
-
   const icon =
     phase === 'completed'
-      ? 'check_circle'
+      ? iterationExhausted
+        ? 'timer_off'
+        : 'check_circle'
       : phase === 'failed'
         ? 'error'
         : phase === 'cancelled'
-          ? 'stop_circle'
+          ? interruptReason === 'timeout' ? 'hourglass_disabled' : 'stop_circle'
           : phase === 'manual_intervention'
             ? 'shield'
             : phase === 'awaiting_user'
               ? 'question_mark'
-              : live
-                ? 'progress_activity'
-                : 'play_circle'
+              // A stop already registered must not keep spinning as if nothing
+              // happened; `progress_activity` is what the surfaces animate.
+              : stopping
+                ? 'pause_circle'
+                : live
+                  ? 'progress_activity'
+                  : 'play_circle'
 
   return {
     phase,
-    label: phaseLabel(phase, input.statusLine?.trim() || '', input.objective?.trim() || ''),
+    label: iterationExhausted
+      ? iterationExhaustedLabel(input.orchestration?.iterations)
+      : stopping
+        ? '正在安全停車…'
+        : phaseLabel(phase, input.statusLine?.trim() || '', input.objective?.trim() || '', interruptReason),
     tone,
     icon,
     live,
     terminal,
     needsAttention,
+    iterationExhausted,
+    interruptReason,
+    stopping,
     // Once the runner has returned, finalization is an atomic hand-off; the
     // stop affordance must not suggest that archive/queue settlement is abortable.
-    canStop: live && phase !== 'finalizing',
+    canStop: live && phase !== 'finalizing' && phase !== 'cancel_requested' && !stopping,
   }
 }
 

@@ -52,7 +52,7 @@ const waitFor = async (id: number) => {
   }
 }
 try {
-  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 1 } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 2 } })}\n`)
   await waitFor(1)
   host.stdin.write(`${JSON.stringify({ id: 20, method: 'memory/add', params: { memory: { id: 'session-rule', project: process.cwd(), text: 'Keep model changes scoped to the active session', tags: ['session', 'model'], createdAt: '2026-08-20T00:00:00.000Z' } } })}\n`)
   await waitFor(20)
@@ -61,7 +61,7 @@ try {
   const sessionId = String(created.result.sessionId)
   host.stdin.write(`${JSON.stringify({ id: 3, method: 'turn/submit', params: { sessionId, runId: 'orchestration-run', cwd: process.cwd(), prompt: 'complete the goal about session model changes', contextPolicy: { memoryEnabled: true, memoryWriteEnabled: true, temporary: false, project: process.cwd(), contextWindowTokens: 4096 }, pattern: 'Goal-based', maxIterations: 2, definitionOfDone: 'two successful Pi turns', profile: { provider: 'loopback', model: 'orchestration-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false } } })}\n`)
   const settled = await waitFor(3)
-  assert.equal(settled.result.settlement, 'success')
+  assert.equal(settled.result.settlement, 'answered')
   assert.deepEqual(settled.result.orchestration, { pattern: 'Goal-based', iterations: 2, maxIterations: 2, definitionOfDone: 'two successful Pi turns', dodMet: true })
   assert.equal(requests, 2)
   assert.match(requestBodies[0] || '', /Keep model changes scoped to the active session/)
@@ -76,7 +76,7 @@ try {
     [8, 'switch to a smaller-context model', 4096],
   ] as const) {
     host.stdin.write(`${JSON.stringify({ id, method: 'turn/submit', params: { sessionId, runId: `context-run-${id}`, cwd: process.cwd(), prompt: text, contextPolicy: { memoryEnabled: false, memoryWriteEnabled: true, temporary: false, project: process.cwd(), contextWindowTokens }, profile: { provider: 'loopback', model: id === 8 ? 'small-model' : 'orchestration-model', thinkingLevel: 'off', compaction: 'auto', approvalMode: 'full', unattended: false } } })}\n`)
-    assert.equal((await waitFor(id)).result.settlement, 'success')
+    assert.equal((await waitFor(id)).result.settlement, 'answered')
   }
   assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'compacted'), true)
   assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'model-switched' && item.payload?.model === 'small-model' && item.payload?.contextWindowTokens === 10), true)
@@ -93,7 +93,7 @@ try {
   assert.deepEqual(forked.messages, listedSession.messages)
   const requestsBeforeStatelessTurn = requestBodies.length
   host.stdin.write(`${JSON.stringify({ id: 15, method: 'turn/submit', params: { sessionId, runId: 'stateless-context-run', cwd: process.cwd(), prompt: 'stateless current request', contextPolicy: { memoryEnabled: false, memoryWriteEnabled: false, referenceChatHistory: false, temporary: false, project: process.cwd(), contextWindowTokens: 4096 }, profile: { provider: 'loopback', model: 'small-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'full', unattended: false } } })}\n`)
-  assert.equal((await waitFor(15)).result.settlement, 'success')
+  assert.equal((await waitFor(15)).result.settlement, 'answered')
   const statelessBody = requestBodies[requestsBeforeStatelessTurn] || ''
   assert.match(statelessBody, /stateless current request/)
   assert.doesNotMatch(statelessBody, /session continuation one|complete the goal about session model changes/)
@@ -104,7 +104,7 @@ try {
   assert.equal(reset.piSessionFile, undefined)
   const requestsBeforeResetTurn = requestBodies.length
   host.stdin.write(`${JSON.stringify({ id: 17, method: 'turn/submit', params: { sessionId, runId: 'reset-memory-run', cwd: process.cwd(), prompt: '請記住我的偏好是繁體中文', contextPolicy: { memoryEnabled: false, memoryWriteEnabled: true, temporary: false, project: process.cwd(), contextWindowTokens: 4096 }, profile: { provider: 'loopback', model: 'small-model', thinkingLevel: 'off', compaction: 'auto', approvalMode: 'full', unattended: false } } })}\n`)
-  assert.equal((await waitFor(17)).result.settlement, 'success')
+  assert.equal((await waitFor(17)).result.settlement, 'answered')
   const resetBody = requestBodies[requestsBeforeResetTurn] || ''
   assert.match(resetBody, /請記住我的偏好是繁體中文/)
   assert.doesNotMatch(resetBody, /session continuation one|complete the goal about session model changes/)

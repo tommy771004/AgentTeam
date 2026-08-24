@@ -1,7 +1,13 @@
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
+import { clampPiIterations } from '../src/agent/loopBounds.ts'
 
-export const PI_HOST_PROTOCOL_VERSION = 1 as const
+/**
+ * Version 2 retired the ambiguous `success` turn settlement for the closed
+ * union (`answered` / `empty` / …) and added the Turn Record to a session, so a
+ * version-1 peer would both misread a settlement and miss the record entirely.
+ */
+export const PI_HOST_PROTOCOL_VERSION = 2 as const
 export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'events', 'automation', 'resources', 'memory', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
@@ -18,7 +24,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -35,8 +41,19 @@ export type PiHostResponse = {
     profile?: PiSettings
     sessionId?: string
     runId?: string
-    settlement?: 'success' | 'failed' | 'cancelled' | 'interrupted'
+    /**
+     * Three vocabularies still share this one field: a turn settlement, a tool
+     * execution settlement (`success`), and an approval settlement (`denied`).
+     * They are kept apart by the method that produced the response; the turn
+     * side is re-validated with `isPiTurnSettlement` before any consumer trusts
+     * it as a settled turn.
+     */
+    settlement?: PiTurnSettlement | 'success' | 'denied'
+    /** Why an `interrupted` settlement stopped short; absent for other settlements. */
+    interruptReason?: PiTurnInterruptReason
     items?: unknown[]
+    /** The entries this turn appended to the session's Turn Record. */
+    record?: TurnRecord
     queue?: PiQueuedRun[]
     run?: PiQueuedRun
     resources?: PiResource[]
@@ -103,8 +120,9 @@ export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
 import type { StreamingUpdate } from '../src/agent/subdesign/streamingEnvelope.ts'
-import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, persistPiLegacyCredential, persistPiLegacyModelConfig, piCoreRuntimeStatus, piProviderDefaultBaseUrl, runPiTurn, steerPiTurn, type PiBuiltinToolName } from './piCoreRuntime.ts'
+import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, interruptPiTurn, persistPiLegacyCredential, persistPiLegacyModelConfig, piCoreRuntimeStatus, piProviderDefaultBaseUrl, runPiTurn, steerPiTurn, type PiBuiltinToolName, type PiTurnInterruptReason } from './piCoreRuntime.ts'
 import { cancelPiCodeMode, runPiCodeMode } from './piCodeMode.ts'
+import { armTurnDeadline, clampTurnTimeout, systemTurnDeadlineClock, type TurnDeadlineClock } from './piTurnDeadline.ts'
 import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
@@ -122,7 +140,8 @@ import { runPiOrchestration, type PiLoopPattern } from './piOrchestrationExtensi
 import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
 import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
 import { callPiMcpTool, listPiMcpTools, stopPiMcp } from './piMcpClient.ts'
-import { isPiHostDefinitionOfDoneMet } from '../src/agent/piHostRun.ts'
+import { isCompletedModelCall, isPiHostDefinitionOfDoneMet, isPiTurnSettlement, piTurnFinalAnswer, piTurnResultText, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
+import { appendTurnRecord, derivePiHistory, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft } from '../src/agent/turnRecord.ts'
 import { cancelSubDesignProviderRun, executeSubDesignProviderStage } from './subDesignProviderRuntime.ts'
 import { shouldStopForProviderProjection, type SubDesignPluginExecutionProjection } from '../src/agent/subdesign/pluginExecution.ts'
 
@@ -145,7 +164,7 @@ export type PiToolAuditRecord = {
   at: number
 }
 
-export type SessionRecord = { id: string; title: string; threadId?: string; parentSessionId?: string; role?: string; profile?: Record<string, unknown>; context?: PiContextPacket; depth?: number; messages: Array<{ role: 'user' | 'assistant'; content: string }>; toolAudit?: PiToolAuditRecord[]; archived?: boolean; piSessionFile?: string }
+export type SessionRecord = { id: string; title: string; threadId?: string; parentSessionId?: string; role?: string; profile?: Record<string, unknown>; context?: PiContextPacket; depth?: number; messages: PiRecordedMessage[]; toolAudit?: PiToolAuditRecord[]; archived?: boolean; piSessionFile?: string; record?: TurnRecord }
 
 const readyResult = (): PiHostResponse['result'] => ({
   protocolVersion: PI_HOST_PROTOCOL_VERSION,
@@ -160,7 +179,7 @@ const errorResponse = (
 ): PiHostResponse => ({ id, error: { code, message } })
 
 /** A session is the serialization boundary for Pi turns. */
-const activeSessionRuns = new Map<string, { runId: string; cancelled: boolean }>()
+const activeSessionRuns = new Map<string, { runId: string; cancelled: boolean; interrupt?: PiTurnInterruptReason }>()
 const PI_HOST_TOOL_UPDATE_MAX_BYTES = 16_384
 
 function isWithinProject(cwd: string, target: string): boolean {
@@ -190,6 +209,32 @@ function resolveExistingPath(path: string): string {
   return tail.reduce((current, part) => resolve(current, part), resolved)
 }
 
+/**
+ * The Turn Record being written by the turn currently running in a session.
+ *
+ * Held per session rather than passed down because the entries come from three
+ * places that do not share a call stack: the turn handler, the Pi event
+ * stream, and the tool audit. Ordering matters more than tidiness — an entry
+ * must be recorded when it happens, not collected afterwards.
+ */
+type ActiveTurnRecorder = { turn: number; step: number; entries: TurnRecordAppend[] }
+
+const activeTurnRecorders = new Map<string, ActiveTurnRecorder>()
+
+function recordTurnEntry(
+  sessionId: string,
+  entry: TurnRecordDraft,
+): void {
+  const recorder = activeTurnRecorders.get(sessionId)
+  if (!recorder) return
+  recorder.entries.push({ turn: recorder.turn, step: recorder.step, at: Date.now(), ...entry } as TurnRecordAppend)
+}
+
+/** The next turn number for a session, read from what the record already holds. */
+function nextTurnNumber(record: TurnRecord | undefined): number {
+  return (record?.entries || []).reduce((highest, entry) => Math.max(highest, entry.turn), 0) + 1
+}
+
 function recordToolAudit(state: HostState, sessionId: unknown, event: PiHostEvent): void {
   if (typeof sessionId !== 'string') return
   const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
@@ -207,6 +252,28 @@ function recordToolAudit(state: HostState, sessionId: unknown, event: PiHostEven
     at: Date.now(),
   }
   session.toolAudit = [...(session.toolAudit || []), record].slice(-200)
+  if (record.phase === 'decision' && record.decision) {
+    recordTurnEntry(sessionId, {
+      kind: 'approval',
+      source: 'host',
+      tool: record.tool,
+      callId: record.callId,
+      decision: record.decision,
+      ...(record.reason ? { reason: record.reason } : {}),
+    })
+  }
+  if (record.phase === 'result') {
+    recordTurnEntry(sessionId, {
+      kind: 'tool-result',
+      source: 'host',
+      tool: record.tool,
+      callId: record.callId,
+      settlement: record.settlement === 'success' || record.settlement === 'denied' || record.settlement === 'cancelled'
+        ? record.settlement
+        : 'failed',
+      ...(record.reason ? { detail: record.reason } : {}),
+    })
+  }
 }
 
 function approvalOutcome(params: Record<string, unknown>, requiresApproval: boolean): { decision: 'allow' | 'ask' | 'deny'; reason?: string; settlement?: 'denied' | 'cancelled' } {
@@ -219,6 +286,16 @@ function approvalOutcome(params: Record<string, unknown>, requiresApproval: bool
     return { decision: 'ask', reason: 'Tool requires approval before execution' }
   }
   return { decision: 'allow', reason: 'Pi approval policy' }
+}
+
+/**
+ * Clock used to arm per-turn deadlines. Swapped by the deadline smoke so the
+ * timeout path is driven by a fake clock instead of by real waiting.
+ */
+let turnDeadlineClock: TurnDeadlineClock = systemTurnDeadlineClock
+
+export function setPiTurnDeadlineClock(clock: TurnDeadlineClock = systemTurnDeadlineClock): void {
+  turnDeadlineClock = clock
 }
 
 export function handlePiHostRequest(state: HostState, request: unknown, emit?: (message: PiHostMessage) => void): PiHostMessage[] | Promise<PiHostMessage[]> {
@@ -539,12 +616,12 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
   if (input.method === 'runs/settle') {
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
     const settlement = input.params?.settlement
-    if (!runId || !['success', 'failed', 'cancelled', 'interrupted'].includes(String(settlement))) return [errorResponse(id, 'invalid_request', 'runId and settlement are required')]
+    if (!runId || !isPiTurnSettlement(settlement)) return [errorResponse(id, 'invalid_request', 'runId and settlement are required')]
     const queue = new PiRunQueue(24, state.snapshot.queue)
     const run = queue.settle(runId)
     if (!run) return [errorResponse(id, 'invalid_request', 'Unknown active Pi run')]
     state.snapshot.queue = queue.snapshot(); state.snapshot.cursor += 1
-    return [{ id, result: { run, queue: state.snapshot.queue, settlement: settlement as 'success' | 'failed' | 'cancelled' | 'interrupted' } }]
+    return [{ id, result: { run, queue: state.snapshot.queue, settlement } }]
   }
   if (input.method === 'runs/enqueue') {
     const params = input.params || {}
@@ -658,6 +735,20 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       return [{ id, result: { sessionId, sessions: [session] } }]
     })
   }
+  if (input.method === 'turn/interrupt') {
+    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+    if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
+    const reason: PiTurnInterruptReason = input.params?.reason === 'timeout' ? 'timeout' : 'user'
+    // Safe park: the orchestration loop stops after the current iteration and
+    // the session aborts at its next tool boundary. In-flight tools are never
+    // severed, so anything already started still reports its own evidence.
+    const orchestrationRun = [...activeSessionRuns.values()].find((run) => run.runId === runId)
+    if (orchestrationRun) orchestrationRun.interrupt = reason
+    const parked = interruptPiTurn(runId, reason)
+    return parked || orchestrationRun
+      ? [{ id, result: { runId, settlement: 'interrupted' as const, interruptReason: reason } }]
+      : [errorResponse(id, 'invalid_request', `Unknown Pi run: ${runId}`)]
+  }
   if (input.method === 'turn/cancel') {
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
     if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
@@ -706,7 +797,9 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       : 'Turn-based'
     const maxIterations = typeof input.params?.maxIterations === 'number' ? input.params.maxIterations : 1
     const definitionOfDone = typeof input.params?.definitionOfDone === 'string' ? input.params.definitionOfDone.trim().slice(0, 2_000) : undefined
-    const iterationLimit = Math.max(1, Math.min(8, Math.floor(maxIterations || 1)))
+    // Same shared clamp as the renderer's config builder (loopBounds.ts):
+    // both sides must agree or a requested budget silently diverges.
+    const iterationLimit = clampPiIterations(maxIterations)
     let turnSettings = state.snapshot.settings
     if (input.params?.profile && typeof input.params.profile === 'object') {
       try {
@@ -717,6 +810,11 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       }
     }
     const turnEvents: PiHostEvent[] = []
+    // One turn, one record. Opened here so every later entry — the model's,
+    // the tools', the approvals' — lands in the order it actually happened.
+    const recorder: ActiveTurnRecorder = { turn: nextTurnNumber(session.record), step: 1, entries: [] }
+    activeTurnRecorders.set(sessionId, recorder)
+    recordTurnEntry(sessionId, { kind: 'turn-start', source: 'host' })
     const contextPolicy = parsePiTurnContextPolicy(input.params?.contextPolicy)
     const previousModel = typeof session.profile?.model === 'string' ? session.profile.model : undefined
     const nextProfile: Record<string, unknown> = {
@@ -740,6 +838,22 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     let contextPreflightComplete = false
     let resolvedContextWindow = contextPolicy.contextWindowTokens
     activeSessionRuns.set(sessionId, { runId, cancelled: false })
+    // A stuck turn must not hold the conversation forever. Expiry walks the
+    // same safe-park path as a user's stop, so an in-flight tool still lands.
+    const timeoutMs = clampTurnTimeout(input.params?.timeoutMs)
+    const deadline = timeoutMs
+      ? armTurnDeadline(timeoutMs, () => {
+          const run = activeSessionRuns.get(sessionId)
+          if (run?.runId === runId && !run.interrupt) run.interrupt = 'timeout'
+          interruptPiTurn(runId, 'timeout')
+          const event: PiHostEvent = {
+            event: 'host/orchestration',
+            payload: { runId, sessionId, phase: 'cancelled', pattern, detail: 'interrupted:timeout' },
+          }
+          if (emit) emit(event)
+          else turnEvents.push(event)
+        }, turnDeadlineClock)
+      : undefined
     const publishOrchestration = (phase: 'parse' | 'iterate' | 'dod' | 'replan' | 'settlement' | 'cancelled', iteration?: number, detail?: string) => {
       const event: PiHostEvent = { event: 'host/orchestration', payload: { runId, sessionId, phase, iteration, pattern, detail } }
       if (emit) emit(event)
@@ -777,6 +891,14 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       if (pluginExecution && shouldStopForProviderProjection(pluginExecution)) {
         const settlement = pluginExecution.state === 'cancelled' ? 'cancelled' as const : 'failed' as const
         publishOrchestration(settlement === 'cancelled' ? 'cancelled' : 'settlement', 0, pluginExecution.state)
+        // A turn stopped by its provider stage is still a turn: it closes on
+        // the record like any other, so the account has no silent gap.
+        recordTurnEntry(sessionId, { kind: 'turn-end', source: 'host', settlement })
+        session.record = appendTurnRecord(session.record, recorder.entries)
+        const stoppedRecord: TurnRecord = {
+          version: session.record.version,
+          entries: session.record.entries.slice(-recorder.entries.length),
+        }
         state.snapshot.cursor += 1
         return [...turnEvents, {
           id,
@@ -785,6 +907,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
             runId,
             settlement,
             items: [{ type: 'assistant_message', content: pluginExecution.summary }],
+            record: stoppedRecord,
             pluginExecution,
             orchestration: { pattern, iterations: 0, maxIterations: iterationLimit, definitionOfDone, dodMet: false },
           },
@@ -797,11 +920,47 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       pattern,
       prompt: orchestrationPrompt,
       maxIterations,
+      interrupted: () => activeSessionRuns.get(sessionId)?.interrupt,
       turn: async (iterationPrompt, iteration) => {
-        if (activeSessionRuns.get(sessionId)?.cancelled) return { settlement: 'cancelled' as const, result: '' }
+        const activeRunState = activeSessionRuns.get(sessionId)
+        if (activeRunState?.interrupt) {
+          return { settlement: 'interrupted' as const, interruptReason: activeRunState.interrupt, result: '' }
+        }
+        if (activeRunState?.cancelled) return { settlement: 'cancelled' as const, result: '' }
         publishOrchestration('iterate', iteration)
+        recorder.step = iteration
+        recordTurnEntry(sessionId, { kind: 'step-start', source: 'host' })
+        recordTurnEntry(sessionId, { kind: 'user-text', source: 'user', content: iteration === 1 ? prompt : iterationPrompt })
         const turn = await runPiTurn(sessionId, cwd, iterationPrompt, session.messages, (event) => {
+          // A tool call is the model asking; the audit records what the Host
+          // then decided and did (ADR-0048).
+          if (event.type === 'tool_execution_start') {
+            recordTurnEntry(sessionId, {
+              kind: 'tool-call',
+              source: 'model',
+              tool: typeof event.toolName === 'string' ? event.toolName : 'tool',
+              callId: typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`,
+              // The arguments travel with the call so a replay can re-derive
+              // the tool's declared presentation (ADR-0050) — a diff card
+              // needs the edit pairs, not the tool's name.
+              ...(event.args !== undefined ? { args: event.args } : {}),
+            })
+          }
+          if (event.type === 'tool_execution_end') {
+            // Pi executes in-turn tools inside this process, so its own report
+            // is the Host's account of what ran — not the model's claim.
+            recordTurnEntry(sessionId, {
+              kind: 'tool-result',
+              source: 'host',
+              tool: typeof event.toolName === 'string' ? event.toolName : 'tool',
+              callId: typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`,
+              settlement: event.isError === true ? 'failed' : 'success',
+            })
+          }
           /* Events are collected below so the response remains ordered after them. */
+          // Real progress resets the budget: a turn still emitting work is
+          // working, not stuck, and long tasks are the point of this feature.
+          deadline?.extend()
           const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event, iteration } }
           if (emit) emit(turnEvent)
           else turnEvents.push(turnEvent)
@@ -819,6 +978,9 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           const oldMessages = session.messages.slice(0, -keepMessages)
           const summary = buildPiCompactionSummary(oldMessages)
           if (!summary || !compactPiSession(sessionId, keepMessages, summary)) return
+          // Recorded as the drop it performed, so deriving history later
+          // reproduces the shortened context instead of re-growing it.
+          recordTurnEntry(sessionId, { kind: 'compaction', source: 'host', replaced: oldMessages.length })
           session.messages = session.messages.slice(-keepMessages)
           if (contextPolicy.memoryWriteEnabled && !contextPolicy.temporary) {
             memory.add({
@@ -835,7 +997,9 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           else turnEvents.push(event)
         })
         session.piSessionFile ||= getPiSessionFile(sessionId)
-        if (turn.settlement === 'success') {
+        // A completed model call records its round; only an answered one has
+        // text to join the conversation history.
+        if (isCompletedModelCall(turn.settlement)) {
           if (!profileCommitted) {
             session.profile = nextProfile
             profileCommitted = true
@@ -856,12 +1020,18 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
               else turnEvents.push(event)
             }
           }
-          const assistant = turn.items.find((item) => Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'assistant_message')) as { content?: string } | undefined
-          session.messages = [
-            ...session.messages,
-            { role: 'user', content: iteration === 1 ? prompt : iterationPrompt },
-            { role: 'assistant', content: assistant?.content ?? '' },
-          ]
+          const answer = piTurnFinalAnswer(turn.items)
+          if (turn.settlement === 'answered') {
+            recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: answer })
+          }
+          recordTurnEntry(sessionId, { kind: 'step-end', source: 'host' })
+          // History is derived from the record, never accumulated beside it:
+          // one write path means the model's context and the record cannot
+          // drift apart. Derived AFTER this round's entries, so the next round
+          // sees what this one just did. The prompt is on the record either
+          // way — it was model-visible — while only an answered turn recorded
+          // an answer.
+          session.messages = derivePiHistory(appendTurnRecord(session.record, recorder.entries))
           if (iteration === 1 && contextPolicy.memoryWriteEnabled && !contextPolicy.temporary) {
             const candidate = buildPiTurnMemory(prompt, { runId, sessionId, project: contextPolicy.project })
             if (candidate) {
@@ -875,18 +1045,51 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           const done = isPiHostDefinitionOfDoneMet(
             definitionOfDone,
             turn.settlement,
-            assistant?.content,
+            answer,
           )
           if (definitionOfDone) {
             publishOrchestration('dod', iteration, done ? 'met' : 'unmet')
             if (!done && iteration < iterationLimit) publishOrchestration('replan', iteration, 'DoD unmet; retrying the Pi turn')
           }
-          return { settlement: 'success' as const, result: assistant?.content ?? '', ...(done === undefined ? {} : { done }) }
+          return { settlement: turn.settlement, result: answer, ...(done === undefined ? {} : { done }) }
         }
-        return { settlement: turn.settlement, result: turn.items.map((item) => typeof item?.content === 'string' ? item.content : '').join('\n') }
+        const stoppedText = piTurnResultText(turn.settlement, turn.items)
+        if (turn.settlement === 'interrupted' && stoppedText) {
+          recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: stoppedText })
+        }
+        recordTurnEntry(sessionId, { kind: 'step-end', source: 'host' })
+        return {
+          settlement: turn.settlement,
+          ...(turn.settlement === 'interrupted' && 'interruptReason' in turn
+            ? { interruptReason: (turn as { interruptReason?: PiTurnInterruptReason }).interruptReason }
+            : {}),
+          result: stoppedText,
+        }
       },
       }).then((orchestration) => {
-      publishOrchestration(orchestration.settlement === 'cancelled' ? 'cancelled' : 'settlement', orchestration.iterations, orchestration.settlement)
+      publishOrchestration(
+        orchestration.settlement === 'cancelled' || orchestration.settlement === 'interrupted' ? 'cancelled' : 'settlement',
+        orchestration.iterations,
+        orchestration.settlement === 'interrupted'
+          ? `interrupted:${orchestration.interruptReason || 'user'}`
+          : orchestration.settlement,
+      )
+      recorder.step = orchestration.iterations || recorder.step
+      recordTurnEntry(sessionId, {
+        kind: 'turn-end',
+        source: 'host',
+        settlement: orchestration.settlement,
+        ...(orchestration.settlement === 'interrupted'
+          ? { interruptReason: orchestration.interruptReason || ('user' as PiTurnInterruptReason) }
+          : {}),
+      })
+      session.record = appendTurnRecord(session.record, recorder.entries)
+      // The turn's own slice travels with its result so the renderer projects
+      // the conversation from the Host's account instead of authoring one.
+      const turnRecordSlice: TurnRecord = {
+        version: session.record.version,
+        entries: session.record.entries.slice(-recorder.entries.length),
+      }
       state.snapshot.cursor += 1
       return [...turnEvents, {
         id,
@@ -894,7 +1097,11 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           sessionId,
           runId,
           settlement: orchestration.settlement,
+          ...(orchestration.settlement === 'interrupted'
+            ? { interruptReason: orchestration.interruptReason || ('user' as PiTurnInterruptReason) }
+            : {}),
           items: orchestration.result ? [{ type: 'assistant_message', content: orchestration.result }] : [],
+          record: turnRecordSlice,
           orchestration: {
             pattern: orchestration.pattern,
             iterations: orchestration.iterations,
@@ -907,6 +1114,8 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       }]
       })
     }).finally(() => {
+      deadline?.cancel()
+      if (activeTurnRecorders.get(sessionId) === recorder) activeTurnRecorders.delete(sessionId)
       if (activeSessionRuns.get(sessionId)?.runId === runId) activeSessionRuns.delete(sessionId)
     })
   }

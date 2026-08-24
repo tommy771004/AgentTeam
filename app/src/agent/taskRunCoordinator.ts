@@ -11,6 +11,7 @@
  * stay importable without pulling the full renderer graph.
  */
 
+import { conversationAnswer } from './conversationProjection.ts'
 import type {
   AgentState,
   ChatAttachment,
@@ -35,6 +36,9 @@ import {
 import { resolveRunSettingsOverrides, snapshotRunSettings } from './runSettingsSnapshot.ts'
 import { normalizeExternalCliRunPolicy } from './externalCliRunSession.ts'
 import { snapshotExternalCliConnectorRequirements } from './externalCliConnectorSnapshot.ts'
+import { orchestrationFromAgent } from './runLifecycle.ts'
+import { resolveTurnTimeout } from './turnTimeout.ts'
+import { clampContinueFreshnessMs, isSnapshotFresh } from './autoContinueFreshness.ts'
 
 import { v4 as uuid } from 'uuid'
 import {
@@ -48,6 +52,17 @@ import {
 export type { ExternalRunOpts, ExternalRunResult, RunSourceKind }
 export type TaskRunInput = ExternalRunOpts
 export type TaskRunResult = ExternalRunResult
+
+/**
+ * A renderer must be mounted AND on screen for an in-thread outcome to count
+ * as seen. A backgrounded window still writes the bubble, but the user has not
+ * been told, so the journal keeps that outcome pending until something narrates
+ * it (the live completion notice, or the startup redelivery pass).
+ */
+function rendererPresent(): boolean {
+  if (typeof document === 'undefined') return false
+  return document.visibilityState === 'visible'
+}
 
 /** Prevent re-entrant callers from starting the same lifecycle twice. */
 const coordinatingRunIds = new Set<string>()
@@ -469,10 +484,21 @@ export async function finalizeTaskRun(
 
   // ── Early terminal (hook deny / exception before or during dispatch) ──
   if (input.early) {
-    recordRunTerminal({ runId, threadId: tid, status: 'failed' })
     thr.setThreadStatus(tid, 'failed')
     thr.setThreadRunning(tid, false, runId)
     thr.pushBubble(tid, 'system', input.early.error)
+    // Marked terminal only after the reason is in the thread, so the delivery
+    // fact recorded alongside it is the truth and not an intention.
+    recordRunTerminal({
+      runId,
+      threadId: tid,
+      status: 'failed',
+      delivery: {
+        hasOwningThread: useThreadStore.getState().threads.some((thread) => thread.id === tid),
+        resultWrittenToThread: true,
+        rendererPresent: rendererPresent(),
+      },
+    })
     try {
       const { collectHookRules, evaluateHooks } = await import('./hooks.ts')
       const ev = evaluateHooks(collectHookRules(settings), {
@@ -654,8 +680,15 @@ export async function finalizeTaskRun(
     .slice(-3)
     .map((step) => step.result)
     .join('\n\n')
+  // The answer is projected from the Host's record, not composed here: the
+  // renderer stopped authoring the conversation (ADR-0039). The older chain
+  // stays as the fallback for runners that do not write a record yet.
   const finalAnswer =
-    finalAgent.result || stepsTail || result.result || `狀態：${status}`
+    conversationAnswer(finalAgent.turnRecord)
+    || finalAgent.result
+    || stepsTail
+    || result.result
+    || `狀態：${status}`
   const hasFinalAnswer = !(result.error && result.status === 'failed' && !result.result)
   if (!hasFinalAnswer) {
     thr.pushBubble(tid, 'system', result.error || finalAgent.haltReason || '執行失敗')
@@ -716,11 +749,65 @@ export async function finalizeTaskRun(
     /* archive must not block release/drain */
   }
 
+  // A parked run leaves a resume point. Replay safety is asserted only for an
+  // interrupt, because that is the one stop that happens at a tool boundary
+  // with nothing mid-execution — the state ADR-0042 requires before a resume
+  // may skip already-completed work.
+  if (finalAgent.interruptReason) {
+    try {
+      const { saveCompactionCheckpoint } = await import('./compactionCheckpoint.ts')
+      const effects = (finalAgent.toolCalls || [])
+        .filter((tool) => tool.ok !== false && /write|edit|create|patch|bash|shell|send|post|publish|delete/i.test(tool.tool))
+        .map((tool) => `${tool.tool}${tool.input?.path ? ` · ${String(tool.input.path)}` : ''}`)
+      await saveCompactionCheckpoint(runId, {
+        threadId: tid,
+        objective,
+        summary: buildResumeSummary(finalAgent),
+        messages: [],
+        parkedAtToolBoundary: true,
+        replaySafe: true,
+        effects,
+      })
+    } catch {
+      /* No checkpoint means no resume offer; never block finalization. */
+    }
+  }
+
+  // Sediment what this run learned into the project, before the terminal
+  // marker: the journal entry then either carries write evidence or does not,
+  // and nothing in between can claim the knowledge was kept.
+  try {
+    await persistRunMemoryDigest({
+      runId,
+      threadId: tid,
+      objective,
+      finalAgent,
+      status: String(status),
+      projectRoot: input.projectRoot,
+    })
+  } catch {
+    /* A missing digest is reported by its absence, never by a failed run. */
+  }
+
   // Persist the terminal marker only after the user-visible summary and
   // archive evidence have been attempted. A crash before this point remains
   // conservatively recoverable as interrupted instead of claiming a complete
   // run without its evidence.
-  recordRunTerminal({ runId, threadId: tid, status: String(status) })
+  recordRunTerminal({
+    runId,
+    threadId: tid,
+    status: String(status),
+    delivery: {
+      hasOwningThread: useThreadStore.getState().threads.some((thread) => thread.id === tid),
+      // The assistant answer / failure line above is this run's outcome in-thread.
+      resultWrittenToThread: true,
+      rendererPresent: rendererPresent(),
+    },
+    settlement: {
+      ...orchestrationFromAgent(finalAgent),
+      interruptReason: finalAgent.interruptReason,
+    },
+  })
 
   try {
     const { useRunActivityStore } = await import('../store/runActivityStore.ts')
@@ -728,9 +815,25 @@ export async function finalizeTaskRun(
       String(status) === 'failed'
         ? '失敗'
         : String(status) === 'halted'
-          ? '已停止'
+          ? finalAgent.interruptReason === 'timeout'
+            ? '已逾時中止'
+            : finalAgent.interruptReason === 'user'
+              ? '已中止'
+              : '已停止'
           : '完成'
-    useRunActivityStore.getState().end(runId, terminalLabel)
+    // The settled outcome rides the same registry entry the shell watches, so
+    // the completion notice reads one record instead of reconstructing state.
+    const outcomeSettlement = orchestrationFromAgent(finalAgent)
+    useRunActivityStore.getState().end(runId, terminalLabel, {
+      status:
+        String(status) === 'failed' ? 'failed' : String(status) === 'halted' ? 'halted' : 'success',
+      objective,
+      executionKind: outcomeSettlement?.executionKind || finalAgent.executionKind,
+      iterations: outcomeSettlement?.iterations,
+      maxIterations: outcomeSettlement?.maxIterations,
+      dodMet: outcomeSettlement?.dodMet,
+      interruptReason: finalAgent.interruptReason,
+    })
   } catch {
     /* renderer activity is optional for headless / recovery paths */
   }
@@ -834,6 +937,99 @@ export async function finalizeRecoveredExternalRun(input: {
   }
 }
 
+/** How many past digests a new run on the same thread is reminded of. */
+const PRIOR_CONTEXT_DIGESTS = 3
+
+/**
+ * The prior-context block for a new run on an existing thread.
+ *
+ * Read from the journal's own write evidence, so a thread only carries forward
+ * digests that provably reached disk — never ones a model said it wrote.
+ */
+async function loadThreadPriorContext(threadId: string, projectRoot?: string): Promise<string> {
+  try {
+    const [{ listJournalEntries }, { parseRunMemoryDigest }, { buildPriorContextBlock }] = await Promise.all([
+      import('./runJournal.ts'),
+      import('./runMemoryDigest.ts'),
+      import('./runMemorySink.ts'),
+    ])
+    const sinks = listJournalEntries()
+      .filter((entry) => entry.kind === 'run' && entry.threadId === threadId && entry.memorySink)
+      .slice(-PRIOR_CONTEXT_DIGESTS)
+    if (!sinks.length) return ''
+    const digests = []
+    for (const entry of sinks) {
+      const read = await window.subagents?.tools?.workspaceRead?.(entry.memorySink!.path, projectRoot)
+      const content = typeof read === 'string' ? read : read?.content
+      if (!content) continue
+      const digest = parseRunMemoryDigest(content, {
+        runId: entry.id,
+        threadId,
+        at: entry.memorySink!.at,
+      })
+      if (digest) digests.push(digest)
+    }
+    return digests.length ? buildPriorContextBlock(digests, PRIOR_CONTEXT_DIGESTS) : ''
+  } catch {
+    // Prior context is a courtesy; a missing one must never block a run.
+    return ''
+  }
+}
+
+/**
+ * Write this run's four-section digest into the project's memory directory.
+ *
+ * Everything in the digest comes from recorded execution — plan steps, failed
+ * steps, halt reasons — never from the model narrating its own competence.
+ */
+async function persistRunMemoryDigest(args: {
+  runId: string
+  threadId: string
+  objective: string
+  finalAgent: import('./types.ts').AgentState
+  status: string
+  projectRoot?: string
+}): Promise<void> {
+  const [{ buildRunMemoryDigestFromRun }, { renderRunMemoryDigest, runMemoryRelativePath, isWorthPersisting }] =
+    await Promise.all([import('./runMemoryDigest.ts'), import('./runMemorySink.ts')])
+  const digest = buildRunMemoryDigestFromRun({
+    runId: args.runId,
+    threadId: args.threadId,
+    objective: args.objective,
+    agent: args.finalAgent,
+    status: args.status,
+  })
+  if (!isWorthPersisting(digest)) return
+  const relativePath = runMemoryRelativePath(digest)
+  const written = await window.subagents?.learning?.export?.({
+    relativePath,
+    content: renderRunMemoryDigest(digest),
+    projectRoot: args.projectRoot,
+    overwrite: true,
+  })
+  if (!written?.ok || !written.path) return
+  const { recordRunMemorySink } = await import('./runJournal.ts')
+  recordRunMemorySink(args.runId, { path: written.path, bytes: written.bytes || 0 })
+}
+
+/**
+ * What a resumed run is told about where the previous attempt got to.
+ *
+ * Built from the run's own recorded steps and partial answer — never from a
+ * model claim about its own progress (ADR-0048).
+ */
+function buildResumeSummary(agent: import('./types.ts').AgentState): string {
+  const steps = (agent.steps || [])
+    .filter((step) => step.status === 'COMPLETED')
+    .slice(-12)
+    .map((step) => `- ${step.description || step.action || `步驟 ${step.step}`}`)
+  const partial = (agent.result || '').trim().slice(0, 2_000)
+  return [
+    steps.length ? `已完成的步驟：\n${steps.join('\n')}` : '沒有記錄到已完成的步驟。',
+    partial ? `\n中斷前的部分輸出：\n${partial}` : '',
+  ].join('\n').trim()
+}
+
 async function pushRunProcessSummary(args: {
   thr: ReturnType<typeof import('../store/threadStore.ts').useThreadStore.getState>
   tid: string
@@ -845,7 +1041,6 @@ async function pushRunProcessSummary(args: {
   projectRoot?: string
 }): Promise<void> {
   const { thr, tid, runId, finalAgent, result, status } = args
-  const { useRunActivityStore } = await import('../store/runActivityStore.ts')
   const {
     useSubDesignStore,
   } = await import('../store/subDesignStore.ts')
@@ -853,129 +1048,29 @@ async function pushRunProcessSummary(args: {
   const { useSubDesignCritiqueStore } = await import('../store/subDesignCritiqueStore.ts')
   const { useSubDesignExportStore } = await import('../store/subDesignExportStore.ts')
 
-  const presentation = useRunActivityStore.getState().getPresentation(runId)
-  const activityOperations = (presentation?.events || [])
-    .filter((event) => event.kind !== 'thought' && event.kind !== 'text')
-    .map((event) => ({
-      id: event.id,
-      kind: event.kind,
-      title: event.title || event.kind,
-      detail: event.detail,
-      path: event.path,
-      ok: event.ok,
-    }))
-  const fallbackOperations = (finalAgent.toolCalls || []).map((tool) => ({
-    id: tool.id,
-    kind: /write|edit|create|patch/i.test(tool.tool) ? 'file' : 'tool',
-    title: /bash|shell/i.test(tool.tool) ? '已執行指令' : `已執行 ${tool.tool}`,
-    detail:
-      typeof tool.input?.command === 'string'
-        ? tool.input.command
-        : tool.output?.slice(0, 400),
-    path:
-      String(tool.input?.path ?? tool.input?.file ?? tool.input?.filePath ?? '') ||
-      undefined,
-    ok: tool.ok,
+  // The execution process is derived from the Turn Record and from nothing
+  // else. The four-source fallback ladder (live activity → Host tool audit →
+  // toolCalls → steps+logs) is gone: none of those shapes was canonical, and
+  // the live cache's 120/40 caps meant a long run lost its earliest operations
+  // exactly when it finished. The record has no such cap — its entries are the
+  // durable history — so the summary now shows every operation a run did.
+  const { projectRunOperations, projectProducedFiles } = await import('./runOperationsProjection.ts')
+  const operations = projectRunOperations(finalAgent.turnRecord).map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    detail: row.detail,
+    path: row.path,
+    ok: row.ok,
   }))
-  const piHostAudits: Array<Record<string, unknown>> = []
-  try {
-    const listed = await window.subagents?.piHost?.sessions?.list?.()
-    const session = (listed?.sessions || []).find((candidate) => {
-      if (!candidate || typeof candidate !== 'object') return false
-      return (candidate as { threadId?: unknown }).threadId === tid
-    })
-    const audits = session && typeof session === 'object' ? (session as { toolAudit?: unknown }).toolAudit : undefined
-    if (Array.isArray(audits)) {
-      for (const audit of audits) {
-        if (audit && typeof audit === 'object') piHostAudits.push(audit as Record<string, unknown>)
-      }
-    }
-  } catch {
-    /* Pi Host evidence is optional; the run result remains authoritative. */
-  }
-  const piHostOperations = piHostAudits
-    .filter((audit) => audit.phase === 'start')
-    .map((audit, index) => {
-      const tool = String(audit.tool || 'tool')
-      const filePath = typeof audit.path === 'string' && audit.path ? audit.path : undefined
-      const result = piHostAudits.find((candidate) => candidate.phase === 'result' && candidate.callId === audit.callId)
-      return {
-        id: `pi_${String(audit.callId || index)}`,
-        kind: /write|edit/i.test(tool) ? 'file' : 'tool',
-        title: filePath ? `已處理 ${filePath.split(/[\\/]/).pop()}` : `已執行 ${tool}`,
-        detail: filePath || `Pi Host ${tool}`,
-        path: filePath,
-        ok: result ? result.settlement === 'success' : undefined,
-      }
-    })
-  const fileMap = new Map<
-    string,
-    { path: string; action: string; added?: number; removed?: number }
-  >()
-  for (const file of presentation?.fileChanges || []) {
-    fileMap.set(file.path, file)
-  }
-  for (const tool of finalAgent.toolCalls || []) {
-    if (!/write|edit|create|patch/i.test(tool.tool)) continue
-    const path = String(tool.input?.path ?? tool.input?.file ?? tool.input?.filePath ?? '')
-    if (path && !fileMap.has(path)) {
-      fileMap.set(path, {
-        path,
-        action: /write|create/i.test(tool.tool) ? 'create' : 'edit',
-      })
-    }
-  }
-  for (const audit of piHostAudits) {
-    if (audit.phase !== 'start' || typeof audit.path !== 'string' || !/write|edit/i.test(String(audit.tool || ''))) continue
-    const path = audit.path.trim()
-    if (!path || fileMap.has(path)) continue
-    fileMap.set(path, {
-      path,
-      action: /write/i.test(String(audit.tool || '')) ? 'create' : 'edit',
-    })
-  }
-  const stepOps = (finalAgent.steps || []).map((step, index) => ({
-    id: `step_${step.step}_${index}`,
-    kind: step.status === 'FAILED' ? 'error' : 'status',
-    title: step.description || step.action || `步驟 ${step.step}`,
-    detail:
-      step.status === 'COMPLETED'
-        ? '完成'
-        : step.status === 'FAILED'
-          ? (step.result || '失敗').slice(0, 400)
-          : step.status,
-    ok: step.status !== 'FAILED',
-  }))
-  const logOps = (finalAgent.logs || [])
-    .filter((line) => {
-      const m = line.message || ''
-      return m && !m.startsWith('$ ') && m.length < 240
-    })
-    .slice(-16)
-    .map((line) => ({
-      id: line.id,
-      kind: line.level === 'ERROR' ? 'error' : line.level === 'SUCCESS' ? 'done' : 'status',
-      title: line.message.slice(0, 200),
-      detail: line.message.slice(0, 400),
-      ok: line.level !== 'ERROR',
-    }))
-  const operations =
-    activityOperations.length > 0
-      ? activityOperations
-      : piHostOperations.length > 0
-        ? piHostOperations
-      : fallbackOperations.length > 0
-        ? fallbackOperations
-        : stepOps.length > 0
-          ? [...stepOps, ...logOps].slice(-40)
-          : logOps
+  const producedFiles = projectProducedFiles(finalAgent.turnRecord)
   let diff: string | undefined
-  if (fileMap.size > 0) {
+  if (producedFiles.length > 0) {
     try {
       const { useProjectStore } = await import('../store/projectStore.ts')
       const projectRoot = args.projectRoot || useProjectStore.getState().root || undefined
       const diffResult = await window.subagents?.tools?.workspaceDiff?.(
-        [...fileMap.keys()],
+        producedFiles.map((file) => file.path),
         projectRoot,
       )
       if (diffResult?.ok && diffResult.diff.trim()) {
@@ -998,10 +1093,16 @@ async function pushRunProcessSummary(args: {
   const subDesignExports = subDesignArtifact
     ? useSubDesignExportStore.getState().findByArtifactId(subDesignArtifact.id)
     : []
+  const settlement = orchestrationFromAgent(finalAgent)
   thr.pushRunSummary(tid, {
     status:
       status === 'failed' ? 'failed' : status === 'halted' ? 'halted' : 'success',
     durationMs: finalAgent.metrics?.executionMs,
+    dodMet: settlement?.dodMet,
+    iterations: settlement?.iterations,
+    maxIterations: settlement?.maxIterations,
+    executionKind: settlement?.executionKind,
+    interruptReason: finalAgent.interruptReason,
     subDesign: subDesignBrief
       ? {
           briefId: subDesignBrief.id,
@@ -1057,7 +1158,7 @@ async function pushRunProcessSummary(args: {
               ok: status === 'success',
             },
           ],
-    files: [...fileMap.values()],
+    files: producedFiles.map((file) => ({ path: file.path, action: file.action })),
   })
 
   await persistArtifactIndexForRun({
@@ -1169,7 +1270,7 @@ async function coordinateTaskRun(
     { enqueueExternalRun, listQueuedRuns, queueLength },
     { isContinueGoalPhrase },
     { detectAutomationSuggestion },
-    { resolvePlanBubbleMetadata },
+    { resolvePlanBubbleMetadata, classifyLoopType },
     lifecycleHelpers,
   ] = await Promise.all([
     import('../store/agentStore.ts'),
@@ -1479,6 +1580,21 @@ async function coordinateTaskRun(
       wantContinue = false
       continueBlockedNote =
         '目前 runner 為外部 CLI（或不支援 continueGoal）。「補齊缺口繼續」僅適用內建引擎；已改為一般任務執行。請切換 runner 為 builtin 後再試，或重新描述任務。'
+    } else {
+      // Freshness gate (hermes auto-continue lesson): a stale snapshot would
+      // replay corrective work against a world that already moved on. Past
+      // the window the run degrades to a fresh parse instead of zombie-resuming.
+      const snapshotAgeMs = existingSnap?.at ? Date.now() - Date.parse(existingSnap.at) : NaN
+      const freshWindowMs = clampContinueFreshnessMs(undefined)
+      if (!isSnapshotFresh({ at: existingSnap?.at })) {
+        wantContinue = false
+        const staleMinutes = Number.isFinite(snapshotAgeMs)
+          ? Math.max(1, Math.round(snapshotAgeMs / 60_000))
+          : 0
+        continueBlockedNote = Number.isFinite(snapshotAgeMs)
+          ? `先前的 Goal 快照已過期（超過 ${Math.round(freshWindowMs / 60_000)} 分鐘窗口，距今約 ${staleMinutes} 分鐘）。為避免在過期狀態上殭屍續跑，已改為重新解析任務；如需保留原 DoD，請重新貼上目標與缺口。`
+          : '先前的 Goal 快照缺少時間戳，無法證明新鮮度；已改為重新解析任務。如需保留原 DoD，請重新貼上目標與缺口。'
+      }
     }
   }
   const continueSnap = wantContinue ? existingSnap : undefined
@@ -1489,6 +1605,17 @@ async function coordinateTaskRun(
     ? ('Goal-based' as LoopType)
     : opts.loopType
   const loopTypeMode: 'force' | 'auto' = forcedLoopType ? 'force' : 'auto'
+  // Auto mode must actually classify. The heuristic parser is the only owner
+  // of that decision (Chat-lite → Turn-based, otherwise Goal-based); without
+  // it every "自動" message silently ran the Goal pipeline. Classification
+  // applies to interactive conversation only — automation sources without an
+  // explicit pin keep the Goal-based default. The classified result feeds run
+  // config but never pins the thread: the thread stays auto per message.
+  const effectiveLoopType: LoopType | undefined = forcedLoopType
+    ? forcedLoopType
+    : objective.trim() && isInteractiveConversationSource(opts)
+      ? classifyLoopType(objective)
+      : undefined
 
   // Coordinator owns thread bind once after capacity is reserved.
   const { threadId: tid } = await bindRunThread({
@@ -1508,7 +1635,7 @@ async function coordinateTaskRun(
   // decide when the visible run is terminal.
   try {
     const { useRunActivityStore } = await import('../store/runActivityStore.ts')
-    useRunActivityStore.getState().begin(runId)
+    useRunActivityStore.getState().begin(runId, tid)
     useRunActivityStore.getState().setStatus('啟動中…', runId)
   } catch {
     /* renderer activity is optional for headless / recovery paths */
@@ -1577,8 +1704,14 @@ async function coordinateTaskRun(
     })
   }
 
+  // A conversation that forgets everything between runs makes the user repeat
+  // themselves. The last few digests from this thread ride in as background,
+  // never as instructions that could outrank the request being made now.
+  const priorContext = await loadThreadPriorContext(tid, opts.projectRoot?.trim() || opts.overrides?.projectRoot)
+
   const extraSystem = [
     opts.overrides?.extraSystemContext,
+    priorContext,
     opts.extraContext?.trim()
       ? `## External event / channel context\n${opts.extraContext.trim().slice(0, 12_000)}`
       : '',
@@ -1600,9 +1733,23 @@ async function coordinateTaskRun(
   // When resuming, engine objective is the original goal (not the "繼續" phrase)
   const dispatchObjective = continueSnap ? continueSnap.objective : objective
 
+  // Admission owns the patience budget: one decision per run, inherited by
+  // every ingress, instead of each caller inventing its own deadline.
+  const admittedTurnTimeoutMs = resolveTurnTimeout({
+    runner: (opts.runner || thr.threads.find((thread) => thread.id === tid)?.runner || 'builtin') === 'builtin'
+      ? 'builtin'
+      : 'external',
+    pattern: (forcedLoopType || 'Turn-based') as Parameters<typeof resolveTurnTimeout>[0]['pattern'],
+    settingsTimeoutMs: settings.turnTimeoutMs,
+    threadTimeoutMs: thr.threads.find((thread) => thread.id === tid)?.turnTimeoutMs,
+    runTimeoutMs: opts.overrides?.turnTimeoutMs,
+    unattended: opts.overrides?.unattended ?? sourceIsAutomation,
+  })
+
   const overrides: RuntimeOverrides = {
     ...admittedSettings,
     ...(opts.overrides || {}),
+    turnTimeoutMs: admittedTurnTimeoutMs,
     runId,
     sourceKind: opts.sourceKind || opts.overrides?.sourceKind,
     triggerSource: planBubbleMetadata.triggerSource,
@@ -1626,7 +1773,7 @@ async function coordinateTaskRun(
       ? attachments
       : opts.overrides?.userAttachments,
     loopTypeMode,
-    forceLoopType: forcedLoopType,
+    forceLoopType: effectiveLoopType,
     threadId: tid,
     continueGoal: continueSnap
       ? {

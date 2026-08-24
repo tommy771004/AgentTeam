@@ -34,7 +34,7 @@ const send = (id: number, method: string, params: Record<string, unknown> = {}) 
 }
 
 try {
-  send(1, 'initialize', { protocolVersion: 1 })
+  send(1, 'initialize', { protocolVersion: 2 })
   await waitFor(1)
   send(2, 'sessions/create', { title: 'Binding smoke', threadId: 'thread-binding-smoke' })
   const created = await waitFor(2)

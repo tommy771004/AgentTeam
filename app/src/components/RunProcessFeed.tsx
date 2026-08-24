@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { emptyAgentLike } from '../agent/localCliRun'
 import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
-import { deriveRunLifecycle } from '../agent/runLifecycle'
+import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
@@ -21,6 +21,7 @@ import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
 import { ContextCards } from './ContextCards'
 import { ElapsedTime } from './primitives/ElapsedTime'
+import { useStallNotice } from '../hooks/useStallNotice'
 import { AgentThinking } from './primitives/AgentThinking'
 import { thinkingVariantForPhase } from './primitives/agentThinkingVariant'
 import { Reveal } from './primitives/Reveal'
@@ -43,6 +44,8 @@ function kindIcon(kind: string): string {
       return 'edit'
     case 'thought':
       return 'psychology'
+    case 'compaction':
+      return 'unfold_less'
     case 'error':
       return 'error'
     case 'done':
@@ -200,11 +203,18 @@ export function RunProcessFeed({
     approvalPending,
     terminal: Boolean(activity?.terminal),
     objective: agent.objective,
+    orchestration: orchestrationFromAgent(agent),
+    interruptReason: agent.interruptReason,
+    stopping: activity?.stopping,
   })
   const phase = lifecycle.label
+  // One honest notice when a live run goes quiet — never a repeated alarm.
+  const stall = useStallNotice(runId)
   const toolCount = new Set(
     [
-      ...agent.toolCalls.map((tool) => tool.id),
+      // Guarded like every other access in this file: a run snapshot without a
+      // tool list must degrade to an empty trace, never blank the whole app.
+      ...(agent.toolCalls || []).map((tool) => tool.id),
       ...events
         .filter((event) => event.kind === 'tool')
         .map((event) => event.callId || event.id),
@@ -347,6 +357,10 @@ export function RunProcessFeed({
         >
           {lifecycle.needsAttention ? (
             <Icon name={lifecycle.icon} size={16} className="shrink-0 text-orange" />
+          ) : lifecycle.stopping ? (
+            // A stop already registered must not keep spinning as if nothing
+            // happened; the pause mark is the immediate answer to the press.
+            <Icon name={lifecycle.icon} size={16} className="shrink-0 text-ink" />
           ) : (
             <AgentThinking variant={thinkingVariantForPhase(lifecycle.phase)} className="shrink-0 text-ink" />
           )}
@@ -376,6 +390,17 @@ export function RunProcessFeed({
           </button>
         ) : null}
       </div>
+
+      {stall.stalled && !lifecycle.needsAttention ? (
+        <div
+          className="agent-process-stall flex items-center gap-2 rounded-md border border-line-strong/60 bg-surface-2 px-3 py-2 text-[11px] text-ink-3"
+          role="status"
+          data-stall-idle-ms={stall.idleMs}
+        >
+          <Icon name="hourglass_top" size={14} className="shrink-0 text-orange" />
+          <span>{stall.label}</span>
+        </div>
+      ) : null}
 
       <Reveal open={processOpen}>
         <div className="space-y-3">
@@ -554,9 +579,13 @@ export function RunProcessFeed({
                       onClick={() => hasDetail && setExpanded((id) => (id === group.id ? null : group.id))}
                     >
                       <Icon
-                        name={active ? 'progress_activity' : kindIcon(row.kind)}
+                        name={active && row.kind !== 'compaction' ? 'progress_activity' : kindIcon(row.kind)}
                         size={15}
-                        className={active ? 'shrink-0 animate-spin text-ink' : 'shrink-0 text-ink-3'}
+                        className={
+                          active && row.kind !== 'compaction'
+                            ? 'shrink-0 animate-spin text-ink'
+                            : 'shrink-0 text-ink-3'
+                        }
                       />
                       <span className="shrink-0 font-medium">{row.title}</span>
                       {hasDetail ? (

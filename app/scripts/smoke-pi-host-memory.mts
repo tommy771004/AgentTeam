@@ -45,7 +45,7 @@ const waitFor = async (id: number) => {
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 
 try {
-  send(1, 'initialize', { protocolVersion: 1 })
+  send(1, 'initialize', { protocolVersion: 2 })
   assert.equal((await waitFor(1)).error, undefined)
   send(2, 'memory/add', { memory: { id: 'pref-language', project: 'demo', text: 'Use Traditional Chinese UI copy', tags: ['preference'], createdAt: '2026-07-22T00:00:00.000Z' } })
   assert.equal((await waitFor(2)).error, undefined)
@@ -79,7 +79,7 @@ try {
       await once(restartedOutput, 'line')
     }
   }
-  restarted.stdin.write(`${JSON.stringify({ id: 7, method: 'initialize', params: { protocolVersion: 1 } })}\n`)
+  restarted.stdin.write(`${JSON.stringify({ id: 7, method: 'initialize', params: { protocolVersion: 2 } })}\n`)
   assert.equal((await restartedWaitFor(7)).error, undefined)
   restarted.stdin.write(`${JSON.stringify({ id: 8, method: 'memory/list', params: {} })}\n`)
   assert.equal((await restartedWaitFor(8)).result?.memories?.length, 0)

@@ -17,6 +17,19 @@ export type JournalStatus =
   | 'cancelled'
   | 'interrupted'
 
+/**
+ * Whether a terminal run's outcome actually reached the user.
+ *
+ * `delivered` — the finalizer wrote the outcome into the owning thread while a
+ * renderer was on screen to show it.
+ * `pending-delivery` — the run is terminal but nobody has been told yet.
+ * `consumed` — a pending outcome has since been narrated (live toast or the
+ * startup redelivery pass) and must never be narrated again.
+ */
+export type JournalDelivery = 'delivered' | 'pending-delivery' | 'consumed'
+
+const JOURNAL_DELIVERIES = new Set<JournalDelivery>(['delivered', 'pending-delivery', 'consumed'])
+
 export type JournalEntry = {
   id: string
   kind: JournalKind
@@ -31,13 +44,57 @@ export type JournalEntry = {
   startedAt: string
   updatedAt: string
   finishedAt?: string
+  /** Set on terminal run entries only; see `classifyRunDelivery`. */
+  delivery?: JournalDelivery
+  /** `external` runs may never claim a Definition of Done. */
+  executionKind?: 'loop' | 'external'
+  /** Bounded settlement evidence — counters only, never prompts or payloads. */
+  dodMet?: boolean
+  iterations?: number
+  maxIterations?: number
+  /** Why a stopped run stopped: a user press or a spent time budget. */
+  interruptReason?: 'user' | 'timeout'
+  /**
+   * Every context compaction this run performed: when, and how much of the
+   * transcript it covered. Counts only — the pre-compaction text itself lives
+   * in the durable checkpoint, never here.
+   */
+  compactions?: JournalCompaction[]
+  /**
+   * Proof that this run's knowledge digest reached the project's memory
+   * directory. Absent means it did not — a model claiming otherwise is wrong
+   * by construction (ADR-0048).
+   */
+  memorySink?: { at: string; path: string; bytes: number }
 }
+
+export type JournalCompaction = {
+  at: string
+  /** How many earlier messages the summary replaced. */
+  replacedMessages: number
+  /** Transcript length after the replacement, so the range is reconstructable. */
+  remainingMessages: number
+  summaryChars: number
+  /** Estimated tokens that triggered the preflight, and the window it neared. */
+  estimatedTokens?: number
+  contextWindow?: number
+}
+
+const MAX_COMPACTIONS_PER_RUN = 40
 
 export type RecoveryItem = {
   kind: JournalKind | 'storage'
   id: string
   previousStatus?: JournalStatus
-  action: 'marked-interrupted' | 'resume-once' | 'restored' | 'quarantined'
+  action:
+    | 'marked-interrupted'
+    | 'resume-once'
+    | 'restored'
+    | 'quarantined'
+    /** A terminal outcome the user never saw was narrated after restart. */
+    | 'redelivered'
+    /** Terminal, but the owning thread is gone — no claim either way. */
+    | 'result-unknown'
   detail?: string
 }
 
@@ -77,6 +134,38 @@ const startupRecoveryReady = new Promise<void>((resolve) => {
   resolveStartupRecovery = resolve
 })
 
+/**
+ * Main-process durability bridge (feature-detected as `window.subagents.journal`).
+ *
+ * localStorage can be evicted under quota pressure and has no torn-write
+ * protection, so every persisted state is also mirrored to userData through
+ * the main process. The bridge is injected — never imported — so this module
+ * stays importable in Node smokes and the renderer keeps feature-detecting.
+ */
+export type RunJournalMirrorBridge = {
+  read: () => Promise<{ state: string } | null | undefined>
+  write: (state: string) => Promise<unknown>
+}
+
+let mirrorBridge: RunJournalMirrorBridge | null = null
+
+/** Wire the durable mirror; pass null to detach (tests). Idempotent. */
+export function setRunJournalMirrorBridge(bridge: RunJournalMirrorBridge | null): void {
+  mirrorBridge = bridge
+}
+
+function queueMirrorWrite(payload: string): void {
+  const bridge = mirrorBridge
+  if (!bridge) return
+  // Fire-and-forget: a mirror failure must never block or fail the primary
+  // write path. localStorage remains the read source; the mirror is recovery.
+  try {
+    void Promise.resolve(bridge.write(payload)).catch(() => { /* best effort */ })
+  } catch {
+    /* best effort */
+  }
+}
+
 function storage(preferred?: Storage): Storage | null {
   if (preferred) return preferred
   try {
@@ -94,6 +183,20 @@ function bounded(value: unknown, max: number): string | undefined {
   const text = typeof value === 'string' ? value.trim() : ''
   return text ? text.slice(0, max) : undefined
 }
+
+/**
+ * Bounded non-negative counter; anything else is simply absent.
+ *
+ * `max` differs by field on purpose: iteration counts are single digits, while
+ * a token estimate is six. One shared ceiling would silently drop the latter.
+ */
+function counter(value: unknown, max = 10_000): number | undefined {
+  const parsed = Math.floor(Number(value))
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= max ? parsed : undefined
+}
+
+/** Token counts and window sizes run far past the iteration ceiling. */
+const MAX_TOKEN_COUNT = 100_000_000
 
 function emptyState(): JournalState {
   return { version: 1, entries: [], updatedAt: now() }
@@ -121,6 +224,33 @@ function parseState(raw: string | null): JournalState | null {
         startedAt: bounded(entry.startedAt, 40) || now(),
         updatedAt: bounded(entry.updatedAt, 40) || now(),
         finishedAt: bounded(entry.finishedAt, 40),
+        // Unknown or malformed delivery metadata drops the field rather than
+        // the entry: a bad enum must never quarantine a whole valid journal.
+        delivery: JOURNAL_DELIVERIES.has(entry.delivery as JournalDelivery)
+          ? (entry.delivery as JournalDelivery)
+          : undefined,
+        executionKind:
+          entry.executionKind === 'loop' || entry.executionKind === 'external'
+            ? entry.executionKind
+            : undefined,
+        dodMet: typeof entry.dodMet === 'boolean' ? entry.dodMet : undefined,
+        iterations: counter(entry.iterations),
+        maxIterations: counter(entry.maxIterations),
+        interruptReason:
+          entry.interruptReason === 'user' || entry.interruptReason === 'timeout'
+            ? entry.interruptReason
+            : undefined,
+        memorySink:
+          entry.memorySink
+          && typeof entry.memorySink === 'object'
+          && typeof (entry.memorySink as { path?: unknown }).path === 'string'
+            ? (entry.memorySink as JournalEntry['memorySink'])
+            : undefined,
+        compactions: Array.isArray(entry.compactions)
+          ? (entry.compactions as JournalCompaction[])
+              .filter((item) => item && typeof item === 'object' && typeof item.at === 'string')
+              .slice(-MAX_COMPACTIONS_PER_RUN)
+          : undefined,
       }))
       .filter(
         (entry) =>
@@ -137,13 +267,66 @@ function parseState(raw: string | null): JournalState | null {
 
 function retainedEntries(entries: JournalEntry[]): JournalEntry[] {
   if (entries.length <= MAX_ENTRIES) return entries
-  const active = entries.filter((entry) =>
-    ['queued', 'dispatching', 'admitted', 'running'].includes(entry.status),
-  )
+  // An outcome nobody has been told about is as unfinished as a running run:
+  // both survive eviction so a completion cannot vanish before it is narrated.
+  const protectedEntry = (entry: JournalEntry) =>
+    ['queued', 'dispatching', 'admitted', 'running'].includes(entry.status) ||
+    entry.delivery === 'pending-delivery'
+  const active = entries.filter(protectedEntry)
   const terminal = entries.filter((entry) => !active.includes(entry))
   const keptActive = active.slice(-MAX_ENTRIES)
   const terminalBudget = Math.max(0, MAX_ENTRIES - keptActive.length)
+  // Past the cap even after protection, the drop is reported instead of silent.
+  for (const dropped of active.slice(0, active.length - keptActive.length)) {
+    if (dropped.delivery !== 'pending-delivery') continue
+    appendRecoveryReport({
+      kind: dropped.kind,
+      id: dropped.id,
+      previousStatus: dropped.status,
+      action: 'result-unknown',
+      detail: `執行紀錄已達上限，未送達的結果被淘汰${dropped.objective ? `：${dropped.objective}` : ''}`,
+    })
+  }
   return [...terminal.slice(-terminalBudget), ...keptActive]
+}
+
+/**
+ * Restore the journal from the durable main-process mirror when local storage
+ * holds no usable entries.
+ *
+ * This covers the quiet failure mode where the browser evicted localStorage:
+ * pending deliveries and interrupted runs still exist in the mirror, and the
+ * startup redelivery pass needs them. Must run BEFORE `reconcileStartup()` so
+ * recovery sees restored state rather than an empty journal. Returns whether a
+ * restore happened.
+ */
+export async function hydrateRunJournalFromDurable(): Promise<boolean> {
+  const store = storage()
+  if (!store || !mirrorBridge) return false
+  const existing = loadState(store)
+  if (existing.entries.length > 0) return false
+  let mirrored: { state?: unknown } | null | undefined
+  try {
+    mirrored = await mirrorBridge.read()
+  } catch {
+    return false
+  }
+  const raw = typeof mirrored?.state === 'string' ? mirrored.state : ''
+  if (!raw) return false
+  const restored = parseState(raw)
+  if (!restored || restored.entries.length === 0) return false
+  try {
+    store.setItem(JOURNAL_KEY, raw)
+  } catch {
+    return false
+  }
+  appendRecoveryReport({
+    kind: 'storage',
+    id: JOURNAL_KEY,
+    action: 'restored',
+    detail: '本機 localStorage 已無可用執行紀錄，已從主程序日誌鏡像還原。',
+  })
+  return true
 }
 
 function loadState(preferred?: Storage): JournalState {
@@ -200,13 +383,17 @@ function persistState(state: JournalState): void {
     entries: retainedEntries(state.entries),
     updatedAt: now(),
   }
+  const payload = JSON.stringify(next)
   try {
     const current = store.getItem(JOURNAL_KEY)
     if (current) store.setItem(JOURNAL_BACKUP_KEY, current)
-    store.setItem(JOURNAL_KEY, JSON.stringify(next))
+    store.setItem(JOURNAL_KEY, payload)
   } catch {
     /* localStorage may be unavailable or full; execution must continue */
   }
+  // Mirror even when the primary write threw: an evicted/full localStorage is
+  // exactly the case the durable copy exists for.
+  queueMirrorWrite(payload)
 }
 
 function appendRecoveryReport(item: RecoveryItem): void {
@@ -244,7 +431,10 @@ function upsert(entry: Omit<JournalEntry, 'attempt' | 'startedAt' | 'updatedAt'>
 
 function terminalStatus(status: string): JournalStatus {
   if (status === 'success') return 'success'
-  if (status === 'cancelled' || status === 'skipped') return 'cancelled'
+  // `halted` is the agent-side word for a run that was stopped, not one that
+  // failed. Recording it as a failure would make the durable record disagree
+  // with what the user was shown.
+  if (status === 'cancelled' || status === 'skipped' || status === 'halted') return 'cancelled'
   if (status === 'interrupted') return 'interrupted'
   return 'failed'
 }
@@ -270,8 +460,44 @@ export function recordRunStarted(input: { runId: string; threadId?: string }): v
   upsert({ id: input.runId, kind: 'run', status: 'running', runId: input.runId, threadId: bounded(input.threadId, 160) })
 }
 
-export function recordRunTerminal(input: { runId: string; threadId?: string; status: string }): void {
+export type RunDeliveryFacts = {
+  /** The run is bound to a conversation thread that still exists. */
+  hasOwningThread: boolean
+  /** The finalizer wrote this run's outcome into that thread. */
+  resultWrittenToThread: boolean
+  /** A renderer was mounted and on screen to present it. */
+  rendererPresent: boolean
+}
+
+/**
+ * The single rule for "did this outcome actually reach the user".
+ *
+ * UI never re-decides this: a surface that guesses would disagree with the
+ * startup redelivery pass and either drop a completion or narrate it twice.
+ */
+export function classifyRunDelivery(facts: RunDeliveryFacts): JournalDelivery {
+  return facts.hasOwningThread && facts.resultWrittenToThread && facts.rendererPresent
+    ? 'delivered'
+    : 'pending-delivery'
+}
+
+export type RunTerminalSettlement = {
+  executionKind?: 'loop' | 'external'
+  dodMet?: boolean
+  iterations?: number
+  maxIterations?: number
+  interruptReason?: 'user' | 'timeout'
+}
+
+export function recordRunTerminal(input: {
+  runId: string
+  threadId?: string
+  status: string
+  delivery?: RunDeliveryFacts
+  settlement?: RunTerminalSettlement
+}): void {
   const finishedAt = now()
+  const external = input.settlement?.executionKind === 'external'
   upsert({
     id: input.runId,
     kind: 'run',
@@ -279,7 +505,98 @@ export function recordRunTerminal(input: { runId: string; threadId?: string; sta
     runId: input.runId,
     threadId: bounded(input.threadId, 160),
     finishedAt,
+    // Written in the same synchronous statement as the terminal marker: there
+    // is no second write point that could disagree about delivery.
+    delivery: input.delivery ? classifyRunDelivery(input.delivery) : 'pending-delivery',
+    executionKind: input.settlement?.executionKind,
+    // An external CLI exit is never a DoD claim, so its settlement carries no
+    // DoD verdict at all rather than an unmet one.
+    dodMet: external ? undefined : input.settlement?.dodMet,
+    iterations: external ? undefined : counter(input.settlement?.iterations),
+    maxIterations: external ? undefined : counter(input.settlement?.maxIterations),
+    interruptReason: input.settlement?.interruptReason,
   })
+}
+
+/**
+ * Mark a pending outcome as told, without changing the terminal status.
+ *
+ * Used by the live completion notice, so a run the user was shown while the app
+ * was open is not narrated again as news on the next restart.
+ */
+/**
+ * Record one context compaction against its run.
+ *
+ * The event is what tells a later reader that the agent's view of the
+ * conversation was rewritten, and when. It is deliberately counts-only: the
+ * text it replaced is retrievable from the durable checkpoint instead.
+ */
+export function recordRunCompaction(runId: string, event: Omit<JournalCompaction, 'at'>): void {
+  if (!runId) return
+  const state = loadState()
+  const entry = state.entries.find((item) => item.kind === 'run' && item.id === runId)
+  if (!entry) return
+  const compaction: JournalCompaction = {
+    at: now(),
+    replacedMessages: Math.max(0, Math.floor(Number(event.replacedMessages) || 0)),
+    remainingMessages: Math.max(0, Math.floor(Number(event.remainingMessages) || 0)),
+    summaryChars: Math.max(0, Math.floor(Number(event.summaryChars) || 0)),
+    estimatedTokens: counter(event.estimatedTokens, MAX_TOKEN_COUNT),
+    contextWindow: counter(event.contextWindow, MAX_TOKEN_COUNT),
+  }
+  entry.compactions = [...(entry.compactions || []), compaction].slice(-MAX_COMPACTIONS_PER_RUN)
+  entry.updatedAt = compaction.at
+  persistState(state)
+}
+
+/**
+ * Record that a run's knowledge digest was written to the project.
+ *
+ * Called only with a real write result; there is no path that records a sink
+ * from an intention or from a model's own account of what it did.
+ */
+export function recordRunMemorySink(runId: string, input: { path: string; bytes: number }): void {
+  if (!runId || !input?.path) return
+  const state = loadState()
+  const entry = state.entries.find((item) => item.kind === 'run' && item.id === runId)
+  if (!entry) return
+  entry.memorySink = {
+    at: now(),
+    path: bounded(input.path, 400) || input.path.slice(0, 400),
+    bytes: Math.max(0, Math.floor(Number(input.bytes) || 0)),
+  }
+  entry.updatedAt = entry.memorySink.at
+  persistState(state)
+}
+
+export function markRunDelivered(runId: string): void {
+  const state = loadState()
+  const entry = state.entries.find((item) => item.kind === 'run' && item.id === runId)
+  if (!entry || entry.delivery !== 'pending-delivery') return
+  entry.delivery = 'delivered'
+  entry.updatedAt = now()
+  persistState(state)
+}
+
+/**
+ * Claim every terminal run outcome the user was never told about.
+ *
+ * Claiming marks each entry `consumed` in the same pass that returns it, so a
+ * repeated startup — or a second caller — can never narrate the same
+ * completion twice.
+ */
+export function claimPendingRunDeliveries(): JournalEntry[] {
+  const state = loadState()
+  const claimed: JournalEntry[] = []
+  for (const entry of state.entries) {
+    if (entry.kind !== 'run' || entry.delivery !== 'pending-delivery') continue
+    if (['queued', 'dispatching', 'admitted', 'running'].includes(entry.status)) continue
+    claimed.push({ ...entry })
+    entry.delivery = 'consumed'
+    entry.updatedAt = now()
+  }
+  if (claimed.length) persistState(state)
+  return claimed
 }
 
 export function recordQueueEnqueued(input: {

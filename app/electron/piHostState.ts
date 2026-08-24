@@ -6,6 +6,7 @@ import type { SessionRecord } from './piHostProtocol.ts'
 import type { PiQueuedRun } from './piRunQueue.ts'
 import type { PiResource } from './piResourceRegistry.ts'
 import { isPiMemory, type PiMemory } from './piMemoryExtension.ts'
+import { parseTurnRecord } from '../src/agent/turnRecord.ts'
 import type { PiExtension } from './piExtensionRegistry.ts'
 
 export type PiHostSnapshot = {
@@ -35,7 +36,29 @@ const emptyState = (): StoredState => ({
   extensions: [],
 })
 
-export async function loadPiHostState(statePath: string): Promise<StoredState> {
+/**
+ * Validate every session's Turn Record before the Host serves any of it.
+ *
+ * Deliberately outside the parse `catch`: an unreadable record must reach the
+ * caller as a failure. Falling back to an empty state here would turn "this
+ * build cannot read your history" into "you have no history" — data loss
+ * performed rather than reported. A damaged FINAL entry is different: that is a
+ * torn append, so the good prefix is kept and the loss is reported.
+ */
+function withValidatedTurnRecords(state: StoredState): StoredState {
+  const sessions = state.sessions.map((session) => {
+    const { record, tornTail } = parseTurnRecord((session as { record?: unknown }).record)
+    if (tornTail) {
+      console.error(`[pi-host] Turn Record for session ${session.id} lost a torn final entry; keeping ${record.entries.length} entries`)
+    }
+    return record.entries.length > 0 || (session as { record?: unknown }).record !== undefined
+      ? { ...session, record }
+      : session
+  })
+  return { ...state, sessions }
+}
+
+async function readStoredPiHostState(statePath: string): Promise<StoredState> {
   try {
     const value = JSON.parse(await readFile(statePath, 'utf8')) as Partial<StoredState>
     if (
@@ -82,6 +105,10 @@ export async function loadPiHostState(statePath: string): Promise<StoredState> {
   } catch {
     return emptyState()
   }
+}
+
+export async function loadPiHostState(statePath: string): Promise<StoredState> {
+  return withValidatedTurnRecords(await readStoredPiHostState(statePath))
 }
 
 export async function savePiHostState(statePath: string, snapshot: PiHostSnapshot): Promise<void> {

@@ -13,6 +13,7 @@ const PHASE_VARIANTS: Record<string, AgentThinkingVariant> = {
   executing: 'infinity',
   responding: 'spin',
   finalizing: 'stars',
+  cancel_requested: 'spin',
 }
 
 export function thinkingVariantForPhase(phase?: string): AgentThinkingVariant {

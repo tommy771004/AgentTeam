@@ -252,6 +252,11 @@ export interface RuntimeOverrides {
   maxToolRounds?: number
   minConfidence?: number
   timeoutMs?: number
+  /**
+   * Per-turn deadline resolved at admission (`agent/turnTimeout.ts`).
+   * Absent for external CLI runs, whose supervision policy owns their lifetime.
+   */
+  turnTimeoutMs?: number
   /** Immutable External CLI supervision policy captured at task admission. */
   externalCliPolicy?: Partial<ExternalCliRunPolicy>
   externalCliRequiredConnectors?: ExternalCliConnectorRequirement[]
@@ -358,6 +363,12 @@ export interface ToolCallRecord {
 }
 
 export interface AgentState {
+  /**
+   * What the Host recorded for this run's turn. The renderer projects the
+   * conversation from it rather than authoring one (ADR-0039 / ADR-0049);
+   * absent for runners that do not write a record yet.
+   */
+  turnRecord?: import('./turnRecord.ts').TurnRecord
   id: string
   objective: string
   loopConfig: LoopConfiguration
@@ -408,6 +419,25 @@ export interface AgentState {
   }
   /** External CLI kind when executionKind=external (codex / claude / …). */
   externalRunnerKind?: string
+  /**
+   * Why this run was parked instead of settling on its own.
+   *
+   * Only ever set alongside `status: 'halted'`. A stop the user pressed and a
+   * spent time budget are different events and never share one word.
+   */
+  interruptReason?: 'user' | 'timeout'
+  /**
+   * Pi Host orchestration settlement for this run.
+   *
+   * `dodMet: false` with a spent iteration budget is a truncated run, not a
+   * plain success — every surface reads it through `deriveRunLifecycle`.
+   * Never populated for `executionKind: 'external'`: a CLI never claims a DoD.
+   */
+  orchestration?: {
+    iterations: number
+    maxIterations: number
+    dodMet?: boolean
+  }
   /** Canonical trigger snapshot retained for audit/archive. */
   scheduleTrigger?: ScheduleTriggerSnapshot
   /** Canonical matcher evidence retained for audit/archive. */
@@ -739,6 +769,11 @@ export interface LlmSettings {
   concurrentRunsEnabled: boolean
   /** Concurrent-run ceiling, clamped to a small fixed range by runtime. */
   maxConcurrentRuns: number
+  /**
+   * General · How long one turn may run before it is parked as
+   * `interrupted(timeout)`. 0 keeps the per-pattern defaults.
+   */
+  turnTimeoutMs: number
   /** General · Desktop notification when a run finishes */
   notifyOnComplete: boolean
   /** General · Soft sound on complete (where supported) */

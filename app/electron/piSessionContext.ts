@@ -1,6 +1,11 @@
 import type { PiMemory } from './piMemoryExtension.ts'
 
-export type PiSessionMessage = { role: 'user' | 'assistant'; content: string }
+/**
+ * One message in the context the model will see. `tool` entries are the agent's
+ * own action trace — they cost context and count towards pressure exactly like
+ * prose does, so compaction weighs them the same way.
+ */
+export type PiSessionMessage = { role: 'user' | 'assistant' | 'tool'; content: string }
 
 export type PiTurnContextPolicy = {
   memoryEnabled: boolean

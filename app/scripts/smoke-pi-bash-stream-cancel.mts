@@ -31,7 +31,7 @@ const waitForEvent = async (event: string) => {
 }
 const send = (id: number, method: string, params: Record<string, unknown>) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 try {
-  send(1, 'initialize', { protocolVersion: 1 })
+  send(1, 'initialize', { protocolVersion: 2 })
   await waitFor(1)
   send(2, 'tools/bash', { cwd: root, runId: 'bash-cancel-run', command: 'printf first; sleep 1; printf never', approval: 'allow' })
   assert.equal((await waitForEvent('host/tool-start', 'bash-cancel-run')).payload.tool, 'bash')

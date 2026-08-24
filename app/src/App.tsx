@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { ProtocolsPage } from './pages/ProtocolsPage'
@@ -23,7 +23,6 @@ import {
   useGatewayStore,
 } from './store/gatewayStore'
 import { PermissionAskModal } from './components/PermissionAskModal'
-import { InterventionOverlay } from './components/InterventionOverlay'
 import { QuestionAskModal } from './components/QuestionAskModal'
 import type { ScheduledJob } from './agent/types'
 import { createScheduleTriggerSnapshot } from './agent/scheduler'
@@ -127,7 +126,9 @@ function PiHostEventBootstrap() {
         callId: update.callId,
         ok: update.ok,
       })
-      activity.setStatus(update.title, update.runId)
+      // Structured phase rides along when the Host named what it is doing;
+      // otherwise setStatus falls back to deriving the phase from the copy.
+      activity.setStatus(update.title, update.runId, update.phase)
     })
     return () => { unsubscribe?.() }
   }, [push])
@@ -213,7 +214,18 @@ function RecoveryBootstrap() {
         ))
         useThreadStore.getState().hydrateFromPiHost(projected)
       }
-      const journalReport = journal.reconcileStartup()
+      const journalReport = await (async () => {
+        if (!journal) return null
+        // Durable mirror must be wired and hydrated BEFORE reconcileStartup:
+        // an evicted localStorage would otherwise mark runs interrupted from
+        // an empty journal instead of the restored one.
+        const mirrorApi = window.subagents?.journal
+        if (mirrorApi) {
+          journal.setRunJournalMirrorBridge({ read: () => mirrorApi.read(), write: (state: string) => mirrorApi.write(state) })
+          try { await journal.hydrateRunJournalFromDurable() } catch { /* best effort */ }
+        }
+        return journal.reconcileStartup()
+      })()
       const hasRunRecovery = (journalReport?.items || []).some(
         (item) => item.kind === 'run' && item.action === 'marked-interrupted',
       )
@@ -370,6 +382,23 @@ function RecoveryBootstrap() {
           action: 'quarantined',
           detail: `找不到排程 ${jobId}，已停止不安全補跑並等待使用者處理。`,
         })
+      }
+
+      // Completions the user was never told about. Claiming marks each entry
+      // consumed in the same pass, so repeated restarts cannot narrate the same
+      // run twice; the messages then ride the existing recovery report → system
+      // bubble → OS notify path rather than a second recovery route.
+      const { narratePendingDelivery } = await import('./agent/runRedelivery')
+      const threadState = useThreadStore.getState()
+      for (const entry of journal.claimPendingRunDeliveries()) {
+        const narration = narratePendingDelivery(
+          entry,
+          Boolean(entry.threadId && threadState.threads.some((thread) => thread.id === entry.threadId)),
+        )
+        if (narration.message && narration.threadId) {
+          useThreadStore.getState().pushBubble(narration.threadId, 'system', narration.message)
+        }
+        if (narration.recovery) journal.recordRecoveryNotice(narration.recovery)
       }
 
       if (cancelled) return
@@ -929,7 +958,6 @@ function GatewayBootstrap() {
 function PreferencesBootstrap() {
   const settings = useSettingsStore((s) => s.settings)
   const isRunning = useAgentStore((s) => s.isRunning)
-  const agentStatus = useAgentStore((s) => s.agent.status)
 
   useEffect(() => {
     const root = document.documentElement
@@ -980,37 +1008,9 @@ function PreferencesBootstrap() {
     }
   }, [settings])
 
-  // Notify on run complete (ChatGPT Notifications) — only after a real run ends
-  const wasRunning = useRef(false)
-  useEffect(() => {
-    if (isRunning) {
-      wasRunning.current = true
-      return
-    }
-    if (!wasRunning.current) return
-    wasRunning.current = false
-    if (!['success', 'failed', 'halted'].includes(agentStatus)) return
-    if (settings.notifyOnComplete === false) return
-    const label =
-      agentStatus === 'success' ? '完成' : agentStatus === 'halted' ? '已中止' : '失敗'
-    void window.subagents?.notify?.('SubAgents AI', `任務${label}`)
-    if (settings.soundOnComplete) {
-      try {
-        const ctx = new AudioContext()
-        const o = ctx.createOscillator()
-        const g = ctx.createGain()
-        o.connect(g)
-        g.connect(ctx.destination)
-        o.frequency.value = agentStatus === 'success' ? 880 : 220
-        g.gain.value = 0.04
-        o.start()
-        o.stop(ctx.currentTime + 0.12)
-        void ctx.close()
-      } catch {
-        /* ignore */
-      }
-    }
-  }, [isRunning, agentStatus, settings.notifyOnComplete, settings.soundOnComplete])
+  // Run-complete notification and sound now live on the per-run falling edge
+  // (`useRunCompletionNotices`), so each concurrent run is announced once with
+  // its own outcome instead of one aggregate signal when everything is idle.
 
   // Best-effort prevent sleep while running
   useEffect(() => {
@@ -1120,7 +1120,6 @@ export default function App() {
         <PluginTokenRefreshBootstrap />
         <PluginProjectRebindBootstrap />
         <PermissionAskModal />
-        <InterventionOverlay />
         <QuestionAskModal />
         <Routes>
           <Route element={<Layout />}>

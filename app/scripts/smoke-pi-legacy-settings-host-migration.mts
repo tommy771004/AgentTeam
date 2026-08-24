@@ -38,7 +38,7 @@ const waitFor = async (id: number) => {
   }
 }
 try {
-  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 1 } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 2 } })}\n`)
   const initialized = await waitFor(1)
   assert.equal(initialized.result && typeof initialized.result === 'object', true)
   const models = JSON.parse(await readFile(join(agentDir, 'models.json'), 'utf8')) as { providers?: Record<string, { baseUrl?: string; models?: Array<{ id?: string; baseUrl?: string }> }> }

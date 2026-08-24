@@ -6,6 +6,11 @@
  * the shipped-module smoke.
  */
 import { critiqueAllowsDeliver } from './critique.ts'
+import {
+  isIterationExhausted,
+  iterationExhaustedLabel,
+  type RunOrchestrationSnapshot,
+} from '../runLifecycle.ts'
 import { SUBDESIGN_STAGES, stageLabel } from './types.ts'
 import type {
   SubDesignArtifact,
@@ -15,7 +20,15 @@ import type {
   SubDesignStage,
 } from './types.ts'
 
-export type SubDesignWorkspaceRunStatus = 'idle' | 'active' | 'success' | 'failed' | 'halted' | 'awaiting-user'
+export type SubDesignWorkspaceRunStatus =
+  | 'idle'
+  | 'active'
+  | 'success'
+  /** Settled as success with the DoD unmet and the iteration budget spent. */
+  | 'exhausted'
+  | 'failed'
+  | 'halted'
+  | 'awaiting-user'
 export type SubDesignWorkspaceCritiqueStatus = 'not-started' | 'running' | 'passed' | 'needs-revision' | 'interrupted' | 'failed'
 export type SubDesignWorkspaceStageState = 'completed' | 'active' | 'pending' | 'locked'
 export type SubDesignWorkspaceGateStatus = 'ready' | 'blocked' | 'complete'
@@ -44,6 +57,11 @@ export type SubDesignWorkspaceViewModel = {
   stages: SubDesignWorkspaceStage[]
   nextGate: SubDesignWorkspaceGate
   runStatus: SubDesignWorkspaceRunStatus
+  /**
+   * Badge wording for `runStatus`. Owned here so the workspace header renders
+   * the projection instead of re-deciding what a terminal run means.
+   */
+  runStatusLabel: string
   critiqueStatus: SubDesignWorkspaceCritiqueStatus
   hasCompleteArtifact: boolean
   latestArtifact: SubDesignArtifact | null
@@ -57,18 +75,46 @@ export type SubDesignWorkspaceInput = {
   critique?: SubDesignCritique | null
   critiqueSession?: SubDesignCritiqueSession | null
   runStatus?: string
+  /** Iteration/DoD settlement for the run behind `runStatus`. */
+  orchestration?: RunOrchestrationSnapshot
 }
 
 const ACTIVE_RUN_STATUSES = new Set(['parsing', 'running', 'manual_intervention'])
 
-function deriveRunStatus(value: string | undefined): SubDesignWorkspaceRunStatus {
+function deriveRunStatus(
+  value: string | undefined,
+  orchestration: RunOrchestrationSnapshot | undefined,
+): SubDesignWorkspaceRunStatus {
   if (!value || value === 'idle') return 'idle'
   if (ACTIVE_RUN_STATUSES.has(value)) return 'active'
   if (value === 'awaiting_user') return 'awaiting-user'
-  if (value === 'success') return 'success'
+  if (value === 'success') return isIterationExhausted(orchestration) ? 'exhausted' : 'success'
   if (value === 'halted' || value === 'aborted') return 'halted'
   if (value === 'failed') return 'failed'
   return 'idle'
+}
+
+const RUN_STATUS_LABELS: Partial<Record<SubDesignWorkspaceRunStatus, string>> = {
+  active: 'LIVE',
+  'awaiting-user': 'ACTION NEEDED',
+  failed: 'FAILED',
+  halted: 'HALTED',
+}
+
+/**
+ * One wording source for the workspace run badge.
+ *
+ * `idle` and a quietly settled `success` keep reading from the stage (READY on
+ * deliver, otherwise IDLE) exactly as before; only a truncated run gets its own
+ * copy, and that copy is the shared lifecycle wording, not a local string.
+ */
+export function subDesignRunStatusLabel(
+  status: SubDesignWorkspaceRunStatus,
+  orchestration?: RunOrchestrationSnapshot,
+  stage?: SubDesignStage,
+): string {
+  if (status === 'exhausted') return iterationExhaustedLabel(orchestration?.iterations)
+  return RUN_STATUS_LABELS[status] || (stage === 'deliver' ? 'READY' : 'IDLE')
 }
 
 function deriveCritiqueStatus(
@@ -196,7 +242,7 @@ export function deriveSubDesignWorkspace(input: SubDesignWorkspaceInput): SubDes
     : null
   const critiqueStatus = deriveCritiqueStatus(critique, critiqueSession)
   const hasPassingCritique = Boolean(latestArtifact?.status === 'complete' && critique && critiqueAllowsDeliver(critique))
-  const runStatus = deriveRunStatus(input.runStatus)
+  const runStatus = deriveRunStatus(input.runStatus, input.orchestration)
   const hasDirection = Boolean(input.brief.selectedDirectionId)
   const stages = SUBDESIGN_STAGES.map((stage) => {
     const state = stageState(input.brief.stage, stage, hasDirection, hasPassingCritique)
@@ -209,6 +255,7 @@ export function deriveSubDesignWorkspace(input: SubDesignWorkspaceInput): SubDes
     stages,
     nextGate: makeGate({ brief: input.brief, runStatus, critiqueStatus, hasCompleteArtifact, hasPassingCritique }),
     runStatus,
+    runStatusLabel: subDesignRunStatusLabel(runStatus, input.orchestration, input.brief.stage),
     critiqueStatus,
     hasCompleteArtifact,
     latestArtifact,

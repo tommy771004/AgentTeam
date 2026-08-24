@@ -24,7 +24,7 @@ const waitFor = async (id: number) => {
 }
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 try {
-  send(1, 'initialize', { protocolVersion: 1 })
+  send(1, 'initialize', { protocolVersion: 2 })
   assert.equal((await waitFor(1)).error, undefined)
   send(2, 'capabilities/list')
   const listed = await waitFor(2)

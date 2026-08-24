@@ -17,7 +17,7 @@ const output = createInterface({ input: host.stdout })
 const messages: Array<{ id?: number; result?: { protocolVersion?: number; capabilities?: string[]; sessions?: unknown[]; resources?: unknown[]; items?: unknown[] }; error?: unknown }> = []
 output.on('line', (line) => messages.push(JSON.parse(line)))
 const request = async (id: number, method: string) => {
-  host.stdin.write(`${JSON.stringify({ id, method, params: method === 'initialize' ? { protocolVersion: 1 } : {} })}\n`)
+  host.stdin.write(`${JSON.stringify({ id, method, params: method === 'initialize' ? { protocolVersion: 2 } : {} })}\n`)
   for (;;) {
     const message = messages.find((item) => item.id === id)
     if (message) {
@@ -33,7 +33,7 @@ try {
   const resources = await request(3, 'resources/list')
   const capabilities = await request(4, 'capabilities/list')
   const evidence: PiHostReleaseEvidence = {
-    protocol: initialized.protocolVersion === 1,
+    protocol: initialized.protocolVersion === 2,
     utilityProcess: true,
     sessions: Array.isArray(sessions.sessions),
     extensions: Array.isArray(resources.resources) && Array.isArray(capabilities.items),

@@ -40,7 +40,7 @@ export type RunnerCapabilities = {
   runScopedProgress: boolean
 }
 
-/** Full Goal/Hermes loop — agentEngine. */
+/** Full Goal/Hermes loop, owned by Pi Core orchestration. */
 export const BUILTIN_RUNNER_CAPABILITIES: RunnerCapabilities = {
   parse: true,
   validateDoD: true,

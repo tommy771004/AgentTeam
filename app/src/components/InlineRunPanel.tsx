@@ -6,7 +6,7 @@ import { AgentThinking } from './primitives/AgentThinking'
 import { ShimmerLabel } from './primitives/ShimmerLabel'
 import { SpinnerRing } from './primitives/SpinnerRing'
 import { emptyAgentLike } from '../agent/localCliRun'
-import { deriveRunLifecycle, lifecycleToneClass } from '../agent/runLifecycle'
+import { deriveRunLifecycle, lifecycleToneClass, orchestrationFromAgent } from '../agent/runLifecycle'
 import {
   EXTERNAL_CLI_UI_LABEL,
   capabilitiesForRunner,
@@ -155,6 +155,9 @@ export function InlineRunPanel({
     approvalPending,
     terminal: Boolean(activity.terminal),
     objective: agent.objective,
+    orchestration: orchestrationFromAgent(agent),
+    interruptReason: agent.interruptReason,
+    stopping: activity.stopping,
   })
   const live = lifecycle.live
 
@@ -187,7 +190,7 @@ export function InlineRunPanel({
           <Icon
             name={lifecycle.icon}
             size={17}
-            className={`${lifecycleToneClass(lifecycle.tone)} shrink-0 ${live && !lifecycle.needsAttention ? 'animate-spin' : ''}`}
+            className={`${lifecycleToneClass(lifecycle.tone)} shrink-0 ${live && !lifecycle.needsAttention && !lifecycle.stopping ? 'animate-spin' : ''}`}
           />
           <div className="min-w-0">
             <div className="flex items-center gap-2">

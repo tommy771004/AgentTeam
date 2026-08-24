@@ -4,6 +4,8 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type { PiThinkingLevel } from './piAgentProfile.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
+import { classifyPiTurnSettlement, piTurnFinalAnswer, piTurnProviderError, piTurnStopReason, PI_TURN_TRUNCATED_NOTICE } from '../src/agent/piHostRun.ts'
+import type { PiRecordedMessage } from '../src/agent/turnRecord.ts'
 
 const vendorCandidates = [
   process.env.SUBAGENTS_PI_VENDOR_DIR,
@@ -45,9 +47,29 @@ type PiSessionRuntime = {
     dispose?: () => Promise<void> | void
   }
 }
-export type PiHostHistoryMessage = { role: 'user' | 'assistant'; content: string }
+export type PiHostHistoryMessage = PiRecordedMessage
+/** Why a turn stopped short of its own settlement. */
+export type PiTurnInterruptReason = 'user' | 'timeout'
+
+/**
+ * One in-flight turn.
+ *
+ * `cancelled` is the hard teardown (abort now, kill in-flight tools).
+ * `interrupt` is the safe park: the request is remembered and the session is
+ * aborted only once no tool is mid-execution, so a write or a shell command
+ * that already started is allowed to finish and report its evidence instead of
+ * being severed halfway.
+ */
+type PiActiveTurn = {
+  session?: PiSessionRuntime['session']
+  cancelled: boolean
+  interrupt?: PiTurnInterruptReason
+  toolsInFlight: number
+  parked: boolean
+}
+
 const sessionRuntimes = new Map<string, PiSessionRuntime>()
-const activeTurns = new Map<string, { session?: PiSessionRuntime['session']; cancelled: boolean }>()
+const activeTurns = new Map<string, PiActiveTurn>()
 const activeToolRuns = new Map<string, Set<{ controller: AbortController; cancelled: boolean }>>()
 
 const TOOL_FACTORIES = {
@@ -283,6 +305,104 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   return runtime
 }
 
+/**
+ * Whether this moment is a safe place to stop.
+ *
+ * Pure so the rule can be driven directly by tests: a park happens only when a
+ * stop is pending, nothing is mid-execution, and we have not parked already.
+ */
+export function shouldParkTurn(state: {
+  interrupt?: PiTurnInterruptReason
+  toolsInFlight: number
+  parked: boolean
+}): boolean {
+  return Boolean(state.interrupt) && state.toolsInFlight === 0 && !state.parked
+}
+
+/** Abort exactly once, and only from a tool boundary. */
+function parkInterruptedTurn(turn: PiActiveTurn): void {
+  if (!shouldParkTurn(turn)) return
+  turn.parked = true
+  void turn.session?.abort?.()
+}
+
+/**
+ * An interrupted turn keeps whatever the assistant had already produced.
+ *
+ * The partial answer is real work the user paid for; discarding it would make
+ * a stop indistinguishable from a failure. The caller seals it in the feed.
+ */
+/** One assistant message, projected into the item shape the protocol carries. */
+function assistantMessageItems(messages: Array<{ role?: string; content?: unknown }>) {
+  return messages
+    .filter((message) => message.role === 'assistant')
+    .map((message) => ({
+      type: 'assistant_message',
+      content: Array.isArray(message.content)
+        ? message.content
+            .filter((part): part is { type: string; text: string } => Boolean(
+              part && typeof part === 'object'
+              && (part as { type?: unknown }).type === 'text'
+              && typeof (part as { text?: unknown }).text === 'string',
+            ))
+            .map((part) => part.text)
+            .join('')
+        : typeof message.content === 'string' ? message.content : '',
+      message,
+    }))
+}
+
+/**
+ * An interrupted turn keeps whatever the assistant had already produced.
+ *
+ * The partial answer is real work the user paid for; discarding it would make
+ * a stop indistinguishable from a failure. Each assistant message stays its own
+ * item, so the message the model was writing when it stopped remains separable
+ * from the narration it opened with — welding them together is what made a
+ * stop return the preamble as if it were the answer. When a stop lands before
+ * any message completes, the text the user watched stream in stands in, still
+ * one item per message.
+ */
+function interruptedTurnResult(
+  turn: PiActiveTurn,
+  messages: Array<{ role?: string; content?: unknown }>,
+  streamedSegments: string[] = [],
+) {
+  const completed = assistantMessageItems(messages)
+  const items = completed.some((item) => item.content.trim())
+    ? completed
+    : streamedSegments
+        .map((segment) => segment.trim())
+        .filter((segment) => segment.length > 0)
+        .map((segment) => ({ type: 'assistant_message', content: segment, message: undefined }))
+  return {
+    settlement: 'interrupted' as const,
+    interruptReason: turn.interrupt || ('user' as PiTurnInterruptReason),
+    items,
+  }
+}
+
+/**
+ * Ask a turn to stop at its next tool boundary.
+ *
+ * Returns false when the run is not active, so the protocol can answer
+ * honestly instead of acknowledging a stop that never reached anything.
+ */
+export function interruptPiTurn(runId: string, reason: PiTurnInterruptReason = 'user'): boolean {
+  const turn = activeTurns.get(runId)
+  if (!turn) return false
+  if (!turn.interrupt) turn.interrupt = reason
+  // No tool is mid-flight, so this call site already is the boundary.
+  if (turn.toolsInFlight === 0) parkInterruptedTurn(turn)
+  return true
+}
+
+/** Whether a turn has been asked to park (Host-side assertion seam). */
+export function piTurnInterruptState(runId: string): { interrupt?: PiTurnInterruptReason; toolsInFlight: number; parked: boolean } | undefined {
+  const turn = activeTurns.get(runId)
+  return turn ? { interrupt: turn.interrupt, toolsInFlight: turn.toolsInFlight, parked: turn.parked } : undefined
+}
+
 export async function runPiTurn(
   sessionId: string,
   cwd: string,
@@ -296,7 +416,7 @@ export async function runPiTurn(
   referenceChatHistory = true,
   onRuntimeReady?: (contextWindowTokens?: number) => void,
 ) {
-  const turn: { session?: PiSessionRuntime['session']; cancelled: boolean } = { cancelled: false }
+  const turn: PiActiveTurn = { cancelled: false, toolsInFlight: 0, parked: false }
   if (runId) {
     if (activeTurns.has(runId)) throw new Error(`Pi run is already active: ${runId}`)
     activeTurns.set(runId, turn)
@@ -309,6 +429,10 @@ export async function runPiTurn(
     throw error
   }
   turn.session = runtime.session
+  if (turn.interrupt) {
+    if (runId) activeTurns.delete(runId)
+    return interruptedTurnResult(turn, [])
+  }
   if (turn.cancelled) {
     if (runId) activeTurns.delete(runId)
     return { settlement: 'cancelled' as const, items: [] }
@@ -320,9 +444,24 @@ export async function runPiTurn(
     throw error
   }
   let completedMessages: Array<{ role?: string; content?: unknown }> = []
+  // What the user has watched arrive, kept one message at a time so a stop can
+  // hand back the message being written without the ones before it.
+  const streamedSegments: string[] = ['']
   const unsubscribe = runtime.session.subscribe((event) => {
     if (event.type === 'agent_end' && Array.isArray(event.messages)) {
       completedMessages = event.messages as Array<{ role?: string; content?: unknown }>
+    }
+    if (event.type === 'message_start' || event.type === 'tool_execution_start') streamedSegments.push('')
+    const streamed = (event as { assistantMessageEvent?: { type?: unknown; delta?: unknown } }).assistantMessageEvent
+    if (streamed?.type === 'text_delta' && typeof streamed.delta === 'string') {
+      streamedSegments[streamedSegments.length - 1] += streamed.delta
+    }
+    // Tool boundaries are the only safe place to stop: between calls the agent
+    // owns no half-applied edit and no orphaned child process.
+    if (event.type === 'tool_execution_start') turn.toolsInFlight += 1
+    if (event.type === 'tool_execution_end') {
+      turn.toolsInFlight = Math.max(0, turn.toolsInFlight - 1)
+      if (turn.interrupt && turn.toolsInFlight === 0) parkInterruptedTurn(turn)
     }
     onEvent?.(event)
   })
@@ -332,20 +471,29 @@ export async function runPiTurn(
       runtime.requestContext.includeHistory = referenceChatHistory
     }
     await runtime.session.prompt(runtime.requestContext || !requestContext ? prompt : `${requestContext}\n## Current request\n${prompt}`)
+    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages, streamedSegments)
     if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
-    return {
-      settlement: 'success' as const,
-      items: completedMessages
-        .filter((message) => message.role === 'assistant')
-        .map((message) => ({
-          type: 'assistant_message',
-          content: Array.isArray(message.content)
-            ? message.content.filter((part): part is { type: string; text: string } => Boolean(part && typeof part === 'object' && (part as { type?: unknown }).type === 'text' && typeof (part as { text?: unknown }).text === 'string')).map((part) => part.text).join('')
-            : typeof message.content === 'string' ? message.content : '',
-          message,
-        })),
+    // A rejected request never throws here: Pi records it as an empty assistant
+    // message carrying the provider's error, so a failed call must not be
+    // mistaken for a turn that simply produced nothing.
+    const providerError = piTurnProviderError(completedMessages as ReadonlyArray<{ role?: string; stopReason?: string; errorMessage?: string }>)
+    if (providerError) return { settlement: 'failed' as const, items: [{ type: 'error', content: providerError }] }
+    const items = assistantMessageItems(completedMessages)
+    // A clean provider call that carried no text is `empty`, not `answered`:
+    // the run finished without producing anything for the user to read. One
+    // cut off by the output budget (`stopReason: 'length'`) is `truncated`
+    // instead — a wall the same prompt will hit again, so it must read as a
+    // failure with the knob that fixes it. Items travel either way; one
+    // classification decides both the settlement and the notice.
+    const stopReason = piTurnStopReason(completedMessages as ReadonlyArray<{ role?: string; stopReason?: string }>)
+    const settlement = classifyPiTurnSettlement(items, stopReason)
+    if (settlement === 'truncated') {
+      return { settlement, items: [...items, { type: 'truncation_notice', content: PI_TURN_TRUNCATED_NOTICE }] }
     }
+    return { settlement, items }
   } catch (error) {
+    // An aborted prompt throws; an interrupt is a deliberate stop, never a failure.
+    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages, streamedSegments)
     if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
     return {
       settlement: 'failed' as const,
