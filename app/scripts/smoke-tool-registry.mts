@@ -32,12 +32,19 @@ console.log('smoke-tool-registry')
 await test('registry covers every TOOL_DEFINITIONS key (big bang)', async () => {
   await discoverRegisteredToolModules()
   ensureBuiltinRegistry()
+  const { HOST_OWNED_TOOL_NAMES } = await import('../src/agent/tools/toolRegistry.ts')
   assert.equal(registryCoversToolDefinitions(), true)
-  assert.equal(registryHandlersComplete(), true, 'each tool module supplies handler')
+  // Handler completeness tolerates EXACTLY the host-owned equivalents
+  // (ADR-0027 removal): everything else must carry its own handler module.
+  assert.equal(registryHandlersComplete(), true, 'each tool module supplies handler except host-owned equivalents')
   const names = getRegistryToolNames()
   for (const k of Object.keys(TOOL_DEFINITIONS)) {
     assert.ok(names.includes(k), `missing ${k}`)
-    assert.ok(getRegistryEntry(k)?.handler, `no handler ${k}`)
+    if (HOST_OWNED_TOOL_NAMES.has(k)) {
+      assert.equal(getRegistryEntry(k)?.handler, undefined, `${k} is host-owned and must not regain a renderer handler`)
+    } else {
+      assert.ok(getRegistryEntry(k)?.handler, `no handler ${k}`)
+    }
   }
 })
 
