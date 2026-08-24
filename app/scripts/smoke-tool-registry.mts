@@ -79,7 +79,9 @@ await test('toolLoop gated path uses invokeGatedTool + registry only', async () 
   assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/loop')), false)
   const regDir = path.join(appRoot, 'src/agent/tools/registered')
   const files = fs.readdirSync(regDir).filter((f) => f.endsWith('.ts') && f !== 'index.ts')
-  assert.ok(files.length >= 40, `expected many per-tool modules, got ${files.length}`)
+  // The catalog shrinks as equivalents move to the Host (issues 14/15/18):
+  // the guard is a floor against mass deletion, not a target to grow back to.
+  assert.ok(files.length >= 35, `expected many per-tool modules, got ${files.length}`)
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   assert.doesNotMatch(delegate, /\brunDelegatedTask\b/)
   assert.doesNotMatch(delegate, /runFunctionCallingLoop/)

@@ -278,6 +278,24 @@ function uid(prefix = 'th') {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
 }
 
+/**
+ * Point the project store at the conversation being opened.
+ *
+ * Fire-and-forget and one-way: `setThreadProject` no-ops when the value is
+ * unchanged, so the return trip through projectStore.setRoot cannot loop.
+ */
+function followThreadProject(root: string): void {
+  void (async () => {
+    try {
+      const { useProjectStore } = await import('./projectStore.ts')
+      const project = useProjectStore.getState()
+      if (project.root.trim() !== root.trim()) await project.setRoot(root)
+    } catch {
+      /* project store is optional in restricted/browser boots */
+    }
+  })()
+}
+
 function piHostCanonical(): boolean {
   return typeof window !== 'undefined' && typeof window.subagents?.piHost?.sessions?.list === 'function'
 }
@@ -339,7 +357,94 @@ function disposeThreadRuntime(threadId: string, runId?: string): void {
   })()
 }
 
+/**
+ * The parts of a conversation Pi Host does not keep.
+ *
+ * The Host owns the MESSAGES, and `sessions/list` returns nothing else — no
+ * runner choice, no model, no depth, no project binding, no unfinished Goal.
+ * Rebuilding a thread from the Host alone therefore reset every one of those to
+ * its default on restart, which is how a conversation lost its project and
+ * silently fell back to whatever the picker happened to hold. None of this is
+ * conversation history, so keeping it in renderer storage does not make local
+ * storage an authority over the record (ADR-0039); it just stops the renderer
+ * from forgetting the user's own settings.
+ */
+type ThreadPrefs = Pick<
+  Thread,
+  | 'model'
+  | 'thinkingDepth'
+  | 'speed'
+  | 'agentMode'
+  | 'runner'
+  | 'loopType'
+  | 'turnTimeoutMs'
+  | 'projectRoot'
+  | 'subDesignBriefId'
+  | 'pinned'
+  | 'lastCapabilityIds'
+  | 'lastCapabilityProvenance'
+  | 'lastUnlockedTools'
+  | 'lastUnlockedToolProvenance'
+  | 'continueGoal'
+  | 'externalRun'
+  | 'awaitingReply'
+>
+
+const PREFS_KEY = 'subagents.threadPrefs.v1'
+
+const PREF_KEYS: Array<keyof ThreadPrefs> = [
+  'model',
+  'thinkingDepth',
+  'speed',
+  'agentMode',
+  'runner',
+  'loopType',
+  'turnTimeoutMs',
+  'projectRoot',
+  'subDesignBriefId',
+  'pinned',
+  'lastCapabilityIds',
+  'lastCapabilityProvenance',
+  'lastUnlockedTools',
+  'lastUnlockedToolProvenance',
+  'continueGoal',
+  'externalRun',
+  'awaitingReply',
+]
+
+function persistThreadPrefs(threads: Thread[]) {
+  try {
+    const prefs: Record<string, ThreadPrefs> = {}
+    for (const thread of threads.slice(0, MAX_THREADS)) {
+      const entry: Record<string, unknown> = {}
+      for (const key of PREF_KEYS) {
+        const value = thread[key]
+        if (value !== undefined) entry[key] = value
+      }
+      if (Object.keys(entry).length) prefs[thread.id] = entry as ThreadPrefs
+    }
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadThreadPrefs(): Record<string, ThreadPrefs> {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, ThreadPrefs>)
+      : {}
+  } catch {
+    return {}
+  }
+}
+
 function persist(threads: Thread[], activeId: string | null) {
+  // Settings survive a Host-owned history; the transcript does not need to.
+  persistThreadPrefs(threads)
   // Host-owned history is not written to renderer storage; this is only a
   // disposable browser/CLI cache when Pi Host is absent.
   if (piHostCanonical()) return
@@ -530,6 +635,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   },
 
   hydrateFromPiHost: (sessions) => {
+    const prefs = loadThreadPrefs()
     const byThread = new Map(
       sessions.map((session) => [session.threadId, projectPiSession(session)] as const).filter(([id, projection]) => Boolean(id && projection)),
     )
@@ -543,13 +649,28 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     const current = get().threads
     const isPlaceholder = current.length === 1 && current[0].runner === 'builtin' && current[0].title === '新對話' && current[0].bubbles.length === 0
     const preserved = (isPlaceholder ? [] : current).filter((thread) => !byThread.has(thread.id) && !tombstoned.has(thread.id))
-    const projected = [...byThread.values()].flatMap((projection) => projection ? [{
-      ...(current.find((thread) => thread.id === projection.threadId) || emptyThread({ id: projection.threadId, title: projection.title })),
-      id: projection.threadId,
-      title: projection.title,
-      bubbles: projection.bubbles,
-      updatedAt: new Date().toISOString(),
-    }] : [])
+    const now = new Date().toISOString()
+    const projected = [...byThread.values()].flatMap((projection) => {
+      if (!projection) return []
+      const live = current.find((thread) => thread.id === projection.threadId)
+      // A thread this session has not touched comes back from the Host as
+      // messages only. Its settings live in the prefs sidecar, so restore them
+      // before `emptyThread` defaults paper over the user's choices.
+      const base = live || {
+        ...emptyThread({ id: projection.threadId, title: projection.title }),
+        ...(prefs[projection.threadId] || {}),
+      }
+      return [{
+        ...base,
+        id: projection.threadId,
+        title: projection.title,
+        bubbles: projection.bubbles,
+        // Only a thread this session actually changed gets a fresh mtime;
+        // stamping every projected thread with `now` flattened the sidebar's
+        // recency order into whatever order the Host happened to list.
+        updatedAt: live ? live.updatedAt : base.updatedAt || now,
+      }]
+    })
     // A fresh Electron/Pi Host install has no durable sessions yet. Keep the
     // renderer's empty starter thread in that case so the first composer
     // submission still has an active thread to bind to the Host session.
@@ -649,9 +770,14 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   },
 
   selectThread: (id) => {
-    if (!get().threads.some((t) => t.id === id)) return
+    const selected = get().threads.find((t) => t.id === id)
+    if (!selected) return
     set({ activeId: id })
     persist(get().threads, id)
+    // The project pill sits directly above the composer, so it must describe
+    // the conversation now on screen. A thread that has never been bound keeps
+    // whatever root is current — that is its default, not another thread's.
+    if (selected.projectRoot) followThreadProject(selected.projectRoot)
   },
 
   deleteThread: (id) => {
@@ -912,6 +1038,13 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     if (get().runningThreadId === threadId) return fail('run 進行中,請先停止再回捲')
 
     const cutoffAt = thread.bubbles[idx].at
+    // Bubbles projected from Pi Host carry a stable projection key, not a time
+    // (piHostProjection.ts): the Host does not record per-message timestamps.
+    // Comparing that key against a snapshot's ISO time picks an arbitrary
+    // snapshot, so refuse rather than restore files from the wrong moment.
+    if (!Number.isFinite(Date.parse(cutoffAt))) {
+      return fail('這則訊息沒有時間戳（由 Pi Host 還原的歷史），無法定位快照；請改用從檢查點分支。')
+    }
     let restored: string[] = []
     let conflicts: string[] = []
     const errors: string[] = []

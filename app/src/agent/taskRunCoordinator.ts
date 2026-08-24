@@ -1870,12 +1870,22 @@ async function coordinateTaskRun(
 
   // Phase 3 item 3: freeze dispatch fields once; runDispatch only selects runner.
   // Pin project root on the snapshot so later UI project switches cannot leak in.
+  //
+  // Order matters. An explicit root (a scheduler pinning its own project) wins;
+  // then the conversation's OWN binding, so a run started here cannot inherit
+  // whichever folder some other conversation last left in the global picker;
+  // the global root is only the default for a thread that has never been bound.
   if (!overrides.projectRoot) {
+    const boundRoot = useThreadStore.getState().threads.find((thread) => thread.id === tid)?.projectRoot
     overrides.projectRoot =
       opts.projectRoot?.trim() ||
+      boundRoot?.trim() ||
       (await import('../store/projectStore.ts')).useProjectStore.getState().root ||
       undefined
   }
+  // Whatever it resolved to is now this conversation's project, so the next run
+  // resolves the same way instead of falling back to the picker again.
+  if (overrides.projectRoot) useThreadStore.getState().setThreadProject(tid, overrides.projectRoot)
 
   // Outbound Data Gate: when protection is active, pin tools to a provider-specific
   // Sanitized Workspace (Restricted Project View) created in Electron main.

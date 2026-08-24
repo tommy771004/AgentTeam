@@ -19,32 +19,6 @@ export function isElectronPiProduction(): boolean {
   return isElectronRuntime() && hasPiHostBridge()
 }
 
-/** Fields whose runtime authority belongs to Pi Host in Electron. */
-export const PI_OWNED_SETTINGS_KEYS = [
-  'apiProvider',
-  'baseUrl',
-  'apiKey',
-  'model',
-  'fallbackModels',
-  'discoveredModels',
-  'roleModels',
-  'toolsEnabled',
-  'functionCalling',
-  'capabilitiesEnabled',
-  'toolSearchEnabled',
-  'codeModeEnabled',
-  'approvalMode',
-  'bashRequireAsk',
-  'unattended',
-] as const
-
-/** Remove renderer copies of fields that Pi Host persists and executes. */
-export function stripPiOwnedSettings(input: Partial<LlmSettings>): Partial<LlmSettings> {
-  const output = { ...input }
-  for (const key of PI_OWNED_SETTINGS_KEYS) delete (output as Record<string, unknown>)[key]
-  return output
-}
-
 export type PiSettingsPatch = {
   provider?: string
   baseUrl?: string
@@ -57,17 +31,57 @@ export type PiSettingsPatch = {
   unattended?: boolean
 }
 
-/** Project the legacy UI shape into the Pi Host settings protocol. */
+/**
+ * Renderer setting -> the Pi Host settings field that stores and executes it.
+ *
+ * This table is the entire ownership contract, and both directions are derived
+ * from it on purpose. A key listed here is stripped from renderer storage AND
+ * forwarded to the Host; a key absent from it stays renderer-owned and keeps
+ * being persisted locally. The two used to be written out separately, so
+ * `toolsEnabled`, `functionCalling`, `capabilitiesEnabled`, `toolSearchEnabled`,
+ * `codeModeEnabled`, `roleModels`, `fallbackModels` and `discoveredModels` were
+ * claimed by the Host, deleted from local storage, and then never sent anywhere
+ * — the Settings UI wrote them to nothing at all. Add a key here only once the
+ * Host protocol genuinely accepts it (see electron/piAgentProfile.ts PiSettings).
+ */
+const PI_SETTINGS_FIELD_BY_KEY = {
+  apiProvider: 'provider',
+  baseUrl: 'baseUrl',
+  apiKey: 'apiKey',
+  model: 'model',
+  approvalMode: 'approvalMode',
+  bashRequireAsk: 'bashRequireAsk',
+  unattended: 'unattended',
+} as const satisfies Partial<Record<keyof LlmSettings, keyof PiSettingsPatch>>
+
+/** Fields whose runtime authority belongs to Pi Host in Electron. */
+export const PI_OWNED_SETTINGS_KEYS = Object.keys(
+  PI_SETTINGS_FIELD_BY_KEY,
+) as Array<keyof LlmSettings & keyof typeof PI_SETTINGS_FIELD_BY_KEY>
+
+/** Remove renderer copies of fields that Pi Host persists and executes. */
+export function stripPiOwnedSettings(input: Partial<LlmSettings>): Partial<LlmSettings> {
+  const output = { ...input }
+  for (const key of PI_OWNED_SETTINGS_KEYS) delete (output as Record<string, unknown>)[key]
+  return output
+}
+
+/**
+ * Project the legacy UI shape into the Pi Host settings protocol.
+ *
+ * Driven by the ownership table rather than a hand-written list, so every key
+ * the renderer stops persisting is a key that actually reaches the Host.
+ */
 export function piSettingsPatchFromLlmSettings(
   settings: Partial<LlmSettings>,
 ): PiSettingsPatch {
-  const patch: PiSettingsPatch = {}
-  if (settings.apiProvider) patch.provider = settings.apiProvider
-  if (settings.baseUrl != null) patch.baseUrl = settings.baseUrl
-  if (settings.apiKey != null) patch.apiKey = settings.apiKey
-  if (settings.model != null) patch.model = settings.model
-  if (settings.approvalMode != null) patch.approvalMode = settings.approvalMode
-  if (settings.bashRequireAsk != null) patch.bashRequireAsk = settings.bashRequireAsk
-  if (settings.unattended != null) patch.unattended = settings.unattended
-  return patch
+  const patch: Record<string, unknown> = {}
+  for (const [key, field] of Object.entries(PI_SETTINGS_FIELD_BY_KEY)) {
+    const value = (settings as Record<string, unknown>)[key]
+    // `apiProvider` is the one field an empty string cannot describe: the Host
+    // reads '' as "no provider chosen" and would drop a working connection.
+    if (value == null || (key === 'apiProvider' && value === '')) continue
+    patch[field] = value
+  }
+  return patch as PiSettingsPatch
 }
