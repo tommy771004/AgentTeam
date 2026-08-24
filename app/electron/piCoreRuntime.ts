@@ -9,15 +9,10 @@ import type { PiRecordedMessage, PiStepTiming } from '../src/agent/turnRecord.ts
 import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
 import { piPackExtensionFactories } from './piToolHost.ts'
 import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, resolvePiSkillsDir } from './piSkills.ts'
+import { piCodingAgentModule as piCodingAgent, piVendorDir } from './piVendor.ts'
+import { piActivePackToolNames, piAllPackToolNames, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
 
-const vendorCandidates = [
-  process.env.SUBAGENTS_PI_VENDOR_DIR,
-  join(process.cwd(), 'vendor/pi'),
-  join(process.cwd(), '../vendor/pi'),
-].filter((candidate): candidate is string => Boolean(candidate))
-const vendorDir = vendorCandidates.find((candidate) => existsSync(join(candidate, 'packages/coding-agent/dist/index.js'))) || vendorCandidates[0]
-if (!vendorDir) throw new Error('Vendored Pi Core directory is not configured')
-const piCodingAgent = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/index.js')).href)
+const vendorDir = piVendorDir
 const piConfig = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/config.js')).href)
 const piAuthStorage = await import(
   /* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/core/auth-storage.js')).href
@@ -140,6 +135,8 @@ export type PiRuntimeSettings = {
   temporaryChat?: boolean
   /** Capability ids preloaded for this turn (per-thread prefs ride in from the renderer). */
   preloadedCapabilities?: string[]
+  /** Tools unlocked by loaded capabilities; the active set unions them in. */
+  unlockedTools?: string[]
 }
 
 export type PiLegacyModelConfig = {
@@ -311,7 +308,13 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
       captureDiscoveredPiSkills(resourceLoader.getSkills())
     }
   }
-  if (settings.activeTools?.length) options.tools = [...settings.activeTools]
+  if (settings.activeTools?.length) {
+    // A restricted allowlist must still ADMIT every pack tool into the
+    // registry, or load_capability could never reveal one mid-run. Being in
+    // the registry is not the same as being active: the active set below is
+    // what reaches the model.
+    options.tools = [...new Set([...settings.activeTools, ...piAllPackToolNames()])]
+  }
   if (settings.thinkingLevel) options.thinkingLevel = settings.thinkingLevel
   if (agentDir) options.agentDir = agentDir
   if (settings.provider && settings.model && typeof piCodingAgent.ModelRuntime?.create === 'function') {
@@ -326,6 +329,39 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     contextWindowTokens = model.contextWindow
   }
   const created = await piCodingAgent.createAgentSession(options)
+  // The active set is stated explicitly so the model sees exactly what the
+  // catalog projection claims: restricted allowlists union their unlocked
+  // capability tools; an unrestricted run gets the Pi defaults plus every
+  // always-on pack tool. Without this, Pi would auto-activate every
+  // registered extension tool and the catalog would understate reality.
+  const desiredActive = [
+    ...(settings.activeTools?.length ? settings.activeTools : Object.keys(TOOL_FACTORIES)),
+    ...piActivePackToolNames(settings.activeTools || [], settings.unlockedTools || []),
+  ]
+  try {
+    created.session.setActiveToolsByName?.([...new Set(desiredActive)])
+  } catch {
+    /* a session that cannot accept an active set still runs on Pi's default */
+  }
+  // The session handle is the ONLY thing packs may touch mid-run: activating
+  // registered tools. load_capability drives it; nothing else is exposed.
+  registerPiPackSession(sessionId, {
+    setActiveTools: (names) => {
+      try {
+        created.session.setActiveToolsByName?.(names)
+        return true
+      } catch {
+        return false
+      }
+    },
+    getActiveTools: () => {
+      try {
+        return (created.session.getActiveToolNames?.() || []) as string[]
+      } catch {
+        return []
+      }
+    },
+  })
   const runtime = {
     activeToolsKey,
     sessionManager,
@@ -580,6 +616,7 @@ export function forkPiSession(sessionId: string) {
 export async function disposePiSession(sessionId: string) {
   const runtime = sessionRuntimes.get(sessionId)
   if (!runtime) return
+  unregisterPiPackSession(sessionId)
   await runtime.session.dispose?.()
   sessionRuntimes.delete(sessionId)
 }

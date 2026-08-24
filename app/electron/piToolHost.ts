@@ -97,6 +97,59 @@ export function findPiPackTool(name: string): { pack: PiExtensionPack; tool: PiP
   return undefined
 }
 
+/** Every pack tool name, so a restricted activeTools allowlist still admits them into the registry. */
+export function piAllPackToolNames(): string[] {
+  return piExtensionPacks().flatMap((pack) => pack.tools.map((tool) => tool.name))
+}
+
+/**
+ * THE shared definition of an active pack tool set.
+ *
+ * - Always-on packs (interaction, planning, core-utils, framework) are active
+ *   under any configuration.
+ * - Capability-gated tools are active once their capability loads, or when
+ *   the user names them explicitly.
+ *
+ * The projection, the session runtime, and Code Mode's sandbox all derive
+ * their answer from this one function, so a tool cannot be listed as callable
+ * in one place and refused in another.
+ */
+export function piActivePackToolNames(activeTools: ReadonlyArray<string>, unlocked: ReadonlyArray<string>): string[] {
+  return piExtensionPacks().flatMap((pack) => {
+    const gated = Boolean(pack.capability) && !pack.alwaysActive
+    return pack.tools
+      .filter((tool) => !gated || unlocked.includes(tool.name) || activeTools.includes(tool.name))
+      .map((tool) => tool.name)
+  })
+}
+
+/* ── Live session handles for mid-run activation ─────────────────────── */
+
+/**
+ * The one thing a pack may do to its own session mid-run: change which
+ * registered tools are active. `load_capability` drives this so a task that
+ * turns out to need a capability picks it up without restarting (user story
+ * 16); nothing else about the session is reachable from packs.
+ */
+export type PiPackSessionHandle = {
+  setActiveTools: (names: string[]) => boolean
+  getActiveTools: () => string[]
+}
+
+const packSessions = new Map<string, PiPackSessionHandle>()
+
+export function registerPiPackSession(sessionId: string, handle: PiPackSessionHandle): void {
+  packSessions.set(sessionId, handle)
+}
+
+export function unregisterPiPackSession(sessionId: string): void {
+  packSessions.delete(sessionId)
+}
+
+export function piPackSessionHandle(sessionId: string): PiPackSessionHandle | undefined {
+  return packSessions.get(sessionId)
+}
+
 /* ── Run binding ─────────────────────────────────────────────────────── */
 
 /**

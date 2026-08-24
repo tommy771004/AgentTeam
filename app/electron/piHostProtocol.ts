@@ -120,6 +120,11 @@ export type PiHostEvent =
       payload: { runId: string; sessionId: string; stageId: string; providerId: string; update: StreamingUpdate }
     }
   | {
+      /** update_plan drove the visible plan panel; steps are the full state. */
+      event: 'host/plan-updated'
+      payload: { sessionId: string; runId?: string; steps: Array<{ id: string; title: string; status: string }> }
+    }
+  | {
       event: 'host/approval-requested'
       payload: { runId: string; sessionId: string; tool: string; callId: string; args?: Record<string, unknown>; reason?: string; timeoutMs: number }
     }
@@ -161,6 +166,7 @@ import {
   consumePiDeniedInTurnCall,
   executePiPackTool,
   findPiPackTool,
+  piActivePackToolNames,
   piPackCatalogEntries,
   resolvePiApproval,
   setPiApprovalBridge,
@@ -172,6 +178,10 @@ import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
 import { configurePiMessagingGateway } from './piExtensionPacks/integrations.ts'
 import { discoveredPiSkills, syncPiSkillsFromRenderer, type PiSkillSyncResult } from './piSkills.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
+import { setPiDelegationBridge, setPiMemoryBridge } from './piPackBridges.ts'
+import { setPiPlanAnnouncer as installPlanAnnouncer } from './piExtensionPacks/interactionPlanning.ts'
+import { setPiMcpExtensionsLookup } from './piExtensionPacks/mcpBridgePack.ts'
+import { setPiCapabilityBridge, setPiCodeModeExecutor } from './piExtensionPacks/framework.ts'
 
 type HostState = {
   initialized: boolean
@@ -476,9 +486,19 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const params = input.params || {}
     if (typeof params.cwd !== 'string' || typeof params.code !== 'string') return [errorResponse(id, 'invalid_request', 'cwd and code are required')]
     const runId = typeof params.runId === 'string' ? params.runId : String(id)
+    const codeSessionId = typeof params.sessionId === 'string' ? params.sessionId : 'direct'
     const requiresApproval = state.snapshot.settings.approvalMode !== 'full' || state.snapshot.settings.unattended
     if (requiresApproval && params.approval !== 'allow') return [errorResponse(id, 'invalid_request', 'code requires approval before execution')]
-    const activeTools = state.snapshot.settings.activeTools.length ? [...state.snapshot.settings.activeTools] : piCoreRuntimeStatus().builtinTools
+    // The nested sandbox sees exactly what this turn could call, computed by
+    // the same formula as the projection and the session runtime (issue 13).
+    const unlockedCodeTools = state.capabilities.activeTools()
+    const activeTools = [
+      ...new Set([
+        ...(state.snapshot.settings.activeTools.length ? state.snapshot.settings.activeTools : piCoreRuntimeStatus().builtinTools),
+        ...piActivePackToolNames(state.snapshot.settings.activeTools, unlockedCodeTools),
+        ...unlockedCodeTools,
+      ]),
+    ]
     let nestedSequence = 0
     return runPiCodeMode({
       runId,
@@ -487,8 +507,39 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       maxToolCalls: typeof params.maxToolCalls === 'number' ? params.maxToolCalls : undefined,
       timeoutMs: typeof params.timeoutMs === 'number' ? params.timeoutMs : undefined,
       callTool: async (toolName, args) => {
-        if (!piCoreRuntimeStatus().builtinTools.includes(toolName)) throw new Error(`Unknown Pi tool: ${toolName}`)
         const nestedId = `${String(id)}:code:${nestedSequence++}`
+        // Extension tools nest through the SAME shared gate as direct calls:
+        // approval is NOT inherited from the outer run_code, so a script can
+        // never launder a side effect past the human (issue 13). Only tools
+        // active this turn are callable at all.
+        if (findPiPackTool(toolName)) {
+          if (!activeTools.includes(toolName)) return JSON.stringify({ ok: false, text: `${toolName} is not active this turn`, data: null })
+          const outcome = await executePiPackTool(toolName, args as Record<string, unknown>, { sessionId: codeSessionId, cwd: String(params.cwd), runId }, {
+            policy: {
+              approvalMode: state.snapshot.settings.approvalMode,
+              unattended: state.snapshot.settings.unattended,
+            },
+            callId: nestedId,
+          })
+          recordToolAudit(state, params.sessionId, { event: 'host/tool-decision', payload: {
+            runId,
+            parentRunId: runId,
+            tool: toolName,
+            callId: nestedId,
+            decision: outcome.denied ? 'deny' : 'allow',
+            ...(outcome.ok ? {} : { settlement: 'denied' as const, reason: outcome.text }),
+          } })
+          recordToolAudit(state, params.sessionId, { event: 'host/tool-result', payload: {
+            runId,
+            tool: toolName,
+            callId: nestedId,
+            settlement: outcome.ok ? 'success' : outcome.denied ? 'denied' : 'failed',
+            item: outcome.data ?? undefined,
+            ...(outcome.ok ? {} : { reason: outcome.text }),
+          } })
+          return JSON.stringify({ ok: outcome.ok, text: outcome.text.slice(0, 20_000), data: outcome.data ?? null })
+        }
+        if (!piCoreRuntimeStatus().builtinTools.includes(toolName)) throw new Error(`Unknown Pi tool: ${toolName}`)
         const nested = await handlePiHostRequest(state, {
           id: nestedId,
           method: `tools/${toolName}` as PiHostRequest['method'],
@@ -950,12 +1001,28 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       }
     }
     const turnEvents: PiHostEvent[] = []
+    // Per-thread prefs ride in as preloaded capabilities (issue 12): the
+    // renderer persists what last run loaded, and this run starts with those
+    // already active. The authority on what is active is still the Host —
+    // preload goes through capabilities/load, not a side door.
+    const preloaded = Array.isArray(input.params?.preloadedCapabilities) ? input.params?.preloadedCapabilities : []
     // One turn, one record. Opened here so every later entry — the model's,
     // the tools', the approvals' — lands in the order it actually happened.
     const recorder: ActiveTurnRecorder = { turn: nextTurnNumber(session.record), step: 1, entries: [] }
     activeTurnRecorders.set(sessionId, recorder)
     recordTurnEntry(sessionId, { kind: 'turn-start', source: 'host' })
     const contextPolicy = parsePiTurnContextPolicy(input.params?.contextPolicy)
+    for (const capabilityId of preloaded) {
+      if (typeof capabilityId !== 'string') continue
+      try {
+        state.capabilities.load(capabilityId)
+      } catch {
+        /* an unknown preloaded id is skipped; the catalog still reports truth */
+      }
+    }
+    // Capability-unlocked tools join the turn's active set: loading a
+    // capability changes what this turn can call, immediately.
+    const unlockedTools = state.capabilities.activeTools()
     const previousModel = typeof session.profile?.model === 'string' ? session.profile.model : undefined
     const nextProfile: Record<string, unknown> = {
       ...(session.profile || {}),
@@ -1163,7 +1230,16 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event, iteration } }
           if (emit) emit(turnEvent)
           else turnEvents.push(turnEvent)
-        }, runId, session.piSessionFile, { ...turnSettings, temporaryChat: contextPolicy.temporary === true }, memoryContext, contextPolicy.referenceChatHistory, (registryContextWindow) => {
+        }, runId, session.piSessionFile, {
+          ...turnSettings,
+          temporaryChat: contextPolicy.temporary === true,
+          // A restricted allowlist unions the unlocked capability tools; an
+          // empty list already means everything is on.
+          activeTools: turnSettings.activeTools.length
+            ? [...new Set([...turnSettings.activeTools, ...unlockedTools])]
+            : turnSettings.activeTools,
+          unlockedTools,
+        }, memoryContext, contextPolicy.referenceChatHistory, (registryContextWindow) => {
           if (contextPreflightComplete) return
           contextPreflightComplete = true
           resolvedContextWindow = registryContextWindow || contextPolicy.contextWindowTokens
@@ -1386,6 +1462,87 @@ export function createPiHostServer(
   ensurePiPacksRegistered()
   // The gateway credential is operator configuration, never a model argument.
   configurePiMessagingGateway({ botToken: process.env.SUBAGENTS_TELEGRAM_BOT_TOKEN })
+  // Packs reach durable Host state ONLY through these accessors: one memory
+  // store, the real child-session/run-queue path, and the live extension
+  // registry. No pack holds a copy of any of them.
+  setPiMemoryBridge({
+    recall: (query, project, limit) => new PiMemoryExtension(state.snapshot.memories).recall(query, project, limit),
+    search: (query, limit) => new PiMemoryExtension(state.snapshot.memories).recall(query, undefined, limit),
+    get: (id) => state.snapshot.memories.find((memory) => memory.id === id),
+    add: (memory) => {
+      const store = new PiMemoryExtension(state.snapshot.memories)
+      store.add(memory)
+      state.snapshot.memories = store.export()
+      state.snapshot.cursor += 1
+    },
+  })
+  setPiDelegationBridge({
+    createChild: async ({ parentSessionId, role, profile, context, depth }) => {
+      const request = {
+        id: `pack-child-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        method: 'sessions/create' as const,
+        params: { parentSessionId, role, profile, context, depth },
+      }
+      const responses = await Promise.resolve(handlePiHostRequest(state, request))
+      const response = (Array.isArray(responses) ? responses : []).find((message) => !('event' in message)) as PiHostResponse | undefined
+      if (!response || response.error) throw new Error(response?.error?.message || 'child session failed')
+      return { sessionId: String(response.result?.sessionId) }
+    },
+    enqueueChildRun: async ({ runId, sessionId, prompt }) => {
+      const queue = new PiRunQueue(24, state.snapshot.queue)
+      const outcome = queue.enqueue({ runId, sessionId, prompt, trigger: 'interactive', profile: {}, status: 'queued' })
+      if (!outcome.ok) throw new Error(`Pi run queue ${outcome.code}`)
+      state.snapshot.queue = queue.snapshot()
+      state.snapshot.cursor += 1
+    },
+    listRuns: () => [
+      ...state.snapshot.queue.map((run) => ({
+        runId: run.runId,
+        sessionId: run.sessionId,
+        status: 'queued' as const,
+        parentSessionId: state.snapshot.sessions.find((session) => session.id === run.sessionId)?.parentSessionId,
+        role: state.snapshot.sessions.find((session) => session.id === run.sessionId)?.role,
+        depth: state.snapshot.sessions.find((session) => session.id === run.sessionId)?.depth,
+      })),
+    ],
+  })
+  setPiMcpExtensionsLookup(() => state.extensions.list())
+  // The framework pack's reserved verbs drive the SAME catalog instance the
+  // protocol methods answer from — one authority on what is active (issue 12).
+  setPiCapabilityBridge({
+    catalog: () => state.capabilities.catalog(),
+    load: (id) => {
+      try {
+        const capability = state.capabilities.load(id)
+        return { id: capability.id, tools: capability.tools }
+      } catch {
+        return undefined
+      }
+    },
+    search: (query) => state.capabilities.search(query),
+  })
+  // run_code nests through Code Mode, and every nested call re-enters the
+  // same Approval Decision the outer call faced (issue 13): no blanket pass
+  // because the model is inside a script.
+  setPiCodeModeExecutor(async ({ code, sessionId, cwd, runId }) => {
+    const request = {
+      id: `pack-code-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      method: 'tools/code' as const,
+      params: { code, cwd, sessionId, ...(runId ? { runId } : {}) },
+    }
+    const responses = await Promise.resolve(handlePiHostRequest(state, request))
+    const response = (Array.isArray(responses) ? responses : []).find((message) => !('event' in message)) as PiHostResponse | undefined
+    if (!response || response.error) return { ok: false, content: response?.error?.message || 'code mode failed' }
+    return {
+      ok: true,
+      settlement: String(response.result?.settlement || 'success'),
+      content: response.result?.content?.map((part) => part.text || '').join('') || '',
+      toolCallCount: Number((response.result?.items?.[0] as { toolCallCount?: number } | undefined)?.toolCallCount ?? 0),
+    }
+  })
+  installPlanAnnouncer((announcement) => {
+    send({ event: 'host/plan-updated', payload: { ...announcement } })
+  })
   // In-turn asks travel out as events on the same channel as every other
   // host event; their verdicts are audited into the same tool audit stream
   // as direct calls.
