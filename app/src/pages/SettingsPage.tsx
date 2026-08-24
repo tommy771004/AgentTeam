@@ -2725,6 +2725,7 @@ export function SettingsPage() {
                   })()}
                 </SettingsStack>
               )}
+              {settings.capabilitiesEnabled !== false && <HostToolCatalogSection />}
               {/* P1-D: declarative lifecycle hook rules */}
               <SettingsStack title="Lifecycle hooks（宣告式規則）">
                 <p className="text-[11px] text-on-surface-variant mb-1 leading-relaxed">
@@ -3848,6 +3849,86 @@ export function SettingsPage() {
         <p className="text-[11px] text-outline px-1 mt-2">變更會立即套用，無需儲存。</p>
       </div>
     </ThemePage>
+  )
+}
+
+/**
+ * 工具目錄（Host 投影）— the Settings tool list IS the Host's catalog.
+ *
+ * Every entry carries its own availability fact with a reason, so live and
+ * not-yet-live tools sit beside each other instead of greying out wholesale
+ * (issue 03). When the Host cannot produce a catalog this section FAILS
+ * CLOSED with an explicit message — it never falls back to the deleted
+ * renderer list, because that fallback is the two-catalog problem restated.
+ */
+function HostToolCatalogSection() {
+  const [catalog, setCatalog] = useState<Array<{ name: string; description: string; pack: string; source: 'discovered' | 'installed'; active: boolean; available: boolean; reason?: string }> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const api = window.subagents?.piHost?.tools?.catalog
+        if (!api) throw new Error('Pi Host bridge 不可用')
+        const { catalog: entries } = await api()
+        if (!cancelled) setCatalog(entries)
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+  return (
+    <SettingsStack title="工具目錄（Host 投影）">
+      <p className="text-[12px] text-on-surface-variant mb-2 leading-relaxed">
+        這份清單就是 agent 實際可用的工具：由 Pi Core Host 投影，每筆帶自己的可用狀態與原因。
+        能力包內的工具在 load_capability 後才會變 active。
+      </p>
+      {error ? (
+        <div className="rounded-lg border border-error/40 bg-error/10 px-3 py-2 text-[12px] text-error">
+          工具目錄不可用：{error}。請確認 Pi Core Host 已啟動；此頁不會回退到本機清單。
+        </div>
+      ) : !catalog ? (
+        <div className="text-[12px] text-outline">載入中…</div>
+      ) : (
+        (() => {
+          const byPack = new Map<string, typeof catalog>()
+          for (const entry of catalog) {
+            byPack.set(entry.pack, [...(byPack.get(entry.pack) || []), entry])
+          }
+          return (
+            <div className="space-y-3">
+              {[...byPack.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([pack, entries]) => (
+                <div key={pack}>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-outline mb-1.5">
+                    {pack}
+                    <span className="ml-1.5 normal-case font-normal opacity-70">
+                      {entries.filter((entry) => entry.active).length}/{entries.length} active
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {entries.map((entry) => (
+                      <span
+                        key={entry.name}
+                        title={`${entry.description}${entry.reason ? `\n${entry.reason}` : ''}`}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-medium border ${
+                          entry.active
+                            ? 'border-primary/40 bg-primary/15 text-primary'
+                            : 'border-white/10 text-on-surface-variant'
+                        }`}
+                      >
+                        {entry.name}
+                        {!entry.active ? ' · inactive' : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        })()
+      )}
+    </SettingsStack>
   )
 }
 

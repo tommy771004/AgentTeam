@@ -105,6 +105,34 @@ function PiHostEventBootstrap() {
     if (!onEvent) return
     const unsubscribe = onEvent((event) => {
       push(event)
+      // In-turn asks ride the SAME HITL queue as every other approval: the
+      // question surfaces in the permission panel and its answer resolves
+      // back through approvals/resolve (user story 11).
+      if ((event as { event?: string }).event === 'host/approval-requested') {
+        const payload = (event as { payload?: { runId: string; tool: string; callId: string; args?: Record<string, unknown>; reason?: string; timeoutMs?: number } }).payload
+        if (payload) {
+          void (async () => {
+            try {
+              const { usePermissionAskStore } = await import('./store/permissionAskStore')
+              const hitl = await usePermissionAskStore.getState().requestAsk({
+                runId: payload.runId,
+                tool: payload.tool,
+                args: payload.args || {},
+                reason: payload.reason,
+                timeoutMs: payload.timeoutMs,
+              })
+              await window.subagents?.piHost?.approvals?.resolve?.({
+                runId: payload.runId,
+                callId: payload.callId,
+                decision: hitl === 'allow' ? 'allow' : 'deny',
+              })
+            } catch {
+              /* a failed transport leaves the Host's own timeout to deny */
+            }
+          })()
+        }
+        return
+      }
       const update = mapPiHostEventToActivity(event)
       if (!update) return
       const activity = useRunActivityStore.getState()
@@ -135,9 +163,57 @@ function PiHostEventBootstrap() {
   return null
 }
 
-/** Rebuild live external CLI activity from Host snapshots after renderer reload. */
-function ExternalCliSessionBootstrap() {
+/**
+ * One-way skill migration (issue 16): the renderer's localStorage copy is
+ * written into the Host-owned skills directory once, with a per-skill report.
+ * The flag flips only when every skill synced, so a partial migration RETRIES
+ * on next boot instead of being silently assumed complete.
+ */
+function SkillsMigrationBootstrap() {
   useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const MIGRATION_KEY = 'subagents.skillsMigration.v1'
+      try {
+        if (localStorage.getItem(MIGRATION_KEY)) return
+        const sync = window.subagents?.piHost?.resources?.syncSkills
+        if (!sync) return
+        // Wait for the Host bridge, then push the renderer copy once.
+        for (let attempt = 0; attempt < 20 && !cancelled; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1500))
+          try {
+            const { skillsStore } = await import('./agent/hermes/skills')
+            const payload = skillsStore.list().map((skill) => ({
+              name: skill.meta.name,
+              description: skill.meta.description || '',
+              body: skill.body,
+              status: skill.meta.status === 'archived' ? 'archived' : skill.meta.status === 'pinned' ? 'pinned' : 'active',
+            }))
+            const report = await sync(payload)
+            if (cancelled) return
+            if (report.results.every((result) => result.ok)) {
+              localStorage.setItem(MIGRATION_KEY, JSON.stringify({
+                completedAt: new Date().toISOString(),
+                skillsDir: report.skillsDir,
+                count: report.results.length,
+              }))
+              return
+            }
+          } catch {
+            /* Host not ready yet; retry until the attempt budget runs out */
+          }
+        }
+      } catch {
+        /* migration is best-effort; a missing bridge must not break boot */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+  return null
+}
+
+/** Rebuild live external CLI activity from Host snapshots after renderer reload. */
+function ExternalCliSessionBootstrap() {  useEffect(() => {
     let cancelled = false
     let stopProjection: (() => void) | undefined
     void (async () => {
@@ -1110,6 +1186,7 @@ export default function App() {
         <PreferencesBootstrap />
         <PiHostProjectionBootstrap />
         <PiHostEventBootstrap />
+      <SkillsMigrationBootstrap />
         <ExternalCliSessionBootstrap />
         <RunQueueBootstrap />
         <SkillCuratorBootstrap />

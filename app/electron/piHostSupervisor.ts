@@ -317,6 +317,34 @@ export class PiHostSupervisor {
     return response.result.builtinTools
   }
 
+  /** The full catalog projection: every entry carries its own availability fact. */
+  async listCatalog(): Promise<Array<{ name: string; description: string; pack: string; source: 'discovered' | 'installed'; active: boolean; available: boolean; reason?: string }>> {
+    const response = await this.request('tools/list', {})
+    if (response.error || !response.result?.catalog) throw new Error(response.error?.message || 'Pi tool catalog is unavailable')
+    return response.result.catalog
+  }
+
+  /** One pack tool execution through the shared approval gate. */
+  async callPackTool(name: string, args: Record<string, unknown>, options: { cwd?: string; sessionId?: string; approval?: 'allow' | 'deny' } = {}): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('tools/pack', { name, arguments: args, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.sessionId ? { sessionId: options.sessionId } : {}), ...(options.approval ? { approval: options.approval } : {}) })
+    if (response.error) throw new Error(response.error.message)
+    return response.result ?? {}
+  }
+
+  /** Sync renderer skills into the Host-owned skills directory; per-skill results come back. */
+  async syncSkills(skills: Array<{ name?: string; description?: string; body?: string; status?: string }>): Promise<{ skillsDir: string; results: Array<{ name: string; ok: boolean; status?: string; filePath?: string; slug?: string; error?: string }> }> {
+    const response = await this.request('resources/sync-skills', { skills })
+    if (response.error || !response.result?.report) throw new Error(response.error?.message || 'Pi skill sync failed')
+    return response.result.report as { skillsDir: string; results: Array<{ name: string; ok: boolean; status?: string; filePath?: string; slug?: string; error?: string }> }
+  }
+
+  /** Answer a pending in-turn HITL ask raised by an extension tool. */
+  async resolveApproval(input: { runId: string; callId: string; decision: 'allow' | 'deny'; answer?: string }): Promise<boolean> {
+    const response = await this.request('approvals/resolve', input)
+    if (response.error) throw new Error(response.error.message)
+    return true
+  }
+
   async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: unknown }): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}), ...(profile ? { profile } : {}), ...(orchestration || {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')

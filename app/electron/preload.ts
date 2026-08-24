@@ -85,8 +85,14 @@ const api = {
         settle: (runId: string, settlement: PiTurnSettlement) => ipcRenderer.invoke('pi-host:runs:settle', runId, settlement) as Promise<{ run?: unknown; queue: unknown[]; settlement: string }>,
       },
       resources: {
-        list: () => ipcRenderer.invoke('pi-host:resources:list') as Promise<{ resources: unknown[] }>,
+        list: () => ipcRenderer.invoke('pi-host:resources:list') as Promise<{ resources?: Array<{ id: string; kind: string; source: string; enabled: boolean; reason?: string }>; diagnostics?: Array<{ path: string; message?: unknown }> }>,
         reload: (resources: unknown[]) => ipcRenderer.invoke('pi-host:resources:reload', resources) as Promise<{ resources: unknown[] }>,
+        syncSkills: (skills: Array<{ name?: string; description?: string; body?: string; status?: string }>) =>
+          ipcRenderer.invoke('pi-host:resources:sync-skills', skills) as Promise<{ skillsDir: string; results: Array<{ name: string; ok: boolean; status?: string; filePath?: string; slug?: string; error?: string }> }>,
+      },
+      approvals: {
+        resolve: (input: { runId: string; callId: string; decision: 'allow' | 'deny'; answer?: string }) =>
+          ipcRenderer.invoke('pi-host:approvals:resolve', input) as Promise<unknown>,
       },
       memory: {
         list: () => ipcRenderer.invoke('pi-host:memory:list') as Promise<{ memories: unknown[] }>,
@@ -116,6 +122,7 @@ const api = {
       },
       tools: {
       list: () => ipcRenderer.invoke('pi-host:tools:list') as Promise<{ builtinTools: string[] }>,
+        catalog: () => ipcRenderer.invoke('pi-host:tools:catalog') as Promise<{ catalog: Array<{ name: string; description: string; pack: string; source: 'discovered' | 'installed'; active: boolean; available: boolean; reason?: string }> }>,
         execute: (tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash' | 'code' | 'mcp', params: Record<string, unknown>) =>
         ipcRenderer.invoke('pi-host:tools:execute', { tool, params }) as Promise<{ tool: string; content: unknown }>,
     },
