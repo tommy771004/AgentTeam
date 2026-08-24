@@ -24,7 +24,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -58,6 +58,13 @@ export type PiHostResponse = {
     queue?: PiQueuedRun[]
     run?: PiQueuedRun
     resources?: PiResource[]
+    /** The Host's tool catalog projection: builtins, packs, and MCP in one list. */
+    catalog?: PiCatalogEntry[]
+    diagnostics?: Array<{ path: string; message?: unknown }>
+    report?: { skillsDir?: string; results?: PiSkillSyncResult[] }
+    resolved?: boolean
+    /** Structured payload of one tool execution (tools/pack). */
+    item?: unknown
     memories?: PiMemory[]
     tool?: string
     code?: string
@@ -113,6 +120,10 @@ export type PiHostEvent =
       payload: { runId: string; sessionId: string; stageId: string; providerId: string; update: StreamingUpdate }
     }
   | {
+      event: 'host/approval-requested'
+      payload: { runId: string; sessionId: string; tool: string; callId: string; args?: Record<string, unknown>; reason?: string; timeoutMs: number }
+    }
+  | {
       event: 'host/extension'
       payload: { action: 'installed' | 'updated' | 'enabled' | 'disabled' | 'uninstalled'; extension: PiExtension }
     }
@@ -145,6 +156,22 @@ import { isCompletedModelCall, isPiHostDefinitionOfDoneMet, isPiTurnSettlement, 
 import { appendTurnRecord, derivePiHistory, pageTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft } from '../src/agent/turnRecord.ts'
 import { cancelSubDesignProviderRun, executeSubDesignProviderStage } from './subDesignProviderRuntime.ts'
 import { shouldStopForProviderProjection, type SubDesignPluginExecutionProjection } from '../src/agent/subdesign/pluginExecution.ts'
+import {
+  cancelPiApprovalsForRun,
+  consumePiDeniedInTurnCall,
+  executePiPackTool,
+  findPiPackTool,
+  piPackCatalogEntries,
+  resolvePiApproval,
+  setPiApprovalBridge,
+  unbindPiSessionRun,
+  bindPiSessionRun,
+  type PiCatalogEntry,
+} from './piToolHost.ts'
+import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
+import { configurePiMessagingGateway } from './piExtensionPacks/integrations.ts'
+import { discoveredPiSkills, syncPiSkillsFromRenderer, type PiSkillSyncResult } from './piSkills.ts'
+import { resolvePiAgentDir } from './piUserConfig.ts'
 
 type HostState = {
   initialized: boolean
@@ -333,8 +360,23 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
   if (input.method === 'health/get') return [{ id, result: readyResult() }]
   if (input.method === 'runtime/status') return [{ id, result: piCoreRuntimeStatus() }]
   if (input.method === 'tools/list') {
+    ensurePiPacksRegistered()
     const extensionTools = state.extensions.list().filter((extension) => extension.enabled).flatMap((extension) => extension.tools.map((tool) => `mcp_${extension.id}_${tool}`))
     const mcpExtensions = state.extensions.list().filter((extension) => extension.enabled && extension.kind === 'mcp' && extension.mcp)
+    const activeTools = state.snapshot.settings.activeTools
+    const unlocked = state.capabilities.activeTools()
+    const packEntries = piPackCatalogEntries({ activeTools, unlockedTools: [...unlocked] })
+    const builtinEntries: PiCatalogEntry[] = piCoreRuntimeStatus().builtinTools.map((name) => ({
+      name,
+      description: `Pi builtin ${name}`,
+      pack: 'builtin',
+      source: 'discovered' as const,
+      // Empty settings.activeTools means "everything on" (the historical
+      // contract); a non-empty list is the user's explicit set.
+      active: activeTools.length === 0 || activeTools.includes(name),
+      available: true,
+      ...(!(activeTools.length === 0 || activeTools.includes(name)) ? { reason: `${name} is disabled by Pi active tools settings` } : {}),
+    }))
     return Promise.all(mcpExtensions.map(async (extension) => {
       try {
         const tools = await listPiMcpTools(extension.id, extension.mcp!)
@@ -342,7 +384,61 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       } catch {
         return []
       }
-    })).then((discovered) => [{ id, result: { builtinTools: [...piCoreRuntimeStatus().builtinTools, ...extensionTools, ...discovered.flat()].sort() } }])
+    })).then((discovered) => {
+      const mcpNames = [...new Set([...extensionTools, ...discovered.flat()])].sort()
+      const mcpEntries: PiCatalogEntry[] = mcpNames.map((name) => ({
+        name,
+        description: 'Tool provided by an installed MCP extension',
+        pack: 'mcp',
+        source: 'installed' as const,
+        active: true,
+        available: true,
+      }))
+      // One list, three sources beside each other with their own facts
+      // carried per entry (issue 03). Sorted by name so the union reads
+      // stably regardless of which source answered first.
+      const catalog = [...builtinEntries, ...packEntries, ...mcpEntries].sort((left, right) => left.name.localeCompare(right.name))
+      return [{ id, result: { builtinTools: catalog.filter((entry) => entry.available && entry.active).map((entry) => entry.name), catalog } }]
+    })
+  }
+  if (input.method === 'tools/pack') {
+    const params = input.params || {}
+    const name = typeof params.name === 'string' ? params.name : ''
+    if (!findPiPackTool(name)) return [errorResponse(id, 'invalid_request', `Unknown Pi extension tool: ${name}`)]
+    const args = (params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments) ? params.arguments : {}) as Record<string, unknown>
+    const sessionId = typeof params.sessionId === 'string' ? params.sessionId : 'direct'
+    const runId = typeof params.runId === 'string' ? params.runId : String(id)
+    const callId = typeof params.callId === 'string' ? params.callId : runId
+    const cwd = typeof params.cwd === 'string' ? params.cwd : process.cwd()
+    const updates: PiHostEvent[] = []
+    const publish = (event: PiHostEvent) => {
+      recordToolAudit(state, params.sessionId, event)
+      if (emit) emit(event); else updates.push(event)
+    }
+    publish({ event: 'host/tool-start', payload: { runId, tool: name, callId } })
+    return executePiPackTool(name, args, { sessionId, cwd, runId }, {
+      approval: params.approval === 'allow' || params.approval === 'deny' ? params.approval : undefined,
+      policy: {
+        approvalMode: state.snapshot.settings.approvalMode,
+        unattended: state.snapshot.settings.unattended,
+      },
+      callId,
+    }).then((outcome) => {
+      publish({
+        event: 'host/tool-decision',
+        payload: outcome.denied
+          ? { runId, tool: name, callId, decision: 'deny', settlement: 'denied' as const, reason: outcome.text }
+          : { runId, tool: name, callId, decision: 'allow' as const, reason: 'Pi extension policy' },
+      })
+      publish({ event: 'host/tool-result', payload: { runId, tool: name, callId, settlement: outcome.ok ? 'success' as const : outcome.denied ? 'denied' as const : 'failed' as const, item: outcome.data ?? { text: outcome.text }, ...(outcome.ok ? {} : { reason: outcome.text }) } })
+      if (!outcome.ok && !outcome.denied) return [...updates, errorResponse(id, 'invalid_request', outcome.text)]
+      return [...updates, { id, result: { tool: name, content: [{ type: 'text', text: outcome.text }], ...(outcome.data !== undefined ? { item: outcome.data } : {}) } }]
+    })
+  }
+  if (input.method === 'approvals/resolve') {
+    const resolved = resolvePiApproval(input.params || {})
+    if (!resolved) return [errorResponse(id, 'invalid_request', 'No pending Pi approval matches runId and callId')]
+    return [{ id, result: { resolved: true } }]
   }
   if (input.method === 'tools/mcp') {
     const extensionId = typeof input.params?.extensionId === 'string' ? input.params.extensionId : ''
@@ -507,7 +603,17 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const limit = typeof input.params?.limit === 'number' ? input.params.limit : undefined
     return [{ id, result: { sessionId, page: pageTurnRecord(session.record, { before, limit }) } }]
   }
-  if (input.method === 'resources/list') return [{ id, result: { resources: state.snapshot.resources.map((resource) => ({ ...resource })) } }]
+  if (input.method === 'resources/list') {
+    // Skills come straight from what the resource loader actually found on
+    // its last reload, so the registry describes reality instead of an empty
+    // array (issue 02). A skill archived via disable-model-invocation stays
+    // listed here while staying out of <available_skills>.
+    const found = discoveredPiSkills()
+    const skillResources: PiResource[] = found.skills
+      .filter((skill) => skill.name)
+      .map((skill) => ({ id: skill.name, kind: 'skill' as const, source: skill.filePath, enabled: !skill.disableModelInvocation }))
+    return [{ id, result: { resources: [...skillResources, ...state.snapshot.resources.map((resource) => ({ ...resource }))].sort((left, right) => left.id.localeCompare(right.id)), ...(found.diagnostics.length ? { diagnostics: found.diagnostics.map((diagnostic) => ({ path: diagnostic.path, message: diagnostic.message })) } : {}) } }]
+  }
   if (input.method === 'resources/reload') {
     const resources = input.params?.resources
     if (!Array.isArray(resources)) return [errorResponse(id, 'invalid_request', 'resources must be an array')]
@@ -519,6 +625,17 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     }
     state.snapshot.resources = registry.list(); state.snapshot.cursor += 1
     return [{ id, result: { resources: state.snapshot.resources.map((resource) => ({ ...resource })) } }]
+  }
+  if (input.method === 'resources/sync-skills') {
+    // One-way migration from the renderer's localStorage copy into the
+    // Host-owned skills directory. Per-skill results travel back so a partial
+    // migration is visible rather than assumed (issue 16).
+    const skills = input.params?.skills
+    if (!Array.isArray(skills)) return [errorResponse(id, 'invalid_request', 'skills must be an array')]
+    return syncPiSkillsFromRenderer(resolvePiAgentDir(), skills as never).then((report) => ({
+      id,
+      result: { report: { skillsDir: report.skillsDir, results: report.results } },
+    })).catch((error: unknown) => errorResponse(id, 'runtime_error', error instanceof Error ? error.message : 'Skill sync failed')).then((message) => [message])
   }
   if (input.method === 'memory/list') {
     const memory = new PiMemoryExtension(state.snapshot.memories)
@@ -851,6 +968,15 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     let contextPreflightComplete = false
     let resolvedContextWindow = contextPolicy.contextWindowTokens
     activeSessionRuns.set(sessionId, { runId, cancelled: false })
+    // In-turn pack tools read their coordinates and approval policy from this
+    // binding; it is cleared when the run ends so a stale policy can never
+    // answer for the next one.
+    bindPiSessionRun(sessionId, {
+      runId,
+      approvalMode: turnSettings.approvalMode,
+      unattended: turnSettings.unattended,
+      temporaryChat: contextPolicy.temporary,
+    })
     // A stuck turn must not hold the conversation forever. Expiry walks the
     // same safe-park path as a user's stop, so an in-flight tool still lands.
     const timeoutMs = clampTurnTimeout(input.params?.timeoutMs)
@@ -987,13 +1113,19 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           }
           if (event.type === 'tool_execution_end') {
             // Pi executes in-turn tools inside this process, so its own report
-            // is the Host's account of what ran — not the model's claim.
+            // is the Host's account of what ran — not the model's claim. A
+            // call the Approval Decision blocked settles as `denied`, never as
+            // an ordinary failure: "the agent could not" and "the gate said
+            // no" are different facts.
+            const toolCallId = typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`
+            const denialReason = consumePiDeniedInTurnCall(sessionId, toolCallId)
             recordTurnEntry(sessionId, {
               kind: 'tool-result',
               source: 'host',
               tool: typeof event.toolName === 'string' ? event.toolName : 'tool',
-              callId: typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`,
-              settlement: event.isError === true ? 'failed' : 'success',
+              callId: toolCallId,
+              settlement: denialReason !== undefined ? 'denied' : event.isError === true ? 'failed' : 'success',
+              ...(denialReason !== undefined ? { detail: denialReason } : {}),
             })
           }
           /* Events are collected below so the response remains ordered after them. */
@@ -1003,7 +1135,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event, iteration } }
           if (emit) emit(turnEvent)
           else turnEvents.push(turnEvent)
-        }, runId, session.piSessionFile, turnSettings, memoryContext, contextPolicy.referenceChatHistory, (registryContextWindow) => {
+        }, runId, session.piSessionFile, { ...turnSettings, temporaryChat: contextPolicy.temporary === true }, memoryContext, contextPolicy.referenceChatHistory, (registryContextWindow) => {
           if (contextPreflightComplete) return
           contextPreflightComplete = true
           resolvedContextWindow = registryContextWindow || contextPolicy.contextWindowTokens
@@ -1154,6 +1286,8 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       })
     }).finally(() => {
       deadline?.cancel()
+      cancelPiApprovalsForRun(runId)
+      unbindPiSessionRun(sessionId)
       if (activeTurnRecorders.get(sessionId) === recorder) activeTurnRecorders.delete(sessionId)
       if (activeSessionRuns.get(sessionId)?.runId === runId) activeSessionRuns.delete(sessionId)
     })
@@ -1221,6 +1355,39 @@ export function createPiHostServer(
 ) {
   const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [] }
   const state: HostState = { initialized: false, snapshot, capabilities: new PiCapabilityCatalog(DEFAULT_PI_CAPABILITIES), extensions: new PiExtensionRegistry(snapshot.extensions) }
+  ensurePiPacksRegistered()
+  // The gateway credential is operator configuration, never a model argument.
+  configurePiMessagingGateway({ botToken: process.env.SUBAGENTS_TELEGRAM_BOT_TOKEN })
+  // In-turn asks travel out as events on the same channel as every other
+  // host event; their verdicts are audited into the same tool audit stream
+  // as direct calls.
+  setPiApprovalBridge({
+    request: (request) => {
+      send({ event: 'host/approval-requested', payload: { ...request } })
+    },
+  }, (record) => {
+    const event: PiHostEvent = { event: 'host/tool-decision', payload: {
+      runId: record.runId,
+      tool: record.tool,
+      callId: record.callId,
+      decision: record.decision,
+      ...(record.settlement ? { settlement: record.settlement } : {}),
+      ...(record.reason ? { reason: record.reason } : {}),
+    } }
+    recordToolAudit(state, record.sessionId, event)
+    send(event)
+    if (record.decision !== 'allow') {
+      const resultEvent: PiHostEvent = { event: 'host/tool-result', payload: {
+        runId: record.runId,
+        tool: record.tool,
+        callId: record.callId,
+        settlement: record.settlement || 'denied',
+        ...(record.reason ? { reason: record.reason } : {}),
+      } }
+      recordToolAudit(state, record.sessionId, resultEvent)
+      send(resultEvent)
+    }
+  })
   return {
     async handle(request: unknown) {
       const input = request && typeof request === 'object' ? request as Partial<PiHostRequest> : undefined

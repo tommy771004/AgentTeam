@@ -6,6 +6,9 @@ import type { PiThinkingLevel } from './piAgentProfile.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
 import { classifyPiTurnSettlement, piTurnProviderError, piTurnStopReason, PI_TURN_TRUNCATED_NOTICE } from '../src/agent/piHostRun.ts'
 import type { PiRecordedMessage, PiStepTiming } from '../src/agent/turnRecord.ts'
+import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
+import { piPackExtensionFactories } from './piToolHost.ts'
+import { captureDiscoveredPiSkills, resolvePiSkillsDir } from './piSkills.ts'
 
 const vendorCandidates = [
   process.env.SUBAGENTS_PI_VENDOR_DIR,
@@ -133,6 +136,10 @@ export type PiRuntimeSettings = {
   model?: string
   thinkingLevel?: PiThinkingLevel
   activeTools?: string[]
+  /** Temporary chats read no memory and write none; pack tools honour it too. */
+  temporaryChat?: boolean
+  /** Capability ids preloaded for this turn (per-thread prefs ride in from the renderer). */
+  preloadedCapabilities?: string[]
 }
 
 export type PiLegacyModelConfig = {
@@ -249,11 +256,20 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   }
   let contextWindowTokens: number | undefined
   const requestContext = { value: '', includeHistory: true }
+  const piSkillsDir = resolvePiSkillsDir(agentDir)
   if (agentDir && typeof piCodingAgent.DefaultResourceLoader === 'function') {
+    // The pack factories register the SubAgents extension tools next to the
+    // hidden session-context factory, so the model sees one tool catalog
+    // owned by the Host (issue 01). `additionalSkillPaths` points the same
+    // loader at the Host-owned skills directory (issue 02).
+    ensurePiPacksRegistered()
     const resourceLoader = new piCodingAgent.DefaultResourceLoader({
       cwd,
       agentDir,
-      extensionFactories: [{
+      additionalSkillPaths: piSkillsDir ? [piSkillsDir] : undefined,
+      extensionFactories: [
+        ...piPackExtensionFactories({ sessionId, cwd, temporaryChat: settings.temporaryChat }),
+        {
         name: 'subagents-session-context',
         hidden: true,
         factory: (pi: { on: (event: string, handler: (input: Record<string, unknown>) => unknown) => void }) => {
@@ -273,10 +289,14 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
             return lastUser >= 0 ? { messages: event.messages.slice(lastUser) } : undefined
           })
         },
-      }],
+      },
+      ],
     })
     await resourceLoader.reload()
     options.resourceLoader = resourceLoader
+    if (typeof resourceLoader.getSkills === 'function') {
+      captureDiscoveredPiSkills(resourceLoader.getSkills())
+    }
   }
   if (settings.activeTools?.length) options.tools = [...settings.activeTools]
   if (settings.thinkingLevel) options.thinkingLevel = settings.thinkingLevel
