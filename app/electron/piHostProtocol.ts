@@ -1071,6 +1071,11 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       approvalMode: turnSettings.approvalMode,
       unattended: turnSettings.unattended,
       temporaryChat: contextPolicy.temporary,
+      ...(contextPolicy.outboundShellMode ? { shellPolicy: {
+        effectiveMode: contextPolicy.outboundShellMode,
+        shellIsolationVerified: contextPolicy.shellIsolationVerified === true,
+        viewRoot: contextPolicy.viewRoot,
+      } } : {}),
     })
     // A stuck turn must not hold the conversation forever. Expiry walks the
     // same safe-park path as a user's stop, so an in-flight tool still lands.

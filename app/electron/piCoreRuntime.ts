@@ -10,7 +10,7 @@ import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
 import { piPackExtensionFactories } from './piToolHost.ts'
 import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, resolvePiSkillsDir } from './piSkills.ts'
 import { piCodingAgentModule as piCodingAgent, piVendorDir } from './piVendor.ts'
-import { piActivePackToolNames, piAllPackToolNames, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
+import { piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
 
 const vendorDir = piVendorDir
 const piConfig = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/config.js')).href)
@@ -266,6 +266,10 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
       additionalSkillPaths: piSkillsDir ? [piSkillsDir] : undefined,
       extensionFactories: [
         ...piPackExtensionFactories({ sessionId, cwd, temporaryChat: settings.temporaryChat }),
+        // ADR-0047: builtin shell stays outside the external-CLI sandbox and
+        // fail-closed under Outbound Guard `required` — enforced here where
+        // in-turn bash actually executes.
+        piBashGateExtensionFactory({ sessionId }),
         // Pinned skills expand up front (issue 16): the same files the loader
         // discovered, read into the system prompt before the agent starts.
         {

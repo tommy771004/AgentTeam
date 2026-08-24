@@ -225,6 +225,16 @@ export interface RunContextPolicy {
   temporary: boolean
   project?: string
   contextWindowTokens?: number
+  /**
+   * Outbound Guard posture for THIS run's builtin shell (ADR-0047). The
+   * renderer derives it from entitlement + policy and ships it per run;
+   * absent information cannot prove `required`, so the gate only denies on
+   * explicit evidence.
+   */
+  outboundShellMode?: 'required' | 'optional' | 'off'
+  shellIsolationVerified?: boolean
+  /** The Restricted Project View root this run is bound to, when pinned. */
+  viewRoot?: string
 }
 
 export interface RuntimeOverrides {

@@ -247,7 +247,23 @@ try {
   const denyDecision = messages.find((message) => message.event === 'host/tool-decision' && message.payload?.tool === 'message_send' && message.payload?.decision === 'deny')
   assert.ok(denyDecision, 'the outbound denial was audited on the same channel as builtins')
 
-  // ── 6. The record is readable one page at a time, coordinates intact ──
+  // ── 6. ADR-0047: builtin shell fails closed under Outbound Guard required ──
+  pendingScript = { tool: 'bash', args: { command: `cat ${webUrl.replace('http://127.0.0.1', '/etc')}` } }
+  send(17, 'turn/submit', {
+    sessionId,
+    runId: 'qual-shell-required-run',
+    cwd: workspace,
+    prompt: '跑個指令',
+    contextPolicy: { memoryEnabled: false, memoryWriteEnabled: false, referenceChatHistory: false, temporary: false, outboundShellMode: 'required', viewRoot: workspace },
+    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'full', unattended: true },
+  })
+  const shellTurn = await waitFor(17)
+  assert.equal(shellTurn.result.settlement, 'answered', 'a denied shell does not end the turn')
+  const shellResult = shellTurn.result.record.entries.find((entry: { kind: string; tool?: string; settlement?: string }) => entry.kind === 'tool-result' && entry.tool === 'bash')
+  assert.ok(shellResult, 'the gated shell call is on the record')
+  assert.equal(shellResult.settlement, 'denied', 'required mode denies an unverified builtin shell — fail-closed (ADR-0047)')
+
+  // ── 7. The record is readable one page at a time, coordinates intact ──
   send(16, 'sessions/record', { sessionId })
   const recordPage = await waitFor(16)
   const pageEntries = recordPage.result?.page?.entries || []

@@ -14,6 +14,8 @@
  * an explicit trust decision, and no UI copy may describe a pack as sandboxed.
  */
 
+import { decideBuiltinShellUnderProtection } from '../src/agent/outbound/cliSandbox.ts'
+
 /** A TypeBox-compatible parameter schema, written as plain JSON Schema so the Host stays dependency-free. */
 export type PiToolSchema = Record<string, unknown>
 
@@ -157,15 +159,28 @@ export function piPackSessionHandle(sessionId: string): PiPackSessionHandle | un
  * In-turn tools learn their coordinates from this binding because extension
  * factories are created per session, while approvals are keyed per run.
  */
-type PiRunBinding = { runId: string; approvalMode: 'always' | 'auto' | 'full'; unattended: boolean; temporaryChat?: boolean }
+type PiRunBinding = {
+  runId: string
+  approvalMode: 'always' | 'auto' | 'full'
+  unattended: boolean
+  temporaryChat?: boolean
+  shellPolicy?: { effectiveMode: 'required' | 'optional' | 'off'; shellIsolationVerified?: boolean; viewRoot?: string }
+}
 const sessionRuns = new Map<string, PiRunBinding>()
 
-export function bindPiSessionRun(sessionId: string, binding: { runId: string; approvalMode?: PiRunBinding['approvalMode']; unattended?: boolean; temporaryChat?: boolean }): void {
+export function bindPiSessionRun(sessionId: string, binding: {
+  runId: string
+  approvalMode?: PiRunBinding['approvalMode']
+  unattended?: boolean
+  temporaryChat?: boolean
+  shellPolicy?: PiRunBinding['shellPolicy']
+}): void {
   sessionRuns.set(sessionId, {
     runId: binding.runId,
     approvalMode: binding.approvalMode || 'auto',
     unattended: binding.unattended === true,
     ...(binding.temporaryChat !== undefined ? { temporaryChat: binding.temporaryChat } : {}),
+    ...(binding.shellPolicy ? { shellPolicy: binding.shellPolicy } : {}),
   })
 }
 
@@ -422,6 +437,49 @@ type InlineExtensionFactoryInput = {
     parameters: PiToolSchema
     execute: (toolCallId: string, params: Record<string, unknown>) => Promise<{ content: Array<{ type: 'text'; text: string }>; details?: unknown }>
   }) => void
+}
+
+/**
+ * ADR-0047 gate for the builtin bash tool, enforced HOST-side where in-turn
+ * execution actually happens: under Outbound Guard `required`, an unverified
+ * shell is refused outright; any mode refuses absolute paths escaping the
+ * bound Restricted Project View. The policy travels per run from the
+ * renderer's contextPolicy — absent information never invents a denial, and
+ * `required` always fails closed.
+ */
+export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: string; hidden: true; factory: (pi: InlineExtensionFactoryInput) => void } {
+  return {
+    name: 'subagents-bash-gate',
+    hidden: true,
+    factory: (pi: InlineExtensionFactoryInput) => {
+      pi.on('tool_call', (event) => {
+        if (event.toolName !== 'bash') return undefined
+        const binding = piSessionRunBinding(ctx.sessionId)
+        const shell = binding?.shellPolicy
+        if (!shell?.effectiveMode || shell.effectiveMode === 'off') return undefined
+        const command = ((event.input as Record<string, unknown>) || {}).command
+        const verdict = decideBuiltinShellUnderProtection({
+          effectiveMode: shell.effectiveMode,
+          command: String(command || ''),
+          viewRoot: shell.viewRoot ?? null,
+          shellIsolationVerified: shell.shellIsolationVerified,
+        })
+        if (verdict.allow) return undefined
+        const callId = typeof event.toolCallId === 'string' ? event.toolCallId : `${binding?.runId || 'turn'}:bash`
+        auditPiInTurnDecision({
+          runId: binding?.runId || 'turn',
+          sessionId: ctx.sessionId,
+          tool: 'bash',
+          callId,
+          decision: 'deny',
+          settlement: 'denied',
+          reason: verdict.reason || 'builtin shell denied by outbound protection',
+        })
+        markPiDeniedInTurnCall(ctx.sessionId, callId, verdict.reason || 'builtin shell denied by outbound protection')
+        return { block: true, reason: verdict.reason || 'builtin shell denied by outbound protection' }
+      })
+    },
+  }
 }
 
 /**

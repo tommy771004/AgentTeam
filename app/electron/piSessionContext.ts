@@ -14,6 +14,10 @@ export type PiTurnContextPolicy = {
   temporary: boolean
   project?: string
   contextWindowTokens?: number
+  /** Outbound shell posture for this run (ADR-0047); absent never denies. */
+  outboundShellMode?: 'required' | 'optional' | 'off'
+  shellIsolationVerified?: boolean
+  viewRoot?: string
 }
 
 export function parsePiTurnContextPolicy(value: unknown): PiTurnContextPolicy {
@@ -30,6 +34,11 @@ export function parsePiTurnContextPolicy(value: unknown): PiTurnContextPolicy {
     ...(typeof input.contextWindowTokens === 'number' && Number.isFinite(input.contextWindowTokens)
       ? { contextWindowTokens: Math.max(1, Math.floor(input.contextWindowTokens)) }
       : {}),
+    ...(input.outboundShellMode === 'required' || input.outboundShellMode === 'optional' || input.outboundShellMode === 'off'
+      ? { outboundShellMode: input.outboundShellMode }
+      : {}),
+    ...(input.shellIsolationVerified === true ? { shellIsolationVerified: true } : {}),
+    ...(typeof input.viewRoot === 'string' && input.viewRoot.trim() ? { viewRoot: input.viewRoot.trim() } : {}),
   }
 }
 

@@ -64,12 +64,18 @@ await test('ticket21: off allows freely', () => {
   assert.equal(r.allow, true)
 })
 
-await test('ticket21: bash handler wires decideBuiltinShellUnderProtection', () => {
-  const t = fs.readFileSync(
-    path.join(appRoot, 'src/agent/tools/registered/bash.ts'),
+await test('ticket21: bash gate wires decideBuiltinShellUnderProtection on the HOST', () => {
+  // ADR-0027 removal moved in-turn bash to the Host; the ADR-0047 gate moved
+  // with it — an inline extension factory intercepting Pi's tool_call.
+  const gate = fs.readFileSync(
+    path.join(appRoot, 'electron/piToolHost.ts'),
     'utf8',
   )
-  assert.match(t, /decideBuiltinShellUnderProtection/)
+  assert.match(gate, /decideBuiltinShellUnderProtection/)
+  assert.match(gate, /subagents-bash-gate/)
+  assert.match(gate, /shellIsolationVerified/, 'required-mode denial needs the verified flag')
+  const runtime = fs.readFileSync(path.join(appRoot, 'electron/piCoreRuntime.ts'), 'utf8')
+  assert.match(runtime, /piBashGateExtensionFactory/, 'the gate is registered next to the pack factories')
 })
 
 await test('ticket22: assertPolicyAdminWriteAllowed standard denies', () => {
