@@ -5,6 +5,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import type { PiThinkingLevel } from './piAgentProfile.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
 import { classifyPiTurnSettlement, piTurnProviderError, piTurnStopReason, PI_TURN_TRUNCATED_NOTICE } from '../src/agent/piHostRun.ts'
+import { reducePiStepUsage, type PiReportedMessage } from '../src/agent/piStepUsage.ts'
 import type { PiRecordedMessage, PiStepTiming } from '../src/agent/turnRecord.ts'
 import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
 import { piPackExtensionFactories } from './piToolHost.ts'
@@ -596,20 +597,23 @@ export async function runPiTurn(
       streamedSegments[streamedSegments.length - 1] += streamed.delta
     }
     if (event.type === 'agent_end' && Array.isArray(event.messages)) {
-      const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
-      const usage = event.messages.reduce(
-        (running: { input: number; output: number; total: number }, message) => {
-          const reported = (message as { usage?: Record<string, unknown> }).usage
-          if (!reported || typeof reported !== 'object') return running
-          return {
-            input: running.input + count(reported.input),
-            output: running.output + count(reported.output),
-            total: running.total + count(reported.totalTokens),
-          }
-        },
-        { input: 0, output: 0, total: 0 },
-      )
-      if (usage.total > 0 || usage.input > 0 || usage.output > 0) timing.usage = usage
+      // Pi already measures all of this per assistant message and prices it
+      // from its own model catalog. The reducer used to keep three fields and
+      // drop the rest, which is why nobody could answer «這個 run 為什麼燒了
+      // 這麼多 token» — the cache split and the cost were measured, published,
+      // and thrown away one line before they were recorded.
+      //
+      // The reduction itself lives in `piStepUsage.ts` so its two easy-to-get-
+      // wrong rules (never write an unreported field as 0; take the prompt
+      // from the last call, not the sum) are checkable by a test rather than
+      // buried in a subscribe callback.
+      const stepUsage = reducePiStepUsage(event.messages as PiReportedMessage[])
+      if (stepUsage) {
+        timing.usage = stepUsage
+        // The catalog's window for the model that served THIS step, so a
+        // mid-run model switch is measured against the model that ran.
+        if (runtime.contextWindowTokens) timing.contextWindow = runtime.contextWindowTokens
+      }
     }
     // Tool boundaries are the only safe place to stop: between calls the agent
     // owns no half-applied edit and no orphaned child process.

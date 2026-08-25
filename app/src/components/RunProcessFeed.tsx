@@ -10,6 +10,8 @@ import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
 import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
 import { projectLiveTimeline, runTimelineRows } from '../agent/liveTimeline'
 import type { TurnRecordEntry } from '../agent/turnRecord'
+import { contextUsageMicrocopy } from '../agent/contextUsageView'
+import { useRunContextUsage } from '../hooks/useRunContextUsage'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
@@ -254,6 +256,11 @@ export function RunProcessFeed({
     : draftText.trim() ? 1 : events.some((event) => event.kind === 'text') ? 1 : 0
   const completedTasks = tasks.filter((task) => task.status === 'done').length
   const taskSummary = tasks.length ? ` · ${completedTasks}/${tasks.length} 任務` : ''
+
+  // `73.2k tok (7%)` — usage at a glance, from the same hook the 上下文 panel
+  // and `/cost` use, so the three cannot disagree about one run. A runner with
+  // no record measures nothing and shows nothing.
+  const usageMicrocopy = contextUsageMicrocopy(useRunContextUsage(runId))
   const recovery = activity?.recovery || null
   const interaction = activity?.interaction || null
   const recoveryThread = useThreadStore((state) =>
@@ -408,6 +415,20 @@ export function RunProcessFeed({
           </span>
           <Icon name={processOpen ? 'expand_less' : 'expand_more'} size={16} className="shrink-0 text-ink-3" />
         </button>
+        {usageMicrocopy && onOpenPanel ? (
+          <button
+            type="button"
+            onClick={onOpenPanel}
+            title="開啟執行摘要的上下文用量"
+            className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-ink-3 transition-colors hover:text-ink"
+          >
+            {usageMicrocopy}
+          </button>
+        ) : usageMicrocopy ? (
+          <span className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-ink-3">
+            {usageMicrocopy}
+          </span>
+        ) : null}
         <span className="flex shrink-0 items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10px] text-ink-3">
           {startedAt > 0 ? <ElapsedTime startedAt={startedAt} /> : null}
         </span>
@@ -538,6 +559,9 @@ export function RunProcessFeed({
                 <span className="normal-case tracking-normal">
                   {unloadedBefore > 0 ? `尚有 ${unloadedBefore} 筆更早 · ` : ''}
                   {toolCount} 個工具 · {messageCount} 則訊息{taskSummary}
+                  {usageMicrocopy ? (
+                    <span className="ml-1 font-[family-name:var(--font-mono)] tabular-nums">{usageMicrocopy}</span>
+                  ) : null}
                 </span>
               </div>
               {recordTimeline.map((row) => {
@@ -614,6 +638,16 @@ export function RunProcessFeed({
                       <span className="shrink-0 font-medium">
                         {pending ? `執行 ${row.tool}…` : failed ? `${row.tool} ${row.settlement}` : `已執行 ${row.tool}`}
                       </span>
+                      {row.approval ? (
+                        <span
+                          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            row.approval === 'deny' ? 'bg-red-tint text-red' : 'bg-inset text-ink-3'
+                          }`}
+                          title={row.approvalReason || row.approval}
+                        >
+                          {row.approval}
+                        </span>
+                      ) : null}
                       {row.detail ? (
                         <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px] font-[family-name:var(--font-mono)]">
                           {row.detail}

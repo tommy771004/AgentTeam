@@ -81,9 +81,13 @@ export async function verifyModelCapabilities(
 ): Promise<VerifyResult> {
   const logs: string[] = []
   const s: LlmSettings = { ...settings, model: modelId }
+  // Rates the user typed are not a capability and no probe can re-derive them,
+  // so they are carried across the re-derivation rather than silently erased.
+  const existingPricing = settings.modelProfiles?.[modelId]?.pricing
   const profile: ModelProfile = {
     ...assumeProfile(modelId),
     modelId,
+    ...(existingPricing ? { pricing: existingPricing } : {}),
     source: 'verified',
     lastVerifiedAt: new Date().toISOString(),
   }

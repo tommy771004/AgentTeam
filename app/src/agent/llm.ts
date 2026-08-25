@@ -4,6 +4,8 @@
 
 import type { LlmSettings, ModelSource } from './types.ts'
 import { DEFAULT_CLI_PROVIDERS } from './cliProviders.ts'
+import { buildRecordedUsage } from './usagePricing.ts'
+import type { RecordedUsage } from './turnRecord.ts'
 import { breakerKey, callWithResilience } from './llmResilience.ts'
 import {
   effectiveOutboundGuardFromSettings,
@@ -198,6 +200,13 @@ export interface ToolCallRequest {
 export interface LlmChatResult {
   content: string
   tokensUsed: number
+  /**
+   * The split the provider reported, when it reported one. `tokensUsed` stays
+   * the scalar every existing caller reads; this is the breakdown that used to
+   * be discarded at the transport boundary. Absent fields were not reported —
+   * they are never filled in with 0.
+   */
+  usage?: RecordedUsage
   model: string
 }
 
@@ -414,14 +423,24 @@ function normalizeChatResult(data: unknown, fallbackModel: string): LlmToolsResu
         }>
       }
     }>
-    usage?: { total_tokens?: number }
+    usage?: {
+      total_tokens?: number
+      prompt_tokens?: number
+      completion_tokens?: number
+      prompt_tokens_details?: { cached_tokens?: number }
+    }
+    normalizedUsage?: RecordedUsage
   }
 
-  // Already normalized from IPC
+  // Already normalized from IPC — main carries the split on `usage`, which at
+  // this branch is already this app's shape rather than the provider's.
   if (d.toolCalls || (typeof d.content === 'string' && !d.choices)) {
+    const fromIpc = (d as { usage?: RecordedUsage }).usage
+    const carried = buildRecordedUsage(fromIpc)
     return {
       content: (d.content || '').trim(),
       tokensUsed: d.tokensUsed ?? 0,
+      ...(carried ? { usage: carried } : {}),
       model: d.model || fallbackModel,
       toolCalls: d.toolCalls || [],
       finishReason: d.finishReason,
@@ -436,9 +455,19 @@ function normalizeChatResult(data: unknown, fallbackModel: string): LlmToolsResu
     arguments: tc.function?.arguments || '{}',
   }))
 
+  // A raw provider body reaches here in the plain-browser degrade, where no
+  // main process normalized it. Same rule: report what was reported.
+  const usage = buildRecordedUsage({
+    input: d.usage?.prompt_tokens,
+    output: d.usage?.completion_tokens,
+    total: d.usage?.total_tokens,
+    cachedRead: d.usage?.prompt_tokens_details?.cached_tokens,
+  })
+
   return {
     content: (msg?.content || '').trim(),
     tokensUsed: d.usage?.total_tokens ?? 0,
+    ...(usage ? { usage } : {}),
     model: d.model || fallbackModel,
     toolCalls,
     finishReason: choice?.finish_reason,

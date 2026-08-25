@@ -820,6 +820,7 @@ async function runFinalizationSequence(
       result,
       status: String(status),
       projectRoot: input.projectRoot,
+      settings,
     })
   } catch {
     /* execution summary must not break the task lifecycle */
@@ -1102,6 +1103,8 @@ async function persistRunMemoryDigest(args: {
   finalAgent: import('./types.ts').AgentState
   status: string
   projectRoot?: string
+  /** The run's frozen settings — the only place user-stated model rates live. */
+  settings?: import('./types.ts').LlmSettings
 }): Promise<void> {
   const [{ buildRunMemoryDigestFromRun }, { renderRunMemoryDigest, runMemoryRelativePath, isWorthPersisting }] =
     await Promise.all([import('./runMemoryDigest.ts'), import('./runMemorySink.ts')])
@@ -1152,6 +1155,8 @@ async function pushRunProcessSummary(args: {
   result: DispatchResult
   status: string
   projectRoot?: string
+  /** The run's frozen settings — the only place user-stated model rates live. */
+  settings?: import('./types.ts').LlmSettings
 }): Promise<void> {
   const { thr, tid, runId, finalAgent, result, status } = args
   const {
@@ -1207,6 +1212,15 @@ async function pushRunProcessSummary(args: {
     ? useSubDesignExportStore.getState().findByArtifactId(subDesignArtifact.id)
     : []
   const settlement = orchestrationFromAgent(finalAgent)
+  // The same projection every live surface reads, run once at settlement so
+  // the archived bubble and the panel it replaces cannot report two totals.
+  const { projectContextUsage } = await import('./contextUsageProjection.ts')
+  const usageModel = finalAgent.steps?.[finalAgent.steps.length - 1]?.modelUsed
+  const usage = projectContextUsage(finalAgent.turnRecord, {
+    // Rates the user stated price the run when its recorder could not. The
+    // window is not needed here: the archived bubble shows totals, not a ratio.
+    pricing: usageModel ? args.settings?.modelProfiles?.[usageModel]?.pricing : undefined,
+  })
   thr.pushRunSummary(tid, {
     status:
       status === 'failed' ? 'failed' : status === 'halted' ? 'halted' : 'success',
@@ -1216,6 +1230,10 @@ async function pushRunProcessSummary(args: {
     maxIterations: settlement?.maxIterations,
     executionKind: settlement?.executionKind,
     interruptReason: finalAgent.interruptReason,
+    // Written only when something was actually measured; a runner that
+    // reported nothing archives no figure rather than a zero.
+    ...(usage.measuredSteps > 0 ? { tokens: usage.tokens.total } : {}),
+    ...(usage.costUsd === undefined ? {} : { costUsd: usage.costUsd }),
     subDesign: subDesignBrief
       ? {
           briefId: subDesignBrief.id,

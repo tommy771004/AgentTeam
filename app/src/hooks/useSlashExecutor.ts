@@ -18,6 +18,8 @@ import {
 } from '../agent/opencode/agents'
 import type { AgentMode } from '../agent/types'
 import { useProjectStore } from '../store/projectStore'
+import { projectContextUsage } from '../agent/contextUsageProjection'
+import { contextUsageReportLines, resolveKnownContextWindow } from '../agent/contextUsageView'
 
 /**
  * Shared slash command handler — Claude / Codex style
@@ -143,6 +145,9 @@ export function useSlashExecutor() {
       }
       case 'clear':
       case 'new': {
+        // 清掉目前對話自己的草稿，不只全域那份
+        const thrState = useThreadStore.getState()
+        if (thrState.activeId) thrState.setThreadDraft(thrState.activeId, '')
         setDraftInput('')
         ui.setComposer('')
         ui.clearLog()
@@ -164,8 +169,26 @@ export function useSlashExecutor() {
       case 'cost':
       case 'tokens':
       case 'usage': {
-        log(`Tokens：${agent.tokensUsed || 0}`)
-        log(`步驟：${agent.steps.length} · 工具呼叫：${agent.toolCalls?.length || 0}`)
+        /*
+         * The same projection the 上下文 panel and the feed microcopy read.
+         * `/cost` used to print one scalar that could not say whether a run
+         * was expensive because the context was long or the answer was; now it
+         * prints the measured split — and prints NO line for a figure nobody
+         * measured, because a `0` there would read as a measurement.
+         */
+        const record = agent.turnRecord
+        const runModel = agent.steps[agent.steps.length - 1]?.modelUsed || settings.model
+        const usage = projectContextUsage(record, {
+          contextWindow: resolveKnownContextWindow(settings, runModel),
+          pricing: settings.modelProfiles?.[(runModel || '').trim()]?.pricing,
+        })
+        if (usage.measuredSteps > 0) {
+          for (const line of contextUsageReportLines(usage)) log(line)
+        } else {
+          // A runner that publishes no per-step usage keeps the scalar it has.
+          log(`Tokens：${agent.tokensUsed || 0}`)
+          log(`步驟：${agent.steps.length} · 工具呼叫：${agent.toolCalls?.length || 0}`)
+        }
         log(`耗時：${agent.metrics?.executionMs || 0} ms`)
         return
       }

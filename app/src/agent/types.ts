@@ -185,6 +185,26 @@ export interface DelegatePersona {
 /** P1-B: how a model capability claim was established */
 export type ModelCapabilitySource = 'verified' | 'assumed' | 'unknown' | 'discovered'
 
+/**
+ * What one million tokens of each kind costs, in US dollars.
+ *
+ * The Pi Host path never reads this: Pi prices a run from its own model
+ * catalog. This exists for the direct OpenAI-compatible path, where nobody
+ * downstream knows the rates — so the user states them, per model, or the
+ * panel shows no cost at all. This app ships no built-in price list and never
+ * guesses a rate: 「未填 = 不顯示」, never 「未填 = 0」.
+ */
+export interface ModelPricing {
+  /** US$ per 1M input (prompt) tokens. */
+  input?: number
+  /** US$ per 1M output (completion) tokens. */
+  output?: number
+  /** US$ per 1M tokens served from the provider's prompt cache. */
+  cacheRead?: number
+  /** US$ per 1M tokens written into that cache. */
+  cacheWrite?: number
+}
+
 export interface ModelProfile {
   modelId: string
   /** Function calling / tool use */
@@ -195,6 +215,8 @@ export interface ModelProfile {
   structuredOutput?: boolean
   /** Context window (tokens) when known */
   contextWindow?: number
+  /** Optional per-1M-token rates for the direct OpenAI-compatible path. */
+  pricing?: ModelPricing
   source: ModelCapabilitySource
   lastVerifiedAt?: string
   /** Probe error summary (why a capability came back false) */

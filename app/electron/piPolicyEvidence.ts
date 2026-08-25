@@ -40,6 +40,8 @@ export type PiToolPolicyRequirements = Readonly<{
   capabilityApproval?: string
   /** Ordinary effect approval is bypassed only by attended full access. */
   approvalRequired?: string
+  /** Human-in-the-loop asks (ask_user) prompt even under complete/full access; unattended still denies. */
+  hitl?: boolean
   sideEffect?: boolean
   outbound?: boolean
   pathArguments?: readonly string[]
@@ -282,7 +284,7 @@ export function evaluatePiInvocationPolicy(input: {
   const effectiveMode = input.policy.approvalMode === 'full' && input.policy.unattended
     ? 'auto'
     : input.policy.approvalMode
-  if (input.requirements?.approvalRequired && effectiveMode !== 'full') {
+  if (input.requirements?.approvalRequired && (effectiveMode !== 'full' || input.requirements.hitl)) {
     return input.policy.unattended
       ? finish('deny', `Unattended approval denied: ${input.requirements.approvalRequired}`)
       : finish('ask', input.requirements.approvalRequired)

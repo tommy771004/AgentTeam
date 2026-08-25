@@ -1105,11 +1105,11 @@ await test('permission asks keep FIFO source identity and request-scoped resolut
   asks.getState().resolve('stale-request', 'deny')
   assert.equal(asks.getState().current?.runId, 'smoke-run-a')
   asks.getState().resolve(head!.id, 'allow')
-  assert.equal(await first, 'allow')
+  assert.equal((await first).decision, 'allow')
   const next = asks.getState().current
   assert.equal(next?.runId, 'smoke-run-b')
   asks.getState().resolve(next!.id, 'deny')
-  assert.equal(await second, 'deny')
+  assert.equal((await second).decision, 'deny')
   for (let i = 0; i < 120; i++) asks.getState().beginRunAudit(`smoke-audit-${i}`)
   assert.ok(Object.keys(asks.getState().runStatsByRun).length <= 100)
   asks.getState().resetStats()

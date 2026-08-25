@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { projectTrajectory, type TrajectoryRow } from '../agent/trajectoryProjection'
 import type { TurnRecordPage } from '../agent/turnRecord'
 import { Icon } from './Icon'
+import { formatTokens, formatUsd } from '../agent/contextUsageView'
 
 /**
  * Walk back through what a run actually did.
@@ -49,7 +50,7 @@ function rowLabel(row: TrajectoryRow): string {
     case 'assistant':
       return row.content
     case 'tool':
-      return `${row.tool}${row.settlement ? ` · ${row.settlement}` : ''}${row.detail ? ` · ${row.detail}` : ''}`
+      return `${row.tool}${row.approval ? ` · ${row.approval}` : ''}${row.settlement ? ` · ${row.settlement}` : ''}${row.detail ? ` · ${row.detail}` : ''}`
     case 'notice':
       return row.content
     case 'reasoning':
@@ -187,7 +188,29 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
               <>
                 {selectedStep?.waitingMs === undefined ? null : <span>等待首 token {formatMs(selectedStep.waitingMs)}</span>}
                 {selectedStep?.generatingMs === undefined ? null : <span>產生 {formatMs(selectedStep.generatingMs)}</span>}
-                {selectedStep?.usage?.total ? <span>{selectedStep.usage.total} tokens</span> : null}
+                {/* Per-step usage, so «哪一步最貴» has an answer. Each figure
+                    appears only when the provider reported it: an absent cache
+                    split or price is omitted, never shown as 0. */}
+                {selectedStep?.usage?.total ? <span className="tabular-nums">{formatTokens(selectedStep.usage.total)} tokens</span> : null}
+                {selectedStep?.usage?.input === undefined ? null : (
+                  <span className="tabular-nums">輸入 {formatTokens(selectedStep.usage.input)}</span>
+                )}
+                {selectedStep?.usage?.output === undefined ? null : (
+                  <span className="tabular-nums">輸出 {formatTokens(selectedStep.usage.output)}</span>
+                )}
+                {/* Each half is guarded on its own. A provider that reports
+                    only reads must not have a 快取寫 0 invented for it — that
+                    is a measurement nobody made, the exact thing this panel
+                    exists to stop showing. */}
+                {selectedStep?.usage?.cachedRead === undefined ? null : (
+                  <span className="tabular-nums">快取讀 {formatTokens(selectedStep.usage.cachedRead)}</span>
+                )}
+                {selectedStep?.usage?.cachedWrite === undefined ? null : (
+                  <span className="tabular-nums">快取寫 {formatTokens(selectedStep.usage.cachedWrite)}</span>
+                )}
+                {selectedStep?.usage?.costUsd === undefined ? null : (
+                  <span className="tabular-nums">{formatUsd(selectedStep.usage.costUsd)}</span>
+                )}
               </>
             )}
           </div>

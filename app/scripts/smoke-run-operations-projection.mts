@@ -103,6 +103,26 @@ assert.ok(files.some((file) => Number(file.path.match(/-(\d+)\.ts$/)?.[1]) % 15 
 // The read-only run above contributes nothing: reads are not mutations.
 assert.deepEqual(projectProducedFiles(withRead), [], 'a read-only run produces no files')
 
+// ── tool-evidence is known, and deliberately never becomes a row ────────────
+// The Host writes the policy/evidence lifecycle (start, decision, result,
+// settlement) alongside every invocation. The merged call+result row already
+// carries the settlement a reader acts on, so the lifecycle itself must not
+// become rows — least of all the unknown-entry notices it used to fall into.
+let withEvidence = appendTurnRecord(undefined, [{ kind: 'turn-start', source: 'host' }])
+withEvidence = appendTurnRecord(withEvidence, [
+  { kind: 'tool-call', source: 'model', tool: 'bash', callId: 'c1', args: { command: 'echo hi' } },
+  { kind: 'tool-evidence', source: 'host', tool: 'bash', runId: 'r1', callId: 'c1', phase: 'start', invocationOrigin: 'model' },
+  { kind: 'tool-evidence', source: 'host', tool: 'bash', runId: 'r1', callId: 'c1', phase: 'decision', decision: 'deny', detail: 'Frozen Host run policy denies invocation', invocationOrigin: 'model' },
+  { kind: 'tool-evidence', source: 'host', tool: 'bash', runId: 'r1', callId: 'c1', phase: 'settlement', settlement: 'denied', detail: 'Frozen Host run policy denies invocation', invocationOrigin: 'model' },
+  { kind: 'tool-result', source: 'host', tool: 'bash', callId: 'c1', settlement: 'denied' },
+])
+const evidencedRows = projectRunOperations(withEvidence)
+assert.equal(evidencedRows.length, 1, 'evidence entries add no operation rows')
+assert.equal(evidencedRows[0].callId, 'c1')
+assert.equal(evidencedRows[0].kind, 'error', 'the merged row still reads the denied settlement')
+assert.ok(evidencedRows.every((row) => row.title !== '未知的記錄項目'),
+  'a kind this build knows must never reach the unknown-entry arm')
+
 // ── Fallbacks: undeclared tools and malformed arguments degrade safely ──────
 let degraded = appendTurnRecord(undefined, [{ kind: 'turn-start', source: 'host' }])
 degraded = appendTurnRecord(degraded, [
@@ -119,6 +139,24 @@ assert.equal(degradedRows.length, 3, 'every recorded operation renders, whatever
 assert.ok(degradedRows.every((row) => !row.card), 'undeclared or malformed calls fall back to the plain row')
 assert.equal(degradedRows.find((row) => row.callId === 'c3')?.kind, 'error', 'a failed mutation reads as an error')
 assert.deepEqual(projectProducedFiles(degraded), [], 'malformed arguments contribute no produced files')
+
+// ── Usage on a step-end is not an operation ────────────────────────────────
+// Tokens, cache and cost belong to the usage projection. A step-end that
+// carries them must produce exactly the rows a step-end without them produces:
+// two projections of one record may not disagree about what an operation is.
+const operated = (usage?: Record<string, number>) => projectRunOperations(appendTurnRecord(undefined, [
+  { kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'step-start', source: 'host', turn: 1, step: 1, at: 2 },
+  { kind: 'tool-call', source: 'model', tool: 'bash', callId: 'u1', args: { command: 'ls' }, turn: 1, step: 1, at: 3 },
+  { kind: 'tool-result', source: 'host', tool: 'bash', callId: 'u1', settlement: 'success', turn: 1, step: 1, at: 4 },
+  { kind: 'step-end', source: 'host', turn: 1, step: 1, at: 9, ...(usage ? { timing: { requestAt: 2, completedAt: 9, usage } } : {}) },
+]))
+assert.deepEqual(
+  operated({ input: 900, output: 100, total: 1_000, cachedRead: 700, cachedWrite: 50, costUsd: 0.004 }),
+  operated(),
+  'usage on a step-end changes no operation row',
+)
+assert.ok(operated().every((row) => row.title !== '未知的記錄項目'))
 
 // ── Catalog tools declare on their definitions, next to the schema ──────────
 const declared = TOOL_DEFINITIONS.workspace_write.presentCall?.({ path: '/w/report.md', content: '# hi\n' })

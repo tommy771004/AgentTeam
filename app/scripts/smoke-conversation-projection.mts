@@ -65,6 +65,25 @@ assert.equal(spoken[0].kind === 'notice' ? spoken[0].content : '', '技能在此
 assert.doesNotMatch(spoken[0].kind === 'notice' ? spoken[0].content : '', /未知的記錄項目/,
   'a kind this build knows must never reach the unknown-entry arm')
 
+// ── tool-evidence is known, and deliberately never becomes a row ───────────
+// The Host writes the policy/evidence lifecycle (start, decision, result,
+// settlement) alongside every invocation — several entries per tool call. Its
+// readable facts already surface as the tool-call/tool-result pair, so the
+// lifecycle itself must not repeat them as rows, least of all as the
+// unknown-entry notice it used to fall into.
+const withEvidence = appendTurnRecord(undefined, [
+  { kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'tool-call', source: 'model', tool: 'bash', callId: 'c1', turn: 1, step: 1, at: 2 },
+  { kind: 'tool-evidence', source: 'host', tool: 'bash', runId: 'r1', callId: 'c1', phase: 'start', invocationOrigin: 'model', turn: 1, step: 1, at: 3 },
+  { kind: 'tool-evidence', source: 'host', tool: 'bash', runId: 'r1', callId: 'c1', phase: 'decision', decision: 'deny', detail: 'Frozen Host run policy denies invocation', invocationOrigin: 'model', turn: 1, step: 1, at: 4 },
+  { kind: 'tool-evidence', source: 'host', tool: 'bash', runId: 'r1', callId: 'c1', phase: 'settlement', settlement: 'denied', detail: 'Frozen Host run policy denies invocation', invocationOrigin: 'model', turn: 1, step: 1, at: 5 },
+  { kind: 'tool-result', source: 'host', tool: 'bash', callId: 'c1', settlement: 'denied', turn: 1, step: 1, at: 6 },
+])
+const evidenced = projectConversationRows(withEvidence)
+assert.deepEqual(evidenced.map((row) => row.kind), ['tool', 'tool'], 'evidence entries project to nothing')
+assert.ok(!evidenced.some((row) => row.kind === 'notice' && row.content.includes('未知的記錄項目')),
+  'a kind this build knows must never reach the unknown-entry arm')
+
 // An entry kind this build does not know becomes a notice — never an
 // exception, never a gap. A record from a newer build must still render.
 const future = { version: 1, entries: [
@@ -130,6 +149,26 @@ assert.deepEqual(
   ],
   'a record with no reasoning entry projects exactly as it did before',
 )
+
+// ── Usage fields are invisible here, and must stay that way ───────────────
+// The conversation is what was said. Tokens, cache and cost live on `step-end`
+// and belong to the usage projection; a step-end carrying them must produce
+// exactly the rows a step-end without them produces, or the two projections
+// would have started disagreeing about what a conversation is.
+const withStepUsage = (usage?: Record<string, number>) => projectConversationRows(appendTurnRecord(undefined, [
+  { kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'step-start', source: 'host', turn: 1, step: 1, at: 2 },
+  { kind: 'user-text', source: 'user', content: '在嗎', turn: 1, step: 1, at: 3 },
+  { kind: 'assistant-text', source: 'model', content: '在', turn: 1, step: 1, at: 4 },
+  { kind: 'step-end', source: 'host', turn: 1, step: 1, at: 9, ...(usage ? { timing: { requestAt: 2, completedAt: 9, usage } } : {}) },
+  { kind: 'turn-end', source: 'host', settlement: 'answered', turn: 1, step: 1, at: 10 },
+]))
+assert.deepEqual(
+  withStepUsage({ input: 900, output: 100, total: 1_000, cachedRead: 700, cachedWrite: 50, costUsd: 0.004 }),
+  withStepUsage(),
+  'usage on a step-end changes no conversation row',
+)
+assert.ok(withStepUsage().every((row) => row.kind !== 'notice' || row.title !== '未知的記錄項目'))
 
 // Purity is a contract, not a hope: the module may not reach for I/O, stores,
 // the clock, or randomness, because it replays.

@@ -14,6 +14,7 @@ import {
   TurnRecordVersionError,
   appendTurnRecord,
   parseTurnRecord,
+  stepTimings,
   turnRecordEntries,
 } from '../src/agent/turnRecord.ts'
 
@@ -49,6 +50,67 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
+
+// ── Usage fields are ADDITIONS, at the same format version ────────────────
+// The cache split and the cost are optional fields on an existing shape, so a
+// record carrying them parses under the same version — and a record written
+// before they existed parses and projects EXACTLY as it did then. Both halves
+// are asserted here, because «向後相容» is only worth the claim if the old
+// shape is checked, not just the new one.
+const priced = appendTurnRecord(undefined, [
+  { kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'step-start', source: 'host', turn: 1, step: 1, at: 2 },
+  {
+    kind: 'step-end',
+    source: 'host',
+    turn: 1,
+    step: 1,
+    at: 9,
+    timing: {
+      requestAt: 2,
+      firstTokenAt: 4,
+      completedAt: 9,
+      usage: { input: 900, output: 100, total: 1_000, cachedRead: 700, cachedWrite: 50, costUsd: 0.004 },
+    },
+  },
+])
+const pricedParsed = parseTurnRecord(priced)
+assert.equal(pricedParsed.tornTail, false, 'the new fields do not read as a torn append')
+assert.equal(pricedParsed.record.version, TURN_RECORD_FORMAT_VERSION, 'they are not a format change')
+const pricedTimings = stepTimings(pricedParsed.record)
+assert.equal(pricedTimings.length, 1)
+assert.deepEqual(
+  pricedTimings[0].usage,
+  { input: 900, output: 100, total: 1_000, cachedRead: 700, cachedWrite: 50, costUsd: 0.004 },
+  'the step-timing view passes every recorded usage field through untouched',
+)
+assert.equal(pricedTimings[0].running, false)
+
+// The same run as an older build wrote it: three fields, no cache, no cost.
+const legacy = parseTurnRecord({
+  version: TURN_RECORD_FORMAT_VERSION,
+  entries: priced.entries.map((entry) => (entry.kind === 'step-end' && entry.timing?.usage
+    ? { ...entry, timing: { ...entry.timing, usage: { input: 900, output: 100, total: 1_000 } } }
+    : entry)),
+})
+assert.equal(legacy.tornTail, false, 'a record from before these fields still parses whole')
+const legacyTimings = stepTimings(legacy.record)
+assert.deepEqual(legacyTimings[0].usage, { input: 900, output: 100, total: 1_000 })
+assert.equal(legacyTimings[0].usage?.cachedRead, undefined, 'an unreported field stays absent, never 0')
+assert.equal(legacyTimings[0].usage?.costUsd, undefined)
+// Everything the old build could produce is unchanged, field for field.
+assert.equal(legacyTimings[0].waitingMs, pricedTimings[0].waitingMs)
+assert.equal(legacyTimings[0].generatingMs, pricedTimings[0].generatingMs)
+assert.equal(legacyTimings[0].totalMs, pricedTimings[0].totalMs)
+assert.equal(legacyTimings[0].running, pricedTimings[0].running)
+
+// A step still running reports no usage at all — there is nothing measured yet.
+const midFlight = stepTimings(appendTurnRecord(undefined, [
+  { kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'step-start', source: 'host', turn: 1, step: 1, at: 2 },
+]))
+assert.equal(midFlight[0].running, true)
+assert.equal(midFlight[0].usage, undefined, 'an unfinished step measures nothing')
 
 // Derived history keeps the agent's actions, in order, and replays a
 // compaction as the drop it performed rather than re-growing the context.

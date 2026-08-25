@@ -35,7 +35,64 @@ export type PiStepTiming = {
   firstTokenAt?: number
   /** When the request finished, successfully or not. */
   completedAt: number
-  usage?: { input?: number; output?: number; total?: number }
+  /**
+   * What the provider reported this step spent. Every field is optional and
+   * every one is MEASURED: a field is written only when the provider actually
+   * reported it, and left absent otherwise. Absent and zero are different
+   * facts — «快取沒省到» and «這個 provider 不談快取» must never render alike —
+   * so nothing here is ever filled in with 0 to make a shape look complete.
+   *
+   * The cache and cost fields are additions, not a format change: a record
+   * written before they existed carries the same three fields it always did
+   * and projects exactly as it did then.
+   */
+  usage?: RecordedUsage
+  /**
+   * The context window of the model that served this step, as its catalog
+   * states it.
+   *
+   * Recorded per step rather than looked up at render time for two reasons: a
+   * conversation that switches models mid-run is then measured against the
+   * model that ACTUALLY ran each step, and a replay a year later gets the same
+   * window the live view had instead of whatever the settings say by then.
+   * Absent when nobody knew it — and an absent window yields no ratio at all,
+   * never a ratio against a default.
+   */
+  contextWindow?: number
+}
+
+/**
+ * The one usage shape, named once.
+ *
+ * Both capture paths write it and one projection reads it, so they cannot
+ * drift into two vocabularies for the same measurement — which is the whole
+ * reason the panel needs no fork per runner.
+ */
+export type RecordedUsage = {
+  input?: number
+  output?: number
+  total?: number
+  /** Prompt tokens served from the provider's cache. */
+  cachedRead?: number
+  /** Prompt tokens written INTO that cache this step. */
+  cachedWrite?: number
+  /**
+   * US dollars, priced by whoever knew the rates — the Pi model catalog on
+   * the Host path, the user's own `ModelProfile.pricing` on the direct
+   * OpenAI-compatible one. Absent when nobody knew them; this app keeps no
+   * price list of its own and will not invent a number.
+   */
+  costUsd?: number
+  /**
+   * The prompt the step's FINAL model call actually sent, cache included.
+   *
+   * Not derivable from `input`: one step can make several model calls when the
+   * agent uses tools, and `input` sums every one of them. Summing prompts
+   * answers «這一步買了多少 token»; only the last prompt answers «模型現在握著
+   * 多滿的 context», which is what a ratio against the window means. Absent
+   * when the provider reported no prompt size.
+   */
+  contextTokens?: number
 }
 
 /** Who is accountable for an entry's content (ADR-0048). */
@@ -441,6 +498,8 @@ export type PiStepTimingView = {
   generatingMs?: number
   totalMs?: number
   usage?: PiStepTiming['usage']
+  /** The window of the model that served this step, when its catalog stated one. */
+  contextWindow?: number
   /** True while the step has started and not yet ended. */
   running: boolean
 }
@@ -477,6 +536,7 @@ export function stepTimings(record: TurnRecord | undefined): PiStepTimingView[] 
                 }),
             totalMs: Math.max(0, timing.completedAt - timing.requestAt),
             ...(timing.usage ? { usage: timing.usage } : {}),
+            ...(timing.contextWindow ? { contextWindow: timing.contextWindow } : {}),
           }
         : {}),
     })

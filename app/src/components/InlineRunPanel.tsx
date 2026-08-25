@@ -16,6 +16,9 @@ import { useAgentStore } from '../store/agentStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import { useRunActivityStore } from '../store/runActivityStore'
 import { ReasoningFocusPanel } from './ReasoningFocusPanel'
+import { ContextUsagePanel } from './ContextUsagePanel'
+import { contextUsageMicrocopy, formatTokensCompact } from '../agent/contextUsageView'
+import { useRunContextUsage } from '../hooks/useRunContextUsage'
 import type { TurnRecordEntry } from '../agent/turnRecord'
 import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
@@ -124,6 +127,9 @@ export function InlineRunPanel({
   const [stepsOpen, setStepsOpen] = useState(false)
   const [subAgentsOpen, setSubAgentsOpen] = useState(false)
   const [thoughtOpen, setThoughtOpen] = useState(false)
+  // Open by default: this is where the token microcopy in the process feed
+  // sends the reader, so arriving on a collapsed section would answer nothing.
+  const [contextOpen, setContextOpen] = useState(true)
 
   const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
@@ -186,6 +192,14 @@ export function InlineRunPanel({
     .filter(Boolean)
     .join(' · ')
   const currentStatus = lifecycle.label
+
+  // 上下文 — the same derivation the process-feed microcopy and `/cost` use.
+  const contextUsage = useRunContextUsage(runId)
+  const contextSummary = !isExternal && contextUsage.measuredSteps > 0
+    ? contextUsageMicrocopy(contextUsage)
+    : agent.tokensUsed > 0
+      ? `${formatTokensCompact(agent.tokensUsed)} tok`
+      : undefined
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-line bg-surface text-ink">
@@ -367,6 +381,20 @@ export function InlineRunPanel({
           ) : null}
         </PanelSection>
 
+        <PanelSection
+          id="run-context"
+          title="上下文"
+          summary={contextSummary}
+          open={contextOpen}
+          onToggle={() => setContextOpen((value) => !value)}
+        >
+          <ContextUsagePanel
+            usage={contextUsage}
+            fallbackTokens={agent.tokensUsed}
+            degraded={isExternal}
+          />
+        </PanelSection>
+
         {detailSummary || isExternal || agent.loadedCapabilityIds.length > 0 ? (
           <PanelSection
             id="run-details"
@@ -449,9 +477,12 @@ export function InlineRunPanel({
                 </div>
               ) : null}
 
-              {(agent.tokensUsed > 0 || agent.metrics.executionMs > 0) ? (
-                <p className="text-[10px] text-ink-3 font-[family-name:var(--font-mono)]">
-                  tokens {agent.tokensUsed} · {agent.metrics.executionMs || 0}ms
+              {/* Tokens moved to 上下文, which derives them from the record.
+                  Repeating the scalar here would be a second source able to
+                  disagree with it, so only the duration stays. */}
+              {agent.metrics.executionMs > 0 ? (
+                <p className="text-[10px] text-ink-3 font-[family-name:var(--font-mono)] tabular-nums">
+                  {agent.metrics.executionMs}ms
                 </p>
               ) : null}
             </div>

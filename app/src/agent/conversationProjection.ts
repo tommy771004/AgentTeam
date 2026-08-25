@@ -24,7 +24,7 @@ export type ConversationRow =
    * projection never shortens it.
    */
   | { kind: 'reasoning'; id: string; seq: number; turn: number; content: string }
-  | { kind: 'tool'; id: string; seq: number; turn: number; tool: string; callId: string; settlement?: string; detail?: string }
+  | { kind: 'tool'; id: string; seq: number; turn: number; tool: string; callId: string; settlement?: string; detail?: string; approval?: string; approvalReason?: string }
   | { kind: 'notice'; id: string; seq: number; turn: number; content: string }
 
 /**
@@ -67,11 +67,33 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
       case 'step-start':
       case 'step-end':
         break
-      case 'approval':
+      case 'approval': {
+        // The decision belongs on the invocation's own line: same callId, one
+        // action, one row. It always follows the call it decided, so the first
+        // tool row with that callId is the anchor — on a live page and on a
+        // replayed one alike. A decision with no recorded call (an older
+        // build's record, a transport gap) still reports, as a notice.
+        const anchor = rows.find((row) => row.kind === 'tool' && row.callId === entry.callId)
+        if (anchor && anchor.kind === 'tool') {
+          anchor.approval = entry.decision
+          if (entry.reason) anchor.approvalReason = entry.reason
+          break
+        }
         rows.push({ ...base, kind: 'notice', content: `${entry.tool}：${entry.decision}${entry.reason ? ` · ${entry.reason}` : ''}` })
         break
+      }
       case 'compaction':
         rows.push({ ...base, kind: 'notice', content: `已壓縮 ${entry.replaced} 則上下文` })
+        break
+      case 'tool-evidence':
+        // The Host's policy/evidence lifecycle for one invocation — start,
+        // decision, result, settlement — several entries per tool call. Its
+        // readable facts already surface as the tool-call/tool-result pair
+        // and any approval notice; projecting the lifecycle itself would
+        // repeat each action four times over. Named here on purpose: it is a
+        // kind this build knows and deliberately leaves to the record, which
+        // is a different fact from the unknown-entry notice the default arm
+        // writes.
         break
       case 'notice':
         // The entry kind whose whole purpose is to be read. It used to fall

@@ -943,7 +943,12 @@ ipcMain.handle(
           }>
         }
       }>
-      usage?: { total_tokens?: number }
+      usage?: {
+        total_tokens?: number
+        prompt_tokens?: number
+        completion_tokens?: number
+        prompt_tokens_details?: { cached_tokens?: number }
+      }
       model?: string
     }
     let data: ChatResponse | undefined
@@ -1011,9 +1016,24 @@ ipcMain.handle(
       arguments: tc.function?.arguments || '{}',
     }))
 
+    // The split the provider reported travels intact. Only `total_tokens` used
+    // to survive this boundary, so nothing downstream could ever say whether a
+    // run was expensive because the context was long or because the answer
+    // was. `buildRecordedUsage` is the shared builder — it keeps only fields
+    // the provider actually reported, so an unreported one stays absent rather
+    // than becoming a 0 the panel would render as a measurement.
+    const { buildRecordedUsage } = await import('../src/agent/usagePricing.ts')
+    const usage = buildRecordedUsage({
+      input: data.usage?.prompt_tokens,
+      output: data.usage?.completion_tokens,
+      total: data.usage?.total_tokens,
+      cachedRead: data.usage?.prompt_tokens_details?.cached_tokens,
+    })
+
     return {
       content: (msg?.content || '').trim(),
       tokensUsed: data.usage?.total_tokens ?? 0,
+      ...(usage ? { usage } : {}),
       model: data.model || usedModel,
       toolCalls,
       finishReason: choice?.finish_reason,

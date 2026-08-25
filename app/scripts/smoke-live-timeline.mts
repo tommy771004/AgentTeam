@@ -182,6 +182,44 @@ assert.deepEqual(
   'the buffer is ordered by seq whatever order the frames took',
 )
 
+// ── Usage rides through live and replay identically ────────────────────────
+// The whole point of one projection is that the live panel and the replayed
+// one cannot disagree. That has to hold for the new usage fields too: a
+// step-end carrying tokens, cache and cost must read the same in both, and a
+// record without them must read exactly as it always did.
+const usedEntries: TurnRecordAppend[] = [
+  ...entries.slice(0, -1),
+  {
+    kind: 'step-end',
+    source: 'host',
+    turn: 1,
+    step: 1,
+    at: 9,
+    timing: {
+      requestAt: 1_000,
+      firstTokenAt: 1_150,
+      completedAt: 1_600,
+      usage: { input: 900, output: 100, total: 1_000, cachedRead: 700, cachedWrite: 50, costUsd: 0.004 },
+    },
+  },
+]
+const usedRecord = appendTurnRecord(undefined, usedEntries)
+assert.deepEqual(
+  projectLiveTimeline(usedRecord.entries, usedRecord.entries.length),
+  projectTrajectory(pageTurnRecord(usedRecord, { limit: LIVE_TIMELINE_LIMIT })),
+  'live and replay agree about usage as they agree about everything else',
+)
+const usedLive = projectLiveTimeline(usedRecord.entries, usedRecord.entries.length)
+assert.equal(usedLive.steps[0]?.usage?.cachedRead, 700)
+assert.equal(usedLive.steps[0]?.usage?.costUsd, 0.004)
+// And the record without them is unchanged, row for row.
+assert.deepEqual(
+  usedLive.rows.map((row) => ({ ...row, timing: undefined })),
+  running.rows.map((row) => ({ ...row, timing: undefined })),
+  'usage changes no row the timeline already produced',
+)
+assert.equal(running.steps[0]?.usage, undefined, 'a step that reported no usage reports none')
+
 // ── Purity is a contract, not a hope ───────────────────────────────────────
 const source = await readFile(resolve(import.meta.dirname, '../src/agent/liveTimeline.ts'), 'utf8')
 for (const forbidden of [/Date\.now/, /Math\.random/, /useState|useStore|zustand/, /require\(|await import\(/, /window\./]) {

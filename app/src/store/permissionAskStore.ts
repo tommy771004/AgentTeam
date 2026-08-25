@@ -7,6 +7,13 @@ export type PermissionAskRequest = {
   tool: string
   argsPreview: string
   reason: string
+  /** HITL asks (ask_user) always pop — the sessionAllow shortcut skips only effect approvals. */
+  hitl?: boolean
+  /** Structured-question fields lifted from args for ask_user-shaped asks. */
+  question?: string
+  options?: string[]
+  multiSelect?: boolean
+  allowFreeform?: boolean
   createdAt: string
   /** Auto-deny after this many ms (interactive default 90s; unattended shorter) */
   timeoutMs: number
@@ -21,7 +28,9 @@ export type PermissionAskStats = {
   recentTimeouts: Array<{ tool: string; at: string }>
 }
 
-type Resolver = (decision: 'allow' | 'deny') => void
+export type PermissionAskOutcome = { decision: 'allow' | 'deny'; answer?: string }
+
+type Resolver = (outcome: PermissionAskOutcome) => void
 
 interface PermissionAskStore {
   /** Head of FIFO queue (shown in modal) */
@@ -57,8 +66,10 @@ interface PermissionAskStore {
     args: Record<string, unknown>
     reason?: string
     timeoutMs?: number
-  }) => Promise<'allow' | 'deny'>
-  resolve: (requestId: string, decision: 'allow' | 'deny') => void
+    hitl?: boolean
+  }) => Promise<PermissionAskOutcome>
+  /** The ask_user answer rides back inside the resolution as the tool result. */
+  resolve: (requestId: string, decision: 'allow' | 'deny', answer?: string) => void
   cancelRun: (runId: string) => void
 }
 
@@ -195,11 +206,22 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
     }
   },
 
-  requestAsk: ({ threadId, runId, tool, args, reason, timeoutMs }) => {
-    if (get().getSessionAllow(threadId)) {
+  requestAsk: ({ threadId, runId, tool, args, reason, timeoutMs, hitl }) => {
+    // ask_user is human-in-the-loop by definition: it always pops, even when
+    // the session is set to auto-approve. Deriving the flag from the tool name
+    // keeps external callers honest without trusting a caller-passed flag.
+    const isHitl = hitl === true || tool === 'ask_user'
+    if (!isHitl && get().getSessionAllow(threadId)) {
       bumpAllow(get, set, { runId })
-      return Promise.resolve('allow')
+      return Promise.resolve({ decision: 'allow' })
     }
+
+    // Structured question (Aligned with the seam ask_user normalization:
+    // string options only, trimmed, deduped, capped at 12).
+    const question = isHitl ? String(args.question ?? '').trim() : ''
+    const options = isHitl && Array.isArray(args.options)
+      ? [...new Set(args.options.map((option) => String(option ?? '').trim()).filter(Boolean))].slice(0, 12)
+      : []
 
     const id = `ask_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
     const ms = Math.max(5_000, timeoutMs ?? 90_000)
@@ -210,12 +232,19 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
       tool,
       argsPreview: JSON.stringify(args, null, 2).slice(0, 1200),
       reason: reason || `工具「${tool}」需要核准後才能執行`,
+      ...(isHitl ? {
+        hitl: true,
+        ...(question ? { question } : {}),
+        ...(options.length ? { options } : {}),
+        multiSelect: args.multiSelect === true,
+        allowFreeform: args.allowFreeform !== false,
+      } : {}),
       createdAt: new Date().toISOString(),
       timeoutMs: ms,
       expiresAt: Date.now() + ms,
     }
 
-    return new Promise<'allow' | 'deny'>((resolve) => {
+    return new Promise<PermissionAskOutcome>((resolve) => {
       resolvers.set(id, resolve)
       timers.set(
         id,
@@ -232,7 +261,7 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
             set({ queue: state.queue.filter((q) => q.id !== id) })
           }
           bumpTimeout(get, set, tool, req)
-          r('deny')
+          r({ decision: 'deny' })
         }, ms),
       )
 
@@ -245,7 +274,7 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
     })
   },
 
-  resolve: (requestId, decision) => {
+  resolve: (requestId, decision, answer) => {
     const cur = get().current
     if (!cur || cur.id !== requestId) return
     const r = resolvers.get(requestId)
@@ -255,7 +284,8 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
     promote(get, set)
     if (decision === 'allow') bumpAllow(get, set, cur)
     else bumpDeny(get, set, cur)
-    r?.(decision)
+    const text = answer?.trim()
+    r?.({ decision, ...(decision === 'allow' && text ? { answer: text } : {}) })
   },
 
   cancelRun: (runId) => {
@@ -268,7 +298,7 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
       const resolver = resolvers.get(item.id)
       resolvers.delete(item.id)
       clearTimer(item.id)
-      resolver?.('deny')
+      resolver?.({ decision: 'deny' })
       bumpDeny(get, set, item)
     }
     set({

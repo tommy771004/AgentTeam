@@ -156,6 +156,13 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
         break
       case 'turn-end':
       case 'step-end':
+      case 'tool-evidence':
+        // The policy/evidence lifecycle rides alongside every invocation's
+        // call and result entries; the merged row above already carries the
+        // settlement a reader acts on. Named here on purpose: it is a kind
+        // this build knows and deliberately leaves to the audit record, which
+        // is a different fact from the unknown-entry notice the default arm
+        // writes.
         break
       default:
         rows.push({ ...base(entry), kind: 'notice', title: '未知的記錄項目' })

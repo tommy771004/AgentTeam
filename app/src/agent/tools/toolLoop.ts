@@ -881,7 +881,7 @@ async function executeOneToolCall(
             : `計畫審批 — 核准即開始實作,拒絕則退回修訂:\n\n${String(args.plan || '').slice(0, 1500)}`,
           timeoutMs: 90_000,
         })
-        if (decision === 'deny') {
+        if (decision.decision === 'deny') {
           output = entering
             ? '使用者未核准進入 Plan mode,請以一般流程直接執行。'
             : '使用者退回計畫 — 留在 Plan mode,請依對話回饋修訂後再次呼叫 exit_plan_mode。'
@@ -892,8 +892,8 @@ async function executeOneToolCall(
             : '計畫已核准,Plan mode 已解除 — 依計畫開始實作。'
         }
         ctx.cb?.onLog?.(
-          decision === 'deny' ? 'WARN' : 'SUCCESS',
-          `${tc.name}:${decision === 'deny' ? '未核准' : '已核准'}`,
+          decision.decision === 'deny' ? 'WARN' : 'SUCCESS',
+          `${tc.name}:${decision.decision === 'deny' ? '未核准' : '已核准'}`,
         )
       } catch (e) {
         ok = false

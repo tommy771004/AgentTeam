@@ -231,7 +231,7 @@ export async function authorizeTool(opts: {
         reason: decision.askSpec.reason,
         timeoutMs,
       })
-      if (hitl === 'deny') {
+      if (hitl.decision === 'deny') {
         const msg = `使用者拒絕或逾時拒絕工具：${tool}`
         onLog?.('WARN', msg)
         await emitPermissionDenied(settings, opts, tool, msg, onLog)
