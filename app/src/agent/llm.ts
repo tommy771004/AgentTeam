@@ -50,7 +50,6 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   llmCircuitBreakerEnabled: true,
   defaultContextWindowTokens: 64_000,
   functionCalling: true,
-  llmParseEnabled: true,
   sessionRecallEnabled: true,
   haltOnPayloadOverflow: false,
   maxToolPayloadKb: 50,

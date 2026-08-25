@@ -2514,16 +2514,6 @@ export function SettingsPage() {
                 }
               />
               <SettingsRow
-                title="LLM 任務解析"
-                description="以 LLM 產生貼合目標的步驟與可量測 DoD（規格 03）；失敗時回退啟發式模板"
-                control={
-                  <SettingsToggle
-                    checked={settings.llmParseEnabled !== false}
-                    onChange={(v) => set({ llmParseEnabled: v })}
-                  />
-                }
-              />
-              <SettingsRow
                 title="跨 Session 召回"
                 description="執行開始時搜尋 Archive／記憶／技能，把同類任務摘要注入 prompt（Hermes 召回）"
                 control={

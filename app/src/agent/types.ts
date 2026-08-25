@@ -236,12 +236,6 @@ export interface RunContextPolicy {
    */
   outboundShellMode?: OutboundGuardMode
   /**
-   * Only main-side proof of a filesystem sandbox may set this. The renderer
-   * never claims it: under `required` an unset flag is a denial, which is the
-   * posture ADR-0047 asks for.
-   */
-  shellIsolationVerified?: boolean
-  /**
    * Tool patterns this run's restrictive beforeTool hooks deny outright, and
    * the ones they force an approval on. Frozen with the run so a hook edited
    * mid-run cannot change what an in-flight call may do.
@@ -668,8 +662,6 @@ export interface LlmSettings {
   webSearchEnabled: boolean
   /** Use OpenAI function-calling multi-round tool loop when LLM is on */
   functionCalling: boolean
-  /** LLM 解析任務計畫（規格 03）；關閉時只使用啟發式 parser。 */
-  llmParseEnabled?: boolean
   /**
    * 對話 run 開始時用 sessionSearch 召回 archive/memory/skills 摘要注入 volatile。
    * 預設開啟；臨時對話仍會跳過。

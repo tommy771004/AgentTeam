@@ -174,6 +174,12 @@ export async function prepareOutboundRunView(opts: {
   connectionId?: string
   /** Effective outbound guard mode — required fails closed on policy load (ticket 17). */
   effectiveMode?: OutboundGuardMode
+  /**
+   * Company classifier endpoint from Settings (issue 21). Absent means no
+   * classifier runs; the local sanitization profile still applies.
+   */
+  classificationEndpointUrl?: string
+  classificationAllowPlaintextHttp?: boolean
 }): Promise<
   | {
       ok: true
@@ -244,6 +250,11 @@ export async function prepareOutboundRunView(opts: {
       projectRoot,
       profile,
       baseDir: path.join(app.getPath('temp'), 'subagents-sanitized'),
+      classifier: {
+        effectiveMode,
+        ...(opts.classificationEndpointUrl ? { endpointUrl: opts.classificationEndpointUrl } : {}),
+        ...(opts.classificationAllowPlaintextHttp ? { allowPlaintextHttp: true } : {}),
+      },
     })
     runViews.set(runId, ws)
     // Ticket 23: main-only evidence at true view prepare

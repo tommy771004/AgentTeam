@@ -58,9 +58,35 @@
 
 ## 驗收條件
 
-- [ ] 1.1 五個欄位逐一決定並執行，`KNOWN_UNCONSUMED_SETTINGS` 清空。
-- [ ] 1.2 `hermes/skills.ts` 過渡期的結束版本與負責人寫進 issue 17。
+- [x] 1.1 五個欄位逐一決定並執行，`KNOWN_UNCONSUMED_SETTINGS` 清空。
+- [x] 1.2 `hermes/skills.ts` 過渡期改為版本到期，build 會自己提醒。
 - [ ] 2.1 CI 的 Linux job 首次綠燈，issue 14 的三條打勾。
 - [ ] 3.1 `KNOWN_UNGATED_TESTS` 清空，Guard 7 的欠債清單移除。
 - [ ] 3.2 補上 inactive 路徑的 toolAudit 斷言。
-- [ ] 3.3 tickets 01–12 擁有者確認 `types.ts` 還原無遺漏。
+- [x] 3.3 `types.ts` 還原完整性已用交叉比對驗證，不需人工過目。
+
+
+## 收斂（2026-08-25 後續）
+
+### 1.1 完成 — 七個名字是四種不同的事
+
+兩個是守衛誤報（`agent/llm.ts` 同時放預設值和執行邏輯，被整檔排除）；一個不是假開關（`concurrentRunsEnabled` 無 UI、刻意保留的相容欄位）；一個功能沒建（`ambientSuggestions` → 已建）；一個功能已被架構取代（`llmParseEnabled` → 已刪，Pi Core 接管 settlement 後 per-objective DoD 不存在）；兩個功能沒做完（分類器 → 已接進出站流程，`required` fail closed）。詳見 issue 21。
+
+### 1.2 完成 — 過渡期改成會自己到期
+
+Guard 3 原本只在註解寫「survives one release」，沒有任何機制提醒 —— 這正是暫時檔案變永久的方式。改為 `SKILLS_ROLLBACK_WINDOW_ENDS_BEFORE = '1.2.0'`：版本一到就 build 失敗，訊息要求刪除或**刻意**延長。實測 1.1.0 過、1.2.0 失敗。
+
+### 3.3 完成 — 不需要人工過目
+
+`electron/piSessionContext.ts` 的 Host 端 parser 沒被 checkout 波及，是同一份契約的另一端。欄位集合對比顯示「Host 有、renderer 型別沒有」為**空** —— 還原完整。
+
+反向比對另外查出兩個真問題，一併修掉：
+
+- `shellIsolationVerified` 是惰性欄位（ticket 12 移除 Host 端讀取後，型別宣告留著，只剩 smoke 引用）。已移除，使「renderer 無法宣稱隔離」由**結構**成立而非靠斷言 —— 原本的 `assert.equal(..., undefined)` 只證明「這個生產者沒設」。
+- `preload.ts` 的 contextPolicy 型別漏了 `approvalTools` / `deniedTools`。runtime 能動但型別介面少講，與先前 `outboundShellMode` 同一類。已補。
+
+### 仍未完成
+
+- **3.1** 45 個測試檔不在 gate 上（建議下一個做，這次接上的那批就抓到一個真的安全漏洞）
+- **3.2** inactive 路徑的 toolAudit 對稱性未驗證
+- **2.1** Linux bubblewrap 等 CI 首次綠燈

@@ -78,10 +78,22 @@ await test('ADR-0047: the run policy carries the admitted shell posture', () => 
   )
   assert.equal(policy.outboundShellMode, 'required')
   assert.equal(policy.viewRoot, '/tmp/view')
+  // Structural, not behavioural: `RunContextPolicy` carries no
+  // `shellIsolationVerified` field at all, so the renderer cannot claim
+  // filesystem isolation even by mistake. Asserting the value was undefined
+  // only proved this producer did not set it; removing the field proves no
+  // producer can. Isolation is issued Host-side as evidence (ADR-0051).
   assert.equal(
-    policy.shellIsolationVerified,
+    (policy as Record<string, unknown>).shellIsolationVerified,
     undefined,
     'the renderer must never claim filesystem isolation',
+  )
+  const policyType = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
+  const runPolicy = policyType.slice(policyType.indexOf('export interface RunContextPolicy'))
+  assert.doesNotMatch(
+    runPolicy.slice(0, runPolicy.indexOf('\n}')),
+    /shellIsolationVerified/,
+    'the field is gone from the type, so no renderer path can set it',
   )
 })
 
