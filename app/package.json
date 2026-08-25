@@ -94,16 +94,17 @@
     "smoke:marketplace": "vite build --config scripts/vite.plugin-e2e.config.ts && node .tmp/plugin-e2e/plugin-installer-e2e.mjs",
     "smoke:plugin-install": "vite build --config scripts/vite.plugin-e2e.config.ts && node .tmp/plugin-e2e/plugin-installer-e2e.mjs --network",
     "icons": "node scripts/render-icons.mjs && node scripts/make-ico.mjs",
-    "dist": "rm -rf release && npm run icons && npm run smoke && npm run build && npm run smoke:built && electron-builder",
-    "dist:mac": "rm -rf release && npm run icons && npm run smoke && npm run build && npm run smoke:built && electron-builder --mac",
+    "dist": "rm -rf release && npm run icons && npm run smoke && npm run build && npm run smoke:built && electron-builder && node --experimental-strip-types scripts/verify-mac-release-signature.mts",
+    "dist:mac": "rm -rf release && npm run icons && npm run smoke && npm run build && npm run smoke:built && electron-builder --mac && node --experimental-strip-types scripts/verify-mac-release-signature.mts",
     "dist:win": "rm -rf release && npm run icons && npm run smoke && npm run build && npm run smoke:built && electron-builder --win",
-    "dist:all": "rm -rf release && npm run icons && npm run smoke && npm run build && npm run smoke:built && electron-builder --mac --win",
+    "dist:all": "rm -rf release && npm run icons && npm run smoke && npm run build && npm run smoke:built && electron-builder --mac --win && node --experimental-strip-types scripts/verify-mac-release-signature.mts",
     "check:build-flavor": "node --experimental-strip-types scripts/check-build-flavor.mts",
     "check:pi-production-owners": "node --experimental-strip-types scripts/smoke-pi-production-owners.mts",
     "check:pi-contract": "node --experimental-strip-types scripts/check-pi-contract.mts",
     "smoke:learning-export": "node --experimental-strip-types scripts/smoke-learning-export.mts",
     "smoke:capability-inspection": "node --experimental-strip-types scripts/smoke-capability-inspection.mts",
-    "qualify:pi-runtime-contract": "npm run build:pi-host && node --experimental-strip-types scripts/qualify-pi-agent-runtime-contract.mts && npm run smoke:pi-host-catalog && npm run smoke:pi-real-tool-contract && npm run smoke:pi-host-capability-contract && npm run smoke:pi-all-origin-policy && npm run smoke:pi-direct-code-policy && npm run smoke:pi-mcp-native && npm run smoke:pi-mcp-reload && npm run smoke:pi-builtin-shell-sandbox"
+    "qualify:pi-runtime-contract": "npm run build:pi-host && node --experimental-strip-types scripts/qualify-pi-agent-runtime-contract.mts && npm run smoke:pi-host-catalog && npm run smoke:pi-real-tool-contract && npm run smoke:pi-host-capability-contract && npm run smoke:pi-all-origin-policy && npm run smoke:pi-direct-code-policy && npm run smoke:pi-mcp-native && npm run smoke:pi-mcp-reload && npm run smoke:pi-builtin-shell-sandbox",
+    "verify:mac-signature": "node --experimental-strip-types scripts/verify-mac-release-signature.mts"
   },
   "dependencies": {
     "ajv": "^8.20.0",

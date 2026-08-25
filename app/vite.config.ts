@@ -51,6 +51,13 @@ export default defineConfig({
       main: {
         entry: 'electron/main.ts',
         vite: {
+          // Vite copies `public/` into every build's outDir by default. For the
+          // renderer that is the point (`/open-design/*` is fetched at runtime),
+          // but the Electron sub-builds share `dist-electron` and would each
+          // stamp another copy of the 71MB design-template tree into the asar,
+          // where nothing reads it — main resolves brand from resourcesPath or
+          // `dist/brand`, never from here.
+          publicDir: false,
           build: {
             outDir: 'dist-electron',
             // Main process: ESM (package.json "type":"module"). Do NOT emit require().
@@ -67,6 +74,8 @@ export default defineConfig({
       preload: {
         input: 'electron/preload.ts',
         vite: {
+          // Same reason as main: no public/ copy into the Electron outDir.
+          publicDir: false,
           build: {
             outDir: 'dist-electron',
             // Preload MUST be CJS (.cjs). Emitting .mjs + require() crashes with
