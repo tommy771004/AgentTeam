@@ -943,7 +943,12 @@ ipcMain.handle(
           }>
         }
       }>
-      usage?: { total_tokens?: number }
+      usage?: {
+        total_tokens?: number
+        prompt_tokens?: number
+        completion_tokens?: number
+        prompt_tokens_details?: { cached_tokens?: number }
+      }
       model?: string
     }
     let data: ChatResponse | undefined
@@ -1011,9 +1016,28 @@ ipcMain.handle(
       arguments: tc.function?.arguments || '{}',
     }))
 
+    // The split the provider reported travels intact. Only `total_tokens` used
+    // to survive this boundary, so nothing downstream could ever say whether a
+    // run was expensive because the context was long or because the answer
+    // was. A field the provider did not report stays absent — never 0.
+    const reportedUsage = data.usage
+    const measured = (value: unknown): number | undefined =>
+      typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+    const usage = reportedUsage
+      ? {
+          ...(measured(reportedUsage.prompt_tokens) === undefined ? {} : { input: measured(reportedUsage.prompt_tokens) }),
+          ...(measured(reportedUsage.completion_tokens) === undefined ? {} : { output: measured(reportedUsage.completion_tokens) }),
+          ...(measured(reportedUsage.total_tokens) === undefined ? {} : { total: measured(reportedUsage.total_tokens) }),
+          ...(measured(reportedUsage.prompt_tokens_details?.cached_tokens) === undefined
+            ? {}
+            : { cachedRead: measured(reportedUsage.prompt_tokens_details?.cached_tokens) }),
+        }
+      : undefined
+
     return {
       content: (msg?.content || '').trim(),
       tokensUsed: data.usage?.total_tokens ?? 0,
+      ...(usage && Object.keys(usage).length > 0 ? { usage } : {}),
       model: data.model || usedModel,
       toolCalls,
       finishReason: choice?.finish_reason,

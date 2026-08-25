@@ -35,7 +35,42 @@ export type PiStepTiming = {
   firstTokenAt?: number
   /** When the request finished, successfully or not. */
   completedAt: number
-  usage?: { input?: number; output?: number; total?: number }
+  /**
+   * What the provider reported this step spent. Every field is optional and
+   * every one is MEASURED: a field is written only when the provider actually
+   * reported it, and left absent otherwise. Absent and zero are different
+   * facts — «快取沒省到» and «這個 provider 不談快取» must never render alike —
+   * so nothing here is ever filled in with 0 to make a shape look complete.
+   *
+   * The cache and cost fields are additions, not a format change: a record
+   * written before they existed carries the same three fields it always did
+   * and projects exactly as it did then.
+   */
+  usage?: RecordedUsage
+}
+
+/**
+ * The one usage shape, named once.
+ *
+ * Both capture paths write it and one projection reads it, so they cannot
+ * drift into two vocabularies for the same measurement — which is the whole
+ * reason the panel needs no fork per runner.
+ */
+export type RecordedUsage = {
+  input?: number
+  output?: number
+  total?: number
+  /** Prompt tokens served from the provider's cache. */
+  cachedRead?: number
+  /** Prompt tokens written INTO that cache this step. */
+  cachedWrite?: number
+  /**
+   * US dollars, priced by whoever knew the rates — the Pi model catalog on
+   * the Host path, the user's own `ModelProfile.pricing` on the direct
+   * OpenAI-compatible one. Absent when nobody knew them; this app keeps no
+   * price list of its own and will not invent a number.
+   */
+  costUsd?: number
 }
 
 /** Who is accountable for an entry's content (ADR-0048). */

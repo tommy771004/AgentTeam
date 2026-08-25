@@ -104,4 +104,29 @@ const running = projectTrajectory(pageTurnRecord(appendTurnRecord(undefined, [
 assert.equal(running.rows[0]?.timing, undefined, 'a running step never lends a duration')
 assert.equal(running.steps[0]?.running, true)
 assert.equal(running.unloadedBefore, 0)
+
+// The cache and cost fields ride through the step view untouched, and their
+// absence in an older record changes nothing this projection already produced.
+const withUsage = (usage: Record<string, number>) => projectTrajectory(pageTurnRecord(appendTurnRecord(undefined, [
+  { kind: 'step-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'assistant-text', source: 'model', content: '回答', turn: 1, step: 1, at: 2 },
+  { kind: 'step-end', source: 'host', turn: 1, step: 1, at: 9, timing: { requestAt: 1, firstTokenAt: 3, completedAt: 9, usage } },
+]), {}))
+const priced = withUsage({ input: 900, output: 100, total: 1_000, cachedRead: 700, cachedWrite: 50, costUsd: 0.004 })
+assert.equal(priced.steps[0]?.usage?.cachedRead, 700, 'the trajectory step view carries the cache split')
+assert.equal(priced.steps[0]?.usage?.costUsd, 0.004, 'and the cost')
+const legacyPriced = withUsage({ input: 900, output: 100, total: 1_000 })
+assert.equal(legacyPriced.steps[0]?.usage?.cachedRead, undefined, 'an older record reports no cache, not zero cache')
+assert.equal(legacyPriced.steps[0]?.usage?.costUsd, undefined)
+// A row carries its step's timing, so the new fields reach the row too — which
+// is the point: story «哪一步最貴» is answered on the row a reader selects.
+assert.equal(priced.rows[0]?.timing?.usage?.costUsd, 0.004, 'a row surfaces its step’s cost')
+assert.equal(legacyPriced.rows[0]?.timing?.usage?.costUsd, undefined)
+// Everything the projection produced BEFORE these fields existed is unchanged.
+const withoutUsage = (rows: typeof priced.rows) =>
+  rows.map((row) => ({ ...row, timing: row.timing ? { ...row.timing, usage: undefined } : undefined }))
+assert.deepEqual(withoutUsage(legacyPriced.rows), withoutUsage(priced.rows), 'usage fields change nothing else on a row')
+assert.equal(legacyPriced.steps[0]?.totalMs, priced.steps[0]?.totalMs)
+assert.equal(legacyPriced.steps[0]?.waitingMs, priced.steps[0]?.waitingMs)
+
 console.log('A long run is read one page at a time, addressed by sequence')

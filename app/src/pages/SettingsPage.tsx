@@ -28,6 +28,7 @@ import type {
   EnterBehavior,
   FollowUpMode,
   ApiProviderPreset,
+  ModelProfile,
 } from '../agent/types'
 import {
   listAllMcpTools,
@@ -1571,6 +1572,68 @@ export function SettingsPage() {
                       {modelVerifyMsg && (
                         <span className="text-outline">{modelVerifyMsg}</span>
                       )}
+                    </div>
+                  )
+                })()}
+                {/* Rates for this model, in US$ per 1M tokens. Only the direct
+                    OpenAI-compatible path reads them: on the Pi Host path Pi
+                    prices a run from its own catalog. Left blank, no cost is
+                    shown anywhere — this app ships no price list and will not
+                    guess a rate. */}
+                {(() => {
+                  const id = (settings.model || '').trim()
+                  if (!id) return null
+                  const pricing = settings.modelProfiles?.[id]?.pricing
+                  const setRate = async (field: 'input' | 'output' | 'cacheRead' | 'cacheWrite', raw: string) => {
+                    const parsed = Number(raw)
+                    const next = {
+                      ...(pricing || {}),
+                      ...(raw.trim() === '' || !Number.isFinite(parsed) || parsed < 0
+                        ? { [field]: undefined }
+                        : { [field]: parsed }),
+                    }
+                    const cleaned = Object.fromEntries(
+                      Object.entries(next).filter(([, value]) => value !== undefined),
+                    )
+                    const existing = settings.modelProfiles?.[id]
+                    const base: ModelProfile = existing || { modelId: id, source: 'unknown' }
+                    await set({
+                      modelProfiles: {
+                        ...(settings.modelProfiles || {}),
+                        [id]: Object.keys(cleaned).length > 0
+                          ? { ...base, pricing: cleaned }
+                          : (({ pricing: _dropped, ...rest }) => rest)(base),
+                      },
+                    })
+                  }
+                  const fields: Array<{ key: 'input' | 'output' | 'cacheRead' | 'cacheWrite'; label: string }> = [
+                    { key: 'input', label: '輸入' },
+                    { key: 'output', label: '輸出' },
+                    { key: 'cacheRead', label: '快取讀' },
+                    { key: 'cacheWrite', label: '快取寫' },
+                  ]
+                  return (
+                    <div className="mt-3">
+                      <p className="text-[11px] text-outline leading-relaxed">
+                        每 1M tokens 單價（US$）· 留空即不顯示成本，不會以 0 代替
+                      </p>
+                      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        {fields.map((field) => (
+                          <label key={field.key} className="block">
+                            <span className="block text-[11px] text-outline">{field.label}</span>
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              inputMode="decimal"
+                              value={pricing?.[field.key] ?? ''}
+                              placeholder="—"
+                              onChange={(e) => void setRate(field.key, e.target.value)}
+                              className={settingsInputCls + ' mt-1 tabular-nums'}
+                            />
+                          </label>
+                        ))}
+                      </div>
                     </div>
                   )
                 })()}

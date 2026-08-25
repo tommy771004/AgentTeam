@@ -9,7 +9,10 @@ import { emptyAgentLike } from '../agent/localCliRun'
 import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
 import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
 import { projectLiveTimeline, runTimelineRows } from '../agent/liveTimeline'
-import type { TurnRecordEntry } from '../agent/turnRecord'
+import { TURN_RECORD_FORMAT_VERSION, type TurnRecordEntry } from '../agent/turnRecord'
+import { projectContextUsage } from '../agent/contextUsageProjection'
+import { formatRatio, formatTokensCompact, resolveKnownContextWindow } from '../agent/contextUsageView'
+import { useSettingsStore } from '../store/settingsStore'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
@@ -254,6 +257,30 @@ export function RunProcessFeed({
     : draftText.trim() ? 1 : events.some((event) => event.kind === 'text') ? 1 : 0
   const completedTasks = tasks.filter((task) => task.status === 'done').length
   const taskSummary = tasks.length ? ` · ${completedTasks}/${tasks.length} 任務` : ''
+
+  /*
+   * `· 73.2k tok (7%)` — usage at a glance, without opening anything.
+   *
+   * The same projection the 上下文 panel and `/cost` read, so the three cannot
+   * disagree. A runner with no record shows nothing rather than a fabricated
+   * figure, and an unknown context window drops the ratio while keeping the
+   * count it did measure.
+   */
+  const usageSettings = useSettingsStore((state) => state.settings)
+  const usageModel = agent.steps[agent.steps.length - 1]?.modelUsed || usageSettings.model
+  const contextUsage = useMemo(
+    () => projectContextUsage(
+      { version: TURN_RECORD_FORMAT_VERSION, entries: [...recordEntries] },
+      {
+        contextWindow: resolveKnownContextWindow(usageSettings, usageModel),
+        unloadedBefore: Math.max(0, recordTotal - recordEntries.length),
+      },
+    ),
+    [recordEntries, recordTotal, usageSettings, usageModel],
+  )
+  const usageMicrocopy = contextUsage.measuredSteps > 0
+    ? `${formatTokensCompact(contextUsage.tokens.total)} tok${contextUsage.ratio === undefined ? '' : ` (${formatRatio(contextUsage.ratio)})`}`
+    : ''
   const recovery = activity?.recovery || null
   const interaction = activity?.interaction || null
   const recoveryThread = useThreadStore((state) =>
@@ -408,6 +435,20 @@ export function RunProcessFeed({
           </span>
           <Icon name={processOpen ? 'expand_less' : 'expand_more'} size={16} className="shrink-0 text-ink-3" />
         </button>
+        {usageMicrocopy && onOpenPanel ? (
+          <button
+            type="button"
+            onClick={onOpenPanel}
+            title="開啟執行摘要的上下文用量"
+            className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-ink-3 transition-colors hover:text-ink"
+          >
+            {usageMicrocopy}
+          </button>
+        ) : usageMicrocopy ? (
+          <span className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-ink-3">
+            {usageMicrocopy}
+          </span>
+        ) : null}
         <span className="flex shrink-0 items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10px] text-ink-3">
           {startedAt > 0 ? <ElapsedTime startedAt={startedAt} /> : null}
         </span>
@@ -538,6 +579,9 @@ export function RunProcessFeed({
                 <span className="normal-case tracking-normal">
                   {unloadedBefore > 0 ? `尚有 ${unloadedBefore} 筆更早 · ` : ''}
                   {toolCount} 個工具 · {messageCount} 則訊息{taskSummary}
+                  {usageMicrocopy ? (
+                    <span className="ml-1 font-[family-name:var(--font-mono)] tabular-nums">{usageMicrocopy}</span>
+                  ) : null}
                 </span>
               </div>
               {recordTimeline.map((row) => {

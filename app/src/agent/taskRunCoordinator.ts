@@ -1207,6 +1207,10 @@ async function pushRunProcessSummary(args: {
     ? useSubDesignExportStore.getState().findByArtifactId(subDesignArtifact.id)
     : []
   const settlement = orchestrationFromAgent(finalAgent)
+  // The same projection every live surface reads, run once at settlement so
+  // the archived bubble and the panel it replaces cannot report two totals.
+  const { projectContextUsage } = await import('./contextUsageProjection.ts')
+  const usage = projectContextUsage(finalAgent.turnRecord)
   thr.pushRunSummary(tid, {
     status:
       status === 'failed' ? 'failed' : status === 'halted' ? 'halted' : 'success',
@@ -1216,6 +1220,10 @@ async function pushRunProcessSummary(args: {
     maxIterations: settlement?.maxIterations,
     executionKind: settlement?.executionKind,
     interruptReason: finalAgent.interruptReason,
+    // Written only when something was actually measured; a runner that
+    // reported nothing archives no figure rather than a zero.
+    ...(usage.measuredSteps > 0 ? { tokens: usage.tokens.total } : {}),
+    ...(usage.costUsd === undefined ? {} : { costUsd: usage.costUsd }),
     subDesign: subDesignBrief
       ? {
           briefId: subDesignBrief.id,

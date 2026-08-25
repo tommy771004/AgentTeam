@@ -60,6 +60,16 @@ export type ThreadRunSummary = {
   iterations?: number
   maxIterations?: number
   executionKind?: 'loop' | 'external'
+  /**
+   * What this run spent, so past runs can be compared without reopening each.
+   *
+   * Both optional and both measured: `tokens` is the projection's total over
+   * steps that reported usage, `costUsd` the sum of the ones that were priced.
+   * A summary written before these existed simply lacks them, and the card
+   * renders exactly as it did then — absent is not zero here either.
+   */
+  tokens?: number
+  costUsd?: number
   /** Set when the run was parked; keeps a user stop distinct from a timeout. */
   interruptReason?: 'user' | 'timeout'
   subDesign?: {

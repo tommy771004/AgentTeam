@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { projectTrajectory, type TrajectoryRow } from '../agent/trajectoryProjection'
 import type { TurnRecordPage } from '../agent/turnRecord'
 import { Icon } from './Icon'
+import { formatTokens, formatUsd } from '../agent/contextUsageView'
 
 /**
  * Walk back through what a run actually did.
@@ -187,7 +188,24 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
               <>
                 {selectedStep?.waitingMs === undefined ? null : <span>等待首 token {formatMs(selectedStep.waitingMs)}</span>}
                 {selectedStep?.generatingMs === undefined ? null : <span>產生 {formatMs(selectedStep.generatingMs)}</span>}
-                {selectedStep?.usage?.total ? <span>{selectedStep.usage.total} tokens</span> : null}
+                {/* Per-step usage, so «哪一步最貴» has an answer. Each figure
+                    appears only when the provider reported it: an absent cache
+                    split or price is omitted, never shown as 0. */}
+                {selectedStep?.usage?.total ? <span className="tabular-nums">{formatTokens(selectedStep.usage.total)} tokens</span> : null}
+                {selectedStep?.usage?.input === undefined ? null : (
+                  <span className="tabular-nums">
+                    輸入 {formatTokens(selectedStep.usage.input)}
+                    {selectedStep.usage.output === undefined ? '' : ` · 輸出 ${formatTokens(selectedStep.usage.output)}`}
+                  </span>
+                )}
+                {selectedStep?.usage?.cachedRead === undefined && selectedStep?.usage?.cachedWrite === undefined ? null : (
+                  <span className="tabular-nums">
+                    快取讀 {formatTokens(selectedStep?.usage?.cachedRead ?? 0)} · 快取寫 {formatTokens(selectedStep?.usage?.cachedWrite ?? 0)}
+                  </span>
+                )}
+                {selectedStep?.usage?.costUsd === undefined ? null : (
+                  <span className="tabular-nums">{formatUsd(selectedStep.usage.costUsd)}</span>
+                )}
               </>
             )}
           </div>

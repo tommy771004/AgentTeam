@@ -6,6 +6,7 @@ import { ContextCards } from './ContextCards'
 import { Icon } from './Icon'
 import { Reveal } from './primitives/Reveal'
 import { contextSummary, groupProcessOperations } from '../lib/runPresentation'
+import { formatTokensCompact, formatUsd } from '../agent/contextUsageView'
 
 function iconFor(kind: string) {
   if (kind === 'file') return 'edit'
@@ -59,6 +60,18 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
           <span className="block text-[11px] text-ink-3">
             {summary.operations.length} 項操作
             {summary.durationMs ? ` · ${Math.round(summary.durationMs / 1000)} 秒` : ''}
+            {/* Measured or absent. An older summary carries neither and reads
+                exactly as it always did. */}
+            {summary.tokens ? (
+              <span className="font-[family-name:var(--font-mono)] tabular-nums">
+                {' · '}{formatTokensCompact(summary.tokens)} tok
+              </span>
+            ) : null}
+            {summary.costUsd === undefined ? null : (
+              <span className="font-[family-name:var(--font-mono)] tabular-nums">
+                {' · '}{formatUsd(summary.costUsd)}
+              </span>
+            )}
           </span>
         </span>
         {outcome ? (

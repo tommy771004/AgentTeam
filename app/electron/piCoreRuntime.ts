@@ -597,19 +597,43 @@ export async function runPiTurn(
     }
     if (event.type === 'agent_end' && Array.isArray(event.messages)) {
       const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+      // Pi already measures all of this per assistant message and prices it
+      // from its own model catalog. The reducer used to keep three fields and
+      // drop the rest, which is why nobody could answer «這個 run 為什麼燒了
+      // 這麼多 token» — the cache split and the cost were measured, published,
+      // and thrown away one line before they were recorded.
       const usage = event.messages.reduce(
-        (running: { input: number; output: number; total: number }, message) => {
+        (running: { input: number; output: number; total: number; cachedRead: number; cachedWrite: number; costUsd: number }, message) => {
           const reported = (message as { usage?: Record<string, unknown> }).usage
           if (!reported || typeof reported !== 'object') return running
+          const cost = reported.cost as Record<string, unknown> | undefined
           return {
             input: running.input + count(reported.input),
             output: running.output + count(reported.output),
             total: running.total + count(reported.totalTokens),
+            cachedRead: running.cachedRead + count(reported.cacheRead),
+            cachedWrite: running.cachedWrite + count(reported.cacheWrite),
+            costUsd: running.costUsd + count(cost?.total),
           }
         },
-        { input: 0, output: 0, total: 0 },
+        { input: 0, output: 0, total: 0, cachedRead: 0, cachedWrite: 0, costUsd: 0 },
       )
-      if (usage.total > 0 || usage.input > 0 || usage.output > 0) timing.usage = usage
+      if (usage.total > 0 || usage.input > 0 || usage.output > 0) {
+        timing.usage = {
+          input: usage.input,
+          output: usage.output,
+          total: usage.total,
+          // Zero cache is a real measurement here — Pi reports the split for
+          // every step — so it is recorded as measured. Cost is different: Pi
+          // computes it from catalog rates that are 0 for a model it has no
+          // price for, so a 0 total cannot tell «免費» from «沒有定價». It is
+          // only recorded when it is positive, which is the only case where
+          // the number means what the panel would say it means.
+          cachedRead: usage.cachedRead,
+          cachedWrite: usage.cachedWrite,
+          ...(usage.costUsd > 0 ? { costUsd: usage.costUsd } : {}),
+        }
+      }
     }
     // Tool boundaries are the only safe place to stop: between calls the agent
     // owns no half-applied edit and no orphaned child process.

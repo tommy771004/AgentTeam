@@ -73,6 +73,16 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
       case 'compaction':
         rows.push({ ...base, kind: 'notice', content: `已壓縮 ${entry.replaced} 則上下文` })
         break
+      case 'tool-evidence':
+        // The Host's policy/evidence lifecycle for one invocation — start,
+        // decision, result, settlement — several entries per tool call. Its
+        // readable facts already surface as the tool-call/tool-result pair
+        // and any approval notice; projecting the lifecycle itself would
+        // repeat each action four times over. Named here on purpose: it is a
+        // kind this build knows and deliberately leaves to the record, which
+        // is a different fact from the unknown-entry notice the default arm
+        // writes.
+        break
       case 'notice':
         // The entry kind whose whole purpose is to be read. It used to fall
         // through to the unknown arm and surface as 「未知的記錄項目：notice」,
