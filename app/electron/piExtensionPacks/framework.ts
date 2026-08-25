@@ -1,4 +1,4 @@
-import { registerPiExtensionPack, findPiPackTool, piAllPackToolNames, piPackSessionHandle, type PiPackTool } from '../piToolHost.ts'
+import { registerPiExtensionPack, piPackSessionHandle, type PiPackTool } from '../piToolHost.ts'
 import { jsonOk, structuredFailure } from './packResults.ts'
 
 /**
@@ -12,9 +12,9 @@ import { jsonOk, structuredFailure } from './packResults.ts'
  */
 
 type CapabilityBridgeAccess = {
-  catalog: () => Array<{ id: string; description: string; deferred: boolean }>
-  load: (id: string) => { id: string; tools: string[] } | undefined
-  search: (query: string) => Array<{ id: string; description: string; tools: string[] }>
+  catalog: (sessionId?: string) => Array<{ id: string; description: string; deferred: boolean }>
+  load: (id: string, sessionId?: string) => { id: string; tools: string[] } | undefined
+  search: (query: string, sessionId?: string) => Array<{ name: string; pack?: string; description: string; schemaDigest: string; active: boolean }>
 }
 
 let capabilityBridge: CapabilityBridgeAccess | undefined
@@ -38,14 +38,17 @@ const loadCapability: PiPackTool = {
     const id = String(args.id || '').trim()
     if (!capabilityBridge) return structuredFailure('capability catalog 在此 Host 無法使用')
     try {
-      const loaded = capabilityBridge.load(id)
+      const loaded = capabilityBridge.load(id, ctx.sessionId)
       if (!loaded) {
         // Honest refusal: an unknown id never pretends to be loaded.
         return structuredFailure(`未知的 capability：${id}`)
       }
       const handle = piPackSessionHandle(ctx.sessionId)
       if (handle) {
-        handle.setActiveTools([...new Set([...handle.getActiveTools(), ...loaded.tools])])
+        if (!handle.setActiveTools([...new Set([...handle.getActiveTools(), ...loaded.tools])])) {
+          return structuredFailure('Pi session could not activate capability tools')
+        }
+        handle.refreshContract?.()
       }
       return jsonOk({ capabilityId: loaded.id, activatedTools: loaded.tools })
     } catch (error) {
@@ -66,16 +69,10 @@ const toolSearch: PiPackTool = {
     },
     required: ['query'],
   },
-  execute: async (args) => {
+  execute: async (args, ctx) => {
     const query = String(args.query || '').trim().toLowerCase()
     if (!query) return structuredFailure('query 必填')
-    const matches = piAllPackToolNames()
-      .map((name) => findPiPackTool(name)!)
-      .filter(({ pack, tool }) =>
-        tool.name.toLowerCase().includes(query)
-        || tool.description.toLowerCase().includes(query)
-        || pack.name.toLowerCase().includes(query))
-      .map(({ pack, tool }) => ({ name: tool.name, pack: pack.capability || pack.id, description: tool.description }))
+    const matches = capabilityBridge?.search(query, ctx.sessionId) || []
     return jsonOk({ matches })
   },
 }

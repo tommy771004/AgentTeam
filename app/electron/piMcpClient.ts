@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 
 type McpConfig = { command: string; args: string[]; env?: Record<string, string> }
 type Rpc = { jsonrpc: '2.0'; id?: number; method?: string; params?: unknown; result?: any; error?: { message?: string } }
+export type PiMcpCallResult = { content: unknown; isError: boolean }
 
 export class PiMcpClient {
   private readonly config: McpConfig
@@ -74,10 +75,15 @@ export class PiMcpClient {
     return result.tools || []
   }
 
-  async call(toolName: string, args: Record<string, unknown>) {
+  async callResult(toolName: string, args: Record<string, unknown>): Promise<PiMcpCallResult> {
     await this.listTools()
-    const result = await this.request('tools/call', { name: toolName, arguments: args }) as { content?: unknown }
-    return JSON.stringify(result?.content ?? result ?? null)
+    const result = await this.request('tools/call', { name: toolName, arguments: args }) as { content?: unknown; isError?: unknown }
+    return { content: result?.content ?? result ?? null, isError: result?.isError === true }
+  }
+
+  async call(toolName: string, args: Record<string, unknown>) {
+    const result = await this.callResult(toolName, args)
+    return JSON.stringify(result.content)
   }
 
   stop() {
@@ -88,18 +94,65 @@ export class PiMcpClient {
 }
 
 const clients = new Map<string, PiMcpClient>()
-export async function listPiMcpTools(extensionId: string, config: McpConfig) {
-  let client = clients.get(extensionId)
-  if (!client) { client = new PiMcpClient(config); clients.set(extensionId, client) }
+const generations = new Map<string, number>()
+
+/** Current discovery generation. A turn captures this value before it builds tools. */
+export function piMcpGeneration(extensionId: string): number {
+  return generations.get(extensionId) || 0
+}
+
+/**
+ * Advance only the future discovery/client generation.
+ *
+ * Existing native tool closures keep passing the generation they captured, so
+ * an extension reload cannot swap the transport underneath an in-flight turn.
+ */
+export function reloadPiMcp(extensionId: string): number {
+  const next = piMcpGeneration(extensionId) + 1
+  generations.set(extensionId, next)
+  return next
+}
+
+/** Stable admission key used to rebuild a Pi session on the next Host turn. */
+export function piMcpGenerationKey(extensionIds: readonly string[]): string {
+  return [...new Set(extensionIds)].sort().map((id) => `${id}:${piMcpGeneration(id)}`).join('|')
+}
+
+function clientKey(extensionId: string, generation: number): string {
+  return `${extensionId}\u0000${generation}`
+}
+
+function clientFor(extensionId: string, config: McpConfig, generation = piMcpGeneration(extensionId)): PiMcpClient {
+  const key = clientKey(extensionId, generation)
+  let client = clients.get(key)
+  if (!client) { client = new PiMcpClient(config); clients.set(key, client) }
+  return client
+}
+
+export async function listPiMcpTools(extensionId: string, config: McpConfig, generation = piMcpGeneration(extensionId)) {
+  const client = clientFor(extensionId, config, generation)
   return client.listTools()
 }
-export async function callPiMcpTool(extensionId: string, config: McpConfig, toolName: string, args: Record<string, unknown>) {
-  let client = clients.get(extensionId)
-  if (!client) { client = new PiMcpClient(config); clients.set(extensionId, client) }
+export async function callPiMcpTool(extensionId: string, config: McpConfig, toolName: string, args: Record<string, unknown>, generation = piMcpGeneration(extensionId)) {
+  const client = clientFor(extensionId, config, generation)
   return client.call(toolName, args)
 }
+export async function callPiMcpToolResult(extensionId: string, config: McpConfig, toolName: string, args: Record<string, unknown>, generation = piMcpGeneration(extensionId)) {
+  const client = clientFor(extensionId, config, generation)
+  return client.callResult(toolName, args)
+}
 export function stopPiMcp(extensionId: string) {
-  const client = clients.get(extensionId)
-  client?.stop()
-  clients.delete(extensionId)
+  for (const [key, client] of clients) {
+    if (!key.startsWith(`${extensionId}\u0000`)) continue
+    client.stop()
+    clients.delete(key)
+  }
+  generations.delete(extensionId)
+}
+
+/** Release every generation on Host shutdown, including frozen pre-reload clients. */
+export function stopAllPiMcp(): void {
+  for (const client of clients.values()) client.stop()
+  clients.clear()
+  generations.clear()
 }

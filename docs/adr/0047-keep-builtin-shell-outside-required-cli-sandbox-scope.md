@@ -8,33 +8,61 @@ status: accepted
 
 ADR-0022 makes verified filesystem isolation mandatory for an external CLI in
 Outbound Guard `required` mode. The builtin `bash` tool is a different
-execution path: it is an Electron IPC adapter, and the current platform
-bridges do not provide a verified seatbelt/bwrap equivalent for that adapter.
-Windows has no supported backend for this guarantee either.
+execution path and needs a platform probe, profile construction, and evidence
+semantics of its own; borrowing the external-CLI wrapper would have been a
+scope expansion that proves nothing about this path.
 
-Changing `required` to run builtin shell without verified isolation would make
-the strict mode claim more than the runtime can prove. Applying the external
-CLI wrapper to builtin shell is a scope expansion that needs a platform probe,
-profile construction, and evidence semantics of its own.
+Running builtin shell under `required` without verified isolation would make
+the strict-mode claim more than the runtime can prove. That was the whole
+question, and ADR-0051 has since answered it: builtin shell gets its own
+Host-owned verified sandbox seam, and the macOS and Linux adapters implement
+it. This ADR keeps the part of the boundary that did not change.
 
 ## Decision
 
-Do not widen ADR-0022 in this change. Under `required`, builtin `bash` remains
-fail-closed and is refused when `shellIsolationVerified` is false. Under
-`optional`, it may run in degraded mode with the existing command/path guard;
-under `off`, the existing unrestricted policy applies. External CLI continues
-to use the verified sandbox path required by ADR-0022.
+Builtin shell stays outside ADR-0022's external-CLI sandbox scope. The two
+paths are confined separately: external CLI by ADR-0022, builtin shell by the
+ADR-0051 seam and its platform adapters. Neither may attest for the other.
 
-This is an intentional product boundary, not a missing fallback. The refusal
-is surfaced as an outbound-shell decision and covered by
-`smoke-outbound-shell-evidence`.
+Under `required`, builtin `bash` is fail-closed by default and runs only when
+ADR-0051 admits it — a Host-issued isolation evidence object bound to this run,
+this Restricted Project View, this backend and profile digest, and unexpired.
+Verification alone is not permission: the command must also execute confined by
+the adapter that issued that evidence, so an admitted-but-unwrapped shell is
+refused rather than run on the open host. `unsupported`, probe failure and
+canary failure are refusals and never degrade to `optional`.
+
+The superseded form of this rule trusted a caller-supplied
+`shellIsolationVerified` boolean. That field is gone: a renderer, a tool
+argument, or model text can no longer describe the runtime as isolated
+(ADR-0048).
+
+Under `optional`, builtin shell may run in degraded mode with the existing
+command/path guard; under `off`, the existing unrestricted policy applies.
+
+This is an intentional product boundary, not a missing fallback. Pi Core Host's
+single model-builtin `tool_call` hook owns the in-turn decision. It composes the
+frozen invocation policy first and then applies this outbound-shell rule before
+Pi may execute `bash`. The refusal is surfaced as a Host tool decision and as
+contract-bound tool evidence in the durable Turn Record. A deterministic real
+Pi turn with an observable forbidden side effect is covered by
+`smoke-pi-adr0047-real-turn-denial`.
 
 ## Consequences
 
-Strict users cannot use builtin shell until a future ADR supplies a verified
-backend. That future proposal must cover macOS seatbelt, Linux bwrap, Windows
-fallback/refusal, canary probing, and metadata-only evidence before changing
-the current call site in `src/agent/tools/registered/bash.ts`.
+Strict users on macOS and Linux can use builtin shell, confined to the
+Restricted Project View with the network denied, once that run's backend has
+passed its probe and both canaries. Windows and every platform without an
+adapter remain honestly refused — the boundary this ADR drew is unchanged for
+them, and an unimplemented platform is never silently downgraded.
 
-Related: ADR-0007, ADR-0022, ADR-0045, and
+Renderer tool handlers are not production execution owners and cannot attest
+filesystem isolation.
+
+`smoke-pi-adr0047-real-turn-denial` covers a deterministic real Pi turn on both
+sides of the rule: a host with a verified backend runs the command confined and
+records which backend, profile and view authorised it; a host without one still
+refuses, with an observable side effect proving nothing executed.
+
+Related: ADR-0007, ADR-0022, ADR-0045, ADR-0048, ADR-0051, and
 `docs/DEEPSEEK_HARNESS_COMPARISON_2026-08-17.md`.

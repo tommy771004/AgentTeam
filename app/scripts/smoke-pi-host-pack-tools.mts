@@ -129,9 +129,13 @@ const waitForEvent = async (event: string, predicate: (payload: Record<string, a
   }
 }
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
-const submitTurn = (id: number, runId: string, prompt: string, profile: Record<string, unknown>, sessionId: string, script?: { tool: string; args: Record<string, unknown> }, preloadedCapabilities?: string[]) => {
+const submitTurn = (id: number, runId: string, prompt: string, profile: Record<string, unknown>, sessionId: string, script?: { tool: string; args: Record<string, unknown> }, preloadedCapabilities?: string[], contextPolicy?: Record<string, unknown>) => {
   if (script) pendingScript = script
-  send(id, 'turn/submit', { sessionId, runId, cwd: workspace, prompt, profile, ...(preloadedCapabilities ? { preloadedCapabilities } : {}) })
+  send(id, 'turn/submit', {
+    sessionId, runId, cwd: workspace, prompt, profile,
+    ...(preloadedCapabilities ? { preloadedCapabilities } : {}),
+    ...(contextPolicy ? { contextPolicy } : {}),
+  })
 }
 
 try {
@@ -245,7 +249,14 @@ try {
   assert.equal(userDeniedResult.settlement, 'denied')
 
   // An ask nobody resolves expires into a denial at the ask's own timeout.
-  submitTurn(12, 'pack-ask-timeout', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: false }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } }, ['messaging'])
+  // The run carries its own HITL timeout so the expiry is exercised in
+  // seconds instead of racing the 90s interactive default — the wait below
+  // used to be shorter than the timeout it was waiting for, so this test could
+  // only ever pass by accident.
+  submitTurn(12, 'pack-ask-timeout', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: false }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } }, ['messaging'], {
+    memoryEnabled: false, memoryWriteEnabled: false, referenceChatHistory: false, temporary: false,
+    approvalTimeoutMs: 1_500,
+  })
   await waitForEvent('host/approval-requested', (payload) => payload.runId === 'pack-ask-timeout')
   const timeoutSettled = await waitFor(12)
   assert.equal(timeoutSettled.result.settlement, 'answered', 'an expired ask does not hang the run forever')

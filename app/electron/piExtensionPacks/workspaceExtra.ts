@@ -46,6 +46,7 @@ const workspaceDiff: PiPackTool = {
     },
     required: ['source', 'target'],
   },
+  policyMigration: { pathArguments: ['source', 'target'] },
   execute: async (args, ctx) => {
     for (const key of ['source', 'target']) {
       const check = scopedTarget(ctx, args[key])
@@ -87,6 +88,7 @@ const workspaceMove: PiPackTool = {
     required: ['source', 'target'],
   },
   approval: () => ({ need: true, reason: 'workspace_move 會搬動專案檔案' }),
+  policyMigration: { sideEffect: true, pathArguments: ['source', 'target'] },
   execute: async (args, ctx) => {
     const source = scopedTarget(ctx, args.source)
     const target = scopedTarget(ctx, args.target)
@@ -112,6 +114,7 @@ const workspaceDelete: PiPackTool = {
     required: ['path'],
   },
   approval: () => ({ need: true, reason: 'workspace_delete 會刪除專案檔案' }),
+  policyMigration: { sideEffect: true, pathArguments: ['path'] },
   execute: async (args, ctx) => {
     const target = scopedTarget(ctx, args.path)
     if (Array.isArray(target)) return structuredFailure(`path: ${target[1]}`)
@@ -130,6 +133,7 @@ const workspaceMkdir: PiPackTool = {
     properties: { path: { type: 'string', description: 'Directory to create' } },
     required: ['path'],
   },
+  policyMigration: { sideEffect: true, pathArguments: ['path'] },
   execute: async (args, ctx) => {
     const target = scopedTarget(ctx, args.path)
     if (Array.isArray(target)) return structuredFailure(`path: ${target[1]}`)
@@ -157,6 +161,14 @@ const workspaceDownload: PiPackTool = {
     required: ['url', 'path'],
   },
   approval: () => ({ need: true, reason: 'workspace_download 寫入專案檔案並對外連線' }),
+  // Ticket 06 expand slice: one invocation crosses the Outbound Data Gate
+  // and writes only inside the frozen Restricted Project View.
+  policyMigration: {
+    capabilityApproval: 'workspace capability requires approval for outbound download',
+    sideEffect: true,
+    outbound: true,
+    pathArguments: ['path'],
+  },
   execute: async (args, ctx) => {
     const url = String(args.url || '').trim()
     const target = scopedTarget(ctx, args.path)

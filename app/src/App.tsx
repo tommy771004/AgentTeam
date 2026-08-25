@@ -191,7 +191,25 @@ function SkillsMigrationBootstrap() {
             }))
             const report = await sync(payload)
             if (cancelled) return
-            if (report.results.every((result) => result.ok)) {
+            const complete = report.results.every((result) => result.ok)
+            // Every attempt publishes its per-skill outcome (issue 16). A skill
+            // that failed to migrate used to vanish here: only `every(ok)` was
+            // read, the rest was dropped, and the loop retried in silence. The
+            // report is read on the Skills page, where a failing skill stays
+            // listed with the reason it failed.
+            const { useSkillMigrationStore } = await import('./store/skillMigrationStore')
+            useSkillMigrationStore.getState().setReport({
+              at: new Date().toISOString(),
+              skillsDir: report.skillsDir,
+              complete,
+              // The bridge type widens both arms, so the union is rebuilt here
+              // rather than trusted: a result that claims success without a
+              // slug is still recorded as a failure, not as a silent success.
+              outcomes: report.results.map((result) => (result.ok && typeof result.slug === 'string'
+                ? { name: result.name, ok: true as const, slug: result.slug }
+                : { name: result.name, ok: false as const, error: typeof result.error === 'string' && result.error ? result.error : '遷移未回報原因' })),
+            })
+            if (complete) {
               localStorage.setItem(MIGRATION_KEY, JSON.stringify({
                 completedAt: new Date().toISOString(),
                 skillsDir: report.skillsDir,
@@ -201,6 +219,21 @@ function SkillsMigrationBootstrap() {
             }
           } catch {
             /* Host not ready yet; retry until the attempt budget runs out */
+          }
+        }
+        // The budget ran out without the Host ever answering. Saying so beats
+        // leaving no trace: "we could not reach the Host" and "your skills
+        // migrated fine" must not look the same.
+        if (!cancelled) {
+          const { useSkillMigrationStore } = await import('./store/skillMigrationStore')
+          if (!useSkillMigrationStore.getState().report) {
+            useSkillMigrationStore.getState().setReport({
+              at: new Date().toISOString(),
+              skillsDir: '',
+              complete: false,
+              unreachable: true,
+              outcomes: [],
+            })
           }
         }
       } catch {

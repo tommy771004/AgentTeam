@@ -4,12 +4,42 @@ import path from 'node:path'
 import { createPiHostServer, type PiHostMessage } from './piHostProtocol.ts'
 import { loadPiHostState, savePiHostState, type PiHostSnapshot } from './piHostState.ts'
 import { migrateLegacySettings } from './piSettingsMigration.ts'
-import { persistPiLegacyCredential, persistPiLegacyModelConfig } from './piCoreRuntime.ts'
+import { disposeAllPiSessions, persistPiLegacyCredential, persistPiLegacyModelConfig } from './piCoreRuntime.ts'
 import { bootstrapPiUserConfig } from './piUserConfig.ts'
+import { stopAllPiMcp } from './piMcpClient.ts'
+import { registerTrustedBuiltinShellSandboxAdapter } from './piBuiltinShellSandbox.ts'
+import { createSeatbeltBuiltinShellAdapter } from './piSeatbeltShellSandbox.ts'
+import { createBubblewrapBuiltinShellAdapter } from './piBubblewrapShellSandbox.ts'
 
 type ParentPort = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
   postMessage(message: PiHostMessage): void
+}
+
+/**
+ * The builtin-shell sandbox adapter is installed HERE, in the Host process, at
+ * startup (ADR-0051, issue 13). Registration is trusted main-side code with no
+ * IPC, renderer, or model path into it; installing it once at boot also means
+ * the seam cannot acquire a second owner mid-run.
+ *
+ * macOS (Seatbelt) and Linux (bubblewrap) are claimed. Every other platform
+ * installs nothing, so verification reports `unsupported` and ADR-0047's
+ * `required` denial stands unchanged — an unimplemented platform is honestly
+ * unsupported, never silently downgraded to optional. Installing an adapter is
+ * still not permission to run: each one must pass its own probe and both
+ * canaries per run before a command is confined and allowed.
+ */
+const builtinShellAdapter = process.platform === 'darwin'
+  ? createSeatbeltBuiltinShellAdapter()
+  : process.platform === 'linux'
+    ? createBubblewrapBuiltinShellAdapter()
+    : undefined
+if (builtinShellAdapter) {
+  try {
+    registerTrustedBuiltinShellSandboxAdapter(builtinShellAdapter)
+  } catch {
+    /* A second registration is refused by the seam; the first owner stands. */
+  }
 }
 
 const parentPort = (process as typeof process & { parentPort?: ParentPort }).parentPort
@@ -92,5 +122,12 @@ if (parentPort) {
     } catch {
       server.handle(null)
     }
+  })
+  // MCP stdio children retain pipe handles. Release every discovery
+  // generation when the supervising stdio channel closes, otherwise a clean
+  // Host shutdown can hang after an extension reload qualification.
+  input.on('close', () => {
+    stopAllPiMcp()
+    void disposeAllPiSessions()
   })
 }

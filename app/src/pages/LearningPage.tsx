@@ -8,6 +8,7 @@ import { useAgentStore } from '../store/agentStore'
 import { PluginMarketplace } from '../components/PluginMarketplace'
 import { useProjectStore } from '../store/projectStore'
 import { buildLearningExportPlan } from '../agent/hermes/learningExport'
+import { failedSkillMigrations, useSkillMigrationStore } from '../store/skillMigrationStore'
 
 const SECTIONS = [
   { id: 'memory', label: '持久記憶', icon: 'psychology' },
@@ -236,6 +237,7 @@ export function LearningPage() {
           </div>
         )}
 
+        {section === 'skills' && <SkillMigrationDiagnostics />}
         {section === 'skills' && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="app-panel overflow-hidden md:col-span-1">
@@ -499,3 +501,59 @@ const input =
   'w-full bg-surface border border-white/10 focus:border-secondary rounded-lg px-3 py-2 text-sm outline-none'
 const ta =
   'w-full bg-surface border border-white/10 focus:border-secondary rounded-lg p-3 text-sm outline-none font-[family-name:var(--font-mono)] text-on-surface-variant resize-y'
+
+
+/**
+ * What the one-way skill migration did, shown where skills live (issue 16).
+ *
+ * Deliberately not a modal or a toast: a migration result is a diagnostic the
+ * user reads when they come looking, the way a doctor report is. It renders
+ * nothing while everything is fine, and a skill that failed stays listed with
+ * the reason — a failed skill disappearing is what made this invisible before.
+ */
+function SkillMigrationDiagnostics() {
+  const report = useSkillMigrationStore((state) => state.report)
+  const dismiss = useSkillMigrationStore((state) => state.clear)
+  if (!report || report.complete) return null
+  const failures = failedSkillMigrations(report)
+  if (!failures.length && !report.unreachable) return null
+  return (
+    <div className="app-panel mb-4 border border-amber-500/40">
+      <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Icon name="warning" className="text-amber-400" />
+          技能遷移未完成
+        </div>
+        <button
+          type="button"
+          onClick={() => dismiss()}
+          className="px-2 py-1 rounded border border-white/15 text-[10px] text-outline"
+        >
+          知道了
+        </button>
+      </div>
+      <div className="px-3 py-2 space-y-2">
+        {report.unreachable ? (
+          <p className="text-xs text-outline">
+            無法連上 Pi Host，技能尚未遷移。重新啟動應用程式會再試一次；技能仍保留在本機，不會遺失。
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-outline">
+              下列技能沒有寫入 Host 技能目錄{report.skillsDir ? `（${report.skillsDir}）` : ''}。
+              修正後重新啟動應用程式會再試一次；在此之前它們不會出現在模型可用的技能清單中。
+            </p>
+            <ul className="space-y-1">
+              {failures.map((failure) => (
+                <li key={failure.name} className="text-xs">
+                  <span className="font-semibold">{failure.name}</span>
+                  <span className="text-outline"> — {failure.error}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}

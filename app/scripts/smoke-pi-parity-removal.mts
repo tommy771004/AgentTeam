@@ -5,7 +5,11 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
-import { TOOL_DEFINITIONS } from '../src/agent/tools/toolDefinitions.ts'
+import {
+  PI_LEGACY_TOOL_TRANSLATIONS,
+  translateLegacyPiToolCall,
+} from './fixtures/piLegacyToolTranslations.ts'
+import { piCoreRuntimeToolCatalog } from '../electron/piCoreRuntime.ts'
 
 /**
  * Issues 14 + 15 — parity evidence before removal, and the removal itself.
@@ -22,12 +26,9 @@ import { TOOL_DEFINITIONS } from '../src/agent/tools/toolDefinitions.ts'
  * the one seam rather than inferred from a neighbouring smoke. Two of them are
  * proven as BEHAVIOUR, not string comparison:
  *
- *  - Schema parity cannot be a field-by-field diff: `tools/list` publishes tool
- *    NAMES, not schemas, and two of the equivalents renamed a parameter on the
- *    way across (workspace_grep `query` → grep `pattern`, workspace_glob
- *    `pattern` → find `pattern`). PARAMETER_PARITY below records that mapping
- *    explicitly, then proves the Host enforces the same requiredness: omitting
- *    a declared-required parameter fails, supplying only those succeeds.
+ *  - Legacy parity is a translation contract, not a schema-equality claim.
+ *    The qualification-only fixture records rename, default materialization,
+ *    and semantic translation independently, then drives the Host behavior.
  *  - The bash scope check is deliberately NOT asserted here. `tools/*` scopes
  *    on `params.path`, and bash has no path — its containment is ADR-0047's
  *    in-turn gate, proven in smoke-outbound-shell-evidence.mts. Asserting a
@@ -91,73 +92,53 @@ const waitForEvent = async (event: string, runId: string) => {
 const firstText = (message: Message): string =>
   (message.result?.content || []).map((part: { text?: string }) => part.text || '').join('\n')
 
-/**
- * The six equivalents, and what the renderer declaration promised about each.
- *
- * `declaredRequired` is asserted against the shipped TOOL_DEFINITIONS so a
- * silently loosened renderer contract fails here. `hostRequired` is what the
- * Host enforces; where the two lists differ the parameter was RENAMED across
- * the seam, and `renamed` records that so the divergence is documented rather
- * than discovered later.
- */
-const PARAMETER_PARITY = [
-  { rendererTool: 'workspace_read', hostMethod: 'tools/read', declaredRequired: ['path'], hostRequired: ['path'], minimal: { path: 'alpha.txt' } },
-  { rendererTool: 'workspace_list', hostMethod: 'tools/ls', declaredRequired: undefined, hostRequired: [], minimal: { path: '.' } },
-  { rendererTool: 'workspace_grep', hostMethod: 'tools/grep', declaredRequired: ['query'], hostRequired: ['path', 'pattern'], renamed: { query: 'pattern' }, minimal: { path: '.', pattern: 'parity' } },
-  { rendererTool: 'workspace_glob', hostMethod: 'tools/find', declaredRequired: ['pattern'], hostRequired: ['pattern'], minimal: { pattern: '**/*.md' } },
-  { rendererTool: 'workspace_write', hostMethod: 'tools/write', declaredRequired: ['path', 'content'], hostRequired: ['path', 'content'], minimal: { path: 'minimal.txt', content: 'minimal\n' }, approval: 'allow' },
-  { rendererTool: 'bash', hostMethod: 'tools/bash', declaredRequired: ['command'], hostRequired: ['command'], minimal: { command: 'true' }, approval: 'allow' },
+const LEGACY_SUCCESS_CASES = [
+  { legacyTool: 'workspace_read', input: { path: 'alpha.txt' } },
+  { legacyTool: 'workspace_list', input: {} },
+  { legacyTool: 'workspace_grep', input: { query: 'parity' } },
+  { legacyTool: 'workspace_glob', input: { pattern: '**/*.md' } },
+  { legacyTool: 'workspace_write', input: { path: 'minimal.txt', content: 'minimal\n' }, approval: 'allow' },
+  { legacyTool: 'bash', input: { command: 'true', timeoutMs: 5_000 }, approval: 'allow' },
 ] as const
 
 try {
   const init = await call('initialize', { protocolVersion: 2 })
   assert.equal(init.error, undefined)
 
-  // ── Schema parity: declared contract, and the Host enforcing it ──
-  for (const entry of PARAMETER_PARITY) {
-    const declared = (TOOL_DEFINITIONS as Record<string, { parameters: { required?: string[] } }>)[entry.rendererTool]
-    assert.ok(declared, `${entry.rendererTool} still declares a contract to be judged against`)
-    assert.deepEqual(
-      declared.parameters.required,
-      entry.declaredRequired,
-      `${entry.rendererTool} required parameters must not drift from the contract parity was proven against`,
-    )
-    // Only the declared-required parameters: the Host must accept that much.
-    const minimal = await call(entry.hostMethod, {
+  // ── Qualification fixture: translate and execute, never compare schemas ──
+  assert.equal(PI_LEGACY_TOOL_TRANSLATIONS.length, LEGACY_SUCCESS_CASES.length)
+  for (const entry of PI_LEGACY_TOOL_TRANSLATIONS) {
+    for (const [legacyName, hostName] of Object.entries(entry.parameterRenames)) {
+      assert.notEqual(legacyName, hostName, `${entry.legacyTool}.${legacyName} is not a rename when its name is unchanged`)
+    }
+    assert.ok(entry.semanticTranslation.length > 0, `${entry.legacyTool} records its semantic translation`)
+  }
+  for (const entry of LEGACY_SUCCESS_CASES) {
+    const translated = translateLegacyPiToolCall(entry.legacyTool, entry.input)
+    const result = await call(translated.translation.hostMethod, {
       cwd: workspace,
-      ...entry.minimal,
+      ...translated.arguments,
       ...('approval' in entry ? { approval: entry.approval } : {}),
     })
-    assert.equal(minimal.error, undefined, `${entry.hostMethod} accepts exactly the declared-required parameters`)
-    // …and reject when one is missing. A tool with no required parameters has
-    // nothing to omit, so it is skipped rather than faked.
-    for (const required of entry.hostRequired) {
-      const omitted: Record<string, unknown> = { cwd: workspace, ...entry.minimal, ...('approval' in entry ? { approval: entry.approval } : {}) }
-      delete omitted[required]
-      const missing = await call(entry.hostMethod, omitted)
-      assert.match(
-        String(missing.error?.message || ''),
-        /parameters are invalid/,
-        `${entry.hostMethod} rejects a call missing \`${required}\``,
-      )
-    }
-    if ('renamed' in entry) {
-      for (const [rendererParam, hostParam] of Object.entries(entry.renamed as Record<string, string>)) {
-        assert.notEqual(rendererParam, hostParam, 'a recorded rename must actually be a rename')
-        assert.ok(
-          entry.hostRequired.includes(hostParam),
-          `${entry.hostMethod} requires \`${hostParam}\`, the name \`${rendererParam}\` became`,
-        )
-      }
-    }
+    assert.equal(result.error, undefined, `${entry.legacyTool} succeeds after its explicit translation`)
   }
+  const grepTranslation = translateLegacyPiToolCall('workspace_grep', { query: 'HELLO PARITY', glob: '*.txt' })
+  assert.deepEqual(grepTranslation.translation.parameterRenames, { query: 'pattern', maxResults: 'limit' })
+  assert.equal(grepTranslation.arguments.path, '.', 'workspace_grep path default is materialized separately from query→pattern')
+  assert.equal(grepTranslation.arguments.ignoreCase, true)
+  const semanticGrep = await call(grepTranslation.translation.hostMethod, { cwd: workspace, ...grepTranslation.arguments })
+  assert.equal(semanticGrep.error, undefined)
+  assert.match(firstText(semanticGrep), /alpha\.txt/, 'case-insensitive regex semantics survive translation')
+  const invalidGrep = translateLegacyPiToolCall('workspace_grep', { query: '[' })
+  const structuredFailure = await call(invalidGrep.translation.hostMethod, { cwd: workspace, ...invalidGrep.arguments })
+  assert.equal(structuredFailure.error?.code, 'invalid_request', 'translated execution failure stays a structured Host error')
 
   // ── workspace_read → read ──
   const readResult = await call('tools/read', { cwd: workspace, path: 'alpha.txt' })
   assert.equal(readResult.error, undefined)
   assert.match(firstText(readResult), /hello parity/, 'Host read returns the same file content the renderer contract promised')
   const readEscape = await call('tools/read', { cwd: workspace, path: '../../etc/passwd' })
-  assert.match(String(readEscape.error?.message || ''), /outside the requested project scope/, 'escape rejected exactly as the sandboxed declaration promised')
+  assert.match(String(readEscape.error?.message || ''), /escapes the frozen Restricted Project View/, 'escape rejected exactly as the sandboxed declaration promised')
 
   // ── workspace_list → ls ──
   const lsResult = await call('tools/ls', { cwd: workspace, path: '.' })
@@ -186,7 +167,7 @@ try {
     const escaped = await call(method, { cwd: workspace, ...params })
     assert.match(
       String(escaped.error?.message || ''),
-      /outside the requested project scope/,
+      /escapes the frozen Restricted Project View/,
       `${method} refuses a path outside the project, exactly as the renderer declaration promised`,
     )
   }
@@ -208,7 +189,7 @@ try {
   assert.equal((await waitFor(secondWriteId)).error, undefined)
   assert.equal(await readFile(join(workspace, 'queued.txt'), 'utf8'), 'second\n', 'same-path writes serialize in order instead of interleaving')
   const writeEscape = await call('tools/write', { cwd: workspace, path: '../escape.txt', content: 'x', approval: 'allow' })
-  assert.match(String(writeEscape.error?.message || ''), /outside the requested project scope/)
+  assert.match(String(writeEscape.error?.message || ''), /escapes the frozen Restricted Project View/)
 
   // ── bash → bash (issue 15) ──
   const bashResult = await call('tools/bash', { cwd: workspace, command: 'cat alpha.txt', approval: 'allow' })
@@ -290,6 +271,45 @@ try {
       audit.some((record) => record.tool === tool && record.phase === 'result' && record.settlement === 'success'),
       `${tool} records the settlement, not just that it ended`,
     )
+  }
+
+  // ── Required parameters: the Host REJECTS a call that omits one ──
+  // Only the success side of translation was asserted above. A translation
+  // that silently produced a call missing a required parameter would still
+  // "succeed" at translating; what makes the contract real is that the Host
+  // refuses such a call rather than defaulting its way past it.
+  // Which parameters are required is READ FROM THE SHIPPED SCHEMA, never
+  // hand-listed here. The Host validates against that same schema, so a
+  // hardcoded list would only assert this smoke's guess — and would go stale
+  // the moment Pi's own schema moved. (It already had: `grep.path` used to be
+  // required by a hardcoded Host check and is optional in Pi's real schema.)
+  const catalog = piCoreRuntimeToolCatalog(workspace)
+  const requiredFor = (hostMethod: string): string[] => {
+    const tool = catalog.find((entry) => entry.name === hostMethod.slice('tools/'.length))
+    const required = (tool?.parameters as { required?: unknown })?.required
+    return Array.isArray(required) ? required.filter((name): name is string => typeof name === 'string') : []
+  }
+  for (const entry of LEGACY_SUCCESS_CASES) {
+    const translated = translateLegacyPiToolCall(entry.legacyTool, entry.input)
+    const required = requiredFor(translated.translation.hostMethod)
+    // A tool with no required parameters has nothing to omit; it is skipped
+    // rather than given a fake requirement to satisfy.
+    if (!required.length) continue
+    for (const name of required) {
+      const omitted: Record<string, unknown> = {
+        cwd: workspace,
+        ...translated.arguments,
+        ...('approval' in entry ? { approval: entry.approval } : {}),
+      }
+      assert.ok(name in omitted, `${translated.translation.hostMethod} translation supplies \`${name}\` before it can be omitted`)
+      delete omitted[name]
+      const missing = await call(translated.translation.hostMethod, omitted)
+      assert.match(
+        String(missing.error?.message || ''),
+        /parameters are invalid/,
+        `${translated.translation.hostMethod} rejects a call missing \`${name}\``,
+      )
+    }
   }
 
   // ── Removal: the renderer handlers are GONE ──

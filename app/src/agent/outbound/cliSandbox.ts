@@ -222,8 +222,6 @@ export function decideBuiltinShellUnderProtection(opts: {
   effectiveMode: OutboundGuardMode
   command: string
   viewRoot?: string | null
-  /** When main can wrap shell like CLI — not yet default. */
-  shellIsolationVerified?: boolean
 }): { allow: boolean; degraded?: boolean; reason?: string } {
   if (opts.effectiveMode === 'off') {
     return { allow: true }
@@ -250,13 +248,10 @@ export function decideBuiltinShellUnderProtection(opts: {
   }
 
   if (opts.effectiveMode === 'required') {
-    if (opts.shellIsolationVerified === true && view) {
-      return { allow: true }
-    }
     return {
       allow: false,
       reason:
-        'Required 模式拒絕未隔離的 builtin shell（cwd 變更不算 isolation）。請使用 sanitized LLM 或已 sandbox 的 external CLI。',
+        'Required 模式需要 Host-issued builtin shell sandbox evidence（cwd 變更或 caller boolean 不算 isolation）。',
     }
   }
 

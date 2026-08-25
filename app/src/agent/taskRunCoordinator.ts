@@ -1900,8 +1900,13 @@ async function coordinateTaskRun(
     // ADR-0047: the builtin shell is gated Host-side, from THIS run's posture.
     // Pinning it here — not in buildRunContextPolicy — keeps one derivation of
     // the mode shared with the Restricted View admission below.
-    const admittedPolicy = overrides.contextPolicySnapshot
+    const basePolicy = overrides.contextPolicySnapshot
       ?? buildRunContextPolicy(settings, { model: overrides.model, temporary, project: overrides.projectRoot })
+    // The HITL timeout this run resolved travels to the Host with the rest of
+    // the frozen policy; without it the Host could only use its own defaults.
+    const admittedPolicy = overrides.hitlTimeoutMs && !basePolicy.approvalTimeoutMs
+      ? { ...basePolicy, approvalTimeoutMs: overrides.hitlTimeoutMs }
+      : basePolicy
     overrides.contextPolicySnapshot = withRunShellPolicy(admittedPolicy, { effectiveMode: mode })
     if (isProtectionActive(mode)) {
       const bridgeAvailable = typeof window.subagents?.outbound?.prepareRunView === 'function'

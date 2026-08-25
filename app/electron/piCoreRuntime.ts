@@ -1,16 +1,17 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import type { PiThinkingLevel } from './piAgentProfile.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
 import { classifyPiTurnSettlement, piTurnProviderError, piTurnStopReason, PI_TURN_TRUNCATED_NOTICE } from '../src/agent/piHostRun.ts'
 import type { PiRecordedMessage, PiStepTiming } from '../src/agent/turnRecord.ts'
 import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
 import { piPackExtensionFactories } from './piToolHost.ts'
-import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, resolvePiSkillsDir } from './piSkills.ts'
+import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, snapshotPiSkillResources } from './piSkills.ts'
 import { piCodingAgentModule as piCodingAgent, piVendorDir } from './piVendor.ts'
-import { piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
+import { bindPiSessionSkillResourceView, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
+import { buildPiMcpDynamicPacks } from './piExtensionPacks/mcpBridgePack.ts'
 
 const vendorDir = piVendorDir
 const piConfig = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/config.js')).href)
@@ -29,6 +30,7 @@ const piAuthStorage = await import(
 
 type PiSessionRuntime = {
   activeToolsKey: string
+  skillSnapshotRoot?: string
   contextWindowTokens?: number
   requestContext?: { value: string; includeHistory: boolean }
   sessionManager: {
@@ -69,6 +71,8 @@ type PiActiveTurn = {
 const sessionRuntimes = new Map<string, PiSessionRuntime>()
 const activeTurns = new Map<string, PiActiveTurn>()
 const activeToolRuns = new Map<string, Set<{ controller: AbortController; cancelled: boolean }>>()
+/** A cancelled run id is a permanent tombstone; late calls may never succeed. */
+const cancelledToolRuns = new Set<string>()
 
 const TOOL_FACTORIES = {
   bash: piCodingAgent.createBashToolDefinition,
@@ -91,6 +95,29 @@ export function piCoreRuntimeStatus() {
   }
 }
 
+/**
+ * Host-owned compact facts for the catalog projection.  The turn contract is
+ * still captured from the live Pi session; this helper only supplies the
+ * descriptions and schemas needed before a Settings page has a turn-bound
+ * session to inspect.
+ */
+export function piCoreRuntimeToolCatalog(cwd = process.cwd()): Array<{ name: string; description: string; parameters: Record<string, unknown> }> {
+  return Object.entries(TOOL_FACTORIES).map(([name, factory]) => {
+    try {
+      const definition = factory(cwd) as { description?: unknown; parameters?: unknown }
+      return {
+        name,
+        description: typeof definition.description === 'string' ? definition.description : `Pi builtin ${name}`,
+        parameters: definition.parameters && typeof definition.parameters === 'object' && !Array.isArray(definition.parameters)
+          ? definition.parameters as Record<string, unknown>
+          : {},
+      }
+    } catch {
+      return { name, description: `Pi builtin ${name}`, parameters: {} }
+    }
+  }).sort((left, right) => left.name.localeCompare(right.name))
+}
+
 export async function executePiRead(cwd: string, args: { path: string; offset?: number; limit?: number }) {
   return executePiTool('read', cwd, args)
 }
@@ -101,6 +128,7 @@ export async function executePiTool(
   args: Record<string, unknown>,
   options: { runId?: string; onUpdate?: (update: unknown) => void } = {},
 ) {
+  if (options.runId && cancelledToolRuns.has(options.runId)) return { content: [], cancelled: true }
   const factory = TOOL_FACTORIES[toolName]
   if (typeof factory !== 'function') throw new Error(`Pi builtin tool is unavailable: ${toolName}`)
   const tool = factory(cwd)
@@ -137,6 +165,10 @@ export type PiRuntimeSettings = {
   preloadedCapabilities?: string[]
   /** Tools unlocked by loaded capabilities; the active set unions them in. */
   unlockedTools?: string[]
+  /** MCP registry generation frozen at Host turn admission. */
+  mcpGenerationKey?: string
+  /** Owning capability was already loaded when this turn was admitted. */
+  mcpCapabilityActive?: boolean
 }
 
 export type PiLegacyModelConfig = {
@@ -222,9 +254,12 @@ export async function persistPiLegacyCredential(provider: string, apiKey: string
 
 async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string, settings: PiRuntimeSettings = {}) {
   const existing = sessionRuntimes.get(sessionId)
-  const activeToolsKey = JSON.stringify(settings)
-  if (existing && existing.activeToolsKey === activeToolsKey) return existing
   const agentDir = resolvePiAgentDir()
+  const skillSnapshot = await snapshotPiSkillResources(agentDir, sessionId)
+  const activeToolsKey = JSON.stringify({ settings, cwd, skillSnapshotDigest: skillSnapshot?.digest })
+  if (skillSnapshot) bindPiSessionSkillResourceView(sessionId, skillSnapshot)
+  if (existing && existing.activeToolsKey === activeToolsKey) return existing
+  try {
   const sessionDir = agentDir ? join(agentDir, 'sessions') : undefined
   const sessionManager = sessionFile
     ? piCodingAgent.SessionManager.open(sessionFile, sessionDir, cwd)
@@ -253,7 +288,8 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   }
   let contextWindowTokens: number | undefined
   const requestContext = { value: '', includeHistory: true }
-  const piSkillsDir = resolvePiSkillsDir(agentDir)
+  const piSkillsDir = skillSnapshot?.root
+  const mcpDynamic = await buildPiMcpDynamicPacks()
   if (agentDir && typeof piCodingAgent.DefaultResourceLoader === 'function') {
     // The pack factories register the SubAgents extension tools next to the
     // hidden session-context factory, so the model sees one tool catalog
@@ -263,9 +299,12 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     const resourceLoader = new piCodingAgent.DefaultResourceLoader({
       cwd,
       agentDir,
+      // Default global/project discovery points at mutable source files.
+      // Only the Host-created frozen snapshot may be advertised this turn.
+      noSkills: true,
       additionalSkillPaths: piSkillsDir ? [piSkillsDir] : undefined,
       extensionFactories: [
-        ...piPackExtensionFactories({ sessionId, cwd, temporaryChat: settings.temporaryChat }),
+        ...piPackExtensionFactories({ sessionId, cwd, temporaryChat: settings.temporaryChat }, mcpDynamic.packs),
         // ADR-0047: builtin shell stays outside the external-CLI sandbox and
         // fail-closed under Outbound Guard `required` — enforced here where
         // in-turn bash actually executes.
@@ -277,7 +316,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
           hidden: true,
           factory: (pi: { on: (event: string, handler: (input: Record<string, unknown>) => unknown) => void }) => {
             pi.on('before_agent_start', async (event) => {
-              const block = await buildPinnedPiSkillsPromptBlock(agentDir)
+              const block = await buildPinnedPiSkillsPromptBlock(agentDir, piSkillsDir)
               if (!block || typeof event.systemPrompt !== 'string') return undefined
               return { systemPrompt: `${event.systemPrompt}\n\n${block}` }
             })
@@ -317,7 +356,11 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     // registry, or load_capability could never reveal one mid-run. Being in
     // the registry is not the same as being active: the active set below is
     // what reaches the model.
-    options.tools = [...new Set([...settings.activeTools, ...piAllPackToolNames()])]
+    options.tools = [...new Set([
+      ...settings.activeTools,
+      ...piAllPackToolNames(),
+      ...mcpDynamic.tools.map((tool) => tool.modelName),
+    ])]
   }
   if (settings.thinkingLevel) options.thinkingLevel = settings.thinkingLevel
   if (agentDir) options.agentDir = agentDir
@@ -341,6 +384,9 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   const desiredActive = [
     ...(settings.activeTools?.length ? settings.activeTools : Object.keys(TOOL_FACTORIES)),
     ...piActivePackToolNames(settings.activeTools || [], settings.unlockedTools || []),
+    ...mcpDynamic.tools
+      .filter((tool) => settings.mcpCapabilityActive === true || (settings.unlockedTools || []).includes(tool.modelName) || (settings.activeTools || []).includes(tool.modelName))
+      .map((tool) => tool.modelName),
   ]
   try {
     created.session.setActiveToolsByName?.([...new Set(desiredActive)])
@@ -368,14 +414,29 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   })
   const runtime = {
     activeToolsKey,
+    ...(skillSnapshot ? { skillSnapshotRoot: skillSnapshot.root } : {}),
     sessionManager,
     session: created.session,
     ...(contextWindowTokens ? { contextWindowTokens } : {}),
     ...(options.resourceLoader ? { requestContext } : {}),
   } as PiSessionRuntime
-  if (existing) await existing.session.dispose?.()
+  if (existing) {
+    await existing.session.dispose?.()
+    if (existing.skillSnapshotRoot && existing.skillSnapshotRoot !== skillSnapshot?.root) {
+      await rm(existing.skillSnapshotRoot, { recursive: true, force: true })
+    }
+  }
   sessionRuntimes.set(sessionId, runtime)
   return runtime
+  } catch (error) {
+    // A failed loader/model/session construction must not strand a readable
+    // snapshot that no live turn owns. Preserve only the previous runtime's
+    // snapshot, which remains valid until a replacement succeeds.
+    if (skillSnapshot?.root && skillSnapshot.root !== existing?.skillSnapshotRoot) {
+      await rm(skillSnapshot.root, { recursive: true, force: true })
+    }
+    throw error
+  }
 }
 
 /**
@@ -487,7 +548,7 @@ export async function runPiTurn(
   settings: PiRuntimeSettings = {},
   requestContext = '',
   referenceChatHistory = true,
-  onRuntimeReady?: (contextWindowTokens?: number) => void,
+  onRuntimeReady?: (contextWindowTokens?: number, session?: unknown) => void,
 ) {
   const turn: PiActiveTurn = { cancelled: false, toolsInFlight: 0, parked: false }
   if (runId) {
@@ -511,7 +572,7 @@ export async function runPiTurn(
     return { settlement: 'cancelled' as const, items: [] }
   }
   try {
-    onRuntimeReady?.(runtime.contextWindowTokens)
+    onRuntimeReady?.(runtime.contextWindowTokens, runtime.session)
   } catch (error) {
     if (runId) activeTurns.delete(runId)
     throw error
@@ -621,8 +682,17 @@ export async function disposePiSession(sessionId: string) {
   const runtime = sessionRuntimes.get(sessionId)
   if (!runtime) return
   unregisterPiPackSession(sessionId)
-  await runtime.session.dispose?.()
-  sessionRuntimes.delete(sessionId)
+  try {
+    await runtime.session.dispose?.()
+  } finally {
+    if (runtime.skillSnapshotRoot) await rm(runtime.skillSnapshotRoot, { recursive: true, force: true })
+    sessionRuntimes.delete(sessionId)
+  }
+}
+
+/** Release every per-session runtime and its Host-owned resource snapshot. */
+export async function disposeAllPiSessions(): Promise<void> {
+  await Promise.allSettled([...sessionRuntimes.keys()].map((sessionId) => disposePiSession(sessionId)))
 }
 
 export function compactPiSession(
@@ -670,6 +740,7 @@ export function followUpPiTurn(sessionId: string, prompt: string): boolean {
 export function cancelPiTool(runId: string) {
   const runs = activeToolRuns.get(runId)
   if (!runs || runs.size === 0) return false
+  cancelledToolRuns.add(runId)
   for (const tool of runs) {
     tool.cancelled = true
     tool.controller.abort()

@@ -8,6 +8,7 @@ import type { PiResource } from './piResourceRegistry.ts'
 import { isPiMemory, type PiMemory } from './piMemoryExtension.ts'
 import { parseTurnRecord } from '../src/agent/turnRecord.ts'
 import type { PiExtension } from './piExtensionRegistry.ts'
+import { isPiTurnToolContract, type PiTurnToolContract } from './piToolContract.ts'
 
 export type PiHostSnapshot = {
   cursor: number
@@ -51,9 +52,12 @@ function withValidatedTurnRecords(state: StoredState): StoredState {
     if (tornTail) {
       console.error(`[pi-host] Turn Record for session ${session.id} lost a torn final entry; keeping ${record.entries.length} entries`)
     }
+    const toolContracts = Array.isArray(session.toolContracts)
+      ? session.toolContracts.filter(isPiTurnToolContract)
+      : []
     return record.entries.length > 0 || (session as { record?: unknown }).record !== undefined
-      ? { ...session, record }
-      : session
+      ? { ...session, record, toolContracts }
+      : { ...session, toolContracts }
   })
   return { ...state, sessions }
 }
@@ -93,7 +97,12 @@ async function readStoredPiHostState(statePath: string): Promise<StoredState> {
     return {
       schemaVersion: 1,
       cursor: value.cursor,
-      sessions: value.sessions,
+      sessions: value.sessions.map((session) => ({
+        ...session,
+        toolContracts: Array.isArray(session.toolContracts)
+          ? session.toolContracts.filter(isPiTurnToolContract) as PiTurnToolContract[]
+          : [],
+      })),
       settings,
       settingsOrigin: value.settingsOrigin === 'managed' || (value.settingsOrigin !== 'native' && legacyStateHasRuntimeOverride) ? 'managed' : 'native',
       config: value.config,

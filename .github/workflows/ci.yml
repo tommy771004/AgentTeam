@@ -1,5 +1,6 @@
 # SubAgents AI — dual-platform verify (app/)
 # Runs build + stable smoke matrix on Ubuntu and Windows.
+# Linux additionally proves the bubblewrap builtin-shell sandbox (ADR-0051).
 # Marketplace E2E is optional (continue-on-error) due to Electron/CJS fragility.
 
 name: CI
@@ -56,6 +57,22 @@ jobs:
 
       - name: Smoke (CI stable matrix)
         run: npm run smoke:ci
+
+      # ADR-0051 / issue 14: the bubblewrap builtin-shell adapter can only be
+      # PROVEN where a Linux kernel can answer — a view escape and outbound
+      # network have to actually fail, not be reasoned about. The smoke reports
+      # honestly on other platforms, so this job is the only place its
+      # kernel-settled assertions ever run.
+      - name: Install bubblewrap (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      - name: Builtin shell sandbox — bubblewrap (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          bwrap --version
+          npm run build:pi-host
+          node --experimental-strip-types scripts/smoke-pi-bwrap-builtin-shell.mts
 
       - name: Smoke built Electron contract (Linux)
         if: runner.os == 'Linux'

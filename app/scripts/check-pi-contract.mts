@@ -18,17 +18,57 @@ const read = (file: string) => readFileSync(join(root, file), 'utf8')
 // ── Guard 1: the renderer registration directory is FROZEN ──
 const registeredDir = join(root, 'src/agent/tools/registered')
 const registeredFiles = readdirSync(registeredDir).filter((file) => file.endsWith('.ts') && file !== 'index.ts').sort()
+/**
+ * The frozen set, written out.
+ *
+ * This list used to be built by re-reading the same directory for every
+ * non-`workspace_` file, so both sides of the comparison grew together and the
+ * guard could only ever fail on a new `workspace_*` file — the exact thing its
+ * message says it catches was the one thing it could not. Adding a file here
+ * is the explicit act of extending the contract.
+ */
 const FROZEN_REGISTERED = [
-  // Non-equivalent workspace tools (issue 09): no Pi builtin counterpart.
+  'ask_user.ts',
+  'codegraph_callers.ts',
+  'codegraph_explore.ts',
+  'codegraph_impact.ts',
+  'codegraph_status.ts',
+  'datetime_now.ts',
+  'delegate_status.ts',
+  'delegate_task.ts',
+  'design_artifact_capture.ts',
+  'design_artifact_export.ts',
+  'design_artifact_lint.ts',
+  'design_artifact_patch.ts',
+  'design_artifact_register.ts',
+  'design_artifact_tweak.ts',
+  'design_brief_update.ts',
+  'design_critique.ts',
+  'design_critique_note.ts',
+  'design_direction_select.ts',
+  'design_gate_contrast.ts',
+  'design_gates.ts',
+  'http_fetch.ts',
+  'json_extract_lite.ts',
+  'mcp_call.ts',
+  'mcp_list_tools.ts',
+  'memory_append.ts',
+  'memory_get.ts',
+  'memory_search.ts',
+  'memory_set.ts',
+  'message_send.ts',
+  'monitor.ts',
+  'table_parse.ts',
+  'tool_output_read.ts',
+  'update_plan.ts',
+  'web_search.ts',
   'workspace_delete.ts',
   'workspace_diff.ts',
   'workspace_download.ts',
   'workspace_mkdir.ts',
   'workspace_move.ts',
-  // Remaining packs whose renderer handlers still serve browser degrade.
-  ...readdirSync(registeredDir).filter((file) => file.endsWith('.ts') && file !== 'index.ts')
-    .filter((file) => !file.startsWith('workspace_')).sort(),
 ]
+
 assert.deepEqual(registeredFiles, [...new Set(FROZEN_REGISTERED)].sort(), 'agent/tools/registered is frozen: a NEW renderer tool registration appeared — the Host catalog is the only catalog (ADR-0028). Remove it, or extend this contract explicitly.')
 
 // ── Guard 2: removed equivalents stay removed ──
@@ -84,4 +124,173 @@ const turnContext = read('src/agent/piTurnContext.ts')
 assert.doesNotMatch(turnContext, /skillsStore|matchForObjective|selectSkillsForObjective/, 'piTurnContext must not resolve skills renderer-side (issue 18)')
 assert.match(turnContext, /Skills are Pi resources/, 'the reason for the removal stays on record where the code lives')
 
-console.log('Pi contract drift guards passed: registrations frozen, equivalents removed, skills discovery single-owner')
+// ── Guard 5: the guidance agents read must not contradict these guards ──
+// A contributor following CLAUDE.md was previously told to add new tools to
+// `tools/registered/` — the directory Guard 1 freezes. Documentation that
+// disagrees with the gate is worse than no documentation: it sends people
+// into a build failure and makes the gate look wrong.
+const guidance = readFileSync(join(root, '..', 'CLAUDE.md'), 'utf8')
+const toolsSection = guidance.slice(guidance.indexOf('**Tools.**'))
+assert.notEqual(guidance.indexOf('**Tools.**'), -1, 'CLAUDE.md still documents how tools are added')
+assert.match(
+  toolsSection.slice(0, 1_200),
+  /piExtensionPacks/,
+  'CLAUDE.md must send a new tool to the Host extension packs, which is where new tools actually go',
+)
+assert.match(
+  toolsSection.slice(0, 1_200),
+  /FROZEN|frozen/,
+  'CLAUDE.md must say the renderer registration directory is frozen, because Guard 1 enforces exactly that',
+)
+
+
+// ── Guard 6: every Settings field must have a consumer ──
+// A field the UI writes and nothing reads is a promise the product does not
+// keep. It has happened twice: `toolsEnabled` and friends were claimed by the
+// Host and then never sent (piProduction.ts documents it), and the Git
+// preferences kept their UI after their only consumer was deleted with the
+// renderer `bash` tool — a user could switch force-push off and still be
+// force-pushed. This makes that class of drift a build failure.
+const DEFAULTS_SOURCE = read('src/agent/llm.ts')
+const defaultsBlock = DEFAULTS_SOURCE.slice(DEFAULTS_SOURCE.indexOf('DEFAULT_LLM_SETTINGS'))
+const settingKeys = [...new Set(
+  [...defaultsBlock.slice(0, defaultsBlock.indexOf('\n}')).matchAll(/^\s{2}([A-Za-z][A-Za-z0-9_]*)\s*:/gm)]
+    .map((match) => match[1]),
+)]
+assert.ok(settingKeys.length > 20, `settings key scan found only ${settingKeys.length} keys — the scan, not the settings, is broken`)
+// Where a field is DECLARED, defaulted, or merely rendered does not count as
+// consuming it; a consumer is code that reads it to decide something.
+const DECLARATION_SITES = new Set([
+  'src/agent/types.ts',
+  'src/pages/SettingsPage.tsx',
+  'src/store/settingsStore.ts',
+])
+/**
+ * `agent/llm.ts` holds the defaults literal AND real consuming logic, so
+ * excluding the whole file reported live settings as orphans — this guard's
+ * first draft did exactly that, and `llmRetryMaxAttempts` /
+ * `llmCircuitBreakerEnabled` were on the debt list while `llm.ts` was reading
+ * them two lines below the defaults. Only the defaults literal is excluded.
+ */
+const llmSource = read('src/agent/llm.ts')
+const llmDefaultsAt = llmSource.indexOf('DEFAULT_LLM_SETTINGS')
+const llmWithoutDefaults = llmSource.slice(0, llmDefaultsAt) + llmSource.slice(llmSource.indexOf('\n}', llmDefaultsAt))
+const consumerText = (file: string): string => {
+  const rel = file.slice(root.length + 1).replaceAll('\\', '/')
+  if (DECLARATION_SITES.has(rel)) return ''
+  if (rel === 'src/agent/llm.ts') return llmWithoutDefaults
+  return readFileSync(file, 'utf8')
+}
+/**
+ * Fields already orphaned when this guard was written.
+ *
+ * They are LISTED, not excused: each is a Settings control the user can move
+ * that changes nothing. Wiring or removing them needs a product decision per
+ * field, tracked in issue 21. Holding them here means the guard bites on any
+ * NEW drift immediately instead of waiting for that decision — and shrinking
+ * this list is the definition of done for issue 21.
+ */
+const KNOWN_UNCONSUMED_SETTINGS = new Set([
+  'llmParseEnabled',
+  'classificationEndpointUrl',
+  'classificationAllowPlaintextHttp',
+  'concurrentRunsEnabled',
+  'ambientSuggestions',
+])
+const unconsumed = settingKeys
+  .filter((key) => !KNOWN_UNCONSUMED_SETTINGS.has(key))
+  .filter((key) => !sourceFiles.some((file) => new RegExp(`\\b${key}\\b`).test(consumerText(file))))
+assert.deepEqual(unconsumed, [], `these Settings fields are written by the UI and read by nothing: ${unconsumed.join(', ')}. Either wire them to behaviour or remove them (issue 18).`)
+// The debt list must shrink, never quietly grow stale: a field that gained a
+// consumer has to leave the list, or the list stops describing reality.
+const revived = [...KNOWN_UNCONSUMED_SETTINGS]
+  .filter((key) => sourceFiles.some((file) => new RegExp(`\\b${key}\\b`).test(consumerText(file))))
+assert.deepEqual(revived, [], `these fields now HAVE consumers and must be removed from KNOWN_UNCONSUMED_SETTINGS: ${revived.join(', ')}`)
+
+
+// ── Guard 7: a test file must be reachable from a gate ──
+// A test nobody runs is not a test. `smoke-pi-parity-removal` — the parity
+// evidence that authorized deleting six renderer tools — sat unreferenced and
+// rotted, and it took writing a new assertion to notice (issue 20). This
+// measures FILES reachable from `npm run smoke` / `build` / `dist*`, not npm
+// script names, because an alias can exist while its file is already run
+// inline.
+const packageScripts = JSON.parse(read('package.json')).scripts as Record<string, string>
+const expandScript = (name: string, seen = new Set<string>()): string => {
+  if (seen.has(name)) return ''
+  seen.add(name)
+  let body = packageScripts[name] || ''
+  for (const referenced of body.match(/npm run [A-Za-z0-9:_-]+/g) || []) {
+    body += ` ${expandScript(referenced.slice('npm run '.length), seen)}`
+  }
+  return body
+}
+const gateBody = ['smoke', 'build', 'dist', 'dist:mac', 'dist:win', 'dist:all']
+  .filter((name) => packageScripts[name])
+  .map((name) => expandScript(name))
+  .join(' ')
+const runByGate = new Set((gateBody.match(/scripts\/[A-Za-z0-9._-]+\.(?:mts|mjs)/g) || [])
+  .map((path) => path.slice('scripts/'.length)))
+const testFiles = readdirSync(join(root, 'scripts'))
+  .filter((file) => /^smoke-.*\.(mts|mjs)$/.test(file) || file.startsWith('qualify-'))
+/**
+ * Test files already orphaned when this guard was written.
+ *
+ * LISTED, not excused: 90 of 189 test files were unreachable from any gate.
+ * Wiring them in means fixing whatever has rotted in each, which is issue 20's
+ * work. Holding them here makes the guard bite on any NEW orphan immediately,
+ * and shrinking this list is the definition of done.
+ */
+const KNOWN_UNGATED_TESTS = new Set([
+  'qualify-pi-host.mts',
+  'qualify-pi-sync.mts',
+  'qualify-release.mts',
+  'smoke-cli-doctor.mts',
+  'smoke-coordinator-browser.mjs',
+  'smoke-external-cli-primary-seam.mts',
+  'smoke-install-contract.mjs',
+  'smoke-pi-bash-single-owner.mts',
+  'smoke-pi-capabilities.mts',
+  'smoke-pi-child-runner.mts',
+  'smoke-pi-core-vendor.mts',
+  'smoke-pi-electron-cutover.mts',
+  'smoke-pi-electron-host-e2e.mjs',
+  'smoke-pi-equivalent-tools.mts',
+  'smoke-pi-extensions.mts',
+  'smoke-pi-external-sources.mts',
+  'smoke-pi-host-capabilities.mts',
+  'smoke-pi-host-direct-contract-validation.mts',
+  'smoke-pi-host-memory.mts',
+  'smoke-pi-host-queue-settlement.mts',
+  'smoke-pi-host-release-evidence.mts',
+  'smoke-pi-host-steer-queue.mts',
+  'smoke-pi-host-tool-registry.mts',
+  'smoke-pi-marketplace-pi-only.mts',
+  'smoke-pi-memory.mts',
+  'smoke-pi-orchestration-extension.mts',
+  'smoke-pi-policy.mts',
+  'smoke-pi-projection-merge.mts',
+  'smoke-pi-queue.mts',
+  'smoke-pi-resources.mts',
+  'smoke-pi-settings-migration.mts',
+  'smoke-pi-settings.mts',
+  'smoke-pi-skill-resource-view.mts',
+  'smoke-pi-sync-evidence.mts',
+  'smoke-pi-sync-gate.mts',
+  'smoke-pi-sync-release-record.mts',
+  'smoke-pi-sync-workflow.mts',
+  'smoke-pi-thread-hydration.mts',
+  'smoke-pi-user-config.mts',
+  'smoke-recovery-e2e.mjs',
+  'smoke-release-evidence.mjs',
+  'smoke-run-journal.mts',
+  'smoke-security.mts',
+  'smoke-update-migration-e2e.mjs',
+  'smoke-update-migration.mts',
+])
+const newOrphans = testFiles.filter((file) => !runByGate.has(file) && !KNOWN_UNGATED_TESTS.has(file))
+assert.deepEqual(newOrphans, [], `these test files are not reachable from any gate, so nothing runs them: ${newOrphans.join(', ')}. Wire them into npm run smoke (issue 20).`)
+const nowGated = [...KNOWN_UNGATED_TESTS].filter((file) => runByGate.has(file))
+assert.deepEqual(nowGated, [], `these files are now gated and must be removed from KNOWN_UNGATED_TESTS: ${nowGated.join(', ')}`)
+
+console.log('Pi contract drift guards passed: registrations frozen, equivalents removed, skills discovery single-owner, guidance agrees with the gate, settings fields have consumers, every test file is gated')

@@ -10,9 +10,13 @@
 
 **Status:** 可交給代理
 
-- [x] 刪除 `hermes/skills.ts` 與 renderer 的 `skill_list` / `skill_load` / `skill_save`
+- [~] `skill_list` / `skill_load` / `skill_save` 已刪除。`hermes/skills.ts` **尚未刪除**：它以 READ-ONLY 形式留存一個版本作為遷移回滾（`check-pi-contract.mts` Guard 3 凍結其 4 個消費者，新增引用會讓 build 失敗）。收尾追蹤於 `pi-agent-runtime-contract/issues/17`。
 - [x] 刪除 `piTurnContext` 的技能分支；專案指引與對話歷史注入保留
 - [x] 刪除 renderer 端已被 Host 取代的工具註冊與 `toolDefinitions.ts` 的目錄角色
 - [x] Drift guard：`agent/tools/registered/` 出現新檔案時 build 失敗
 - [x] Drift guard：新增對 `hermes/skills.ts` 的 import 或字串引用時 build 失敗
 - [x] `npm run build` 與 `npm run smoke` 全綠
+
+## Comments
+
+- 更正（2026-08-25）：上面第一條原本打勾為「刪除 `hermes/skills.ts`」，但檔案仍存在 7.5K，且 contract guard 明文允許它以 read-only 形式留存一個版本。過渡設計本身合理，不成立的是那個勾。已改為部分完成並指向 issue 17 收尾。

@@ -1,5 +1,7 @@
-import { join } from 'node:path'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join, relative } from 'node:path'
+import { chmod, lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 
 /**
  * Host-owned skills（技能目錄）— one SKILL.md per skill, discovered by Pi's
@@ -30,6 +32,68 @@ export function resolvePiSkillsDir(agentDir: string | undefined): string | undef
   if (configured) return configured
   if (!agentDir) return undefined
   return join(agentDir, 'skills')
+}
+
+export type PiSkillResourceSnapshot = { root: string; digest: string; manifest: string[] }
+
+/** Host-only, bounded and symlink-free view of the files Pi may advertise. */
+export async function snapshotPiSkillResources(agentDir: string | undefined, scope = 'turn'): Promise<PiSkillResourceSnapshot | undefined> {
+  const source = resolvePiSkillsDir(agentDir)
+  if (!source) return undefined
+  const files: Array<{ relativePath: string; content: Buffer; granted: boolean }> = []
+  let bytes = 0
+  const visit = async (dir: string, prefix = ''): Promise<void> => {
+    let entries
+    try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (files.length >= 128) throw new Error('Skill Resource View exceeds 128 files')
+      const relativePath = prefix ? join(prefix, entry.name) : entry.name
+      const absolute = join(dir, entry.name)
+      const stat = await lstat(absolute)
+      if (stat.isSymbolicLink()) continue
+      if (stat.isDirectory()) {
+        // A random sibling directory is not a skill bundle. Only a top-level
+        // directory with its own regular, non-symlink SKILL.md enters the view.
+        if (!prefix) {
+          try {
+            const skillFile = await lstat(join(absolute, 'SKILL.md'))
+            if (!skillFile.isFile() || skillFile.isSymbolicLink()) continue
+          } catch { continue }
+        }
+        await visit(absolute, relativePath)
+        continue
+      }
+      if (!stat.isFile()) continue
+      // Root metadata is needed for pinned semantics but is never granted to tools.
+      if (!prefix && entry.name !== 'skills-state.json') continue
+      const content = await readFile(absolute)
+      bytes += content.byteLength
+      if (bytes > 2 * 1024 * 1024) throw new Error('Skill Resource View exceeds 2 MiB')
+      files.push({ relativePath, content, granted: Boolean(prefix) })
+    }
+  }
+  await visit(source)
+  const hash = createHash('sha256')
+  for (const file of files) hash.update(file.relativePath).update('\0').update(file.content).update('\0')
+  const digest = hash.digest('hex')
+  const root = join(tmpdir(), 'subagents-pi-skill-resource-view', String(process.pid), safeSegment(scope), digest)
+  await mkdir(root, { recursive: true })
+  for (const file of files) {
+    const target = join(root, file.relativePath)
+    await mkdir(join(target, '..'), { recursive: true })
+    try {
+      const existing = await lstat(target)
+      if (existing.isFile()) {
+        const materialized = await readFile(target)
+        if (!materialized.equals(file.content)) throw new Error(`Skill Resource View content drift: ${file.relativePath}`)
+        await chmod(target, 0o444)
+        continue
+      }
+    } catch { /* first materialization */ }
+    await writeFile(target, file.content, { mode: 0o444 })
+    await chmod(target, 0o444)
+  }
+  return { root, digest, manifest: files.filter((file) => file.granted).map((file) => relative(root, join(root, file.relativePath))) }
 }
 
 /** Escape a user-facing skill name into a safe single-path directory segment. */
@@ -121,8 +185,8 @@ function stripFrontmatter(raw: string): string {
  * front — the way Pi's own `/skill:<name>` expansion works, and through the
  * SAME files on disk, never a second discovery path.
  */
-export async function loadPinnedPiSkillBodies(agentDir: string | undefined): Promise<Array<{ name: string; body: string }>> {
-  const dir = resolvePiSkillsDir(agentDir)
+export async function loadPinnedPiSkillBodies(agentDir: string | undefined, skillsDir?: string): Promise<Array<{ name: string; body: string }>> {
+  const dir = skillsDir || resolvePiSkillsDir(agentDir)
   if (!dir) return []
   const state = await readSkillsState(dir)
   const bodies: Array<{ name: string; body: string }> = []
@@ -204,8 +268,8 @@ export async function deletePiSkill(agentDir: string | undefined, name: string):
  * The system-prompt block that expands pinned skill bodies up front, or an
  * empty string when nothing is pinned.
  */
-export async function buildPinnedPiSkillsPromptBlock(agentDir: string | undefined): Promise<string> {
-  const bodies = await loadPinnedPiSkillBodies(agentDir)
+export async function buildPinnedPiSkillsPromptBlock(agentDir: string | undefined, skillsDir?: string): Promise<string> {
+  const bodies = await loadPinnedPiSkillBodies(agentDir, skillsDir)
   if (!bodies.length) return ''
   return `## 已釘選技能\n\n以下技能由使用者釘選，無論當前任務是否提及關鍵字都必須套用：\n\n${bodies.map((skill) => skill.body).join('\n\n')}`
 }

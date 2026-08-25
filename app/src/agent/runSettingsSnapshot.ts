@@ -1,5 +1,7 @@
 import type { OutboundGuardMode } from './outbound/outboundGate.ts'
+import { gitCommandPolicyFromSettings } from './tools/gitCommandPolicy.ts'
 import type { ApprovalMode, LlmSettings, RunContextPolicy, RuntimeOverrides } from './types.ts'
+import { collectHookRules } from './hooks.ts'
 
 /** Clone Settings once at coordinator admission so queued/in-flight runs cannot drift. */
 export function snapshotRunSettings(settings: LlmSettings): LlmSettings {
@@ -14,6 +16,10 @@ export function buildRunContextPolicy(
   const model = input.model || settings.model
   const temporary = input.temporary === true
   const memoryEnabled = settings.memoryEnabled !== false && !temporary
+  const restrictiveHooks = collectHookRules(settings)
+    .filter((rule) => rule.point === 'beforeTool' && rule.enabled !== false
+      && (rule.action === 'deny' || rule.action === 'require-approval'))
+  const hookPattern = (rule: (typeof restrictiveHooks)[number]) => rule.match?.tool || '*'
   return {
     memoryEnabled,
     memoryWriteEnabled: memoryEnabled && settings.memoryWriteEnabled !== false,
@@ -22,6 +28,11 @@ export function buildRunContextPolicy(
     ...(input.project?.trim() ? { project: input.project.trim() } : {}),
     contextWindowTokens: settings.modelProfiles?.[model]?.contextWindow
       || settings.defaultContextWindowTokens,
+    deniedTools: [...new Set(restrictiveHooks.filter((rule) => rule.action === 'deny').map(hookPattern))],
+    approvalTools: [...new Set(restrictiveHooks.filter((rule) => rule.action === 'require-approval').map(hookPattern))],
+    // Frozen with the rest of the run: changing a Git preference mid-run must
+    // not change what an in-flight command is allowed to do.
+    gitPolicy: gitCommandPolicyFromSettings(settings),
   }
 }
 
@@ -32,9 +43,8 @@ export function buildRunContextPolicy(
  * Gate has admitted the run, so they arrive after buildRunContextPolicy rather
  * than inside it. Two rules hold here: the posture is the mode the gate actually
  * admitted under (never re-derived, so the shell gate and the view cannot
- * disagree), and isolation is never claimed from the renderer — only main-side
- * proof may set `shellIsolationVerified`, so `required` without a verified
- * sandbox stays a denial on the Host.
+ * disagree). Sandbox evidence is not part of this renderer-owned projection:
+ * ADR-0051 allows only the Host verifier to issue it.
  */
 export function withRunShellPolicy(
   policy: RunContextPolicy,

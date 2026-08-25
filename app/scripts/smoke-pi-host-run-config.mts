@@ -27,6 +27,13 @@ assert.deepEqual(buildRunContextPolicy(frozenSettings, {
   temporary: false,
   project: '/project',
   contextWindowTokens: 128_000,
+  // The frozen policy carries the run's tool restrictions too; empty lists are
+  // still a decision ("nothing restricted"), not an absent field.
+  approvalTools: [],
+  deniedTools: [],
+  // Git preferences are frozen with the run too (issue 18), so a mid-run
+  // Settings change cannot alter what an in-flight command may do.
+  gitPolicy: { branchPrefix: 'agent/', allowForcePush: false, draftPr: true },
 })
 assert.equal(buildRunContextPolicy(frozenSettings, { temporary: true }).memoryEnabled, false)
 const admitted = resolveRunSettingsOverrides(frozenSettings, {

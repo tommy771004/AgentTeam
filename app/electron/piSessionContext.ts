@@ -15,9 +15,13 @@ export type PiTurnContextPolicy = {
   project?: string
   contextWindowTokens?: number
   /** Outbound shell posture for this run (ADR-0047); absent never denies. */
+  gitPolicy?: { branchPrefix?: string; allowForcePush: boolean; draftPr: boolean }
+  approvalTimeoutMs?: number
   outboundShellMode?: 'required' | 'optional' | 'demo' | 'off'
-  shellIsolationVerified?: boolean
   viewRoot?: string
+  /** beforeTool hook restrictions frozen at renderer admission. */
+  deniedTools?: string[]
+  approvalTools?: string[]
 }
 
 export function parsePiTurnContextPolicy(value: unknown): PiTurnContextPolicy {
@@ -40,8 +44,27 @@ export function parsePiTurnContextPolicy(value: unknown): PiTurnContextPolicy {
       || input.outboundShellMode === 'demo' || input.outboundShellMode === 'off'
       ? { outboundShellMode: input.outboundShellMode }
       : {}),
-    ...(input.shellIsolationVerified === true ? { shellIsolationVerified: true } : {}),
     ...(typeof input.viewRoot === 'string' && input.viewRoot.trim() ? { viewRoot: input.viewRoot.trim() } : {}),
+    // `allowForcePush` is read strictly: anything that is not an explicit
+    // `true` means not allowed, so a malformed or partial policy fails closed
+    // on the one preference with destructive consequences.
+    ...(typeof input.approvalTimeoutMs === 'number' && Number.isFinite(input.approvalTimeoutMs) && input.approvalTimeoutMs > 0
+      ? { approvalTimeoutMs: Math.floor(input.approvalTimeoutMs) }
+      : {}),
+    ...(input.gitPolicy && typeof input.gitPolicy === 'object'
+      ? {
+          gitPolicy: {
+            ...(typeof (input.gitPolicy as Record<string, unknown>).branchPrefix === 'string'
+              && String((input.gitPolicy as Record<string, unknown>).branchPrefix).trim()
+              ? { branchPrefix: String((input.gitPolicy as Record<string, unknown>).branchPrefix).trim() }
+              : {}),
+            allowForcePush: (input.gitPolicy as Record<string, unknown>).allowForcePush === true,
+            draftPr: (input.gitPolicy as Record<string, unknown>).draftPr !== false,
+          },
+        }
+      : {}),
+    ...(Array.isArray(input.deniedTools) ? { deniedTools: input.deniedTools.filter((name): name is string => typeof name === 'string') } : {}),
+    ...(Array.isArray(input.approvalTools) ? { approvalTools: input.approvalTools.filter((name): name is string => typeof name === 'string') } : {}),
   }
 }
 

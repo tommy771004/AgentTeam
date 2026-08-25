@@ -33,7 +33,6 @@ await test('ticket21: required denies unisolated bash', () => {
     effectiveMode: 'required',
     command: 'ls',
     viewRoot: '/tmp/view',
-    shellIsolationVerified: false,
   })
   assert.equal(r.allow, false)
   assert.match(r.reason || '', /Required|shell|isolation/i)
@@ -67,20 +66,6 @@ await test('ticket21: off allows freely', () => {
   assert.equal(r.allow, true)
 })
 
-await test('ticket21: bash gate wires decideBuiltinShellUnderProtection on the HOST', () => {
-  // ADR-0027 removal moved in-turn bash to the Host; the ADR-0047 gate moved
-  // with it — an inline extension factory intercepting Pi's tool_call.
-  const gate = fs.readFileSync(
-    path.join(appRoot, 'electron/piToolHost.ts'),
-    'utf8',
-  )
-  assert.match(gate, /decideBuiltinShellUnderProtection/)
-  assert.match(gate, /subagents-bash-gate/)
-  assert.match(gate, /shellIsolationVerified/, 'required-mode denial needs the verified flag')
-  const runtime = fs.readFileSync(path.join(appRoot, 'electron/piCoreRuntime.ts'), 'utf8')
-  assert.match(runtime, /piBashGateExtensionFactory/, 'the gate is registered next to the pack factories')
-})
-
 // A gate nothing feeds is a gate that always allows. These exercise the SHIPPED
 // producer, the IPC crossing and the Host decision on one policy object, so a
 // missing renderer-side producer fails here instead of passing silently.
@@ -110,7 +95,6 @@ await test('ADR-0047: an unbound view leaves viewRoot absent, so required still 
     effectiveMode: policy.outboundShellMode!,
     command: 'ls',
     viewRoot: policy.viewRoot ?? null,
-    shellIsolationVerified: policy.shellIsolationVerified,
   })
   assert.equal(verdict.allow, false)
 })
