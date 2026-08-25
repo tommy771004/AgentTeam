@@ -318,8 +318,8 @@ export class PiHostSupervisor {
   }
 
   /** The full catalog projection: every entry carries its own availability fact. */
-  async listCatalog(): Promise<Array<{ name: string; description: string; pack: string; source: 'discovered' | 'installed'; active: boolean; available: boolean; reason?: string }>> {
-    const response = await this.request('tools/list', {})
+  async listCatalog(): Promise<NonNullable<PiHostResponse['result']>['catalog']> {
+    const response = await this.request('tools/list', { requireContract: true })
     if (response.error || !response.result?.catalog) throw new Error(response.error?.message || 'Pi tool catalog is unavailable')
     return response.result.catalog
   }

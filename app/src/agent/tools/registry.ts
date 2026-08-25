@@ -23,6 +23,20 @@ export interface ToolDef {
 /** Derived catalog view — same shape as the former hand-maintained array. */
 export const TOOL_CATALOG: ToolDef[] = toolCatalogEntries()
 
+/**
+ * Compatibility declarations retained for plain-browser simulation only.
+ * In Electron, Pi Host projects its own live catalog and these names must not
+ * participate in renderer routing or validation authority.
+ */
+const PI_HOST_OWNED_COMPAT_TOOLS = new Set<ToolName>([
+  'workspace_read',
+  'workspace_list',
+  'workspace_grep',
+  'workspace_glob',
+  'workspace_write',
+  'bash',
+])
+
 /** Pick tools relevant to a step description + objective. */
 export function selectToolsForStep(
   description: string,
@@ -39,7 +53,7 @@ export function selectToolsForStep(
   for (const tool of TOOL_CATALOG) {
     // Electron/Pi Host is the canonical Bash owner. The legacy renderer loop
     // remains available only for plain-browser development fallback.
-    if (electronPiHostOwnsTools && tool.name === 'bash') continue
+    if (electronPiHostOwnsTools && PI_HOST_OWNED_COMPAT_TOOLS.has(tool.name)) continue
     if (tool.name === 'web_search' && opts?.webSearchEnabled === false) continue
     if (tool.keywords.some((k) => hay.includes(k))) {
       picks.push(tool.name)
@@ -180,4 +194,3 @@ function guessFilename(objective: string, kind: 'report' | 'input'): string {
     .slice(0, 40)
   return kind === 'report' ? `reports/${slug || 'output'}.md` : `inputs/${slug || 'notes'}.md`
 }
-

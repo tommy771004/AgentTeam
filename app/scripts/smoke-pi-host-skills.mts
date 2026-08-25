@@ -162,7 +162,12 @@ try {
   assert.match(systemPrompt1, /<available_skills>/, 'the turn advertises discovered skills')
   assert.match(systemPrompt1, /release-notes/)
   assert.match(systemPrompt1, /寫發布說明的步驟/, 'name AND description travel with the advertisement')
-  assert.match(systemPrompt1, /skills[/\\]release-notes[/\\]SKILL\.md/, 'the location is given so read can reach the body')
+  // The intent is that `read` can reach the body from the prompt alone, so the
+  // assertion is on a resolvable absolute path to THIS skill's SKILL.md. The
+  // literal `skills/` segment is gone on purpose: skills are Pi resources now
+  // (ADR-0034) and are served from a per-session resource view whose layout is
+  // not part of the contract.
+  assert.match(systemPrompt1, /\/[^"\s]*release-notes[/\\]SKILL\.md/, 'the location is given so read can reach the body')
   assert.doesNotMatch(systemPrompt1, /legacy-promo/, 'an archived skill stays out of <available_skills>')
   // Pinned expansion up front (issue 16): body travels even without keyword match.
   assert.match(systemPrompt1, /已釘選技能/, 'pinned skills get their own expansion block')
@@ -178,11 +183,30 @@ try {
   assert.equal(releaseEntry.kind, 'skill')
   assert.equal(releaseEntry.enabled, true)
   assert.equal(legacyEntry?.enabled, false, 'archived stays listed as disabled')
-  assert.ok((resourcesListed.result?.diagnostics || []).some((diagnostic: { path: string }) => String(diagnostic.path).includes('broken')), 'the malformed skill is reported as a diagnostic')
+  // The malformed skill is REPORTED, not dropped. It is identified by the
+  // problem, not by its directory name: a skill missing its frontmatter has no
+  // usable name, so the loader gives it a generated slug and the actionable
+  // part is the message. Pinning the old `broken` path pinned a layout that
+  // ADR-0034 deliberately replaced with a per-session resource view.
+  const diagnostics = (resourcesListed.result?.diagnostics || []) as Array<{ path: string; message: string }>
+  assert.equal(diagnostics.length, 1, 'exactly the malformed skill is reported')
+  assert.match(String(diagnostics[0].path), /SKILL\.md$/, 'the diagnostic points at the file to fix')
+  assert.match(String(diagnostics[0].message), /description is required/, 'and says what is wrong with it')
+  // The skills that DID load are unaffected by their broken neighbour.
+  assert.ok(releaseEntry && legacyEntry, 'a malformed skill does not take the valid ones down with it')
 
   // The model can follow the advertised location: scripted round 1 reads the
-  // exact SKILL.md path the catalog gave, and the body reaches round 2.
-  const skillPath = join(skillsDir, 'release-notes', 'SKILL.md')
+  // exact SKILL.md path the SYSTEM PROMPT gave, and the body reaches round 2.
+  //
+  // Read from the prompt rather than rebuilt from `skillsDir`: skills are
+  // served from a per-session resource view (ADR-0034), so a path assembled
+  // from the Host-owned directory is a path the model was never given — and it
+  // is refused as escaping the frozen Restricted Project View. That refusal is
+  // correct; using it here would have tested the wrong location. What matters
+  // is that the location the model IS told to use can actually be read.
+  const advertised = /<location>([^<]+release-notes[/\\]SKILL\.md)<\/location>/.exec(systemPrompt1)
+  assert.ok(advertised, 'the prompt advertises a concrete location for the skill')
+  const skillPath = advertised[1]
   send(6, 'turn/submit', {
     sessionId,
     runId: 'skills-read-run',

@@ -59,6 +59,38 @@ export type TurnRecordCoordinates = {
   at: number
 }
 
+/**
+ * Identity of the immutable Host tool contract that authorized one invocation.
+ *
+ * These fields are optional at the file-format boundary so records written by
+ * older builds remain readable. Production Pi tool calls written by the
+ * current Host populate the complete identity on both call and result entries.
+ */
+export type TurnRecordToolContractIdentity = {
+  contractRevision?: number
+  contractDigest?: string
+  schemaDigest?: string
+  toolSource?: 'builtin' | 'extension-pack' | 'mcp'
+  toolPack?: string
+  invocationOrigin?: 'model' | 'direct-protocol' | 'code-mode' | 'mcp'
+  /**
+   * Why this entry carries no contract identity (issue 19).
+   *
+   * Three different situations used to look identical in the record:
+   *
+   *  - `catalogued-not-in-turn-contract` — the Host knows this tool (it is in
+   *    the published catalog) but this turn's frozen contract does not carry
+   *    it, typically a deferred capability's tool called before loading. The
+   *    schema digest and source above ARE present; only the contract revision
+   *    is not, because the tool was not part of that revision.
+   *  - `not-in-turn-contract` — the Host does not know this tool at all.
+   *  - absent — ordinary identified call.
+   *
+   * Recording which keeps a refusal from reading as a dropped field.
+   */
+  contractStatus?: 'not-in-turn-contract' | 'catalogued-not-in-turn-contract'
+}
+
 export type TurnRecordEntry = TurnRecordCoordinates &
   (
     | {
@@ -94,7 +126,7 @@ export type TurnRecordEntry = TurnRecordCoordinates &
       }
     | { kind: 'user-text'; source: 'user'; content: string }
     | { kind: 'assistant-text'; source: 'model'; content: string }
-    | {
+    | ({
         kind: 'tool-call'
         source: 'model'
         tool: string
@@ -102,15 +134,29 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         /** The arguments as recorded, so a replay re-presents identically (ADR-0050). */
         args?: unknown
         path?: string
-      }
-    | {
+      } & TurnRecordToolContractIdentity)
+    | ({
         kind: 'tool-result'
         source: 'host'
         tool: string
         callId: string
         settlement: 'success' | 'failed' | 'cancelled' | 'denied'
         detail?: string
-      }
+      } & TurnRecordToolContractIdentity)
+    | ({
+        /** Host-owned policy/evidence lifecycle for a migrated invocation. */
+        kind: 'tool-evidence'
+        source: 'host'
+        tool: string
+        runId: string
+        callId: string
+        parentRunId?: string
+        phase: 'start' | 'decision' | 'update' | 'result' | 'settlement'
+        decision?: 'allow' | 'ask' | 'deny'
+        settlement?: 'success' | 'failed' | 'cancelled' | 'denied'
+        /** Bounded metadata only; never raw tool output or credentials. */
+        detail?: string
+      } & TurnRecordToolContractIdentity)
     | { kind: 'approval'; source: 'host'; tool: string; callId: string; decision: string; reason?: string }
     | { kind: 'compaction'; source: 'host'; replaced: number; tokens?: number }
     | {
@@ -172,6 +218,7 @@ const KINDS = new Set([
   'assistant-text',
   'tool-call',
   'tool-result',
+  'tool-evidence',
   'approval',
   'compaction',
   'notice',
@@ -187,8 +234,33 @@ function isEntry(value: unknown): value is TurnRecordEntry {
     if (typeof number !== 'number' || !Number.isFinite(number)) return false
   }
   if ((entry.kind === 'user-text' || entry.kind === 'assistant-text') && typeof entry.content !== 'string') return false
-  if ((entry.kind === 'tool-call' || entry.kind === 'tool-result' || entry.kind === 'approval')
+  if ((entry.kind === 'tool-call' || entry.kind === 'tool-result' || entry.kind === 'tool-evidence' || entry.kind === 'approval')
     && (typeof entry.tool !== 'string' || typeof entry.callId !== 'string')) return false
+  if (entry.kind === 'tool-call' || entry.kind === 'tool-result' || entry.kind === 'tool-evidence') {
+    const hasContractIdentity = entry.contractRevision !== undefined
+      || entry.contractDigest !== undefined
+      || entry.schemaDigest !== undefined
+      || entry.toolSource !== undefined
+      || entry.toolPack !== undefined
+      || entry.invocationOrigin !== undefined
+    if (hasContractIdentity) {
+      if (typeof entry.contractRevision !== 'number' || !Number.isInteger(entry.contractRevision) || entry.contractRevision < 1) return false
+      // Optional at the format boundary so records from the pre-digest build
+      // remain readable; the current Host writes it for every new invocation.
+      if (entry.contractDigest !== undefined && (typeof entry.contractDigest !== 'string' || !/^[a-f0-9]{64}$/.test(entry.contractDigest))) return false
+      if (typeof entry.schemaDigest !== 'string' || !/^[a-f0-9]{64}$/.test(entry.schemaDigest)) return false
+      if (entry.toolSource !== 'builtin' && entry.toolSource !== 'extension-pack' && entry.toolSource !== 'mcp') return false
+      if (entry.toolPack !== undefined && typeof entry.toolPack !== 'string') return false
+      if (entry.invocationOrigin !== 'model' && entry.invocationOrigin !== 'direct-protocol' && entry.invocationOrigin !== 'code-mode' && entry.invocationOrigin !== 'mcp') return false
+    }
+  }
+  if (entry.kind === 'tool-evidence') {
+    if (typeof entry.runId !== 'string' || !['start', 'decision', 'update', 'result', 'settlement'].includes(String(entry.phase))) return false
+    if (entry.parentRunId !== undefined && typeof entry.parentRunId !== 'string') return false
+    if (entry.decision !== undefined && entry.decision !== 'allow' && entry.decision !== 'ask' && entry.decision !== 'deny') return false
+    if (entry.settlement !== undefined && entry.settlement !== 'success' && entry.settlement !== 'failed' && entry.settlement !== 'cancelled' && entry.settlement !== 'denied') return false
+    if (entry.detail !== undefined && (typeof entry.detail !== 'string' || new TextEncoder().encode(entry.detail).byteLength > 1_024)) return false
+  }
   if (entry.kind === 'notice' && (typeof entry.topic !== 'string' || typeof entry.text !== 'string')) return false
   return true
 }

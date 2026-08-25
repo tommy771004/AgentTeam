@@ -2,6 +2,7 @@
 export type LoopType = 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
 
 import type { OutboundGuardMode } from './outbound/outboundGate.ts'
+import type { GitCommandPolicy } from './tools/gitCommandPolicy.ts'
 import type { ExternalCliDelegateContract } from './runners/types.ts'
 import type { ExternalCliConnectorRequirement, ExternalCliRunPolicy, ExternalCliTerminalClassification } from './externalCliRunSession.ts'
 
@@ -240,8 +241,30 @@ export interface RunContextPolicy {
    * posture ADR-0047 asks for.
    */
   shellIsolationVerified?: boolean
+  /**
+   * Tool patterns this run's restrictive beforeTool hooks deny outright, and
+   * the ones they force an approval on. Frozen with the run so a hook edited
+   * mid-run cannot change what an in-flight call may do.
+   */
+  deniedTools?: string[]
+  approvalTools?: string[]
   /** The Restricted Project View root this run is bound to, when pinned. */
   viewRoot?: string
+  /**
+   * Settings → Git preferences, frozen for THIS run and enforced Host-side on
+   * the builtin shell. Absent means Settings said nothing; it never means
+   * "anything goes" for force push, because the flag itself is explicit.
+   */
+  gitPolicy?: GitCommandPolicy
+  /**
+   * How long a HITL ask waits before it expires, for THIS run.
+   *
+   * The Host otherwise falls back to 45s unattended / 90s interactive. The
+   * renderer already resolved a per-run value (`hitlTimeoutMs`) but it only
+   * ever reached the browser loop, so on the Pi Host path the policy was not
+   * actually configurable — CLAUDE.md describes the adapter handing it over.
+   */
+  approvalTimeoutMs?: number
 }
 
 export interface RuntimeOverrides {

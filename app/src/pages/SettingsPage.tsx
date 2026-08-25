@@ -3157,7 +3157,7 @@ export function SettingsPage() {
             <SettingsGroup title="MCP">
               <SettingsRow
                 title="啟用 MCP"
-                description="代理可用 mcp_list_tools / mcp_call"
+                description="代理載入已啟用來源的 namespaced native MCP tools"
                 control={
                   <SettingsToggle
                     checked={settings.mcpEnabled === true}
@@ -3862,14 +3862,14 @@ export function SettingsPage() {
  * renderer list, because that fallback is the two-catalog problem restated.
  */
 function HostToolCatalogSection() {
-  const [catalog, setCatalog] = useState<Array<{ name: string; description: string; pack: string; source: 'discovered' | 'installed'; active: boolean; available: boolean; reason?: string }> | null>(null)
+  const [catalog, setCatalog] = useState<Array<{ name: string; description: string; pack: string; source: 'discovered' | 'installed'; active: boolean; available: boolean; reason?: string; schemaDigest: string }> | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
         const api = window.subagents?.piHost?.tools?.catalog
-        if (!api) throw new Error('Pi Host bridge 不可用')
+        if (!api) throw new Error('目前是 plain-browser compatibility mode，沒有 Electron Pi Host contract；工具目錄不會回退到 renderer definitions')
         const { catalog: entries } = await api()
         if (!cancelled) setCatalog(entries)
       } catch (e) {
@@ -3910,7 +3910,7 @@ function HostToolCatalogSection() {
                     {entries.map((entry) => (
                       <span
                         key={entry.name}
-                        title={`${entry.description}${entry.reason ? `\n${entry.reason}` : ''}`}
+                        title={`${entry.description}${entry.reason ? `\n${entry.reason}` : ''}\nsource: ${entry.source}\npack: ${entry.pack}\nschema: ${entry.schemaDigest}`}
                         className={`px-2 py-1 rounded-lg text-[11px] font-medium border ${
                           entry.active
                             ? 'border-primary/40 bg-primary/15 text-primary'
@@ -3918,8 +3918,19 @@ function HostToolCatalogSection() {
                         }`}
                       >
                         {entry.name}
-                        {!entry.active ? ' · inactive' : ''}
+                        {!entry.available ? ' · unavailable' : !entry.active ? ' · inactive' : ' · active'}
                       </span>
+                    ))}
+                  </div>
+                  <div className="mt-1 space-y-0.5 text-[10px] text-outline">
+                    {entries.map((entry) => (
+                      <div key={`${entry.name}-facts`} className="flex flex-wrap gap-x-2">
+                        <span>{entry.name}</span>
+                        <span>source={entry.source}</span>
+                        <span>pack={entry.pack}</span>
+                        <span>schema={entry.schemaDigest.slice(0, 12)}…</span>
+                        {entry.reason && <span className="text-error">{entry.reason}</span>}
+                      </div>
                     ))}
                   </div>
                 </div>

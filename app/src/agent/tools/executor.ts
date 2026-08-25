@@ -11,5 +11,4 @@ export {
   formatSearch,
   browserWebSearch,
   browserHttpFetch,
-  applyGitSettingsToBash,
 } from './toolIoHelpers.ts'

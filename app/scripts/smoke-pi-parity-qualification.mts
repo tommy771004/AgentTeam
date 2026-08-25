@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 
 /**
@@ -32,7 +32,8 @@ const workspace = await mkdtemp(join(tmpdir(), 'pi-qual-cwd-'))
 const skillsDir = join(agentDir, 'skills')
 await mkdir(skillsDir, { recursive: true })
 await mkdir(join(skillsDir, 'deploy-checklist'), { recursive: true })
-await writeFile(join(skillsDir, 'deploy-checklist', 'SKILL.md'), [
+const deploySkillPath = join(skillsDir, 'deploy-checklist', 'SKILL.md')
+await writeFile(deploySkillPath, [
   '---',
   '"name": "deploy-checklist"',
   '"description": "上線前的部署檢查步驟"',
@@ -44,6 +45,10 @@ await writeFile(join(skillsDir, 'deploy-checklist', 'SKILL.md'), [
   '- 標記 release tag',
   '',
 ].join('\n'), 'utf8')
+await mkdir(join(skillsDir, 'deploy-checklist', 'references'), { recursive: true })
+await writeFile(join(skillsDir, 'deploy-checklist', 'references', 'check.md'), 'RELATIVE RESOURCE V1\n', 'utf8')
+await writeFile(join(agentDir, 'private-auth-sibling.txt'), 'MUST NOT ENTER SNAPSHOT\n', 'utf8')
+await symlink(join(agentDir, 'private-auth-sibling.txt'), join(skillsDir, 'deploy-checklist', 'references', 'escape.md'))
 // An archived skill must be discoverable but never advertised.
 await mkdir(join(skillsDir, 'old-promo'), { recursive: true })
 await writeFile(join(skillsDir, 'old-promo', 'SKILL.md'), [
@@ -59,6 +64,8 @@ await writeFile(join(skillsDir, 'old-promo', 'SKILL.md'), [
 
 let requests: string[] = []
 let pendingScript: { tool: string; args: Record<string, unknown> } | undefined
+let mutateSkillSourceDuringTurn = false
+let advertisedSnapshotRoot: string | undefined
 const sse = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`
 const chunk = (delta: unknown, finish: string | null) => sse({
   id: `qual-${requests.length}`,
@@ -79,8 +86,32 @@ const modelServer = createServer(async (request, response) => {
   requests.push(body)
   response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive', 'cache-control': 'no-cache' })
   if (pendingScript) {
-    const script = pendingScript
+    let script = pendingScript
     pendingScript = undefined
+    if (script.tool === 'read') {
+      const advertised = body.match(/<location>([^<]*deploy-checklist\/SKILL\.md)<\/location>/)?.[1]
+      if (advertised) {
+        advertisedSnapshotRoot = dirname(dirname(advertised))
+        const requestedPath = script.args.path === '__relative_resource__'
+          ? advertised.replace(/SKILL\.md$/, 'references/check.md')
+          : advertised
+        script = { ...script, args: { ...script.args, path: requestedPath } }
+        if (mutateSkillSourceDuringTurn) {
+          mutateSkillSourceDuringTurn = false
+          await writeFile(deploySkillPath, [
+            '---',
+            '"name": "deploy-checklist"',
+            '"description": "上線前的部署檢查步驟"',
+            '---',
+            '',
+            '# 部署檢查 NEXT TURN',
+            '',
+            '- NEXT TURN BODY V2',
+            '',
+          ].join('\n'), 'utf8')
+        }
+      }
+    }
     response.write(chunk({ role: 'assistant', content: '執行工具。' }, null))
     response.write(chunk({ tool_calls: [{
       index: 0,
@@ -200,6 +231,7 @@ try {
 
   // ── 3. Skills visible in the prompt; bodies reachable; archived hidden ──
   pendingScript = { tool: 'read', args: { path: join(skillsDir, 'deploy-checklist', 'SKILL.md') } }
+  mutateSkillSourceDuringTurn = true
   send(13, 'turn/submit', {
     sessionId,
     runId: 'qual-skills-run',
@@ -209,13 +241,42 @@ try {
     profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'full', unattended: true },
   })
   const skillsTurn = await waitFor(13)
+  assert.equal(skillsTurn.error, undefined, JSON.stringify(skillsTurn.error))
   assert.equal(skillsTurn.result.settlement, 'answered')
   const prompt1 = requests[0] || ''
   assert.match(prompt1, /<available_skills>/, 'skills are advertised in the system prompt')
   assert.match(prompt1, /deploy-checklist/)
   assert.match(prompt1, /部署檢查/)
+  assert.doesNotMatch(prompt1, new RegExp(agentDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'prompt never advertises the mutable global skill path')
+  assert.match(prompt1, /subagents-pi-skill-resource-view\/[^<]*\/[a-f0-9]{64}\/deploy-checklist\/SKILL\.md/)
   assert.doesNotMatch(prompt1, /old-promo/, 'archived skill is not advertised')
   assert.match(requests.at(-1) || '', /確認 CI 綠燈/, 'the advertised location led the model to the real body')
+
+  // Source changed after this turn advertised its snapshot. The current turn
+  // kept V1; the next turn must reload and advertise/read V2.
+  pendingScript = { tool: 'read', args: { path: join(skillsDir, 'deploy-checklist', 'SKILL.md') } }
+  send(18, 'turn/submit', {
+    sessionId,
+    runId: 'qual-skill-reload-run',
+    cwd: workspace,
+    prompt: '再次讀取 deploy-checklist',
+    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'full', unattended: false },
+  })
+  const reloadTurn = await waitFor(18)
+  assert.equal(reloadTurn.error, undefined)
+  assert.match(requests.at(-1) || '', /NEXT TURN BODY V2/, 'next turn sees the changed source through a new snapshot')
+
+  pendingScript = { tool: 'read', args: { path: '__relative_resource__' } }
+  send(19, 'turn/submit', {
+    sessionId,
+    runId: 'qual-skill-relative-run',
+    cwd: workspace,
+    prompt: '讀取技能的 relative reference',
+    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'full', unattended: false },
+  })
+  const relativeTurn = await waitFor(19)
+  assert.equal(relativeTurn.error, undefined)
+  assert.match(requests.at(-1) || '', /RELATIVE RESOURCE V1/, 'manifested relative resource is readable through native read')
 
   // ── 4. Extension tool execution inside a turn, end to end ──
   send(14, 'turn/submit', {
@@ -287,6 +348,9 @@ try {
   if (host.exitCode === null) {
     host.stdin.end()
     await once(host, 'exit').catch(() => host.kill())
+  }
+  if (advertisedSnapshotRoot) {
+    await assert.rejects(access(advertisedSnapshotRoot), 'Host shutdown removes the final per-session Skill Resource View')
   }
   modelServer.close()
   webServer.close()

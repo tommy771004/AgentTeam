@@ -15,6 +15,17 @@
  */
 
 import { decideBuiltinShellUnderProtection } from '../src/agent/outbound/cliSandbox.ts'
+import { admitBuiltinShellSandbox, releaseBuiltinShellExecution, wrapVerifiedBuiltinShellCommand, type BuiltinShellSandboxVerification } from './piBuiltinShellSandbox.ts'
+import { decideGitCommand, type GitCommandPolicy } from '../src/agent/tools/gitCommandPolicy.ts'
+import { schemaDigest, type PiToolCatalogEntry } from './piToolContract.ts'
+import {
+  evaluatePiInvocationPolicy,
+  PiInvocationEvidence,
+  type PiFrozenRunPolicy,
+  type PiInvocationContractIdentity,
+  type PiPolicyEvidenceEvent,
+  type PiToolPolicyRequirements,
+} from './piPolicyEvidence.ts'
 
 /** A TypeBox-compatible parameter schema, written as plain JSON Schema so the Host stays dependency-free. */
 export type PiToolSchema = Record<string, unknown>
@@ -51,6 +62,8 @@ export type PiPackTool = {
   parameters: PiToolSchema
   execute: (args: Record<string, unknown>, ctx: PiToolContext) => Promise<PiToolResult>
   approval?: (args: Record<string, unknown>, ctx: PiToolContext) => PiToolApprovalPlan
+  /** Tool-specific restrictions composed by the common Host policy seam. */
+  policyMigration?: PiToolPolicyRequirements
 }
 
 export type PiExtensionPack = {
@@ -136,6 +149,7 @@ export function piActivePackToolNames(activeTools: ReadonlyArray<string>, unlock
 export type PiPackSessionHandle = {
   setActiveTools: (names: string[]) => boolean
   getActiveTools: () => string[]
+  refreshContract?: () => void
 }
 
 const packSessions = new Map<string, PiPackSessionHandle>()
@@ -152,6 +166,18 @@ export function piPackSessionHandle(sessionId: string): PiPackSessionHandle | un
   return packSessions.get(sessionId)
 }
 
+/** Attach the Host-owned contract publisher after a live Pi session exists. */
+export function setPiPackSessionContractRefresh(sessionId: string, refreshContract?: () => void): boolean {
+  const handle = packSessions.get(sessionId)
+  if (!handle) return false
+  if (refreshContract) packSessions.set(sessionId, { ...handle, refreshContract })
+  else {
+    const { refreshContract: _refreshContract, ...withoutRefresh } = handle
+    packSessions.set(sessionId, withoutRefresh)
+  }
+  return true
+}
+
 /* ── Run binding ─────────────────────────────────────────────────────── */
 
 /**
@@ -164,7 +190,15 @@ type PiRunBinding = {
   approvalMode: 'always' | 'auto' | 'full'
   unattended: boolean
   temporaryChat?: boolean
-  shellPolicy?: { effectiveMode: 'required' | 'optional' | 'demo' | 'off'; shellIsolationVerified?: boolean; viewRoot?: string }
+  shellPolicy?: {
+    effectiveMode: 'required' | 'optional' | 'demo' | 'off'
+    viewRoot?: string
+    /** Started at Host turn admission; renderer/model input cannot supply it. */
+    sandboxVerification?: Promise<BuiltinShellSandboxVerification>
+  }
+  /** Settings → Git preferences frozen for this run (issue 18). */
+  gitPolicy?: GitCommandPolicy
+  frozenPolicy?: PiFrozenRunPolicy
 }
 const sessionRuns = new Map<string, PiRunBinding>()
 
@@ -174,6 +208,8 @@ export function bindPiSessionRun(sessionId: string, binding: {
   unattended?: boolean
   temporaryChat?: boolean
   shellPolicy?: PiRunBinding['shellPolicy']
+  gitPolicy?: PiRunBinding['gitPolicy']
+  frozenPolicy?: PiFrozenRunPolicy
 }): void {
   sessionRuns.set(sessionId, {
     runId: binding.runId,
@@ -181,15 +217,59 @@ export function bindPiSessionRun(sessionId: string, binding: {
     unattended: binding.unattended === true,
     ...(binding.temporaryChat !== undefined ? { temporaryChat: binding.temporaryChat } : {}),
     ...(binding.shellPolicy ? { shellPolicy: binding.shellPolicy } : {}),
+    ...(binding.gitPolicy ? { gitPolicy: binding.gitPolicy } : {}),
+    ...(binding.frozenPolicy ? { frozenPolicy: binding.frozenPolicy } : {}),
   })
 }
 
+/**
+ * Patch a verified bash call so it executes inside this run's sandbox.
+ *
+ * Pi allows `event.input` to be mutated in place before execution, so the
+ * command the Approval Decision inspected is the command that runs — only now
+ * confined. Which backend does the confining is the seam's business, not this
+ * module's: a new platform adapter needs no change here.
+ */
+async function wrapVerifiedBuiltinShell(input: {
+  evidenceBackend: string
+  runId: string
+  viewRoot: string
+  input: Record<string, unknown>
+}): Promise<{ wrapped: true } | { wrapped: false; reason: string }> {
+  const command = typeof input.input?.command === 'string' ? input.input.command : ''
+  const wrapped = await wrapVerifiedBuiltinShellCommand({
+    backend: input.evidenceBackend,
+    runId: input.runId,
+    viewRoot: input.viewRoot,
+    command,
+  })
+  if (!wrapped.ok) return { wrapped: false, reason: wrapped.reason }
+  input.input.command = wrapped.command
+  return { wrapped: true }
+}
+
 export function unbindPiSessionRun(sessionId: string): void {
+  const binding = sessionRuns.get(sessionId)
+  if (binding?.runId) releaseBuiltinShellExecution(binding.runId)
   sessionRuns.delete(sessionId)
 }
 
 export function piSessionRunBinding(sessionId: string): PiRunBinding | undefined {
   return sessionRuns.get(sessionId)
+}
+
+/** Host runtime adds its immutable Skill Resource View after snapshotting. */
+export function bindPiSessionSkillResourceView(sessionId: string, resourceView: NonNullable<PiFrozenRunPolicy['resourceView']>): void {
+  const binding = sessionRuns.get(sessionId)
+  if (!binding?.frozenPolicy) return
+  const frozenResourceView = Object.freeze({
+    ...resourceView,
+    manifest: Object.freeze([...resourceView.manifest]),
+  })
+  sessionRuns.set(sessionId, {
+    ...binding,
+    frozenPolicy: Object.freeze({ ...binding.frozenPolicy, resourceView: frozenResourceView }),
+  })
 }
 
 /* ── Approval Decision ──────────────────────────────────────────────── */
@@ -204,7 +284,7 @@ export type PiApprovalRequest = {
   timeoutMs: number
 }
 
-export type PiApprovalResolution = { decision: 'allow' | 'deny' | 'timeout'; answer?: string; reason?: string }
+export type PiApprovalResolution = { decision: 'allow' | 'deny' | 'timeout' | 'cancel'; answer?: string; reason?: string }
 
 type PiApprovalBridge = {
   request: (request: PiApprovalRequest) => void
@@ -287,7 +367,7 @@ export function cancelPiApprovalsForRun(runId: string): number {
     clearTimeout(pending.timer)
     pendingApprovals.delete(key)
     cancelled += 1
-    pending.resolve({ decision: 'timeout', reason: 'Approval cancelled with its run' })
+    pending.resolve({ decision: 'cancel', reason: 'Approval cancelled with its run' })
   }
   return cancelled
 }
@@ -338,6 +418,68 @@ export function consumePiDeniedInTurnCall(sessionId: string, callId: string): st
   return reason
 }
 
+/* ── Policy/evidence expand bridge (Ticket 06) ──────────────────────── */
+
+type PiPolicyEvidenceBridge = {
+  contractIdentity: (sessionId: string, tool: string) => PiInvocationContractIdentity | undefined
+  append: (sessionId: string, event: PiPolicyEvidenceEvent) => void
+}
+
+let policyEvidenceBridge: PiPolicyEvidenceBridge | undefined
+
+export function setPiPolicyEvidenceBridge(bridge: PiPolicyEvidenceBridge): void {
+  policyEvidenceBridge = bridge
+}
+
+const migratedInvocations = new Map<string, {
+  evidence: PiInvocationEvidence
+  args: Readonly<Record<string, unknown>>
+  executionRoot: string
+}>()
+
+const builtinInvocations = new Map<string, PiInvocationEvidence>()
+
+function migratedInvocationKey(sessionId: string, callId: string): string {
+  return `${sessionId}:${callId}`
+}
+
+/** Complete the evidence started by the single model-builtin tool_call hook. */
+export function settlePiModelBuiltinInvocation(input: {
+  sessionId: string
+  callId: string
+  cancelled?: boolean
+  failed?: boolean
+  detail?: string
+}): void {
+  const key = migratedInvocationKey(input.sessionId, input.callId)
+  const evidence = builtinInvocations.get(key)
+  if (!evidence) return
+  builtinInvocations.delete(key)
+  const settlement = input.cancelled ? 'cancelled' : input.failed ? 'failed' : 'success'
+  evidence.update(input.detail || `Builtin execution ${settlement}`)
+  evidence.result(settlement === 'success', input.detail || settlement)
+  evidence.settle(settlement, input.detail)
+}
+
+function packPolicyRequirements(tool: PiPackTool, args: Record<string, unknown>, ctx: PiToolContext): PiToolPolicyRequirements {
+  const approval = tool.approval?.(args, ctx)
+  return {
+    ...(tool.policyMigration || {}),
+    ...(approval?.need && !tool.policyMigration?.capabilityApproval && !tool.policyMigration?.approvalRequired
+      ? { approvalRequired: approval.reason, sideEffect: true }
+      : {}),
+  }
+}
+
+function builtinPolicyRequirements(tool: string): PiToolPolicyRequirements {
+  const mutating = tool === 'write' || tool === 'edit' || tool === 'bash'
+  return {
+    ...(tool !== 'bash' ? { pathArguments: ['path'] } : {}),
+    ...(tool === 'bash' ? { outbound: true } : {}),
+    ...(mutating ? { sideEffect: true, approvalRequired: `${tool} requires approval before execution` } : {}),
+  }
+}
+
 /* ── Execution with the shared gates ─────────────────────────────────── */
 
 export type PiPackExecutionOutcome = {
@@ -348,68 +490,28 @@ export type PiPackExecutionOutcome = {
 }
 
 /**
- * Effective Approval Decision for one call, composed the same way the direct
- * protocol path composes it: a tool's own plan, the turn's approval mode, and
- * the unattended downgrade all land in one verdict (ADR-0048 layers).
- *
- * `full` attended mode trusts declared plans only when they force an ask;
- * `unattended` keeps every ask fail-closed.
- */
-export function evaluatePiToolApproval(
-  tool: PiPackTool,
-  args: Record<string, unknown>,
-  ctx: PiToolContext,
-  policy: { approvalMode?: 'always' | 'auto' | 'full'; unattended?: boolean } = {},
-): PiToolApprovalPlan {
-  const base = tool.approval?.(args, ctx) || { need: false }
-  if (!base.need) return { need: false }
-  if (policy.unattended) return base
-  if ((policy.approvalMode || 'auto') === 'full') return { need: false }
-  return base
-}
-
-/**
- * Run one pack tool through its Approval Decision. Every consumer shares this
- * path: the model calling mid-turn, the renderer calling `tools/pack`, and
- * Code Mode nesting `tools.<name>()`.
- *
- * A denial is an outcome, not an exception — the caller sees exactly why the
- * tool did not run ("the agent could not" vs "the agent chose not to",
- * user story 14).
+ * Execute an already-authorized pack definition. The policy/evidence module is
+ * the only caller-facing gate; keeping approval out of this leaf prevents a
+ * second, subtly different verdict from reappearing here.
  */
 export async function executePiPackTool(
   name: string,
   args: Record<string, unknown>,
   ctx: PiToolContext,
-  options: { approval?: 'allow' | 'deny'; policy?: { approvalMode?: 'always' | 'auto' | 'full'; unattended?: boolean }; callId?: string } = {},
+  options: { callId?: string } = {},
 ): Promise<PiPackExecutionOutcome> {
   const found = findPiPackTool(name)
   if (!found) return { ok: false, text: `Unknown Pi extension tool: ${name}` }
-  const { tool } = found
-  const callId = options.callId || `${ctx.runId || ctx.sessionId}:${name}:${Math.random().toString(36).slice(2, 8)}`
-  const policy = options.policy || {}
-  if (options.approval !== 'allow') {
-    const plan = evaluatePiToolApproval(tool, args, ctx, policy)
-    if (plan.need) {
-      if (options.approval === 'deny') {
-        return { ok: false, denied: true, text: `${name} was not approved: ${plan.reason}` }
-      }
-      const resolution = await requestPiToolApproval({
-        runId: ctx.runId || 'direct',
-        sessionId: ctx.sessionId,
-        tool: name,
-        callId,
-        args,
-        reason: plan.reason,
-        ...(policy.unattended ? { unattended: true } : {}),
-      })
-      if (resolution.decision !== 'allow') {
-        return { ok: false, denied: true, text: `${name} was not approved (${resolution.decision}): ${plan.reason}`, data: { ok: false, denied: true, error: plan.reason } }
-      }
-      // ask_user's answer travels back inside the resolved arguments.
-      if (resolution.answer !== undefined) (args as Record<string, unknown>).answer = resolution.answer
-    }
-  }
+  return executePiPackToolDefinition(found.tool, name, args, ctx, options)
+}
+
+async function executePiPackToolDefinition(
+  tool: PiPackTool,
+  name: string,
+  args: Record<string, unknown>,
+  ctx: PiToolContext,
+  options: { callId?: string } = {},
+): Promise<PiPackExecutionOutcome> {
   try {
     const result = await tool.execute(args, ctx)
     return {
@@ -440,32 +542,201 @@ type InlineExtensionFactoryInput = {
 }
 
 /**
- * ADR-0047 gate for the builtin bash tool, enforced HOST-side where in-turn
- * execution actually happens: under Outbound Guard `required`, an unverified
- * shell is refused outright; any mode refuses absolute paths escaping the
- * bound Restricted Project View. The policy travels per run from the
- * renderer's contextPolicy — absent information never invents a denial, and
- * `required` always fails closed.
+ * The single model-builtin policy hook. Every Pi builtin first enters the
+ * common frozen policy/evidence seam. Bash then receives ADR-0047's additional
+ * shell-specific verdict in this same hook, so there is no competing gate.
  */
 export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: string; hidden: true; factory: (pi: InlineExtensionFactoryInput) => void } {
   return {
     name: 'subagents-bash-gate',
     hidden: true,
     factory: (pi: InlineExtensionFactoryInput) => {
-      pi.on('tool_call', (event) => {
-        if (event.toolName !== 'bash') return undefined
+      pi.on('tool_call', async (event) => {
+        const toolName = typeof event.toolName === 'string' ? event.toolName : ''
+        if (!['bash', 'edit', 'find', 'grep', 'ls', 'read', 'write'].includes(toolName)) return undefined
         const binding = piSessionRunBinding(ctx.sessionId)
+        const callId = typeof event.toolCallId === 'string' ? event.toolCallId : `${binding?.runId || 'turn'}:${toolName}`
+        const contract = policyEvidenceBridge?.contractIdentity(ctx.sessionId, toolName)
+        const frozenPolicy = binding?.frozenPolicy
+        if (!binding || !contract || !frozenPolicy || !policyEvidenceBridge) {
+          const reason = `Host policy evidence unavailable for Pi builtin ${toolName}`
+          markPiDeniedInTurnCall(ctx.sessionId, callId, reason)
+          auditPiInTurnDecision({ runId: binding?.runId || 'turn', sessionId: ctx.sessionId, tool: toolName, callId, decision: 'deny', settlement: 'denied', reason })
+          return { block: true, reason }
+        }
+        const coordinates = { sessionId: ctx.sessionId, runId: binding.runId, callId }
+        const evidence = new PiInvocationEvidence({ ...coordinates, tool: toolName, origin: 'model', ...contract }, (entry) => policyEvidenceBridge!.append(ctx.sessionId, entry))
+        evidence.start()
+        const evaluation = evaluatePiInvocationPolicy({
+          coordinates,
+          origin: 'model',
+          tool: toolName,
+          contract,
+          args: (event.input as Record<string, unknown>) || {},
+          policy: frozenPolicy,
+          requirements: builtinPolicyRequirements(toolName),
+        })
+        if (evaluation.verdict === 'deny') {
+          evidence.decision('deny', evaluation.reason)
+          evidence.result(false, evaluation.reason)
+          evidence.settle('denied', evaluation.reason)
+          markPiDeniedInTurnCall(ctx.sessionId, callId, evaluation.reason)
+          auditPiInTurnDecision({ runId: binding.runId, sessionId: ctx.sessionId, tool: toolName, callId, decision: 'deny', settlement: 'denied', reason: evaluation.reason })
+          return { block: true, reason: evaluation.reason }
+        }
+        if (evaluation.verdict === 'ask') {
+          evidence.decision('ask', evaluation.reason)
+          const resolution = await requestPiToolApproval({
+            runId: binding.runId,
+            sessionId: ctx.sessionId,
+            tool: toolName,
+            callId,
+            args: evaluation.normalizedArgs as Record<string, unknown>,
+            reason: evaluation.reason,
+            timeoutMs: frozenPolicy.approvalTimeoutMs,
+            ...(frozenPolicy.unattended ? { unattended: true } : {}),
+          })
+          if (resolution.decision !== 'allow') {
+            const reason = resolution.reason || evaluation.reason
+            evidence.decision('deny', reason)
+            evidence.result(false, reason)
+            evidence.settle(resolution.decision === 'cancel' ? 'cancelled' : 'denied', reason)
+            markPiDeniedInTurnCall(ctx.sessionId, callId, reason)
+            auditPiInTurnDecision({ runId: binding.runId, sessionId: ctx.sessionId, tool: toolName, callId, decision: 'deny', settlement: 'denied', reason })
+            return { block: true, reason }
+          }
+        }
+
+        if (toolName !== 'bash') {
+          evidence.decision('allow', evaluation.reason)
+          auditPiInTurnDecision({ runId: binding.runId, sessionId: ctx.sessionId, tool: toolName, callId, decision: 'allow' })
+          builtinInvocations.set(migratedInvocationKey(ctx.sessionId, callId), evidence)
+          return undefined
+        }
+        // Issue 18: Settings → Git preferences apply BEFORE the outbound gate,
+        // so the gate inspects (and the sandbox wraps) the command that will
+        // actually run. A forbidden force push is refused rather than silently
+        // stripped: rewriting destructive intent would leave the model reading
+        // a success for a push that did not do what it asked.
+        if (binding?.gitPolicy) {
+          const git = decideGitCommand(String(((event.input as Record<string, unknown>) || {}).command || ''), binding.gitPolicy)
+          if (git.action === 'deny') {
+            evidence.decision('deny', git.reason)
+            evidence.result(false, git.reason)
+            evidence.settle('denied', git.reason)
+            auditPiInTurnDecision({
+              runId: binding.runId,
+              sessionId: ctx.sessionId,
+              tool: toolName,
+              callId,
+              decision: 'deny',
+              settlement: 'denied',
+              reason: git.reason,
+            })
+            markPiDeniedInTurnCall(ctx.sessionId, callId, git.reason)
+            return { block: true, reason: git.reason }
+          }
+          if (git.action === 'rewrite') {
+            ;(event.input as Record<string, unknown>).command = git.command
+            evidence.update(git.note)
+          }
+        }
         const shell = binding?.shellPolicy
-        if (!shell?.effectiveMode || shell.effectiveMode === 'off') return undefined
+        if (!shell?.effectiveMode || shell.effectiveMode === 'off') {
+          evidence.decision('allow', shell?.effectiveMode === 'off'
+            ? 'Outbound Guard is off for builtin shell'
+            : evaluation.reason)
+          auditPiInTurnDecision({ runId: binding.runId, sessionId: ctx.sessionId, tool: toolName, callId, decision: 'allow' })
+          builtinInvocations.set(migratedInvocationKey(ctx.sessionId, callId), evidence)
+          return undefined
+        }
         const command = ((event.input as Record<string, unknown>) || {}).command
+        if (shell.effectiveMode === 'required') {
+          const verification = await shell.sandboxVerification
+          const admission = admitBuiltinShellSandbox({
+            verification,
+            runId: binding.runId,
+            viewRoot: shell.viewRoot || '',
+          })
+          if (admission.verified) {
+            // Verification authorises nothing on its own: the command must
+            // actually execute under the profile the canary proved. Pi allows
+            // `event.input` to be patched in place before execution, so the
+            // model's command is wrapped here — whole and unparsed — rather
+            // than merely permitted to run on the open host.
+            const wrap = await wrapVerifiedBuiltinShell({
+              evidenceBackend: admission.evidence.backend,
+              runId: binding.runId,
+              viewRoot: shell.viewRoot || '',
+              input: event.input as Record<string, unknown>,
+            })
+            if (!wrap.wrapped) {
+              evidence.decision('deny', wrap.reason)
+              evidence.result(false, wrap.reason)
+              evidence.settle('denied', wrap.reason)
+              auditPiInTurnDecision({
+                runId: binding.runId,
+                sessionId: ctx.sessionId,
+                tool: 'bash',
+                callId,
+                decision: 'deny',
+                settlement: 'denied',
+                reason: wrap.reason,
+              })
+              markPiDeniedInTurnCall(ctx.sessionId, callId, wrap.reason)
+              return { block: true, reason: wrap.reason }
+            }
+            const reason = `${admission.reason} view=${admission.evidence.viewRoot}`
+            evidence.decision('allow', reason)
+            auditPiInTurnDecision({
+              runId: binding.runId,
+              sessionId: ctx.sessionId,
+              tool: toolName,
+              callId,
+              decision: 'allow',
+              reason,
+            })
+            builtinInvocations.set(migratedInvocationKey(ctx.sessionId, callId), evidence)
+            return undefined
+          }
+          evidence.decision('deny', admission.reason)
+          evidence.result(false, admission.reason)
+          evidence.settle('denied', admission.reason)
+          auditPiInTurnDecision({
+            runId: binding.runId,
+            sessionId: ctx.sessionId,
+            tool: 'bash',
+            callId,
+            decision: 'deny',
+            settlement: 'denied',
+            reason: admission.reason,
+          })
+          markPiDeniedInTurnCall(ctx.sessionId, callId, admission.reason)
+          return { block: true, reason: admission.reason }
+        }
         const verdict = decideBuiltinShellUnderProtection({
           effectiveMode: shell.effectiveMode,
           command: String(command || ''),
           viewRoot: shell.viewRoot ?? null,
-          shellIsolationVerified: shell.shellIsolationVerified,
         })
-        if (verdict.allow) return undefined
-        const callId = typeof event.toolCallId === 'string' ? event.toolCallId : `${binding?.runId || 'turn'}:bash`
+        if (verdict.allow) {
+          const reason = verdict.reason || evaluation.reason
+          evidence.decision('allow', reason)
+          if (verdict.degraded) evidence.update(reason)
+          auditPiInTurnDecision({
+            runId: binding.runId,
+            sessionId: ctx.sessionId,
+            tool: toolName,
+            callId,
+            decision: 'allow',
+            ...(verdict.reason ? { reason: verdict.reason } : {}),
+          })
+          builtinInvocations.set(migratedInvocationKey(ctx.sessionId, callId), evidence)
+          return undefined
+        }
+        evidence.decision('deny', verdict.reason || 'builtin shell denied by outbound protection')
+        evidence.result(false, verdict.reason)
+        evidence.settle('denied', verdict.reason)
         auditPiInTurnDecision({
           runId: binding?.runId || 'turn',
           sessionId: ctx.sessionId,
@@ -488,8 +759,11 @@ export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: 
  * its `tool_call` hook is where the shared Approval Decision intercepts the
  * model's calls mid-turn, so a nested or direct call cannot slip past it.
  */
-export function piPackExtensionFactories(ctx: { sessionId: string; cwd: string; temporaryChat?: boolean }): Array<{ name: string; hidden: true; factory: (pi: InlineExtensionFactoryInput) => void }> {
-  return piExtensionPacks().map((pack) => ({
+export function piPackExtensionFactories(
+  ctx: { sessionId: string; cwd: string; temporaryChat?: boolean },
+  additionalPacks: ReadonlyArray<PiExtensionPack> = [],
+): Array<{ name: string; hidden: true; factory: (pi: InlineExtensionFactoryInput) => void }> {
+  return [...piExtensionPacks(), ...additionalPacks].map((pack) => ({
     name: `subagents-${pack.id}`,
     hidden: true,
     factory: (pi: InlineExtensionFactoryInput) => {
@@ -499,40 +773,89 @@ export function piPackExtensionFactories(ctx: { sessionId: string; cwd: string; 
         const tool = byName.get(toolName)
         if (!tool) return undefined
         const binding = piSessionRunBinding(ctx.sessionId)
-        const policy = { approvalMode: binding?.approvalMode, unattended: binding?.unattended }
-        const plan = evaluatePiToolApproval(tool, (event.input as Record<string, unknown>) || {}, {
-          sessionId: ctx.sessionId,
-          cwd: ctx.cwd,
-          runId: binding?.runId,
-          temporaryChat: binding?.temporaryChat || ctx.temporaryChat,
-        }, policy)
-        if (!plan.need) return undefined
         const callId = typeof event.toolCallId === 'string' ? event.toolCallId : `${binding?.runId || 'turn'}:${toolName}`
-        const resolution = await requestPiToolApproval({
-          runId: binding?.runId || 'turn',
-          sessionId: ctx.sessionId,
-          tool: toolName,
-          callId,
-          args: (event.input as Record<string, unknown>) || {},
-          reason: plan.reason,
-          ...(binding?.unattended ? { unattended: true } : {}),
-        })
-        const allowed = resolution.decision === 'allow'
-        auditPiInTurnDecision({
-          runId: binding?.runId || 'turn',
-          sessionId: ctx.sessionId,
-          tool: toolName,
-          callId,
-          decision: allowed ? 'allow' : 'deny',
-          ...(!allowed ? { settlement: 'denied' as const, reason: resolution.reason || plan.reason } : {}),
-        })
-        if (!allowed) {
-          // The record must say the tool was DENIED, not merely failed.
-          markPiDeniedInTurnCall(ctx.sessionId, callId, `${toolName} was not approved (${resolution.decision}): ${plan.reason}`)
+        {
+          const contract = policyEvidenceBridge?.contractIdentity(ctx.sessionId, toolName)
+          const frozenPolicy = binding?.frozenPolicy
+          if (!contract || !frozenPolicy || !policyEvidenceBridge) {
+            const reason = `Host policy evidence unavailable for migrated tool ${toolName}`
+            markPiDeniedInTurnCall(ctx.sessionId, callId, reason)
+            auditPiInTurnDecision({
+              runId: binding?.runId || 'turn', sessionId: ctx.sessionId, tool: toolName,
+              callId, decision: 'deny', settlement: 'denied', reason,
+            })
+            return { block: true, reason }
+          }
+          const coordinates = { sessionId: ctx.sessionId, runId: binding.runId, callId }
+          const evidence = new PiInvocationEvidence({
+            ...coordinates,
+            tool: toolName,
+            origin: 'model',
+            ...contract,
+          }, (entry) => policyEvidenceBridge!.append(ctx.sessionId, entry))
+          evidence.start()
+          const evaluation = evaluatePiInvocationPolicy({
+            coordinates,
+            origin: 'model',
+            tool: toolName,
+            contract,
+            args: (event.input as Record<string, unknown>) || {},
+            policy: frozenPolicy,
+            requirements: packPolicyRequirements(tool, (event.input as Record<string, unknown>) || {}, {
+              sessionId: ctx.sessionId,
+              cwd: ctx.cwd,
+              runId: binding?.runId,
+              temporaryChat: binding?.temporaryChat || ctx.temporaryChat,
+            }),
+          })
+          let normalizedArgs = evaluation.normalizedArgs
+          evidence.decision(evaluation.verdict, evaluation.reason)
+          if (evaluation.verdict === 'deny') {
+            evidence.result(false, evaluation.reason)
+            evidence.settle('denied', evaluation.reason)
+            markPiDeniedInTurnCall(ctx.sessionId, callId, evaluation.reason)
+            auditPiInTurnDecision({
+              runId: binding.runId, sessionId: ctx.sessionId, tool: toolName,
+              callId, decision: 'deny', settlement: 'denied', reason: evaluation.reason,
+            })
+            return { block: true, reason: evaluation.reason }
+          }
+          if (evaluation.verdict === 'ask') {
+            const resolution = await requestPiToolApproval({
+              runId: binding.runId,
+              sessionId: ctx.sessionId,
+              tool: toolName,
+              callId,
+              args: evaluation.normalizedArgs as Record<string, unknown>,
+              reason: evaluation.reason,
+              timeoutMs: frozenPolicy.approvalTimeoutMs,
+              ...(frozenPolicy.unattended ? { unattended: true } : {}),
+            })
+            const allowed = resolution.decision === 'allow'
+            if (allowed && resolution.answer !== undefined) normalizedArgs = Object.freeze({ ...normalizedArgs, answer: resolution.answer })
+            evidence.decision(allowed ? 'allow' : 'deny', resolution.reason || evaluation.reason)
+            auditPiInTurnDecision({
+              runId: binding.runId, sessionId: ctx.sessionId, tool: toolName,
+              callId, decision: allowed ? 'allow' : 'deny',
+              ...(!allowed ? { settlement: 'denied' as const, reason: resolution.reason || evaluation.reason } : {}),
+            })
+            if (!allowed) {
+              const reason = `${toolName} was not approved (${resolution.decision}): ${evaluation.reason}`
+              evidence.result(false, reason)
+              evidence.settle('denied', reason)
+              markPiDeniedInTurnCall(ctx.sessionId, callId, reason)
+              return { block: true, reason }
+            }
+          } else {
+            auditPiInTurnDecision({ runId: binding.runId, sessionId: ctx.sessionId, tool: toolName, callId, decision: 'allow' })
+          }
+          migratedInvocations.set(migratedInvocationKey(ctx.sessionId, callId), {
+            evidence,
+            args: normalizedArgs,
+            executionRoot: frozenPolicy.outbound.restrictedViewRoot || frozenPolicy.projectRoot,
+          })
+          return undefined
         }
-        return allowed
-          ? undefined
-          : { block: true, reason: `${toolName} was not approved (${resolution.decision}): ${plan.reason}` }
       })
       for (const tool of pack.tools) {
         pi.registerTool({
@@ -544,14 +867,32 @@ export function piPackExtensionFactories(ctx: { sessionId: string; cwd: string; 
           parameters: tool.parameters,
           // The `tool_call` hook above IS this path's Approval Decision; the
           // execution must not ask a second time for the same call.
-          execute: async (_toolCallId, params) => {
+          execute: async (toolCallId, params) => {
             const binding = piSessionRunBinding(ctx.sessionId)
-            const outcome = await executePiPackTool(tool.name, params, {
+            const migrated = migratedInvocations.get(migratedInvocationKey(ctx.sessionId, toolCallId))
+            const executionArgs = migrated?.args || params
+            const outcome = await executePiPackToolDefinition(tool, tool.name, executionArgs as Record<string, unknown>, {
               sessionId: ctx.sessionId,
-              cwd: ctx.cwd,
+              cwd: migrated?.executionRoot || ctx.cwd,
               runId: binding?.runId,
               temporaryChat: binding?.temporaryChat || ctx.temporaryChat,
-            }, { approval: 'allow' })
+            })
+            if (migrated) {
+              // A structured `{ok:false}` is a successful transport but a
+              // failed tool result. It stays content for Pi recovery while
+              // evidence records the actual result semantics.
+              const structuredFailure = Boolean(outcome.data && typeof outcome.data === 'object'
+                && (outcome.data as { ok?: unknown }).ok === false)
+              const resultOk = outcome.ok && !structuredFailure
+              migrated.evidence.update(resultOk ? 'Extension Pack execution completed' : outcome.text)
+              migrated.evidence.result(resultOk, resultOk ? 'structured result returned' : outcome.text)
+              migrated.evidence.settle(outcome.denied ? 'denied' : resultOk ? 'success' : 'failed', resultOk ? undefined : outcome.text)
+              migratedInvocations.delete(migratedInvocationKey(ctx.sessionId, toolCallId))
+            }
+            if (outcome.data && typeof outcome.data === 'object'
+              && (outcome.data as { transportFailure?: unknown }).transportFailure === true) {
+              throw new Error(outcome.text)
+            }
             return {
               content: [{ type: 'text' as const, text: outcome.text }],
               details: { ...(outcome.data as Record<string, unknown> | undefined), ...(outcome.denied ? { denied: true } : {}) },
@@ -565,16 +906,7 @@ export function piPackExtensionFactories(ctx: { sessionId: string; cwd: string; 
 
 /* ── Catalog projection ──────────────────────────────────────────────── */
 
-export type PiCatalogEntry = {
-  name: string
-  description: string
-  /** Owning extension pack id, or `builtin` / `mcp`. */
-  pack: string
-  source: 'discovered' | 'installed'
-  active: boolean
-  available: boolean
-  reason?: string
-}
+export type PiCatalogEntry = PiToolCatalogEntry
 
 /**
  * Project the packs into catalog entries.
@@ -596,6 +928,7 @@ export function piPackCatalogEntries(options: { activeTools: ReadonlyArray<strin
       source: 'discovered' as const,
       active,
       available: true,
+      schemaDigest: schemaDigest(tool.parameters),
       ...(!active ? { reason: `Inactive this turn: load the ${pack.capability} capability or enable the tool explicitly` } : {}),
     }
   }))

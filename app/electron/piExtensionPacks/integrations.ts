@@ -24,6 +24,7 @@ const httpFetch: PiPackTool = {
     },
     required: ['url'],
   },
+  policyMigration: { outbound: true },
   execute: async (args) => {
     const url = String(args.url || '').trim()
     const maxChars = Math.max(1, Math.min(200_000, Number(args.maxChars) || 4000))
@@ -33,9 +34,15 @@ const httpFetch: PiPackTool = {
     try {
       const response = await fetch(url, { headers: { 'User-Agent': 'SubAgentsAI/1.0' }, redirect: 'follow' })
       const text = (await response.text()).slice(0, maxChars)
+      // One envelope for every outcome. The success path used to hand back the
+      // RAW body while both failure paths returned `{ok:…}`, so the same tool
+      // answered in two shapes and a caller could not tell an empty 404 body
+      // from a tool that returned nothing. `details` already carried the
+      // structured facts; the model-visible content now says the same thing.
+      const payload = { ok: response.ok, status: response.status, url, text }
       return {
-        content: [{ type: 'text', text }],
-        details: { ok: response.ok, status: response.status, url, text },
+        content: [{ type: 'text', text: JSON.stringify(payload) }],
+        details: payload,
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -57,6 +64,7 @@ const webSearch: PiPackTool = {
     },
     required: ['query'],
   },
+  policyMigration: { outbound: true },
   execute: async (args) => {
     const query = String(args.query || '').trim()
     const limit = Math.max(1, Math.min(8, Number(args.limit) || 5))
@@ -109,6 +117,7 @@ const messageSend: PiPackTool = {
     required: ['chatId', 'text'],
   },
   approval: () => ({ need: true, reason: 'message_send sends a message outside this machine' }),
+  policyMigration: { outbound: true, sideEffect: true },
   execute: async (args) => {
     const chatId = String(args.chatId || '').trim()
     const text = String(args.text || '').trim()
