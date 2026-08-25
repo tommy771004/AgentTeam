@@ -194,6 +194,13 @@ interface ThreadStore {
   runningThreadIds: string[]
   /** Ephemeral thread → run identity map used by concurrent activity updates. */
   runningRunIds: Record<string, string>
+  /**
+   * Per-thread composer drafts. A conversation's unfinished input belongs to
+   * that conversation — switching threads must not drag task A's draft into
+   * task B. Ephemeral by design: never persisted, never leaves the session.
+   */
+  draftByThread: Record<string, string>
+  setThreadDraft: (id: string, value: string) => void
 
   hydrate: () => void
   /** Replace the disposable renderer history with the Host snapshot for matching threads. */
@@ -619,6 +626,16 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   runningThreadId: null,
   runningThreadIds: [],
   runningRunIds: {},
+  draftByThread: {},
+
+  setThreadDraft: (id, value) => {
+    const trimmed = id.trim()
+    if (!trimmed) return
+    const next = { ...get().draftByThread }
+    if (value) next[trimmed] = value
+    else delete next[trimmed]
+    set({ draftByThread: next })
+  },
 
   hydrate: () => {
     // In Electron the Pi Host owns durable history, while this Zustand store

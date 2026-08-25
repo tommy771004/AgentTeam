@@ -15,16 +15,11 @@
  * capture path and any smoke can all import it.
  */
 import type { ModelPricing } from './types.ts'
+// The record's own `RecordedUsage` is THE usage shape (turnRecord.ts names it
+// once on purpose). This module reads and builds that shape rather than
+// declaring a parallel one, so the capture side and the recorded side cannot
+// drift into two vocabularies for one measurement.
 import type { RecordedUsage } from './turnRecord.ts'
-
-/**
- * Token counts as a provider reported them.
- *
- * Deliberately the record's own `RecordedUsage` rather than a parallel
- * definition: the capture side and the recorded side are one shape, so the
- * projection downstream never has to branch on which path measured it.
- */
-export type MeasuredUsage = RecordedUsage
 
 const PER_MILLION = 1_000_000
 
@@ -46,7 +41,7 @@ function tokens(value: number | undefined): number {
  * the deliberate trade for never showing a fabricated number.
  */
 export function computeUsageCostUsd(
-  usage: MeasuredUsage | undefined,
+  usage: RecordedUsage | undefined,
   pricing: ModelPricing | undefined,
 ): number | undefined {
   if (!usage || !pricing) return undefined
@@ -76,13 +71,13 @@ export function computeUsageCostUsd(
  * nothing was measured at all — a step with no usage records no usage.
  */
 export function buildRecordedUsage(
-  usage: MeasuredUsage | undefined,
+  usage: RecordedUsage | undefined,
   pricing?: ModelPricing,
-): MeasuredUsage | undefined {
+): RecordedUsage | undefined {
   if (!usage) return undefined
   const keep = (value: number | undefined): number | undefined =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
-  const built: MeasuredUsage = {}
+  const built: RecordedUsage = {}
   for (const field of ['input', 'output', 'total', 'cachedRead', 'cachedWrite'] as const) {
     const value = keep(usage[field])
     if (value !== undefined) built[field] = value

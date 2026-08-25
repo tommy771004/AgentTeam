@@ -123,7 +123,7 @@ export type RunTimelineRow = {
       /** Still being written — the current assistant line, not a settled one. */
       draft?: boolean
     }
-  | { kind: 'tool'; tool: string; callId: string; settlement?: string; detail?: string }
+  | { kind: 'tool'; tool: string; callId: string; settlement?: string; detail?: string; approval?: string; approvalReason?: string }
   | { kind: 'notice'; content: string }
 )
 
@@ -163,7 +163,18 @@ export function runTimelineRows(view: TrajectoryView, draft?: string): RunTimeli
         const existing = toolRowIndex.get(row.callId)
         if (existing === undefined) {
           toolRowIndex.set(row.callId, rows.length)
-          rows.push({ ...base, kind: 'tool', tool: row.tool, callId: row.callId, ...(row.settlement ? { settlement: row.settlement } : {}), ...(row.detail ? { detail: row.detail } : {}) })
+          rows.push({
+            ...base,
+            kind: 'tool',
+            tool: row.tool,
+            callId: row.callId,
+            ...(row.settlement ? { settlement: row.settlement } : {}),
+            ...(row.detail ? { detail: row.detail } : {}),
+            // The approval decision rides the invocation's own line (the
+            // conversation projection attached it there); keep it through the fold.
+            ...(row.approval ? { approval: row.approval } : {}),
+            ...(row.approvalReason ? { approvalReason: row.approvalReason } : {}),
+          })
           break
         }
         const merged = rows[existing]
@@ -174,6 +185,8 @@ export function runTimelineRows(view: TrajectoryView, draft?: string): RunTimeli
           // The call's own detail (its path) is the better label; a result
           // only fills the gap when the call never carried one.
           ...(merged.detail ? {} : row.detail ? { detail: row.detail } : {}),
+          ...(merged.approval ? {} : row.approval ? { approval: row.approval } : {}),
+          ...(merged.approvalReason ? {} : row.approvalReason ? { approvalReason: row.approvalReason } : {}),
           ...(row.timing ? { timing: row.timing } : {}),
         }
         break

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { CommandComposer } from '../components/CommandComposer'
 import { ThreadSidebar } from '../components/ThreadSidebar'
@@ -93,6 +93,7 @@ export function ProtocolsPage() {
     setLoopType,
     createThread,
     clearBubbles,
+    setThreadDraft,
   } = useThreadStore()
   const selectActivityRun = useRunActivityStore((s) => s.selectRun)
   // Per-thread, matching where the grant is actually stored and enforced. The
@@ -106,6 +107,16 @@ export function ProtocolsPage() {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const thread = activeThread()
+  // 草稿跟著對話走：每個 thread 一份輸入草稿，切換任務互不干擾；
+  // 沒有 active thread 時退回全域 draftInput。
+  const threadDraft = useThreadStore((s) => (activeId ? s.draftByThread[activeId] || '' : ''))
+  const setComposerDraft = useCallback(
+    (v: string) => {
+      if (activeId) setThreadDraft(activeId, v)
+      setDraftInput(v)
+    },
+    [activeId, setThreadDraft, setDraftInput],
+  )
   const presentationRunId = activeId ? getRunIdForThread(activeId) : null
   const activity = useRunActivityStore((s) =>
     presentationRunId ? s.presentations[presentationRunId] : undefined,
@@ -320,7 +331,7 @@ export function ProtocolsPage() {
     })
 
     setBusy(true)
-    setDraftInput('')
+    setComposerDraft('')
     if (thread?.loopType) setSelectedLoopType(thread.loopType)
     else setSelectedLoopType(null)
 
@@ -508,13 +519,13 @@ export function ProtocolsPage() {
                   </h1>
                   <CliDoctorCard
                     onStartTask={() => {
-                      setDraftInput('請檢查目前專案，完成一個小幅度安全修正並回報 Git diff。')
+                      setComposerDraft('請檢查目前專案，完成一個小幅度安全修正並回報 Git diff。')
                       requestFocusComposer({ openSlash: false })
                     }}
                   />
                   <SuggestedPrompts
                     onPick={(prompt) => {
-                      setDraftInput(prompt)
+                      setComposerDraft(prompt)
                       requestFocusComposer({ openSlash: false })
                     }}
                   />
@@ -572,8 +583,8 @@ export function ProtocolsPage() {
             <div className="shrink-0 w-full pt-3 pb-4 space-y-2">
               <ProjectContextBar />
               <CommandComposer
-                value={draftInput}
-                onChange={setDraftInput}
+                value={activeId ? threadDraft : draftInput}
+                onChange={setComposerDraft}
                 mode="agent"
                 primary
                 autoFocus

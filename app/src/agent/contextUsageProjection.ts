@@ -13,12 +13,15 @@
  * replayed one must not be able to disagree. Ordering comes from `seq` and from
  * nothing else.
  *
- * The rule underneath every field (ADR-0048): what was measured is reported,
+ * The rule underneath every field — the same one ADR-0048 holds for execution
+ * evidence, applied to measurement: what was measured is reported,
  * and what was not is ABSENT. Never a 0 standing in for an unreported figure,
  * never a ratio against a guessed window, never a token count for a step that
  * has not finished.
  */
 import { stepTimings, turnRecordEntries, type RecordedUsage, type TurnRecord } from './turnRecord.ts'
+import { computeUsageCostUsd } from './usagePricing.ts'
+import type { ModelPricing } from './types.ts'
 
 /**
  * Estimated shares of the conversation's volume, by who produced it.
@@ -53,6 +56,15 @@ export type ContextUsage = {
    * and deliberately not what the model is currently holding.
    */
   tokens: { input: number; output: number; cachedRead: number; cachedWrite: number; total: number }
+  /**
+   * Which of those sums any step actually reported.
+   *
+   * A sum of 0 is ambiguous on its own — «provider 說快取省了 0» and «這個
+   * provider 根本不談快取» add up to the same number, and a surface that
+   * printed `快取讀 0` for the second would be stating a measurement nobody
+   * made. A false here means: show no figure, not a zero.
+   */
+  reported: { input: boolean; output: boolean; cachedRead: boolean; cachedWrite: boolean }
   /** Summed from steps that were priced. Absent when none were. */
   costUsd?: number
   breakdown: ContextUsageBreakdown
@@ -67,7 +79,14 @@ export type ContextUsage = {
    * step reported a prompt size.
    */
   contextTokens?: number
-  /** Only when genuinely known; never a default standing in for knowledge. */
+  /**
+   * Only when genuinely known; never a default standing in for knowledge.
+   *
+   * Preference order: the window the record itself carries for the last
+   * measured step (the model catalog's own figure for the model that ran),
+   * then whatever the caller could establish. A conversation that switched
+   * models is therefore measured against the model that actually ran.
+   */
   contextWindow?: number
   /** `contextTokens / contextWindow`, and only when both are known. */
   ratio?: number
@@ -80,8 +99,20 @@ export type ContextUsage = {
 }
 
 export type ContextUsageOptions = {
-  /** The model's context window, when it is actually known. */
+  /**
+   * A window the caller could establish, used only when the record carries
+   * none of its own. Pass nothing rather than a default: an absent window
+   * yields no ratio, which is the honest answer to a window nobody knows.
+   */
   contextWindow?: number
+  /**
+   * Rates the user stated for this model, used ONLY to price steps whose
+   * recorder could not. On the Pi path the catalog usually prices the run and
+   * this is never consulted; where the catalog has no price for a model, this
+   * is the only thing that can answer «這個 run 花了多少錢». Absent rates
+   * still mean no cost — never a zero.
+   */
+  pricing?: ModelPricing
   /** Entries older than this view, when it is a bounded window onto a longer record. */
   unloadedBefore?: number
 }
@@ -109,8 +140,19 @@ function stepTotal(usage: RecordedUsage): number {
   return (input ?? 0) + (output ?? 0)
 }
 
-/** How much of the context one step's prompt occupied, cache included. */
+/**
+ * How full the context was after this step, cache included.
+ *
+ * The recorder's own `contextTokens` is preferred because it is the LAST model
+ * call's prompt, which is the only figure that answers «模型現在握著多滿的
+ * context». Falling back to `input + cache` is a knowingly generous estimate:
+ * one step can make several model calls and those fields sum all of them, so
+ * on a tool-looping turn the fallback over-reports. Records written before the
+ * recorder measured this take the fallback; new ones do not.
+ */
 function stepPrompt(usage: RecordedUsage): number | undefined {
+  const recorded = measured(usage.contextTokens)
+  if (recorded !== undefined) return recorded
   const input = measured(usage.input)
   const cachedRead = measured(usage.cachedRead)
   const cachedWrite = measured(usage.cachedWrite)
@@ -175,10 +217,12 @@ export function projectContextUsage(
   // already knows a step still running has no measurement to give.
   const steps = stepTimings(record)
   const tokens = { input: 0, output: 0, cachedRead: 0, cachedWrite: 0, total: 0 }
+  const reported = { input: false, output: false, cachedRead: false, cachedWrite: false }
   let runningSteps = 0
   let measuredSteps = 0
   let costUsd: number | undefined
   let contextTokens: number | undefined
+  let recordedWindow: number | undefined
 
   for (const step of steps) {
     if (step.running) {
@@ -187,21 +231,34 @@ export function projectContextUsage(
     }
     const usage = step.usage
     if (!usage) continue
+    // A step counts as measured when the provider reported ANY figure for it —
+    // including a cache-only report, and including a genuine zero. Testing the
+    // sums instead would silently drop a step whose only reported number was 0,
+    // which is a measurement, and one that reported cache but no totals.
+    const anyReported = (['input', 'output', 'total', 'cachedRead', 'cachedWrite'] as const)
+      .some((field) => measured(usage[field]) !== undefined)
+    if (!anyReported) continue
     const total = stepTotal(usage)
     const input = measured(usage.input) ?? 0
     const output = measured(usage.output) ?? 0
-    if (total === 0 && input === 0 && output === 0) continue
     measuredSteps += 1
     tokens.input += input
     tokens.output += output
     tokens.cachedRead += measured(usage.cachedRead) ?? 0
     tokens.cachedWrite += measured(usage.cachedWrite) ?? 0
     tokens.total += total
-    const cost = measured(usage.costUsd)
+    for (const field of ['input', 'output', 'cachedRead', 'cachedWrite'] as const) {
+      if (measured(usage[field]) !== undefined) reported[field] = true
+    }
+    // The recorder prices the step when it can. When it could not, the user's
+    // own rates are the only thing that can — and if there are none, the step
+    // contributes no cost rather than a zero.
+    const cost = measured(usage.costUsd) ?? computeUsageCostUsd(usage, options.pricing)
     if (cost !== undefined) costUsd = (costUsd ?? 0) + cost
     // Steps arrive oldest-first, so the last one that measured a prompt wins.
     const prompt = stepPrompt(usage)
     if (prompt !== undefined) contextTokens = prompt
+    if (step.contextWindow && step.contextWindow > 0) recordedWindow = step.contextWindow
   }
 
   const totalChars = chars.assistant + chars.tool + chars.user + chars.reasoning
@@ -214,11 +271,14 @@ export function projectContextUsage(
       }
     : { ...EMPTY_BREAKDOWN }
 
-  const contextWindow = typeof options.contextWindow === 'number'
+  // The record's own figure wins: it is the catalog's window for the model
+  // that actually served the last measured step, and it replays unchanged.
+  const givenWindow = typeof options.contextWindow === 'number'
     && Number.isFinite(options.contextWindow)
     && options.contextWindow > 0
     ? options.contextWindow
     : undefined
+  const contextWindow = recordedWindow ?? givenWindow
   const unloadedBefore = typeof options.unloadedBefore === 'number'
     && Number.isFinite(options.unloadedBefore)
     && options.unloadedBefore > 0
@@ -232,6 +292,7 @@ export function projectContextUsage(
     messages: { user, assistant },
     toolCalls: callIds.size,
     tokens,
+    reported,
     ...(costUsd === undefined ? {} : { costUsd }),
     breakdown,
     ...(contextTokens === undefined ? {} : { contextTokens }),

@@ -9,7 +9,6 @@ import { v4 as uuid } from 'uuid'
 import type { LlmSettings, PermissionProjection, ToolCallRecord } from '../types.ts'
 import { chatCompletionWithTools, type ChatMessageExt, type ToolCallRequest } from '../llm.ts'
 import { buildOpenAiTools, type OpenAiToolDef } from './schemas.ts'
-import type { RecordedUsage } from '../turnRecord.ts'
 import {
   DEFAULT_SUPERVISOR_LIMITS,
   enforceStepContextBudget,
@@ -115,12 +114,6 @@ export interface ToolLoopCallbacks {
 export interface ToolLoopResult {
   content: string
   tokensUsed: number
-  /**
-   * The measured split behind `tokensUsed`, when the provider reported one.
-   * Same shape the Turn Record stores, so this degrade path and the Host path
-   * feed one projection rather than two.
-   */
-  usage?: RecordedUsage
   toolCalls: ToolCallRecord[]
   toolContext: string
   rounds: number
@@ -518,19 +511,6 @@ export async function runFunctionCallingLoop(
   }
 
   let tokensUsed = 0
-  // The split behind the scalar. Fields stay absent until a provider actually
-  // reports them, so a provider that talks only in totals records only a total.
-  const measured: RecordedUsage = {}
-  const addUsage = (reported: RecordedUsage | undefined) => {
-    if (!reported) return
-    for (const field of ['input', 'output', 'total', 'cachedRead', 'cachedWrite', 'costUsd'] as const) {
-      const value = reported[field]
-      if (typeof value !== 'number' || !Number.isFinite(value)) continue
-      measured[field] = (measured[field] ?? 0) + value
-    }
-  }
-  const measuredUsage = (): RecordedUsage | undefined =>
-    Object.keys(measured).length > 0 ? { ...measured } : undefined
   let rounds = 0
 
   // ContextEngine (Hermes seam) — default adapter wraps ContextGovernor per step.
@@ -717,7 +697,6 @@ ${systemExtra}`,
       },
     })
     tokensUsed += result.tokensUsed
-    addUsage(result.usage)
 
     if (result.toolCalls.length === 0) {
       const content =
@@ -730,7 +709,6 @@ ${systemExtra}`,
       return {
         content,
         tokensUsed,
-        ...(measuredUsage() ? { usage: measuredUsage() } : {}),
         toolCalls,
         toolContext: budget.text,
         rounds,
@@ -826,13 +804,11 @@ ${systemExtra}`,
     onResilienceEvent: (m) => cb?.onLog?.('WARN', m),
   })
   tokensUsed += final.tokensUsed
-  addUsage(final.usage)
   const budget = enforceStepContextBudget(toolChunks, limits)
   const loadedCapabilityIds = [...capState.loadedIds].sort()
   return {
     content: final.content || budget.text || 'Step completed after tool budget exhausted.',
     tokensUsed,
-    ...(measuredUsage() ? { usage: measuredUsage() } : {}),
     toolCalls,
     toolContext: budget.text,
     rounds,

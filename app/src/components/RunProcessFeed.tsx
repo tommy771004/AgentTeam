@@ -9,10 +9,9 @@ import { emptyAgentLike } from '../agent/localCliRun'
 import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
 import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
 import { projectLiveTimeline, runTimelineRows } from '../agent/liveTimeline'
-import { TURN_RECORD_FORMAT_VERSION, type TurnRecordEntry } from '../agent/turnRecord'
-import { projectContextUsage } from '../agent/contextUsageProjection'
-import { formatRatio, formatTokensCompact, resolveKnownContextWindow } from '../agent/contextUsageView'
-import { useSettingsStore } from '../store/settingsStore'
+import type { TurnRecordEntry } from '../agent/turnRecord'
+import { contextUsageMicrocopy } from '../agent/contextUsageView'
+import { useRunContextUsage } from '../hooks/useRunContextUsage'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
@@ -258,29 +257,10 @@ export function RunProcessFeed({
   const completedTasks = tasks.filter((task) => task.status === 'done').length
   const taskSummary = tasks.length ? ` · ${completedTasks}/${tasks.length} 任務` : ''
 
-  /*
-   * `· 73.2k tok (7%)` — usage at a glance, without opening anything.
-   *
-   * The same projection the 上下文 panel and `/cost` read, so the three cannot
-   * disagree. A runner with no record shows nothing rather than a fabricated
-   * figure, and an unknown context window drops the ratio while keeping the
-   * count it did measure.
-   */
-  const usageSettings = useSettingsStore((state) => state.settings)
-  const usageModel = agent.steps[agent.steps.length - 1]?.modelUsed || usageSettings.model
-  const contextUsage = useMemo(
-    () => projectContextUsage(
-      { version: TURN_RECORD_FORMAT_VERSION, entries: [...recordEntries] },
-      {
-        contextWindow: resolveKnownContextWindow(usageSettings, usageModel),
-        unloadedBefore: Math.max(0, recordTotal - recordEntries.length),
-      },
-    ),
-    [recordEntries, recordTotal, usageSettings, usageModel],
-  )
-  const usageMicrocopy = contextUsage.measuredSteps > 0
-    ? `${formatTokensCompact(contextUsage.tokens.total)} tok${contextUsage.ratio === undefined ? '' : ` (${formatRatio(contextUsage.ratio)})`}`
-    : ''
+  // `73.2k tok (7%)` — usage at a glance, from the same hook the 上下文 panel
+  // and `/cost` use, so the three cannot disagree about one run. A runner with
+  // no record measures nothing and shows nothing.
+  const usageMicrocopy = contextUsageMicrocopy(useRunContextUsage(runId))
   const recovery = activity?.recovery || null
   const interaction = activity?.interaction || null
   const recoveryThread = useThreadStore((state) =>
@@ -658,6 +638,16 @@ export function RunProcessFeed({
                       <span className="shrink-0 font-medium">
                         {pending ? `執行 ${row.tool}…` : failed ? `${row.tool} ${row.settlement}` : `已執行 ${row.tool}`}
                       </span>
+                      {row.approval ? (
+                        <span
+                          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            row.approval === 'deny' ? 'bg-red-tint text-red' : 'bg-inset text-ink-3'
+                          }`}
+                          title={row.approvalReason || row.approval}
+                        >
+                          {row.approval}
+                        </span>
+                      ) : null}
                       {row.detail ? (
                         <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px] font-[family-name:var(--font-mono)]">
                           {row.detail}

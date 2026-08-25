@@ -145,6 +145,9 @@ export function useSlashExecutor() {
       }
       case 'clear':
       case 'new': {
+        // 清掉目前對話自己的草稿，不只全域那份
+        const thrState = useThreadStore.getState()
+        if (thrState.activeId) thrState.setThreadDraft(thrState.activeId, '')
         setDraftInput('')
         ui.setComposer('')
         ui.clearLog()
@@ -177,6 +180,7 @@ export function useSlashExecutor() {
         const runModel = agent.steps[agent.steps.length - 1]?.modelUsed || settings.model
         const usage = projectContextUsage(record, {
           contextWindow: resolveKnownContextWindow(settings, runModel),
+          pricing: settings.modelProfiles?.[(runModel || '').trim()]?.pricing,
         })
         if (usage.measuredSteps > 0) {
           for (const line of contextUsageReportLines(usage)) log(line)

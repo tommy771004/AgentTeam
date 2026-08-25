@@ -47,6 +47,18 @@ export type PiStepTiming = {
    * and projects exactly as it did then.
    */
   usage?: RecordedUsage
+  /**
+   * The context window of the model that served this step, as its catalog
+   * states it.
+   *
+   * Recorded per step rather than looked up at render time for two reasons: a
+   * conversation that switches models mid-run is then measured against the
+   * model that ACTUALLY ran each step, and a replay a year later gets the same
+   * window the live view had instead of whatever the settings say by then.
+   * Absent when nobody knew it — and an absent window yields no ratio at all,
+   * never a ratio against a default.
+   */
+  contextWindow?: number
 }
 
 /**
@@ -71,6 +83,16 @@ export type RecordedUsage = {
    * price list of its own and will not invent a number.
    */
   costUsd?: number
+  /**
+   * The prompt the step's FINAL model call actually sent, cache included.
+   *
+   * Not derivable from `input`: one step can make several model calls when the
+   * agent uses tools, and `input` sums every one of them. Summing prompts
+   * answers «這一步買了多少 token»; only the last prompt answers «模型現在握著
+   * 多滿的 context», which is what a ratio against the window means. Absent
+   * when the provider reported no prompt size.
+   */
+  contextTokens?: number
 }
 
 /** Who is accountable for an entry's content (ADR-0048). */
@@ -476,6 +498,8 @@ export type PiStepTimingView = {
   generatingMs?: number
   totalMs?: number
   usage?: PiStepTiming['usage']
+  /** The window of the model that served this step, when its catalog stated one. */
+  contextWindow?: number
   /** True while the step has started and not yet ended. */
   running: boolean
 }
@@ -512,6 +536,7 @@ export function stepTimings(record: TurnRecord | undefined): PiStepTimingView[] 
                 }),
             totalMs: Math.max(0, timing.completedAt - timing.requestAt),
             ...(timing.usage ? { usage: timing.usage } : {}),
+            ...(timing.contextWindow ? { contextWindow: timing.contextWindow } : {}),
           }
         : {}),
     })

@@ -13,7 +13,9 @@ import {
  * this panel, the feed header, `/cost` and the finished-run bubble cannot
  * disagree about one run. The component's whole job is presentation.
  *
- * The line it holds (ADR-0048): only measured values appear. A step still
+ * The line it holds — ADR-0048's principle that a component may not
+ * manufacture what it did not observe, applied to numbers: only measured
+ * values appear. A step still
  * running says so instead of contributing a guess, a model with no known
  * context window shows no percentage rather than one against a default, and a
  * provider that reported no cost shows no cost rather than US$0.00.
@@ -33,20 +35,29 @@ function RatioBar({ ratio }: { ratio: number }) {
 }
 
 /**
- * Where the conversation's volume sits, as one bar of tonal steps.
+ * Where the conversation's volume sits: one hue, four clearly separated values.
  *
- * Tonal rather than four colours: the segments are one accent mixed toward the
- * surface at descending strengths, so the bar reads as a single measured
- * quantity divided up rather than a row of unrelated swatches. Each step is
- * mixed with the inset it sits on, not faded to transparent, so the quietest
- * segment still has a value gap to stand on.
+ * Tonal rather than four colours, so the bar reads as one measured quantity
+ * divided up rather than a row of unrelated swatches. The ladder runs from the
+ * accent's emphasis ink down toward the inset, spread WIDE — a first pass used
+ * narrow steps and the whole bar rendered as one flat colour, which is a chart
+ * nobody can read. The floor stays well clear of the surface so even a 3%
+ * sliver is visible, in both themes: `accent-ink` is the emphasis tone either
+ * way, and mixing toward `inset` recedes either way, so the ladder keeps its
+ * direction when the theme flips.
+ *
+ * Colour is tied to the CATEGORY, never to its rank, so 工具 looks the same
+ * from run to run and the legend stays learnable.
  */
-// The quietest step still keeps a real value gap from the track it sits on;
-// a segment too faint to see is a measurement the reader cannot read.
-const BREAKDOWN_STRENGTH: Record<string, number> = { tool: 100, assistant: 76, reasoning: 56, user: 40 }
+const BREAKDOWN_TONE: Record<string, string> = {
+  tool: 'var(--color-accent-ink)',
+  assistant: 'var(--color-accent)',
+  reasoning: 'color-mix(in srgb, var(--color-accent) 68%, var(--color-inset))',
+  user: 'color-mix(in srgb, var(--color-accent) 44%, var(--color-inset))',
+}
 
 function breakdownColor(key: string): string {
-  return `color-mix(in srgb, var(--color-accent) ${BREAKDOWN_STRENGTH[key] ?? 40}%, var(--color-inset))`
+  return BREAKDOWN_TONE[key] ?? 'var(--color-accent)'
 }
 
 function BreakdownBar({ breakdown }: { breakdown: ContextUsage['breakdown'] }) {
@@ -56,20 +67,25 @@ function BreakdownBar({ breakdown }: { breakdown: ContextUsage['breakdown'] }) {
   if (segments.length === 0) return null
   return (
     <div className="mt-3">
-      <div className="flex h-1.5 overflow-hidden rounded-full bg-inset" role="presentation">
+      {/* No track behind this one, deliberately. The ratio bar above measures
+          against a maximum, so it has a track showing the headroom left. This
+          bar is a whole divided up — there is no headroom to show, and a track
+          would invite reading one as the other. The gaps say «分段», not
+          «未填滿». */}
+      <div className="flex h-1.5 gap-[3px]" role="presentation">
         {segments.map((segment, index) => (
           <div
             key={segment.key}
             style={{
               flexBasis: `${segment.share * 100}%`,
-              // The last segment absorbs sub-pixel rounding, so the shares
-              // always fill the whole track — a bar that stops a hair short of
-              // its end reads as a broken fill, not as a proportion.
+              // The last segment absorbs sub-pixel rounding so the row always
+              // resolves exactly, never stopping a hair short of its end.
               flexGrow: index === segments.length - 1 ? 1 : 0,
-              flexShrink: 0,
+              flexShrink: 1,
+              minWidth: '3px',
               background: breakdownColor(segment.key),
             }}
-            className="h-full transition-[flex-basis] duration-500 motion-reduce:transition-none"
+            className="h-full rounded-full transition-[flex-basis] duration-500 motion-reduce:transition-none"
           />
         ))}
       </div>
@@ -92,21 +108,37 @@ function BreakdownBar({ breakdown }: { breakdown: ContextUsage['breakdown'] }) {
   )
 }
 
-/** Four parallel figures on one grid, so no value floats out of line. */
-function TokenGrid({ tokens }: { tokens: ContextUsage['tokens'] }) {
-  const rows: Array<[string, number]> = [
-    ['輸入', tokens.input],
-    ['輸出', tokens.output],
-    ['快取讀', tokens.cachedRead],
-    ['快取寫', tokens.cachedWrite],
+/**
+ * Four parallel figures on one grid, so no value floats out of line.
+ *
+ * A field nobody reported shows an em dash rather than `0`: printing zero for
+ * an unreported figure states a measurement this build never made. The row
+ * still holds its slot, so the grid stays aligned instead of collapsing into
+ * a ragged one — a missing value is shown as missing, not omitted.
+ */
+function TokenGrid({
+  tokens,
+  reported,
+}: {
+  tokens: ContextUsage['tokens']
+  reported: ContextUsage['reported']
+}) {
+  const rows: Array<[string, number, boolean]> = [
+    ['輸入', tokens.input, reported.input],
+    ['輸出', tokens.output, reported.output],
+    ['快取讀', tokens.cachedRead, reported.cachedRead],
+    ['快取寫', tokens.cachedWrite, reported.cachedWrite],
   ]
   return (
     <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
-      {rows.map(([label, value]) => (
+      {rows.map(([label, value, isReported]) => (
         <div key={label} className="flex items-baseline justify-between gap-2">
           <dt className="text-[10px] text-ink-3">{label}</dt>
-          <dd className="font-[family-name:var(--font-mono)] text-[11px] tabular-nums text-ink-2">
-            {formatTokens(value)}
+          <dd
+            className={`font-[family-name:var(--font-mono)] text-[11px] tabular-nums ${isReported ? 'text-ink-2' : 'text-ink-3'}`}
+            title={isReported ? undefined : 'provider 未回報這個欄位'}
+          >
+            {isReported ? formatTokens(value) : '—'}
           </dd>
         </div>
       ))}
@@ -144,7 +176,7 @@ export function ContextUsagePanel({
           {degraded
             ? '這個 runner 只回報總量，沒有輸入／輸出／快取的分解。'
             : usage.runningSteps > 0
-              ? '第一個步驟尚未結束，用量要等步驟結算後才會出現。'
+              ? '步驟尚未結束，用量要等結算後才會出現。'
               : 'provider 未回報用量分解，面板不代為推算。'}
         </p>
       </div>
@@ -201,7 +233,7 @@ export function ContextUsagePanel({
         </div>
       )}
 
-      <TokenGrid tokens={usage.tokens} />
+      <TokenGrid tokens={usage.tokens} reported={usage.reported} />
 
       <BreakdownBar breakdown={usage.breakdown} />
 
@@ -218,7 +250,7 @@ export function ContextUsagePanel({
         </p>
       ) : null}
       <p className="mt-2 text-[10px] leading-relaxed text-ink-3">
-        分解比例依各類記錄的字元量估算；token、快取與成本皆為 provider 實測值。
+        分解比例為字元量估算，token、快取與成本為 provider 實測值，— 表示未回報。
       </p>
       {usage.partial ? (
         <p className="mt-1 text-[10px] leading-relaxed text-orange">

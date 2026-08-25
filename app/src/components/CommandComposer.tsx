@@ -314,18 +314,22 @@ export function CommandComposer({
     const line = value.trim()
     if (disabled || attaching) return
     if (!line && !attachments.length) return
+    // 先清輸入再送出：送出管線再慢或拋錯，都不該把已送出的字留在框裡。
+    const toSend = attachments
+    setAttachments([])
+    setAttachError(null)
+    histIdx.current = -1
     // Slash commands ignore attachments for now
     if (line.startsWith('/')) {
       pushHistory(line)
-      histIdx.current = -1
       setMentionOpen(false)
       const parsed = parseSlashLine(line)
+      onChange('')
       if (parsed) {
         const cmd = resolveSlashCommand(parsed.cmd)
         if (cmd) {
           setMenuOpen(false)
           await onSlashCommand(cmd, parsed.args, parsed.raw)
-          onChange('')
           return
         }
         await onSlashCommand(
@@ -333,17 +337,13 @@ export function CommandComposer({
           parsed.args,
           parsed.raw,
         )
-        onChange('')
         return
       }
     }
     pushHistory(line || `（${attachments.length} 個附件）`)
-    histIdx.current = -1
-    const toSend = attachments
-    setAttachments([])
-    setAttachError(null)
-    await onSubmitLine(line, toSend)
+    setMenuOpen(false)
     onChange('')
+    await onSubmitLine(line, toSend)
   }, [
     value,
     disabled,
@@ -383,6 +383,10 @@ export function CommandComposer({
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // IME 組字中（注音/中文確認、keyCode 229）：Enter 是「確認組字」不是送出，
+    // 方向鍵與 Escape 也屬於組字操作，一律不觸發編輯器的快捷行為。
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
+
     if (showMentionMenu && mentionItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()

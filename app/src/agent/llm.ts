@@ -4,7 +4,8 @@
 
 import type { LlmSettings, ModelSource } from './types.ts'
 import { DEFAULT_CLI_PROVIDERS } from './cliProviders.ts'
-import { buildRecordedUsage, type MeasuredUsage } from './usagePricing.ts'
+import { buildRecordedUsage } from './usagePricing.ts'
+import type { RecordedUsage } from './turnRecord.ts'
 import { breakerKey, callWithResilience } from './llmResilience.ts'
 import {
   effectiveOutboundGuardFromSettings,
@@ -205,7 +206,7 @@ export interface LlmChatResult {
    * be discarded at the transport boundary. Absent fields were not reported —
    * they are never filled in with 0.
    */
-  usage?: MeasuredUsage
+  usage?: RecordedUsage
   model: string
 }
 
@@ -428,13 +429,13 @@ function normalizeChatResult(data: unknown, fallbackModel: string): LlmToolsResu
       completion_tokens?: number
       prompt_tokens_details?: { cached_tokens?: number }
     }
-    normalizedUsage?: MeasuredUsage
+    normalizedUsage?: RecordedUsage
   }
 
   // Already normalized from IPC — main carries the split on `usage`, which at
   // this branch is already this app's shape rather than the provider's.
   if (d.toolCalls || (typeof d.content === 'string' && !d.choices)) {
-    const fromIpc = (d as { usage?: MeasuredUsage }).usage
+    const fromIpc = (d as { usage?: RecordedUsage }).usage
     const carried = buildRecordedUsage(fromIpc)
     return {
       content: (d.content || '').trim(),

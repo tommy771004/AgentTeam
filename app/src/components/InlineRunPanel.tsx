@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { LogViewer } from './LogViewer'
 import { ElapsedTime } from './primitives/ElapsedTime'
@@ -17,10 +17,9 @@ import { usePermissionAskStore } from '../store/permissionAskStore'
 import { useRunActivityStore } from '../store/runActivityStore'
 import { ReasoningFocusPanel } from './ReasoningFocusPanel'
 import { ContextUsagePanel } from './ContextUsagePanel'
-import { projectContextUsage } from '../agent/contextUsageProjection'
-import { formatTokensCompact, formatRatio, resolveKnownContextWindow } from '../agent/contextUsageView'
-import { useSettingsStore } from '../store/settingsStore'
-import { TURN_RECORD_FORMAT_VERSION, type TurnRecordEntry } from '../agent/turnRecord'
+import { contextUsageMicrocopy, formatTokensCompact } from '../agent/contextUsageView'
+import { useRunContextUsage } from '../hooks/useRunContextUsage'
+import type { TurnRecordEntry } from '../agent/turnRecord'
 import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
 import type { ExecutionStep } from '../agent/types'
@@ -141,11 +140,9 @@ export function InlineRunPanel({
         s.queue.some((item) => item.runId === runId),
     ),
   )
-  const settings = useSettingsStore((s) => s.settings)
   const threadRunner = useThreadStore(
     (s) => s.threads.find((t) => t.id === threadId)?.runner || 'builtin',
   )
-  const threadModel = useThreadStore((s) => s.threads.find((t) => t.id === threadId)?.model)
   const persistedPlan = useThreadStore(
     (s) => s.threads.find((t) => t.id === threadId)?.runPlan || EMPTY_RUN_PLAN,
   )
@@ -196,26 +193,10 @@ export function InlineRunPanel({
     .join(' · ')
   const currentStatus = lifecycle.label
 
-  /*
-   * 上下文 — the same projection the process-feed header and `/cost` read.
-   *
-   * The window comes from this run's own model, not the global one, so a
-   * conversation that switched models mid-session is measured against the
-   * model that actually ran. An unknown window yields no ratio at all rather
-   * than a percentage against a default nobody chose.
-   */
-  const runModel = agent.steps[agent.steps.length - 1]?.modelUsed || threadModel || settings.model
-  const contextWindow = resolveKnownContextWindow(settings, runModel)
-  const contextUsage = useMemo(
-    () => projectContextUsage(
-      { version: TURN_RECORD_FORMAT_VERSION, entries: [...activity.recordEntries] },
-      { contextWindow, unloadedBefore: Math.max(0, activity.recordTotal - activity.recordEntries.length) },
-    ),
-    [activity.recordEntries, activity.recordTotal, contextWindow],
-  )
-  const hasMeasuredContext = !isExternal && contextUsage.measuredSteps > 0
-  const contextSummary = hasMeasuredContext
-    ? `${formatTokensCompact(contextUsage.tokens.total)} tok${contextUsage.ratio === undefined ? '' : ` · ${formatRatio(contextUsage.ratio)}`}`
+  // 上下文 — the same derivation the process-feed microcopy and `/cost` use.
+  const contextUsage = useRunContextUsage(runId)
+  const contextSummary = !isExternal && contextUsage.measuredSteps > 0
+    ? contextUsageMicrocopy(contextUsage)
     : agent.tokensUsed > 0
       ? `${formatTokensCompact(agent.tokensUsed)} tok`
       : undefined

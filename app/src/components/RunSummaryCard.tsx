@@ -62,11 +62,11 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
             {summary.durationMs ? ` · ${Math.round(summary.durationMs / 1000)} 秒` : ''}
             {/* Measured or absent. An older summary carries neither and reads
                 exactly as it always did. */}
-            {summary.tokens ? (
+            {summary.tokens === undefined ? null : (
               <span className="font-[family-name:var(--font-mono)] tabular-nums">
                 {' · '}{formatTokensCompact(summary.tokens)} tok
               </span>
-            ) : null}
+            )}
             {summary.costUsd === undefined ? null : (
               <span className="font-[family-name:var(--font-mono)] tabular-nums">
                 {' · '}{formatUsd(summary.costUsd)}

@@ -62,9 +62,19 @@ export function formatUsd(value: number): string {
   return `US$${value.toFixed(4)}`
 }
 
-/** Whether this run measured anything at all, or only ever reported a scalar. */
-export function hasMeasuredUsage(usage: ContextUsage): boolean {
-  return usage.measuredSteps > 0
+/**
+ * `73.2k tok (7%)` — the one microcopy, for every surface that shows one.
+ *
+ * Returns an empty string when nothing was measured, which is how a runner
+ * that reports no usage shows no figure instead of a fabricated one. Lives
+ * here because two surfaces rendered it with different separators before, and
+ * one run reading two ways in two places is exactly what one projection is
+ * supposed to make impossible.
+ */
+export function contextUsageMicrocopy(usage: ContextUsage): string {
+  if (usage.measuredSteps === 0) return ''
+  const total = `${formatTokensCompact(usage.tokens.total)} tok`
+  return usage.ratio === undefined ? total : `${total} (${formatRatio(usage.ratio)})`
 }
 
 /**
@@ -80,13 +90,15 @@ export function contextUsageReportLines(usage: ContextUsage): string[] {
       ? `${total} · 上下文 ${formatTokens(usage.contextTokens)}/${formatTokens(usage.contextWindow)}（${formatRatio(usage.ratio)}）`
       : total,
   )
+  // A field the provider never reported is left out entirely. Printing
+  // `快取讀 0` would put a measurement on screen that nobody made.
   const split = [
-    `輸入 ${formatTokens(usage.tokens.input)}`,
-    `輸出 ${formatTokens(usage.tokens.output)}`,
-    `快取讀 ${formatTokens(usage.tokens.cachedRead)}`,
-    `快取寫 ${formatTokens(usage.tokens.cachedWrite)}`,
-  ]
-  lines.push(split.join(' · '))
+    usage.reported.input ? `輸入 ${formatTokens(usage.tokens.input)}` : '',
+    usage.reported.output ? `輸出 ${formatTokens(usage.tokens.output)}` : '',
+    usage.reported.cachedRead ? `快取讀 ${formatTokens(usage.tokens.cachedRead)}` : '',
+    usage.reported.cachedWrite ? `快取寫 ${formatTokens(usage.tokens.cachedWrite)}` : '',
+  ].filter(Boolean)
+  if (split.length > 0) lines.push(split.join(' · '))
   if (usage.costUsd !== undefined) lines.push(`成本：${formatUsd(usage.costUsd)}`)
   lines.push(`步驟：${usage.steps} · 工具呼叫：${usage.toolCalls} · 訊息：${usage.messages.assistant}`)
   if (usage.runningSteps > 0) {
