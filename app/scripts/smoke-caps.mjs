@@ -779,7 +779,17 @@ await test('Phase 3 item 4/5: unique finalization order; stop does not drain', a
   const a4 = coordinator.indexOf('// 4) onSettled')
   const a5 = coordinator.indexOf('// 5) release capacity')
   const a6 = coordinator.indexOf('// 6) queue drain')
-  assert.ok(a2 < a3 && a3 < a4 && a4 < a5 && a5 < a6, 'finalization step comments stay ordered')
+  assert.ok(a2 < a3 && a3 < a4, 'finalization step comments stay ordered')
+  assert.ok(a5 < a6, 'release still precedes the single drain')
+  // Steps 5/6 moved up to the per-run finalization claim: they are obligations
+  // of holding the claim (a finally), not steps an exception can skip.
+  const gateStart = coordinator.indexOf('export async function finalizeTaskRun')
+  const sequenceStart = coordinator.indexOf('async function runFinalizationSequence')
+  assert.ok(gateStart >= 0 && sequenceStart > gateStart, 'claim gate wraps a separate sequence')
+  assert.ok(a5 > gateStart && a6 < sequenceStart, 'release/drain live in the claim gate')
+  assert.ok(a2 > sequenceStart, 'the ordered sequence steps live in the sequence')
+  assert.match(coordinator.slice(gateStart, sequenceStart), /finalizationClaims/)
+  assert.match(coordinator.slice(gateStart, a5), /finally\s*\{/, 'release rides a finally')
   assert.doesNotMatch(types, /deferFinalization/)
   assert.doesNotMatch(agent, /deferFinalization/)
   assert.match(agent, /Phase 3 item 5: stop only terminates/)
@@ -2446,7 +2456,17 @@ await test('drift guard: delegate capability_mode stacks on role blocks; wait pr
 await test('drift guard: metrics recorded at coordinator settle + guard/loop bumps', async () => {
   const fs = await import('node:fs')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
-  assert.match(coordinator, /finalizeRunMetric\(runId/)
+  // Settle moved onto the per-run finalization claim, so the once-per-run
+  // metric must be recorded there — inside settleOnce, not in the sequence
+  // an exception can skip.
+  const settleOnce = coordinator.slice(
+    coordinator.indexOf('const settleOnce = async'),
+    coordinator.indexOf('const outcome = (async ()'),
+  )
+  assert.ok(settleOnce.length > 0, 'the claim holder still owns settle')
+  assert.match(settleOnce, /finalizeRunMetric\(input\.runId/)
+  assert.match(settleOnce, /input\.onSettled\?\.\(result\)/, 'and owns onSettled')
+  assert.match(settleOnce, /if \(settled\) return/, 'settle is once per run, by construction')
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
   assert.match(guard, /bumpRunMetric\(opts\.runId, 'toolAsks'\)/)
   assert.match(guard, /'toolDenials'\)/)
@@ -2492,6 +2512,57 @@ await test('drift guard: monitor tool gated like bash and feeds eventMatcher', a
   const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
   assert.match(app, /source: 'monitor'/)
   assert.match(app, /eventPreMatched: true/)
+})
+
+await test('drift guard: the Pi path\'s live timeline is the record projection, never synthesised events', async () => {
+  const fs = await import('node:fs')
+  // ONE reading of one ordered source. Before this, the running view came from
+  // the activity event stream (arrival order) and the finished view from the
+  // Turn Record (recorded order) — two builders, no reason to agree. The feed
+  // must therefore reach its rows through the shared projection and through
+  // nothing else.
+  const feed = fs.readFileSync(path.join(appRoot, 'src/components/RunProcessFeed.tsx'), 'utf8')
+  assert.match(feed, /const recordView = useMemo\(\s*\(\) => projectLiveTimeline\(recordEntries, recordTotal\)/,
+    'the timeline view is projected from the record entries the run published')
+  assert.match(feed, /runTimelineRows\(recordView, draftText\)/,
+    'and its rows are the fold over that projection — not a second synthesis')
+  assert.match(feed, /const hasRecordTimeline = recordTimeline\.length > 0/)
+  // The activity-event trace is the FALLBACK. It renders only where no record
+  // exists, so the two can never appear side by side as rival accounts.
+  for (const fallback of [
+    /\{!hasRecordTimeline && thought\.trim\(\) \? \(/,
+    /\{!hasRecordTimeline && groups\.length > 0 \? \(/,
+    /\{draftText && !hasRecordTimeline \? \(/,
+  ]) {
+    assert.match(feed, fallback, `the activity-event surface stays gated behind the record path: ${fallback}`)
+  }
+
+  // The live projection is a composition of the replay one, not a second
+  // implementation of it: one function shapes a row, or neither does.
+  const live = fs.readFileSync(path.join(appRoot, 'src/agent/liveTimeline.ts'), 'utf8')
+  assert.match(live, /return projectTrajectory\(liveTimelinePage\(entries, seen, limit\)\)/)
+  assert.doesNotMatch(live, /RunActivityEvent|piHostActivity/, 'the live timeline may not read the activity vocabulary')
+
+  // Record appends never travel through the activity translator; App handles
+  // them first so the two channels keep separate jobs.
+  const activity = fs.readFileSync(path.join(appRoot, 'src/agent/piHostActivity.ts'), 'utf8')
+  assert.doesNotMatch(activity, /record-append|TurnRecord/, 'the host→feed translator stays transport-only')
+  const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
+  const appendIndex = app.indexOf('recordAppendFromEvent(event')
+  const mapIndex = app.indexOf('mapPiHostEventToActivity(event)')
+  assert.ok(appendIndex > 0 && mapIndex > appendIndex,
+    'record appends are handled before — and instead of — the activity mapping')
+
+  // Reasoning is written whole. A cap added "just to be safe" is the failure
+  // this asserts against, in the Host writer and in the projection alike.
+  const host = fs.readFileSync(path.join(appRoot, 'electron/piHostProtocol.ts'), 'utf8')
+  const flush = host.slice(host.indexOf('function flushReasoning'), host.indexOf('function flushReasoning') + 500)
+  assert.match(flush, /recorder\.reasoning\.join\(''\)/)
+  assert.doesNotMatch(flush, /slice\(0,|substring\(|\.slice\(-/, 'the recorded thought is never shortened')
+  const projection = fs.readFileSync(path.join(appRoot, 'src/agent/conversationProjection.ts'), 'utf8')
+  const reasoningCase = projection.slice(projection.indexOf("case 'reasoning':"), projection.indexOf("case 'tool-call':"))
+  assert.match(reasoningCase, /content: entry\.content/)
+  assert.doesNotMatch(reasoningCase, /slice\(/, 'the projection hands over the whole thought')
 })
 
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)

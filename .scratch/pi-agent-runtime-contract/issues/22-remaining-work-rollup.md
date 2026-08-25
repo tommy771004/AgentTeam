@@ -42,9 +42,12 @@
 
 `KNOWN_UNGATED_TESTS` 從 90 降到 45。清空它是 issue 20 的完成定義。每一支都要先查明「期望值過時」還是「程式真的壞了」—— 這批五支裡就有一支是**真的安全錯誤**（`full` 模式下危險指令免核准），不能假設剩下的都只是過時。
 
-### 3.2 inactive 路徑的 `session.toolAudit` phase 對稱性未驗證（issue 19）
+### 3.2 inactive 路徑的 `session.toolAudit` phase 對稱性未驗證（issue 19）—— 已完成
 
-它走的是 issue 16 建立的同一個 publisher，所以理論上與 allow／deny 兩條路對稱 —— 但那是推論，沒有斷言證明。補一條即可。
+補了三條斷言（見 issue 19）。結論比推論精確：執行的兩個 phase（`start` + 恰好一個
+`result`）確實對稱，第三個 `decision` **刻意缺席** —— activation 在 Approval
+Decision 之前就拒絕了，沒有裁決可記，補一個假的才是錯的。順帶釘住「未知名稱記
+`failed`、未啟用記 `denied`」在稽核層也不得collapse。已 mutation 驗證會咬。
 
 ### 3.3 `types.ts` 還原的完整性需要人確認
 
@@ -62,7 +65,7 @@
 - [x] 1.2 `hermes/skills.ts` 過渡期改為版本到期，build 會自己提醒。
 - [ ] 2.1 CI 的 Linux job 首次綠燈，issue 14 的三條打勾。
 - [ ] 3.1 `KNOWN_UNGATED_TESTS` 清空，Guard 7 的欠債清單移除。
-- [ ] 3.2 補上 inactive 路徑的 toolAudit 斷言。
+- [x] 3.2 補上 inactive 路徑的 toolAudit 斷言。
 - [x] 3.3 `types.ts` 還原完整性已用交叉比對驗證，不需人工過目。
 
 

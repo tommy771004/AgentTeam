@@ -389,6 +389,68 @@ try {
       'the two cases must not collapse into one status')
   })
 
+  // Issue 19's remainder: the refusal reaches `session.toolAudit`, not just the
+  // Turn Record. Both write through the same publisher, so symmetry was
+  // *inferred* — and an inference is not a fact until something fails without
+  // it. What the assertion found is that the shape is symmetric in the two
+  // phases that describe execution and deliberately asymmetric in the third.
+  send(20, 'sessions/list', {})
+  const outsiderAudit: Array<Record<string, any>> =
+    ((await wait(20)).result?.sessions || []).find((entry: any) => entry.id === outsiderSession)?.toolAudit || []
+  const auditFor = (tool: string) => outsiderAudit.filter((record) => record.tool === tool)
+
+  check('the inactive refusal is audited with the same lifecycle as an executed call', () => {
+    const records = auditFor(MCP_TOOL)
+    assert.ok(records.length, 'the refusal reached the session audit at all')
+    assert.deepEqual(
+      records.map((record) => record.phase),
+      ['start', 'result'],
+      'one start and exactly one terminal — the double-terminal bug issue 19 fixed stays fixed',
+    )
+    const terminal = records.find((record) => record.phase === 'result')
+    assert.equal(terminal?.settlement, 'denied', 'the audit calls it a refusal, not a failure')
+    assert.match(
+      String(terminal?.reason || ''),
+      /load the mcp-bridge capability/,
+      'the audit carries the sentence that names the fix, same as the Turn Record',
+    )
+    assert.equal(
+      new Set(records.map((record) => record.callId)).size,
+      1,
+      'both phases belong to one call',
+    )
+  })
+
+  check('no approval decision is invented for a call the approval gate never saw', () => {
+    // Allow and deny both record a `decision` phase because the Approval
+    // Decision actually ran. Activation refuses this call BEFORE that gate, so
+    // there is no verdict to record; writing one would put a decision nobody
+    // made into the audit. The absence is the honest answer, and it is pinned
+    // here so a future "let's make the phases uniform" cannot quietly fake it.
+    for (const tool of [MCP_TOOL, UNKNOWN_TOOL]) {
+      assert.equal(
+        auditFor(tool).some((record) => record.phase === 'decision'),
+        false,
+        `${tool} never reached the approval gate, so it has no decision to remember`,
+      )
+    }
+  })
+
+  check('the audit separates a refused tool from a broken one', () => {
+    const unknown = auditFor(UNKNOWN_TOOL)
+    assert.deepEqual(unknown.map((record) => record.phase), ['start', 'result'])
+    assert.equal(
+      unknown.find((record) => record.phase === 'result')?.settlement,
+      'failed',
+      'an unknown name is a failure, not a policy refusal',
+    )
+    assert.notEqual(
+      unknown.find((record) => record.phase === 'result')?.settlement,
+      auditFor(MCP_TOOL).find((record) => record.phase === 'result')?.settlement,
+      'the two must not collapse into one settlement in the audit either',
+    )
+  })
+
   // The unsupported expectation is exercised too, not just reasoned about:
   // a run whose view cannot be verified must fail closed on EVERY platform,
   // including the ones that do have a backend. Without this, "unsupported" is

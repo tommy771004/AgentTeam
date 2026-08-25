@@ -114,7 +114,17 @@ function makeDeps(overrides: Partial<ContextGovernorDeps> = {}) {
       return { ...compactResult, messages: compactResult.messages.slice() }
     },
     saveCheckpoint: (id, payload) => {
-      calls.push({ name: 'saveCheckpoint', args: { id, n: payload.messages.length, summary: payload.summary } })
+      calls.push({
+        name: 'saveCheckpoint',
+        args: {
+          id,
+          n: payload.messages.length,
+          summary: payload.summary,
+          plain: payload.messages.every(
+            (m) => typeof m.content === 'string' || m.content == null,
+          ),
+        },
+      })
     },
     memoryFlush: () => {
       calls.push({ name: 'memoryFlush' })
@@ -176,33 +186,116 @@ await test('fixed-round trigger: round 1 and even rounds call compact', async ()
   assert.equal(calls.filter((c) => c.name === 'compact').length, 0, 'odd round without overflow skips')
 })
 
-await test('vision attachments skip compact and do not call compact dep', async () => {
+function visionMessage(text = 'see'): GovernorMessage {
+  return {
+    role: 'user',
+    content: [
+      { type: 'text', text },
+      { type: 'image_url', image_url: { url: 'data:x' } },
+      { type: 'image_url', image_url: { url: 'data:y' } },
+    ],
+  }
+}
+
+function logged(calls: CallLog[], pattern: RegExp): boolean {
+  return calls.some(
+    (c) => c.name === 'log' && pattern.test(String((c.args as { message?: string })?.message)),
+  )
+}
+
+await test('vision without overflow: transcript returned untouched, no compaction, honest log', async () => {
   const { deps, calls } = makeDeps()
   const g = createContextGovernor(deps)
-  // Multiple image parts → estimated tokens >> preflight threshold
-  const visionMsgs: GovernorMessage[] = [
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: 'see' },
-        { type: 'image_url', image_url: { url: 'data:x' } },
-        { type: 'image_url', image_url: { url: 'data:y' } },
-      ],
-    },
+  const pre: GovernorMessage[] = [visionMessage(), { role: 'assistant', content: 'ok' }]
+  const out = await g.beforeRound({
+    messages: pre,
+    round: 1,
+    toolsEstimateText: '[]',
+    settings: settings({ defaultContextWindowTokens: 1_000_000 }),
+  })
+  assert.equal(calls.filter((c) => c.name === 'compact').length, 0, 'parity must not compact vision')
+  assert.equal(out, pre, 'identity: nothing was rewritten')
+  assert.ok(logged(calls, /含影像/), 'the skip decision is logged')
+  assert.ok(
+    !logged(calls, /已先壓縮/),
+    'a skipped compaction must never be reported as a compaction',
+  )
+})
+
+await test('vision under overflow: compaction runs on undamaged messages, retained images survive', async () => {
+  const pre: GovernorMessage[] = [
+    { role: 'user', content: 'old turn' },
+    { role: 'assistant', content: 'old answer' },
+    visionMessage('recent screenshot'),
   ]
-  await g.beforeRound({
-    messages: visionMsgs,
+  let received: GovernorMessage[] = []
+  const { deps, calls } = makeDeps({
+    compact: async (_s, messages) => {
+      received = messages
+      calls.push({ name: 'compact', args: { n: messages.length } })
+      // Mirror the OpenCode contract: summarize the old head, keep the tail
+      // exactly as it arrived.
+      return {
+        compacted: true,
+        summary: 'sum',
+        messages: [
+          { role: 'system', content: '## Context compaction\nsum' },
+          messages[messages.length - 1],
+        ],
+      }
+    },
+  })
+  const g = createContextGovernor(deps)
+  const out = await g.beforeRound({
+    messages: pre,
     round: 1,
     toolsEstimateText: '[]',
     settings: settings({ defaultContextWindowTokens: 2_000 }),
   })
-  assert.equal(calls.filter((c) => c.name === 'compact').length, 0)
+  assert.equal(calls.filter((c) => c.name === 'compact').length, 1, 'overflow still compacts')
   assert.ok(
-    calls.some(
-      (c) =>
-        c.name === 'log' &&
-        /影像無法壓縮/.test(String((c.args as { message?: string })?.message)),
-    ),
+    Array.isArray(received.at(-1)?.content),
+    'the compactor receives original multimodal content, not flattened text',
+  )
+  const tail = out.at(-1)
+  assert.ok(Array.isArray(tail?.content), 'retained tail keeps its content parts')
+  assert.ok(
+    (tail?.content as Array<{ type?: string }>).some((p) => p.type === 'image_url'),
+    'the image survives a compaction that deliberately retained its message',
+  )
+  assert.ok(
+    !logged(calls, /無法壓縮/),
+    'the log must not claim vision blocked a compaction that ran',
+  )
+})
+
+await test('checkpoint of a vision transcript stays plain text', async () => {
+  const { deps, calls } = makeDeps({
+    contentToPlainText: () => 'see\n[image]\n[image]',
+    compact: async (_s, messages) => {
+      calls.push({ name: 'compact', args: { n: messages.length } })
+      return {
+        compacted: true,
+        summary: 'sum',
+        messages: [{ role: 'system', content: '## Context compaction\nsum' }, messages[messages.length - 1]],
+      }
+    },
+  })
+  const g = createContextGovernor(deps)
+  await g.beforeRound({
+    messages: [{ role: 'user', content: 'old' }, visionMessage()],
+    round: 1,
+    toolsEstimateText: '[]',
+    settings: settings({ defaultContextWindowTokens: 2_000 }),
+    runId: 'run-vision',
+  })
+  const ck = calls.find((c) => c.name === 'saveCheckpoint')
+  assert.ok(ck, 'a compaction still checkpoints')
+  assert.equal((ck?.args as { n: number }).n, 2, 'checkpoint holds the pre-compaction transcript')
+  assert.equal(
+    (ck?.args as { plain: boolean }).plain,
+    true,
+    'checkpoint payload is flattened so persisted state stays text-sized',
   )
 })
 
@@ -338,6 +431,77 @@ await test('unchanged path returns the same message array reference', async () =
     settings: settings({ defaultContextWindowTokens: 1_000_000 }),
   })
   assert.equal(out, pre, 'identity: skip path must return inputMessages reference')
+})
+
+await test('shipped compactor: retained tail keeps image parts, summarized head becomes text', async () => {
+  const { maybeCompactMessages } = await import('../src/agent/opencode/compaction.ts')
+  const filler = 'y'.repeat(4_000)
+  const old = Array.from({ length: 8 }, (_, i) => ({
+    role: i % 2 === 0 ? 'user' : 'assistant',
+    content: `${filler} old-${i}`,
+  }))
+  const shot = {
+    role: 'user' as const,
+    content: [
+      { type: 'text', text: 'compare this screenshot' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } },
+    ],
+  }
+  const recent = [
+    ...Array.from({ length: 5 }, (_, i) => ({
+      role: i % 2 === 0 ? 'assistant' : 'user',
+      content: `recent-${i}`,
+    })),
+    shot,
+  ]
+  const out = await maybeCompactMessages(
+    settings({ enabled: false, apiKey: '' }),
+    [...old, ...recent],
+    { maxChars: 1_000, keepRecent: 6 },
+  )
+  assert.equal(out.compacted, true, 'an oversized transcript still compacts')
+  const tail = out.messages.at(-1)
+  assert.ok(Array.isArray(tail?.content), 'the retained screenshot keeps its content parts')
+  assert.equal(tail?.content, shot.content, 'retention is verbatim, not a rebuilt copy')
+  const summary = out.messages.find(
+    (m) => typeof m.content === 'string' && m.content.startsWith('## Context compaction'),
+  )
+  assert.ok(summary, 'the head was replaced by one summary message')
+  assert.ok(
+    !String(summary?.content).includes('[object Object]'),
+    'multimodal head content is flattened, never stringified as an object',
+  )
+})
+
+await test('shipped compactor: a multimodal message inside the summarized head flattens to [image]', async () => {
+  const { maybeCompactMessages } = await import('../src/agent/opencode/compaction.ts')
+  const filler = 'z'.repeat(4_000)
+  const messages = [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'first screenshot' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,BBB' } },
+      ],
+    },
+    ...Array.from({ length: 12 }, (_, i) => ({
+      role: i % 2 === 0 ? 'assistant' : 'user',
+      content: `${filler} turn-${i}`,
+    })),
+  ]
+  const out = await maybeCompactMessages(
+    settings({ enabled: false, apiKey: '' }),
+    messages,
+    { maxChars: 1_000, keepRecent: 4 },
+  )
+  assert.equal(out.compacted, true)
+  const summary = String(
+    out.messages.find(
+      (m) => typeof m.content === 'string' && m.content.startsWith('## Context compaction'),
+    )?.content,
+  )
+  assert.ok(summary.includes('[image]'), 'the discarded image is a text placeholder in the summary')
+  assert.ok(summary.includes('first screenshot'), 'its text part is preserved in the summary')
 })
 
 await test('toolLoop wires ContextEngine (default wraps createContextGovernor)', async () => {

@@ -94,7 +94,8 @@ export type PersistedQueueItem = {
 const STORAGE_KEY = 'subagents.runQueue.v1'
 const BACKUP_KEY = `${STORAGE_KEY}.backup`
 const DEDUPE_KEY = 'subagents.runQueue.dedupe.v1'
-const MAX_QUEUE = 24
+/** Hard ceiling on parked automation / follow-up work. */
+export const MAX_RUN_QUEUE = 24
 const MAX_DEDUPE_EVENTS = 80
 const queue: QueuedExternalRun[] = []
 export type QueueDedupeEvent = {
@@ -398,7 +399,7 @@ export function hydrateRunQueue(): number {
       }
       queue.push(fromPersisted(p))
     }
-    while (queue.length > MAX_QUEUE) queue.shift()
+    while (queue.length > MAX_RUN_QUEUE) queue.shift()
     emit()
     return queue.length
   } catch {
@@ -441,7 +442,7 @@ export function resetRunQueueForTests(): void {
 function parsePersistedQueue(raw: string | null): { items: PersistedQueueItem[] } {
   if (!raw || raw.length > 1_000_000) throw new Error('queue payload too large')
   const data = JSON.parse(raw) as { v?: unknown; items?: unknown }
-  if (data.v !== 1 || !Array.isArray(data.items) || data.items.length > MAX_QUEUE * 4) {
+  if (data.v !== 1 || !Array.isArray(data.items) || data.items.length > MAX_RUN_QUEUE * 4) {
     throw new Error('queue payload schema invalid')
   }
   for (const item of data.items) {
@@ -570,7 +571,7 @@ export function enqueueExternalRun(opts: ExternalRunOpts): QueuedExternalRun | n
     sourceKind: item.sourceKind,
   })
   queue.push(item)
-  while (queue.length > MAX_QUEUE) {
+  while (queue.length > MAX_RUN_QUEUE) {
     const dropped = queue.shift()
     // P0: never silent-drop schedule jobs — settle as cancelled
     if (dropped) {

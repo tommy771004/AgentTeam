@@ -42,8 +42,10 @@ import {
   readArtifactIndex,
 } from '../agent/composerRunControls'
 import {
+  approveWorkflowDeliverable,
   buildStageDeliverablesFromIndex,
   rejectWorkflowDeliverable,
+  workflowApprovalEvidence,
   workflowRejectionEvidence,
   type WorkflowStageDeliverable,
 } from '../agent/paidWorkflow'
@@ -145,6 +147,25 @@ export function ProtocolsPage() {
   const workflowDeliverables = workflowIndex?.id
     ? buildStageDeliverablesFromIndex({ id: workflowIndex.id, entries: workflowIndex.entries || [] })
     : []
+  const approveDeliverable = (deliverable: WorkflowStageDeliverable) => {
+    const index = readArtifactIndex(
+      typeof window === 'undefined' ? undefined : window.localStorage,
+      activeId || '',
+    ) as ArtifactIndex | null
+    if (!index) return
+    const approved = approveWorkflowDeliverable(deliverable)
+    if (!approved.ok) return
+    // The approval lives in the run's own history as artifact evidence, so the
+    // settled panel stays addressable after reload without a second store.
+    upsertArtifactIndex(
+      typeof window === 'undefined' ? undefined : window.localStorage,
+      recordArtifactEvidence(index, workflowApprovalEvidence(approved.deliverable)),
+    )
+    if (activeId) {
+      pushBubble(activeId, 'system', `已核准 ${deliverable.title}`)
+    }
+  }
+
   const rejectDeliverable = (
     deliverable: WorkflowStageDeliverable,
     reason: string,
@@ -536,6 +557,7 @@ export function ProtocolsPage() {
                         {workflowDeliverables.length > 0 ? (
                           <WorkflowDeliverablesPanel
                             deliverables={workflowDeliverables}
+                            onApprove={approveDeliverable}
                             onReject={rejectDeliverable}
                           />
                         ) : null}

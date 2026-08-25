@@ -63,6 +63,29 @@
 
 已收緊為三個條件同時成立：identity 是從 catalog 回退來的、catalog 說它 `available: true`、且 `active: false`。也就是「這工具是好的，只是這回合沒開」，而不是「這工具壞了」。
 
-### 一併留意
+### 已完成：phase 對稱性從推論變成事實
 
-`session.toolAudit` 對這條 inactive 路徑的 phase 對稱性沒有單獨斷言。issue 16 已讓 allow 與 deny 兩條路都經 `recordToolAudit`，這條走的是同一個 publisher，因此理論上對稱 —— 但那是推論，不是驗證過的事實。
+原本這裡寫著「走同一個 publisher，因此理論上對稱 —— 但那是推論」。斷言補上後，
+`qualify-pi-agent-runtime-contract` 多了三條檢查，答案比推論更精確：
+
+- **執行的兩個 phase 對稱。** inactive 路徑在 `session.toolAudit` 留下 `start` 與
+  **恰好一個** `result`（settlement `denied`、reason 帶著「load the mcp-bridge
+  capability」）—— 與 allow/deny 兩條路同形。「恰好一個」是刻意釘的：issue 19
+  修掉的正是雙終局。
+- **第三個 phase 刻意不對稱。** allow 與 deny 有 `decision` 是因為 Approval
+  Decision 真的跑過；activation 在那道閘門**之前**就拒絕了這個呼叫，所以沒有
+  裁決可記。補一個假的 `decision` 會把沒人做過的決定寫進稽核，缺席才是誠實的
+  答案。已用斷言釘住，防止日後「讓 phase 統一」把它偽造出來。
+- **拒絕與故障在稽核層也分得開。** 未知名稱記 `failed`，未啟用記 `denied`，
+  斷言直接比對兩者不得相等。
+
+以 mutation 驗證過會咬：在 inactive 分支插入一個假的 `host/tool-decision`，
+斷言立刻失敗。
+
+### 已知但未處理（不屬本票）
+
+`PiToolAuditRecord` 不帶 contract identity —— `contractStatus` / `schemaDigest`
+只進 Turn Record，不進 `session.toolAudit`。稽核串流因此無法自己分辨
+「catalogued 但未啟用」與「完全不認得」，只能靠 settlement 與 reason 推斷。
+Turn Record 是 ADR-0050 的事實來源，這條不影響本票的驗收條件，但若要讓
+`session.toolAudit` 獨立可稽核，需要另開一票。

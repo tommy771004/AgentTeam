@@ -36,6 +36,7 @@ import { applyRendererStorageSnapshot } from './agent/updateMigration'
 import { compareVersions } from './agent/updateContracts'
 import type { PiSessionProjection } from './agent/piHostProjection'
 import { mapPiHostEventToActivity } from './agent/piHostActivity'
+import { recordAppendFromEvent } from './agent/liveTimeline'
 import { usePiHostEventStore } from './store/piHostEventStore'
 import { useRunActivityStore } from './store/runActivityStore'
 import { isElectronPiProduction } from './agent/piProduction'
@@ -131,6 +132,15 @@ function PiHostEventBootstrap() {
             }
           })()
         }
+        return
+      }
+      // The Pi path's timeline is projected from the record, so record
+      // appends are handled BEFORE the activity translator and never travel
+      // through it: the activity stream stays what it always was — transport,
+      // and the fallback for runners that keep no record (ADR-0039).
+      const appended = recordAppendFromEvent(event as { event?: unknown; payload?: unknown })
+      if (appended) {
+        useRunActivityStore.getState().appendRecordEntries(appended.entries, appended.runId)
         return
       }
       const update = mapPiHostEventToActivity(event)

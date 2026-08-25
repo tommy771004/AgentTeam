@@ -126,6 +126,26 @@ export type TurnRecordEntry = TurnRecordCoordinates &
       }
     | { kind: 'user-text'; source: 'user'; content: string }
     | { kind: 'assistant-text'; source: 'model'; content: string }
+    | {
+        /**
+         * What the model thought before it spoke or acted.
+         *
+         * It is a first-class entry because of the rule this project shares
+         * with deepseek-harness: model-visible means logged. The thinking
+         * already reached the UI as a stream; not writing it here meant that,
+         * an hour later, nobody could answer «為什麼它那時決定跑這個指令» —
+         * the record held the tool call and not one word of its reason.
+         *
+         * Kept WHOLE. There is no per-entry truncation and no per-turn budget,
+         * a decision taken deliberately: a summarised thought is evidence of a
+         * thought, not the thought. Volume is served by the bounded paging
+         * every reader already goes through, never by silently shortening what
+         * the model actually said.
+         */
+        kind: 'reasoning'
+        source: 'model'
+        content: string
+      }
     | ({
         kind: 'tool-call'
         source: 'model'
@@ -216,6 +236,7 @@ const KINDS = new Set([
   'step-end',
   'user-text',
   'assistant-text',
+  'reasoning',
   'tool-call',
   'tool-result',
   'tool-evidence',
@@ -233,7 +254,7 @@ function isEntry(value: unknown): value is TurnRecordEntry {
     const number = entry[field]
     if (typeof number !== 'number' || !Number.isFinite(number)) return false
   }
-  if ((entry.kind === 'user-text' || entry.kind === 'assistant-text') && typeof entry.content !== 'string') return false
+  if ((entry.kind === 'user-text' || entry.kind === 'assistant-text' || entry.kind === 'reasoning') && typeof entry.content !== 'string') return false
   if ((entry.kind === 'tool-call' || entry.kind === 'tool-result' || entry.kind === 'tool-evidence' || entry.kind === 'approval')
     && (typeof entry.tool !== 'string' || typeof entry.callId !== 'string')) return false
   if (entry.kind === 'tool-call' || entry.kind === 'tool-result' || entry.kind === 'tool-evidence') {
@@ -298,6 +319,19 @@ export function parseTurnRecord(value: unknown): { record: TurnRecord; tornTail:
 }
 
 /**
+ * The sequence number the next appended entry will receive.
+ *
+ * Exported because the Host publishes entries live, one at a time, long before
+ * the turn commits them — and a live entry must carry the SAME `seq` its
+ * committed twin will get, or the two projections of one turn would disagree
+ * about order. One function decides it, so they cannot drift.
+ */
+export function nextTurnRecordSeq(record: TurnRecord | undefined): number {
+  const base = record?.version === TURN_RECORD_FORMAT_VERSION ? record.entries : []
+  return (base.length > 0 ? base[base.length - 1].seq : 0) + 1
+}
+
+/**
  * Append entries, assigning the next sequence numbers.
  *
  * Sequence is owned here so no caller can invent one, and so a reader never
@@ -308,7 +342,7 @@ export function appendTurnRecord(
   entries: TurnRecordAppend[],
 ): TurnRecord {
   const base = record?.version === TURN_RECORD_FORMAT_VERSION ? record.entries : []
-  let seq = base.length > 0 ? base[base.length - 1].seq : 0
+  let seq = nextTurnRecordSeq(record) - 1
   const appended = entries.map((entry) => {
     seq += 1
     return { ...entry, seq } as TurnRecordEntry

@@ -2394,7 +2394,6 @@ ipcMain.handle('pi-host:extensions:set-enabled', async (_evt, input: { id: strin
 ipcMain.handle('pi-host:extensions:uninstall', async (_evt, id: string) => piHostSupervisor.mutateExtension('extensions/uninstall', { id }))
 ipcMain.handle('pi-host:tools:list', async () => ({ builtinTools: await piHostSupervisor.listTools() }))
 ipcMain.handle('pi-host:tools:catalog', async () => ({ catalog: await piHostSupervisor.listCatalog() }))
-ipcMain.handle('pi-host:resources:list', async () => piHostSupervisor.listResources())
 ipcMain.handle('pi-host:resources:sync-skills', async (_evt, skills: Array<{ name?: string; description?: string; body?: string; status?: string }>) => piHostSupervisor.syncSkills(skills || []))
 ipcMain.handle('pi-host:approvals:resolve', async (_evt, input: { runId: string; callId: string; decision: 'allow' | 'deny'; answer?: string }) => {
   const response = await piHostSupervisor.resolveApproval(input)

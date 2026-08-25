@@ -69,6 +69,33 @@ assert.ok(answered?.timing, 'a finished step lends its timing to its rows')
 assert.equal(answered?.timing?.waitingMs, 100)
 assert.equal(answered?.timing?.generatingMs, 300)
 
+// ── Reasoning inherits step attribution and timing from the same projection ──
+// The trajectory does not learn about reasoning separately; it reuses the
+// conversation projection, so a new row kind arrives already located in time.
+const reasoned = projectTrajectory(pageTurnRecord(appendTurnRecord(undefined, [
+  { kind: 'step-start', source: 'host', turn: 3, step: 2, at: 1 },
+  { kind: 'reasoning', source: 'model', content: '先確認範圍再動手。', turn: 3, step: 2, at: 2 },
+  { kind: 'tool-call', source: 'model', tool: 'bash', callId: 'b1', turn: 3, step: 2, at: 3 },
+  { kind: 'tool-result', source: 'host', tool: 'bash', callId: 'b1', settlement: 'success', turn: 3, step: 2, at: 4 },
+  {
+    kind: 'step-end',
+    source: 'host',
+    turn: 3,
+    step: 2,
+    at: 5,
+    timing: { requestAt: 500, firstTokenAt: 700, completedAt: 1_200 },
+  },
+]), {}))
+const thought = reasoned.rows.find((row) => row.kind === 'reasoning')
+assert.ok(thought, 'a reasoning entry becomes a trajectory row')
+assert.equal(thought.turn, 3)
+assert.equal(thought.step, 2, 'located in the step it was thought in')
+assert.equal(thought.timing?.waitingMs, 200, 'and carries that step’s measured timing once it ended')
+assert.ok(
+  reasoned.rows.findIndex((row) => row.kind === 'reasoning') < reasoned.rows.findIndex((row) => row.kind === 'tool'),
+  'the thought is ahead of the call it explains, as the record has it',
+)
+
 // A row inside a step that has not ended carries no duration at all.
 const running = projectTrajectory(pageTurnRecord(appendTurnRecord(undefined, [
   { kind: 'step-start', source: 'host', turn: 1, step: 1, at: 1 },

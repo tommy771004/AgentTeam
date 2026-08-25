@@ -148,10 +148,12 @@ assert.throws(() => approveWorkflowSpec({ ...draft.spec, status: 'approved' }, '
 // ── ticket 17: deliverables persist and can be sent back ───────
 {
   const {
-    buildStageDeliverablesFromIndex,
-    rejectWorkflowDeliverable,
-    workflowRejectionEvidence,
-    REJECTION_PREFIX,
+  buildStageDeliverablesFromIndex,
+  rejectWorkflowDeliverable,
+  approveWorkflowDeliverable,
+  workflowRejectionEvidence,
+  workflowApprovalEvidence,
+  REJECTION_PREFIX,
   } = await import('../src/agent/paidWorkflow.ts')
   const { recordArtifactEvidence } = await import('../src/agent/artifactIndex.ts')
 
@@ -210,6 +212,42 @@ assert.throws(() => approveWorkflowSpec({ ...draft.spec, status: 'approved' }, '
     assert.ok(
       persisted.entries.some((entry) => entry.detail?.startsWith(REJECTION_PREFIX)),
       'rejection must be visible in the workflow history',
+    )
+
+    // approval: only a ready, unapproved deliverable can be approved
+    const pendingTdd = after.find((item) => item.stage === 'tdd')
+    assert.ok(pendingTdd)
+    assert.equal(approveWorkflowDeliverable(pendingTdd).ok, false, 'a pending stage cannot be approved')
+    assert.equal(approveWorkflowDeliverable(specAfter!).ok, false, 'a rejected stage cannot be approved')
+
+    const tickets = after.find((item) => item.stage === 'tickets')
+    assert.ok(tickets)
+    const approved = approveWorkflowDeliverable(tickets, '2026-08-25T02:00:00.000Z')
+    assert.equal(approved.ok, true)
+    assert.equal(approveWorkflowDeliverable(approved.ok ? approved.deliverable : tickets).ok, false, 'approving twice is refused')
+
+    const persistedApproval = recordArtifactEvidence(
+      persisted,
+      workflowApprovalEvidence(approved.ok ? approved.deliverable : tickets),
+      '2026-08-25T02:00:00.000Z',
+    )
+    const afterApproval = buildStageDeliverablesFromIndex(persistedApproval)
+    const ticketsAfter = afterApproval.find((item) => item.stage === 'tickets')
+    assert.equal(ticketsAfter?.approvedAt, '2026-08-25T02:00:00.000Z', 'approval must survive a reload of the index')
+    assert.equal(ticketsAfter?.status, 'ready', 'approval does not change the readiness status')
+    assert.ok(
+      ticketsAfter?.evidence.every((item) => !item.title?.includes('已核准')),
+      'the approval marker is lifecycle history, not stage evidence',
+    )
+
+    // lifecycle markers route by deliverable source, not by evidence type —
+    // a decision-type marker for tickets must never leak into the spec stage
+    const specAfterApproval = afterApproval.find((item) => item.stage === 'spec')
+    assert.ok(specAfterApproval)
+    assert.equal(specAfterApproval.approvedAt, undefined)
+    assert.ok(
+      specAfterApproval.evidence.every((item) => !item.source.includes('/approval') && !item.source.includes('/rejection')),
+      'lifecycle markers must not appear as another stage’s evidence',
     )
   }
 }

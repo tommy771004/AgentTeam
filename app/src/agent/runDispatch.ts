@@ -263,12 +263,9 @@ export async function dispatchThreadTask(
         .join('\n\n')
     }
     if (settings.referenceChatHistory !== false && thread?.bubbles?.length) {
-      const chat = thread.bubbles.filter(
-        (b) => b.role === 'user' || b.role === 'assistant',
-      )
-      const currentWasStored =
-        chat.at(-1)?.role === 'user' && chat.at(-1)?.content === raw
-      const history = (currentWasStored ? chat.slice(0, -1) : chat)
+      const { dropCurrentObjectiveFromHistory } = await import('./chatHistory.ts')
+      const history = dropCurrentObjectiveFromHistory(thread.bubbles, raw)
+        .filter((b) => b.role === 'user' || b.role === 'assistant')
         .slice(-12)
         .map(
           (b) =>
@@ -363,9 +360,16 @@ export async function dispatchThreadTask(
   // Chat history: recent verbatim + older condensed (budget-friendly).
   let extra = baseOverrides.extraSystemContext || ''
   if (settings.referenceChatHistory !== false && thread?.bubbles?.length) {
-    const { buildChatHistoryContext, CHAT_HISTORY_CONTEXT_CHARS } = await import('./chatHistory.ts')
+    const {
+      buildChatHistoryContext,
+      dropCurrentObjectiveFromHistory,
+      CHAT_HISTORY_CONTEXT_CHARS,
+    } = await import('./chatHistory.ts')
     const hist = buildChatHistoryContext(
-      thread.bubbles.map((b) => ({ role: b.role, content: b.content })),
+      dropCurrentObjectiveFromHistory(
+        thread.bubbles.map((b) => ({ role: b.role, content: b.content })),
+        raw,
+      ),
       { keepRecent: 3, maxChars: CHAT_HISTORY_CONTEXT_CHARS, perMessageChars: 600 },
     )
     if (hist.trim()) {

@@ -15,6 +15,15 @@ import { turnRecordEntries, type TurnRecord, type TurnRecordEntry } from './turn
 export type ConversationRow =
   | { kind: 'user'; id: string; seq: number; turn: number; content: string }
   | { kind: 'assistant'; id: string; seq: number; turn: number; content: string }
+  /**
+   * What the model thought, in the place it thought it.
+   *
+   * A row of its own rather than a decoration on the next one: the reader's
+   * question is «這個工具呼叫之前它在想什麼», and only an interleaved row can
+   * answer it. It carries the thought whole — a view may collapse it, but the
+   * projection never shortens it.
+   */
+  | { kind: 'reasoning'; id: string; seq: number; turn: number; content: string }
   | { kind: 'tool'; id: string; seq: number; turn: number; tool: string; callId: string; settlement?: string; detail?: string }
   | { kind: 'notice'; id: string; seq: number; turn: number; content: string }
 
@@ -36,6 +45,9 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
         break
       case 'assistant-text':
         rows.push({ ...base, kind: 'assistant', content: entry.content })
+        break
+      case 'reasoning':
+        rows.push({ ...base, kind: 'reasoning', content: entry.content })
         break
       case 'tool-call':
         rows.push({ ...base, kind: 'tool', tool: entry.tool, callId: entry.callId, ...(entry.path ? { detail: entry.path } : {}) })
@@ -61,6 +73,14 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
       case 'compaction':
         rows.push({ ...base, kind: 'notice', content: `已壓縮 ${entry.replaced} 則上下文` })
         break
+      case 'notice':
+        // The entry kind whose whole purpose is to be read. It used to fall
+        // through to the unknown arm and surface as 「未知的記錄項目：notice」,
+        // which hid the very fact it was written to show — a skills-unavailable
+        // warning, say. A known kind reaching that arm is the guard misfiring,
+        // not graceful degradation.
+        rows.push({ ...base, kind: 'notice', content: entry.text })
+        break
       default:
         rows.push({ ...base, kind: 'notice', content: unknownEntryLabel(entry) })
         break
@@ -80,6 +100,10 @@ function unknownEntryLabel(entry: TurnRecordEntry): string {
  * The LAST assistant row, for the same reason the Host derives it that way: a
  * tool-using turn narrates before it works and concludes after, so the first
  * thing it said is the preamble, never the answer.
+ *
+ * Reasoning rows are deliberately not eligible. A thought is not an answer,
+ * however confidently it ends, and letting one become the published answer
+ * would put words in the model's mouth that it chose not to say.
  */
 export function conversationAnswer(record: TurnRecord | undefined): string | undefined {
   const answers = projectConversationRows(record).filter((row): row is Extract<ConversationRow, { kind: 'assistant' }> => row.kind === 'assistant')

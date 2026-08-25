@@ -243,6 +243,26 @@ await test('electron bridge is ESM/CJS-safe and Windows core paths avoid POSIX s
   assert.doesNotMatch(mcpWrite, /Content-Length/)
 })
 
+await test('every ipcMain channel is registered exactly once across the main process', () => {
+  const seen = new Map()
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(p)
+      else if (entry.name.endsWith('.ts')) {
+        const source = fs.readFileSync(p, 'utf8')
+        for (const match of source.matchAll(/ipcMain\.handle\(\s*['"`]([^'"`]+)['"`]/g)) {
+          if (seen.has(match[1])) {
+            assert.fail(`channel '${match[1]}' registered twice (${seen.get(match[1])} and ${p}) — Electron throws 'Attempted to register a second handler' at startup`)
+          }
+          seen.set(match[1], p)
+        }
+      }
+    }
+  }
+  walk(path.join(appRoot, 'electron'))
+})
+
 console.log(`\n${passed} tests passed, ${skipped} skipped`)
 if (process.exitCode) {
   console.error('Smoke tests failed')
