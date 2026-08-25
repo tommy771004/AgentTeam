@@ -46,7 +46,6 @@ function settings(partial: Partial<LlmSettings> = {}): LlmSettings {
     llmCircuitBreakerEnabled: true,
     defaultContextWindowTokens: 8_000,
     functionCalling: true,
-    llmParseEnabled: true,
     sessionRecallEnabled: true,
     haltOnPayloadOverflow: false,
     maxToolPayloadKb: 50,

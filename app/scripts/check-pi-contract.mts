@@ -77,13 +77,29 @@ for (const removed of ['workspace_read.ts', 'workspace_list.ts', 'workspace_grep
   assert.equal(existsSync(path), false, `${removed} was removed after parity evidence (ADR-0027 / issue 18); it must not return`)
 }
 
-// ── Guard 3: hermes/skills.ts consumer set is FROZEN ──
+// ── Guard 3: hermes/skills.ts consumer set is FROZEN, and the window EXPIRES ──
 // ADR-0034 makes Pi's resource loader the ONLY skill discovery path. The
-// localStorage copy survives one release READ-ONLY as migration rollback
-// (issue 16); its existing consumers may keep reading during that window,
-// and nothing new may reference it.
+// localStorage copy survives READ-ONLY as migration rollback (issue 16); its
+// existing consumers may keep reading during that window, and nothing new may
+// reference it.
+//
+// "One release" used to be the whole plan, which is how a temporary file
+// becomes permanent: nobody is reminded, so nobody removes it. The window is
+// pinned to a version instead, and the build fails once the app ships past it
+// — the reminder arrives by itself, at the release that was supposed to be the
+// last one carrying this file.
+const SKILLS_ROLLBACK_WINDOW_ENDS_BEFORE = '1.2.0'
 const skillsFile = read('src/agent/hermes/skills.ts')
 void skillsFile
+const appVersion = String((JSON.parse(read('package.json')) as { version?: unknown }).version || '0.0.0')
+const asNumbers = (version: string) => version.split('.').map((part) => Number(part) || 0)
+const [appMajor, appMinor] = asNumbers(appVersion)
+const [endMajor, endMinor] = asNumbers(SKILLS_ROLLBACK_WINDOW_ENDS_BEFORE)
+assert.ok(
+  appMajor < endMajor || (appMajor === endMajor && appMinor < endMinor),
+  `hermes/skills.ts was kept only as a one-release migration rollback and this build is ${appVersion}, at or past ${SKILLS_ROLLBACK_WINDOW_ENDS_BEFORE}. `
+  + 'Delete the file and its consumers, or make a deliberate decision to extend the window by moving SKILLS_ROLLBACK_WINDOW_ENDS_BEFORE.',
+)
 const ALLOWED_SKILLS_CONSUMERS = new Set([
   // rollback copy readers + the learning subsystem scheduled for its own removal
   'src/App.tsx',
@@ -182,23 +198,36 @@ const consumerText = (file: string): string => {
   return readFileSync(file, 'utf8')
 }
 /**
- * Fields already orphaned when this guard was written.
+ * Empty, and it should stay that way (issue 21 is done).
  *
- * They are LISTED, not excused: each is a Settings control the user can move
- * that changes nothing. Wiring or removing them needs a product decision per
- * field, tracked in issue 21. Holding them here means the guard bites on any
- * NEW drift immediately instead of waiting for that decision — and shrinking
- * this list is the definition of done for issue 21.
+ * It once held seven names. Two were this guard's own false positives — it
+ * excluded all of `agent/llm.ts`, which holds the defaults AND real consuming
+ * logic. Of the five that were real: `ambientSuggestions` named a feature that
+ * had never been built, so it was built; `llmParseEnabled` named one the Pi
+ * migration deliberately replaced, so it was removed rather than revived; and
+ * the two classifier fields reached a module that existed but was never called
+ * on the outbound path, so the pass was wired in.
+ *
+ * A new entry here is a promise the product does not keep. Prefer wiring or
+ * removing the field over adding its name.
  */
-const KNOWN_UNCONSUMED_SETTINGS = new Set([
-  'llmParseEnabled',
-  'classificationEndpointUrl',
-  'classificationAllowPlaintextHttp',
+const KNOWN_UNCONSUMED_SETTINGS = new Set<string>([])
+/**
+ * Fields that are DELIBERATELY unconsumed, with the reason on record.
+ *
+ * This guard asks "does anything read it", which cannot tell a forgotten
+ * switch from a field kept on purpose. `concurrentRunsEnabled` is the latter:
+ * `settingsStore` force-sets it to true and says why — cross-thread execution
+ * is an invariant now, not an opt-in, and the field survives only so an older
+ * exported settings bundle still loads. It has no UI, so it is not a control
+ * the user can move. Wiring it would restore the app-wide single-run lock that
+ * was deliberately removed.
+ */
+const INTENTIONALLY_UNCONSUMED_SETTINGS = new Set([
   'concurrentRunsEnabled',
-  'ambientSuggestions',
 ])
 const unconsumed = settingKeys
-  .filter((key) => !KNOWN_UNCONSUMED_SETTINGS.has(key))
+  .filter((key) => !KNOWN_UNCONSUMED_SETTINGS.has(key) && !INTENTIONALLY_UNCONSUMED_SETTINGS.has(key))
   .filter((key) => !sourceFiles.some((file) => new RegExp(`\\b${key}\\b`).test(consumerText(file))))
 assert.deepEqual(unconsumed, [], `these Settings fields are written by the UI and read by nothing: ${unconsumed.join(', ')}. Either wire them to behaviour or remove them (issue 18).`)
 // The debt list must shrink, never quietly grow stale: a field that gained a

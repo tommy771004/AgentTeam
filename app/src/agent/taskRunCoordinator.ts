@@ -1928,6 +1928,14 @@ async function coordinateTaskRun(
           apiProvider: settings.apiProvider,
           baseUrl: settings.baseUrl,
           effectiveMode: mode,
+          // Settings → company classifier. Without these the endpoint the user
+          // configured was never contacted on the real outbound path.
+          ...(settings.classificationEndpointUrl?.trim()
+            ? { classificationEndpointUrl: settings.classificationEndpointUrl.trim() }
+            : {}),
+          ...(settings.classificationAllowPlaintextHttp === true
+            ? { classificationAllowPlaintextHttp: true }
+            : {}),
         })
         prepare = prep.ok
           ? {

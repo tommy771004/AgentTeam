@@ -4,6 +4,8 @@
  */
 
 import fs from 'node:fs'
+import { mergeAdditiveExclusions, runClassifierPass, type ClassifierPassOutcome } from './classifierPass.ts'
+import type { OutboundGuardMode } from './outboundGate.ts'
 import os from 'node:os'
 import path from 'node:path'
 import type { ProviderSecurityProfile } from './policyMerge.ts'
@@ -43,6 +45,8 @@ export type SanitizedWorkspace = {
   originalRoot: string
   viewRoot: string
   exclusions: WorkspaceExclusion[]
+  /** What the company classifier did for this view, if it ran. */
+  classifier?: ClassifierPassOutcome
   fileMappings: SanitizedFileMapping[]
   skipped: Array<{ relPath: string; reason: string }>
 }
@@ -120,6 +124,19 @@ export async function createSanitizedWorkspace(opts: {
   projectRoot: string
   profile: ProviderSecurityProfile
   baseDir?: string
+  /**
+   * Company classifier (issue 21). When an endpoint is configured, every
+   * sanitized file is classified before the view is handed out, and whatever
+   * it asks to exclude is blanked ON TOP of the local profile's exclusions.
+   * Absent means no classifier ran, which is different from one that ran and
+   * found nothing.
+   */
+  classifier?: {
+    endpointUrl?: string
+    allowPlaintextHttp?: boolean
+    effectiveMode: OutboundGuardMode
+    fetchImpl?: typeof fetch
+  }
 }): Promise<SanitizedWorkspace> {
   const cap = getSanitizedViewCapability()
   if (cap.status !== 'full') {
@@ -224,6 +241,48 @@ export async function createSanitizedWorkspace(opts: {
     }
   }
 
+  // The classifier sees the ALREADY-sanitized text, never the original: the
+  // local profile is the first line, and sending raw content to a third party
+  // to ask whether it is safe to send would defeat the point.
+  let classifierOutcome: ClassifierPassOutcome = { status: 'not-configured' }
+  if (opts.classifier) {
+    classifierOutcome = await runClassifierPass({
+      endpointUrl: opts.classifier.endpointUrl,
+      allowPlaintextHttp: opts.classifier.allowPlaintextHttp,
+      effectiveMode: opts.classifier.effectiveMode,
+      connectionId: opts.connectionId,
+      ...(opts.classifier.fetchImpl ? { fetchImpl: opts.classifier.fetchImpl } : {}),
+      files: fileMappings.map((mapping) => ({ relPath: mapping.relPath, text: mapping.initialSanitizedText || '' })),
+      applyExclusions: (relPath, added) => {
+        const mapping = fileMappings.find((candidate) => candidate.relPath === relPath)
+        if (!mapping) return
+        const merged = mergeAdditiveExclusions(
+          exclusions.filter((exclusion) => exclusion.relPath === relPath),
+          added,
+        )
+        for (const exclusion of merged.slice(exclusions.filter((e) => e.relPath === relPath).length)) {
+          exclusions.push({ ...exclusion, relPath, source: relPath } as WorkspaceExclusion)
+        }
+        // Blank the newly excluded lines in the file the provider will read.
+        const lines = fs.readFileSync(mapping.sanitizedAbs, 'utf8').split('\n')
+        for (const range of added) {
+          const start = Math.max(1, Number(range.startLine) || 1)
+          const end = Math.min(lines.length, Number(range.endLine) || start)
+          for (let line = start; line <= end; line += 1) lines[line - 1] = ''
+        }
+        const redacted = lines.join('\n')
+        fs.writeFileSync(mapping.sanitizedAbs, redacted, 'utf8')
+        mapping.initialSanitizedText = redacted
+      },
+    })
+    if (classifierOutcome.status === 'blocked') {
+      // Fail closed under `required`: tear the view down rather than hand out
+      // one whose content was never checked.
+      fs.rmSync(viewRoot, { recursive: true, force: true })
+      throw new Error(`出站資料閘門：${classifierOutcome.reason}`)
+    }
+  }
+
   return {
     connectionId: opts.connectionId,
     originalRoot,
@@ -231,6 +290,7 @@ export async function createSanitizedWorkspace(opts: {
     exclusions,
     fileMappings,
     skipped,
+    classifier: classifierOutcome,
   }
 }
 

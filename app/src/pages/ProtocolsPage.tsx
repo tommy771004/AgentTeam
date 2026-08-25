@@ -32,6 +32,7 @@ import { ChatBubble } from '../components/ChatBubble'
 import { RunSummaryCard } from '../components/RunSummaryCard'
 import { RunContinuationActions } from '../components/RunContinuationActions'
 import { CliDoctorCard } from '../components/CliDoctorCard'
+import { SuggestedPrompts } from '../components/SuggestedPrompts'
 import { requestFocusComposer } from '../store/commandHistoryStore'
 import type { ApprovalMode } from '../agent/types'
 import {
@@ -487,6 +488,12 @@ export function ProtocolsPage() {
                   <CliDoctorCard
                     onStartTask={() => {
                       setDraftInput('請檢查目前專案，完成一個小幅度安全修正並回報 Git diff。')
+                      requestFocusComposer({ openSlash: false })
+                    }}
+                  />
+                  <SuggestedPrompts
+                    onPick={(prompt) => {
+                      setDraftInput(prompt)
                       requestFocusComposer({ openSlash: false })
                     }}
                   />
