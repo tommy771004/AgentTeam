@@ -3871,8 +3871,10 @@ function HostToolCatalogSection() {
   return (
     <SettingsStack title="工具目錄（Host 投影）">
       <p className="text-[12px] text-on-surface-variant mb-2 leading-relaxed">
-        這份清單就是 agent 實際可用的工具：由 Pi Core Host 投影，每筆帶自己的可用狀態與原因。
-        能力包內的工具在 load_capability 後才會變 active。
+        這份清單就是 agent 實際可用的工具，由 Pi Core Host 投影。
+        <span className="text-primary ml-1">實心</span>＝本回合可用；
+        <span className="text-on-surface-variant mx-1">淡色</span>＝能力包尚未 load_capability（需要時才載入，非錯誤）；
+        <span className="text-error mx-1">紅框</span>＝工具真的不可用。
       </p>
       {error ? (
         <div className="rounded-lg border border-error/40 bg-error/10 px-3 py-2 text-[12px] text-error">
@@ -3880,55 +3882,66 @@ function HostToolCatalogSection() {
         </div>
       ) : !catalog ? (
         <div className="text-[12px] text-outline">載入中…</div>
-      ) : (
-        (() => {
-          const byPack = new Map<string, typeof catalog>()
-          for (const entry of catalog) {
-            byPack.set(entry.pack, [...(byPack.get(entry.pack) || []), entry])
-          }
-          return (
-            <div className="space-y-3">
-              {[...byPack.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([pack, entries]) => (
+      ) : (() => {
+        const byPack = new Map<string, typeof catalog>()
+        for (const entry of catalog) {
+          byPack.set(entry.pack, [...(byPack.get(entry.pack) || []), entry])
+        }
+        const activeCount = catalog.filter((entry) => entry.active && entry.available).length
+        const unavailableCount = catalog.filter((entry) => !entry.available).length
+        return (
+          <div className="space-y-3">
+            <p className="text-[11px] text-outline font-[family-name:var(--font-mono)]">
+              {activeCount}/{catalog.length} active{unavailableCount > 0 ? ` · ${unavailableCount} unavailable` : ''}
+            </p>
+            {[...byPack.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([pack, entries]) => {
+              const problems = entries.filter((entry) => !entry.available)
+              const describe = (entry: typeof catalog[number]) =>
+                [
+                  entry.description,
+                  entry.reason ? `reason: ${entry.reason}` : undefined,
+                  `source: ${entry.source} · schema: ${entry.schemaDigest.slice(0, 16)}…`,
+                ].filter(Boolean).join('\n')
+              return (
                 <div key={pack}>
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-outline mb-1.5">
                     {pack}
                     <span className="ml-1.5 normal-case font-normal opacity-70">
-                      {entries.filter((entry) => entry.active).length}/{entries.length} active
+                      {entries.filter((entry) => entry.active && entry.available).length}/{entries.length} active
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {entries.map((entry) => (
                       <span
                         key={entry.name}
-                        title={`${entry.description}${entry.reason ? `\n${entry.reason}` : ''}\nsource: ${entry.source}\npack: ${entry.pack}\nschema: ${entry.schemaDigest}`}
-                        className={`px-2 py-1 rounded-lg text-[11px] font-medium border ${
-                          entry.active
-                            ? 'border-primary/40 bg-primary/15 text-primary'
-                            : 'border-white/10 text-on-surface-variant'
+                        title={describe(entry)}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border ${
+                          !entry.available
+                            ? 'border-error/50 bg-error/10 text-error'
+                            : entry.active
+                              ? 'border-primary/40 bg-primary/15 text-primary'
+                              : 'border-line text-outline'
                         }`}
                       >
-                        {entry.name}
-                        {!entry.available ? ' · unavailable' : !entry.active ? ' · inactive' : ' · active'}
+                        {!entry.available ? '✕' : entry.active ? '●' : '○'} {entry.name}
                       </span>
                     ))}
                   </div>
-                  <div className="mt-1 space-y-0.5 text-[10px] text-outline">
-                    {entries.map((entry) => (
-                      <div key={`${entry.name}-facts`} className="flex flex-wrap gap-x-2">
-                        <span>{entry.name}</span>
-                        <span>source={entry.source}</span>
-                        <span>pack={entry.pack}</span>
-                        <span>schema={entry.schemaDigest.slice(0, 12)}…</span>
-                        {entry.reason && <span className="text-error">{entry.reason}</span>}
-                      </div>
-                    ))}
-                  </div>
+                  {problems.length > 0 && (
+                    <div className="mt-1 space-y-0.5 text-[10px] text-error/90">
+                      {problems.map((entry) => (
+                        <div key={`${entry.name}-problem`} title={describe(entry)} className="truncate">
+                          ✕ {entry.name}：{entry.reason}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          )
-        })()
-      )}
+              )
+            })}
+          </div>
+        )
+      })()}
     </SettingsStack>
   )
 }

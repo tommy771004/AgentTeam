@@ -35,6 +35,8 @@ function rowIcon(kind: TrajectoryRow['kind']): string {
       return 'person'
     case 'assistant':
       return 'deployed_code'
+    case 'reasoning':
+      return 'psychology'
     default:
       return 'info'
   }
@@ -50,6 +52,10 @@ function rowLabel(row: TrajectoryRow): string {
       return `${row.tool}${row.settlement ? ` · ${row.settlement}` : ''}${row.detail ? ` · ${row.detail}` : ''}`
     case 'notice':
       return row.content
+    case 'reasoning':
+      // Named and measured on the line; the thought itself is read by
+      // selecting the row, so a long one cannot push the walk off screen.
+      return `推理 · ${row.content.length.toLocaleString()} 字`
     default:
       return ''
   }
@@ -165,17 +171,26 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
       </div>
 
       {selectedRow ? (
-        <footer className="flex flex-wrap items-center gap-3 border-t border-hairline px-2 py-1 text-xs text-muted">
-          <span>回合 {selectedRow.turn} · 步驟 {selectedRow.step}</span>
-          {selectedStep?.running ? (
-            <span>執行中</span>
-          ) : (
-            <>
-              {selectedStep?.waitingMs === undefined ? null : <span>等待首 token {formatMs(selectedStep.waitingMs)}</span>}
-              {selectedStep?.generatingMs === undefined ? null : <span>產生 {formatMs(selectedStep.generatingMs)}</span>}
-              {selectedStep?.usage?.total ? <span>{selectedStep.usage.total} tokens</span> : null}
-            </>
-          )}
+        <footer className="flex flex-col gap-1 border-t border-hairline px-2 py-1 text-xs text-muted">
+          {/* The thought in full. This is the whole point of recording it: an
+              hour later, «它那時在想什麼» has an answer that survived the run. */}
+          {selectedRow.kind === 'reasoning' ? (
+            <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-fg">
+              {selectedRow.content}
+            </pre>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-3">
+            <span>回合 {selectedRow.turn} · 步驟 {selectedRow.step}</span>
+            {selectedStep?.running ? (
+              <span>執行中</span>
+            ) : (
+              <>
+                {selectedStep?.waitingMs === undefined ? null : <span>等待首 token {formatMs(selectedStep.waitingMs)}</span>}
+                {selectedStep?.generatingMs === undefined ? null : <span>產生 {formatMs(selectedStep.generatingMs)}</span>}
+                {selectedStep?.usage?.total ? <span>{selectedStep.usage.total} tokens</span> : null}
+              </>
+            )}
+          </div>
         </footer>
       ) : null}
     </section>

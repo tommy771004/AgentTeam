@@ -15,6 +15,8 @@ import {
 import { useAgentStore } from '../store/agentStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import { useRunActivityStore } from '../store/runActivityStore'
+import { ReasoningFocusPanel } from './ReasoningFocusPanel'
+import type { TurnRecordEntry } from '../agent/turnRecord'
 import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
 import type { ExecutionStep } from '../agent/types'
@@ -30,7 +32,8 @@ const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 
 // Stable references — a fresh object/array literal returned from a zustand
 // selector fallback breaks Object.is identity every render and triggers
 // "Maximum update depth exceeded" (React getSnapshot-must-be-cached loop).
-const EMPTY_ACTIVITY = { active: false, tasks: [], statusLine: '', thought: '', startedAt: 0, phase: 'starting' as const, terminal: null } as const
+const EMPTY_RECORD_ENTRIES: TurnRecordEntry[] = []
+const EMPTY_ACTIVITY = { active: false, tasks: [], statusLine: '', thought: '', startedAt: 0, phase: 'starting' as const, terminal: null, recordEntries: EMPTY_RECORD_ENTRIES, recordTotal: 0 } as const
 const EMPTY_RUN_PLAN: ThreadPlanItem[] = []
 
 function CompactStepList({ steps }: { steps: ExecutionStep[] }) {
@@ -174,8 +177,9 @@ export function InlineRunPanel({
     : agent.steps.length
       ? `${completedSteps}/${agent.steps.length}`
       : undefined
+  const reasoningCount = activity.recordEntries.filter((entry) => entry.kind === 'reasoning').length
   const detailSummary = [
-    activity.thought ? '推理' : '',
+    reasoningCount ? `${reasoningCount} 段推理` : activity.thought ? '推理' : '',
     agent.toolCalls.length ? `${agent.toolCalls.length} 工具` : '',
     agent.logs.length ? `${agent.logs.length} 日誌` : '',
   ]
@@ -372,7 +376,7 @@ export function InlineRunPanel({
             onToggle={() => setDetailsOpen((value) => !value)}
           >
             <div className="space-y-4">
-              {activity.thought ? (
+              {reasoningCount || activity.thought ? (
                 <div>
                   <button
                     type="button"
@@ -382,14 +386,16 @@ export function InlineRunPanel({
                   >
                     <span className="flex-1 font-medium">推理摘要</span>
                     <span className="font-[family-name:var(--font-mono)] text-[10px] text-ink-3">
-                      {activity.thought.length.toLocaleString()} 字
+                      {reasoningCount ? `${reasoningCount} 段` : `${activity.thought.length.toLocaleString()} 字`}
                     </span>
                     <Icon name={thoughtOpen ? 'expand_less' : 'expand_more'} size={15} className="text-ink-3" />
                   </button>
                   {thoughtOpen ? (
-                    <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-control bg-inset p-2.5 text-[10px] leading-relaxed text-ink-2 font-[family-name:var(--font-mono)] custom-scrollbar">
-                      {activity.thought}
-                    </pre>
+                    <ReasoningFocusPanel
+                      entries={activity.recordEntries}
+                      total={activity.recordTotal}
+                      fallbackThought={activity.thought}
+                    />
                   ) : null}
                 </div>
               ) : null}

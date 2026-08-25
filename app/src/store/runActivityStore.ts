@@ -12,6 +12,7 @@ import type {
   ExternalCliRunPhase,
   ExternalCliTerminalClassification,
 } from '../agent/externalCliRunSession.ts'
+import type { TurnRecordEntry } from '../agent/turnRecord.ts'
 
 export type RunActivityKind =
   | 'status'
@@ -155,6 +156,21 @@ export type RunPresentation = {
   tasks: RunTaskItem[]
   phase: RunActivityPhase
   /**
+   * Turn Record entries this run has published so far, in recorded order.
+   *
+   * Still ephemeral — the Host's record remains the durable account, and this
+   * is only what the renderer has watched arrive. It exists so the live
+   * timeline can be projected from the record instead of synthesised from the
+   * activity stream, which is what makes live and replay agree on order.
+   */
+  recordEntries: TurnRecordEntry[]
+  /**
+   * How many entries the run has published, including any the buffer above
+   * has already dropped. Kept so the view can say an older prefix exists
+   * rather than presenting a trimmed buffer as the whole run.
+   */
+  recordTotal: number
+  /**
    * The user has asked this run to stop and the Host has not settled yet.
    * Drives immediate feedback so the button answers the press, not the Host.
    */
@@ -213,6 +229,8 @@ export interface RunActivityStore {
   push: (ev: Omit<RunActivityEvent, 'id' | 'at'> & { id?: string }) => void
   appendThought: (delta: string, runId?: string) => void
   appendText: (delta: string, runId?: string) => void
+  /** Entries the Host just wrote to the running turn's record, in order. */
+  appendRecordEntries: (entries: readonly TurnRecordEntry[], runId?: string) => void
   setStatus: (line: string, runId?: string, phase?: RunActivityPhase) => void
   setRecovery: (recovery: ExternalCliRecoveryProjection, runId?: string) => void
   setInteraction: (interaction: ExternalCliInteractionProjection | null, runId?: string) => void
@@ -232,6 +250,15 @@ function nid(prefix = 'ra') {
 }
 
 const MAX_EVENTS = 120
+/**
+ * Live record entries one run keeps in the renderer.
+ *
+ * Bounded because this store is ephemeral presentation, not storage — the
+ * complete record lives in the Host and is read a page at a time. Dropping the
+ * oldest is safe precisely because `recordTotal` keeps counting, so the view
+ * knows a prefix exists and can ask the Host for it.
+ */
+const MAX_RECORD_ENTRIES = 400
 const MAX_THOUGHT = 12_000
 const MAX_DRAFT = 40_000
 const MAX_FILES = 80
@@ -269,6 +296,8 @@ function emptyPresentation(runId: string, now = Date.now()): RunPresentation {
     fileChanges: [],
     tasks: [],
     phase: 'starting',
+    recordEntries: [],
+    recordTotal: 0,
     stopping: false,
     terminal: null,
     recovery: null,
@@ -296,6 +325,7 @@ function clonePresentation(p: RunPresentation): RunPresentation {
     events: [...p.events],
     fileChanges: [...p.fileChanges],
     tasks: [...p.tasks],
+    recordEntries: [...p.recordEntries],
     terminal: p.terminal
       ? {
           ...p.terminal,
@@ -640,6 +670,35 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         active: true,
         phase: 'responding',
       })),
+    )
+  },
+
+  appendRecordEntries: (entries, runId) => {
+    if (!entries.length) return
+    const target = runId || get().runId
+    if (!target) return
+    set((s) =>
+      applyRunUpdate(s, target, (presentation) => {
+        // Dedupe by seq rather than by arrival: a reconnect or a replayed
+        // frame must not be able to put the same entry on the timeline twice.
+        const known = new Set(presentation.recordEntries.map((entry) => entry.seq))
+        const added = entries.filter((entry) => !known.has(entry.seq))
+        if (!added.length) return presentation
+        const merged = [...presentation.recordEntries, ...added].sort((left, right) => left.seq - right.seq)
+        // The message the draft was accumulating is now ON the record, so the
+        // draft has done its job. Keeping it would put the same sentence on the
+        // timeline twice — once as the recorded assistant row and once as the
+        // line still being written — and would weld the next message onto it.
+        const recorded = added.some((entry) => entry.kind === 'assistant-text')
+        return {
+          ...presentation,
+          recordEntries: merged.slice(-MAX_RECORD_ENTRIES),
+          recordTotal: presentation.recordTotal + added.length,
+          ...(recorded ? { draftText: '' } : {}),
+          updatedAt: Date.now(),
+          active: true,
+        }
+      }),
     )
   },
 

@@ -8,6 +8,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { emptyAgentLike } from '../agent/localCliRun'
 import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
 import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
+import { projectLiveTimeline, runTimelineRows } from '../agent/liveTimeline'
+import type { TurnRecordEntry } from '../agent/turnRecord'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
@@ -59,6 +61,7 @@ function kindIcon(kind: string): string {
 
 const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 })
 const EMPTY_EVENTS: RunActivityEvent[] = []
+const EMPTY_RECORD_ENTRIES: TurnRecordEntry[] = []
 const EMPTY_FILES: FileChangeRecord[] = []
 const EMPTY_TASKS: RunTaskItem[] = []
 
@@ -89,6 +92,8 @@ export function RunProcessFeed({
   const activityPhase = activity?.phase || 'starting'
   const fileChanges = activity?.fileChanges ?? EMPTY_FILES
   const tasks = activity?.tasks ?? EMPTY_TASKS
+  const recordEntries = activity?.recordEntries ?? EMPTY_RECORD_ENTRIES
+  const recordTotal = activity?.recordTotal ?? 0
 
   // OpenCode keeps reasoning compact by default; raw streamed thought remains
   // available for inspection without pushing the answer below the fold.
@@ -195,6 +200,26 @@ export function RunProcessFeed({
   }, [events, agent.steps, agent.toolCalls, agent.logs])
 
   const groups = useMemo(() => groupProcessOperations(timeline), [timeline])
+
+  /**
+   * The unified timeline: 思考 → 工具 → 結果 → 回應, in recorded order.
+   *
+   * It comes out of the SAME projection the finished trajectory uses, over the
+   * Turn Record entries this run has published. The activity-event trace below
+   * is not a second way to build it — it is the fallback for a runner that
+   * keeps no record at all (external CLI), and it renders only when this is
+   * empty.
+   */
+  const recordView = useMemo(
+    () => projectLiveTimeline(recordEntries, recordTotal),
+    [recordEntries, recordTotal],
+  )
+  const recordTimeline = useMemo(
+    () => runTimelineRows(recordView, draftText),
+    [recordView, draftText],
+  )
+  const unloadedBefore = recordView.unloadedBefore
+  const hasRecordTimeline = recordTimeline.length > 0
   const lifecycle = deriveRunLifecycle({
     phase: activityPhase,
     status: agent.status,
@@ -210,17 +235,23 @@ export function RunProcessFeed({
   const phase = lifecycle.label
   // One honest notice when a live run goes quiet — never a repeated alarm.
   const stall = useStallNotice(runId)
-  const toolCount = new Set(
-    [
-      // Guarded like every other access in this file: a run snapshot without a
-      // tool list must degrade to an empty trace, never blank the whole app.
-      ...(agent.toolCalls || []).map((tool) => tool.id),
-      ...events
-        .filter((event) => event.kind === 'tool')
-        .map((event) => event.callId || event.id),
-    ],
-  ).size
-  const messageCount = draftText.trim() ? 1 : events.some((event) => event.kind === 'text') ? 1 : 0
+  // Counted from whichever source is actually on screen, so the header never
+  // describes a trace the reader is not looking at.
+  const toolCount = hasRecordTimeline
+    ? new Set(recordTimeline.filter((row) => row.kind === 'tool').map((row) => (row.kind === 'tool' ? row.callId : ''))).size
+    : new Set(
+        [
+          // Guarded like every other access in this file: a run snapshot without a
+          // tool list must degrade to an empty trace, never blank the whole app.
+          ...(agent.toolCalls || []).map((tool) => tool.id),
+          ...events
+            .filter((event) => event.kind === 'tool')
+            .map((event) => event.callId || event.id),
+        ],
+      ).size
+  const messageCount = hasRecordTimeline
+    ? recordTimeline.filter((row) => row.kind === 'assistant').length
+    : draftText.trim() ? 1 : events.some((event) => event.kind === 'text') ? 1 : 0
   const completedTasks = tasks.filter((task) => task.status === 'done').length
   const taskSummary = tasks.length ? ` · ${completedTasks}/${tasks.length} 任務` : ''
   const recovery = activity?.recovery || null
@@ -496,8 +527,115 @@ export function RunProcessFeed({
             </div>
           ) : null}
 
-          {/* Reasoning is an optional detail, not a competing second answer. */}
-          {thought.trim() ? (
+          {/* The single timeline. Thinking, tools, results and the reply are one
+              ordered stream here, so nobody has to read three panels to learn
+              what happened — and it is the record's order, not the arrival
+              order the transport happened to produce. */}
+          {hasRecordTimeline ? (
+            <div className="agent-process-trace space-y-1" data-run-timeline="record">
+              <div className="agent-process-trace-head flex items-center justify-between px-1 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                <span>執行時間軸</span>
+                <span className="normal-case tracking-normal">
+                  {unloadedBefore > 0 ? `尚有 ${unloadedBefore} 筆更早 · ` : ''}
+                  {toolCount} 個工具 · {messageCount} 則訊息{taskSummary}
+                </span>
+              </div>
+              {recordTimeline.map((row) => {
+                const open = expanded === row.id
+                if (row.kind === 'reasoning') {
+                  return (
+                    <div key={row.id} style={{ animation: 'fade-up 320ms cubic-bezier(0.23,1,0.32,1) both' }}>
+                      <button
+                        type="button"
+                        aria-expanded={open}
+                        data-timeline-row="reasoning"
+                        className="agent-process-row flex max-w-full items-center gap-2 text-left text-[12px] text-ink-2"
+                        onClick={() => setExpanded((id) => (id === row.id ? null : row.id))}
+                      >
+                        <Icon name="psychology" size={15} className="shrink-0 text-ink-3" />
+                        <span className="shrink-0 font-medium">推理</span>
+                        <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px]">
+                          {row.chars.toLocaleString()} 字 · {open ? '收合' : '展開看全文'}
+                        </span>
+                        <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 text-ink-3" />
+                      </button>
+                      <Reveal open={open}>
+                        <pre className="agent-process-detail ml-5 mt-0.5 whitespace-pre-wrap text-[11.5px] leading-relaxed text-ink-2 font-[family-name:var(--font-mono)] custom-scrollbar">
+                          {row.content}
+                        </pre>
+                      </Reveal>
+                    </div>
+                  )
+                }
+                if (row.kind === 'assistant') {
+                  return (
+                    <div
+                      key={row.id}
+                      className={row.draft ? 'agent-streaming-answer pt-1' : 'pt-1'}
+                      data-timeline-row={row.draft ? 'assistant-draft' : 'assistant'}
+                    >
+                      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+                        <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
+                        assistant{row.draft ? ' · 回覆中' : ''}
+                      </div>
+                      <div
+                        className={row.draft ? 'agent-streaming-body' : ''}
+                        style={row.draft ? { animation: 'stream-in 420ms cubic-bezier(0.22,0.61,0.25,1) both' } : undefined}
+                      >
+                        <MarkdownBody content={row.content} />
+                      </div>
+                    </div>
+                  )
+                }
+                if (row.kind === 'notice') {
+                  return (
+                    <div key={row.id} className="agent-process-row flex max-w-full items-center gap-2 text-[12px] text-ink-3">
+                      <Icon name="info" size={15} className="shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">{row.content}</span>
+                    </div>
+                  )
+                }
+                const pending = row.settlement === undefined
+                const failed = row.settlement !== undefined && row.settlement !== 'success'
+                return (
+                  <div key={row.id} style={{ animation: 'fade-up 320ms cubic-bezier(0.23,1,0.32,1) both' }}>
+                    <button
+                      type="button"
+                      aria-expanded={row.detail ? open : undefined}
+                      data-timeline-row="tool"
+                      className={`agent-process-row flex max-w-full items-center gap-2 text-left text-[12px] ${failed ? 'text-red' : 'text-ink-2'}`}
+                      onClick={() => row.detail && setExpanded((id) => (id === row.id ? null : row.id))}
+                    >
+                      <Icon
+                        name={pending ? 'progress_activity' : failed ? 'error' : 'terminal'}
+                        size={15}
+                        className={pending ? 'shrink-0 animate-spin text-ink' : 'shrink-0 text-ink-3'}
+                      />
+                      <span className="shrink-0 font-medium">
+                        {pending ? `執行 ${row.tool}…` : failed ? `${row.tool} ${row.settlement}` : `已執行 ${row.tool}`}
+                      </span>
+                      {row.detail ? (
+                        <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px] font-[family-name:var(--font-mono)]">
+                          {row.detail}
+                        </span>
+                      ) : null}
+                      {row.detail ? <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 text-ink-3" /> : null}
+                    </button>
+                    <Reveal open={open && Boolean(row.detail)}>
+                      <pre className="agent-process-detail ml-5 mt-0.5 whitespace-pre-wrap break-all text-[11px] text-ink-2 font-[family-name:var(--font-mono)] line-clamp-5">
+                        {row.detail}
+                      </pre>
+                    </Reveal>
+                  </div>
+                )
+              })}
+            </div>
+          ) : null}
+
+          {/* Reasoning is an optional detail, not a competing second answer.
+              Only on the fallback path: a run with a Turn Record shows its
+              thinking inside the timeline above, in the place it happened. */}
+          {!hasRecordTimeline && thought.trim() ? (
             <div className="agent-process-disclosure">
               <button
                 type="button"
@@ -520,8 +658,11 @@ export function RunProcessFeed({
             </div>
           ) : null}
 
-          {/* Consecutive read/search parts become one compact context group. */}
-          {groups.length > 0 ? (
+          {/* Consecutive read/search parts become one compact context group.
+              This is the fallback trace, for a runner that publishes no Turn
+              Record; the timeline above owns the Pi path and this must never
+              render beside it. */}
+          {!hasRecordTimeline && groups.length > 0 ? (
             <div className="agent-process-trace space-y-1">
               <div className="agent-process-trace-head flex items-center justify-between px-1 text-[10px] font-semibold uppercase tracking-[0.12em]">
                 <span>執行訊息</span>
@@ -636,10 +777,12 @@ export function RunProcessFeed({
         </div>
       </Reveal>
 
-      {/* Streaming draft (markdown). The answer resolves out of blur once when
-          it first appears, and carries the docs/ui caret on its last line so
-          "still writing" is visible without a second status row. */}
-      {draftText ? (
+      {/* Streaming draft (markdown), fallback path only. On the record path the
+          draft is the timeline's current assistant line — showing it here too
+          would be the same text in two places. The answer resolves out of blur
+          once when it first appears, and carries the docs/ui caret on its last
+          line so "still writing" is visible without a second status row. */}
+      {draftText && !hasRecordTimeline ? (
         <div className="agent-streaming-answer pt-2">
           <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
             <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />

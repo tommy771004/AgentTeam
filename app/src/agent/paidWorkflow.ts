@@ -127,6 +127,7 @@ export type WorkflowStageDeliverable = {
   evidence: ArtifactEvidence[]
   rejectedAt?: string
   rejectionReason?: string
+  approvedAt?: string
 }
 
 type Result<T> = ({ ok: true } & T) | { ok: false; reason: string }
@@ -517,18 +518,25 @@ export function buildStageDeliverablesFromIndex(
   index: Pick<ArtifactIndex, 'id' | 'entries'>,
   at = new Date().toISOString(),
 ): WorkflowStageDeliverable[] {
+  const lifecycleEntries = index.entries.filter((entry) => /\/(approval|rejection)$/.test(entry.source))
   return DELIVERABLE_STAGES.map((definition) => {
-    const entries = index.entries.filter((entry) => definition.types.includes(entry.type))
-    const stageEvidence: ArtifactEvidence[] = entries.map((entry) => ({
-      type: entry.type,
-      source: entry.source,
-      status: entry.status,
-      title: entry.title,
-      detail: entry.detail,
-      revision: entry.revision,
-      digest: entry.digest,
-    }))
-    const rejection = entries.find((entry) => entry.detail?.startsWith(REJECTION_PREFIX))
+    const stagePrefix = `deliverable:${index.id}:${definition.stage}/`
+    const markers = lifecycleEntries.filter((entry) => entry.source.startsWith(stagePrefix))
+    const entries = index.entries.filter(
+      (entry) => definition.types.includes(entry.type) && !lifecycleEntries.includes(entry),
+    )
+    const stageEvidence: ArtifactEvidence[] = entries
+      .map((entry) => ({
+        type: entry.type,
+        source: entry.source,
+        status: entry.status,
+        title: entry.title,
+        detail: entry.detail,
+        revision: entry.revision,
+        digest: entry.digest,
+      }))
+    const rejection = markers.find((entry) => entry.detail?.startsWith(REJECTION_PREFIX))
+    const approval = markers.find((entry) => entry.detail?.startsWith(APPROVAL_PREFIX) || entry.source.endsWith('/approval'))
     return {
       id: `deliverable:${index.id}:${definition.stage}`,
       sessionId: index.id,
@@ -540,12 +548,16 @@ export function buildStageDeliverablesFromIndex(
       evidence: stageEvidence,
       rejectedAt: rejection?.at,
       rejectionReason: rejection?.detail?.slice(REJECTION_PREFIX.length),
+      approvedAt: approval?.at,
     }
   }).filter((deliverable) => deliverable.evidence.length > 0)
 }
 
 /** Marker that keeps a rejection in the run's own history, not a new store. */
 export const REJECTION_PREFIX = '退回：'
+
+/** Marker that keeps a user approval in the run's own history, not a new store. */
+export const APPROVAL_PREFIX = '核准：'
 
 /** Persistable evidence describing a user rejection of one stage. */
 export function workflowRejectionEvidence(
@@ -559,6 +571,20 @@ export function workflowRejectionEvidence(
     revision: deliverable.revision,
     title: `${deliverable.title} 已退回`,
     detail: `${REJECTION_PREFIX}${compact(reason, 300)}`,
+  }
+}
+
+/** Persistable evidence describing a user approval of one stage. */
+export function workflowApprovalEvidence(
+  deliverable: WorkflowStageDeliverable,
+): ArtifactEvidence {
+  return {
+    type: deliverable.stage === 'final-output' ? 'final-output' : 'decision',
+    source: `${deliverable.id}/approval`,
+    status: 'complete',
+    revision: deliverable.revision,
+    title: `${deliverable.title} 已核准`,
+    detail: APPROVAL_PREFIX,
   }
 }
 
@@ -578,6 +604,19 @@ export function rejectWorkflowDeliverable(
       rejectedAt: at,
       rejectionReason: normalized,
     },
+  }
+}
+
+export function approveWorkflowDeliverable(
+  deliverable: WorkflowStageDeliverable,
+  at = new Date().toISOString(),
+): Result<{ deliverable: WorkflowStageDeliverable }> {
+  if (deliverable.status === 'rejected') return { ok: false, reason: 'a rejected deliverable must be re-produced before approval' }
+  if (deliverable.status !== 'ready') return { ok: false, reason: 'only a ready deliverable can be approved' }
+  if (deliverable.approvedAt) return { ok: false, reason: 'deliverable is already approved' }
+  return {
+    ok: true,
+    deliverable: { ...deliverable, approvedAt: at },
   }
 }
 

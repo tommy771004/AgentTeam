@@ -148,7 +148,11 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
       case 'step-start':
       case 'assistant-text':
       case 'user-text':
+      case 'reasoning':
         // Conversation content and boundaries belong to the conversation view.
+        // Reasoning is named here on purpose: it is a kind this build knows
+        // and deliberately leaves to the timeline, which is a different fact
+        // from the unknown-entry notice the default arm writes.
         break
       case 'turn-end':
       case 'step-end':

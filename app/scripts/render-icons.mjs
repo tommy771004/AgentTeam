@@ -3,9 +3,13 @@
  * Uses Playwright (already a devDependency) for crisp rasterization.
  *
  *   node scripts/render-icons.mjs
+ *
+ * 以 `build/icons/icon.svg` 內容雜湊做快取：SVG 未變且輸出俱全時直接跳過
+ * Playwright 重繪（快取存 `.cache/render-icons.json`，不入 git、不進打包）。
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
@@ -18,6 +22,40 @@ const publicDir = path.join(appRoot, 'public')
 const srcAssetsDir = path.join(appRoot, 'src', 'assets')
 
 const SIZES = [16, 24, 32, 48, 64, 128, 256, 512, 1024]
+const CACHE_VERSION = 1
+const cachePath = path.join(appRoot, '.cache', 'render-icons.json')
+
+// 完整輸出清單：主渲染 + canonical 複本 + make-ico 產物。快取命中前逐一驗存在，
+// 避免部分產物被清除後卻誤判新鮮。
+const expectedOutputs = [
+  ...SIZES.map((size) => path.join(outDir, `icon-${size}.png`)),
+  path.join(outDir, 'icon.png'),
+  path.join(brandDir, 'subagents-icon.svg'),
+  ...[32, 64, 128, 512, 1024].map((size) => path.join(brandDir, `subagents-icon-${size}.png`)),
+  path.join(publicDir, 'favicon.svg'),
+  path.join(publicDir, 'favicon-32.png'),
+  path.join(srcAssetsDir, 'subagents-icon.svg'),
+  path.join(srcAssetsDir, 'subagents-icon-32.png'),
+  path.join(srcAssetsDir, 'subagents-icon-64.png'),
+  path.join(outDir, 'icon.ico'),
+  path.join(appRoot, 'build', 'icon.ico'),
+  path.join(appRoot, 'build', 'icon.png'),
+]
+
+function readCache() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(cachePath, 'utf8'))
+    if (parsed?.schemaVersion !== CACHE_VERSION || typeof parsed?.svgSha256 !== 'string') return undefined
+    return parsed
+  } catch {
+    return undefined
+  }
+}
+
+function writeCache(svgSha256) {
+  fs.mkdirSync(path.dirname(cachePath), { recursive: true })
+  fs.writeFileSync(cachePath, `${JSON.stringify({ schemaVersion: CACHE_VERSION, svgSha256 }, null, 2)}\n`)
+}
 
 async function main() {
   if (!fs.existsSync(svgPath)) {
@@ -29,6 +67,13 @@ async function main() {
   fs.mkdirSync(srcAssetsDir, { recursive: true })
 
   const svg = fs.readFileSync(svgPath, 'utf8')
+  const svgSha256 = createHash('sha256').update(svg).digest('hex')
+  const cached = readCache()
+  if (!process.env.SUBAGENTS_ICONS_FORCE_RENDER && cached?.svgSha256 === svgSha256 && expectedOutputs.every((file) => fs.existsSync(file))) {
+    console.log('icons are up-to-date; skipping render (force with SUBAGENTS_ICONS_FORCE_RENDER=1)')
+    return
+  }
+
   const browser = await chromium.launch()
   const page = await browser.newPage()
 
@@ -77,6 +122,7 @@ async function main() {
   }
 
   console.log('OK — icons in build/icons and public/brand')
+  writeCache(svgSha256)
 }
 
 main().catch((e) => {

@@ -103,6 +103,20 @@ export type PiHostEvent =
       payload: { runId: string; sessionId: string; item: unknown; iteration?: number }
     }
   | {
+      /**
+       * One entry the running turn just wrote to its Turn Record, carrying the
+       * exact `seq` the commit will give it.
+       *
+       * The live timeline is projected from these, by the same pure function
+       * that projects a replayed page — so what the user watches happen and
+       * what they read back afterwards cannot come out in different orders.
+       * `host/turn-item` stays what it always was: a transport-level stream,
+       * and the fallback for runners that keep no record at all.
+       */
+      event: 'host/record-append'
+      payload: { runId: string; sessionId: string; entries: TurnRecordEntry[] }
+    }
+  | {
       event: 'host/tool-update'
       payload: { runId: string; tool: string; item: unknown; callId?: string }
     }
@@ -165,7 +179,7 @@ import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
 import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
 import { callPiMcpTool, listPiMcpTools, piMcpGenerationKey, reloadPiMcp, stopPiMcp } from './piMcpClient.ts'
 import { isCompletedModelCall, isPiHostDefinitionOfDoneMet, isPiTurnSettlement, piTurnFinalAnswer, piTurnResultText, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
-import { appendTurnRecord, derivePiHistory, pageTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
+import { appendTurnRecord, derivePiHistory, nextTurnRecordSeq, pageTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordEntry, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
 import { cancelSubDesignProviderRun, executeSubDesignProviderStage } from './subDesignProviderRuntime.ts'
 import { shouldStopForProviderProjection, type SubDesignPluginExecutionProjection } from '../src/agent/subdesign/pluginExecution.ts'
 import {
@@ -298,6 +312,23 @@ type ActiveTurnRecorder = {
   entries: TurnRecordAppend[]
   /** Frozen at tool start so a mid-call capability load cannot rewrite history. */
   toolIdentities: Map<string, TurnRecordToolContractIdentity>
+  /**
+   * The seq the commit will start from, read once when the turn opened.
+   * `session.record` does not change while a turn runs, so an entry's live
+   * seq and its committed seq are the same number by construction.
+   */
+  seqBase: number
+  /**
+   * Thinking deltas received since the last flush, still in arrival order.
+   *
+   * Buffered rather than written per delta for the same reason assistant text
+   * is: one thought is one entry. Nothing is dropped — the buffer is joined
+   * whole at the next ordered boundary (a message, a tool call, the step's
+   * end), which is what puts the reasoning BEFORE the action it explains.
+   */
+  reasoning: string[]
+  /** Publishes a recorded entry to the live stream; absent in batch mode. */
+  publish?: (entry: TurnRecordEntry) => void
 }
 
 const activeTurnRecorders = new Map<string, ActiveTurnRecorder>()
@@ -308,7 +339,35 @@ function recordTurnEntry(
 ): void {
   const recorder = activeTurnRecorders.get(sessionId)
   if (!recorder) return
-  recorder.entries.push({ turn: recorder.turn, step: recorder.step, at: Date.now(), ...entry } as TurnRecordAppend)
+  const appended = { turn: recorder.turn, step: recorder.step, at: Date.now(), ...entry } as TurnRecordAppend
+  recorder.entries.push(appended)
+  // `appendTurnRecord` numbers from the same base in the same order, so this
+  // is the entry's real seq and not a live-only placeholder.
+  recorder.publish?.({ ...appended, seq: recorder.seqBase + recorder.entries.length - 1 } as TurnRecordEntry)
+}
+
+/** Collect one thinking delta. Nothing is written yet, and nothing is dropped. */
+function recordReasoningDelta(sessionId: string, delta: string): void {
+  const recorder = activeTurnRecorders.get(sessionId)
+  if (!recorder || !delta) return
+  recorder.reasoning.push(delta)
+}
+
+/**
+ * Write everything the model has thought since the last flush as ONE entry.
+ *
+ * Called at each ordered boundary rather than on a timer: reasoning has to
+ * land before the tool call or the message it led to, because "what was it
+ * thinking before it ran that" is the question the entry exists to answer.
+ * The buffer is joined whole — there is no length cap here, by decision.
+ */
+function flushReasoning(sessionId: string): void {
+  const recorder = activeTurnRecorders.get(sessionId)
+  if (!recorder?.reasoning.length) return
+  const content = recorder.reasoning.join('')
+  recorder.reasoning = []
+  if (!content.trim()) return
+  recordTurnEntry(sessionId, { kind: 'reasoning', source: 'model', content })
 }
 
 /** The next turn number for a session, read from what the record already holds. */
@@ -1748,6 +1807,12 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       step: 1,
       entries: [],
       toolIdentities: new Map(),
+      seqBase: nextTurnRecordSeq(session.record),
+      reasoning: [],
+      // Only when there is a live stream to feed. A batch caller receives the
+      // whole committed slice in the turn's result, so republishing each entry
+      // there would be a second copy of the same account, not a live view.
+      ...(emit ? { publish: (entry: TurnRecordEntry) => emit({ event: 'host/record-append', payload: { runId, sessionId, entries: [entry] } }) } : {}),
     }
     activeTurnRecorders.set(sessionId, recorder)
     recordTurnEntry(sessionId, { kind: 'turn-start', source: 'host' })
@@ -1941,7 +2006,16 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           // opening narration keeps its place before the tool it preceded.
           // Recording only the settled answer left everything the model said
           // on the way there unreconstructable from the record (ADR-0049).
+          // Thinking arrives as a stream of deltas on the same channel as
+          // text. It is collected here and written at the next boundary, so
+          // the record answers «它跑那個指令之前在想什麼» instead of only
+          // «它跑了那個指令» (model-visible means logged).
+          const streamedEvent = (event as { assistantMessageEvent?: { type?: unknown; delta?: unknown } }).assistantMessageEvent
+          if (streamedEvent?.type === 'thinking_delta' && typeof streamedEvent.delta === 'string') {
+            recordReasoningDelta(sessionId, streamedEvent.delta)
+          }
           if (event.type === 'message_end') {
+            flushReasoning(sessionId)
             const message = (event as { message?: { role?: unknown; content?: unknown } }).message
             if (message?.role === 'assistant') {
               const text = Array.isArray(message.content)
@@ -1961,6 +2035,10 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
             }
           }
           if (event.type === 'tool_execution_start') {
+            // Before the call, never after: the reasoning is the answer to
+            // «為什麼是這個指令», and an entry recorded afterwards would read
+            // as a reaction to a result it never saw.
+            flushReasoning(sessionId)
             const callId = typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`
             const toolName = typeof event.toolName === 'string' ? event.toolName : 'tool'
             const identity = modelToolContractIdentity(state, sessionId, toolName)
@@ -2139,6 +2217,9 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           if (turn.settlement === 'answered' && !spokenThisStep) {
             recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: answer })
           }
+          // A step whose thinking was never followed by a message or a tool
+          // still thought; closing the step is the last ordered boundary it has.
+          flushReasoning(sessionId)
           recordTurnEntry(sessionId, { kind: 'step-end', source: 'host', ...('timing' in turn && turn.timing ? { timing: turn.timing } : {}) })
           // History is derived from the record, never accumulated beside it:
           // one write path means the model's context and the record cannot
@@ -2172,6 +2253,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
         if (turn.settlement === 'interrupted' && stoppedText && !spokenThisStep) {
           recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: stoppedText })
         }
+        flushReasoning(sessionId)
         recordTurnEntry(sessionId, { kind: 'step-end', source: 'host', ...('timing' in turn && turn.timing ? { timing: turn.timing } : {}) })
         return {
           settlement: turn.settlement,
