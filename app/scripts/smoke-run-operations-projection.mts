@@ -76,6 +76,14 @@ assert.deepEqual(
   writeRow?.card?.card === 'diff' ? writeRow.card.diffs.map((diff) => diff.path) : [],
   ['/proj/file-10.ts'],
 )
+// The diff size a row shows comes from the tool's own declared card, never a
+// guess: a one-line replacement is +1 −1, a creation is +N −0.
+assert.equal(writeRow?.added, 1, 'a creation carries the added line count its card declares')
+assert.equal(writeRow?.removed, 0, 'a creation removes nothing')
+const editRow = rows.find((row) => row.callId === 'call_15')
+assert.equal(editRow?.added, 1, 'an edit row carries the + count its card declares')
+assert.equal(editRow?.removed, 1, 'an edit row carries the − count its card declares')
+assert.equal(rows.find((row) => row.callId === 'call_1')?.added, undefined, 'a non-mutating row carries no diff size')
 const grepRow = rows.find((row) => row.callId === 'call_3')
 assert.equal(grepRow?.card?.card, 'search', 'a search call presents as a search card')
 

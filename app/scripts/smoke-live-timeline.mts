@@ -78,6 +78,23 @@ assert.equal(toolRow?.kind === 'tool' ? toolRow.detail : undefined, 'CLAUDE.md',
 assert.ok(shown.findIndex((row) => row.kind === 'reasoning') < shown.findIndex((row) => row.kind === 'tool'),
   'the thought is readable before the action it explains')
 
+// A mutating call's merged line keeps the diff size its own declaration
+// derived from the recorded args — live rows and replayed rows alike.
+const mutating = appendTurnRecord(undefined, [
+  { kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'step-start', source: 'host', turn: 1, step: 1, at: 2 },
+  { kind: 'tool-call', source: 'model', tool: 'write', callId: 'w1', args: { path: 'out/x.ts', content: 'export {}\n' }, turn: 1, step: 1, at: 3 },
+  { kind: 'tool-result', source: 'host', tool: 'write', callId: 'w1', settlement: 'success', turn: 1, step: 1, at: 4 },
+])
+const mutatingShown = runTimelineRows(projectLiveTimeline(mutating.entries, mutating.entries.length))
+const mutatingRow = mutatingShown.find((row) => row.kind === 'tool')
+assert.equal(mutatingRow?.kind === 'tool' ? mutatingRow.title : undefined, '已寫入 x.ts',
+  'the row title is what the write tool declared')
+assert.equal(mutatingRow?.kind === 'tool' ? mutatingRow.added : undefined, 1,
+  'a one-line creation reads as +1')
+assert.equal(mutatingRow?.kind === 'tool' ? mutatingRow.removed : undefined, 0,
+  'a creation removes nothing')
+
 // The text streaming in right now is the timeline's current assistant line.
 const streaming = runTimelineRows(running, '結論：Pi Core 擁')
 const last = streaming[streaming.length - 1]

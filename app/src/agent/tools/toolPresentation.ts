@@ -323,3 +323,87 @@ export function diffPaths(presentation: ToolPresentation): Array<{ path: string;
   }
   return paths.length > 0 ? paths : undefined
 }
+
+/** Line count the way a reader counts: a trailing newline does not start a new line. */
+function toLines(text: string): string[] {
+  const lines = text.split('\n')
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  return lines
+}
+
+export type DiffStat = { path: string; added: number; removed: number }
+
+/**
+ * How many lines a diff card adds and removes, per file.
+ *
+ * Measured by trimming the common prefix and suffix off the old/new line
+ * arrays and counting what remains — deterministic, dependency-free, and
+ * honest about what it is: an edit that moves a block reads as the whole
+ * block removed and re-added, never as a lucky guess at a smaller number.
+ * A creation (`oldText === null`) adds every line and removes none.
+ */
+export function diffStats(presentation: ToolPresentation): DiffStat[] | undefined {
+  if (presentation.card !== 'diff') return undefined
+  const stats: DiffStat[] = []
+  for (const diff of presentation.diffs) {
+    const path = asPath(diff.path)
+    if (!path) continue
+    if (diff.oldText === null) {
+      stats.push({ path, added: toLines(diff.newText).length, removed: 0 })
+      continue
+    }
+    const oldLines = toLines(diff.oldText)
+    const newLines = toLines(diff.newText)
+    let start = 0
+    while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) start++
+    let endOld = oldLines.length - 1
+    let endNew = newLines.length - 1
+    while (endOld >= start && endNew >= start && oldLines[endOld] === newLines[endNew]) {
+      endOld--
+      endNew--
+    }
+    stats.push({
+      path,
+      added: Math.max(0, endNew - start + 1),
+      removed: Math.max(0, endOld - start + 1),
+    })
+  }
+  return stats.length > 0 ? stats : undefined
+}
+
+/** The summary a timeline row shows for one tool call: title, where, how much. */
+export type PresentedToolSummary = { title?: string; path?: string; added?: number; removed?: number }
+
+/**
+ * One tool call's presented summary, from its own declaration and nothing
+ * else. The single place that folds a presentation into the three facts a
+ * reader scans for — so every projection (conversation, timeline, operations)
+ * says the same thing about the same call, and a card change reaches all of
+ * them or none. `undefined` means the tool declared nothing usable; the
+ * caller degrades to its generic row rather than inventing a title.
+ */
+export function presentedToolSummary(
+  tool: string,
+  args: unknown,
+  result?: { content: string; isError: boolean; meta?: unknown },
+): PresentedToolSummary | undefined {
+  const presentation = result
+    ? (presentToolResult(tool, args, result) ?? presentToolCall(tool, args))
+    : presentToolCall(tool, args)
+  if (!presentation) return undefined
+  const stats = diffStats(presentation)
+  const locationPath =
+    presentation.card === 'diff'
+      ? presentation.diffs[0]?.path
+      : presentation.card === 'generic'
+        ? presentation.locations?.[0]?.path
+        : undefined
+  const added = stats?.reduce((total, stat) => total + stat.added, 0)
+  const removed = stats?.reduce((total, stat) => total + stat.removed, 0)
+  return {
+    ...(presentation.title ? { title: presentation.title } : {}),
+    ...(locationPath ? { path: locationPath } : {}),
+    ...(added !== undefined ? { added } : {}),
+    ...(removed !== undefined ? { removed } : {}),
+  }
+}

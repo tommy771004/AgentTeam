@@ -48,6 +48,11 @@ export type ThreadAgentSummary = {
 }
 
 export type ThreadRunSummary = {
+  /**
+   * The run this summary archives. It keys the bubble's stable id, so a Host
+   * hydration can re-attach the same card without duplicating it.
+   */
+  runId?: string
   /** Terminal lifecycle state shared with the live process feed. */
   status?: 'success' | 'failed' | 'halted'
   durationMs?: number
@@ -109,6 +114,9 @@ export type ThreadRunSummary = {
     detail?: string
     path?: string
     ok?: boolean
+    /** Diff size for write/edit calls, from the tool's own declared card. */
+    added?: number
+    removed?: number
   }>
   files: Array<{
     path: string
@@ -596,6 +604,30 @@ function titleFromText(text: string) {
   return (t || '新對話').slice(0, 42)
 }
 
+/**
+ * Re-attach persisted run cards to a Host-projected bubble list.
+ *
+ * Idempotent by the card's run-keyed id: hydrating the same session twice
+ * yields one card, not two. Each card lands before the LAST assistant bubble —
+ * the answer its run produced — which is where the live thread had it. A card
+ * whose answer the projection does not know about still survives, appended.
+ */
+function insertRunBubbles(
+  projected: ThreadBubble[],
+  runBubbles: ThreadBubble[],
+): ThreadBubble[] {
+  const known = new Set(projected.map((bubble) => bubble.id))
+  const fresh = runBubbles.filter((bubble) => !known.has(bubble.id))
+  if (!fresh.length) return projected
+  const lastAssistant = projected.map((bubble) => bubble.role).lastIndexOf('assistant')
+  if (lastAssistant === -1) return [...projected, ...fresh]
+  return [
+    ...projected.slice(0, lastAssistant),
+    ...fresh,
+    ...projected.slice(lastAssistant),
+  ]
+}
+
 function emptyThread(partial?: Partial<Thread>): Thread {
   const now = new Date().toISOString()
   return {
@@ -680,6 +712,16 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     const projected = [...byThread.values()].flatMap((projection) => {
       if (!projection) return []
       const live = current.find((thread) => thread.id === projection.threadId)
+      // The Host's projection is plain user/assistant strings; it does not
+      // carry the structured run cards (operations, diff stats, plan) this
+      // session persisted. Re-attach them, deduped by their run-keyed ids, so
+      // a restart replays the same summary card instead of losing the process.
+      // A run card sits before the answer it produced — the last assistant
+      // bubble — which is where the live thread had it.
+      const runBubbles = (live?.bubbles || []).filter((bubble) => bubble.role === 'run')
+      const bubbles = runBubbles.length
+        ? insertRunBubbles(projection.bubbles, runBubbles)
+        : projection.bubbles
       // A thread this session has not touched comes back from the Host as
       // messages only. Its settings live in the prefs sidecar, so restore them
       // before `emptyThread` defaults paper over the user's choices.
@@ -691,7 +733,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
         ...base,
         id: projection.threadId,
         title: projection.title,
-        bubbles: projection.bubbles,
+        bubbles,
         // Only a thread this session actually changed gets a fresh mtime;
         // stamping every projected thread with `now` flattened the sidebar's
         // recency order into whatever order the Host happened to list.
@@ -935,7 +977,9 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
 
   pushRunSummary: (threadId, summary) => {
     const bubble: ThreadBubble = {
-      id: uid('r'),
+      // A run-keyed id makes the card idempotent: re-hydrating the same Host
+      // session re-attaches the same card instead of stacking a copy.
+      id: summary.runId ? `run_${summary.runId}` : uid('r'),
       role: 'run',
       content: '執行過程',
       at: new Date().toISOString(),

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { LogViewer } from './LogViewer'
 import { ElapsedTime } from './primitives/ElapsedTime'
@@ -23,6 +23,8 @@ import type { TurnRecordEntry } from '../agent/turnRecord'
 import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
 import type { ExecutionStep } from '../agent/types'
+import { projectLiveTimeline, runTimelineRows } from '../agent/liveTimeline'
+import { RunTimelineList } from './RunTimelineList'
 
 /**
  * CloudCLI-style embedded run progress — no page navigation.
@@ -174,14 +176,45 @@ export function InlineRunPanel({
     agent.executionKind === 'external' ||
     agent.loopConfig.trigger === 'local-cli' ||
     threadRunner !== 'builtin'
+  const isPiHost = !isExternal && agent.loopConfig.trigger === 'pi-host'
   const runnerCaps =
     agent.runnerCapabilities || capabilitiesForRunner(isExternal ? threadRunner : 'builtin')
+  // The Pi Host's fixed `pi-host-turn` step is an admission/settlement summary,
+  // not the work happening inside the turn. The right rail therefore reads the
+  // same append-only Turn Record as the center feed. This keeps both surfaces
+  // updating from one ordered source while tool calls and messages arrive.
+  const recordTimeline = useMemo(
+    () => runTimelineRows(
+      projectLiveTimeline(activity.recordEntries, activity.recordTotal),
+      activity.draftText,
+    ),
+    [activity.recordEntries, activity.recordTotal, activity.draftText],
+  )
   const completedTasks = tasks.filter((task) => task.status === 'done').length
   const completedSteps = agent.steps.filter((step) => step.status === 'COMPLETED').length
+  const recordToolCount = new Set(
+    recordTimeline
+      .filter((row) => row.kind === 'tool')
+      .map((row) => row.kind === 'tool' ? row.callId : ''),
+  ).size
+  const recordMessageCount = recordTimeline.filter((row) => row.kind === 'assistant').length
+  const recordSummary = [
+    recordToolCount ? `${recordToolCount} 工具` : '',
+    recordMessageCount ? `${recordMessageCount} 訊息` : '',
+  ].filter(Boolean).join(' · ')
   const progressSummary = tasks.length
     ? `${completedTasks}/${tasks.length}`
-    : agent.steps.length
+    : recordSummary
+      ? recordSummary
+      : !isPiHost && agent.steps.length
       ? `${completedSteps}/${agent.steps.length}`
+      : undefined
+  // A Host turn has no honest percentage until it publishes a finite plan.
+  // Keeping the old 15% until settlement looked precise but conveyed no fact.
+  const measuredProgress = tasks.length
+    ? Math.round((completedTasks / tasks.length) * 100)
+    : !isPiHost && agent.steps.length
+      ? Math.min(100, Math.max(0, agent.progress))
       : undefined
   const reasoningCount = activity.recordEntries.filter((entry) => entry.kind === 'reasoning').length
   const detailSummary = [
@@ -243,9 +276,13 @@ export function InlineRunPanel({
                 {currentStatus}
               </p>
             </div>
-            <span className="shrink-0 font-[family-name:var(--font-mono)] text-[18px] font-semibold tabular-nums text-accent-ink">
-              {agent.progress}%
-            </span>
+            {measuredProgress !== undefined ? (
+              <span className="shrink-0 font-[family-name:var(--font-mono)] text-[18px] font-semibold tabular-nums text-accent-ink">
+                {measuredProgress}%
+              </span>
+            ) : live ? (
+              <AgentThinking variant="spin" className="shrink-0 text-accent-ink" />
+            ) : null}
           </div>
 
           <p className="mt-3 line-clamp-3 text-[13px] leading-relaxed text-ink-2">
@@ -253,13 +290,15 @@ export function InlineRunPanel({
           </p>
 
           <div className="mt-3">
-            <div className="h-1.5 overflow-hidden rounded-full bg-inset">
-              <div
-                className="h-full rounded-full bg-accent transition-[width] duration-500 motion-reduce:transition-none"
-                style={{ width: `${Math.min(100, Math.max(0, agent.progress))}%` }}
-              />
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-ink-3">
+            {measuredProgress !== undefined ? (
+              <div className="h-1.5 overflow-hidden rounded-full bg-inset">
+                <div
+                  className="h-full rounded-full bg-accent transition-[width] duration-500 motion-reduce:transition-none"
+                  style={{ width: `${measuredProgress}%` }}
+                />
+              </div>
+            ) : null}
+            <div className={`${measuredProgress !== undefined ? 'mt-2' : ''} flex items-center justify-between gap-2 text-[10px] text-ink-3`}>
               <span className="truncate">
                 {isExternal
                   ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind ? ` · ${agent.externalRunnerKind}` : ''}`
@@ -268,7 +307,7 @@ export function InlineRunPanel({
               <span className="shrink-0 font-[family-name:var(--font-mono)] tabular-nums">
                 {live && activity.startedAt > 0 ? <ElapsedTime startedAt={activity.startedAt} /> : null}
                 {live && activity.startedAt > 0 ? ' · ' : ''}
-                {progressSummary ? `${progressSummary} 項` : '準備中'}
+                {progressSummary || (live ? '即時更新中' : '無進度項目')}
               </span>
             </div>
           </div>
@@ -278,7 +317,7 @@ export function InlineRunPanel({
         <PanelSection
           id="run-progress"
           title="執行進度"
-          summary={progressSummary ? `${progressSummary} 完成` : undefined}
+          summary={tasks.length && progressSummary ? `${progressSummary} 完成` : progressSummary}
           open={progressOpen}
           onToggle={() => setProgressOpen((value) => !value)}
         >
@@ -317,7 +356,16 @@ export function InlineRunPanel({
                 </li>
               ))}
             </ul>
-          ) : agent.steps.length > 0 ? (
+          ) : recordTimeline.length > 0 ? (
+            <div className="agent-process-trace space-y-1" data-run-timeline="record">
+              <RunTimelineList rows={recordTimeline} />
+            </div>
+          ) : isPiHost && live ? (
+            <p className="flex items-center gap-2 text-[12px] text-ink-3" role="status">
+              <AgentThinking variant="spin" className="text-accent-ink" />
+              <ShimmerLabel active>{currentStatus}</ShimmerLabel>
+            </p>
+          ) : !isPiHost && agent.steps.length > 0 ? (
             <CompactStepList steps={agent.steps} />
           ) : live && agent.loopConfig.trigger === 'local-cli' ? (
             <p className="flex items-center gap-2 text-[12px] text-ink-3">
@@ -328,7 +376,7 @@ export function InlineRunPanel({
             <p className="text-[12px] text-ink-3">等待引擎建立進度…</p>
           )}
 
-          {tasks.length > 0 && agent.steps.length > 0 ? (
+          {tasks.length > 0 && !isPiHost && agent.steps.length > 0 ? (
             <div className="mt-4 border-t border-line pt-3">
               <button
                 type="button"

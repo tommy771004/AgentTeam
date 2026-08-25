@@ -2,18 +2,38 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ThreadRunSummary } from '../store/threadStore'
 import { deriveRunLifecycle, lifecycleToneClass } from '../agent/runLifecycle'
-import { ContextCards } from './ContextCards'
 import { Icon } from './Icon'
-import { Reveal } from './primitives/Reveal'
+import { RunTimelineList, type TimelineItem } from './RunTimelineList'
 import { contextSummary, groupProcessOperations } from '../lib/runPresentation'
 import { formatTokensCompact, formatUsd } from '../agent/contextUsageView'
 
-function iconFor(kind: string) {
-  if (kind === 'file') return 'edit'
-  if (kind === 'error') return 'error'
-  if (kind === 'done') return 'check_circle'
-  if (kind === 'compaction') return 'unfold_less'
-  return 'terminal'
+/**
+ * The persisted operations replay through the SAME timeline renderer the live
+ * feed uses, so the process you watched and the process you read back are the
+ * same rows — including the「+N −M」each mutating tool declared.
+ */
+function timelineItems(operations: ThreadRunSummary['operations']): TimelineItem[] {
+  return groupProcessOperations(operations).map((group) => {
+    if (group.type === 'context') {
+      return {
+        id: group.id,
+        kind: 'context' as const,
+        summary: contextSummary(group.operations),
+        operations: group.operations,
+      }
+    }
+    const operation = group.operation
+    return {
+      id: group.id,
+      kind: 'tool' as const,
+      tool: operation.title,
+      title: operation.title,
+      settlement: operation.ok === false ? 'failed' : 'success',
+      detail: operation.path && operation.path !== operation.detail ? `${operation.path}\n${operation.detail || ''}` : operation.detail,
+      added: operation.added,
+      removed: operation.removed,
+    }
+  })
 }
 
 /** Persisted, collapsible record of what an agent did for one answer. */
@@ -21,9 +41,8 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
   const navigate = useNavigate()
   // Context is visible at a glance; details remain one click away.
   const [open, setOpen] = useState(false)
-  const [openOperation, setOpenOperation] = useState<string | null>(null)
   const [diffOpen, setDiffOpen] = useState(false)
-  const groups = groupProcessOperations(summary.operations)
+  const items = timelineItems(summary.operations)
   const additions = summary.files.reduce((total, file) => total + (file.added || 0), 0)
   const removals = summary.files.reduce((total, file) => total + (file.removed || 0), 0)
   const lifecycle = deriveRunLifecycle({
@@ -111,55 +130,9 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
 
       {open ? (
           <div className="agent-summary-content max-h-[420px] space-y-3 overflow-y-auto border-t border-line px-3.5 py-3 custom-scrollbar">
-          {groups.length ? (
+          {items.length ? (
             <div className="agent-summary-trace space-y-1">
-              {groups.map((group, index) => {
-                const expanded = openOperation === group.id
-                const enter = {
-                  animation: `fade-up 300ms cubic-bezier(0.23,1,0.32,1) ${Math.min(index, 8) * 40}ms both`,
-                }
-                if (group.type === 'context') {
-                  return (
-                    <div key={group.id} style={enter}>
-                      <button
-                        type="button"
-                        className="agent-summary-row flex max-w-full items-center gap-2 text-left text-[12px] text-ink-2"
-                        onClick={() => setOpenOperation((id) => (id === group.id ? null : group.id))}
-                      >
-                        <Icon name="folder_open" size={15} className="shrink-0 opacity-80" />
-                        <span className="truncate">已蒐集上下文</span>
-                        <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px]">{contextSummary(group.operations)}</span>
-                        <Icon name={expanded ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 text-ink-3" />
-                      </button>
-                      <Reveal open={expanded}>
-                        <ContextCards operations={group.operations} />
-                      </Reveal>
-                    </div>
-                  )
-                }
-                const operation = group.operation
-                return (
-                  <div key={group.id} style={enter}>
-                    <button
-                      type="button"
-                      className={`agent-summary-row flex max-w-full items-center gap-2 text-left text-[12px] ${
-                        operation.ok === false ? 'text-red' : 'text-ink-2'
-                      }`}
-                      onClick={() => setOpenOperation((id) => (id === group.id ? null : group.id))}
-                    >
-                      <Icon name={iconFor(operation.kind)} size={15} className="shrink-0 opacity-80" />
-                      <span className="shrink-0 font-medium">{operation.title}</span>
-                      {(operation.detail || operation.path) ? <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px] font-[family-name:var(--font-mono)]">{operation.path || operation.detail}</span> : null}
-                      {(operation.detail || operation.path) ? <Icon name={expanded ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 text-ink-3" /> : null}
-                    </button>
-                    <Reveal open={expanded && Boolean(operation.detail || operation.path)}>
-                      <pre className="agent-summary-detail ml-5 mt-1 whitespace-pre-wrap break-all text-[11px] text-ink-2 font-[family-name:var(--font-mono)]">
-                        {operation.path && operation.path !== operation.detail ? `${operation.path}\n` : ''}{operation.detail}
-                      </pre>
-                    </Reveal>
-                  </div>
-                )
-              })}
+              <RunTimelineList rows={items} />
             </div>
           ) : null}
 

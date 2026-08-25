@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { projectTrajectory, type TrajectoryRow } from '../agent/trajectoryProjection'
 import type { TurnRecordPage } from '../agent/turnRecord'
+import { mergeTrajectoryPages } from '../agent/trajectoryPaging'
 import { Icon } from './Icon'
 import { formatTokens, formatUsd } from '../agent/contextUsageView'
 
@@ -70,31 +71,46 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
   // Following the tail is the default, and the user's own scroll ends it.
   const following = useRef(true)
   const scroller = useRef<HTMLDivElement | null>(null)
-  const loader = loadPage || hostPageLoader()
+  // `hostPageLoader` closes over the bridge. Memoising it is required: a fresh
+  // function per render would recreate `read`, rerun the loading effect, and
+  // start another async page request after every state update.
+  const loader = useMemo(() => loadPage || hostPageLoader(), [loadPage])
+  // A late page from the previous session/request may resolve after the user
+  // has already moved on. Only the newest generation may mutate the view.
+  const requestGeneration = useRef(0)
 
   const read = useCallback(async (before?: number) => {
     if (!loader) return
+    const generation = ++requestGeneration.current
     setLoading(true)
     setError(null)
     try {
       const next = await loader(sessionId, before, PAGE_LIMIT)
+      if (generation !== requestGeneration.current) return
       setPage((current) => (current && before !== undefined
-        // An older page is prepended; rows already on screen keep their identity.
-        ? { ...next, entries: [...next.entries, ...current.entries], total: next.total }
+        // An older page is merged by record identity; overlapping/retried
+        // pages cannot duplicate a row or lower the Host high-watermark.
+        ? mergeTrajectoryPages(next, current)
         : next))
     } catch (cause) {
+      if (generation !== requestGeneration.current) return
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
-      setLoading(false)
+      if (generation === requestGeneration.current) setLoading(false)
     }
   }, [loader, sessionId])
 
   useEffect(() => {
+    requestGeneration.current += 1
     following.current = true
     setPage(null)
     setSelected(null)
     void read()
-  }, [read, sessionId])
+    return () => {
+      // Invalidate a request whose component/session lifetime just ended.
+      requestGeneration.current += 1
+    }
+  }, [read])
 
   useEffect(() => {
     if (!following.current || !scroller.current) return
