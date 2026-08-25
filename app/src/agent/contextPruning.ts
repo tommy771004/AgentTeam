@@ -37,7 +37,8 @@ export const DEFAULT_PRUNING_CONFIG: PruningConfig = {
 /** compaction CompactableMessage / llm ChatMessageExt 相容的最小形狀。 */
 export interface PrunableMessage {
   role: string
-  content: string | null
+  /** 多模態 content 只會原樣通過:pruning 只截 `typeof content === 'string'` 的 tool 結果。 */
+  content: string | null | unknown[]
   tool_calls?: Array<{
     id: string
     type: 'function'

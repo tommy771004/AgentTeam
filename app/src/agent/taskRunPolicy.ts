@@ -16,6 +16,7 @@ import {
   type AutomationSuggestion,
 } from './automationSuggestion.ts'
 import { validateEventTriggerSnapshot } from './eventMatcher.ts'
+import { MAX_RUN_QUEUE } from './runQueue.ts'
 import {
   isClaimedScheduleTrigger,
   validateScheduleTriggerSnapshot,
@@ -28,6 +29,61 @@ import type {
 } from './taskRunTypes.ts'
 
 export { resolveBusyPolicy, type BusyPolicy } from './taskRunTypes.ts'
+
+/**
+ * What a steer actually achieved. A safe park stops at the next tool boundary,
+ * so "the previous run was told to stop" and "the new goal is running" are two
+ * different facts and the thread must not conflate them.
+ */
+export type SteerOutcome =
+  /** Capacity came free inside the wait window; the new goal is running. */
+  | 'took-over'
+  /** The previous run was aborted but had not let go; the new goal is queued. */
+  | 'queued'
+  /** The previous run was aborted, but the queue refused the new goal. */
+  | 'aborted-not-queued'
+  /** Nothing abortable was behind the busy signal; the new goal did not start. */
+  | 'not-abortable'
+
+export type SteerNoticeInput = {
+  outcome: SteerOutcome
+  runningTitle?: string
+  partial?: string
+  /** 1-based queue position; only meaningful for `queued`. */
+  queuePosition?: number
+  /** Total items in the queue after this one was added. */
+  queueTotal?: number
+}
+
+/**
+ * The one sentence that says what a steer did. Both the thread bubble and the
+ * admission result's `error` are built from it, so the two can never drift
+ * into claiming different things about the same steer.
+ */
+export function steerOutcomeSummary(input: SteerNoticeInput): string {
+  const title = input.runningTitle ? `（${input.runningTitle.slice(0, 32)}）` : ''
+  switch (input.outcome) {
+    case 'took-over':
+      return `轉向目前執行：已中止前一個任務${title}，新目標已接手`
+    case 'queued':
+      return `轉向目前執行：已中止前一個任務${title}，但容量尚未釋出 — 新目標已排入佇列第 ${input.queuePosition || 1} 位（${input.queueTotal || 1}/${MAX_RUN_QUEUE}）`
+    case 'aborted-not-queued':
+      return `轉向目前執行：已中止前一個任務${title}，但佇列已滿或重複 — 新目標未啟動，請稍後重送`
+    case 'not-abortable':
+      return `轉向目前執行：無法中止前一個任務${title}，新目標未啟動`
+  }
+}
+
+/**
+ * The thread bubble: the summary above, plus what the stopped run had already
+ * achieved. That digest rides along in every branch — the partial progress is
+ * the cost of steering, and the user is owed it whichever way the steer landed.
+ */
+export function formatSteerNotice(input: SteerNoticeInput): string {
+  const headline = steerOutcomeSummary(input)
+  const partial = input.partial?.trim()
+  return partial ? `${headline}\n\n### 中止前摘要\n${partial}` : headline
+}
 
 /** Compact partial result when steer aborts a running task. */
 export function buildSteerPartialDigest(agent: AgentState): string {

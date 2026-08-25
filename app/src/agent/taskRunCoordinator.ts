@@ -24,7 +24,7 @@ import type {
   ExternalRunResult,
   RunSourceKind,
 } from './taskRunTypes.ts'
-import type { BusyPolicy } from './taskRunPolicy.ts'
+import type { BusyPolicy, SteerOutcome } from './taskRunPolicy.ts'
 import type { DispatchResult } from './runDispatch.ts'
 import type { HookEvaluation } from './hooks.ts'
 import type { ThreadRunner } from '../store/threadStore.ts'
@@ -408,6 +408,26 @@ export type FinalizeTaskRunInput = {
 }
 
 /**
+ * Per-run finalization claim. The first entry owns the whole terminal
+ * sequence; every later entry — the outer catch in `coordinateTaskRun` above
+ * all — reads the outcome the claim already produced.
+ *
+ * Holds the outcome promise rather than a boolean so a re-entry that lands
+ * while the sequence is still running waits for the same answer instead of
+ * starting a second one. `done` marks a finished claim; only finished claims
+ * are ever forgotten, so trimming can never free an in-flight run to restart.
+ */
+type FinalizationClaim = { outcome: Promise<ExternalRunResult>; done: boolean }
+const finalizationClaims = new Map<string, FinalizationClaim>()
+/**
+ * How many finished runs stay remembered. Only settled claims are forgotten,
+ * and forgetting one only means a much later call with that same runId would
+ * be treated as a fresh finalization — which cannot happen, because runIds are
+ * unique per run and re-entry is always same-tick with the first call.
+ */
+const MAX_FINALIZATION_CLAIMS = 256
+
+/**
  * Single finalization sequence for every terminal outcome:
  *   thread summary/bubble → afterRun → Archive → onSettled → release capacity → drain
  *
@@ -415,16 +435,153 @@ export type FinalizeTaskRunInput = {
  * that is deferred so outcome semantics stay stable.
  *
  * Only this function (and early/deny paths that call it) may drain the queue.
+ *
+ * Exactly-once is a property of this seam, not of caller discipline: the run
+ * claims finalization here, so a second entry can only return the first
+ * outcome. Capacity release and the queue drain sit in the claim holder's
+ * `finally`, which makes them obligations of *holding* the claim rather than
+ * steps of a sequence that an exception could skip.
  */
 export async function finalizeTaskRun(
   input: FinalizeTaskRunInput,
 ): Promise<ExternalRunResult> {
-  const [{ useAgentStore }, { useThreadStore }, { drainExternalRunQueue }] =
-    await Promise.all([
-      import('../store/agentStore.ts'),
-      import('../store/threadStore.ts'),
-      import('./runQueue.ts'),
-    ])
+  const claimed = finalizationClaims.get(input.runId)
+  if (claimed) return claimed.outcome
+
+  // onSettled is what closes scheduler / webhook / gateway bookkeeping, so it
+  // is owned here rather than inside the sequence: exactly once per run,
+  // including when the sequence dies before reaching its own settle step.
+  let settled = false
+  const settleOnce = async (result: ExternalRunResult) => {
+    if (settled) return
+    settled = true
+    // G11:每 run 一筆指標(finalization 唯一出口保證恰好一次)
+    try {
+      const { finalizeRunMetric } = await import('./metrics.ts')
+      finalizeRunMetric(input.runId, {
+        sourceKind: input.sourceKind,
+        path: result.path,
+        status: result.status,
+        ok: !result.error && !result.skipped,
+      })
+    } catch {
+      /* metrics must never block finalization */
+    }
+    try {
+      await window.subagents?.tools?.toolOutputSpillDispose?.({
+        runId: input.runId,
+        projectRoot: input.projectRoot,
+      })
+    } catch {
+      /* spill cleanup is bounded best effort and never changes the run result */
+    }
+    try {
+      await input.onSettled?.(result)
+    } catch {
+      /* caller errors non-fatal */
+    }
+  }
+
+  const outcome = (async (): Promise<ExternalRunResult> => {
+    try {
+      return await runFinalizationSequence(input, settleOnce)
+    } catch (error) {
+      // Finalization is this run's last owner. An unexpected throw here used
+      // to reach the caller's catch, which restarted finalization from the
+      // top and ended the run twice. The claim forbids that, so the ending
+      // this run does get has to be written here — once.
+      const message = error instanceof Error ? error.message : String(error)
+      const reason = `finalization 失敗：${message}`
+      const path = input.dispatchResult?.path || input.early?.path || 'builtin'
+      try {
+        // The durable terminal marker is the witness that the run already has
+        // an ending — the same key finalizeRecoveredExternalRun keys on. With
+        // one, the thread and the journal are already settled and a second
+        // ending would contradict them. Without one, the sequence died before
+        // writing any evidence, and the early-terminal path (which every deny
+        // and recovery entry shares) writes it now.
+        if (!hasJournalledEnding(input.runId)) {
+          return await runFinalizationSequence(
+            {
+              ...input,
+              dispatchResult: undefined,
+              early: {
+                error: reason,
+                path,
+                agent: input.early?.agent,
+              },
+            },
+            settleOnce,
+          )
+        }
+      } catch {
+        /* the closeout is the last resort; it must not replace the reason */
+      }
+      const failed: ExternalRunResult = {
+        path,
+        status: 'failed',
+        error: reason,
+        threadId: input.threadId,
+        runId: input.runId,
+      }
+      try {
+        const { useThreadStore } = await import('../store/threadStore.ts')
+        useThreadStore.getState().setThreadRunning(input.threadId, false, input.runId)
+      } catch {
+        /* the thread may already be gone; release still has to happen */
+      }
+      // A run that died in finalization is still a settled run downstream.
+      await settleOnce(failed)
+      return failed
+    } finally {
+      // 5) release capacity
+      await releaseRunCapacity(input.runId)
+      // 6) queue drain — only finalization may drain
+      try {
+        const { drainExternalRunQueue } = await import('./runQueue.ts')
+        void drainExternalRunQueue((o) =>
+          runTask({
+            ...o,
+            _fromQueue: true,
+            sourceKind: o.sourceKind || 'queue-drain',
+          }),
+        )
+      } catch {
+        /* a drain that cannot start is retried by the next finalization */
+      }
+      const mine = finalizationClaims.get(input.runId)
+      if (mine) mine.done = true
+      forgetSettledFinalizationClaims()
+    }
+  })()
+
+  finalizationClaims.set(input.runId, { outcome, done: false })
+  return outcome
+}
+
+/** Does the durable journal already record how this run ended? */
+function hasJournalledEnding(runId: string): boolean {
+  const entry = getJournalEntry('run', runId)
+  return Boolean(entry && ['success', 'failed', 'cancelled', 'interrupted'].includes(entry.status))
+}
+
+/** Trim the claim ledger, never touching a finalization still in flight. */
+function forgetSettledFinalizationClaims(): void {
+  if (finalizationClaims.size <= MAX_FINALIZATION_CLAIMS) return
+  for (const [runId, claim] of finalizationClaims) {
+    if (finalizationClaims.size <= MAX_FINALIZATION_CLAIMS) return
+    if (claim.done) finalizationClaims.delete(runId)
+  }
+}
+
+async function runFinalizationSequence(
+  input: FinalizeTaskRunInput,
+  settle: (result: ExternalRunResult) => Promise<void>,
+): Promise<ExternalRunResult> {
+  const [{ useAgentStore }, { useThreadStore }] = await Promise.all([
+    import('../store/agentStore.ts'),
+    import('../store/threadStore.ts'),
+  ])
 
   const thr = useThreadStore.getState()
   const { runId, threadId: tid, objective, settings } = input
@@ -442,44 +599,6 @@ export async function finalizeTaskRun(
     clearPlanMode(runId)
   } catch {
     /* non-fatal */
-  }
-
-  const drainOnce = () => {
-    void drainExternalRunQueue((o) =>
-      runTask({
-        ...o,
-        _fromQueue: true,
-        sourceKind: o.sourceKind || 'queue-drain',
-      }),
-    )
-  }
-
-  const settle = async (result: ExternalRunResult) => {
-    // G11:每 run 一筆指標(finalization 唯一出口保證恰好一次)
-    try {
-      const { finalizeRunMetric } = await import('./metrics.ts')
-      finalizeRunMetric(runId, {
-        sourceKind: input.sourceKind,
-        path: result.path,
-        status: result.status,
-        ok: !result.error && !result.skipped,
-      })
-    } catch {
-      /* metrics must never block finalization */
-    }
-    try {
-      await window.subagents?.tools?.toolOutputSpillDispose?.({
-        runId,
-        projectRoot: input.projectRoot,
-      })
-    } catch {
-      /* spill cleanup is bounded best effort and never changes the run result */
-    }
-    try {
-      await input.onSettled?.(result)
-    } catch {
-      /* caller errors non-fatal */
-    }
   }
 
   // ── Early terminal (hook deny / exception before or during dispatch) ──
@@ -569,9 +688,6 @@ export async function finalizeTaskRun(
       /* renderer activity is optional for headless / recovery paths */
     }
     await settle(failResult)
-    await releaseRunCapacity(runId)
-    thr.setThreadRunning(tid, false, runId)
-    drainOnce()
     return failResult
   }
 
@@ -870,12 +986,9 @@ export async function finalizeTaskRun(
     /* non-fatal */
   }
 
-  // 5) release capacity
-  await releaseRunCapacity(runId)
-
-  // 6) queue drain — only finalization may drain
-  drainOnce()
-
+  // Steps 5 (release capacity) and 6 (queue drain) are not steps of this
+  // sequence: they are obligations of holding the finalization claim, and run
+  // in finalizeTaskRun's finally whatever this sequence did.
   return finalResult
 }
 
@@ -1267,7 +1380,7 @@ async function coordinateTaskRun(
     { useThreadStore },
     { useSettingsStore },
     { dispatchThreadTask },
-    { enqueueExternalRun, listQueuedRuns, queueLength },
+    { enqueueExternalRun, listQueuedRuns, queueLength, MAX_RUN_QUEUE },
     { isContinueGoalPhrase },
     { detectAutomationSuggestion },
     { resolvePlanBubbleMetadata, classifyLoopType },
@@ -1286,6 +1399,8 @@ async function coordinateTaskRun(
   const {
     buildSteerPartialDigest,
     explicitLoopTypeForConversation,
+    formatSteerNotice,
+    steerOutcomeSummary,
     isAutomationSource,
     isInteractiveConversationSource,
     presentConversationAutomationSuggestion,
@@ -1475,21 +1590,87 @@ async function coordinateTaskRun(
       : undefined
 
     if (policy === 'steer' && !opts._fromQueue) {
-      // Interactive steer: capture partial digest, abort, then proceed
+      // Interactive steer: capture the partial digest, abort, then report what
+      // actually happened. The bubble is written after the outcome is known —
+      // announcing an abort up front is how the old path could say "已轉向"
+      // and then answer busy, leaving the user's instruction nowhere at all.
       const tid0 = opts.reuseThreadId || thrBusy.activeId
       const partial = buildSteerPartialDigest(agent.getRunState(busyRunId || undefined) || agent.agent)
-      if (tid0) {
-        const lines = [
-          `轉向目前執行：已中止前一個任務${runningTitle ? `（${runningTitle.slice(0, 32)}）` : ''}`,
-        ]
-        if (partial) lines.push('', '### 中止前摘要', partial)
-        thrBusy.pushBubble(tid0, 'system', lines.join('\n'))
+      // The bubble and the returned `error` are the same sentence, so the
+      // thread and the caller can never be told different stories.
+      const steerResult = (
+        outcome: SteerOutcome,
+        queuePosition?: number,
+        queueTotal?: number,
+      ): string => {
+        const shape = { outcome, runningTitle, partial, queuePosition, queueTotal }
+        if (tid0) thrBusy.pushBubble(tid0, 'system', formatSteerNotice(shape))
+        return steerOutcomeSummary(shape)
       }
-      if (busyRunId) useAgentStore.getState().stopExecution(busyRunId)
-      for (let i = 0; i < 20; i += 1) {
-        await new Promise((r) => setTimeout(r, 50))
-        capacity = await checkRunCapacity(runId, opts.reuseThreadId)
-        if (capacity.allowed) break
+      // Only a run still holding a capacity slot can be steered away from.
+      // A stale thread→run association is not something to abort, and busy is
+      // then the truthful answer rather than a lost race.
+      const abortableRunId =
+        busyRunId && useAgentStore.getState().activeRunIds.includes(busyRunId)
+          ? busyRunId
+          : null
+      if (!abortableRunId) {
+        return {
+          path: 'builtin',
+          status: 'skipped',
+          error: steerResult('not-abortable'),
+          threadId: tid0 || null,
+          runId,
+          skipped: true,
+          skipReason: 'busy',
+        }
+      } else {
+        useAgentStore.getState().stopExecution(abortableRunId)
+        for (let i = 0; i < 20; i += 1) {
+          await new Promise((r) => setTimeout(r, 50))
+          capacity = await checkRunCapacity(runId, opts.reuseThreadId)
+          if (capacity.allowed) break
+        }
+        if (capacity.allowed) {
+          steerResult('took-over')
+        } else {
+          // A safe park stops at the next tool boundary, so outliving the wait
+          // window is normal behaviour — not a reason to discard the new goal.
+          // It takes the same queue every other busy follow-up takes.
+          const item = enqueueExternalRun({
+            ...opts,
+            runId,
+            attachments,
+            unattended: opts.unattended ?? isAutomationSource(opts),
+          })
+          if (item) {
+            const pos = listQueuedRuns().findIndex((q) => q.id === item.id) + 1
+            return {
+              path: 'builtin',
+              status: 'skipped',
+              error: steerResult('queued', pos > 0 ? pos : queueLength(), queueLength()),
+              threadId: tid0 || null,
+              runId,
+              skipped: true,
+              skipReason: 'queued',
+              queued: true,
+              queueId: item.id,
+            }
+          }
+          // Unreachable while the queue dedupes on runId and the duplicate
+          // guard at the top of admission already rejects a re-queued runId —
+          // kept because the abort has happened either way, and the generic
+          // capacity wording below would flatly contradict the bubble.
+          return {
+            path: 'builtin',
+            status: 'skipped',
+            error: steerResult('aborted-not-queued'),
+            threadId: tid0 || null,
+            runId,
+            skipped: true,
+            skipReason: 'busy',
+          }
+        }
       }
     } else if (policy === 'queue' && !opts._fromQueue) {
       const item = enqueueExternalRun({
@@ -1504,7 +1685,7 @@ async function coordinateTaskRun(
         return {
           path: 'builtin',
           status: 'skipped',
-          error: `並行執行上限 ${capacity.limit}${runningTitle ? `（${runningTitle}）` : ''} — 已加入佇列第 ${posLabel} 位（${queueLength()}/24）`,
+          error: `並行執行上限 ${capacity.limit}${runningTitle ? `（${runningTitle}）` : ''} — 已加入佇列第 ${posLabel} 位（${queueLength()}/${MAX_RUN_QUEUE}）`,
           threadId: opts.reuseThreadId || thrBusy.activeId,
           runId,
           skipped: true,

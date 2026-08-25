@@ -27,6 +27,44 @@ function firstLine(text: string, max = 140): string {
 }
 
 /**
+ * Cut the thread bubble that *is* this turn's request out of the replayed
+ * history.
+ *
+ * Every execution path carries the current request in its own prompt slot
+ * ("當前請求" for the builtin/Pi Host turn, "Current request" for external
+ * CLI). The same text sitting at the tail of the chat history would then be
+ * injected twice: the user pays for the tokens twice and the repetition
+ * nudges the model's attention off the rest of the context.
+ *
+ * The comparison is strict equality on a trailing `user` bubble — deliberately
+ * not fuzzy. A merely similar earlier message is a different message, and
+ * dropping it would silently lose real context. Bubbles that are neither user
+ * nor assistant (system notes pushed after the request) are skipped over when
+ * looking for the tail but are never removed. Attachments are prepared on
+ * their own path, so an attachment-bearing bubble whose text equals the
+ * objective is cut exactly like a plain one.
+ */
+export function dropCurrentObjectiveFromHistory<T extends ChatHistoryBubble>(
+  bubbles: readonly T[] | undefined,
+  objective: string,
+): T[] {
+  const list = bubbles ? [...bubbles] : []
+  if (!objective) return list
+  let tail = -1
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const role = list[i]?.role
+    if (role === 'user' || role === 'assistant') {
+      tail = i
+      break
+    }
+  }
+  if (tail < 0) return list
+  if (list[tail].role !== 'user' || list[tail].content !== objective) return list
+  list.splice(tail, 1)
+  return list
+}
+
+/**
  * Build a bounded history block for system context.
  * - ≤ keepRecent messages: full recent turns (capped per message)
  * - older turns: one-line bullets only

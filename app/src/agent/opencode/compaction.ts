@@ -8,6 +8,7 @@
  */
 
 import type { LlmSettings } from '../types.ts'
+import { contentPartsToPlainText, type MultimodalContentPart } from '../../lib/chatAttachments.ts'
 import { chatCompletion } from '../llm.ts'
 import { getCompactionConfig, getSmallModel } from './agentRegistry.ts'
 import {
@@ -18,7 +19,13 @@ import {
 
 export type CompactableMessage = {
   role: string
-  content: string | null
+  /**
+   * Multimodal content rides through untouched. Only the head this module
+   * replaces with a summary is flattened (image part → `[image]`); the tail it
+   * retains keeps its parts verbatim, which is the only reason a vision
+   * workflow survives a compaction mid-conversation.
+   */
+  content: string | null | MultimodalContentPart[]
   tool_calls?: Array<{
     id: string
     type: 'function'
@@ -28,8 +35,13 @@ export type CompactableMessage = {
   name?: string
 }
 
+/** Text of a message for weighing and summarizing; images count as `[image]`. */
+function plainText(m: CompactableMessage): string {
+  return typeof m.content === 'string' ? m.content : contentPartsToPlainText(m.content)
+}
+
 function messageWeight(m: CompactableMessage): number {
-  let n = (m.content || '').length
+  let n = plainText(m).length
   if (m.tool_calls?.length) {
     for (const tc of m.tool_calls) {
       n += (tc.function?.name || '').length + (tc.function?.arguments || '').length
@@ -115,14 +127,15 @@ export async function maybeCompactMessages(
   // Build extractive summary without needing tool_calls structure
   const blob = old
     .map((m) => {
+      const text = plainText(m)
       if (m.role === 'assistant' && m.tool_calls?.length) {
         const names = m.tool_calls.map((t) => t.function.name).join(', ')
-        return `assistant: (tool_calls: ${names}) ${(m.content || '').slice(0, 400)}`
+        return `assistant: (tool_calls: ${names}) ${text.slice(0, 400)}`
       }
       if (m.role === 'tool') {
-        return `tool${m.tool_call_id ? `(${m.tool_call_id.slice(0, 8)})` : ''}: ${(m.content || '').slice(0, 800)}`
+        return `tool${m.tool_call_id ? `(${m.tool_call_id.slice(0, 8)})` : ''}: ${text.slice(0, 800)}`
       }
-      return `${m.role}: ${(m.content || '').slice(0, 1500)}`
+      return `${m.role}: ${text.slice(0, 1500)}`
     })
     .join('\n\n')
     .slice(0, 24_000)

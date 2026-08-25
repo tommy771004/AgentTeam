@@ -13,7 +13,11 @@
  * loader. Skills travel through the Host now — written to the Host-owned
  * directory, advertised by `<available_skills>`, expanded when pinned.
  */
-import { buildChatHistoryContext, type ChatHistoryBubble } from './chatHistory.ts'
+import {
+  buildChatHistoryContext,
+  dropCurrentObjectiveFromHistory,
+  type ChatHistoryBubble,
+} from './chatHistory.ts'
 import { buildContextPacket, formatSessionRecallBlock, type ContextPacket } from './hermes/contextPacket.ts'
 import { formatProjectGuidance, resolveProjectContext, summarizeProjectContext } from './projectContext.ts'
 import type { ArchiveRecord, LlmSettings } from './types.ts'
@@ -53,9 +57,11 @@ export async function buildPiTurnContext(input: PiTurnContextInput): Promise<PiT
     /* Guidance is additive; a missing bridge must not fail the turn. */
   }
 
+  // The objective travels in the 當前請求 slot below the packet; the bubble
+  // holding the same text must not be replayed as history on top of it.
   const recentChat =
     input.settings.referenceChatHistory !== false && input.bubbles?.length
-      ? buildChatHistoryContext(input.bubbles)
+      ? buildChatHistoryContext(dropCurrentObjectiveFromHistory(input.bubbles, objective))
       : ''
 
   let sessionRecall = ''

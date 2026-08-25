@@ -164,35 +164,56 @@ export function createContextGovernor(deps: ContextGovernorDeps): ContextGoverno
         )
       }
 
-      const vision = hasVisionParts(messages)
-      if (vision && overflowRisk) {
-        deps.log(
-          'WARN',
-          `context 估算 ${estTokens}/${contextWindow} tokens 已逼近上限,但 transcript 含影像無法壓縮`,
-        )
-      }
-
       // Fixed-round trigger: round 1 or every even round; overflow forces.
-      if (vision || !(overflowRisk || round === 1 || round % 2 === 0)) {
+      if (!(overflowRisk || round === 1 || round % 2 === 0)) {
         return inputMessages
       }
 
-      const flat: GovernorMessage[] = messages.map((m) => ({
-        role: m.role,
-        content:
-          typeof m.content === 'string' || m.content == null
-            ? (m.content as string | null)
-            : deps.contentToPlainText(m.content),
-        tool_calls: m.tool_calls,
-        tool_call_id: m.tool_call_id,
-        name: m.name,
-      }))
+      // A compaction always costs the summarized head its images. Under the
+      // parity trigger nothing is at risk yet, so the cheaper answer is not to
+      // run one — and the log says exactly that, because a line claiming the
+      // transcript "cannot be compacted" beside a compaction that happened is
+      // how this decision became unreadable in the first place.
+      const vision = hasVisionParts(messages)
+      if (vision && !overflowRisk) {
+        deps.log(
+          'INFO',
+          `context 估算 ${estTokens}/${contextWindow} tokens 未逼近上限,transcript 含影像故略過本輪壓縮`,
+        )
+        return inputMessages
+      }
+      if (vision) {
+        deps.log(
+          'WARN',
+          `context 估算 ${estTokens}/${contextWindow} tokens 已逼近上限,含影像 transcript 僅摘要較舊段落`,
+        )
+      }
+
+      // The compactor receives the transcript undamaged: it flattens only the
+      // head it replaces with a summary, so the tail it deliberately retains
+      // keeps its image parts (OpenCode's verbatim-retention promise).
+      // Flattening survives here for the checkpoint alone — persisted state
+      // must stay text-sized, and a resume offer is not a vision workflow.
+      // Bound to its own name because `messages` is rebound to the compacted
+      // transcript below: the checkpoint must keep meaning "before".
+      const preCompaction = messages
+      const flatten = (): GovernorMessage[] =>
+        preCompaction.map((m) => ({
+          role: m.role,
+          content:
+            typeof m.content === 'string' || m.content == null
+              ? (m.content as string | null)
+              : deps.contentToPlainText(m.content),
+          tool_calls: m.tool_calls,
+          tool_call_id: m.tool_call_id,
+          name: m.name,
+        }))
 
       let c: CompactResult
       try {
         c = await deps.compact(
           settings,
-          flat,
+          messages,
           overflowRisk
             ? {
                 force: true,
@@ -226,11 +247,11 @@ export function createContextGovernor(deps: ContextGovernorDeps): ContextGoverno
           /* non-fatal */
         }
 
-        // 2) checkpoint — pre-compaction messages (flat original)
+        // 2) checkpoint — pre-compaction messages (flattened for storage)
         try {
           await deps.saveCheckpoint(runId || threadId || 'adhoc', {
             summary: c.summary || '',
-            messages: flat,
+            messages: flatten(),
           })
         } catch {
           /* non-fatal */
@@ -242,7 +263,7 @@ export function createContextGovernor(deps: ContextGovernorDeps): ContextGoverno
             runId,
             threadId,
             summary: c.summary || '',
-            replacedMessages: Math.max(0, flat.length - c.messages.length + 1),
+            replacedMessages: Math.max(0, preCompaction.length - c.messages.length + 1),
             remainingMessages: c.messages.length,
             estimatedTokens: estTokens,
             contextWindow,
