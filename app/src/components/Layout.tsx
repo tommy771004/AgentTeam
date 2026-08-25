@@ -11,8 +11,6 @@ import { getElectronBridgeStatus } from '../lib/electronBridge'
 import { PiHostStatusPill } from './PiHostStatusPill'
 import { RunCompletionToasts } from './primitives/RunCompletionToasts'
 import { useRunCompletionNotices } from '../hooks/useRunCompletionNotices'
-// Vite-bundled brand mark (always in the JS asset graph — no public/ relative-path 404)
-import brandIconUrl from '../assets/subagents-icon-64.png'
 
 type NavItem = { to: string; label: string; icon: string; end?: boolean }
 type NavGroup = { title: string; items: NavItem[] }
@@ -108,7 +106,6 @@ export function Layout() {
   const bridge = useMemo(() => getElectronBridgeStatus(), [])
   const isMac = useIsMacDesktop()
   const primaryKey = isMac ? '⌘' : 'Ctrl+'
-  const platformLabel = isMac ? 'macOS' : 'Windows'
 
   const openLiveRun = () => {
     navigate('/')
@@ -170,38 +167,6 @@ export function Layout() {
             aria-hidden
           />
         )}
-        <div
-          className={`flex items-center gap-2.5 px-3 border-b border-line no-drag ${
-            isMac ? 'h-11' : 'h-12'
-          }`}
-        >
-          <img
-            src={brandIconUrl}
-            alt="SubAgents AI"
-            width={32}
-            height={32}
-            className="w-8 h-8 shrink-0 object-contain"
-            draggable={false}
-            onError={(e) => {
-              // Fallback to public/ brand pack (dev + packaged dist/brand)
-              const img = e.currentTarget
-              if (img.dataset.fallback === '1') return
-              img.dataset.fallback = '1'
-              img.src = `${import.meta.env.BASE_URL}brand/subagents-icon-64.png`
-            }}
-          />
-          {!collapsed && (
-            <div className="min-w-0 animate-macos-fade">
-              <div className="font-[family-name:var(--font-sora)] font-semibold text-primary text-[13px] tracking-tight truncate">
-                SubAgents
-              </div>
-              <div className="text-[10px] text-outline truncate tracking-wide">
-                Multi-agent · {platformLabel}
-              </div>
-            </div>
-          )}
-        </div>
-
         <nav className="flex-1 overflow-y-auto custom-scrollbar no-drag py-3 px-2 space-y-4">
           {NAV_GROUPS.map((group) => (
             <div key={group.title} className="stagger-children">

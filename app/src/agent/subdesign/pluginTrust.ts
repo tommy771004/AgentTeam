@@ -168,7 +168,7 @@ export async function requestCapabilityGrants(input: {
       reason: `Plugin「${input.snapshot.pluginId}」要求 ${capability} 權限，預設不授權。`,
       timeoutMs,
     })
-    if (decision === 'allow') granted.push(capability)
+    if (decision.decision === 'allow') granted.push(capability)
     else denied.push(capability)
   }
 

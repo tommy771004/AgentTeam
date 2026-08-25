@@ -45,7 +45,7 @@ export type PiToolResult = {
 
 export type PiToolApprovalPlan =
   | { need: false }
-  | { need: true; reason: string }
+  | { need: true; reason: string; hitl?: boolean }
 
 /**
  * What one pack tool is. `execute` returns structured results — an expected
@@ -468,6 +468,7 @@ function packPolicyRequirements(tool: PiPackTool, args: Record<string, unknown>,
     ...(approval?.need && !tool.policyMigration?.capabilityApproval && !tool.policyMigration?.approvalRequired
       ? { approvalRequired: approval.reason, sideEffect: true }
       : {}),
+    ...(approval?.need && approval.hitl ? { hitl: true } : {}),
   }
 }
 

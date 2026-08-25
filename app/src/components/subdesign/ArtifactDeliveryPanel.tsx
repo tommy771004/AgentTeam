@@ -42,7 +42,7 @@ export function ArtifactDeliveryPanel({ artifact, critique, critiquePassed }: { 
     setError(null)
     try {
       const decision = await requestAsk({ tool: 'design_artifact_export', args: { artifactId: artifact.id, revision: artifact.revision, format }, reason: `將 artifact「${artifact.title}」export 為 ${format.toUpperCase()}，並由你選擇輸出位置。` })
-      if (decision !== 'allow') {
+      if (decision.decision !== 'allow') {
         setMessage('Export 已取消或未獲核准。')
         return
       }

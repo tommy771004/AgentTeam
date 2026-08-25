@@ -41,7 +41,9 @@ function RatioBar({ ratio }: { ratio: number }) {
  * mixed with the inset it sits on, not faded to transparent, so the quietest
  * segment still has a value gap to stand on.
  */
-const BREAKDOWN_STRENGTH: Record<string, number> = { tool: 100, assistant: 68, reasoning: 44, user: 26 }
+// The quietest step still keeps a real value gap from the track it sits on;
+// a segment too faint to see is a measurement the reader cannot read.
+const BREAKDOWN_STRENGTH: Record<string, number> = { tool: 100, assistant: 76, reasoning: 56, user: 40 }
 
 function breakdownColor(key: string): string {
   return `color-mix(in srgb, var(--color-accent) ${BREAKDOWN_STRENGTH[key] ?? 40}%, var(--color-inset))`
@@ -55,11 +57,19 @@ function BreakdownBar({ breakdown }: { breakdown: ContextUsage['breakdown'] }) {
   return (
     <div className="mt-3">
       <div className="flex h-1.5 overflow-hidden rounded-full bg-inset" role="presentation">
-        {segments.map((segment) => (
+        {segments.map((segment, index) => (
           <div
             key={segment.key}
-            style={{ width: `${segment.share * 100}%`, background: breakdownColor(segment.key) }}
-            className="h-full transition-[width] duration-500 motion-reduce:transition-none"
+            style={{
+              flexBasis: `${segment.share * 100}%`,
+              // The last segment absorbs sub-pixel rounding, so the shares
+              // always fill the whole track — a bar that stops a hair short of
+              // its end reads as a broken fill, not as a proportion.
+              flexGrow: index === segments.length - 1 ? 1 : 0,
+              flexShrink: 0,
+              background: breakdownColor(segment.key),
+            }}
+            className="h-full transition-[flex-basis] duration-500 motion-reduce:transition-none"
           />
         ))}
       </div>
@@ -143,25 +153,39 @@ export function ContextUsagePanel({
 
   return (
     <div>
+      {/* Two different questions, two labelled rows, so neither figure can be
+          read as the other: 用量 is what this run SPENT (summed over steps),
+          上下文 is how full the model's window currently is (the last prompt).
+          Both labels sit in one column so the numbers line up beside them. */}
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="font-[family-name:var(--font-mono)] text-[13px] tabular-nums text-ink">
-            {formatTokens(usage.tokens.total)}
-            <span className="text-ink-3"> tokens</span>
-            {usage.costUsd === undefined ? null : (
-              <>
-                <span className="text-ink-3"> · </span>
-                {formatUsd(usage.costUsd)}
-              </>
-            )}
-          </p>
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-baseline gap-2">
+            <span className="w-10 shrink-0 text-[10px] text-ink-3">用量</span>
+            <span className="font-[family-name:var(--font-mono)] text-[13px] tabular-nums text-ink">
+              {formatTokens(usage.tokens.total)}
+              <span className="text-ink-3"> tokens</span>
+              {usage.costUsd === undefined ? null : (
+                <>
+                  <span className="text-ink-3"> · </span>
+                  {formatUsd(usage.costUsd)}
+                </>
+              )}
+            </span>
+          </div>
           {usage.contextTokens === undefined ? null : (
-            <p className="mt-1 text-[10px] text-ink-3">
-              上下文 <span className="font-[family-name:var(--font-mono)] tabular-nums">{formatTokens(usage.contextTokens)}</span>
-              {usage.contextWindow === undefined
-                ? ' tokens（模型 context window 未知）'
-                : <> / <span className="font-[family-name:var(--font-mono)] tabular-nums">{formatTokens(usage.contextWindow)}</span></>}
-            </p>
+            <div className="flex items-baseline gap-2">
+              <span className="w-10 shrink-0 text-[10px] text-ink-3">上下文</span>
+              <span className="font-[family-name:var(--font-mono)] text-[11px] tabular-nums text-ink-2">
+                {formatTokens(usage.contextTokens)}
+                {usage.contextWindow === undefined ? (
+                  <span className="font-[family-name:var(--font-inter)] text-[10px] text-ink-3">
+                    {' '}tokens · context window 未知
+                  </span>
+                ) : (
+                  <> / {formatTokens(usage.contextWindow)}</>
+                )}
+              </span>
+            </div>
           )}
         </div>
         {usage.ratio === undefined ? null : (

@@ -115,7 +115,7 @@ function PiHostEventBootstrap() {
           void (async () => {
             try {
               const { usePermissionAskStore } = await import('./store/permissionAskStore')
-              const hitl = await usePermissionAskStore.getState().requestAsk({
+              const outcome = await usePermissionAskStore.getState().requestAsk({
                 runId: payload.runId,
                 tool: payload.tool,
                 args: payload.args || {},
@@ -125,7 +125,8 @@ function PiHostEventBootstrap() {
               await window.subagents?.piHost?.approvals?.resolve?.({
                 runId: payload.runId,
                 callId: payload.callId,
-                decision: hitl === 'allow' ? 'allow' : 'deny',
+                decision: outcome.decision,
+                ...(outcome.answer ? { answer: outcome.answer } : {}),
               })
             } catch {
               /* a failed transport leaves the Host's own timeout to deny */

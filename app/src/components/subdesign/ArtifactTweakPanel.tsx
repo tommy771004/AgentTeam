@@ -102,7 +102,7 @@ export function ArtifactTweakPanel({ artifact }: { artifact: SubDesignArtifact |
     setError(null)
     try {
       const decision = await requestAsk({ tool: 'design_artifact_patch', args: { artifactId: artifact.id, tweakId: tweak.id, value }, reason: `套用「${tweak.label}」即時參數，建立新的 artifact revision。` })
-      if (decision !== 'allow') { setMessage('Tweak 已取消或未獲核准。'); return }
+      if (decision.decision !== 'allow') { setMessage('Tweak 已取消或未獲核准。'); return }
       const api = window.subagents?.subdesign
       if (!api) throw new Error('artifact tweak 需要 Electron desktop。')
       const result = tweak.inferred
@@ -127,7 +127,7 @@ export function ArtifactTweakPanel({ artifact }: { artifact: SubDesignArtifact |
     setError(null)
     try {
       const decision = await requestAsk({ tool: 'design_artifact_patch', args: { artifactId: artifact.id, path: advancedPath, expectedMatches }, reason: `對 artifact「${artifact.title}」做一次 exact in-place patch。` })
-      if (decision !== 'allow') { setMessage('Patch 已取消或未獲核准。'); return }
+      if (decision.decision !== 'allow') { setMessage('Patch 已取消或未獲核准。'); return }
       const result = await window.subagents?.subdesign?.patchArtifact?.({ artifact, operations: [{ path: advancedPath, find, replace, expectedMatches: Math.max(1, Math.min(12, Number(expectedMatches) || 1)) }], projectRoot: projectRoot || undefined })
       if (!result?.ok || !result.artifact) throw new Error(result?.error || 'artifact patch 失敗。')
       const stored = registerArtifact(result.artifact, { briefId: artifact.briefId }, projectRoot || undefined)

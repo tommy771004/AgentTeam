@@ -35,12 +35,22 @@ const askUser: PiPackTool = {
     properties: {
       question: { type: 'string', description: 'What to ask' },
       context: { type: 'string', description: 'Optional background for the question' },
+      options: {
+        type: 'array',
+        items: { type: 'string' },
+        maxItems: 12,
+        description: 'Optional choices the user can pick from; omit to request a free-text answer',
+      },
+      multiSelect: { type: 'boolean', description: 'Allow picking several options (default false)' },
+      allowFreeform: { type: 'boolean', description: 'Allow a free-text answer alongside the options (default true)' },
     },
     required: ['question'],
   },
   // The question IS an approval-shaped ask; unattended runs refuse it after
-  // their timeout rather than waiting out a person who is not there.
-  approval: () => ({ need: true, reason: 'ask_user 等待使用者回覆' }),
+  // their timeout rather than waiting out a person who is not there. hitl
+  // makes it surface even under complete/full access: asking the user is the
+  // tool's whole purpose, so no policy may silently auto-answer it.
+  approval: () => ({ need: true, reason: 'ask_user 等待使用者回覆', hitl: true }),
   execute: async (args) => {
     const question = String(args.question || '').trim()
     if (!question) return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'question 必填' }) }], details: { ok: false, error: 'question 必填' } }
