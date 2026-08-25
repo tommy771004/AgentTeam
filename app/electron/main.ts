@@ -2370,6 +2370,7 @@ ipcMain.handle('pi-host:settings:profile', async (_evt, role?: Record<string, un
 ipcMain.handle('pi-host:sessions:create', async (_evt, title?: string, threadId?: string) => piHostSupervisor.createSession(title, threadId))
 ipcMain.handle('pi-host:sessions:create-child', async (_evt, input: Record<string, unknown>) => piHostSupervisor.createChildSession(input || {}))
 ipcMain.handle('pi-host:sessions:list', async () => ({ sessions: await piHostSupervisor.listSessions() }))
+ipcMain.handle('pi-host:sessions:record', async (_evt, sessionId: string, before?: number, limit?: number) => ({ page: await piHostSupervisor.readSessionRecord(sessionId, before, limit) }))
 ipcMain.handle('pi-host:runs:list', async () => ({ queue: await piHostSupervisor.listQueuedRuns() }))
 ipcMain.handle('pi-host:runs:enqueue', async (_evt, input: Record<string, unknown>) => ({ queue: await piHostSupervisor.enqueueRun(input || {}) }))
 ipcMain.handle('pi-host:runs:cancel', async (_evt, runId: string) => ({ queue: await piHostSupervisor.cancelQueuedRun(runId) }))
@@ -2392,6 +2393,13 @@ ipcMain.handle('pi-host:extensions:reload', async (_evt, id: string) => piHostSu
 ipcMain.handle('pi-host:extensions:set-enabled', async (_evt, input: { id: string; enabled: boolean }) => piHostSupervisor.mutateExtension('extensions/set-enabled', input))
 ipcMain.handle('pi-host:extensions:uninstall', async (_evt, id: string) => piHostSupervisor.mutateExtension('extensions/uninstall', { id }))
 ipcMain.handle('pi-host:tools:list', async () => ({ builtinTools: await piHostSupervisor.listTools() }))
+ipcMain.handle('pi-host:tools:catalog', async () => ({ catalog: await piHostSupervisor.listCatalog() }))
+ipcMain.handle('pi-host:resources:list', async () => piHostSupervisor.listResources())
+ipcMain.handle('pi-host:resources:sync-skills', async (_evt, skills: Array<{ name?: string; description?: string; body?: string; status?: string }>) => piHostSupervisor.syncSkills(skills || []))
+ipcMain.handle('pi-host:approvals:resolve', async (_evt, input: { runId: string; callId: string; decision: 'allow' | 'deny'; answer?: string }) => {
+  const response = await piHostSupervisor.resolveApproval(input)
+  return response
+})
 ipcMain.handle('pi-host:sessions:fork', async (_evt, sessionId: string) => piHostSupervisor.forkSession(sessionId))
 ipcMain.handle('pi-host:sessions:reset', async (_evt, sessionId: string) => piHostSupervisor.resetSession(sessionId))
 ipcMain.handle('pi-host:sessions:archive', async (_evt, sessionId: string) => piHostSupervisor.archiveSession(sessionId))

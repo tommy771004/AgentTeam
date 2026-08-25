@@ -33,7 +33,7 @@ import {
   buildExternalCliDelegateContract,
   capabilitiesForRunner,
 } from './runners/types.ts'
-import { resolveRunSettingsOverrides, snapshotRunSettings } from './runSettingsSnapshot.ts'
+import { buildRunContextPolicy, resolveRunSettingsOverrides, snapshotRunSettings, withRunShellPolicy } from './runSettingsSnapshot.ts'
 import { normalizeExternalCliRunPolicy } from './externalCliRunSession.ts'
 import { snapshotExternalCliConnectorRequirements } from './externalCliConnectorSnapshot.ts'
 import { orchestrationFromAgent } from './runLifecycle.ts'
@@ -1870,12 +1870,22 @@ async function coordinateTaskRun(
 
   // Phase 3 item 3: freeze dispatch fields once; runDispatch only selects runner.
   // Pin project root on the snapshot so later UI project switches cannot leak in.
+  //
+  // Order matters. An explicit root (a scheduler pinning its own project) wins;
+  // then the conversation's OWN binding, so a run started here cannot inherit
+  // whichever folder some other conversation last left in the global picker;
+  // the global root is only the default for a thread that has never been bound.
   if (!overrides.projectRoot) {
+    const boundRoot = useThreadStore.getState().threads.find((thread) => thread.id === tid)?.projectRoot
     overrides.projectRoot =
       opts.projectRoot?.trim() ||
+      boundRoot?.trim() ||
       (await import('../store/projectStore.ts')).useProjectStore.getState().root ||
       undefined
   }
+  // Whatever it resolved to is now this conversation's project, so the next run
+  // resolves the same way instead of falling back to the picker again.
+  if (overrides.projectRoot) useThreadStore.getState().setThreadProject(tid, overrides.projectRoot)
 
   // Outbound Data Gate: when protection is active, pin tools to a provider-specific
   // Sanitized Workspace (Restricted Project View) created in Electron main.
@@ -1887,6 +1897,12 @@ async function coordinateTaskRun(
       decideRestrictedViewAdmission,
     } = await import('./outbound/outboundGate.ts')
     const mode = effectiveOutboundGuardFromSettings(settings)
+    // ADR-0047: the builtin shell is gated Host-side, from THIS run's posture.
+    // Pinning it here — not in buildRunContextPolicy — keeps one derivation of
+    // the mode shared with the Restricted View admission below.
+    const admittedPolicy = overrides.contextPolicySnapshot
+      ?? buildRunContextPolicy(settings, { model: overrides.model, temporary, project: overrides.projectRoot })
+    overrides.contextPolicySnapshot = withRunShellPolicy(admittedPolicy, { effectiveMode: mode })
     if (isProtectionActive(mode)) {
       const bridgeAvailable = typeof window.subagents?.outbound?.prepareRunView === 'function'
       const projectRoot = (overrides.projectRoot || '').trim()
@@ -1948,6 +1964,12 @@ async function coordinateTaskRun(
       }
       if (admission.action === 'use-view' && prepare && prepare.ok) {
         overrides.projectRoot = admission.viewRoot
+        // The shell gate refuses absolute paths escaping this view, and under
+        // `required` refuses entirely until isolation is proven main-side.
+        overrides.contextPolicySnapshot = withRunShellPolicy(admittedPolicy, {
+          effectiveMode: mode,
+          viewRoot: admission.viewRoot,
+        })
         // Ticket 18: pin local view root so tools resolve via single truth
         // even when a call site omits explicit projectRoot (main remains owner).
         try {

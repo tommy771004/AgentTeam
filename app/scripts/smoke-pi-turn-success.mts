@@ -86,8 +86,13 @@ try {
   assert.equal(settled.result.items[0].type, 'assistant_message')
   assert.equal(settled.result.items[0].content, 'hello from Pi')
   assert.equal(requestSeen, true)
-  assert.ok(requestBody?.tools?.some((tool) => Boolean(tool && typeof tool === 'object' && (tool as { function?: { name?: string } }).function?.name === 'grep')))
-  assert.ok(requestBody?.tools?.every((tool) => Boolean(tool && typeof tool === 'object' && (tool as { function?: { name?: string } }).function?.name === 'grep')))
+  // A restricted allowlist exposes grep plus the ALWAYS-ON pack tools —
+  // and never a capability-gated tool whose capability has not loaded.
+  const names = (requestBody?.tools || []).map((tool: { function?: { name?: string } }) => tool?.function?.name)
+  const ALWAYS_ON = ['ask_user', 'update_plan', 'datetime_now', 'table_parse', 'json_extract_lite', 'tool_output_read', 'load_capability', 'tool_search', 'run_code']
+  assert.equal(names.includes('grep'), true)
+  assert.ok(names.every((name: string) => name === 'grep' || ALWAYS_ON.includes(name)), `unexpected tools in restricted turn: ${names.join(', ')}`)
+  assert.equal(names.includes('http_fetch'), false, 'capability-gated tools stay out until loaded')
   send(5, 'sessions/list')
   const listed = await waitFor((message) => message.id === 5)
   const projected = listed.result.sessions.find((candidate: { id: string }) => candidate.id === sessionId)

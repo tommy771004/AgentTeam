@@ -11,12 +11,12 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { runBash } from './shellBridge'
+import { runBash } from './shellBridge.ts'
 import {
   executableLookupCommand,
   firstExecutablePath,
   quoteShellArg,
-} from './platformProcess'
+} from './platformProcess.ts'
 
 export type CodegraphStatus = {
   installed: boolean

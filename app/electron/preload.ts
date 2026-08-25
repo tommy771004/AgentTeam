@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
 import type { PiTurnSettlement } from '../src/agent/piHostRun'
+import type { TurnRecordPage } from '../src/agent/turnRecord'
 import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
 import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from '../src/agent/subdesign/pluginExecution'
 import type { SubDesignMetadataKind } from '../src/agent/subdesign/metadataKinds'
@@ -69,6 +70,8 @@ const api = {
         create: (title?: string, threadId?: string) => ipcRenderer.invoke('pi-host:sessions:create', title, threadId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         createChild: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:sessions:create-child', input) as Promise<{ sessionId: string; sessions: unknown[] }>,
         list: () => ipcRenderer.invoke('pi-host:sessions:list') as Promise<{ sessions: unknown[] }>,
+        record: (sessionId: string, before?: number, limit?: number) =>
+          ipcRenderer.invoke('pi-host:sessions:record', sessionId, before, limit) as Promise<{ page: TurnRecordPage }>,
         fork: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:fork', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         reset: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:reset', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         archive: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:archive', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
@@ -82,8 +85,14 @@ const api = {
         settle: (runId: string, settlement: PiTurnSettlement) => ipcRenderer.invoke('pi-host:runs:settle', runId, settlement) as Promise<{ run?: unknown; queue: unknown[]; settlement: string }>,
       },
       resources: {
-        list: () => ipcRenderer.invoke('pi-host:resources:list') as Promise<{ resources: unknown[] }>,
+        list: () => ipcRenderer.invoke('pi-host:resources:list') as Promise<{ resources?: Array<{ id: string; kind: string; source: string; enabled: boolean; reason?: string }>; diagnostics?: Array<{ path: string; message?: unknown }> }>,
         reload: (resources: unknown[]) => ipcRenderer.invoke('pi-host:resources:reload', resources) as Promise<{ resources: unknown[] }>,
+        syncSkills: (skills: Array<{ name?: string; description?: string; body?: string; status?: string }>) =>
+          ipcRenderer.invoke('pi-host:resources:sync-skills', skills) as Promise<{ skillsDir: string; results: Array<{ name: string; ok: boolean; status?: string; filePath?: string; slug?: string; error?: string }> }>,
+      },
+      approvals: {
+        resolve: (input: { runId: string; callId: string; decision: 'allow' | 'deny'; answer?: string }) =>
+          ipcRenderer.invoke('pi-host:approvals:resolve', input) as Promise<unknown>,
       },
       memory: {
         list: () => ipcRenderer.invoke('pi-host:memory:list') as Promise<{ memories: unknown[] }>,
@@ -106,13 +115,14 @@ const api = {
         uninstall: (id: string) => ipcRenderer.invoke('pi-host:extensions:uninstall', id) as Promise<{ removed?: boolean }>,
       },
       turn: {
-        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: { memoryEnabled: boolean; memoryWriteEnabled: boolean; referenceChatHistory: boolean; temporary: boolean; project?: string; contextWindowTokens?: number }; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }; pluginExecution?: SubDesignPluginExecutionProjection }>,
+        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: { memoryEnabled: boolean; memoryWriteEnabled: boolean; referenceChatHistory: boolean; temporary: boolean; project?: string; contextWindowTokens?: number; outboundShellMode?: 'required' | 'optional' | 'demo' | 'off'; shellIsolationVerified?: boolean; viewRoot?: string }; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }; pluginExecution?: SubDesignPluginExecutionProjection }>,
         cancel: (runId: string) => ipcRenderer.invoke('pi-host:turn:cancel', runId) as Promise<{ runId: string; settlement: string }>,
         interrupt: (input: { runId: string; reason?: 'user' | 'timeout' }) =>
           ipcRenderer.invoke('pi-host:turn:interrupt', input) as Promise<{ runId: string; settlement: string; interruptReason?: 'user' | 'timeout' }>,
       },
       tools: {
       list: () => ipcRenderer.invoke('pi-host:tools:list') as Promise<{ builtinTools: string[] }>,
+        catalog: () => ipcRenderer.invoke('pi-host:tools:catalog') as Promise<{ catalog: Array<{ name: string; description: string; pack: string; source: 'discovered' | 'installed'; active: boolean; available: boolean; reason?: string }> }>,
         execute: (tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash' | 'code' | 'mcp', params: Record<string, unknown>) =>
         ipcRenderer.invoke('pi-host:tools:execute', { tool, params }) as Promise<{ tool: string; content: unknown }>,
     },

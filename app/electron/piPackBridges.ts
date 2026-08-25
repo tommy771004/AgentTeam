@@ -1,0 +1,108 @@
+import type { PiMemory } from './piMemoryExtension.ts'
+import type { PiContextPacket } from './piDelegationExtension.ts'
+
+/**
+ * The bridges between extension packs and Host-owned state.
+ *
+ * Packs execute inside per-session runtimes, while the durable state they
+ * read and write — memories, child sessions, the run queue — lives in the
+ * protocol server's snapshot. Rather than giving packs a second store (the
+ * exact disease this effort treats), each bridge is a narrow accessor the
+ * server installs once; when no server is running, accessors are absent and
+ * tools answer structurally instead of pretending.
+ */
+
+export type PiMemoryBridgeAccess = {
+  recall: (query: string, project?: string, limit?: number) => PiMemory[]
+  search: (query: string, limit?: number) => PiMemory[]
+  get: (id: string) => PiMemory | undefined
+  add: (memory: PiMemory) => void
+}
+
+let memoryBridge: PiMemoryBridgeAccess | undefined
+
+export function setPiMemoryBridge(access: PiMemoryBridgeAccess): void {
+  memoryBridge = access
+}
+
+/** Absent-bridge reads answer empty rather than throwing a turn away. */
+export function piMemoryBridge(): PiMemoryBridgeAccess {
+  return memoryBridge ?? {
+    recall: () => [],
+    search: () => [],
+    get: () => undefined,
+    add: () => {},
+  }
+}
+
+export type PiDelegatedRunView = {
+  runId: string
+  sessionId: string
+  status: 'queued' | 'claimed' | 'settled' | 'interrupted'
+  settlement?: string
+  parentSessionId?: string
+  role?: string
+  depth?: number
+}
+
+export type PiDelegationBridgeAccess = {
+  /** Create a child session through the same validation as `sessions/create`. */
+  createChild: (input: { parentSessionId: string; role: string; profile: Record<string, unknown>; context: PiContextPacket; depth: number }) => Promise<{ sessionId: string }>
+  /** Queue the child's first turn on the same run queue automation claims from. */
+  enqueueChildRun: (input: { runId: string; sessionId: string; prompt: string }) => Promise<void>
+  /** Every background work item this Host still knows about. */
+  listRuns: () => PiDelegatedRunView[]
+}
+
+let delegationBridge: PiDelegationBridgeAccess | undefined
+
+export function setPiDelegationBridge(access: PiDelegationBridgeAccess): void {
+  delegationBridge = access
+}
+
+export function piDelegationBridge(): PiDelegationBridgeAccess | undefined {
+  return delegationBridge
+}
+
+/* ── Plan snapshots ──────────────────────────────────────────────────── */
+
+export type PiPlanStep = { id: string; title: string; status: 'pending' | 'in_progress' | 'done' }
+
+/**
+ * The live plan per session. The durable copy is the Turn Record's `notice`
+ * entry the tool appends, so a finished run replays its plans without this
+ * map; this only carries what a RUNNING panel needs.
+ */
+const livePlans = new Map<string, PiPlanStep[]>()
+
+export function setPiLivePlan(sessionId: string, steps: PiPlanStep[]): void {
+  livePlans.set(sessionId, steps.map((step) => ({ ...step })))
+}
+
+export function getPiLivePlan(sessionId: string): PiPlanStep[] | undefined {
+  const plan = livePlans.get(sessionId)
+  return plan ? plan.map((step) => ({ ...step })) : undefined
+}
+
+/* ── Tool output store ───────────────────────────────────────────────── */
+
+export type PiStoredToolOutput = { id: string; tool: string; text: string; at: number }
+
+const MAX_STORED_OUTPUTS = 64
+
+/**
+ * Full outputs of recent pack executions, so `tool_output_read` can page back
+ * through something that was truncated in the model-visible content.
+ */
+const storedOutputs: PiStoredToolOutput[] = []
+
+export function storePiToolOutput(tool: string, text: string): string {
+  const id = `out-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  storedOutputs.push({ id, tool, text, at: Date.now() })
+  while (storedOutputs.length > MAX_STORED_OUTPUTS) storedOutputs.shift()
+  return id
+}
+
+export function readPiStoredOutput(id: string): PiStoredToolOutput | undefined {
+  return storedOutputs.find((output) => output.id === id)
+}

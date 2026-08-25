@@ -518,59 +518,6 @@ export const TOOL_DEFINITIONS = {
     owningCapability: 'memory',
     presentCall: searchMatchesCard('query'),
   },
-  skill_list: {
-    description: "List available skills (procedural memory)",
-    keywords: ["skill","skills","procedure","playbook"],
-    parameters: {
-      "type": "object",
-      "properties": {}
-    },
-    owningCapability: 'skills',
-    presentCall: labelledCard('name', '列出技能', 'read'),
-  },
-  skill_load: {
-    description: "Load full SKILL.md content by name",
-    keywords: ["skill","load skill","playbook","procedure"],
-    parameters: {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "Skill name"
-        }
-      },
-      "required": [
-        "name"
-      ]
-    },
-    owningCapability: 'skills',
-    presentCall: labelledCard('name', '載入技能', 'read'),
-  },
-  skill_save: {
-    description: "Save or update a skill document",
-    keywords: ["save skill","create skill","write skill"],
-    parameters: {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "description": {
-          "type": "string"
-        },
-        "body": {
-          "type": "string",
-          "description": "Markdown skill body"
-        }
-      },
-      "required": [
-        "name",
-        "body"
-      ]
-    },
-    owningCapability: 'skills',
-    presentCall: mutationCard('name', '儲存技能'),
-  },
   mcp_list_tools: {
     description: "List tools from configured MCP servers",
     keywords: ["mcp","list tools","external tool"],

@@ -2364,10 +2364,15 @@ await test('drift guard: rewind snapshots wired into write tools + thread rewind
   const fs = await import('node:fs')
   const helpers = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolIoHelpers.ts'), 'utf8')
   assert.match(helpers, /recordRewindSnapshot/)
-  const writeTools = ['workspace_write', 'workspace_delete', 'workspace_move']
+  // ADR-0027 removal: workspace_write's renderer handler is GONE; the Host
+  // owns writes now. The guard asserts the removal holds and the remaining
+  // mutating renderer tools still record their rewind kinds.
+  const removed = fs.existsSync(path.join(appRoot, 'src/agent/tools/registered/workspace_write.ts'))
+  assert.equal(removed, false, 'workspace_write renderer handler must stay deleted')
+  const writeTools = ['workspace_delete', 'workspace_move']
     .map((n) => fs.readFileSync(path.join(appRoot, `src/agent/tools/registered/${n}.ts`), 'utf8'))
     .join('\n')
-  for (const kind of ["kind: 'write'", "kind: 'delete'", "kind: 'move'"]) {
+  for (const kind of ["kind: 'delete'", "kind: 'move'"]) {
     assert.ok(writeTools.includes(kind), `registered write tools record rewind ${kind}`)
   }
   const store = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')

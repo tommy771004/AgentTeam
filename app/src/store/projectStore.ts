@@ -61,6 +61,24 @@ function nameFromPath(p: string) {
   return parts[parts.length - 1] || p || '—'
 }
 
+/**
+ * Bind the conversation on screen to the folder just chosen.
+ *
+ * Imported lazily: projectStore is loaded by boot paths that must not drag the
+ * whole thread store in with them, and this is a one-way notification, never a
+ * read of thread state.
+ */
+async function bindActiveThreadToRoot(root: string): Promise<void> {
+  if (!root) return
+  try {
+    const { useThreadStore } = await import('./threadStore.ts')
+    const threads = useThreadStore.getState()
+    if (threads.activeId) threads.setThreadProject(threads.activeId, root)
+  } catch {
+    /* thread store is unavailable in restricted/browser boots */
+  }
+}
+
 export const useProjectStore = create<ProjectStore>((set, get) => ({
   root: loadRoot(),
   name: '—',
@@ -237,6 +255,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const r = root.trim()
     set({ root: r, name: nameFromPath(r) || '—' })
     saveRoot(r)
+    // Changing the folder is aimed at the conversation the user is looking at,
+    // so bind it here. Without this the root stays a single global the next run
+    // of ANY conversation silently adopts. Boot-time restores run before the
+    // thread store hydrates, so they find no active thread and bind nothing.
+    void bindActiveThreadToRoot(r)
     // Keep electron workspace_* tools & default cwd in sync with ProjectContextBar
     try {
       await window.subagents?.project?.setActiveRoot?.(r || null)

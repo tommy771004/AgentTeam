@@ -121,8 +121,12 @@ try {
   const projected = listed.result.sessions.find((candidate: { id: string }) => candidate.id === sessionId)
   // History is derived from the Turn Record, so it carries what the agent DID
   // as well as what it said — in the order it happened.
+  // Every assistant message is on the record where it happened: the opening
+  // narration keeps its place BEFORE the tool it preceded, and the conclusion
+  // is still what settles the turn.
   assert.deepEqual(projected.messages, [
     { role: 'user', content: '分析這個專案' },
+    { role: 'assistant', content: PREAMBLE },
     { role: 'tool', content: '→ grep(call_grep_1)' },
     { role: 'tool', content: '← grep(call_grep_1) success' },
     { role: 'assistant', content: CONCLUSION },

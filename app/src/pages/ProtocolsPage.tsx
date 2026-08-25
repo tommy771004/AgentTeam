@@ -10,7 +10,7 @@ import { RunProcessFeed } from '../components/RunProcessFeed'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { ComposerQuickActions } from '../components/ComposerQuickActions'
 import { usePermissionAskStore } from '../store/permissionAskStore'
-import { useAgentStore } from '../store/agentStore'
+import { IDLE_AGENT_STATE, useAgentStore } from '../store/agentStore'
 import { useRunActivityStore } from '../store/runActivityStore'
 import { useSlashExecutor } from '../hooks/useSlashExecutor'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
@@ -92,7 +92,13 @@ export function ProtocolsPage() {
     clearBubbles,
   } = useThreadStore()
   const selectActivityRun = useRunActivityStore((s) => s.selectRun)
-  const sessionAllow = usePermissionAskStore((s) => s.sessionAllow)
+  // Per-thread, matching where the grant is actually stored and enforced. The
+  // legacy `sessionAllow` scalar is only ever set for a run with no thread, so
+  // reading it here showed the badge for a grant this conversation never made —
+  // and never showed one it did, leaving the user no way to revoke it.
+  const sessionAllow = usePermissionAskStore((s) =>
+    activeId ? s.sessionAllowByThread[activeId] === true : s.sessionAllow,
+  )
   const setSessionAllow = usePermissionAskStore((s) => s.setSessionAllow)
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -104,8 +110,10 @@ export function ProtocolsPage() {
   const presentationActive = useAgentStore((s) =>
     presentationRunId ? s.activeRunIds.includes(presentationRunId) : false,
   )
+  // Strictly run-scoped: a conversation with no run of its own shows nothing,
+  // never `s.agent`, which is whichever run the store last had selected.
   const presentationAgent = useAgentStore((s) =>
-    presentationRunId ? s.runStates[presentationRunId] || s.agent : s.agent,
+    (presentationRunId ? s.runStates[presentationRunId] : undefined) || IDLE_AGENT_STATE,
   )
   const approvalPending = usePermissionAskStore((s) =>
     Boolean(
@@ -487,12 +495,15 @@ export function ProtocolsPage() {
                 <div className="w-full space-y-4 pb-2">
                   {(() => {
                     const items = thread?.bubbles || []
-                    // Codex order: …user → system → [process] → assistant
-                    const lastUser = items.map((b) => b.role).lastIndexOf('user')
-                    const head = lastUser >= 0 ? items.slice(0, lastUser + 1) : items
-                    const rest = lastUser >= 0 ? items.slice(lastUser + 1) : []
-                    const midSystems = rest.filter((b) => b.role === 'system')
-                    const midAssistants = rest.filter((b) => b.role !== 'system')
+                    // Recorded order, exactly. Bucketing the tail into
+                    // "systems, then the live feed, then assistants" put hook
+                    // notices that fired AFTER an answer above it, and — while a
+                    // follow-up steered a live run — showed the previous turn's
+                    // answer under the new question, as if it had replied to it.
+                    // The live feed goes last because that is where it belongs
+                    // in time: the answer it is working towards has not been
+                    // pushed yet, and once the run settles the feed hides itself
+                    // and the recorded run summary takes its place in sequence.
                     const renderBubble = (b: (typeof items)[0]) =>
                       b.role === 'run' && b.runSummary ? (
                         <RunSummaryCard key={b.id} summary={b.runSummary} />
@@ -501,9 +512,7 @@ export function ProtocolsPage() {
                       )
                     return (
                       <>
-                        {head.map(renderBubble)}
-                        {midSystems.map(renderBubble)}
-                        {/* Live process sits ABOVE the final answer (Codex order) */}
+                        {items.map(renderBubble)}
                         {presentationRunId ? (
                           <RunProcessFeed
                             runId={presentationRunId}
@@ -511,7 +520,6 @@ export function ProtocolsPage() {
                             onOpenPanel={() => setShowRunPanel(true)}
                           />
                         ) : null}
-                        {midAssistants.map(renderBubble)}
                         {activeId ? (
                           <RunContinuationActions
                             threadId={activeId}
@@ -616,7 +624,7 @@ export function ProtocolsPage() {
                     {sessionAllow && (
                       <button
                         type="button"
-                        onClick={() => setSessionAllow(false)}
+                        onClick={() => setSessionAllow(false, activeId || undefined)}
                         title="本次 session 其餘 ask 一律允許中 — 點擊取消"
                         className="inline-flex items-center gap-1 text-[11px] text-amber-300/90 hover:text-amber-200"
                       >

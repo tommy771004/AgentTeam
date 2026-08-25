@@ -59,9 +59,30 @@ export function registryCoversToolDefinitions(): boolean {
   return Object.keys(TOOL_DEFINITIONS).every((n) => _tools.has(n))
 }
 
+/**
+ * Tools the Pi Core Host now OWNS outright (ADR-0027 removal, issues 14/15).
+ *
+ * Their renderer handler modules are deleted after parity evidence, so the
+ * seeded definition entries intentionally carry no handler. This list is the
+ * drift guard's contract: a name here without a Host-side counterpart, or a
+ * NEW renderer registration for any of them, must fail the build. Everything
+ * outside this list still requires its own handler module.
+ */
+export const HOST_OWNED_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'workspace_read',
+  'workspace_list',
+  'workspace_grep',
+  'workspace_glob',
+  'workspace_write',
+  'bash',
+])
+
 export function registryHandlersComplete(): boolean {
   ensureBuiltinRegistry()
-  return Object.keys(TOOL_DEFINITIONS).every((n) => Boolean(_tools.get(n)?.handler))
+  return Object.keys(TOOL_DEFINITIONS).every((n) => {
+    if (HOST_OWNED_TOOL_NAMES.has(n)) return true
+    return Boolean(_tools.get(n)?.handler)
+  })
 }
 
 /** Seed missing entries from TOOL_DEFINITIONS (no handlers — modules supply those). */
@@ -99,6 +120,11 @@ export async function dispatchRegistered(
 ): Promise<{ ok: boolean; output: string }> {
   await discoverRegisteredToolModules()
   const entry = _tools.get(name)
+  if (HOST_OWNED_TOOL_NAMES.has(name) && !entry?.handler) {
+    // ADR-0027 removal: the Host owns this tool now. The honest answer names
+    // the owner instead of pretending the renderer can still run it.
+    return { ok: false, output: `${name} 已由 Pi Core Host 接管：請改用 Host 的同名 builtin 工具` }
+  }
   if (!entry?.handler) {
     return { ok: false, output: `Unknown or unregistered tool: ${name}` }
   }

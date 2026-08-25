@@ -17,6 +17,7 @@ import { useSettingsStore } from './settingsStore.ts'
 import { useLearningStore } from './learningStore.ts'
 import { consumeNextState } from '../agent/outcomeDispatcher.ts'
 import { buildPiHostRunConfig, piTurnOutcome, submitPiHostRun } from '../agent/piHostRun.ts'
+import { buildExternalCliRecord, type ExternalCliRecordEvent } from '../agent/externalCliRecord.ts'
 import {
   emptyAgentLike,
   runPromptViaLocalCli,
@@ -152,6 +153,16 @@ const reservedRuns = new Map<string, { threadId?: string; kind: 'builtin' | 'cli
 const lastRunIdByThread = new Map<string, string>()
 const MAX_RUN_AGENT_STATES = 100
 
+/**
+ * Has a consumer ever said which run it is looking at?
+ *
+ * Until it has, `publishRun` may pick one so the very first run is visible
+ * before any view has mounted. After it has, the choice is the consumer's —
+ * INCLUDING the choice of "none". Auto-picking past an explicit `selectRun(null)`
+ * is what let a running conversation's live state appear under an idle one.
+ */
+let runSelectionIsExplicit = false
+
 function pruneRunAgentStates(selectedRunId: string | null) {
   if (runAgentStates.size <= MAX_RUN_AGENT_STATES) return
   const activeRunIds = new Set(reservedRuns.keys())
@@ -187,13 +198,26 @@ function stateSnapshot(): Record<string, AgentState> {
   return Object.fromEntries([...runAgentStates.entries()].map(([id, state]) => [id, state]))
 }
 
+/**
+ * The single blank state a run-scoped view shows when it has no run.
+ *
+ * It must be one stable reference: a selector that built a fresh object each
+ * call would re-render its component on every unrelated store write. Frozen at
+ * the top level so a consumer cannot quietly turn the shared blank into
+ * something a particular run said.
+ */
+export const IDLE_AGENT_STATE: AgentState = Object.freeze(emptyAgent())
+
 function publishRun(set: (partial: Partial<AgentStore>) => void, get: () => AgentStore, runId: string, state: AgentState) {
   runAgentStates.set(runId, state)
   const activeRunIds = [...reservedRuns.keys()]
   let selectedRunId = get().selectedRunId
-  if (!selectedRunId || (!activeRunIds.includes(selectedRunId) && activeRunIds.length)) selectedRunId = activeRunIds.at(-1) || runId
+  // Only choose on the consumer's behalf while it has never chosen. Once it
+  // has, a settled run stays selected (its thread is still on screen) and a
+  // deliberate `null` stays null, so another thread's run cannot slide in.
+  if (!runSelectionIsExplicit && !selectedRunId) selectedRunId = activeRunIds.at(-1) || runId
   pruneRunAgentStates(selectedRunId)
-  const visible = (selectedRunId && runAgentStates.get(selectedRunId)) || state
+  const visible = (selectedRunId && runAgentStates.get(selectedRunId)) || emptyAgent()
   set({
     agent: visible,
     runStates: stateSnapshot(),
@@ -431,6 +455,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       // Clearing the selection must not leave the previous thread's live
       // state visible. The thread bubble / terminal digest is the fallback
       // until a run-scoped presentation is selected again.
+      runSelectionIsExplicit = true
       set({ selectedRunId: state ? runId || null : null, agent: state || emptyAgent() })
     },
 
@@ -574,6 +599,9 @@ export const useAgentStore = create<AgentStore>((set, get) => {
 
       // Codex-style center feed
       let unsubStream: (() => void) | undefined
+      // The same events the feed renders also build this run's Turn Record, so
+      // an external run projects through one seam like a builtin one.
+      const recordEvents: ExternalCliRecordEvent[] = []
       try {
         const { useRunActivityStore } = await import('./runActivityStore.ts')
         useRunActivityStore.getState().begin(runId)
@@ -593,6 +621,15 @@ export const useAgentStore = create<AgentStore>((set, get) => {
               ev.sessionPhase === 'waiting_for_user' ? '等待你的回覆' : '等待核准',
               runId,
             )
+          }
+          if (ev.kind === 'tool' || ev.kind === 'file') {
+            recordEvents.push({
+              kind: ev.kind,
+              ...(ev.tool ? { tool: ev.tool } : {}),
+              ...(ev.path ? { path: ev.path } : {}),
+              ...(ev.detail ? { detail: ev.detail } : {}),
+              ...(ev.ok === undefined ? {} : { ok: ev.ok }),
+            })
           }
           if ((ev.kind === 'tool' || ev.kind === 'file') && (ev.tool || ev.path)) {
             toolCalls = [
@@ -715,6 +752,20 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         const final = emptyAgentLike({
           id: runId,
           objective: prompt,
+          turnRecord: buildExternalCliRecord({
+            runner: opts.kind,
+            prompt,
+            events: recordEvents,
+            answer: r.output || '',
+            settlement: r.ok
+              ? (r.output || '').trim() ? 'answered' : 'empty'
+              : r.terminalClassification === 'interrupted'
+                ? 'interrupted'
+                : r.error === '使用者取消' || r.terminalClassification === 'user-cancelled'
+                  ? 'cancelled'
+                  : 'failed',
+            startedAt: t0,
+          }),
           status:
             r.ok
               ? 'success'
@@ -918,6 +969,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       reservedRuns.clear()
       runAgentStates.clear()
       lastRunIdByThread.clear()
+      runSelectionIsExplicit = false
       set({
         agent: emptyAgent(),
         isRunning: false,

@@ -4,13 +4,29 @@
 
 **Blocked by:** 05, 09
 
-**Status:** 可交給代理
+**Status:** done
 
-- [ ] Pi Host Protocol 新增依 `seq` 定址的分頁讀取方法，回傳有界的一頁與游標
-- [ ] 檢視開在尾端；到達已載入範圍頂端時載入前一頁，載入中有明確狀態
-- [ ] 記憶體中只保留可見範圍與少量 overscan；prepend 之後既有列的身分不變
-- [ ] 每列可讀出所屬回合與步驟；選取可看該步的 token 用量與時間
-- [ ] 進行中的列顯示執行中但不顯示時長；尚未載入的前段以中性標示，不給未知歷史捏造長度
-- [ ] 串流時貼底，往上捲即暫停跟隨
-- [ ] Seam 1 smoke：分頁邊界（第一頁、中間頁、最舊一頁、空游標）各有斷言
-- [ ] Seam 2 smoke：以長帳本 fixture 斷言分頁投影與座標
+- [x] Pi Host Protocol 新增依 `seq` 定址的分頁讀取方法，回傳有界的一頁與游標
+- [x] 檢視開在尾端；到達已載入範圍頂端時載入前一頁，載入中有明確狀態
+- [~] prepend 之後既有列身分不變（以 `seq` 為 key）；**未**做視窗虛擬化 —— 見下方
+- [x] 每列可讀出所屬回合與步驟；選取可看該步的 token 用量與時間
+- [x] 進行中的列顯示執行中但不顯示時長；尚未載入的前段以中性標示，不給未知歷史捏造長度
+- [x] 串流時貼底，往上捲即暫停跟隨
+- [x] Seam 1 smoke：分頁邊界（第一頁、中間頁、最舊一頁、空游標）各有斷言
+- [x] Seam 2 smoke：以長帳本 fixture 斷言分頁投影與座標
+
+## Comments
+
+**Implemented and verified.**
+
+`sessions/record` serves a bounded page addressed by `seq` — never by array position — and hands back the cursor for the page before it. `pageTurnRecord` is the shared primitive, so Host and renderer page identically.
+
+**`sessions/list` stopped carrying the whole record.** It now reports a `recordSummary` (version, entry count, latest seq) instead, so listing sessions cannot grow with the length of their history. That was the note ticket 03 left behind; `smoke-pi-turn-record` was repointed at the paged read rather than weakened.
+
+`projectTrajectory` attaches a step's timing to its rows **only once that step has ended**, so a row inside a running step carries no duration. `unloadedBefore` is counted from the page's own total — the prefix nobody has loaded is marked, never given a length.
+
+The panel opens at the tail, follows new rows while pinned to the bottom, and stops following the moment the user scrolls up: reading older rows must not be interrupted by new ones arriving. Older pages prepend under `seq` keys, so rows already on screen keep their identity. Selecting a row shows its step's waiting / generating split and token usage, or `執行中` with no numbers.
+
+**One criterion partially met, deliberately.** True windowed virtualization (mounting only the visible range plus overscan) is not implemented — the panel renders the pages it has loaded. Paging already bounds memory to what was asked for, which is the substantive half; mounting fewer DOM nodes than that is a rendering optimisation that needs a real measurement pass in the app, not a smoke. Marked `[~]` rather than ticked, so it is not mistaken for done.
+
+**Not wired into a route yet.** `TrajectoryPanel` is feature-detected (`window.subagents?.piHost?.sessions?.record`) and returns null without a Host, so it is safe to mount anywhere; choosing where it belongs in the app's navigation is a product decision rather than part of this ticket.

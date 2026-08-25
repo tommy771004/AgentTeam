@@ -4,17 +4,15 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import type { PiThinkingLevel } from './piAgentProfile.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
-import { classifyPiTurnSettlement, piTurnFinalAnswer, piTurnProviderError, piTurnStopReason, PI_TURN_TRUNCATED_NOTICE } from '../src/agent/piHostRun.ts'
-import type { PiRecordedMessage } from '../src/agent/turnRecord.ts'
+import { classifyPiTurnSettlement, piTurnProviderError, piTurnStopReason, PI_TURN_TRUNCATED_NOTICE } from '../src/agent/piHostRun.ts'
+import type { PiRecordedMessage, PiStepTiming } from '../src/agent/turnRecord.ts'
+import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
+import { piPackExtensionFactories } from './piToolHost.ts'
+import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, resolvePiSkillsDir } from './piSkills.ts'
+import { piCodingAgentModule as piCodingAgent, piVendorDir } from './piVendor.ts'
+import { piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
 
-const vendorCandidates = [
-  process.env.SUBAGENTS_PI_VENDOR_DIR,
-  join(process.cwd(), 'vendor/pi'),
-  join(process.cwd(), '../vendor/pi'),
-].filter((candidate): candidate is string => Boolean(candidate))
-const vendorDir = vendorCandidates.find((candidate) => existsSync(join(candidate, 'packages/coding-agent/dist/index.js'))) || vendorCandidates[0]
-if (!vendorDir) throw new Error('Vendored Pi Core directory is not configured')
-const piCodingAgent = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/index.js')).href)
+const vendorDir = piVendorDir
 const piConfig = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/config.js')).href)
 const piAuthStorage = await import(
   /* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/core/auth-storage.js')).href
@@ -133,6 +131,12 @@ export type PiRuntimeSettings = {
   model?: string
   thinkingLevel?: PiThinkingLevel
   activeTools?: string[]
+  /** Temporary chats read no memory and write none; pack tools honour it too. */
+  temporaryChat?: boolean
+  /** Capability ids preloaded for this turn (per-thread prefs ride in from the renderer). */
+  preloadedCapabilities?: string[]
+  /** Tools unlocked by loaded capabilities; the active set unions them in. */
+  unlockedTools?: string[]
 }
 
 export type PiLegacyModelConfig = {
@@ -249,11 +253,37 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   }
   let contextWindowTokens: number | undefined
   const requestContext = { value: '', includeHistory: true }
+  const piSkillsDir = resolvePiSkillsDir(agentDir)
   if (agentDir && typeof piCodingAgent.DefaultResourceLoader === 'function') {
+    // The pack factories register the SubAgents extension tools next to the
+    // hidden session-context factory, so the model sees one tool catalog
+    // owned by the Host (issue 01). `additionalSkillPaths` points the same
+    // loader at the Host-owned skills directory (issue 02).
+    ensurePiPacksRegistered()
     const resourceLoader = new piCodingAgent.DefaultResourceLoader({
       cwd,
       agentDir,
-      extensionFactories: [{
+      additionalSkillPaths: piSkillsDir ? [piSkillsDir] : undefined,
+      extensionFactories: [
+        ...piPackExtensionFactories({ sessionId, cwd, temporaryChat: settings.temporaryChat }),
+        // ADR-0047: builtin shell stays outside the external-CLI sandbox and
+        // fail-closed under Outbound Guard `required` — enforced here where
+        // in-turn bash actually executes.
+        piBashGateExtensionFactory({ sessionId }),
+        // Pinned skills expand up front (issue 16): the same files the loader
+        // discovered, read into the system prompt before the agent starts.
+        {
+          name: 'subagents-pinned-skills',
+          hidden: true,
+          factory: (pi: { on: (event: string, handler: (input: Record<string, unknown>) => unknown) => void }) => {
+            pi.on('before_agent_start', async (event) => {
+              const block = await buildPinnedPiSkillsPromptBlock(agentDir)
+              if (!block || typeof event.systemPrompt !== 'string') return undefined
+              return { systemPrompt: `${event.systemPrompt}\n\n${block}` }
+            })
+          },
+        },
+        {
         name: 'subagents-session-context',
         hidden: true,
         factory: (pi: { on: (event: string, handler: (input: Record<string, unknown>) => unknown) => void }) => {
@@ -273,12 +303,22 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
             return lastUser >= 0 ? { messages: event.messages.slice(lastUser) } : undefined
           })
         },
-      }],
+      },
+      ],
     })
     await resourceLoader.reload()
     options.resourceLoader = resourceLoader
+    if (typeof resourceLoader.getSkills === 'function') {
+      captureDiscoveredPiSkills(resourceLoader.getSkills())
+    }
   }
-  if (settings.activeTools?.length) options.tools = [...settings.activeTools]
+  if (settings.activeTools?.length) {
+    // A restricted allowlist must still ADMIT every pack tool into the
+    // registry, or load_capability could never reveal one mid-run. Being in
+    // the registry is not the same as being active: the active set below is
+    // what reaches the model.
+    options.tools = [...new Set([...settings.activeTools, ...piAllPackToolNames()])]
+  }
   if (settings.thinkingLevel) options.thinkingLevel = settings.thinkingLevel
   if (agentDir) options.agentDir = agentDir
   if (settings.provider && settings.model && typeof piCodingAgent.ModelRuntime?.create === 'function') {
@@ -293,6 +333,39 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     contextWindowTokens = model.contextWindow
   }
   const created = await piCodingAgent.createAgentSession(options)
+  // The active set is stated explicitly so the model sees exactly what the
+  // catalog projection claims: restricted allowlists union their unlocked
+  // capability tools; an unrestricted run gets the Pi defaults plus every
+  // always-on pack tool. Without this, Pi would auto-activate every
+  // registered extension tool and the catalog would understate reality.
+  const desiredActive = [
+    ...(settings.activeTools?.length ? settings.activeTools : Object.keys(TOOL_FACTORIES)),
+    ...piActivePackToolNames(settings.activeTools || [], settings.unlockedTools || []),
+  ]
+  try {
+    created.session.setActiveToolsByName?.([...new Set(desiredActive)])
+  } catch {
+    /* a session that cannot accept an active set still runs on Pi's default */
+  }
+  // The session handle is the ONLY thing packs may touch mid-run: activating
+  // registered tools. load_capability drives it; nothing else is exposed.
+  registerPiPackSession(sessionId, {
+    setActiveTools: (names) => {
+      try {
+        created.session.setActiveToolsByName?.(names)
+        return true
+      } catch {
+        return false
+      }
+    },
+    getActiveTools: () => {
+      try {
+        return (created.session.getActiveToolNames?.() || []) as string[]
+      } catch {
+        return []
+      }
+    },
+  })
   const runtime = {
     activeToolsKey,
     sessionManager,
@@ -447,6 +520,9 @@ export async function runPiTurn(
   // What the user has watched arrive, kept one message at a time so a stop can
   // hand back the message being written without the ones before it.
   const streamedSegments: string[] = ['']
+  // Measured at the boundary that makes the request, so nobody downstream has
+  // to infer a duration from timestamps that were never its edges.
+  const timing: PiStepTiming = { requestAt: Date.now(), completedAt: 0 }
   const unsubscribe = runtime.session.subscribe((event) => {
     if (event.type === 'agent_end' && Array.isArray(event.messages)) {
       completedMessages = event.messages as Array<{ role?: string; content?: unknown }>
@@ -454,7 +530,25 @@ export async function runPiTurn(
     if (event.type === 'message_start' || event.type === 'tool_execution_start') streamedSegments.push('')
     const streamed = (event as { assistantMessageEvent?: { type?: unknown; delta?: unknown } }).assistantMessageEvent
     if (streamed?.type === 'text_delta' && typeof streamed.delta === 'string') {
+      // The moment the model stopped thinking and started writing.
+      timing.firstTokenAt ??= Date.now()
       streamedSegments[streamedSegments.length - 1] += streamed.delta
+    }
+    if (event.type === 'agent_end' && Array.isArray(event.messages)) {
+      const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+      const usage = event.messages.reduce(
+        (running: { input: number; output: number; total: number }, message) => {
+          const reported = (message as { usage?: Record<string, unknown> }).usage
+          if (!reported || typeof reported !== 'object') return running
+          return {
+            input: running.input + count(reported.input),
+            output: running.output + count(reported.output),
+            total: running.total + count(reported.totalTokens),
+          }
+        },
+        { input: 0, output: 0, total: 0 },
+      )
+      if (usage.total > 0 || usage.input > 0 || usage.output > 0) timing.usage = usage
     }
     // Tool boundaries are the only safe place to stop: between calls the agent
     // owns no half-applied edit and no orphaned child process.
@@ -471,13 +565,13 @@ export async function runPiTurn(
       runtime.requestContext.includeHistory = referenceChatHistory
     }
     await runtime.session.prompt(runtime.requestContext || !requestContext ? prompt : `${requestContext}\n## Current request\n${prompt}`)
-    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages, streamedSegments)
-    if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
+    if (turn.interrupt) return { ...interruptedTurnResult(turn, completedMessages, streamedSegments), timing }
+    if (turn.cancelled) return { settlement: 'cancelled' as const, items: [], timing }
     // A rejected request never throws here: Pi records it as an empty assistant
     // message carrying the provider's error, so a failed call must not be
     // mistaken for a turn that simply produced nothing.
     const providerError = piTurnProviderError(completedMessages as ReadonlyArray<{ role?: string; stopReason?: string; errorMessage?: string }>)
-    if (providerError) return { settlement: 'failed' as const, items: [{ type: 'error', content: providerError }] }
+    if (providerError) return { settlement: 'failed' as const, items: [{ type: 'error', content: providerError }], timing }
     const items = assistantMessageItems(completedMessages)
     // A clean provider call that carried no text is `empty`, not `answered`:
     // the run finished without producing anything for the user to read. One
@@ -488,18 +582,20 @@ export async function runPiTurn(
     const stopReason = piTurnStopReason(completedMessages as ReadonlyArray<{ role?: string; stopReason?: string }>)
     const settlement = classifyPiTurnSettlement(items, stopReason)
     if (settlement === 'truncated') {
-      return { settlement, items: [...items, { type: 'truncation_notice', content: PI_TURN_TRUNCATED_NOTICE }] }
+      return { settlement, items: [...items, { type: 'truncation_notice', content: PI_TURN_TRUNCATED_NOTICE }], timing }
     }
-    return { settlement, items }
+    return { settlement, items, timing }
   } catch (error) {
     // An aborted prompt throws; an interrupt is a deliberate stop, never a failure.
-    if (turn.interrupt) return interruptedTurnResult(turn, completedMessages, streamedSegments)
-    if (turn.cancelled) return { settlement: 'cancelled' as const, items: [] }
+    if (turn.interrupt) return { ...interruptedTurnResult(turn, completedMessages, streamedSegments), timing }
+    if (turn.cancelled) return { settlement: 'cancelled' as const, items: [], timing }
     return {
+      timing,
       settlement: 'failed' as const,
       items: [{ type: 'error', content: error instanceof Error ? error.message : 'Pi turn failed' }],
     }
   } finally {
+    timing.completedAt = Date.now()
     if (runtime.requestContext) {
       runtime.requestContext.value = ''
       runtime.requestContext.includeHistory = true
@@ -524,6 +620,7 @@ export function forkPiSession(sessionId: string) {
 export async function disposePiSession(sessionId: string) {
   const runtime = sessionRuntimes.get(sessionId)
   if (!runtime) return
+  unregisterPiPackSession(sessionId)
   await runtime.session.dispose?.()
   sessionRuntimes.delete(sessionId)
 }

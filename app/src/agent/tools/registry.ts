@@ -120,18 +120,6 @@ export function buildToolInput(
       return { text: priorOutputs.slice(-1)[0]?.slice(0, 400) || objective.slice(0, 200) }
     case 'memory_search':
       return { query: extractQuery(objective, stepDescription) }
-    case 'skill_list':
-      return {}
-    case 'skill_load': {
-      const match = skillsHintName(objective, stepDescription)
-      return { name: match }
-    }
-    case 'skill_save':
-      return {
-        name: `skill-${Date.now().toString(36)}`,
-        description: objective.slice(0, 60),
-        body: priorOutputs.slice(-1)[0] || `# Skill\n\n${objective}`,
-      }
     case 'mcp_list_tools':
       return {}
     case 'mcp_call':
@@ -193,9 +181,3 @@ function guessFilename(objective: string, kind: 'report' | 'input'): string {
   return kind === 'report' ? `reports/${slug || 'output'}.md` : `inputs/${slug || 'notes'}.md`
 }
 
-function skillsHintName(objective: string, step: string): string {
-  const hay = `${objective} ${step}`.toLowerCase()
-  if (/export|credential|sensitive|dump/.test(hay)) return 'safe-export'
-  if (/search|research|price|compare|find/.test(hay)) return 'web-research'
-  return 'web-research'
-}

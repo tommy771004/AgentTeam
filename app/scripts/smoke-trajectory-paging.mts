@@ -1,0 +1,80 @@
+import { strict as assert } from 'node:assert'
+import { appendTurnRecord, pageTurnRecord, TURN_RECORD_PAGE_SIZE, type TurnRecordAppend } from '../src/agent/turnRecord.ts'
+import { projectTrajectory } from '../src/agent/trajectoryProjection.ts'
+
+/**
+ * Seam 2: a long run is read a page at a time, addressed by sequence.
+ *
+ * The earliest steps used to be the first thing the product forgot, because
+ * the whole record travelled at once and memory decided what survived.
+ */
+
+// A run long enough that no single page holds it: 12 turns, 4 entries each.
+const entries: TurnRecordAppend[] = []
+for (let turn = 1; turn <= 12; turn += 1) {
+  entries.push({ kind: 'step-start', source: 'host', turn, step: 1, at: turn * 10 })
+  entries.push({ kind: 'user-text', source: 'user', content: `問題 ${turn}`, turn, step: 1, at: turn * 10 + 1 })
+  entries.push({ kind: 'assistant-text', source: 'model', content: `回答 ${turn}`, turn, step: 1, at: turn * 10 + 2 })
+  entries.push({
+    kind: 'step-end',
+    source: 'host',
+    turn,
+    step: 1,
+    at: turn * 10 + 3,
+    timing: { requestAt: turn * 1_000, firstTokenAt: turn * 1_000 + 100, completedAt: turn * 1_000 + 400 },
+  })
+}
+const record = appendTurnRecord(undefined, entries)
+assert.equal(record.entries.length, 48)
+
+// The first read lands on the newest end.
+const tail = pageTurnRecord(record, { limit: 10 })
+assert.equal(tail.entries.length, 10)
+assert.equal(tail.entries[tail.entries.length - 1].seq, 48, 'a first read opens at the tail')
+assert.equal(tail.hasOlder, true)
+assert.equal(tail.nextBefore, 39)
+assert.equal(tail.total, 48)
+
+// A middle page is addressed by the cursor the page before it handed back.
+const middle = pageTurnRecord(record, { before: tail.nextBefore, limit: 10 })
+assert.deepEqual(middle.entries.map((entry) => entry.seq), [29, 30, 31, 32, 33, 34, 35, 36, 37, 38])
+assert.equal(middle.hasOlder, true)
+assert.equal(middle.nextBefore, 29)
+
+// The oldest page reports that nothing remains ahead of it.
+let cursor: number | undefined = middle.nextBefore
+let oldest = pageTurnRecord(record, { before: cursor, limit: 10 })
+while (oldest.hasOlder) oldest = pageTurnRecord(record, { before: oldest.nextBefore, limit: 10 })
+assert.equal(oldest.entries[0].seq, 1, 'paging back reaches the first entry')
+assert.equal(oldest.hasOlder, false)
+assert.equal(oldest.nextBefore, undefined, 'no cursor is offered past the beginning')
+
+// An empty record pages without inventing anything.
+const empty = pageTurnRecord(undefined, { limit: 10 })
+assert.deepEqual(empty, { entries: [], hasOlder: false, total: 0 })
+// A cursor before the beginning yields an empty page, not an error.
+assert.deepEqual(pageTurnRecord(record, { before: 1, limit: 10 }).entries, [])
+// A page is bounded however large a caller asks.
+assert.ok(pageTurnRecord(record, { limit: 10_000 }).entries.length <= TURN_RECORD_PAGE_SIZE)
+
+// ── The view a page projects ───────────────────────────────────────────────
+const view = projectTrajectory(middle)
+assert.ok(view.rows.length > 0)
+assert.ok(view.rows.every((row) => row.turn >= 1 && row.step >= 1), 'every row knows where it sits')
+assert.equal(view.unloadedBefore, 38, 'the unloaded prefix is counted, not guessed at')
+assert.equal(view.nextBefore, 29)
+// A finished step carries the timing that was measured for it.
+const answered = view.rows.find((row) => row.kind === 'assistant')
+assert.ok(answered?.timing, 'a finished step lends its timing to its rows')
+assert.equal(answered?.timing?.waitingMs, 100)
+assert.equal(answered?.timing?.generatingMs, 300)
+
+// A row inside a step that has not ended carries no duration at all.
+const running = projectTrajectory(pageTurnRecord(appendTurnRecord(undefined, [
+  { kind: 'step-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'user-text', source: 'user', content: '進行中', turn: 1, step: 1, at: 2 },
+]), {}))
+assert.equal(running.rows[0]?.timing, undefined, 'a running step never lends a duration')
+assert.equal(running.steps[0]?.running, true)
+assert.equal(running.unloadedBefore, 0)
+console.log('A long run is read one page at a time, addressed by sequence')

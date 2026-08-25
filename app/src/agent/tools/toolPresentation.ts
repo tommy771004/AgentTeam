@@ -87,11 +87,17 @@ function editPairs(args: unknown): Array<{ oldText: string | null; newText: stri
 export function writeCard(args: unknown): ToolPresentation | undefined {
   const record = asRecord(args)
   const path = record ? asPath(record.path) : undefined
+  if (!path) return undefined
   const newText = record ? asText(record.content) : undefined
-  if (!path || newText === undefined) return undefined
+  const title = `已寫入 ${path.split(/[\\/]/).pop()}`
+  // A write whose content the record did not keep — an external CLI reports the
+  // path it touched, not the text — is still a write. It declares the mutation
+  // it can prove and drops the diff it cannot, rather than vanishing from the
+  // produced-files list because one field was missing.
+  if (newText === undefined) return { card: 'generic', kind: 'edit', title, locations: [{ path }] }
   return {
     card: 'diff',
-    title: `已寫入 ${path.split(/[\\/]/).pop()}`,
+    title,
     diffs: [{ path, oldText: null, newText }],
     locations: [{ path }],
   }

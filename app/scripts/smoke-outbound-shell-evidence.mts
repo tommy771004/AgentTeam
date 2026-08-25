@@ -7,6 +7,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { decideBuiltinShellUnderProtection } from '../src/agent/outbound/cliSandbox.ts'
+import { buildRunContextPolicy, withRunShellPolicy } from '../src/agent/runSettingsSnapshot.ts'
+import { parsePiTurnContextPolicy } from '../electron/piSessionContext.ts'
+import type { LlmSettings } from '../src/agent/types.ts'
 import { allowEvidenceAppendFromIpc } from '../src/agent/outbound/evidenceLedger.ts'
 import { assertPolicyAdminWriteAllowed } from '../src/agent/outbound/policyAdmin.ts'
 
@@ -64,12 +67,81 @@ await test('ticket21: off allows freely', () => {
   assert.equal(r.allow, true)
 })
 
-await test('ticket21: bash handler wires decideBuiltinShellUnderProtection', () => {
-  const t = fs.readFileSync(
-    path.join(appRoot, 'src/agent/tools/registered/bash.ts'),
+await test('ticket21: bash gate wires decideBuiltinShellUnderProtection on the HOST', () => {
+  // ADR-0027 removal moved in-turn bash to the Host; the ADR-0047 gate moved
+  // with it — an inline extension factory intercepting Pi's tool_call.
+  const gate = fs.readFileSync(
+    path.join(appRoot, 'electron/piToolHost.ts'),
     'utf8',
   )
-  assert.match(t, /decideBuiltinShellUnderProtection/)
+  assert.match(gate, /decideBuiltinShellUnderProtection/)
+  assert.match(gate, /subagents-bash-gate/)
+  assert.match(gate, /shellIsolationVerified/, 'required-mode denial needs the verified flag')
+  const runtime = fs.readFileSync(path.join(appRoot, 'electron/piCoreRuntime.ts'), 'utf8')
+  assert.match(runtime, /piBashGateExtensionFactory/, 'the gate is registered next to the pack factories')
+})
+
+// A gate nothing feeds is a gate that always allows. These exercise the SHIPPED
+// producer, the IPC crossing and the Host decision on one policy object, so a
+// missing renderer-side producer fails here instead of passing silently.
+const baseSettings = { model: 'test-model' } as unknown as LlmSettings
+
+await test('ADR-0047: the run policy carries the admitted shell posture', () => {
+  const policy = withRunShellPolicy(
+    buildRunContextPolicy(baseSettings, { temporary: false }),
+    { effectiveMode: 'required', viewRoot: '/tmp/view' },
+  )
+  assert.equal(policy.outboundShellMode, 'required')
+  assert.equal(policy.viewRoot, '/tmp/view')
+  assert.equal(
+    policy.shellIsolationVerified,
+    undefined,
+    'the renderer must never claim filesystem isolation',
+  )
+})
+
+await test('ADR-0047: an unbound view leaves viewRoot absent, so required still denies', () => {
+  const policy = withRunShellPolicy(
+    buildRunContextPolicy(baseSettings, { temporary: false }),
+    { effectiveMode: 'required' },
+  )
+  assert.equal(policy.viewRoot, undefined)
+  const verdict = decideBuiltinShellUnderProtection({
+    effectiveMode: policy.outboundShellMode!,
+    command: 'ls',
+    viewRoot: policy.viewRoot ?? null,
+    shellIsolationVerified: policy.shellIsolationVerified,
+  })
+  assert.equal(verdict.allow, false)
+})
+
+await test('ADR-0047: every mode survives the IPC crossing into the Host', () => {
+  for (const mode of ['required', 'optional', 'demo', 'off'] as const) {
+    const policy = withRunShellPolicy(
+      buildRunContextPolicy(baseSettings, { temporary: false }),
+      { effectiveMode: mode, viewRoot: '/tmp/view' },
+    )
+    const parsed = parsePiTurnContextPolicy(JSON.parse(JSON.stringify(policy)))
+    assert.equal(parsed.outboundShellMode, mode, `${mode} must not be dropped in transit`)
+    assert.equal(parsed.viewRoot, '/tmp/view')
+  }
+})
+
+await test('ADR-0047: taskRunCoordinator pins the posture it admitted the run under', () => {
+  const coordinator = fs.readFileSync(
+    path.join(appRoot, 'src/agent/taskRunCoordinator.ts'),
+    'utf8',
+  )
+  assert.match(
+    coordinator,
+    /withRunShellPolicy\(admittedPolicy, \{ effectiveMode: mode \}\)/,
+    'the shell posture must be pinned from the same mode the Outbound Data Gate resolved',
+  )
+  assert.match(
+    coordinator,
+    /viewRoot: admission\.viewRoot/,
+    'a bound Restricted Project View must reach the Host shell gate',
+  )
 })
 
 await test('ticket22: assertPolicyAdminWriteAllowed standard denies', () => {

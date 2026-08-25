@@ -20,6 +20,24 @@ import type { PiTurnInterruptReason, PiTurnSettlement } from './piHostRun.ts'
  */
 export const TURN_RECORD_FORMAT_VERSION = 1
 
+/**
+ * What one model request actually cost, measured at the boundary that made it.
+ *
+ * `firstTokenAt` is the moment the model stopped thinking and started writing.
+ * Splitting it out is the difference between "the provider is stalled" and
+ * "the answer is long" — one total number cannot tell those apart. It is
+ * absent when the request produced no text at all.
+ */
+export type PiStepTiming = {
+  /** When the request left for the provider. */
+  requestAt: number
+  /** When the first token of text arrived; absent if none ever did. */
+  firstTokenAt?: number
+  /** When the request finished, successfully or not. */
+  completedAt: number
+  usage?: { input?: number; output?: number; total?: number }
+}
+
 /** Who is accountable for an entry's content (ADR-0048). */
 export type TurnRecordSource =
   /** The person driving the conversation. */
@@ -43,7 +61,19 @@ export type TurnRecordCoordinates = {
 
 export type TurnRecordEntry = TurnRecordCoordinates &
   (
-    | { kind: 'turn-start'; source: 'host' }
+    | {
+        kind: 'turn-start'
+        source: 'host'
+        /** Which runner drove the turn; absent means the builtin Pi Core loop. */
+        runner?: string
+        /**
+         * What that runner actually does. Carried on the record so identical
+         * presentation can never be read as identical guarantees: an external
+         * CLI produces the same rows while still declaring that it ran no
+         * builtin Parse, no DoD validation and no iterate.
+         */
+        capabilities?: { parse: boolean; validateDoD: boolean; iterate: boolean }
+      }
     | {
         kind: 'turn-end'
         source: 'host'
@@ -51,7 +81,17 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         interruptReason?: PiTurnInterruptReason
       }
     | { kind: 'step-start'; source: 'host' }
-    | { kind: 'step-end'; source: 'host' }
+    | {
+        kind: 'step-end'
+        source: 'host'
+        /**
+         * Measured, never inferred. A reader must not subtract one entry's
+         * timestamp from another's to invent a duration: entries are appended
+         * around work, not at its exact edges, and a turn can wait on tools
+         * between them.
+         */
+        timing?: PiStepTiming
+      }
     | { kind: 'user-text'; source: 'user'; content: string }
     | { kind: 'assistant-text'; source: 'model'; content: string }
     | {
@@ -73,6 +113,13 @@ export type TurnRecordEntry = TurnRecordCoordinates &
       }
     | { kind: 'approval'; source: 'host'; tool: string; callId: string; decision: string; reason?: string }
     | { kind: 'compaction'; source: 'host'; replaced: number; tokens?: number }
+    | {
+        /** A fact the user must see that is not a tool call or a message. */
+        kind: 'notice'
+        source: 'host'
+        topic: string
+        text: string
+      }
   )
 
 /**
@@ -127,6 +174,7 @@ const KINDS = new Set([
   'tool-result',
   'approval',
   'compaction',
+  'notice',
 ])
 
 function isEntry(value: unknown): value is TurnRecordEntry {
@@ -141,6 +189,7 @@ function isEntry(value: unknown): value is TurnRecordEntry {
   if ((entry.kind === 'user-text' || entry.kind === 'assistant-text') && typeof entry.content !== 'string') return false
   if ((entry.kind === 'tool-call' || entry.kind === 'tool-result' || entry.kind === 'approval')
     && (typeof entry.tool !== 'string' || typeof entry.callId !== 'string')) return false
+  if (entry.kind === 'notice' && (typeof entry.topic !== 'string' || typeof entry.text !== 'string')) return false
   return true
 }
 
@@ -231,6 +280,114 @@ export function derivePiHistory(record: TurnRecord | undefined): PiRecordedMessa
     }
   }
   return messages
+}
+
+/** One bounded page of a record, addressed by sequence. */
+export type TurnRecordPage = {
+  /** The page's entries in ascending `seq`, oldest first. */
+  entries: TurnRecordEntry[]
+  /**
+   * Ask for the page before this one by passing it as `before`. Absent when
+   * the page reaches the beginning of the record.
+   */
+  nextBefore?: number
+  /** Whether older entries remain unloaded ahead of this page. */
+  hasOlder: boolean
+  /** Entries in the whole record, so a view can say what it has not loaded. */
+  total: number
+}
+
+/** How many entries one page carries unless a caller asks for fewer. */
+export const TURN_RECORD_PAGE_SIZE = 100
+
+/**
+ * One page of a record, newest end first.
+ *
+ * A long run's earliest steps used to be the first thing the product forgot,
+ * because the whole record travelled at once and memory bounded what survived.
+ * Paging by `seq` — never by array position — means a view holds what it is
+ * showing and can always ask for the page before it.
+ */
+export function pageTurnRecord(
+  record: TurnRecord | undefined,
+  options: { before?: number; limit?: number } = {},
+): TurnRecordPage {
+  const ordered = turnRecordEntries(record)
+  const limit = Math.max(1, Math.min(TURN_RECORD_PAGE_SIZE, Math.floor(options.limit ?? TURN_RECORD_PAGE_SIZE)))
+  const before = typeof options.before === 'number' && Number.isFinite(options.before) ? options.before : undefined
+  const eligible = before === undefined ? ordered : ordered.filter((entry) => entry.seq < before)
+  const entries = eligible.slice(-limit)
+  const hasOlder = entries.length < eligible.length
+  return {
+    entries,
+    ...(hasOlder && entries.length > 0 ? { nextBefore: entries[0].seq } : {}),
+    hasOlder,
+    total: ordered.length,
+  }
+}
+
+/** One step's timing, as a reader needs it. */
+export type PiStepTimingView = {
+  turn: number
+  step: number
+  /** Present only once the step has ended. */
+  waitingMs?: number
+  generatingMs?: number
+  totalMs?: number
+  usage?: PiStepTiming['usage']
+  /** True while the step has started and not yet ended. */
+  running: boolean
+}
+
+/**
+ * Per-step timing for a record.
+ *
+ * A step still running reports `running: true` and NO durations. Inventing one
+ * — by measuring against "now", or by subtracting the previous entry — would
+ * put a number on screen that was never measured, which is the same class of
+ * mistake as publishing an answer nobody wrote.
+ */
+export function stepTimings(record: TurnRecord | undefined): PiStepTimingView[] {
+  const views = new Map<string, PiStepTimingView>()
+  for (const entry of turnRecordEntries(record)) {
+    if (entry.kind !== 'step-start' && entry.kind !== 'step-end') continue
+    const key = `${entry.turn}:${entry.step}`
+    if (entry.kind === 'step-start') {
+      views.set(key, { turn: entry.turn, step: entry.step, running: true })
+      continue
+    }
+    const view = views.get(key) || { turn: entry.turn, step: entry.step, running: true }
+    const timing = entry.timing
+    views.set(key, {
+      ...view,
+      running: false,
+      ...(timing
+        ? {
+            ...(timing.firstTokenAt === undefined
+              ? {}
+              : {
+                  waitingMs: Math.max(0, timing.firstTokenAt - timing.requestAt),
+                  generatingMs: Math.max(0, timing.completedAt - timing.firstTokenAt),
+                }),
+            totalMs: Math.max(0, timing.completedAt - timing.requestAt),
+            ...(timing.usage ? { usage: timing.usage } : {}),
+          }
+        : {}),
+    })
+  }
+  return [...views.values()]
+}
+
+/** What the record says about the runner that drove it. */
+export function recordRunnerDeclaration(
+  record: TurnRecord | undefined,
+): { runner: string; capabilities?: { parse: boolean; validateDoD: boolean; iterate: boolean } } | undefined {
+  for (const entry of turnRecordEntries(record)) {
+    if (entry.kind !== 'turn-start') continue
+    if (!entry.runner) continue
+    return { runner: entry.runner, ...(entry.capabilities ? { capabilities: entry.capabilities } : {}) }
+  }
+  return undefined
 }
 
 /** Entries in the order they happened, decided by `seq` and never by position. */
