@@ -462,6 +462,12 @@ function RecoveryBootstrap() {
           const allRuns = [...new Map([...activeRuns, ...terminalRuns].map((record) => [record.runId, record])).values()]
           const activeRunIds = new Set(activeRuns.map((record) => record.runId).filter(Boolean))
           const terminalRunIds = new Set(terminalRuns.map((record) => record.runId).filter(Boolean))
+          const pendingTerminalFinalizations: Array<{
+            runId: string
+            threadId: string
+            objective: string
+            agent: AgentState
+          }> = []
           for (const attachment of allRuns) {
             if (!attachment?.runId || !attachment.threadId) continue
             const objective = getJournalEntry('run', attachment.runId)?.objective || 'Pi Core Host 執行中的任務'
@@ -530,28 +536,44 @@ function RecoveryBootstrap() {
               presentReattachedApproval(attachedSnapshot.pendingApproval, attachedSnapshot.threadId)
             }
             if (attachedSnapshot.status === 'terminal') {
-              const { finalizeRecoveredPiHostRun, isPiFinalizationAckable } = await import('./agent/taskRunCoordinator')
-              let ackable = false
-              try {
-                await finalizeRecoveredPiHostRun({
-                  runId: attachment.runId,
-                  threadId: attachment.threadId,
-                  objective,
-                  agent: state,
-                })
-                ackable = isPiFinalizationAckable(attachment.runId)
-              } finally {
-                // Host CAS completion is the gate for acknowledgement. A
-                // renderer that lost the claim must leave the attachment
-                // pending so the owner (or a later lease holder) can finish
-                // app finalization before ack releases it.
-                if (ackable || isPiFinalizationAckable(attachment.runId)) {
-                  await runs.ack(attachment.runId).catch(() => undefined)
-                }
-              }
+              // Do not let a delayed Host finalization claim hold the startup
+              // gate. The projection and capacity reservation are complete;
+              // app finalization (and its eventual complete → ack) continues
+              // asynchronously after reconciliation unlocks the UI.
+              pendingTerminalFinalizations.push({
+                runId: attachment.runId,
+                threadId: attachment.threadId,
+                objective,
+                agent: state,
+              })
             }
           }
           markRunRegistryReconciled()
+          if (pendingTerminalFinalizations.length) {
+            // Import and settle after returning the Host projection. The
+            // promise chain is observed so a failed lazy import cannot become
+            // an unhandled rejection during boot.
+            void import('./agent/taskRunCoordinator')
+              .then(({ finalizeRecoveredPiHostRun, isPiFinalizationAckable }) => Promise.all(
+                pendingTerminalFinalizations.map(async (pending) => {
+                  let ackable = false
+                  try {
+                    await finalizeRecoveredPiHostRun(pending)
+                    ackable = isPiFinalizationAckable(pending.runId)
+                  } catch {
+                    // Claim/finalization transport errors leave the Host
+                    // attachment pending; never fabricate an ending or ack.
+                  }
+                  if (ackable || isPiFinalizationAckable(pending.runId)) {
+                    await runs.ack(pending.runId).catch(() => undefined)
+                  }
+                }),
+              ))
+              .catch(() => {
+                // A later renderer/bootstrap can retry the still-pending
+                // terminal attachment when the coordinator import is absent.
+              })
+          }
           return { activeRunIds, terminalRunIds }
         } catch (error) {
           // A missing/failed Host query must not open a capacity hole. The

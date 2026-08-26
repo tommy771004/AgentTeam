@@ -294,6 +294,83 @@ await test('a renderer that loses the Host claim performs no app finalization or
   assert.equal(hasEnding(runId), false, 'loser must not write a second terminal journal')
 })
 
+await test('a delayed recovered terminal finalizer does not release its capacity early', async () => {
+  useAgentStore.getState().reset()
+  clearRunQueue()
+  const tid = useThreadStore.getState().createThread({ title: '延遲終態復原' })
+  const otherTid = useThreadStore.getState().createThread({ title: '另一個 thread' })
+  const thirdTid = useThreadStore.getState().createThread({ title: '第三個 thread' })
+  const runId = 'run_idem_pi_delayed_terminal'
+  const previousSettings = useSettingsStore.getState().settings
+  useSettingsStore.setState({ settings: { ...previousSettings, maxConcurrentRuns: 1 } })
+  useAgentStore.getState().reserveRun(runId, tid, 'builtin')
+  // The product enforces a minimum concurrency of two. Fill the second slot
+  // so the restored terminal run's reservation is observable at admission.
+  useAgentStore.getState().reserveRun('run_idem_pi_delayed_filler', otherTid, 'builtin')
+
+  let claimStarted = false
+  let releaseClaim!: () => void
+  const claimReleased = new Promise<void>((resolve) => { releaseClaim = resolve })
+  const previous = (globalThis.window as any).subagents
+  ;(globalThis.window as any).subagents = {
+    piHost: {
+      runs: {
+        finalizeClaim: async () => {
+          claimStarted = true
+          await claimReleased
+          return { runId, claimed: true, owner: true, state: 'claimed', claimEpoch: 1, leaseExpiresAt: Date.now() + 120_000 }
+        },
+        finalizeComplete: async () => ({ runId, completed: true, owner: true, state: 'completed', claimEpoch: 1 }),
+        ack: async () => ({ runId, resolved: true }),
+      },
+    },
+  }
+  try {
+    const { finalizeRecoveredPiHostRun } = await import('../src/agent/taskRunCoordinator.ts')
+    const finalization = finalizeRecoveredPiHostRun({
+      runId,
+      threadId: tid,
+      objective: '延遲終態復原',
+      agent: { id: runId, objective: '延遲終態復原', status: 'success', steps: [], logs: [] } as any,
+    })
+    for (let attempt = 0; attempt < 20 && !claimStarted; attempt += 1) await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(claimStarted, true, 'recovered finalization reached the delayed Host claim')
+    assert.equal(useAgentStore.getState().activeRunIds.includes(runId), true, 'terminal recovery keeps its slot while claim is delayed')
+    assert.equal(
+      useAgentStore.getState().canStartRun(undefined, thirdTid).allowed,
+      false,
+      'new admission remains blocked while the restored terminal run is unsettled',
+    )
+    releaseClaim()
+    await finalization
+    assert.equal(useAgentStore.getState().activeRunIds.includes(runId), false, 'capacity is released only after finalization settles')
+  } finally {
+    ;(globalThis.window as any).subagents = previous
+    useSettingsStore.setState({ settings: previousSettings })
+  }
+})
+
+await test('RecoveryBootstrap unlocks startup before terminal finalization can await', () => {
+  const app = read('src/App.tsx')
+  const recoveryStart = app.indexOf('const hostTruth = await')
+  const recoveryEnd = app.indexOf('const journalReport = await', recoveryStart)
+  assert.ok(recoveryStart >= 0 && recoveryEnd > recoveryStart, 'Pi Host recovery seam is present')
+  const hostRecovery = app.slice(recoveryStart, recoveryEnd)
+  const registryReconciled = hostRecovery.lastIndexOf('markRunRegistryReconciled()')
+  assert.ok(registryReconciled >= 0, 'Host projection recovery reconciles capacity explicitly')
+  assert.equal(
+    hostRecovery.slice(0, registryReconciled).includes('await finalizeRecoveredPiHostRun'),
+    false,
+    'a delayed terminal finalizer cannot hold the startup barrier',
+  )
+  assert.ok(
+    hostRecovery.indexOf('finalizeRecoveredPiHostRun', registryReconciled) > registryReconciled,
+    'terminal finalization is scheduled after capacity registry reconciliation',
+  )
+  const startupComplete = app.indexOf('completeStartupRecovery()', recoveryEnd)
+  assert.ok(startupComplete > recoveryEnd, 'the existing startup barrier still completes after required recovery work')
+})
+
 await test('drift guard: one claim gate, release and drain in a finally', () => {
   const coordinator = read('src/agent/taskRunCoordinator.ts')
   assert.match(
