@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { projectTrajectory, type TrajectoryRow } from '../agent/trajectoryProjection'
 import type { TurnRecordPage } from '../agent/turnRecord'
 import { mergeTrajectoryPages } from '../agent/trajectoryPaging'
+import {
+  anchorScrollTopAfterPrepend,
+  computeTrajectoryWindow,
+  TRAJECTORY_ROW_HEIGHT,
+  type TrajectoryWindowSlice,
+} from '../agent/trajectoryWindow'
 import { Icon } from './Icon'
 import { formatTokens, formatUsd } from '../agent/contextUsageView'
 
@@ -12,11 +18,18 @@ import { formatTokens, formatUsd } from '../agent/contextUsageView'
  * longer the first thing the product forgets. Two rules the view holds to:
  * a step still running shows as running and NEVER borrows a duration, and the
  * prefix nobody has loaded is marked as unloaded rather than given a length.
+ * The list itself mounts only the visible range plus overscan — windowing
+ * math lives in `trajectoryWindow`, so «長 run 撐得住» does not depend on
+ * how many pages have been loaded.
  */
 
 export type RecordPageLoader = (sessionId: string, before?: number, limit?: number) => Promise<TurnRecordPage>
 
 const PAGE_LIMIT = 50
+/** Extra rows mounted above and below the viewport. The measurement pass in
+ * trajectory-review-closure owns this number. */
+const OVERSCAN = 8
+const EMPTY_ROWS: TrajectoryRow[] = []
 
 function hostPageLoader(): RecordPageLoader | undefined {
   const read = window.subagents?.piHost?.sessions?.record
@@ -71,6 +84,14 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
   // Following the tail is the default, and the user's own scroll ends it.
   const following = useRef(true)
   const scroller = useRef<HTMLDivElement | null>(null)
+  // Windowing state: which rows are mounted. Null means «not measured yet» —
+  // the first layout effect syncs it before the first rows ever paint.
+  const [slice, setSlice] = useState<TrajectoryWindowSlice | null>(null)
+  // Latest projection rows for effects that must not depend on render.
+  const rowsRef = useRef<TrajectoryRow[]>(EMPTY_ROWS)
+  // Set while an older page is in flight so the reader's row can be held
+  // stationary when the merge prepends everything by exactly its length.
+  const pendingAnchor = useRef<{ scrollTopBefore: number; indexBefore: number; seq: number } | null>(null)
   // `hostPageLoader` closes over the bridge. Memoising it is required: a fresh
   // function per render would recreate `read`, rerun the loading effect, and
   // start another async page request after every state update.
@@ -79,8 +100,57 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
   // has already moved on. Only the newest generation may mutate the view.
   const requestGeneration = useRef(0)
 
+  // Recompute the mounted range from the scroller's real metrics. Setting
+  // state only when the slice itself changes keeps scroll storms cheap.
+  const syncWindow = useCallback(() => {
+    const element = scroller.current
+    if (!element) return
+    const next = computeTrajectoryWindow({
+      rowCount: rowsRef.current.length,
+      rowHeight: TRAJECTORY_ROW_HEIGHT,
+      overscan: OVERSCAN,
+      scrollTop: element.scrollTop,
+      viewportHeight: element.clientHeight,
+    })
+    setSlice((current) =>
+      current &&
+      current.startIndex === next.startIndex &&
+      current.endIndex === next.endIndex &&
+      current.topSpacerHeight === next.topSpacerHeight &&
+      current.bottomSpacerHeight === next.bottomSpacerHeight
+        ? current
+        : next,
+    )
+  }, [])
+
   const read = useCallback(async (before?: number) => {
     if (!loader) return
+    // Before asking for an older page, remember which row the reader is on.
+    // After the merge prepends everything by that page's length, this seq is
+    // what holds their place still.
+    if (before !== undefined) {
+      const element = scroller.current
+      const rowButtons = element?.querySelectorAll<HTMLButtonElement>('[data-trajectory-row]')
+      if (element && rowButtons && rowButtons.length > 0) {
+        // The reader's top-visible ROW, found in DOM terms — spacer heights,
+        // the load-older button or errors above the list cannot skew this the
+        // way dividing raw scrollTop by a row height would.
+        const scrollerTop = element.getBoundingClientRect().top
+        let topVisible = rowButtons[0]
+        for (const button of rowButtons) {
+          if (button.getBoundingClientRect().top <= scrollerTop + 1) topVisible = button
+          else break
+        }
+        const seq = Number(topVisible.dataset.seq)
+        if (Number.isFinite(seq)) {
+          pendingAnchor.current = {
+            scrollTopBefore: element.scrollTop,
+            indexBefore: Number(topVisible.dataset.index),
+            seq,
+          }
+        }
+      }
+    }
     const generation = ++requestGeneration.current
     setLoading(true)
     setError(null)
@@ -105,6 +175,8 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
     following.current = true
     setPage(null)
     setSelected(null)
+    setSlice(null)
+    pendingAnchor.current = null
     void read()
     return () => {
       // Invalidate a request whose component/session lifetime just ended.
@@ -112,14 +184,66 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
     }
   }, [read])
 
+  // Mirrors for event handlers and sibling effects — written pre-paint here,
+  // never during render (concurrent rendering must not observe torn refs).
+  // Declared before the anchor/sync effects so they read this commit's truth.
+  useLayoutEffect(() => {
+    rowsRef.current = page ? projectTrajectory(page).rows : EMPTY_ROWS
+  }, [page])
+
+  // Anchor BEFORE pinning: a prepend must hold the reader's row still, while
+  // a tail-following reader simply stays at the bottom. Both run pre-paint.
+  useLayoutEffect(() => {
+    const element = scroller.current
+    if (!element) return
+    const anchor = pendingAnchor.current
+    pendingAnchor.current = null
+    if (anchor && !following.current) {
+      const indexAfter = rowsRef.current.findIndex((row) => row.seq === anchor.seq)
+      if (indexAfter >= 0) {
+        element.scrollTop = anchorScrollTopAfterPrepend({
+          scrollTopBefore: anchor.scrollTopBefore,
+          rowHeight: TRAJECTORY_ROW_HEIGHT,
+          indexBefore: anchor.indexBefore,
+          indexAfter,
+        })
+      }
+    }
+  }, [page])
+
   useEffect(() => {
     if (!following.current || !scroller.current) return
     scroller.current.scrollTop = scroller.current.scrollHeight
   }, [page])
 
+  // The mounted range tracks the real scroller: after pages load or merge,
+  // after the panel is resized, and on every scroll that moves the range.
+  useLayoutEffect(() => {
+    syncWindow()
+  }, [page, syncWindow])
+
+  useEffect(() => {
+    const element = scroller.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => syncWindow())
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [syncWindow])
+
   if (!loader) return null
 
   const view = page ? projectTrajectory(page) : null
+  const rows = view?.rows ?? EMPTY_ROWS
+  // Before the first window sync lands, derive the range from the same real
+  // metrics the sync would use — no hand-built literal, no full-list flash.
+  const range = slice ?? computeTrajectoryWindow({
+    rowCount: rows.length,
+    rowHeight: TRAJECTORY_ROW_HEIGHT,
+    overscan: OVERSCAN,
+    scrollTop: scroller.current?.scrollTop ?? 0,
+    viewportHeight: scroller.current?.clientHeight ?? 0,
+  })
+  const mountedRows = rows.slice(range.startIndex, range.endIndex)
   const selectedRow = view?.rows.find((row) => row.seq === selected)
   const selectedStep = selectedRow
     ? view?.steps.find((step) => step.turn === selectedRow.turn && step.step === selectedRow.step)
@@ -147,8 +271,11 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
           const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 24
           // Reading older rows must not be interrupted by new ones arriving.
           following.current = atBottom
+          syncWindow()
         }}
       >
+        <div aria-hidden="true" style={{ height: range.topSpacerHeight }} />
+
         {view && view.unloadedBefore > 0 ? (
           <button
             type="button"
@@ -162,13 +289,16 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
 
         {error ? <p className="px-2 py-1 text-xs text-red">讀取軌跡失敗：{error}</p> : null}
 
-        {view?.rows.map((row) => {
+        {mountedRows.map((row, index) => {
           const isSelected = row.seq === selected
           return (
             <button
               key={row.seq}
               type="button"
               aria-pressed={isSelected}
+              data-trajectory-row="true"
+              data-seq={row.seq}
+              data-index={range.startIndex + index}
               onClick={() => setSelected(isSelected ? null : row.seq)}
               className={`flex items-start gap-2 rounded px-2 py-1 text-left text-xs ${isSelected ? 'bg-surface-2' : ''}`}
             >
@@ -185,6 +315,8 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
             </button>
           )
         })}
+
+        <div aria-hidden="true" style={{ height: range.bottomSpacerHeight }} />
       </div>
 
       {selectedRow ? (

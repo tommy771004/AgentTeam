@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { LogViewer } from './LogViewer'
 import { ElapsedTime } from './primitives/ElapsedTime'
@@ -17,6 +17,8 @@ import { usePermissionAskStore } from '../store/permissionAskStore'
 import { useRunActivityStore } from '../store/runActivityStore'
 import { ReasoningFocusPanel } from './ReasoningFocusPanel'
 import { ContextUsagePanel } from './ContextUsagePanel'
+import { TrajectoryPanel } from './TrajectoryPanel'
+import type { PiHostSession } from '../agent/piHostRun'
 import { contextUsageMicrocopy, formatTokensCompact } from '../agent/contextUsageView'
 import { useRunContextUsage } from '../hooks/useRunContextUsage'
 import type { TurnRecordEntry } from '../agent/turnRecord'
@@ -40,6 +42,18 @@ const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 
 const EMPTY_RECORD_ENTRIES: TurnRecordEntry[] = []
 const EMPTY_ACTIVITY = { active: false, tasks: [], statusLine: '', thought: '', startedAt: 0, phase: 'starting' as const, terminal: null, recordEntries: EMPTY_RECORD_ENTRIES, recordTotal: 0 } as const
 const EMPTY_RUN_PLAN: ThreadPlanItem[] = []
+
+// The trajectory section remembers being opened across remounts — repeated
+// walks through a long run should not re-collapse it every time.
+const TRAJECTORY_OPEN_KEY = 'subagents.runPanel.trajectoryOpen.v1'
+
+function readStoredTrajectoryOpen(): boolean {
+  try {
+    return localStorage.getItem(TRAJECTORY_OPEN_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
 
 function CompactStepList({ steps }: { steps: ExecutionStep[] }) {
   return (
@@ -132,6 +146,11 @@ export function InlineRunPanel({
   // Open by default: this is where the token microcopy in the process feed
   // sends the reader, so arriving on a collapsed section would answer nothing.
   const [contextOpen, setContextOpen] = useState(true)
+  // 執行軌跡 — collapsed until asked; the choice persists across remounts.
+  const [trajectoryOpen, setTrajectoryOpen] = useState(readStoredTrajectoryOpen)
+  // undefined = not yet resolved; null = this run has no Host session binding
+  // (the section then stays hidden — absent, not broken).
+  const [trajectorySessionId, setTrajectorySessionId] = useState<string | null | undefined>(undefined)
 
   const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
@@ -233,6 +252,47 @@ export function InlineRunPanel({
     : agent.tokensUsed > 0
       ? `${formatTokensCompact(agent.tokensUsed)} tok`
       : undefined
+
+  // Resolve this thread's Host session lazily — only once the reader opens
+  // the trajectory section. The binding choice matches submitPiHostRun: the
+  // FIRST non-archived session bound to this thread is the one runs submit
+  // to, so it is the one whose record this panel must show. No binding
+  // (plain browser, non-Host runner) means the section never appears.
+  useEffect(() => {
+    if (!trajectoryOpen || trajectorySessionId !== undefined) return
+    const bridge = window.subagents?.piHost?.sessions
+    if (typeof bridge?.record !== 'function' || typeof bridge.list !== 'function') {
+      setTrajectorySessionId(null)
+      return
+    }
+    let cancelled = false
+    void bridge
+      .list()
+      .then(({ sessions }) => {
+        if (cancelled) return
+        const match = (sessions as PiHostSession[]).find(
+          (session) => session.threadId === threadId && !session.archived && typeof session.id === 'string',
+        )
+        setTrajectorySessionId(match ? match.id : null)
+      })
+      .catch(() => {
+        if (!cancelled) setTrajectorySessionId(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [trajectoryOpen, trajectorySessionId, threadId])
+
+  const toggleTrajectory = () => {
+    setTrajectoryOpen((value) => {
+      try {
+        localStorage.setItem(TRAJECTORY_OPEN_KEY, String(!value))
+      } catch {
+        // A blocked localStorage must not break the toggle.
+      }
+      return !value
+    })
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-line bg-surface text-ink">
@@ -442,6 +502,20 @@ export function InlineRunPanel({
             degraded={isExternal}
           />
         </PanelSection>
+
+        {trajectorySessionId ? (
+          <PanelSection
+            id="run-trajectory"
+            title="執行軌跡"
+            summary="回看 Turn Record"
+            open={trajectoryOpen}
+            onToggle={toggleTrajectory}
+          >
+            <div className="h-72">
+              <TrajectoryPanel sessionId={trajectorySessionId} />
+            </div>
+          </PanelSection>
+        ) : null}
 
         {detailSummary || isExternal || agent.loadedCapabilityIds.length > 0 ? (
           <PanelSection
