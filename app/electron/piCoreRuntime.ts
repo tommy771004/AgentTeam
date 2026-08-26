@@ -11,7 +11,7 @@ import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
 import { piPackExtensionFactories } from './piToolHost.ts'
 import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, snapshotPiSkillResources } from './piSkills.ts'
 import { piCodingAgentModule as piCodingAgent, piVendorDir } from './piVendor.ts'
-import { SUBSCRIPTION_PROVIDERS, type SubscriptionModelInfo, type SubscriptionProviderId } from '../src/agent/subscriptionCatalog.ts'
+import { sanitizeModelRow, SUBSCRIPTION_PROVIDERS, type SubscriptionModelInfo, type SubscriptionProviderId } from '../src/agent/subscriptionCatalog.ts'
 import { bindPiSessionSkillResourceView, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
 import { buildPiMcpDynamicPacks } from './piExtensionPacks/mcpBridgePack.ts'
 
@@ -223,15 +223,15 @@ export async function buildPiSubscriptionModelView(): Promise<{
     try {
       const projected: SubscriptionModelInfo[] = []
       for (const raw of getModels(id) || []) {
-        if (!raw || typeof raw.id !== 'string' || !raw.id.trim()) continue
-        projected.push({
-          id: raw.id,
-          ...(typeof raw.name === 'string' && raw.name ? { label: raw.name } : {}),
-          ...(typeof raw.contextWindow === 'number' && Number.isFinite(raw.contextWindow)
-            ? { contextWindow: raw.contextWindow }
-            : {}),
-          ...(raw.reasoning === true ? { reasoning: true } : {}),
+        // The ModelRuntime's raw rows name the label `name`; the shared guard
+        // owns every acceptance decision, so the two producers cannot drift.
+        const clean = sanitizeModelRow({
+          id: raw?.id,
+          label: raw?.name,
+          contextWindow: raw?.contextWindow,
+          reasoning: raw?.reasoning,
         })
+        if (clean) projected.push(clean)
       }
       models[id] = projected
     } catch (error) {

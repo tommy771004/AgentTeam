@@ -25,3 +25,12 @@
 - trf#10 已補指向註記。
 
 **剩餘兩框需真機操作**（DevTools DOM 計數＋主觀捲動品質），依 spec 屬人工證據，fail-closed：無數字不勾。
+
+## Comments
+
+**2026-08-26 — 可代理半部就緒性核查（tracker-truth-reconciliation 順帶確認）。**
+
+- fixture 產生器實跑驗證：`createFixturePageLoader(20_000)` → total=80000、每頁 100 列、跨頁 seq 嚴格遞減；loader 直接委派 shipped `pageTurnRecord`（量測即生產合約）。
+- 程序文件完備：`../measurement-pass.md` 含注入步驟、console 片段、四項數字表、兩個常數的定案規則。
+- 證據模板已備：[evidence/measurement-pass.md](../evidence/measurement-pass.md)——真人照程序操作後填數字即可。
+- **剩餘半部本質需人工**（spec 明文「量測 pass 是人工證據，不是 smoke」）：真機 DevTools DOM 計數與捲動品質判讀。依 fail-closed 慣例，代理不代產此證據。

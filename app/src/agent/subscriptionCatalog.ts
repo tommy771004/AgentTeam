@@ -83,6 +83,36 @@ const REASON_CONFLICT = 'CLI 與 Pi 的憑證屬於不同帳號；請在單一 C
 const REASON_NO_CREDENTIAL = '尚未偵測到 CLI 登入；請先在對應 CLI（codex / claude）完成登入後重啟。'
 const REASON_NO_MODELS = '憑證已同步，但此訂閱目前沒有可解析的模型。'
 
+/**
+ * The ONE row guard for subscription model facts (ticket 03).
+ *
+ * Every producer of model rows — the catalog projection and the Host's
+ * ModelRuntime view alike — routes raw entries through here, so the two can
+ * never drift apart in what they accept or drop. Identity travels VERBATIM:
+ * ids are not trimmed, folded, or rewritten, because the model picker writes
+ * the listed id back verbatim and the runtime must resolve it unchanged.
+ *
+ * Pure and total over any input: junk rows become `undefined`, wrong-typed
+ * fields drop individually rather than coercing.
+ */
+export function sanitizeModelRow(input: {
+  id?: unknown
+  label?: unknown
+  contextWindow?: unknown
+  reasoning?: unknown
+} | null | undefined): SubscriptionModelInfo | undefined {
+  if (!input || typeof input.id !== 'string' || !input.id.trim()) return undefined
+  const id = input.id
+  return {
+    id,
+    ...(typeof input.label === 'string' && input.label ? { label: input.label } : {}),
+    ...(typeof input.contextWindow === 'number' && Number.isFinite(input.contextWindow)
+      ? { contextWindow: input.contextWindow }
+      : {}),
+    ...(input.reasoning === true ? { reasoning: true } : {}),
+  }
+}
+
 function boundedModels(
   raw: readonly SubscriptionModelInfo[] | undefined,
 ): { models: readonly SubscriptionModelInfo[]; modelTotal: number } {
@@ -91,18 +121,8 @@ function boundedModels(
   // mutated.
   const byId = new Map<string, SubscriptionModelInfo>()
   for (const model of raw || []) {
-    if (!model || typeof model.id !== 'string' || !model.id.trim()) continue
-    const id = model.id
-    if (!byId.has(id)) {
-      byId.set(id, {
-        id,
-        ...(typeof model.label === 'string' && model.label ? { label: model.label } : {}),
-        ...(typeof model.contextWindow === 'number' && Number.isFinite(model.contextWindow)
-          ? { contextWindow: model.contextWindow }
-          : {}),
-        ...(model.reasoning === true ? { reasoning: true } : {}),
-      })
-    }
+    const clean = sanitizeModelRow(model)
+    if (clean && !byId.has(clean.id)) byId.set(clean.id, clean)
   }
   const sorted = [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   return { models: sorted.slice(0, SUBSCRIPTION_CATALOG_MAX_MODELS), modelTotal: sorted.length }
@@ -165,4 +185,28 @@ export function assembleSubscriptionCatalog(
     providerModels: modelView,
     providerModelError: modelErrors,
   })
+}
+
+/**
+ * The offline-fallback decision (ticket 02): publish a fresh build as-is, or —
+ * when the fresh build could not make ANY row available and a previous
+ * snapshot carried at least one usable row — republish that last-good catalog
+ * marked stale, with the moment the CACHE was built (not now) so the UI can
+ * say honestly how old it is.
+ *
+ * A previous snapshot whose rows were all unavailable is not a cache worth
+ * falling back to: republishing it would dress a known-dead state up as
+ * memory. Fail-closed stays fail-closed — no previous usable state means the
+ * degraded fresh build publishes verbatim.
+ */
+export function resolveCatalogPublication(
+  fresh: readonly SubscriptionProviderCatalog[],
+  previous: { catalog: readonly SubscriptionProviderCatalog[]; builtAt: number } | undefined,
+  now: number,
+): { catalog: readonly SubscriptionProviderCatalog[]; stale: boolean; builtAt: number } {
+  const freshUsable = fresh.some((row) => row.availability === 'available')
+  if (freshUsable || !previous || !previous.catalog.some((row) => row.availability === 'available')) {
+    return { catalog: fresh, stale: false, builtAt: now }
+  }
+  return { catalog: previous.catalog, stale: true, builtAt: previous.builtAt }
 }

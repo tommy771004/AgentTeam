@@ -27,6 +27,10 @@ export type PiHostConfigStatus = {
   oauthConflicts: string[]
   /** Fail-closed selectable-subscription rows; availability metadata only. */
   subscriptionCatalog?: readonly SubscriptionProviderCatalog[]
+  /** True when the rows above are the last-good cache, not this boot's build. */
+  subscriptionCatalogStale?: boolean
+  /** When the published catalog was built (cache keeps its ORIGINAL build time). */
+  subscriptionCatalogCachedAt?: number
 }
 
 export type PiHostRequest = {

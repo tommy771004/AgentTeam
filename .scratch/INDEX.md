@@ -1,51 +1,69 @@
 # `.scratch` issue tracker index
 
 Local Markdown tracker per `docs/agents/issue-tracker.md`.  
-**Status** vocabulary: `docs/agents/triage-labels.md`（`可交給代理` / `resolved` / …）.
+**Status** vocabulary: `docs/agents/triage-labels.md`（`可交給代理` / `resolved` / …）.  
+**對帳紀律（2026-08-26 起）**：`resolved` 的證據定義與 DEV_STATE 更新紀律見 `docs/agents/triage-labels.md`。本檔內所有相對路徑引用由 `app/scripts/smoke-tracker-index-links.mts` 守衛（掛 `npm run smoke`）：死路徑會讓 build 紅。
 
 ## Active frontier (implement next)
 
 | Effort | Spec | Frontier | Notes |
-|--------|------|----------|--------|
-| **tracker-truth-reconciliation** | [spec.md](tracker-truth-reconciliation/spec.md) | （spec 先行；拆票後更新此格） | **先於其他 effort 排工**。對帳：以 smoke gate 為唯一證據，把各 effort 的 Status／spec 敘述、INDEX 死連結（`subagents-paid-beta/`、`loop-runner-deepening/` 已不存在）、DEV_STATE.md（停在 08-15）對齊程式現實；新增恰好一支 drift guard（INDEX 相對路徑必須存在）；`resolved` 翻牌規則入 `docs/agents/`。harness-gap-closure #09 維持待維護者裁決，本 effort 僅使其顯形。 |
-| **trajectory-review-closure** | [spec.md](trajectory-review-closure/spec.md) | [01 窗口模組](trajectory-review-closure/issues/01-window-module.md) · [02 掛載＋guard](trajectory-review-closure/issues/02-mount-and-guard.md) | 01、02 resolved（純函式窗口＋決定論 smoke、InlineRunPanel「執行軌跡」section＋惰性 sessionId 解析＋防復發 drift guard，皆已接 gate）；[03 量測 pass](trajectory-review-closure/issues/03-measurement-pass.md) `需人工處理`——fixture 與程序文件已備，缺真機證據。trf#10 的 `[~]` 已指向本 effort。 |
-| **cli-subscription-pi-loop** | [spec.md](cli-subscription-pi-loop/spec.md) | **resolved** | 6/6 tickets done。ADR-0052（accepted）落地：CLI 訂閱 OAuth（openai-codex / anthropic）成為 builtin Pi Core loop 原生 provider 連線——`src/agent/subscriptionCatalog.ts` fail-closed 純投影、Host snapshot bounded catalog（protocol v4，相容 v2/v3 client）、renderer 訂閱 preset＋模型 picker、三支誠實標示 drift guards（已掛鏈）。驗收證據：[qualification.md](cli-subscription-pi-loop/qualification.md)（99 smoke 全綠；真機 E2E：隔離 dir 匯入真 codex OAuth → gpt-5.4-mini 經 Pi loop 回答；snapshot 全文零 credential 形狀）。可重跑：`qualify-subscription-snapshot.mts` / `qualify-subscription-e2e.mts`。 |
-| **active-run-reattachment** | [spec.md](active-run-reattachment/spec.md) | [01 真相歸屬決策（resolved）](active-run-reattachment/issues/01-truth-owner-decision.md) · [02 reattach 純協調模組](active-run-reattachment/issues/02-reattach-projection.md) | 01 已決：以 **Pi Core Host journal** 為 active／terminal attachment 唯一真相，main 只 relay，Pi Host Protocol v2→v3；決策見 [decision.md](active-run-reattachment/decision.md)。其餘 10 張 `可交給代理` tickets 實作 renderer reload 的 snapshot+cursor 重建、Host terminal outcome 到既有 app finalization 的 exactly-once 交付、容量重建與真實重啟 e2e。範圍仍不含 main／Host process 重啟，且不新增 coordinator 或第二進度來源。依賴:03←01(resolved)，02 可先行，04←03 → 05←02+04 → 06←05 → 07←04、08←06、09←05、10←06 → 11 收口。 |
-| **context-usage-panel** | [spec.md](context-usage-panel/spec.md) | [01 usage 記錄擴充 + Host 補抓](context-usage-panel/issues/01-usage-record-capture.md) | 8 張 `可交給代理` tickets。opencode 式 session 上下文面板：token/cost/快取落在 `step-end` usage（ADR-0039/0049 語意），單一測試接縫為 `projectContextUsage` 純投影。依賴：01 先行 → 02/03 並行 → 04/06/07 並行 → 05←03+04 → 08 收口 |
-| **pi-host-tool-and-skill-parity** | [spec.md](pi-host-tool-and-skill-parity/spec.md) | [01 Host extension tool 接縫](pi-host-tool-and-skill-parity/issues/01-host-extension-tool-seam.md) · [02 技能改由 Pi resource loader](pi-host-tool-and-skill-parity/issues/02-skills-via-pi-resource-loader.md) | `可交給代理`。本 session 排查第四題的終局：Host 只有 6 個 builtin tool / 3 個 capability，renderer 有 48 個工具 / 14 個 capability，技能在 localStorage 而 Host 沒有 skill 工具 —— Settings 列的能力在 Electron production 幾乎都叫不動。改為 `pi.registerTool()` 的 Extension Pack + Pi resource loader 的 `additionalSkillPaths`（ADR-0027/0028/0034）。**注意**：止血用的 `agent/piTurnContext.ts` 技能注入牴觸 ADR-0034，由本 effort 排定退場。單一接縫：spawn `dist-electron/pi-host.js` 走 Pi Host Protocol。19 張 `可交給代理`：01 與 02 兩條 tracer 可同時開工（tools / skills 互不相依），04–12 九張只擋在 01 之後可全部並行，13←12，14←03，15←09+14，16←02，17←02+12，18 為 contract（刪 renderer 目錄與 Hermes 技能 + drift guard），19 為完整 qualification |
-| **external-cli-durable-harness** | [spec.md](external-cli-durable-harness/spec.md) | [01 External CLI Run Session seam](external-cli-durable-harness/issues/01-expand-external-cli-run-session-seam.md) | 7 張 `可交給代理` tickets；01 先建立 expand seam，之後 02/03/05 可並行，04 依賴 02/03，06 依賴 02，07 為完整 qualification |
+|--------|------|----------|-------|
+| **subscription-surface-hardening** | [spec.md](subscription-surface-hardening/spec.md) | [01 Settings 誠實性](subscription-surface-hardening/issues/01-settings-honesty.md) · [03 模組衛生](subscription-surface-hardening/issues/03-catalog-module-hygiene.md) | 5 張 `可交給代理`（勾選框核實全開）。2026-08-26 三輪 two-axis review 的修復 effort：Settings 訂閱面誠實性（訊息順序／正字／衝突後可刷新）、離線快取 catalog 後備＋stale 如實標示（承接 cli-subscription-pi-loop L26 承諾）、catalog 模組四項去重、usage 輪詢防復活契約、finalization「不阻塞啟動」行為入冊。01↔03 可並行，02←03，04 獨立，05 收口。 |
+| **trajectory-review-closure** | [spec.md](trajectory-review-closure/spec.md) | [03 量測 pass](trajectory-review-closure/issues/03-measurement-pass.md) | 01、02 resolved（純函式窗口＋決定論 smoke、InlineRunPanel「執行軌跡」section＋惰性 sessionId 解析＋防復發 drift guard，皆已接 gate）。僅剩 [03 量測 pass](trajectory-review-closure/issues/03-measurement-pass.md) `需人工處理`——fixture 與程序文件已備，缺真機 before/after DOM 節點數證據與 overscan 定案；無證據不得勾（fail-closed）。 |
+| **context-usage-panel** | [spec.md](context-usage-panel/spec.md) | [01 usage 記錄擴充 + Host 補抓](context-usage-panel/issues/01-usage-record-capture.md) | 8 張 `可交給代理` tickets（勾選框核實 0/38 勾，確實未動）。opencode 式 session 上下文面板：token/cost/快取落在 `step-end` usage（ADR-0039/0049 語意），單一測試接縫為 `projectContextUsage` 純投影。依賴：01 先行 → 02/03 並行 → 04/06/07 並行 → 05←03+04 → 08 收口。 |
+| **external-cli-durable-harness** | [spec.md](external-cli-durable-harness/spec.md) | [01 External CLI Run Session seam](external-cli-durable-harness/issues/01-expand-external-cli-run-session-seam.md) | 7 張 `可交給代理` tickets（2026-08-26 核實：66 個驗收框全開，確實未動）；01 先建立 expand seam，之後 02/03/05 可並行，04 依賴 02/03，06 依賴 02，07 為完整 qualification。trf#11 的 seam-1 真 CLI 斷言由本 effort 承接。 |
+| **harness-gap-closure** | [spec.md](harness-gap-closure/spec.md) | [01 統一架構敘述](harness-gap-closure/issues/01-unify-architecture-narrative.md) | 17 張票，10 張已完成（#02 #03 #04 #05 #08 #12 #13 #14 #16 #17，驗收框全滿＋gate smoke 綠），7 張未動：#01（敘述統一；注意其問題陳述寫於 remove-legacy-engine 合併前，「兩條路徑並存」已是歷史，動工前先照現實重新框限）、#06 workspace grep/glob、#07 spill 大工具輸出、#10 headless 入口、#11 evaluation harness、#15 outbound run view。09 為範圍決策，見下方待維護者裁決 queue。 |
+| **active-run-reattachment** | [spec.md](active-run-reattachment/spec.md) | 02–11（框待負責人對證據補勾） | 01 resolved：以 **Pi Core Host journal** 為 active／terminal attachment 唯一真相，main 只 relay，Pi Host Protocol v2→v3；決策見 [decision.md](active-run-reattachment/decision.md)。**對帳註記（2026-08-26）**：02–11 驗收框仍全開，但 git 顯示大量對應實作已落地——`reattachReconcile.ts` 純模組＋`smoke-reattach-reconcile.mts` 在主 smoke 鏈（commit e002493）、protocol v3 attachment persistence＋pending approval attachment＋finalization claim lease（93acc1b／53674f5／9d56e8d／92c2c78）、renderer 重附著（adb80fd）。票框與證據的歸位是票主判斷，不自動翻牌。範圍仍不含 main／Host process 重啟。 |
+| **pi-agent-runtime-contract** | spec（見目錄） | [#14 Linux bwrap 真機](pi-agent-runtime-contract/issues/14-linux-bubblewrap-builtin-shell-tracer.md) · [#18 git preferences 裁決](pi-agent-runtime-contract/issues/18-git-preferences-reach-no-runtime.md) · [#22 rollup](pi-agent-runtime-contract/issues/22-remaining-work-rollup.md) | 對帳後現實：22 張中 19 張驗收框全滿且 gate smoke 綠（`npm run qualify:pi-runtime-contract` 在主鏈）。殘餘三張：#14 需 Linux CI 首綠（macOS seatbelt tracer 已完成）、#18 待維護者裁決 git `--force` 移除語意、#22 rollup 開 2.1（＝#14 三框）與 3.1（`KNOWN_UNGATED_TESTS` 依 ADR-0052 為「列出非豁免」清單，清空目標需重新表述）。 |
 | **subdesign-p0-harness-gaps** | [spec.md](subdesign-p0-harness-gaps/spec.md) | [01 Gate evidence contract](subdesign-p0-harness-gaps/issues/01-gate-evidence-contract-fail-closed.md) · [05 Pin 模式端到端](subdesign-p0-harness-gaps/issues/05-pin-mode-end-to-end.md) · [07 Register 快照 + restore](subdesign-p0-harness-gaps/issues/07-register-snapshot-restore.md) | 8 張 `可交給代理` 票、三條並行線（A gates：01→02→03，04←01；B pins：05→06；C snapshots：07→08）；由 `docs/research/claude-design-clones-harness-comparison.md` P0 建議展開 |
 | **subdesign-architecture-deepening** | [spec.md](subdesign-architecture-deepening/spec.md) | [01 SubDesign workspace module](subdesign-architecture-deepening/issues/01-deepen-subdesign-workspace-module.md) | 5 張 `可交給代理` tickets；01 與 02 可先行，03/04 依賴 01，05 依賴 02/03 |
-| **turn-record-fidelity** | [spec.md](turn-record-fidelity/spec.md) | **resolved** | 12/12 tickets done。Host 端一份有 seq/turn/step 的 Turn Record，答案／模型歷史／UI Projection 三者都從它推導（ADR-0039 合規、ADR-0049/0050 新增）；Pi Host Protocol 升到 v2；`smoke-record-fidelity-qualification` 為完整驗收。兩處刻意未完成：trajectory 的視窗虛擬化、外部 CLI 的真實 seam-1 harness 斷言（各票 `[~]` 有記） |
-| **harness-gap-closure** | [spec.md](harness-gap-closure/spec.md) | [01 統一架構敘述](harness-gap-closure/issues/01-unify-architecture-narrative.md) | 由 `docs/DEEPSEEK_HARNESS_COMPARISON_2026-08-17.md` 展開，17 張票。01 應先做（決定後續程式該落在哪一軌）；09 為範圍決策，`待分流` 待維護者裁決 |
-| **subagents-paid-beta** | [spec.md](subagents-paid-beta/spec.md) | [14 release qualification](subagents-paid-beta/issues/14-paid-beta-release-qualification.md) | **唯一未完成 P0** — 需真實 signed Win/mac 證據；本地 qualify 腳本 fail-closed No-Go |
-| **loop-runner-deepening** | [spec.md](loop-runner-deepening/spec.md) | [05 manual parity](loop-runner-deepening/issues/05-manual-parity-merge-bar.md) | 01–04 resolved（transport seam／stepRun／loopRunner 四 pattern／engine 瘦身+drift guard，engine.ts 1702→808 行，`npm run smoke` 全綠）；僅剩 05 人工 dev-app parity 待做（需人工處理，非代理） |
-| 其餘 product efforts | — | — | **resolved**（見下表） |
 
 ## Resolved this session chain
 
-| Effort | Status |
-|--------|--------|
-| tool-invocation-pipeline / review-cleanup | resolved |
-| hermes-aligned-runtime + registry-executor-cleanup | resolved |
-| outbound-data-gate（01–25 + evidence residual + PolicyAdmin extract） | resolved |
-| execution-trust-and-safety / hardening | resolved |
-| task-run-coordinator-deepening / single-owner-cleanup | resolved |
-| subdesign-project-workspace（含 05 自動化 smoke） | resolved |
-| paid-beta 05, 10–13（composer/handoff/workflow/website 等） | resolved |
+| Effort | Status | 一 hop 證據 |
+|--------|--------|------------|
+| tracker-truth-reconciliation | resolved（2026-08-26 本日收口；[spec.md](tracker-truth-reconciliation/spec.md)） | guard `smoke-tracker-index-links.mts` 掛主鏈並綠；七張對帳票 Comments 附證據；DEV_STATE 同日更新 |
+| pi-host-tool-and-skill-parity | resolved（19/19 驗收框全滿） | `smoke-pi-parity-qualification` 在主鏈；十個 extension pack 落地（ef781cf）、renderer 等價工具刪除＋單一 owner（a6d7754、b0f615a）；唯一 `[~]` 見 known residuals #18 |
+| turn-record-fidelity | resolved（12/12 tickets done） | `smoke-record-fidelity-qualification` 在主鏈；Host 端 seq/turn/step Turn Record，答案／模型歷史／UI Projection 三者皆由它推導（ADR-0039/0049/0050）；刻意 `[~]` 見 known residuals |
+| cli-subscription-pi-loop | resolved（6/6 tickets done） | [qualification.md](cli-subscription-pi-loop/qualification.md)：99 smoke 全綠＋真機 E2E（隔離 dir 匯入真 codex OAuth → gpt-5.4-mini 經 Pi loop 回答）；可重跑 `qualify-subscription-snapshot.mts` / `qualify-subscription-e2e.mts` |
+| tool-invocation-pipeline / review-cleanup | resolved | — |
+| hermes-aligned-runtime + registry-executor-cleanup | resolved | — |
+| outbound-data-gate（01–25 + evidence residual + PolicyAdmin extract） | resolved | — |
+| execution-trust-and-safety / hardening | resolved | — |
+| task-run-coordinator-deepening / single-owner-cleanup | resolved | — |
+| subdesign-project-workspace（含 05 自動化 smoke） | resolved | — |
+| paid-beta 05, 10–13（composer/handoff/workflow/website 等） | resolved | — |
+
+### 已收口但目錄已移除（下場註記，非死連結）
+
+- **loop-runner-deepening** — 由 remove-legacy-engine 收口（PR #8–#13 合併）：`agent/engine.ts` 與 `agent/loop/` 已自程式碼刪除，Pi Core Host 為唯一 tool-loop owner（ADR-0045 初始化門檻已過），相關 drift guards 接管敘事。其舊票 #05「manual dev-app parity」隨遺留路徑消失而失去主體。
+- **subagents-paid-beta** — 目錄已不存在（git 759d691 清理）；#14 release qualification 殘餘遷記至下方 Remaining blocked，追蹤不因目錄消失而丟失。
+
+## Known residuals（刻意 `[~]`，是紀錄不是欠債）
+
+- **trf#04** — `toolAudit` 未改為投影：它涵蓋回合之外的工具呼叫，純推導會遺失那些記錄（設計決策，票內有說明）。
+- **trf#10** — TrajectoryPanel 視窗虛擬化：純函式視窗＋掛載已由 [trajectory-review-closure 01/02](trajectory-review-closure/spec.md) 落地；量測證據與 overscan 定案歸 [03 量測 pass](trajectory-review-closure/issues/03-measurement-pass.md)。
+- **trf#11** — 外部 CLI record 的 seam-1 真 CLI 斷言：形狀以純 builder fixture 斷言（`smoke-external-cli-record`）；跑真 CLI 的端到端歸 external-cli-durable-harness effort。
+- **parity#18** — `hermes/skills.ts` 以 READ-ONLY 形式留一個版本作為遷移回滾（`check-pi-contract.mts` Guard 3 凍結其 4 個消費者）；收口追蹤於 runtime-contract #17。
+
+## 待維護者裁決 queue（顯式，不埋在雜訊裡）
+
+1. **harness-gap-closure #09** — builtin shell 是否納入 ADR-0022 sandbox 義務（範圍決策）。
+2. **runtime-contract #18** — git `--force` 語意移除裁決（傾向 deny + reason，與 gate 一致；若移除需連動 Settings UI／`LlmSettings` 欄位／re-export）。
 
 ## Remaining blocked / non-agent
 
-1. **paid-beta #14** — `blocked-pending-real-signed-platform-evidence`  
-   - 需 clean-machine 上 signed 安裝、CLI doctor、N-1→N、entitlement、workflow 實機證據。  
-   - 產物：`.scratch/subagents-paid-beta/evidence/14-paid-beta-release-qualification-no-go.md`  
-   - 工具：`npm` scripts / `qualify-release.mts`（無證據則 No-Go）。
-
-2. **Optional polish（非 P0）**  
-   - `inspectOutbound` 將 sanitize 收進單一 egress API（行為已在 `prepareLlmEgressMessages` + call sites）。  
-   - seatbelt 擴真實 CLI adapter 網路/nvm 路徑。  
+1. **paid-beta #14 release qualification** — `blocked-pending-real-signed-platform-evidence`
+   - 需 clean-machine 上 signed 安裝、CLI doctor、N-1→N、entitlement、workflow 實機證據。
+   - 目錄已移除；No-Go 記錄可自 git 歷史（759d691 之前的 `.scratch/subagents-paid-beta/evidence/`）取回。
+   - 工具仍在 gate 上：`npm run smoke-release-qualification` / `scripts/qualify-release.mts`（無證據則 No-Go）。
+2. **runtime-contract #14 Linux bwrap 真機 qualification** — 需 Linux CI 首綠（macOS seatbelt 已完成）；完成後補勾 #14 三框與 #22 的 2.1。
+3. **trajectory-review-closure #03 量測 pass** — `需人工處理`：真機 DOM 節點數量測與 overscan 定案，程序文件已備。
+4. **Optional polish（非 P0）**
+   - `inspectOutbound` 將 sanitize 收進單一 egress API（行為已在 `prepareLlmEgressMessages` + call sites）。
+   - seatbelt 擴真實 CLI adapter 網路/nvm 路徑。
    - Playwright 完整點擊 smoke（Chromium 可選）。
 
 ## Smoke added this pass
 
-- `app/scripts/smoke-subdesign-studio.mts` — Studio 契約 + delivery gate + prototype guard（已掛 smoke chain）
+- `app/scripts/smoke-tracker-index-links.mts` — INDEX 相對路徑必須存在（檔案與目錄皆驗、無豁免、訊息列出違規路徑）；fixture 自測含說謊輸入必紅、誠實輸入必綠（已掛 `npm run smoke` 主鏈）

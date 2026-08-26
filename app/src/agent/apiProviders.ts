@@ -1,4 +1,5 @@
 import type { ApiProviderPreset } from './types.ts'
+import { SUBSCRIPTION_PROVIDERS, type SubscriptionProviderId } from './subscriptionCatalog.ts'
 
 export type ApiProviderDefinition = {
   id: ApiProviderPreset
@@ -12,12 +13,13 @@ export type ApiProviderDefinition = {
 /**
  * Native Pi providers whose credential comes from a local CLI login sync
  * (ADR-0052): the CLI OAuth lands in the Host-side synced credential store
- * and the builtin Pi loop runs on the subscription model. Mirrors
- * `SUBSCRIPTION_PROVIDERS` in `subscriptionCatalog.ts`.
+ * and the builtin Pi loop runs on the subscription model. The list is the
+ * catalog module's OWN definition re-exported under its settings-surface
+ * name — one list, never a mirrored copy.
  */
-export type SubscriptionProviderPreset = 'openai-codex' | 'anthropic'
+export type SubscriptionProviderPreset = SubscriptionProviderId
 
-export const SUBSCRIPTION_PROVIDER_PRESETS: readonly SubscriptionProviderPreset[] = ['openai-codex', 'anthropic']
+export const SUBSCRIPTION_PROVIDER_PRESETS: readonly SubscriptionProviderPreset[] = SUBSCRIPTION_PROVIDERS
 
 export function isSubscriptionProviderPreset(id: ApiProviderPreset | string): boolean {
   return (SUBSCRIPTION_PROVIDER_PRESETS as readonly string[]).includes(id)

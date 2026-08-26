@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { ContextUsageChip } from './ContextUsageChip'
 import { Icon } from './Icon'
 import { LogViewer } from './LogViewer'
 import { ElapsedTime } from './primitives/ElapsedTime'
@@ -19,7 +20,7 @@ import { ReasoningFocusPanel } from './ReasoningFocusPanel'
 import { ContextUsagePanel } from './ContextUsagePanel'
 import { TrajectoryPanel } from './TrajectoryPanel'
 import { pickThreadPiSession } from '../agent/piHostRun'
-import { contextUsageMicrocopy, formatTokensCompact } from '../agent/contextUsageView'
+import { formatTokensCompact } from '../agent/contextUsageView'
 import { useRunContextUsage } from '../hooks/useRunContextUsage'
 import { useRunUsageRefresher } from '../hooks/useRunUsageRefresher'
 import type { TurnRecordEntry } from '../agent/turnRecord'
@@ -87,6 +88,24 @@ function CompactStepList({ steps }: { steps: ExecutionStep[] }) {
   )
 }
 
+/**
+ * The 上下文 section body as a self-subscribing leaf: the projection is
+ * computed here and only while the section is open, so a usage-only update
+ * never re-renders the rail's other sections (ticket 04).
+ */
+const RunContextBody = memo(function RunContextBody({
+  runId,
+  fallbackTokens,
+  degraded,
+}: {
+  runId: string
+  fallbackTokens?: number
+  degraded?: boolean
+}) {
+  const contextUsage = useRunContextUsage(runId)
+  return <ContextUsagePanel usage={contextUsage} fallbackTokens={fallbackTokens} degraded={degraded} />
+})
+
 function PanelSection({
   id,
   title,
@@ -97,7 +116,8 @@ function PanelSection({
 }: {
   id: string
   title: string
-  summary?: string
+  /** ReactNode so a section head can host a self-subscribing leaf (usage chip). */
+  summary?: ReactNode
   open: boolean
   onToggle: () => void
   children: ReactNode
@@ -119,8 +139,7 @@ function PanelSection({
             {summary}
           </span>
         ) : null}
-        <Icon name={open ? 'expand_less' : 'expand_more'} size={16} className="shrink-0 text-ink-3" />
-      </button>
+        <Icon name={open ? 'expand_less' : 'expand_more'} size={16} className="shrink-0 text-ink-3" />      </button>
       {open ? (
         <div id={contentId} className="px-4 pb-4">
           {children}
@@ -249,10 +268,11 @@ export function InlineRunPanel({
     .join(' · ')
   const currentStatus = lifecycle.label
 
-  // 上下文 — the same derivation the process-feed microcopy and `/cost` use.
-  const contextUsage = useRunContextUsage(runId)
-  const contextSummary = !isExternal && contextUsage.measuredSteps > 0
-    ? contextUsageMicrocopy(contextUsage)
+  // 上下文 — the section head hosts a self-subscribing chip and the body is a
+  // memo leaf with its own projection, so usage changes re-render neither the
+  // rail nor its sibling sections (ticket 04).
+  const contextSummary = !isExternal
+    ? <ContextUsageChip runId={runId} variant="inline" />
     : agent.tokensUsed > 0
       ? `${formatTokensCompact(agent.tokensUsed)} tok`
       : undefined
@@ -507,11 +527,7 @@ export function InlineRunPanel({
           open={contextOpen}
           onToggle={() => setContextOpen((value) => !value)}
         >
-          <ContextUsagePanel
-            usage={contextUsage}
-            fallbackTokens={agent.tokensUsed}
-            degraded={isExternal}
-          />
+          <RunContextBody runId={runId} fallbackTokens={agent.tokensUsed} degraded={isExternal} />
         </PanelSection>
 
         {trajectorySessionId ? (

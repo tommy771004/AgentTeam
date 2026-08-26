@@ -2,9 +2,16 @@ import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+
+// The handshake version is EXTRACTED from the protocol module's source rather
+// than hardcoded a fourth time (ticket 03): bumping PI_HOST_PROTOCOL_VERSION
+// updates this smoke without anyone remembering the literal here.
+const protocolSource = await readFile(resolve(import.meta.dirname, '../electron/piHostProtocol.ts'), 'utf8')
+const PROTOCOL_VERSION = Number(protocolSource.match(/PI_HOST_PROTOCOL_VERSION = (\d+) as const/)?.[1])
+assert.ok(Number.isInteger(PROTOCOL_VERSION) && PROTOCOL_VERSION >= 2, 'protocol version constant must be extractable from piHostProtocol.ts')
 
 type HostMessage = {
   id?: string | number
@@ -33,10 +40,10 @@ const waitFor = async (predicate: (message: HostMessage) => boolean): Promise<Ho
 }
 
 try {
-  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 4, client: 'smoke', capabilities: ['attachments-v1'] } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: PROTOCOL_VERSION, client: 'smoke', capabilities: ['attachments-v1'] } })}\n`)
   const initialized = await waitFor((message) => message.id === 1)
   assert.deepEqual(initialized.result, {
-    protocolVersion: 4,
+    protocolVersion: PROTOCOL_VERSION,
     capabilities: ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'capabilities'],
     status: 'ready',
   })

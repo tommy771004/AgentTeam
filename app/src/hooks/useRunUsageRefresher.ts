@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useAgentStore } from '../store/agentStore'
 import { useRunActivityStore } from '../store/runActivityStore'
 
 /**
@@ -33,6 +34,9 @@ function pullLatestPage(runId: string): Promise<void> {
       const presentation = useRunActivityStore.getState().presentations[runId]
       const newestKnown = presentation?.recordEntries.at(-1)?.seq ?? 0
       if (newestPage <= newestKnown) return
+      // 晚到的頁面不得翻轉已結束的 run：appendRecordEntries 會把 presentation
+      // 翻回 active，所以寫回前以活躍集合為最終裁決（ticket 04）。
+      if (!useAgentStore.getState().activeRunIds.includes(runId)) return
       useRunActivityStore.getState().appendRecordEntries(entries, runId)
     } catch {
       // Host 暫時不可達：略過這一輪，下一輪再對時；輪詢本身不中斷。

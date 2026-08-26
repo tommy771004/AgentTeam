@@ -299,13 +299,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         return { ok: false, message: error instanceof Error ? error.message : String(error) }
       }
     }
-    if (!s.apiKey) return { ok: false, message: 'API key is empty' }
     // ADR-0052: a subscription connection has no OpenAI-compatible endpoint or
     // key to probe; its health is the Host's, already returned above in
-    // Electron production. Reaching here means no Host exists — say so.
+    // Electron production. This check must precede the key check — subscription
+    // connections never carry an apiKey, so "API key is empty" would be a lie.
     if (isSubscriptionProviderPreset(s.apiProvider)) {
-      return { ok: false, message: '訂閲連線由 Pi Core Host 提供；此環境沒有 Host。' }
+      return { ok: false, message: '訂閱連線由 Pi Core Host 提供；此環境沒有 Host。' }
     }
+    if (!s.apiKey) return { ok: false, message: 'API key is empty' }
     const m = model || s.model
     try {
       let discoveredModels: string[] = []

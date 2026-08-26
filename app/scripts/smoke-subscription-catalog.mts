@@ -4,6 +4,8 @@ import { resolve } from 'node:path'
 import {
   projectSubscriptionCatalog,
   assembleSubscriptionCatalog,
+  sanitizeModelRow,
+  resolveCatalogPublication,
   SUBSCRIPTION_CATALOG_MAX_MODELS,
   SUBSCRIPTION_PROVIDERS,
 } from '../src/agent/subscriptionCatalog.ts'
@@ -191,13 +193,18 @@ for (const forbidden of [/Date\.now/, /Math\.random/, /useState|useStore|zustand
 // ── Host wiring is a contract, not a convention ─────────────────────────────
 const entrySource = await readFile(resolve(import.meta.dirname, '../electron/piHostEntry.ts'), 'utf8')
 assert.match(entrySource, /buildPiSubscriptionModelView\(\)/, 'piHostEntry must build the model view at startup')
-assert.match(entrySource, /subscriptionCatalog:\s*assembleSubscriptionCatalog\(/, 'piHostEntry must assemble the catalog into config.subscriptionCatalog')
+assert.match(entrySource, /resolveCatalogPublication\(/, 'piHostEntry must publish through the offline-fallback decision, not hand-pick rows')
+assert.match(entrySource, /subscriptionCatalog:\s*publishedCatalog\.catalog/, 'config carries exactly the publication decision')
+assert.match(entrySource, /subscriptionCatalogStale: true/, 'the stale marker rides only when the fallback fired')
 const protocolSource = await readFile(resolve(import.meta.dirname, '../electron/piHostProtocol.ts'), 'utf8')
 assert.match(protocolSource, /PI_HOST_PROTOCOL_VERSION = 4 as const/, 'ADR-0052 rides protocol v4')
 assert.match(protocolSource, /requestedVersion !== PI_HOST_PROTOCOL_VERSION && requestedVersion !== 3 && requestedVersion !== 2/, 'v2/v3 peers stay readable across the v4 bump')
 assert.match(protocolSource, /subscriptionCatalog\?: readonly SubscriptionProviderCatalog\[\]/, 'snapshot config type carries the catalog')
+assert.match(protocolSource, /subscriptionCatalogStale\?: boolean/, 'snapshot config type carries the stale marker')
+assert.match(protocolSource, /subscriptionCatalogCachedAt\?: number/, 'snapshot config type carries when the cached catalog was built')
 const supervisorSource = await readFile(resolve(import.meta.dirname, '../electron/piHostSupervisor.ts'), 'utf8')
-assert.match(supervisorSource, /protocolVersion: 4/, 'the app client negotiates the current version')
+assert.match(supervisorSource, /protocolVersion: PI_HOST_PROTOCOL_VERSION/, 'the app client negotiates the constant, never a literal')
+assert.ok(!/protocolVersion: 4/.test(supervisorSource), 'no hardcoded protocol literal may remain in the supervisor')
 
 // ── Ticket 04: the model picker relays ids verbatim, from the catalog only ──
 const pickerSource = await readFile(resolve(import.meta.dirname, '../src/components/settings/SubscriptionModelPicker.tsx'), 'utf8')
@@ -210,5 +217,120 @@ const productionSource = await readFile(resolve(import.meta.dirname, '../src/age
 assert.match(productionSource, /model: 'model',/, 'the Host settings mapping stays an identity map for model ids')
 const storeSource = await readFile(resolve(import.meta.dirname, '../src/store/settingsStore.ts'), 'utf8')
 assert.match(storeSource, /isSubscriptionProviderPreset\(s\.apiProvider\)/, 'the browser test-connection path refuses subscription probes fail-closed')
+
+// ── sanitizeModelRow is THE single row guard (ticket 03) ───────────────────
+const sanitized = sanitizeModelRow({ id: ' m2 ', label: 'M2', contextWindow: 1000, reasoning: true })
+assert.equal(sanitized!.id, ' m2 ', 'ids travel verbatim — no trimming, no case folding (picker contract)')
+assert.deepEqual(sanitized, { id: ' m2 ', label: 'M2', contextWindow: 1000, reasoning: true })
+assert.equal(sanitizeModelRow({ id: '   ' }), undefined, 'blank ids drop')
+assert.equal(sanitizeModelRow({}), undefined, 'missing id drops')
+assert.equal(sanitizeModelRow(null), undefined)
+assert.deepEqual(sanitizeModelRow({ id: 'x', name: 3 as unknown as string }), { id: 'x' }, 'wrong-typed fields drop, not coerce')
+assert.deepEqual(sanitizeModelRow({ id: 'y', contextWindow: Number.NaN }), { id: 'y' }, 'non-finite contextWindow drops')
+// Both call sites must route through the one owner.
+const coreRuntimeSource = await readFile(resolve(import.meta.dirname, '../electron/piCoreRuntime.ts'), 'utf8')
+assert.match(coreRuntimeSource, /sanitizeModelRow\(/, 'the Host model view reuses the shared row guard')
+assert.ok(!/typeof raw\.id !== 'string'/.test(coreRuntimeSource), 'the duplicated inline guard chain must be gone from piCoreRuntime')
+assert.match(source, /export function sanitizeModelRow/, 'the row guard lives in the catalog module')
+
+// ── Offline fallback: publish fresh, or the last cached catalog marked stale (ticket 02) ──
+const freshLive = projectSubscriptionCatalog({
+  importedProviders: ['openai-codex'],
+  skippedProviders: [],
+  conflicts: [],
+  providerModels: { 'openai-codex': [model('gpt-live')] },
+})
+const previousGood = {
+  catalog: projectSubscriptionCatalog({
+    importedProviders: ['openai-codex'],
+    skippedProviders: [],
+    conflicts: [],
+    providerModels: { 'openai-codex': [model('gpt-old')] },
+  }),
+  builtAt: 1_000,
+}
+const publishedLive = resolveCatalogPublication(freshLive, previousGood, 5_000)
+assert.equal(publishedLive.stale, false, 'a usable fresh build publishes as-is')
+assert.equal(publishedLive.builtAt, 5_000)
+assert.deepEqual(publishedLive.catalog, freshLive)
+
+const degradedFresh = projectSubscriptionCatalog({
+  importedProviders: ['openai-codex'],
+  skippedProviders: [],
+  conflicts: [],
+  providerModels: {},
+  providerModelError: { 'openai-codex': 'models.json unreadable' },
+})
+const publishedStale = resolveCatalogPublication(degradedFresh, previousGood, 5_000)
+assert.equal(publishedStale.stale, true, 'a degraded build falls back to cache and says so')
+assert.equal(publishedStale.builtAt, 1_000, 'cachedAt stays the moment the CACHE was built, not now')
+assert.deepEqual(publishedStale.catalog, previousGood.catalog)
+
+// A previous snapshot that never had a usable row must NOT masquerade as cache.
+const previousDead = {
+  catalog: projectSubscriptionCatalog({
+    importedProviders: [],
+    skippedProviders: [],
+    conflicts: [],
+    providerModels: {},
+  }),
+  builtAt: 1_000,
+}
+const publishedDead = resolveCatalogPublication(degradedFresh, previousDead, 5_000)
+assert.equal(publishedDead.stale, false, 'an all-unavailable previous catalog is no cache worth falling back to')
+assert.deepEqual(publishedDead.catalog, degradedFresh)
+
+// First boot with no previous snapshot at all.
+const publishedFirst = resolveCatalogPublication(degradedFresh, undefined, 5_000)
+assert.equal(publishedFirst.stale, false)
+assert.deepEqual(publishedFirst.catalog, degradedFresh)
+
+// The publication decision is pure too.
+const pubInput = { catalog: freshLive, builtAt: 42 }
+assert.deepEqual(
+  resolveCatalogPublication(degradedFresh, pubInput, 7_000),
+  resolveCatalogPublication(degradedFresh, pubInput, 7_000),
+  'same input, same output',
+)
+
+// ── Ticket 01: test-connection honesty — no Host beats no-key ──────────────
+const { useSettingsStore } = await import('../src/store/settingsStore.ts')
+const store = useSettingsStore.getState()
+useSettingsStore.setState({ settings: { ...store.settings, apiProvider: 'openai-codex', apiKey: '' } })
+const subscriptionProbe = await useSettingsStore.getState().testConnection()
+assert.ok(!subscriptionProbe.ok)
+assert.match(subscriptionProbe.message, /Host/, 'a subscription probe without a Host says SO — not "API key is empty"')
+assert.doesNotMatch(subscriptionProbe.message, /API key/)
+// Non-subscription presets keep the original key check.
+useSettingsStore.setState({ settings: { ...store.settings, apiProvider: 'openai', apiKey: '' } })
+const keyedProbe = await useSettingsStore.getState().testConnection()
+assert.equal(keyedProbe.message, 'API key is empty', 'OpenAI-compatible probes still demand a key first')
+useSettingsStore.setState({ settings: store.settings })
+
+// Traditional-Chinese copy standard: 訂閱 (U+95B1), never the variant 閲 (U+95B2).
+const storeSourceRecheck = await readFile(resolve(import.meta.dirname, '../src/store/settingsStore.ts'), 'utf8')
+assert.ok(!storeSourceRecheck.includes('訂閲'), 'the variant 閲 must not appear in user-facing copy')
+assert.match(storeSourceRecheck, /訂閱連線由 Pi Core Host 提供/, 'the honest subscription message stays')
+// Ordering contract: the subscription branch is checked BEFORE the key check.
+assert.ok(
+  storeSourceRecheck.indexOf('isSubscriptionProviderPreset(s.apiProvider)') < storeSourceRecheck.indexOf("message: 'API key is empty'"),
+  'no-Host must be judged before no-key',
+)
+
+// ── Ticket 01: both settings surfaces load through the ONE shared hook ─────
+for (const component of ['SubscriptionConnectionStatus.tsx', 'SubscriptionModelPicker.tsx']) {
+  const componentSource = await readFile(resolve(import.meta.dirname, '../src/components/settings', component), 'utf8')
+  assert.match(componentSource, /useSubscriptionCatalog\(\)/, `${component} loads through the shared hook`)
+  assert.doesNotMatch(componentSource, /piHost\?\.settings\?\.get/, `${component} must not hand-roll its own catalog fetch`)
+  // The offline marker must reach the user, verbatim vocabulary.
+  assert.match(componentSource, /subscriptionCacheBadge/, `${component} surfaces the stale-cache badge honestly`)
+}
+const hookSource = await readFile(resolve(import.meta.dirname, '../src/hooks/useSubscriptionCatalog.ts'), 'utf8')
+assert.match(hookSource, /visibilitychange|'focus'/, 'the shared loader re-queries on focus so conflict resolution becomes observable')
+
+// ── Ticket 04: the rail's usage surface is isolated leaves, not a top-level subscription ──
+const panelSource = await readFile(resolve(import.meta.dirname, '../src/components/InlineRunPanel.tsx'), 'utf8')
+assert.match(panelSource, /<ContextUsageChip runId=\{runId\}/, 'the section head hosts the self-subscribing usage chip')
+assert.match(panelSource, /const RunContextBody = memo\(/, 'the 上下文 body is a memo leaf owning its own projection')
 
 console.log('Subscription catalog projects fail-closed: conflict hides all, no login falls back to nothing, bounding is visible')

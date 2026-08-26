@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ApiProviderPreset } from '../../agent/types'
 import type { SubscriptionProviderCatalog } from '../../agent/subscriptionCatalog'
+import { subscriptionCacheBadge, useSubscriptionCatalog } from '../../hooks/useSubscriptionCatalog'
 
 /**
  * ADR-0052 ticket 04 — fail-closed model picker for CLI-subscription
@@ -22,21 +23,7 @@ type Props = {
 }
 
 export function SubscriptionModelPicker({ providerId, value, onChange }: Props) {
-  const [catalog, setCatalog] = useState<readonly SubscriptionProviderCatalog[]>()
-  const [loadFailed, setLoadFailed] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    void window.subagents?.piHost?.settings?.get?.().then((result) => {
-      if (!active) return
-      // Older Hosts (protocol < v4) carry no catalog: nothing selectable is
-      // invented behind their back.
-      setCatalog(result?.config?.subscriptionCatalog)
-    }).catch(() => {
-      if (active) setLoadFailed(true)
-    })
-    return () => { active = false }
-  }, [])
+  const { catalog, stale, cachedAt, loadFailed } = useSubscriptionCatalog()
 
   if (loadFailed) {
     return (
@@ -70,6 +57,9 @@ export function SubscriptionModelPicker({ providerId, value, onChange }: Props) 
     const known = row.models.some((model) => model.id === value)
     return (
       <div className="flex flex-col gap-1">
+        {stale ? (
+          <p className="text-[11px] text-amber-300">⚠︎ {subscriptionCacheBadge(cachedAt)}——清單可能不是最新。</p>
+        ) : null}
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}

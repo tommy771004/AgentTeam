@@ -33,6 +33,10 @@ type PiHostConfigStatus = {
   oauthConflicts: string[]
   /** ADR-0052: availability metadata only; never credential-shaped. */
   subscriptionCatalog?: import('../src/agent/subscriptionCatalog').SubscriptionProviderCatalog[]
+  /** True when the rows above are the last-good cache, not this boot's build. */
+  subscriptionCatalogStale?: boolean
+  /** When the published catalog was built (cache keeps its ORIGINAL build time). */
+  subscriptionCatalogCachedAt?: number
 }
 
 const api = {

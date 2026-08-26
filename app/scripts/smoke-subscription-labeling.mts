@@ -73,8 +73,14 @@ for (const file of ['src/store/settingsStore.ts', 'src/pages/SettingsPage.tsx', 
   }
 }
 // …while the sanctioned surface — availability metadata only — is consumed
-// exactly where ticket 03/04 wired it.
-assert.match(statusUi, /config\?\.subscriptionCatalog/)
+// exactly where ticket 03/04 wired it. The fetch itself lives in the shared
+// hook; the components may only reach the catalog THROUGH it.
+assert.match(statusUi, /useSubscriptionCatalog\(\)/)
+const catalogHook = await read('src/hooks/useSubscriptionCatalog.ts')
+assert.match(catalogHook, /config\?\.subscriptionCatalog/, 'the shared loader is the one place reading config.subscriptionCatalog')
+for (const forbidden of [/auth\.json/, /credentials\.json/, /access_token|refresh_token/i]) {
+  assert.doesNotMatch(catalogHook, forbidden, `the catalog loader must not touch credential material: ${forbidden}`)
+}
 const catalogModule = await read('src/agent/subscriptionCatalog.ts')
 assert.match(catalogModule, /Credential-shaped data/, 'the projection module still states its credential-exclusion contract')
 

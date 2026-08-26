@@ -1,9 +1,16 @@
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createInterface } from 'node:readline'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+
+// Handshake version comes from the protocol module's source — never a second
+// literal (ticket 03).
+const QUALIFY_PROTOCOL_VERSION = Number(
+  (await readFile(resolve(import.meta.dirname, '../electron/piHostProtocol.ts'), 'utf8'))
+    .match(/PI_HOST_PROTOCOL_VERSION = (\d+) as const/)?.[1],
+)
 
 /**
  * ADR-0052 ticket 06 — real end-to-end over a CLI subscription.
@@ -41,7 +48,7 @@ const waitFor = async (predicate: (m: Record<string, unknown>) => boolean): Prom
 }
 
 try {
-  send(1, 'initialize', { protocolVersion: 4, client: 'subagents-subscription-e2e', capabilities: ['attachments-v1', 'tool-contract-v1'] })
+  send(1, 'initialize', { protocolVersion: QUALIFY_PROTOCOL_VERSION, client: 'subagents-subscription-e2e', capabilities: ['attachments-v1', 'tool-contract-v1'] })
   await waitFor((m) => m.id === 1)
 
   // The sync must have landed the codex credential into the isolated dir…

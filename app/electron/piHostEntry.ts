@@ -5,7 +5,7 @@ import { createPiHostServer, type PiHostMessage } from './piHostProtocol.ts'
 import { loadPiHostState, savePiHostState, type PiHostSnapshot } from './piHostState.ts'
 import { migrateLegacySettings } from './piSettingsMigration.ts'
 import { buildPiSubscriptionModelView, disposeAllPiSessions, persistPiLegacyCredential, persistPiLegacyModelConfig } from './piCoreRuntime.ts'
-import { assembleSubscriptionCatalog } from '../src/agent/subscriptionCatalog.ts'
+import { assembleSubscriptionCatalog, resolveCatalogPublication } from '../src/agent/subscriptionCatalog.ts'
 import { bootstrapPiUserConfig } from './piUserConfig.ts'
 import { stopAllPiMcp } from './piMcpClient.ts'
 import { registerTrustedBuiltinShellSandboxAdapter } from './piBuiltinShellSandbox.ts'
@@ -96,24 +96,31 @@ const effectiveSettings = settingsOrigin === 'native'
   : migratedSettings
 // ADR-0052 ticket 02: the selectable-subscription surface rides in the same
 // snapshot config as the OAuth status it projects from. A model-view failure
-// lands as per-provider reasons — the rows stay, honestly unavailable.
+// lands as per-provider reasons — the rows stay, honestly unavailable. When a
+// degraded build meets a last-good snapshot, ticket 02's offline fallback
+// republishes that cache marked stale instead of showing an empty world.
+const oauthSyncStatus = {
+  oauthImportedProviders: userConfig.oauth.importedProviders,
+  oauthSkippedProviders: userConfig.oauth.skippedProviders,
+  oauthConflicts: userConfig.oauth.conflicts,
+}
 const subscriptionModelView = await buildPiSubscriptionModelView()
+const previousSubscriptionCatalog = storedState.config?.subscriptionCatalog?.length
+  ? { catalog: storedState.config.subscriptionCatalog, builtAt: storedState.config.subscriptionCatalogCachedAt || 0 }
+  : undefined
+const publishedCatalog = resolveCatalogPublication(
+  assembleSubscriptionCatalog(oauthSyncStatus, subscriptionModelView.models, subscriptionModelView.errors),
+  previousSubscriptionCatalog,
+  Date.now(),
+)
 const config = {
   settingsSource: settingsOrigin === 'managed' ? 'managed' : userConfig.settingsPath ? 'native' : 'default',
   settingsLoaded: Boolean(userConfig.settingsPath),
   oauthSources: userConfig.oauth.sourceKinds,
-  oauthImportedProviders: userConfig.oauth.importedProviders,
-  oauthSkippedProviders: userConfig.oauth.skippedProviders,
-  oauthConflicts: userConfig.oauth.conflicts,
-  subscriptionCatalog: assembleSubscriptionCatalog(
-    {
-      oauthImportedProviders: userConfig.oauth.importedProviders,
-      oauthSkippedProviders: userConfig.oauth.skippedProviders,
-      oauthConflicts: userConfig.oauth.conflicts,
-    },
-    subscriptionModelView.models,
-    subscriptionModelView.errors,
-  ),
+  ...oauthSyncStatus,
+  subscriptionCatalog: publishedCatalog.catalog,
+  ...(publishedCatalog.stale ? { subscriptionCatalogStale: true } : {}),
+  subscriptionCatalogCachedAt: publishedCatalog.builtAt,
 } as const
 const initialSnapshot: PiHostSnapshot = { cursor: storedState.cursor, sessions: storedState.sessions, settings: effectiveSettings, settingsOrigin, config, queue: storedState.queue, resources: storedState.resources, memories: storedState.memories, extensions: storedState.extensions, attachments: storedState.attachments }
 await savePiHostState(statePath, initialSnapshot)

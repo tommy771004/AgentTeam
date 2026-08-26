@@ -1,6 +1,10 @@
 # Pi Host tool and skill parity: one tool catalog, one resource loader
 
-Status: 可交給代理
+Status: resolved
+
+> **對帳註記（2026-08-26，tracker-truth-reconciliation #03）**：本 spec 的問題陳述（「Host 只有 6 個 builtin tool / 3 個 capability」「技能在 localStorage 而 Host 沒有 skill 工具」「Settings 列的能力幾乎都叫不動」）描述的是**動工前的世界**，現已成歷史：十個 extension pack 已落地 `electron/piExtensionPacks/`、`pi.registerTool()` 與 `additionalSkillPaths` 接縫已通、`piTurnContext` 技能注入分支已整段移除（ADR-0034 衝突已解）、renderer 等價工具已刪。19/19 票驗收框全滿；gate 證據為主鏈上的 `smoke-pi-parity-qualification`。唯一刻意 `[~]`（hermes/skills.ts 唯讀回滾版本）見票 #18 與 INDEX known residuals。以下原文保留作為決策紀錄。
+
+Status（原文）： 可交給代理
 
 Source: 本 session 的排查（四題：對話互相污染／session 保存／request-response 顯示／工具與 skill 的 global 載入）。前三題與第四題的緊急止血已經 ship（`agentStore.publishRun` 選擇權、`piProduction` ownership 表、thread prefs sidecar、專案綁定順序、氣泡時序、`renderMarkdown`）。這份 spec 只擁有第四題的**終局**：讓 Pi Core Host 真的擁有 SubAgents 的工具目錄與技能，並移除為了止血而生的第二套 discovery。
 

@@ -245,6 +245,7 @@ export function SettingsPage() {
   const [hookRulesDraft, setHookRulesDraft] = useState('')
   const [hookRulesError, setHookRulesError] = useState<string | null>(null)
   const [verifyingModel, setVerifyingModel] = useState(false)
+  const isSubscriptionProvider = isSubscriptionProviderPreset(settings.apiProvider || 'custom')
   const [modelVerifyMsg, setModelVerifyMsg] = useState('')
   const [customToolsDraft, setCustomToolsDraft] = useState('')
   const [customToolsError, setCustomToolsError] = useState<string | null>(null)
@@ -1474,7 +1475,7 @@ export function SettingsPage() {
                 <p className="mt-1 text-[11px] text-outline">
                   {apiProviderPreset(settings.apiProvider || 'custom').note}
                 </p>
-                {isSubscriptionProviderPreset(settings.apiProvider || 'custom') && (
+                {isSubscriptionProvider && (
                   <SubscriptionConnectionStatus />
                 )}
               </SettingsStack>
@@ -1488,7 +1489,7 @@ export function SettingsPage() {
                   />
                 }
               />
-              {!isSubscriptionProviderPreset(settings.apiProvider || 'custom') && (
+              {!isSubscriptionProvider && (
                 <SettingsStack title="Base URL">
                   <input
                     value={settings.baseUrl}
@@ -1498,7 +1499,7 @@ export function SettingsPage() {
                   />
                 </SettingsStack>
               )}
-              {!isSubscriptionProviderPreset(settings.apiProvider || 'custom') && (
+              {!isSubscriptionProvider && (
                 <SettingsStack title="API 金鑰">
                   <input
                     type="password"
@@ -1511,7 +1512,7 @@ export function SettingsPage() {
                 </SettingsStack>
               )}
               <SettingsStack title="預設模型">
-                {isSubscriptionProviderPreset(settings.apiProvider || 'custom') ? (
+                {isSubscriptionProvider ? (
                   <SubscriptionModelPicker
                     providerId={settings.apiProvider}
                     value={settings.model}
@@ -1564,7 +1565,7 @@ export function SettingsPage() {
                           {p.contextWindow ? ` · ${Math.round(p.contextWindow / 1000)}k ctx` : ''}
                         </span>
                       )}
-                      {!isSubscriptionProviderPreset(settings.apiProvider || 'custom') && (
+                      {!isSubscriptionProvider && (
                         <button
                           type="button"
                           disabled={verifyingModel || !settings.model || !settings.apiKey}

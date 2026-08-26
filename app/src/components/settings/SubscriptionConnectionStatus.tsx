@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react'
 import type { SubscriptionProviderCatalog } from '../../agent/subscriptionCatalog'
+import { subscriptionCacheBadge, useSubscriptionCatalog } from '../../hooks/useSubscriptionCatalog'
 
 /**
  * ADR-0052 ticket 03 — sync-status summary for CLI-subscription connections.
  * Reads ONLY availability metadata from the Host snapshot config
- * (`config.subscriptionCatalog`); raw tokens never cross IPC and never reach
- * this component. Rows relay the projection's verdict verbatim — a conflict
- * stays a conflict until the user resolves it in the CLI.
+ * (`config.subscriptionCatalog`) through the shared loader hook; raw tokens
+ * never cross IPC and never reach this component. Rows relay the projection's
+ * verdict verbatim — a conflict stays a conflict until the user resolves it in
+ * the CLI.
  */
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -27,21 +28,7 @@ const AVAILABILITY_STYLES: Record<SubscriptionProviderCatalog['availability'], s
 }
 
 export function SubscriptionConnectionStatus() {
-  const [catalog, setCatalog] = useState<readonly SubscriptionProviderCatalog[]>()
-  const [loadFailed, setLoadFailed] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    void window.subagents?.piHost?.settings?.get?.().then((result) => {
-      if (!active) return
-      // Older Hosts (protocol < v4) carry no catalog; render nothing instead
-      // of inventing rows the snapshot cannot back.
-      setCatalog(result?.config?.subscriptionCatalog)
-    }).catch(() => {
-      if (active) setLoadFailed(true)
-    })
-    return () => { active = false }
-  }, [])
+  const { catalog, stale, cachedAt, loadFailed } = useSubscriptionCatalog()
 
   if (loadFailed) {
     return <p className="mt-1 text-[11px] text-outline">無法讀取訂閱狀態（Pi Core Host 未就緒）。</p>
@@ -62,6 +49,9 @@ export function SubscriptionConnectionStatus() {
           </span>
         </div>
       ))}
+      {stale ? (
+        <p className="text-amber-300">⚠︎ {subscriptionCacheBadge(cachedAt)}——此清單非本次啟動的即時結果。</p>
+      ) : null}
       <p className="text-outline">
         訂閱連線以「Pi loop + 訂閱模型」執行；受該服務的訂閱條款與限流約束。
       </p>

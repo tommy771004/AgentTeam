@@ -424,4 +424,14 @@ for (const forbidden of [/Date\.now/, /Math\.random/, /useState|useStore|zustand
   assert.doesNotMatch(source, forbidden, `the context-usage projection must stay pure: ${forbidden}`)
 }
 
+// ── The live refresher keeps its lifecycle contract (effort: subscription-surface-hardening #04) ──
+// Polling is a self-heal over the push stream; its writes must never resurrect
+// a finished run, and the timer must always be cleaned up.
+const refresherSource = await readFile(resolve(import.meta.dirname, '../src/hooks/useRunUsageRefresher.ts'), 'utf8')
+assert.match(refresherSource, /activeRunIds\.includes\(runId\)/, 'a polled page may only be written back while the run is still active')
+assert.match(refresherSource, /newestPage <= newestKnown/, 'a page bringing nothing new must be a store no-op (identity preserved, siblings do not re-render)')
+assert.match(refresherSource, /clearInterval/, 'the polling interval is cleared on unmount/deactivate — lifecycle contract')
+assert.match(refresherSource, /inflight/, 'concurrent polls for one run are deduplicated across mounting surfaces')
+assert.match(refresherSource, /typeof attach !== 'function'/, 'the bridge is feature-detected before use')
+
 console.log('what a run spent is one pure projection of the Turn Record; unmeasured stays unmeasured')
