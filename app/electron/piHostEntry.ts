@@ -101,7 +101,7 @@ const config = {
   oauthSkippedProviders: userConfig.oauth.skippedProviders,
   oauthConflicts: userConfig.oauth.conflicts,
 } as const
-const initialSnapshot: PiHostSnapshot = { cursor: storedState.cursor, sessions: storedState.sessions, settings: effectiveSettings, settingsOrigin, config, queue: storedState.queue, resources: storedState.resources, memories: storedState.memories, extensions: storedState.extensions }
+const initialSnapshot: PiHostSnapshot = { cursor: storedState.cursor, sessions: storedState.sessions, settings: effectiveSettings, settingsOrigin, config, queue: storedState.queue, resources: storedState.resources, memories: storedState.memories, extensions: storedState.extensions, attachments: storedState.attachments }
 await savePiHostState(statePath, initialSnapshot)
 let persistence = Promise.resolve()
 const persist = (snapshot: typeof initialSnapshot) => {

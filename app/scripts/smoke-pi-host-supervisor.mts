@@ -1,5 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { PiHostSupervisor } from '../electron/piHostSupervisor.ts'
+import { PiHostAttachmentJournal, PI_HOST_ATTACHMENT_MAX_SUMMARY_BYTES } from '../electron/piHostAttachment.ts'
+import type { TurnRecordEntry } from '../src/agent/turnRecord.ts'
 
 class FakeChild {
   private listeners = new Map<string, Array<(...args: any[]) => void>>()
@@ -61,4 +63,35 @@ await assert.rejects(
   /Pi Core Host turn\/submit timed out after 50ms/,
 )
 boundedSupervisor.stop()
+
+const entry = (seq: number): TurnRecordEntry => ({
+  kind: seq === 1 ? 'turn-start' : seq === 4 ? 'turn-end' : 'assistant-text',
+  source: seq === 1 || seq === 4 ? 'host' : 'model',
+  ...(seq === 1 ? {} : seq === 4 ? { settlement: 'answered' as const } : { content: `entry-${seq}` }),
+  seq,
+  turn: 1,
+  step: 1,
+  at: seq,
+} as TurnRecordEntry)
+let now = 10_000
+const journal = new PiHostAttachmentJournal({}, undefined, () => now)
+journal.begin({ runId: 'run-1', sessionId: 'session-1', threadId: 'thread-1', turn: 1 })
+journal.append('run-1', [entry(1), entry(2)])
+journal.append('run-1', [entry(2), entry(3)])
+assert.deepEqual({ latestSeq: journal.get('run-1')?.latestSeq, total: journal.get('run-1')?.total }, { latestSeq: 3, total: 3 })
+const terminal = journal.settle('run-1', 'answered', '字'.repeat(70_000), 4)
+assert.ok(new TextEncoder().encode(terminal?.summary || '').byteLength <= PI_HOST_ATTACHMENT_MAX_SUMMARY_BYTES)
+assert.equal(journal.acknowledge('run-1'), true)
+assert.equal(journal.acknowledge('run-1'), true)
+assert.equal(journal.get('run-1'), undefined)
+const orphan = new PiHostAttachmentJournal({}, undefined, () => now)
+orphan.begin({ runId: 'orphan', sessionId: 'session-1' })
+assert.equal(orphan.recoverOrphanedActive()[0]?.settlement, 'interrupted')
+assert.equal(orphan.active().length, 0)
+for (let index = 0; index < 260; index += 1) {
+  const runId = `terminal-${index}`
+  journal.begin({ runId, sessionId: 'session-1' })
+  journal.settle(runId, 'answered', `summary-${index}`, index + 1)
+}
+assert.equal(journal.pendingTerminal().length, 256)
 console.log('Pi Host Supervisor exposes cancellation to Electron callers')

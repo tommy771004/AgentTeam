@@ -9,6 +9,7 @@ import { isPiMemory, type PiMemory } from './piMemoryExtension.ts'
 import { parseTurnRecord } from '../src/agent/turnRecord.ts'
 import type { PiExtension } from './piExtensionRegistry.ts'
 import { isPiTurnToolContract, type PiTurnToolContract } from './piToolContract.ts'
+import type { PiHostAttachment } from './piHostAttachment.ts'
 
 export type PiHostSnapshot = {
   cursor: number
@@ -21,12 +22,14 @@ export type PiHostSnapshot = {
   resources: PiResource[]
   memories: PiMemory[]
   extensions: PiExtension[]
+  /** Host-canonical run attachment metadata; Turn Record entries are not copied. */
+  attachments: PiHostAttachment[]
 }
 
-type StoredState = PiHostSnapshot & { schemaVersion: 1 }
+type StoredState = PiHostSnapshot & { schemaVersion: number }
 
 const emptyState = (): StoredState => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   cursor: 0,
   sessions: [],
   settings: { ...DEFAULT_PI_SETTINGS },
@@ -35,6 +38,7 @@ const emptyState = (): StoredState => ({
   resources: [],
   memories: [],
   extensions: [],
+  attachments: [],
 })
 
 /**
@@ -66,7 +70,7 @@ async function readStoredPiHostState(statePath: string): Promise<StoredState> {
   try {
     const value = JSON.parse(await readFile(statePath, 'utf8')) as Partial<StoredState>
     if (
-      value.schemaVersion !== 1 ||
+      (value.schemaVersion !== 1 && value.schemaVersion !== 2) ||
       typeof value.cursor !== 'number' ||
       !Array.isArray(value.sessions) ||
       !Array.isArray(value.queue || []) ||
@@ -95,7 +99,7 @@ async function readStoredPiHostState(statePath: string): Promise<StoredState> {
       || settings.bashRequireAsk !== DEFAULT_PI_SETTINGS.bashRequireAsk
       || settings.unattended !== DEFAULT_PI_SETTINGS.unattended
     return {
-      schemaVersion: 1,
+      schemaVersion: value.schemaVersion === 2 ? 2 : 1,
       cursor: value.cursor,
       sessions: value.sessions.map((session) => ({
         ...session,
@@ -110,6 +114,7 @@ async function readStoredPiHostState(statePath: string): Promise<StoredState> {
       resources: Array.isArray(value.resources) ? value.resources : [],
       memories: Array.isArray(value.memories) ? value.memories.filter(isPiMemory) : [],
       extensions: Array.isArray(value.extensions) ? value.extensions : [],
+      attachments: Array.isArray(value.attachments) ? value.attachments : [],
     }
   } catch {
     return emptyState()
@@ -123,6 +128,6 @@ export async function loadPiHostState(statePath: string): Promise<StoredState> {
 export async function savePiHostState(statePath: string, snapshot: PiHostSnapshot): Promise<void> {
   await mkdir(path.dirname(statePath), { recursive: true })
   const temporaryPath = `${statePath}.${process.pid}.tmp`
-  await writeFile(temporaryPath, JSON.stringify({ schemaVersion: 1, ...snapshot }), 'utf8')
+  await writeFile(temporaryPath, JSON.stringify({ schemaVersion: 2, ...snapshot }), 'utf8')
   await rename(temporaryPath, statePath)
 }

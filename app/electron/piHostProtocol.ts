@@ -1,14 +1,15 @@
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
+import { PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage } from './piHostAttachment.ts'
 
 /**
  * Version 2 retired the ambiguous `success` turn settlement for the closed
  * union (`answered` / `empty` / …) and added the Turn Record to a session, so a
  * version-1 peer would both misread a settlement and miss the record entirely.
  */
-export const PI_HOST_PROTOCOL_VERSION = 2 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'events', 'automation', 'resources', 'memory', 'capabilities'] as const
+export const PI_HOST_PROTOCOL_VERSION = 3 as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
@@ -24,7 +25,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -51,7 +52,7 @@ export type PiHostResponse = {
     settlement?: PiTurnSettlement | 'success' | 'denied'
     /** Why an `interrupted` settlement stopped short; absent for other settlements. */
     interruptReason?: PiTurnInterruptReason
-    page?: import('../src/agent/turnRecord.ts').TurnRecordPage
+    page?: import('../src/agent/turnRecord.ts').TurnRecordPage | PiHostAttachmentPage
     items?: unknown[]
     /** The entries this turn appended to the session's Turn Record. */
     record?: TurnRecord
@@ -86,6 +87,14 @@ export type PiHostResponse = {
     extensions?: PiExtension[]
     removed?: boolean
     pluginExecution?: SubDesignPluginExecutionProjection
+    attachments?: PiHostAttachment[]
+    attachment?: PiHostAttachment
+    activeRuns?: PiHostAttachment[]
+    terminalRuns?: PiHostAttachment[]
+    availableFromSeq?: number
+    total?: number
+    latestSeq?: number
+    gap?: { missingBefore: number; earliestSeq: number }
   }
   error?: {
     code: 'invalid_request' | 'protocol_mismatch' | 'not_initialized' | 'unknown_method' | 'runtime_error' | 'tool_contract_not_found' | 'tool_contract_unknown_tool' | 'tool_contract_stale' | 'tool_contract_session_mismatch' | 'tool_contract_inactive'
@@ -224,7 +233,8 @@ import {
 
 type HostState = {
   initialized: boolean
-  snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[] }
+  negotiatedProtocolVersion: number
+  snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[]; attachments: PiHostAttachment[] }
   capabilities: PiCapabilityCatalog
   extensions: PiExtensionRegistry
   toolContracts: PiToolContractStore
@@ -239,6 +249,7 @@ type HostState = {
    * that tool when it last described the world.
    */
   catalogProjection: Map<string, PiCatalogEntry>
+  attachmentJournal: PiHostAttachmentJournal
 }
 
 export type PiToolAuditRecord = {
@@ -255,8 +266,8 @@ export type PiToolAuditRecord = {
 
 export type SessionRecord = { id: string; title: string; threadId?: string; parentSessionId?: string; role?: string; profile?: Record<string, unknown>; context?: PiContextPacket; depth?: number; messages: PiRecordedMessage[]; toolAudit?: PiToolAuditRecord[]; archived?: boolean; piSessionFile?: string; record?: TurnRecord; toolContracts?: PiTurnToolContract[]; toolContractRevisionFloor?: number }
 
-const readyResult = (): PiHostResponse['result'] => ({
-  protocolVersion: PI_HOST_PROTOCOL_VERSION,
+const readyResult = (protocolVersion: number = PI_HOST_PROTOCOL_VERSION): PiHostResponse['result'] => ({
+  protocolVersion,
   capabilities: [...PI_HOST_CAPABILITIES],
   status: 'ready',
 })
@@ -329,6 +340,8 @@ type ActiveTurnRecorder = {
   reasoning: string[]
   /** Publishes a recorded entry to the live stream; absent in batch mode. */
   publish?: (entry: TurnRecordEntry) => void
+  /** Updates the Host attachment watermark without copying the entry. */
+  onAppend?: (entry: TurnRecordEntry) => void
 }
 
 const activeTurnRecorders = new Map<string, ActiveTurnRecorder>()
@@ -344,6 +357,7 @@ function recordTurnEntry(
   // `appendTurnRecord` numbers from the same base in the same order, so this
   // is the entry's real seq and not a live-only placeholder.
   recorder.publish?.({ ...appended, seq: recorder.seqBase + recorder.entries.length - 1 } as TurnRecordEntry)
+  recorder.onAppend?.({ ...appended, seq: recorder.seqBase + recorder.entries.length - 1 } as TurnRecordEntry)
 }
 
 /** Collect one thinking delta. Nothing is written yet, and nothing is dropped. */
@@ -797,7 +811,9 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
 
   if (input.method === 'initialize') {
     const requestedVersion = (input.params as { protocolVersion?: unknown } | undefined)?.protocolVersion
-    if (requestedVersion !== PI_HOST_PROTOCOL_VERSION) {
+    // v2 remains readable for existing local clients, while v3 is the only
+    // negotiated version that exposes the attachment contract.
+    if (requestedVersion !== PI_HOST_PROTOCOL_VERSION && requestedVersion !== 2) {
       return [
         errorResponse(
           id,
@@ -807,10 +823,11 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       ]
     }
     state.initialized = true
+    state.negotiatedProtocolVersion = requestedVersion as number
     const requestedCapabilities = (input.params as { capabilities?: unknown } | undefined)?.capabilities
     state.toolContractNegotiated = !Array.isArray(requestedCapabilities) || requestedCapabilities.includes('tool-contract-v1')
-    const result = readyResult()
-    const protocolVersion = result?.protocolVersion ?? PI_HOST_PROTOCOL_VERSION
+    const result = readyResult(state.negotiatedProtocolVersion)
+    const protocolVersion = result?.protocolVersion ?? state.negotiatedProtocolVersion
     const capabilities = result?.capabilities ?? [...PI_HOST_CAPABILITIES]
     return [
       { event: 'host/ready', payload: { protocolVersion, capabilities } },
@@ -819,7 +836,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
   }
 
   if (!state.initialized) return [errorResponse(id, 'not_initialized', 'Pi Host must be initialized first')]
-  if (input.method === 'health/get') return [{ id, result: readyResult() }]
+  if (input.method === 'health/get') return [{ id, result: readyResult(state.negotiatedProtocolVersion) }]
   if (input.method === 'runtime/status') return [{ id, result: piCoreRuntimeStatus() }]
   if (input.method === 'tools/list') {
     if (input.params?.requireContract === true && !state.toolContractNegotiated) {
@@ -1435,6 +1452,26 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const limit = typeof input.params?.limit === 'number' ? input.params.limit : undefined
     return [{ id, result: { sessionId, page: pageTurnRecord(session.record, { before, limit }) } }]
   }
+  if (input.method === 'runs/active') {
+    if (state.negotiatedProtocolVersion < 3) return [errorResponse(id, 'protocol_mismatch', 'Pi Host attachment requires Protocol v3')]
+    return [{ id, result: { activeRuns: state.attachmentJournal.active(), terminalRuns: state.attachmentJournal.pendingTerminal() } }]
+  }
+  if (input.method === 'runs/attach') {
+    if (state.negotiatedProtocolVersion < 3) return [errorResponse(id, 'protocol_mismatch', 'Pi Host attachment requires Protocol v3')]
+    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+    const attachment = state.attachmentJournal.get(runId)
+    if (!attachment) return [{ id, result: { attachment: undefined, page: undefined } }]
+    const session = state.snapshot.sessions.find((candidate) => candidate.id === attachment.sessionId)
+    const page = state.attachmentJournal.attach(runId, session?.record?.entries || [], input.params?.before as number | undefined, typeof input.params?.limit === 'number' ? input.params.limit : PI_HOST_ATTACHMENT_PAGE_LIMIT)
+    return [{ id, result: page ? { attachment: page.attachment, page } : {} }]
+  }
+  if (input.method === 'runs/ack') {
+    if (state.negotiatedProtocolVersion < 3) return [errorResponse(id, 'protocol_mismatch', 'Pi Host acknowledgement requires Protocol v3')]
+    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+    if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
+    state.attachmentJournal.acknowledge(runId)
+    return [{ id, result: { runId, resolved: true } }]
+  }
   if (input.method === 'resources/list') {
     // Skills come straight from what the resource loader actually found on
     // its last reload, so the registry describes reality instead of an empty
@@ -1745,6 +1782,10 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
     if (!session || !prompt.trim()) return [errorResponse(id, 'invalid_request', 'sessionId and prompt are required')]
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : `pi-run-${Date.now()}`
+    const existingAttachment = state.attachmentJournal.get(runId)
+    if (existingAttachment) {
+      return [errorResponse(id, 'invalid_request', `Pi run already exists: ${runId}`)]
+    }
     const activeRun = activeSessionRuns.get(sessionId)
     if (activeRun && activeRun.runId !== runId) {
       const mode = input.params?.followUpMode === 'steer' || input.params?.mode === 'steer'
@@ -1813,7 +1854,9 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       // whole committed slice in the turn's result, so republishing each entry
       // there would be a second copy of the same account, not a live view.
       ...(emit ? { publish: (entry: TurnRecordEntry) => emit({ event: 'host/record-append', payload: { runId, sessionId, entries: [entry] } }) } : {}),
+      onAppend: (entry) => state.attachmentJournal.append(runId, [entry], entry.seq),
     }
+    state.attachmentJournal.begin({ runId, sessionId, threadId: session.threadId, turn: recorder.turn })
     activeTurnRecorders.set(sessionId, recorder)
     recordTurnEntry(sessionId, { kind: 'turn-start', source: 'host' })
     const contextPolicy = parsePiTurnContextPolicy(input.params?.contextPolicy)
@@ -1965,6 +2008,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           entries: session.record.entries.slice(-recorder.entries.length),
         }
         state.snapshot.cursor += 1
+        state.attachmentJournal.settle(runId, settlement, pluginExecution.summary, session.record.entries.at(-1)?.seq)
         return [...turnEvents, {
           id,
           result: {
@@ -2288,6 +2332,12 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
         entries: session.record.entries.slice(-recorder.entries.length),
       }
       state.snapshot.cursor += 1
+      state.attachmentJournal.settle(
+        runId,
+        orchestration.settlement,
+        orchestration.result,
+        session.record.entries.at(-1)?.seq,
+      )
       return [...turnEvents, {
         id,
           result: {
@@ -2375,7 +2425,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
 
 export function createPiHostServer(
   send: (message: PiHostMessage) => void,
-  initialSnapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions?: PiExtension[] } = {
+  initialSnapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions?: PiExtension[]; attachments?: PiHostAttachment[] } = {
     cursor: 0,
     sessions: [],
     settings: { ...DEFAULT_PI_SETTINGS },
@@ -2383,19 +2433,30 @@ export function createPiHostServer(
     resources: [],
     memories: [],
     extensions: [],
+    attachments: [],
   },
-  onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[] }) => void,
+  onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[]; attachments: PiHostAttachment[] }) => void,
 ) {
-  const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [] }
+  const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [], attachments: initialSnapshot.attachments || [] }
+  const attachmentJournal = new PiHostAttachmentJournal({ records: snapshot.attachments }, (next) => {
+    snapshot.attachments = next.records
+    onStateChange?.(snapshot)
+  })
   const state: HostState = {
     initialized: false,
+    negotiatedProtocolVersion: PI_HOST_PROTOCOL_VERSION,
     snapshot,
     capabilities: new PiCapabilityCatalog(DEFAULT_PI_CAPABILITIES),
     extensions: new PiExtensionRegistry(snapshot.extensions),
     toolContracts: new PiToolContractStore(snapshot.sessions.flatMap((session) => session.toolContracts || [])),
     toolContractNegotiated: false,
     catalogProjection: new Map(),
+    attachmentJournal,
   }
+  // A persisted active record has no live witness in a new Host child. Keep
+  // the Host honest across process restart; renderer reloads do not recreate
+  // this server and therefore preserve their active records.
+  attachmentJournal.recoverOrphanedActive()
   for (const session of snapshot.sessions) {
     state.toolContracts.reserveNextRevision(session.id, session.toolContractRevisionFloor || 1)
   }

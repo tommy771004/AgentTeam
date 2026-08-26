@@ -98,7 +98,7 @@ export class PiHostSupervisor {
       this.statusValue = { state: 'error', message: error.message }
     })
 
-    const response = await this.request('initialize', { protocolVersion: 2, client: 'subagents-electron' })
+    const response = await this.request('initialize', { protocolVersion: 3, client: 'subagents-electron', capabilities: ['attachments-v1', 'tool-contract-v1'] })
     if (response.error || !response.result) {
       const message = response.error?.message || 'Pi Core Host did not initialize'
       this.statusValue = { state: 'error', message }
@@ -183,6 +183,32 @@ export class PiHostSupervisor {
     const response = await this.request('runs/list', {})
     if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queue listing failed')
     return response.result.queue
+  }
+
+  async listActiveRuns(): Promise<NonNullable<PiHostResponse['result']>['activeRuns']> {
+    const result = await this.listAttachmentRuns()
+    return result.activeRuns
+  }
+
+  async listAttachmentRuns(): Promise<{
+    activeRuns: NonNullable<PiHostResponse['result']>['activeRuns']
+    terminalRuns: NonNullable<PiHostResponse['result']>['terminalRuns']
+  }> {
+    const response = await this.request('runs/active', {})
+    if (response.error || !response.result?.activeRuns) throw new Error(response.error?.message || 'Pi attachment query failed')
+    return { activeRuns: response.result.activeRuns, terminalRuns: response.result.terminalRuns || [] }
+  }
+
+  async attachRun(runId: string, before?: number, limit?: number): Promise<NonNullable<PiHostResponse['result']>['page']> {
+    const response = await this.request('runs/attach', { runId, ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })
+    if (response.error) throw new Error(response.error.message)
+    return response.result?.page
+  }
+
+  async acknowledgeRun(runId: string): Promise<boolean> {
+    const response = await this.request('runs/ack', { runId })
+    if (response.error) throw new Error(response.error.message)
+    return response.result?.resolved === true
   }
 
   async enqueueRun(input: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>['queue']> {

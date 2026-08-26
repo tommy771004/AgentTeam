@@ -6,6 +6,7 @@ import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
 import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from '../src/agent/subdesign/pluginExecution'
 import type { SubDesignMetadataKind } from '../src/agent/subdesign/metadataKinds'
 import type { PiCatalogEntry } from './piToolHost'
+import type { PiHostAttachment, PiHostAttachmentPage } from './piHostAttachment'
 import type {
   ExternalCliConnectorRequirement,
   ExternalCliRunPhase,
@@ -80,6 +81,9 @@ const api = {
       },
       runs: {
         list: () => ipcRenderer.invoke('pi-host:runs:list') as Promise<{ queue: unknown[] }>,
+        active: () => ipcRenderer.invoke('pi-host:runs:active') as Promise<{ activeRuns: PiHostAttachment[]; terminalRuns: PiHostAttachment[] }>,
+        attach: (runId: string, before?: number, limit?: number) => ipcRenderer.invoke('pi-host:runs:attach', runId, before, limit) as Promise<{ page?: PiHostAttachmentPage; attachment?: PiHostAttachment }>,
+        ack: (runId: string) => ipcRenderer.invoke('pi-host:runs:ack', runId) as Promise<{ runId: string; resolved: boolean }>,
         enqueue: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:runs:enqueue', input) as Promise<{ queue: unknown[] }>,
         cancel: (runId: string) => ipcRenderer.invoke('pi-host:runs:cancel', runId) as Promise<{ queue: unknown[] }>,
         claim: (runId?: string) => ipcRenderer.invoke('pi-host:runs:claim', runId) as Promise<{ run?: unknown; queue: unknown[] }>,
