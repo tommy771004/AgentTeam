@@ -31,7 +31,10 @@ export function useSubscriptionCatalog(): {
     void window.subagents?.piHost?.settings?.get?.().then((result) => {
       if (!active) return
       // Older Hosts (protocol < v4) carry no catalog: nothing selectable is
-      // invented behind their back.
+      // invented behind their back. A success also clears a previous load
+      // failure — healing must be able to end the error state, not just
+      // silently coexist with it.
+      setLoadFailed(false)
       setCatalog(result?.config?.subscriptionCatalog)
       setStale(Boolean(result?.config?.subscriptionCatalogStale))
       setCachedAt(result?.config?.subscriptionCatalogCachedAt)

@@ -28,10 +28,15 @@ const AVAILABILITY_STYLES: Record<SubscriptionProviderCatalog['availability'], s
 }
 
 export function SubscriptionConnectionStatus() {
-  const { catalog, stale, cachedAt, loadFailed } = useSubscriptionCatalog()
+  const { catalog, stale, cachedAt, loadFailed, refresh } = useSubscriptionCatalog()
 
   if (loadFailed) {
-    return <p className="mt-1 text-[11px] text-outline">無法讀取訂閱狀態（Pi Core Host 未就緒）。</p>
+    return (
+      <div className="mt-1 flex flex-col items-start gap-1 text-[11px]">
+        <p className="text-outline">無法讀取訂閱狀態（Pi Core Host 未就緒）。</p>
+        <button type="button" onClick={refresh} className="agent-process-link">重新整理</button>
+      </div>
+    )
   }
   if (!catalog) return null
 
@@ -42,10 +47,17 @@ export function SubscriptionConnectionStatus() {
           <span className={`shrink-0 rounded px-1.5 py-0.5 font-semibold ${AVAILABILITY_STYLES[entry.availability]}`}>
             {PROVIDER_LABELS[entry.id] || entry.id} · {AVAILABILITY_LABELS[entry.availability]}
           </span>
-          <span className="text-outline">
+          <span className="min-w-0 flex-1 text-outline">
             {entry.availability === 'available'
               ? `${entry.modelTotal} 個模型${entry.modelTotal > entry.models.length ? `（顯示前 ${entry.models.length} 個）` : ''}`
               : entry.reason}
+            {entry.availability === 'conflict' ? (
+              <>
+                {' '}請在對應 CLI 登出其他帳號後，
+                <button type="button" onClick={refresh} className="ml-0.5 underline underline-offset-2 hover:text-ink">重新整理</button>
+                以確認。
+              </>
+            ) : null}
           </span>
         </div>
       ))}

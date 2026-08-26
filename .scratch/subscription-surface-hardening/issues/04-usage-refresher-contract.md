@@ -1,6 +1,6 @@
 # 04 — Usage 輪詢契約硬化＋右欄隔離補完
 
-Status: 可交給代理
+Status: resolved
 Effort: subscription-surface-hardening
 
 ## 問題
@@ -10,8 +10,8 @@ Effort: subscription-surface-hardening
 
 ## 驗收條件
 
-- [ ] refresher 寫回前複查該 run 是否仍在活躍集合（activeRunIds）；不在則整頁丟棄不寫。
-- [ ] 防復發 guard（source-text 或行為層）斷言晚到寫入不得翻轉非活躍 presentation。
-- [ ] 右欄用量微縮文字比照主 feed 改由 memo leaf 自行訂閱；主 feed 行為不變。
-- [ ] attach-as-poll 契約借用與 hidden-tab ≥3s 取捨的既有程式註解保留（已聲明的設計決策，不改道新 IPC）。
-- [ ] 生命週期回歸：interval 清理、in-flight 去重、feature-detect 三項既有保證不退化。
+- [x] refresher 寫回前複查 activeRunIds（activeRunIds）；不在則整頁丟棄不寫。
+- [x] 防復發 guard 掛進 smoke-context-usage-projection（activeRunIds 斷言＋no-op identity＋cleanup/dedupe/feature-detect）。
+- [x] 右欄 head 用 ContextUsageChip、body 為 memo RunContextBody（僅展開時計算投影）。
+- [x] 既有註解保留，未改道新 IPC。
+- [x] 三項保證由 smoke-context-usage-projection 斷言釘住。

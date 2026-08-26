@@ -36,3 +36,8 @@
 
 - 不動外部 CLI runner、connector vault、capability matrix。
 - token 不過 IPC；renderer 只消費 availability metadata。
+
+## 後續歸宿（subscription-surface-hardening effort）
+
+- spec L26／story 9 的「離線時退回最後快取的 catalog 並如實標示」原屬本 effort 承諾但無票認領；已由 `.scratch/subscription-surface-hardening/issues/02-offline-catalog-fallback.md` 實作收口（`resolveCatalogPublication` 純決策＋`subscriptionCatalogStale/CachedAt` 標示＋兩個 settings 面的過期徽章）。ticket 01/02 的此項缺口以該票為準。
+- ticket 03/04 的「序列化 drift guard 覆蓋範圍」缺口同由該 effort 的 smoke-subscription-catalog 強化（supervisor 常數化、publication 決策、settings 元件 hook 契約）。

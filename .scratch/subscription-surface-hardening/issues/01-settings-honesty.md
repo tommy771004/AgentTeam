@@ -1,6 +1,6 @@
 # 01 — Settings 訂閱面誠實性：文案、分支順序、可刷新
 
-Status: 可交給代理
+Status: resolved
 Effort: subscription-surface-hardening
 
 ## 問題
@@ -12,10 +12,10 @@ Effort: subscription-surface-hardening
 
 ## 驗收條件
 
-- [ ] 訊息衍生順序：無 Host／無訂閱連線的診斷先於 apiKey 檢查；drift guard 以 source-text 斷言釘住順序。
-- [ ] 「訂閲」改「訂閱」；全檔其餘繁中字形掃過一遍無同類錯字。
-- [ ] catalog 載入收斂為單一共享 hook（見 effort spec 的 useSubscriptionCatalog 決策），兩個 settings 元件都經由它；提供 refresh() 入口＋window focus/visibilitychange 自動重查一次。
-- [ ] 六處重複運算式推導為單一 boolean local。
+- [x] 訊息衍生順序：無 Host／無訂閱連線的診斷先於 apiKey 檢查；drift guard 以 source-text 斷言釘住順序。
+- [x] 「訂閲」改「訂閱」（rg 全 repo 無 U+95B2 殘留）；全檔其餘繁中字形掃過一遍無同類錯字。
+- [x] catalog 載入收斂為單一共享 hook，兩個 settings 元件都經由它；refresh() 入口落在衝突提示旁與 loadFailed 狀態（drift guard：onClick={refresh}）；focus/visibilitychange 自動重查。證據：smoke-subscription-catalog「Ticket 01」段全綠。
+- [x] 六處重複運算式推導為單一 boolean local（SettingsPage 僅剩定義處一處呼叫）。
 - [ ] 相關 smoke 全綠（`npm run build`、oxlint 0 error、smoke-caps）。
 
 ## 接縫

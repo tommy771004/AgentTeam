@@ -139,7 +139,8 @@ function PanelSection({
             {summary}
           </span>
         ) : null}
-        <Icon name={open ? 'expand_less' : 'expand_more'} size={16} className="shrink-0 text-ink-3" />      </button>
+        <Icon name={open ? 'expand_less' : 'expand_more'} size={16} className="shrink-0 text-ink-3" />
+      </button>
       {open ? (
         <div id={contentId} className="px-4 pb-4">
           {children}

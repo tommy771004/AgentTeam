@@ -1,9 +1,16 @@
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createInterface } from 'node:readline'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+
+// The negotiated version is EXTRACTED from the protocol module — never a
+// second literal (ticket 03).
+const QUALIFY_PROTOCOL_VERSION = Number(
+  (await readFile(resolve(import.meta.dirname, '../electron/piHostProtocol.ts'), 'utf8'))
+    .match(/PI_HOST_PROTOCOL_VERSION = (\d+) as const/)?.[1],
+)
 
 /**
  * ADR-0052 ticket 06 security probe — boots the REAL host entry against the
@@ -33,10 +40,10 @@ const waitFor = async (id: number): Promise<Record<string, unknown>> => {
 }
 
 try {
-  send(1, 'initialize', { protocolVersion: 4, client: 'subagents-qualify', capabilities: ['attachments-v1', 'tool-contract-v1'] })
+  send(1, 'initialize', { protocolVersion: QUALIFY_PROTOCOL_VERSION, client: 'subagents-qualify', capabilities: ['attachments-v1', 'tool-contract-v1'] })
   const ready = await waitFor(1)
-  if ((ready.result as { protocolVersion?: number } | undefined)?.protocolVersion !== 4) {
-    throw new Error(`expected negotiated protocolVersion 4, got ${JSON.stringify((ready.result as { protocolVersion?: number })?.protocolVersion)}`)
+  if ((ready.result as { protocolVersion?: number } | undefined)?.protocolVersion !== QUALIFY_PROTOCOL_VERSION) {
+    throw new Error(`expected negotiated protocolVersion ${QUALIFY_PROTOCOL_VERSION}, got ${JSON.stringify((ready.result as { protocolVersion?: number })?.protocolVersion)}`)
   }
   send(2, 'settings/get', {})
   const settingsGet = await waitFor(2)

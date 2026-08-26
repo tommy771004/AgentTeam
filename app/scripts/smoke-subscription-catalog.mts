@@ -325,6 +325,10 @@ for (const component of ['SubscriptionConnectionStatus.tsx', 'SubscriptionModelP
   // The offline marker must reach the user, verbatim vocabulary.
   assert.match(componentSource, /subscriptionCacheBadge/, `${component} surfaces the stale-cache badge honestly`)
 }
+// The manual refresh entry lives beside the conflict resolution hint —
+// fail-closed healing needs a visible trigger, not only focus re-query.
+const statusSource = await readFile(resolve(import.meta.dirname, '../src/components/settings/SubscriptionConnectionStatus.tsx'), 'utf8')
+assert.match(statusSource, /onClick=\{refresh\}/, 'the status surface exposes the manual refresh entry')
 const hookSource = await readFile(resolve(import.meta.dirname, '../src/hooks/useSubscriptionCatalog.ts'), 'utf8')
 assert.match(hookSource, /visibilitychange|'focus'/, 'the shared loader re-queries on focus so conflict resolution becomes observable')
 

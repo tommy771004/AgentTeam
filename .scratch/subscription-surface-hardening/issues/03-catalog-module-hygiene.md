@@ -1,6 +1,6 @@
 # 03 — Catalog 模組衛生：sanitize、provider 清單、clump、版本常數
 
-Status: 可交給代理
+Status: resolved
 Effort: subscription-surface-hardening
 
 ## 問題（四份僅靠註解或複製維持同步的重複）
@@ -12,6 +12,6 @@ Effort: subscription-surface-hardening
 
 ## 驗收條件
 
-- [ ] 四項重複各只剩一個 owner；rg 檢查無殘留字面值 `4` 於協商／斷言路徑（常數 import 除外）。
-- [ ] 行為不變：現有投影與握手 smoke 全綠（sanitize 去重屬重構，投影輸出必須逐位元組一致）。
-- [ ] 新增 provider 時只需改一處清單（以 source-text drift guard 斷言 preset 表來自 import）。
+- [x] 四項重複各只剩一個 owner；rg 檢查無殘留字面值 `4` 於協商／斷言路徑（常數 import 除外）。
+- [x] 行為不變：smoke-subscription-catalog／smoke-pi-host-protocol 全綠（sanitize 去重屬重構，投影輸出必須逐位元組一致）。
+- [x] 新增 provider 時只需改一處清單（以 source-text drift guard 斷言 preset 表來自 import）。
