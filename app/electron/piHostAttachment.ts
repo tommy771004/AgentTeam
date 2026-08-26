@@ -221,7 +221,11 @@ export class PiHostAttachmentJournal {
     const ordered = [...entries].sort((a, b) => a.seq - b.seq)
     const cursor = typeof before === 'number' && Number.isFinite(before) ? before : Number.POSITIVE_INFINITY
     const page = ordered.filter((entry) => entry.seq < cursor).slice(-bounded)
-    const availableFromSeq = ordered[0]?.seq || 0
+    // `availableFromSeq` describes this bounded response, not merely the
+    // oldest row still on disk. A caller must be told when the 200-row page
+    // starts after an omitted prefix, even if the Host could page that prefix
+    // separately.
+    const availableFromSeq = page[0]?.seq || ordered[0]?.seq || 0
     const missingBefore = availableFromSeq > 1 ? availableFromSeq - 1 : 0
     return {
       attachment,
