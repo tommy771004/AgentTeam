@@ -99,7 +99,7 @@ export class PiHostSupervisor {
       this.statusValue = { state: 'error', message: error.message }
     })
 
-    const response = await this.request('initialize', { protocolVersion: 3, client: 'subagents-electron', capabilities: ['attachments-v1', 'tool-contract-v1'] })
+    const response = await this.request('initialize', { protocolVersion: 4, client: 'subagents-electron', capabilities: ['attachments-v1', 'tool-contract-v1'] })
     if (response.error || !response.result) {
       const message = response.error?.message || 'Pi Core Host did not initialize'
       this.statusValue = { state: 'error', message }

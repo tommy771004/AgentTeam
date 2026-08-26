@@ -60,7 +60,9 @@ import {
 import { BUILTIN_CAPABILITIES } from '../agent/capabilities'
 import { skillsStore } from '../agent/hermes/skills'
 import { recommendToolTuning } from '../agent/modelTuning'
-import { API_PROVIDER_PRESETS, apiProviderPreset } from '../agent/apiProviders'
+import { API_PROVIDER_PRESETS, apiProviderPreset, isSubscriptionProviderPreset } from '../agent/apiProviders'
+import { SubscriptionConnectionStatus } from '../components/settings/SubscriptionConnectionStatus'
+import { SubscriptionModelPicker } from '../components/settings/SubscriptionModelPicker'
 import {
   OAUTH_REDIRECT_URI,
   PLUGIN_OAUTH_PROVIDERS,
@@ -1449,13 +1451,18 @@ export function SettingsPage() {
                       set({ apiProvider: 'custom' })
                       return
                     }
-                    set({
-                      apiProvider: provider.id,
-                      baseUrl: provider.baseUrl,
-                      model: provider.defaultModel,
-                      fallbackModels: provider.fallbackModels,
-                      discoveredModels: [],
-                    })
+                    // ADR-0052: subscription presets carry no endpoint or key
+                    // of their own — the credential lives Host-side and the
+                    // model list comes from the snapshot catalog.
+                    set(isSubscriptionProviderPreset(provider.id)
+                      ? { apiProvider: provider.id, model: '', fallbackModels: [], discoveredModels: [] }
+                      : {
+                          apiProvider: provider.id,
+                          baseUrl: provider.baseUrl,
+                          model: provider.defaultModel,
+                          fallbackModels: provider.fallbackModels,
+                          discoveredModels: [],
+                        })
                   }}
                 >
                   {API_PROVIDER_PRESETS.map((provider) => (
@@ -1467,6 +1474,9 @@ export function SettingsPage() {
                 <p className="mt-1 text-[11px] text-outline">
                   {apiProviderPreset(settings.apiProvider || 'custom').note}
                 </p>
+                {isSubscriptionProviderPreset(settings.apiProvider || 'custom') && (
+                  <SubscriptionConnectionStatus />
+                )}
               </SettingsStack>
               <SettingsRow
                 title="啟用 LLM"
@@ -1478,37 +1488,51 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsStack title="Base URL">
-                <input
-                  value={settings.baseUrl}
-                  onChange={(e) => set({ baseUrl: e.target.value })}
-                  className={settingsInputCls}
-                  placeholder="https://api.openai.com/v1"
-                />
-              </SettingsStack>
-              <SettingsStack title="API 金鑰">
-                <input
-                  type="password"
-                  value={settings.apiKey}
-                  onChange={(e) => set({ apiKey: e.target.value })}
-                  className={settingsInputCls}
-                  placeholder="sk-..."
-                  autoComplete="off"
-                />
-              </SettingsStack>
+              {!isSubscriptionProviderPreset(settings.apiProvider || 'custom') && (
+                <SettingsStack title="Base URL">
+                  <input
+                    value={settings.baseUrl}
+                    onChange={(e) => set({ baseUrl: e.target.value })}
+                    className={settingsInputCls}
+                    placeholder="https://api.openai.com/v1"
+                  />
+                </SettingsStack>
+              )}
+              {!isSubscriptionProviderPreset(settings.apiProvider || 'custom') && (
+                <SettingsStack title="API 金鑰">
+                  <input
+                    type="password"
+                    value={settings.apiKey}
+                    onChange={(e) => set({ apiKey: e.target.value })}
+                    className={settingsInputCls}
+                    placeholder="sk-..."
+                    autoComplete="off"
+                  />
+                </SettingsStack>
+              )}
               <SettingsStack title="預設模型">
-                <input
-                  list="discovered-models"
-                  value={settings.model}
-                  onChange={(e) => set({ model: e.target.value })}
-                  className={settingsInputCls}
-                  placeholder="model id（由 CLI 偵測或手動填入）"
-                />
-                <datalist id="discovered-models">
-                  {(settings.discoveredModels || []).map((id) => <option key={id} value={id} />)}
-                </datalist>
-                {(settings.discoveredModels || []).length > 0 && (
-                  <p className="mt-1 text-[11px] text-outline">已從 /models 自動帶入 {settings.discoveredModels.length} 個模型。</p>
+                {isSubscriptionProviderPreset(settings.apiProvider || 'custom') ? (
+                  <SubscriptionModelPicker
+                    providerId={settings.apiProvider}
+                    value={settings.model}
+                    onChange={(model) => set({ model })}
+                  />
+                ) : (
+                  <>
+                    <input
+                      list="discovered-models"
+                      value={settings.model}
+                      onChange={(e) => set({ model: e.target.value })}
+                      className={settingsInputCls}
+                      placeholder="model id（由 CLI 偵測或手動填入）"
+                    />
+                    <datalist id="discovered-models">
+                      {(settings.discoveredModels || []).map((id) => <option key={id} value={id} />)}
+                    </datalist>
+                    {(settings.discoveredModels || []).length > 0 && (
+                      <p className="mt-1 text-[11px] text-outline">已從 /models 自動帶入 {settings.discoveredModels.length} 個模型。</p>
+                    )}
+                  </>
                 )}
                 {/* P1-B: capability profile — 已驗證 / 推測 / 未知 */}
                 {(() => {
@@ -1540,11 +1564,12 @@ export function SettingsPage() {
                           {p.contextWindow ? ` · ${Math.round(p.contextWindow / 1000)}k ctx` : ''}
                         </span>
                       )}
-                      <button
-                        type="button"
-                        disabled={verifyingModel || !settings.model || !settings.apiKey}
-                        className={`${settingsBtnCls} disabled:opacity-50`}
-                        onClick={async () => {
+                      {!isSubscriptionProviderPreset(settings.apiProvider || 'custom') && (
+                        <button
+                          type="button"
+                          disabled={verifyingModel || !settings.model || !settings.apiKey}
+                          className={`${settingsBtnCls} disabled:opacity-50`}
+                          onClick={async () => {
                           const id = settings.model?.trim()
                           if (!id) return
                           setVerifyingModel(true)
@@ -1568,7 +1593,8 @@ export function SettingsPage() {
                         }}
                       >
                         {verifyingModel ? '驗證中…' : '驗證模型能力（3 次極小呼叫）'}
-                      </button>
+                        </button>
+                      )}
                       {modelVerifyMsg && (
                         <span className="text-outline">{modelVerifyMsg}</span>
                       )}

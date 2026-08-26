@@ -659,8 +659,13 @@ export type ReducedMotionPreference = 'system' | 'on' | 'off'
 export type EnterBehavior = 'enter' | 'cmdEnter'
 /** Follow-up while agent is running: interrupt/steer vs queue */
 export type FollowUpMode = 'steer' | 'queue'
-/** Provider-specific convenience preset; every option remains OpenAI-compatible. */
-export type ApiProviderPreset = 'aihubmix' | 'openai' | 'openrouter' | 'custom'
+/**
+ * Provider-specific convenience presets: OpenAI-compatible gateways plus
+ * native CLI-subscription connections (ADR-0052). A subscription preset has
+ * no endpoint or key of its own — its credential lives in the Host-side
+ * auth.json synced from the user's CLI login.
+ */
+export type ApiProviderPreset = 'aihubmix' | 'openai' | 'openrouter' | 'openai-codex' | 'anthropic' | 'custom'
 
 export interface LlmSettings {
   enabled: boolean

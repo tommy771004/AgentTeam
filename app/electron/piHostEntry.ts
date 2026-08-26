@@ -4,7 +4,8 @@ import path from 'node:path'
 import { createPiHostServer, type PiHostMessage } from './piHostProtocol.ts'
 import { loadPiHostState, savePiHostState, type PiHostSnapshot } from './piHostState.ts'
 import { migrateLegacySettings } from './piSettingsMigration.ts'
-import { disposeAllPiSessions, persistPiLegacyCredential, persistPiLegacyModelConfig } from './piCoreRuntime.ts'
+import { buildPiSubscriptionModelView, disposeAllPiSessions, persistPiLegacyCredential, persistPiLegacyModelConfig } from './piCoreRuntime.ts'
+import { assembleSubscriptionCatalog } from '../src/agent/subscriptionCatalog.ts'
 import { bootstrapPiUserConfig } from './piUserConfig.ts'
 import { stopAllPiMcp } from './piMcpClient.ts'
 import { registerTrustedBuiltinShellSandboxAdapter } from './piBuiltinShellSandbox.ts'
@@ -93,6 +94,10 @@ const settingsOrigin = storedState.settingsOrigin === 'managed' ? 'managed' : 'n
 const effectiveSettings = settingsOrigin === 'native'
   ? { ...migratedSettings, ...userConfig.settings }
   : migratedSettings
+// ADR-0052 ticket 02: the selectable-subscription surface rides in the same
+// snapshot config as the OAuth status it projects from. A model-view failure
+// lands as per-provider reasons — the rows stay, honestly unavailable.
+const subscriptionModelView = await buildPiSubscriptionModelView()
 const config = {
   settingsSource: settingsOrigin === 'managed' ? 'managed' : userConfig.settingsPath ? 'native' : 'default',
   settingsLoaded: Boolean(userConfig.settingsPath),
@@ -100,6 +105,15 @@ const config = {
   oauthImportedProviders: userConfig.oauth.importedProviders,
   oauthSkippedProviders: userConfig.oauth.skippedProviders,
   oauthConflicts: userConfig.oauth.conflicts,
+  subscriptionCatalog: assembleSubscriptionCatalog(
+    {
+      oauthImportedProviders: userConfig.oauth.importedProviders,
+      oauthSkippedProviders: userConfig.oauth.skippedProviders,
+      oauthConflicts: userConfig.oauth.conflicts,
+    },
+    subscriptionModelView.models,
+    subscriptionModelView.errors,
+  ),
 } as const
 const initialSnapshot: PiHostSnapshot = { cursor: storedState.cursor, sessions: storedState.sessions, settings: effectiveSettings, settingsOrigin, config, queue: storedState.queue, resources: storedState.resources, memories: storedState.memories, extensions: storedState.extensions, attachments: storedState.attachments }
 await savePiHostState(statePath, initialSnapshot)

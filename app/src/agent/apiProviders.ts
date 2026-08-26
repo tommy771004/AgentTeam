@@ -9,6 +9,20 @@ export type ApiProviderDefinition = {
   note: string
 }
 
+/**
+ * Native Pi providers whose credential comes from a local CLI login sync
+ * (ADR-0052): the CLI OAuth lands in the Host-side synced credential store
+ * and the builtin Pi loop runs on the subscription model. Mirrors
+ * `SUBSCRIPTION_PROVIDERS` in `subscriptionCatalog.ts`.
+ */
+export type SubscriptionProviderPreset = 'openai-codex' | 'anthropic'
+
+export const SUBSCRIPTION_PROVIDER_PRESETS: readonly SubscriptionProviderPreset[] = ['openai-codex', 'anthropic']
+
+export function isSubscriptionProviderPreset(id: ApiProviderPreset | string): boolean {
+  return (SUBSCRIPTION_PROVIDER_PRESETS as readonly string[]).includes(id)
+}
+
 /** OpenAI-compatible connection presets. Custom keeps the user's exact endpoint. */
 export const API_PROVIDER_PRESETS: ApiProviderDefinition[] = [
   {
@@ -38,6 +52,22 @@ export const API_PROVIDER_PRESETS: ApiProviderDefinition[] = [
     defaultModel: 'openai/gpt-4.1-mini',
     fallbackModels: [],
     note: '使用 OpenRouter 的 OpenAI 相容端點。',
+  },
+  {
+    id: 'openai-codex',
+    label: 'Codex 訂閱（CLI 登入）',
+    baseUrl: '',
+    defaultModel: '',
+    fallbackModels: [],
+    note: '使用本機 Codex CLI 登入的訂閱憑證，由 Pi loop 執行（非 Codex agent）。模型清單由訂閱目錄提供；受訂閱條款與限流約束。',
+  },
+  {
+    id: 'anthropic',
+    label: 'Claude 訂閱（CLI 登入）',
+    baseUrl: '',
+    defaultModel: '',
+    fallbackModels: [],
+    note: '使用本機 Claude CLI 登入的訂閱憑證，由 Pi loop 執行（非 Claude Code）。模型清單由訂閱目錄提供；受訂閱條款與限流約束。',
   },
   {
     id: 'custom',

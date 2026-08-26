@@ -31,6 +31,8 @@ type PiHostConfigStatus = {
   oauthImportedProviders: string[]
   oauthSkippedProviders: string[]
   oauthConflicts: string[]
+  /** ADR-0052: availability metadata only; never credential-shaped. */
+  subscriptionCatalog?: import('../src/agent/subscriptionCatalog').SubscriptionProviderCatalog[]
 }
 
 const api = {

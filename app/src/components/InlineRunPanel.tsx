@@ -21,6 +21,7 @@ import { TrajectoryPanel } from './TrajectoryPanel'
 import { pickThreadPiSession } from '../agent/piHostRun'
 import { contextUsageMicrocopy, formatTokensCompact } from '../agent/contextUsageView'
 import { useRunContextUsage } from '../hooks/useRunContextUsage'
+import { useRunUsageRefresher } from '../hooks/useRunUsageRefresher'
 import type { TurnRecordEntry } from '../agent/turnRecord'
 import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
@@ -177,6 +178,9 @@ export function InlineRunPanel({
       }))
 
   const runActive = isRunning || activity.active
+
+  // 與 feed 共用同一道用量對時輪詢；in-flight 去重，兩個掛載面不會疊加 IPC。
+  useRunUsageRefresher(runId, runActive)
   const lifecycle = deriveRunLifecycle({
     phase: activity.phase,
     status: agent.status,

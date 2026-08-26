@@ -1,4 +1,5 @@
 import type { LlmSettings } from './types.ts'
+import { isSubscriptionProviderPreset } from './apiProviders.ts'
 
 /**
  * Electron's Pi Host is the production runtime boundary. The renderer keeps
@@ -76,11 +77,17 @@ export function piSettingsPatchFromLlmSettings(
   settings: Partial<LlmSettings>,
 ): PiSettingsPatch {
   const patch: Record<string, unknown> = {}
+  // ADR-0052: a subscription connection's credential lives Host-side in the
+  // synced CLI-login store. The renderer never sends an API key
+  // or endpoint for one — not even an empty string — so the Host's legacy
+  // endpoint persist can never latch onto a subscription provider.
+  const subscriptionConnection = isSubscriptionProviderPreset(String(settings.apiProvider ?? ''))
   for (const [key, field] of Object.entries(PI_SETTINGS_FIELD_BY_KEY)) {
     const value = (settings as Record<string, unknown>)[key]
     // `apiProvider` is the one field an empty string cannot describe: the Host
     // reads '' as "no provider chosen" and would drop a working connection.
     if (value == null || (key === 'apiProvider' && value === '')) continue
+    if (subscriptionConnection && (key === 'baseUrl' || key === 'apiKey')) continue
     patch[field] = value
   }
   return patch as PiSettingsPatch

@@ -53,7 +53,7 @@ export function RunTimelineList({ rows }: { rows: readonly TimelineItem[] }) {
                 <Icon name="psychology" size={15} className="shrink-0 text-ink-3" />
                 <span className="shrink-0 font-medium">推理</span>
                 <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px]">
-                  {row.chars.toLocaleString()} 字 · {open ? '收合' : '展開看全文'}
+                  {row.chars.toLocaleString()} 字
                 </span>
                 <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 text-ink-3" />
               </button>

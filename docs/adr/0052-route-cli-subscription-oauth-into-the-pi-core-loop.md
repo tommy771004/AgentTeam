@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Route CLI subscription OAuth into the Pi Core loop

@@ -11,6 +11,7 @@ import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
 import { piPackExtensionFactories } from './piToolHost.ts'
 import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, snapshotPiSkillResources } from './piSkills.ts'
 import { piCodingAgentModule as piCodingAgent, piVendorDir } from './piVendor.ts'
+import { SUBSCRIPTION_PROVIDERS, type SubscriptionModelInfo, type SubscriptionProviderId } from '../src/agent/subscriptionCatalog.ts'
 import { bindPiSessionSkillResourceView, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
 import { buildPiMcpDynamicPacks } from './piExtensionPacks/mcpBridgePack.ts'
 
@@ -176,6 +177,68 @@ export type PiLegacyModelConfig = {
   provider: string
   model: string
   baseUrl: string
+}
+
+/**
+ * The ModelRuntime view of each subscription provider's model catalog
+ * (ADR-0052 ticket 02). Built with the SAME auth/models files a session uses,
+ * so what the catalog claims is exactly what a run would see. One provider's
+ * failure never blanks the others: errors surface as per-provider reason
+ * strings and the projection renders them honestly unavailable.
+ */
+export async function buildPiSubscriptionModelView(): Promise<{
+  models: Partial<Record<SubscriptionProviderId, SubscriptionModelInfo[]>>
+  errors: Partial<Record<SubscriptionProviderId, string>>
+}> {
+  const agentDir = resolvePiAgentDir()
+  if (!agentDir) {
+    return {
+      models: {},
+      errors: Object.fromEntries(SUBSCRIPTION_PROVIDERS.map((id) => [id, 'Pi agent 目錄不可用；無法列舉訂閱模型。'])),
+    }
+  }
+  let getModels: (providerId?: string) => ReadonlyArray<{
+    id?: unknown
+    name?: unknown
+    contextWindow?: unknown
+    reasoning?: unknown
+  }>
+  try {
+    if (typeof piCodingAgent?.ModelRuntime?.create !== 'function') {
+      throw new Error('vendored Pi ModelRuntime unavailable')
+    }
+    const runtime = await piCodingAgent.ModelRuntime.create({
+      authPath: join(agentDir, 'auth.json'),
+      modelsPath: join(agentDir, 'models.json'),
+    })
+    if (typeof runtime?.getModels !== 'function') throw new Error('ModelRuntime.getModels unavailable')
+    getModels = (providerId?: string) => runtime.getModels(providerId)
+  } catch (error) {
+    const reason = `訂閱模型目錄建構失敗：${error instanceof Error ? error.message : String(error)}`
+    return { models: {}, errors: Object.fromEntries(SUBSCRIPTION_PROVIDERS.map((id) => [id, reason])) }
+  }
+  const models: Partial<Record<SubscriptionProviderId, SubscriptionModelInfo[]>> = {}
+  const errors: Partial<Record<SubscriptionProviderId, string>> = {}
+  for (const id of SUBSCRIPTION_PROVIDERS) {
+    try {
+      const projected: SubscriptionModelInfo[] = []
+      for (const raw of getModels(id) || []) {
+        if (!raw || typeof raw.id !== 'string' || !raw.id.trim()) continue
+        projected.push({
+          id: raw.id,
+          ...(typeof raw.name === 'string' && raw.name ? { label: raw.name } : {}),
+          ...(typeof raw.contextWindow === 'number' && Number.isFinite(raw.contextWindow)
+            ? { contextWindow: raw.contextWindow }
+            : {}),
+          ...(raw.reasoning === true ? { reasoning: true } : {}),
+        })
+      }
+      models[id] = projected
+    } catch (error) {
+      errors[id] = `模型列舉失敗：${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+  return { models, errors }
 }
 
 /** Official endpoints that let Pi register models newer than its vendored catalog. */

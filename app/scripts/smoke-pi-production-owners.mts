@@ -35,4 +35,37 @@ assert.match(app, /isElectronPiProduction\(\)/)
 assert.match(hostEntry, /pi-settings-migration\.json/)
 assert.match(hostEntry, /credentialPersisted/)
 
+// ── ADR-0052 ticket 03: a subscription connection never ships key/endpoint ──
+const { piSettingsPatchFromLlmSettings } = await import('../src/agent/piProduction.ts')
+const subscriptionPatch = piSettingsPatchFromLlmSettings({
+  apiProvider: 'openai-codex',
+  baseUrl: '',
+  apiKey: 'sk-should-never-travel',
+  model: 'gpt-5.4',
+})
+assert.deepEqual(
+  Object.keys(subscriptionPatch).sort(),
+  ['model', 'provider'],
+  'subscription patches carry identity fields only — no endpoint, no key, not even empty',
+)
+assert.equal(subscriptionPatch.apiKey, undefined)
+assert.equal(subscriptionPatch.baseUrl, undefined)
+const anthropicPatch = piSettingsPatchFromLlmSettings({
+  apiProvider: 'anthropic',
+  baseUrl: '',
+  apiKey: '',
+  model: 'claude-sonnet-4-5',
+})
+assert.deepEqual(Object.keys(anthropicPatch).sort(), ['model', 'provider'])
+// Regression guard: OpenAI-compatible presets keep their exact old behavior.
+const gatewayPatch = piSettingsPatchFromLlmSettings({
+  apiProvider: 'openai',
+  baseUrl: 'https://api.openai.com/v1',
+  apiKey: 'sk-real',
+  model: 'gpt-4.1-mini',
+})
+assert.equal(gatewayPatch.provider, 'openai')
+assert.equal(gatewayPatch.baseUrl, 'https://api.openai.com/v1')
+assert.equal(gatewayPatch.apiKey, 'sk-real')
+
 console.log('Pi production owner contract passed: Pi Host is the only execution owner and the legacy engine is gone')

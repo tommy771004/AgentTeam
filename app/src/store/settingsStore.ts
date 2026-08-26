@@ -13,6 +13,7 @@ import {
   type SettingsCustomMergeKey,
 } from '../agent/settingsMergeKeys.ts'
 import type { LlmSettings } from '../agent/types.ts'
+import { isSubscriptionProviderPreset } from '../agent/apiProviders.ts'
 
 export { SETTINGS_CUSTOM_MERGE_KEYS, type SettingsCustomMergeKey }
 
@@ -272,6 +273,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     if (window.subagents?.piHost?.settings?.update) {
       const connectionChanged = ['apiProvider', 'baseUrl', 'apiKey', 'model']
         .some((key) => Object.prototype.hasOwnProperty.call(patch, key))
+      // Subscription stripping lives in piSettingsPatchFromLlmSettings
+      // (ADR-0052) — the single owner for what may reach the Host.
       const piPatch = piSettingsPatchFromLlmSettings(connectionChanged
         ? {
             ...patch,
@@ -297,6 +300,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       }
     }
     if (!s.apiKey) return { ok: false, message: 'API key is empty' }
+    // ADR-0052: a subscription connection has no OpenAI-compatible endpoint or
+    // key to probe; its health is the Host's, already returned above in
+    // Electron production. Reaching here means no Host exists — say so.
+    if (isSubscriptionProviderPreset(s.apiProvider)) {
+      return { ok: false, message: '訂閲連線由 Pi Core Host 提供；此環境沒有 Host。' }
+    }
     const m = model || s.model
     try {
       let discoveredModels: string[] = []

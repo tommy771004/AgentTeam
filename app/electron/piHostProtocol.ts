@@ -1,14 +1,18 @@
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
+import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatalog.ts'
 import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage, type PiHostFinalizationClaimResult, type PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 
 /**
  * Version 2 retired the ambiguous `success` turn settlement for the closed
  * union (`answered` / `empty` / …) and added the Turn Record to a session, so a
  * version-1 peer would both misread a settlement and miss the record entirely.
+ * Version 3 added the attachment contract. Version 4 (ADR-0052) exposes the
+ * fail-closed subscription catalog in snapshot config; it is additive, so v3
+ * and v2 peers stay readable and only v1 is refused.
  */
-export const PI_HOST_PROTOCOL_VERSION = 3 as const
+export const PI_HOST_PROTOCOL_VERSION = 4 as const
 export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
@@ -21,6 +25,8 @@ export type PiHostConfigStatus = {
   oauthImportedProviders: string[]
   oauthSkippedProviders: string[]
   oauthConflicts: string[]
+  /** Fail-closed selectable-subscription rows; availability metadata only. */
+  subscriptionCatalog?: readonly SubscriptionProviderCatalog[]
 }
 
 export type PiHostRequest = {
@@ -813,9 +819,10 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
 
   if (input.method === 'initialize') {
     const requestedVersion = (input.params as { protocolVersion?: unknown } | undefined)?.protocolVersion
-    // v2 remains readable for existing local clients, while v3 is the only
-    // negotiated version that exposes the attachment contract.
-    if (requestedVersion !== PI_HOST_PROTOCOL_VERSION && requestedVersion !== 2) {
+    // v1 peers would misread settlements and miss Turn Records entirely, so
+    // they are refused. v2/v3 remain readable for existing local clients;
+    // only the negotiated version exposes the newest contract surfaces.
+    if (requestedVersion !== PI_HOST_PROTOCOL_VERSION && requestedVersion !== 3 && requestedVersion !== 2) {
       return [
         errorResponse(
           id,
