@@ -123,7 +123,7 @@ export type RunTimelineRow = {
       /** Still being written — the current assistant line, not a settled one. */
       draft?: boolean
     }
-  | { kind: 'tool'; tool: string; callId: string; settlement?: string; detail?: string; approval?: string; approvalReason?: string }
+  | { kind: 'tool'; tool: string; callId: string; settlement?: string; detail?: string; title?: string; added?: number; removed?: number; approval?: string; approvalReason?: string }
   | { kind: 'notice'; content: string }
 )
 
@@ -170,6 +170,9 @@ export function runTimelineRows(view: TrajectoryView, draft?: string): RunTimeli
             callId: row.callId,
             ...(row.settlement ? { settlement: row.settlement } : {}),
             ...(row.detail ? { detail: row.detail } : {}),
+            ...(row.title ? { title: row.title } : {}),
+            ...(row.added !== undefined ? { added: row.added } : {}),
+            ...(row.removed !== undefined ? { removed: row.removed } : {}),
             // The approval decision rides the invocation's own line (the
             // conversation projection attached it there); keep it through the fold.
             ...(row.approval ? { approval: row.approval } : {}),

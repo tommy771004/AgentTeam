@@ -1180,6 +1180,11 @@ async function pushRunProcessSummary(args: {
     detail: row.detail,
     path: row.path,
     ok: row.ok,
+    // The diff size the tool's own declaration derived from the record's
+    // args — the same numbers the live timeline showed, so the collapsed
+    // summary card can re-render the same process without the live cache.
+    added: row.added,
+    removed: row.removed,
   }))
   const producedFiles = projectProducedFiles(finalAgent.turnRecord)
   let diff: string | undefined
@@ -1222,6 +1227,7 @@ async function pushRunProcessSummary(args: {
     pricing: usageModel ? args.settings?.modelProfiles?.[usageModel]?.pricing : undefined,
   })
   thr.pushRunSummary(tid, {
+    runId,
     status:
       status === 'failed' ? 'failed' : status === 'halted' ? 'halted' : 'success',
     durationMs: finalAgent.metrics?.executionMs,

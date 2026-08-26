@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { conversationAnswer, projectConversationRows } from '../src/agent/conversationProjection.ts'
+import { runTimelineRows } from '../src/agent/liveTimeline.ts'
 import { appendTurnRecord } from '../src/agent/turnRecord.ts'
 
 /**
@@ -53,6 +54,44 @@ const noticed = projectConversationRows(appendTurnRecord(undefined, [
 assert.deepEqual(noticed.map((row) => row.kind), ['notice', 'notice'])
 assert.match(noticed[0].kind === 'notice' ? noticed[0].content : '', /bash.*deny/)
 assert.match(noticed[1].kind === 'notice' ? noticed[1].content : '', /4/)
+
+// An approval for a RECORDED call rides the invocation's own tool row — same
+// callId, one action, one line. A separate 「tool：decision」 notice row would
+// stack two lines where the reader is watching one.
+const approved = projectConversationRows(appendTurnRecord(undefined, [
+  { kind: 'tool-call', source: 'model', tool: 'edit', callId: 'c2', path: 'src/a.ts', turn: 1, step: 1, at: 1 },
+  { kind: 'approval', source: 'host', tool: 'edit', callId: 'c2', decision: 'allow', reason: 'Frozen Host run policy allows invocation', turn: 1, step: 1, at: 2 },
+  { kind: 'tool-result', source: 'host', tool: 'edit', callId: 'c2', settlement: 'success', turn: 1, step: 1, at: 3 },
+]))
+assert.deepEqual(approved.map((row) => row.kind), ['tool', 'tool'], 'the approval is not a row of its own')
+const callRow = approved[0]
+assert.ok(callRow.kind === 'tool')
+assert.equal(callRow.approval, 'allow', 'the decision lands on the call row')
+assert.equal(callRow.approvalReason, 'Frozen Host run policy allows invocation')
+// The live timeline folds call+result by callId and must keep the decision.
+const folded = runTimelineRows({ rows: approved.map((row) => ({ ...row, step: 1 })), unloadedBefore: 0, steps: [] })
+assert.equal(folded.filter((row) => row.kind === 'tool').length, 1)
+const mergedRow = folded[0]
+assert.ok(mergedRow.kind === 'tool')
+assert.equal(mergedRow.approval, 'allow', 'the fold keeps the decision on the merged line')
+
+// A mutating call's row carries the tool's own declared presentation — title
+// and diff size — derived from its recorded args and from nothing else, so
+// live and replay say the same「已編輯 +N −M」about the same call.
+const presented = projectConversationRows(appendTurnRecord(undefined, [
+  { kind: 'tool-call', source: 'model', tool: 'edit', callId: 'c3', args: { path: 'src/b.ts', edits: [{ oldText: 'const old\nconst keep', newText: 'const new\nconst keep' }] }, turn: 1, step: 1, at: 1 },
+  { kind: 'tool-result', source: 'host', tool: 'edit', callId: 'c3', settlement: 'success', turn: 1, step: 1, at: 2 },
+]))
+const presentedRow = presented[0]
+assert.ok(presentedRow.kind === 'tool')
+assert.equal(presentedRow.title, '已編輯 b.ts', 'the title is what the tool declared')
+assert.equal(presentedRow.added, 1, 'the + count comes from the declared diff')
+assert.equal(presentedRow.removed, 1, 'the − count comes from the declared diff')
+const foldedPresented = runTimelineRows({ rows: presented.map((row) => ({ ...row, step: 1 })), unloadedBefore: 0, steps: [] })
+const presentedMerged = foldedPresented[0]
+assert.ok(presentedMerged.kind === 'tool')
+assert.equal(presentedMerged.added, 1, 'the fold keeps the diff size on the merged line')
+assert.equal(presentedMerged.removed, 1, 'the fold keeps the diff size on the merged line')
 
 // A `notice` entry is written precisely so the user sees it — a run whose
 // skills went unavailable, say. It must read as its own text, never as the

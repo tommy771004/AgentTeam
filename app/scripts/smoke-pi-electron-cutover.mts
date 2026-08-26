@@ -37,7 +37,11 @@ assert.match(app, /activity\.push\(/)
 const processFeed = await readFile(resolve(root, 'src/components/RunProcessFeed.tsx'), 'utf8')
 assert.match(processFeed, /aria-expanded=\{processOpen\}/)
 assert.match(processFeed, /收合執行細節/)
-assert.match(processFeed, /正在撰寫回覆/)
+// The responding copy is owned by the lifecycle seam and reaches the feed as
+// its resolved statusLine — the feed no longer hardcodes the sentence.
+const runLifecycleSource = await readFile(resolve(root, 'src/agent/runLifecycle.ts'), 'utf8')
+assert.match(runLifecycleSource, /正在撰寫回覆/)
+assert.match(processFeed, /statusLine/)
 assert.match(processFeed, /推理摘要/)
 assert.match(processFeed, /任務進度/)
 assert.match(processFeed, /tasks\.map/)

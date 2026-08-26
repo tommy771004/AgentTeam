@@ -15,6 +15,7 @@
 import { turnRecordEntries, type TurnRecord, type TurnRecordEntry } from './turnRecord.ts'
 import {
   diffPaths,
+  diffStats,
   presentToolCall,
   presentToolResult,
   type ToolPresentation,
@@ -31,6 +32,9 @@ export type RunOperationRow = {
   path?: string
   callId?: string
   ok?: boolean
+  /** Diff size the tool's own card declares, for write/edit calls. */
+  added?: number
+  removed?: number
   /** The tool's declared presentation, when this build and the record agree. */
   card?: ToolPresentation
 }
@@ -93,6 +97,9 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
           }) ?? presentToolCall(pair.call.tool, args))
         : presentToolCall(pair.call.tool, args)
     const presented = rowFromCard(card, result ? `已執行 ${pair.call.tool}` : `執行 ${pair.call.tool}…`)
+    const stats = card ? diffStats(card) : undefined
+    const added = stats?.reduce((total, stat) => total + stat.added, 0)
+    const removed = stats?.reduce((total, stat) => total + stat.removed, 0)
     const failed = Boolean(result && result.settlement !== 'success')
     rows.push({
       ...base(pair.call),
@@ -104,6 +111,8 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
       ...(result?.detail ? { detail: result.detail } : {}),
       ...(presented.detail ? { detail: presented.detail } : {}),
       ...(result ? { ok: !failed } : {}),
+      ...(added !== undefined ? { added } : {}),
+      ...(removed !== undefined ? { removed } : {}),
       ...(card ? { card } : {}),
     })
     open.delete(callId)

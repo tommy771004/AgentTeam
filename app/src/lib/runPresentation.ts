@@ -12,6 +12,9 @@ export type ProcessOperation = {
   detail?: string
   path?: string
   ok?: boolean
+  /** Diff size for write/edit calls, from the tool's own declared card. */
+  added?: number
+  removed?: number
 }
 
 export type ProcessOperationGroup =

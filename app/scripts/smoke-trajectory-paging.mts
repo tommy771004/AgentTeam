@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { appendTurnRecord, pageTurnRecord, TURN_RECORD_PAGE_SIZE, type TurnRecordAppend } from '../src/agent/turnRecord.ts'
 import { projectTrajectory } from '../src/agent/trajectoryProjection.ts'
+import { mergeTrajectoryPages } from '../src/agent/trajectoryPaging.ts'
 
 /**
  * Seam 2: a long run is read a page at a time, addressed by sequence.
@@ -40,6 +41,16 @@ const middle = pageTurnRecord(record, { before: tail.nextBefore, limit: 10 })
 assert.deepEqual(middle.entries.map((entry) => entry.seq), [29, 30, 31, 32, 33, 34, 35, 36, 37, 38])
 assert.equal(middle.hasOlder, true)
 assert.equal(middle.nextBefore, 29)
+
+// Overlapping/retried pages merge by seq. The newer tail wins for a duplicate,
+// rows stay sorted, and a stale older response cannot lower the Host total.
+const overlap = mergeTrajectoryPages(
+  { entries: middle.entries.slice(0, 5), hasOlder: true, nextBefore: 29, total: 40 },
+  { entries: middle.entries.slice(4), hasOlder: true, nextBefore: 34, total: 48 },
+)
+assert.deepEqual(overlap.entries.map((entry) => entry.seq), middle.entries.map((entry) => entry.seq))
+assert.equal(overlap.total, 48, 'the Host high-watermark is monotonic')
+assert.equal(overlap.nextBefore, 29, 'the older page owns the next backward cursor')
 
 // The oldest page reports that nothing remains ahead of it.
 let cursor: number | undefined = middle.nextBefore

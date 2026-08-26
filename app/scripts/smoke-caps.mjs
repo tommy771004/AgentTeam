@@ -2532,11 +2532,20 @@ await test('drift guard: the Pi path\'s live timeline is the record projection, 
   // must therefore reach its rows through the shared projection and through
   // nothing else.
   const feed = fs.readFileSync(path.join(appRoot, 'src/components/RunProcessFeed.tsx'), 'utf8')
+  const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
   assert.match(feed, /const recordView = useMemo\(\s*\(\) => projectLiveTimeline\(recordEntries, recordTotal\)/,
     'the timeline view is projected from the record entries the run published')
   assert.match(feed, /runTimelineRows\(recordView, draftText\)/,
     'and its rows are the fold over that projection — not a second synthesis')
   assert.match(feed, /const hasRecordTimeline = recordTimeline\.length > 0/)
+  assert.match(panel, /projectLiveTimeline\(activity\.recordEntries, activity\.recordTotal\)/,
+    'the right-side progress panel reads the same ordered Host record')
+  assert.match(panel, /\) : recordTimeline\.length > 0 \? \(/,
+    'record activity wins over the synthetic runner step in the progress panel')
+  assert.match(panel, /\) : !isPiHost && agent\.steps\.length > 0 \? \(/,
+    'the fixed Pi Core Host turn is never presented as if it were live progress')
+  assert.doesNotMatch(panel, /\{agent\.progress\}%/,
+    'a Pi Host run without a finite plan must not display a fake percentage')
   // The activity-event trace is the FALLBACK. It renders only where no record
   // exists, so the two can never appear side by side as rival accounts.
   for (const fallback of [
@@ -2562,6 +2571,14 @@ await test('drift guard: the Pi path\'s live timeline is the record projection, 
   const mapIndex = app.indexOf('mapPiHostEventToActivity(event)')
   assert.ok(appendIndex > 0 && mapIndex > appendIndex,
     'record appends are handled before — and instead of — the activity mapping')
+
+  const trajectoryPanel = fs.readFileSync(path.join(appRoot, 'src/components/TrajectoryPanel.tsx'), 'utf8')
+  assert.match(trajectoryPanel, /const loader = useMemo\(\(\) => loadPage \|\| hostPageLoader\(\), \[loadPage\]\)/,
+    'the Host page loader is stable across renderer state updates')
+  assert.match(trajectoryPanel, /generation !== requestGeneration\.current/,
+    'late page reads cannot overwrite a newer session/request')
+  assert.match(trajectoryPanel, /mergeTrajectoryPages\(next, current\)/,
+    'overlapping Host pages merge by record identity')
 
   // Reasoning is written whole. A cap added "just to be safe" is the failure
   // this asserts against, in the Host writer and in the projection alike.

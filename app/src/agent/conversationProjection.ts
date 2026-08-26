@@ -11,6 +11,7 @@
  * it runs on live turns and on replayed records alike.
  */
 import { turnRecordEntries, type TurnRecord, type TurnRecordEntry } from './turnRecord.ts'
+import { presentedToolSummary } from './tools/toolPresentation.ts'
 
 export type ConversationRow =
   | { kind: 'user'; id: string; seq: number; turn: number; content: string }
@@ -24,7 +25,23 @@ export type ConversationRow =
    * projection never shortens it.
    */
   | { kind: 'reasoning'; id: string; seq: number; turn: number; content: string }
-  | { kind: 'tool'; id: string; seq: number; turn: number; tool: string; callId: string; settlement?: string; detail?: string; approval?: string; approvalReason?: string }
+  | {
+      kind: 'tool'
+      id: string
+      seq: number
+      turn: number
+      tool: string
+      callId: string
+      settlement?: string
+      detail?: string
+      /** The tool's own declared title and diff size, when it declares them. */
+      title?: string
+      added?: number
+      removed?: number
+      /** The approval decision that rode this invocation's line. */
+      approval?: string
+      approvalReason?: string
+    }
   | { kind: 'notice'; id: string; seq: number; turn: number; content: string }
 
 /**
@@ -49,9 +66,25 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
       case 'reasoning':
         rows.push({ ...base, kind: 'reasoning', content: entry.content })
         break
-      case 'tool-call':
-        rows.push({ ...base, kind: 'tool', tool: entry.tool, callId: entry.callId, ...(entry.path ? { detail: entry.path } : {}) })
+      case 'tool-call': {
+        // The call row carries what the tool declares about itself — title,
+        // path, diff size — so a view merging call and result still shows
+        // 「已編輯 x.ts +10 −0」 while the call is the only half recorded.
+        // An undeclared or malformed call degrades to the plain name.
+        const presented = presentedToolSummary(entry.tool, 'args' in entry ? entry.args : undefined)
+        rows.push({
+          ...base,
+          kind: 'tool',
+          tool: entry.tool,
+          callId: entry.callId,
+          ...(entry.path ? { detail: entry.path } : {}),
+          ...(presented?.title ? { title: presented.title } : {}),
+          ...(presented?.path && !entry.path ? { detail: presented.path } : {}),
+          ...(presented?.added !== undefined ? { added: presented.added } : {}),
+          ...(presented?.removed !== undefined ? { removed: presented.removed } : {}),
+        })
         break
+      }
       case 'tool-result':
         rows.push({
           ...base,
