@@ -356,6 +356,8 @@ await test('RecoveryBootstrap unlocks startup before terminal finalization can a
   const recoveryEnd = app.indexOf('const journalReport = await', recoveryStart)
   assert.ok(recoveryStart >= 0 && recoveryEnd > recoveryStart, 'Pi Host recovery seam is present')
   const hostRecovery = app.slice(recoveryStart, recoveryEnd)
+  assert.doesNotMatch(hostRecovery, /void unsubscribe/, 'the temporary reattach listener must actually be released')
+  assert.match(app, /recoveryUnsubscribe\?\.\(\)/, 'RecoveryBootstrap cleanup releases its temporary Host listener')
   const registryReconciled = hostRecovery.lastIndexOf('markRunRegistryReconciled()')
   assert.ok(registryReconciled >= 0, 'Host projection recovery reconciles capacity explicitly')
   assert.equal(
@@ -371,6 +373,15 @@ await test('RecoveryBootstrap unlocks startup before terminal finalization can a
   assert.ok(startupComplete > recoveryEnd, 'the existing startup barrier still completes after required recovery work')
 })
 
+await test('the real renderer-restart E2E is part of the release smoke chain', () => {
+  const packageJson = JSON.parse(read('package.json')) as { scripts?: Record<string, string> }
+  assert.match(
+    packageJson.scripts?.smoke || '',
+    /npm run smoke:pi-electron-host-e2e/,
+    'npm run smoke must exercise the real Host + renderer restart boundary',
+  )
+})
+
 await test('drift guard: one claim gate, release and drain in a finally', () => {
   const coordinator = read('src/agent/taskRunCoordinator.ts')
   assert.match(
@@ -382,6 +393,16 @@ await test('drift guard: one claim gate, release and drain in a finally', () => 
     coordinator,
     /finalizationClaims/,
     'finalization is claimed per run, not left to caller discipline',
+  )
+  assert.match(
+    coordinator,
+    /startPiHostFinalizationHeartbeat/,
+    'a long app finalization renews its Host lease instead of silently expiring',
+  )
+  assert.match(
+    coordinator,
+    /PI_FINALIZATION_RENEW_INTERVAL_MS/,
+    'lease renewal cadence remains an explicit bounded contract',
   )
   const gate = coordinator.slice(
     coordinator.indexOf('export async function finalizeTaskRun'),

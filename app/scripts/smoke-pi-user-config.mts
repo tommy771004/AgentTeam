@@ -79,6 +79,17 @@ try {
   assert.deepEqual(stale.oauth.skippedProviders, ['openai-codex'])
   const preservedAuth = JSON.parse(await readFile(join(nativeDir, 'auth.json'), 'utf8')) as Record<string, Record<string, unknown>>
   assert.equal(preservedAuth['openai-codex'].refresh, 'refresh-two')
+
+  const otherAccountAccess = jwt('acct-other', Math.floor(Date.now() / 1000) + 7200)
+  await writeFile(codexAuthPath, JSON.stringify({
+    tokens: { access_token: otherAccountAccess, refresh_token: 'refresh-other', account_id: 'acct-other' },
+    last_refresh: '2026-08-15T12:00:00.000Z',
+  }))
+  const conflict = await bootstrapPiUserConfig()
+  assert.deepEqual(conflict.oauth.conflicts, ['openai-codex'])
+  const conflictPreservedAuth = JSON.parse(await readFile(join(nativeDir, 'auth.json'), 'utf8')) as Record<string, Record<string, unknown>>
+  assert.equal(conflictPreservedAuth['openai-codex'].accountId, 'acct-smoke')
+  assert.equal(conflictPreservedAuth['openai-codex'].refresh, 'refresh-two')
 } finally {
   for (const key of envKeys) {
     const value = previousEnv[key]

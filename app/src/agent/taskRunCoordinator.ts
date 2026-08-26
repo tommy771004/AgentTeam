@@ -68,6 +68,7 @@ function rendererPresent(): boolean {
 const coordinatingRunIds = new Set<string>()
 const recoveredFinalizationClaims = new Set<string>()
 const PI_FINALIZATION_LEASE_MS = 120_000
+const PI_FINALIZATION_RENEW_INTERVAL_MS = Math.floor(PI_FINALIZATION_LEASE_MS / 3)
 const rendererFinalizationClaimant = `renderer_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 /** RecoveryBootstrap uses this to decide whether it is safe to send Host ack. */
 const piFinalizationAckable = new Set<string>()
@@ -427,7 +428,12 @@ export type FinalizeTaskRunInput = {
  */
 type FinalizationClaim = { outcome: Promise<ExternalRunResult>; done: boolean }
 
-type PiHostFinalizationClaim = { claimantId: string; claimEpoch: number }
+type PiHostFinalizationClaim = { claimantId: string; claimEpoch: number; leaseExpiresAt?: number }
+
+type PiHostFinalizationHeartbeat = {
+  stop: () => Promise<void>
+  lostOwnership: () => boolean
+}
 
 function isPiHostFinalization(input: FinalizeTaskRunInput): boolean {
   // A loop dispatch is the only renderer path whose terminal settlement is
@@ -454,7 +460,11 @@ async function claimPiHostFinalization(input: FinalizeTaskRunInput): Promise<PiH
     if (!claim) return null
     const result = await claim(input.runId, rendererFinalizationClaimant, PI_FINALIZATION_LEASE_MS)
     if (result.claimed && result.owner && result.claimEpoch > 0) {
-      return { claimantId: rendererFinalizationClaimant, claimEpoch: result.claimEpoch }
+      return {
+        claimantId: rendererFinalizationClaimant,
+        claimEpoch: result.claimEpoch,
+        leaseExpiresAt: result.leaseExpiresAt,
+      }
     }
     if (result.state === 'completed' || result.reason === 'completed') {
       piFinalizationAckable.add(input.runId)
@@ -465,6 +475,39 @@ async function claimPiHostFinalization(input: FinalizeTaskRunInput): Promise<PiH
     // Leave it pending for the next bootstrap rather than running app effects
     // without a durable CAS owner.
     return 'unavailable'
+  }
+}
+
+/** Keep a long renderer-owned closeout inside its Host CAS lease. */
+function startPiHostFinalizationHeartbeat(
+  runId: string,
+  claim: PiHostFinalizationClaim,
+): PiHostFinalizationHeartbeat | undefined {
+  const renew = window.subagents?.piHost?.runs?.finalizeClaim
+  if (!renew) return undefined
+  let stopped = false
+  let lost = false
+  let inFlight: Promise<void> | undefined
+  const tick = () => {
+    if (stopped || lost || inFlight) return
+    inFlight = renew(runId, claim.claimantId, PI_FINALIZATION_LEASE_MS)
+      .then((result) => {
+        if (!result.claimed || !result.owner || result.claimEpoch !== claim.claimEpoch) lost = true
+      })
+      .catch(() => {
+        // A transient IPC failure does not prove ownership was lost. The next
+        // tick retries; finalizeComplete remains the final fencing check.
+      })
+      .finally(() => { inFlight = undefined })
+  }
+  const timer = setInterval(tick, PI_FINALIZATION_RENEW_INTERVAL_MS)
+  return {
+    stop: async () => {
+      stopped = true
+      clearInterval(timer)
+      await inFlight
+    },
+    lostOwnership: () => lost,
   }
 }
 const finalizationClaims = new Map<string, FinalizationClaim>()
@@ -533,15 +576,18 @@ export async function finalizeTaskRun(
 
   const outcome = (async (): Promise<ExternalRunResult> => {
     let piHostClaim: PiHostFinalizationClaim | undefined
+    let piHostHeartbeat: PiHostFinalizationHeartbeat | undefined
     try {
       if (isPiHostFinalization(input)) {
         const claim = await claimPiHostFinalization(input)
         if (claim === 'unavailable') return syntheticPiFinalizationResult(input, 'Pi Host app-finalization claim unavailable; terminal attachment remains pending')
         piHostClaim = claim || undefined
+        if (piHostClaim) piHostHeartbeat = startPiHostFinalizationHeartbeat(input.runId, piHostClaim)
       }
       const result = await runFinalizationSequence(input, settleOnce)
       if (piHostClaim) {
         try {
+          if (piHostHeartbeat?.lostOwnership()) return result
           const complete = await window.subagents?.piHost?.runs?.finalizeComplete?.(
             input.runId,
             piHostClaim.claimantId,
@@ -608,6 +654,7 @@ export async function finalizeTaskRun(
       await settleOnce(failed)
       return failed
     } finally {
+      await piHostHeartbeat?.stop()
       // 5) release capacity
       await releaseRunCapacity(input.runId)
       // 6) queue drain — only finalization may drain

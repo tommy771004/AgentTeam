@@ -23,7 +23,7 @@
 /** Single-line truncated rows render at one height today. The measurement
  * pass in trajectory-review-closure owns this number; variable heights would
  * reopen it. */
-export const TRAJECTORY_ROW_HEIGHT = 30
+export const TRAJECTORY_ROW_HEIGHT = 28
 
 export type TrajectoryWindowInput = {
   rowCount: number

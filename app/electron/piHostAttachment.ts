@@ -387,6 +387,11 @@ export class PiHostAttachmentJournal {
     }
     if (current && current.leaseExpiresAt > now) {
       const owner = current.claimantId === normalizedClaimant
+      if (owner) {
+        const lease = Math.max(1, Math.floor(Number.isFinite(leaseMs) ? leaseMs : PI_HOST_ATTACHMENT_FINALIZATION_LEASE_MS))
+        current.leaseExpiresAt = now + lease
+        this.changed()
+      }
       return {
         runId: normalizedRunId,
         claimed: owner,
@@ -394,7 +399,7 @@ export class PiHostAttachmentJournal {
         state: 'claimed',
         claimEpoch: current.claimEpoch,
         leaseExpiresAt: current.leaseExpiresAt,
-        reason: owner ? undefined : 'claimed_by_other',
+        ...(owner ? {} : { reason: 'claimed_by_other' as const }),
       }
     }
     const claimEpoch = (current?.claimEpoch || 0) + 1

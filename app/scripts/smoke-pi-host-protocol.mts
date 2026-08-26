@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { mkdtemp, rm, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -15,7 +15,12 @@ assert.ok(Number.isInteger(PROTOCOL_VERSION) && PROTOCOL_VERSION >= 2, 'protocol
 
 type HostMessage = {
   id?: string | number
-  result?: { protocolVersion?: number; capabilities?: string[]; status?: string }
+  result?: {
+    protocolVersion?: number
+    capabilities?: string[]
+    status?: string
+    config?: { oauthImportedProviders?: string[]; oauthSkippedProviders?: string[]; oauthConflicts?: string[] }
+  }
   error?: { code: string; message: string }
   event?: string
 }
@@ -23,8 +28,31 @@ type HostMessage = {
 const hostEntry = process.env.PI_HOST_ENTRY || resolve(import.meta.dirname, '../dist-electron/pi-host.js')
 const hostArgs = hostEntry.endsWith('.ts') ? ['--experimental-strip-types', hostEntry] : [hostEntry]
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-host-protocol-'))
+const nativeAgentDir = join(stateDir, 'native-agent')
+const codexAuthPath = join(stateDir, 'codex-auth.json')
+await mkdir(nativeAgentDir, { recursive: true })
+const codexAccess = (accountId: string) => {
+  const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')
+  const payload = Buffer.from(JSON.stringify({
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    'https://api.openai.com/auth': { chatgpt_account_id: accountId },
+  })).toString('base64url')
+  return `${header}.${payload}.signature`
+}
+const writeCodexLogin = (accountId: string) => writeFile(codexAuthPath, JSON.stringify({
+  tokens: { access_token: codexAccess(accountId), refresh_token: `refresh-${accountId}`, account_id: accountId },
+  last_refresh: new Date().toISOString(),
+}))
+await writeCodexLogin('account-a')
 const host = spawn(process.execPath, hostArgs, {
-  env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json') },
+  env: {
+    ...process.env,
+    SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'),
+    SUBAGENTS_PI_NATIVE_AGENT_DIR: nativeAgentDir,
+    SUBAGENTS_CODEX_AUTH_PATH: codexAuthPath,
+    SUBAGENTS_CLAUDE_CREDENTIALS_PATH: join(stateDir, 'absent-claude.json'),
+    SUBAGENTS_PI_SYNC_CLI_OAUTH: 'true',
+  },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 const output = createInterface({ input: host.stdout })
@@ -47,6 +75,17 @@ try {
     capabilities: ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'capabilities'],
     status: 'ready',
   })
+
+  host.stdin.write(`${JSON.stringify({ id: 20, method: 'settings/get', params: {} })}\n`)
+  const initialSettings = await waitFor((message) => message.id === 20)
+  assert.ok(initialSettings.result?.config?.oauthSkippedProviders?.includes('openai-codex'))
+  await writeCodexLogin('account-b')
+  host.stdin.write(`${JSON.stringify({ id: 23, method: 'settings/get', params: {} })}\n`)
+  const refreshedSettings = await waitFor((message) => message.id === 23)
+  assert.ok(
+    refreshedSettings.result?.config?.oauthConflicts?.includes('openai-codex'),
+    'settings/get re-reads CLI OAuth instead of replaying the startup snapshot',
+  )
 
   host.stdin.write(`${JSON.stringify({ id: 2, method: 'runs/active', params: {} })}\n`)
   const attachments = await waitFor((message) => message.id === 2)

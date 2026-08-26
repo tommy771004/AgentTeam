@@ -2552,6 +2552,7 @@ export function createPiHostServer(
     attachments: [],
   },
   onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[]; attachments: PiHostAttachment[] }) => void,
+  refreshConfig?: () => Promise<PiHostConfigStatus>,
 ) {
   const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [], attachments: initialSnapshot.attachments || [] }
   const attachmentJournal = new PiHostAttachmentJournal({ records: snapshot.attachments }, (next) => {
@@ -2783,6 +2784,10 @@ export function createPiHostServer(
       const input = request && typeof request === 'object' ? request as Partial<PiHostRequest> : undefined
       const id = typeof input?.id === 'string' || typeof input?.id === 'number' ? input.id : ''
       try {
+        if (input?.method === 'settings/get' && refreshConfig) {
+          state.snapshot.config = await refreshConfig()
+          state.snapshot.cursor += 1
+        }
         const messages = await handlePiHostRequest(state, request, send)
         const method = input?.method
         if (method?.startsWith('settings/') || method?.startsWith('sessions/') || method?.startsWith('runs/') || method?.startsWith('resources/') || method?.startsWith('memory/') || method?.startsWith('extensions/') || method === 'turn/submit') onStateChange?.(state.snapshot)

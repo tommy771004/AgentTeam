@@ -120,6 +120,16 @@ assert.ok(new TextEncoder().encode(terminal?.summary || '').byteLength <= PI_HOS
 assert.equal(terminal?.pendingApproval, undefined)
 const firstClaim = journal.claimFinalization('run-1', 'renderer-a', 100)
 assert.deepEqual(firstClaim, { runId: 'run-1', claimed: true, owner: true, state: 'claimed', claimEpoch: 1, leaseExpiresAt: now + 100 })
+now += 40
+const renewedClaim = journal.claimFinalization('run-1', 'renderer-a', 100)
+assert.deepEqual(renewedClaim, {
+  runId: 'run-1',
+  claimed: true,
+  owner: true,
+  state: 'claimed',
+  claimEpoch: 1,
+  leaseExpiresAt: now + 100,
+})
 assert.deepEqual(journal.claimFinalization('run-1', 'renderer-b', 100), {
   runId: 'run-1',
   claimed: false,

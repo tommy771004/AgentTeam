@@ -203,10 +203,25 @@ export function resolveCatalogPublication(
   fresh: readonly SubscriptionProviderCatalog[],
   previous: { catalog: readonly SubscriptionProviderCatalog[]; builtAt: number } | undefined,
   now: number,
+  modelErrors: Partial<Record<SubscriptionProviderId, string>>,
 ): { catalog: readonly SubscriptionProviderCatalog[]; stale: boolean; builtAt: number } {
-  const freshUsable = fresh.some((row) => row.availability === 'available')
-  if (freshUsable || !previous || !previous.catalog.some((row) => row.availability === 'available')) {
+  if (!previous) {
     return { catalog: fresh, stale: false, builtAt: now }
   }
-  return { catalog: previous.catalog, stale: true, builtAt: previous.builtAt }
+  const previousByProvider = new Map(previous.catalog.map((row) => [row.id, row]))
+  let usedCache = false
+  const catalog = fresh.map((row) => {
+    // Cache may replace only a model-view failure. OAuth conflict and missing
+    // credential verdicts are fresh security facts and must never be revived
+    // by a previously selectable row.
+    const modelError = modelErrors[row.id]
+    if (row.availability !== 'unavailable' || !modelError || row.reason !== modelError) return row
+    const cached = previousByProvider.get(row.id)
+    if (cached?.availability !== 'available') return row
+    usedCache = true
+    return cached
+  })
+  return usedCache
+    ? { catalog, stale: true, builtAt: previous.builtAt }
+    : { catalog: fresh, stale: false, builtAt: now }
 }

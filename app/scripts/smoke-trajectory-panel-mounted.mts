@@ -60,6 +60,15 @@ assert.ok(
   'trajectoryWindow 模組的兩個純函式不可消失',
 )
 assert.ok(panel.includes('key={row.seq}'), '列身分必須仍是 record 的 seq')
+assert.ok(
+  panel.includes('trajectory-panel flex h-full min-h-0'),
+  'TrajectoryPanel 必須採用父層固定高度，否則 scroller 會被內容撐開並使虛擬化失效',
+)
+assert.equal(
+  (panel.match(/className="shrink-0" style=\{\{ height: range\.(?:top|bottom)SpacerHeight \}\}/g) || []).length,
+  2,
+  '上下 spacer 都不得被 flex shrink 壓縮，否則長列表的可捲動高度會消失',
+)
 
 // --- negative: each regression actually turns red -------------------------------
 

@@ -194,9 +194,12 @@ for (const forbidden of [/Date\.now/, /Math\.random/, /useState|useStore|zustand
 const entrySource = await readFile(resolve(import.meta.dirname, '../electron/piHostEntry.ts'), 'utf8')
 assert.match(entrySource, /buildPiSubscriptionModelView\(\)/, 'piHostEntry must build the model view at startup')
 assert.match(entrySource, /resolveCatalogPublication\(/, 'piHostEntry must publish through the offline-fallback decision, not hand-pick rows')
+assert.match(entrySource, /refreshSubscriptionConfig/, 'piHostEntry exposes one real OAuth + model catalog refresh owner')
+assert.match(entrySource, /initialSnapshot, persist, refreshSubscriptionConfig\)/, 'settings/get is wired to the real Host refresh owner')
 assert.match(entrySource, /subscriptionCatalog:\s*publishedCatalog\.catalog/, 'config carries exactly the publication decision')
 assert.match(entrySource, /subscriptionCatalogStale: true/, 'the stale marker rides only when the fallback fired')
 const protocolSource = await readFile(resolve(import.meta.dirname, '../electron/piHostProtocol.ts'), 'utf8')
+assert.match(protocolSource, /input\?\.method === 'settings\/get' && refreshConfig/, 'settings/get refreshes Host facts before returning its snapshot')
 assert.match(protocolSource, /PI_HOST_PROTOCOL_VERSION = 4 as const/, 'ADR-0052 rides protocol v4')
 assert.match(protocolSource, /requestedVersion !== PI_HOST_PROTOCOL_VERSION && requestedVersion !== 3 && requestedVersion !== 2/, 'v2/v3 peers stay readable across the v4 bump')
 assert.match(protocolSource, /subscriptionCatalog\?: readonly SubscriptionProviderCatalog\[\]/, 'snapshot config type carries the catalog')
@@ -249,7 +252,7 @@ const previousGood = {
   }),
   builtAt: 1_000,
 }
-const publishedLive = resolveCatalogPublication(freshLive, previousGood, 5_000)
+const publishedLive = resolveCatalogPublication(freshLive, previousGood, 5_000, {})
 assert.equal(publishedLive.stale, false, 'a usable fresh build publishes as-is')
 assert.equal(publishedLive.builtAt, 5_000)
 assert.deepEqual(publishedLive.catalog, freshLive)
@@ -261,7 +264,12 @@ const degradedFresh = projectSubscriptionCatalog({
   providerModels: {},
   providerModelError: { 'openai-codex': 'models.json unreadable' },
 })
-const publishedStale = resolveCatalogPublication(degradedFresh, previousGood, 5_000)
+const publishedStale = resolveCatalogPublication(
+  degradedFresh,
+  previousGood,
+  5_000,
+  { 'openai-codex': 'models.json unreadable' },
+)
 assert.equal(publishedStale.stale, true, 'a degraded build falls back to cache and says so')
 assert.equal(publishedStale.builtAt, 1_000, 'cachedAt stays the moment the CACHE was built, not now')
 assert.deepEqual(publishedStale.catalog, previousGood.catalog)
@@ -276,22 +284,62 @@ const previousDead = {
   }),
   builtAt: 1_000,
 }
-const publishedDead = resolveCatalogPublication(degradedFresh, previousDead, 5_000)
+const publishedDead = resolveCatalogPublication(
+  degradedFresh,
+  previousDead,
+  5_000,
+  { 'openai-codex': 'models.json unreadable' },
+)
 assert.equal(publishedDead.stale, false, 'an all-unavailable previous catalog is no cache worth falling back to')
 assert.deepEqual(publishedDead.catalog, degradedFresh)
 
 // First boot with no previous snapshot at all.
-const publishedFirst = resolveCatalogPublication(degradedFresh, undefined, 5_000)
+const publishedFirst = resolveCatalogPublication(
+  degradedFresh,
+  undefined,
+  5_000,
+  { 'openai-codex': 'models.json unreadable' },
+)
 assert.equal(publishedFirst.stale, false)
 assert.deepEqual(publishedFirst.catalog, degradedFresh)
 
 // The publication decision is pure too.
 const pubInput = { catalog: freshLive, builtAt: 42 }
 assert.deepEqual(
-  resolveCatalogPublication(degradedFresh, pubInput, 7_000),
-  resolveCatalogPublication(degradedFresh, pubInput, 7_000),
+  resolveCatalogPublication(degradedFresh, pubInput, 7_000, { 'openai-codex': 'models.json unreadable' }),
+  resolveCatalogPublication(degradedFresh, pubInput, 7_000, { 'openai-codex': 'models.json unreadable' }),
   'same input, same output',
 )
+
+const conflictFresh = projectSubscriptionCatalog({
+  importedProviders: [],
+  skippedProviders: [],
+  conflicts: ['openai-codex'],
+  providerModels: {},
+})
+const publishedConflict = resolveCatalogPublication(
+  conflictFresh,
+  previousGood,
+  8_000,
+  { 'openai-codex': 'models.json unreadable' },
+)
+assert.equal(publishedConflict.stale, false, 'a fresh OAuth conflict must never be replaced by cached availability')
+assert.equal(publishedConflict.catalog.find((row) => row.id === 'openai-codex')?.availability, 'conflict')
+
+const loggedOutFresh = projectSubscriptionCatalog({
+  importedProviders: [],
+  skippedProviders: [],
+  conflicts: [],
+  providerModels: {},
+})
+const publishedLoggedOut = resolveCatalogPublication(
+  loggedOutFresh,
+  previousGood,
+  9_000,
+  { 'openai-codex': 'models.json unreadable' },
+)
+assert.equal(publishedLoggedOut.stale, false, 'a fresh missing-credential verdict must never be replaced by cache')
+assert.equal(publishedLoggedOut.catalog.find((row) => row.id === 'openai-codex')?.availability, 'unavailable')
 
 // ── Ticket 01: test-connection honesty — no Host beats no-key ──────────────
 const { useSettingsStore } = await import('../src/store/settingsStore.ts')

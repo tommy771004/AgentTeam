@@ -87,7 +87,7 @@ function rowLabel(row: TrajectoryRow): string {
   }
 }
 
-export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; loadPage?: RecordPageLoader }) {
+export function TrajectoryPanel({ sessionId, loadPage, windowed = true }: { sessionId: string; loadPage?: RecordPageLoader; windowed?: boolean }) {
   const [page, setPage] = useState<TurnRecordPage | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -250,7 +250,9 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
   const rows = view?.rows ?? EMPTY_ROWS
   // Before the first window sync lands, derive the range from the same real
   // metrics the sync would use — no hand-built literal, no full-list flash.
-  const range = slice ?? computeTrajectoryWindow(windowInputFrom(scroller.current ?? { scrollTop: 0, clientHeight: 0 }, rows.length))
+  const range = windowed
+    ? slice ?? computeTrajectoryWindow(windowInputFrom(scroller.current ?? { scrollTop: 0, clientHeight: 0 }, rows.length))
+    : { startIndex: 0, endIndex: rows.length, topSpacerHeight: 0, bottomSpacerHeight: 0 }
   const mountedRows = rows.slice(range.startIndex, range.endIndex)
   const selectedRow = view?.rows.find((row) => row.seq === selected)
   const selectedStep = selectedRow
@@ -258,7 +260,7 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
     : undefined
 
   return (
-    <section className="trajectory-panel flex min-h-0 flex-col gap-2" aria-label="執行軌跡">
+    <section className="trajectory-panel flex h-full min-h-0 flex-col gap-2" aria-label="執行軌跡">
       <header className="flex items-center gap-2 text-xs text-muted">
         <span>執行軌跡</span>
         {view ? <span>{view.rows.length} 列</span> : null}
@@ -282,7 +284,7 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
           syncWindow()
         }}
       >
-        <div aria-hidden="true" style={{ height: range.topSpacerHeight }} />
+        <div aria-hidden="true" className="shrink-0" style={{ height: range.topSpacerHeight }} />
 
         {view && view.unloadedBefore > 0 ? (
           <button
@@ -324,7 +326,7 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
           )
         })}
 
-        <div aria-hidden="true" style={{ height: range.bottomSpacerHeight }} />
+        <div aria-hidden="true" className="shrink-0" style={{ height: range.bottomSpacerHeight }} />
       </div>
 
       {selectedRow ? (

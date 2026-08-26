@@ -81,6 +81,8 @@ export const API_PROVIDER_PRESETS: ApiProviderDefinition[] = [
   },
 ]
 
+const CUSTOM_API_PROVIDER = API_PROVIDER_PRESETS.find((provider) => provider.id === 'custom')!
+
 export function apiProviderPreset(id: ApiProviderPreset) {
-  return API_PROVIDER_PRESETS.find((provider) => provider.id === id) || API_PROVIDER_PRESETS[3]
+  return API_PROVIDER_PRESETS.find((provider) => provider.id === id) || CUSTOM_API_PROVIDER
 }

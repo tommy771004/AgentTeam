@@ -289,7 +289,6 @@ const KNOWN_UNGATED_TESTS = new Set([
   'smoke-pi-child-runner.mts',
   'smoke-pi-core-vendor.mts',
   'smoke-pi-electron-cutover.mts',
-  'smoke-pi-electron-host-e2e.mjs',
   'smoke-pi-equivalent-tools.mts',
   'smoke-pi-extensions.mts',
   'smoke-pi-external-sources.mts',

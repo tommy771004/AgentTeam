@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { apiProviderPreset } from '../src/agent/apiProviders.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const read = (file: string) => readFile(resolve(root, file), 'utf8')
@@ -32,6 +33,11 @@ assert.match(codexNote, /非 Codex agent/, 'the codex preset explicitly negates 
 const anthropicNote = presets.slice(presets.indexOf("id: 'anthropic'"), presets.indexOf("id: 'custom'"))
 assert.match(anthropicNote, /Pi loop/, 'the anthropic preset states Pi-loop semantics')
 assert.match(anthropicNote, /非 Claude Code/, 'the anthropic preset explicitly negates vendor-agent semantics')
+assert.equal(
+  apiProviderPreset('legacy-unknown' as never).id,
+  'custom',
+  'an unknown persisted provider falls back to custom, never a subscription provider',
+)
 
 for (const ui of ['src/components/settings/SubscriptionConnectionStatus.tsx', 'src/components/settings/SubscriptionModelPicker.tsx']) {
   const source = await read(ui)

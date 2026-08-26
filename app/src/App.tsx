@@ -49,6 +49,7 @@ import { reconcileReattach } from './agent/reattachReconcile'
 import { markRunRegistryReconciled } from './store/agentStore'
 import type { AgentState } from './agent/types'
 import type { TurnRecordEntry } from './agent/turnRecord'
+import { DevTrajectoryMeasurement } from './DevTrajectoryMeasurement'
 
 type PiHostAttachmentProjection = {
   runId: string
@@ -389,6 +390,8 @@ function ExternalCliSessionBootstrap() {  useEffect(() => {
 function RecoveryBootstrap() {
   useEffect(() => {
     let cancelled = false
+    let recoveryUnsubscribe: (() => void) | undefined
+    let recoveryUnsubscribeTimer: ReturnType<typeof setTimeout> | undefined
     void (async () => {
       let journal: typeof import('./agent/runJournal.ts') | undefined
       try {
@@ -452,7 +455,7 @@ function RecoveryBootstrap() {
         }
         const buffered = new Map<string, TurnRecordEntry[]>()
         const attached = new Set<string>()
-        const unsubscribe = onEvent?.((event) => {
+        recoveryUnsubscribe = onEvent?.((event) => {
           const appended = recordAppendFromEvent(event as { event?: unknown; payload?: unknown })
           if (!appended) return
           if (attached.has(appended.runId)) {
@@ -598,12 +601,6 @@ function RecoveryBootstrap() {
           // interrupted would fabricate a terminal outcome. Keep capacity
           // fail-closed and defer reconciliation until a later bootstrap.
           return null
-        } finally {
-          // Keep the listener alive through the first post-attach tick so
-          // append events cannot fall into the gap before PiHostEventBootstrap
-          // installs its ordinary transport listener. It only handles record
-          // entries and is deduped by seq in the activity store.
-          void unsubscribe
         }
       })()
       const journalReport = await (async () => {
@@ -830,10 +827,20 @@ function RecoveryBootstrap() {
         void window.subagents?.notify?.('SubAgents AI · 啟動復原', detail)
       } finally {
         completeStartupRecovery()
+        // StartupGate can now mount PiHostEventBootstrap. Release this
+        // pre-query buffer listener on the next task, after the ordinary
+        // transport listener has had a React commit to take over.
+        recoveryUnsubscribeTimer = setTimeout(() => {
+          recoveryUnsubscribe?.()
+          recoveryUnsubscribe = undefined
+        }, 0)
       }
     })()
     return () => {
       cancelled = true
+      if (recoveryUnsubscribeTimer) clearTimeout(recoveryUnsubscribeTimer)
+      recoveryUnsubscribe?.()
+      recoveryUnsubscribe = undefined
     }
   }, [])
   return null
@@ -1495,6 +1502,8 @@ export default function App() {
     })()
     return () => { cancelled = true }
   }, [loadSettings, loadLearning])
+
+  if (window.location.hash === '#/trajectory-measurement') return <DevTrajectoryMeasurement />
 
   return (
     <HashRouter>

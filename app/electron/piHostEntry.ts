@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { createPiHostServer, type PiHostMessage } from './piHostProtocol.ts'
+import { createPiHostServer, type PiHostConfigStatus, type PiHostMessage } from './piHostProtocol.ts'
 import { loadPiHostState, savePiHostState, type PiHostSnapshot } from './piHostState.ts'
 import { migrateLegacySettings } from './piSettingsMigration.ts'
 import { buildPiSubscriptionModelView, disposeAllPiSessions, persistPiLegacyCredential, persistPiLegacyModelConfig } from './piCoreRuntime.ts'
@@ -59,7 +59,7 @@ try {
       const migration = migrateLegacySettings({
           provider: legacy.provider || legacy.apiProvider,
           model: legacy.model,
-          baseUrl: legacy.baseUrl,
+        baseUrl: legacy.baseUrl,
         thinkingLevel: legacy.thinkingLevel,
         activeTools: legacy.activeTools,
         compaction: legacy.compaction,
@@ -86,7 +86,12 @@ try {
       }) + '\n', { mode: 0o600 })
     } catch (error) {
       // Do not write the completion marker: a later host restart retries safely.
-      console.error('[pi-host] legacy settings migration pending', error)
+      // ENOENT means no legacy settings file exists (fresh install or isolated E2E profile).
+      // This is expected and not an error — silently skip migration.
+      const code = (error as NodeJS.ErrnoException)?.code
+      if (code !== 'ENOENT') {
+        console.error('[pi-host] legacy settings migration pending', error)
+      }
     }
   }
 }
@@ -99,29 +104,49 @@ const effectiveSettings = settingsOrigin === 'native'
 // lands as per-provider reasons — the rows stay, honestly unavailable. When a
 // degraded build meets a last-good snapshot, ticket 02's offline fallback
 // republishes that cache marked stale instead of showing an empty world.
-const oauthSyncStatus = {
-  oauthImportedProviders: userConfig.oauth.importedProviders,
-  oauthSkippedProviders: userConfig.oauth.skippedProviders,
-  oauthConflicts: userConfig.oauth.conflicts,
+async function buildSubscriptionConfig(
+  currentUserConfig: Awaited<ReturnType<typeof bootstrapPiUserConfig>>,
+  previousConfig?: PiHostConfigStatus,
+): Promise<PiHostConfigStatus> {
+  const oauthSyncStatus = {
+    oauthImportedProviders: currentUserConfig.oauth.importedProviders,
+    oauthSkippedProviders: currentUserConfig.oauth.skippedProviders,
+    oauthConflicts: currentUserConfig.oauth.conflicts,
+  }
+  const subscriptionModelView = await buildPiSubscriptionModelView()
+  const previousSubscriptionCatalog = previousConfig?.subscriptionCatalog?.length
+    ? { catalog: previousConfig.subscriptionCatalog, builtAt: previousConfig.subscriptionCatalogCachedAt || 0 }
+    : undefined
+  const publishedCatalog = resolveCatalogPublication(
+    assembleSubscriptionCatalog(oauthSyncStatus, subscriptionModelView.models, subscriptionModelView.errors),
+    previousSubscriptionCatalog,
+    Date.now(),
+    subscriptionModelView.errors,
+  )
+  return {
+    settingsSource: settingsOrigin === 'managed' ? 'managed' : currentUserConfig.settingsPath ? 'native' : 'default',
+    settingsLoaded: Boolean(currentUserConfig.settingsPath),
+    oauthSources: currentUserConfig.oauth.sourceKinds,
+    ...oauthSyncStatus,
+    subscriptionCatalog: publishedCatalog.catalog,
+    ...(publishedCatalog.stale ? { subscriptionCatalogStale: true } : {}),
+    subscriptionCatalogCachedAt: publishedCatalog.builtAt,
+  }
 }
-const subscriptionModelView = await buildPiSubscriptionModelView()
-const previousSubscriptionCatalog = storedState.config?.subscriptionCatalog?.length
-  ? { catalog: storedState.config.subscriptionCatalog, builtAt: storedState.config.subscriptionCatalogCachedAt || 0 }
-  : undefined
-const publishedCatalog = resolveCatalogPublication(
-  assembleSubscriptionCatalog(oauthSyncStatus, subscriptionModelView.models, subscriptionModelView.errors),
-  previousSubscriptionCatalog,
-  Date.now(),
-)
-const config = {
-  settingsSource: settingsOrigin === 'managed' ? 'managed' : userConfig.settingsPath ? 'native' : 'default',
-  settingsLoaded: Boolean(userConfig.settingsPath),
-  oauthSources: userConfig.oauth.sourceKinds,
-  ...oauthSyncStatus,
-  subscriptionCatalog: publishedCatalog.catalog,
-  ...(publishedCatalog.stale ? { subscriptionCatalogStale: true } : {}),
-  subscriptionCatalogCachedAt: publishedCatalog.builtAt,
-} as const
+
+const config = await buildSubscriptionConfig(userConfig, storedState.config)
+let latestSubscriptionConfig = config
+let refreshSubscriptionConfigInFlight: Promise<PiHostConfigStatus> | undefined
+const refreshSubscriptionConfig = (): Promise<PiHostConfigStatus> => {
+  if (refreshSubscriptionConfigInFlight) return refreshSubscriptionConfigInFlight
+  refreshSubscriptionConfigInFlight = (async () => {
+    const refreshedUserConfig = await bootstrapPiUserConfig()
+    const refreshedConfig = await buildSubscriptionConfig(refreshedUserConfig, latestSubscriptionConfig)
+    latestSubscriptionConfig = refreshedConfig
+    return refreshedConfig
+  })().finally(() => { refreshSubscriptionConfigInFlight = undefined })
+  return refreshSubscriptionConfigInFlight
+}
 const initialSnapshot: PiHostSnapshot = { cursor: storedState.cursor, sessions: storedState.sessions, settings: effectiveSettings, settingsOrigin, config, queue: storedState.queue, resources: storedState.resources, memories: storedState.memories, extensions: storedState.extensions, attachments: storedState.attachments }
 await savePiHostState(statePath, initialSnapshot)
 let persistence = Promise.resolve()
@@ -132,10 +157,10 @@ const persist = (snapshot: typeof initialSnapshot) => {
 }
 
 if (parentPort) {
-  const server = createPiHostServer((message) => parentPort.postMessage(message), initialSnapshot, persist)
+  const server = createPiHostServer((message) => parentPort.postMessage(message), initialSnapshot, persist, refreshSubscriptionConfig)
   parentPort.on('message', (event) => server.handle(event.data))
 } else {
-  const server = createPiHostServer((message) => process.stdout.write(`${JSON.stringify(message)}\n`), initialSnapshot, persist)
+  const server = createPiHostServer((message) => process.stdout.write(`${JSON.stringify(message)}\n`), initialSnapshot, persist, refreshSubscriptionConfig)
   const input = createInterface({ input: process.stdin })
   input.on('line', (line) => {
     try {

@@ -314,6 +314,7 @@ const runScenario = async (page, kind, iteration) => {
     // The launcher marker below then makes the renderer-destruction boundary
     // deterministic, leaving the Host terminal record for the replacement
     // renderer's RecoveryBootstrap.
+    console.log('[e2e] terminal gateState start');
     const gateState = await page.evaluate((id) => {
       const onEvent = window.subagents?.piHost?.onEvent
       if (!onEvent) throw new Error('Pi Host event bridge unavailable for terminal race')
@@ -336,6 +337,7 @@ const runScenario = async (page, kind, iteration) => {
     // Do not await cancellation before observing the terminal append: the
     // cancellation response is downstream of the record event and would
     // otherwise let the original renderer finalize first.
+    console.log('[e2e] terminalCancel start', runId);
     const terminalCancel = page.evaluate(async (id) => {
       try {
         return { result: await window.subagents?.piHost?.turn?.cancel?.(id) }
@@ -343,37 +345,52 @@ const runScenario = async (page, kind, iteration) => {
         return { error: error instanceof Error ? error.message : String(error) }
       }
     }, runId)
+    console.log('[e2e] waitFor turn-end start');
     await page.waitForFunction(
       () => window.__reattachTerminalGate?.status === 'turn-end',
       undefined,
       { timeout, polling: 100 },
     )
+    console.log('[e2e] waitFor old gate start');
     const gateMarker = await waitForFinalizeClaimGate(runId, gateId)
     oldGateMarker = gateMarker
     assert.equal(gateMarker?.runId, runId, 'launcher gate consumed this terminal run')
+    console.log('[e2e] waitFor terminal status start');
     const terminalAttachment = await waitForHostStatus(page, runId, 'terminal', 'terminal append before renderer reload')
     assert.equal(terminalAttachment?.settlement, 'cancelled', `Host terminal append is cancellation: ${JSON.stringify(terminalAttachment)}`)
     // The turn-end listener established the renderer-destruction boundary;
     // reload only after the launcher proves the old claim is parked.
+    console.log('[e2e] terminal reload start');
     await page.reload({ waitUntil: 'domcontentloaded', timeout })
+    console.log('[e2e] terminal reload done');
+    console.log('[e2e] waitForSelector after terminal reload start');
     await page.waitForSelector('textarea.composer-field', { timeout })
+    console.log('[e2e] waitForSelector after terminal reload done');
+    console.log('[e2e] awaiting terminalCancel');
     const cancelOutcome = await terminalCancel
+    console.log('[e2e] terminalCancel outcome', cancelOutcome)
     if (cancelOutcome.error && !/context|target|closed|navigation/i.test(cancelOutcome.error)) {
       throw new Error(`terminal Host cancellation transport failed: ${cancelOutcome.error}`)
     }
   }
 
   if (kind === 'active') {
+    console.log('[e2e] active reload start');
     await page.reload({ waitUntil: 'domcontentloaded', timeout })
+    console.log('[e2e] active reload done');
     await page.waitForSelector('textarea.composer-field', { timeout })
+    console.log('[e2e] active waitForSelector done');
   }
+  console.log(`[e2e] waitForRecoveredTimeline ${kind} start`, runId);
   await waitForRecoveredTimeline(page, runId, kind, `${kind} renderer reattach projection`)
+  console.log(`[e2e] waitForRecoveredTimeline ${kind} done`)
 
   if (kind === 'terminal') {
     // RecoveryBootstrap restores the Host record and renderer timeline before
     // awaiting its finalization claim. The launcher parks that replacement
     // claim too, making the proof observable instead of racing an immediate
     // finalize → ack → prune sequence.
+    console.log('[e2e] waitFor replacement gate start');
     const replacementGateMarker = await waitForFinalizeClaimGate(
       runId,
       terminalGateId,
