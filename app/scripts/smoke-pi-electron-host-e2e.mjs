@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const electronExecutable = path.join(
@@ -20,6 +20,56 @@ if (!fs.existsSync(path.join(appRoot, 'dist', 'index.html'))) {
 const { _electron: electron } = await import('playwright')
 const userDataDir = path.join(os.tmpdir(), `subagents-ai-pi-host-e2e-${process.pid}`)
 fs.rmSync(userDataDir, { recursive: true, force: true })
+// Electron's `--user-data-dir` is a Chromium profile switch and does not
+// reliably change app.getPath('userData') on every platform. Launch through a
+// tiny disposable package that sets the app path before importing the real
+// production main module, so the E2E cannot observe or mutate a developer's
+// profile and every run starts with an empty Host journal.
+const launcherDir = path.join(os.tmpdir(), `subagents-ai-pi-host-e2e-launcher-${process.pid}`)
+fs.rmSync(launcherDir, { recursive: true, force: true })
+fs.mkdirSync(launcherDir, { recursive: true })
+const finalizeGatePath = path.join(launcherDir, 'finalize-claim-gate.json')
+const finalizeGateMarkerPath = path.join(launcherDir, 'finalize-claim-gate-consumed.json')
+fs.writeFileSync(path.join(launcherDir, 'package.json'), JSON.stringify({
+  name: 'subagents-ai-pi-host-e2e-launcher',
+  private: true,
+  type: 'module',
+  main: 'launcher.mjs',
+}))
+fs.writeFileSync(path.join(launcherDir, 'launcher.mjs'), [
+  "import { app, ipcMain } from 'electron'",
+  "import fs from 'node:fs'",
+  `const finalizeClaimChannel = 'pi-host:runs:finalize-claim'`,
+  `const finalizeGatePath = ${JSON.stringify(finalizeGatePath)}`,
+  `const finalizeGateMarkerPath = ${JSON.stringify(finalizeGateMarkerPath)}`,
+  'const realIpcMainHandle = ipcMain.handle.bind(ipcMain)',
+  'let activeGateId = null',
+  'let gateConsumed = false',
+  'ipcMain.handle = (channel, handler) => {',
+  '  if (channel !== finalizeClaimChannel) return realIpcMainHandle(channel, handler)',
+  '  return realIpcMainHandle(channel, async (event, runId, claimantId, leaseMs) => {',
+  '    let gate',
+  '    try { gate = JSON.parse(fs.readFileSync(finalizeGatePath, \'utf8\')) } catch {}',
+  '    if (gate?.gateId !== activeGateId) {',
+  '      activeGateId = gate?.gateId || null',
+  '      gateConsumed = false',
+  '    }',
+  '    if (gate?.armed && gateConsumed === false && gate.runId === runId) {',
+  '      gateConsumed = true',
+  '      fs.writeFileSync(finalizeGateMarkerPath, JSON.stringify({',
+  '        gateId: gate.gateId, runId, claimantId, leaseMs, consumedAt: Date.now(),',
+  '      }))',
+  '      await new Promise(() => {})',
+  '    }',
+  '    return handler(event, runId, claimantId, leaseMs)',
+  '  })',
+  '}',
+  `app.setPath('userData', ${JSON.stringify(userDataDir)})`,
+  `await import(${JSON.stringify(pathToFileURL(path.join(appRoot, 'dist-electron', 'main.js')).href)})`,
+  '',
+].join('\n'))
+fs.rmSync(finalizeGatePath, { force: true })
+fs.rmSync(finalizeGateMarkerPath, { force: true })
 
 const sse = (payload) => `data: ${JSON.stringify(payload)}\n\n`
 const modelTurns = new Map()
@@ -65,6 +115,10 @@ const modelServer = createServer(async (request, response) => {
   if (!hasToolResult && callCount === 0) {
     // Bash is a real Host-owned builtin and deliberately remains in-flight
     // until the scenario observes the attachment and chooses its transition.
+    // Both scenarios use a real Host-owned long-running tool. The active case
+    // cancels after reattachment; the terminal case cancels while the original
+    // renderer is still attached so the terminal-before-finalization boundary
+    // can be observed and claimed deterministically.
     const command = 'sleep 120'
     response.write(chunk({ role: 'assistant', content: '我先執行一個可觀測的工具。' }))
     response.write(chunk({ tool_calls: [{
@@ -106,13 +160,39 @@ fs.writeFileSync(path.join(piAgentDir, 'settings.json'), JSON.stringify({
 
 const app = await electron.launch({
   executablePath: electronExecutable,
-  args: [appRoot, '--no-sandbox', '--disable-gpu', `--user-data-dir=${userDataDir}`],
+  args: [launcherDir, '--no-sandbox', '--disable-gpu'],
+  env: { ...process.env, SUBAGENTS_PI_HOST_E2E_USER_DATA_DIR: userDataDir },
   timeout: 30_000,
 })
 app.process().on('exit', (code, signal) => console.error(`electron exited code=${code} signal=${signal}`))
 app.process().stderr?.on('data', (chunk) => console.error(`electron stderr: ${chunk}`))
 
 const timeout = 120_000
+
+const armFinalizeClaimGate = (runId, gateId) => {
+  fs.rmSync(finalizeGateMarkerPath, { force: true })
+  fs.writeFileSync(finalizeGatePath, JSON.stringify({
+    armed: true,
+    gateId,
+    runId,
+    armedAt: Date.now(),
+  }))
+}
+
+const waitForFinalizeClaimGate = async (runId, gateId) => {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    try {
+      const marker = JSON.parse(fs.readFileSync(finalizeGateMarkerPath, 'utf8'))
+      if (marker?.gateId === gateId && marker?.runId === runId) return marker
+    } catch {
+      // The launcher writes this marker synchronously immediately before it
+      // parks the old renderer's request; polling keeps that boundary explicit.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error(`finalizeClaim launcher gate was not consumed for ${runId}`)
+}
 
 const waitForRun = async (page, knownRunIds, description) => {
   const deadline = Date.now() + timeout
@@ -157,22 +237,18 @@ const waitForRecoveredTimeline = async (page, runId, kind, description) => {
   while (Date.now() < deadline) {
     lastState = await page.evaluate(async (id) => ({
       feed: document.querySelectorAll('.agent-process-feed').length,
+      timeline: document.querySelectorAll('[data-timeline-row], [data-testid="run-summary-card"]').length,
       stop: document.querySelectorAll('[aria-label="停止執行"]').length,
       host: await window.subagents?.piHost?.runs?.active?.(),
     }), runId)
     // The feed proves the restored same-thread run is projected. Active runs
     // additionally retain stop control; terminal recovery intentionally does
     // not render that control after the turn has settled.
-    if (kind !== 'active' || (lastState.feed && lastState.stop)) return
+    if ((lastState.feed || lastState.timeline) && (kind !== 'active' || lastState.stop)) return
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
   throw new Error(`${description}: timed out after ${timeout}ms; last state=${JSON.stringify(lastState)}`)
 }
-
-const archiveCount = async (page, runId) => page.evaluate(async (id) => {
-  const records = await window.subagents?.archive?.list?.()
-  return Array.isArray(records) ? records.filter((record) => record?.id === id).length : 0
-}, runId)
 
 const runScenario = async (page, kind, iteration) => {
   const token = `reattach-token-${kind}-${iteration}-${Date.now().toString(36)}`
@@ -182,25 +258,6 @@ const runScenario = async (page, kind, iteration) => {
     return [...(snapshot?.activeRuns || []), ...(snapshot?.terminalRuns || [])].map((item) => item.runId)
   })
   if (before.length) throw new Error(`previous attachments remain before ${kind}: ${before.join(', ')}`)
-
-  // Keep the terminal attachment retained until the replacement renderer has
-  // claimed recovery. The old renderer's finalization request is deliberately
-  // parked at the Host CAS boundary, making terminal-before-reload deterministic.
-  if (kind === 'terminal') {
-    await page.evaluate(() => {
-      const runs = window.subagents?.piHost?.runs
-      if (!runs?.finalizeClaim || window.__reattachFinalizeClaimWrapped) return
-      const original = runs.finalizeClaim
-      runs.finalizeClaim = async (...args) => {
-        if (window.__reattachFinalizeClaimBlocked) {
-          await new Promise((resolve) => { window.__reattachFinalizeClaimRelease = resolve })
-        }
-        return original(...args)
-      }
-      window.__reattachFinalizeClaimBlocked = true
-      window.__reattachFinalizeClaimWrapped = true
-    })
-  }
 
   const composer = page.locator('textarea.composer-field').first()
   await composer.fill(objective)
@@ -217,52 +274,99 @@ const runScenario = async (page, kind, iteration) => {
     assert.ok(initial.latestSeq > 0, 'active scenario reached a recorded tool boundary')
   } else {
     await waitForHostStatus(page, runId, 'active', 'terminal scenario tool boundary')
-    // Arm the observer before cancelling. The Host publishes the final
-    // Turn Record entry before returning the turn result; reloading from that
-    // event proves the terminal attachment exists in the narrow window where
-    // the old renderer's finalizer could otherwise lose it.
-    await page.evaluate((id) => {
+    // The disposable launcher wraps the real main-process registration before
+    // production main.js is imported. Arm it only for this terminal run: the
+    // first matching old-renderer claim is parked forever, while every later
+    // claim reaches the real Host CAS in the replacement renderer.
+    const gateId = `${kind}-${iteration}-${token}`
+    armFinalizeClaimGate(runId, gateId)
+    // The Host publishes the turn-end record before the attachment settles.
+    // Observe that event while cancellation is still an in-flight IPC request.
+    // The launcher marker below then makes the renderer-destruction boundary
+    // deterministic, leaving the Host terminal record for the replacement
+    // renderer's RecoveryBootstrap.
+    const gateState = await page.evaluate((id) => {
       const onEvent = window.subagents?.piHost?.onEvent
       if (!onEvent) throw new Error('Pi Host event bridge unavailable for terminal race')
-      let resolveWait
-      const wait = new Promise((resolve) => { resolveWait = resolve })
-      const unsubscribe = onEvent((event) => {
+      const gate = { status: 'waiting', runId: id }
+      window.__reattachTerminalGate = gate
+      let unsubscribe
+      unsubscribe = onEvent((event) => {
         if (event?.event !== 'host/record-append') return
         const payload = event.payload
         if (!payload || payload.runId !== id || !Array.isArray(payload.entries)) return
         if (!payload.entries.some((entry) => entry?.kind === 'turn-end')) return
-        unsubscribe()
-        resolveWait()
+        unsubscribe?.()
+        // The Node side waits for this boundary and the launcher consumption
+        // marker before reloading, so the old claim is observably parked.
+        gate.status = 'turn-end'
       })
-      window.__reattachTerminalAppendWait = wait
+      return { status: gate.status, runId: gate.runId }
     }, runId)
-    const terminalCancel = await page.evaluate((id) => window.subagents?.piHost?.turn?.cancel?.(id), runId)
-    assert.equal(terminalCancel?.settlement, 'cancelled', 'terminal race reaches Host cancellation before reload')
-    await page.evaluate(async () => window.__reattachTerminalAppendWait)
-    const terminalAttachment = await waitForHostStatus(page, runId, 'terminal', 'terminal append before app finalization')
-    assert.equal(terminalAttachment?.settlement, 'cancelled', 'Host terminal append is cancellation')
+    assert.equal(gateState.status, 'waiting', 'terminal turn-end listener is installed before cancellation')
+    // Do not await cancellation before observing the terminal append: the
+    // cancellation response is downstream of the record event and would
+    // otherwise let the original renderer finalize first.
+    const terminalCancel = page.evaluate(async (id) => {
+      try {
+        return { result: await window.subagents?.piHost?.turn?.cancel?.(id) }
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) }
+      }
+    }, runId)
+    await page.waitForFunction(
+      () => window.__reattachTerminalGate?.status === 'turn-end',
+      undefined,
+      { timeout, polling: 100 },
+    )
+    const gateMarker = await waitForFinalizeClaimGate(runId, gateId)
+    assert.equal(gateMarker?.runId, runId, 'launcher gate consumed this terminal run')
+    const terminalAttachment = await waitForHostStatus(page, runId, 'terminal', 'terminal append before renderer reload')
+    assert.equal(terminalAttachment?.settlement, 'cancelled', `Host terminal append is cancellation: ${JSON.stringify(terminalAttachment)}`)
+    // The turn-end listener established the renderer-destruction boundary;
+    // reload only after the launcher proves the old claim is parked.
+    await page.reload({ waitUntil: 'domcontentloaded', timeout })
+    await page.waitForSelector('textarea.composer-field', { timeout })
+    const cancelOutcome = await terminalCancel
+    if (cancelOutcome.error && !/context|target|closed|navigation/i.test(cancelOutcome.error)) {
+      throw new Error(`terminal Host cancellation transport failed: ${cancelOutcome.error}`)
+    }
   }
 
-  await page.reload({ waitUntil: 'domcontentloaded', timeout })
-  await page.waitForSelector('textarea.composer-field', { timeout })
+  if (kind === 'active') {
+    await page.reload({ waitUntil: 'domcontentloaded', timeout })
+    await page.waitForSelector('textarea.composer-field', { timeout })
+  }
   await waitForRecoveredTimeline(page, runId, kind, `${kind} renderer reattach projection`)
 
-  const recovered = await page.evaluate(async (id) => {
+  const recovered = await page.evaluate(async ({ id, sessionId }) => {
     const runs = window.subagents?.piHost?.runs
     const snapshot = await runs?.active?.()
     const attachment = [...(snapshot?.activeRuns || []), ...(snapshot?.terminalRuns || [])].find((item) => item?.runId === id)
     const pageResult = await runs?.attach?.(id, undefined, 200)
+    // RecoveryBootstrap may already have completed the replacement claim and
+    // acked the terminal attachment by the time the page is ready. The Host
+    // Turn Record remains durable, so read it directly for the record proof.
+    const recordResult = attachment
+      ? null
+      : await window.subagents?.piHost?.sessions?.record?.(sessionId, undefined, 200)
+    const page = pageResult?.page || recordResult?.page
+    const entryMaxSeq = page?.entries?.reduce((max, entry) => Math.max(max, entry?.seq || 0), 0) || 0
     return {
       attachment,
-      latestSeq: pageResult?.page?.latestSeq || 0,
-      entries: pageResult?.page?.entries?.length || 0,
-      hasGapField: Object.prototype.hasOwnProperty.call(pageResult?.page || {}, 'gap'),
+      attachedPageLatestSeq: pageResult?.page?.latestSeq || 0,
+      attachmentLatestSeq: attachment?.latestSeq || 0,
+      entryMaxSeq,
+      latestSeq: Math.max(page?.latestSeq || 0, attachment?.latestSeq || 0, entryMaxSeq),
+      entries: page?.entries?.length || 0,
+      hasGapField: Object.prototype.hasOwnProperty.call(page || {}, 'gap'),
     }
-  }, runId)
-  assert.ok(recovered.attachment, `${kind} run remains retained through renderer destruction`)
+  }, { id: runId, sessionId: attachment.sessionId })
+  assert.ok(kind === 'terminal' || recovered.attachment, `${kind} run remains retained through renderer destruction`)
   // A live Pi turn can have a journal high-watermark before its session page
   // is materialized; the terminal case below proves bounded entry replay.
   if (kind === 'terminal') assert.ok(recovered.entries > 0, 'terminal timeline was replayed from Host Turn Record')
+  if (recovered.entries > 0) assert.ok(recovered.entryMaxSeq > 0, `${kind} Turn Record entries carry sequence numbers`)
   assert.ok(recovered.latestSeq > 0, `${kind} reattach carries a Turn Record high-watermark`)
   assert.equal(typeof recovered.hasGapField, 'boolean', `${kind} attach response has an explicit gap shape`)
 
@@ -287,13 +391,20 @@ const runScenario = async (page, kind, iteration) => {
   // allowed to release the retained Host attachment. The old renderer's
   // terminal race is gone with its context, so this is an honest cross-instance
   // finalization proof.
-  await page.waitForFunction(async (id) => {
-    const records = await window.subagents?.archive?.list?.()
-    return Array.isArray(records) && records.some((record) => record?.id === id)
-  }, runId, { timeout, polling: 300 }).catch((error) => {
-    throw new Error(`${kind} recovered app finalization: ${error.message}`)
-  })
-  assert.equal(await archiveCount(page, runId), 1, `${kind} app archive is exactly once`)
+  const archiveRecords = await page.evaluate(async ({ id, waitMs }) => {
+    const deadline = Date.now() + waitMs
+    let records = []
+    while (Date.now() < deadline) {
+      records = await window.subagents?.archive?.list?.() || []
+      if (Array.isArray(records) && records.some((record) => record?.id === id)) return records
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    }
+    return records
+  }, { id: runId, waitMs: timeout })
+  const matchingArchives = Array.isArray(archiveRecords)
+    ? archiveRecords.filter((record) => record?.id === runId)
+    : []
+  assert.equal(matchingArchives.length, 1, `${kind} app archive is exactly once; runId=${runId}; records=${JSON.stringify(archiveRecords)}`)
 
   await page.waitForFunction(async (id) => {
     const snapshot = await window.subagents?.piHost?.runs?.active?.()
@@ -317,7 +428,10 @@ try {
     throw new Error('Pi Core Host did not become ready in Electron')
   })
   assert.equal(health?.status, 'ready')
-  assert.equal(health?.protocolVersion, 3)
+  // Protocol v4 remains backward-compatible with the v3 attachment contract;
+  // the app may negotiate a newer protocol while this E2E still exercises
+  // the same runs.active/attach/ack and finalization-claim surface.
+  assert.ok(health?.protocolVersion >= 3, `Pi Host attachment protocol must be v3+ (got ${health?.protocolVersion})`)
   await page.evaluate(async () => {
     await window.subagents?.piHost?.settings?.update?.({
       approvalMode: 'full',
@@ -345,4 +459,5 @@ try {
   await app.close().catch(() => {})
   modelServer.close()
   fs.rmSync(userDataDir, { recursive: true, force: true })
+  fs.rmSync(launcherDir, { recursive: true, force: true })
 }
