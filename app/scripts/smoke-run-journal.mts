@@ -69,6 +69,29 @@ recordRunTerminal({ runId: 'run-complete', threadId: 'thread-complete', status: 
 assert.equal(reconcileStartup(), null)
 assert.equal(getJournalEntry('run', 'run-complete')?.status, 'success')
 
+// Pi Host is the execution authority after a renderer reload. Host-recognized
+// active/terminal attachments must survive startup reconciliation; only a run
+// absent from both sets is honestly marked interrupted.
+resetRunJournalForTests()
+recordRunAdmitted({ runId: 'host-active', objective: 'still running' })
+recordRunStarted({ runId: 'host-active', threadId: 'thread-host' })
+assert.equal(
+  reconcileStartup({ activeRunIds: new Set(['host-active']), terminalRunIds: new Set() }),
+  null,
+)
+assert.equal(getJournalEntry('run', 'host-active')?.status, 'running')
+recordRunAdmitted({ runId: 'host-terminal', objective: 'finished while away' })
+recordRunStarted({ runId: 'host-terminal', threadId: 'thread-host' })
+assert.equal(
+  reconcileStartup({ activeRunIds: new Set(['host-active']), terminalRunIds: new Set(['host-terminal']) }),
+  null,
+)
+assert.equal(getJournalEntry('run', 'host-terminal')?.status, 'running')
+recordRunAdmitted({ runId: 'renderer-died', objective: 'no Host witness' })
+recordRunStarted({ runId: 'renderer-died', threadId: 'thread-missing' })
+assert.ok(reconcileStartup({ activeRunIds: new Set(['host-active']), terminalRunIds: new Set(['host-terminal']) })?.items.some((item) => item.id === 'renderer-died'))
+assert.equal(getJournalEntry('run', 'renderer-died')?.status, 'interrupted')
+
 recordQueueEnqueued({ queueId: 'queue-safe', runId: 'run-safe', objective: 'queued once', sourceKind: 'schedule' })
 assert.equal(getJournalEntry('queue', 'queue-safe')?.status, 'queued')
 // A queued item may resume once; once it is claimed, an interruption is never

@@ -167,6 +167,25 @@ assert.deepEqual(
   replayed,
   'what the store accumulated projects to the same rows as the finished record',
 )
+
+// Host snapshot replay is a count/high-watermark calibration, not another
+// batch of activity. A backfilled page and a live overlap collapse by seq and
+// leave the Host's total intact.
+store.clear()
+store.begin('reattach_run', 'reattach_thread')
+store.setReattaching(true, 'reattach_run')
+store.reattachRecord({
+  entries: [live[2], live[0], live[2]],
+  total: 42,
+  latestSeq: 42,
+  gap: { missingBefore: 2, earliestSeq: live[0].seq },
+}, 'reattach_run')
+store.appendRecordEntries([live[1], live[2]], 'reattach_run')
+const reattached = useRunActivityStore.getState().getPresentation('reattach_run')
+assert.equal(reattached?.reattaching, false)
+assert.equal(reattached?.recordTotal, 42, 'backfill must not inflate the Host total')
+assert.deepEqual(reattached?.recordEntries.map((entry) => entry.seq), [1, 2, 3])
+assert.deepEqual(reattached?.reattachGap, { missingBefore: 2, earliestSeq: 1 })
 // The draft is what has NOT been recorded yet. Once the Host writes the
 // message the draft was accumulating, keeping it would show the same sentence
 // twice — as the recorded row and as the line still being written.

@@ -105,6 +105,16 @@ export type RecoveryReport = {
   delivered?: boolean
 }
 
+/**
+ * Host-canonical startup truth. The renderer journal remains a local-first
+ * delivery ledger; it must not decide that a Pi run died merely because this
+ * renderer was destroyed.
+ */
+export type StartupHostTruth = {
+  activeRunIds: ReadonlySet<string>
+  terminalRunIds: ReadonlySet<string>
+}
+
 type JournalState = {
   version: 1
   entries: JournalEntry[]
@@ -692,13 +702,25 @@ export function listRecoveryReports(preferred?: Storage): RecoveryReport[] {
   }
 }
 
-/** Mark uncertain in-flight work interrupted; never replay an uncertain side effect. */
-export function reconcileStartup(): RecoveryReport | null {
+/**
+ * Mark uncertain in-flight work interrupted; never replay an uncertain side
+ * effect. When Host truth is supplied, active/terminal Pi attachments are
+ * preserved and consumed by the coordinator recovery path instead.
+ *
+ * Without Host truth (plain browser or a missing bridge), the historical
+ * fail-safe remains: renderer-owned in-flight work is honestly interrupted.
+ */
+export function reconcileStartup(hostTruth?: StartupHostTruth): RecoveryReport | null {
   const state = loadState()
   const active = new Set<JournalStatus>(['admitted', 'running', 'dispatching'])
   const items: RecoveryItem[] = []
   for (const entry of state.entries) {
     if (!active.has(entry.status)) continue
+    if (entry.kind === 'run' && hostTruth) {
+      const runId = entry.runId || entry.id
+      if (hostTruth.activeRunIds.has(runId)) continue
+      if (hostTruth.terminalRunIds.has(runId)) continue
+    }
     const previousStatus = entry.status
     entry.status = 'interrupted'
     entry.updatedAt = now()

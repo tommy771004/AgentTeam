@@ -5,12 +5,12 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## What to build
 
-本 effort 的**核心新測試接縫**,而且**不依賴 01 的決策**——不論真相放在 main 還是 Pi child,協調邏輯的輸入輸出都一樣,所以這張票可以立刻開工。
+本 effort 的**核心新測試接縫**。01 已決定真相在 Pi Core Host；本模組只協調 Host snapshot 與 live event，不自行判定或改寫 execution settlement。
 
 一個純模組,把 snapshot 與 live 事件協調成一份狀態:
 
 輸入:snapshot(entries、`latestSeq`、`total`、run 狀態)、訂閱期間緩衝的 entries、generation、已觀察的 high-watermark。
-輸出:協調後的 entries(依 `seq` 排序去重)、新的 high-watermark(單調)、缺口回報、是否過期(generation 不符)、以及該不該結算與結算為何。
+輸出:協調後的 entries(依 `seq` 排序去重)、新的 high-watermark(單調)、缺口回報、是否過期(generation 不符)、以及是否觀察到可交給既有 app finalization 出口的 Host terminal outcome。terminal 的種類由 Host snapshot／event 給定,renderer 不重新推導。
 
 合約與 `liveTimeline` / `conversationProjection` / `projectContextUsage` 同族同純度:no I/O、no store、no clock、no randomness。排序只看 `seq`,**沿用 Turn Record 既有 sequence,不發明第二套事件詞彙**。
 
@@ -31,4 +31,9 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## Blocked by
 
-無（純模組,與 01 並行;協調邏輯不受真相歸屬影響）
+無（01 已 resolved；本票只依賴已定稿的 Host snapshot 合約）
+
+## Implementation evidence (2026-08-26)
+
+- `app/src/agent/reattachReconcile.ts` remains a pure snapshot/buffer/generation seam; `smoke-reattach-reconcile.mts` covers overlap dedupe, ordering, stale generation, bounded gaps, monotonic high-watermark, terminal immutability, and deterministic output.
+- `npm run build` and the full `npm run smoke` chain passed after the renderer/Host integration.

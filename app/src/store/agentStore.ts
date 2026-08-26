@@ -45,6 +45,8 @@ interface AgentStore {
   setShowReport: (v: boolean) => void
   canStartRun: (runId?: string, threadId?: string) => { allowed: boolean; active: number; limit: number; reason?: string }
   reserveRun: (runId: string, threadId?: string, kind?: 'builtin' | 'cli') => boolean
+  /** Rebuild a disposable renderer run projection from Host attachment truth. */
+  restoreRun: (input: { runId: string; threadId?: string; state: AgentState }) => boolean
   bindRun: (runId: string, threadId: string) => void
   releaseRun: (runId: string) => void
   getRunState: (runId?: string) => AgentState | null
@@ -197,6 +199,19 @@ function rememberRunThread(threadId: string | undefined, runId: string) {
 function stateSnapshot(): Record<string, AgentState> {
   return Object.fromEntries([...runAgentStates.entries()].map(([id, state]) => [id, state]))
 }
+
+function piHostCapacityReconciliationRequired(): boolean {
+  try {
+    return typeof window !== 'undefined' && typeof window.subagents?.piHost?.runs?.active === 'function'
+  } catch {
+    return false
+  }
+}
+
+// Admission stays fail-closed until the renderer has rebuilt the registry from
+// Host attachment truth. Plain-browser and non-Pi paths have no Host query and
+// remain immediately usable.
+let runRegistryReconciled = !piHostCapacityReconciliationRequired()
 
 /**
  * The single blank state a run-scoped view shows when it has no run.
@@ -405,6 +420,14 @@ export const useAgentStore = create<AgentStore>((set, get) => {
     setShowReport: (v) => set({ showReport: v }),
 
     canStartRun: (runId, threadId) => {
+      if (!runRegistryReconciled && !runId) {
+        return {
+          allowed: false,
+          active: reservedRuns.size,
+          limit: useSettingsStore.getState().settings.maxConcurrentRuns || 1,
+          reason: 'reattach-pending',
+        }
+      }
       if (runId && reservedRuns.has(runId)) return { allowed: true, active: reservedRuns.size, limit: useSettingsStore.getState().settings.maxConcurrentRuns || 1 }
       if (threadId) {
         const sameThread = [...reservedRuns.values()].some((entry) => entry.threadId === threadId)
@@ -423,6 +446,23 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       reservedRuns.set(runId, { threadId, kind })
       rememberRunThread(threadId, runId)
       runAgentStates.set(runId, emptyAgentLike({ id: runId, objective: '', status: 'idle' }))
+      publishRun(set, get, runId, runAgentStates.get(runId)!)
+      return true
+    },
+
+    restoreRun: ({ runId, threadId, state }) => {
+      if (!runId) return false
+      // Host admission already enforced its own cap before the renderer was
+      // destroyed. Rebuild that canonical registry even if Settings changed
+      // while the renderer was away; new admissions remain gated until the
+      // full Host set is restored and then use the current cap.
+      if (!reservedRuns.has(runId)) {
+        reservedRuns.set(runId, { threadId, kind: state.executionKind === 'external' ? 'cli' : 'builtin' })
+      }
+      const entry = reservedRuns.get(runId)
+      if (entry && threadId) entry.threadId = threadId
+      runAgentStates.set(runId, { ...state, id: runId })
+      rememberRunThread(threadId, runId)
       publishRun(set, get, runId, runAgentStates.get(runId)!)
       return true
     },
@@ -970,6 +1010,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       runAgentStates.clear()
       lastRunIdByThread.clear()
       runSelectionIsExplicit = false
+      runRegistryReconciled = !piHostCapacityReconciliationRequired()
       set({
         agent: emptyAgent(),
         isRunning: false,
@@ -1055,6 +1096,16 @@ export const useAgentStore = create<AgentStore>((set, get) => {
     },
   }
 })
+
+/** Called only after Host active/terminal attachment reconciliation completes. */
+export function markRunRegistryReconciled(): void {
+  runRegistryReconciled = true
+}
+
+/** Test/diagnostic seam for proving admission remains fail-closed during boot. */
+export function isRunRegistryReconciled(): boolean {
+  return runRegistryReconciled
+}
 
 /** Delete archive records older than N days (0 = off) */
 async function pruneArchiveByAge(days: number) {

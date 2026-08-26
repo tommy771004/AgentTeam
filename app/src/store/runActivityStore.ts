@@ -170,6 +170,10 @@ export type RunPresentation = {
    * rather than presenting a trimmed buffer as the whole run.
    */
   recordTotal: number
+  /** Host attachment bootstrap is in progress; this is transport state, not run failure. */
+  reattaching: boolean
+  /** Retention omitted an older prefix during Host attachment. */
+  reattachGap: { missingBefore: number; earliestSeq: number } | null
   /**
    * The user has asked this run to stop and the Host has not settled yet.
    * Drives immediate feedback so the button answers the press, not the Host.
@@ -231,6 +235,14 @@ export interface RunActivityStore {
   appendText: (delta: string, runId?: string) => void
   /** Entries the Host just wrote to the running turn's record, in order. */
   appendRecordEntries: (entries: readonly TurnRecordEntry[], runId?: string) => void
+  /** Install a Host snapshot without treating backfilled entries as new events. */
+  reattachRecord: (input: {
+    entries: readonly TurnRecordEntry[]
+    total: number
+    latestSeq: number
+    gap?: { missingBefore: number; earliestSeq: number }
+  }, runId: string) => void
+  setReattaching: (reattaching: boolean, runId: string, statusLine?: string) => void
   setStatus: (line: string, runId?: string, phase?: RunActivityPhase) => void
   setRecovery: (recovery: ExternalCliRecoveryProjection, runId?: string) => void
   setInteraction: (interaction: ExternalCliInteractionProjection | null, runId?: string) => void
@@ -298,6 +310,8 @@ function emptyPresentation(runId: string, now = Date.now()): RunPresentation {
     phase: 'starting',
     recordEntries: [],
     recordTotal: 0,
+    reattaching: false,
+    reattachGap: null,
     stopping: false,
     terminal: null,
     recovery: null,
@@ -693,13 +707,56 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         return {
           ...presentation,
           recordEntries: merged.slice(-MAX_RECORD_ENTRIES),
-          recordTotal: presentation.recordTotal + added.length,
+          // `recordTotal` is a Host high-watermark/count, not a count of this
+          // renderer's arrivals. A replayed/backfilled page must not inflate it.
+          recordTotal: Math.max(presentation.recordTotal, merged.length, merged.at(-1)?.seq || 0),
           ...(recorded ? { draftText: '' } : {}),
           updatedAt: Date.now(),
           active: true,
         }
       }),
     )
+  },
+
+  reattachRecord: (input, runId) => {
+    if (!runId) return
+    set((s) =>
+      applyRunUpdate(s, runId, (presentation) => {
+        const bySeq = new Map<number, TurnRecordEntry>()
+        for (const entry of presentation.recordEntries) bySeq.set(entry.seq, entry)
+        for (const entry of input.entries) bySeq.set(entry.seq, entry)
+        const recordEntries = [...bySeq.values()].sort((left, right) => left.seq - right.seq).slice(-MAX_RECORD_ENTRIES)
+        return {
+          ...presentation,
+          recordEntries,
+          // The Host's total/latestSeq are authoritative and monotonic; the
+          // renderer never derives a larger count from replay arrivals.
+          recordTotal: Math.max(presentation.recordTotal, input.total, input.latestSeq, recordEntries.length),
+          reattachGap: input.gap || presentation.reattachGap,
+          reattaching: false,
+          statusLine: presentation.statusLine === '正在重新附著…' ? 'Pi Core Host 執行中…' : presentation.statusLine,
+          updatedAt: Date.now(),
+          active: true,
+        }
+      }),
+    )
+  },
+
+  setReattaching: (reattaching, runId, statusLine) => {
+    if (!runId) return
+    set((s) => {
+      const current = s.presentations[runId] || emptyPresentation(runId)
+      const next = {
+        ...current,
+        reattaching,
+        statusLine: statusLine || (reattaching ? '正在重新附著…' : current.statusLine),
+        updatedAt: Date.now(),
+        ...(reattaching ? { active: true, phase: 'starting' as const } : {}),
+      }
+      const presentations = { ...s.presentations, [runId]: next }
+      const selected = s.runId === runId ? next : presentations[s.runId || '']
+      return { presentations, ...projectPresentation(selected) }
+    })
   },
 
   setStatus: (line, runId, phase) => {

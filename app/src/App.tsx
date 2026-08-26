@@ -30,6 +30,7 @@ import { scheduleSkillCurator } from './agent/hermes/curator'
 import { scheduleDreamConsolidation } from './agent/hermes/dream'
 import {
   completeStartupRecovery,
+  getJournalEntry,
   waitForStartupRecovery,
 } from './agent/runJournal.ts'
 import { applyRendererStorageSnapshot } from './agent/updateMigration'
@@ -40,6 +41,120 @@ import { recordAppendFromEvent } from './agent/liveTimeline'
 import { usePiHostEventStore } from './store/piHostEventStore'
 import { useRunActivityStore } from './store/runActivityStore'
 import { isElectronPiProduction } from './agent/piProduction'
+import { emptyAgentLike } from './agent/localCliRun'
+import { isPiTurnSettlement, piTurnOutcome } from './agent/piHostRun'
+import { reconcileReattach } from './agent/reattachReconcile'
+import { markRunRegistryReconciled } from './store/agentStore'
+import type { AgentState } from './agent/types'
+import type { TurnRecordEntry } from './agent/turnRecord'
+
+type PiHostAttachmentProjection = {
+  runId: string
+  sessionId: string
+  threadId?: string
+  status: 'active' | 'terminal'
+  latestSeq: number
+  total: number
+  settlement?: string
+  interruptReason?: 'user' | 'timeout'
+  summary?: string
+  pendingApproval?: {
+    runId: string
+    sessionId?: string
+    tool: string
+    callId: string
+    args?: Record<string, unknown>
+    reason?: string
+    timeoutMs: number
+  }
+}
+
+/**
+ * Rehydrate the same approval queue used by live Host events. The call id is
+ * the durable identity, so a snapshot racing a live approval frame cannot
+ * create two modal rows or resolve the Host twice.
+ */
+const reattachedApprovalKeys = new Set<string>()
+function presentReattachedApproval(
+  pending: PiHostAttachmentProjection['pendingApproval'],
+  threadId?: string,
+): void {
+  if (!pending?.runId || !pending.callId) return
+  const key = `${pending.runId}:${pending.callId}`
+  if (reattachedApprovalKeys.has(key)) return
+  reattachedApprovalKeys.add(key)
+  void (async () => {
+    try {
+      const { usePermissionAskStore } = await import('./store/permissionAskStore')
+      const outcome = await usePermissionAskStore.getState().requestAsk({
+        threadId,
+        runId: pending.runId,
+        tool: pending.tool,
+        args: pending.args || {},
+        reason: pending.reason,
+        timeoutMs: pending.timeoutMs,
+      })
+      await window.subagents?.piHost?.approvals?.resolve?.({
+        runId: pending.runId,
+        callId: pending.callId,
+        decision: outcome.decision,
+        ...(outcome.answer ? { answer: outcome.answer } : {}),
+      })
+    } catch {
+      // A transport failure leaves the Host's own approval timeout in charge.
+    }
+  })()
+}
+
+function piHostAttachmentAgent(
+  attachment: PiHostAttachmentProjection,
+  entries: readonly TurnRecordEntry[],
+  objective: string,
+): AgentState {
+  const settlement = isPiTurnSettlement(attachment.settlement) ? attachment.settlement : undefined
+  const outcome = settlement
+    ? piTurnOutcome(settlement, {
+        answer: attachment.summary || '',
+        interruptReason: attachment.interruptReason,
+      })
+    : undefined
+  const active = attachment.status === 'active'
+  const status = active ? 'running' : outcome?.status || 'failed'
+  return emptyAgentLike({
+    id: attachment.runId,
+    objective,
+    status,
+    progress: active ? 15 : 100,
+    result: outcome?.text,
+    haltReason: outcome?.status === 'failed' ? outcome.text : undefined,
+    interruptReason: outcome?.interruptReason,
+    turnRecord: entries.length ? { version: 1, entries: [...entries] } : undefined,
+    loopConfig: {
+      loopType: 'Goal-based',
+      trigger: 'pi-host',
+      executionSequence: ['pi-host-turn'],
+      definitionOfDone: '',
+      maxIterations: 1,
+      fallbackProtocol: '',
+      nextState: 'Halt',
+    },
+    steps: [{
+      step: 1,
+      action: 'pi-host-turn',
+      description: 'Pi Core Host turn',
+      status: active ? 'IN_PROGRESS' : outcome?.stepStatus || 'FAILED',
+      result: outcome?.text,
+      modelSource: 'primary',
+    }],
+    logs: [{
+      id: `pi-reattach-${attachment.runId}`,
+      timestamp: new Date().toISOString(),
+      level: active ? 'PROCESS' : outcome?.logLevel || 'ERROR',
+      message: active ? 'Pi Core Host 執行中（renderer reattached）' : `Pi Core Host settlement=${attachment.settlement || 'failed'}`,
+    }],
+    executionKind: 'loop',
+  })
+}
 
 /** Restore automation queue from disk and drain when capacity is available */
 function RunQueueBootstrap() {
@@ -110,28 +225,12 @@ function PiHostEventBootstrap() {
       // question surfaces in the permission panel and its answer resolves
       // back through approvals/resolve (user story 11).
       if ((event as { event?: string }).event === 'host/approval-requested') {
-        const payload = (event as { payload?: { runId: string; tool: string; callId: string; args?: Record<string, unknown>; reason?: string; timeoutMs?: number } }).payload
+        const payload = (event as { payload?: { runId: string; threadId?: string; tool: string; callId: string; args?: Record<string, unknown>; reason?: string; timeoutMs?: number } }).payload
         if (payload) {
-          void (async () => {
-            try {
-              const { usePermissionAskStore } = await import('./store/permissionAskStore')
-              const outcome = await usePermissionAskStore.getState().requestAsk({
-                runId: payload.runId,
-                tool: payload.tool,
-                args: payload.args || {},
-                reason: payload.reason,
-                timeoutMs: payload.timeoutMs,
-              })
-              await window.subagents?.piHost?.approvals?.resolve?.({
-                runId: payload.runId,
-                callId: payload.callId,
-                decision: outcome.decision,
-                ...(outcome.answer ? { answer: outcome.answer } : {}),
-              })
-            } catch {
-              /* a failed transport leaves the Host's own timeout to deny */
-            }
-          })()
+          presentReattachedApproval({
+            ...payload,
+            timeoutMs: payload.timeoutMs || 90_000,
+          }, payload.threadId)
         }
         return
       }
@@ -334,6 +433,150 @@ function RecoveryBootstrap() {
         ))
         useThreadStore.getState().hydrateFromPiHost(projected)
       }
+      // Pi Core Host owns active/terminal execution truth. Subscribe before
+      // querying it, buffer record appends during attach, then merge by the
+      // Turn Record sequence so a renderer reload cannot create a startup gap.
+      const hostTruth = await (async () => {
+        const runs = window.subagents?.piHost?.runs
+        const onEvent = window.subagents?.piHost?.onEvent
+        if (!runs?.active) {
+          markRunRegistryReconciled()
+          return undefined
+        }
+        const buffered = new Map<string, TurnRecordEntry[]>()
+        const attached = new Set<string>()
+        const unsubscribe = onEvent?.((event) => {
+          const appended = recordAppendFromEvent(event as { event?: unknown; payload?: unknown })
+          if (!appended) return
+          if (attached.has(appended.runId)) {
+            useRunActivityStore.getState().appendRecordEntries(appended.entries, appended.runId)
+            return
+          }
+          const current = buffered.get(appended.runId) || []
+          buffered.set(appended.runId, [...current, ...appended.entries])
+        })
+        try {
+          const result = await runs.active()
+          const activeRuns = Array.isArray(result?.activeRuns) ? result.activeRuns as PiHostAttachmentProjection[] : []
+          const terminalRuns = Array.isArray(result?.terminalRuns) ? result.terminalRuns as PiHostAttachmentProjection[] : []
+          const allRuns = [...new Map([...activeRuns, ...terminalRuns].map((record) => [record.runId, record])).values()]
+          const activeRunIds = new Set(activeRuns.map((record) => record.runId).filter(Boolean))
+          const terminalRunIds = new Set(terminalRuns.map((record) => record.runId).filter(Boolean))
+          for (const attachment of allRuns) {
+            if (!attachment?.runId || !attachment.threadId) continue
+            const objective = getJournalEntry('run', attachment.runId)?.objective || 'Pi Core Host 執行中的任務'
+            const activity = useRunActivityStore.getState()
+            activity.begin(attachment.runId, attachment.threadId)
+            activity.setReattaching(true, attachment.runId)
+            let page: {
+              entries?: TurnRecordEntry[]
+              latestSeq?: number
+              total?: number
+              gap?: { missingBefore: number; earliestSeq: number }
+            } | undefined
+            let attachedSnapshot = attachment
+            try {
+              const attachedResult = await runs.attach(attachment.runId, undefined, 200)
+              page = attachedResult?.page
+              if (attachedResult?.attachment) {
+                attachedSnapshot = { ...attachment, ...attachedResult.attachment }
+              }
+            } catch {
+              // The Host query is still authoritative; a transient page read
+              // failure stays visible as a reconnecting state and never as a
+              // terminal run failure.
+            }
+            const observed = activity.getPresentation(attachment.runId)
+            const reconciled = reconcileReattach({
+              snapshot: {
+                entries: page?.entries || [],
+                latestSeq: Math.max(attachedSnapshot.latestSeq || 0, page?.latestSeq || 0),
+                total: Math.max(attachedSnapshot.total || 0, page?.total || 0),
+                ...(page?.gap ? { unloadedBefore: page.gap.missingBefore } : {}),
+              },
+              buffered: buffered.get(attachment.runId) || [],
+              generation: 1,
+              currentGeneration: 1,
+              observed: {
+                latestSeq: observed?.recordEntries.at(-1)?.seq || 0,
+                total: observed?.recordTotal || 0,
+              },
+            })
+            const entries = reconciled.entries
+            const state = piHostAttachmentAgent(attachedSnapshot, entries, objective)
+            const restored = useAgentStore.getState().restoreRun({ runId: attachment.runId, threadId: attachment.threadId, state })
+            if (!restored) throw new Error(`renderer run registry restore failed: ${attachment.runId}`)
+            // The Agent registry is only the capacity/control projection. Keep
+            // the owning conversation bound as well so every surface (including
+            // stop controls and thread-busy admission) sees the Host identity
+            // after a renderer reload.
+            const restoredThread = useThreadStore.getState()
+            restoredThread.setThreadRunning(attachment.threadId, true, attachment.runId)
+            restoredThread.setAwaitingReply(attachment.threadId, false)
+            restoredThread.setThreadStatus(attachment.threadId, 'running')
+            if (page) {
+              activity.reattachRecord({
+                entries,
+                total: reconciled.total,
+                latestSeq: reconciled.latestSeq,
+                gap: reconciled.gap,
+              }, attachment.runId)
+            } else {
+              activity.setReattaching(false, attachment.runId, attachedSnapshot.status === 'active' ? 'Pi Core Host 執行中…' : undefined)
+            }
+            attached.add(attachment.runId)
+            buffered.delete(attachment.runId)
+            if (attachedSnapshot.pendingApproval) {
+              presentReattachedApproval(attachedSnapshot.pendingApproval, attachedSnapshot.threadId)
+            }
+            if (attachedSnapshot.status === 'terminal') {
+              const { finalizeRecoveredPiHostRun, isPiFinalizationAckable } = await import('./agent/taskRunCoordinator')
+              let ackable = false
+              try {
+                await finalizeRecoveredPiHostRun({
+                  runId: attachment.runId,
+                  threadId: attachment.threadId,
+                  objective,
+                  agent: state,
+                })
+                ackable = isPiFinalizationAckable(attachment.runId)
+              } finally {
+                // Host CAS completion is the gate for acknowledgement. A
+                // renderer that lost the claim must leave the attachment
+                // pending so the owner (or a later lease holder) can finish
+                // app finalization before ack releases it.
+                if (ackable || isPiFinalizationAckable(attachment.runId)) {
+                  await runs.ack(attachment.runId).catch(() => undefined)
+                }
+              }
+            }
+          }
+          markRunRegistryReconciled()
+          return { activeRunIds, terminalRunIds }
+        } catch (error) {
+          // A missing/failed Host query must not open a capacity hole. The
+          // bridge-less browser path above is the only path that unlocks boot.
+          journal?.recordRecoveryNotice({
+            kind: 'run',
+            id: 'pi-host-reattach',
+            action: 'quarantined',
+            detail: `Pi Host reattach query failed，admission remains locked：${error instanceof Error ? error.message : String(error)}`.slice(0, 300),
+          })
+          // `undefined` means there is no Host bridge (plain-browser
+          // compatibility), where the journal's historical interruption rule
+          // remains correct. A present-but-unreachable Host is different: its
+          // active set is unknown, so marking every in-flight Pi run
+          // interrupted would fabricate a terminal outcome. Keep capacity
+          // fail-closed and defer reconciliation until a later bootstrap.
+          return null
+        } finally {
+          // Keep the listener alive through the first post-attach tick so
+          // append events cannot fall into the gap before PiHostEventBootstrap
+          // installs its ordinary transport listener. It only handles record
+          // entries and is deduped by seq in the activity store.
+          void unsubscribe
+        }
+      })()
       const journalReport = await (async () => {
         if (!journal) return null
         // Durable mirror must be wired and hydrated BEFORE reconcileStartup:
@@ -344,7 +587,8 @@ function RecoveryBootstrap() {
           journal.setRunJournalMirrorBridge({ read: () => mirrorApi.read(), write: (state: string) => mirrorApi.write(state) })
           try { await journal.hydrateRunJournalFromDurable() } catch { /* best effort */ }
         }
-        return journal.reconcileStartup()
+        if (hostTruth === null) return null
+        return journal.reconcileStartup(hostTruth)
       })()
       const hasRunRecovery = (journalReport?.items || []).some(
         (item) => item.kind === 'run' && item.action === 'marked-interrupted',

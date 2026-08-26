@@ -216,6 +216,84 @@ await test('the queue still drains from finalization, and only from there', asyn
   assert.equal(reserved(runId), false)
 })
 
+await test('Pi Host CAS gates original finalization and acknowledges only after complete', async () => {
+  useAgentStore.getState().reset()
+  clearRunQueue()
+  const tid = useThreadStore.getState().createThread({ title: 'Host CAS' })
+  const runId = 'run_idem_pi_cas'
+  useAgentStore.getState().reserveRun(runId, tid, 'builtin')
+  const calls: string[] = []
+  const previous = (globalThis.window as any).subagents
+  ;(globalThis.window as any).subagents = {
+    piHost: {
+      runs: {
+        finalizeClaim: async () => {
+          calls.push('claim')
+          return { runId, claimed: true, owner: true, state: 'claimed', claimEpoch: 1, leaseExpiresAt: Date.now() + 120_000 }
+        },
+        finalizeComplete: async () => {
+          calls.push('complete')
+          return { runId, completed: true, owner: true, state: 'completed', claimEpoch: 1, leaseExpiresAt: Date.now() + 120_000 }
+        },
+        ack: async () => {
+          calls.push('ack')
+          return { runId, resolved: true }
+        },
+      },
+    },
+  }
+  try {
+    await finalizeTaskRun({
+      runId,
+      threadId: tid,
+      objective: 'Pi CAS gate',
+      settings: settings(),
+      dispatchResult: { path: 'builtin', executionKind: 'loop', status: 'success', result: '完成' },
+    })
+  } finally {
+    ;(globalThis.window as any).subagents = previous
+  }
+  assert.deepEqual(calls.slice(0, 3), ['claim', 'complete', 'ack'], 'complete precedes ack')
+  assert.equal(calls.filter((call) => call === 'claim').length, 1)
+})
+
+await test('a renderer that loses the Host claim performs no app finalization or ack', async () => {
+  useAgentStore.getState().reset()
+  clearRunQueue()
+  const tid = useThreadStore.getState().createThread({ title: 'Host CAS loser' })
+  const runId = 'run_idem_pi_cas_loser'
+  useAgentStore.getState().reserveRun(runId, tid, 'builtin')
+  const calls: string[] = []
+  const previous = (globalThis.window as any).subagents
+  ;(globalThis.window as any).subagents = {
+    piHost: {
+      runs: {
+        finalizeClaim: async () => {
+          calls.push('claim')
+          return { runId, claimed: false, owner: false, state: 'claimed', claimEpoch: 4, leaseExpiresAt: Date.now() + 120_000, reason: 'claimed_by_other' }
+        },
+        finalizeComplete: async () => { calls.push('complete'); return { runId, completed: true, owner: true, state: 'completed', claimEpoch: 4 } },
+        ack: async () => { calls.push('ack'); return { runId, resolved: true } },
+      },
+    },
+  }
+  let result: { error?: string } | null = null
+  try {
+    const { finalizeRecoveredPiHostRun } = await import('../src/agent/taskRunCoordinator.ts')
+    result = await finalizeRecoveredPiHostRun({
+      runId,
+      threadId: tid,
+      objective: 'CAS loser',
+      agent: { id: runId, objective: 'CAS loser', status: 'success', steps: [], logs: [] } as any,
+    })
+  } finally {
+    ;(globalThis.window as any).subagents = previous
+  }
+  assert.match(String(result?.error), /claim unavailable/)
+  assert.deepEqual(calls, ['claim'], 'loser must not complete or ack')
+  assert.equal(hasEnding(runId), false, 'loser must not write a second terminal journal')
+})
+
 await test('drift guard: one claim gate, release and drain in a finally', () => {
   const coordinator = read('src/agent/taskRunCoordinator.ts')
   assert.match(

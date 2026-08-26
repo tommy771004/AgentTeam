@@ -97,6 +97,8 @@ export function RunProcessFeed({
   const tasks = activity?.tasks ?? EMPTY_TASKS
   const recordEntries = activity?.recordEntries ?? EMPTY_RECORD_ENTRIES
   const recordTotal = activity?.recordTotal ?? 0
+  const reattaching = activity?.reattaching ?? false
+  const reattachGap = activity?.reattachGap ?? null
 
   // OpenCode keeps reasoning compact by default; raw streamed thought remains
   // available for inspection without pushing the answer below the fold.
@@ -235,7 +237,7 @@ export function RunProcessFeed({
     interruptReason: agent.interruptReason,
     stopping: activity?.stopping,
   })
-  const phase = lifecycle.label
+  const phase = reattaching ? '正在重新附著…' : lifecycle.label
   // One honest notice when a live run goes quiet — never a repeated alarm.
   const stall = useStallNotice(runId)
   // Counted from whichever source is actually on screen, so the header never
@@ -443,6 +445,26 @@ export function RunProcessFeed({
           </button>
         ) : null}
       </div>
+
+      {reattaching ? (
+        <div
+          className="agent-process-recovery flex items-center gap-2 rounded-md border border-line-strong/60 bg-surface-2 px-3 py-2 text-[11px] text-ink-3"
+          role="status"
+          aria-label="Pi Core Host 重新附著中"
+        >
+          <Icon name="sync" size={14} className="shrink-0" />
+          <span>正在重新附著到 Pi Core Host；這不是執行失敗。</span>
+        </div>
+      ) : null}
+      {reattachGap ? (
+        <div
+          className="agent-process-recovery flex items-center gap-2 rounded-md border border-line-strong/60 bg-surface-2 px-3 py-2 text-[11px] text-ink-3"
+          role="status"
+        >
+          <Icon name="history" size={14} className="shrink-0" />
+          <span>較早的 {reattachGap.missingBefore} 筆紀錄不在目前保留範圍；時間軸從 seq {reattachGap.earliestSeq} 開始。</span>
+        </div>
+      ) : null}
 
       {stall.stalled && !lifecycle.needsAttention ? (
         <div

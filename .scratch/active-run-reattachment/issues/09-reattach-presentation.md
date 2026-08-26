@@ -25,3 +25,9 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 ## Blocked by
 
 05 — renderer bootstrap 重新附著 + 容量重建
+
+## Implementation evidence (2026-08-26)
+
+- `RunProcessFeed` presents reattach as transport state (`正在重新附著…`) with an explicit bounded-history gap notice; it does not synthesize progress or turn a reconnect failure into run failure.
+- Pending Host approvals rehydrate into the existing `PermissionAskStore`/modal and resolve through the existing approval IPC, with `runId:callId` dedupe for snapshot/live races.
+- `npm run build`, targeted live-timeline/journal smokes, `npx oxlint src`, and full smoke passed.

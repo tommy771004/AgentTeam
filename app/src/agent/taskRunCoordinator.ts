@@ -67,6 +67,14 @@ function rendererPresent(): boolean {
 /** Prevent re-entrant callers from starting the same lifecycle twice. */
 const coordinatingRunIds = new Set<string>()
 const recoveredFinalizationClaims = new Set<string>()
+const PI_FINALIZATION_LEASE_MS = 120_000
+const rendererFinalizationClaimant = `renderer_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+/** RecoveryBootstrap uses this to decide whether it is safe to send Host ack. */
+const piFinalizationAckable = new Set<string>()
+
+export function isPiFinalizationAckable(runId: string): boolean {
+  return piFinalizationAckable.has(runId)
+}
 
 /**
  * Normalize only the canonical ingress field; preserve the caller object and
@@ -418,6 +426,47 @@ export type FinalizeTaskRunInput = {
  * are ever forgotten, so trimming can never free an in-flight run to restart.
  */
 type FinalizationClaim = { outcome: Promise<ExternalRunResult>; done: boolean }
+
+type PiHostFinalizationClaim = { claimantId: string; claimEpoch: number }
+
+function isPiHostFinalization(input: FinalizeTaskRunInput): boolean {
+  // A loop dispatch is the only renderer path whose terminal settlement is
+  // owned by the Pi Host attachment journal. Hook/guard early exits have no
+  // Host terminal attachment and must retain the ordinary coordinator path.
+  return input.dispatchResult?.executionKind === 'loop'
+}
+
+function syntheticPiFinalizationResult(input: FinalizeTaskRunInput, error?: string): ExternalRunResult {
+  return {
+    path: 'builtin',
+    executionKind: 'loop',
+    status: input.dispatchResult?.status || 'failed',
+    ...(input.dispatchResult?.result ? { result: input.dispatchResult.result } : {}),
+    ...(error ? { error } : input.dispatchResult?.error ? { error: input.dispatchResult.error } : {}),
+    threadId: input.threadId,
+    runId: input.runId,
+  }
+}
+
+async function claimPiHostFinalization(input: FinalizeTaskRunInput): Promise<PiHostFinalizationClaim | null | 'unavailable'> {
+  try {
+    const claim = window.subagents?.piHost?.runs?.finalizeClaim
+    if (!claim) return null
+    const result = await claim(input.runId, rendererFinalizationClaimant, PI_FINALIZATION_LEASE_MS)
+    if (result.claimed && result.owner && result.claimEpoch > 0) {
+      return { claimantId: rendererFinalizationClaimant, claimEpoch: result.claimEpoch }
+    }
+    if (result.state === 'completed' || result.reason === 'completed') {
+      piFinalizationAckable.add(input.runId)
+    }
+    return 'unavailable'
+  } catch {
+    // A terminal attachment remains Host-owned until claim+complete succeeds.
+    // Leave it pending for the next bootstrap rather than running app effects
+    // without a durable CAS owner.
+    return 'unavailable'
+  }
+}
 const finalizationClaims = new Map<string, FinalizationClaim>()
 /**
  * How many finished runs stay remembered. Only settled claims are forgotten,
@@ -483,8 +532,33 @@ export async function finalizeTaskRun(
   }
 
   const outcome = (async (): Promise<ExternalRunResult> => {
+    let piHostClaim: PiHostFinalizationClaim | undefined
     try {
-      return await runFinalizationSequence(input, settleOnce)
+      if (isPiHostFinalization(input)) {
+        const claim = await claimPiHostFinalization(input)
+        if (claim === 'unavailable') return syntheticPiFinalizationResult(input, 'Pi Host app-finalization claim unavailable; terminal attachment remains pending')
+        piHostClaim = claim || undefined
+      }
+      const result = await runFinalizationSequence(input, settleOnce)
+      if (piHostClaim) {
+        try {
+          const complete = await window.subagents?.piHost?.runs?.finalizeComplete?.(
+            input.runId,
+            piHostClaim.claimantId,
+            piHostClaim.claimEpoch,
+          )
+          if (complete?.completed) {
+            piFinalizationAckable.add(input.runId)
+            // The original renderer has no RecoveryBootstrap to send this
+            // acknowledgement, so complete→ack is one owned sequence here.
+            await window.subagents?.piHost?.runs?.ack?.(input.runId)
+          }
+        } catch {
+          // Keep the terminal attachment pending when completion/ack transport
+          // fails; a later renderer can retry after the finite claim lease.
+        }
+      }
+      return result
     } catch (error) {
       // Finalization is this run's last owner. An unexpected throw here used
       // to reach the caller's catch, which restarted finalization from the
@@ -1044,6 +1118,48 @@ export async function finalizeRecoveredExternalRun(input: {
       sourceKind: 'retry',
       settings: useSettingsStore.getState().settings,
       early: { error: `外部 CLI 執行已中斷：${reason}`, path: 'cli', agent },
+    })
+  } catch (error) {
+    recoveredFinalizationClaims.delete(runId)
+    throw error
+  }
+}
+
+/**
+ * Consume a terminal settlement that Pi Host journalled after a renderer
+ * reload. This is deliberately a coordinator adapter, not a new ingress: the
+ * existing finalizeTaskRun sequence still owns summary, archive, metrics,
+ * onSettled, release, and queue drain.
+ */
+export async function finalizeRecoveredPiHostRun(input: {
+  runId: string
+  threadId: string
+  objective: string
+  agent: AgentState
+}): Promise<ExternalRunResult | null> {
+  const runId = input.runId.trim()
+  if (!runId || recoveredFinalizationClaims.has(runId)) return null
+  recoveredFinalizationClaims.add(runId)
+  try {
+    const { useSettingsStore } = await import('../store/settingsStore.ts')
+    const status = input.agent.status === 'success'
+      ? 'success'
+      : input.agent.status === 'halted'
+        ? 'halted'
+        : 'failed'
+    return await finalizeTaskRun({
+      runId,
+      threadId: input.threadId,
+      objective: input.objective,
+      sourceKind: 'retry',
+      settings: useSettingsStore.getState().settings,
+      dispatchResult: {
+        path: 'builtin',
+        executionKind: 'loop',
+        status,
+        ...(input.agent.result ? { result: input.agent.result } : {}),
+        ...(status === 'failed' && input.agent.result ? { error: input.agent.result } : {}),
+      },
     })
   } catch (error) {
     recoveredFinalizationClaims.delete(runId)

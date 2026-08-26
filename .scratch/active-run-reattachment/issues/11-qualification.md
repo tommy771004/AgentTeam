@@ -29,9 +29,14 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 - [ ] 完整 `npm run smoke` 鏈全綠
 - [ ] `npx oxlint src` 對本 effort 觸碰的檔案 0 警告
 - [ ] 上列回歸案逐項有覆蓋並記錄證據
-- [ ] 既有 drift guard 只加強未放寬(未新增 coordinator、未新增第二進度來源;protocol 版本處置符合 01 決策)
+- [ ] 既有 drift guard 只加強未放寬(未新增 coordinator、未新增第二進度來源、main 無第二份 attachment truth、Pi Host Protocol 為 v3)
 - [ ] 01 的決策記錄已回填 spec,Implementation Decisions 無殘留「未決」
 
 ## Blocked by
 
 01–10（全部 resolved）
+
+## Current evidence (2026-08-26)
+
+- Green: `npm run build`, `npx oxlint src`, full `npm run smoke`, `smoke-reattach-reconcile`, `smoke-live-timeline`, `smoke-run-journal`, `smoke-run-journal-durability`, `smoke-run-lifecycle`, `smoke-finalize-idempotency`, and the existing real Host protocol/session Electron smoke.
+- Pending: ticket 10 true renderer restart e2e and repeated-run flake evidence; qualification remains No-Go until that proof lands.

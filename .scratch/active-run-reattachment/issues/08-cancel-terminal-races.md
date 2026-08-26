@@ -9,7 +9,7 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 
 - 重新附著的 run 可以要求取消(拿回畫面就拿回控制權)。
 - 取消維持 `cancel_requested` 直到 Host ack,UI 不得宣稱一個尚未發生的停止。
-- terminal 之後抵達的 late success **不得**把 cancelled／failed 改回成功。
+- Pi Core Host 寫入 terminal 之後抵達的 late success **不得**把 cancelled／failed 改回成功；renderer 無權覆寫 Host settlement。
 - 未完成的 tool item 在 interrupt／error 時全部 settlement,不殘留 running。
 - **retryable transport 失敗與 terminal run 失敗必須是不同的東西**:連線斷掉重連中不得顯示成 run 失敗。
 
@@ -28,3 +28,9 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 ## Blocked by
 
 06 — 跨 renderer 實例的冪等結算
+
+## Implementation evidence (2026-08-26)
+
+- Reattached runs restore thread running identity, so existing `stopExecution` sends the Host interrupt/cancel while the activity store remains `cancel_requested` until Host settlement.
+- Host attachment tests cover immutable terminal state, pending-approval clearing, lease/ack gates, and late-settlement protection; build and full smoke passed.
+- The real renderer-restart timing path is intentionally left to ticket 10; this ticket is not marked fully qualified from fixtures alone.
