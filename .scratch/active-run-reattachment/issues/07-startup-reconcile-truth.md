@@ -1,6 +1,6 @@
 # 07 — `reconcileStartup` 先問再標
 
-Status: 可交給代理
+Status: resolved
 Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## What to build
@@ -15,12 +15,12 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## Acceptance criteria
 
-- [ ] 仍被認得的 active run 不再被標成 `interrupted`
-- [ ] 不被認得的 run 仍標 `interrupted`(誠實中斷回報未流失)
-- [ ] bridge 缺席／plain browser 時維持現行行為
-- [ ] `pending-delivery` / `consumed` 投遞語意不變,不重複敘述也不漏敘述
-- [ ] 模組註解寫明 journal 非真相來源
-- [ ] `smoke-run-journal`、`smoke-run-journal-durability` 延伸後全綠
+- [x] 仍被認得的 active run 不再被標成 `interrupted`
+- [x] 不被認得的 run 仍標 `interrupted`(誠實中斷回報未流失)
+- [x] bridge 缺席／plain browser 時維持現行行為
+- [x] `pending-delivery` / `consumed` 投遞語意不變,不重複敘述也不漏敘述
+- [x] 模組註解寫明 journal 非真相來源
+- [x] `smoke-run-journal`、`smoke-run-journal-durability` 延伸後全綠
 
 ## Blocked by
 

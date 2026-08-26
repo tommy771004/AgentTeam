@@ -20,3 +20,7 @@ Follow the **current** registration model, not the one `CLAUDE.md` documents. Th
 - [ ] The "Adding a tool touches `registry.ts` / `schemas.ts` / `executor.ts` / `builtins.ts`" paragraph in `CLAUDE.md` is corrected to the current model.
 
 Files: `app/src/agent/tools/toolDefinitions.ts`, `app/src/agent/tools/registered/`, `app/electron/workspaceFs.ts`, `CLAUDE.md`.
+
+## Comments
+
+> 對帳註記（2026-08-26，workspace-text-search effort 發布時）：本票寫於 remove-legacy-engine 合併前，其實作處方已與現實衝突——`tools/registered/` 是凍結 seam（`check-pi-contract.mts` 對新檔案即失敗），「新增自註冊模組」不再可行。且本票描述的能力大半已以不同形狀存在：`toolDefinitions.ts` 已有 `workspace_grep` / `workspace_glob` 定義、`electron/workspaceFs.ts` 有搜尋 helper（含 `--no-config` 前綴）、main.ts 有 IPC、`smoke-workspace-search.mts` 在鏈上。真正缺口是 **Pi Host 生產路徑的工具面與治理開關**——由新 effort `.scratch/workspace-text-search/`（4 票）承接。本票最終下場（resolved／superseded）待該 effort 收口時一併對帳。

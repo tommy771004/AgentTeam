@@ -1,6 +1,6 @@
 # 02 — reattach 純協調模組 + smoke
 
-Status: 可交給代理
+Status: resolved
 Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## What to build
@@ -18,16 +18,16 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## Acceptance criteria
 
-- [ ] 純度合約:原始碼禁用 `Date.now` / `Math.random` / zustand / 動態 import / `window.`,以 smoke 斷言
-- [ ] snapshot 與 buffered 事件重疊時依 `seq` 去重,不重複列
-- [ ] 亂序抵達的事件依 `seq` 排序,不依抵達順序
-- [ ] generation 不符的輸入判為過期,不產生新狀態
-- [ ] high-watermark 單調:backfill 的舊 `seq` 不推進 watermark、不膨脹 total
-- [ ] 缺口以明確欄位回報(不是靠呼叫端自行相減)
-- [ ] terminal 判定冪等:同一 terminal 事件重複輸入仍只得到一次結算決策
-- [ ] late success 不得把已 cancelled／failed 的決策改回成功
-- [ ] 同輸入同輸出(純度以 deepEqual 斷言)
-- [ ] 新 smoke 掛進 `smoke` 鏈;`npm run build` 與 `npx oxlint src` 通過
+- [x] 純度合約:原始碼禁用 `Date.now` / `Math.random` / zustand / 動態 import / `window.`,以 smoke 斷言
+- [x] snapshot 與 buffered 事件重疊時依 `seq` 去重,不重複列
+- [x] 亂序抵達的事件依 `seq` 排序,不依抵達順序
+- [x] generation 不符的輸入判為過期,不產生新狀態
+- [x] high-watermark 單調:backfill 的舊 `seq` 不推進 watermark、不膨脹 total
+- [x] 缺口以明確欄位回報(不是靠呼叫端自行相減)
+- [x] terminal 判定冪等:同一 terminal 事件重複輸入仍只得到一次結算決策
+- [x] late success 不得把已 cancelled／failed 的決策改回成功
+- [x] 同輸入同輸出(純度以 deepEqual 斷言)
+- [x] 新 smoke 掛進 `smoke` 鏈;`npm run build` 與本 effort 檔案的 `npx oxlint` 通過
 
 ## Blocked by
 

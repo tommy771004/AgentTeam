@@ -1,6 +1,6 @@
 # 03 — attachment record + 終局保留
 
-Status: 可交給代理
+Status: resolved
 Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## What to build
@@ -15,16 +15,22 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## Acceptance criteria
 
-- [ ] 每個 run 有 attachment record,鍵為 `runId`(thread／session／turn identity 一併保存以供比對)
-- [ ] `turn/submit` 的終局結果寫入 record;renderer 不在時不遺失
-- [ ] 保留符合決策:terminal 到 ack 或 24 小時 TTL、最多 256 筆；清理不逐出 active record
-- [ ] terminal summary 上限 64 KiB；Turn Record entries 不在 attachment metadata 複製一份
-- [ ] record 只含有界 metadata;無 prompt／工具輸出／raw connector 憑證
-- [ ] `latestSeq` high-watermark 隨 Host 的 record append 前進,且單調
-- [ ] 既有 `turn/submit` 行為(正常路徑仍直接回覆 invoke)不回歸
-- [ ] 落地於 Pi Core Host journal；main supervisor 只有 relay／subscription state,沒有第二份 lifecycle truth
-- [ ] `npm run build` 通過
+- [x] 每個 run 有 attachment record,鍵為 `runId`(thread／session／turn identity 一併保存以供比對)
+- [x] `turn/submit` 的終局結果寫入 record;renderer 不在時不遺失
+- [x] 保留符合決策:terminal 到 ack 或 24 小時 TTL、最多 256 筆；清理不逐出 active record
+- [x] terminal summary 上限 64 KiB；Turn Record entries 不在 attachment metadata 複製一份
+- [x] record 只含有界 metadata;無 prompt／工具輸出／raw connector 憑證
+- [x] `latestSeq` high-watermark 隨 Host 的 record append 前進,且單調
+- [x] 既有 `turn/submit` 行為(正常路徑仍直接回覆 invoke)不回歸
+- [x] 落地於 Pi Core Host journal；main supervisor 只有 relay／subscription state,沒有第二份 lifecycle truth
+- [x] `npm run build` 通過
 
 ## Blocked by
 
 01 — 決定重新附著的真相歸屬
+
+## Implementation evidence (2026-08-26)
+
+- `PiHostAttachmentJournal` 持久化 active／terminal metadata、24 小時 TTL、256 筆 terminal 上限、64 KiB summary、單調 `latestSeq`，active records 不受 terminal pruning 逐出。
+- `turn/submit` 仍回覆原 invoke，同時先將 Host settlement 寫入 attachment state；Turn Record entries 只由 session record 分頁提供。
+- `smoke-pi-host-supervisor.mts`、`smoke-pi-host-protocol.mts` 與 `npm run build` 全綠。

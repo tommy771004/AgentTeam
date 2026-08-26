@@ -1,6 +1,6 @@
 # 12 — Finalization 的啟動閘門：已恢復的 terminal 結算不阻塞啟動
 
-Status: 可交給代理
+Status: resolved
 Effort: active-run-reattachment
 Origin: commits ce68392／8a6d09c／6419de9（2026-08-26）引入的行為缺少 owning ticket；本票補齊文件與驗收，行為本身已落地並由既有 gates 斷言。
 
@@ -18,4 +18,4 @@ Origin: commits ce68392／8a6d09c／6419de9（2026-08-26）引入的行為缺少
 
 - [x] 行為由三個 commit 落地，且 `smoke-pi-electron-host-e2e.mjs`／`smoke-pi-host-protocol.mts` 等 gate 全綠作為證據。
 - [x] 本票即 owning 文件；未來改動啟動路徑或 finalization 閘者必讀。
-- [ ] 若後續調整交付語意（而非時機），必須另開新票並更新 ADR 引用——不得在本票內靜默擴權。
+- [x] 已記錄治理約束：若後續調整交付語意（而非時機），必須另開新票並更新 ADR 引用——不得在本票內靜默擴權。

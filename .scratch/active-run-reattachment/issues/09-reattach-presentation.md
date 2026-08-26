@@ -1,6 +1,6 @@
 # 09 — 重新附著的 UI 呈現
 
-Status: 可交給代理
+Status: resolved
 Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## What to build
@@ -15,12 +15,12 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## Acceptance criteria
 
-- [ ] 重新附著中有明確狀態,與「閒置」可分辨
-- [ ] 有缺口時如實告知未載入範圍,不假裝完整
-- [ ] 重連中與 run 失敗視覺可分辨
-- [ ] 沿用既有 Turn Record 投影,未新增第二個進度來源
-- [ ] 未新增假百分比;樣式全用既有 design token
-- [ ] `npm run build` 通過;既有面板行為不回歸
+- [x] 重新附著中有明確狀態,與「閒置」可分辨
+- [x] 有缺口時如實告知未載入範圍,不假裝完整
+- [x] 重連中與 run 失敗視覺可分辨
+- [x] 沿用既有 Turn Record 投影,未新增第二個進度來源
+- [x] 未新增假百分比;樣式全用既有 design token
+- [x] `npm run build` 通過;既有面板行為不回歸
 
 ## Blocked by
 

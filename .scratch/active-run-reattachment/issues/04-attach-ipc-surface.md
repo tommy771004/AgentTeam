@@ -1,6 +1,6 @@
 # 04 — attach / ack 介面 + preload
 
-Status: 可交給代理
+Status: resolved
 Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## What to build
@@ -17,15 +17,21 @@ renderer 一律以 `window.subagents?.x` 偵測,plain-browser 缺席時安靜降
 
 ## Acceptance criteria
 
-- [ ] attach 回傳有界 snapshot + cursor 之後的 ordered events,缺口為明確欄位
-- [ ] ack 釋放保留;重複 ack 不報錯也不重複釋放
-- [ ] 提供 active run 集合查詢(供 07)
-- [ ] Pi Host Protocol 升到 v3,初始化 negotiation、shared types 與 protocol smoke 同步更新
-- [ ] main／preload 只是 typed relay,不在 main 建立第二份 attachment truth
-- [ ] renderer 端 `window.subagents?.x` feature-detect;plain browser 不炸
-- [ ] 不回傳 prompt、工具輸出或 raw connector 憑證
-- [ ] `npm run build` 通過
+- [x] attach 回傳有界 snapshot + cursor 之後的 ordered events,缺口為明確欄位
+- [x] ack 釋放保留;重複 ack 不報錯也不重複釋放
+- [x] 提供 active run 集合查詢(供 07)
+- [x] Pi Host Protocol v3 引入此能力；初始化 negotiation、shared types 與 protocol smoke 同步更新（目前 HEAD 已向後相容地升至 v4）
+- [x] main／preload 只是 typed relay,不在 main 建立第二份 attachment truth
+- [x] renderer 端 `window.subagents?.x` feature-detect;plain browser 不炸
+- [x] 不回傳 prompt、工具輸出或 raw connector 憑證
+- [x] `npm run build` 通過
 
 ## Blocked by
 
 03 — attachment record + 終局保留
+
+## Implementation evidence (2026-08-26)
+
+- Host `runs.active`／`runs.attach`／`runs.ack` 經 protocol negotiation、main 與 preload typed relay 暴露；attachment truth 仍只有 Host journal 一份。
+- attach 每頁最多 200 entries，依 `seq` 排序，提供 `latestSeq`／`total`／`availableFromSeq` 與有界缺口；ack 在 completed finalization 後冪等釋放。
+- protocol/supervisor smokes 與 `npm run build` 全綠；後續 subscription effort 將 protocol 升為 v4，未移除 v3 的 reattachment contract。

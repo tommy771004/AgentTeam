@@ -28,6 +28,19 @@ assert.deepEqual(piResource, { from: '../vendor/pi', to: 'vendor/pi' })
 const piDependenciesResource = packageJson.build?.extraResources?.find((resource) => resource.from === '../vendor/pi/node_modules')
 assert.deepEqual(piDependenciesResource, { from: '../vendor/pi/node_modules', to: 'vendor/pi/node_modules' })
 assert.ok(packageJson.build?.mac?.target, 'macOS package target is required')
+
+// The MAIN process resolves the vendored Pi barrel through piVendor.ts, whose
+// candidates must survive packaging: a packaged app launches with cwd === '/',
+// so a release that only knew cwd-relative paths crashed importing
+// /vendor/pi/... (2026-08-26 release defect). Guard the anchors, not the prose.
+const vendorResolverSource = await readFile(resolve(appRoot, 'electron/piVendor.ts'), 'utf8')
+for (const required of [
+  /process\.resourcesPath/,
+  /import\.meta\.url/,
+  /resolve\(moduleDir, '\.\.\/\.\.\/vendor\/pi'\)/,
+]) {
+  assert.match(vendorResolverSource, required, `piVendor.ts must keep a packaging-safe vendor candidate: ${required}`)
+}
 assert.ok(packageJson.build?.win?.target, 'Windows package target is required')
 
 const artifact = resolve(appRoot, 'dist-electron/pi-host.js')

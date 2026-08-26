@@ -1,6 +1,6 @@
 # 08 — cancel / terminal 競態
 
-Status: 可交給代理
+Status: resolved
 Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## What to build
@@ -17,13 +17,13 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## Acceptance criteria
 
-- [ ] 重新附著後可要求取消,且請求確實送達 Host
-- [ ] 取消維持 `cancel_requested` 直到 Host ack;ack 前不宣稱已停止
-- [ ] late success 不復活已 cancelled／failed 的 run
-- [ ] interrupt／error 時未完成 item 全部 settlement,無殘留 running
-- [ ] retryable transport 失敗顯示為重連中,不顯示為 run 失敗
-- [ ] 以上競態皆有 fixture 覆蓋,無計時測試
-- [ ] `npm run build` 通過
+- [x] 重新附著後可要求取消,且請求確實送達 Host
+- [x] 取消維持 `cancel_requested` 直到 Host ack;ack 前不宣稱已停止
+- [x] late success 不復活已 cancelled／failed 的 run
+- [x] interrupt／error 時未完成 item 全部 settlement,無殘留 running
+- [x] retryable transport 失敗顯示為重連中,不顯示為 run 失敗
+- [x] 以上競態皆有 fixture 覆蓋,無計時測試
+- [x] `npm run build` 通過
 
 ## Blocked by
 
@@ -33,4 +33,4 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 
 - Reattached runs restore thread running identity, so existing `stopExecution` sends the Host interrupt/cancel while the activity store remains `cancel_requested` until Host settlement.
 - Host attachment tests cover immutable terminal state, pending-approval clearing, lease/ack gates, and late-settlement protection; build and full smoke passed.
-- The real renderer-restart timing path is intentionally left to ticket 10; this ticket is not marked fully qualified from fixtures alone.
+- 真實 renderer restart 後的 cancel/Host settlement 已由 ticket 10 Electron e2e 覆蓋；fixture 仍負責不含時鐘的 late-success 與 terminal immutability 競態。

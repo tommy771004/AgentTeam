@@ -1,6 +1,6 @@
 # 05 — renderer bootstrap 重新附著 + 容量重建
 
-Status: 可交給代理
+Status: resolved
 Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## What to build
@@ -17,17 +17,17 @@ renderer 啟動時重新附著到仍在執行的 run,順序是**先訂閱、再�
 
 ## Acceptance criteria
 
-- [ ] 訂閱先於 snapshot;訂閱期間的 append 被緩衝且不遺失
-- [ ] generation 不符時不安裝(較舊的回應不覆蓋較新的 session)
-- [ ] 合併後的時間軸與從未斷線的投影逐列相同
-- [ ] run 回到 run registry 且容量重新佔用;`maxConcurrentRuns` 在 reload 後仍生效
-- [ ] bootstrap reconciliation 完成前 admission 不會利用暫時為零的 renderer registry 開新 run
-- [ ] 同 thread 已有執行中 run 時,不會開出第二個 run
-- [ ] `recordTotal` 取 monotonic max,backfill 不膨脹
-- [ ] 全程未呼叫 `dispatchThreadTask` / `startExecution`、未觸發第二次 model turn(drift guard 斷言)
-- [ ] 等待核准中的 run 重新附著後仍在等待,未被自動拒絕
-- [ ] 不同 thread 在某 thread 重新附著期間仍獨立執行
-- [ ] `npm run build` 通過
+- [x] 訂閱先於 snapshot;訂閱期間的 append 被緩衝且不遺失
+- [x] generation 不符時不安裝(較舊的回應不覆蓋較新的 session)
+- [x] 合併後的時間軸與從未斷線的投影逐列相同
+- [x] run 回到 run registry 且容量重新佔用;`maxConcurrentRuns` 在 reload 後仍生效
+- [x] bootstrap reconciliation 完成前 admission 不會利用暫時為零的 renderer registry 開新 run
+- [x] 同 thread 已有執行中 run 時,不會開出第二個 run
+- [x] `recordTotal` 取 monotonic max,backfill 不膨脹
+- [x] 全程未呼叫 `dispatchThreadTask` / `startExecution`、未觸發第二次 model turn(drift guard 斷言)
+- [x] 等待核准中的 run 重新附著後仍在等待,未被自動拒絕
+- [x] 不同 thread 在某 thread 重新附著期間仍獨立執行
+- [x] `npm run build` 通過
 
 ## Blocked by
 
