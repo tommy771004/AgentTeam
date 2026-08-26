@@ -10,6 +10,13 @@ export type PiSettings = {
   /** Segment-aware Bash policy; dangerous/unsplittable commands always ask. */
   bashRequireAsk: boolean
   unattended: boolean
+  /**
+   * Enables the Host-owned progressive workspace text-search pack.
+   *
+   * This is deliberately OFF by default. A run additionally needs an explicit,
+   * valid workspace root before workspace_grep/workspace_glob can exist.
+   */
+  workspaceTextSearch: boolean
 }
 
 export type EffectiveAgentProfile = PiSettings
@@ -23,6 +30,7 @@ export const DEFAULT_PI_SETTINGS: PiSettings = {
   approvalMode: 'auto',
   bashRequireAsk: true,
   unattended: false,
+  workspaceTextSearch: false,
 }
 
 export function isPiThinkingLevel(value: unknown): value is PiThinkingLevel {
@@ -43,6 +51,9 @@ export function compileEffectiveAgentProfile(
     approvalMode: taskOverride?.approvalMode || role?.approvalMode || settings.approvalMode,
     bashRequireAsk: taskOverride?.bashRequireAsk ?? role?.bashRequireAsk ?? settings.bashRequireAsk,
     unattended: taskOverride?.unattended ?? role?.unattended ?? settings.unattended,
+    // Governance root: per-turn/profile overrides cannot open this capability.
+    // Only persisted Host Settings may change it, and turn admission freezes it.
+    workspaceTextSearch: settings.workspaceTextSearch === true,
   }
 }
 
@@ -83,6 +94,10 @@ export function validatePiSettingsPatch(patch: Record<string, unknown>): Partial
   if ('unattended' in patch) {
     if (typeof patch.unattended !== 'boolean') throw new Error('unattended must be a boolean')
     next.unattended = patch.unattended
+  }
+  if ('workspaceTextSearch' in patch) {
+    if (typeof patch.workspaceTextSearch !== 'boolean') throw new Error('workspaceTextSearch must be a boolean')
+    next.workspaceTextSearch = patch.workspaceTextSearch
   }
   return next
 }

@@ -164,10 +164,10 @@ const waitFor = async (id: number) => {
   for (;;) {
     const message = messages.find((item) => item.id === id)
     if (message) return message
-    await Promise.race([
-      once(output, 'line'),
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`timed out waiting for host response ${id}`)), 25_000)),
-    ])
+    await new Promise<Array<unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timed out waiting for host response ${id}`)), 25_000)
+      once(output, 'line').then((value) => { clearTimeout(timer); resolve(value) }, (error) => { clearTimeout(timer); reject(error) })
+      })
   }
 }
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)

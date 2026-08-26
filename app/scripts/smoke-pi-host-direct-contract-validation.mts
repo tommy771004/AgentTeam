@@ -121,7 +121,10 @@ const call = async (method: string, params: Record<string, unknown> = {}) => {
   for (;;) {
     const message = received.find((candidate) => candidate.id === id)
     if (message) return message
-    await Promise.race([once(lines, 'line'), new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout waiting for ${method}`)), 20_000))])
+    await new Promise<Array<unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timeout waiting for ${method}`)), 20_000)
+      once(lines, 'line').then((value) => { clearTimeout(timer); resolve(value) }, (error) => { clearTimeout(timer); reject(error) })
+    })
   }
 }
 
@@ -190,7 +193,10 @@ try {
   console.log('Direct Pi Host calls validate complete current-contract schemas; legacy translations remain qualification-only')
 } finally {
   host.stdin.end()
-  if (host.exitCode === null) await Promise.race([once(host, 'exit'), new Promise<void>((done) => setTimeout(() => { host.kill(); done() }, 1_000))])
+  if (host.exitCode === null) await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => { host.kill(); resolve() }, 1_000)
+    once(host, 'exit').then(() => { clearTimeout(timer); resolve() })
+  })
   lines.close()
   modelServer.close()
   await Promise.all([

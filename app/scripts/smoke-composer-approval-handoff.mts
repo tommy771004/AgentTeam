@@ -4,6 +4,7 @@ import {
   buildHandoffDocument,
   buildComposerRunOverrides,
   buildComposerRunInput,
+  resolveBuiltinRunnerTransition,
   resolveComposerApprovalMode,
 } from '../src/agent/composerRunControls.ts'
 import { piThinkingLevelForDepth } from '../src/agent/thinking.ts'
@@ -73,6 +74,33 @@ test('Composer depth reaches the Pi Core task profile vocabulary', () => {
   assert.equal(piThinkingLevelForDepth('max'), 'xhigh')
   assert.equal(piThinkingLevelForDepth('ultra'), 'max')
   assert.equal(piThinkingLevelForDepth(undefined), undefined)
+})
+
+test('switching a Codex CLI model to builtin selects the native Pi subscription provider', () => {
+  assert.deepEqual(
+    resolveBuiltinRunnerTransition({
+      currentRunner: 'codex',
+      selectedModel: 'gpt-5.6-luna',
+    }),
+    {
+      threadModel: 'gpt-5.6-luna',
+      settingsPatch: {
+        apiProvider: 'openai-codex',
+        model: 'gpt-5.6-luna',
+        fallbackModels: [],
+        discoveredModels: [],
+      },
+    },
+  )
+  assert.equal(
+    resolveBuiltinRunnerTransition({ currentRunner: 'claude', selectedModel: 'claude-sonnet-4-5' })
+      .settingsPatch?.apiProvider,
+    'anthropic',
+  )
+  assert.deepEqual(
+    resolveBuiltinRunnerTransition({ currentRunner: 'gemini', selectedModel: 'gemini-2.5-pro' }),
+    { threadModel: '' },
+  )
 })
 
 test('handoff is unavailable when the current thread has no Artifact Index', () => {

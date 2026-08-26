@@ -54,7 +54,10 @@ const startHost = (environment = hostEnv) => {
     for (;;) {
       const found = received.find((message) => message.id === id)
       if (found) return found
-      await Promise.race([once(lines, 'line'), new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout waiting for ${id}`)), 20_000))])
+      await new Promise<Array<unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timeout waiting for ${id}`)), 20_000)
+      once(lines, 'line').then((value) => { clearTimeout(timer); resolve(value) }, (error) => { clearTimeout(timer); reject(error) })
+    })
     }
   }
   const sendRequest = (id: number, method: string, params: Record<string, unknown> = {}) => child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
@@ -64,7 +67,10 @@ const startHost = (environment = hostEnv) => {
 const stopHost = async (instance: ReturnType<typeof startHost>) => {
   instance.child.stdin.end()
   if (instance.child.exitCode === null) {
-    await Promise.race([once(instance.child, 'exit'), new Promise<void>((done) => setTimeout(() => { instance.child.kill(); done() }, 1_000))])
+    await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => { instance.child.kill(); resolve() }, 1_000)
+    once(instance.child, 'exit').then(() => { clearTimeout(timer); resolve() })
+  })
   }
   instance.lines.close()
 }

@@ -205,13 +205,22 @@ function shouldImportCredential(current: unknown, incoming: OAuthImport): 'impor
   if (!existing) return 'import'
   if (existing.type !== 'oauth') return 'conflict'
 
+  // 同一條 CLI 同步通道（marker.kind 相同）換了帳號，代表使用者在該 CLI
+  // 重新登入了另一個帳號——最新的 CLI 登入就是最新的明確選擇，同步必須
+  // 跟隨它，否則換帳號後訂閱供應商會永遠卡在 conflict 且 App 內無解。
+  // 只有「不是這條通道放進來的」憑證（Pi 自行 login、外部寫入的 api_key）
+  // 才在帳號相異時視為衝突，保留給使用者裁決。
+  const marker = sourceMarker(existing)
+  const sameChannel = marker?.kind === incoming.sourceKind
+
   const existingAccountId = credentialAccountId(existing)
-  if (incoming.accountId && existingAccountId && incoming.accountId !== existingAccountId) return 'conflict'
+  if (incoming.accountId && existingAccountId && incoming.accountId !== existingAccountId) {
+    return sameChannel ? 'import' : 'conflict'
+  }
   if (existing.access === incoming.credential.access && existing.refresh === incoming.credential.refresh) return 'skip'
 
-  const marker = sourceMarker(existing)
-  if (marker?.kind === incoming.sourceKind) {
-    if (marker.updatedAt && incoming.sourceUpdatedAt && incoming.sourceUpdatedAt <= marker.updatedAt) return 'skip'
+  if (sameChannel) {
+    if (marker?.updatedAt && incoming.sourceUpdatedAt && incoming.sourceUpdatedAt <= marker.updatedAt) return 'skip'
     return 'import'
   }
 

@@ -9,6 +9,7 @@ import { PluginMarketplace } from '../components/PluginMarketplace'
 import { useProjectStore } from '../store/projectStore'
 import { buildLearningExportPlan } from '../agent/hermes/learningExport'
 import { failedSkillMigrations, useSkillMigrationStore } from '../store/skillMigrationStore'
+import { pushSkillsToHost } from '../agent/hermes/skillHostSync'
 
 const SECTIONS = [
   { id: 'memory', label: '持久記憶', icon: 'psychology' },
@@ -546,24 +547,33 @@ function SkillMigrationDiagnostics() {
           <Icon name="warning" className="text-amber-400" />
           技能遷移未完成
         </div>
-        <button
-          type="button"
-          onClick={() => dismiss()}
-          className="px-2 py-1 rounded border border-white/15 text-[10px] text-outline"
-        >
-          知道了
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => pushSkillsToHost()}
+            className="px-2 py-1 rounded border border-amber-500/40 text-[10px] font-semibold text-amber-300"
+          >
+            立即同步
+          </button>
+          <button
+            type="button"
+            onClick={() => dismiss()}
+            className="px-2 py-1 rounded border border-white/15 text-[10px] text-outline"
+          >
+            知道了
+          </button>
+        </div>
       </div>
       <div className="px-3 py-2 space-y-2">
         {report.unreachable ? (
           <p className="text-xs text-outline">
-            無法連上 Pi Host，技能尚未遷移。重新啟動應用程式會再試一次；技能仍保留在本機，不會遺失。
+            無法連上 Pi Host，技能尚未遷移。按「立即同步」可立刻重試，重新啟動應用程式也會再試一次；技能仍保留在本機，不會遺失。
           </p>
         ) : (
           <>
             <p className="text-xs text-outline">
               下列技能沒有寫入 Host 技能目錄{report.skillsDir ? `（${report.skillsDir}）` : ''}。
-              修正後重新啟動應用程式會再試一次；在此之前它們不會出現在模型可用的技能清單中。
+              修正後按「立即同步」可立刻重試（重新啟動應用程式也會）；在此之前它們不會出現在模型可用的技能清單中。
             </p>
             <ul className="space-y-1">
               {failures.map((failure) => (

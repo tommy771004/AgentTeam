@@ -11,6 +11,7 @@ export const DEFAULT_PI_CAPABILITIES: PiCapability[] = [
   { id: 'core-files', description: 'Read-only project file discovery and inspection.', tools: ['find', 'grep', 'ls', 'read'], runbook: 'Use project-scoped read tools before proposing edits.', deferLoading: true },
   { id: 'workspace-write', description: 'Workspace file edits.', tools: ['edit', 'write'], runbook: 'Review the target and preserve the approved project root.', deferLoading: true },
   { id: 'workspace', description: 'Move, delete, diff, and download project files.', tools: ['workspace_diff', 'workspace_move', 'workspace_delete', 'workspace_mkdir', 'workspace_download'], runbook: 'Mutating workspace tools join the per-file mutation queue and require approval.', deferLoading: true },
+  { id: 'workspace-text-search', description: 'Bounded read-only file-name and text search inside the admitted workspace.', tools: ['workspace_grep', 'workspace_glob'], runbook: 'Narrow the relevant file set before reading whole files; never search outside the admitted workspace.', deferLoading: true },
   { id: 'shell', description: 'Controlled project shell execution.', tools: ['bash'], runbook: 'Use the policy gate and ask before side effects.', deferLoading: true },
   { id: 'interaction', description: 'Human-in-the-loop questions through the shared HITL path.', tools: ['ask_user'], runbook: 'Ask when the objective is genuinely ambiguous; unattended runs auto-deny.' },
   { id: 'planning', description: 'The plan panel the model drives and the user watches.', tools: ['update_plan'], runbook: 'Publish multi-step plans so the user can follow progress.' },
@@ -63,8 +64,9 @@ export class PiCapabilityCatalog {
     const active = this.activeSet(sessionId)
     return this.capabilities.filter((capability) => active.has(capability.id)).flatMap((capability) => capability.tools).sort()
   }
-  search(query: string, sessionId?: string) {
+  search(query: string, sessionId?: string, include: (capability: PiCapability) => boolean = () => true) {
     return this.capabilities
+      .filter(include)
       .filter((capability) => `${capability.id} ${capability.description} ${capability.tools.join(' ')}`.toLowerCase().includes(query.toLowerCase()))
       .map((capability) => this.load(capability.id, sessionId))
   }

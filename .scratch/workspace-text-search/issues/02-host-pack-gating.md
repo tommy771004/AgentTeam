@@ -4,9 +4,13 @@
 
 **Blocked by:** 01 — 「工作區文字檢索」設定開關（治理根）（gating 需要設定欄位存在）
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] 工具進入 pack 目錄並宣告 owning capability（漸進式揭露機制原樣適用）
-- [ ] OFF：目錄缺席／tool_search 不可見／execute 與巢狀皆誠實拒絕（訊息說明未啟用，不假裝零結果）
-- [ ] ON：fixture 目錄樹上匹配/glob/截斷/skip（.git、node_modules、超大檔）正確，越界路徑回 typed 失敗
-- [ ] 單一 pack 層級 smoke 以設定快照參數化涵蓋上述全部（prior art：pack 工具煙霧＋workspace-search fixture 模式），掛進 smoke 主鏈
+- [x] 工具進入 pack 目錄並宣告 owning capability（漸進式揭露機制原樣適用）
+- [x] OFF：目錄缺席／tool_search 不可見／execute 與巢狀皆誠實拒絕（訊息說明未啟用，不假裝零結果）
+- [x] ON：fixture 目錄樹上匹配/glob/截斷/skip（.git、node_modules、超大檔）正確，越界路徑回 typed 失敗
+- [x] 單一 pack 層級 smoke 以設定快照參數化涵蓋上述全部（prior art：pack 工具煙霧＋workspace-search fixture 模式），掛進 smoke 主鏈
+
+## Closure evidence
+
+`npm run smoke:workspace-text-search` 19/19，涵蓋 OFF／ON、catalog／capability／直接執行、缺 workspace、越界、skip、截斷、超大檔、run snapshot，以及由實際模型 tool call 進入 `run_code` 的巢狀 Host 重入；該 smoke 已掛主 `npm run smoke` 鏈。

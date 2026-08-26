@@ -125,7 +125,12 @@ interface SettingsStore {
   load: () => Promise<void>
   update: (patch: Partial<LlmSettings>) => Promise<void>
   /** Refresh the renderer projection after Pi Host-owned settings change. */
-  syncPiHostSettings: (settings: { model: string; approvalMode: LlmSettings['approvalMode']; unattended: boolean }) => void
+  syncPiHostSettings: (settings: {
+    model: string
+    approvalMode: LlmSettings['approvalMode']
+    unattended: boolean
+    workspaceTextSearch?: boolean
+  }) => void
   testConnection: (model?: string) => Promise<{ ok: boolean; message: string }>
   exportBundle: () => Promise<string>
   importBundle: (json: string) => Promise<{ ok: boolean; message: string }>
@@ -140,6 +145,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       model: pi.model,
       approvalMode: pi.approvalMode,
       unattended: pi.unattended,
+      workspaceTextSearch: pi.workspaceTextSearch === true,
     })
     set({ settings: next })
     saveLocal(next)
@@ -164,7 +170,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
     // Electron Pi Host owns the overlapping runtime profile. The legacy
     // settings bridge remains only for provider credentials, CLI, and UI-only
-    // preferences; model/approval/unattended are projected from Pi here.
+    // preferences; model/approval/unattended/workspaceTextSearch are projected from Pi here.
     if (window.subagents?.piHost?.settings?.get) {
       try {
         const pi = await window.subagents.piHost.settings.get()
@@ -173,6 +179,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
             model: pi.settings.model,
             approvalMode: pi.settings.approvalMode,
             unattended: pi.settings.unattended,
+            workspaceTextSearch: pi.settings.workspaceTextSearch === true,
           })
         }
       } catch {

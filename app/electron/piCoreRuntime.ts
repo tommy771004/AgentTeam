@@ -305,6 +305,31 @@ export async function persistPiLegacyModelConfig(patch: PiLegacyModelConfig | nu
   return true
 }
 
+/**
+ * The endpoint already persisted for a provider in Pi's models.json.
+ *
+ * The renderer strips Pi-owned keys (baseUrl included) from its own storage,
+ * so a model-only save arrives without an endpoint. The models.json entry is
+ * the durable truth about the connection — reuse it instead of letting the
+ * Host register a provider/model pair no turn could ever run. Subscription
+ * providers never own a legacy endpoint by definition (ADR-0052).
+ */
+export async function readPiLegacyProviderBaseUrl(provider: string): Promise<string> {
+  const agentDir = resolvePiAgentDir()
+  const trimmed = provider.trim()
+  if (!agentDir || !trimmed || (SUBSCRIPTION_PROVIDERS as readonly string[]).includes(trimmed)) return ''
+  try {
+    const parsed = JSON.parse(await readFile(join(agentDir, 'models.json'), 'utf8')) as {
+      providers?: Record<string, { baseUrl?: unknown }>
+    }
+    const baseUrl = parsed.providers?.[trimmed]?.baseUrl
+    return typeof baseUrl === 'string' ? baseUrl.trim() : ''
+  } catch {
+    /* an absent or unreadable models.json simply means no known endpoint */
+    return ''
+  }
+}
+
 /** Import the one legacy API key into Pi's main-process auth.json. */
 export async function persistPiLegacyCredential(provider: string, apiKey: string): Promise<void> {
   const agentDir = resolvePiAgentDir()
@@ -434,7 +459,12 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
       modelsPath: agentDir ? join(agentDir, 'models.json') : undefined,
     })
     const model = modelRuntime.getModel(settings.provider, settings.model)
-    if (!model) throw new Error(`Pi model is not configured: ${settings.provider}/${settings.model}`)
+    if (!model) {
+      throw new Error(
+        `Pi model is not configured: ${settings.provider}/${settings.model}`
+        + '（Pi 模型目錄沒有這個供應商／模型配對；請到「設定 → LLM」重新選擇模型，或補上 Base URL 後重新儲存）',
+      )
+    }
     options.modelRuntime = modelRuntime
     options.model = model
     contextWindowTokens = model.contextWindow

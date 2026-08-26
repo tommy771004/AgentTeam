@@ -30,6 +30,7 @@ export type PiSettingsPatch = {
   approvalMode?: 'always' | 'auto' | 'full'
   bashRequireAsk?: boolean
   unattended?: boolean
+  workspaceTextSearch?: boolean
 }
 
 /**
@@ -53,6 +54,7 @@ const PI_SETTINGS_FIELD_BY_KEY = {
   approvalMode: 'approvalMode',
   bashRequireAsk: 'bashRequireAsk',
   unattended: 'unattended',
+  workspaceTextSearch: 'workspaceTextSearch',
 } as const satisfies Partial<Record<keyof LlmSettings, keyof PiSettingsPatch>>
 
 /** Fields whose runtime authority belongs to Pi Host in Electron. */

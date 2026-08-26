@@ -826,6 +826,8 @@ export interface LlmSettings {
   followUpMode: FollowUpMode
   /** Legacy persisted field. Different conversation threads always run independently. */
   concurrentRunsEnabled: boolean
+  /** General · Host-owned progressive workspace grep/glob; explicit opt-in. */
+  workspaceTextSearch: boolean
   /** Concurrent-run ceiling, clamped to a small fixed range by runtime. */
   maxConcurrentRuns: number
   /**

@@ -133,4 +133,12 @@ await test('App keeps subscribing after the one-shot migration flag flips', () =
     'every post-migration mutation must re-push through the same bridge')
 })
 
+await test('the migration diagnostics offer an immediate re-push, not just「重新啟動再試」', () => {
+  const page = read('src/pages/LearningPage.tsx')
+  const diagnostics = page.slice(page.indexOf('function SkillMigrationDiagnostics'))
+  assert.match(diagnostics, /pushSkillsToHost\(\)/,
+    'the「立即同步」button must call the SAME live push path mutations use')
+  assert.match(diagnostics, /立即同步/, 'the retry affordance must be visible where the failure is reported')
+})
+
 console.log(`\n${passed} tests passed`)

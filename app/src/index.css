@@ -752,6 +752,17 @@ html[data-theme='light'] .app-panel {
   transition: background 120ms ease, color 120ms ease;
 }
 .agent-composer-stop:hover { background: var(--color-red-tint); color: var(--color-red); }
+/* 送出／停止共用同一顆按鈕：停止態以雙類提高優先序，壓過各主題的送出底色 */
+.agent-composer-send.agent-composer-stop,
+.agent-composer-send.agent-composer-stop:disabled {
+  background: transparent;
+  color: var(--color-red);
+  box-shadow: none;
+}
+.agent-composer-send.agent-composer-stop:hover {
+  background: var(--color-red-tint);
+  filter: none;
+}
 
 .agent-process-status { min-height: 28px; }
 /* Waiting states are decisions, not background work: keep them calm and

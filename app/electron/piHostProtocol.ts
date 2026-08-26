@@ -181,7 +181,7 @@ export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
 import type { StreamingUpdate } from '../src/agent/subdesign/streamingEnvelope.ts'
-import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, interruptPiTurn, persistPiLegacyCredential, persistPiLegacyModelConfig, piCoreRuntimeStatus, piCoreRuntimeToolCatalog, piProviderDefaultBaseUrl, runPiTurn, steerPiTurn, type PiBuiltinToolName, type PiTurnInterruptReason } from './piCoreRuntime.ts'
+import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, interruptPiTurn, persistPiLegacyCredential, persistPiLegacyModelConfig, piCoreRuntimeStatus, piCoreRuntimeToolCatalog, piProviderDefaultBaseUrl, readPiLegacyProviderBaseUrl, runPiTurn, steerPiTurn, type PiBuiltinToolName, type PiTurnInterruptReason } from './piCoreRuntime.ts'
 import { cancelPiCodeMode, runPiCodeMode } from './piCodeMode.ts'
 import { armTurnDeadline, clampTurnTimeout, systemTurnDeadlineClock, type TurnDeadlineClock } from './piTurnDeadline.ts'
 import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
@@ -223,6 +223,13 @@ import {
   type PiCatalogEntry,
 } from './piToolHost.ts'
 import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
+import {
+  bindWorkspaceTextSearchRun,
+  isWorkspaceTextSearchCapability,
+  isWorkspaceTextSearchTool,
+  unbindWorkspaceTextSearchRun,
+  workspaceTextSearchAvailability,
+} from './piWorkspaceTextSearchRuntime.ts'
 import { configurePiMessagingGateway } from './piExtensionPacks/integrations.ts'
 import { discoveredPiSkills, readPiSkillFiles, syncPiSkillsFromRenderer, type PiSkillSyncResult } from './piSkills.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
@@ -861,10 +868,17 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const mcpExtensions = state.extensions.list().filter((extension) => extension.kind === 'mcp' && extension.mcp)
     const activeTools = state.snapshot.settings.activeTools
     const requestedSessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : undefined
+    const workspaceTextSearch = workspaceTextSearchAvailability({
+      sessionId: requestedSessionId,
+      enabled: state.snapshot.settings.workspaceTextSearch === true,
+      workspaceRoot: typeof input.params?.cwd === 'string' ? input.params.cwd : undefined,
+    })
     const unlocked = state.capabilities.activeTools(requestedSessionId)
+      .filter((tool) => workspaceTextSearch.available || !isWorkspaceTextSearchTool(tool))
     const mcpCapabilityActive = state.capabilities.catalog(requestedSessionId)
       .find((capability) => capability.id === 'mcp-bridge')?.deferred === false
     const packEntries = piPackCatalogEntries({ activeTools, unlockedTools: [...unlocked] })
+      .filter((entry) => workspaceTextSearch.available || !isWorkspaceTextSearchTool(entry.name))
     const builtinEntries: PiCatalogEntry[] = piCoreRuntimeToolCatalog().map((definition) => ({
       name: definition.name,
       description: definition.description,
@@ -1001,6 +1015,20 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const name = typeof params.name === 'string' ? params.name : ''
     const definition = findPiPackTool(name)
     if (!definition) return [errorResponse(id, 'invalid_request', `Unknown Pi extension tool: ${name}`)]
+    if (isWorkspaceTextSearchTool(name)) {
+      const explicitWorkspaceRoot = typeof params.cwd === 'string' && params.cwd.trim() ? params.cwd : undefined
+      if (!explicitWorkspaceRoot) {
+        return [errorResponse(id, 'invalid_request', '工作區文字檢索需要明確的 workspace cwd；不允許使用 process.cwd() fallback。')]
+      }
+      const gate = workspaceTextSearchAvailability({
+        sessionId: typeof params.sessionId === 'string' ? params.sessionId : undefined,
+        enabled: state.snapshot.settings.workspaceTextSearch === true,
+        workspaceRoot: explicitWorkspaceRoot,
+      })
+      if (!gate.available) {
+        return [errorResponse(id, 'invalid_request', gate.reason || 'Workspace text search is unavailable')]
+      }
+    }
     const rawArgs = (params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments) ? params.arguments : {}) as Record<string, unknown>
     const sessionId = typeof params.sessionId === 'string' ? params.sessionId : 'direct'
     const runId = typeof params.runId === 'string' ? params.runId : String(id)
@@ -1599,12 +1627,26 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const memory = new PiMemoryExtension(state.snapshot.memories)
     return [{ id, result: { memories: memory.recall(query, project, limit) } }]
   }
-  if (input.method === 'capabilities/list') return [{ id, result: { items: state.capabilities.catalog() } }]
+  const capabilitySessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : undefined
+  const workspaceCapabilityGate = () => workspaceTextSearchAvailability({
+    sessionId: capabilitySessionId,
+    enabled: state.snapshot.settings.workspaceTextSearch === true,
+    workspaceRoot: typeof input.params?.cwd === 'string' ? input.params.cwd : undefined,
+  })
+  if (input.method === 'capabilities/list') {
+    const gate = workspaceCapabilityGate()
+    return [{ id, result: { items: state.capabilities.catalog(capabilitySessionId)
+      .filter((capability) => gate.available || !isWorkspaceTextSearchCapability(capability.id)) } }]
+  }
   if (input.method === 'capabilities/load') {
     const capabilityId = typeof input.params?.id === 'string' ? input.params.id : ''
     if (!capabilityId) return [errorResponse(id, 'invalid_request', 'capability id is required')]
+    const gate = workspaceCapabilityGate()
+    if (isWorkspaceTextSearchCapability(capabilityId) && !gate.available) {
+      return [errorResponse(id, 'invalid_request', gate.reason || 'Workspace text search is unavailable')]
+    }
     try {
-      return [{ id, result: { items: [state.capabilities.load(capabilityId)], loaded: true } }]
+      return [{ id, result: { items: [state.capabilities.load(capabilityId, capabilitySessionId)], loaded: true } }]
     } catch (error) {
       return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Unknown Pi capability')]
     }
@@ -1612,7 +1654,12 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
   if (input.method === 'capabilities/search') {
     const query = typeof input.params?.query === 'string' ? input.params.query : ''
     if (!query.trim()) return [errorResponse(id, 'invalid_request', 'query is required')]
-    return [{ id, result: { items: state.capabilities.search(query) } }]
+    const gate = workspaceCapabilityGate()
+    return [{ id, result: { items: state.capabilities.search(
+      query,
+      capabilitySessionId,
+      (capability) => gate.available || !isWorkspaceTextSearchCapability(capability.id),
+    ) } }]
   }
   if (input.method === 'extensions/list') return [{ id, result: { extensions: state.extensions.list() } }]
   if (input.method === 'extensions/install' || input.method === 'extensions/update' || input.method === 'extensions/reload') {
@@ -1856,7 +1903,10 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       }
       return [errorResponse(id, 'invalid_request', `Pi session already has an active run: ${activeRun.runId}`)]
     }
-    const cwd = typeof input.params?.cwd === 'string' ? input.params.cwd : process.cwd()
+    const explicitWorkspaceRoot = typeof input.params?.cwd === 'string' && input.params.cwd.trim()
+      ? input.params.cwd
+      : undefined
+    const cwd = explicitWorkspaceRoot || process.cwd()
     const patternValue = input.params?.pattern
     const pattern: PiLoopPattern = patternValue === 'Goal-based' || patternValue === 'Time-based' || patternValue === 'Proactive'
       ? patternValue
@@ -1912,8 +1962,14 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       contextPolicy.outboundShellMode === 'required'
         ? verifyBuiltinShellSandbox({ runId, viewRoot: contextPolicy.viewRoot || '' })
         : undefined
+    const workspaceTextSearchRun = bindWorkspaceTextSearchRun(sessionId, {
+      runId,
+      enabled: turnSettings.workspaceTextSearch === true,
+      workspaceRoot: explicitWorkspaceRoot,
+    })
     for (const capabilityId of preloaded) {
       if (typeof capabilityId !== 'string') continue
+      if (isWorkspaceTextSearchCapability(capabilityId) && !workspaceTextSearchRun.available) continue
       try {
         state.capabilities.load(capabilityId, sessionId)
       } catch {
@@ -1923,6 +1979,12 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     // Capability-unlocked tools join the turn's active set: loading a
     // capability changes what this turn can call, immediately.
     const unlockedTools = state.capabilities.activeTools(sessionId)
+      .filter((tool) => workspaceTextSearchRun.available || !isWorkspaceTextSearchTool(tool))
+    const configuredActiveTools = turnSettings.activeTools
+      .filter((tool) => workspaceTextSearchRun.available || !isWorkspaceTextSearchTool(tool))
+    const turnVisibleActiveTools = turnSettings.activeTools.length > 0 && configuredActiveTools.length === 0
+      ? ['load_capability']
+      : configuredActiveTools
     const mcpCapabilityLoaded = state.capabilities.catalog(sessionId)
       .find((capability) => capability.id === 'mcp-bridge')?.deferred === false
     const previousModel = typeof session.profile?.model === 'string' ? session.profile.model : undefined
@@ -2229,7 +2291,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           // A restricted allowlist unions the unlocked capability tools; an
           // empty list already means everything is on.
           activeTools: turnSettings.activeTools.length
-            ? [...new Set([...turnSettings.activeTools, ...unlockedTools])]
+            ? [...new Set([...turnVisibleActiveTools, ...unlockedTools])]
             : turnSettings.activeTools,
           unlockedTools,
           mcpGenerationKey: mcpTurnGenerationKey,
@@ -2415,6 +2477,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           if (verification.status === 'supported+verified') revokeBuiltinShellSandboxEvidence(verification.evidence)
         })
       }
+        unbindWorkspaceTextSearchRun(sessionId, runId)
         unbindPiSessionRun(sessionId)
       setPiPackSessionContractRefresh(sessionId)
       if (activeTurnRecorders.get(sessionId) === recorder) activeTurnRecorders.delete(sessionId)
@@ -2430,7 +2493,14 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       const settingsParams = input.params || {}
       const explicitBaseUrl = typeof settingsParams.baseUrl === 'string' ? settingsParams.baseUrl.trim() : ''
       const connectionChanged = 'provider' in settingsParams || 'model' in settingsParams
-      const baseUrl = explicitBaseUrl || (connectionChanged ? piProviderDefaultBaseUrl(provider) : '') || ''
+      // The renderer cannot resend an endpoint it no longer stores (baseUrl is
+      // a Pi-owned key, stripped client-side). A model-only save must reuse the
+      // endpoint already persisted for this provider — otherwise the Host would
+      // adopt a provider/model pair that models.json never registered and every
+      // turn would fail with "Pi model is not configured".
+      const persistedBaseUrl = explicitBaseUrl
+        || (connectionChanged ? await readPiLegacyProviderBaseUrl(provider) : '')
+      const baseUrl = persistedBaseUrl || (connectionChanged ? piProviderDefaultBaseUrl(provider) : '') || ''
       const apiKey = typeof input.params?.apiKey === 'string' ? input.params.apiKey.trim() : ''
       if (baseUrl) {
         const persisted = await persistPiLegacyModelConfig({ provider, model, baseUrl })
@@ -2557,9 +2627,21 @@ export function createPiHostServer(
   // The framework pack's reserved verbs drive the SAME catalog instance the
   // protocol methods answer from — one authority on what is active (issue 12).
   setPiCapabilityBridge({
-    catalog: (sessionId) => state.capabilities.catalog(sessionId),
+    catalog: (sessionId) => {
+      const gate = workspaceTextSearchAvailability({
+        sessionId,
+        enabled: state.snapshot.settings.workspaceTextSearch === true,
+      })
+      return state.capabilities.catalog(sessionId)
+        .filter((capability) => gate.available || !isWorkspaceTextSearchCapability(capability.id))
+    },
     load: (id, sessionId) => {
       try {
+        const gate = workspaceTextSearchAvailability({
+          sessionId,
+          enabled: state.snapshot.settings.workspaceTextSearch === true,
+        })
+        if (isWorkspaceTextSearchCapability(id) && !gate.available) return undefined
         const capability = state.capabilities.load(id, sessionId)
         const nativeMcpTools = id === 'mcp-bridge' && sessionId
           ? (state.toolContracts.latest(sessionId)?.tools || [])
@@ -2576,7 +2658,12 @@ export function createPiHostServer(
         ? state.toolContracts.list(sessionId).at(-1)
         : undefined
       if (!contract) return []
+      const gate = workspaceTextSearchAvailability({
+        sessionId,
+        enabled: state.snapshot.settings.workspaceTextSearch === true,
+      })
       return contract.tools
+        .filter((tool) => gate.available || !isWorkspaceTextSearchTool(tool.name))
         .filter((tool) => tool.name.toLowerCase().includes(query.toLowerCase()) || tool.description.toLowerCase().includes(query.toLowerCase()) || (tool.pack || '').toLowerCase().includes(query.toLowerCase()))
         .map((tool) => ({ name: tool.name, pack: tool.pack, description: tool.description, schemaDigest: tool.schemaDigest, active: tool.active }))
     },

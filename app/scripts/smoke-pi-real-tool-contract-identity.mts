@@ -88,10 +88,10 @@ function startHost() {
     for (;;) {
       const found = messages.find((message) => message.id === id)
       if (found) return found
-      await Promise.race([
-        once(output, 'line'),
-        new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout waiting for ${id}`)), 25_000)),
-      ])
+      await new Promise<Array<unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`timeout waiting for ${id}`)), 25_000)
+        once(output, 'line').then((value) => { clearTimeout(timer); resolve(value) }, (error) => { clearTimeout(timer); reject(error) })
+        })
     }
   }
   const send = (id: number, method: string, params: Record<string, unknown> = {}) => child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)

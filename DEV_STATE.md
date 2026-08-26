@@ -6,6 +6,10 @@
 
 `.scratch/tracker-truth-reconciliation`（七票全數 resolved）完成一次全面對帳：以 smoke gate 為唯一證據核對五個訊號來源；`resolved` 證據定義入冊 `docs/agents/triage-labels.md`；新增恰好一支 drift guard `app/scripts/smoke-tracker-index-links.mts`（INDEX 相對路徑必須存在，檔案與目錄皆驗、無豁免、掛 `npm run smoke` 主鏈——首跑即抓出全部四條死連結）；`.scratch/INDEX.md` 重寫（Active frontier 只留真開工作、resolved 表附一 hop 證據、新增 Known residuals 與待維護者裁決 queue、死連結改下場註記）；本檔同步重寫。
 
+## 本日收口：workspace text search
+
+`.scratch/workspace-text-search` 4/4 tickets resolved：`workspace_grep`／`workspace_glob` 以 Pi Host Extension Pack 接上生產工具面，受「設定→一般→工作區文字檢索」單一開關治理（預設 OFF、無有效 workspace 時 fail-closed），並固定每一 run 的 availability snapshot；catalog、capability、直接 execute 與 `run_code` 巢狀重入皆受同一 Host gate。證據：`npm run smoke:workspace-text-search` 19/19、`npm run build`、完整 `npm run smoke` 全綠；Browser 實點確認開關持久化與 reload 行為。harness-gap-closure #06 的過時 renderer 處方以 superseded 收口。
+
 ## 自 2026-08-15 以來已落地（git 證據）
 
 - **remove-legacy-engine（PR #8–#13 合併）**：`agent/engine.ts` 與 `agent/loop/` 自程式碼刪除，Pi Core Host 為唯一 tool-loop owner；ADR-0045 初始化門檻已過。loop-runner-deepening effort 隨之收口（目錄已移除）。

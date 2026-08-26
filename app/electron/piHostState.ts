@@ -89,6 +89,7 @@ async function readStoredPiHostState(statePath: string): Promise<StoredState> {
       approvalMode: value.settings.approvalMode === 'always' || value.settings.approvalMode === 'full' ? value.settings.approvalMode : DEFAULT_PI_SETTINGS.approvalMode,
       bashRequireAsk: value.settings.bashRequireAsk !== false,
       unattended: value.settings.unattended === true,
+      workspaceTextSearch: value.settings.workspaceTextSearch === true,
     }
     const legacyStateHasRuntimeOverride = settings.provider !== DEFAULT_PI_SETTINGS.provider
       || settings.model !== DEFAULT_PI_SETTINGS.model
@@ -98,6 +99,7 @@ async function readStoredPiHostState(statePath: string): Promise<StoredState> {
       || settings.approvalMode !== DEFAULT_PI_SETTINGS.approvalMode
       || settings.bashRequireAsk !== DEFAULT_PI_SETTINGS.bashRequireAsk
       || settings.unattended !== DEFAULT_PI_SETTINGS.unattended
+      || settings.workspaceTextSearch !== DEFAULT_PI_SETTINGS.workspaceTextSearch
     return {
       schemaVersion: value.schemaVersion === 2 ? 2 : 1,
       cursor: value.cursor,

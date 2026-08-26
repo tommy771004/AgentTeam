@@ -653,6 +653,18 @@ export function SettingsPage() {
 
         {section === 'general' && (
           <>
+            <SettingsGroup title="工作區">
+              <SettingsRow
+                title="工作區文字檢索"
+                description="預設關閉；開啟後模型才會取得 workspace_grep / workspace_glob 搜尋工具。切換只會影響下一個 run。"
+                control={
+                  <SettingsToggle
+                    checked={settings.workspaceTextSearch === true}
+                    onChange={(value) => set({ workspaceTextSearch: value })}
+                  />
+                }
+              />
+            </SettingsGroup>
             <SettingsGroup title="方案">
               <SettingsRow
                 title={entitlementSnapshot.tier === 'paid' ? '已啟用付費方案' : 'Free Core（本機優先，免登入）'}

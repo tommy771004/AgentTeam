@@ -69,6 +69,16 @@ try {
   assert.deepEqual(third.oauth.importedProviders, ['openai-codex'])
   const secondAuth = JSON.parse(await readFile(join(nativeDir, 'auth.json'), 'utf8')) as Record<string, Record<string, unknown>>
   assert.equal(secondAuth['openai-codex'].refresh, 'refresh-two')
+
+  const staleAccess = jwt('acct-smoke', Math.floor(Date.now() / 1000) + 5400)
+  await writeFile(codexAuthPath, JSON.stringify({
+    tokens: { access_token: staleAccess, refresh_token: 'refresh-stale', account_id: 'acct-smoke' },
+    last_refresh: '2026-08-15T10:30:00.000Z',
+  }))
+  const stale = await bootstrapPiUserConfig()
+  assert.deepEqual(stale.oauth.skippedProviders, ['openai-codex'])
+  const preservedAuth = JSON.parse(await readFile(join(nativeDir, 'auth.json'), 'utf8')) as Record<string, Record<string, unknown>>
+  assert.equal(preservedAuth['openai-codex'].refresh, 'refresh-two')
 } finally {
   for (const key of envKeys) {
     const value = previousEnv[key]

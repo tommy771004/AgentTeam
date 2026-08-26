@@ -11,6 +11,7 @@ import { ensureMemoryPackRegistered } from './memoryPack.ts'
 import { ensureInteractionPlanningPacksRegistered } from './interactionPlanning.ts'
 import { ensureBackgroundWorkPackRegistered } from './backgroundWork.ts'
 import { ensureWorkspaceExtraPackRegistered } from './workspaceExtra.ts'
+import { ensureWorkspaceTextSearchPackRegistered } from './workspaceTextSearch.ts'
 import { ensureUtilityCodegraphPacksRegistered } from './utilityCodegraph.ts'
 import { ensureMcpBridgePackRegistered } from './mcpBridgePack.ts'
 import { ensureSubDesignPackRegistered } from './subdesignPack.ts'
@@ -22,6 +23,7 @@ export function ensurePiPacksRegistered(): void {
   ensureInteractionPlanningPacksRegistered()
   ensureBackgroundWorkPackRegistered()
   ensureWorkspaceExtraPackRegistered()
+  ensureWorkspaceTextSearchPackRegistered()
   ensureUtilityCodegraphPacksRegistered()
   ensureMcpBridgePackRegistered()
   ensureSubDesignPackRegistered()

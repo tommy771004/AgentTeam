@@ -4,9 +4,13 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] `LlmSettings` 新增 boolean 欄位，預設 `false`，遵循三點編輯契約（型別/預設/UI）
-- [ ] 設定合併對 boolean 欄位行為正確（匯出匯入 bundle 帶得上）
-- [ ] UI 文案說明「開啟後模型才會取得搜尋工具」，繁中混英
-- [ ] source-text drift guard 斷言預設值為 false 且 UI 掛在一般分頁
+- [x] `LlmSettings` 新增 boolean 欄位，預設 `false`，遵循三點編輯契約（型別/預設/UI）
+- [x] 設定合併對 boolean 欄位行為正確（匯出匯入 bundle 帶得上）
+- [x] UI 文案說明「開啟後模型才會取得搜尋工具」，繁中混英
+- [x] source-text drift guard 斷言預設值為 false 且 UI 掛在一般分頁
+
+## Closure evidence
+
+`npm run smoke:workspace-text-search` 19/19、`npm run build`、`npm run smoke` 全綠。專屬 smoke 直接守住 `LlmSettings`／預設值／一般分頁 UI／Host settings hydration；Browser 實點確認 OFF→ON、reload 後仍為 ON，並還原 OFF。

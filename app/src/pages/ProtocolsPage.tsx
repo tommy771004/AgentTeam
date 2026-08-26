@@ -40,6 +40,7 @@ import {
   buildHandoffAvailability,
   buildHandoffDocument,
   readArtifactIndex,
+  resolveBuiltinRunnerTransition,
 } from '../agent/composerRunControls'
 import {
   approveWorkflowDeliverable,
@@ -72,6 +73,7 @@ export function ProtocolsPage() {
   const [composerApprovalModes, setComposerApprovalModes] = useState<Record<string, ApprovalMode>>({})
   const { run: runSlash } = useSlashExecutor()
   const settings = useSettingsStore((s) => s.settings)
+  const updateSettings = useSettingsStore((s) => s.update)
   const projectRoot = useProjectStore((s) => s.root)
   const pickProjectFolder = useProjectStore((s) => s.pickFolder)
 
@@ -612,7 +614,36 @@ export function ProtocolsPage() {
                     onPickProject={() => void pickProjectFolder()}
                     onLoopChange={onModeChange}
                     onAgentModeChange={(mode) => activeId && setAgentMode(activeId, mode)}
-                    onRunnerChange={(nextRunner) => activeId && setRunner(activeId, nextRunner)}
+                    onRunnerChange={(nextRunner) => {
+                      if (!activeId) return
+                      if (nextRunner !== 'builtin') {
+                        setRunner(activeId, nextRunner)
+                        return
+                      }
+                      const transition = resolveBuiltinRunnerTransition({
+                        currentRunner: runner,
+                        selectedModel: threadModel,
+                      })
+                      const settingsPatch = transition.settingsPatch
+                      if (settingsPatch) {
+                        void (async () => {
+                          try {
+                            await updateSettings(settingsPatch)
+                            setModel(activeId, transition.threadModel)
+                            setRunner(activeId, 'builtin')
+                          } catch (error) {
+                            pushBubble(
+                              activeId,
+                              'system',
+                              `無法切換到 Pi Core：${error instanceof Error ? error.message : String(error)}`,
+                            )
+                          }
+                        })()
+                        return
+                      }
+                      setModel(activeId, transition.threadModel)
+                      setRunner(activeId, 'builtin')
+                    }}
                     onOpenAutomation={(kind) => {
                       window.location.hash = kind === 'event' ? '#/automation?tab=events' : '#/automation'
                     }}

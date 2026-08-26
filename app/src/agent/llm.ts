@@ -101,6 +101,7 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   enterBehavior: 'enter',
   followUpMode: 'steer',
   concurrentRunsEnabled: true,
+  workspaceTextSearch: false,
   maxConcurrentRuns: 4,
   turnTimeoutMs: 0,
   notifyOnComplete: true,

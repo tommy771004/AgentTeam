@@ -56,6 +56,8 @@ export type PiPackTool = {
   name: string
   label: string
   description: string
+  /** Explicit audit classification for tools guaranteed not to mutate or send data. */
+  operationClass?: 'read'
   /** One-line snippet for the system prompt's Available tools section. */
   promptSnippet: string
   promptGuidelines?: string[]

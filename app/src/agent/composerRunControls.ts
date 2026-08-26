@@ -2,6 +2,7 @@ import type {
   AgentMode,
   ApprovalMode,
   ChatAttachment,
+  LlmSettings,
   LoopType,
 } from './types.ts'
 import type { ThreadRunner } from '../store/threadStore.ts'
@@ -48,6 +49,46 @@ export function buildComposerRunOverrides(
   selectedMode?: ApprovalMode,
 ): { approvalMode: ApprovalMode } {
   return { approvalMode: resolveComposerApprovalMode(settingsMode, selectedMode) }
+}
+
+type BuiltinSubscriptionSettingsPatch = Pick<
+  LlmSettings,
+  'apiProvider' | 'model' | 'fallbackModels' | 'discoveredModels'
+>
+
+/**
+ * Convert an explicit external-CLI-to-builtin switch into the equivalent
+ * native Pi subscription connection. Providers without a native Pi OAuth
+ * route cannot safely reuse their CLI-only model, so their thread override is
+ * cleared and the existing global Pi model remains authoritative.
+ */
+export function resolveBuiltinRunnerTransition(input: {
+  currentRunner: ThreadRunner
+  selectedModel: string
+}): {
+  threadModel: string
+  settingsPatch?: BuiltinSubscriptionSettingsPatch
+} {
+  const threadModel = input.selectedModel.trim()
+  if (input.currentRunner === 'builtin') return { threadModel }
+  if (!threadModel) return { threadModel: '' }
+
+  const apiProvider = input.currentRunner === 'codex'
+    ? 'openai-codex'
+    : input.currentRunner === 'claude'
+      ? 'anthropic'
+      : null
+  if (!apiProvider) return { threadModel: '' }
+
+  return {
+    threadModel,
+    settingsPatch: {
+      apiProvider,
+      model: threadModel,
+      fallbackModels: [],
+      discoveredModels: [],
+    },
+  }
 }
 
 /**

@@ -23,6 +23,7 @@ type PiHostSettings = {
   approvalMode: 'always' | 'auto' | 'full'
   bashRequireAsk: boolean
   unattended: boolean
+  workspaceTextSearch?: boolean
 }
 type PiHostConfigStatus = {
   settingsSource: 'native' | 'managed' | 'default'
@@ -66,7 +67,7 @@ const api = {
         settings: PiHostSettings
         config?: PiHostConfigStatus
       }>,
-      update: (patch: { provider?: string; baseUrl?: string; apiKey?: string; model?: string; thinkingLevel?: PiHostThinkingLevel; activeTools?: string[]; compaction?: 'auto' | 'manual'; approvalMode?: 'always' | 'auto' | 'full'; bashRequireAsk?: boolean; unattended?: boolean }) =>
+      update: (patch: { provider?: string; baseUrl?: string; apiKey?: string; model?: string; thinkingLevel?: PiHostThinkingLevel; activeTools?: string[]; compaction?: 'auto' | 'manual'; approvalMode?: 'always' | 'auto' | 'full'; bashRequireAsk?: boolean; unattended?: boolean; workspaceTextSearch?: boolean }) =>
         ipcRenderer.invoke('pi-host:settings:update', patch) as Promise<{
           settings: PiHostSettings
           config?: PiHostConfigStatus

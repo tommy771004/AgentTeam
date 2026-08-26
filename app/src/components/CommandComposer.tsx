@@ -531,6 +531,55 @@ export function CommandComposer({
 
   const canSend = !disabled && !attaching && (Boolean(value.trim()) || attachments.length > 0)
 
+  // 送出／停止共用同一顆按鈕：執行中切換為停止，其餘時候是送出。
+  const stopActive = running && Boolean(onStop)
+
+  // textarea 隨內容長高（上限 10 行），超過後內部捲動。
+  useEffect(() => {
+    const el = taRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const style = window.getComputedStyle(el)
+    const lineHeight = parseFloat(style.lineHeight) || 22
+    const padY =
+      (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0)
+    const minHeight = lineHeight * 2 + padY
+    const maxHeight = lineHeight * 10 + padY
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`
+  }, [value, compact])
+
+  /**
+   * 單一動態按鈕：執行中＝停止（紅），否則＝送出。
+   * 有底欄（模型選擇器所在列）時放在 footerRight 右側；無底欄的精簡模式保留在輸入列右端。
+   */
+  const actionButton = (
+    <button
+      type="button"
+      data-action={stopActive ? 'stop' : 'send'}
+      disabled={!stopActive && !canSend}
+      onClick={() => {
+        if (stopActive) onStop?.()
+        else void submit()
+      }}
+      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-control ${
+        stopActive ? 'agent-composer-send agent-composer-stop' : 'agent-composer-send'
+      }`}
+      aria-label={stopActive ? '停止執行' : '送出'}
+      title={
+        stopActive
+          ? '停止執行'
+          : enterBehavior === 'cmdEnter'
+            ? '送出（⌘/Ctrl+Enter）'
+            : '送出（Enter）'
+      }
+    >
+      <Icon name={stopActive ? 'stop' : 'arrow_upward'} size={stopActive ? 17 : 18} filled={stopActive} />
+    </button>
+  )
+
+  /** 底欄是否存在（模型選擇器等 footer 內容會渲染） */
+  const hasFooter = Boolean(footerLeft || footerRight || quickActions) || !hideHints
+
   return (
     <div
       className={`agent-composer relative w-full max-w-full min-w-0 box-border border bg-surface ${
@@ -692,34 +741,13 @@ export function CommandComposer({
               ? placeholder || '輸入任務，或貼上／拖放圖片…'
               : placeholder
           }
-          className="composer-field flex-1 min-w-0 self-stretch border-0 bg-transparent shadow-none resize-none outline-none ring-0 focus:outline-none focus-visible:outline-none focus:ring-0 text-[14px] text-ink placeholder:text-ink-3 leading-relaxed font-[family-name:var(--font-inter)]"
+          className="composer-field flex-1 min-w-0 self-stretch border-0 bg-transparent shadow-none resize-none overflow-y-auto outline-none ring-0 focus:outline-none focus-visible:outline-none focus:ring-0 text-[14px] text-ink placeholder:text-ink-3 leading-relaxed font-[family-name:var(--font-inter)]"
           spellCheck={false}
         />
-        <div className="flex shrink-0 pb-0.5">
-          {running && onStop ? (
-            <button
-              type="button"
-              onClick={onStop}
-              className="agent-composer-stop mr-1 flex h-8 w-8 items-center justify-center rounded-control text-red"
-              aria-label="停止執行"
-              title="停止執行"
-            >
-              <Icon name="stop" size={17} filled />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            disabled={!canSend}
-            onClick={() => void submit()}
-            className="agent-composer-send w-8 h-8 rounded-control disabled:opacity-40 flex items-center justify-center"
-            title={enterBehavior === 'cmdEnter' ? '送出（⌘/Ctrl+Enter）' : '送出（Enter）'}
-          >
-            <Icon name="arrow_upward" size={18} />
-          </button>
-        </div>
+        {!hasFooter && <div className="flex shrink-0 pb-0.5">{actionButton}</div>}
       </div>
-      {/* 附圖風格底欄：左操作 · 右模型/推理 */}
-      {(footerLeft || footerRight || !hideHints) && (
+      {/* 附圖風格底欄：左操作 · 右模型/推理 · 最右送出/停止 */}
+      {hasFooter && (
         <div className="px-3 pb-2.5 flex items-center justify-between gap-2 min-h-[32px]">
           <div className="flex items-center gap-2 min-w-0 flex-wrap">
             {quickActions?.({
@@ -776,6 +804,7 @@ export function CommandComposer({
             {!footerRight && !hideHints && (
               <span className="text-[10px] text-accent-ink">{getLiveSlashCommands().length} 指令</span>
             )}
+            {actionButton}
           </div>
         </div>
       )}
