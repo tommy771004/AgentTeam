@@ -274,6 +274,12 @@ const KNOWN_UNGATED_TESTS = new Set([
   'qualify-pi-host.mts',
   'qualify-pi-sync.mts',
   'qualify-release.mts',
+  // ADR-0052 ticket 06: real-credential qualification — needs a machine with
+  // Codex/Claude CLI login, so it stays out of the chain by that ticket's own
+  // decision (「兩者需真機憑證，不進 smoke chain」); manual runners:
+  // npm run qualify:subscription-snapshot / qualify:subscription-e2e.
+  'qualify-subscription-e2e.mts',
+  'qualify-subscription-snapshot.mts',
   'smoke-cli-doctor.mts',
   'smoke-coordinator-browser.mjs',
   'smoke-external-cli-primary-seam.mts',

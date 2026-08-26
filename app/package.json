@@ -67,6 +67,8 @@
     "smoke:update:e2e": "node scripts/smoke-update-migration-e2e.mjs",
     "release:evidence": "node scripts/release-evidence.mjs",
     "release:qualification": "node --experimental-strip-types scripts/qualify-release.mts",
+    "qualify:subscription-snapshot": "node --experimental-strip-types scripts/qualify-subscription-snapshot.mts",
+    "qualify:subscription-e2e": "node --experimental-strip-types scripts/qualify-subscription-e2e.mts",
     "security:gates": "node scripts/security-gates.mjs",
     "smoke:security": "node --experimental-strip-types scripts/smoke-security.mts && node scripts/security-gates.mjs",
     "smoke:composer": "node --experimental-strip-types scripts/smoke-composer-approval-handoff.mts",

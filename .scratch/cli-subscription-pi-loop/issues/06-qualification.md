@@ -26,3 +26,5 @@ Spec: `.scratch/cli-subscription-pi-loop/spec.md`
 **GO。** 六項證據全數收口於 `qualification.md`：build/oxlint/99-smoke 全綠、v4 握手＋v2 相容、fail-closed 矩陣 fixture＋實機活體（codex=available(7)／anthropic=unavailable(0)）、真實訂閱 E2E PASS（隔離 dir 匯入真 codex OAuth → gpt-5.4-mini 經 builtin Pi loop 回答 pong → Turn Record 完整）、安全抽查（auth.json 0600 實測、snapshot 全文 7 種 credential 形狀零命中）、CLAUDE.md/INDEX.md 同步。
 
 可重跑驗證腳本：`qualify-subscription-snapshot.mts`（安全探針）與 `qualify-subscription-e2e.mts <modelId>`（真實 E2E，支援單模型探測避免限流）；兩者需真機憑證，不進 smoke chain。
+
+**Update（2026-08-26，release gate 修復）。** 兩支 qualifier 落地時未列入 Gate 7 的 `KNOWN_UNGATED_TESTS`，`npm run smoke`／`dist*` 因此紅：「not reachable from any gate」。依本票明文決策（「兩者需真機憑證，不進 smoke chain」）處置，與 `qualify-release` / `qualify-pi-host` / `qualify-pi-sync` 同類：已列入清單（列出、非豁免），並補手動入口 `npm run qualify:subscription-snapshot` 與 `npm run qualify:subscription-e2e <modelId>`。snapshot 入口已實測可跑（本機無憑證 → catalog unavailable + SECURITY PROBE PASS）；e2e 留待真機憑證機器執行。守衛現綠。
