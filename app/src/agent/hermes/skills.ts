@@ -179,6 +179,31 @@ export class SkillsStore {
     ].join('\n')
   }
 
+  /**
+   * Pinned skills expand into the system prompt up front (issue 16), whether
+   * or not the objective happens to match their keywords.
+   */
+  pin(name: string): boolean {
+    return this.applyStatus(name, 'pinned')
+  }
+
+  /** Unpinning returns a pinned skill to the normal advertised-only state. */
+  unpin(name: string): boolean {
+    return this.applyStatus(name, 'active', 'pinned')
+  }
+
+  private applyStatus(name: string, status: NonNullable<SkillMeta['status']>, from?: SkillMeta['status']): boolean {
+    const skill = this.skills.get(name)
+    if (!skill || skill.meta.status === status || (from && skill.meta.status !== from)) return false
+    const raw = serializeSkill(
+      { ...skill.meta, status, updatedAt: new Date().toISOString() },
+      skill.body,
+    )
+    this.skills.set(name, parseSkillMarkdown(raw, skill.path))
+    notifySkillsChanged()
+    return true
+  }
+
   save(meta: SkillMeta, body: string): Skill {
     const path = `agent-created/${meta.name}/SKILL.md`
     const raw = serializeSkill(
@@ -192,11 +217,14 @@ export class SkillsStore {
     )
     const skill = parseSkillMarkdown(raw, path)
     this.skills.set(skill.meta.name, skill)
+    notifySkillsChanged()
     return skill
   }
 
   remove(name: string): boolean {
-    return this.skills.delete(name)
+    const removed = this.skills.delete(name)
+    if (removed) notifySkillsChanged()
+    return removed
   }
 
   /** Curator may archive agent-created skills, never delete them. */
@@ -210,6 +238,7 @@ export class SkillsStore {
       skill.body,
     )
     this.skills.set(name, parseSkillMarkdown(raw, skill.path))
+    notifySkillsChanged()
     return true
   }
 
@@ -222,19 +251,24 @@ export class SkillsStore {
       skill.body,
     )
     this.skills.set(name, parseSkillMarkdown(raw, skill.path))
+    notifySkillsChanged()
     return true
   }
 
   /** Hydrate from persisted list */
   loadAll(items: Array<{ path: string; raw: string }>) {
+    let loaded = 0
     for (const s of items) {
       try {
         const skill = parseSkillMarkdown(s.raw, s.path)
         this.skills.set(skill.meta.name, skill)
+        loaded += 1
       } catch {
         /* skip bad skill */
       }
     }
+    // Import replaces the list wholesale — the Host copy must follow.
+    if (loaded) notifySkillsChanged()
   }
 
   exportAll(): Array<{ path: string; raw: string }> {
@@ -248,6 +282,31 @@ export class SkillsStore {
         objective,
       ),
     )
+  }
+}
+
+/**
+ * Mutation notification. Skills only auto-load through the Host-owned
+ * directory (ADR-0034), so every local change must reach it — subscribers
+ * (App bootstrap) push the full list through the Host bridge on any change.
+ * The store itself stays bridge-free: in a plain browser there is no bridge
+ * and the subscriber is simply never registered.
+ */
+type SkillsListener = () => void
+const listeners = new Set<SkillsListener>()
+
+export function onSkillsChanged(listener: SkillsListener): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+function notifySkillsChanged(): void {
+  for (const listener of [...listeners]) {
+    try {
+      listener()
+    } catch {
+      /* a broken listener must not break the mutation itself */
+    }
   }
 }
 

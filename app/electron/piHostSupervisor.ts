@@ -377,6 +377,13 @@ export class PiHostSupervisor {
   }
 
   /** Sync renderer skills into the Host-owned skills directory; per-skill results come back. */
+  /** Read the Host skills directory back out for renderer hydration. */
+  async readSkillFiles(): Promise<{ files: Array<{ path: string; raw: string }> }> {
+    const response = await this.request('resources/read-skill-files', {})
+    const files = (response.result as { files?: Array<{ path: string; raw: string }> } | undefined)?.files
+    return { files: Array.isArray(files) ? files : [] }
+  }
+
   async syncSkills(skills: Array<{ name?: string; description?: string; body?: string; status?: string }>): Promise<{ skillsDir: string; results: Array<{ name: string; ok: boolean; status?: string; filePath?: string; slug?: string; error?: string }> }> {
     const response = await this.request('resources/sync-skills', { skills })
     if (response.error || !response.result?.report) throw new Error(response.error?.message || 'Pi skill sync failed')

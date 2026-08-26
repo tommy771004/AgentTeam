@@ -59,6 +59,8 @@ export function LearningPage() {
     rejectDraft,
     search,
     saveSkill,
+    pinSkill,
+    unpinSkill,
     restoreSkill,
     removeSkill,
     refresh,
@@ -274,13 +276,33 @@ export function LearningPage() {
                         復原技能
                       </button>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => void removeSkill(selected.meta.name)}
-                        className="text-xs text-error"
-                      >
-                        刪除
-                      </button>
+                      <div className="flex items-center gap-3">
+                        {selected.meta.status === 'pinned' ? (
+                          <button
+                            type="button"
+                            onClick={() => void unpinSkill(selected.meta.name)}
+                            className="text-xs text-outline hover:text-on-surface"
+                          >
+                            取消釘選
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void pinSkill(selected.meta.name)}
+                            className="text-xs text-primary"
+                            title="釘選後每次執行都會自動展開到系統提示，不需關鍵字匹配"
+                          >
+                            釘選（自動載入）
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void removeSkill(selected.meta.name)}
+                          className="text-xs text-error"
+                        >
+                          刪除
+                        </button>
+                      </div>
                     )}
                   </div>
                   <p className="text-xs text-outline">

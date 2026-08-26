@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
-import { chmod, lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 
 /**
  * Host-owned skills（技能目錄）— one SKILL.md per skill, discovered by Pi's
@@ -204,10 +204,15 @@ export async function loadPinnedPiSkillBodies(agentDir: string | undefined, skil
 }
 
 /**
- * One-way migration: write each renderer skill into the Host-owned directory
- * and report per-skill results (user story 32). A malformed skill is REPORTED,
- * never silently dropped. Existing files are overwritten — sync is idempotent,
- * so a retried upgrade cannot duplicate work.
+ * Full-state sync: the payload is the renderer's WHOLE skill list, so every
+ * call both writes each skill into the Host-owned directory AND removes Host
+ * copies the renderer no longer has (deleted or renamed — a rename changes the
+ * slug; if the NEW name fails to write, the OLD copy still goes, because the
+ * renderer list is authoritative and the collision is reported). Without the removal half, a skill deleted in the 技能庫 would keep
+ * being advertised and auto-loaded forever. A malformed skill is REPORTED,
+ * never silently dropped; its slug still counts as attempted so a transient
+ * failure cannot be mistaken for a deletion. Existing files are overwritten —
+ * sync is idempotent, so a retried upgrade cannot duplicate work.
  */
 export async function syncPiSkillsFromRenderer(
   agentDir: string | undefined,
@@ -222,11 +227,15 @@ export async function syncPiSkillsFromRenderer(
   // Slugs claimed during this run, so two different display names colliding
   // on one slug is REPORTED instead of one silently overwriting the other.
   const claimed = new Map<string, string>()
+  // Slugs the payload ATTEMPTED, including ones whose write later failed —
+  // reconciliation may only remove what the payload no longer mentions.
+  const attempted = new Set<string>()
   for (const [index, candidate] of payload.entries()) {
     const fallbackName = typeof candidate?.name === 'string' && candidate.name.trim() ? candidate.name.trim() : `skill-${index + 1}`
     try {
       const displayName = fallbackName
       const name = slugifyPiSkillName(displayName)
+      attempted.add(name)
       const description = typeof candidate.description === 'string' ? candidate.description : ''
       const body = typeof candidate.body === 'string' ? candidate.body : ''
       const rawStatus = candidate.status === 'pinned' || candidate.status === 'archived' ? candidate.status : 'active'
@@ -249,8 +258,54 @@ export async function syncPiSkillsFromRenderer(
       results.push({ name: fallbackName, ok: false, error: error instanceof Error ? error.message : String(error) })
     }
   }
+  // Removal pass: state entries absent from the payload were deleted (or
+  // renamed) on the renderer side. Only entries THIS path wrote before are
+  // eligible — a hand-placed file with no state entry is left alone, which is
+  // also what keeps diagnostics for hand-written broken skills meaningful.
+  for (const stale of Object.keys(state.skills)) {
+    if (attempted.has(stale)) continue
+    delete state.skills[stale]
+    await rm(join(dir, safeSegment(stale)), { recursive: true, force: true })
+  }
   await writeSkillsState(dir, state)
   return { skillsDir: dir, results, synced }
+}
+
+/** Renderer hydration cap — same spirit as the snapshot view's file bounds. */
+const PI_SKILL_FILE_MAX_BYTES = 64 * 1024
+
+/**
+ * Read every discoverable skill back OUT of the Host-owned directory.
+ *
+ * The renderer skill store must never push a full-state sync built from an
+ * unhydrated list（that would reconcile real skills away）, so the Electron
+ * production branch projects the Host directory INTO the renderer at boot:
+ * Pi owns the resource (ADR-0034), the 技能庫 UI is a read-write projection.
+ * Hand-placed root-level files stay out on purpose — the loader already
+ * reports them as diagnostics, and they are not renderer-managed state.
+ */
+export async function readPiSkillFiles(agentDir: string | undefined): Promise<Array<{ path: string; raw: string }>> {
+  const dir = resolvePiSkillsDir(agentDir)
+  if (!dir) return []
+  const files: Array<{ path: string; raw: string }> = []
+  let skillDirs: string[] = []
+  try {
+    const entries = await readdir(dir, { withFileTypes: true })
+    skillDirs = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+  } catch {
+    return [] // directory not created yet — nothing to hydrate
+  }
+  for (const name of skillDirs) {
+    const filePath = join(dir, name, 'SKILL.md')
+    try {
+      const info = await lstat(filePath)
+      if (!info.isFile() || info.size > PI_SKILL_FILE_MAX_BYTES) continue
+      files.push({ path: filePath, raw: await readFile(filePath, 'utf8') })
+    } catch {
+      /* directory without a readable SKILL.md is not a renderer-managed skill */
+    }
+  }
+  return files
 }
 
 /** Remove one skill's file and its pin/archive record. */

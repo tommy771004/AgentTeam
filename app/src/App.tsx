@@ -28,6 +28,8 @@ import type { ScheduledJob } from './agent/types'
 import { createScheduleTriggerSnapshot } from './agent/scheduler'
 import { scheduleSkillCurator } from './agent/hermes/curator'
 import { scheduleDreamConsolidation } from './agent/hermes/dream'
+import { onSkillsChanged } from './agent/hermes/skills'
+import { pushSkillsToHost } from './agent/hermes/skillHostSync'
 import {
   completeStartupRecovery,
   getJournalEntry,
@@ -280,6 +282,11 @@ function PiHostEventBootstrap() {
  * on next boot instead of being silently assumed complete.
  */
 function SkillsMigrationBootstrap() {
+  // The one-shot migration below only seeds the FIRST boot. Skills auto-load
+  // exclusively through the Host-owned directory (ADR-0034), so every later
+  // mutation（技能庫儲存／釘選／刪除、學習草稿核准、curator 封存）must reach
+  // it too — otherwise a new skill would sit in localStorage and never load.
+  useEffect(() => onSkillsChanged(pushSkillsToHost), [])
   useEffect(() => {
     let cancelled = false
     void (async () => {

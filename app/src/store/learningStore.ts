@@ -88,6 +88,8 @@ interface LearningStore {
   rejectDraft: (name: string) => void
   search: (query: string, archive: ArchiveRecord[]) => Promise<void>
   saveSkill: (name: string, description: string, body: string) => Promise<void>
+  pinSkill: (name: string) => Promise<void>
+  unpinSkill: (name: string) => Promise<void>
   restoreSkill: (name: string) => Promise<void>
   removeSkill: (name: string) => Promise<void>
   setPluginEnabled: (id: string, enabled: boolean) => Promise<void>
@@ -231,6 +233,17 @@ async function loadFromDisk() {
       }
     } catch {
       /* Pi Host recovery will retry on the next bootstrap. */
+    }
+    // Skills: Pi Host owns the directory (ADR-0034), so the 技能庫 projects it
+    // back in at boot. Without this, a full-state sync built from an unhydrated
+    // store would reconcile REAL host skills away on the next mutation.
+    if (window.subagents?.piHost?.resources?.listSkillFiles) {
+      try {
+        const { files } = await window.subagents.piHost.resources.listSkillFiles()
+        skillsStore.loadAll(files || [])
+      } catch {
+        /* hydration is best-effort; pushSkillsToHost refuses to fire while unhydrated */
+      }
     }
     pluginRegistry.apply()
     return
@@ -557,6 +570,18 @@ export const useLearningStore = create<LearningStore>((set, get) => {
         },
         body,
       )
+      get().refresh()
+      await get().persist()
+    },
+
+    pinSkill: async (name) => {
+      if (!skillsStore.pin(name)) return
+      get().refresh()
+      await get().persist()
+    },
+
+    unpinSkill: async (name) => {
+      if (!skillsStore.unpin(name)) return
       get().refresh()
       await get().persist()
     },

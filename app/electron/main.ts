@@ -2420,6 +2420,7 @@ ipcMain.handle('pi-host:extensions:uninstall', async (_evt, id: string) => piHos
 ipcMain.handle('pi-host:tools:list', async () => ({ builtinTools: await piHostSupervisor.listTools() }))
 ipcMain.handle('pi-host:tools:catalog', async () => ({ catalog: await piHostSupervisor.listCatalog() }))
 ipcMain.handle('pi-host:resources:sync-skills', async (_evt, skills: Array<{ name?: string; description?: string; body?: string; status?: string }>) => piHostSupervisor.syncSkills(skills || []))
+ipcMain.handle('pi-host:resources:list-skill-files', async () => piHostSupervisor.readSkillFiles())
 ipcMain.handle('pi-host:approvals:resolve', async (_evt, input: { runId: string; callId: string; decision: 'allow' | 'deny'; answer?: string }) => {
   const response = await piHostSupervisor.resolveApproval(input)
   return response

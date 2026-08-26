@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -248,7 +248,67 @@ try {
   assert.equal(restored.result.settlement, 'answered')
   assert.match(requests.at(-1) || '', /<available_skills>/, 'skills return once read is active again')
 
-  console.log('Pi skills are resource-loader owned: advertised, readable, migrated with reports, pinned-expanded, archived-hidden, and honest about the read dependency')
+  // ── Mutations propagate: removal + unpin actually reach the loader ──
+  // The renderer re-pushes its WHOLE list on every change（技能庫儲存／刪除／
+  // 釘選）。A payload that no longer mentions a skill must remove its Host
+  // copy — otherwise a deleted skill would keep being advertised and
+  // auto-loaded forever, which is exactly the silent-ghost bug this guards.
+  send(9, 'resources/sync-skills', { skills: [
+    { name: '部署檢查', description: '上線前的檢查清單', body: '- 確認 CI 綠燈\n- 標記 tag', status: 'active' },
+    { name: 'legacy-promo', description: '已退役的促銷文案技能', body: '舊流程，不再使用。', status: 'archived' },
+  ] })
+  const resynced = await waitFor(9)
+  assert.equal(resynced.error, undefined)
+  const stateAfter = JSON.parse(await readFile(join(skillsDir, 'skills-state.json'), 'utf8')) as {
+    skills: Record<string, { status?: string; displayName?: string }>
+  }
+  assert.ok(!stateAfter.skills['release-notes'], 'a removed skill loses its state entry')
+  await assert.rejects(() => stat(join(skillsDir, 'release-notes', 'SKILL.md')), 'its file is really gone')
+  assert.ok(
+    Object.values(stateAfter.skills).some((meta) => meta?.displayName === '部署檢查' && meta?.status === 'active'),
+    'unpin updates the recorded status',
+  )
+  assert.ok(await stat(join(skillsDir, 'broken.md')).then(() => true, () => false),
+    'hand-written files without a state entry survive reconciliation')
+
+  // A fresh session reloads resources, so the NEXT turn reflects the mutations.
+  send(10, 'sessions/create', {})
+  const recreated = await waitFor(10)
+  const sessionIdAfter = String(recreated.result.sessionId)
+  const marker = requests.length
+  send(11, 'turn/submit', {
+    sessionId: sessionIdAfter,
+    runId: 'skills-after-mutation-run',
+    cwd: workspace,
+    prompt: '請寫一份發布說明',
+    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'full', unattended: true },
+  })
+  const settledAfterMutation = await waitFor(11)
+  assert.equal(settledAfterMutation.result.settlement, 'answered')
+  // A fresh session may also fire background model calls（例如命名）that do
+  // not carry the loader's system prompt, so the POSITIVE assertion is
+  // existential（回合本身的請求一定在其中）while the negative ones hold for
+  // every request — and never `at(-1)`, which can index a naming prompt.
+  const turnRequests = requests.slice(marker)
+  assert.ok(turnRequests.some((request) => request.includes('<available_skills>')), 'the surviving skill is still advertised')
+  for (const request of turnRequests) {
+    assert.doesNotMatch(request, /release-notes/, 'the removed skill leaves every prompt')
+    assert.doesNotMatch(request, /已釘選技能/, 'unpinning removes the up-front expansion')
+    assert.doesNotMatch(request, /確認 CI 綠燈/, 'the unpinned body is no longer expanded without keyword match')
+  }
+
+  // Hydration read-back: the renderer projects the Host directory in at boot
+  // so its next full-state push can never reconcile real skills away. The
+  // read must reflect the mutations above and exclude non-renderer files.
+  send(12, 'resources/read-skill-files', {})
+  const skillFiles = await waitFor(12)
+  const paths = ((skillFiles.result?.files || []) as Array<{ path: string }>).map((file) => file.path)
+  assert.ok(paths.some((p) => p.includes('skill-15phjom')), 'the surviving skill is projected back to the renderer')
+  assert.ok(paths.some((p) => p.includes('legacy-promo')), 'archived skills stay listed（狀態在 frontmatter，UI 負責呈現）')
+  assert.ok(!paths.some((p) => p.includes('release-notes')), 'a removed skill is gone from the projection too')
+  assert.ok(!paths.some((p) => p.includes('broken.md')), 'hand-placed root files are not renderer-managed state')
+
+  console.log('Pi skills are resource-loader owned: advertised, readable, migrated with reports, pinned-expanded, archived-hidden, honest about the read dependency, mutations propagate (remove + unpin), and hydrate back for safe full-state syncs')
 } finally {
   if (host.exitCode === null) {
     host.stdin.end()

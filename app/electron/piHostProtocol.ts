@@ -35,7 +35,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -80,6 +80,8 @@ export type PiHostResponse = {
     catalogContractDigest?: string
     diagnostics?: Array<{ path: string; message?: unknown }>
     report?: { skillsDir?: string; results?: PiSkillSyncResult[] }
+    /** The Host skills directory projected back out for renderer hydration (resources/read-skill-files). */
+    files?: Array<{ path: string; raw: string }>
     resolved?: boolean
     /** Structured payload of one tool execution (tools/pack). */
     item?: unknown
@@ -222,7 +224,7 @@ import {
 } from './piToolHost.ts'
 import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
 import { configurePiMessagingGateway } from './piExtensionPacks/integrations.ts'
-import { discoveredPiSkills, syncPiSkillsFromRenderer, type PiSkillSyncResult } from './piSkills.ts'
+import { discoveredPiSkills, readPiSkillFiles, syncPiSkillsFromRenderer, type PiSkillSyncResult } from './piSkills.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
 import { setPiDelegationBridge, setPiMemoryBridge } from './piPackBridges.ts'
 import { setPiPlanAnnouncer as installPlanAnnouncer } from './piExtensionPacks/interactionPlanning.ts'
@@ -1550,6 +1552,15 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
       id,
       result: { report: { skillsDir: report.skillsDir, results: report.results } },
     })).catch((error: unknown) => errorResponse(id, 'runtime_error', error instanceof Error ? error.message : 'Skill sync failed')).then((message) => [message])
+  }
+  if (input.method === 'resources/read-skill-files') {
+    // The renderer projects the Host-owned skills directory into the 技能庫
+    // (ADR-0034: Pi is the only discovery system). Read-only by contract —
+    // writes go back through resources/sync-skills.
+    return readPiSkillFiles(resolvePiAgentDir()).then((files) => ({
+      id,
+      result: { files },
+    })).catch((error: unknown) => errorResponse(id, 'runtime_error', error instanceof Error ? error.message : 'Skill file read failed')).then((message) => [message])
   }
   if (input.method === 'memory/list') {
     const memory = new PiMemoryExtension(state.snapshot.memories)
