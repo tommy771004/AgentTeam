@@ -1,7 +1,7 @@
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
-import { PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage } from './piHostAttachment.ts'
+import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage } from './piHostAttachment.ts'
 
 /**
  * Version 2 retired the ambiguous `success` turn settlement for the closed
@@ -2573,7 +2573,18 @@ export function createPiHostServer(
   // as direct calls.
   setPiApprovalBridge({
     request: (request) => {
-      send({ event: 'host/approval-requested', payload: { ...request } })
+      // Journal before publishing so a renderer that reloads immediately
+      // after this event can recover the same actionable approval from
+      // runs/active or runs/attach. The journal owns redaction and bounds.
+      state.attachmentJournal.setPendingApproval(request.runId, request)
+      const pendingApproval = state.attachmentJournal.get(request.runId)?.pendingApproval
+      // Direct protocol/code-mode calls may not have a run attachment; retain
+      // their existing event behavior while attached turns use the bounded
+      // journal projection above.
+      send({ event: 'host/approval-requested', payload: { ...(pendingApproval || normalizePiHostPendingApproval(request) || request) } })
+    },
+    resolved: (request) => {
+      state.attachmentJournal.clearPendingApproval(request.runId, request.callId)
     },
   }, (record) => {
     const identity = modelToolContractIdentity(state, record.sessionId, record.tool)

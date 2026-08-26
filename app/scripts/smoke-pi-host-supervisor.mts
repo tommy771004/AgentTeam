@@ -79,8 +79,35 @@ journal.begin({ runId: 'run-1', sessionId: 'session-1', threadId: 'thread-1', tu
 journal.append('run-1', [entry(1), entry(2)])
 journal.append('run-1', [entry(2), entry(3)])
 assert.deepEqual({ latestSeq: journal.get('run-1')?.latestSeq, total: journal.get('run-1')?.total }, { latestSeq: 3, total: 3 })
+const pendingApproval = {
+  runId: 'run-1',
+  sessionId: 'session-1',
+  tool: 'write',
+  callId: 'call-approval',
+  args: {
+    path: 'note.txt',
+    content: 'approved content',
+    apiKey: 'must-not-reach-renderer',
+  },
+  reason: 'This tool changes a workspace file',
+  timeoutMs: 90_000,
+}
+journal.setPendingApproval('run-1', pendingApproval)
+assert.deepEqual(journal.active()[0]?.pendingApproval, {
+  ...pendingApproval,
+  args: {
+    path: 'note.txt',
+    content: 'approved content',
+    apiKey: '[redacted]',
+  },
+})
+assert.deepEqual(journal.attach('run-1', [])?.attachment.pendingApproval, journal.active()[0]?.pendingApproval)
+journal.clearPendingApproval('run-1', 'call-approval')
+assert.equal(journal.get('run-1')?.pendingApproval, undefined)
+journal.setPendingApproval('run-1', pendingApproval)
 const terminal = journal.settle('run-1', 'answered', '字'.repeat(70_000), 4)
 assert.ok(new TextEncoder().encode(terminal?.summary || '').byteLength <= PI_HOST_ATTACHMENT_MAX_SUMMARY_BYTES)
+assert.equal(terminal?.pendingApproval, undefined)
 assert.equal(journal.acknowledge('run-1'), true)
 assert.equal(journal.acknowledge('run-1'), true)
 assert.equal(journal.get('run-1'), undefined)

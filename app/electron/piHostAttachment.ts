@@ -9,6 +9,17 @@ import type { TurnRecordEntry } from '../src/agent/turnRecord.ts'
  */
 export type PiHostAttachmentStatus = 'active' | 'terminal'
 
+/** Renderer-safe descriptor for the one approval blocking a Host run. */
+export type PiHostPendingApproval = {
+  runId: string
+  sessionId: string
+  tool: string
+  callId: string
+  args?: Record<string, unknown>
+  reason?: string
+  timeoutMs: number
+}
+
 export type PiHostAttachment = {
   runId: string
   sessionId: string
@@ -20,6 +31,7 @@ export type PiHostAttachment = {
   settlement?: PiTurnSettlement
   interruptReason?: PiTurnInterruptReason
   summary?: string
+  pendingApproval?: PiHostPendingApproval
   terminalAt?: number
   acknowledged?: boolean
 }
@@ -41,6 +53,13 @@ export const PI_HOST_ATTACHMENT_TERMINAL_LIMIT = 256
 export const PI_HOST_ATTACHMENT_MAX_SUMMARY_BYTES = 64 * 1024
 export const PI_HOST_ATTACHMENT_TTL_MS = 24 * 60 * 60 * 1000
 export const PI_HOST_ATTACHMENT_PAGE_LIMIT = 200
+export const PI_HOST_ATTACHMENT_MAX_APPROVAL_BYTES = 16 * 1024
+const PI_HOST_ATTACHMENT_MAX_APPROVAL_STRING = 2_048
+const PI_HOST_ATTACHMENT_MAX_APPROVAL_REASON = 1_024
+const PI_HOST_ATTACHMENT_MAX_APPROVAL_DEPTH = 4
+const PI_HOST_ATTACHMENT_MAX_APPROVAL_KEYS = 32
+const PI_HOST_ATTACHMENT_MAX_APPROVAL_ITEMS = 32
+const SENSITIVE_APPROVAL_KEY = /(?:api[_-]?key|access[_-]?key|token|secret|password|credential|authorization|cookie|private[_-]?key|client[_-]?secret)/i
 
 const emptyState = (): PiHostAttachmentState => ({ records: [] })
 
@@ -59,6 +78,67 @@ function boundedSummary(summary: unknown): string | undefined {
 
 function boundedString(value: unknown, max = 160): string | undefined {
   return typeof value === 'string' && value.trim() ? value.slice(0, max) : undefined
+}
+
+function sanitizeApprovalValue(value: unknown, depth = 0): unknown {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value
+  if (typeof value === 'string') return value.slice(0, PI_HOST_ATTACHMENT_MAX_APPROVAL_STRING)
+  if (depth >= PI_HOST_ATTACHMENT_MAX_APPROVAL_DEPTH || !value || typeof value !== 'object') return undefined
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, PI_HOST_ATTACHMENT_MAX_APPROVAL_ITEMS)
+      .map((item) => sanitizeApprovalValue(item, depth + 1))
+      .filter((item) => item !== undefined)
+  }
+  const result: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value).slice(0, PI_HOST_ATTACHMENT_MAX_APPROVAL_KEYS)) {
+    if (SENSITIVE_APPROVAL_KEY.test(key)) {
+      result[key] = '[redacted]'
+      continue
+    }
+    const sanitized = sanitizeApprovalValue(item, depth + 1)
+    if (sanitized !== undefined) result[key] = sanitized
+  }
+  return result
+}
+
+function boundedApprovalArgs(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const sanitized = sanitizeApprovalValue(value)
+  if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) return undefined
+  const result = sanitized as Record<string, unknown>
+  while (Object.keys(result).length > 0 && new TextEncoder().encode(JSON.stringify(result)).byteLength > PI_HOST_ATTACHMENT_MAX_APPROVAL_BYTES) {
+    delete result[Object.keys(result).at(-1)!]
+  }
+  return result
+}
+
+export function normalizePiHostPendingApproval(value: unknown): PiHostPendingApproval | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Partial<PiHostPendingApproval>
+  const runId = boundedString(candidate.runId)
+  const sessionId = boundedString(candidate.sessionId)
+  const tool = boundedString(candidate.tool)
+  const callId = boundedString(candidate.callId)
+  const timeoutMs = typeof candidate.timeoutMs === 'number' && Number.isFinite(candidate.timeoutMs)
+    ? Math.max(1, Math.floor(candidate.timeoutMs))
+    : undefined
+  if (!runId || !sessionId || !tool || !callId || timeoutMs === undefined) return undefined
+  const args = boundedApprovalArgs(candidate.args)
+  const reason = boundedString(candidate.reason, PI_HOST_ATTACHMENT_MAX_APPROVAL_REASON)
+  return {
+    runId,
+    sessionId,
+    tool,
+    callId,
+    ...(args && Object.keys(args).length ? { args } : {}),
+    ...(reason ? { reason } : {}),
+    timeoutMs,
+  }
+}
+
+function clonePendingApproval(value: PiHostPendingApproval | undefined): PiHostPendingApproval | undefined {
+  return value ? { ...value, ...(value.args ? { args: structuredClone(value.args) as Record<string, unknown> } : {}) } : undefined
 }
 
 function boundedCount(value: unknown): number {
@@ -84,6 +164,7 @@ function normalizeRecord(record: PiHostAttachment): PiHostAttachment | undefined
     ...(settlement ? { settlement } : {}),
     ...(record.interruptReason === 'user' || record.interruptReason === 'timeout' ? { interruptReason: record.interruptReason } : {}),
     ...(boundedSummary(record.summary) ? { summary: boundedSummary(record.summary) } : {}),
+    ...(normalizePiHostPendingApproval(record.pendingApproval) ? { pendingApproval: normalizePiHostPendingApproval(record.pendingApproval) } : {}),
     ...(typeof record.terminalAt === 'number' && Number.isFinite(record.terminalAt) ? { terminalAt: record.terminalAt } : {}),
     ...(record.acknowledged === true ? { acknowledged: true } : {}),
   }
@@ -105,7 +186,7 @@ export class PiHostAttachmentJournal {
   }
 
   snapshot(): PiHostAttachmentState {
-    return { records: this.state.records.map((record) => ({ ...record })) }
+    return { records: this.state.records.map((record) => ({ ...record, ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}) })) }
   }
 
   private changed(): void {
@@ -148,6 +229,22 @@ export class PiHostAttachmentJournal {
     this.changed()
   }
 
+  setPendingApproval(runId: string, request: PiHostPendingApproval): void {
+    const record = this.state.records.find((candidate) => candidate.runId === runId)
+    if (!record || record.status !== 'active') return
+    const pendingApproval = normalizePiHostPendingApproval(request)
+    if (!pendingApproval) return
+    record.pendingApproval = pendingApproval
+    this.changed()
+  }
+
+  clearPendingApproval(runId: string, callId?: string): void {
+    const record = this.state.records.find((candidate) => candidate.runId === runId)
+    if (!record?.pendingApproval || (callId && record.pendingApproval.callId !== callId)) return
+    delete record.pendingApproval
+    this.changed()
+  }
+
   settle(runId: string, settlement: PiTurnSettlement, summary?: string, latestSeq?: number, interruptReason?: PiTurnInterruptReason): PiHostAttachment | undefined {
     const record = this.state.records.find((candidate) => candidate.runId === runId)
     if (!record) return undefined
@@ -155,6 +252,7 @@ export class PiHostAttachmentJournal {
     // cancellation or failure.
     if (record.status === 'terminal') return { ...record }
     record.status = 'terminal'
+    delete record.pendingApproval
     record.settlement = settlement
     record.terminalAt = this.clock()
     record.acknowledged = false
@@ -183,17 +281,17 @@ export class PiHostAttachmentJournal {
 
   get(runId: string): PiHostAttachment | undefined {
     const record = this.state.records.find((candidate) => candidate.runId === runId)
-    return record ? { ...record } : undefined
+    return record ? { ...record, ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}) } : undefined
   }
 
   active(): PiHostAttachment[] {
     this.prune(this.clock())
-    return this.state.records.filter((record) => record.status === 'active').map((record) => ({ ...record }))
+    return this.state.records.filter((record) => record.status === 'active').map((record) => ({ ...record, ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}) }))
   }
 
   pendingTerminal(): PiHostAttachment[] {
     this.prune(this.clock())
-    return this.state.records.filter((record) => record.status === 'terminal' && !record.acknowledged).map((record) => ({ ...record }))
+    return this.state.records.filter((record) => record.status === 'terminal' && !record.acknowledged).map((record) => ({ ...record, ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}) }))
   }
 
   /** A Host child restart has no live execution witness; active turns end honestly. */
@@ -202,6 +300,7 @@ export class PiHostAttachmentJournal {
     for (const record of this.state.records) {
       if (record.status !== 'active') continue
       record.status = 'terminal'
+      delete record.pendingApproval
       record.settlement = 'interrupted'
       record.terminalAt = this.clock()
       record.acknowledged = false

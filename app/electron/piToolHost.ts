@@ -288,6 +288,7 @@ export type PiApprovalResolution = { decision: 'allow' | 'deny' | 'timeout' | 'c
 
 type PiApprovalBridge = {
   request: (request: PiApprovalRequest) => void
+  resolved?: (request: PiApprovalRequest, resolution: PiApprovalResolution) => void
 }
 
 type PiTurnAuditRecord = {
@@ -324,6 +325,7 @@ function piApprovalTimeoutMs(): number {
 }
 
 const pendingApprovals = new Map<string, {
+  request: PiApprovalRequest
   resolve: (resolution: PiApprovalResolution) => void
   timer: NodeJS.Timeout
 }>()
@@ -345,17 +347,20 @@ export function resolvePiApproval(params: {
   if (!pending) return false
   clearTimeout(pending.timer)
   pendingApprovals.delete(approvalKey(runId, callId))
+  let resolution: PiApprovalResolution
   if (params.decision === 'allow') {
-    pending.resolve({
+    resolution = {
       decision: 'allow',
       ...(typeof params.answer === 'string' ? { answer: params.answer } : {}),
-    })
+    }
   } else {
-    pending.resolve({
+    resolution = {
       decision: params.decision === 'deny' ? 'deny' : 'timeout',
       reason: params.decision === 'deny' ? 'Approval denied by user' : 'Approval timed out',
-    })
+    }
   }
+  pending.resolve(resolution)
+  approvalBridge?.resolved?.(pending.request, resolution)
   return true
 }
 
@@ -367,7 +372,9 @@ export function cancelPiApprovalsForRun(runId: string): number {
     clearTimeout(pending.timer)
     pendingApprovals.delete(key)
     cancelled += 1
-    pending.resolve({ decision: 'cancel', reason: 'Approval cancelled with its run' })
+    const resolution = { decision: 'cancel' as const, reason: 'Approval cancelled with its run' }
+    pending.resolve(resolution)
+    approvalBridge?.resolved?.(pending.request, resolution)
   }
   return cancelled
 }
@@ -384,14 +391,17 @@ export async function requestPiToolApproval(request: Omit<PiApprovalRequest, 'ti
     return { decision: 'deny', reason: 'Unattended approval denied after timeout' }
   }
   const timeoutMs = request.timeoutMs ?? piApprovalTimeoutMs()
+  const pendingRequest: PiApprovalRequest = { ...request, timeoutMs }
   return new Promise<PiApprovalResolution>((resolvePromise) => {
     const key = approvalKey(request.runId, request.callId)
     const timer = setTimeout(() => {
       pendingApprovals.delete(key)
-      resolvePromise({ decision: 'timeout', reason: 'Approval timed out' })
+      const resolution = { decision: 'timeout' as const, reason: 'Approval timed out' }
+      resolvePromise(resolution)
+      approvalBridge?.resolved?.(pendingRequest, resolution)
     }, timeoutMs)
-    pendingApprovals.set(key, { resolve: resolvePromise, timer })
-    approvalBridge?.request({ ...request, timeoutMs })
+    pendingApprovals.set(key, { request: pendingRequest, resolve: resolvePromise, timer })
+    approvalBridge?.request(pendingRequest)
   })
 }
 

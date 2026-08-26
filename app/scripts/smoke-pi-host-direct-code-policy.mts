@@ -73,7 +73,7 @@ const waitFor = async (predicate: (message: Message) => boolean, label: string, 
 const waitId = (requestId: number) => waitFor((message) => message.id === requestId, `id ${requestId}`)
 
 try {
-  assert.equal((await waitId(send('initialize', { protocolVersion: 2, capabilities: ['tool-contract-v1'] }))).error, undefined)
+  assert.equal((await waitId(send('initialize', { protocolVersion: 3, capabilities: ['tool-contract-v1', 'attachments-v1'] }))).error, undefined)
   const created = await waitId(send('sessions/create', { title: 'direct/code policy' }))
   const sessionId = String(created.result?.sessionId)
   const turnStart = messages.length
@@ -87,6 +87,19 @@ try {
   })
 
   const modelAsk = await waitFor((message) => message.event === 'host/approval-requested' && message.payload?.tool === 'workspace_download', 'model workspace approval', turnStart)
+  const activeWhileApproval = await waitId(send('runs/active'))
+  const attachedWhileApproval = (activeWhileApproval.result?.activeRuns || []).find((run: any) => run.runId === 'policy-origin-run')
+  assert.deepEqual(attachedWhileApproval?.pendingApproval, {
+    runId: modelAsk.payload?.runId,
+    sessionId,
+    tool: 'workspace_download',
+    callId: modelAsk.payload?.callId,
+    args: modelAsk.payload?.args,
+    reason: modelAsk.payload?.reason,
+    timeoutMs: modelAsk.payload?.timeoutMs,
+  })
+  const attachedPage = await waitId(send('runs/attach', { runId: 'policy-origin-run' }))
+  assert.deepEqual(attachedPage.result?.page?.attachment?.pendingApproval, attachedWhileApproval?.pendingApproval)
   const catalogId = send('tools/list', { sessionId, requireContract: true })
   const catalog = await waitId(catalogId)
   const revision = Number(catalog.result?.catalogContractRevision)
@@ -110,6 +123,9 @@ try {
   assert.equal((await waitId(send('approvals/resolve', { runId: modelAsk.payload?.runId, callId: modelAsk.payload?.callId, decision: 'deny' }))).error, undefined)
 
   const outerAsk = await waitFor((message) => message.event === 'host/approval-requested' && message.payload?.tool === 'run_code', 'outer run_code approval', turnStart)
+  const activeAfterApproval = await waitId(send('runs/active'))
+  assert.notEqual((activeAfterApproval.result?.activeRuns || []).find((run: any) => run.runId === 'policy-origin-run')?.pendingApproval?.callId, modelAsk.payload?.callId)
+  assert.equal((activeAfterApproval.result?.activeRuns || []).find((run: any) => run.runId === 'policy-origin-run')?.pendingApproval?.callId, outerAsk.payload?.callId)
   assert.equal((await waitId(send('approvals/resolve', { runId: outerAsk.payload?.runId, callId: outerAsk.payload?.callId, decision: 'allow' }))).error, undefined)
   const nestedAsk = await waitFor((message) => message.event === 'host/approval-requested' && message.payload?.tool === 'workspace_download' && message.payload?.callId !== modelAsk.payload?.callId, 'nested workspace approval', turnStart)
   assert.match(String(nestedAsk.payload?.callId), /:code:/)
