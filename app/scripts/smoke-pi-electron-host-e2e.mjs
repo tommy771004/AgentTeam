@@ -30,6 +30,8 @@ fs.rmSync(launcherDir, { recursive: true, force: true })
 fs.mkdirSync(launcherDir, { recursive: true })
 const finalizeGatePath = path.join(launcherDir, 'finalize-claim-gate.json')
 const finalizeGateMarkerPath = path.join(launcherDir, 'finalize-claim-gate-consumed.json')
+const replacementFinalizeGateMarkerPath = path.join(launcherDir, 'finalize-claim-gate-replacement-consumed.json')
+const finalizeGateReleasePath = path.join(launcherDir, 'finalize-claim-gate-release.json')
 fs.writeFileSync(path.join(launcherDir, 'package.json'), JSON.stringify({
   name: 'subagents-ai-pi-host-e2e-launcher',
   private: true,
@@ -42,24 +44,33 @@ fs.writeFileSync(path.join(launcherDir, 'launcher.mjs'), [
   `const finalizeClaimChannel = 'pi-host:runs:finalize-claim'`,
   `const finalizeGatePath = ${JSON.stringify(finalizeGatePath)}`,
   `const finalizeGateMarkerPath = ${JSON.stringify(finalizeGateMarkerPath)}`,
+  `const replacementFinalizeGateMarkerPath = ${JSON.stringify(replacementFinalizeGateMarkerPath)}`,
+  `const finalizeGateReleasePath = ${JSON.stringify(finalizeGateReleasePath)}`,
   'const realIpcMainHandle = ipcMain.handle.bind(ipcMain)',
   'let activeGateId = null',
-  'let gateConsumed = false',
+  'let gatePhase = 0',
   'ipcMain.handle = (channel, handler) => {',
   '  if (channel !== finalizeClaimChannel) return realIpcMainHandle(channel, handler)',
   '  return realIpcMainHandle(channel, async (event, runId, claimantId, leaseMs) => {',
   '    let gate',
   '    try { gate = JSON.parse(fs.readFileSync(finalizeGatePath, \'utf8\')) } catch {}',
-  '    if (gate?.gateId !== activeGateId) {',
+    '    if (gate?.gateId !== activeGateId) {',
   '      activeGateId = gate?.gateId || null',
-  '      gateConsumed = false',
+  '      gatePhase = 0',
   '    }',
-  '    if (gate?.armed && gateConsumed === false && gate.runId === runId) {',
-  '      gateConsumed = true',
+  '    if (gate?.armed && gatePhase === 0 && gate.runId === runId) {',
+  '      gatePhase = 1',
   '      fs.writeFileSync(finalizeGateMarkerPath, JSON.stringify({',
   '        gateId: gate.gateId, runId, claimantId, leaseMs, consumedAt: Date.now(),',
   '      }))',
   '      await new Promise(() => {})',
+  '    }',
+  '    if (gate?.armed && gatePhase === 1 && gate.runId === runId) {',
+  '      gatePhase = 2',
+  '      fs.writeFileSync(replacementFinalizeGateMarkerPath, JSON.stringify({',
+  '        gateId: gate.gateId, runId, claimantId, leaseMs, consumedAt: Date.now(),',
+  '      }))',
+  '      while (!fs.existsSync(finalizeGateReleasePath)) await new Promise((resolve) => setTimeout(resolve, 25))',
   '    }',
   '    return handler(event, runId, claimantId, leaseMs)',
   '  })',
@@ -70,6 +81,8 @@ fs.writeFileSync(path.join(launcherDir, 'launcher.mjs'), [
 ].join('\n'))
 fs.rmSync(finalizeGatePath, { force: true })
 fs.rmSync(finalizeGateMarkerPath, { force: true })
+fs.rmSync(replacementFinalizeGateMarkerPath, { force: true })
+fs.rmSync(finalizeGateReleasePath, { force: true })
 
 const sse = (payload) => `data: ${JSON.stringify(payload)}\n\n`
 const modelTurns = new Map()
@@ -119,7 +132,10 @@ const modelServer = createServer(async (request, response) => {
     // cancels after reattachment; the terminal case cancels while the original
     // renderer is still attached so the terminal-before-finalization boundary
     // can be observed and claimed deterministically.
-    const command = 'sleep 120'
+    // Keep the active reattach case alive longer than the bounded E2E timeout;
+    // otherwise a missed projection can turn into a natural terminal answer
+    // at exactly the same moment the diagnostic wait expires.
+    const command = 'sleep 600'
     response.write(chunk({ role: 'assistant', content: '我先執行一個可觀測的工具。' }))
     response.write(chunk({ tool_calls: [{
       index: 0,
@@ -171,6 +187,8 @@ const timeout = 120_000
 
 const armFinalizeClaimGate = (runId, gateId) => {
   fs.rmSync(finalizeGateMarkerPath, { force: true })
+  fs.rmSync(replacementFinalizeGateMarkerPath, { force: true })
+  fs.rmSync(finalizeGateReleasePath, { force: true })
   fs.writeFileSync(finalizeGatePath, JSON.stringify({
     armed: true,
     gateId,
@@ -179,11 +197,11 @@ const armFinalizeClaimGate = (runId, gateId) => {
   }))
 }
 
-const waitForFinalizeClaimGate = async (runId, gateId) => {
+const waitForFinalizeClaimGate = async (runId, gateId, markerPath = finalizeGateMarkerPath) => {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
     try {
-      const marker = JSON.parse(fs.readFileSync(finalizeGateMarkerPath, 'utf8'))
+      const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'))
       if (marker?.gateId === gateId && marker?.runId === runId) return marker
     } catch {
       // The launcher writes this marker synchronously immediately before it
@@ -192,6 +210,10 @@ const waitForFinalizeClaimGate = async (runId, gateId) => {
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   throw new Error(`finalizeClaim launcher gate was not consumed for ${runId}`)
+}
+
+const releaseFinalizeClaimGate = (runId, gateId) => {
+  fs.writeFileSync(finalizeGateReleasePath, JSON.stringify({ gateId, runId, releasedAt: Date.now() }))
 }
 
 const waitForRun = async (page, knownRunIds, description) => {
@@ -237,14 +259,18 @@ const waitForRecoveredTimeline = async (page, runId, kind, description) => {
   while (Date.now() < deadline) {
     lastState = await page.evaluate(async (id) => ({
       feed: document.querySelectorAll('.agent-process-feed').length,
-      timeline: document.querySelectorAll('[data-timeline-row], [data-testid="run-summary-card"]').length,
+      recordTimeline: document.querySelectorAll('[data-run-timeline="record"]').length,
       stop: document.querySelectorAll('[aria-label="停止執行"]').length,
       host: await window.subagents?.piHost?.runs?.active?.(),
     }), runId)
     // The feed proves the restored same-thread run is projected. Active runs
     // additionally retain stop control; terminal recovery intentionally does
-    // not render that control after the turn has settled.
-    if ((lastState.feed || lastState.timeline) && (kind !== 'active' || lastState.stop)) return
+    // not render that control after the turn has settled, and the settled
+    // process shell is replaced by its recorded timeline.
+    const timelineReady = kind === 'active'
+      ? lastState.feed && lastState.stop
+      : lastState.recordTimeline
+    if (timelineReady) return
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
   throw new Error(`${description}: timed out after ${timeout}ms; last state=${JSON.stringify(lastState)}`)
@@ -268,6 +294,8 @@ const runScenario = async (page, kind, iteration) => {
   const runId = attachment.runId
   const threadId = attachment.threadId
   assert.ok(threadId, `${kind} attachment carries its owning thread`)
+  let terminalGateId
+  let oldGateMarker
 
   if (kind === 'active') {
     const initial = await waitForHostStatus(page, runId, 'active', 'active tool boundary')
@@ -279,6 +307,7 @@ const runScenario = async (page, kind, iteration) => {
     // first matching old-renderer claim is parked forever, while every later
     // claim reaches the real Host CAS in the replacement renderer.
     const gateId = `${kind}-${iteration}-${token}`
+    terminalGateId = gateId
     armFinalizeClaimGate(runId, gateId)
     // The Host publishes the turn-end record before the attachment settles.
     // Observe that event while cancellation is still an in-flight IPC request.
@@ -320,6 +349,7 @@ const runScenario = async (page, kind, iteration) => {
       { timeout, polling: 100 },
     )
     const gateMarker = await waitForFinalizeClaimGate(runId, gateId)
+    oldGateMarker = gateMarker
     assert.equal(gateMarker?.runId, runId, 'launcher gate consumed this terminal run')
     const terminalAttachment = await waitForHostStatus(page, runId, 'terminal', 'terminal append before renderer reload')
     assert.equal(terminalAttachment?.settlement, 'cancelled', `Host terminal append is cancellation: ${JSON.stringify(terminalAttachment)}`)
@@ -338,6 +368,25 @@ const runScenario = async (page, kind, iteration) => {
     await page.waitForSelector('textarea.composer-field', { timeout })
   }
   await waitForRecoveredTimeline(page, runId, kind, `${kind} renderer reattach projection`)
+
+  if (kind === 'terminal') {
+    // RecoveryBootstrap restores the Host record and renderer timeline before
+    // awaiting its finalization claim. The launcher parks that replacement
+    // claim too, making the proof observable instead of racing an immediate
+    // finalize → ack → prune sequence.
+    const replacementGateMarker = await waitForFinalizeClaimGate(
+      runId,
+      terminalGateId,
+      replacementFinalizeGateMarkerPath,
+    )
+    assert.equal(replacementGateMarker?.runId, runId, 'replacement launcher gate consumed this terminal run')
+    assert.notEqual(
+      replacementGateMarker?.claimantId,
+      oldGateMarker?.claimantId,
+      'replacement RecoveryBootstrap uses a new finalization claimant',
+    )
+    releaseFinalizeClaimGate(runId, terminalGateId)
+  }
 
   const recovered = await page.evaluate(async ({ id, sessionId }) => {
     const runs = window.subagents?.piHost?.runs
