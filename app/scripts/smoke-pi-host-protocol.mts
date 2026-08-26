@@ -46,6 +46,26 @@ try {
   assert.deepEqual(attachments.result?.activeRuns, [])
   assert.deepEqual(attachments.result?.terminalRuns, [])
 
+  host.stdin.write(`${JSON.stringify({ id: 21, method: 'runs/finalize-claim', params: { runId: 'unknown-run', claimantId: 'renderer-a' } })}\n`)
+  const claim = await waitFor((message) => message.id === 21)
+  assert.deepEqual(claim.result?.finalizationClaim, {
+    runId: 'unknown-run',
+    claimed: false,
+    owner: false,
+    state: 'missing',
+    claimEpoch: 0,
+  })
+
+  host.stdin.write(`${JSON.stringify({ id: 22, method: 'runs/finalize-complete', params: { runId: 'unknown-run', claimantId: 'renderer-a', claimEpoch: 1 } })}\n`)
+  const complete = await waitFor((message) => message.id === 22)
+  assert.deepEqual(complete.result?.finalizationComplete, {
+    runId: 'unknown-run',
+    completed: false,
+    owner: false,
+    state: 'missing',
+    claimEpoch: 0,
+  })
+
   host.stdin.write(`${JSON.stringify({ id: 3, method: 'health/get', params: {} })}\n`)
   const health = await waitFor((message) => message.id === 3)
   assert.equal(health.result?.status, 'ready')

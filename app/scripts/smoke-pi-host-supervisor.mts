@@ -10,7 +10,13 @@ class FakeChild {
   }
   postMessage(message: { id: number; method: string }) {
     const result = message.method === 'initialize'
-      ? { protocolVersion: 2, capabilities: ['turns'], status: 'ready' }
+      ? { protocolVersion: 3, capabilities: ['turns', 'attachments-v1'], status: 'ready' }
+      : message.method === 'runs/finalize-claim'
+        ? { finalizationClaim: { runId: 'supervised-run', claimed: true, owner: true, state: 'claimed', claimEpoch: 1, leaseExpiresAt: 30_000 } }
+        : message.method === 'runs/finalize-complete'
+          ? { finalizationComplete: { runId: 'supervised-run', completed: true, owner: true, state: 'completed', claimEpoch: 1, leaseExpiresAt: 30_000, completedAt: 1 } }
+          : message.method === 'runs/ack'
+            ? { runId: 'supervised-run', resolved: true }
       : message.method === 'tools/read'
         ? { tool: 'read', content: [{ type: 'text', text: 'hello' }] }
       : { runId: 'supervised-run', settlement: 'cancelled' }
@@ -43,6 +49,10 @@ supervisor.onEvent((event) => events.push(event))
 await supervisor.start()
 const cancelled = await supervisor.cancelTurn('supervised-run')
 assert.equal(cancelled.settlement, 'cancelled')
+const claim = await supervisor.claimRunFinalization('supervised-run', 'renderer-a')
+assert.deepEqual(claim, { runId: 'supervised-run', claimed: true, owner: true, state: 'claimed', claimEpoch: 1, leaseExpiresAt: 30_000 })
+const complete = await supervisor.completeRunFinalization('supervised-run', 'renderer-a', claim.claimEpoch)
+assert.equal(complete.completed, true)
 const tool = await supervisor.executeTool('read', { cwd: '/tmp', path: 'hello.txt' })
 assert.equal(tool.tool, 'read')
 assert.equal(events.length, 1)
@@ -108,6 +118,33 @@ journal.setPendingApproval('run-1', pendingApproval)
 const terminal = journal.settle('run-1', 'answered', '字'.repeat(70_000), 4)
 assert.ok(new TextEncoder().encode(terminal?.summary || '').byteLength <= PI_HOST_ATTACHMENT_MAX_SUMMARY_BYTES)
 assert.equal(terminal?.pendingApproval, undefined)
+const firstClaim = journal.claimFinalization('run-1', 'renderer-a', 100)
+assert.deepEqual(firstClaim, { runId: 'run-1', claimed: true, owner: true, state: 'claimed', claimEpoch: 1, leaseExpiresAt: now + 100 })
+assert.deepEqual(journal.claimFinalization('run-1', 'renderer-b', 100), {
+  runId: 'run-1',
+  claimed: false,
+  owner: false,
+  state: 'claimed',
+  claimEpoch: 1,
+  leaseExpiresAt: now + 100,
+  reason: 'claimed_by_other',
+})
+assert.equal(journal.acknowledge('run-1'), false, 'ack cannot release before the app finalizer completes')
+assert.deepEqual(journal.completeFinalization('run-1', 'renderer-b', firstClaim.claimEpoch), {
+  runId: 'run-1',
+  completed: false,
+  owner: false,
+  state: 'claimed',
+  claimEpoch: 1,
+  leaseExpiresAt: now + 100,
+  reason: 'not_owner',
+})
+now += 101
+const takeover = journal.claimFinalization('run-1', 'renderer-b', 100)
+assert.equal(takeover.claimed, true, 'an expired claimant lease is recoverable by a new renderer')
+assert.equal(takeover.claimEpoch, 2)
+assert.equal(journal.completeFinalization('run-1', 'renderer-b', takeover.claimEpoch).completed, true)
+assert.equal(journal.completeFinalization('run-1', 'renderer-a', firstClaim.claimEpoch).completed, true, 'complete is idempotent after ownership changes')
 assert.equal(journal.acknowledge('run-1'), true)
 assert.equal(journal.acknowledge('run-1'), true)
 assert.equal(journal.get('run-1'), undefined)

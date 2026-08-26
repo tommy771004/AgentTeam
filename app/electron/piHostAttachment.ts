@@ -9,6 +9,45 @@ import type { TurnRecordEntry } from '../src/agent/turnRecord.ts'
  */
 export type PiHostAttachmentStatus = 'active' | 'terminal'
 
+/**
+ * Durable app-finalization claim state.  Pi execution settlement remains a
+ * separate, immutable Host decision; this state only coordinates the
+ * renderer-owned app finalization that consumes that settlement.
+ *
+ * `claimantId` is an opaque renderer-instance id.  It is persisted with the
+ * attachment so a Host-side CAS survives a transport reconnect; it is not a
+ * credential and carries no run payload.
+ */
+export type PiHostFinalizationState = {
+  status: 'claimed' | 'completed'
+  claimantId: string
+  claimEpoch: number
+  leaseExpiresAt: number
+  completedAt?: number
+}
+
+export type PiHostFinalizationClaimResult = {
+  runId: string
+  claimed: boolean
+  owner: boolean
+  state: 'missing' | 'active' | 'available' | 'claimed' | 'completed'
+  claimEpoch: number
+  leaseExpiresAt?: number
+  completedAt?: number
+  reason?: 'not_terminal' | 'claimed_by_other' | 'not_claimed' | 'completed'
+}
+
+export type PiHostFinalizationCompleteResult = {
+  runId: string
+  completed: boolean
+  owner: boolean
+  state: 'missing' | 'active' | 'available' | 'claimed' | 'completed'
+  claimEpoch: number
+  leaseExpiresAt?: number
+  completedAt?: number
+  reason?: 'not_terminal' | 'not_claimed' | 'not_owner' | 'completed'
+}
+
 /** Renderer-safe descriptor for the one approval blocking a Host run. */
 export type PiHostPendingApproval = {
   runId: string
@@ -34,6 +73,7 @@ export type PiHostAttachment = {
   pendingApproval?: PiHostPendingApproval
   terminalAt?: number
   acknowledged?: boolean
+  finalization?: PiHostFinalizationState
 }
 
 export type PiHostAttachmentState = {
@@ -54,6 +94,8 @@ export const PI_HOST_ATTACHMENT_MAX_SUMMARY_BYTES = 64 * 1024
 export const PI_HOST_ATTACHMENT_TTL_MS = 24 * 60 * 60 * 1000
 export const PI_HOST_ATTACHMENT_PAGE_LIMIT = 200
 export const PI_HOST_ATTACHMENT_MAX_APPROVAL_BYTES = 16 * 1024
+/** A crashed renderer can be replaced after this bounded lease. */
+export const PI_HOST_ATTACHMENT_FINALIZATION_LEASE_MS = 30_000
 const PI_HOST_ATTACHMENT_MAX_APPROVAL_STRING = 2_048
 const PI_HOST_ATTACHMENT_MAX_APPROVAL_REASON = 1_024
 const PI_HOST_ATTACHMENT_MAX_APPROVAL_DEPTH = 4
@@ -141,9 +183,32 @@ function clonePendingApproval(value: PiHostPendingApproval | undefined): PiHostP
   return value ? { ...value, ...(value.args ? { args: structuredClone(value.args) as Record<string, unknown> } : {}) } : undefined
 }
 
+function cloneFinalization(value: PiHostFinalizationState | undefined): PiHostFinalizationState | undefined {
+  return value ? { ...value } : undefined
+}
+
 function boundedCount(value: unknown): number {
   const parsed = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : 0
   return Math.max(0, parsed)
+}
+
+function normalizeFinalization(value: unknown): PiHostFinalizationState | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Partial<PiHostFinalizationState>
+  if (candidate.status !== 'claimed' && candidate.status !== 'completed') return undefined
+  const claimantId = boundedString(candidate.claimantId, 160)
+  const claimEpoch = boundedCount(candidate.claimEpoch)
+  const leaseExpiresAt = typeof candidate.leaseExpiresAt === 'number' && Number.isFinite(candidate.leaseExpiresAt)
+    ? Math.max(0, candidate.leaseExpiresAt)
+    : undefined
+  if (!claimantId || claimEpoch < 1 || leaseExpiresAt === undefined) return undefined
+  return {
+    status: candidate.status,
+    claimantId,
+    claimEpoch,
+    leaseExpiresAt,
+    ...(typeof candidate.completedAt === 'number' && Number.isFinite(candidate.completedAt) ? { completedAt: candidate.completedAt } : {}),
+  }
 }
 
 /** Pick the attachment schema explicitly; never reflect persisted unknown fields. */
@@ -167,6 +232,7 @@ function normalizeRecord(record: PiHostAttachment): PiHostAttachment | undefined
     ...(normalizePiHostPendingApproval(record.pendingApproval) ? { pendingApproval: normalizePiHostPendingApproval(record.pendingApproval) } : {}),
     ...(typeof record.terminalAt === 'number' && Number.isFinite(record.terminalAt) ? { terminalAt: record.terminalAt } : {}),
     ...(record.acknowledged === true ? { acknowledged: true } : {}),
+    ...(normalizeFinalization(record.finalization) ? { finalization: normalizeFinalization(record.finalization) } : {}),
   }
 }
 
@@ -186,7 +252,11 @@ export class PiHostAttachmentJournal {
   }
 
   snapshot(): PiHostAttachmentState {
-    return { records: this.state.records.map((record) => ({ ...record, ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}) })) }
+    return { records: this.state.records.map((record) => ({
+      ...record,
+      ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}),
+      ...(record.finalization ? { finalization: cloneFinalization(record.finalization) } : {}),
+    })) }
   }
 
   private changed(): void {
@@ -256,6 +326,7 @@ export class PiHostAttachmentJournal {
     record.settlement = settlement
     record.terminalAt = this.clock()
     record.acknowledged = false
+    delete record.finalization
     record.latestSeq = Math.max(record.latestSeq, latestSeq || 0)
     record.total = Math.max(record.total, record.latestSeq)
     record.summary = boundedSummary(summary)
@@ -272,6 +343,10 @@ export class PiHostAttachmentJournal {
     // ack must never turn that retry into an error or a second release.
     if (!record) return true
     if (record.status !== 'terminal') return false
+    // A terminal outcome is retained until the renderer proves that it
+    // completed the coordinator-owned app finalization.  This closes the
+    // dangerous ack-before-finalize window during renderer reload.
+    if (!record.finalization || record.finalization.status !== 'completed') return false
     if (record.acknowledged) return true
     record.acknowledged = true
     this.prune(this.clock())
@@ -279,19 +354,133 @@ export class PiHostAttachmentJournal {
     return true
   }
 
+  /**
+   * Compare-and-swap the app-finalization owner.  Calls are synchronous inside
+   * the Host request handler, so two renderer requests cannot both win.  A
+   * lease is deliberately finite: if the winner disappears before completing
+   * its local durable effects, a later renderer can retry after expiry.
+   */
+  claimFinalization(
+    runId: string,
+    claimantId: string,
+    leaseMs = PI_HOST_ATTACHMENT_FINALIZATION_LEASE_MS,
+  ): PiHostFinalizationClaimResult {
+    const normalizedRunId = runId.trim()
+    const normalizedClaimant = claimantId.trim().slice(0, 160)
+    const record = this.state.records.find((candidate) => candidate.runId === normalizedRunId)
+    if (!record) return { runId: normalizedRunId, claimed: false, owner: false, state: 'missing', claimEpoch: 0 }
+    if (record.status !== 'terminal') return { runId: normalizedRunId, claimed: false, owner: false, state: 'active', claimEpoch: 0, reason: 'not_terminal' }
+    if (!normalizedClaimant) return { runId: normalizedRunId, claimed: false, owner: false, state: 'available', claimEpoch: 0, reason: 'not_claimed' }
+    const now = this.clock()
+    const current = record.finalization
+    if (current?.status === 'completed') {
+      return {
+        runId: normalizedRunId,
+        claimed: false,
+        owner: current.claimantId === normalizedClaimant,
+        state: 'completed',
+        claimEpoch: current.claimEpoch,
+        leaseExpiresAt: current.leaseExpiresAt,
+        ...(current.completedAt === undefined ? {} : { completedAt: current.completedAt }),
+        reason: 'completed',
+      }
+    }
+    if (current && current.leaseExpiresAt > now) {
+      const owner = current.claimantId === normalizedClaimant
+      return {
+        runId: normalizedRunId,
+        claimed: owner,
+        owner,
+        state: 'claimed',
+        claimEpoch: current.claimEpoch,
+        leaseExpiresAt: current.leaseExpiresAt,
+        reason: owner ? undefined : 'claimed_by_other',
+      }
+    }
+    const claimEpoch = (current?.claimEpoch || 0) + 1
+    const lease = Math.max(1, Math.floor(Number.isFinite(leaseMs) ? leaseMs : PI_HOST_ATTACHMENT_FINALIZATION_LEASE_MS))
+    record.finalization = {
+      status: 'claimed',
+      claimantId: normalizedClaimant,
+      claimEpoch,
+      leaseExpiresAt: now + lease,
+    }
+    this.changed()
+    return { runId: normalizedRunId, claimed: true, owner: true, state: 'claimed', claimEpoch, leaseExpiresAt: now + lease }
+  }
+
+  /** Complete the current claim. Repeating complete is an idempotent success. */
+  completeFinalization(runId: string, claimantId: string, claimEpoch: number): PiHostFinalizationCompleteResult {
+    const normalizedRunId = runId.trim()
+    const normalizedClaimant = claimantId.trim().slice(0, 160)
+    const record = this.state.records.find((candidate) => candidate.runId === normalizedRunId)
+    if (!record) return { runId: normalizedRunId, completed: false, owner: false, state: 'missing', claimEpoch: 0 }
+    if (record.status !== 'terminal') return { runId: normalizedRunId, completed: false, owner: false, state: 'active', claimEpoch: 0, reason: 'not_terminal' }
+    const current = record.finalization
+    if (!current) return { runId: normalizedRunId, completed: false, owner: false, state: 'available', claimEpoch: 0, reason: 'not_claimed' }
+    if (current.status === 'completed') {
+      return {
+        runId: normalizedRunId,
+        completed: true,
+        owner: current.claimantId === normalizedClaimant && current.claimEpoch === claimEpoch,
+        state: 'completed',
+        claimEpoch: current.claimEpoch,
+        leaseExpiresAt: current.leaseExpiresAt,
+        ...(current.completedAt === undefined ? {} : { completedAt: current.completedAt }),
+        reason: 'completed',
+      }
+    }
+    const owner = current.claimantId === normalizedClaimant && current.claimEpoch === claimEpoch
+    if (!owner || current.leaseExpiresAt <= this.clock()) {
+      return {
+        runId: normalizedRunId,
+        completed: false,
+        owner: false,
+        state: 'claimed',
+        claimEpoch: current.claimEpoch,
+        leaseExpiresAt: current.leaseExpiresAt,
+        reason: 'not_owner',
+      }
+    }
+    const completedAt = this.clock()
+    record.finalization = { ...current, status: 'completed', completedAt }
+    this.changed()
+    return {
+      runId: normalizedRunId,
+      completed: true,
+      owner: true,
+      state: 'completed',
+      claimEpoch: current.claimEpoch,
+      leaseExpiresAt: current.leaseExpiresAt,
+      completedAt,
+    }
+  }
+
   get(runId: string): PiHostAttachment | undefined {
     const record = this.state.records.find((candidate) => candidate.runId === runId)
-    return record ? { ...record, ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}) } : undefined
+    return record ? {
+      ...record,
+      ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}),
+      ...(record.finalization ? { finalization: cloneFinalization(record.finalization) } : {}),
+    } : undefined
   }
 
   active(): PiHostAttachment[] {
     this.prune(this.clock())
-    return this.state.records.filter((record) => record.status === 'active').map((record) => ({ ...record, ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}) }))
+    return this.state.records.filter((record) => record.status === 'active').map((record) => ({
+      ...record,
+      ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}),
+      ...(record.finalization ? { finalization: cloneFinalization(record.finalization) } : {}),
+    }))
   }
 
   pendingTerminal(): PiHostAttachment[] {
     this.prune(this.clock())
-    return this.state.records.filter((record) => record.status === 'terminal' && !record.acknowledged).map((record) => ({ ...record, ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}) }))
+    return this.state.records.filter((record) => record.status === 'terminal' && !record.acknowledged).map((record) => ({
+      ...record,
+      ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}),
+      ...(record.finalization ? { finalization: cloneFinalization(record.finalization) } : {}),
+    }))
   }
 
   /** A Host child restart has no live execution witness; active turns end honestly. */

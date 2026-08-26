@@ -1,4 +1,5 @@
 import type { PiHostEvent, PiHostMessage, PiHostRequest, PiHostResponse } from './piHostProtocol.ts'
+import type { PiHostFinalizationClaimResult, PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
 
 export type PiHostStatus =
@@ -203,6 +204,24 @@ export class PiHostSupervisor {
     const response = await this.request('runs/attach', { runId, ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })
     if (response.error) throw new Error(response.error.message)
     return response.result?.page
+  }
+
+  /** Atomically reserve Host terminal app-finalization for one renderer instance. */
+  async claimRunFinalization(runId: string, claimantId: string, leaseMs?: number): Promise<PiHostFinalizationClaimResult> {
+    const response = await this.request('runs/finalize-claim', {
+      runId,
+      claimantId,
+      ...(leaseMs === undefined ? {} : { leaseMs }),
+    })
+    if (response.error || !response.result?.finalizationClaim) throw new Error(response.error?.message || 'Pi Host finalization claim failed')
+    return response.result.finalizationClaim
+  }
+
+  /** Commit the durable claim after the coordinator-owned effects complete. */
+  async completeRunFinalization(runId: string, claimantId: string, claimEpoch: number): Promise<PiHostFinalizationCompleteResult> {
+    const response = await this.request('runs/finalize-complete', { runId, claimantId, claimEpoch })
+    if (response.error || !response.result?.finalizationComplete) throw new Error(response.error?.message || 'Pi Host finalization completion failed')
+    return response.result.finalizationComplete
   }
 
   async acknowledgeRun(runId: string): Promise<boolean> {

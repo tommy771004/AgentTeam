@@ -2394,6 +2394,8 @@ ipcMain.handle('pi-host:sessions:record', async (_evt, sessionId: string, before
 ipcMain.handle('pi-host:runs:list', async () => ({ queue: await piHostSupervisor.listQueuedRuns() }))
 ipcMain.handle('pi-host:runs:active', async () => piHostSupervisor.listAttachmentRuns())
 ipcMain.handle('pi-host:runs:attach', async (_evt, runId: string, before?: number, limit?: number) => ({ page: await piHostSupervisor.attachRun(runId, before, limit) }))
+ipcMain.handle('pi-host:runs:finalize-claim', async (_evt, runId: string, claimantId: string, leaseMs?: number) => piHostSupervisor.claimRunFinalization(runId, claimantId, leaseMs))
+ipcMain.handle('pi-host:runs:finalize-complete', async (_evt, runId: string, claimantId: string, claimEpoch: number) => piHostSupervisor.completeRunFinalization(runId, claimantId, claimEpoch))
 ipcMain.handle('pi-host:runs:ack', async (_evt, runId: string) => ({ runId, resolved: await piHostSupervisor.acknowledgeRun(runId) }))
 ipcMain.handle('pi-host:runs:enqueue', async (_evt, input: Record<string, unknown>) => ({ queue: await piHostSupervisor.enqueueRun(input || {}) }))
 ipcMain.handle('pi-host:runs:cancel', async (_evt, runId: string) => ({ queue: await piHostSupervisor.cancelQueuedRun(runId) }))

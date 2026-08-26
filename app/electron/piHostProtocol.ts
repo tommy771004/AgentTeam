@@ -1,7 +1,7 @@
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
-import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage } from './piHostAttachment.ts'
+import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage, type PiHostFinalizationClaimResult, type PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 
 /**
  * Version 2 retired the ambiguous `success` turn settlement for the closed
@@ -25,7 +25,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -91,6 +91,8 @@ export type PiHostResponse = {
     attachment?: PiHostAttachment
     activeRuns?: PiHostAttachment[]
     terminalRuns?: PiHostAttachment[]
+    finalizationClaim?: PiHostFinalizationClaimResult
+    finalizationComplete?: PiHostFinalizationCompleteResult
     availableFromSeq?: number
     total?: number
     latestSeq?: number
@@ -1465,12 +1467,34 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const page = state.attachmentJournal.attach(runId, session?.record?.entries || [], input.params?.before as number | undefined, typeof input.params?.limit === 'number' ? input.params.limit : PI_HOST_ATTACHMENT_PAGE_LIMIT)
     return [{ id, result: page ? { attachment: page.attachment, page } : {} }]
   }
+  if (input.method === 'runs/finalize-claim') {
+    if (state.negotiatedProtocolVersion < 3) return [errorResponse(id, 'protocol_mismatch', 'Pi Host finalization claim requires Protocol v3')]
+    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+    const claimantId = typeof input.params?.claimantId === 'string' ? input.params.claimantId : ''
+    if (!runId || !claimantId) return [errorResponse(id, 'invalid_request', 'runId and claimantId are required')]
+    const leaseMs = typeof input.params?.leaseMs === 'number' ? input.params.leaseMs : undefined
+    const finalizationClaim = state.attachmentJournal.claimFinalization(runId, claimantId, leaseMs)
+    return [{ id, result: { runId, finalizationClaim } }]
+  }
+  if (input.method === 'runs/finalize-complete') {
+    if (state.negotiatedProtocolVersion < 3) return [errorResponse(id, 'protocol_mismatch', 'Pi Host finalization completion requires Protocol v3')]
+    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+    const claimantId = typeof input.params?.claimantId === 'string' ? input.params.claimantId : ''
+    const claimEpoch = typeof input.params?.claimEpoch === 'number' && Number.isFinite(input.params.claimEpoch)
+      ? Math.floor(input.params.claimEpoch)
+      : undefined
+    if (!runId || !claimantId || claimEpoch === undefined || claimEpoch < 1) {
+      return [errorResponse(id, 'invalid_request', 'runId, claimantId and a positive claimEpoch are required')]
+    }
+    const finalizationComplete = state.attachmentJournal.completeFinalization(runId, claimantId, claimEpoch)
+    return [{ id, result: { runId, finalizationComplete } }]
+  }
   if (input.method === 'runs/ack') {
     if (state.negotiatedProtocolVersion < 3) return [errorResponse(id, 'protocol_mismatch', 'Pi Host acknowledgement requires Protocol v3')]
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
     if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
-    state.attachmentJournal.acknowledge(runId)
-    return [{ id, result: { runId, resolved: true } }]
+    const resolved = state.attachmentJournal.acknowledge(runId)
+    return [{ id, result: { runId, resolved } }]
   }
   if (input.method === 'resources/list') {
     // Skills come straight from what the resource loader actually found on
