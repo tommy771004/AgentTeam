@@ -1,6 +1,6 @@
 # 01 — 決定重新附著的真相歸屬
 
-Status: 可交給代理
+Status: resolved
 Type: grilling
 Spec: `.scratch/active-run-reattachment/spec.md`
 
@@ -19,12 +19,21 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## Acceptance criteria
 
-- [ ] 決策記錄寫進本 effort 目錄,說明選了哪一個以及為什麼
-- [ ] 明確回答:落地位置、保留上限(ack／TTL)、記憶體上界
-- [ ] 明確回答:是否需要新 ADR 或升 ADR-0038 protocol 版本;需要就先寫
-- [ ] 確認未新增第二個 coordinator、未移動結算歸屬(若會移動則先寫 ADR)
-- [ ] 決策後回填 spec 的 Implementation Decisions,把「未決」改為已決
+- [x] 決策記錄寫進本 effort 目錄,說明選了哪一個以及為什麼
+- [x] 明確回答:落地位置、保留上限(ack／TTL)、記憶體上界
+- [x] 明確回答:是否需要新 ADR 或升 ADR-0038 protocol 版本;需要就先寫
+- [x] 確認未新增第二個 coordinator、未移動結算歸屬(若會移動則先寫 ADR)
+- [x] 決策後回填 spec 的 Implementation Decisions,把「未決」改為已決
 
 ## Blocked by
 
 無（本 effort 的第一個決策點）
+
+## Answer
+
+選 **B：Pi Core Host child 的 run attachment journal**。完整決策見 [`../decision.md`](../decision.md)。
+
+- Pi Core Host 保存 authoritative active／terminal metadata；main supervisor 只 relay，不保存第二份真相。
+- active 保留至 terminal；terminal 到 ack 或 24 小時 TTL，硬上限 256 筆；attach 每頁 200 entries，terminal summary 上限 64 KiB。
+- Pi Host Protocol v2 → v3；不新增 ADR，因 ADR-0039 已決定 Host canonical 與 snapshot + cursor。ADR-0040 的 automation queue record 不與 attachment record 混為一種語意。
+- Pi execution settlement 與 `taskRunCoordinator` app finalization 維持既有 owner，未新增第二個 coordinator。若實作發現必須移動 owner，須另案先寫 ADR。

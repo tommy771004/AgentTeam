@@ -311,6 +311,15 @@ function asSession(value: unknown): PiHostSession | undefined {
   }
 }
 
+/** The session a thread's runs submit to: the FIRST non-archived binding.
+ * One owner for that choice — submission (submitPiHostRun) and any surface
+ * reading a run's record back must resolve the same id or the two disagree. */
+export function pickThreadPiSession(sessions: readonly unknown[], threadId: string): PiHostSession | undefined {
+  return sessions
+    .map(asSession)
+    .find((session) => session?.threadId === threadId && !session.archived)
+}
+
 /**
  * The answer a turn settles on is its LAST assistant message, never its first.
  *
@@ -397,9 +406,7 @@ export async function submitPiHostRun(
   input: SubmitPiHostRunInput,
 ): Promise<SubmitPiHostRunResult> {
   const listed = await api.sessions.list()
-  const existing = (listed.sessions || [])
-    .map(asSession)
-    .find((session) => session?.threadId === input.threadId && !session.archived)
+  const existing = pickThreadPiSession(listed.sessions || [], input.threadId)
   const parentSessionId = existing?.id || (await api.sessions.create(input.title, input.threadId)).sessionId
   const sessionId = input.child && api.sessions.createChild
     ? (await api.sessions.createChild({ title: input.title, parentSessionId, ...input.child })).sessionId

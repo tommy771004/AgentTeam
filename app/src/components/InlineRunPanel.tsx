@@ -18,7 +18,7 @@ import { useRunActivityStore } from '../store/runActivityStore'
 import { ReasoningFocusPanel } from './ReasoningFocusPanel'
 import { ContextUsagePanel } from './ContextUsagePanel'
 import { TrajectoryPanel } from './TrajectoryPanel'
-import type { PiHostSession } from '../agent/piHostRun'
+import { pickThreadPiSession } from '../agent/piHostRun'
 import { contextUsageMicrocopy, formatTokensCompact } from '../agent/contextUsageView'
 import { useRunContextUsage } from '../hooks/useRunContextUsage'
 import type { TurnRecordEntry } from '../agent/turnRecord'
@@ -254,10 +254,14 @@ export function InlineRunPanel({
       : undefined
 
   // Resolve this thread's Host session lazily — only once the reader opens
-  // the trajectory section. The binding choice matches submitPiHostRun: the
-  // FIRST non-archived session bound to this thread is the one runs submit
-  // to, so it is the one whose record this panel must show. No binding
-  // (plain browser, non-Host runner) means the section never appears.
+  // the trajectory section. The binding choice is pickThreadPiSession, the
+  // same owner submitPiHostRun uses, so this panel shows the record runs
+  // actually write to. Absence semantics: no bridge functions at all is a
+  // permanent null (the section stays hidden); an absent match or failed
+  // list() while the run is producing record events stays undefined and
+  // retries as events arrive — a binding created moments later is found,
+  // instead of one unlucky race hiding the entry for the mount's lifetime.
+  const recordEntryCount = activity.recordEntries.length
   useEffect(() => {
     if (!trajectoryOpen || trajectorySessionId !== undefined) return
     const bridge = window.subagents?.piHost?.sessions
@@ -270,18 +274,21 @@ export function InlineRunPanel({
       .list()
       .then(({ sessions }) => {
         if (cancelled) return
-        const match = (sessions as PiHostSession[]).find(
-          (session) => session.threadId === threadId && !session.archived && typeof session.id === 'string',
-        )
-        setTrajectorySessionId(match ? match.id : null)
+        const match = pickThreadPiSession(sessions || [], threadId)
+        setTrajectorySessionId(match ? match.id : recordEntryCount > 0 ? undefined : null)
       })
       .catch(() => {
-        if (!cancelled) setTrajectorySessionId(null)
+        if (!cancelled) setTrajectorySessionId(undefined)
       })
     return () => {
       cancelled = true
     }
-  }, [trajectoryOpen, trajectorySessionId, threadId])
+  }, [trajectoryOpen, trajectorySessionId, threadId, recordEntryCount])
+
+  // A reused panel instance must not carry the previous thread's answer.
+  useEffect(() => {
+    setTrajectorySessionId(undefined)
+  }, [threadId])
 
   const toggleTrajectory = () => {
     setTrajectoryOpen((value) => {

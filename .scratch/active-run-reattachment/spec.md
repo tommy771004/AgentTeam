@@ -19,7 +19,7 @@ ADR-0039 早就規定了正確行為：「after renderer reload or Host restart,
 
 ## Solution
 
-為每個 run 保留一份 **attachment record**：狀態、Turn Record 的 high-watermark、以及終局結果——保留到某個 renderer 明確 acknowledge 為止，所以 renderer 不在時結果有地方落地。（放在哪一層由 ticket 01 決定。）renderer 啟動時先訂閱、再取 snapshot、最後依 `seq` 把訂閱期間緩衝的事件合併進來，重建同一條 UI 投影，接著繼續收更新、可以要求取消，並且**恰好結算一次**。
+Pi Core Host 為每個 run 保留一份 **attachment record**：狀態、Turn Record 的 high-watermark、以及不可逆的 execution settlement——terminal record 保留到 renderer 明確 acknowledge 或有界 TTL 到期，所以 renderer 不在時結果有地方落地。Electron main 只 relay，不保存第二份 lifecycle truth。renderer 啟動時先訂閱、再取 snapshot、最後依 `seq` 把訂閱期間緩衝的事件合併進來，重建同一條 UI 投影，接著繼續收更新、可以要求取消，並把 Host terminal outcome 恰好一次交給既有 app finalization。
 
 合併與結算判斷抽成一個純模組：吃 snapshot、緩衝事件、generation 與已觀察的 high-watermark，吐出協調後的 entries、缺口回報、以及該不該結算。所有競態（重複、亂序、過期世代、快照與 live 重疊、terminal 競跑）都變成 fixture 而不是計時測試；真實時序另由一條重啟 e2e 覆蓋。
 
@@ -57,23 +57,18 @@ ADR-0039 早就規定了正確行為：「after renderer reload or Host restart,
 
 ## Implementation Decisions
 
-**⚠️ 未決：真相歸屬（ticket 01 決定，其餘設計依它而定）**
+**已決：Pi Core Host 是 attachment truth owner。** Ticket 01 已選 B，完整理由與上界見 [`decision.md`](decision.md)。Pi Core Host journal 保存 active／terminal attachment metadata；Turn Record 仍是同一份 Host session record。main 的 `piHostSupervisor` 只持有 transport pending request 與 renderer subscription，不建立第二份可獨立演進的 attachment truth；renderer 仍是 disposable UI Projection。
 
-「Host 擁有 attachment record」裡的「Host」有歧義，兩種解讀的工程量差一個量級，使用者尚未裁定：
+**Protocol v3。** Attach／ack／active-run query 是 Pi Host Protocol 的 versioned contract，不是 main-only 私有 IPC。依 ADR-0038 由 v2 升到 v3，更新 negotiation、shared types 與 protocol smoke。這不新增 ADR：ADR-0039 已明定 Host canonical 與 snapshot + cursor；也不把 ADR-0040 的 automation queue record 混成 attachment record。
 
-- **A：main 的 `piHostSupervisor`。** main 已經活過 renderer reload，也已經持有那個 pending 的 `turn/submit`；attachment record 放它旁邊即可。不動 Pi Host Protocol、不需 ADR-0038 版本升級、Pi child 完全不改。代價：main 死掉救不回來——那正是本 effort 明確排除的範圍。
-- **B：Pi Host child 的 durable journal。** attach/ack 進 Pi Host Protocol 本身，依 ADR-0038 升 protocol 版本，ADR-0040 的 journal 要擴出 automation queue 之外。好處是連 main 重啟也能救；代價是改動大很多，且複製一份 supervisor 已有的狀態。
-
-**這個選擇改變 ticket 03（attachment record）與 04（介面）的形狀，但不改變其餘任何一張票**——協調邏輯、bootstrap 流程、結算冪等、journal 修正、UI 都與它無關。因此 02 可以立刻開工，01 平行決策。決策後回填本節。
-
-**已確認的兩個決定**
+**其餘已確認的決定**
 
 - **測試形狀：純協調模組 + 真實重啟 e2e，兩者都做。** fixture 證明每個競態下的邏輯正確，e2e 證明真實時序下整條路徑接得起來；兩者互補。
 - **只處理 renderer 重啟。** main／Host process 重啟不在範圍內。
 
-**Attachment record。** 為每個 `runId` 保留：目前狀態（active / terminal 的分類）、Turn Record 的 `latestSeq` high-watermark、終局結果、以及 acknowledgement 狀態。`turn/submit` 的結果**寫進這份 record**，而不是只回覆給當初那個 invoke——所以 renderer 不在時結果有地方落地。保留到 renderer 明確 ack 或保留策略到期為止，兩者都是有界的。落地層由 01 決定。
+**Attachment record。** 為每個 `runId` 在 Pi Core Host 保留：目前狀態（active / terminal 的分類）、`sessionId`／`threadId`／turn identity、Turn Record 的 `latestSeq` high-watermark、不可逆的 Pi execution settlement、bounded terminal summary、以及 acknowledgement 狀態。`turn/submit` 的結果先寫進這份 record，再回覆當初 invoke。active 保留到 terminal；terminal 到 ack 或 24 小時 TTL，硬上限 256 筆；summary 最多 64 KiB。清理不逐出 active record。record 不含 prompt、完整工具輸出或 raw credentials，且不複製 Turn Record entries。
 
-**attach / ack 介面（feature-detected）。** 兩個方法：一個回傳「有界 snapshot + cursor 之後的 ordered events」，一個做 acknowledgement 釋放保留。Snapshot 帶 `latestSeq` 與 `total`，缺口以明確欄位回報，不用「少了幾筆你自己算」。renderer 一律 `window.subagents?.x` 偵測。介面放在哪一層由 01 決定：選 A 則**不新增 Pi Host Protocol 方法**（`sessions/record` 的 cursor API 已存在且夠用，新東西只在 main↔renderer 這一層，不觸發 ADR-0038 升版）；選 B 則需依 ADR-0038 升版。
+**attach / ack / active query 介面（feature-detected）。** Attach 回傳「有界 snapshot + cursor 之後的 ordered events」，ack 冪等釋放 terminal retention，active query 供 bootstrap／startup reconcile。Snapshot 每次最多 200 entries，帶 `latestSeq`、`total`、`availableFromSeq` 與明確 gap，不用「少了幾筆你自己算」。renderer 一律 `window.subagents?.piHost` 偵測；main／preload 只做 typed relay。
 
 **訂閱先於 snapshot。** 先註冊 listener 並緩衝，再取 snapshot，最後依 `seq` 合併——否則 snapshot 請求與 listener 註冊之間會有 startup gap。研究文件已經指出這一點，照它做。
 
@@ -83,17 +78,17 @@ ADR-0039 早就規定了正確行為：「after renderer reload or Host restart,
 
 **High-watermark 單調。** `recordTotal` 改由 snapshot 的 `total` / `latestSeq` 校準，取 monotonic max；不再用「本次 buffer 新增幾筆」累加，否則 backfill 會被當成新事件而膨脹。
 
-**結算仍然只有一個出口。** 重新附著是**觀察與協調**，不是第二個 ingress：它不呼叫 `dispatchThreadTask`、不呼叫 `startExecution`、不觸發第二次 model turn。terminal 結果經由 attachment record 交回 `taskRunCoordinator` 既有的 unique finalization，冪等地跑一次。既有的 finalize-idempotency 保證要延伸到「原 renderer 的 finalizer 與重啟後 renderer 的協調競跑」這一案。
+**兩層 settlement，各自只有一個 owner。** Pi execution settlement 只由 Pi Core Host 決定並先寫 journal；terminal 後不可被 late event 改寫。重新附著是**觀察與協調**，不是第二個 ingress：它不呼叫 `dispatchThreadTask`、不呼叫 `startExecution`、不觸發第二次 model turn。它只把 Host terminal outcome 交回 `taskRunCoordinator` 既有的 unique app finalization，冪等完成 summary／afterRun／Archive／`onSettled`／release／drain。既有的 finalize-idempotency 保證要延伸到「原 renderer 的 finalizer 與重啟後 renderer 的協調競跑」這一案。
 
-**容量與 registry 重建。** 重新附著必須把 run 放回 run registry 並重新佔用容量，否則 reload 之後 `maxConcurrentRuns` 形同虛設、同 thread 也可能開出第二個 run。這是 story 10/11 的實作位置。
+**容量與 registry 重建。** 重新附著必須以 Host active query 把 run 放回 renderer run registry 投影並重新佔用容量；bootstrap reconciliation 完成前，新的 admission fail closed／等待。否則 reload 之後 `maxConcurrentRuns` 形同虛設、同 thread 也可能開出第二個 run。這是 story 10/11 的實作位置。
 
 **Cancel 語意不變。** 取消維持 `cancel_requested` 直到 Host ack；terminal 之後抵達的 late success 不得把 cancelled／failed 改回成功。這是既有語意，重新附著只是要在跨 renderer 實例時仍然成立。
 
 **Retryable ≠ terminal。** transport 層的重連失敗與 run 的終局失敗必須是不同的東西，UI 不得把前者顯示成後者。
 
-**`reconcileStartup()` 改為先問再標。** 目前它無條件把 active 狀態標成 `interrupted`。改成：先取得 main 仍認得的 active run 集合，只有不在集合裡的才標 interrupted。main 不可用（plain browser、bridge 缺席）時維持現行行為——那個情況下 renderer 的死亡確實等於 run 的死亡。
+**`reconcileStartup()` 改為先問再標。** 目前它無條件把 active 狀態標成 `interrupted`。改成：先取得 Pi Core Host 仍認得的 active／terminal attachment 集合；active 不標 interrupted，terminal 交給 app finalization，只有兩者都查不到的才標 interrupted。Host bridge 不可用（plain browser、bridge 缺席）時維持現行行為——那個情況下 renderer 的死亡確實等於 run 的死亡。
 
-**Journal 的角色。** `runJournal` 維持 local-first 的**投遞追蹤**用途（`pending-delivery` / `consumed` 那套不動）。它不是重新附著的真相來源；真相來自 main 的 attachment record 與 Host 的 Turn Record。兩者的分工要寫進模組註解，避免下一個人以為 journal 是權威。
+**Journal 的角色。** renderer `runJournal` 維持 local-first 的**投遞追蹤**用途（`pending-delivery` / `consumed` 那套不動）。它不是重新附著的真相來源；真相來自 Pi Core Host attachment journal 與同一 Host 的 Turn Record。兩者的分工要寫進模組註解，避免下一個人以為 renderer journal 是權威。
 
 **UI 最後做。** 先證明生命週期正確，再加畫面。重新附著中的狀態、缺口告知沿用既有 Turn Record 投影與既有 design token，不新增第二個進度來源、不新增假百分比。
 
@@ -110,7 +105,7 @@ ADR-0039 早就規定了正確行為：「after renderer reload or Host restart,
 
 - `smoke-finalize-idempotency` — 加「原 renderer finalizer 與重啟後協調競跑，仍只結算一次」。
 - `smoke-run-completion-reachability` — 加「renderer 在 Host terminal append 之後、finalization 之前重啟，結果仍然到得了使用者」。
-- `smoke-run-journal-durability` / `smoke-run-journal` — 加「`reconcileStartup` 不再把 main 仍認得的 active run 標成 interrupted」。
+- `smoke-run-journal-durability` / `smoke-run-journal` — 加「`reconcileStartup` 不再把 Pi Core Host 仍認得的 active run 標成 interrupted，且 Host terminal attachment 走 app finalization」。
 - `smoke-run-lifecycle` — 加重新附著後的 lifecycle 相位。
 - `smoke-live-timeline` — 加「snapshot 與 live 重疊時，合併後的投影與從未斷線的投影逐列相同」。
 - `smoke-steer-enqueue-fallback` — 加「跨 reload 的同 thread 佇列順序不變」。
@@ -124,14 +119,14 @@ ADR-0039 早就規定了正確行為：「after renderer reload or Host restart,
 - **main／Host process 重啟與機器重開。** Pi child 隨父程序而死，in-flight turn 目前無法跨越；那需要 on-disk 的 in-flight 持久化與可續跑的 Pi child，是另一個 effort。這些情況下 `reconcileStartup` 標 interrupted 是**正確的**，維持現狀。
 - **`runResume`（parked run 續跑）。** 那是用續跑目標開一個**新的** run，與附著到**仍在執行**的 run 是不同的問題，本 effort 不動它。
 - **External CLI runner 的重新附著。** 本 effort 只處理 Pi Core Host 路徑；external CLI 有自己的 supervision policy 與 durable harness。
-- **（視 01 決策）Pi Host Protocol 版本升級。** 選 A 則不新增 protocol 方法、不觸發 ADR-0038 升版；選 B 則升版屬於範圍內。
+- **Pi Host Protocol v3 以外的無關 protocol 重構。** 本 effort 只加入 attach／ack／active query 與必要 negotiation；不趁機改造其他 method。
 - **TrajectoryPanel 的視窗虛擬化。** 是 `turn-record-fidelity` 既有的刻意未完成項。
 - **新的進度呈現或百分比。** 沿用既有 Turn Record 投影。
 - **跨裝置／跨機器的 run 接續。**
 
 ## Further Notes
 
-- **本 effort 不改變執行或結算的歸屬**，因此不需要新 ADR。ADR-0039 已經指定 Host 為權威、renderer 為可拋棄投影並規定 snapshot+cursor 續傳；本 effort 是它的實作。若實作過程中發現必須新增第二個 coordinator 或移動結算歸屬，**先寫 ADR 再動工**（handoff 的設計性質 10）。
+- **本 effort 不改變執行或 app finalization 的歸屬**，因此不需要新 ADR。ADR-0039 已經指定 Host 為權威、renderer 為可拋棄投影並規定 snapshot+cursor 續傳；本 effort 是它的實作。依 ADR-0038，Pi Host Protocol 由 v2 升到 v3。若實作過程中發現必須新增第二個 coordinator 或移動結算歸屬，**先寫 ADR 再動工**（handoff 的設計性質 10）。
 - CONTEXT.md 對 **UI Projection（UI 投影）** 的定義已經寫著「rebuilt from a snapshot plus events after a cursor」——這個詞彙已經存在，本 effort 讓定義成真。文件與 issue 一律使用 glossary 的詞：Task run、Loop run、Chat turn、Pi Core Host、UI Projection、Execution evidence。
 - 研究成果在 `.scratch/run-progress-lifecycle/research.md`，其中的 reconnect 演算法（先訂閱 → 取 snapshot → generation 相同才安裝 → 依 seq 合併）與六項差距排序是本 spec 的依據，不在此重述。
 - 現行 worktree 刻意是 dirty 的，含使用者自有變更；**不得 reset、覆蓋或大範圍重排**。
@@ -153,4 +148,4 @@ ADR-0039 早就規定了正確行為：「after renderer reload or Host restart,
 | 10 | [真實重啟 e2e](issues/10-real-restart-e2e.md) | 06 |
 | 11 | [qualification](issues/11-qualification.md) | 01–10 |
 
-**開工順序**：01（決策）與 02（純模組）可同時開始——協調邏輯不受真相歸屬影響。01 決完 → 03 → 04 → 05 → 06，之後 07／08／09／10 可並行，11 收口。
+**開工順序**：01 已 resolved。02 可立即開始；03 → 04 → 05（同時依賴 02）→ 06，之後 07／08／09／10 可並行，11 收口。

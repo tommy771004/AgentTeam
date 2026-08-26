@@ -2,7 +2,6 @@ import { strict as assert } from 'node:assert'
 import {
   anchorScrollTopAfterPrepend,
   computeTrajectoryWindow,
-  EMPTY_TRAJECTORY_WINDOW_SLICE,
   TRAJECTORY_ROW_HEIGHT,
 } from '../src/agent/trajectoryWindow.ts'
 
@@ -104,6 +103,5 @@ const OVERSCAN = 8
 // --- the shared row height is a real measurement slot ------------------------
 
 assert.ok(Number.isFinite(TRAJECTORY_ROW_HEIGHT) && TRAJECTORY_ROW_HEIGHT > 0)
-assert.deepEqual(EMPTY_TRAJECTORY_WINDOW_SLICE, { startIndex: 0, endIndex: 0, topSpacerHeight: 0, bottomSpacerHeight: 0 })
 
 console.log('smoke-trajectory-window: green')

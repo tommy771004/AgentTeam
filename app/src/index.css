@@ -203,7 +203,14 @@ html[data-theme='light'] .glass-panel {
 
 html[data-theme='light'] .material-sidebar,
 html[data-theme='light'] aside.sidebar-panel {
-  background: var(--color-surface) !important;
+  /* 液態玻璃（淺色）— 以淺色表面為基底的半透明材質 */
+  --sidebar-glass-tint: rgba(251, 252, 250, 0.6);
+  --sidebar-glass-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.42),
+    transparent 26%
+  );
+  --sidebar-glass-edge: rgba(255, 255, 255, 0.5);
   border-color: var(--color-line);
 }
 
@@ -298,9 +305,24 @@ html[data-theme='light'] .app-panel {
 
 /* Sidebar / header material */
 .material-sidebar {
-  background: var(--color-surface);
+  /* 液態玻璃 — 半透明 tint + 背景 blur/saturate + 邊緣高光（specular edge）。
+     實體模式由 data-sidebar-solid='true' 覆寫為不透明。 */
+  --sidebar-glass-tint: rgba(20, 24, 21, 0.64);
+  --sidebar-glass-sheen: linear-gradient(
+    180deg,
+    rgba(52, 60, 55, 0.2),
+    transparent 26%
+  );
+  --sidebar-glass-edge: rgba(237, 242, 237, 0.05);
+  background:
+    var(--sidebar-glass-sheen),
+    var(--sidebar-glass-tint);
+  backdrop-filter: blur(32px) saturate(160%);
+  -webkit-backdrop-filter: blur(32px) saturate(160%);
   border-right: 1px solid var(--color-line);
-  box-shadow: none;
+  box-shadow:
+    inset 1px 0 0 var(--sidebar-glass-edge),
+    inset 0 1px 0 var(--sidebar-glass-edge);
 }
 
 .material-header {
@@ -1286,11 +1308,20 @@ html[data-theme='light'] .agent-question-card { background: var(--color-surface)
    The product is information-dense, so hierarchy comes from tone and spacing.
    Keep borders quiet, reserve accent for state, and never hide live content
    while a decorative animation is settling. */
-.sidebar-panel,
-.sidebar-panel.material-sidebar {
-  background: var(--color-surface) !important;
+html:not([data-sidebar-solid='true']) .sidebar-panel,
+html:not([data-sidebar-solid='true']) .sidebar-panel.material-sidebar {
+  background:
+    var(--sidebar-glass-sheen),
+    var(--sidebar-glass-tint) !important;
   border-right-color: var(--color-line) !important;
-  box-shadow: none !important;
+  box-shadow:
+    inset 1px 0 0 var(--sidebar-glass-edge),
+    inset 0 1px 0 var(--sidebar-glass-edge) !important;
+}
+
+html:not([data-sidebar-solid='true']) .sidebar-panel {
+  backdrop-filter: blur(32px) saturate(160%);
+  -webkit-backdrop-filter: blur(32px) saturate(160%);
 }
 
 .sidebar-panel .macos-nav-item[aria-current='page'] {

@@ -5,7 +5,7 @@ Spec: `.scratch/active-run-reattachment/spec.md`
 
 ## What to build
 
-一條真正的 Electron e2e:對**真實的 Pi Host** 起一個 run,在執行中途銷毀並重建 renderer,然後驗證它重新附著、時間軸重建、繼續收到更新、可以取消、並且恰好結算一次。
+一條真正的 Electron e2e:對**真實的 Pi Core Host（protocol v3）** 起一個 run,在執行中途銷毀並重建 renderer,然後驗證它從 Host journal 重新附著、時間軸重建、繼續收到更新、可以取消、並且恰好結算一次。
 
 02 的 fixture 證明協調邏輯在每個競態下都對;這條 e2e 證明**真實時序**下整條路徑真的接得起來——訂閱時機、IPC 生命週期、保留與 ack、容量重建,這些是 fixture 看不到的。兩者互補,缺一不可。
 

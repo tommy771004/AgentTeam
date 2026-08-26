@@ -11,6 +11,13 @@
  *    a reader is on must stay where it was; identity (`seq`) resolves the
  *    same row before and after the merge, the index delta times the row
  *    height is the whole compensation.
+ *
+ * Known simplification, deliberate: the model treats scroller content as
+ * exactly `rowCount × rowHeight`, ignoring non-row siblings (the load-older
+ * button, error rows). Their height only skews the maxScroll clamp slightly —
+ * the clamp errs toward showing more, never loses rows — and bottomSpacer is
+ * zero precisely where those elements sit. Variable heights would reopen the
+ * measurement pass.
  */
 
 /** Single-line truncated rows render at one height today. The measurement
@@ -33,14 +40,6 @@ export type TrajectoryWindowSlice = {
   endIndex: number
   topSpacerHeight: number
   bottomSpacerHeight: number
-}
-
-/** Shared empty slice — one identity instead of re-created literals. */
-export const EMPTY_TRAJECTORY_WINDOW_SLICE: TrajectoryWindowSlice = {
-  startIndex: 0,
-  endIndex: 0,
-  topSpacerHeight: 0,
-  bottomSpacerHeight: 0,
 }
 
 export function computeTrajectoryWindow(input: TrajectoryWindowInput): TrajectoryWindowSlice {

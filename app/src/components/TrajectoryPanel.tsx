@@ -6,6 +6,7 @@ import {
   anchorScrollTopAfterPrepend,
   computeTrajectoryWindow,
   TRAJECTORY_ROW_HEIGHT,
+  type TrajectoryWindowInput,
   type TrajectoryWindowSlice,
 } from '../agent/trajectoryWindow'
 import { Icon } from './Icon'
@@ -30,6 +31,16 @@ const PAGE_LIMIT = 50
  * trajectory-review-closure owns this number. */
 const OVERSCAN = 8
 const EMPTY_ROWS: TrajectoryRow[] = []
+
+function windowInputFrom(scroller: { scrollTop: number; clientHeight: number }, rowCount: number): TrajectoryWindowInput {
+  return {
+    rowCount,
+    rowHeight: TRAJECTORY_ROW_HEIGHT,
+    overscan: OVERSCAN,
+    scrollTop: scroller.scrollTop,
+    viewportHeight: scroller.clientHeight,
+  }
+}
 
 function hostPageLoader(): RecordPageLoader | undefined {
   const read = window.subagents?.piHost?.sessions?.record
@@ -91,7 +102,8 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
   const rowsRef = useRef<TrajectoryRow[]>(EMPTY_ROWS)
   // Set while an older page is in flight so the reader's row can be held
   // stationary when the merge prepends everything by exactly its length.
-  const pendingAnchor = useRef<{ scrollTopBefore: number; indexBefore: number; seq: number } | null>(null)
+  // `generation` marks ownership: a superseded request clears only its own.
+  const pendingAnchor = useRef<{ generation: number; scrollTopBefore: number; indexBefore: number; seq: number } | null>(null)
   // `hostPageLoader` closes over the bridge. Memoising it is required: a fresh
   // function per render would recreate `read`, rerun the loading effect, and
   // start another async page request after every state update.
@@ -105,13 +117,7 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
   const syncWindow = useCallback(() => {
     const element = scroller.current
     if (!element) return
-    const next = computeTrajectoryWindow({
-      rowCount: rowsRef.current.length,
-      rowHeight: TRAJECTORY_ROW_HEIGHT,
-      overscan: OVERSCAN,
-      scrollTop: element.scrollTop,
-      viewportHeight: element.clientHeight,
-    })
+    const next = computeTrajectoryWindow(windowInputFrom(element, rowsRef.current.length))
     setSlice((current) =>
       current &&
       current.startIndex === next.startIndex &&
@@ -125,9 +131,11 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
 
   const read = useCallback(async (before?: number) => {
     if (!loader) return
+    const generation = ++requestGeneration.current
     // Before asking for an older page, remember which row the reader is on.
     // After the merge prepends everything by that page's length, this seq is
-    // what holds their place still.
+    // what holds their place still. The anchor carries its generation: a
+    // superseded request must never clear or apply a newer request's anchor.
     if (before !== undefined) {
       const element = scroller.current
       const rowButtons = element?.querySelectorAll<HTMLButtonElement>('[data-trajectory-row]')
@@ -144,6 +152,7 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
         const seq = Number(topVisible.dataset.seq)
         if (Number.isFinite(seq)) {
           pendingAnchor.current = {
+            generation,
             scrollTopBefore: element.scrollTop,
             indexBefore: Number(topVisible.dataset.index),
             seq,
@@ -151,19 +160,24 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
         }
       }
     }
-    const generation = ++requestGeneration.current
     setLoading(true)
     setError(null)
     try {
       const next = await loader(sessionId, before, PAGE_LIMIT)
-      if (generation !== requestGeneration.current) return
+      if (generation !== requestGeneration.current) {
+        if (pendingAnchor.current?.generation === generation) pendingAnchor.current = null
+        return
+      }
       setPage((current) => (current && before !== undefined
         // An older page is merged by record identity; overlapping/retried
         // pages cannot duplicate a row or lower the Host high-watermark.
         ? mergeTrajectoryPages(next, current)
         : next))
     } catch (cause) {
-      if (generation !== requestGeneration.current) return
+      if (generation !== requestGeneration.current) {
+        if (pendingAnchor.current?.generation === generation) pendingAnchor.current = null
+        return
+      }
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       if (generation === requestGeneration.current) setLoading(false)
@@ -236,13 +250,7 @@ export function TrajectoryPanel({ sessionId, loadPage }: { sessionId: string; lo
   const rows = view?.rows ?? EMPTY_ROWS
   // Before the first window sync lands, derive the range from the same real
   // metrics the sync would use — no hand-built literal, no full-list flash.
-  const range = slice ?? computeTrajectoryWindow({
-    rowCount: rows.length,
-    rowHeight: TRAJECTORY_ROW_HEIGHT,
-    overscan: OVERSCAN,
-    scrollTop: scroller.current?.scrollTop ?? 0,
-    viewportHeight: scroller.current?.clientHeight ?? 0,
-  })
+  const range = slice ?? computeTrajectoryWindow(windowInputFrom(scroller.current ?? { scrollTop: 0, clientHeight: 0 }, rows.length))
   const mountedRows = rows.slice(range.startIndex, range.endIndex)
   const selectedRow = view?.rows.find((row) => row.seq === selected)
   const selectedStep = selectedRow

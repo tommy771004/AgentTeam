@@ -6,16 +6,20 @@
 
 1. 本分支（虛擬化已生效）。`npm run dev` 開 app。
 2. 任選一個有 Host session 的 thread，打開任一 run 的「執行軌跡」section。
-3. 臨時把面板改為吃 fixture（量完還原）：
+3. 臨時把面板改為吃 fixture（量完還原，`git checkout -- <file>`）：
+
+```bash
+# 1) 把 fixture 複製到 src 底下（vite 才解析得到；scripts/ 在 renderer bundle 外）
+cp app/scripts/trajectory-measurement-fixture.mts app/src/dev-trajectory-fixture.mts
+```
 
 ```tsx
-// components/InlineRunPanel.tsx 內，僅供量測：
-import { createFixturePageLoader } from '../scripts-fixtures/trajectory-measurement-fixture'
+// 2) components/InlineRunPanel.tsx 內，僅供量測：
+import { createFixturePageLoader } from '../dev-trajectory-fixture'
 <TrajectoryPanel sessionId="fixture" loadPage={createFixturePageLoader(20_000)} />
 ```
 
-> fixture 檔在 `app/scripts/trajectory-measurement-fixture.mts`；若 import 路徑不便，
-> 複製一份到 `src/` 底下量測後刪除。20_000 turns ≈ 100_000 列。
+> 20_000 turns ≈ 100_000 列。量完刪除 `app/src/dev-trajectory-fixture.mts` 還原兩處。
 
 ## 要量的數字
 

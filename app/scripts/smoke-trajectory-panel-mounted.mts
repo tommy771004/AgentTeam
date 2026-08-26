@@ -20,18 +20,18 @@ const read = (file: string) => readFileSync(`${root}${file}`, 'utf8')
 function assertMounted(container: string): void {
   assert.ok(
     container.includes('<TrajectoryPanel'),
-    'InlineRunPanel 必須掛載 <TrajectoryPanel>：軌跡檢視不得再次變成無人掛載的孤兒元件',
+    'InlineRunPanel 必須掛載 <TrajectoryPanel>：軌跡檢視不得再次變成無人掛載的孤兒元件（owner: .scratch/trajectory-review-closure；guard/smokes: app/scripts/smoke-trajectory-*.mts）',
   )
 }
 
 function assertWindowed(panel: string): void {
   assert.ok(
     panel.includes('computeTrajectoryWindow'),
-    'TrajectoryPanel 必須經過 trajectoryWindow 的純函式窗口，不得自行掛載全部列',
+    'TrajectoryPanel 必須經過 trajectoryWindow 的純函式窗口，不得自行掛載全部列（owner: .scratch/trajectory-review-closure/issues/01）',
   )
   assert.ok(
     !panel.includes('view?.rows.map('),
-    '軌跡列必須經切片後渲染；直接 map 全部已載入列是虛擬化的退化',
+    '軌跡列必須經切片後渲染；直接 map 全部已載入列是虛擬化的退化（owner: .scratch/trajectory-review-closure）',
   )
 }
 
@@ -40,7 +40,7 @@ function assertDegrade(panel: string): void {
   // «record» alone would survive deleting the detection itself.
   assert.ok(
     panel.includes('piHost?.sessions?.record'),
-    'TrajectoryPanel 必須保留對 piHost sessions.record 的功能偵測（plain-browser 降級）',
+    'TrajectoryPanel 必須保留對 piHost sessions.record 的功能偵測（plain-browser 降級；owner: .scratch/trajectory-review-closure/issues/02）',
   )
 }
 
