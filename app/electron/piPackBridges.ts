@@ -17,7 +17,20 @@ import { DurableMemoryStoreError } from './durableMemoryStore.ts'
 export type PiMemoryBridgeAccess = {
   search: (query: string, limit: number, ctx: PiToolContext) => Promise<PiMemory[]>
   get: (id: string, ctx: PiToolContext) => Promise<PiMemory | undefined>
-  add: (memory: PiMemory, ctx: PiToolContext) => Promise<PiMemory>
+  set: (input: { key: string; text: string; tags: string[] }, ctx: PiToolContext) => Promise<PiMemoryWriteReceipt>
+  append: (input: { text: string; tags: string[] }, ctx: PiToolContext) => Promise<PiMemoryWriteReceipt>
+}
+
+/** Metadata-only identity returned after the SQLite commit. */
+export type PiMemoryWriteReceipt = {
+  operation: 'set' | 'append'
+  id: string
+  logicalKey: string
+  scope: 'project'
+  revision: number
+  runId: string
+  sessionId: string
+  callId: string
 }
 
 let memoryBridge: PiMemoryBridgeAccess | undefined

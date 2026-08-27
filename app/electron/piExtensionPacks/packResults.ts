@@ -23,6 +23,7 @@ export function structuredOk(text: string, data: Record<string, unknown> = {}): 
   return { content: [{ type: 'text', text }], details: { ok: true, ...data } }
 }
 
-export function structuredFailure(error: string): PiToolResult {
-  return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error }) }], details: { ok: false, error } }
+export function structuredFailure(error: string, data: Record<string, unknown> = {}): PiToolResult {
+  const details = { ok: false, error, ...data }
+  return { content: [{ type: 'text', text: JSON.stringify(details) }], details }
 }

@@ -3,7 +3,7 @@ import {
   type DurableMemoryStore, type DurableMemoryEntry, type MemoryAccessContext, type MemoryEntryDraft, type MemoryScope,
 } from './durableMemoryStore.ts'
 import { isPiMemory, type PiMemory } from './piMemoryExtension.ts'
-import type { PiMemoryBridgeAccess } from './piPackBridges.ts'
+import type { PiMemoryBridgeAccess, PiMemoryWriteReceipt } from './piPackBridges.ts'
 import { piSessionRunBinding, type PiToolContext } from './piToolHost.ts'
 
 // Only the parent management protocol uses this context. Packs never receive it.
@@ -12,11 +12,12 @@ const managementAccess: MemoryAccessContext = {
 }
 
 export type PiMemoryChange = {
-  operation: 'upsert' | 'delete' | 'clear'
+  operation: 'upsert' | 'append' | 'delete' | 'clear'
   revision: number
   changed: number
   scope: MemoryScope | { kind: 'all' }
   logicalKey: string
+  write?: PiMemoryWriteReceipt
 }
 type PublishChange = (change: PiMemoryChange) => void
 
@@ -78,10 +79,58 @@ export async function handleLegacyMemory(
 
 function runtimeAccess(ctx: PiToolContext): MemoryAccessContext {
   const binding = piSessionRunBinding(ctx.sessionId)
-  if (!ctx.runId || binding?.runId !== ctx.runId || !binding.memoryAccess) {
+  const access = binding?.memoryAccess
+  if (!ctx.runId || binding?.runId !== ctx.runId || !access
+    || access.origin !== 'runtime' || !access.canonicalProject
+    || access.runId !== ctx.runId || access.sessionId !== ctx.sessionId) {
     throw new DurableMemoryStoreError('forbidden', '記憶工具需要有效任務與凍結的記憶權限。')
   }
-  return { ...binding.memoryAccess, ...(ctx.callId ? { callId: ctx.callId } : {}) }
+  return { ...access, ...(ctx.callId ? { callId: ctx.callId } : {}) }
+}
+
+function memoryWriteReceipt(
+  operation: PiMemoryWriteReceipt['operation'],
+  entry: DurableMemoryEntry,
+  access: MemoryAccessContext,
+): PiMemoryWriteReceipt {
+  if (entry.scope.kind !== 'project' || !access.runId || !access.sessionId || !access.callId) {
+    throw new DurableMemoryStoreError('invalid_input', '記憶寫入缺少 project/run/session/call identity。')
+  }
+  return {
+    operation,
+    id: entry.id,
+    logicalKey: entry.logicalKey,
+    scope: 'project',
+    revision: entry.revision,
+    runId: access.runId,
+    sessionId: access.sessionId,
+    callId: access.callId,
+  }
+}
+
+async function commitRuntimeMemory(
+  store: DurableMemoryStore,
+  access: MemoryAccessContext,
+  operation: PiMemoryWriteReceipt['operation'],
+  draft: MemoryEntryDraft,
+  publish?: PublishChange,
+): Promise<PiMemoryWriteReceipt> {
+  const before = await store.revision()
+  const entry = operation === 'append'
+    ? await store.append({ access, ...draft })
+    : await store.upsert({ access, ...draft })
+  const write = memoryWriteReceipt(operation, entry, access)
+  if (entry.revision > before) {
+    publish?.({
+      operation: operation === 'append' ? 'append' : 'upsert',
+      revision: entry.revision,
+      changed: 1,
+      scope: entry.scope,
+      logicalKey: entry.logicalKey,
+      write,
+    })
+  }
+  return write
 }
 
 export function createPiDurableMemoryBridge(store: DurableMemoryStore, publish?: PublishChange): PiMemoryBridgeAccess {
@@ -95,10 +144,28 @@ export function createPiDurableMemoryBridge(store: DurableMemoryStore, publish?:
       const found = project || await store.get({ access, scope: { kind: 'global' }, logicalKey: id })
       return found ? piMemoryProjection(found) : undefined
     },
-    add: async (memory, ctx) => {
+    set: async (input, ctx) => {
       const access = runtimeAccess(ctx)
-      return writePiMemory(store, access, {
-        ...memory, project: access.canonicalProject,
+      return commitRuntimeMemory(store, access, 'set', {
+        scope: { kind: 'project', project: access.canonicalProject! },
+        logicalKey: input.key,
+        kind: 'memory',
+        text: input.text,
+        tags: input.tags,
+        createdAt: piSessionRunBinding(ctx.sessionId)!.memoryCreatedAt!,
+      }, publish)
+    },
+    append: async (input, ctx) => {
+      const access = runtimeAccess(ctx)
+      if (!access.runId || !access.callId) {
+        throw new DurableMemoryStoreError('invalid_input', '記憶寫入缺少 run/call identity。')
+      }
+      return commitRuntimeMemory(store, access, 'append', {
+        scope: { kind: 'project', project: access.canonicalProject! },
+        logicalKey: `mem-${access.runId}-${access.callId}`,
+        kind: 'memory',
+        text: input.text,
+        tags: input.tags,
         createdAt: piSessionRunBinding(ctx.sessionId)!.memoryCreatedAt!,
       }, publish)
     },

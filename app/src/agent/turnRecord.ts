@@ -150,6 +150,35 @@ export type TurnRecordToolContractIdentity = {
   contractStatus?: 'not-in-turn-contract' | 'catalogued-not-in-turn-contract'
 }
 
+/** Commit receipt only; private durable-memory content never enters the record. */
+export type TurnRecordMemoryWrite = {
+  operation: 'set' | 'append'
+  id: string
+  logicalKey: string
+  scope: 'project'
+  revision: number
+  runId: string
+  sessionId: string
+  callId: string
+}
+
+export function asTurnRecordMemoryWrite(value: unknown, expectedCallId?: string): TurnRecordMemoryWrite | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const write = value as Record<string, unknown>
+  const strings = [
+    [write.id, 512],
+    [write.logicalKey, 256],
+    [write.runId, 512],
+    [write.sessionId, 512],
+    [write.callId, 512],
+  ] as const
+  if (!strings.every(([item, max]) => typeof item === 'string' && item.length > 0 && item.length <= max)) return undefined
+  if (write.operation !== 'set' && write.operation !== 'append') return undefined
+  if (write.scope !== 'project' || !Number.isSafeInteger(write.revision) || Number(write.revision) < 1) return undefined
+  if (expectedCallId !== undefined && write.callId !== expectedCallId) return undefined
+  return write as TurnRecordMemoryWrite
+}
+
 export type TurnRecordEntry = TurnRecordCoordinates &
   (
     | {
@@ -221,6 +250,7 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         callId: string
         settlement: 'success' | 'failed' | 'cancelled' | 'denied'
         detail?: string
+        memoryWrite?: TurnRecordMemoryWrite
       } & TurnRecordToolContractIdentity)
     | ({
         /** Host-owned policy/evidence lifecycle for a migrated invocation. */
@@ -338,6 +368,9 @@ function isMemoryRecallEntry(entry: Record<string, unknown>): boolean {
 function isHostContextEntry(entry: Record<string, unknown>): boolean {
   if (entry.kind === 'memory-recall') return isMemoryRecallEntry(entry)
   if (entry.kind === 'notice') return typeof entry.topic === 'string' && typeof entry.text === 'string'
+  if (entry.kind === 'tool-result') {
+    return entry.memoryWrite === undefined || Boolean(asTurnRecordMemoryWrite(entry.memoryWrite, String(entry.callId || '')))
+  }
   return true
 }
 

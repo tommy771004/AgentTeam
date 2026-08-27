@@ -185,6 +185,11 @@ export type PiHostEvent =
         summaryChars?: number
         estimatedTokens?: number
         checkpointed?: boolean
+        operation?: 'set' | 'append'
+        logicalKey?: string
+        scope?: 'project'
+        revision?: number
+        callId?: string
       }
     }
   | {
@@ -221,6 +226,7 @@ import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
 import type { PiMemory } from './piMemoryExtension.ts'
 import { createPiDurableMemoryBridge, handleLegacyMemory, listPiMemories, piMemoryProjection, writePiMemory, type PiMemoryChange } from './piDurableMemory.ts'
+import type { PiMemoryWriteReceipt } from './piPackBridges.ts'
 import {
   canonicalMemoryDraft,
   canonicalProjectId,
@@ -247,7 +253,7 @@ import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
 import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
 import { callPiMcpTool, listPiMcpTools, piMcpGenerationKey, reloadPiMcp, stopPiMcp } from './piMcpClient.ts'
 import { isCompletedModelCall, isPiHostDefinitionOfDoneMet, isPiTurnSettlement, piTurnFinalAnswer, piTurnResultText, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
-import { appendTurnRecord, derivePiHistory, nextTurnRecordSeq, pageTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordEntry, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
+import { appendTurnRecord, asTurnRecordMemoryWrite, derivePiHistory, nextTurnRecordSeq, pageTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordEntry, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
 import type { CompactionCheckpointSaveInput, CompactionManifest, CompactionReason } from '../src/agent/compactionCheckpoint.ts'
 import { cancelSubDesignProviderRun, executeSubDesignProviderStage } from './subDesignProviderRuntime.ts'
 import { shouldStopForProviderProjection, type SubDesignPluginExecutionProjection } from '../src/agent/subdesign/pluginExecution.ts'
@@ -750,6 +756,34 @@ function publishInTurnToolEvent(
   if (emit) emit(event)
 }
 
+function memoryWriteReceiptFromResult(value: unknown): PiMemoryWriteReceipt | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const details = record.details && typeof record.details === 'object' ? record.details as Record<string, unknown> : record
+  return asTurnRecordMemoryWrite(details.memoryWrite)
+}
+
+function memoryWriteRecordFields(value: unknown, callId: string): { memoryWrite?: PiMemoryWriteReceipt } {
+  const memoryWrite = memoryWriteReceiptFromResult(value)
+  return memoryWrite?.callId === callId ? { memoryWrite } : {}
+}
+
+function memoryWriteToolResultFields(value: unknown, callId: string): { item?: { memoryWrite: PiMemoryWriteReceipt } } {
+  const memoryWrite = memoryWriteReceiptFromResult(value)
+  return memoryWrite?.callId === callId ? { item: { memoryWrite } } : {}
+}
+
+function piToolExecutionFailed(event: Record<string, unknown>, toolName: string): boolean {
+  if (event.isError === true) return true
+  // Memory writes promise commit durability, so their typed CONTENT failure
+  // must settle as failed. Other packs retain their existing transport-level
+  // settlement until their own contracts explicitly opt into this semantic.
+  if (!toolName.startsWith('memory_')) return false
+  if (!event.result || typeof event.result !== 'object') return false
+  const details = (event.result as { details?: unknown }).details
+  return Boolean(details && typeof details === 'object' && (details as { ok?: unknown }).ok === false)
+}
+
 function recordToolAudit(state: HostState, sessionId: unknown, event: PiHostEvent): void {
   if (typeof sessionId !== 'string') return
   const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
@@ -787,6 +821,7 @@ function recordToolAudit(state: HostState, sessionId: unknown, event: PiHostEven
         ? record.settlement
         : 'failed',
       ...(record.reason ? { detail: record.reason } : {}),
+      ...memoryWriteRecordFields(payload.item, record.callId),
       ...(payload.contractRevision !== undefined ? {
         contractRevision: payload.contractRevision,
         contractDigest: payload.contractDigest,
@@ -1266,6 +1301,22 @@ function claimMemoryRevision(state: HostState, revision: number, changed: boolea
 function publishPiMemoryChange(state: HostState, change: PiMemoryChange, emit: (message: PiHostEvent) => void): void {
   if (claimMemoryRevision(state, change.revision, change.changed > 0)) {
     emit(durableMemoryChangedEvent(change.operation, change.revision, change.changed, change.scope, change.logicalKey))
+    if (change.write) {
+      emit({
+        event: 'host/context',
+        payload: {
+          runId: change.write.runId,
+          sessionId: change.write.sessionId,
+          phase: 'memory-written',
+          written: 1,
+          operation: change.write.operation,
+          logicalKey: change.write.logicalKey,
+          scope: change.write.scope,
+          revision: change.write.revision,
+          callId: change.write.callId,
+        },
+      })
+    }
   }
 }
 
@@ -2788,11 +2839,13 @@ export function handlePiHostRequest(
             // an ordinary failure: "the agent could not" and "the gate said
             // no" are different facts.
             const toolCallId = typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`
+            const toolName = typeof event.toolName === 'string' ? event.toolName : 'tool'
             const denialReason = consumePiDeniedInTurnCall(sessionId, toolCallId)
+            const toolFailed = piToolExecutionFailed(event, toolName)
             settlePiModelBuiltinInvocation({
               sessionId,
               callId: toolCallId,
-              failed: event.isError === true,
+              failed: toolFailed,
               detail: denialReason,
             })
             const identity = recorder.toolIdentities.get(toolCallId)
@@ -2801,7 +2854,6 @@ export function handlePiHostRequest(
             // its one terminal result. Pi's blocked execution_end confirms the
             // gate held, but must not create a second terminal result.
             if (denialReason === undefined) {
-              const toolName = typeof event.toolName === 'string' ? event.toolName : 'tool'
               // A tool the catalog knows but this turn never activated did not
               // "fail" — it was refused. Reporting it as a failure makes a
               // policy outcome look like a broken tool, and hides the one thing
@@ -2822,7 +2874,7 @@ export function handlePiHostRequest(
                 : undefined
               const settlement = refusedAsInactive
                 ? 'denied' as const
-                : event.isError === true ? 'failed' as const : 'success' as const
+                : toolFailed ? 'failed' as const : 'success' as const
               // The one terminal for this call, in the event stream, the
               // session audit and the durable record. `recordToolAudit` is the
               // single writer of the record entry — writing it here as well
@@ -2834,6 +2886,7 @@ export function handlePiHostRequest(
                 payload: {
                   runId, tool: toolName, callId: toolCallId, settlement,
                   ...(refusedAsInactive ? { reason: refusedAsInactive } : {}),
+                  ...memoryWriteToolResultFields(event.result, toolCallId),
                   ...(identity || {}),
                 },
               })

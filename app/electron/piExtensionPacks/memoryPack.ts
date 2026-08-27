@@ -1,6 +1,7 @@
 import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
 import { piMemoryBridge } from '../piPackBridges.ts'
 import { memoryDecayFactor, memoryStalenessNote } from '../../src/agent/hermes/memory.ts'
+import { DurableMemoryStoreError, type MemoryStoreErrorCode } from '../durableMemoryStore.ts'
 import { structuredFailure, structuredOk } from './packResults.ts'
 
 /**
@@ -31,18 +32,16 @@ const memorySet: PiPackTool = {
     required: ['key', 'text'],
   },
   execute: async (args, ctx) => {
-    if (ctx.temporaryChat) return structuredFailure('temporary chat 不寫入記憶')
+    if (ctx.temporaryChat) return memoryFailure('temporary chat 不寫入記憶', 'forbidden')
     const key = String(args.key || '').trim()
     const text = String(args.text || '').trim()
-    if (!key || !text) return structuredFailure('key 與 text 必填')
-    await piMemoryBridge().add({
-      id: key,
-      project: ctx.cwd,
-      text,
-      tags: ['curated', `session:${ctx.sessionId}`],
-      createdAt: new Date().toISOString(),
-    }, ctx)
-    return structuredOk(`已記住 ${key}`, { id: key })
+    if (!key || !text) return memoryFailure('key 與 text 必填', 'invalid_input')
+    try {
+      const memoryWrite = await piMemoryBridge().set({ key, text, tags: ['curated', `session:${ctx.sessionId}`] }, ctx)
+      return structuredOk(`已記住 ${key}`, { id: key, memoryWrite })
+    } catch (error) {
+      return memoryStoreFailure(error)
+    }
   },
 }
 
@@ -57,9 +56,13 @@ const memoryGet: PiPackTool = {
     required: ['id'],
   },
   execute: async (args, ctx) => {
-    const found = await piMemoryBridge().get(String(args.id || '').trim(), ctx)
-    if (!found) return structuredFailure(`找不到記憶：${String(args.id || '')}`)
-    return structuredOk(found.text, found)
+    try {
+      const found = await piMemoryBridge().get(String(args.id || '').trim(), ctx)
+      if (!found) return memoryFailure(`找不到記憶：${String(args.id || '')}`, 'not_found')
+      return structuredOk(found.text, found)
+    } catch (error) {
+      return memoryStoreFailure(error)
+    }
   },
 }
 
@@ -77,15 +80,18 @@ const memoryAppend: PiPackTool = {
     required: ['text'],
   },
   execute: async (args, ctx) => {
-    if (ctx.temporaryChat) return structuredFailure('temporary chat 不寫入記憶')
+    if (ctx.temporaryChat) return memoryFailure('temporary chat 不寫入記憶', 'forbidden')
     const text = String(args.text || '').trim()
-    if (!text) return structuredFailure('text 必填')
+    if (!text) return memoryFailure('text 必填', 'invalid_input')
     const rawTags = Array.isArray(args.tags) ? args.tags : []
     const tags = ['auto', ...rawTags.map((tag) => String(tag)).filter(Boolean), `session:${ctx.sessionId}`]
-    if (!ctx.runId || !ctx.callId) return structuredFailure('記憶寫入缺少 run/call identity')
-    const id = `mem-${ctx.runId}-${ctx.callId}`
-    await piMemoryBridge().add({ id, project: ctx.cwd, text, tags, createdAt: new Date().toISOString() }, ctx)
-    return structuredOk(`已附加記憶 ${id}`, { id })
+    if (!ctx.runId || !ctx.callId) return memoryFailure('記憶寫入缺少 run/call identity', 'invalid_input')
+    try {
+      const memoryWrite = await piMemoryBridge().append({ text, tags }, ctx)
+      return structuredOk(`已附加記憶 ${memoryWrite.logicalKey}`, { id: memoryWrite.logicalKey, memoryWrite })
+    } catch (error) {
+      return memoryStoreFailure(error)
+    }
   },
 }
 
@@ -104,9 +110,14 @@ const memorySearch: PiPackTool = {
   },
   execute: async (args, ctx) => {
     const query = String(args.query || '').trim()
-    if (!query) return structuredFailure('query 必填')
+    if (!query) return memoryFailure('query 必填', 'invalid_input')
     const nowMs = Date.now()
-    const hits = await piMemoryBridge().search(query, Math.max(1, Math.min(10, Number(args.limit) || 5)), ctx)
+    let hits
+    try {
+      hits = await piMemoryBridge().search(query, Math.max(1, Math.min(10, Number(args.limit) || 5)), ctx)
+    } catch (error) {
+      return memoryStoreFailure(error)
+    }
     // Staleness rides WITH the hit, so old automatic memories announce
     // themselves instead of reading as current fact.
     const lines = hits.map((hit) => `- [${hit.id}] ${hit.text}${memoryStalenessNote(hit, nowMs)}`)
@@ -115,6 +126,15 @@ const memorySearch: PiPackTool = {
       details: { ok: true, results: hits.map((hit) => ({ ...hit, decayFactor: memoryDecayFactor(hit, nowMs), stalenessNote: memoryStalenessNote(hit, nowMs) })) },
     }
   },
+}
+
+function memoryFailure(error: string, code: MemoryStoreErrorCode) {
+  return structuredFailure(error, { code })
+}
+
+function memoryStoreFailure(error: unknown) {
+  if (error instanceof DurableMemoryStoreError) return memoryFailure(error.message, error.code)
+  return memoryFailure(error instanceof Error ? error.message : 'Durable memory tool failed', 'unavailable')
 }
 
 
