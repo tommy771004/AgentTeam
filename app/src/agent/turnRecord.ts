@@ -29,9 +29,10 @@ import {
  * payload: a record this build cannot read is refused loudly, never treated as
  * empty. Version 2 adds metadata-only durable-memory recall provenance.
  * Version 3 adds Host-owned Verified Working State snapshots.
+ * Version 4 adds Host-authored blocked proposals and explicit rebase verdicts.
  */
-export const TURN_RECORD_FORMAT_VERSION = 3
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2])
+export const TURN_RECORD_FORMAT_VERSION = 4
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -304,9 +305,9 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         }>
       }
     | {
-        /** What model-authored tool arguments propose, never a completion fact. */
+        /** A candidate patch, never a completion fact; source stays accountable. */
         kind: 'state-proposal'
-        source: 'model'
+        source: 'model' | 'host'
         proposal: WorkingStateProposal
       }
     | {
@@ -411,9 +412,10 @@ function isMemoryRecallEntry(entry: Record<string, unknown>): boolean {
 function isHostContextEntry(entry: Record<string, unknown>): boolean {
   if (entry.kind === 'memory-recall') return isMemoryRecallEntry(entry)
   if (entry.kind === 'state-proposal') {
-    return entry.source === 'model'
+    return (entry.source === 'model' || entry.source === 'host')
       && Object.keys(entry).every((key) => ['kind', 'source', 'proposal', 'seq', 'turn', 'step', 'at'].includes(key))
       && isWorkingStateProposal(entry.proposal)
+      && entry.source === entry.proposal.source
   }
   if (entry.kind === 'state-check') {
     return entry.source === 'host'

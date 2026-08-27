@@ -1,5 +1,5 @@
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
 import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatalog.ts'
@@ -273,6 +273,7 @@ import {
   isWorkingExecutionEvidence,
   isWorkingGoalCompletionPredicate,
   type WorkingExecutionEvidence,
+  type WorkingGoalSeed,
   type WorkingState,
   type WorkingStateProposal,
   type WorkingToolSettlement,
@@ -283,6 +284,7 @@ import { shouldStopForProviderProjection, type SubDesignPluginExecutionProjectio
 import {
   cancelPiApprovalsForRun,
   consumePiDeniedInTurnCall,
+  consumePiWorkingWriteCanonicalPath,
   settlePiModelBuiltinInvocation,
   executePiPackTool,
   findPiPackTool,
@@ -408,17 +410,36 @@ function workingStateForAdmittedTurn(
   runId: string,
   objective: string,
   completionPredicate: unknown,
+  goals: readonly WorkingGoalSeed[] | undefined,
 ): WorkingState {
   return createInitialWorkingState({
     runId,
     objective,
     constraints: session.context?.constraints,
     ...(isWorkingGoalCompletionPredicate(completionPredicate) ? { completionPredicate } : {}),
+    ...(goals?.length ? { goals } : {}),
   })
 }
 
 function requestedWorkingGoal(input: { params?: Record<string, unknown> }): unknown {
   return input.params?.workingGoal
+}
+
+function requestedWorkingGoals(input: { params?: Record<string, unknown> }): WorkingGoalSeed[] | undefined {
+  const value = input.params?.workingGoals
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length < 1 || value.length > 100) throw new Error('workingGoals must contain 1 to 100 valid goals')
+  return value.map((item) => {
+    if (!item || typeof item !== 'object') throw new Error('workingGoals contains a malformed goal')
+    const seed = item as Record<string, unknown>
+    if (Object.keys(seed).some((key) => key !== 'description' && key !== 'completionPredicate')) throw new Error('workingGoals contains an unknown field')
+    if (typeof seed.description !== 'string' || !seed.description.trim() || seed.description.length > 800) throw new Error('workingGoals contains an invalid description')
+    if (seed.completionPredicate !== undefined && !isWorkingGoalCompletionPredicate(seed.completionPredicate)) throw new Error('workingGoals contains an invalid completion predicate')
+    return {
+      description: seed.description,
+      ...(seed.completionPredicate ? { completionPredicate: seed.completionPredicate } : {}),
+    }
+  })
 }
 
 function fileWriteStateProposal(
@@ -427,10 +448,18 @@ function fileWriteStateProposal(
   callId: string,
   args: unknown,
 ): WorkingStateProposal | undefined {
-  const goal = state.goals.find((candidate) => candidate.status === 'pending' && candidate.completionPredicate?.kind === 'file-content')
-  if (!goal || tool !== 'write' || !args || typeof args !== 'object') return undefined
+  if (tool !== 'write' || !args || typeof args !== 'object') return undefined
   const values = args as Record<string, unknown>
   if (typeof values.path !== 'string' || !values.path || typeof values.content !== 'string') return undefined
+  const contentSha256 = createHash('sha256').update(values.content).digest('hex')
+  const goal = state.goals.find((candidate) => candidate.status !== 'done'
+    && candidate.completionPredicate?.kind === 'file-content'
+    && candidate.completionPredicate.path === values.path
+    && candidate.completionPredicate.sha256 === contentSha256)
+    || state.goals.find((candidate) => candidate.status !== 'done'
+      && candidate.completionPredicate?.kind === 'file-content'
+      && candidate.completionPredicate.path === values.path)
+  if (!goal) return undefined
   const modelEvidenceClaimed = Object.keys(values).some((key) => /^(evidence|evidenceId|attestation|issuedBy)$/i.test(key))
   return {
     schemaVersion: 1,
@@ -444,7 +473,7 @@ function fileWriteStateProposal(
     callId,
     file: {
       path: values.path,
-      sha256: createHash('sha256').update(values.content).digest('hex'),
+      sha256: contentSha256,
     },
     ...(modelEvidenceClaimed ? { modelEvidenceClaimed: true } : {}),
   }
@@ -458,6 +487,7 @@ function hostFileWriteEvidence(input: {
   trustedResult: unknown
 }): WorkingExecutionEvidence | undefined {
   if (input.settlement !== 'success'
+    || input.proposal.proposedStatus !== 'done'
     || input.proposal.tool !== 'write'
     || input.identity?.toolSource !== 'builtin'
     || typeof input.identity.contractDigest !== 'string'
@@ -548,6 +578,8 @@ type ActiveTurnRecorder = {
   toolIdentities: Map<string, TurnRecordToolContractIdentity>
   /** Model-authored completion proposals awaiting the exact terminal result. */
   stateProposals: Map<string, WorkingStateProposal>
+  /** Immutable state all sibling tool drafts in the current model step saw. */
+  proposalState: WorkingState
   /**
    * The seq the commit will start from, read once when the turn opened.
    * `session.record` does not change while a turn runs, so an entry's live
@@ -1033,6 +1065,7 @@ function commitCheckedWorkingState(input: {
   proposal: WorkingStateProposal | undefined
   callId: string
   settlement: WorkingToolSettlement
+  evidenceStillApplicable?: boolean
 }): WorkingState {
   if (!input.proposal) return input.workingState
   let terminalIndex = -1
@@ -1046,17 +1079,54 @@ function commitCheckedWorkingState(input: {
   const terminalEntry = terminalIndex >= 0 ? input.recorder.entries[terminalIndex] : undefined
   const executionEvidence = terminalEntry?.kind === 'tool-result' ? terminalEntry.executionEvidence : undefined
   const settlement = terminalEntry?.kind === 'tool-result' ? terminalEntry.settlement : input.settlement
+  const proposal = settlement === 'success' || input.proposal.proposedStatus === 'blocked'
+    ? input.proposal
+    : blockedProposalFromToolOutcome(input.proposal, settlement, terminalEntry?.kind === 'tool-result' ? terminalEntry.detail : undefined)
+  if (proposal !== input.proposal) {
+    recordTurnEntry(input.sessionId, { kind: 'state-proposal', source: 'host', proposal })
+  }
   const checked = checkWorkingStateProposal({
     state: input.workingState,
-    proposal: input.proposal,
+    proposal,
     settlement,
     evidence: executionEvidence,
     evidenceSeq: terminalIndex >= 0 ? input.recorder.seqBase + terminalIndex : 0,
+    evidenceStillApplicable: input.evidenceStillApplicable,
   })
   recordTurnEntry(input.sessionId, { kind: 'state-check', source: 'host', check: checked.check })
-  if (checked.verdict !== 'accepted') return input.workingState
+  if (checked.verdict === 'rejected') return input.workingState
   recordTurnEntry(input.sessionId, { kind: 'working-state', source: 'host', state: checked.state })
   return checked.state
+}
+
+function proposalEvidenceStillApplies(canonicalPath: string | undefined, proposal: WorkingStateProposal): boolean {
+  if (proposal.proposedStatus !== 'done') return true
+  if (!canonicalPath) return false
+  try {
+    return createHash('sha256').update(readFileSync(canonicalPath)).digest('hex') === proposal.file.sha256
+  } catch {
+    return false
+  }
+}
+
+function blockedProposalFromToolOutcome(
+  proposal: WorkingStateProposal,
+  settlement: Exclude<WorkingToolSettlement, 'success'>,
+  detail?: string,
+): WorkingStateProposal {
+  const boundedDetail = detail?.replace(/\s+/g, ' ').trim().slice(0, 500)
+  return {
+    schemaVersion: 1,
+    proposalId: `${proposal.proposalId}:blocked:${settlement}`,
+    source: 'host',
+    baseRevision: proposal.baseRevision,
+    runId: proposal.runId,
+    goalId: proposal.goalId,
+    proposedStatus: 'blocked',
+    tool: proposal.tool,
+    callId: proposal.callId,
+    blocker: boundedDetail || `${proposal.tool} ${settlement}; the requested effect was not verified`,
+  }
 }
 
 function recordFileWriteStateProposal(input: {
@@ -1070,7 +1140,7 @@ function recordFileWriteStateProposal(input: {
   const proposal = fileWriteStateProposal(input.workingState, input.tool, input.callId, input.args)
   if (!proposal) return
   input.recorder.stateProposals.set(input.callId, proposal)
-  recordTurnEntry(input.sessionId, { kind: 'state-proposal', source: 'model', proposal })
+  recordTurnEntry(input.sessionId, { kind: 'state-proposal', source: proposal.source, proposal })
 }
 
 const DIRECT_TOOL_ENVELOPE_FIELDS = new Set([
@@ -2937,12 +3007,20 @@ export function handlePiHostRequest(
     const preloaded = Array.isArray(input.params?.preloadedCapabilities) ? input.params?.preloadedCapabilities : []
     // One turn, one record. Opened here so every later entry — the model's,
     // the tools', the approvals' — lands in the order it actually happened.
+    let admittedWorkingGoals: WorkingGoalSeed[] | undefined
+    try {
+      admittedWorkingGoals = requestedWorkingGoals(input)
+    } catch (error) {
+      return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid workingGoals')]
+    }
+    const initialWorkingState = workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input), admittedWorkingGoals)
     const recorder: ActiveTurnRecorder = {
       turn: nextTurnNumber(session.record),
       step: 1,
       entries: [],
       toolIdentities: new Map(),
       stateProposals: new Map(),
+      proposalState: initialWorkingState,
       seqBase: nextTurnRecordSeq(session.record),
       reasoning: [],
       // Only when there is a live stream to feed. A batch caller receives the
@@ -2967,7 +3045,7 @@ export function handlePiHostRequest(
     })
     activeTurnRecorders.set(sessionId, recorder)
     recordTurnEntry(sessionId, { kind: 'turn-start', source: 'host' })
-    let workingState = workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input))
+    let workingState = initialWorkingState
     recordTurnEntry(sessionId, { kind: 'working-state', source: 'host', state: workingState })
     // Trusted Host verification starts from the admitted run/view. No field in
     // contextPolicy, model text, or tool args can supply or deserialize it.
@@ -3176,9 +3254,16 @@ export function handlePiHostRequest(
         if (activeRunState?.cancelled) return { settlement: 'cancelled' as const, result: '' }
         publishOrchestration('iterate', iteration)
         recorder.step = iteration
+        recorder.proposalState = workingState
         // Whether this step recorded any assistant message of its own; if the
         // stream carried none, the settled answer stands in for them.
         let spokenThisStep = false
+        const pendingStateSettlements: Array<{
+          proposal: WorkingStateProposal
+          callId: string
+          settlement: WorkingToolSettlement
+          canonicalPath?: string
+        }> = []
         recordTurnEntry(sessionId, { kind: 'step-start', source: 'host' })
         recordTurnEntry(sessionId, { kind: 'user-text', source: 'user', content: iteration === 1 ? prompt : iterationPrompt })
         const turn = await runPiTurn(sessionId, cwd, iterationPrompt, session.messages, (event) => {
@@ -3241,7 +3326,7 @@ export function handlePiHostRequest(
               ...(event.args !== undefined ? { args: event.args } : {}),
               ...(identity || {}),
             })
-            recordFileWriteStateProposal({ sessionId, recorder, workingState, tool: toolName, callId, args: event.args })
+            recordFileWriteStateProposal({ sessionId, recorder, workingState: recorder.proposalState, tool: toolName, callId, args: event.args })
             // Issue 16: an in-turn call gets the same observable lifecycle as
             // a direct-protocol one — start, decision, exactly one terminal.
             // Previously only the DENY path published anything terminal, so an
@@ -3287,14 +3372,8 @@ export function handlePiHostRequest(
               trustedResult: event.result,
               eventIsError: event.isError === true,
             })
-            workingState = commitCheckedWorkingState({
-              sessionId,
-              recorder,
-              workingState,
-              proposal,
-              callId: toolCallId,
-              settlement: terminalSettlement,
-            })
+            const canonicalPath = consumePiWorkingWriteCanonicalPath(runId, toolCallId)
+            if (proposal) pendingStateSettlements.push({ proposal, callId: toolCallId, settlement: terminalSettlement, ...(canonicalPath ? { canonicalPath } : {}) })
             recorder.toolIdentities.delete(toolCallId)
             recorder.stateProposals.delete(toolCallId)
           }
@@ -3347,6 +3426,29 @@ export function handlePiHostRequest(
             turnEvents,
           })
         })
+        // Arbitrate only after every sibling effect in this model step has
+        // settled. A later write may invalidate an earlier read-back receipt;
+        // that stale evidence is rejected rather than leaving a false `done`.
+        const arbitratedStateSettlements = pendingStateSettlements
+          .map((pending, index) => ({
+            ...pending,
+            index,
+            evidenceStillApplicable: proposalEvidenceStillApplies(pending.canonicalPath, pending.proposal),
+          }))
+          .sort((left, right) => {
+            const leftPriority = left.settlement === 'success' && left.evidenceStillApplicable ? 0 : 1
+            const rightPriority = right.settlement === 'success' && right.evidenceStillApplicable ? 0 : 1
+            return leftPriority - rightPriority || left.index - right.index
+          })
+        for (const pending of arbitratedStateSettlements) {
+          const { canonicalPath: _canonicalPath, index: _index, ...checked } = pending
+          workingState = commitCheckedWorkingState({
+            sessionId,
+            recorder,
+            workingState,
+            ...checked,
+          })
+        }
         session.piSessionFile ||= getPiSessionFile(sessionId)
         // A completed model call records its round; only an answered one has
         // text to join the conversation history.

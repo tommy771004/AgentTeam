@@ -777,6 +777,18 @@ export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: 
 
 export const WORKING_EXECUTION_EVIDENCE_DETAIL_KEY = 'workingExecutionEvidence'
 
+const workingWriteCanonicalPaths = new Map<string, string>()
+
+const workingWriteEffectKey = (runId: string, callId: string) => `${runId}\u0000${callId}`
+
+/** Host-private path captured by Pi's write resolver; never exposed to the model. */
+export function consumePiWorkingWriteCanonicalPath(runId: string, callId: string): string | undefined {
+  const key = workingWriteEffectKey(runId, callId)
+  const path = workingWriteCanonicalPaths.get(key)
+  workingWriteCanonicalPaths.delete(key)
+  return path
+}
+
 type PiWriteToolDefinition = {
   execute: (
     toolCallId: string,
@@ -813,6 +825,7 @@ export function wrapPiBuiltinWriteWithEvidence(input: {
   cwd: string
   factory: PiWriteToolFactory
   evidenceContext: () => PiWriteEvidenceContext | undefined
+  onEvidenceIssued?: (runId: string, callId: string, absolutePath: string) => void
 }): PiWriteToolDefinition {
   let activeEffect: { absolutePath?: string } | undefined
   let executionQueue: Promise<void> = Promise.resolve()
@@ -845,6 +858,7 @@ export function wrapPiBuiltinWriteWithEvidence(input: {
               contractDigest: identity.contractDigest,
               schemaDigest: identity.schemaDigest,
             })
+            input.onEvidenceIssued?.(identity.runId, toolCallId, effect.absolutePath)
             return { ...result, details: { [WORKING_EXECUTION_EVIDENCE_DETAIL_KEY]: evidence } }
           } catch {
             return result
@@ -869,6 +883,9 @@ export function piWorkingStateWriteToolDefinition(input: {
   return wrapPiBuiltinWriteWithEvidence({
     cwd: input.cwd,
     factory: input.factory,
+    onEvidenceIssued: (runId, callId, absolutePath) => {
+      workingWriteCanonicalPaths.set(workingWriteEffectKey(runId, callId), absolutePath)
+    },
     evidenceContext: () => {
       const binding = piSessionRunBinding(input.sessionId)
       const identity = policyEvidenceBridge?.contractIdentity(input.sessionId, 'write')

@@ -52,7 +52,7 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
-assert.equal(TURN_RECORD_FORMAT_VERSION, 3, 'Working State is an explicit Turn Record format evolution')
+assert.equal(TURN_RECORD_FORMAT_VERSION, 4, 'blocked/rebased Working State is an explicit Turn Record format evolution')
 const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
 assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')

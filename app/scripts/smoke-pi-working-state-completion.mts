@@ -88,6 +88,111 @@ assert.equal(checkWorkingStateProposal({
   evidenceSeq: 3,
 }).verdict, 'rejected', 'missing evidence fails closed')
 
+const blockedProposal = {
+  schemaVersion: 1 as const,
+  proposalId: 'proposal:checker-run:call-blocked',
+  source: 'host' as const,
+  baseRevision: 1,
+  runId: 'checker-run',
+  goalId: 'checker-run:goal:1',
+  proposedStatus: 'blocked' as const,
+  tool: 'write',
+  callId: 'call-blocked',
+  blocker: 'write denied by the frozen Host policy',
+}
+const blocked = checkWorkingStateProposal({
+  state: checkerState,
+  proposal: blockedProposal,
+  settlement: 'denied',
+  evidence: undefined,
+  evidenceSeq: 0,
+})
+assert.equal(blocked.verdict, 'accepted')
+assert.equal(blocked.state?.revision, 2)
+assert.equal(blocked.state?.goals[0]?.status, 'blocked')
+assert.equal(blocked.state?.goals[0]?.blocker, blockedProposal.blocker)
+assert.equal(blocked.check.currentRevision, 1)
+assert.equal(blocked.check.committedRevision, 2)
+
+assert.equal(checkWorkingStateProposal({
+  state: checkerState,
+  proposal: { ...checkerProposal, baseRevision: 2 },
+  settlement: 'success',
+  evidence: checkerEvidence,
+  evidenceSeq: 3,
+}).reason, 'future-base-revision')
+assert.equal(checkWorkingStateProposal({
+  state: checkerState,
+  proposal: { ...blockedProposal, blocker: 'x'.repeat(801) },
+  settlement: 'failed',
+  evidence: undefined,
+  evidenceSeq: 0,
+}).reason, 'proposal-malformed')
+
+const resolvedBlock = checkWorkingStateProposal({
+  state: blocked.state!,
+  proposal: { ...checkerProposal, baseRevision: 2 },
+  settlement: 'success',
+  evidence: checkerEvidence,
+  evidenceSeq: 4,
+})
+assert.equal(resolvedBlock.verdict, 'accepted')
+assert.equal(resolvedBlock.state?.goals[0]?.status, 'done')
+assert.equal(resolvedBlock.state?.goals[0]?.blocker, undefined)
+assert.equal(checkWorkingStateProposal({
+  state: resolvedBlock.state!,
+  proposal: { ...blockedProposal, baseRevision: 3 },
+  settlement: 'failed',
+  evidence: undefined,
+  evidenceSeq: 0,
+}).reason, 'illegal-done-transition')
+
+const secondWriteResult = await checkerWrite.execute('call-2', { path: 'second.txt', content: 'second\n' })
+const secondEvidence = (secondWriteResult.details as Record<string, unknown>).workingExecutionEvidence as WorkingExecutionEvidence
+const parallelState = {
+  ...checkerState,
+  goals: [
+    checkerState.goals[0]!,
+    {
+      id: 'checker-run:goal:2',
+      description: 'write second.txt',
+      status: 'pending' as const,
+      evidence: [],
+      completionPredicate: { kind: 'file-content' as const, path: 'second.txt', sha256: sha256('second\n') },
+    },
+  ],
+}
+const firstCommit = checkWorkingStateProposal({
+  state: parallelState,
+  proposal: checkerProposal,
+  settlement: 'success',
+  evidence: checkerEvidence,
+  evidenceSeq: 3,
+})
+const rebasedCommit = checkWorkingStateProposal({
+  state: firstCommit.state!,
+  proposal: {
+    ...checkerProposal,
+    proposalId: 'proposal:checker-run:call-2',
+    goalId: 'checker-run:goal:2',
+    callId: 'call-2',
+    file: { path: 'second.txt', sha256: sha256('second\n') },
+  },
+  settlement: 'success',
+  evidence: secondEvidence,
+  evidenceSeq: 5,
+})
+assert.equal(rebasedCommit.verdict, 'rebased')
+assert.equal(rebasedCommit.state?.revision, 3)
+assert.deepEqual(rebasedCommit.state?.goals.map((goal) => goal.status), ['done', 'done'])
+assert.equal(checkWorkingStateProposal({
+  state: firstCommit.state!,
+  proposal: checkerProposal,
+  settlement: 'success',
+  evidence: checkerEvidence,
+  evidenceSeq: 5,
+}).reason, 'stale-goal-conflict', 'same-goal stale proposal cannot overwrite the first commit')
+
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-working-state-host-'))
 const agentDir = await mkdtemp(join(tmpdir(), 'pi-working-state-agent-'))
 const statePath = join(stateDir, 'state.json')
@@ -108,19 +213,79 @@ const modelServer = createServer(async (request, response) => {
   for await (const part of request) void part
   completions += 1
   response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive', 'cache-control': 'no-cache' })
-  if (completions === 1) {
-    response.write(chunk({ role: 'assistant', content: '寫入指定內容。' }, null))
+  if (completions === 1 || completions === 4 || completions === 6 || completions === 8 || completions === 10) {
+    response.write(chunk({ role: 'assistant', content: completions === 1
+      ? '寫入指定內容。'
+      : completions === 4
+        ? '同一步提出兩個衝突寫入。'
+        : completions === 6
+          ? '嘗試一個會失敗的寫入。'
+          : completions === 8 ? '同一步完成兩個獨立目標。' : '先失敗，再由 sibling 完成同一目標。' }, null))
     response.write(chunk({
-      tool_calls: [{
-        index: 0,
-        id: 'call_write_verified',
-        type: 'function',
-        function: { name: 'write', arguments: JSON.stringify({ path: 'result.txt', content: 'verified\n' }) },
-      }],
+      tool_calls: completions === 1
+        ? [{
+            index: 0,
+            id: 'call_write_verified',
+            type: 'function',
+            function: { name: 'write', arguments: JSON.stringify({ path: 'result.txt', content: 'verified\n' }) },
+          }]
+        : completions === 4 ? [
+            {
+              index: 0,
+              id: 'call_race_first',
+              type: 'function',
+              function: { name: 'write', arguments: JSON.stringify({ path: 'race.txt', content: 'race\n' }) },
+            },
+            {
+              index: 1,
+              id: 'call_race_stale',
+              type: 'function',
+              function: { name: 'write', arguments: JSON.stringify({ path: 'race.txt', content: 'overwritten\n' }) },
+            },
+          ] : completions === 8 ? [
+            {
+              index: 0,
+              id: 'call_multi_first',
+              type: 'function',
+              function: { name: 'write', arguments: JSON.stringify({ path: 'nested/../first.txt', content: 'first\n' }) },
+            },
+            {
+              index: 1,
+              id: 'call_multi_second',
+              type: 'function',
+              function: { name: 'write', arguments: JSON.stringify({ path: 'second.txt', content: 'second\n' }) },
+            },
+          ] : completions === 10 ? [
+            {
+              index: 0,
+              id: 'call_recover_failed',
+              type: 'function',
+              function: { name: 'write', arguments: JSON.stringify({ path: 'recover.txt', content: 'recovered\n', unexpected: true }) },
+            },
+            {
+              index: 1,
+              id: 'call_recover_success',
+              type: 'function',
+              function: { name: 'write', arguments: JSON.stringify({ path: 'recover.txt', content: 'recovered\n' }) },
+            },
+          ] : [{
+            index: 0,
+            id: 'call_write_blocked',
+            type: 'function',
+            function: { name: 'write', arguments: JSON.stringify({ path: 'blocked-parent/result.txt', content: 'blocked\n' }) },
+          }],
     }, null))
     response.write(chunk({}, 'tool_calls'))
   } else {
-    response.write(chunk({ role: 'assistant', content: completions === 2 ? '檔案已驗證完成。' : '我宣稱已經完成。' }, null))
+    response.write(chunk({ role: 'assistant', content: completions === 2
+      ? '檔案已驗證完成。'
+      : completions === 5
+        ? '競爭提案已由 Host 仲裁。'
+        : completions === 7
+          ? '這個目標目前受檔案系統阻擋。'
+          : completions === 9
+            ? '兩個獨立目標都由 Host 驗證。'
+            : completions === 11 ? '成功 sibling 保留完成狀態。' : '我宣稱已經完成。' }, null))
     response.write(chunk({}, 'stop'))
   }
   response.end('data: [DONE]\n\n')
@@ -237,6 +402,140 @@ try {
   assert.equal(refused.result?.orchestration?.dodMet, false, 'assistant completion text is not DoD evidence')
   assert.equal(refused.result?.workingState?.revision, 1)
   assert.equal(refused.result?.workingState?.goals[0]?.status, 'pending')
+
+  send(6, 'sessions/create', { title: 'CAS proposal race' })
+  const raceSessionId = String((await waitFor(6)).result?.sessionId)
+  send(7, 'turn/submit', {
+    sessionId: raceSessionId,
+    runId: 'working-cas-race-run',
+    cwd: workspace,
+    prompt: '在同一步把 race 寫入 race.txt 兩次，Host 必須仲裁 stale proposal',
+    profile,
+    pattern: 'Goal-based',
+    maxIterations: 1,
+    definitionOfDone: 'race.txt contains exact verified content',
+    workingGoal: { kind: 'file-content', path: 'race.txt', sha256: sha256('race\n') },
+  })
+  const raced = await waitFor(7)
+  assert.equal(raced.result?.settlement, 'failed')
+  assert.equal(raced.result?.workingState?.revision, 1, 'invalidated sibling evidence must not commit')
+  assert.equal(raced.result?.workingState?.goals[0]?.status, 'pending')
+  const raceEntries = turnRecordEntries({
+    version: TURN_RECORD_FORMAT_VERSION,
+    entries: raced.result?.record?.entries || [],
+  })
+  const raceProposals = raceEntries.filter((entry) => entry.kind === 'state-proposal')
+  const raceChecks = raceEntries.filter((entry) => entry.kind === 'state-check')
+  assert.equal(raceProposals.length, 2)
+  assert.deepEqual(raceProposals.map((entry) => entry.proposal.baseRevision), [1, 1])
+  assert.deepEqual(raceChecks.map((entry) => entry.check.verdict), ['rejected', 'rejected'])
+  assert.deepEqual(raceChecks.map((entry) => entry.check.reason), ['goal-predicate-unmet', 'execution-evidence-invalidated'])
+  assert.equal(await readFile(join(workspace, 'race.txt'), 'utf8'), 'overwritten\n')
+
+  await writeFile(join(workspace, 'blocked-parent'), 'not a directory')
+  send(8, 'sessions/create', { title: 'Concrete blocked state' })
+  const blockedSessionId = String((await waitFor(8)).result?.sessionId)
+  send(9, 'turn/submit', {
+    sessionId: blockedSessionId,
+    runId: 'working-blocked-run',
+    cwd: workspace,
+    prompt: '把 blocked 寫入 blocked-parent/result.txt',
+    profile,
+    pattern: 'Goal-based',
+    maxIterations: 1,
+    definitionOfDone: 'blocked-parent/result.txt exists with exact content',
+    workingGoal: { kind: 'file-content', path: 'blocked-parent/result.txt', sha256: sha256('blocked\n') },
+  })
+  const blockedRun = await waitFor(9)
+  assert.equal(blockedRun.result?.settlement, 'failed')
+  assert.equal(blockedRun.result?.workingState?.revision, 2)
+  assert.equal(blockedRun.result?.workingState?.goals[0]?.status, 'blocked')
+  assert.match(blockedRun.result?.workingState?.goals[0]?.blocker || '', /write failed/)
+  assert.ok((blockedRun.result?.workingState?.goals[0]?.blocker || '').length <= 800)
+  const blockedEntries = turnRecordEntries({
+    version: TURN_RECORD_FORMAT_VERSION,
+    entries: blockedRun.result?.record?.entries || [],
+  })
+  assert.equal(blockedEntries.find((entry) => entry.kind === 'state-proposal' && entry.source === 'host')?.proposal.proposedStatus, 'blocked')
+  assert.equal(blockedEntries.find((entry) => entry.kind === 'state-check')?.check.verdict, 'accepted')
+
+  send(10, 'sessions/create', { title: 'Independent proposal rebase' })
+  const multiSessionId = String((await waitFor(10)).result?.sessionId)
+  send(11, 'turn/submit', {
+    sessionId: multiSessionId,
+    runId: 'working-multi-rebase-run',
+    cwd: workspace,
+    prompt: '同一步寫入 first.txt 與 second.txt，保留兩個獨立進度',
+    profile,
+    pattern: 'Goal-based',
+    maxIterations: 1,
+    definitionOfDone: 'both files contain exact verified content',
+    workingGoals: [
+      { description: 'first.txt exact content', completionPredicate: { kind: 'file-content', path: 'nested/../first.txt', sha256: sha256('first\n') } },
+      { description: 'second.txt exact content', completionPredicate: { kind: 'file-content', path: 'second.txt', sha256: sha256('second\n') } },
+    ],
+  })
+  const multi = await waitFor(11)
+  assert.equal(multi.result?.settlement, 'answered')
+  assert.equal(multi.result?.workingState?.revision, 3)
+  assert.deepEqual(multi.result?.workingState?.goals.map((goal: { status: string }) => goal.status), ['done', 'done'])
+  const multiEntries = turnRecordEntries({
+    version: TURN_RECORD_FORMAT_VERSION,
+    entries: multi.result?.record?.entries || [],
+  })
+  assert.deepEqual(
+    multiEntries.filter((entry) => entry.kind === 'state-proposal').map((entry) => entry.proposal.baseRevision),
+    [1, 1],
+  )
+  assert.deepEqual(
+    multiEntries.filter((entry) => entry.kind === 'state-check').map((entry) => entry.check.verdict),
+    ['accepted', 'rebased'],
+  )
+  assert.deepEqual(
+    multiEntries.filter((entry) => entry.kind === 'working-state').map((entry) => entry.state.revision),
+    [1, 2, 3],
+  )
+
+  send(12, 'sessions/create', { title: 'Malformed multi-goal admission' })
+  const malformedSessionId = String((await waitFor(12)).result?.sessionId)
+  send(13, 'turn/submit', {
+    sessionId: malformedSessionId,
+    runId: 'working-malformed-goals-run',
+    cwd: workspace,
+    prompt: '這個 admission 必須 fail closed',
+    profile,
+    workingGoals: [
+      { description: 'valid', completionPredicate: { kind: 'file-content', path: 'valid.txt', sha256: sha256('valid\n') } },
+      { description: '', completionPredicate: { kind: 'file-content', path: 'dropped.txt', sha256: sha256('dropped\n') } },
+    ],
+  })
+  const malformed = await waitFor(13)
+  assert.equal(malformed.error?.code, 'invalid_request')
+  assert.match(malformed.error?.message || '', /workingGoals contains an invalid description/)
+
+  send(14, 'sessions/create', { title: 'Failed then successful sibling' })
+  const recoveredSessionId = String((await waitFor(14)).result?.sessionId)
+  send(15, 'turn/submit', {
+    sessionId: recoveredSessionId,
+    runId: 'working-recovered-sibling-run',
+    cwd: workspace,
+    prompt: '第一個 sibling 失敗後，第二個完成 recover.txt',
+    profile,
+    pattern: 'Goal-based',
+    maxIterations: 1,
+    definitionOfDone: 'recover.txt contains exact verified content',
+    workingGoal: { kind: 'file-content', path: 'recover.txt', sha256: sha256('recovered\n') },
+  })
+  const recovered = await waitFor(15)
+  assert.equal(recovered.result?.settlement, 'answered')
+  assert.equal(recovered.result?.workingState?.revision, 2)
+  assert.equal(recovered.result?.workingState?.goals[0]?.status, 'done')
+  const recoveredChecks = turnRecordEntries({
+    version: TURN_RECORD_FORMAT_VERSION,
+    entries: recovered.result?.record?.entries || [],
+  }).filter((entry) => entry.kind === 'state-check')
+  assert.equal(recoveredChecks.some((entry) => entry.check.verdict === 'accepted'), true)
+  assert.equal(recoveredChecks.some((entry) => entry.check.verdict === 'rejected'), true)
 } finally {
   host.stdin.end()
   if (host.exitCode === null && host.signalCode === null) await once(host, 'exit')
