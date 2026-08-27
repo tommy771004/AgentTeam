@@ -1,6 +1,6 @@
 # 長期記憶 JSON → SQLite 遷移
 
-> 狀態：`可交給代理`
+> 狀態：`resolved`
 
 ## Problem Statement
 
@@ -172,6 +172,8 @@ renderer 只保留 paged UI Projection，收到 revision event 後 invalidate/re
 - Tickets preserve the single `DurableMemoryStore` seam and use expand–migrate–contract sequencing; every workflow converges on one protocol-level qualification ticket before the effort can close.
 
 ## Tickets
+
+**2026-08-27 對帳：** 16/16 tickets resolved，所有 acceptance checkboxes 已勾選；主 gate 的一 hop 證據為 `app/scripts/smoke-durable-memory-workflow-qualification.mts`，由 `smoke:pi-parity-qualification` 與完整 `npm run smoke` 到達。
 
 | # | Ticket | Blocked by |
 |---|--------|-----------|

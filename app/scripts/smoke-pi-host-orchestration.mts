@@ -53,12 +53,12 @@ const waitFor = async (id: number) => {
   }
 }
 const memoryAdmin = { origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: false }
-const memoryEntry = (logicalKey: string, text: string, tags: string[], createdAt: string, project?: string) => ({
+const memoryEntry = (logicalKey: string, kind: 'memory' | 'profile' | 'document', text: string, tags: string[], createdAt: string, project?: string) => ({
   access: memoryAdmin,
   entry: {
     scope: project ? { kind: 'project', project } : { kind: 'global' },
     logicalKey,
-    kind: logicalKey === 'profile:user' ? 'profile' : logicalKey === 'memory:document' ? 'document' : 'memory',
+    kind,
     text,
     tags,
     createdAt,
@@ -80,15 +80,15 @@ const finalizeRun = async (runId: string, requestId: number) => {
 try {
   host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 5, capabilities: ['memory-store-v1'] } })}\n`)
   await waitFor(1)
-  host.stdin.write(`${JSON.stringify({ id: 20, method: 'memory/v1/upsert', params: memoryEntry('session-rule', 'Keep model changes scoped to the active session', ['session', 'model'], '2026-08-20T00:00:00.000Z', process.cwd()) })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 20, method: 'memory/v1/upsert', params: memoryEntry('session-rule', 'memory', 'Keep model changes scoped to the active session', ['session', 'model'], '2026-08-20T00:00:00.000Z', process.cwd()) })}\n`)
   await waitFor(20)
-  host.stdin.write(`${JSON.stringify({ id: 201, method: 'memory/v1/upsert', params: memoryEntry('global-rule', 'Global model changes must be reviewed', ['session', 'model'], '2026-08-20T00:01:00.000Z') })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 201, method: 'memory/v1/upsert', params: memoryEntry('global-rule', 'memory', 'Global model changes must be reviewed', ['session', 'model'], '2026-08-20T00:01:00.000Z') })}\n`)
   await waitFor(201)
-  host.stdin.write(`${JSON.stringify({ id: 202, method: 'memory/v1/upsert', params: memoryEntry('other-rule', 'OTHER PROJECT PRIVATE model changes', ['session', 'model'], '2026-08-20T00:02:00.000Z', join(stateDir, 'other-project')) })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 202, method: 'memory/v1/upsert', params: memoryEntry('other-rule', 'memory', 'OTHER PROJECT PRIVATE model changes', ['session', 'model'], '2026-08-20T00:02:00.000Z', join(stateDir, 'other-project')) })}\n`)
   await waitFor(202)
-  host.stdin.write(`${JSON.stringify({ id: 220, method: 'memory/v1/upsert', params: memoryEntry('profile:user', 'PROFILE ALWAYS use Traditional Chinese', [], '2026-08-20T00:03:00.000Z') })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 220, method: 'memory/v1/upsert', params: memoryEntry('profile:user', 'profile', 'PROFILE ALWAYS use Traditional Chinese', [], '2026-08-20T00:03:00.000Z') })}\n`)
   await waitFor(220)
-  host.stdin.write(`${JSON.stringify({ id: 221, method: 'memory/v1/upsert', params: memoryEntry('memory:document', 'DOCUMENT ALWAYS architecture rule', [], '2026-08-20T00:04:00.000Z') })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 221, method: 'memory/v1/upsert', params: memoryEntry('memory:document', 'document', 'DOCUMENT ALWAYS architecture rule', [], '2026-08-20T00:04:00.000Z') })}\n`)
   await waitFor(221)
   host.stdin.write(`${JSON.stringify({ id: 2, method: 'sessions/create', params: { title: 'Orchestration smoke' } })}\n`)
   const created = await waitFor(2)

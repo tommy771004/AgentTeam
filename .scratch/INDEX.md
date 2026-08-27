@@ -8,7 +8,6 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 | Effort | Spec | Frontier | Notes |
 |--------|------|----------|-------|
-| **durable-memory-sqlite-migration** | [spec.md](durable-memory-sqlite-migration/spec.md) | [06 Memory Pack 工具完整遷移](durable-memory-sqlite-migration/issues/06-memory-pack-tools-cutover.md) · [07 Task run learning settlement](durable-memory-sqlite-migration/issues/07-run-learning-settlement.md) · [08 Learning／Settings UI Projection](durable-memory-sqlite-migration/issues/08-learning-settings-projection.md) · [13 Host storage lifecycle](durable-memory-sqlite-migration/issues/13-host-storage-lifecycle.md) | #01–05 resolved。#05 以 frozen canonical workspace 執行 current+global recall，Turn Record v2 保存 metadata-only identity／entry+store revision，v1 無損升級；disabled／temporary、bounded selection、live/replay、restart 真 Host 證據全綠。06/07/08/13 現可並行。[復原邊界](durable-memory-sqlite-migration/cutover-recovery.md)。 |
 | **context-usage-panel** | [spec.md](context-usage-panel/spec.md) | [01 usage 記錄擴充 + Host 補抓](context-usage-panel/issues/01-usage-record-capture.md) | 8 張 `可交給代理` tickets（勾選框核實 0/38 勾，確實未動）。opencode 式 session 上下文面板：token/cost/快取落在 `step-end` usage（ADR-0039/0049 語意），單一測試接縫為 `projectContextUsage` 純投影。依賴：01 先行 → 02/03 並行 → 04/06/07 並行 → 05←03+04 → 08 收口。 |
 | **external-cli-durable-harness** | [spec.md](external-cli-durable-harness/spec.md) | [01 External CLI Run Session seam](external-cli-durable-harness/issues/01-expand-external-cli-run-session-seam.md) | 7 張 `可交給代理` tickets（2026-08-26 核實：66 個驗收框全開，確實未動）；01 先建立 expand seam，之後 02/03/05 可並行，04 依賴 02/03，06 依賴 02，07 為完整 qualification。trf#11 的 seam-1 真 CLI 斷言由本 effort 承接。 |
 | **harness-gap-closure** | [spec.md](harness-gap-closure/spec.md) | [01 統一架構敘述](harness-gap-closure/issues/01-unify-architecture-narrative.md) | #15 已補 active + retained run selector，不再固定顯示第一個 active run；其 redaction 類別 UX 仍待完成。其餘 frontier 維持 #01、#07、#10、#11 與 #09 範圍裁決。 |
@@ -20,6 +19,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 | Effort | Status | 一 hop 證據 |
 |--------|--------|------------|
+| durable-memory-sqlite-migration | resolved（16/16 tickets done；[spec.md](durable-memory-sqlite-migration/spec.md)） | `smoke-durable-memory-workflow-qualification.mts` 固定 16 個 lifecycle gates 並做 protocol v5／single-authority audit；build、oxlint、完整 smoke 綠；[復原邊界](durable-memory-sqlite-migration/cutover-recovery.md) |
 | subscription-surface-hardening | resolved（5/5 tickets done；[spec.md](subscription-surface-hardening/spec.md)） | Settings／catalog／usage hardening smokes 全綠；finalization 啟動語意由 active-run-reattachment #12 owning；tracker #05 已完成三項對帳 |
 | trajectory-review-closure | resolved（3/3 tickets done；[spec.md](trajectory-review-closure/spec.md)） | 真 renderer 量測：[evidence](trajectory-review-closure/evidence/measurement-pass.md)；10 頁後 windowed 165 nodes／27 rows，full-map 1,653／275；rowHeight 28、overscan 8 定案 |
 | active-run-reattachment | resolved（12/12 tickets done；[spec.md](active-run-reattachment/spec.md)） | protocol attachment journal／renderer bootstrap／finalization CAS／真 Electron restart e2e 皆有票內證據；#12 記錄 terminal finalization 不阻塞啟動 |

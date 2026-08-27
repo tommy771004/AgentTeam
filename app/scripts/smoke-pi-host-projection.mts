@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 type Message = {
   id?: number
   result?: { cursor?: number; sessions?: unknown[]; queue?: unknown[] }
+  error?: { code?: string }
   event?: string
 }
 
@@ -34,11 +35,19 @@ const start = () => {
   return { child, waitFor }
 }
 
-const request = (child: ChildProcessWithoutNullStreams, id: number, method: string) => {
-  child.stdin.write(`${JSON.stringify({ id, method, params: { protocolVersion: 2 } })}\n`)
+const request = (child: ChildProcessWithoutNullStreams, id: number, method: string, protocolVersion = 5) => {
+  child.stdin.write(`${JSON.stringify({ id, method, params: { protocolVersion } })}\n`)
 }
 
 try {
+  const legacy = start()
+  request(legacy.child, 90, 'initialize', 2)
+  await legacy.waitFor((message) => message.id === 90)
+  request(legacy.child, 91, 'state/snapshot', 2)
+  assert.equal((await legacy.waitFor((message) => message.id === 91)).error?.code, 'protocol_mismatch')
+  legacy.child.stdin.end()
+  await once(legacy.child, 'exit')
+
   const first = start()
   request(first.child, 1, 'initialize')
   await first.waitFor((message) => message.id === 1)
@@ -60,4 +69,4 @@ try {
   await rm(stateDir, { recursive: true, force: true })
 }
 
-console.log('pi host state projection survives restart')
+console.log('pi host v5 state projection survives restart and prior snapshot clients fail closed')
