@@ -879,7 +879,7 @@ await test('Phase 1: run presentation components use explicit run selectors', as
   assert.equal(fs.existsSync(path.join(appRoot, 'src/components/InterventionOverlay.tsx')), false)
   assert.doesNotMatch(continuation, /continueTurn/)
   // Every run-scoped action still resolves an explicit runId, never a global one.
-  assert.match(continuation, /claimCheckpointResume\(runId\)/)
+  assert.doesNotMatch(continuation, /claimCheckpointResume\(runId\)/, 'renderer cannot claim Host resume checkpoints')
   assert.match(agent, /MAX_RUN_AGENT_STATES = 100/)
   assert.match(agent, /pruneRunAgentStates/)
   assert.match(agent, /lastRunIdByThread/)

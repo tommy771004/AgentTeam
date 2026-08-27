@@ -17,6 +17,10 @@
 import { decideBuiltinShellUnderProtection } from '../src/agent/outbound/cliSandbox.ts'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { realpathSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { admitBuiltinShellSandbox, releaseBuiltinShellExecution, wrapVerifiedBuiltinShellCommand, type BuiltinShellSandboxVerification } from './piBuiltinShellSandbox.ts'
 import { decideGitCommand, type GitCommandPolicy } from '../src/agent/tools/gitCommandPolicy.ts'
 import { schemaDigest, type PiToolCatalogEntry } from './piToolContract.ts'
@@ -208,6 +212,7 @@ type PiRunBinding = {
   /** Settings → Git preferences frozen for this run (issue 18). */
   gitPolicy?: GitCommandPolicy
   frozenPolicy?: PiFrozenRunPolicy
+  completedFileEffects?: ReadonlyArray<{ path: string; sha256: string }>
 }
 const sessionRuns = new Map<string, PiRunBinding>()
 
@@ -220,6 +225,7 @@ export function bindPiSessionRun(sessionId: string, binding: {
   shellPolicy?: PiRunBinding['shellPolicy']
   gitPolicy?: PiRunBinding['gitPolicy']
   frozenPolicy?: PiFrozenRunPolicy
+  completedFileEffects?: ReadonlyArray<{ path: string; sha256: string }>
 }): void {
   sessionRuns.set(sessionId, {
     runId: binding.runId,
@@ -230,6 +236,7 @@ export function bindPiSessionRun(sessionId: string, binding: {
     ...(binding.shellPolicy ? { shellPolicy: binding.shellPolicy } : {}),
     ...(binding.gitPolicy ? { gitPolicy: binding.gitPolicy } : {}),
     ...(binding.frozenPolicy ? { frozenPolicy: binding.frozenPolicy } : {}),
+    ...(binding.completedFileEffects ? { completedFileEffects: Object.freeze(binding.completedFileEffects.map((effect) => Object.freeze({ ...effect }))) } : {}),
   })
 }
 
@@ -575,16 +582,41 @@ export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: 
     factory: (pi: InlineExtensionFactoryInput) => {
       pi.on('tool_call', async (event) => {
         const toolName = typeof event.toolName === 'string' ? event.toolName : ''
-        if (!['bash', 'edit', 'find', 'grep', 'ls', 'read', 'write'].includes(toolName)) return undefined
         const binding = piSessionRunBinding(ctx.sessionId)
         const callId = typeof event.toolCallId === 'string' ? event.toolCallId : `${binding?.runId || 'turn'}:${toolName}`
         const contract = policyEvidenceBridge?.contractIdentity(ctx.sessionId, toolName)
+        if (!['bash', 'edit', 'find', 'grep', 'ls', 'read', 'write'].includes(toolName)) {
+          const unsafeResumeTool = binding?.completedFileEffects?.length
+            && (!contract || contract.toolSource === 'builtin' || contract.toolSource === 'mcp')
+          if (unsafeResumeTool) {
+            const reason = `resume replay refused for unclassified or MCP tool: ${toolName}`
+            markPiDeniedInTurnCall(ctx.sessionId, callId, reason)
+            auditPiInTurnDecision({ runId: binding.runId, sessionId: ctx.sessionId, tool: toolName, callId, decision: 'deny', settlement: 'denied', reason })
+            return { block: true, reason }
+          }
+          return undefined
+        }
         const frozenPolicy = binding?.frozenPolicy
         if (!binding || !contract || !frozenPolicy || !policyEvidenceBridge) {
           const reason = `Host policy evidence unavailable for Pi builtin ${toolName}`
           markPiDeniedInTurnCall(ctx.sessionId, callId, reason)
           auditPiInTurnDecision({ runId: binding?.runId || 'turn', sessionId: ctx.sessionId, tool: toolName, callId, decision: 'deny', settlement: 'denied', reason })
           return { block: true, reason }
+        }
+        if (binding.completedFileEffects?.length && (toolName === 'write' || toolName === 'edit' || toolName === 'bash')) {
+          const toolInput = (event.input as Record<string, unknown>) || {}
+          const path = typeof toolInput.path === 'string' ? toolInput.path : ''
+          const canonicalPath = path ? canonicalReplayPath(frozenPolicy.projectRoot, path) : ''
+          const protectedEffect = toolName === 'bash'
+            ? binding.completedFileEffects[0]
+            : binding.completedFileEffects.find((effect) =>
+                canonicalReplayPath(frozenPolicy.projectRoot, effect.path) === canonicalPath)
+          if (protectedEffect) {
+            const reason = `resume replay refused for completed resource: ${protectedEffect.path}`
+            markPiDeniedInTurnCall(ctx.sessionId, callId, reason)
+            auditPiInTurnDecision({ runId: binding.runId, sessionId: ctx.sessionId, tool: toolName, callId, decision: 'deny', settlement: 'denied', reason })
+            return { block: true, reason }
+          }
         }
         const coordinates = { sessionId: ctx.sessionId, runId: binding.runId, callId }
         const evidence = new PiInvocationEvidence({ ...coordinates, tool: toolName, origin: 'model', ...contract }, (entry) => policyEvidenceBridge!.append(ctx.sessionId, entry))
@@ -781,6 +813,19 @@ const workingWriteCanonicalPaths = new Map<string, string>()
 
 const workingWriteEffectKey = (runId: string, callId: string) => `${runId}\u0000${callId}`
 
+function canonicalReplayPath(root: string, value: string): string {
+  let normalized = value.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+  if (normalized.startsWith('@')) normalized = normalized.slice(1)
+  const path = normalized === '~'
+    ? homedir()
+    : normalized.startsWith('~/') || (process.platform === 'win32' && normalized.startsWith('~\\'))
+      ? resolve(homedir(), normalized.slice(2))
+      : /^file:\/\//.test(normalized)
+        ? fileURLToPath(normalized)
+        : resolve(root, normalized)
+  try { return realpathSync.native(path) } catch { return path }
+}
+
 /** Host-private path captured by Pi's write resolver; never exposed to the model. */
 export function consumePiWorkingWriteCanonicalPath(runId: string, callId: string): string | undefined {
   const key = workingWriteEffectKey(runId, callId)
@@ -972,6 +1017,21 @@ export function piPackExtensionFactories(
             })
             return { block: true, reason }
           }
+          const requirements = packPolicyRequirements(tool, (event.input as Record<string, unknown>) || {}, {
+            sessionId: ctx.sessionId,
+            cwd: ctx.cwd,
+            runId: binding?.runId,
+            temporaryChat: binding?.temporaryChat || ctx.temporaryChat,
+          })
+          if (binding.completedFileEffects?.length && requirements.sideEffect) {
+            const reason = `resume replay refused for side-effecting extension tool: ${toolName}`
+            markPiDeniedInTurnCall(ctx.sessionId, callId, reason)
+            auditPiInTurnDecision({
+              runId: binding.runId, sessionId: ctx.sessionId, tool: toolName,
+              callId, decision: 'deny', settlement: 'denied', reason,
+            })
+            return { block: true, reason }
+          }
           const coordinates = { sessionId: ctx.sessionId, runId: binding.runId, callId }
           const evidence = new PiInvocationEvidence({
             ...coordinates,
@@ -987,12 +1047,7 @@ export function piPackExtensionFactories(
             contract,
             args: (event.input as Record<string, unknown>) || {},
             policy: frozenPolicy,
-            requirements: packPolicyRequirements(tool, (event.input as Record<string, unknown>) || {}, {
-              sessionId: ctx.sessionId,
-              cwd: ctx.cwd,
-              runId: binding?.runId,
-              temporaryChat: binding?.temporaryChat || ctx.temporaryChat,
-            }),
+            requirements,
           })
           let normalizedArgs = evaluation.normalizedArgs
           evidence.decision(evaluation.verdict, evaluation.reason)

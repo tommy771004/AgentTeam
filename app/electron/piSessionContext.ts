@@ -1,5 +1,6 @@
 import type { PiMemory } from './piMemory.ts'
 import type { CompactionManifest } from '../src/agent/compactionCheckpoint.ts'
+import type { WorkingState } from '../src/agent/workingState.ts'
 
 /**
  * One message in the context the model will see. `tool` entries are the agent's
@@ -217,12 +218,16 @@ export function buildPiCompactionManifest(
     objective?: string
     latestSeq?: number
     completedEffects?: string[]
+    workingState?: WorkingState
   },
 ): CompactionManifest {
-  const objective = input.objective?.trim()
+  const objective = input.workingState?.objective
+    || input.objective?.trim()
     || [...messages].reverse().find((message) => message.role === 'user')?.content.trim().slice(0, 800)
     || ''
-  const changedFiles = referencedFiles(messages)
+  const changedFiles = input.workingState
+    ? input.workingState.goals.flatMap((goal) => goal.completionPredicate?.kind === 'file-content' ? [goal.completionPredicate.path] : [])
+    : referencedFiles(messages)
   const decisions = matchingLines(messages, /(?:決定|採用|改為|選擇|decision|decided|use\b)/iu)
     .map((decision) => ({ decision }))
   const unresolvedErrors = matchingLines(messages, /(?:error|exception|failed|failure|錯誤|失敗|異常)/iu)
@@ -233,16 +238,25 @@ export function buildPiCompactionManifest(
     sessionId: input.sessionId,
     runId: input.runId,
     objective: objective.slice(0, 800),
-    constraints: matchingLines(messages, /(?:must\b|must not|only\b|不要|不可|必須|只能|限制)/iu),
+    constraints: input.workingState?.constraints
+      ? [...input.workingState.constraints]
+      : matchingLines(messages, /(?:must\b|must not|only\b|不要|不可|必須|只能|限制)/iu),
     changedFiles,
     decisions,
-    unresolvedErrors,
-    pendingWork,
+    unresolvedErrors: input.workingState
+      ? input.workingState.goals.flatMap((goal) => goal.status === 'blocked' && goal.blocker ? [goal.blocker] : [])
+      : unresolvedErrors,
+    pendingWork: input.workingState
+      ? input.workingState.goals.flatMap((goal) => goal.status !== 'done' ? [goal.description] : [])
+      : pendingWork,
     pendingApprovals,
-    completedEffects: [...new Set(input.completedEffects || [])].slice(0, 100),
+    completedEffects: [...new Set(input.workingState
+      ? input.workingState.goals.flatMap((goal) => goal.evidence.map((evidence) => evidence.evidenceId))
+      : input.completedEffects || [])].slice(0, 100),
     references: changedFiles.map((target) => ({ kind: 'file' as const, target })),
     sourceHash: input.sourceHash,
     latestSeq: Math.max(0, Math.floor(input.latestSeq || 0)),
+    ...(input.workingState ? { workingState: structuredClone(input.workingState) } : {}),
   }
 }
 
@@ -261,6 +275,8 @@ export function formatPiCompactionSummary(
     '# Context checkpoint',
     `Current objective: ${manifest.objective || '（未記錄）'}`,
     ...summarySection('Constraints', manifest.constraints),
+    ...summarySection('Verified goal state', (manifest.workingState?.goals || []).map((goal) =>
+      `${goal.status}: ${goal.description}${goal.blocker ? ` (blocked: ${goal.blocker})` : ''}`)),
     ...summarySection('Changed files', manifest.changedFiles),
     ...summarySection('Decisions', manifest.decisions.map((item) => item.reason ? `${item.decision} — ${item.reason}` : item.decision)),
     ...summarySection('Unresolved errors', manifest.unresolvedErrors),

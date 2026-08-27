@@ -2563,7 +2563,6 @@ ipcMain.handle('checkpoints:save', async (_evt, input: { runId: string; threadId
 ipcMain.handle('checkpoints:load', async (_evt, runId: string) => compactionCheckpoints.load(runId))
 ipcMain.handle('checkpoints:list', async (_evt, runId?: string) => compactionCheckpoints.list(runId))
 ipcMain.handle('checkpoints:remove', async (_evt, runId: string) => compactionCheckpoints.remove(runId))
-ipcMain.handle('checkpoints:claim-resume', async (_evt, runId: string) => compactionCheckpoints.claimResume(runId))
 
 // ── Durable run-journal mirror (localStorage eviction / torn-write recovery) ──
 // The renderer journal stays the schema owner; this only mirrors its serialized

@@ -257,8 +257,6 @@ const api = {
     load: (runId: string) => ipcRenderer.invoke('checkpoints:load', runId) as Promise<unknown>,
     list: (runId?: string) => ipcRenderer.invoke('checkpoints:list', runId) as Promise<unknown[]>,
     remove: (runId: string) => ipcRenderer.invoke('checkpoints:remove', runId) as Promise<{ ok: boolean }>,
-    claimResume: (runId: string) =>
-      ipcRenderer.invoke('checkpoints:claim-resume', runId) as Promise<{ ok: boolean; checkpoint?: unknown; reason?: string }>,
   },
   notify: (title: string, body: string) =>
     ipcRenderer.invoke('app:notify', title, body) as Promise<{ ok: boolean }>,

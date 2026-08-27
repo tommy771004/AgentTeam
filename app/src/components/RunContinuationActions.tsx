@@ -90,29 +90,27 @@ export function RunContinuationActions({
     setResuming(true)
     setResumeError('')
     try {
-      const [{ claimCheckpointResume, loadCompactionCheckpoint }, { buildResumeObjective }, { runTask }] =
+      const [{ loadCompactionCheckpoint }, { buildResumeObjective }, { runTask }] =
         await Promise.all([
           import('../agent/compactionCheckpoint'),
           import('../agent/runResume'),
           import('../agent/taskRunCoordinator'),
         ])
-      // Claim first: the durable marker is what stops a second press, a retry,
-      // or another window from continuing the same checkpoint twice.
-      const claim = await claimCheckpointResume(runId)
-      if (!claim.ok || !claim.checkpoint) {
-        const latest = await loadCompactionCheckpoint(runId)
-        const refused = decideResume(latest, { hasOwningThread: Boolean(threadId) })
-        setResume(refused)
-        setResumeError(refused.allowed ? '續跑未能取得檢查點鎖定，請稍後再試。' : refused.detail)
+      const checkpoint = await loadCompactionCheckpoint(runId)
+      const decision = decideResume(checkpoint, { hasOwningThread: Boolean(threadId) })
+      if (!decision.allowed) {
+        setResume(decision)
+        setResumeError(decision.detail)
         return
       }
       await runTask({
-        objective: buildResumeObjective(claim.checkpoint),
+        objective: buildResumeObjective(decision.checkpoint),
         sourceKind: 'retry',
         reuseThreadId: threadId,
         runner: thread?.runner || 'builtin',
         skipUserBubble: false,
         projectRoot: useProjectStore.getState().root || undefined,
+        overrides: { resumeFromRunId: runId },
       })
       setResume(null)
     } catch (error) {

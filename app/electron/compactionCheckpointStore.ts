@@ -43,6 +43,8 @@ export class JsonCompactionCheckpointStore {
         estimatedTokens: Number.isFinite(input.estimatedTokens) ? Math.max(0, Math.floor(input.estimatedTokens!)) : undefined,
         contextWindow: Number.isFinite(input.contextWindow) ? Math.max(0, Math.floor(input.contextWindow!)) : undefined,
         manifest: input.manifest ? structuredClone(input.manifest) : undefined,
+        workingStateRevision: input.workingStateRevision,
+        workingState: input.workingState ? structuredClone(input.workingState) : undefined,
       }
       const file = this.fileFor(runId, checkpoint.sequence || existing.length + 1)
       fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -98,13 +100,21 @@ export class JsonCompactionCheckpointStore {
     if (latest.resumeClaimedAt) return { ok: false, reason: 'already-claimed', checkpoint: latest }
     if (latest.replaySafe !== true) return { ok: false, reason: 'not-replay-safe', checkpoint: latest }
     const claimed: CompactionCheckpoint = { ...latest, resumeClaimedAt: new Date().toISOString() }
+    const file = this.fileFor(runId, claimed.sequence || 1)
+    const claimPath = `${file}.resume-claim`
+    let claimHandle: number | undefined
     try {
-      const file = this.fileFor(runId, claimed.sequence || 1)
+      claimHandle = fs.openSync(claimPath, 'wx', 0o600)
+      fs.closeSync(claimHandle)
+      claimHandle = undefined
       const tempPath = `${file}.${process.pid}.tmp`
       fs.writeFileSync(tempPath, JSON.stringify(claimed), { mode: 0o600 })
       fs.renameSync(tempPath, file)
       return { ok: true, checkpoint: claimed }
     } catch (error) {
+      if (claimHandle !== undefined) fs.closeSync(claimHandle)
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return { ok: false, reason: 'already-claimed', checkpoint: latest }
+      try { fs.rmSync(claimPath, { force: true }) } catch { /* retry remains fail-closed */ }
       return { ok: false, reason: error instanceof Error ? error.message : 'claim write failed' }
     }
   }

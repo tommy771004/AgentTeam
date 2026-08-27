@@ -259,7 +259,7 @@ export type PiHostRunnerApi = {
     createChild?: (input: { title?: string; parentSessionId: string; role: string; profile: Record<string, unknown>; context: { objective: string; facts: string[]; constraints: string[] }; depth: number }) => Promise<{ sessionId: string; sessions: unknown[] }>
   }
   turn: {
-    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; workingGoal?: WorkingGoalCompletionPredicate; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => Promise<{
+    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; workingGoal?: WorkingGoalCompletionPredicate; resumeFromRunId?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => Promise<{
       sessionId: string
       runId: string
       settlement: string
@@ -286,6 +286,7 @@ export type SubmitPiHostRunInput = {
   maxIterations?: number
   definitionOfDone?: string
   workingGoal?: WorkingGoalCompletionPredicate
+  resumeFromRunId?: string
   /** Per-turn deadline decided at admission; absent means the Host arms none. */
   timeoutMs?: number
   pluginExecution?: SubDesignPluginExecutionRequest
@@ -421,6 +422,7 @@ export async function submitPiHostRun(
     maxIterations: input.maxIterations,
     definitionOfDone: input.definitionOfDone,
     workingGoal: input.workingGoal,
+    resumeFromRunId: input.resumeFromRunId,
     timeoutMs: input.timeoutMs,
     pluginExecution: input.pluginExecution,
   })

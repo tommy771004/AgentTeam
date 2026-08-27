@@ -288,6 +288,8 @@ export interface RuntimeOverrides {
   runId?: string
   /** Explicit Host-verifiable goal contract; never inferred from model prose. */
   workingGoal?: import('./workingState.ts').WorkingGoalCompletionPredicate
+  /** Host-owned durable checkpoint to resume; renderer supplies only its run id. */
+  resumeFromRunId?: string
   /**
    * Run entry source for lifecycle hooks (composer / schedule / webhook / …).
    * Set by runTask; tools forward it into beforeTool/afterTool evaluation.

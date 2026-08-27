@@ -3,17 +3,50 @@ import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInitialWorkingState, checkWorkingStateProposal, type WorkingExecutionEvidence, type WorkingStateProposal } from '../src/agent/workingState.ts'
 import { TURN_RECORD_FORMAT_VERSION, turnRecordEntries } from '../src/agent/turnRecord.ts'
-import { wrapPiBuiltinWriteWithEvidence } from '../electron/piToolHost.ts'
+import {
+  bindPiSessionRun,
+  piBashGateExtensionFactory,
+  setPiPolicyEvidenceBridge,
+  unbindPiSessionRun,
+  wrapPiBuiltinWriteWithEvidence,
+} from '../electron/piToolHost.ts'
 import { piCodingAgentModule } from '../electron/piVendor.ts'
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
 const digest = sha256('fixture')
 const workspace = await mkdtemp(join(tmpdir(), 'pi-working-state-'))
+
+// A resumed run never lets a tool with no frozen contract slip past the Host hook.
+const unknownGateSession = 'resume-unknown-contract-session'
+bindPiSessionRun(unknownGateSession, {
+  runId: 'resume-unknown-contract-run',
+  frozenPolicy: {
+    approvalMode: 'full',
+    unattended: false,
+    approvalTimeoutMs: 1_000,
+    projectRoot: workspace,
+    outbound: { mode: 'off' },
+    deniedTools: [],
+    approvalTools: [],
+  },
+  completedFileEffects: [{ path: '@result.txt', sha256: digest }],
+})
+setPiPolicyEvidenceBridge({ contractIdentity: () => undefined, append: () => undefined })
+let unknownGate: ((event: Record<string, unknown>) => unknown) | undefined
+piBashGateExtensionFactory({ sessionId: unknownGateSession }).factory({
+  on: (event, handler) => { if (event === 'tool_call') unknownGate = handler },
+  registerTool: () => undefined,
+})
+assert.ok(unknownGate)
+const unknownGateDecision = await unknownGate({ toolName: 'future_mutator', toolCallId: 'call_future', input: {} })
+assert.equal((unknownGateDecision as { block?: boolean } | undefined)?.block, true)
+unbindPiSessionRun(unknownGateSession)
 
 // The Checker contract is fail-closed even when fed deserialised/cast input.
 const checkerState = createInitialWorkingState({
@@ -213,14 +246,16 @@ const modelServer = createServer(async (request, response) => {
   for await (const part of request) void part
   completions += 1
   response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive', 'cache-control': 'no-cache' })
-  if (completions === 1 || completions === 4 || completions === 6 || completions === 8 || completions === 10) {
+  if (completions === 1 || completions === 4 || completions === 6 || completions === 8 || completions === 10 || completions === 12) {
     response.write(chunk({ role: 'assistant', content: completions === 1
       ? '寫入指定內容。'
       : completions === 4
         ? '同一步提出兩個衝突寫入。'
         : completions === 6
           ? '嘗試一個會失敗的寫入。'
-          : completions === 8 ? '同一步完成兩個獨立目標。' : '先失敗，再由 sibling 完成同一目標。' }, null))
+          : completions === 8
+            ? '同一步完成兩個獨立目標。'
+            : completions === 10 ? '先失敗，再由 sibling 完成同一目標。' : '嘗試重做已完成的 write。' }, null))
     response.write(chunk({
       tool_calls: completions === 1
         ? [{
@@ -260,13 +295,38 @@ const modelServer = createServer(async (request, response) => {
               index: 0,
               id: 'call_recover_failed',
               type: 'function',
-              function: { name: 'write', arguments: JSON.stringify({ path: 'recover.txt', content: 'recovered\n', unexpected: true }) },
+              function: { name: 'write', arguments: JSON.stringify({ path: '@recover\u00A0file.txt', content: 'recovered\n', unexpected: true }) },
             },
             {
               index: 1,
               id: 'call_recover_success',
               type: 'function',
-              function: { name: 'write', arguments: JSON.stringify({ path: 'recover.txt', content: 'recovered\n' }) },
+              function: { name: 'write', arguments: JSON.stringify({ path: '@recover\u00A0file.txt', content: 'recovered\n' }) },
+            },
+          ] : completions === 12 ? [
+            {
+              index: 0,
+              id: 'call_resume_overwrite',
+              type: 'function',
+              function: { name: 'write', arguments: JSON.stringify({ path: 'nested/../recover file.txt', content: 'corrupted\n' }) },
+            },
+            {
+              index: 1,
+              id: 'call_resume_bash',
+              type: 'function',
+              function: { name: 'bash', arguments: JSON.stringify({ command: "printf 'corrupted\\n' > './recover file.txt'" }) },
+            },
+            {
+              index: 2,
+              id: 'call_resume_read_extension',
+              type: 'function',
+              function: { name: 'workspace_diff', arguments: JSON.stringify({ source: 'recover file.txt', target: 'recover file.txt' }) },
+            },
+            {
+              index: 3,
+              id: 'call_resume_mutating_extension',
+              type: 'function',
+              function: { name: 'workspace_mkdir', arguments: JSON.stringify({ path: 'must-not-exist' }) },
             },
           ] : [{
             index: 0,
@@ -285,7 +345,9 @@ const modelServer = createServer(async (request, response) => {
           ? '這個目標目前受檔案系統阻擋。'
           : completions === 9
             ? '兩個獨立目標都由 Host 驗證。'
-            : completions === 11 ? '成功 sibling 保留完成狀態。' : '我宣稱已經完成。' }, null))
+            : completions === 11
+              ? '成功 sibling 保留完成狀態。'
+              : completions === 13 ? 'Host 已拒絕重做完成的 effect。' : '我宣稱已經完成。' }, null))
     response.write(chunk({}, 'stop'))
   }
   response.end('data: [DONE]\n\n')
@@ -310,6 +372,7 @@ const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-elec
   env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: statePath, SUBAGENTS_PI_AGENT_DIR: agentDir },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
+let hostStopped = false
 const messages: Array<Record<string, any>> = []
 let stdout = ''
 host.stdout.on('data', (buffer) => {
@@ -524,7 +587,7 @@ try {
     pattern: 'Goal-based',
     maxIterations: 1,
     definitionOfDone: 'recover.txt contains exact verified content',
-    workingGoal: { kind: 'file-content', path: 'recover.txt', sha256: sha256('recovered\n') },
+    workingGoal: { kind: 'file-content', path: '@recover\u00A0file.txt', sha256: sha256('recovered\n') },
   })
   const recovered = await waitFor(15)
   assert.equal(recovered.result?.settlement, 'answered')
@@ -536,9 +599,101 @@ try {
   }).filter((entry) => entry.kind === 'state-check')
   assert.equal(recoveredChecks.some((entry) => entry.check.verdict === 'accepted'), true)
   assert.equal(recoveredChecks.some((entry) => entry.check.verdict === 'rejected'), true)
-} finally {
+
+  send(16, 'sessions/compact', {
+    sessionId: recoveredSessionId,
+    runId: 'working-recovered-sibling-run',
+    contextWindowTokens: 10,
+  })
+  const compacted = await waitFor(16)
+  assert.equal(compacted.error, undefined, JSON.stringify(compacted))
+  const checkpointPath = join(stateDir, 'run-checkpoints', 'working-recovered-sibling-run', '0001.json')
+  const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8'))
+  assert.equal(checkpoint.workingStateRevision, 2)
+  assert.equal(checkpoint.workingState.goals[0].status, 'done')
+  assert.deepEqual(checkpoint.manifest.workingState, checkpoint.workingState)
+  assert.deepEqual(checkpoint.manifest.completedEffects, checkpoint.workingState.goals[0].evidence.map((item: { evidenceId: string }) => item.evidenceId))
+
   host.stdin.end()
-  if (host.exitCode === null && host.signalCode === null) await once(host, 'exit')
+  await once(host, 'exit')
+  hostStopped = true
+  const restarted = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
+    env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: statePath, SUBAGENTS_PI_AGENT_DIR: agentDir },
+    stdio: ['pipe', 'pipe', 'inherit'],
+  })
+  const restartedMessages: Array<Record<string, any>> = []
+  let restartedStdout = ''
+  restarted.stdout.on('data', (buffer) => {
+    restartedStdout += String(buffer)
+    for (;;) {
+      const newline = restartedStdout.indexOf('\n')
+      if (newline < 0) break
+      const line = restartedStdout.slice(0, newline).trim()
+      restartedStdout = restartedStdout.slice(newline + 1)
+      if (line) restartedMessages.push(JSON.parse(line))
+    }
+  })
+  const restartedWaitFor = async (id: number) => {
+    const timeoutAt = Date.now() + 20_000
+    for (;;) {
+      const message = restartedMessages.find((candidate) => candidate.id === id)
+      if (message) return message
+      if (Date.now() > timeoutAt) throw new Error(`timed out waiting for restarted response ${id}`)
+      await new Promise((done) => setTimeout(done, 10))
+    }
+  }
+  restarted.stdin.write(`${JSON.stringify({ id: 17, method: 'initialize', params: { protocolVersion: 5 } })}\n`)
+  await restartedWaitFor(17)
+  restarted.stdin.write(`${JSON.stringify({ id: 18, method: 'turn/submit', params: {
+    sessionId: recoveredSessionId,
+    runId: 'working-recovered-resume-run',
+    resumeFromRunId: 'working-recovered-sibling-run',
+    cwd: workspace,
+    prompt: '從 verified checkpoint 接續，不要重做 recover.txt',
+    profile: { ...profile, activeTools: ['write', 'edit', 'bash', 'workspace_diff', 'workspace_mkdir'] },
+    pattern: 'Goal-based',
+    maxIterations: 1,
+    definitionOfDone: 'recover.txt remains verified',
+  } })}\n`)
+  const resumed = await restartedWaitFor(18)
+  assert.equal(resumed.error, undefined, JSON.stringify(resumed))
+  assert.equal(resumed.result.workingState.revision, 2)
+  assert.equal(resumed.result.workingState.runId, 'working-recovered-sibling-run')
+  assert.equal(resumed.result.workingState.goals[0].status, 'done')
+  assert.equal(await readFile(join(workspace, 'recover file.txt'), 'utf8'), 'recovered\n')
+  const replayResults = resumed.result.record.entries.filter((entry: { kind?: string; callId?: string }) =>
+    entry.kind === 'tool-result' && ['call_resume_overwrite', 'call_resume_bash', 'call_resume_read_extension', 'call_resume_mutating_extension'].includes(entry.callId || ''))
+  assert.equal(replayResults.find((entry: { callId?: string }) => entry.callId === 'call_resume_read_extension')?.settlement, 'success')
+  assert.equal(replayResults.find((entry: { callId?: string }) => entry.callId === 'call_resume_mutating_extension')?.settlement, 'denied')
+  assert.equal(existsSync(join(workspace, 'must-not-exist')), false)
+  const builtinReplayResults = replayResults.filter((entry: { callId?: string }) =>
+    entry.callId === 'call_resume_overwrite' || entry.callId === 'call_resume_bash')
+  assert.deepEqual(builtinReplayResults.map((entry: { settlement?: string }) => entry.settlement), ['denied', 'denied'], JSON.stringify(replayResults))
+  assert.equal(replayResults.filter((entry: { settlement?: string }) => entry.settlement === 'denied')
+    .every((entry: { detail?: string }) => /resume replay refused/.test(entry.detail || '')), true)
+  restarted.stdin.write(`${JSON.stringify({ id: 19, method: 'turn/submit', params: {
+    sessionId: recoveredSessionId,
+    runId: 'working-duplicate-resume-run',
+    resumeFromRunId: 'working-recovered-sibling-run',
+    cwd: workspace,
+    prompt: '不可重複 claim',
+    profile,
+  } })}\n`)
+  assert.match((await restartedWaitFor(19)).error?.message || '', /revision mismatch|already-claimed|newer completed effects/)
+  restarted.stdin.write(`${JSON.stringify({ id: 20, method: 'turn/submit', params: {
+    sessionId: recoveredSessionId,
+    runId: 'working-missing-resume-run',
+    resumeFromRunId: 'missing-checkpoint-run',
+    cwd: workspace,
+    prompt: '缺少 checkpoint 必須 fail closed',
+    profile,
+  } })}\n`)
+  assert.match((await restartedWaitFor(20)).error?.message || '', /checkpoint is missing/)
+  restarted.stdin.end()
+  await once(restarted, 'exit')
+} finally {
+  if (!hostStopped) host.stdin.end()
+  if (!hostStopped && host.exitCode === null && host.signalCode === null) await once(host, 'exit')
   modelServer.close()
   await rm(workspace, { recursive: true, force: true })
   await rm(stateDir, { recursive: true, force: true })

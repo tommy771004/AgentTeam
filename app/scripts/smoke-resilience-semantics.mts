@@ -44,6 +44,7 @@ const { deriveRunLifecycle } = await import('../src/agent/runLifecycle.ts')
 const { sealInterruptedDraft, INTERRUPTED_DRAFT_SEAL } = await import('../src/store/runActivityStore.ts')
 const { decideResume, buildResumeObjective, isResumableTerminalRun, RESUME_REFUSAL_COPY } =
   await import('../src/agent/runResume.ts')
+const { createInitialWorkingState } = await import('../src/agent/workingState.ts')
 const {
   getJournalEntry,
   recordRunAdmitted,
@@ -329,6 +330,7 @@ const checkpointRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'subagents-checkpoi
   assert.equal((refusedMidTool as { detail: string }).detail, RESUME_REFUSAL_COPY['not-replay-safe'])
   assert.match((refusedMidTool as { detail: string }).detail, /副作用/, 'the refusal says why, in the user’s language')
 
+  const resumeWorkingState = createInitialWorkingState({ runId: 'run-resume', objective: '重構登入流程' })
   store.save({
     runId: 'run-resume',
     threadId: 'thread-resume',
@@ -338,6 +340,8 @@ const checkpointRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'subagents-checkpoi
     parkedAtToolBoundary: true,
     replaySafe: true,
     effects: ['write · auth/session.ts', 'bash · npm test'],
+    workingStateRevision: resumeWorkingState.revision,
+    workingState: resumeWorkingState,
   })
   const allowed = decideResume(store.load('run-resume'))
   assert.equal(allowed.allowed, true, 'a clean park is resumable')

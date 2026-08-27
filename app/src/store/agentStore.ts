@@ -319,6 +319,7 @@ async function executePiHostTurn(
       maxIterations,
       definitionOfDone,
       workingGoal: overrides.workingGoal,
+      resumeFromRunId: overrides.resumeFromRunId,
       timeoutMs: overrides.turnTimeoutMs,
       pluginExecution: overrides.subDesignPluginExecution,
     })

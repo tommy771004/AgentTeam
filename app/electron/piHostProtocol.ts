@@ -272,6 +272,7 @@ import {
   createInitialWorkingState,
   isWorkingExecutionEvidence,
   isWorkingGoalCompletionPredicate,
+  isWorkingState,
   type WorkingExecutionEvidence,
   type WorkingGoalSeed,
   type WorkingState,
@@ -442,6 +443,37 @@ function requestedWorkingGoals(input: { params?: Record<string, unknown> }): Wor
   })
 }
 
+function resumeWorkingState(input: {
+  request: { params?: Record<string, unknown> }
+  session: SessionRecord
+  runId: string
+  checkpoints?: CompactionCheckpointWriter
+}): { state?: WorkingState; error?: string } {
+  const requestedRunId = input.request.params?.resumeFromRunId
+  if (requestedRunId === undefined) return {}
+  if (typeof requestedRunId !== 'string' || !requestedRunId.trim()) return { error: 'resumeFromRunId must be a non-empty run id' }
+  const checkpoint = input.checkpoints?.load?.(requestedRunId)
+  if (!checkpoint) return { error: 'resume checkpoint is missing' }
+  if (checkpoint.replaySafe !== true || checkpoint.parkedAtToolBoundary !== true) return { error: 'resume checkpoint is not replay-safe' }
+  if (!isWorkingState(checkpoint.workingState)
+    || checkpoint.workingStateRevision !== checkpoint.workingState.revision) return { error: 'resume checkpoint Working State is missing or malformed' }
+  const durableState = workingStateFromTurnRecord(input.session.record)
+  if (!durableState
+    || durableState.revision !== checkpoint.workingStateRevision
+    || JSON.stringify(durableState) !== JSON.stringify(checkpoint.workingState)) return { error: 'resume Working State revision mismatch' }
+  const checkpointSeq = checkpoint.manifest?.latestSeq
+  if (!Number.isSafeInteger(checkpointSeq)) return { error: 'resume checkpoint effect boundary is missing' }
+  // Tool contracts may gain new side-effecting verbs. Treat every later
+  // successful tool result as replay-unsafe instead of guessing from names.
+  const laterEffect = input.session.record?.entries.some((entry) => entry.seq > Number(checkpointSeq)
+    && entry.kind === 'tool-result'
+    && entry.settlement === 'success')
+  if (laterEffect) return { error: 'resume checkpoint has newer completed effects' }
+  const claim = input.checkpoints?.claimResume?.(requestedRunId)
+  if (!claim?.ok) return { error: `resume checkpoint refused: ${claim?.reason || 'claim-unavailable'}` }
+  return { state: structuredClone(checkpoint.workingState) }
+}
+
 function fileWriteStateProposal(
   state: WorkingState,
   tool: string,
@@ -485,6 +517,7 @@ function hostFileWriteEvidence(input: {
   identity: TurnRecordToolContractIdentity | undefined
   settlement: WorkingToolSettlement
   trustedResult: unknown
+  executionRunId: string
 }): WorkingExecutionEvidence | undefined {
   if (input.settlement !== 'success'
     || input.proposal.proposedStatus !== 'done'
@@ -497,7 +530,7 @@ function hostFileWriteEvidence(input: {
   if (!details || typeof details !== 'object') return undefined
   const evidence = (details as Record<string, unknown>)[WORKING_EXECUTION_EVIDENCE_DETAIL_KEY]
   if (!isWorkingExecutionEvidence(evidence)) return undefined
-  if (evidence.runId !== input.state.runId
+  if (evidence.runId !== input.executionRunId
     || evidence.tool !== input.proposal.tool
     || evidence.callId !== input.proposal.callId
     || evidence.contractDigest !== input.identity.contractDigest
@@ -517,6 +550,8 @@ function hostFileWriteEvidence(input: {
 
 type CompactionCheckpointWriter = {
   save(input: CompactionCheckpointSaveInput): { ok: boolean; error?: string }
+  load?(runId: string): import('../src/agent/compactionCheckpoint.ts').CompactionCheckpoint | null
+  claimResume?(runId: string): { ok: boolean; checkpoint?: import('../src/agent/compactionCheckpoint.ts').CompactionCheckpoint; reason?: string }
 }
 
 const readyResult = (protocolVersion: number = PI_HOST_PROTOCOL_VERSION): PiHostResponse['result'] => ({
@@ -697,6 +732,7 @@ function preparePiCompaction(
   }
   const oldMessages = session.messages.slice(0, -keepMessages)
   const sourceHash = compactionSourceHash(oldMessages)
+  const workingState = workingStateFromTurnRecord(session.record)
   const manifest = buildPiCompactionManifest(oldMessages, {
     sessionId: session.id,
     runId,
@@ -704,6 +740,7 @@ function preparePiCompaction(
     objective,
     latestSeq: session.record?.entries.at(-1)?.seq,
     completedEffects: completedSideEffects(session),
+    ...(workingState ? { workingState } : {}),
   })
   session.preparedCompaction = {
     sourceHash,
@@ -739,6 +776,7 @@ function compactHostSession(input: {
   const sourceHash = compactionSourceHash(oldMessages)
   const pressure = assessPiContextPressure(session.messages, input.prompt || '', input.contextWindow)
   const completedEffects = completedSideEffects(session)
+  const workingState = workingStateFromTurnRecord(session.record)
   const manifest = buildPiCompactionManifest(oldMessages, {
     sessionId: session.id,
     runId,
@@ -746,9 +784,12 @@ function compactHostSession(input: {
     objective: input.objective,
     latestSeq: session.record?.entries.at(-1)?.seq,
     completedEffects,
+    ...(workingState ? { workingState } : {}),
   })
-  const summary = preparedCompactionSummary(session, sourceHash, manifest.objective)
-    || formatPiCompactionSummary(manifest, oldMessages)
+  const summary = workingState
+    ? formatPiCompactionSummary(manifest, oldMessages)
+    : preparedCompactionSummary(session, sourceHash, manifest.objective)
+      || formatPiCompactionSummary(manifest, oldMessages)
   const checkpoint = input.checkpointWriter?.save({
     runId,
     threadId: session.threadId,
@@ -756,15 +797,16 @@ function compactHostSession(input: {
     summary,
     messages: oldMessages,
     parkedAtToolBoundary: true,
-    // A context checkpoint is recoverable/auditable but is not an interrupted
-    // run. Only the interruption path may authorize a replay-safe resume.
-    replaySafe: false,
+    // This snapshot is captured at a clean tool boundary. A later resume must
+    // still prove its revision equals the durable session record.
+    replaySafe: true,
     effects: completedEffects,
     reason,
     sourceHash,
     estimatedTokens: pressure.estimatedTokens,
     contextWindow: input.contextWindow,
     manifest,
+    ...(workingState ? { workingStateRevision: workingState.revision, workingState } : {}),
   })
   const checkpointFailed = Boolean(input.checkpointWriter && checkpoint?.ok !== true)
   if (checkpointFailed && reason !== 'emergency') {
@@ -807,6 +849,9 @@ function handleManualSessionCompaction(input: {
   checkpointWriter?: CompactionCheckpointWriter
   emit?: (message: PiHostMessage) => void
 }): PiHostMessage[] {
+  if (activeSessionRuns.has(input.session.id)) {
+    return [errorResponse(input.id, 'invalid_request', 'Pi session compaction requires a clean tool boundary')]
+  }
   const runId = typeof input.request.params?.runId === 'string' && input.request.params.runId.trim()
     ? input.request.params.runId.trim()
     : `manual:${input.session.id}`
@@ -1040,6 +1085,7 @@ function publishModelToolTerminal(input: {
         identity: input.identity,
         settlement,
         trustedResult: input.trustedResult,
+        executionRunId: input.runId,
       })
     : undefined
   publishInTurnToolEvent(input.state, input.sessionId, input.emit, {
@@ -1066,6 +1112,7 @@ function commitCheckedWorkingState(input: {
   callId: string
   settlement: WorkingToolSettlement
   evidenceStillApplicable?: boolean
+  executionRunId: string
 }): WorkingState {
   if (!input.proposal) return input.workingState
   let terminalIndex = -1
@@ -1092,6 +1139,7 @@ function commitCheckedWorkingState(input: {
     evidence: executionEvidence,
     evidenceSeq: terminalIndex >= 0 ? input.recorder.seqBase + terminalIndex : 0,
     evidenceStillApplicable: input.evidenceStillApplicable,
+    executionRunId: input.executionRunId,
   })
   recordTurnEntry(input.sessionId, { kind: 'state-check', source: 'host', check: checked.check })
   if (checked.verdict === 'rejected') return input.workingState
@@ -3013,7 +3061,14 @@ export function handlePiHostRequest(
     } catch (error) {
       return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid workingGoals')]
     }
-    const initialWorkingState = workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input), admittedWorkingGoals)
+    if (input.params?.resumeFromRunId !== undefined
+      && (requestedWorkingGoal(input) !== undefined || admittedWorkingGoals !== undefined)) {
+      return [errorResponse(id, 'invalid_request', 'resume cannot replace checkpoint Working State goals')]
+    }
+    const resumed = resumeWorkingState({ request: input, session, runId, checkpoints: checkpointWriter })
+    if (resumed.error) return [errorResponse(id, 'invalid_request', resumed.error)]
+    const initialWorkingState = resumed.state
+      || workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input), admittedWorkingGoals)
     const recorder: ActiveTurnRecorder = {
       turn: nextTurnNumber(session.record),
       step: 1,
@@ -3130,6 +3185,12 @@ export function handlePiHostRequest(
         approvalTools: contextPolicy.approvalTools,
         ...(contextPolicy.approvalTimeoutMs ? { approvalTimeoutMs: contextPolicy.approvalTimeoutMs } : {}),
       }),
+      ...(resumed.state ? {
+        completedFileEffects: resumed.state.goals.flatMap((goal) =>
+          goal.status === 'done' && goal.completionPredicate?.kind === 'file-content'
+            ? [{ path: goal.completionPredicate.path, sha256: goal.completionPredicate.sha256 }]
+            : []),
+      } : {}),
       ...(contextPolicy.gitPolicy ? { gitPolicy: contextPolicy.gitPolicy } : {}),
       ...(contextPolicy.outboundShellMode ? { shellPolicy: {
         effectiveMode: contextPolicy.outboundShellMode,
@@ -3447,6 +3508,7 @@ export function handlePiHostRequest(
             recorder,
             workingState,
             ...checked,
+            executionRunId: runId,
           })
         }
         session.piSessionFile ||= getPiSessionFile(sessionId)

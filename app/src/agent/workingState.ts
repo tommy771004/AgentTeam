@@ -315,6 +315,8 @@ export function checkWorkingStateProposal(input: {
   evidenceSeq: number
   /** False when a later sibling effect changed the verified resource. */
   evidenceStillApplicable?: boolean
+  /** Current continuation run; state.runId remains the stable lineage id. */
+  executionRunId?: string
 }):
   | { verdict: 'accepted' | 'rebased'; reason: string; check: WorkingStateCheck; state: WorkingState }
   | { verdict: 'rejected'; reason: string; check: WorkingStateCheck; state?: undefined } {
@@ -345,7 +347,8 @@ export function checkWorkingStateProposal(input: {
   if (!isWorkingExecutionEvidence(input.evidence)) return rejected({ state: input.state, proposal: input.proposal, reason: 'execution-evidence-malformed' })
   const evidence = input.evidence
   if (evidence.evidenceId !== `execution:${evidence.receiptDigest}`) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-identity-mismatch' })
-  if (evidence.runId !== input.state.runId || evidence.runId !== input.proposal.runId) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-run-mismatch' })
+  const executionRunId = input.executionRunId || input.state.runId
+  if (evidence.runId !== executionRunId) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-run-mismatch' })
   if (evidence.tool !== input.proposal.tool) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-tool-mismatch' })
   if (evidence.callId !== input.proposal.callId) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-call-mismatch' })
   if (evidence.resource.path !== input.proposal.file.path || evidence.resource.sha256 !== input.proposal.file.sha256) {

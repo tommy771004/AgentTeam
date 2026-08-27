@@ -13,6 +13,7 @@
  */
 
 import type { CompactionCheckpoint } from './compactionCheckpoint.ts'
+import { isWorkingState } from './workingState.ts'
 
 export type ResumeRefusal =
   | 'no-checkpoint'
@@ -20,6 +21,8 @@ export type ResumeRefusal =
   | 'already-claimed'
   | 'no-durable-store'
   | 'no-thread'
+  | 'working-state-missing'
+  | 'working-state-mismatch'
 
 export type ResumeDecision =
   | { allowed: true; checkpoint: CompactionCheckpoint }
@@ -33,6 +36,8 @@ export const RESUME_REFUSAL_COPY: Record<ResumeRefusal, string> = {
   'already-claimed': '這個檢查點已經續跑過一次了，不會重複觸發。',
   'no-durable-store': '找不到本機的檢查點儲存層，無法確認續跑是否安全。',
   'no-thread': '找不到這次執行所屬的對話，無法把續跑放回原處。',
+  'working-state-missing': '檢查點缺少可驗證的工作狀態，為了避免重做副作用，這次不提供續跑。',
+  'working-state-mismatch': '檢查點與目前的工作狀態 revision 不一致，為了避免覆寫較新的進度，這次不提供續跑。',
 }
 
 /**
@@ -55,6 +60,12 @@ export function decideResume(
   // it is never inferred here from the absence of evidence.
   if (checkpoint.replaySafe !== true || checkpoint.parkedAtToolBoundary !== true) {
     return { allowed: false, refusal: 'not-replay-safe', detail: RESUME_REFUSAL_COPY['not-replay-safe'], checkpoint }
+  }
+  if (!isWorkingState(checkpoint.workingState)) {
+    return { allowed: false, refusal: 'working-state-missing', detail: RESUME_REFUSAL_COPY['working-state-missing'], checkpoint }
+  }
+  if (checkpoint.workingState && checkpoint.workingStateRevision !== checkpoint.workingState.revision) {
+    return { allowed: false, refusal: 'working-state-mismatch', detail: RESUME_REFUSAL_COPY['working-state-mismatch'], checkpoint }
   }
   if (options.hasOwningThread === false) {
     return { allowed: false, refusal: 'no-thread', detail: RESUME_REFUSAL_COPY['no-thread'], checkpoint }

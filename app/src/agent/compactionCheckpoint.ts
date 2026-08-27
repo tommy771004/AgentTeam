@@ -9,6 +9,8 @@
  * fallback — a checkpoint that cannot be written is reported as not written.
  */
 
+import type { WorkingState } from './workingState.ts'
+
 export type CompactionReason = 'auto' | 'manual' | 'emergency' | 'interrupt'
 
 /** Structured state retained across a context rewrite. */
@@ -27,6 +29,8 @@ export interface CompactionManifest {
   references: Array<{ kind: 'file' | 'tool-output' | 'turn-record'; target: string }>
   sourceHash: string
   latestSeq: number
+  /** Exact Host-committed state; absent only for legacy sessions. */
+  workingState?: WorkingState
 }
 
 export interface CompactionCheckpoint {
@@ -70,6 +74,8 @@ export interface CompactionCheckpoint {
   contextWindow?: number
   /** Machine-readable state; summary remains the model-facing projection. */
   manifest?: CompactionManifest
+  workingStateRevision?: number
+  workingState?: WorkingState
   /** Set the moment a resume claims this checkpoint; one claim, ever. */
   resumeClaimedAt?: string
 }
@@ -89,6 +95,8 @@ export type CompactionCheckpointSaveInput = {
   estimatedTokens?: number
   contextWindow?: number
   manifest?: CompactionManifest
+  workingStateRevision?: number
+  workingState?: WorkingState
 }
 
 export type CompactionCheckpointBridge = {
@@ -96,8 +104,6 @@ export type CompactionCheckpointBridge = {
   load: (runId: string) => Promise<CompactionCheckpoint | null>
   list: (runId?: string) => Promise<CompactionCheckpoint[]>
   remove: (runId: string) => Promise<{ ok: boolean }>
-  /** Atomically claim the newest checkpoint for a resume; succeeds once. */
-  claimResume: (runId: string) => Promise<{ ok: boolean; checkpoint?: CompactionCheckpoint; reason?: string }>
 }
 
 /**
@@ -126,24 +132,6 @@ export async function saveCompactionCheckpoint(
     return (result as { ok?: boolean } | undefined)?.ok === true
   } catch {
     return false
-  }
-}
-
-/**
- * Take exactly one resume claim on a run's newest checkpoint.
- *
- * The claim is written before the resume runs, so a double-click, a retried
- * IPC call, or two windows racing can only ever produce one continuation.
- */
-export async function claimCheckpointResume(
-  runId: string,
-): Promise<{ ok: boolean; checkpoint?: CompactionCheckpoint; reason?: string }> {
-  const api = bridge()
-  if (!api?.claimResume || !runId) return { ok: false, reason: 'no-durable-store' }
-  try {
-    return (await api.claimResume(runId)) || { ok: false, reason: 'no-durable-store' }
-  } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : 'claim failed' }
   }
 }
 
