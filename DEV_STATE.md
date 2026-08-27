@@ -2,6 +2,10 @@
 
 截至 2026-08-27。目前工作基準 commit `bc7e737`，另含本次未提交修復。
 
+## 本日進展：durable memory SQLite migration
+
+`.scratch/durable-memory-sqlite-migration` #01 已 resolved：新增 Host-owned async `DurableMemoryStore` 契約與不依賴 Electron／SQLite／renderer 的 in-memory adapter，固定 global + current-project scope、特殊 profile/document、logical key、tags、ranking、recency 與 decay parity。新 `smoke-durable-memory-store.mts` 已由 `smoke:pi-parity-qualification` 掛入主鏈；`npm run build`、完整 `npm run smoke` 與 Standards／Spec 雙軸 code review 全綠。Production authority 尚未切換，frontier 推進 #02 SQLite Host protocol vertical slice。
+
 ## 本日收口：tracker 對帳
 
 `.scratch/tracker-truth-reconciliation`（七票全數 resolved）完成一次全面對帳：以 smoke gate 為唯一證據核對五個訊號來源；`resolved` 證據定義入冊 `docs/agents/triage-labels.md`；新增恰好一支 drift guard `app/scripts/smoke-tracker-index-links.mts`（INDEX 相對路徑必須存在，檔案與目錄皆驗、無豁免、掛 `npm run smoke` 主鏈——首跑即抓出全部四條死連結）；`.scratch/INDEX.md` 重寫（Active frontier 只留真開工作、resolved 表附一 hop 證據、新增 Known residuals 與待維護者裁決 queue、死連結改下場註記）；本檔同步重寫。
@@ -37,4 +41,4 @@
 
 ## 下一步
 
-依 `.scratch/INDEX.md` Active frontier 排工：context-usage-panel（8 票未動）與 external-cli-durable-harness（7 票未動）兩條線可並行開工。
+依 `.scratch/INDEX.md` Active frontier 排工：durable-memory-sqlite-migration 從 #02 SQLite Host protocol vertical slice 繼續；context-usage-panel（8 票未動）與 external-cli-durable-harness（7 票未動）仍可並行開工。
