@@ -43,6 +43,7 @@ import { recordAppendFromEvent } from './agent/liveTimeline'
 import { presentReattachedApproval, reattachPiHostRuns } from './agent/activeRunReattachment'
 import { usePiHostEventStore } from './store/piHostEventStore'
 import { useRunActivityStore } from './store/runActivityStore'
+import { useWorkingStateProjectionStore } from './store/workingStateProjectionStore'
 import { isElectronPiProduction } from './agent/piProduction'
 
 const DevTrajectoryMeasurement = import.meta.env.DEV
@@ -89,15 +90,21 @@ function PiHostProjectionBootstrap() {
     void (async () => {
       await waitForStartupRecovery()
       const api = window.subagents?.piHost?.sessions
-      if (cancelled || !api?.list) return
+      if (cancelled) return
+      if (!api?.list) {
+        useWorkingStateProjectionStore.getState().setHostAvailable(false)
+        return
+      }
       try {
         const { useThreadStore } = await import('./store/threadStore')
         useThreadStore.getState().hydrate()
         const result = await api.list()
         if (cancelled) return
         const sessions = (result.sessions || []).filter((item): item is PiSessionProjection => Boolean(item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string' && typeof (item as { title?: unknown }).title === 'string' && Array.isArray((item as { messages?: unknown }).messages)))
+        useWorkingStateProjectionStore.getState().hydrateHostSessions(sessions)
         useThreadStore.getState().hydrateFromPiHost(sessions)
       } catch {
+        useWorkingStateProjectionStore.getState().setHostAvailable(false)
         /* Host projection is best-effort; the durable Host remains authoritative. */
       }
     })()
@@ -150,6 +157,7 @@ function PiHostEventBootstrap() {
       const appended = recordAppendFromEvent(event as { event?: unknown; payload?: unknown })
       if (appended) {
         useRunActivityStore.getState().appendRecordEntries(appended.entries, appended.runId)
+        useWorkingStateProjectionStore.getState().appendHostRecord(appended.entries, appended.runId)
         return
       }
       const update = mapPiHostEventToActivity(event)
@@ -335,7 +343,10 @@ function RecoveryBootstrap() {
           typeof (item as { title?: unknown }).title === 'string' &&
           Array.isArray((item as { messages?: unknown }).messages),
         ))
+        useWorkingStateProjectionStore.getState().hydrateHostSessions(projected)
         useThreadStore.getState().hydrateFromPiHost(projected)
+      } else {
+        useWorkingStateProjectionStore.getState().setHostAvailable(false)
       }
       // Pi Core Host owns active/terminal execution truth. Subscribe before
       // querying it, buffer record appends during attach, then merge by the
@@ -552,6 +563,7 @@ function RecoveryBootstrap() {
         `${items.length} 項本機狀態已標記為中斷或安全補跑。`,
       )
       } catch (error) {
+        useWorkingStateProjectionStore.getState().setHostAvailable(false)
         const detail = `啟動復原未完整完成，已停止隱性重跑：${error instanceof Error ? error.message : String(error)}`.slice(0, 300)
         journal?.recordRecoveryNotice({
           kind: 'storage',

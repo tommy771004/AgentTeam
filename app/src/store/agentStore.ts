@@ -1054,6 +1054,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         /* ignore */
       }
       const record: ArchiveRecord = {
+        turnRecord: agent.turnRecord,
         id: agent.id,
         status: toArchiveStatus(agent.status),
         objective: agent.objective,

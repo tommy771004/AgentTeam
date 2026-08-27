@@ -8,8 +8,11 @@ import {
 } from '../components/settings/SettingsChrome'
 import { LogViewer } from '../components/LogViewer'
 import { ForkFromCheckpoint } from '../components/ForkFromCheckpoint'
+import { WorkingStateView } from '../components/WorkingStateView'
 import { useAgentStore } from '../store/agentStore'
 import type { ArchiveRecord } from '../agent/types'
+import { turnRecordEntries } from '../agent/turnRecord'
+import { projectWorkingStateEntries, unavailableWorkingStateProjection } from '../agent/workingStateProjection'
 import { STATUS_ZH, loopTypeZh, statusZh } from '../i18n/zh'
 
 const SECTIONS = [
@@ -18,6 +21,21 @@ const SECTIONS = [
 ]
 
 const PAGE_SIZE = 8
+
+function ArchiveWorkingState({ record, fallbackId }: { record?: ArchiveRecord['turnRecord']; fallbackId: string }) {
+  const projection = useMemo(() => record
+    ? projectWorkingStateEntries(
+        turnRecordEntries(record),
+        false,
+      )
+    : unavailableWorkingStateProjection(fallbackId), [record, fallbackId])
+  return <WorkingStateView projection={projection} />
+}
+
+function PlainBrowserWorkingStateNotice() {
+  if (typeof window.subagents?.piHost?.sessions?.list === 'function') return null
+  return <ArchiveWorkingState fallbackId="plain-browser" />
+}
 
 export function RecordsPage() {
   const [params, setParams] = useSearchParams()
@@ -94,6 +112,8 @@ function ArchiveSection() {
           />
         </div>
       </div>
+
+      <PlainBrowserWorkingStateNotice />
 
       <div className="app-panel overflow-hidden">
         <div className="overflow-x-auto">
@@ -202,6 +222,7 @@ function ArchiveSection() {
             </div>
             <div className="p-5 overflow-y-auto custom-scrollbar space-y-3">
               <p className="text-sm">{selected.objective}</p>
+              <ArchiveWorkingState record={selected.turnRecord} fallbackId={selected.id} />
               {selected.result && (
                 <pre className="bg-surface border border-white/10 rounded-lg p-3 text-[12px] font-[family-name:var(--font-mono)] text-on-surface-variant whitespace-pre-wrap">
                   {selected.result}

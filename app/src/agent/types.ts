@@ -523,6 +523,8 @@ export interface SubAgentNode {
 }
 
 export interface ArchiveRecord {
+  /** Canonical replay source; absent only on legacy or external-run archives. */
+  turnRecord?: import('./turnRecord.ts').TurnRecord
   id: string
   status: 'success' | 'failed' | 'warning' | 'running' | 'halted'
   objective: string

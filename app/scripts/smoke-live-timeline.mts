@@ -10,6 +10,14 @@ import {
 } from '../src/agent/liveTimeline.ts'
 import { projectTrajectory } from '../src/agent/trajectoryProjection.ts'
 import { appendTurnRecord, derivePiHistory, pageTurnRecord, type TurnRecordAppend } from '../src/agent/turnRecord.ts'
+import {
+  mergeWorkingStateProjection,
+  projectWorkingState,
+  projectWorkingStateEntries,
+  unavailableWorkingStateProjection,
+} from '../src/agent/workingStateProjection.ts'
+import type { WorkingState } from '../src/agent/workingState.ts'
+import { useWorkingStateProjectionStore } from '../src/store/workingStateProjectionStore.ts'
 
 /**
  * Live and replay are the same reading of the same record.
@@ -255,6 +263,82 @@ assert.deepEqual(
   'usage changes no row the timeline already produced',
 )
 assert.equal(running.steps[0]?.usage, undefined, 'a step that reported no usage reports none')
+
+// ── Working State uses one bounded projection in live, replay and reload ───
+const stateDigest = 'a'.repeat(64)
+const stateV1: WorkingState = {
+  schemaVersion: 1,
+  runId: 'working-ui-run',
+  revision: 1,
+  objective: '完成兩個可驗證目標',
+  constraints: ['不可從 renderer 寫回狀態'],
+  goals: [
+    { id: 'goal-a', description: '寫入結果', status: 'pending', evidence: [] },
+    { id: 'goal-b', description: '等待權限', status: 'blocked', evidence: [], blocker: 'Host policy denied write' },
+  ],
+}
+const evidence = Array.from({ length: 5 }, (_, index) => ({
+  seq: 20 + index,
+  evidenceId: `execution:evidence-${index}`,
+  runId: stateV1.runId,
+  goalId: 'goal-a',
+  tool: 'write',
+  callId: `call-${index}`,
+  contractDigest: stateDigest,
+  schemaDigest: stateDigest,
+  receiptDigest: stateDigest,
+}))
+const stateV2: WorkingState = {
+  ...stateV1,
+  revision: 2,
+  goals: [
+    { ...stateV1.goals[0], status: 'done', evidence },
+    stateV1.goals[1],
+  ],
+}
+const stateRecord = appendTurnRecord(undefined, [
+  { kind: 'working-state', source: 'host', state: stateV1, turn: 1, step: 1, at: 1 },
+  { kind: 'working-state', source: 'host', state: stateV2, turn: 1, step: 2, at: 2 },
+])
+const modelClaimRecord = appendTurnRecord(stateRecord, [
+  { kind: 'working-state', source: 'model', state: { ...stateV2, revision: 99 }, turn: 1, step: 3, at: 3 },
+])
+const liveState = projectWorkingStateEntries(stateRecord.entries, true)
+const replayState = projectWorkingState(stateV2, 'verified')
+assert.deepEqual(liveState, replayState, 'live/replay/reload use the same Working State projection')
+assert.deepEqual(liveState.goals.map((goal) => goal.id), ['goal-a', 'goal-b'], 'canonical goal ordering is stable')
+assert.equal(liveState.goals[0].evidence.length, 3, 'evidence references are bounded')
+assert.equal(liveState.goals[0].hiddenEvidenceCount, 2, 'the UI says how many bounded references were omitted')
+assert.equal(JSON.stringify(liveState).includes(stateDigest), false, 'private digests never enter the renderer projection')
+assert.equal(projectWorkingStateEntries(modelClaimRecord.entries, true).revision, 2,
+  'model-authored state claims never become a Host-verified projection')
+assert.equal(mergeWorkingStateProjection(replayState, projectWorkingState(stateV1, 'verified')), replayState,
+  'a stale renderer projection cannot overwrite the newer Host revision')
+const tombstone = unavailableWorkingStateProjection(stateV2.runId, true)
+assert.equal(mergeWorkingStateProjection(tombstone, projectWorkingState({ ...stateV2, revision: 3 }, 'verified')), tombstone,
+  'a late append cannot resurrect a tombstoned state')
+assert.equal(projectWorkingStateEntries(stateRecord.entries, false).verification, 'unverified',
+  'plain-browser replay is explicit about missing Host verification')
+assert.equal(unavailableWorkingStateProjection('plain-browser').verification, 'unavailable')
+const workingStore = useWorkingStateProjectionStore.getState()
+workingStore.reset()
+workingStore.setHostAvailable(true)
+  workingStore.hydrateHostSessions([{ id: 'session-a', workingState: stateV2 }])
+workingStore.appendHostRecord(stateRecord.entries.slice(0, 1), stateV1.runId)
+  assert.equal(useWorkingStateProjectionStore.getState().byRunId[stateV1.runId]?.revision, 2,
+    'a stale live append cannot overwrite the reload snapshot')
+workingStore.setHostAvailable(false)
+assert.equal(useWorkingStateProjectionStore.getState().byRunId[stateV1.runId]?.verification, 'unverified',
+  'Host loss fail-closed downgrades an existing verified projection')
+workingStore.setHostAvailable(true)
+workingStore.hydrateHostSessions([{ id: 'session-a', archived: true, workingState: stateV2 }])
+workingStore.appendHostRecord([
+  { ...stateRecord.entries[1], seq: 3, state: { ...stateV2, revision: 3 } },
+], stateV1.runId)
+assert.equal(useWorkingStateProjectionStore.getState().byRunId[stateV1.runId]?.tombstoned, true,
+  'an archived Host session stays tombstoned after a late renderer event')
+workingStore.reset()
+assert.equal(useWorkingStateProjectionStore.getState().hostAvailable, false, 'plain browser starts honestly unavailable')
 
 // ── Purity is a contract, not a hope ───────────────────────────────────────
 const source = await readFile(resolve(import.meta.dirname, '../src/agent/liveTimeline.ts'), 'utf8')

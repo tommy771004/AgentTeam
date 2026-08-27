@@ -12,6 +12,8 @@ export type PiSessionProjection = {
   /** Host tombstone. An archived session is deleted history, not hidden history. */
   archived?: boolean
   messages: PiProjectedMessage[]
+  /** Latest Host-owned state, projected from the durable Turn Record. */
+  workingState?: import('./workingState.ts').WorkingState
 }
 
 export type ProjectedThreadView = {

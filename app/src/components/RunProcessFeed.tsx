@@ -10,6 +10,7 @@ import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
 import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
 import { projectLiveTimeline, runTimelineRows } from '../agent/liveTimeline'
 import type { TurnRecordEntry } from '../agent/turnRecord'
+import { mergeWorkingStateProjection, projectWorkingStateEntries } from '../agent/workingStateProjection'
 import { ContextUsageChip } from './ContextUsageChip'
 import { useRunUsageRefresher } from '../hooks/useRunUsageRefresher'
 import { useAgentStore } from '../store/agentStore'
@@ -21,6 +22,7 @@ import {
   type RunActivityEvent,
   type RunTaskItem,
 } from '../store/runActivityStore'
+import { useWorkingStateProjectionStore } from '../store/workingStateProjectionStore'
 import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
 import { RunTimelineList } from './RunTimelineList'
@@ -31,6 +33,7 @@ import { AgentThinking } from './primitives/AgentThinking'
 import { thinkingVariantForPhase } from './primitives/agentThinkingVariant'
 import { Reveal } from './primitives/Reveal'
 import { ShimmerLabel } from './primitives/ShimmerLabel'
+import { WorkingStateView } from './WorkingStateView'
 import {
   contextSummary,
   groupProcessOperations,
@@ -158,6 +161,16 @@ export function RunProcessFeed({
   const recordTotal = activity?.recordTotal ?? 0
   const reattaching = activity?.reattaching ?? false
   const reattachGap = activity?.reattachGap ?? null
+  const hostAvailable = useWorkingStateProjectionStore((state) => state.hostAvailable)
+  const snapshotWorkingState = useWorkingStateProjectionStore((state) => state.byRunId[runId])
+  const recordedWorkingState = useMemo(
+    () => projectWorkingStateEntries(recordEntries, hostAvailable),
+    [recordEntries, hostAvailable],
+  )
+  const workingState = useMemo(
+    () => mergeWorkingStateProjection(snapshotWorkingState, recordedWorkingState),
+    [snapshotWorkingState, recordedWorkingState],
+  )
 
   // OpenCode keeps reasoning compact by default; raw streamed thought remains
   // available for inspection without pushing the answer below the fold.
@@ -508,6 +521,7 @@ export function RunProcessFeed({
 
       <Reveal open={processOpen}>
         <div className="space-y-3">
+          <WorkingStateView projection={workingState} />
           {recovery ? (
             <div className="agent-process-recovery space-y-2 text-[12px] text-ink-2" role="status">
               <div>

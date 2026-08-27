@@ -8,6 +8,7 @@ import { recordRecoveryNotice } from '../agent/runJournal.ts'
 import { replaySafeCheckpointIndex } from '../agent/runFork.ts'
 import type { CapabilityUnlockProvenance } from '../agent/capabilities/runtime.ts'
 import { projectPiSession, type PiSessionProjection } from '../agent/piHostProjection.ts'
+import { useWorkingStateProjectionStore } from './workingStateProjectionStore.ts'
 
 const KEY = 'subagents.threads.v5'
 const BACKUP_KEY = `${KEY}.backup`
@@ -339,10 +340,14 @@ async function archivePiHostSession(threadId: string): Promise<void> {
     const listed = await api.list()
     for (const raw of listed?.sessions || []) {
       if (!raw || typeof raw !== 'object') continue
-      const session = raw as { id?: unknown; threadId?: unknown; archived?: unknown }
+      const session = raw as PiSessionProjection
       if (session.threadId !== threadId || typeof session.id !== 'string') continue
       if (session.archived === true) continue
       await api.archive(session.id)
+      // `sessions/archive` returns the raw durable session (record included,
+      // summary fields omitted). Reuse the verified pre-archive projection so
+      // the renderer installs its tombstone before any late append can arrive.
+      useWorkingStateProjectionStore.getState().hydrateHostSessions([{ ...session, archived: true }])
     }
   } catch {
     /* Host teardown is best-effort; the renderer projection already dropped it */

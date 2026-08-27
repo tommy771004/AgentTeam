@@ -2359,6 +2359,33 @@ await test('drift guard: the Pi path\'s live timeline is the record projection, 
   assert.doesNotMatch(reasoningCase, /slice\(/, 'the projection hands over the whole thought')
 })
 
+await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and read-only', async () => {
+  const fs = await import('node:fs')
+  const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
+  const projection = fs.readFileSync(path.join(appRoot, 'src/agent/workingStateProjection.ts'), 'utf8')
+  const store = fs.readFileSync(path.join(appRoot, 'src/store/workingStateProjectionStore.ts'), 'utf8')
+  const view = fs.readFileSync(path.join(appRoot, 'src/components/WorkingStateView.tsx'), 'utf8')
+  const archivePage = fs.readFileSync(path.join(appRoot, 'src/pages/RecordsPage.tsx'), 'utf8')
+  const threadStore = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
+  assert.match(app, /hydrateHostSessions\(sessions\)/)
+  assert.match(app, /appendHostRecord\(appended\.entries, appended\.runId\)/)
+  assert.match(app, /if \(!api\?\.list\) \{\s*useWorkingStateProjectionStore\.getState\(\)\.setHostAvailable\(false\)/,
+    'missing Host capability fail-closed downgrades existing verified projections')
+  assert.match(app, /catch \{\s*useWorkingStateProjectionStore\.getState\(\)\.setHostAvailable\(false\)\s*\/\* Host projection/,
+    'Host list failure fail-closed downgrades existing verified projections')
+  assert.match(projection, /WORKING_STATE_EVIDENCE_LIMIT = 3/)
+  assert.match(projection, /if \(current\.tombstoned\) return current/)
+  assert.match(projection, /if \(incomingRevision < currentRevision\) return current/)
+  assert.match(store, /projectWorkingStateEntries\(entries, state\.hostAvailable\)/)
+  assert.match(view, /data-working-state-verification/)
+  assert.doesNotMatch(view, /<input|<textarea|contentEditable|onChange|onSubmit/,
+    'the renderer may inspect Working State but cannot edit or submit it')
+  assert.match(archivePage, /projectWorkingStateEntries\([\s\S]*?turnRecordEntries\(record\),\s*false,/,
+    'a renderer archive stays unverified until it is matched to Host-owned identity')
+  assert.match(threadStore, /hydrateHostSessions\(\[\{ \.\.\.session, archived: true \}\]\)/,
+    'a confirmed Host archive installs a tombstone from the verified pre-archive projection')
+})
+
 console.log(`\n${passed} capability smoke tests passed, ${skipped} skipped`)
 if (process.exitCode) {
   console.error('Capability smoke failed')
