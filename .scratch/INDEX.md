@@ -19,6 +19,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 | Effort | Status | 一 hop 證據 |
 |--------|--------|------------|
+| verified-working-memory-lifecycle | resolved（15/15 tickets done；[spec.md](verified-working-memory-lifecycle/spec.md)） | [qualification.md](verified-working-memory-lifecycle/qualification.md)：同一 Turn Record 可回答 package／Skill／effect／Checker／state revision；canonical evaluation gate、restart/resume、delegation、candidate-only Meta-Agent 與 owner drift guards 均掛 `npm run smoke` |
 | sidebar-navigation-integration | resolved（5/5 tickets done；[spec.md](sidebar-navigation-integration/spec.md)） | [qualification.md](sidebar-navigation-integration/qualification.md)：Radix menu 鍵盤與回焦、desktop/mobile drawer、anti-slop 全項複查；乾淨 worktree `npm run build`、完整 `npm run smoke` 全綠 |
 | durable-memory-sqlite-migration | resolved（16/16 tickets done；[spec.md](durable-memory-sqlite-migration/spec.md)） | `smoke-durable-memory-workflow-qualification.mts` 固定 16 個 lifecycle gates 並做 protocol v5／single-authority audit；build、oxlint、完整 smoke 綠；[復原邊界](durable-memory-sqlite-migration/cutover-recovery.md) |
 | subscription-surface-hardening | resolved（5/5 tickets done；[spec.md](subscription-surface-hardening/spec.md)） | Settings／catalog／usage hardening smokes 全綠；finalization 啟動語意由 active-run-reattachment #12 owning；tracker #05 已完成三項對帳 |

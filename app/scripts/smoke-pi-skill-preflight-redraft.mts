@@ -161,6 +161,17 @@ try {
   assert.match(secondRequest, /fresh call identity/)
 
   const entries = settled.result?.record?.entries || []
+  const packageEntry = entries.find((entry: any) => entry.kind === 'memory-control-package')
+  const workingStates = entries.filter((entry: any) => entry.kind === 'working-state')
+  const checker = entries.find((entry: any) => entry.kind === 'state-check')
+  assert.match(packageEntry?.packageIdentity?.digest || '', /^[a-f0-9]{64}$/)
+  assert.deepEqual(workingStates.map((entry: any) => entry.state.revision), [1, 2])
+  assert.deepEqual(workingStates.map((entry: any) => entry.state.goals[0].status), ['pending', 'done'])
+  assert.equal(checker?.check?.verdict, 'accepted')
+  assert.equal(typeof checker?.check?.evidenceRef?.evidenceId, 'string')
+  assert.match(checker?.check?.evidenceRef?.receiptDigest || '', /^[a-f0-9]{64}$/,
+    'the same record carries the Checker receipt identity that committed progress')
+  assert.deepEqual(checker?.packageIdentity, packageEntry?.packageIdentity)
   const originalCall = entries.findIndex((entry: any) => entry.kind === 'tool-call' && entry.callId === 'call_original_write')
   const invocation = entries.findIndex((entry: any) => entry.kind === 'skill-invocation' && entry.invocation?.callId === 'call_original_write')
   const originalResult = entries.findIndex((entry: any) => entry.kind === 'tool-result' && entry.callId === 'call_original_write')

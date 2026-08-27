@@ -116,6 +116,7 @@ const corpus = (sourceActions: string[] = []) => sealMemoryControlEvaluationCorp
 })
 
 let auditSequence = 0
+let lastAudit: any
 const settleThroughAuditRun = async (
   report: Awaited<ReturnType<typeof evaluateMemoryControlCandidate>>,
   expected: 'settled' | 'rejected' = 'settled',
@@ -143,6 +144,7 @@ const settleThroughAuditRun = async (
     releaseAudit()
   }
   const audit = await turn
+  lastAudit = audit
   auditStarted = undefined
   releaseAudit = undefined
   const lifecycleEntries = audit.record.entries.filter((entry: any) => entry.kind === 'memory-control-lifecycle')
@@ -202,6 +204,20 @@ try {
   assert.deepEqual(improving.metrics, { taskSuccessRate: 1, falseDoneRate: 0, requiredActionRecall: 1,
     skillInvocationPrecision: 1, skillInvocationReach: 1, promptTokens: 160, tokensPerSuccess: 80 })
   await settleThroughAuditRun(improving)
+
+  const auditPackage = lastAudit.record.entries.find((entry: any) => entry.kind === 'memory-control-package')
+  assert.equal(auditPackage.packageIdentity.revision, 1,
+    'the already-admitted audit run remains frozen on its original package while activation settles')
+  replies = [{ content: 'new run after gated activation', promptTokens: 80 }]
+  const nextSession = await rpc('sessions/create', { title: 'post-promotion admission' })
+  const nextRun = await rpc('turn/submit', {
+    sessionId: nextSession.sessionId, runId: 'post-promotion-run', cwd: root,
+    prompt: 'observe the newly activated package', pattern: 'Turn-based', maxIterations: 1,
+    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: [], approvalMode: 'full', unattended: false, compaction: 'manual' },
+  })
+  const nextPackage = nextRun.record.entries.find((entry: any) => entry.kind === 'memory-control-package')
+  assert.equal(nextPackage.packageIdentity.revision, candidates[2].revision,
+    'only a new run observes the candidate revision activated through the evaluation gate')
 
   const persisted = await rpc('memory-control/v1/package/get', { schemaVersion: 1, view: 'evaluations' })
   assert.deepEqual(persisted.memoryControlEvaluations.map((report: any) => report.reportId), [falseDone.reportId, tokenRegression.reportId, improving.reportId])
