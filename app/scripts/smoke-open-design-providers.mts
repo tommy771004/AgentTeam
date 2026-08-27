@@ -16,6 +16,13 @@ import { cdtAvailability, cdtToProviderEvidence, chromeDevToolsEvidenceAllowsPas
 import { createHarnessFakeSession, harnessAvailability, normalizeHarnessFixture } from '../src/agent/subdesign/providers/harnessProvider.ts'
 import { mcpAppsAvailability, validateBridgeMessage, validateSurfaceDeclaration, isToolAllowed, parseMcpToolCoordinate } from '../src/agent/subdesign/providers/mcpAppsProvider.ts'
 import { SURFACE_STATUS_LABELS, surfaceFallsBack } from '../src/agent/subdesign/surfaceStatus.ts'
+import {
+  createInMemorySurfaceSessionRepository,
+  createHostSurfaceSessionRepository,
+  createSurfaceSession,
+  resolveSurfaceSessionRef,
+  transitionSurfaceSession,
+} from '../src/agent/subdesign/surfaceSession.ts'
 import { createStreamingEnvelope, appendStreamingUpdate, finalizeEnvelope, reconcileUpdates, canRender } from '../src/agent/subdesign/streamingEnvelope.ts'
 import {
   DEFAULT_STORYBOOK_PROVIDER_SETTINGS,
@@ -229,6 +236,35 @@ await test('mcp-apps: validation rejects untrusted origin / disallowed tool / ma
   assert.equal(good.ok,true)
 })
 
+await test('mcp-apps: scoped session persists lifecycle and fails closed without identity',async()=>{
+  const missing=resolveSurfaceSessionRef('surface_1',{kind:'form',scope:'run',allowlist:[]},{})
+  assert.equal(missing.ok,false)
+  const resolved=resolveSurfaceSessionRef('surface_1',{kind:'form',scope:'conversation',allowlist:[]},{threadId:'thread_1'})
+  assert.equal(resolved.ok,true)
+  if(!resolved.ok)return
+  let session=createSurfaceSession(resolved.ref,'form')
+  session=transitionSurfaceSession(session,{type:'ready'})
+  session=transitionSurfaceSession(session,{type:'draft',values:{input:'kept'}})
+  session=transitionSurfaceSession(session,{type:'submitted',values:{input:'accepted'}})
+  assert.equal(session.status,'submitted')
+  assert.equal(session.draft,undefined)
+  const repository=createInMemorySurfaceSessionRepository()
+  await repository.save(session)
+  assert.deepEqual(await repository.load(resolved.ref),session)
+
+  let persisted: unknown = null
+  const host=globalThis as unknown as {window?:unknown}; const priorWindow=host.window
+  host.window={subagents:{subdesign:{
+    writeMetadata:async(input:any)=>{persisted=input.payload;return{ok:true}},
+    readMetadata:async()=>({ok:true,briefs:[],artifacts:[],critiques:[],exports:[],openDesignPacks:[],openDesignSnapshots:[],openDesignProviderSettings:[],openDesignProviderRuns:[],openDesignSurfaceSessions:persisted?[persisted]:[]}),
+  }}}
+  try {
+    const hostRepository=createHostSurfaceSessionRepository('/tmp/project')
+    assert.equal(await hostRepository.save(session),true)
+    assert.deepEqual(await hostRepository.load(resolved.ref),session)
+  } finally { host.window=priorWindow }
+})
+
 await test('mcp-apps: real fallback options, distinct states, no placeholder choices',()=>{
   const surface=fs.readFileSync(path.join(appRoot,'src/components/subdesign/McpAppSurface.tsx'),'utf8')
   // The hardcoded placeholder directions must not come back.
@@ -246,6 +282,10 @@ await test('mcp-apps: real fallback options, distinct states, no placeholder cho
   const sandboxAttr = surface.match(/sandbox="([^"]*)"/)
   assert.ok(sandboxAttr,'iframe 必須宣告 sandbox')
   assert.equal(sandboxAttr[1],'allow-scripts')
+  assert.doesNotMatch(surface,/\|\| 'unknown'/)
+  assert.match(surface,/action === 'ready'/)
+  assert.match(surface,/action === 'error'/)
+  assert.match(surface,/createHostSurfaceSessionRepository/)
 
   // Every state has its own wording, so the conversation is not one spinner.
   const labels=Object.entries(SURFACE_STATUS_LABELS)

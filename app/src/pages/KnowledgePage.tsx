@@ -231,7 +231,7 @@ export function KnowledgePage() {
               })
             }
           }}
-          className={settingsBtnCls}
+          className="min-h-8 rounded-control bg-transparent px-3 py-1.5 text-[12px] font-semibold text-on-surface-variant transition-colors hover:bg-hover-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
         >
           返回
         </button>
@@ -268,7 +268,7 @@ export function KnowledgePage() {
                 type="button"
                 disabled={cgBusy || !projectRoot || !cgStatus?.indexed}
                 onClick={() => void onSyncIndex()}
-                className="px-2.5 py-1 rounded-lg text-[11px] border border-white/15 text-on-surface-variant hover:border-primary/30 disabled:opacity-40"
+                className="min-h-8 rounded-lg bg-transparent px-2.5 py-1 text-[11px] text-on-surface-variant transition-colors hover:bg-hover-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:opacity-40"
               >
                 sync
               </button>
@@ -276,7 +276,7 @@ export function KnowledgePage() {
                 type="button"
                 disabled={cgBusy}
                 onClick={() => void refreshCg()}
-                className="px-2.5 py-1 rounded-lg text-[11px] border border-white/15 text-on-surface-variant hover:border-primary/30 disabled:opacity-40"
+                className="min-h-8 rounded-lg bg-transparent px-2.5 py-1 text-[11px] text-on-surface-variant transition-colors hover:bg-hover-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:opacity-40"
               >
                 重新整理狀態
               </button>
@@ -293,11 +293,12 @@ export function KnowledgePage() {
               <button
                 key={id}
                 type="button"
+                aria-pressed={mode === id}
                 onClick={() => setMode(id)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] border ${
+                className={`min-h-8 rounded-lg bg-transparent px-2.5 py-1 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
                   mode === id
-                    ? 'border-primary/40 bg-primary/15 text-primary'
-                    : 'border-white/12 text-on-surface-variant hover:border-white/25'
+                    ? 'bg-primary/15 text-primary'
+                    : 'text-on-surface-variant hover:bg-hover-2 hover:text-on-surface'
                 }`}
               >
                 {label}
@@ -424,15 +425,17 @@ export function KnowledgePage() {
                 <div className="flex gap-1">
                   <button
                     type="button"
+                    aria-label="放大關係圖譜"
                     onClick={() => setZoom((z) => Math.min(1.6, z + 0.1))}
-                    className="p-1.5 rounded hover:bg-white/5 text-outline"
+                    className="flex size-8 items-center justify-center rounded-lg bg-transparent text-outline transition-colors hover:bg-hover-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
                   >
                     <Icon name="zoom_in" size={18} />
                   </button>
                   <button
                     type="button"
+                    aria-label="縮小關係圖譜"
                     onClick={() => setZoom((z) => Math.max(0.6, z - 0.1))}
-                    className="p-1.5 rounded hover:bg-white/5 text-outline"
+                    className="flex size-8 items-center justify-center rounded-lg bg-transparent text-outline transition-colors hover:bg-hover-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
                   >
                     <Icon name="zoom_out" size={18} />
                   </button>

@@ -193,7 +193,7 @@ export function PluginMarketplace() {
             type="button"
             onClick={() => setScope('personal')}
             title="管理已安裝能力"
-            className="w-8 h-8 rounded-lg text-outline hover:text-on-surface hover:bg-white/5 flex items-center justify-center transition-colors"
+            className="flex size-8 items-center justify-center rounded-lg bg-transparent text-outline transition-colors hover:bg-hover-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
           >
             <Icon name="settings" size={18} />
           </button>
@@ -241,16 +241,17 @@ export function PluginMarketplace() {
       {/* 公開 / 個人 + filter icon (category menu) */}
       <div className="flex items-center justify-between gap-3 mb-6">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-control bg-surface-container/90 p-0.5 border border-line">
+          <div className="inline-flex gap-0.5" role="group" aria-label="擴充來源">
             {(['public', 'personal'] as const).map((value) => (
               <button
                 key={value}
                 type="button"
+                aria-pressed={scope === value}
                 onClick={() => setScope(value)}
                 className={`min-w-[3.75rem] rounded-control px-3 py-1.5 text-[12px] font-semibold transition-colors ${
                   scope === value
                     ? 'bg-hover text-on-surface'
-                    : 'text-outline hover:text-on-surface-variant'
+                    : 'text-outline hover:bg-hover-2 hover:text-on-surface-variant'
                 }`}
               >
                 {value === 'public' ? '商店' : '我的'}
@@ -258,16 +259,17 @@ export function PluginMarketplace() {
             ))}
           </div>
           {scope === 'public' && (
-            <div className="inline-flex rounded-control bg-surface-container/90 p-0.5 border border-line">
+            <div className="inline-flex gap-0.5" role="group" aria-label="擴充目錄模式">
               {(['simple', 'all'] as const).map((mode) => (
                 <button
                   key={mode}
                   type="button"
+                  aria-pressed={catalogMode === mode}
                   onClick={() => setCatalogMode(mode)}
                   className={`rounded-control px-3 py-1.5 text-[11px] font-semibold transition-colors ${
                     catalogMode === mode
                       ? 'bg-primary/15 text-primary'
-                      : 'text-outline hover:text-on-surface-variant'
+                      : 'text-outline hover:bg-hover-2 hover:text-on-surface-variant'
                   }`}
                 >
                   {mode === 'simple' ? '常用' : '全部（含進階）'}
@@ -282,6 +284,8 @@ export function PluginMarketplace() {
             type="button"
             onClick={() => setFilterOpen((open) => !open)}
             title="分類篩選"
+            aria-expanded={filterOpen}
+            aria-haspopup="menu"
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
               category !== 'All' || filterOpen
                 ? 'text-on-surface bg-white/8'

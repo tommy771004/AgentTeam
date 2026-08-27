@@ -344,7 +344,7 @@ export function SubDesignProjectStudio({
                           detail,
                         })
                       }}
-                      fallback={(
+                      fallback={(surfaceActions) => (
                         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                           {brief.directions.map((direction, index) => {
                             const selected = direction.id === candidateDirectionId
@@ -354,7 +354,7 @@ export function SubDesignProjectStudio({
                                 key={direction.id}
                                 type="button"
                                 aria-pressed={selected}
-                                onClick={() => setCandidateDirectionId(direction.id)}
+                                onClick={() => surfaceActions.choose(direction.id)}
                                 className={`min-h-[92px] rounded-xl px-3 py-3 text-left transition-colors ${
                                   selected ? 'bg-primary/[0.09] text-on-surface' : 'bg-white/[0.025] text-on-surface-variant hover:bg-white/[0.045]'
                                 }`}

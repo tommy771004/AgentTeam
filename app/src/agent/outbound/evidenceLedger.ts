@@ -6,6 +6,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import type { RedactionSummaryEntry } from './redactionTaxonomy.ts'
 
 export type EvidenceEventType =
   | 'outbound-decision'
@@ -40,6 +41,7 @@ export type EvidenceRecord = {
   filesystemIsolation?: string
   action?: string
   exclusions?: EvidenceExclusionLocator[]
+  redactionSummary?: RedactionSummaryEntry[]
   sealed: boolean
   previousMac?: string
   recordMac?: string
@@ -176,6 +178,7 @@ function canonicalPayload(rec: Omit<EvidenceRecord, 'recordMac'>): string {
     sealed: rec.sealed,
     previousMac: rec.previousMac ?? null,
   }
+  if (rec.redactionSummary) o.redactionSummary = rec.redactionSummary
   return JSON.stringify(o)
 }
 
@@ -212,6 +215,7 @@ export type AppendEvidenceInput = {
   filesystemIsolation?: string
   action?: string
   exclusions?: EvidenceExclusionLocator[]
+  redactionSummary?: RedactionSummaryEntry[]
 }
 
 /** Event types that only main-internal control points may write (ticket 23 / ADR-0015). */
@@ -291,6 +295,7 @@ export async function appendEvidenceRecord(
     filesystemIsolation: input.filesystemIsolation,
     action: input.action,
     exclusions: input.exclusions || [],
+    redactionSummary: input.redactionSummary,
     sealed,
     previousMac,
   }

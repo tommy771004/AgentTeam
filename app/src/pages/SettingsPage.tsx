@@ -1043,8 +1043,8 @@ export function SettingsPage() {
                 }
               />
               <SettingsRow
-                title="側欄半透明"
-                description="Liquid Glass 材質側欄"
+                title="液態玻璃側欄"
+                description="啟用背景折射、霧化與邊緣高光；關閉後改用不透明側欄。"
                 control={
                   <SettingsToggle
                     checked={settings.translucentSidebar !== false}

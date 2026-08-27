@@ -160,17 +160,19 @@ function ArchiveSection() {
           <div className="flex gap-1">
             <button
               type="button"
+              aria-label="上一頁"
               disabled={page === 0}
               onClick={() => setPage((p) => p - 1)}
-              className="p-1.5 rounded hover:bg-white/5 disabled:opacity-30"
+              className="flex size-8 items-center justify-center rounded-lg bg-transparent text-outline transition-colors hover:bg-hover-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:opacity-30"
             >
               <Icon name="chevron_left" size={18} />
             </button>
             <button
               type="button"
+              aria-label="下一頁"
               disabled={page >= totalPages - 1}
               onClick={() => setPage((p) => p + 1)}
-              className="p-1.5 rounded hover:bg-white/5 disabled:opacity-30"
+              className="flex size-8 items-center justify-center rounded-lg bg-transparent text-outline transition-colors hover:bg-hover-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:opacity-30"
             >
               <Icon name="chevron_right" size={18} />
             </button>

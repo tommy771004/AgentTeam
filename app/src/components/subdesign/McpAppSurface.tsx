@@ -6,18 +6,32 @@
  * - Per-surface allowlist; never calls arbitrary tools or exposes raw tokens
  * - Falls back to native UI on crash / unsupported host / flag disabled
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { validateBridgeMessage, isToolAllowed, parseMcpToolCoordinate, CSP_SANDBOX, type SurfaceDeclaration } from '../../agent/subdesign/providers/mcpAppsProvider.ts'
 import { isProviderEnabled } from '../../agent/subdesign/providers/providerFlags.ts'
 import { useSurfaceDraftStore } from '../../agent/subdesign/surfaceDraftStore.ts'
 import { surfaceFallsBack, type SurfaceStatus } from '../../agent/subdesign/surfaceStatus.ts'
 import { usePermissionAskStore } from '../../store/permissionAskStore.ts'
+import {
+  createHostSurfaceSessionRepository,
+  createSurfaceSession,
+  resolveSurfaceSessionRef,
+  transitionSurfaceSession,
+  type SurfaceSessionEvent,
+  type SurfaceSessionSnapshot,
+} from '../../agent/subdesign/surfaceSession.ts'
 
 export { SURFACE_STATUS_LABELS, type SurfaceStatus } from '../../agent/subdesign/surfaceStatus.ts'
 
 const TRUSTED_ORIGIN = 'null' // sandboxed iframe has opaque origin; host validates via expectedOrigin check in provider, not real network origin
 
 export type SurfaceChoiceOption = { id: string; label: string; summary?: string }
+type SubmissionResult = void | boolean | Promise<void | boolean>
+export type SurfaceFallbackActions = {
+  choose: (value: string) => void
+  submitForm: (values: Record<string, unknown>) => void
+  confirm: (confirmed: boolean) => void
+}
 
 type ToolProxyContext = {
   surfaceId: string
@@ -148,18 +162,25 @@ export function McpAppSurface(props: {
   /** Real choices for a `choice` surface — never placeholder labels. */
   choiceOptions?: readonly SurfaceChoiceOption[]
   /** Native UI to show when the surface is unavailable, invalid, expired or crashed. */
-  fallback?: ReactNode
+  fallback?: ReactNode | ((actions: SurfaceFallbackActions) => ReactNode)
   /**
    * Every surface state change, so the conversation shows real execution
    * messages instead of one undifferentiated spinner (issue 07).
    */
   onStatusChange?: (status: SurfaceStatus, detail?: string) => void
-  onChoice?: (value: string) => void
-  onFormSubmit?: (values: Record<string, unknown>) => void
-  onConfirm?: (confirmed: boolean) => void
+  onChoice?: (value: string) => SubmissionResult
+  onFormSubmit?: (values: Record<string, unknown>) => SubmissionResult
+  onConfirm?: (confirmed: boolean) => SubmissionResult
+  expiresAt?: string
 }) {
   const enabled = isProviderEnabled('mcp-apps')
-  const [status, setStatus] = useState<SurfaceStatus>(enabled ? 'loading' : 'unavailable')
+  const resolution = useMemo(() => resolveSurfaceSessionRef(props.surfaceId, props.declaration, {
+    runId: props.runId,
+    threadId: props.threadId,
+    projectRoot: props.projectRoot,
+  }), [props.surfaceId, props.declaration, props.runId, props.threadId, props.projectRoot])
+  const repository = useMemo(() => createHostSurfaceSessionRepository(props.projectRoot), [props.projectRoot])
+  const [status, setStatus] = useState<SurfaceStatus>(enabled && resolution.ok && props.html ? 'loading' : 'unavailable')
   const [error, setError] = useState<string | null>(null)
   const onStatusChange = props.onStatusChange
   const reported = useRef<string>('')
@@ -174,16 +195,69 @@ export function McpAppSurface(props: {
     onStatusChange?.(status, error ?? undefined)
   }, [enabled, status, error, onStatusChange])
   const iframeRef = useRef<HTMLIFrameElement>(null)
-  const draftStore = useSurfaceDraftStore()
+  const persistenceQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const session = useRef<SurfaceSessionSnapshot | null>(resolution.ok
+    ? createSurfaceSession(resolution.ref, props.declaration.kind, { expiresAt: props.expiresAt })
+    : null)
+  const drafts = useSurfaceDraftStore((state) => state.drafts)
+  const saveDraft = useSurfaceDraftStore((state) => state.saveDraft)
+  const clearDraft = useSurfaceDraftStore((state) => state.clearDraft)
+  const draftRef = resolution.ok ? resolution.ref : null
+  const draft = draftRef
+    ? drafts.find((candidate) => candidate.surfaceId === draftRef.surfaceId && candidate.scope === draftRef.scope && candidate.scopeKey === draftRef.scopeKey)?.values ?? null
+    : null
+  const { onChoice, onConfirm, onFormSubmit } = props
 
-  const scopeKey = props.declaration.scope === 'run' ? (props.runId || 'unknown') : props.declaration.scope === 'conversation' ? (props.threadId || 'unknown') : (props.projectRoot || 'unknown')
+  const transition = useCallback((event: SurfaceSessionEvent) => {
+    const current = session.current
+    if (!current) return
+    const next = transitionSurfaceSession(current, event)
+    session.current = next
+    setStatus(next.status)
+    persistenceQueue.current = persistenceQueue.current.then(() => repository.save(next))
+  }, [repository])
 
-  const draftRef = { surfaceId: props.surfaceId, scope: props.declaration.scope, scopeKey }
-  const draft = draftStore.loadDraft(draftRef)
+  const submit = useCallback(async (values: Record<string, unknown>, callback?: () => SubmissionResult) => {
+    if (!draftRef || !callback) return
+    saveDraft(draftRef, values)
+    transition({ type: 'draft', values })
+    try {
+      const accepted = await callback()
+      if (accepted === false) return
+      clearDraft(draftRef)
+      transition({ type: 'submitted', values })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      transition({ type: 'error' })
+    }
+  }, [clearDraft, draftRef, saveDraft, transition])
+
+  const actions = useMemo<SurfaceFallbackActions>(() => ({
+    choose: (value) => { void submit({ value }, onChoice ? () => onChoice(value) : undefined) },
+    submitForm: (values) => { void submit(values, onFormSubmit ? () => onFormSubmit(values) : undefined) },
+    confirm: (confirmed) => { void submit({ confirmed }, onConfirm ? () => onConfirm(confirmed) : undefined) },
+  }), [onChoice, onConfirm, onFormSubmit, submit])
 
   useEffect(() => {
-    if (!enabled) {
-      setStatus('unavailable')
+    if (!enabled || !resolution.ok || !props.html) {
+      if (!resolution.ok) setError(resolution.reason)
+      if (enabled && resolution.ok && !props.html) transition({ type: 'unavailable' })
+      else setStatus('unavailable')
+      return
+    }
+    session.current = createSurfaceSession(resolution.ref, props.declaration.kind, { expiresAt: props.expiresAt })
+    void repository.load(resolution.ref).then((restored) => {
+      if (!restored) return
+      if (restored.draft) saveDraft(resolution.ref, restored.draft)
+      if (restored.status === 'submitted') {
+        session.current = restored
+        setStatus('submitted')
+      } else if (session.current) {
+        session.current = { ...session.current, draft: restored.draft }
+      }
+    })
+    if (props.expiresAt && Date.parse(props.expiresAt) <= Date.now()) {
+      transition({ type: 'expired' })
       return
     }
     const handler = (ev: MessageEvent) => {
@@ -192,7 +266,7 @@ export function McpAppSurface(props: {
       // origin for sandboxed iframe is opaque ("null") — validate via bridge schema, not network origin
       const validated = validateBridgeMessage(ev.data, { expectedOrigin: TRUSTED_ORIGIN, actualOrigin: ev.origin })
       if (!validated.ok) {
-        setStatus('invalid')
+        transition({ type: 'invalid' })
         setError(validated.reason)
         // log security reason — never expose token
         console.warn(`[mcp-apps] bridge rejected: ${validated.reason}`)
@@ -200,6 +274,15 @@ export function McpAppSurface(props: {
       }
       const msg = validated.msg
       if (msg.surfaceId !== props.surfaceId) return
+      if (msg.action === 'ready') {
+        transition({ type: 'ready' })
+        return
+      }
+      if (msg.action === 'error') {
+        setError('MCP Apps iframe 發生執行錯誤。')
+        transition({ type: 'error' })
+        return
+      }
 
       // Allowlist enforcement — UI cannot call arbitrary tools
       if (msg.action === 'tool_call') {
@@ -216,45 +299,44 @@ export function McpAppSurface(props: {
         return
       }
 
-      if (msg.action === 'choice_select' && props.onChoice) {
-        props.onChoice(String((msg.payload as Record<string, unknown>)?.value || ''))
-        setStatus('submitted')
+      if (msg.action === 'choice_select') {
+        actions.choose(String((msg.payload as Record<string, unknown>)?.value || ''))
       }
-      if (msg.action === 'form_submit' && props.onFormSubmit) {
+      if (msg.action === 'form_submit') {
         const values = (msg.payload as Record<string, unknown>)?.values as Record<string, unknown>
-        if (values && typeof values === 'object') {
-          draftStore.saveDraft({ surfaceId: props.surfaceId, scope: props.declaration.scope, scopeKey }, values)
-        }
-        props.onFormSubmit(values || {})
-        setStatus('submitted')
+        actions.submitForm(values || {})
       }
-      if (msg.action === 'confirm' && props.onConfirm) {
+      if (msg.action === 'confirm') {
         const confirmed = Boolean((msg.payload as Record<string, unknown>)?.confirmed)
-        props.onConfirm(confirmed)
-        setStatus('submitted')
+        actions.confirm(confirmed)
       }
     }
     window.addEventListener('message', handler)
-    // Mark ready after mount (host-to-iframe init message validated as v=1)
-    const readyTimer = setTimeout(() => setStatus((s) => (s === 'loading' ? 'ready' : s)), 300)
+    const readyTimer = setTimeout(() => {
+      if (session.current?.status !== 'loading') return
+      setError('MCP Apps iframe ready handshake 逾時。')
+      transition({ type: 'unavailable' })
+    }, 2_000)
+    const expiryTimer = props.expiresAt ? setTimeout(() => transition({ type: 'expired' }), Math.max(0, Date.parse(props.expiresAt) - Date.now())) : undefined
     return () => {
       window.removeEventListener('message', handler)
       clearTimeout(readyTimer)
+      if (expiryTimer) clearTimeout(expiryTimer)
     }
-  }, [enabled, props.surfaceId, props.declaration, props.runId, props.threadId, props.projectRoot, props.onChoice, props.onFormSubmit, props.onConfirm, scopeKey, draftStore])
+  }, [actions, enabled, props.surfaceId, props.declaration, props.html, props.expiresAt, props.projectRoot, props.runId, props.threadId, resolution, repository, saveDraft, transition])
 
   if (!enabled) {
-    return <FallbackSwitch {...props} draft={draft} status="unavailable" />
+    return <FallbackSwitch {...props} actions={actions} draft={draft} status="unavailable" />
   }
 
   if (surfaceFallsBack(status)) {
-    return <FallbackSwitch {...props} draft={draft} status={status} error={error} />
+    return <FallbackSwitch {...props} actions={actions} draft={draft} status={status} error={error} />
   }
 
   // Sandboxed iframe — no Electron/Node authority, constrained CSP, no network
   // Note: sandbox attribute + srcDoc + csp meta ensure no top navigation / no external resources
   const srcDoc = props.html
-    ? `<!doctype html><meta http-equiv="Content-Security-Policy" content="${CSP_SANDBOX}"><meta charset="utf-8"><body style="margin:0;font-family:system-ui">${props.html}<script>window.addEventListener('error',()=>parent.postMessage({v:1,surfaceId:'${props.surfaceId}',kind:'${props.declaration.kind}',action:'error'},'*'))<\/script>`
+    ? `<!doctype html><meta http-equiv="Content-Security-Policy" content="${CSP_SANDBOX}"><meta charset="utf-8"><body style="margin:0;font-family:system-ui">${props.html}<script>window.addEventListener('error',()=>parent.postMessage({v:1,surfaceId:'${props.surfaceId}',kind:'${props.declaration.kind}',action:'error'},'*'));parent.postMessage({v:1,surfaceId:'${props.surfaceId}',kind:'${props.declaration.kind}',action:'ready'},'*')</script>`
     : `<!doctype html><meta http-equiv="Content-Security-Policy" content="${CSP_SANDBOX}"><body style="display:grid;place-items:center;height:100vh;margin:0;font-family:system-ui;opacity:1"><div>Surface ${props.surfaceId} (${props.declaration.kind})</div>`
 
   return (
@@ -271,8 +353,7 @@ export function McpAppSurface(props: {
         // srcDoc — the `csp` iframe attribute was never shipped by browsers.
         sandbox="allow-scripts"
         srcDoc={srcDoc}
-        onError={() => setStatus('error')}
-        onLoad={() => setStatus((s) => (s === 'loading' ? 'ready' : s))}
+        onError={() => transition({ type: 'error' })}
         style={{ width: '100%', height: 260, border: 0, background: 'white' }}
       />
       {error && <p className="px-3 py-1 text-xs text-red-500">{error}</p>}
@@ -287,11 +368,12 @@ function FallbackSwitch(
     runId?: string
     threadId?: string
     projectRoot?: string
-    onChoice?: (v: string) => void
-    onFormSubmit?: (v: Record<string, unknown>) => void
-    onConfirm?: (v: boolean) => void
+    onChoice?: (v: string) => SubmissionResult
+    onFormSubmit?: (v: Record<string, unknown>) => SubmissionResult
+    onConfirm?: (v: boolean) => SubmissionResult
     choiceOptions?: readonly SurfaceChoiceOption[]
-    fallback?: ReactNode
+    fallback?: ReactNode | ((actions: SurfaceFallbackActions) => ReactNode)
+    actions: SurfaceFallbackActions
     draft?: Record<string, unknown> | null
     status?: SurfaceStatus
     error?: string | null
@@ -299,12 +381,13 @@ function FallbackSwitch(
 ) {
   // A caller-supplied native surface always wins: it is the real product UI,
   // not a stand-in.
+  if (typeof props.fallback === 'function') return <>{props.fallback(props.actions)}</>
   if (props.fallback) return <>{props.fallback}</>
   if (props.declaration.kind === 'choice') {
-    return <FallbackChoice options={props.choiceOptions ?? []} onSelect={(v) => props.onChoice?.(v)} />
+    return <FallbackChoice options={props.choiceOptions ?? []} onSelect={props.actions.choose} />
   }
   if (props.declaration.kind === 'form') {
-    return <FallbackForm onSubmit={(v) => props.onFormSubmit?.(v)} draft={props.draft || undefined} />
+    return <FallbackForm onSubmit={props.actions.submitForm} draft={props.draft || undefined} />
   }
-  return <FallbackConfirm onConfirm={() => props.onConfirm?.(true)} onReject={() => props.onConfirm?.(false)} />
+  return <FallbackConfirm onConfirm={() => props.actions.confirm(true)} onReject={() => props.actions.confirm(false)} />
 }

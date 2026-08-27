@@ -83,13 +83,14 @@ export function OpsPage() {
           <h1 className="font-[family-name:var(--font-sora)] text-3xl font-semibold">執行營運總覽</h1>
           <p className="text-sm text-on-surface-variant mt-1">排程、事件、佇列、容量與 recovery 的同一個投影面。</p>
         </div>
-        <div className="flex gap-1 p-1 rounded-lg bg-surface-container-high">
+        <div className="flex gap-1" role="group" aria-label="Ops 檢視">
           {tabs.map((item) => (
             <button
               key={item.id}
               type="button"
+              aria-pressed={tab === item.id}
               onClick={() => setTab(item.id)}
-              className={`px-3 py-2 rounded-md text-xs font-semibold ${tab === item.id ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant hover:text-on-surface'}`}
+              className={`min-h-8 rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${tab === item.id ? 'bg-primary/12 text-primary' : 'text-on-surface-variant hover:bg-hover-2 hover:text-on-surface'}`}
             >
               {item.label}
             </button>

@@ -362,6 +362,7 @@ const api = {
       effectiveMode?: 'off' | 'demo' | 'optional' | 'required'
       providerConnectionId?: string
       outboundProfileSource?: 'company' | 'baseline' | 'none'
+      outboundRedactionSummary?: import('../src/agent/outbound/redactionTaxonomy.ts').RedactionSummaryEntry[]
     }) =>
       ipcRenderer.invoke('llm:chat', req) as Promise<{
         content: string
@@ -481,6 +482,7 @@ const api = {
         openDesignSnapshots: unknown[]
         openDesignProviderSettings: unknown[]
         openDesignProviderRuns: unknown[]
+        openDesignSurfaceSessions: unknown[]
         error?: string
       }>,
     writeMetadata: (input: { kind: SubDesignMetadataKind; payload: unknown; projectRoot?: string }) =>
@@ -1511,6 +1513,7 @@ const api = {
         filesystemIsolation?: string
         action?: string
         exclusionCount: number
+        redactionSummary?: import('../src/agent/outbound/redactionTaxonomy.ts').RedactionSummaryEntry[]
         sealed: boolean
       }>>,
     appendEvidence: (

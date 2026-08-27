@@ -438,7 +438,7 @@ export function SubDesignPage() {
                 <select
                   value={surfaceId}
                   onChange={(event) => setSurfaceId(event.target.value as DesignSurface['id'])}
-                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
+                  className="h-11 w-full cursor-pointer appearance-none rounded-xl bg-transparent px-3 pr-8 text-[13px] font-medium text-on-surface outline-none transition-colors hover:bg-hover-2 focus-visible:ring-2 focus-visible:ring-primary/35"
                   aria-label="設計範本"
                 >
                   {SURFACES.map((surface) => <option key={surface.id} value={surface.id}>{surface.title}</option>)}
@@ -449,7 +449,7 @@ export function SubDesignPage() {
                 <select
                   value={platform}
                   onChange={(event) => setPlatform(event.target.value as SubDesignPlatform)}
-                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
+                  className="h-11 w-full cursor-pointer appearance-none rounded-xl bg-transparent px-3 pr-8 text-[13px] font-medium text-on-surface outline-none transition-colors hover:bg-hover-2 focus-visible:ring-2 focus-visible:ring-primary/35"
                   aria-label="設計平台"
                 >
                   {PLATFORMS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -460,7 +460,7 @@ export function SubDesignPage() {
                 <select
                   value={runner}
                   onChange={(event) => setRunner(event.target.value as ThreadRunner)}
-                  className="h-11 w-full appearance-none rounded-xl border border-white/10 bg-black/10 px-3 pr-8 text-[13px] font-medium text-on-surface outline-none focus:border-primary/45"
+                  className="h-11 w-full cursor-pointer appearance-none rounded-xl bg-transparent px-3 pr-8 text-[13px] font-medium text-on-surface outline-none transition-colors hover:bg-hover-2 focus-visible:ring-2 focus-visible:ring-primary/35"
                   aria-label="Design agent"
                 >
                   {availableRunners.map((item) => <option key={item} value={item}>{RUNNER_LABELS[item] || item}</option>)}

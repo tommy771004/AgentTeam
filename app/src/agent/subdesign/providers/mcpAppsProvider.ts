@@ -5,25 +5,22 @@
  */
 import { isProviderEnabled } from './providerFlags.ts'
 import type { ProviderAvailability } from './providerContract.ts'
+import {
+  validateInteractiveSurfaceDeclaration,
+  type InteractiveSurfaceDeclaration,
+  type InteractiveSurfaceKind,
+} from '../../openDesign/pluginContract.ts'
 
-export type SurfaceKind = 'choice' | 'form' | 'confirmation'
-export type SurfaceScope = 'run' | 'conversation' | 'project'
-
-export type SurfaceDeclaration = {
-  kind: SurfaceKind
-  scope: SurfaceScope
-  allowlist: string[] // tool allowlist
-}
+export type SurfaceDeclaration = Pick<InteractiveSurfaceDeclaration, 'kind' | 'scope'> & { allowlist: string[] }
 
 export type BridgeMessage = {
   v: 1
   surfaceId: string
-  kind: SurfaceKind
+  kind: InteractiveSurfaceKind
   action: string
   payload?: unknown
 }
 
-const ALLOWLIST_LIMIT = 16
 const PAYLOAD_BUDGET = 8 * 1024
 
 export function mcpAppsAvailability(): ProviderAvailability {
@@ -32,16 +29,10 @@ export function mcpAppsAvailability(): ProviderAvailability {
 }
 
 export function validateSurfaceDeclaration(raw: unknown): { ok: true; decl: SurfaceDeclaration } | { ok: false; reason: string } {
-  if (!raw || typeof raw !== 'object') return { ok: false, reason: 'surface 必須是 object' }
-  const r = raw as Record<string, unknown>
-  const kind = String(r.kind || '')
-  if (!['choice', 'form', 'confirmation'].includes(kind)) return { ok: false, reason: `未知 surface kind: ${kind}` }
-  const scope = String(r.scope || 'run')
-  if (!['run', 'conversation', 'project'].includes(scope)) return { ok: false, reason: `未知 scope: ${scope}` }
-  const allowlist = Array.isArray(r.allowlist) ? r.allowlist.map((x) => String(x).trim()).filter(Boolean) : []
-  if (allowlist.length > ALLOWLIST_LIMIT) return { ok: false, reason: 'allowlist 過長' }
-  for (const a of allowlist) if (!/^[a-z_][a-z0-9_.-]{1,63}$/.test(a)) return { ok: false, reason: `allowlist 含非法 tool 名：${a}` }
-  return { ok: true, decl: { kind: kind as SurfaceKind, scope: scope as SurfaceScope, allowlist } }
+  const parsed = validateInteractiveSurfaceDeclaration(raw, { idFallback: 'runtime_surface' })
+  if (!parsed.ok) return parsed
+  const { kind, scope, allowlist = [] } = parsed.declaration
+  return { ok: true, decl: { kind, scope, allowlist } }
 }
 
 export function validateBridgeMessage(raw: unknown, opts?: { expectedOrigin?: string; actualOrigin?: string }): { ok: true; msg: BridgeMessage } | { ok: false; reason: string } {
@@ -64,7 +55,7 @@ export function validateBridgeMessage(raw: unknown, opts?: { expectedOrigin?: st
   }
   const json = JSON.stringify(r)
   if (new TextEncoder().encode(json).length > PAYLOAD_BUDGET) return { ok: false, reason: 'oversized payload' }
-  return { ok: true, msg: { v: 1, surfaceId, kind: kind as SurfaceKind, action, payload: r.payload } }
+  return { ok: true, msg: { v: 1, surfaceId, kind: kind as InteractiveSurfaceKind, action, payload: r.payload } }
 }
 
 export function isToolAllowed(surface: SurfaceDeclaration, toolName: string): boolean {

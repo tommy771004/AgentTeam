@@ -101,7 +101,7 @@ export function PillSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="appearance-none cursor-pointer bg-surface-container-low hover:bg-hover border border-line rounded-control pl-3.5 pr-8 py-1.5 text-[12px] font-medium text-on-surface outline-none focus:border-primary/40 min-w-[6.5rem] max-w-[14rem]"
+        className="min-h-8 min-w-[6.5rem] max-w-[14rem] cursor-pointer appearance-none rounded-control bg-transparent py-1.5 pl-3.5 pr-8 text-[12px] font-medium text-on-surface outline-none transition-colors hover:bg-hover-2 focus-visible:ring-2 focus-visible:ring-primary/35"
       >
         {children}
       </select>

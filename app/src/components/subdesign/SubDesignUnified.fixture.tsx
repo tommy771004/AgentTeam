@@ -70,6 +70,7 @@ export function SubDesignUnifiedFixture() {
   const [fixtureThread, setFixtureThread] = useState(thread)
   const [runIsLive, setRunIsLive] = useState(false)
   const [selectedArtifact, setSelectedArtifact] = useState<SubDesignArtifact | null>(artifact)
+  const [pinFixtureState, setPinFixtureState] = useState<'idle' | 'submitted'>('idle')
   const workspace = deriveSubDesignWorkspace({
     brief: fixtureBrief,
     artifacts: [artifact],
@@ -77,7 +78,9 @@ export function SubDesignUnifiedFixture() {
     runStatus: runIsLive ? 'running' : 'idle',
   })
   return (
-    <SubDesignProjectStudio
+    <div className="relative h-full" data-pin-fixture-state={pinFixtureState}>
+      <output className="sr-only" data-testid="pin-fixture-state">{pinFixtureState}</output>
+      <SubDesignProjectStudio
       brief={fixtureBrief}
       workspace={workspace}
       thread={fixtureThread}
@@ -103,6 +106,10 @@ export function SubDesignUnifiedFixture() {
           updatedAt: at,
         }))
       }}
+      onSubmitPinnedComments={async () => {
+        setPinFixtureState('submitted')
+        return { ok: true, runId: 'run_pin_fixture' }
+      }}
       onOpenTranscript={() => setFixtureThread((current) => ({ ...current, title: `${current.title} · Transcript` }))}
       onSelectArtifact={setSelectedArtifact}
       onSelectDirection={(directionId) => setFixtureBrief((current) => ({
@@ -114,6 +121,7 @@ export function SubDesignUnifiedFixture() {
       storybookSettings={DEFAULT_STORYBOOK_PROVIDER_SETTINGS}
       latestStorybookRun={null}
       onSaveStorybookSettings={async () => ({ ok: true })}
-    />
+      />
+    </div>
   )
 }

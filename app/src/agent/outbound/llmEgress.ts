@@ -6,6 +6,8 @@
 import type { OutboundGuardMode } from './outboundGate.ts'
 import type { ProviderSecurityProfile } from './policyMerge.ts'
 import { sanitizeChatMessages } from './textSanitize.ts'
+import type { ProtectedExclusion } from './textSanitize.ts'
+import type { RedactionSummaryEntry } from './redactionTaxonomy.ts'
 
 export type LlmProfileLoadResult =
   | { ok: true; profile: ProviderSecurityProfile }
@@ -73,6 +75,7 @@ export async function prepareLlmEgressMessages(opts: {
       messages: ChatMessageLite[]
       source: 'company' | 'baseline'
       degraded?: boolean
+      exclusions: ProtectedExclusion[]
     }
   | { ok: false; reason: string }
 > {
@@ -110,6 +113,7 @@ export async function prepareLlmEgressMessages(opts: {
     messages: sanitized.messages,
     source: decision.source,
     degraded: decision.degraded,
+    exclusions: sanitized.exclusions,
   }
 }
 
@@ -127,6 +131,7 @@ export function buildLlmEgressEvidenceMeta(opts: {
   effectiveMode: OutboundGuardMode
   action: 'llm-allow' | 'llm-block' | 'llm-transport'
   profileSource?: 'company' | 'baseline' | 'none'
+  redactionSummary?: RedactionSummaryEntry[]
 }): {
   eventType: 'outbound-decision'
   runId?: string
@@ -134,6 +139,7 @@ export function buildLlmEgressEvidenceMeta(opts: {
   effectiveGuardMode: string
   policySource: 'local'
   action: string
+  redactionSummary?: RedactionSummaryEntry[]
 } {
   return {
     eventType: 'outbound-decision',
@@ -141,6 +147,7 @@ export function buildLlmEgressEvidenceMeta(opts: {
     providerId: opts.connectionId,
     effectiveGuardMode: opts.effectiveMode,
     policySource: 'local',
+    redactionSummary: opts.redactionSummary,
     action:
       opts.profileSource && opts.profileSource !== 'none'
         ? `${opts.action}:${opts.profileSource}`

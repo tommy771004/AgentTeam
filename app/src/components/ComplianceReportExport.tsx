@@ -98,7 +98,8 @@ export function ComplianceReportExport({ activeRunIds = [] }: { activeRunIds?: s
         <select
           value={scope}
           onChange={(e) => setScope(e.target.value as Scope)}
-          className="px-3 py-2 rounded-control text-xs bg-surface-container-high border border-line"
+          aria-label="合規報告範圍"
+          className="min-h-8 cursor-pointer rounded-control bg-transparent px-3 py-2 text-xs text-on-surface-variant outline-none transition-colors hover:bg-hover-2 hover:text-on-surface focus-visible:ring-2 focus-visible:ring-primary/35"
         >
           <option value="all">全部既有證據</option>
           <option value="last-7-days">最近 7 天</option>

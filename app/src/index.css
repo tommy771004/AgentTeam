@@ -1352,19 +1352,22 @@ html:not([data-sidebar-solid='true']) .sidebar-panel.material-sidebar {
   border-right-color: var(--color-line) !important;
   box-shadow:
     inset 1px 0 0 var(--sidebar-glass-edge),
-    inset 0 1px 0 var(--sidebar-glass-edge) !important;
+    inset 0 1px 0 var(--sidebar-glass-edge),
+    12px 0 32px var(--sidebar-glass-shadow) !important;
 }
 
 html:not([data-sidebar-solid='true']) .sidebar-panel {
-  backdrop-filter: blur(32px) saturate(160%);
-  -webkit-backdrop-filter: blur(32px) saturate(160%);
+  backdrop-filter: blur(38px) saturate(180%);
+  -webkit-backdrop-filter: blur(38px) saturate(180%);
 }
 
 .sidebar-panel .macos-nav-item[aria-current='page'] {
-  background: var(--color-hover) !important;
+  background: color-mix(in srgb, var(--color-on-surface) 8%, transparent) !important;
   color: var(--color-ink) !important;
   border-color: transparent !important;
-  box-shadow: none !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 9%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-on-surface) 3%, transparent) !important;
 }
 
 .sidebar-panel .macos-nav-item[aria-current='page'] span:not(.material-symbols-outlined) {
@@ -1387,8 +1390,7 @@ html:not([data-sidebar-solid='true']) .sidebar-panel {
 
 /* 側邊欄功能項目不畫外框線（保留 1px 透明邊避免位移） */
 .sidebar-panel .macos-nav-item,
-.sidebar-panel .macos-nav-item:hover,
-.sidebar-panel .macos-nav-item[aria-current='page'] {
+.sidebar-panel .macos-nav-item:hover {
   border-color: transparent !important;
   box-shadow: none !important;
 }

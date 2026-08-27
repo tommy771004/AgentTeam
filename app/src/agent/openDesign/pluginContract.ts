@@ -85,6 +85,33 @@ export type InteractiveSurfaceDeclaration = {
   title?: string
 }
 
+export function validateInteractiveSurfaceDeclaration(
+  raw: unknown,
+  opts?: { idFallback?: string },
+): { ok: true; declaration: InteractiveSurfaceDeclaration } | { ok: false; reason: string } {
+  if (!isObject(raw)) return { ok: false, reason: 'surface 必須是 object。' }
+  const id = cleanText(raw.id, 80) || cleanText(opts?.idFallback, 80)
+  if (!id || !/^[a-zA-Z][a-zA-Z0-9._-]{1,79}$/.test(id)) return { ok: false, reason: 'surface.id 不合法。' }
+  const kind = cleanText(raw.kind, 20)
+  if (!['choice', 'form', 'confirmation'].includes(kind)) return { ok: false, reason: 'surface.kind 必須是 choice/form/confirmation。' }
+  const scope = cleanText(raw.scope, 20) || 'run'
+  if (!['run', 'conversation', 'project'].includes(scope)) return { ok: false, reason: 'surface.scope 不合法。' }
+  if (raw.allowlist != null && !Array.isArray(raw.allowlist)) return { ok: false, reason: 'surface.allowlist 必須是字串陣列。' }
+  const allowlist = Array.isArray(raw.allowlist) ? raw.allowlist.map((value) => cleanText(value, 64)).filter(Boolean) : []
+  if (allowlist.length > 16) return { ok: false, reason: 'surface.allowlist 最多 16。' }
+  if (allowlist.some((tool) => !/^[a-z_][a-z0-9_.-]{1,63}$/.test(tool))) return { ok: false, reason: 'surface.allowlist 含非法 tool。' }
+  return {
+    ok: true,
+    declaration: {
+      id,
+      kind: kind as InteractiveSurfaceKind,
+      scope: scope as InteractiveSurfaceScope,
+      allowlist,
+      title: cleanText(raw.title, 120) || undefined,
+    },
+  }
+}
+
 export type V1Manifest = {
   specVersion: string
   name?: string
@@ -495,26 +522,11 @@ function parseV1(rawObj: Record<string, unknown>, warnings: string[]): PluginCon
     surfaces = []
     const seenIds = new Set<string>()
     for (let i = 0; i < surfacesRaw.length; i++) {
-      const entry = surfacesRaw[i]
-      if (!isObject(entry)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}] 必須是 object。`, field: `od.surfaces[${i}]`, raw: rawObj }
-      const id = cleanText(entry.id, 80)
-      if (!id || !/^[a-zA-Z][a-zA-Z0-9._-]{1,79}$/.test(id)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].id 不合法。`, field: `od.surfaces[${i}].id`, raw: rawObj }
-      if (seenIds.has(id)) return { ok: false, kind: 'malformed', reason: `surfaces id 重複：${id}`, field: `od.surfaces[${i}].id`, raw: rawObj }
-      seenIds.add(id)
-      const kindRaw = cleanText(entry.kind, 20)
-      if (!['choice', 'form', 'confirmation'].includes(kindRaw)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].kind 必須是 choice/form/confirmation。`, field: `od.surfaces[${i}].kind`, raw: rawObj }
-      const scopeRaw = cleanText(entry.scope, 20) || 'run'
-      if (!['run', 'conversation', 'project'].includes(scopeRaw)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].scope 不合法。`, field: `od.surfaces[${i}].scope`, raw: rawObj }
-      let allowlist: string[] | undefined
-      if (entry.allowlist != null) {
-        if (!Array.isArray(entry.allowlist)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].allowlist 必須是字串陣列。`, field: `od.surfaces[${i}].allowlist`, raw: rawObj }
-        allowlist = entry.allowlist.map((v) => cleanText(v, 64)).filter(Boolean)
-        if (allowlist.length > 16) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].allowlist 最多 16。`, field: `od.surfaces[${i}].allowlist`, raw: rawObj }
-        for (const a of allowlist) {
-          if (!/^[a-z_][a-z0-9_.-]{1,63}$/.test(a)) return { ok: false, kind: 'malformed', reason: `surfaces[${i}].allowlist 含非法 tool：${a}`, field: `od.surfaces[${i}].allowlist`, raw: rawObj }
-        }
-      }
-      surfaces.push({ id, kind: kindRaw as InteractiveSurfaceKind, scope: scopeRaw as InteractiveSurfaceScope, allowlist, title: cleanText(entry.title, 120) || undefined })
+      const parsedSurface = validateInteractiveSurfaceDeclaration(surfacesRaw[i])
+      if (!parsedSurface.ok) return { ok: false, kind: 'malformed', reason: `surfaces[${i}]：${parsedSurface.reason}`, field: `od.surfaces[${i}]`, raw: rawObj }
+      if (seenIds.has(parsedSurface.declaration.id)) return { ok: false, kind: 'malformed', reason: `surfaces id 重複：${parsedSurface.declaration.id}`, field: `od.surfaces[${i}].id`, raw: rawObj }
+      seenIds.add(parsedSurface.declaration.id)
+      surfaces.push(parsedSurface.declaration)
     }
   }
 

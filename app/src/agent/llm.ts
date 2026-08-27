@@ -23,6 +23,7 @@ import {
   loadCompanyProfileViaOutboundIpc,
   prepareLlmEgressMessages,
 } from './outbound/llmEgress.ts'
+import { summarizeRedactions, type RedactionSummaryEntry } from './outbound/redactionTaxonomy.ts'
 
 export type { LlmSettings }
 
@@ -226,6 +227,7 @@ export type LlmTransportRequest = {
   effectiveMode: ReturnType<typeof effectiveOutboundGuardFromSettings>
   providerConnectionId: string
   outboundProfileSource: 'company' | 'baseline' | 'none'
+  outboundRedactionSummary?: RedactionSummaryEntry[]
   fallbackModel: string
 }
 
@@ -244,6 +246,7 @@ async function defaultLlmTransport(req: LlmTransportRequest): Promise<LlmToolsRe
       effectiveMode: req.effectiveMode,
       providerConnectionId: req.providerConnectionId,
       outboundProfileSource: req.outboundProfileSource,
+      outboundRedactionSummary: req.outboundRedactionSummary,
     })
     return normalizeChatResult(r, req.fallbackModel)
   }
@@ -340,6 +343,7 @@ export async function chatCompletionWithTools(
   })
   let egressPayload: typeof body = body
   let outboundProfileSource: 'company' | 'baseline' | 'none' = 'none'
+  let outboundRedactionSummary: RedactionSummaryEntry[] | undefined
   if (isProtectionActive(effectiveMode)) {
     const baselineProfile = compileProviderSecurityProfile(
       BUILTIN_BASELINE_POLICY,
@@ -363,6 +367,7 @@ export async function chatCompletionWithTools(
       throw new Error(`出站資料閘門：無法建立公司保護設定檔（${prepared.reason}）`)
     }
     outboundProfileSource = prepared.source
+    outboundRedactionSummary = summarizeRedactions(prepared.exclusions, { profileSource: prepared.source })
     egressPayload = {
       ...body,
       messages: prepared.messages.map((m, i) => {
@@ -396,6 +401,7 @@ export async function chatCompletionWithTools(
         effectiveMode,
         providerConnectionId: connectionId,
         outboundProfileSource,
+        outboundRedactionSummary,
         fallbackModel: settings.model,
       }),
     {

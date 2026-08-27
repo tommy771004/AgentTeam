@@ -932,6 +932,7 @@ ipcMain.handle(
       effectiveMode?: OutboundGuardMode
       providerConnectionId?: string
       outboundProfileSource?: 'company' | 'baseline' | 'none'
+      outboundRedactionSummary?: import('../src/agent/outbound/redactionTaxonomy.ts').RedactionSummaryEntry[]
     },
   ) => {
     const base = (req.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '')
@@ -1003,6 +1004,7 @@ ipcMain.handle(
           effectiveMode: mode,
           action: data ? 'llm-transport' : 'llm-block',
           profileSource: req.outboundProfileSource || 'none',
+          redactionSummary: req.outboundRedactionSummary,
         })
         void appendOutboundEvidence(meta)
       } catch {
@@ -2779,6 +2781,9 @@ function subDesignMetadataFile(root: string, kind: SubDesignMetadataKind, payloa
   if (kind === 'open-design-provider-run') {
     return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/provider-runs/${safeSubDesignMetadataId(payload.runId)}.json`, root)
   }
+  if (kind === 'open-design-surface-session') {
+    return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/surface-sessions/${safeSubDesignMetadataId(payload.id)}.json`, root)
+  }
   return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/exports/${safeSubDesignMetadataId(payload.id)}.json`, root)
 }
 
@@ -3982,9 +3987,10 @@ ipcMain.handle('subdesign:readMetadata', async (_evt, projectRoot?: string) => {
       openDesignSnapshots: readJsonDirectory(root, '.subagents/open-design/snapshots', 500),
       openDesignProviderSettings: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/providers`, 40),
       openDesignProviderRuns: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/provider-runs`, 160),
+      openDesignSurfaceSessions: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/surface-sessions`, 160),
     }
   } catch (error) {
-    return { ok: false, briefs: [], artifacts: [], critiques: [], exports: [], openDesignPacks: [], openDesignSnapshots: [], openDesignProviderSettings: [], openDesignProviderRuns: [], error: error instanceof Error ? error.message : String(error) }
+    return { ok: false, briefs: [], artifacts: [], critiques: [], exports: [], openDesignPacks: [], openDesignSnapshots: [], openDesignProviderSettings: [], openDesignProviderRuns: [], openDesignSurfaceSessions: [], error: error instanceof Error ? error.message : String(error) }
   }
 })
 

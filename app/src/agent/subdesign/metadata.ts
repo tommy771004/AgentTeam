@@ -18,9 +18,10 @@ export type SubDesignMetadataSnapshot = {
   openDesignSnapshots: unknown[]
   openDesignProviderSettings: unknown[]
   openDesignProviderRuns: unknown[]
+  openDesignSurfaceSessions: unknown[]
 }
 
-type MetadataPayload = SubDesignBrief | SubDesignArtifact | SubDesignCritique | SubDesignExportRecord | OpenDesignContentPackManifest | PluginResolvedSnapshot | StorybookProviderSettings | ChromeDevToolsProviderSettings | HarnessProviderSettings | ExperimentalSurfaceSettings | SubDesignPluginExecutionProjection | SubDesignPinnedCommentAuditRecord
+type MetadataPayload = SubDesignBrief | SubDesignArtifact | SubDesignCritique | SubDesignExportRecord | OpenDesignContentPackManifest | PluginResolvedSnapshot | StorybookProviderSettings | ChromeDevToolsProviderSettings | HarnessProviderSettings | ExperimentalSurfaceSettings | SubDesignPluginExecutionProjection | SubDesignPinnedCommentAuditRecord | { schemaVersion: 1; id: string; [key: string]: unknown }
 
 export async function readSubDesignMetadata(projectRoot?: string): Promise<SubDesignMetadataSnapshot | null> {
   const api = typeof window === 'undefined' ? undefined : window.subagents?.subdesign
@@ -36,6 +37,7 @@ export async function readSubDesignMetadata(projectRoot?: string): Promise<SubDe
     openDesignSnapshots: Array.isArray(result.openDesignSnapshots) ? result.openDesignSnapshots : [],
     openDesignProviderSettings: Array.isArray(result.openDesignProviderSettings) ? result.openDesignProviderSettings : [],
     openDesignProviderRuns: Array.isArray(result.openDesignProviderRuns) ? result.openDesignProviderRuns : [],
+    openDesignSurfaceSessions: Array.isArray(result.openDesignSurfaceSessions) ? result.openDesignSurfaceSessions : [],
   }
 }
 

@@ -71,10 +71,11 @@ export function PluginInputForm({
         ...resolved.invalid.map((item) => `${item.name} ${item.reason}`),
       ].join('；')
       setState((current) => ({ ...current, error: detail }))
-      return
+      return false
     }
     clearDraft(draftRef)
     onSubmit(resolved.values)
+    return true
   }
 
   return (
@@ -98,7 +99,7 @@ export function PluginInputForm({
             detail,
           })
         }}
-        fallback={(
+        fallback={(surfaceActions) => (
           <div className="mt-2 flex flex-col gap-3">
             {inputs.map((input) => (
               <label key={input.name} className="flex flex-col gap-1">
@@ -137,7 +138,7 @@ export function PluginInputForm({
             ))}
             <button
               type="button"
-              onClick={() => submit(values)}
+              onClick={() => surfaceActions.submitForm(values)}
               className="inline-flex h-9 items-center justify-center gap-1.5 self-start rounded-lg bg-primary px-4 text-[11px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
             >
               <Icon name="check" size={14} />套用輸入

@@ -8,11 +8,23 @@ import {
   readEvidenceRecords,
 } from '../src/agent/outbound/evidenceLedger.ts'
 import { projectOutboundRunEvidence } from '../src/agent/outbound/runEvidence.ts'
+import { summarizeRedactions } from '../src/agent/outbound/redactionTaxonomy.ts'
 
 const opsSource = fs.readFileSync(new URL('../src/pages/OpsPage.tsx', import.meta.url), 'utf8')
+const viewSource = fs.readFileSync(new URL('../src/components/OutboundRunView.tsx', import.meta.url), 'utf8')
 assert.doesNotMatch(opsSource, /activeRuns\[0\].*OutboundRunView/)
 assert.match(opsSource, /selectedOutboundRunId/)
 assert.match(opsSource, /outboundRunIds\.map/)
+assert.match(viewSource, /遮罩類別/)
+
+const taxonomy = summarizeRedactions([
+  { detectorId: 'baseline.api-key' },
+  { detectorId: 'company.customer-secret' },
+], { profileSource: 'company' })
+assert.deepEqual(taxonomy, [
+  { category: 'credential', count: 1 },
+  { category: 'company-policy', count: 1 },
+])
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'subagents-outbound-view-'))
 try {
@@ -26,6 +38,7 @@ try {
     filesystemIsolation: 'verified',
     action: 'restricted-view',
     exclusions: [{ source: 'prompt', startLine: 2, endLine: 2 }],
+    redactionSummary: [{ category: 'credential', count: 1 }],
   }, { ledgerDir: dir, keyProvider: key, sealed: true })
   await appendEvidenceRecord({
     eventType: 'outbound-decision',
@@ -46,13 +59,15 @@ try {
     filesystemIsolation: record.filesystemIsolation,
     action: record.action,
     exclusionCount: record.exclusions?.length || 0,
+    redactionSummary: record.redactionSummary,
     sealed: record.sealed,
   })))
   assert.equal(view.providerIds.join(','), 'openai:default')
   assert.equal(view.exclusionCount, 1)
   assert.equal(view.sealedRecords, 1)
   assert.equal(view.records[0]?.filesystemIsolation, 'verified')
-  console.log('outbound-run-view smoke: 8 assertions passed')
+  assert.deepEqual(view.redactionSummary, [{ category: 'credential', count: 1 }])
+  console.log('outbound-run-view smoke: taxonomy, evidence, and UX assertions passed')
 } finally {
   fs.rmSync(dir, { recursive: true, force: true })
 }

@@ -15,10 +15,7 @@ import { ARTIFACT_RENDERER_CAPABILITIES, withPreviewCsp } from '../../agent/subd
  * schema validation，這裡只負責「指」的動作。
  */
 const PIN_CAPTURE_SCRIPT = `<script>(function(){
-  var enabled=false;
-  window.addEventListener('message',function(event){
-    if(event&&event.data&&event.data.type==='subdesign-pin-mode'){enabled=event.data.enabled===true}
-  });
+  var enabled=true;
   document.addEventListener('click',function(e){
     if(!enabled)return;
     // 只接受真實使用者點擊：頁面 script 合成的 click（dispatchEvent）isTrusted=false，

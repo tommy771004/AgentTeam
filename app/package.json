@@ -79,7 +79,7 @@
     "smoke:release-qualification": "node --experimental-strip-types scripts/smoke-release-qualification.mts",
     "smoke:scenario": "node scripts/smoke-scenario-e2e.mjs",
     "smoke:prod": "node --experimental-strip-types scripts/smoke-prod-modules.mts",
-    "smoke:subdesign-workspace": "node --experimental-strip-types scripts/smoke-subdesign-workspace.mts",
+    "smoke:subdesign-workspace": "node --experimental-strip-types scripts/smoke-subdesign-workspace.mts && node scripts/smoke-subdesign-pin-component.mjs",
     "smoke:headless": "node --experimental-strip-types scripts/smoke-headless.mts",
     "smoke:durable-harness": "node --experimental-strip-types scripts/smoke-external-cli-durable-harness.mts",
     "smoke:workspace-search": "node --experimental-strip-types scripts/smoke-workspace-search.mts",

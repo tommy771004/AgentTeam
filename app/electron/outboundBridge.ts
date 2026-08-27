@@ -30,8 +30,15 @@ import {
 import { BUILTIN_BASELINE_POLICY, emptySupplementalPolicy } from '../src/agent/outbound/policySchema.ts'
 import { compileProviderSecurityProfile } from '../src/agent/outbound/policyMerge.ts'
 import { formatProviderPolicyStatus } from '../src/agent/outbound/policyStatus.ts'
+import { summarizeRedactions } from '../src/agent/outbound/redactionTaxonomy.ts'
 
 const runViews = new Map<string, SanitizedWorkspace>()
+
+function workspaceRedactionSummary(workspace: SanitizedWorkspace, profileDegraded: boolean) {
+  return summarizeRedactions(workspace.exclusions, {
+    profileSource: profileDegraded ? 'baseline' : 'company',
+  })
+}
 
 function envMap(): Record<string, string | undefined> {
   return process.env as Record<string, string | undefined>
@@ -265,6 +272,8 @@ export async function prepareOutboundRunView(opts: {
       effectiveGuardMode: effectiveMode,
       policySource: 'local',
       action: profileDegraded ? 'restricted-view-degraded' : 'restricted-view',
+      exclusions: ws.exclusions.map(({ source, startLine, endLine }) => ({ source, startLine, endLine })),
+      redactionSummary: workspaceRedactionSummary(ws, profileDegraded),
     })
     return {
       ok: true,
@@ -350,6 +359,7 @@ export function readOutboundRunEvidence(runId: string) {
     filesystemIsolation: record.filesystemIsolation,
     action: record.action,
     exclusionCount: record.exclusions?.length || 0,
+    redactionSummary: record.redactionSummary,
     sealed: record.sealed,
   }))
 }

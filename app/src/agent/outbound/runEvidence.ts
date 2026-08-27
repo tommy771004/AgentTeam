@@ -10,6 +10,7 @@ export type OutboundRunEvidenceRecord = {
   filesystemIsolation?: string
   action?: string
   exclusionCount: number
+  redactionSummary?: RedactionSummaryEntry[]
   sealed: boolean
 }
 
@@ -19,6 +20,7 @@ export type OutboundRunView = {
   providerIds: string[]
   exclusionCount: number
   redactionEvents: number
+  redactionSummary: RedactionSummaryEntry[]
   sealedRecords: number
 }
 
@@ -39,6 +41,7 @@ export function projectOutboundRunEvidence(
     policySource: record.policySource?.slice(0, 120),
     action: record.action?.slice(0, 180),
     exclusionCount: Math.max(0, Math.min(1000, Number(record.exclusionCount) || 0)),
+    redactionSummary: mergeRedactionSummaries([record.redactionSummary]),
   }))
   return {
     runId,
@@ -46,6 +49,8 @@ export function projectOutboundRunEvidence(
     providerIds: [...new Set(bounded.map((record) => record.providerId).filter(Boolean) as string[])],
     exclusionCount: bounded.reduce((sum, record) => sum + record.exclusionCount, 0),
     redactionEvents: bounded.filter(isRedactionEvent).length,
+    redactionSummary: mergeRedactionSummaries(bounded.map((record) => record.redactionSummary)),
     sealedRecords: bounded.filter((record) => record.sealed).length,
   }
 }
+import { mergeRedactionSummaries, type RedactionSummaryEntry } from './redactionTaxonomy.ts'

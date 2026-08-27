@@ -236,19 +236,19 @@ export function Layout() {
           首頁沒有功能頂欄，仍保留一條可靠的視窗拖曳帶；其餘頁面由
           下方 titlebar 的整個非互動區負責拖曳。
         */}
-        {isHome && <div className="page-window-drag-strip drag-region h-3 shrink-0" aria-hidden />}
+        {isHome && <div className="page-window-drag-strip drag-region h-5 shrink-0" aria-hidden />}
         {/* 首頁（新任務）隱藏頂欄，更接近 Codex 沉浸式 */}
         {!isHome && (
           <header className="app-window-titlebar h-11 shrink-0 border-b border-line bg-surface flex items-center justify-between px-4 drag-region">
             <div className="flex flex-1 self-stretch items-center truncate pl-2 text-xs text-on-surface-variant md:pl-0 max-[760px]:hidden">
               本機多代理 · {primaryKey}/ 指令 · {primaryKey}. 小視窗
             </div>
-            <div className="no-drag flex items-center gap-2">
+            <div className="no-drag flex items-center gap-1">
               <button
                 type="button"
                 title={`開啟指令選單（${primaryKey}/）`}
                 onClick={() => requestFocusComposer({ openSlash: true })}
-                className="shrink-0 whitespace-nowrap text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-line text-on-surface-variant hover:text-on-surface hover:border-line-strong font-[family-name:var(--font-mono)]"
+                className="shrink-0 min-h-8 whitespace-nowrap rounded-lg bg-transparent px-2.5 py-1.5 text-xs font-semibold text-on-surface-variant transition-colors hover:bg-hover-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 font-[family-name:var(--font-mono)]"
               >
                 /
               </button>
@@ -264,10 +264,11 @@ export function Layout() {
                     setFloatOpen(true)
                   }
                 }}
-                className={`shrink-0 whitespace-nowrap text-xs font-semibold px-2.5 py-1.5 rounded-lg border flex items-center gap-1 ${
+                aria-pressed={floatOpen}
+                className={`shrink-0 min-h-8 whitespace-nowrap rounded-lg bg-transparent px-2.5 py-1.5 text-xs font-semibold transition-colors flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
                   floatOpen
-                    ? 'border-primary/40 text-primary bg-primary/10'
-                    : 'border-line text-on-surface-variant hover:text-on-surface hover:border-line-strong'
+                    ? 'text-primary bg-primary/10'
+                    : 'text-on-surface-variant hover:bg-hover-2 hover:text-on-surface'
                 }`}
               >
                 <Icon name="picture_in_picture_alt" size={14} />
@@ -275,7 +276,11 @@ export function Layout() {
               </button>
               <NavLink
                 to="/settings"
-                className="shrink-0 whitespace-nowrap text-xs font-semibold tracking-wide px-3 py-1.5 rounded-lg border border-line text-on-surface-variant hover:text-on-surface hover:border-line-strong"
+                className={({ isActive }) => `shrink-0 min-h-8 whitespace-nowrap rounded-lg bg-transparent px-3 py-1.5 text-xs font-semibold tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
+                  isActive
+                    ? 'bg-hover text-on-surface'
+                    : 'text-on-surface-variant hover:bg-hover-2 hover:text-on-surface'
+                }`}
               >
                 設定
               </NavLink>
