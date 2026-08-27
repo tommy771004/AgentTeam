@@ -223,6 +223,24 @@ export type MemoryImportInput = {
   mode: 'merge' | 'replace'
 }
 
+export type MemoryMigrationInput = {
+  access: MemoryAccessContext
+  sourceHash: string
+  sourceSchema: 1 | 2
+  memories: unknown[]
+}
+
+export type MemoryMigrationReport = {
+  version: 1
+  sourceHash: string
+  sourceSchema: 1 | 2
+  imported: number
+  rejected: Array<{ index: number; code: MemoryStoreErrorCode | 'duplicate_key' | 'existing_entry' }>
+  revision: number
+}
+
+export type MemoryMigrationResult = { alreadyApplied: boolean; report: MemoryMigrationReport }
+
 export interface DurableMemoryStore {
   upsert(input: MemoryUpsertInput): Promise<DurableMemoryEntry>
   append(input: MemoryAppendInput): Promise<DurableMemoryEntry>
@@ -236,12 +254,14 @@ export interface DurableMemoryStore {
   consolidate(input: MemoryConsolidateInput): Promise<MemoryConsolidationResult>
   exportBundle(input: MemoryExportInput): Promise<DurableMemoryBundle>
   importBundle(input: MemoryImportInput): Promise<MemoryMutationResult>
+  migrateLegacy(input: MemoryMigrationInput): Promise<MemoryMigrationResult>
+  migrationStatus(): Promise<MemoryMigrationReport | undefined>
   close(): Promise<void>
 }
 
 export type MemoryAuthorityAction =
   | 'get' | 'recall' | 'list' | 'upsert' | 'append' | 'delete' | 'clear'
-  | 'consolidate' | 'export' | 'import'
+  | 'consolidate' | 'export' | 'import' | 'migrate'
 
 const READ_ACTIONS = new Set<MemoryAuthorityAction>(['get', 'recall', 'list', 'export'])
 const WRITE_ACTIONS = new Set<MemoryAuthorityAction>(['upsert', 'append', 'delete', 'clear', 'consolidate', 'import'])
@@ -287,7 +307,7 @@ function authorizeSpecialMemoryAccess(
     return
   }
   if (access.origin === 'migration') {
-    if (action !== 'import') throw new DurableMemoryStoreError('forbidden', `Migration memory ${action} is not allowed`)
+    if (action !== 'import' && action !== 'migrate') throw new DurableMemoryStoreError('forbidden', `Migration memory ${action} is not allowed`)
     return
   }
   if (action !== 'consolidate') throw new DurableMemoryStoreError('forbidden', `Consolidation memory ${action} is not allowed`)
@@ -446,6 +466,71 @@ function entryKey(scope: MemoryScope, logicalKey: string): string {
   return `${memoryScopeKey(scope)}\u0000${logicalKey}`
 }
 
+export function validateMemoryMigration(input: MemoryMigrationInput, limits: DurableMemoryLimits): void {
+  authorizeMemoryAccess('migrate', input.access)
+  if (typeof input.sourceHash !== 'string' || !/^[a-f0-9]{64}$/.test(input.sourceHash) || ![1, 2].includes(input.sourceSchema)) {
+    throw new DurableMemoryStoreError('invalid_input', 'Memory migration requires a SHA-256 source hash and supported source schema')
+  }
+  if (!Array.isArray(input.memories) || input.memories.length > limits.maxImportBatch) {
+    throw new DurableMemoryStoreError('invalid_input', 'Legacy memory migration exceeds the import batch limit')
+  }
+}
+
+function legacyMemoryDraft(value: unknown, limits: DurableMemoryLimits): MemoryEntryDraft {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new DurableMemoryStoreError('invalid_input', 'Invalid legacy memory row')
+  const row = value as Record<string, unknown>
+  const logicalKey = canonicalMemoryLogicalKey(row.id as string, limits)
+  const scope: MemoryScope = row.project === undefined || row.project === ''
+    ? { kind: 'global' }
+    : { kind: 'project', project: canonicalProjectId(row.project as string) }
+  const kind = scope.kind === 'global' && logicalKey === 'profile:user' ? 'profile'
+    : scope.kind === 'global' && logicalKey === 'memory:document' ? 'document' : 'memory'
+  return canonicalMemoryDraft({ scope, logicalKey, kind, text: row.text, tags: row.tags, createdAt: row.createdAt } as MemoryEntryDraft, limits)
+}
+
+/** Stage rows before any mutation. Reports identify source indexes, never copy private content. */
+export function prepareLegacyMemoryMigration(
+  input: MemoryMigrationInput,
+  existing: Iterable<DurableMemoryEntry>,
+  limits: DurableMemoryLimits,
+): { drafts: MemoryEntryDraft[]; rejected: MemoryMigrationReport['rejected'] } {
+  validateMemoryMigration(input, limits)
+  const rejected: MemoryMigrationReport['rejected'] = []
+  const candidates = new Map<string, { draft: MemoryEntryDraft; index: number }>()
+  input.memories.forEach((row, index) => {
+    try {
+      const draft = legacyMemoryDraft(row, limits)
+      const key = entryKey(draft.scope, draft.logicalKey)
+      const prior = candidates.get(key)
+      if (prior) rejected.push({ index: prior.index, code: 'duplicate_key' })
+      candidates.delete(key)
+      candidates.set(key, { draft, index })
+    } catch (error) {
+      if (!(error instanceof DurableMemoryStoreError)) throw error
+      rejected.push({ index, code: error.code })
+    }
+  })
+  const projected = new Map([...existing].map((entry) => [entryKey(entry.scope, entry.logicalKey), entry]))
+  const drafts: MemoryEntryDraft[] = []
+  for (const [key, { draft, index }] of candidates) {
+    if (projected.has(key)) { rejected.push({ index, code: 'existing_entry' }); continue }
+    try {
+      assertMemoryQuota(projected.values(), draft.scope, draft.logicalKey, limits)
+      projected.set(key, { ...draft, id: 'migration-preview', updatedAt: draft.createdAt, revision: 0 })
+      drafts.push(draft)
+    } catch (error) {
+      if (!(error instanceof DurableMemoryStoreError)) throw error
+      rejected.push({ index, code: error.code })
+    }
+  }
+  return { drafts, rejected: rejected.sort((left, right) => left.index - right.index) }
+}
+
+export function replayMemoryMigration(report: MemoryMigrationReport, sourceHash: string): MemoryMigrationResult {
+  if (report.sourceHash !== sourceHash) throw new DurableMemoryStoreError('invalid_input', 'Legacy memory source changed after migration; restore the matching backup before retrying')
+  return { alreadyApplied: true, report: structuredClone(report) }
+}
+
 function cloneScope(scope: MemoryScope): MemoryScope {
   return scope.kind === 'global' ? { kind: 'global' } : { kind: 'project', project: scope.project }
 }
@@ -559,6 +644,7 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
   private readonly limits: DurableMemoryLimits
   private nextIdentity = 1
   private currentRevision = 0
+  private migrationReport?: MemoryMigrationReport
   private closed = false
 
   constructor(limits?: Partial<DurableMemoryLimits>) {
@@ -753,5 +839,25 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
 
   async close(): Promise<void> {
     this.closed = true
+  }
+
+  async migrationStatus(): Promise<MemoryMigrationReport | undefined> {
+    this.ensureOpen()
+    return this.migrationReport ? structuredClone(this.migrationReport) : undefined
+  }
+
+  async migrateLegacy(input: MemoryMigrationInput): Promise<MemoryMigrationResult> {
+    this.ensureOpen()
+    validateMemoryMigration(input, this.limits)
+    if (this.migrationReport) return replayMemoryMigration(this.migrationReport, input.sourceHash)
+    const { drafts, rejected } = prepareLegacyMemoryMigration(input, this.entries.values(), this.limits)
+    const revision = this.currentRevision + (drafts.length ? 1 : 0)
+    for (const draft of drafts) {
+      const entry = this.nextEntry(draft, revision)
+      this.entries.set(entryKey(entry.scope, entry.logicalKey), entry)
+    }
+    this.currentRevision = revision
+    this.migrationReport = { version: 1, sourceHash: input.sourceHash, sourceSchema: input.sourceSchema, imported: drafts.length, rejected, revision }
+    return { alreadyApplied: false, report: structuredClone(this.migrationReport) }
   }
 }

@@ -92,42 +92,59 @@ function withValidatedTurnRecords(state: StoredState): StoredState {
   return { ...state, sessions }
 }
 
-async function readStoredPiHostState(statePath: string): Promise<StoredState> {
+function parseStoredPiHostState(source: string): StoredState {
+  let value: Partial<StoredState>
   try {
-    const value = JSON.parse(await readFile(statePath, 'utf8')) as Partial<StoredState>
-    if (
-      (value.schemaVersion !== 1 && value.schemaVersion !== 2) ||
-      typeof value.cursor !== 'number' ||
-      !Array.isArray(value.sessions) ||
-      !Array.isArray(value.queue || []) ||
-      !value.settings ||
-      typeof value.settings.model !== 'string' ||
-      !Array.isArray(value.settings.activeTools)
-    ) {
-      return emptyState()
-    }
-    const settings = normalizeStoredSettings(value.settings)
-    const legacyStateHasRuntimeOverride = hasRuntimeOverride(settings)
-    return {
-      schemaVersion: value.schemaVersion === 2 ? 2 : 1,
-      cursor: value.cursor,
-      sessions: value.sessions.map((session) => ({
-        ...session,
-        toolContracts: Array.isArray(session.toolContracts)
-          ? session.toolContracts.filter(isPiTurnToolContract) as PiTurnToolContract[]
-          : [],
-      })),
-      settings,
-      settingsOrigin: value.settingsOrigin === 'managed' || (value.settingsOrigin !== 'native' && legacyStateHasRuntimeOverride) ? 'managed' : 'native',
-      config: value.config,
-      queue: (value.queue || []).filter((item): item is PiQueuedRun => Boolean(item && typeof item === 'object' && typeof (item as PiQueuedRun).runId === 'string')),
-      resources: Array.isArray(value.resources) ? value.resources : [],
-      memories: Array.isArray(value.memories) ? value.memories.filter(isPiMemory) : [],
-      extensions: Array.isArray(value.extensions) ? value.extensions : [],
-      attachments: Array.isArray(value.attachments) ? value.attachments : [],
-    }
+    value = JSON.parse(source) as Partial<StoredState>
   } catch {
-    return emptyState()
+    throw new Error('Pi Host state JSON 損壞；未覆寫資料，請從有效備份復原。')
+  }
+  if (!value || typeof value !== 'object') throw new Error('Pi Host state 格式無效；未覆寫資料。')
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) {
+    throw new Error('Pi Host state schema 不相容；未覆寫資料，請使用相容版本或明確匯出後再降級。')
+  }
+  if (
+    typeof value.cursor !== 'number' ||
+    !Array.isArray(value.sessions) ||
+    !Array.isArray(value.queue || []) ||
+    (value.memories !== undefined && !Array.isArray(value.memories)) ||
+    !value.settings ||
+    typeof value.settings.model !== 'string' ||
+    !Array.isArray(value.settings.activeTools)
+  ) {
+    throw new Error('Pi Host state 結構無效；未覆寫資料，請從有效備份復原。')
+  }
+  return value as StoredState
+}
+
+async function readStoredPiHostState(statePath: string): Promise<StoredState> {
+  let source: string
+  try {
+    source = await readFile(statePath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyState()
+    throw new Error('Pi Host state 無法讀取；未覆寫資料，請檢查檔案權限或從備份復原。', { cause: error })
+  }
+  const value = parseStoredPiHostState(source)
+  const settings = normalizeStoredSettings(value.settings)
+  const legacyStateHasRuntimeOverride = hasRuntimeOverride(settings)
+  return {
+    schemaVersion: value.schemaVersion === 2 ? 2 : 1,
+    cursor: value.cursor,
+    sessions: value.sessions.map((session) => ({
+      ...session,
+      toolContracts: Array.isArray(session.toolContracts)
+        ? session.toolContracts.filter(isPiTurnToolContract) as PiTurnToolContract[]
+        : [],
+    })),
+    settings,
+    settingsOrigin: value.settingsOrigin === 'managed' || (value.settingsOrigin !== 'native' && legacyStateHasRuntimeOverride) ? 'managed' : 'native',
+    config: value.config,
+    queue: (value.queue || []).filter((item): item is PiQueuedRun => Boolean(item && typeof item === 'object' && typeof (item as PiQueuedRun).runId === 'string')),
+    resources: Array.isArray(value.resources) ? value.resources : [],
+    memories: Array.isArray(value.memories) ? value.memories.filter(isPiMemory) : [],
+    extensions: Array.isArray(value.extensions) ? value.extensions : [],
+    attachments: Array.isArray(value.attachments) ? value.attachments : [],
   }
 }
 

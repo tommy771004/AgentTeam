@@ -14,9 +14,12 @@ import {
   memoryOperationPayload,
   memoryScopeKey,
   recallMemoryEntries,
+  prepareLegacyMemoryMigration,
+  replayMemoryMigration,
   selectVisibleMemoryEntries,
   validateMemoryCursor,
   validateMemoryImport,
+  validateMemoryMigration,
   validateMemoryPage,
   type DurableMemoryBundle,
   type DurableMemoryEntry,
@@ -35,6 +38,9 @@ import {
   type MemoryImportInput,
   type MemoryListInput,
   type MemoryMutationResult,
+  type MemoryMigrationInput,
+  type MemoryMigrationReport,
+  type MemoryMigrationResult,
   type MemoryPage,
   type MemoryRecallInput,
   type MemoryRecallResult,
@@ -534,5 +540,30 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     this.db.close()
     this.closed = true
     this.closedRevision = revision
+  }
+
+  private readMigrationReport(): MemoryMigrationReport | undefined {
+    const row = this.db.prepare("SELECT value FROM memory_meta WHERE key = 'legacy_json_migration'").get() as { value: string } | undefined
+    return row ? JSON.parse(row.value) as MemoryMigrationReport : undefined
+  }
+
+  async migrationStatus(): Promise<MemoryMigrationReport | undefined> {
+    await this.settleWrites()
+    return this.readMigrationReport()
+  }
+
+  async migrateLegacy(input: MemoryMigrationInput): Promise<MemoryMigrationResult> {
+    validateMemoryMigration(input, this.limits)
+    return this.enqueueWrite(() => {
+      const prior = this.readMigrationReport()
+      if (prior) return replayMemoryMigration(prior, input.sourceHash)
+      const { drafts, rejected } = prepareLegacyMemoryMigration(input, this.readEntries(), this.limits)
+      const revision = this.currentRevision() + (drafts.length ? 1 : 0)
+      for (const draft of drafts) this.writeEntry(draft, input.access, revision, 'legacy-migration')
+      const report: MemoryMigrationReport = { version: 1, sourceHash: input.sourceHash, sourceSchema: input.sourceSchema, imported: drafts.length, rejected, revision }
+      this.db.prepare("INSERT INTO memory_meta(key, value) VALUES ('legacy_json_migration', ?)").run(JSON.stringify(report))
+      this.setRevision(revision)
+      return { alreadyApplied: false, report }
+    })
   }
 }

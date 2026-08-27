@@ -6,6 +6,8 @@
 
 `.scratch/durable-memory-sqlite-migration` #01–03 已 resolved：Host-owned async `DurableMemoryStore` 契約與共用 parity fixtures 已由 in-memory／SQLite adapter 同時通過；production SQLite adapter 具 versioned schema、WAL、busy timeout、transaction 與 serialized Host writes。Pi Host v4 的顯式 `memory-store-v1` 現涵蓋 scoped get/recall/list/set/append/delete/clear；單一 authority boundary 集中 realpath project identity、origin/action policy、runtime flags、validation、per-scope quota、credential rejection 與 deterministic retry idempotency。operation journal 只留 hash／identity／revision，concurrent retry 不會重複 revision event。現行 production supervisor 仍未協商新 capability，legacy JSON memory authority 尚未切換；frontier 推進 #04 JSON → SQLite 原子遷移與 authority cutover。`npm run build`、完整 `npm run smoke`、tsconfig.node typecheck、相關 oxlint 與 complexity gate 全綠。
 
+#04 已補 pre-cutover 核心：兩個 adapter 的 legacy migration transaction／source-hash marker／拒絕報告與真 Host corrupt/unknown-schema startup refusal。build、Pi parity qualification、Node typecheck、相關 lint/complexity 綠；本輪未重跑完整 smoke。#04 仍未 resolved，等待確認是否允許調整包含 sessions 的 Host state 檔案佈局，以阻擋既有舊 binary 忽略新 schema 後覆寫。正式 JSON authority 未切換，#05–13 尚未解鎖。
+
 ## 本日收口：tracker 對帳
 
 `.scratch/tracker-truth-reconciliation`（七票全數 resolved）完成一次全面對帳：以 smoke gate 為唯一證據核對五個訊號來源；`resolved` 證據定義入冊 `docs/agents/triage-labels.md`；新增恰好一支 drift guard `app/scripts/smoke-tracker-index-links.mts`（INDEX 相對路徑必須存在，檔案與目錄皆驗、無豁免、掛 `npm run smoke` 主鏈——首跑即抓出全部四條死連結）；`.scratch/INDEX.md` 重寫（Active frontier 只留真開工作、resolved 表附一 hop 證據、新增 Known residuals 與待維護者裁決 queue、死連結改下場註記）；本檔同步重寫。
