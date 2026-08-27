@@ -178,7 +178,7 @@ try {
     cursor: 1,
     sessions: [{ id: 'malformed-session', title: 'Malformed', messages: [], toolContracts: [null, { version: 1, revision: 1, tools: 'not-an-array' }] }],
     settings: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: [] },
-    queue: [], resources: [], memories: [], extensions: [],
+    queue: [], resources: [], extensions: [],
   }))
   const malformedHost = startHost({ ...hostEnv, SUBAGENTS_PI_HOST_STATE_PATH: join(malformedStateDir, 'state.json') })
   try {

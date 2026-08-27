@@ -119,13 +119,6 @@ const api = {
         resolve: (input: { runId: string; callId: string; decision: 'allow' | 'deny'; answer?: string }) =>
           ipcRenderer.invoke('pi-host:approvals:resolve', input) as Promise<unknown>,
       },
-      memory: {
-        list: () => ipcRenderer.invoke('pi-host:memory:list') as Promise<{ memories: unknown[] }>,
-        add: (memory: Record<string, unknown>) => ipcRenderer.invoke('pi-host:memory:add', memory) as Promise<{ memories: unknown[] }>,
-        delete: (id: string) => ipcRenderer.invoke('pi-host:memory:delete', id) as Promise<{ memories: unknown[] }>,
-        clear: () => ipcRenderer.invoke('pi-host:memory:clear') as Promise<{ memories: unknown[] }>,
-        recall: (query: string, project?: string, limit?: number) => ipcRenderer.invoke('pi-host:memory:recall', query, project, limit) as Promise<{ memories: unknown[] }>,
-      },
       memoryProjection: {
         list: (input: { scope: MemoryProjectionScope; cursor?: string; limit?: number }) =>
           ipcRenderer.invoke('pi-host:memory-projection:list', input) as Promise<MemoryProjectionResult>,

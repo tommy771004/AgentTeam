@@ -44,7 +44,7 @@ try {
   await first.waitFor((message) => message.id === 1)
   request(first.child, 2, 'state/snapshot')
   const firstSnapshot = await first.waitFor((message) => message.id === 2)
-  assert.deepEqual(firstSnapshot.result, { cursor: 0, sessions: [], queue: [], resources: [], memories: [] })
+  assert.deepEqual(firstSnapshot.result, { cursor: 0, sessions: [], queue: [], resources: [] })
   first.child.kill()
   await once(first.child, 'exit')
 
@@ -53,7 +53,7 @@ try {
   await second.waitFor((message) => message.id === 3)
   request(second.child, 4, 'state/snapshot')
   const secondSnapshot = await second.waitFor((message) => message.id === 4)
-  assert.deepEqual(secondSnapshot.result, { cursor: 0, sessions: [], queue: [], resources: [], memories: [] })
+  assert.deepEqual(secondSnapshot.result, { cursor: 0, sessions: [], queue: [], resources: [] })
   second.child.stdin.end()
   await once(second.child, 'exit')
 } finally {

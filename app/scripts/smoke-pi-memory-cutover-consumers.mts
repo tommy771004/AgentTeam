@@ -16,8 +16,8 @@ const project = canonicalProjectId(directory)
 const access: MemoryAccessContext = { origin: 'runtime', canonicalProject: project, memoryReadEnabled: true, memoryWriteEnabled: true, temporary: false, runId: 'run', sessionId: 'session' }
 const admin: MemoryAccessContext = { origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: false }
 const messages: PiHostMessage[] = []
-const snapshots: unknown[][] = []
-const server = createPiHostServer((message) => messages.push(message), undefined, (snapshot) => snapshots.push([...snapshot.memories]), undefined, undefined, store)
+const snapshots: unknown[] = []
+const server = createPiHostServer((message) => messages.push(message), undefined, (snapshot) => snapshots.push(snapshot), undefined, undefined, store)
 const ctx = { sessionId: 'session', runId: 'run', cwd: '/untrusted/other-project' }
 let call = 0
 async function tool(name: string, args: Record<string, unknown>, callId = `call-${++call}`) {
@@ -43,7 +43,7 @@ function bind(overrides: Partial<MemoryAccessContext> = {}) {
 }
 
 try {
-  await server.handle({ id: 1, method: 'initialize', params: { protocolVersion: 4, capabilities: ['memory-store-v1'] } })
+  await server.handle({ id: 1, method: 'initialize', params: { protocolVersion: 5, capabilities: ['memory-store-v1'] } })
   bind()
   const set = await tool('memory_set', { key: 'rule', text: 'Use Traditional Chinese' }, 'set-rule')
   assert.equal(set.data?.ok, true)
@@ -100,10 +100,10 @@ try {
   ])
   assert.equal(JSON.stringify(written).includes('Traditional Chinese'), false, 'context events omit private text')
 
-  await server.handle({ id: 2, method: 'memory/list' })
+  await server.handle({ id: 2, method: 'memory/list' as never })
   const listed = messages.find((message) => 'id' in message && message.id === 2)
-  assert.equal(listed && 'result' in listed ? listed.result?.memories?.length : undefined, 3)
-  assert.ok(snapshots.every((snapshot) => snapshot.length === 0), 'state callbacks never contain live memory bodies')
+  assert.equal(listed && 'error' in listed ? listed.error?.code : undefined, 'unknown_method')
+  assert.ok(snapshots.every((snapshot) => !Object.hasOwn(snapshot as object, 'memories')), 'state callbacks never contain a memory collection')
 
   const quotaStore = await SqliteDurableMemoryStore.open(join(directory, 'quota.sqlite'), { maxEntriesPerScope: 1 })
   try {

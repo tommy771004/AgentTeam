@@ -28,7 +28,7 @@ async function startup(requests: unknown[] = [], directory = root): Promise<{ co
   const closed = once(child, 'close')
   const timeout = setTimeout(() => child.kill('SIGKILL'), 20_000)
   child.stdin.on('error', () => {})
-  child.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 4, capabilities: ['memory-store-v1'] } })}\n`)
+  child.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 5, capabilities: ['memory-store-v1'] } })}\n`)
   try {
     const [code, signal] = await closed
     assert.equal(signal, null, 'Host startup must finish without hitting the test timeout')
@@ -86,29 +86,29 @@ async function assertCutover(): Promise<void> {
     assert.equal(response.result.memoryStore.page.total, 3)
     assert.equal(response.result.memoryStore.revision, 1)
     const legacy = result.stdout.split('\n').filter(Boolean).map((line) => JSON.parse(line)).find((message) => message.id === 3)
-    assert.equal(legacy.result.memories.length, 3, 'legacy management reads the same SQLite authority')
+    assert.equal(legacy.error.code, 'unknown_method', 'whole-bundle legacy management is retired after cutover')
     assert.equal((await stat(statePath)).isDirectory(), true, 'the legacy pathname becomes a downgrade barrier')
     assert.equal(await readFile(`${statePath}.pre-sqlite.json`, 'utf8'), original)
     const snapshot = JSON.parse(await readFile(join(statePath, 'snapshot.json'), 'utf8'))
-    assert.equal(snapshot.schemaVersion, 3)
+    assert.equal(snapshot.schemaVersion, 4)
     assert.equal(snapshot.memoryAuthority.backend, 'sqlite')
-    assert.deepEqual(snapshot.memories, [])
+    assert.equal(Object.hasOwn(snapshot, 'memories'), false)
     const report = JSON.parse(await readFile(join(statePath, 'migration-report.json'), 'utf8'))
     assert.deepEqual(report.rejected, [{ index: 3, code: 'invalid_input' }])
   }
   const mutation = await startup([
-    { id: 2, method: 'memory/add', params: { memory: { id: 'live', text: 'SQLite-only live write', tags: [], createdAt: '2026-08-27T01:00:00.000Z' } } },
+    { id: 2, method: 'memory/v1/upsert', params: { access: admin, entry: { scope: { kind: 'global' }, logicalKey: 'live', kind: 'memory', text: 'SQLite-only live write', tags: [], createdAt: '2026-08-27T01:00:00.000Z' } } },
     { ...list, id: 3 },
     { id: 4, method: 'memory/delete', params: { id: 'same' } },
   ])
   assert.equal(responseFor(mutation.stdout, 2).error, undefined)
   assert.equal(responseFor(mutation.stdout, 3).result.memoryStore.page.total, 4)
-  assert.equal(responseFor(mutation.stdout, 4).error.code, 'invalid_request', 'ambiguous legacy delete must not erase another scope')
-  const cleared = await startup([{ id: 2, method: 'memory/clear' }])
-  assert.deepEqual(responseFor(cleared.stdout, 2).result.memories, [])
+  assert.equal(responseFor(mutation.stdout, 4).error.code, 'unknown_method', 'retired unscoped delete cannot erase any scope')
+  const cleared = await startup([{ id: 2, method: 'memory/v1/clear-all', params: { access: admin } }])
+  assert.equal(responseFor(cleared.stdout, 2).result.memoryStore.mutation.changed, 4)
   const restarted = await startup([list])
   assert.equal(responseFor(restarted.stdout, 2).result.memoryStore.page.total, 0, 'backup is never replayed after live clear')
-  assert.deepEqual(JSON.parse(await readFile(join(statePath, 'snapshot.json'), 'utf8')).memories, [])
+  assert.equal(Object.hasOwn(JSON.parse(await readFile(join(statePath, 'snapshot.json'), 'utf8')), 'memories'), false)
   assert.equal(await readFile(`${statePath}.pre-sqlite.json`, 'utf8'), original)
 
   // The historical writer uses temp-file + rename. Prove the OS barrier itself,

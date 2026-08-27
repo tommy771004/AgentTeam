@@ -377,7 +377,7 @@ async function validationAndPrivacyMatrix() {
   const invalidImport = await send('memory/v1/import-preview', { access: admin, bundle: bundle('credential-import', credential), mode: 'skip' })
   assert.equal(invalidImport.result?.memoryStore?.preview?.counts.invalid, 1)
   const legacy = await send('memory/add', { memory: { id: 'credential-legacy', text: credential, tags: [], createdAt } })
-  assert.ok(legacy.error, 'legacy bridge must not turn sanitizer rejection into success')
+  assert.equal(legacy.error?.code, 'unknown_method', 'retired legacy bridge cannot bypass the durable authority')
   assert.equal(JSON.stringify(messages).includes(credential), false)
 
   const receipt = asTurnRecordMemoryWrite({

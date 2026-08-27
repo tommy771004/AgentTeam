@@ -2,14 +2,9 @@ import {
   canonicalProjectId, DurableMemoryStoreError,
   type DurableMemoryStore, type DurableMemoryEntry, type MemoryAccessContext, type MemoryEntryDraft, type MemoryScope,
 } from './durableMemoryStore.ts'
-import { isPiMemory, type PiMemory } from './piMemoryExtension.ts'
+import type { PiMemory } from './piMemory.ts'
 import type { PiMemoryBridgeAccess, PiMemoryWriteReceipt } from './piPackBridges.ts'
 import { piSessionRunBinding, type PiToolContext } from './piToolHost.ts'
-
-// Only the parent management protocol uses this context. Packs never receive it.
-const managementAccess: MemoryAccessContext = {
-  origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: false,
-}
 
 export type PiMemoryChange = {
   operation: 'upsert' | 'append' | 'delete' | 'clear'
@@ -38,43 +33,11 @@ export function piMemoryProjection(entry: DurableMemoryEntry): PiMemory {
   }
 }
 
-export function piMemoryDraft(memory: PiMemory): MemoryEntryDraft {
+function piMemoryDraft(memory: PiMemory): MemoryEntryDraft {
   const scope = memory.project ? { kind: 'project' as const, project: canonicalProjectId(memory.project) } : { kind: 'global' as const }
   const kind = scope.kind === 'global' && memory.id === 'profile:user' ? 'profile'
     : scope.kind === 'global' && memory.id === 'memory:document' ? 'document' : 'memory'
   return { scope, logicalKey: memory.id, kind, text: memory.text, tags: memory.tags, createdAt: memory.createdAt } as MemoryEntryDraft
-}
-
-/** Transitional parent-only projection; JSON is never read or written here. */
-export async function listPiMemories(store: DurableMemoryStore): Promise<PiMemory[]> {
-  return (await store.exportBundle({ access: managementAccess })).entries.map(piMemoryProjection)
-}
-
-export async function handleLegacyMemory(
-  store: DurableMemoryStore, method: string, params: Record<string, unknown>, publish?: PublishChange,
-): Promise<PiMemory[]> {
-  if (method === 'memory/add') {
-    if (!isPiMemory(params.memory)) throw new DurableMemoryStoreError('invalid_input', 'memory must include id, text, tags, and createdAt')
-    await writePiMemory(store, managementAccess, params.memory, publish)
-  } else if (method === 'memory/delete') {
-    const matches = (await listPiMemories(store)).filter((memory) => memory.id === params.id)
-    if (typeof params.id !== 'string' || !params.id) throw new DurableMemoryStoreError('invalid_input', 'memory id is required')
-    if (matches.length > 1) throw new DurableMemoryStoreError('invalid_input', '同 key 存在多個 scope；請使用 scoped memory/v1/delete。')
-    if (matches[0]) {
-      const scope = piMemoryDraft(matches[0]).scope
-      const result = await store.delete({ access: managementAccess, scope, logicalKey: matches[0].id })
-      if (result.changed) publish?.({ operation: 'delete', ...result, scope, logicalKey: matches[0].id })
-    }
-  } else if (method === 'memory/clear') {
-    const result = await store.clear({ access: managementAccess, scope: { kind: 'all' } })
-    if (result.changed) publish?.({ operation: 'clear', ...result, scope: { kind: 'all' }, logicalKey: '' })
-  } else if (method === 'memory/recall') {
-    const access: MemoryAccessContext = typeof params.project === 'string' && params.project
-      ? { origin: 'runtime', canonicalProject: canonicalProjectId(params.project), memoryReadEnabled: true, memoryWriteEnabled: false, temporary: false }
-      : managementAccess
-    return (await store.recall({ access, query: String(params.query || ''), limit: typeof params.limit === 'number' ? params.limit : undefined })).items.map(piMemoryProjection)
-  }
-  return listPiMemories(store)
 }
 
 function runtimeAccess(ctx: PiToolContext): MemoryAccessContext {

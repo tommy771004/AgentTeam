@@ -52,18 +52,43 @@ const waitFor = async (id: number) => {
     ])
   }
 }
+const memoryAdmin = { origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: false }
+const memoryEntry = (logicalKey: string, text: string, tags: string[], createdAt: string, project?: string) => ({
+  access: memoryAdmin,
+  entry: {
+    scope: project ? { kind: 'project', project } : { kind: 'global' },
+    logicalKey,
+    kind: logicalKey === 'profile:user' ? 'profile' : logicalKey === 'memory:document' ? 'document' : 'memory',
+    text,
+    tags,
+    createdAt,
+  },
+})
+const finalizeRun = async (runId: string, requestId: number) => {
+  const claimantId = `qualification-${runId}`
+  host.stdin.write(`${JSON.stringify({ id: requestId, method: 'runs/finalize-claim', params: { runId, claimantId } })}\n`)
+  const claim = await waitFor(requestId)
+  assert.equal(claim.result.finalizationClaim.owner, true)
+  host.stdin.write(`${JSON.stringify({ id: requestId + 1, method: 'runs/finalize-complete', params: {
+    runId,
+    claimantId,
+    claimEpoch: claim.result.finalizationClaim.claimEpoch,
+    finalOutcome: { status: 'success', executionKind: 'loop', dodMet: true },
+  } })}\n`)
+  return waitFor(requestId + 1)
+}
 try {
-  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 2 } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 1, method: 'initialize', params: { protocolVersion: 5, capabilities: ['memory-store-v1'] } })}\n`)
   await waitFor(1)
-  host.stdin.write(`${JSON.stringify({ id: 20, method: 'memory/add', params: { memory: { id: 'session-rule', project: process.cwd(), text: 'Keep model changes scoped to the active session', tags: ['session', 'model'], createdAt: '2026-08-20T00:00:00.000Z' } } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 20, method: 'memory/v1/upsert', params: memoryEntry('session-rule', 'Keep model changes scoped to the active session', ['session', 'model'], '2026-08-20T00:00:00.000Z', process.cwd()) })}\n`)
   await waitFor(20)
-  host.stdin.write(`${JSON.stringify({ id: 201, method: 'memory/add', params: { memory: { id: 'global-rule', text: 'Global model changes must be reviewed', tags: ['session', 'model'], createdAt: '2026-08-20T00:01:00.000Z' } } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 201, method: 'memory/v1/upsert', params: memoryEntry('global-rule', 'Global model changes must be reviewed', ['session', 'model'], '2026-08-20T00:01:00.000Z') })}\n`)
   await waitFor(201)
-  host.stdin.write(`${JSON.stringify({ id: 202, method: 'memory/add', params: { memory: { id: 'other-rule', project: join(stateDir, 'other-project'), text: 'OTHER PROJECT PRIVATE model changes', tags: ['session', 'model'], createdAt: '2026-08-20T00:02:00.000Z' } } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 202, method: 'memory/v1/upsert', params: memoryEntry('other-rule', 'OTHER PROJECT PRIVATE model changes', ['session', 'model'], '2026-08-20T00:02:00.000Z', join(stateDir, 'other-project')) })}\n`)
   await waitFor(202)
-  host.stdin.write(`${JSON.stringify({ id: 220, method: 'memory/add', params: { memory: { id: 'profile:user', text: 'PROFILE ALWAYS use Traditional Chinese', tags: [], createdAt: '2026-08-20T00:03:00.000Z' } } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 220, method: 'memory/v1/upsert', params: memoryEntry('profile:user', 'PROFILE ALWAYS use Traditional Chinese', [], '2026-08-20T00:03:00.000Z') })}\n`)
   await waitFor(220)
-  host.stdin.write(`${JSON.stringify({ id: 221, method: 'memory/add', params: { memory: { id: 'memory:document', text: 'DOCUMENT ALWAYS architecture rule', tags: [], createdAt: '2026-08-20T00:04:00.000Z' } } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 221, method: 'memory/v1/upsert', params: memoryEntry('memory:document', 'DOCUMENT ALWAYS architecture rule', [], '2026-08-20T00:04:00.000Z') })}\n`)
   await waitFor(221)
   host.stdin.write(`${JSON.stringify({ id: 2, method: 'sessions/create', params: { title: 'Orchestration smoke' } })}\n`)
   const created = await waitFor(2)
@@ -128,8 +153,8 @@ try {
   assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'compacted' && item.payload?.checkpointed === true), true)
   assert.equal((await readdir(join(stateDir, 'run-checkpoints'))).length > 0, true)
   assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'model-switched' && item.payload?.model === 'small-model' && item.payload?.contextWindowTokens === 10), true)
-  host.stdin.write(`${JSON.stringify({ id: 9, method: 'memory/list', params: {} })}\n`)
-  assert.equal((await waitFor(9)).result.memories.some((memory: { tags?: string[] }) => memory.tags?.includes('compaction')), false)
+  host.stdin.write(`${JSON.stringify({ id: 9, method: 'memory/v1/list', params: { access: memoryAdmin } })}\n`)
+  assert.equal((await waitFor(9)).result.memoryStore.page.items.some((memory: { tags?: string[] }) => memory.tags?.includes('compaction')), false)
   host.stdin.write(`${JSON.stringify({ id: 10, method: 'sessions/list', params: {} })}\n`)
   const listedSession = (await waitFor(10)).result.sessions.find((candidate: { id?: string }) => candidate.id === sessionId)
   assert.equal(listedSession.profile.model, 'small-model')
@@ -156,18 +181,20 @@ try {
   const resetBody = requestBodies[requestsBeforeResetTurn] || ''
   assert.match(resetBody, /請記住我的偏好是繁體中文/)
   assert.doesNotMatch(resetBody, /session continuation one|complete the goal about session model changes/)
-  host.stdin.write(`${JSON.stringify({ id: 18, method: 'memory/list', params: {} })}\n`)
-  assert.equal((await waitFor(18)).result.memories.some((item: { tags?: string[] }) => item.tags?.includes('turn-memory')), false, 'write-disabled also denies explicit remember')
+  host.stdin.write(`${JSON.stringify({ id: 18, method: 'memory/v1/list', params: { access: memoryAdmin } })}\n`)
+  assert.equal((await waitFor(18)).result.memoryStore.page.items.some((item: { tags?: string[] }) => item.tags?.includes('turn-memory')), false, 'write-disabled also denies explicit remember')
   assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'memory-written' && item.payload?.runId === 'reset-memory-run'), false)
   host.stdin.write(`${JSON.stringify({ id: 117, method: 'turn/submit', params: { sessionId, runId: 'explicit-memory-enabled', cwd: process.cwd(), prompt: '請記住我的偏好是繁體中文', contextPolicy: { memoryEnabled: true, memoryWriteEnabled: true, temporary: false, project: process.cwd() }, profile: { provider: 'loopback', model: 'small-model', thinkingLevel: 'off', compaction: 'auto', approvalMode: 'full', unattended: false } } })}\n`)
   assert.equal((await waitFor(117)).result.settlement, 'answered')
-  host.stdin.write(`${JSON.stringify({ id: 118, method: 'memory/list', params: {} })}\n`)
-  assert.equal((await waitFor(118)).result.memories.some((item: { tags?: string[] }) => item.tags?.includes('explicit')), true)
+  assert.equal((await finalizeRun('explicit-memory-enabled', 2117)).result.learningSettlement.committed, true)
+  host.stdin.write(`${JSON.stringify({ id: 118, method: 'memory/v1/list', params: { access: memoryAdmin } })}\n`)
+  assert.equal((await waitFor(118)).result.memoryStore.page.items.some((item: { tags?: string[] }) => item.tags?.includes('explicit')), true)
   assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'memory-written' && item.payload?.runId === 'explicit-memory-enabled'), true)
   host.stdin.write(`${JSON.stringify({ id: 19, method: 'turn/submit', params: { sessionId, runId: 'auto-memory-run', cwd: process.cwd(), prompt: '這個專案一律使用繁體中文 UI', contextPolicy: { memoryEnabled: true, memoryWriteEnabled: true, temporary: false, project: process.cwd(), contextWindowTokens: 4096 }, profile: { provider: 'loopback', model: 'small-model', thinkingLevel: 'off', compaction: 'auto', approvalMode: 'full', unattended: false } } })}\n`)
   assert.equal((await waitFor(19)).result.settlement, 'answered')
-  host.stdin.write(`${JSON.stringify({ id: 21, method: 'memory/list', params: {} })}\n`)
-  assert.equal((await waitFor(21)).result.memories.some((item: { tags?: string[] }) => item.tags?.includes('auto-learned')), true)
+  assert.equal((await finalizeRun('auto-memory-run', 2019)).result.learningSettlement.committed, true)
+  host.stdin.write(`${JSON.stringify({ id: 21, method: 'memory/v1/list', params: { access: memoryAdmin } })}\n`)
+  assert.equal((await waitFor(21)).result.memoryStore.page.items.some((item: { tags?: string[] }) => item.tags?.includes('auto-learned')), true)
   host.stdin.write(`${JSON.stringify({ id: 4, method: 'sessions/create', params: { title: 'Unmet DoD smoke' } })}\n`)
   const unmetSession = await waitFor(4)
   host.stdin.write(`${JSON.stringify({ id: 5, method: 'turn/submit', params: { sessionId: String(unmetSession.result.sessionId), runId: 'unmet-run', cwd: process.cwd(), prompt: 'never complete', pattern: 'Goal-based', maxIterations: 2, definitionOfDone: 'non-empty assistant result', profile: { provider: 'loopback', model: 'orchestration-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false } } })}\n`)
@@ -193,7 +220,7 @@ try {
       await once(restartedOutput, 'line')
     }
   }
-  restarted.stdin.write(`${JSON.stringify({ id: 300, method: 'initialize', params: { protocolVersion: 2 } })}\n`)
+  restarted.stdin.write(`${JSON.stringify({ id: 300, method: 'initialize', params: { protocolVersion: 5, capabilities: ['memory-store-v1'] } })}\n`)
   await restartedWaitFor(300)
   const requestIndex = requestBodies.length
   restarted.stdin.write(`${JSON.stringify({ id: 301, method: 'turn/submit', params: { sessionId, runId: 'restart-memory-recall', cwd: process.cwd(), prompt: 'review model changes after restart', contextPolicy: { memoryEnabled: true, memoryWriteEnabled: false, temporary: false, project: process.cwd() }, profile: { provider: 'loopback', model: 'orchestration-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false } } })}\n`)

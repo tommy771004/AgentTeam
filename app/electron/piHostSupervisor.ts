@@ -304,36 +304,6 @@ export class PiHostSupervisor {
     return response.result.resources
   }
 
-  async listMemories(): Promise<NonNullable<PiHostResponse['result']>['memories']> {
-    const response = await this.request('memory/list', {})
-    if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory listing failed')
-    return response.result.memories
-  }
-
-  async addMemory(memory: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>['memories']> {
-    const response = await this.request('memory/add', { memory })
-    if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory write failed')
-    return response.result.memories
-  }
-
-  async deleteMemory(id: string): Promise<NonNullable<PiHostResponse['result']>['memories']> {
-    const response = await this.request('memory/delete', { id })
-    if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory deletion failed')
-    return response.result.memories
-  }
-
-  async clearMemories(): Promise<NonNullable<PiHostResponse['result']>['memories']> {
-    const response = await this.request('memory/clear', {})
-    if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory clear failed')
-    return response.result.memories
-  }
-
-  async recallMemory(query: string, project?: string, limit?: number): Promise<NonNullable<PiHostResponse['result']>['memories']> {
-    const response = await this.request('memory/recall', { query, ...(project ? { project } : {}), ...(limit === undefined ? {} : { limit }) })
-    if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory recall failed')
-    return response.result.memories
-  }
-
   private async durableMemoryRequest(
     method: 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply',
     params: Record<string, unknown>,

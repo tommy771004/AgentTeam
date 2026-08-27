@@ -1,4 +1,4 @@
-import type { PiMemory } from './piMemoryExtension.ts'
+import type { PiMemory } from './piMemory.ts'
 import type { CompactionManifest } from '../src/agent/compactionCheckpoint.ts'
 
 /**

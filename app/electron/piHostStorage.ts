@@ -57,11 +57,11 @@ async function openPiHostStorageUnchecked(
       memories: (JSON.parse(source) as { memories?: unknown[] }).memories || [],
     })
     onTransition?.('memory-committed')
-    const next: PiHostSnapshot = { ...snapshot, memories: [], memoryAuthority: { backend: 'sqlite', sourceHash } }
+    const next: PiHostSnapshot = { ...snapshot, memoryAuthority: { backend: 'sqlite', sourceHash } }
     const staged = `${statePath}.cutover`
     await isDirectory(staged)
     await mkdir(staged, { recursive: true, mode: 0o700 })
-    await atomicWrite(join(staged, 'snapshot.json'), JSON.stringify({ ...next, schemaVersion: 3 }))
+    await atomicWrite(join(staged, 'snapshot.json'), JSON.stringify({ ...next, schemaVersion: 4 }))
     await atomicWrite(join(staged, 'migration-report.json'), JSON.stringify(migrated.report))
     await atomicWrite(join(staged, 'README.txt'), '此目錄阻擋舊版覆寫 SQLite 記憶。請使用相容版本；降級前須明確匯出。原始 JSON 備份位於同層 .pre-sqlite.json，僅供復原，不是 live authority。\n')
     const current = await optionalRead(statePath)

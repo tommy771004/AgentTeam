@@ -8,7 +8,7 @@
 
 ```text
 pi-host-state.json/                  ← 舊 pathname 改成目錄，阻擋舊 writer 的 rename
-  snapshot.json                    ← schema 3，memoryAuthority，memories: []
+  snapshot.json                    ← schema 4，memoryAuthority，不含 memories 欄位
   migration-report.json            ← source hash、匯入數、拒絕 index/reason，不含正文
   README.txt                       ← 相容版本／明確匯出與備份說明
 pi-host-state.json.pre-sqlite.json  ← 原始來源，0600，僅供復原

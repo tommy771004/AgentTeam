@@ -192,8 +192,9 @@ try {
   restarted.child.stdin.end()
   await once(restarted.child, 'exit')
 
-  const legacySnapshot = JSON.parse(await readFile(await resolvePiHostStateFile(statePath), 'utf8')) as { memories?: unknown[] }
-  assert.deepEqual(legacySnapshot.memories, [])
+  const contractedSnapshot = JSON.parse(await readFile(await resolvePiHostStateFile(statePath), 'utf8')) as Record<string, unknown>
+  assert.equal(contractedSnapshot.schemaVersion, 4)
+  assert.equal(Object.hasOwn(contractedSnapshot, 'memories'), false)
 
   const relay = new PiHostSupervisor(
     () => new RelayChild(),

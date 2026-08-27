@@ -202,8 +202,34 @@ const revived = [...KNOWN_UNCONSUMED_SETTINGS]
   .filter((key) => sourceFiles.some((file) => new RegExp(`\\b${key}\\b`).test(consumerText(file))))
 assert.deepEqual(revived, [], `these fields now HAVE consumers and must be removed from KNOWN_UNCONSUMED_SETTINGS: ${revived.join(', ')}`)
 
+// ── Guard 7: durable memory has exactly one production owner ──
+// Ticket 15 closes the expand-contract window. The old renderer IPC and Host
+// memory/* surface returned whole collections and made it possible to rebuild
+// a second owner beside DurableMemoryStore. Migration may still READ schema
+// 1/2 JSON, but production snapshots and callable protocols cannot carry it.
+assert.equal(existsSync(join(root, 'electron/piMemoryExtension.ts')), false, 'PiMemoryExtension was the JSON/in-memory owner and must not return')
+const legacyMemoryChannels = [
+  'pi-host:memory:list',
+  'pi-host:memory:add',
+  'pi-host:memory:delete',
+  'pi-host:memory:clear',
+  'pi-host:memory:recall',
+]
+const productionMemoryBoundary = [
+  'electron/main.ts',
+  'electron/preload.ts',
+  'electron/piHostSupervisor.ts',
+  'electron/piHostProtocol.ts',
+].map((file) => read(file)).join('\n')
+for (const channel of legacyMemoryChannels) {
+  assert.doesNotMatch(productionMemoryBoundary, new RegExp(channel.replaceAll('/', '\\/')), `${channel} is a retired whole-bundle memory owner`)
+}
+const hostStateSource = read('electron/piHostState.ts')
+assert.doesNotMatch(hostStateSource, /^\s*memories\??:\s*PiMemory\[\]/m, 'production PiHostSnapshot cannot contain live memory bodies')
+assert.doesNotMatch(read('electron/piHostProtocol.ts'), /result:\s*\{[^\n]*memories\b/, 'Pi Host responses cannot masquerade as the retired memory collection protocol')
 
-// ── Guard 7: a test file must be reachable from a gate ──
+
+// ── Guard 8: a test file must be reachable from a gate ──
 // A test nobody runs is not a test. `smoke-pi-parity-removal` — the parity
 // evidence that authorized deleting six renderer tools — sat unreferenced and
 // rotted, and it took writing a new assertion to notice (issue 20). This

@@ -149,7 +149,7 @@ let runningHost: ReturnType<typeof startHost> | undefined
 try {
   const host = startHost()
   runningHost = host
-  host.send(1, 'initialize', { protocolVersion: 4, capabilities: ['tool-contract-v1', 'memory-store-v1'] })
+  host.send(1, 'initialize', { protocolVersion: 5, capabilities: ['tool-contract-v1', 'memory-store-v1'] })
   assert.equal((await host.wait(1)).error, undefined)
   host.send(2, 'sessions/create', { title: 'Memory Pack lifecycle' })
   sessionId = String((await host.wait(2)).result?.sessionId)
@@ -207,7 +207,7 @@ try {
   const restarted = startHost()
   runningHost = restarted
   try {
-    restarted.send(20, 'initialize', { protocolVersion: 4, capabilities: ['tool-contract-v1', 'memory-store-v1'] })
+    restarted.send(20, 'initialize', { protocolVersion: 5, capabilities: ['tool-contract-v1', 'memory-store-v1'] })
     assert.equal((await restarted.wait(20)).error, undefined)
     const afterRestart = await submitMemoryTurn(restarted, 21, sessionId, 'memory-restart-a', projectA, [
       { id: 'call_restart_get', name: 'memory_get', args: { id: 'shared-rule' } },

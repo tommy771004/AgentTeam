@@ -2437,11 +2437,6 @@ ipcMain.handle('pi-host:runs:claim', async (_evt, runId?: string) => piHostSuper
 ipcMain.handle('pi-host:runs:settle', async (_evt, runId: string, settlement: PiTurnSettlement) => piHostSupervisor.settleQueuedRun(runId, settlement))
 ipcMain.handle('pi-host:resources:list', async () => ({ resources: await piHostSupervisor.listResources() }))
 ipcMain.handle('pi-host:resources:reload', async (_evt, resources: unknown[]) => ({ resources: await piHostSupervisor.reloadResources(resources || []) }))
-ipcMain.handle('pi-host:memory:list', async () => ({ memories: await piHostSupervisor.listMemories() }))
-ipcMain.handle('pi-host:memory:add', async (_evt, memory: Record<string, unknown>) => ({ memories: await piHostSupervisor.addMemory(memory || {}) }))
-ipcMain.handle('pi-host:memory:delete', async (_evt, id: string) => ({ memories: await piHostSupervisor.deleteMemory(id) }))
-ipcMain.handle('pi-host:memory:clear', async () => ({ memories: await piHostSupervisor.clearMemories() }))
-ipcMain.handle('pi-host:memory:recall', async (_evt, query: string, project?: string, limit?: number) => ({ memories: await piHostSupervisor.recallMemory(query, project, limit) }))
 const memoryProjectionAdmin: MemoryAccessContext = {
   origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: true,
 }

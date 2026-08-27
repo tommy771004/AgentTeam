@@ -5,7 +5,7 @@ import type { PiHostConfigStatus } from './piHostProtocol.ts'
 import type { SessionRecord } from './piHostProtocol.ts'
 import type { PiQueuedRun } from './piRunQueue.ts'
 import type { PiResource } from './piResourceRegistry.ts'
-import { isPiMemory, type PiMemory } from './piMemoryExtension.ts'
+import type { PiMemory } from './piMemory.ts'
 import { parseTurnRecord } from '../src/agent/turnRecord.ts'
 import type { PiExtension } from './piExtensionRegistry.ts'
 import { isPiTurnToolContract, type PiTurnToolContract } from './piToolContract.ts'
@@ -20,16 +20,16 @@ export type PiHostSnapshot = {
   config?: PiHostConfigStatus
   queue: PiQueuedRun[]
   resources: PiResource[]
-  memories: PiMemory[]
   extensions: PiExtension[]
   /** Host-canonical run attachment metadata; Turn Record entries are not copied. */
   attachments: PiHostAttachment[]
   memoryAuthority?: { backend: 'sqlite'; sourceHash: string }
 }
 
-type StoredState = PiHostSnapshot & { schemaVersion: number }
+export type PiHostStoredState = PiHostSnapshot & { schemaVersion: number }
+type ParsedStoredState = PiHostStoredState & { memories?: PiMemory[] }
 
-const emptyState = (): StoredState => ({
+const emptyState = (): ParsedStoredState => ({
   schemaVersion: 2,
   cursor: 0,
   sessions: [],
@@ -77,7 +77,7 @@ function hasRuntimeOverride(settings: PiSettings): boolean {
  * performed rather than reported. A damaged FINAL entry is different: that is a
  * torn append, so the good prefix is kept and the loss is reported.
  */
-function withValidatedTurnRecords(state: StoredState): StoredState {
+function withValidatedTurnRecords(state: PiHostStoredState): PiHostStoredState {
   const sessions = state.sessions.map((session) => {
     const { record, tornTail } = parseTurnRecord((session as { record?: unknown }).record)
     if (tornTail) {
@@ -93,25 +93,26 @@ function withValidatedTurnRecords(state: StoredState): StoredState {
   return { ...state, sessions }
 }
 
-function validateMemoryAuthority(value: Partial<StoredState>): void {
-  if (value.schemaVersion !== 3) {
+function validateMemoryAuthority(value: Partial<ParsedStoredState>): void {
+  if (value.schemaVersion !== 3 && value.schemaVersion !== 4) {
     if (value.memoryAuthority !== undefined) throw new Error('Legacy state 不可宣告 SQLite authority。')
     return
   }
-  if (value.memoryAuthority?.backend !== 'sqlite' || typeof value.memoryAuthority.sourceHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.memoryAuthority.sourceHash) || value.memories?.length !== 0) {
+  const memoryShapeValid = value.schemaVersion === 3 ? value.memories?.length === 0 : value.memories === undefined
+  if (value.memoryAuthority?.backend !== 'sqlite' || typeof value.memoryAuthority.sourceHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.memoryAuthority.sourceHash) || !memoryShapeValid) {
     throw new Error('Pi Host SQLite authority marker 無效；未覆寫資料。')
   }
 }
 
-function parseStoredPiHostState(source: string): StoredState {
-  let value: Partial<StoredState>
+function parseStoredPiHostState(source: string): ParsedStoredState {
+  let value: Partial<ParsedStoredState>
   try {
-    value = JSON.parse(source) as Partial<StoredState>
+    value = JSON.parse(source) as Partial<ParsedStoredState>
   } catch {
     throw new Error('Pi Host state JSON 損壞；未覆寫資料，請從有效備份復原。')
   }
   if (!value || typeof value !== 'object') throw new Error('Pi Host state 格式無效；未覆寫資料。')
-  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3) {
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4) {
     throw new Error('Pi Host state schema 不相容；未覆寫資料，請使用相容版本或明確匯出後再降級。')
   }
   validateMemoryAuthority(value)
@@ -126,7 +127,7 @@ function parseStoredPiHostState(source: string): StoredState {
   ) {
     throw new Error('Pi Host state 結構無效；未覆寫資料，請從有效備份復原。')
   }
-  return value as StoredState
+  return value as ParsedStoredState
 }
 
 export async function resolvePiHostStateFile(statePath: string): Promise<string> {
@@ -136,7 +137,7 @@ export async function resolvePiHostStateFile(statePath: string): Promise<string>
   }
 }
 
-async function readStoredPiHostState(statePath: string): Promise<StoredState> {
+async function readStoredPiHostState(statePath: string): Promise<PiHostStoredState> {
   const filePath = await resolvePiHostStateFile(statePath)
   let source: string
   try {
@@ -148,7 +149,7 @@ async function readStoredPiHostState(statePath: string): Promise<StoredState> {
   return decodePiHostState(source)
 }
 
-export function decodePiHostState(source: string): StoredState {
+export function decodePiHostState(source: string): PiHostStoredState {
   const value = parseStoredPiHostState(source)
   const settings = normalizeStoredSettings(value.settings)
   const legacyStateHasRuntimeOverride = hasRuntimeOverride(settings)
@@ -166,14 +167,13 @@ export function decodePiHostState(source: string): StoredState {
     config: value.config,
     queue: (value.queue || []).filter((item): item is PiQueuedRun => Boolean(item && typeof item === 'object' && typeof (item as PiQueuedRun).runId === 'string')),
     resources: Array.isArray(value.resources) ? value.resources : [],
-    memories: Array.isArray(value.memories) ? value.memories.filter(isPiMemory) : [],
     extensions: Array.isArray(value.extensions) ? value.extensions : [],
     attachments: Array.isArray(value.attachments) ? value.attachments : [],
     ...(value.memoryAuthority ? { memoryAuthority: value.memoryAuthority } : {}),
   })
 }
 
-export async function loadPiHostState(statePath: string): Promise<StoredState> {
+export async function loadPiHostState(statePath: string): Promise<PiHostStoredState> {
   return readStoredPiHostState(statePath)
 }
 
@@ -183,6 +183,6 @@ export async function savePiHostState(statePath: string, snapshot: PiHostSnapsho
   if (filePath !== statePath && !snapshot.memoryAuthority) throw new Error('拒絕以 legacy snapshot 覆寫 SQLite Host state。')
   await mkdir(path.dirname(filePath), { recursive: true })
   const temporaryPath = `${filePath}.${process.pid}.tmp`
-  await writeFile(temporaryPath, JSON.stringify({ ...snapshot, schemaVersion: snapshot.memoryAuthority ? 3 : 2, ...(snapshot.memoryAuthority ? { memories: [] } : {}) }), { mode: 0o600 })
+  await writeFile(temporaryPath, JSON.stringify({ ...snapshot, schemaVersion: snapshot.memoryAuthority ? 4 : 2 }), { mode: 0o600 })
   await rename(temporaryPath, filePath)
 }

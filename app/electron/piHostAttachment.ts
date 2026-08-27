@@ -1,6 +1,6 @@
 import { isPiTurnSettlement, type PiTurnInterruptReason, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
 import type { TurnRecordEntry } from '../src/agent/turnRecord.ts'
-import { isPiMemory, type PiMemory } from './piMemoryExtension.ts'
+import { isLegacyPiMemory, type PiMemory } from './piMemory.ts'
 
 /**
  * Host-owned attachment journal.  This is deliberately metadata, not a
@@ -207,7 +207,7 @@ function normalizeLearning(value: unknown): PiHostRunLearningCandidate | undefin
   if (!value || typeof value !== 'object') return undefined
   const candidate = value as Partial<PiHostRunLearningCandidate>
   if (candidate.mode !== 'explicit' && candidate.mode !== 'automatic') return undefined
-  if (!isPiMemory(candidate.memory)) return undefined
+  if (!isLegacyPiMemory(candidate.memory)) return undefined
   if (!candidate.access || typeof candidate.access !== 'object') return undefined
   const canonicalProject = boundedString(candidate.access.canonicalProject, 4_096)
   const runId = boundedString(candidate.access.runId)

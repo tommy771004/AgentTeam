@@ -1,4 +1,4 @@
-import type { PiMemory } from './piMemoryExtension.ts'
+import type { PiMemory } from './piMemory.ts'
 import type { PiContextPacket } from './piDelegationExtension.ts'
 import type { PiToolContext } from './piToolHost.ts'
 import { DurableMemoryStoreError } from './durableMemoryStore.ts'
