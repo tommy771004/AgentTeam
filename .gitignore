@@ -51,3 +51,7 @@ test-results/
 
 .agents/*
 .claude/*
+docs/ui/sample/ApprovalCard/ApprovalCard.module.css
+docs/ui/sample/ApprovalCard/ApprovalCard.tsx
+docs/ui/sample/TodoList/TodoList.module.css
+docs/ui/sample/TodoList/TodoList.tsx
