@@ -1,6 +1,10 @@
 import { realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, resolve } from 'node:path'
+import {
+  planMemoryImport, checkedMemoryImportPlan, memoryImportOperationKey, memoryImportRequestHash, replayMemoryImport, sourceProvenance,
+  type MemoryImportPreviewInput, type MemoryImportPreview, type MemoryImportApplyInput, type MemoryImportResult, type MemoryImportReceipt, type MemoryImportTestHooks,
+} from './durableMemoryImport.ts'
 
 /**
  * Host-owned durable-memory seam.
@@ -106,6 +110,8 @@ export type DurableMemoryProtocolResult = { version: 1; revision: number } & (
   | { operation: 'deletion-capability'; capability: MemoryDeletionCapability }
   | { operation: 'consolidate-dream'; consolidation: MemoryDreamConsolidationResult }
   | { operation: 'export'; bundle: DurableMemoryBundle }
+  | { operation: 'import-preview'; preview: MemoryImportPreview }
+  | { operation: 'import-apply'; importResult: MemoryImportResult }
 )
 
 export type MemoryStoreErrorCode =
@@ -167,6 +173,8 @@ export type DurableMemoryProvenance = {
   runId?: string
   sessionId?: string
   callId?: string
+  /** Untrusted historical source, never an access context. */
+  importedFrom?: Omit<DurableMemoryProvenance, 'importedFrom'>
 }
 
 export type DurableMemoryExportEntry = DurableMemoryEntry & {
@@ -209,6 +217,7 @@ export function parseDurableMemoryProvenance(value: string, operation: string): 
       ...(typeof parsed.runId === 'string' ? { runId: parsed.runId } : {}),
       ...(typeof parsed.sessionId === 'string' ? { sessionId: parsed.sessionId } : {}),
       ...(typeof parsed.callId === 'string' ? { callId: parsed.callId } : {}),
+      ...(parsed.importedFrom ? { importedFrom: sourceProvenance(parsed.importedFrom, DEFAULT_DURABLE_MEMORY_LIMITS) } : {}),
     }
   } catch {
     return { origin: 'migration', operation }
@@ -376,6 +385,8 @@ export interface DurableMemoryStore {
   consolidateDream(input: MemoryDreamConsolidateInput): Promise<MemoryDreamConsolidationResult>
   exportBundle(input: MemoryExportInput): Promise<DurableMemoryBundle>
   importBundle(input: MemoryImportInput): Promise<MemoryMutationResult>
+  previewImport(input: MemoryImportPreviewInput): Promise<MemoryImportPreview>
+  applyImport(input: MemoryImportApplyInput): Promise<MemoryImportResult>
   migrateLegacy(input: MemoryMigrationInput): Promise<MemoryMigrationResult>
   migrationStatus(): Promise<MemoryMigrationReport | undefined>
   close(): Promise<void>
@@ -836,14 +847,17 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
   private readonly provenanceByEntryId = new Map<string, DurableMemoryProvenance>()
   private readonly operations = new Map<string, { hash: string; entryId: string }>()
   private readonly dreamOperations = new Map<string, { payload: string; result: MemoryDreamConsolidationResult }>()
+  private readonly importOperations = new Map<string, MemoryImportReceipt>()
+  private readonly importTestHooks?: MemoryImportTestHooks
   private readonly limits: DurableMemoryLimits
   private nextIdentity = 1
   private currentRevision = 0
   private migrationReport?: MemoryMigrationReport
   private closed = false
 
-  constructor(limits?: Partial<DurableMemoryLimits>) {
+  constructor(limits?: Partial<DurableMemoryLimits>, testHooks?: MemoryImportTestHooks) {
     this.limits = durableMemoryLimits(limits)
+    this.importTestHooks = testHooks
   }
 
   private ensureOpen(): void {
@@ -1073,6 +1087,42 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
         provenance: structuredClone(this.provenanceByEntryId.get(entry.id) || { origin: 'migration' as const, operation: 'migration' }),
       }))
     return validateMemoryExportBundle(durableMemoryBundle(this.currentRevision, entries), this.limits)
+  }
+
+  async previewImport(input: MemoryImportPreviewInput): Promise<MemoryImportPreview> {
+    this.ensureOpen()
+    authorizeMemoryAccess('import', input.access)
+    return planMemoryImport(input.bundle, input.mode, [...this.entries.values()], this.currentRevision, this.limits).preview
+  }
+
+  async applyImport(input: MemoryImportApplyInput): Promise<MemoryImportResult> {
+    this.ensureOpen()
+    authorizeMemoryAccess('import', input.access)
+    const key = memoryImportOperationKey(input, this.limits)
+    const prior = this.importOperations.get(key)
+    if (prior) return replayMemoryImport(prior, input, [...this.entries.values()])
+    const plan = checkedMemoryImportPlan(input, [...this.entries.values()], this.currentRevision, this.limits)
+    const revision = this.currentRevision + Number(plan.drafts.length > 0)
+    const nextIdentity = this.nextIdentity
+    let staged: Array<{ entry: DurableMemoryEntry; source?: DurableMemoryProvenance }>
+    try {
+      staged = plan.drafts.map((draft, index) => {
+        const entry = { ...this.nextEntry(draft, revision), updatedAt: draft.updatedAt }
+        this.importTestHooks?.afterImportEntryWrite?.(index)
+        return { entry, source: draft.source }
+      })
+    } catch (error) {
+      this.nextIdentity = nextIdentity
+      throw error
+    }
+    for (const { entry, source } of staged) {
+      this.entries.set(entryKey(entry.scope, entry.logicalKey), entry)
+      this.provenanceByEntryId.set(entry.id, { ...durableMemoryProvenance({ ...input.access, callId: input.operationId }, 'import'), ...(source ? { importedFrom: source } : {}) })
+    }
+    this.currentRevision = revision
+    const result = { changed: staged.length, revision, alreadyApplied: false, counts: plan.preview.counts }
+    this.importOperations.set(key, { hash: memoryImportRequestHash(input), entryIds: staged.map(({ entry }) => entry.id), result: structuredClone(result) })
+    return result
   }
 
   async importBundle(input: MemoryImportInput): Promise<MemoryMutationResult> {

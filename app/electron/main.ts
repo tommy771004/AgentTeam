@@ -238,6 +238,7 @@ import {
 import { safeOpenCodeServerOrigin } from '../src/agent/opencodeServerSafety'
 import { PiHostSupervisor } from './piHostSupervisor'
 import { writeSettingsBundleExport } from './settingsBundleExportWrite'
+import type { MemoryImportApplyInput, MemoryImportMode } from './durableMemoryImport'
 import type { PiTurnSettlement } from '../src/agent/piHostRun'
 import {
   canonicalProjectId,
@@ -2494,6 +2495,19 @@ ipcMain.handle('settings:export-bundle', async (_evt, input: { content?: string;
   const selected = parent ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options)
   if (selected.canceled || !selected.filePath) return { ok: false as const, cancelled: true as const }
   return writeSettingsBundleExport(selected.filePath, String(input?.content || ''))
+})
+ipcMain.handle('pi-host:memory-projection:import-preview', async (_evt, input: { bundle: unknown; mode: MemoryImportMode }) => {
+  const result = await piHostSupervisor.previewMemoryImport({ access: memoryProjectionAdmin, bundle: input?.bundle, mode: input?.mode })
+  if (result.operation !== 'import-preview') throw new Error('Host memory import preview failed')
+  return result.preview
+})
+ipcMain.handle('pi-host:memory-projection:import-apply', async (_evt, input: Omit<MemoryImportApplyInput, 'access'>) => {
+  const result = await piHostSupervisor.applyMemoryImport({
+    access: memoryProjectionAdmin, bundle: input?.bundle, mode: input?.mode,
+    operationId: input?.operationId, previewId: input?.previewId, expectedRevision: input?.expectedRevision,
+  })
+  if (result.operation !== 'import-apply') throw new Error('Host memory import failed')
+  return result.importResult
 })
 ipcMain.handle('pi-host:memory-projection:consolidate-dream', async (_evt, input: { scope: MemoryProjectionScope; operationId: string; force?: boolean }) => {
   const scope = projectionMemoryScope(input?.scope)

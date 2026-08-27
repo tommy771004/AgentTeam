@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import {
+  planMemoryImport, checkedMemoryImportPlan, memoryImportOperationKey, memoryImportRequestHash, replayMemoryImport,
+  type MemoryImportPreviewInput, type MemoryImportPreview, type MemoryImportApplyInput, type MemoryImportResult, type MemoryImportReceipt, type MemoryImportTestHooks,
+} from './durableMemoryImport.ts'
+import {
   appendMemoryDraft,
   assertMemoryQuota,
   authorizeMemoryAccess,
@@ -31,6 +35,7 @@ import {
   type DurableMemoryEntry,
   type DurableMemoryExportEntry,
   type DurableMemoryLimits,
+  type DurableMemoryProvenance,
   type DurableMemoryStore,
   type MemoryAccessContext,
   type MemoryAppendInput,
@@ -113,6 +118,7 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
   private readonly db: DatabaseSync
   private readonly limits: DurableMemoryLimits
   private readonly afterExportEntriesRead?: () => void | Promise<void>
+  private readonly importTestHooks?: MemoryImportTestHooks
   private writeTail: Promise<void> = Promise.resolve()
   private closed = false
   private closedRevision = 0
@@ -121,18 +127,19 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
   private constructor(
     databasePath: string,
     limits?: Partial<DurableMemoryLimits>,
-    testHooks?: { afterExportEntriesRead?: () => void | Promise<void> },
+    testHooks?: MemoryImportTestHooks & { afterExportEntriesRead?: () => void | Promise<void> },
   ) {
     this.db = new DatabaseSync(databasePath)
     this.limits = durableMemoryLimits(limits)
     this.afterExportEntriesRead = testHooks?.afterExportEntriesRead
+    this.importTestHooks = testHooks
     this.migrate()
   }
 
   static async open(
     databasePath: string,
     limits?: Partial<DurableMemoryLimits>,
-    testHooks?: { afterExportEntriesRead?: () => void | Promise<void> },
+    testHooks?: MemoryImportTestHooks & { afterExportEntriesRead?: () => void | Promise<void> },
   ): Promise<SqliteDurableMemoryStore> {
     return new SqliteDurableMemoryStore(databasePath, limits, testHooks)
   }
@@ -332,6 +339,7 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     operation: string,
     operationId?: string,
     operationPayload?: string,
+    restore?: { source?: DurableMemoryProvenance; updatedAt: string },
   ): DurableMemoryEntry {
     const draft = canonicalMemoryDraft(draftInput, this.limits)
     const existing = this.findEntry(draft.scope, draft.logicalKey)
@@ -343,12 +351,12 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
       text: draft.text,
       tags: [...draft.tags],
       createdAt: existing?.createdAt || draft.createdAt,
-      updatedAt: draft.createdAt,
+      updatedAt: restore?.updatedAt ?? draft.createdAt,
       revision,
     }
     const columns = scopeColumns(entry.scope)
     const hash = contentHash(entry)
-    const origin = provenance(access)
+    const origin = restore?.source ? JSON.stringify({ ...JSON.parse(provenance(access)), importedFrom: restore.source }) : provenance(access)
     this.db.prepare(`
       INSERT INTO memory_entries(
         id, scope_kind, project_id, logical_key, kind, text, created_at, updated_at,
@@ -623,6 +631,42 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
       if (error instanceof DurableMemoryStoreError) throw error
       throw new DurableMemoryStoreError('unavailable', error instanceof Error ? error.message : 'SQLite memory export failed')
     }
+  }
+
+  async previewImport(input: MemoryImportPreviewInput): Promise<MemoryImportPreview> {
+    authorizeMemoryAccess('import', input.access)
+    await this.settleWrites()
+    this.db.exec('BEGIN DEFERRED')
+    try {
+      const preview = planMemoryImport(input.bundle, input.mode, this.readEntries(), this.currentRevision(), this.limits).preview
+      this.db.exec('COMMIT')
+      return preview
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  async applyImport(input: MemoryImportApplyInput): Promise<MemoryImportResult> {
+    authorizeMemoryAccess('import', input.access)
+    const key = memoryImportOperationKey(input, this.limits)
+    return this.enqueueWrite(() => {
+      const existing = this.readEntries()
+      const prior = this.db.prepare('SELECT value FROM memory_meta WHERE key = ?').get(key) as { value: string } | undefined
+      if (prior) return replayMemoryImport(JSON.parse(prior.value) as MemoryImportReceipt, input, existing)
+      const plan = checkedMemoryImportPlan(input, existing, this.currentRevision(), this.limits)
+      const revision = this.currentRevision() + Number(plan.drafts.length > 0)
+      const entryIds = plan.drafts.map((draft, index) => {
+        const entry = this.writeEntry(draft, { ...input.access, callId: input.operationId }, revision, 'import', undefined, undefined, draft)
+        this.importTestHooks?.afterImportEntryWrite?.(index)
+        return entry.id
+      })
+      if (plan.drafts.length) this.setRevision(revision)
+      const result = { changed: entryIds.length, revision, alreadyApplied: false, counts: plan.preview.counts }
+      const receipt: MemoryImportReceipt = { hash: memoryImportRequestHash(input), entryIds, result }
+      this.db.prepare('INSERT INTO memory_meta(key, value) VALUES (?, ?)').run(key, JSON.stringify(receipt))
+      return result
+    })
   }
 
   async importBundle(input: MemoryImportInput): Promise<MemoryMutationResult> {

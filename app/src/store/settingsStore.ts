@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { DEFAULT_LLM_SETTINGS } from '../agent/llm.ts'
 import { mergeCliProviders } from '../agent/cliProviders.ts'
 import { recommendToolTuning } from '../agent/modelTuning.ts'
-import { redactSettingsForExport } from '../agent/settingsExport.ts'
+import { redactSettingsForExport, withoutLegacyHermesMemory, preserveLegacyHermesMemory } from '../agent/settingsExport.ts'
 import {
   isElectronPiProduction,
   piSettingsPatchFromLlmSettings,
@@ -19,18 +19,24 @@ export { SETTINGS_CUSTOM_MERGE_KEYS, type SettingsCustomMergeKey }
 
 const STORAGE_KEY = 'subagents.settings.v1'
 
-function withoutLegacyHermesMemory(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
-  const { memory: _legacyMemory, ...rest } = value as Record<string, unknown>
-  return rest
-}
-
 async function readCanonicalMemoryExport(): Promise<unknown> {
   const exportBundle = window.subagents?.piHost?.memoryProjection?.exportBundle
   if (!exportBundle) {
     throw new Error('目前執行環境不支援 Host canonical memory export；未產生不完整備份。')
   }
   return exportBundle()
+}
+
+async function importNonMemoryHermes(incoming: unknown): Promise<void> {
+  const bridge = window.subagents?.hermes
+  if (bridge?.set) {
+    if (typeof bridge.get !== 'function') throw new Error('無法讀取既有 Hermes 資料，未套用匯入。')
+    const current = await bridge.get()
+    await bridge.set(preserveLegacyHermesMemory(current, incoming))
+    return
+  }
+  const current = JSON.parse(localStorage.getItem('subagents.hermes.v1') || 'null')
+  localStorage.setItem('subagents.hermes.v1', JSON.stringify(preserveLegacyHermesMemory(current, incoming)))
 }
 
 /**
@@ -512,17 +518,11 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       } else if (data.events) {
         localStorage.setItem('subagents.events', JSON.stringify(data.events))
       }
-      if (data.hermes) {
-        if (window.subagents?.hermes?.set) {
-          await window.subagents.hermes.set(data.hermes)
-        } else {
-          localStorage.setItem('subagents.hermes.v1', JSON.stringify(data.hermes))
-        }
-      }
+      if (data.hermes) await importNonMemoryHermes(data.hermes)
       return {
         ok: true,
         message:
-          'Bundle imported（secrets 若為 REDACTED 則保留本機金鑰）。請重新整理 Scheduler/Events/學習中心。',
+          '設定已匯入（REDACTED 保留本機金鑰）；未套用任何記憶。記憶請使用獨立的預覽匯入。',
       }
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : String(e) }

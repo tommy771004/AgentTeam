@@ -17,6 +17,7 @@ import type {
   MemoryProjectionScope,
 } from '../src/agent/memoryProjection'
 import type { DurableMemoryBundle } from './durableMemoryStore'
+import type { MemoryImportApplyInput, MemoryImportMode, MemoryImportPreview, MemoryImportResult } from './durableMemoryImport'
 
 type PiHostThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 type PiHostSettings = {
@@ -151,6 +152,10 @@ const api = {
           ipcRenderer.invoke('pi-host:memory-projection:consolidate-dream', input) as Promise<MemoryProjectionResult>,
         exportBundle: () =>
           ipcRenderer.invoke('pi-host:memory-projection:export') as Promise<DurableMemoryBundle>,
+        previewImport: (input: { bundle: unknown; mode: MemoryImportMode }) =>
+          ipcRenderer.invoke('pi-host:memory-projection:import-preview', input) as Promise<MemoryImportPreview>,
+        applyImport: (input: Omit<MemoryImportApplyInput, 'access'>) =>
+          ipcRenderer.invoke('pi-host:memory-projection:import-apply', input) as Promise<MemoryImportResult>,
       },
       capabilities: {
         list: () => ipcRenderer.invoke('pi-host:capabilities:list') as Promise<{ items: unknown[] }>,

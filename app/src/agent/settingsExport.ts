@@ -6,6 +6,20 @@
 
 export const REDACTED = '***REDACTED***'
 
+export function withoutLegacyHermesMemory(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const { memory: _legacyMemory, ...rest } = value as Record<string, unknown>
+  return rest
+}
+
+/** Settings-only import cannot replace or erase the compatibility memory field. */
+export function preserveLegacyHermesMemory(current: unknown, incoming: unknown): unknown {
+  const rest = withoutLegacyHermesMemory(incoming)
+  if (!rest || typeof rest !== 'object' || Array.isArray(rest)) throw new Error('Invalid Hermes settings object')
+  const existing = current && typeof current === 'object' && !Array.isArray(current) ? current as Record<string, unknown> : {}
+  return { ...rest, ...(Object.hasOwn(existing, 'memory') ? { memory: existing.memory } : {}) }
+}
+
 /** key 名稱看起來像祕密 → 字串值遮罩（含自訂 HTTP 工具 header 憑證） */
 const SECRET_KEY_PATTERN = /(apikey|api_key|token|secret|password|credential|authorization|cookie)/i
 /** 例外：名字帶 token 但非祕密的 metadata 欄位 */

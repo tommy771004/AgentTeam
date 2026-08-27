@@ -10,6 +10,7 @@ import { useProjectStore } from '../store/projectStore'
 import { buildLearningExportPlan } from '../agent/hermes/learningExport'
 import { failedSkillMigrations, useSkillMigrationStore } from '../store/skillMigrationStore'
 import { pushSkillsToHost } from '../agent/hermes/skillHostSync'
+import { MemoryImportPanel } from '../components/MemoryImportPanel'
 
 const SECTIONS = [
   { id: 'memory', label: '持久記憶', icon: 'psychology' },
@@ -278,6 +279,7 @@ export function LearningPage() {
         {section === 'memory' && (
           <div className="space-y-4">
             <LearningMemoryScopeBar />
+            <MemoryImportPanel />
             <div className="app-panel p-5 space-y-3">
               <h2 className="font-semibold flex items-center gap-2">
                 <Icon name="person" size={18} className="text-primary" />

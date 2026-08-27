@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../components/Icon'
+import { MemoryImportPanel } from '../components/MemoryImportPanel'
 import { APPROVAL_MODE_DEFS } from '../agent/approvalModes'
 import { exportRunMetricsJsonl, metricsSummary, resetRunMetrics } from '../agent/metrics'
 import { ThemePage } from '../components/SectionNav'
@@ -3982,6 +3983,7 @@ export function SettingsPage() {
         )}
 
         {section === 'bundle' && (
+          <>
           <SettingsGroup title="備份">
             <SettingsRow
               title="匯出設定包"
@@ -4020,10 +4022,10 @@ export function SettingsPage() {
             />
             <SettingsRow
               title="匯入設定包"
-              description="覆寫本機設定"
+              description="只套用設定、排程與技能；記憶請用下方獨立預覽匯入"
               control={
                 <label className={settingsBtnCls + ' cursor-pointer'}>
-                  匯入 JSON
+                  只匯入設定
                   <input
                     type="file"
                     accept="application/json,.json"
@@ -4041,6 +4043,8 @@ export function SettingsPage() {
               }
             />
           </SettingsGroup>
+          <MemoryImportPanel />
+          </>
         )}
         {bundleMsg && (
           <p className="text-[12px] font-[family-name:var(--font-mono)] text-on-surface-variant px-1 mb-4">

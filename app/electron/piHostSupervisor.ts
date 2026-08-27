@@ -2,6 +2,7 @@ import { PI_HOST_PROTOCOL_VERSION, type PiHostEvent, type PiHostMessage, type Pi
 import type { PiHostFinalizationClaimResult, PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
+import type { MemoryImportPreviewInput, MemoryImportApplyInput } from './durableMemoryImport.ts'
 import type {
   DurableMemoryProtocolResult,
   CanonicalProjectId,
@@ -321,7 +322,7 @@ export class PiHostSupervisor {
   }
 
   private async durableMemoryRequest(
-    method: 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export',
+    method: 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply',
     params: Record<string, unknown>,
     operation: DurableMemoryProtocolResult['operation'],
   ): Promise<DurableMemoryProtocolResult> {
@@ -389,6 +390,14 @@ export class PiHostSupervisor {
 
   async exportDurableMemory(access: MemoryAccessContext): Promise<DurableMemoryProtocolResult> {
     return this.durableMemoryRequest('memory/v1/export', { access }, 'export')
+  }
+
+  async previewMemoryImport(input: MemoryImportPreviewInput): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/import-preview', input, 'import-preview')
+  }
+
+  async applyMemoryImport(input: MemoryImportApplyInput): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/import-apply', input, 'import-apply')
   }
 
   async listCapabilities(): Promise<NonNullable<PiHostResponse['result']>['items']> {
