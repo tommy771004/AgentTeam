@@ -12,6 +12,13 @@ export type DispatchResult = {
   executionKind?: 'loop' | 'external'
   kind?: LocalRunnerKind
   status: string
+  /** Final Host loop evidence; external CLI never supplies DoD truth. */
+  orchestration?: {
+    iterations?: number
+    maxIterations?: number
+    dodMet?: boolean
+    executionKind?: 'loop' | 'external'
+  }
   result?: string
   error?: string
   /** Host-owned external settlement evidence; retained through coordinator finalization. */

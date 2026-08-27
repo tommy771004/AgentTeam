@@ -1,5 +1,6 @@
 import { isPiTurnSettlement, type PiTurnInterruptReason, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
 import type { TurnRecordEntry } from '../src/agent/turnRecord.ts'
+import { isPiMemory, type PiMemory } from './piMemoryExtension.ts'
 
 /**
  * Host-owned attachment journal.  This is deliberately metadata, not a
@@ -59,6 +60,20 @@ export type PiHostPendingApproval = {
   timeoutMs: number
 }
 
+/** Host-private, admission-frozen candidate. It is only consumed by app finalization. */
+export type PiHostRunLearningCandidate = {
+  mode: 'explicit' | 'automatic'
+  memory: PiMemory
+  access: {
+    runId: string
+    sessionId: string
+    memoryReadEnabled: boolean
+    memoryWriteEnabled: boolean
+    temporary: boolean
+    canonicalProject: string
+  }
+}
+
 export type PiHostAttachment = {
   runId: string
   sessionId: string
@@ -74,6 +89,7 @@ export type PiHostAttachment = {
   terminalAt?: number
   acknowledged?: boolean
   finalization?: PiHostFinalizationState
+  learning?: PiHostRunLearningCandidate
 }
 
 export type PiHostAttachmentState = {
@@ -187,6 +203,51 @@ function cloneFinalization(value: PiHostFinalizationState | undefined): PiHostFi
   return value ? { ...value } : undefined
 }
 
+function normalizeLearning(value: unknown): PiHostRunLearningCandidate | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Partial<PiHostRunLearningCandidate>
+  if (candidate.mode !== 'explicit' && candidate.mode !== 'automatic') return undefined
+  if (!isPiMemory(candidate.memory)) return undefined
+  if (!candidate.access || typeof candidate.access !== 'object') return undefined
+  const canonicalProject = boundedString(candidate.access.canonicalProject, 4_096)
+  const runId = boundedString(candidate.access.runId)
+  const sessionId = boundedString(candidate.access.sessionId)
+  if (!canonicalProject || !runId || !sessionId) return undefined
+  return {
+    mode: candidate.mode,
+    memory: {
+      ...candidate.memory,
+      tags: [...candidate.memory.tags],
+    },
+    access: {
+      runId,
+      sessionId,
+      memoryReadEnabled: candidate.access.memoryReadEnabled === true,
+      memoryWriteEnabled: candidate.access.memoryWriteEnabled === true,
+      temporary: candidate.access.temporary === true,
+      canonicalProject,
+    },
+  }
+}
+
+function cloneLearning(value: PiHostRunLearningCandidate | undefined): PiHostRunLearningCandidate | undefined {
+  return value ? {
+    mode: value.mode,
+    memory: { ...value.memory, tags: [...value.memory.tags] },
+    access: { ...value.access },
+  } : undefined
+}
+
+/** Renderer projection deliberately omits the pending memory text. */
+function projectAttachment(record: PiHostAttachment): PiHostAttachment {
+  const { learning: _learning, ...visible } = record
+  return {
+    ...visible,
+    ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}),
+    ...(record.finalization ? { finalization: cloneFinalization(record.finalization) } : {}),
+  }
+}
+
 function boundedCount(value: unknown): number {
   const parsed = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : 0
   return Math.max(0, parsed)
@@ -233,6 +294,7 @@ function normalizeRecord(record: PiHostAttachment): PiHostAttachment | undefined
     ...(typeof record.terminalAt === 'number' && Number.isFinite(record.terminalAt) ? { terminalAt: record.terminalAt } : {}),
     ...(record.acknowledged === true ? { acknowledged: true } : {}),
     ...(normalizeFinalization(record.finalization) ? { finalization: normalizeFinalization(record.finalization) } : {}),
+    ...(normalizeLearning(record.learning) ? { learning: normalizeLearning(record.learning) } : {}),
   }
 }
 
@@ -256,6 +318,7 @@ export class PiHostAttachmentJournal {
       ...record,
       ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}),
       ...(record.finalization ? { finalization: cloneFinalization(record.finalization) } : {}),
+      ...(record.learning ? { learning: cloneLearning(record.learning) } : {}),
     })) }
   }
 
@@ -271,7 +334,7 @@ export class PiHostAttachmentJournal {
     this.state.records = [...active, ...sorted]
   }
 
-  begin(input: { runId: string; sessionId: string; threadId?: string; turn?: number }): PiHostAttachment {
+  begin(input: { runId: string; sessionId: string; threadId?: string; turn?: number; learning?: PiHostRunLearningCandidate }): PiHostAttachment {
     const existing = this.state.records.find((record) => record.runId === input.runId)
     if (existing) return { ...existing }
     const record: PiHostAttachment = {
@@ -282,6 +345,7 @@ export class PiHostAttachmentJournal {
       status: 'active',
       latestSeq: 0,
       total: 0,
+      ...(input.learning ? { learning: cloneLearning(input.learning) } : {}),
     }
     this.state.records.push(record)
     this.changed()
@@ -463,29 +527,25 @@ export class PiHostAttachmentJournal {
 
   get(runId: string): PiHostAttachment | undefined {
     const record = this.state.records.find((candidate) => candidate.runId === runId)
-    return record ? {
-      ...record,
-      ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}),
-      ...(record.finalization ? { finalization: cloneFinalization(record.finalization) } : {}),
-    } : undefined
+    return record ? projectAttachment(record) : undefined
+  }
+
+  /** Host-only finalization input; never included in runs/active or attach. */
+  learningCandidate(runId: string): PiHostRunLearningCandidate | undefined {
+    const record = this.state.records.find((candidate) => candidate.runId === runId)
+    return cloneLearning(record?.learning)
   }
 
   active(): PiHostAttachment[] {
     this.prune(this.clock())
-    return this.state.records.filter((record) => record.status === 'active').map((record) => ({
-      ...record,
-      ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}),
-      ...(record.finalization ? { finalization: cloneFinalization(record.finalization) } : {}),
-    }))
+    return this.state.records.filter((record) => record.status === 'active').map(projectAttachment)
   }
 
   pendingTerminal(): PiHostAttachment[] {
     this.prune(this.clock())
-    return this.state.records.filter((record) => record.status === 'terminal' && !record.acknowledged).map((record) => ({
-      ...record,
-      ...(record.pendingApproval ? { pendingApproval: clonePendingApproval(record.pendingApproval) } : {}),
-      ...(record.finalization ? { finalization: cloneFinalization(record.finalization) } : {}),
-    }))
+    return this.state.records
+      .filter((record) => record.status === 'terminal' && !record.acknowledged)
+      .map(projectAttachment)
   }
 
   /** A Host child restart has no live execution witness; active turns end honestly. */
@@ -498,7 +558,7 @@ export class PiHostAttachmentJournal {
       record.settlement = 'interrupted'
       record.terminalAt = this.clock()
       record.acknowledged = false
-      recovered.push({ ...record })
+      recovered.push(projectAttachment(record))
     }
     if (recovered.length) {
       this.prune(this.clock())

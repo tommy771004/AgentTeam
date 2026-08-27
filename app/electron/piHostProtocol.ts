@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
 import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatalog.ts'
 import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage, type PiHostFinalizationClaimResult, type PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
+import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
 
 /**
  * Version 2 retired the ambiguous `success` turn settlement for the closed
@@ -109,6 +110,7 @@ export type PiHostResponse = {
     terminalRuns?: PiHostAttachment[]
     finalizationClaim?: PiHostFinalizationClaimResult
     finalizationComplete?: PiHostFinalizationCompleteResult
+    learningSettlement?: PiRunLearningSettlement
     availableFromSeq?: number
     total?: number
     latestSeq?: number
@@ -225,7 +227,7 @@ import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
 import type { PiMemory } from './piMemoryExtension.ts'
-import { createPiDurableMemoryBridge, handleLegacyMemory, listPiMemories, piMemoryProjection, writePiMemory, type PiMemoryChange } from './piDurableMemory.ts'
+import { createPiDurableMemoryBridge, handleLegacyMemory, listPiMemories, piMemoryProjection, type PiMemoryChange } from './piDurableMemory.ts'
 import type { PiMemoryWriteReceipt } from './piPackBridges.ts'
 import {
   canonicalMemoryDraft,
@@ -242,11 +244,12 @@ import {
 import {
   assessPiContextPressure,
   buildPiCompactionManifest,
-  buildPiTurnMemoryCandidate,
+  buildPiTurnLearningCandidate,
   formatPiCompactionSummary,
   parsePiTurnContextPolicy,
   selectPiMemoryContext,
 } from './piSessionContext.ts'
+import { settlePiRunLearning, type PiRunLearningSettlement } from './piRunLearningSettlement.ts'
 import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
 import { runPiOrchestration, type PiLoopPattern } from './piOrchestrationExtension.ts'
 import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
@@ -1157,22 +1160,61 @@ function claimRunFinalization(state: HostState, input: Partial<InternalPiHostReq
   return [{ id, result: { runId, finalizationClaim } }]
 }
 
-function completeRunFinalization(state: HostState, input: Partial<InternalPiHostRequest>, id: string | number, runId: string, claimantId: string): PiHostMessage[] {
+function parseRunLearningFinalOutcome(value: unknown): RunLearningFinalOutcome {
+  if (!value || typeof value !== 'object') return { status: 'failed', executionKind: 'external' }
+  const candidate = value as Record<string, unknown>
+  return {
+    status: typeof candidate.status === 'string' ? candidate.status : 'failed',
+    executionKind: candidate.executionKind === 'loop' ? 'loop' : 'external',
+    ...(candidate.dodMet === true || candidate.dodMet === false
+      ? { dodMet: candidate.dodMet }
+      : {}),
+  }
+}
+
+async function completeRunFinalization(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  runId: string,
+  claimantId: string,
+  emit?: (message: PiHostMessage) => void,
+): Promise<PiHostMessage[]> {
   const claimEpoch = typeof input.params?.claimEpoch === 'number' && Number.isFinite(input.params.claimEpoch)
     ? Math.floor(input.params.claimEpoch)
     : undefined
   if (claimEpoch === undefined || claimEpoch < 1) {
     return [errorResponse(id, 'invalid_request', 'runId, claimantId and a positive claimEpoch are required')]
   }
+  const renewed = state.attachmentJournal.claimFinalization(runId, claimantId)
+  if (!renewed.claimed || !renewed.owner || renewed.claimEpoch !== claimEpoch) {
+    const finalizationComplete = state.attachmentJournal.completeFinalization(runId, claimantId, claimEpoch)
+    return [{ id, result: { runId, finalizationComplete } }]
+  }
+  const finalOutcome = parseRunLearningFinalOutcome(input.params?.finalOutcome)
+  const attachment = state.attachmentJournal.get(runId)
+  const learningSettlement = await settlePiRunLearning({
+    store: state.memoryStore,
+    candidate: state.attachmentJournal.learningCandidate(runId),
+    outcome: finalOutcome,
+    publish: (change) => publishPiMemoryChange(state, change, emit || (() => undefined)),
+  })
   const finalizationComplete = state.attachmentJournal.completeFinalization(runId, claimantId, claimEpoch)
-  return [{ id, result: { runId, finalizationComplete } }]
+  if (learningSettlement.committed) {
+    emit?.({
+      event: 'host/context',
+      payload: { runId, sessionId: attachment?.sessionId || '', phase: 'memory-written', written: 1 },
+    })
+  }
+  return [{ id, result: { runId, finalizationComplete, learningSettlement } }]
 }
 
 function handleAttachmentRequest(
   state: HostState,
   input: Partial<InternalPiHostRequest>,
   id: string | number,
-): PiHostMessage[] | undefined {
+  emit?: (message: PiHostMessage) => void,
+): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
   const method = input.method
   if (!method?.startsWith('runs/')) return undefined
   if (!['runs/active', 'runs/attach', 'runs/finalize-claim', 'runs/finalize-complete', 'runs/ack'].includes(method)) return undefined
@@ -1190,7 +1232,7 @@ function handleAttachmentRequest(
   if (!runId || !claimantId) return [errorResponse(id, 'invalid_request', 'runId and claimantId are required')]
   return method === 'runs/finalize-claim'
     ? claimRunFinalization(state, input, id, runId, claimantId)
-    : completeRunFinalization(state, input, id, runId, claimantId)
+    : completeRunFinalization(state, input, id, runId, claimantId, emit)
 }
 
 function handleInitialization(
@@ -1522,6 +1564,37 @@ function handleMemoryOrCapabilityRequest(
   emit?: (message: PiHostMessage) => void,
 ): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
   return handleDurableMemoryRequest(state, input, id, emit) || handleCapabilityRequest(state, input, id)
+}
+
+function frozenRunLearningCandidate(input: {
+  prompt: string
+  runId: string
+  sessionId: string
+  canonicalProject: string
+  memoryAccess: MemoryAccessContext
+  automaticLearning: boolean
+}) {
+  const candidate = buildPiTurnLearningCandidate(
+    input.prompt,
+    {
+      runId: input.runId,
+      sessionId: input.sessionId,
+      project: input.canonicalProject,
+    },
+    input.automaticLearning,
+  )
+  if (!candidate) return undefined
+  return {
+    ...candidate,
+    access: {
+      runId: input.runId,
+      sessionId: input.sessionId,
+      memoryReadEnabled: input.memoryAccess.memoryReadEnabled,
+      memoryWriteEnabled: input.memoryAccess.memoryWriteEnabled,
+      temporary: input.memoryAccess.temporary,
+      canonicalProject: input.canonicalProject,
+    },
+  }
 }
 
 export function handlePiHostRequest(
@@ -2163,7 +2236,7 @@ export function handlePiHostRequest(
   if (input.method === 'state/snapshot') {
     return listPiMemories(state.memoryStore).then((memories) => [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions], queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })), resources: state.snapshot.resources.map((resource) => ({ ...resource })), memories } }])
   }
-  const attachmentResponse = handleAttachmentRequest(state, input, id)
+  const attachmentResponse = handleAttachmentRequest(state, input, id, emit)
   if (attachmentResponse) return attachmentResponse
   // The list carries what a session IS, not everything it did: a long run's
   // record is read a page at a time through `sessions/record`, so listing
@@ -2549,7 +2622,20 @@ export function handlePiHostRequest(
       ...(emit ? { publish: (entry: TurnRecordEntry) => emit({ event: 'host/record-append', payload: { runId, sessionId, entries: [entry] } }) } : {}),
       onAppend: (entry) => state.attachmentJournal.append(runId, [entry], entry.seq),
     }
-    state.attachmentJournal.begin({ runId, sessionId, threadId: session.threadId, turn: recorder.turn })
+    state.attachmentJournal.begin({
+      runId,
+      sessionId,
+      threadId: session.threadId,
+      turn: recorder.turn,
+      learning: frozenRunLearningCandidate({
+        prompt,
+        runId,
+        sessionId,
+        canonicalProject: canonicalWorkspace,
+        memoryAccess,
+        automaticLearning: contextPolicy.memoryWriteEnabled,
+      }),
+    })
     activeTurnRecorders.set(sessionId, recorder)
     recordTurnEntry(sessionId, { kind: 'turn-start', source: 'host' })
     // Trusted Host verification starts from the admitted run/view. No field in
@@ -2981,19 +3067,9 @@ export function handlePiHostRequest(
           // an answer.
           session.messages = derivePiHistory(appendTurnRecord(session.record, recorder.entries))
           preparePiCompaction(session, runId, prompt, resolvedContextWindow)
-          // An explicit「請記住」is controlled by the memory master switch,
-          // not by automatic learning. Turning auto-learning off must not make
-          // a direct user instruction silently disappear.
-          if (iteration === 1 && memoryAccess.memoryWriteEnabled && !memoryAccess.temporary) {
-            const coordinates = { runId, sessionId, project: contextPolicy.project }
-            const candidate = buildPiTurnMemoryCandidate(prompt, coordinates, contextPolicy.memoryWriteEnabled)
-            if (candidate) {
-              await writePiMemory(state.memoryStore, { ...memoryAccess, callId: 'turn-memory' }, candidate, (change) => publishPiMemoryChange(state, change, emit || ((event) => turnEvents.push(event))))
-              const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'memory-written', written: 1 } }
-              if (emit) emit(event)
-              else turnEvents.push(event)
-            }
-          }
+          // Learning is only a frozen candidate here. The renderer's unique
+          // app-finalization claim supplies the final status/DoD evidence and
+          // the Host commits it atomically with finalization completion.
           const done = isPiHostDefinitionOfDoneMet(
             definitionOfDone,
             turn.settlement,

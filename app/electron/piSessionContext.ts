@@ -158,6 +158,17 @@ export function buildPiTurnMemoryCandidate(
     || (automaticLearning ? buildPiAutoMemory(prompt, input) : undefined)
 }
 
+export function buildPiTurnLearningCandidate(
+  prompt: string,
+  input: { runId: string; sessionId: string; project?: string; createdAt?: string },
+  automaticLearning: boolean,
+): { mode: 'explicit' | 'automatic'; memory: PiMemory } | undefined {
+  const explicit = buildPiTurnMemory(prompt, input)
+  if (explicit) return { mode: 'explicit', memory: explicit }
+  const automatic = automaticLearning ? buildPiAutoMemory(prompt, input) : undefined
+  return automatic ? { mode: 'automatic', memory: automatic } : undefined
+}
+
 /** Preflight against the model selected for this turn, including a safety reserve. */
 export function shouldCompactPiContext(
   messages: PiSessionMessage[],

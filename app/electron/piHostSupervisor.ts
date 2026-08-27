@@ -1,6 +1,7 @@
 import { PI_HOST_PROTOCOL_VERSION, type PiHostEvent, type PiHostMessage, type PiHostRequest, type PiHostResponse } from './piHostProtocol.ts'
 import type { PiHostFinalizationClaimResult, PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
+import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
 import type {
   DurableMemoryProtocolResult,
   MemoryAppendInput,
@@ -233,8 +234,13 @@ export class PiHostSupervisor {
   }
 
   /** Commit the durable claim after the coordinator-owned effects complete. */
-  async completeRunFinalization(runId: string, claimantId: string, claimEpoch: number): Promise<PiHostFinalizationCompleteResult> {
-    const response = await this.request('runs/finalize-complete', { runId, claimantId, claimEpoch })
+  async completeRunFinalization(
+    runId: string,
+    claimantId: string,
+    claimEpoch: number,
+    finalOutcome: RunLearningFinalOutcome,
+  ): Promise<PiHostFinalizationCompleteResult> {
+    const response = await this.request('runs/finalize-complete', { runId, claimantId, claimEpoch, finalOutcome })
     if (response.error || !response.result?.finalizationComplete) throw new Error(response.error?.message || 'Pi Host finalization completion failed')
     return response.result.finalizationComplete
   }

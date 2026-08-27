@@ -526,6 +526,7 @@ async function completePiHostFinalization(
   runId: string,
   claim: PiHostFinalizationClaim | undefined,
   heartbeat: PiHostFinalizationHeartbeat | undefined,
+  result: ExternalRunResult,
 ): Promise<void> {
   if (!claim || heartbeat?.lostOwnership()) return
   try {
@@ -533,6 +534,13 @@ async function completePiHostFinalization(
       runId,
       claim.claimantId,
       claim.claimEpoch,
+      {
+        status: result.status,
+        executionKind: result.executionKind,
+        ...(result.orchestration?.dodMet === undefined
+          ? {}
+          : { dodMet: result.orchestration.dodMet }),
+      },
     )
     if (!complete?.completed) return
     piFinalizationAckable.add(runId)
@@ -613,7 +621,7 @@ async function executeClaimedFinalization(
       if (claim) heartbeat = startPiHostFinalizationHeartbeat(input.runId, claim)
     }
     const result = await runFinalizationSequence(input, settle)
-    await completePiHostFinalization(input.runId, claim, heartbeat)
+    await completePiHostFinalization(input.runId, claim, heartbeat, result)
     return result
   } catch (error) {
     return recoverFinalizationFailure(input, settle, error)
@@ -964,6 +972,7 @@ async function runFinalizationSequence(
     status: status as ExternalRunResult['status'],
     error: result.error || finalAgent.haltReason,
     postState,
+    orchestration: orchestrationFromAgent(finalAgent),
   }
 
   // 2) afterRun hooks
@@ -1208,6 +1217,7 @@ export async function finalizeRecoveredPiHostRun(input: {
         path: 'builtin',
         executionKind: 'loop',
         status,
+        orchestration: orchestrationFromAgent(input.agent),
         ...(input.agent.result ? { result: input.agent.result } : {}),
         ...(status === 'failed' && input.agent.result ? { error: input.agent.result } : {}),
       },
