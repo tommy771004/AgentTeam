@@ -3,17 +3,15 @@ import { canonicalJson } from './piToolContract.ts'
 import { shouldRunSkillPreflight, type PiInvocationContractIdentity } from './piPolicyEvidence.ts'
 import type { SkillInvocationTrace, SkillPreflightPackageIdentity, SkillRevisionIdentity } from '../src/agent/skillPreflight.ts'
 import type { WorkingState } from '../src/agent/workingState.ts'
+import { BASELINE_MEMORY_CONTROL_PACKAGE as BASELINE_PACKAGE } from './memoryControlPackageRepository.ts'
+import { memoryControlPackageIdentity } from '../src/agent/memoryControlPackage.ts'
 
 const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex')
 const MAX_DRAFT_SAMPLE_BYTES = 4_096
 export const MAX_SKILL_PREFLIGHT_DRAFT_BYTES = 65_536
 const MAX_CANONICAL_DEPTH = 64
 
-export const BASELINE_MEMORY_CONTROL_PACKAGE: SkillPreflightPackageIdentity = Object.freeze({
-  id: 'agentteam-memory-control-baseline',
-  revision: 1,
-  digest: 'bc97618bbaddba54582e8aad3771f896b77dbf08b88b0e4ed7b4ff1b85dae691',
-})
+export const BASELINE_MEMORY_CONTROL_PACKAGE: SkillPreflightPackageIdentity = memoryControlPackageIdentity(BASELINE_PACKAGE)
 
 export { shouldRunSkillPreflight }
 
@@ -98,8 +96,10 @@ export function createSkillPreflight(input: {
   args: Record<string, unknown>
   trigger?: SkillInvocationTrace['trigger']
   selectedSkills?: SkillRevisionIdentity[]
+  packageIdentity?: SkillPreflightPackageIdentity
 }): SkillInvocationTrace {
   const runId = input.runId || input.state.runId
+  const packageIdentity = input.packageIdentity || BASELINE_MEMORY_CONTROL_PACKAGE
   const goalIds = input.state.goals
     .filter((goal) => goal.status === 'pending' || goal.status === 'blocked')
     .map((goal) => goal.id)
@@ -114,6 +114,7 @@ export function createSkillPreflight(input: {
     constraints: input.state.constraints,
     blockers,
     toolIdentity,
+    packageIdentity,
     draft,
   }))
   const identityDigest = sha256(canonicalJson({
@@ -123,6 +124,7 @@ export function createSkillPreflight(input: {
     callId: input.callId,
     workingStateRevision: input.state.revision,
     toolIdentity,
+    packageIdentity,
     draft,
   }))
   const selectedSkills = input.selectedSkills?.slice(0, 2)
@@ -141,7 +143,7 @@ export function createSkillPreflight(input: {
     matchCount: (selectedSkills?.length || 0) as 0 | 1 | 2,
     decision: selectedSkills?.length ? 'redraft' : 'pass-through',
     ...(selectedSkills?.length ? { selectedSkills } : {}),
-    packageIdentity: BASELINE_MEMORY_CONTROL_PACKAGE,
+    packageIdentity,
     toolIdentity,
     draft,
   }

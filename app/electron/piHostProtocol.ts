@@ -6,6 +6,8 @@ import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatal
 import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
 import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage, type PiHostFinalizationClaimResult, type PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
+import { memoryControlPackageIdentity, type MemoryControlPackage, type MemoryControlPackageIdentity, type MemoryControlPackageReader } from '../src/agent/memoryControlPackage.ts'
+import { baselineMemoryControlPackageReader } from './memoryControlPackageRepository.ts'
 
 /**
  * Version 2 retired the ambiguous `success` turn settlement for the closed
@@ -18,7 +20,7 @@ import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement
  * field. Durable memory is available only through negotiated memory-store-v1.
  */
 export const PI_HOST_PROTOCOL_VERSION = 5 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'capabilities'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
@@ -40,7 +42,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -51,6 +53,7 @@ export type PiHostResponse = {
     capabilities?: PiHostCapability[]
     status?: 'ready'
     memoryHealth?: MemoryStorageHealth
+    memoryControlPackage?: MemoryControlPackage
     cursor?: number
     sessions?: unknown[]
     settings?: PiSettings
@@ -348,7 +351,9 @@ type HostState = {
   toolContracts: PiToolContractStore
   toolContractNegotiated: boolean
   memoryStoreNegotiated: boolean
+  memoryControlNegotiated: boolean
   memoryStore: DurableMemoryStore
+  memoryControlPackages: MemoryControlPackageReader
   publishedMemoryRevisions: Set<number>
   /**
    * The last catalog projection the Host published, by tool name (issue 19).
@@ -646,6 +651,8 @@ type ActiveTurnRecorder = {
   stateProposals: Map<string, WorkingStateProposal>
   /** Immutable state all sibling tool drafts in the current model step saw. */
   proposalState: WorkingState
+  /** Atomically admitted package identity; later activation cannot rewrite it. */
+  governingPackage: MemoryControlPackageIdentity
   /** Parent Checker commits adopted child evidence here during a pack call. */
   delegatedWorkingState?: WorkingState
   /** Set by the mutating pack tool; consumed only after sibling effects settle. */
@@ -805,7 +812,10 @@ function collectDelegatedGoalResults(
     if (!observation) continue
     recordTurnEntry(parentSessionId, { kind: 'delegation-observation', source: 'host', observation })
     const checked = checkDelegatedGoalObservation({ state: workingState, assignment, observation })
-    recordTurnEntry(parentSessionId, { kind: 'delegation-check', source: 'host', check: checked.check })
+  recordTurnEntry(parentSessionId, {
+    kind: 'delegation-check', source: 'host', check: checked.check,
+    packageIdentity: recorder.governingPackage,
+  })
     checks.push(checked.check)
     if (!checked.state) continue
     workingState = checked.state
@@ -1345,7 +1355,10 @@ function commitCheckedWorkingState(input: {
     evidenceStillApplicable: input.evidenceStillApplicable,
     executionRunId: input.executionRunId,
   })
-  recordTurnEntry(input.sessionId, { kind: 'state-check', source: 'host', check: checked.check })
+  recordTurnEntry(input.sessionId, {
+    kind: 'state-check', source: 'host', check: checked.check,
+    packageIdentity: input.recorder.governingPackage,
+  })
   if (checked.verdict === 'rejected') return input.workingState
   recordTurnEntry(input.sessionId, { kind: 'working-state', source: 'host', state: checked.state })
   return checked.state
@@ -1808,6 +1821,8 @@ function handleInitialization(
   const requestedCapabilities = (input.params as { capabilities?: unknown } | undefined)?.capabilities
   state.toolContractNegotiated = !Array.isArray(requestedCapabilities) || requestedCapabilities.includes('tool-contract-v1')
   state.memoryStoreNegotiated = Array.isArray(requestedCapabilities) && requestedCapabilities.includes('memory-store-v1')
+  state.memoryControlNegotiated = requestedVersion === PI_HOST_PROTOCOL_VERSION
+    && Array.isArray(requestedCapabilities) && requestedCapabilities.includes('memory-control-v1')
   const result = readyResult(state.negotiatedProtocolVersion)
   return [
     { event: 'host/ready', payload: {
@@ -2897,8 +2912,8 @@ export function handlePiHostRequest(
   if (input.method === 'state/snapshot') {
     return projectPiHostStateSnapshot(state, id)
   }
-  const attachmentResponse = handleAttachmentRequest(state, input, id, emit)
-  if (attachmentResponse) return attachmentResponse
+  const boundedReadResponse = handleBoundedHostRead(state, input, id, emit)
+  if (boundedReadResponse) return boundedReadResponse
   // The list carries what a session IS, not everything it did: a long run's
   // record is read a page at a time through `sessions/record`, so listing
   // sessions cannot grow with the length of their history.
@@ -3270,6 +3285,7 @@ export function handlePiHostRequest(
     if (resumed.error) return [errorResponse(id, 'invalid_request', resumed.error)]
     const initialWorkingState = resumed.state
       || workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input), admittedWorkingGoals)
+    const governingPackage = memoryControlPackageIdentity(state.memoryControlPackages.admitActive())
     const recorder: ActiveTurnRecorder = {
       cwd,
       turn: nextTurnNumber(session.record),
@@ -3278,6 +3294,7 @@ export function handlePiHostRequest(
       toolIdentities: new Map(),
       stateProposals: new Map(),
       proposalState: initialWorkingState,
+      governingPackage,
       seqBase: nextTurnRecordSeq(session.record),
       reasoning: [],
       // Only when there is a live stream to feed. A batch caller receives the
@@ -3302,6 +3319,7 @@ export function handlePiHostRequest(
     })
     activeTurnRecorders.set(sessionId, recorder)
     recordTurnEntry(sessionId, { kind: 'turn-start', source: 'host' })
+    recordTurnEntry(sessionId, { kind: 'memory-control-package', source: 'host', packageIdentity: governingPackage })
     let workingState = initialWorkingState
     recordTurnEntry(sessionId, { kind: 'working-state', source: 'host', state: workingState })
     // Trusted Host verification starts from the admitted run/view. No field in
@@ -3373,6 +3391,7 @@ export function handlePiHostRequest(
     // answer for the next one.
     bindPiSessionRun(sessionId, {
       runId,
+      memoryControlPackage: governingPackage,
       approvalMode: turnSettings.approvalMode,
       unattended: turnSettings.unattended,
       temporaryChat: contextPolicy.temporary,
@@ -3939,6 +3958,40 @@ function isPiHostLifecycleRequest(state: HostState, method: PiHostRequest['metho
   return method === 'health/get' || method === 'lifecycle/shutdown' || state.shuttingDown
 }
 
+function handleMemoryControlPackageRead(
+  state: HostState,
+  input: Partial<PiHostRequest>,
+  id: string | number,
+): PiHostResponse[] | undefined {
+  if (input.method !== 'memory-control/v1/package/get') return undefined
+  if (state.negotiatedProtocolVersion !== PI_HOST_PROTOCOL_VERSION || !state.memoryControlNegotiated) {
+    return [errorResponse(id, 'protocol_mismatch', 'memory-control-v1 capability was not negotiated')]
+  }
+  try {
+    const schemaVersion = input.params?.schemaVersion
+    const revision = input.params?.revision
+    if (schemaVersion !== 1 || (revision !== undefined && (!Number.isSafeInteger(revision) || Number(revision) < 1))) {
+      return [errorResponse(id, 'invalid_request', 'Memory-Control Package read requires schemaVersion 1 and an optional positive revision')]
+    }
+    return [{ id, result: { memoryControlPackage: state.memoryControlPackages.read({
+      schemaVersion: 1,
+      ...(revision === undefined ? {} : { revision: Number(revision) }),
+    }) } }]
+  } catch (error) {
+    return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Memory-Control Package read failed')]
+  }
+}
+
+function handleBoundedHostRead(
+  state: HostState,
+  input: Partial<PiHostRequest>,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
+  return handleMemoryControlPackageRead(state, input, id)
+    || handleAttachmentRequest(state, input, id, emit)
+}
+
 export function createPiHostServer(
   send: (message: PiHostMessage) => void,
   initialSnapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; extensions?: PiExtension[]; attachments?: PiHostAttachment[] } = {
@@ -3954,8 +4007,10 @@ export function createPiHostServer(
   refreshConfig?: () => Promise<PiHostConfigStatus>,
   checkpointWriter?: CompactionCheckpointWriter,
   suppliedMemoryStore?: DurableMemoryStore,
+  suppliedMemoryControlPackages?: MemoryControlPackageReader,
 ) {
   const memoryStore = suppliedMemoryStore || new InMemoryDurableMemoryStore()
+  const memoryControlPackages = suppliedMemoryControlPackages || baselineMemoryControlPackageReader()
   const memoryReady = Promise.resolve()
   const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [], attachments: initialSnapshot.attachments || [] }
   const attachmentJournal = new PiHostAttachmentJournal({ records: snapshot.attachments }, (next) => {
@@ -3971,7 +4026,9 @@ export function createPiHostServer(
     toolContracts: new PiToolContractStore(snapshot.sessions.flatMap((session) => session.toolContracts || [])),
     toolContractNegotiated: false,
     memoryStoreNegotiated: false,
+    memoryControlNegotiated: false,
     memoryStore,
+    memoryControlPackages,
     publishedMemoryRevisions: new Set(),
     catalogProjection: new Map(),
     attachmentJournal,
@@ -4258,6 +4315,7 @@ export function createPiHostServer(
         trigger: input.trigger,
         selectedSkills: identities,
         batchId: input.batchId,
+        packageIdentity: recorder.governingPackage,
       })
       recordTurnEntry(input.sessionId, { kind: 'skill-invocation', source: 'host', invocation })
       return skills.length ? { kind: 'redraft' as const, skills } : { kind: 'pass-through' as const }

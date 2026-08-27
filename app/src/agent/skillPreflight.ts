@@ -1,9 +1,7 @@
+import { isMemoryControlPackageIdentity, type MemoryControlPackageIdentity } from './memoryControlPackage.ts'
+
 /** Bounded, Host-authored trace for one drafted tool call's Skill preflight. */
-export type SkillPreflightPackageIdentity = {
-  id: string
-  revision: number
-  digest: string
-}
+export type SkillPreflightPackageIdentity = MemoryControlPackageIdentity
 
 export type SkillPreflightToolIdentity = {
   tool: string
@@ -128,12 +126,7 @@ export function isSkillContextInjectionTrace(value: unknown): value is SkillCont
 }
 
 function isPackageIdentity(value: unknown): value is SkillPreflightPackageIdentity {
-  if (!value || typeof value !== 'object') return false
-  const identity = value as Record<string, unknown>
-  return Object.keys(identity).every((key) => ['id', 'revision', 'digest'].includes(key))
-    && bounded(identity.id, 256)
-    && Number.isSafeInteger(identity.revision) && Number(identity.revision) > 0
-    && typeof identity.digest === 'string' && SHA256.test(identity.digest)
+  return isMemoryControlPackageIdentity(value)
 }
 
 function isToolIdentity(value: unknown): value is SkillPreflightToolIdentity {

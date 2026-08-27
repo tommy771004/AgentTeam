@@ -20,7 +20,7 @@ import {
   turnRecordEntries,
 } from '../src/agent/turnRecord.ts'
 import { createInitialWorkingState } from '../src/agent/workingState.ts'
-import { createSkillPreflight, createZeroHitSkillPreflight } from '../electron/piSkillPreflight.ts'
+import { BASELINE_MEMORY_CONTROL_PACKAGE, createSkillPreflight, createZeroHitSkillPreflight } from '../electron/piSkillPreflight.ts'
 
 /**
  * The Turn Record is the Host's ordered account of one turn. This asserts the
@@ -54,7 +54,7 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
-assert.equal(TURN_RECORD_FORMAT_VERSION, 8, 'Skill batch identity is an explicit Turn Record format evolution')
+assert.equal(TURN_RECORD_FORMAT_VERSION, 9, 'governing Memory-Control Package identity is an explicit Turn Record evolution')
 const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
 assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')
@@ -178,6 +178,17 @@ const legacySkillInvocation = appendTurnRecord(undefined, [{
 }])
 assert.equal(parseTurnRecord({ version: 6, entries: legacySkillInvocation.entries }).record.entries[0]?.kind, 'skill-invocation')
 assert.equal(parseTurnRecord({ version: 7, entries: legacySkillInvocation.entries }).record.entries[0]?.kind, 'skill-invocation')
+const governingPackage = appendTurnRecord(undefined, [{
+  kind: 'memory-control-package', source: 'host', packageIdentity: BASELINE_MEMORY_CONTROL_PACKAGE,
+  turn: 1, step: 1, at: 1,
+}])
+assert.equal(parseTurnRecord(governingPackage).record.entries[0]?.kind, 'memory-control-package')
+for (const legacyVersion of [1, 2, 3, 4, 5, 6, 7, 8]) {
+  assert.throws(() => parseTurnRecord({
+    version: legacyVersion,
+    entries: governingPackage.entries,
+  }), TurnRecordCorruptError, `v${legacyVersion} cannot smuggle a v9 governing package entry`)
+}
 const skillContext = appendTurnRecord(undefined, [{
   kind: 'skill-context', source: 'host',
   injection: {

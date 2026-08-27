@@ -35,6 +35,7 @@ import {
   type SkillContextInjectionTrace,
   type SkillInvocationTrace,
 } from './skillPreflight.ts'
+import { isMemoryControlPackageIdentity, type MemoryControlPackageIdentity } from './memoryControlPackage.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
@@ -46,9 +47,10 @@ import {
  * Version 6 adds bounded, Host-authored Skill invocation decisions.
  * Version 7 adds immutable Skill context injection and not-executed outcomes.
  * Version 8 adds batch-bound Skill preflight idempotency identities.
+ * Version 9 adds the governing Memory-Control Package and Checker linkage.
  */
-export const TURN_RECORD_FORMAT_VERSION = 8
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7])
+export const TURN_RECORD_FORMAT_VERSION = 9
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -331,6 +333,8 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         kind: 'state-check'
         source: 'host'
         check: WorkingStateCheck
+        /** Absent only on legacy records written before format v9. */
+        packageIdentity?: MemoryControlPackageIdentity
       }
     | {
         /** Canonical Host snapshot for one Task run; models can only observe it. */
@@ -340,7 +344,8 @@ export type TurnRecordEntry = TurnRecordCoordinates &
       }
     | { kind: 'delegation-assignment'; source: 'host'; assignment: DelegatedGoalAssignment }
     | { kind: 'delegation-observation'; source: 'host'; observation: DelegatedGoalObservation }
-    | { kind: 'delegation-check'; source: 'host'; check: DelegatedGoalCheck }
+    | { kind: 'delegation-check'; source: 'host'; check: DelegatedGoalCheck; packageIdentity?: MemoryControlPackageIdentity }
+    | { kind: 'memory-control-package'; source: 'host'; packageIdentity: MemoryControlPackageIdentity }
     | { kind: 'skill-invocation'; source: 'host'; invocation: SkillInvocationTrace }
     | { kind: 'skill-context'; source: 'host'; injection: SkillContextInjectionTrace }
     | {
@@ -413,6 +418,7 @@ const KINDS = new Set([
   'delegation-assignment',
   'delegation-observation',
   'delegation-check',
+  'memory-control-package',
   'skill-invocation',
   'skill-context',
   'notice',
@@ -436,6 +442,11 @@ function isMemoryRecallEntry(entry: Record<string, unknown>): boolean {
 }
 
 function isWorkingStateContextEntry(entry: Record<string, unknown>): boolean | undefined {
+  if (entry.kind === 'memory-control-package') {
+    return entry.source === 'host'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'packageIdentity', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isMemoryControlPackageIdentity(entry.packageIdentity)
+  }
   if (entry.kind === 'state-proposal') {
     return (entry.source === 'model' || entry.source === 'host')
       && Object.keys(entry).every((key) => ['kind', 'source', 'proposal', 'seq', 'turn', 'step', 'at'].includes(key))
@@ -444,8 +455,9 @@ function isWorkingStateContextEntry(entry: Record<string, unknown>): boolean | u
   }
   if (entry.kind === 'state-check') {
     return entry.source === 'host'
-      && Object.keys(entry).every((key) => ['kind', 'source', 'check', 'seq', 'turn', 'step', 'at'].includes(key))
+      && Object.keys(entry).every((key) => ['kind', 'source', 'check', 'packageIdentity', 'seq', 'turn', 'step', 'at'].includes(key))
       && isWorkingStateCheck(entry.check)
+      && (entry.packageIdentity === undefined || isMemoryControlPackageIdentity(entry.packageIdentity))
   }
   if (entry.kind === 'working-state') {
     return entry.source === 'host'
@@ -468,8 +480,9 @@ function isDelegationContextEntry(entry: Record<string, unknown>): boolean | und
   }
   if (entry.kind === 'delegation-check') {
     return entry.source === 'host'
-      && Object.keys(entry).every((key) => ['kind', 'source', 'check', 'seq', 'turn', 'step', 'at'].includes(key))
+      && Object.keys(entry).every((key) => ['kind', 'source', 'check', 'packageIdentity', 'seq', 'turn', 'step', 'at'].includes(key))
       && isDelegatedGoalCheck(entry.check)
+      && (entry.packageIdentity === undefined || isMemoryControlPackageIdentity(entry.packageIdentity))
   }
   if (entry.kind === 'skill-invocation') {
     return entry.source === 'host'
@@ -579,6 +592,8 @@ function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
   const kind = String(entry.kind || '')
   if (version === 1 && kind === 'memory-recall') return true
   if (version <= 2 && kind === 'working-state') return true
+  if (version < 9 && (kind === 'memory-control-package'
+    || ((kind === 'state-check' || kind === 'delegation-check') && entry.packageIdentity !== undefined))) return true
   if (isLegacySkillEntry(version, kind, entry)) return true
   return version < 5 && ['delegation-assignment', 'delegation-observation', 'delegation-check'].includes(kind)
 }

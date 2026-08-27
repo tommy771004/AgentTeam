@@ -27,6 +27,7 @@ import type { SkillContextInjectionTrace, SkillRevisionIdentity } from '../src/a
 import { canonicalJson, schemaDigest, type PiToolCatalogEntry } from './piToolContract.ts'
 import type { MemoryAccessContext } from './durableMemoryStore.ts'
 import type { WorkingExecutionEvidence } from '../src/agent/workingState.ts'
+import type { MemoryControlPackageIdentity } from '../src/agent/memoryControlPackage.ts'
 import {
   evaluatePiInvocationPolicy,
   PiInvocationEvidence,
@@ -215,6 +216,7 @@ type PiRunBinding = {
   gitPolicy?: GitCommandPolicy
   frozenPolicy?: PiFrozenRunPolicy
   completedFileEffects?: ReadonlyArray<{ path: string; sha256: string }>
+  memoryControlPackage?: MemoryControlPackageIdentity
 }
 const sessionRuns = new Map<string, PiRunBinding>()
 
@@ -228,6 +230,7 @@ export function bindPiSessionRun(sessionId: string, binding: {
   gitPolicy?: PiRunBinding['gitPolicy']
   frozenPolicy?: PiFrozenRunPolicy
   completedFileEffects?: ReadonlyArray<{ path: string; sha256: string }>
+  memoryControlPackage?: MemoryControlPackageIdentity
 }): void {
   sessionRuns.set(sessionId, {
     runId: binding.runId,
@@ -239,6 +242,7 @@ export function bindPiSessionRun(sessionId: string, binding: {
     ...(binding.gitPolicy ? { gitPolicy: binding.gitPolicy } : {}),
     ...(binding.frozenPolicy ? { frozenPolicy: binding.frozenPolicy } : {}),
     ...(binding.completedFileEffects ? { completedFileEffects: Object.freeze(binding.completedFileEffects.map((effect) => Object.freeze({ ...effect }))) } : {}),
+    ...(binding.memoryControlPackage ? { memoryControlPackage: Object.freeze({ ...binding.memoryControlPackage }) } : {}),
   })
 }
 

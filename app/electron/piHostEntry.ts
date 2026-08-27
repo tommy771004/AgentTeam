@@ -14,6 +14,7 @@ import { createBubblewrapBuiltinShellAdapter } from './piBubblewrapShellSandbox.
 import { JsonCompactionCheckpointStore } from './compactionCheckpointStore.ts'
 import { openPiHostStorage } from './piHostStorage.ts'
 import { MemoryStorageLifecycleError, storageLifecycleError } from './memoryStorageLifecycle.ts'
+import { JsonMemoryControlPackageRepository } from './memoryControlPackageRepository.ts'
 
 type ParentPort = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
@@ -51,6 +52,8 @@ const statePath = process.env.SUBAGENTS_PI_HOST_STATE_PATH || `${process.cwd()}/
 const checkpointDir = process.env.SUBAGENTS_PI_CHECKPOINT_DIR || path.join(path.dirname(statePath), 'run-checkpoints')
 const compactionCheckpoints = new JsonCompactionCheckpointStore(checkpointDir)
 const durableMemoryPath = process.env.SUBAGENTS_DURABLE_MEMORY_DB_PATH || path.join(path.dirname(statePath), 'durable-memory.sqlite')
+const memoryControlPackagePath = process.env.SUBAGENTS_MEMORY_CONTROL_PACKAGE_PATH
+  || path.join(path.dirname(statePath), 'memory-control-packages.json')
 const publishStorageFailure = (error: unknown) => {
   const lifecycle = error instanceof MemoryStorageLifecycleError
     ? error
@@ -62,6 +65,9 @@ const publishStorageFailure = (error: unknown) => {
 }
 const { snapshot: storedState, memoryStore: durableMemoryStore } = await openPiHostStorage(statePath, durableMemoryPath)
   .catch((error) => { throw publishStorageFailure(error) })
+// Deliberately separate from DurableMemoryStore/SQLite: package lineage has
+// its own fail-closed repository and does not share memory migrations or CRUD.
+const memoryControlPackages = await JsonMemoryControlPackageRepository.open(memoryControlPackagePath)
 const userConfig = await bootstrapPiUserConfig()
 const migrationPath = process.env.SUBAGENTS_PI_SETTINGS_MIGRATION_PATH || path.join(path.dirname(statePath), 'pi-settings-migration.json')
 let migratedSettings = storedState.settings
@@ -183,7 +189,7 @@ const createConfiguredHost = (
   persist: Persist,
   refreshSubscriptionConfig: RefreshSubscriptionConfig,
   compactionCheckpoints: CompactionCheckpoints,
-) => createPiHostServer(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints, durableMemoryStore)
+) => createPiHostServer(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints, durableMemoryStore, memoryControlPackages)
 const createEntryHost = (
   send: HostSend,
   initialSnapshot: InitialSnapshot,
