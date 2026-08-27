@@ -14,6 +14,7 @@ import {
   workspaceTextSearchAvailability,
 } from '../electron/piWorkspaceTextSearchRuntime.ts'
 import { resolveWorkspaceSearchBase } from '../electron/piExtensionPacks/workspaceTextSearch.ts'
+import { pagedText } from '../electron/piExtensionPacks/utility.ts'
 
 let passed = 0
 const test = async (name: string, fn: () => void | Promise<void>) => {
@@ -60,6 +61,13 @@ await test('source drift guard pins the single Host gate and run_code re-entry',
   assert.match(protocol, /nestedRequest\[INTERNAL_INVOCATION_ORIGIN\] = 'code-mode'/)
   assert.match(protocol, /handlePiHostRequest\(state, nestedRequest, emit\)/)
   assert.match(pack, /workspaceTextSearchAvailability\(/)
+})
+
+await test('truncated paged output exposes its outputId to the model', () => {
+  const result = pagedText('abcdefghijklmnopqrstuvwxyz', 10)
+  const outputId = String(result.details.outputId || '')
+  assert.ok(outputId)
+  assert.match(result.content[0]?.text || '', new RegExp(outputId))
 })
 
 const workspace = await mkdtemp(join(tmpdir(), 'workspace-text-search-'))
@@ -123,13 +131,16 @@ try {
   const stateDir = await mkdtemp(join(tmpdir(), 'workspace-text-search-state-'))
   const agentDir = await mkdtemp(join(tmpdir(), 'workspace-text-search-agent-'))
   let pendingScript: { tool: string; args: Record<string, unknown> } | undefined
+  const modelRequests: unknown[] = []
   const modelServer = createServer(async (request, response) => {
     if (request.url !== '/v1/chat/completions' || request.method !== 'POST') {
       response.writeHead(404).end()
       return
     }
-    request.on('data', () => undefined)
+    let requestBody = ''
+    request.on('data', (chunk) => { requestBody += String(chunk) })
     await once(request, 'end')
+    modelRequests.push(JSON.parse(requestBody))
     const chunk = (delta: unknown, finish: string | null) => `data: ${JSON.stringify({
       id: 'workspace-text-search',
       object: 'chat.completion.chunk',
@@ -246,6 +257,7 @@ try {
       const files = [...(response.result?.item?.files || [])].sort()
       assert.deepEqual(files, ['src/answer.ts', 'src/huge.ts', 'src/many.ts'])
       assert.equal(response.result?.item?.truncated, false)
+      assert.match(String(response.result?.content?.[0]?.text || ''), /src\/answer\.ts/)
     })
 
     send(9, 'tools/pack', {
@@ -266,6 +278,7 @@ try {
       const answer = (data.matches || []).find((match: any) => match.path === 'src/answer.ts')
       assert.equal(answer?.line, 1)
       assert.equal(answer?.text, 'export const needle = 42')
+      assert.match(String(response.result?.content?.[0]?.text || ''), /src\/answer\.ts:1 export const needle = 42/)
     })
 
     send(10, 'tools/pack', {
@@ -357,9 +370,33 @@ try {
       assert.match(String(codeResult?.payload?.item?.result?.content?.[0]?.text || ''), /workspace_glob 找到 3 個檔案/)
     })
 
-    send(17, 'settings/update', { workspaceTextSearch: false })
+    pendingScript = {
+      tool: 'workspace_grep',
+      args: { query: 'needle', glob: 'src/**/*.ts', maxResults: 20 },
+    }
+    send(17, 'turn/submit', {
+      sessionId,
+      runId: 'workspace-model-visible',
+      cwd: workspace,
+      prompt: '找出 needle 的檔案與行號',
+      preloadedCapabilities: ['workspace-text-search'],
+      profile: {
+        provider: 'loopback',
+        model: 'smoke-model',
+        thinkingLevel: 'off',
+        approvalMode: 'full',
+        unattended: false,
+      },
+    })
     assert.equal((await wait(17)).error, undefined)
-    send(18, 'tools/code', {
+    await test('workspace_grep path, line, and snippet reach the model context', () => {
+      const serialized = modelRequests.map((request) => JSON.stringify(request)).join('\n')
+      assert.match(serialized, /src\/answer\.ts:1[^\n]*export const needle = 42/)
+    })
+
+    send(18, 'settings/update', { workspaceTextSearch: false })
+    assert.equal((await wait(18)).error, undefined)
+    send(19, 'tools/code', {
       cwd: workspace,
       sessionId,
       runId: 'workspace-nested-off',
@@ -367,7 +404,7 @@ try {
       code: "return await tools.workspace_glob({ pattern: 'src/**/*.ts' })",
     })
     await test('run_code nested call re-enters the OFF gate', async () => {
-      const response = await wait(18)
+      const response = await wait(19)
       assert.equal(response.error, undefined)
       assert.equal(response.result?.settlement, 'failed')
       assert.match(String(response.result?.content?.[0]?.text || ''), /工作區文字檢索|workspace/i)

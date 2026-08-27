@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert'
 import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -79,9 +79,11 @@ try {
     assert.equal((await waitFor(id)).result.settlement, 'answered')
   }
   assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'compacted'), true)
+  assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'compacted' && item.payload?.checkpointed === true), true)
+  assert.equal((await readdir(join(stateDir, 'run-checkpoints'))).length > 0, true)
   assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'model-switched' && item.payload?.model === 'small-model' && item.payload?.contextWindowTokens === 10), true)
   host.stdin.write(`${JSON.stringify({ id: 9, method: 'memory/list', params: {} })}\n`)
-  assert.equal((await waitFor(9)).result.memories.some((memory: { tags?: string[] }) => memory.tags?.includes('compaction')), true)
+  assert.equal((await waitFor(9)).result.memories.some((memory: { tags?: string[] }) => memory.tags?.includes('compaction')), false)
   host.stdin.write(`${JSON.stringify({ id: 10, method: 'sessions/list', params: {} })}\n`)
   const listedSession = (await waitFor(10)).result.sessions.find((candidate: { id?: string }) => candidate.id === sessionId)
   assert.equal(listedSession.profile.model, 'small-model')
@@ -103,7 +105,7 @@ try {
   assert.equal(reset.profile, undefined)
   assert.equal(reset.piSessionFile, undefined)
   const requestsBeforeResetTurn = requestBodies.length
-  host.stdin.write(`${JSON.stringify({ id: 17, method: 'turn/submit', params: { sessionId, runId: 'reset-memory-run', cwd: process.cwd(), prompt: '請記住我的偏好是繁體中文', contextPolicy: { memoryEnabled: false, memoryWriteEnabled: true, temporary: false, project: process.cwd(), contextWindowTokens: 4096 }, profile: { provider: 'loopback', model: 'small-model', thinkingLevel: 'off', compaction: 'auto', approvalMode: 'full', unattended: false } } })}\n`)
+  host.stdin.write(`${JSON.stringify({ id: 17, method: 'turn/submit', params: { sessionId, runId: 'reset-memory-run', cwd: process.cwd(), prompt: '請記住我的偏好是繁體中文', contextPolicy: { memoryEnabled: true, memoryWriteEnabled: false, temporary: false, project: process.cwd(), contextWindowTokens: 4096 }, profile: { provider: 'loopback', model: 'small-model', thinkingLevel: 'off', compaction: 'auto', approvalMode: 'full', unattended: false } } })}\n`)
   assert.equal((await waitFor(17)).result.settlement, 'answered')
   const resetBody = requestBodies[requestsBeforeResetTurn] || ''
   assert.match(resetBody, /請記住我的偏好是繁體中文/)
@@ -111,6 +113,10 @@ try {
   host.stdin.write(`${JSON.stringify({ id: 18, method: 'memory/list', params: {} })}\n`)
   assert.equal((await waitFor(18)).result.memories.some((item: { tags?: string[] }) => item.tags?.includes('turn-memory')), true)
   assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'memory-written' && item.payload?.runId === 'reset-memory-run'), true)
+  host.stdin.write(`${JSON.stringify({ id: 19, method: 'turn/submit', params: { sessionId, runId: 'auto-memory-run', cwd: process.cwd(), prompt: '這個專案一律使用繁體中文 UI', contextPolicy: { memoryEnabled: true, memoryWriteEnabled: true, temporary: false, project: process.cwd(), contextWindowTokens: 4096 }, profile: { provider: 'loopback', model: 'small-model', thinkingLevel: 'off', compaction: 'auto', approvalMode: 'full', unattended: false } } })}\n`)
+  assert.equal((await waitFor(19)).result.settlement, 'answered')
+  host.stdin.write(`${JSON.stringify({ id: 21, method: 'memory/list', params: {} })}\n`)
+  assert.equal((await waitFor(21)).result.memories.some((item: { tags?: string[] }) => item.tags?.includes('auto-learned')), true)
   host.stdin.write(`${JSON.stringify({ id: 4, method: 'sessions/create', params: { title: 'Unmet DoD smoke' } })}\n`)
   const unmetSession = await waitFor(4)
   host.stdin.write(`${JSON.stringify({ id: 5, method: 'turn/submit', params: { sessionId: String(unmetSession.result.sessionId), runId: 'unmet-run', cwd: process.cwd(), prompt: 'never complete', pattern: 'Goal-based', maxIterations: 2, definitionOfDone: 'non-empty assistant result', profile: { provider: 'loopback', model: 'orchestration-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false } } })}\n`)

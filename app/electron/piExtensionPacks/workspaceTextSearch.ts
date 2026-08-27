@@ -7,7 +7,12 @@ import {
 } from '../workspaceFs.ts'
 import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
 import { WORKSPACE_TEXT_SEARCH_CAPABILITY_ID, workspaceTextSearchAvailability } from '../piWorkspaceTextSearchRuntime.ts'
-import { structuredFailure, structuredOk } from './packResults.ts'
+import { structuredFailure } from './packResults.ts'
+import { pagedText } from './utility.ts'
+
+const WORKSPACE_GREP_DEFAULT_RESULTS = 25
+const WORKSPACE_GLOB_DEFAULT_RESULTS = 100
+const WORKSPACE_SEARCH_PAGE_CHARS = 8_000
 
 function within(root: string, target: string): boolean {
   const rel = relative(root, target)
@@ -55,6 +60,35 @@ function resultPayload(result: WorkspaceSearchResult) {
   }
 }
 
+function compactLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+export function formatWorkspaceGrepContent(result: WorkspaceSearchResult): string {
+  const header = `workspace_grep 找到 ${result.matches.length} 筆結果${result.truncated ? '（搜尋結果已截斷）' : ''}`
+  if (!result.matches.length) return header
+  return [header, ...result.matches.map((match) => `${match.path}:${match.line} ${compactLine(match.text)}`)].join('\n')
+}
+
+export function formatWorkspaceGlobContent(result: WorkspaceSearchResult): string {
+  const header = `workspace_glob 找到 ${result.files.length} 個檔案${result.truncated ? '（搜尋結果已截斷）' : ''}`
+  if (!result.files.length) return header
+  return [header, ...result.files].join('\n')
+}
+
+function pagedWorkspaceResult(text: string, result: WorkspaceSearchResult) {
+  const page = pagedText(text, WORKSPACE_SEARCH_PAGE_CHARS)
+  return {
+    content: page.content,
+    details: {
+      ...resultPayload(result),
+      outputId: page.details.outputId,
+      outputTruncated: page.details.truncated,
+      totalChars: page.details.totalChars,
+    },
+  }
+}
+
 const workspaceGrep: PiPackTool = {
   name: 'workspace_grep',
   label: 'Workspace Grep',
@@ -67,7 +101,7 @@ const workspaceGrep: PiPackTool = {
       query: { type: 'string', description: 'Case-insensitive regular expression' },
       glob: { type: 'string', description: 'Optional workspace-relative file glob' },
       base: { type: 'string', description: 'Optional workspace-relative base directory', default: '.' },
-      maxResults: { type: 'integer', minimum: 1, maximum: 500, default: 100 },
+      maxResults: { type: 'integer', minimum: 1, maximum: 500, default: WORKSPACE_GREP_DEFAULT_RESULTS },
       maxFiles: { type: 'integer', minimum: 1, maximum: 4000, default: 4000 },
     },
     required: ['query'],
@@ -89,14 +123,11 @@ const workspaceGrep: PiPackTool = {
     const result = grepWorkspaceFiles(scoped.root, String(args.query || ''), {
       baseDir: scoped.baseDir,
       glob: typeof args.glob === 'string' ? args.glob : undefined,
-      maxResults: Number(args.maxResults) || undefined,
+      maxResults: Number(args.maxResults) || WORKSPACE_GREP_DEFAULT_RESULTS,
       maxFiles: Number(args.maxFiles) || undefined,
     })
     if (!result.ok) return structuredFailure(result.error || 'workspace grep failed')
-    return structuredOk(
-      `workspace_grep 找到 ${result.matches.length} 筆結果${result.truncated ? '（已截斷）' : ''}`,
-      resultPayload(result),
-    )
+    return pagedWorkspaceResult(formatWorkspaceGrepContent(result), result)
   },
 }
 
@@ -111,7 +142,7 @@ const workspaceGlob: PiPackTool = {
     properties: {
       pattern: { type: 'string', description: 'Workspace-relative glob pattern such as src/**/*.ts' },
       base: { type: 'string', description: 'Optional workspace-relative base directory', default: '.' },
-      maxResults: { type: 'integer', minimum: 1, maximum: 1000, default: 200 },
+      maxResults: { type: 'integer', minimum: 1, maximum: 1000, default: WORKSPACE_GLOB_DEFAULT_RESULTS },
       maxFiles: { type: 'integer', minimum: 1, maximum: 4000, default: 4000 },
     },
     required: ['pattern'],
@@ -129,14 +160,11 @@ const workspaceGlob: PiPackTool = {
     if (!scoped.ok) return structuredFailure(scoped.reason)
     const result = globWorkspaceFiles(scoped.root, String(args.pattern || ''), {
       baseDir: scoped.baseDir,
-      maxResults: Number(args.maxResults) || undefined,
+      maxResults: Number(args.maxResults) || WORKSPACE_GLOB_DEFAULT_RESULTS,
       maxFiles: Number(args.maxFiles) || undefined,
     })
     if (!result.ok) return structuredFailure(result.error || 'workspace glob failed')
-    return structuredOk(
-      `workspace_glob 找到 ${result.files.length} 個檔案${result.truncated ? '（已截斷）' : ''}`,
-      resultPayload(result),
-    )
+    return pagedWorkspaceResult(formatWorkspaceGlobContent(result), result)
   },
 }
 

@@ -813,6 +813,7 @@ export function compactPiSession(
   sessionId: string,
   keepMessages = 4,
   summary = 'Pi Host compacted the conversation while preserving the recent message window.',
+  tokensBefore?: number,
 ) {
   const runtime = sessionRuntimes.get(sessionId)
   if (!runtime) return false
@@ -824,7 +825,7 @@ export function compactPiSession(
   ;(runtime.sessionManager as { appendCompaction?: (summary: string, firstKeptEntryId: string, tokensBefore: number) => string }).appendCompaction?.(
     summary,
     firstKeptEntryId,
-    messages.length,
+    Number.isFinite(tokensBefore) ? Math.max(0, Math.floor(tokensBefore!)) : messages.length,
   )
   return true
 }

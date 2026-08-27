@@ -1,5 +1,6 @@
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
 import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatalog.ts'
 import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage, type PiHostFinalizationClaimResult, type PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
@@ -153,7 +154,23 @@ export type PiHostEvent =
     }
   | {
       event: 'host/context'
-      payload: { runId: string; sessionId: string; phase: 'memory-recalled' | 'memory-written' | 'compacted' | 'model-switched' | 'skills-unavailable'; recalled?: number; written?: number; previousModel?: string; model?: string; provider?: string; contextWindowTokens?: number }
+      payload: {
+        runId: string
+        sessionId: string
+        phase: 'memory-recalled' | 'memory-written' | 'compacted' | 'model-switched' | 'skills-unavailable'
+        recalled?: number
+        written?: number
+        previousModel?: string
+        model?: string
+        provider?: string
+        contextWindowTokens?: number
+        reason?: CompactionReason
+        replacedMessages?: number
+        remainingMessages?: number
+        summaryChars?: number
+        estimatedTokens?: number
+        checkpointed?: boolean
+      }
     }
   | {
       event: 'host/pipeline-stage'
@@ -189,11 +206,12 @@ import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
 import { isPiMemory, PiMemoryExtension, type PiMemory } from './piMemoryExtension.ts'
 import {
-  buildPiCompactionSummary,
+  assessPiContextPressure,
+  buildPiCompactionManifest,
   buildPiMemoryContext,
-  buildPiTurnMemory,
+  buildPiTurnMemoryCandidate,
+  formatPiCompactionSummary,
   parsePiTurnContextPolicy,
-  shouldCompactPiContext,
   withPiMemoryContext,
 } from './piSessionContext.ts'
 import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
@@ -203,6 +221,7 @@ import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
 import { callPiMcpTool, listPiMcpTools, piMcpGenerationKey, reloadPiMcp, stopPiMcp } from './piMcpClient.ts'
 import { isCompletedModelCall, isPiHostDefinitionOfDoneMet, isPiTurnSettlement, piTurnFinalAnswer, piTurnResultText, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
 import { appendTurnRecord, derivePiHistory, nextTurnRecordSeq, pageTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordEntry, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
+import type { CompactionCheckpointSaveInput, CompactionManifest, CompactionReason } from '../src/agent/compactionCheckpoint.ts'
 import { cancelSubDesignProviderRun, executeSubDesignProviderStage } from './subDesignProviderRuntime.ts'
 import { shouldStopForProviderProjection, type SubDesignPluginExecutionProjection } from '../src/agent/subdesign/pluginExecution.ts'
 import {
@@ -285,7 +304,20 @@ export type PiToolAuditRecord = {
   at: number
 }
 
-export type SessionRecord = { id: string; title: string; threadId?: string; parentSessionId?: string; role?: string; profile?: Record<string, unknown>; context?: PiContextPacket; depth?: number; messages: PiRecordedMessage[]; toolAudit?: PiToolAuditRecord[]; archived?: boolean; piSessionFile?: string; record?: TurnRecord; toolContracts?: PiTurnToolContract[]; toolContractRevisionFloor?: number }
+type PreparedPiCompaction = {
+  sourceHash: string
+  summary: string
+  manifest: CompactionManifest
+  preparedAt: string
+  estimatedTokens: number
+  contextWindow: number
+}
+
+export type SessionRecord = { id: string; title: string; threadId?: string; parentSessionId?: string; role?: string; profile?: Record<string, unknown>; context?: PiContextPacket; depth?: number; messages: PiRecordedMessage[]; toolAudit?: PiToolAuditRecord[]; archived?: boolean; piSessionFile?: string; record?: TurnRecord; toolContracts?: PiTurnToolContract[]; toolContractRevisionFloor?: number; preparedCompaction?: PreparedPiCompaction }
+
+type CompactionCheckpointWriter = {
+  save(input: CompactionCheckpointSaveInput): { ok: boolean; error?: string }
+}
 
 const readyResult = (protocolVersion: number = PI_HOST_PROTOCOL_VERSION): PiHostResponse['result'] => ({
   protocolVersion,
@@ -408,6 +440,227 @@ function flushReasoning(sessionId: string): void {
 /** The next turn number for a session, read from what the record already holds. */
 function nextTurnNumber(record: TurnRecord | undefined): number {
   return (record?.entries || []).reduce((highest, entry) => Math.max(highest, entry.turn), 0) + 1
+}
+
+function compactionSourceHash(messages: PiRecordedMessage[]): string {
+  return createHash('sha256').update(JSON.stringify(messages)).digest('hex')
+}
+
+function completedSideEffects(session: SessionRecord): string[] {
+  return (session.toolAudit || [])
+    .filter((entry) => entry.phase === 'result' && entry.settlement === 'success'
+      && /write|edit|create|patch|bash|shell|send|post|publish|delete/i.test(entry.tool))
+    .map((entry) => `${entry.tool}:${entry.callId}`)
+}
+
+function appendStandaloneCompactionRecord(
+  session: SessionRecord,
+  replaced: number,
+  runId: string,
+  emit?: (message: PiHostMessage) => void,
+): void {
+  const previous = session.record?.entries.at(-1)
+  const entry: TurnRecordAppend = {
+    kind: 'compaction',
+    source: 'host',
+    replaced,
+    turn: previous?.turn || 1,
+    step: previous?.step || 1,
+    at: Date.now(),
+  }
+  session.record = appendTurnRecord(session.record, [entry])
+  const committed = session.record.entries.at(-1)
+  if (committed && emit) {
+    emit({ event: 'host/record-append', payload: { runId, sessionId: session.id, entries: [committed] } })
+  }
+}
+
+function preparePiCompaction(
+  session: SessionRecord,
+  runId: string,
+  objective: string,
+  contextWindow?: number,
+): void {
+  const keepMessages = 6
+  if (!contextWindow || session.messages.length <= keepMessages) {
+    session.preparedCompaction = undefined
+    return
+  }
+  const pressure = assessPiContextPressure(session.messages, '', contextWindow)
+  if (pressure.level === 'normal') {
+    session.preparedCompaction = undefined
+    return
+  }
+  const oldMessages = session.messages.slice(0, -keepMessages)
+  const sourceHash = compactionSourceHash(oldMessages)
+  const manifest = buildPiCompactionManifest(oldMessages, {
+    sessionId: session.id,
+    runId,
+    sourceHash,
+    objective,
+    latestSeq: session.record?.entries.at(-1)?.seq,
+    completedEffects: completedSideEffects(session),
+  })
+  session.preparedCompaction = {
+    sourceHash,
+    summary: formatPiCompactionSummary(manifest, oldMessages),
+    manifest,
+    preparedAt: new Date().toISOString(),
+    estimatedTokens: pressure.estimatedTokens,
+    contextWindow,
+  }
+}
+
+function preparedCompactionSummary(session: SessionRecord, sourceHash: string, objective: string): string | undefined {
+  if (session.preparedCompaction?.sourceHash !== sourceHash) return undefined
+  const currentObjective = objective.replace(/\s+/g, ' ').trim().slice(0, 800) || '（未記錄）'
+  return session.preparedCompaction.summary.replace(/^Current objective:.*$/m, `Current objective: ${currentObjective}`)
+}
+
+function compactHostSession(input: {
+  state: HostState
+  session: SessionRecord
+  runId: string
+  objective: string
+  reason: CompactionReason
+  keepMessages: number
+  prompt?: string
+  contextWindow?: number
+  checkpointWriter?: CompactionCheckpointWriter
+  emit?: (message: PiHostMessage) => void
+}): { ok: boolean; checkpointed: boolean; event?: PiHostEvent; error?: string } {
+  const { session, runId, reason, keepMessages } = input
+  if (session.messages.length <= keepMessages) return { ok: false, checkpointed: false, error: 'not-enough-messages' }
+  const oldMessages = session.messages.slice(0, -keepMessages)
+  const sourceHash = compactionSourceHash(oldMessages)
+  const pressure = assessPiContextPressure(session.messages, input.prompt || '', input.contextWindow)
+  const completedEffects = completedSideEffects(session)
+  const manifest = buildPiCompactionManifest(oldMessages, {
+    sessionId: session.id,
+    runId,
+    sourceHash,
+    objective: input.objective,
+    latestSeq: session.record?.entries.at(-1)?.seq,
+    completedEffects,
+  })
+  const summary = preparedCompactionSummary(session, sourceHash, manifest.objective)
+    || formatPiCompactionSummary(manifest, oldMessages)
+  const checkpoint = input.checkpointWriter?.save({
+    runId,
+    threadId: session.threadId,
+    objective: input.objective,
+    summary,
+    messages: oldMessages,
+    parkedAtToolBoundary: true,
+    // A context checkpoint is recoverable/auditable but is not an interrupted
+    // run. Only the interruption path may authorize a replay-safe resume.
+    replaySafe: false,
+    effects: completedEffects,
+    reason,
+    sourceHash,
+    estimatedTokens: pressure.estimatedTokens,
+    contextWindow: input.contextWindow,
+    manifest,
+  })
+  const checkpointFailed = Boolean(input.checkpointWriter && checkpoint?.ok !== true)
+  if (checkpointFailed && reason !== 'emergency') {
+    return { ok: false, checkpointed: false, error: checkpoint?.error || 'checkpoint-write-failed' }
+  }
+  if (!compactPiSession(session.id, keepMessages, summary, pressure.estimatedTokens)) {
+    return { ok: false, checkpointed: checkpoint?.ok === true, error: 'pi-session-compaction-failed' }
+  }
+  if (activeTurnRecorders.has(session.id)) {
+    recordTurnEntry(session.id, { kind: 'compaction', source: 'host', replaced: oldMessages.length })
+  } else {
+    appendStandaloneCompactionRecord(session, oldMessages.length, runId, input.emit)
+  }
+  session.messages = session.messages.slice(-keepMessages)
+  session.preparedCompaction = undefined
+  input.state.snapshot.cursor += 1
+  const event: PiHostEvent = {
+    event: 'host/context',
+    payload: {
+      runId,
+      sessionId: session.id,
+      phase: 'compacted',
+      contextWindowTokens: input.contextWindow,
+      reason,
+      replacedMessages: oldMessages.length,
+      remainingMessages: session.messages.length,
+      summaryChars: summary.length,
+      estimatedTokens: pressure.estimatedTokens,
+      checkpointed: checkpoint?.ok === true,
+    },
+  }
+  return { ok: true, checkpointed: checkpoint?.ok === true, event }
+}
+
+function handleManualSessionCompaction(input: {
+  state: HostState
+  session: SessionRecord
+  request: Partial<InternalPiHostRequest>
+  id: string | number
+  checkpointWriter?: CompactionCheckpointWriter
+  emit?: (message: PiHostMessage) => void
+}): PiHostMessage[] {
+  const runId = typeof input.request.params?.runId === 'string' && input.request.params.runId.trim()
+    ? input.request.params.runId.trim()
+    : `manual:${input.session.id}`
+  const compacted = compactHostSession({
+    state: input.state,
+    session: input.session,
+    runId,
+    objective: input.session.context?.objective || input.session.title,
+    reason: 'manual',
+    keepMessages: 4,
+    contextWindow: typeof input.request.params?.contextWindowTokens === 'number'
+      ? input.request.params.contextWindowTokens
+      : undefined,
+    checkpointWriter: input.checkpointWriter,
+    emit: input.emit,
+  })
+  if (!compacted.ok) return [errorResponse(input.id, 'runtime_error', compacted.error || 'Pi session compaction failed')]
+  const response: PiHostResponse = { id: input.id, result: { sessionId: input.session.id, sessions: [input.session] } }
+  if (!compacted.event || input.emit) {
+    if (compacted.event) input.emit?.(compacted.event)
+    return [response]
+  }
+  return [compacted.event, response]
+}
+
+function runAutoCompactionPreflight(input: {
+  state: HostState
+  session: SessionRecord
+  runId: string
+  prompt: string
+  executionPrompt: string
+  compaction: PiSettings['compaction']
+  contextWindow?: number
+  checkpointWriter?: CompactionCheckpointWriter
+  emit?: (message: PiHostMessage) => void
+  turnEvents: PiHostMessage[]
+}): void {
+  const keepMessages = 6
+  const pressure = assessPiContextPressure(input.session.messages, input.executionPrompt, input.contextWindow)
+  const shouldCompact = input.compaction === 'auto'
+    && input.session.messages.length > keepMessages
+    && (pressure.level === 'compact' || pressure.level === 'emergency')
+  if (!shouldCompact) return
+  const compacted = compactHostSession({
+    state: input.state,
+    session: input.session,
+    runId: input.runId,
+    objective: input.prompt,
+    reason: pressure.level === 'emergency' ? 'emergency' : 'auto',
+    keepMessages,
+    prompt: input.executionPrompt,
+    contextWindow: input.contextWindow,
+    checkpointWriter: input.checkpointWriter,
+    emit: input.emit,
+  })
+  if (!compacted.ok || !compacted.event) return
+  if (input.emit) input.emit(compacted.event)
+  else input.turnEvents.push(compacted.event)
 }
 
 function modelToolContractIdentity(
@@ -936,7 +1189,12 @@ function handleCapabilityRequest(
   }
 }
 
-export function handlePiHostRequest(state: HostState, request: unknown, emit?: (message: PiHostMessage) => void): PiHostMessage[] | Promise<PiHostMessage[]> {
+export function handlePiHostRequest(
+  state: HostState,
+  request: unknown,
+  emit?: (message: PiHostMessage) => void,
+  checkpointWriter?: CompactionCheckpointWriter,
+): PiHostMessage[] | Promise<PiHostMessage[]> {
   if (!request || typeof request !== 'object') {
     return [errorResponse('', 'invalid_request', 'Pi Host request must be an object')]
   }
@@ -1857,11 +2115,7 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
         return [{ id, result: { sessionId, sessions: [session] } }]
       })
     }
-    return Promise.resolve(compactPiSession(sessionId)).then(() => {
-      if (session.messages.length > 4) session.messages = session.messages.slice(-4)
-      state.snapshot.cursor += 1
-      return [{ id, result: { sessionId, sessions: [session] } }]
-    })
+    return handleManualSessionCompaction({ state, session, request: input, id, checkpointWriter, emit })
   }
   if (input.method === 'turn/interrupt') {
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
@@ -2334,32 +2588,18 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           contextPreflightComplete = true
           resolvedContextWindow = registryContextWindow || contextPolicy.contextWindowTokens
           if (resolvedContextWindow) nextProfile.contextWindowTokens = resolvedContextWindow
-          const keepMessages = 6
-          if (
-            turnSettings.compaction !== 'auto'
-            || session.messages.length <= keepMessages
-            || !shouldCompactPiContext(session.messages, executionPrompt, resolvedContextWindow)
-          ) return
-          const oldMessages = session.messages.slice(0, -keepMessages)
-          const summary = buildPiCompactionSummary(oldMessages)
-          if (!summary || !compactPiSession(sessionId, keepMessages, summary)) return
-          // Recorded as the drop it performed, so deriving history later
-          // reproduces the shortened context instead of re-growing it.
-          recordTurnEntry(sessionId, { kind: 'compaction', source: 'host', replaced: oldMessages.length })
-          session.messages = session.messages.slice(-keepMessages)
-          if (contextPolicy.memoryWriteEnabled && !contextPolicy.temporary) {
-            memory.add({
-              id: `compaction-${sessionId}-${Date.now()}`,
-              project: contextPolicy.project,
-              text: summary,
-              tags: ['compaction', 'session', `session:${sessionId}`],
-              createdAt: new Date().toISOString(),
-            })
-            state.snapshot.memories = memory.export()
-          }
-          const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'compacted', recalled: recalled.length, contextWindowTokens: resolvedContextWindow } }
-          if (emit) emit(event)
-          else turnEvents.push(event)
+          runAutoCompactionPreflight({
+            state,
+            session,
+            runId,
+            prompt,
+            executionPrompt,
+            compaction: turnSettings.compaction,
+            contextWindow: resolvedContextWindow,
+            checkpointWriter,
+            emit,
+            turnEvents,
+          })
         })
         session.piSessionFile ||= getPiSessionFile(sessionId)
         // A completed model call records its round; only an answered one has
@@ -2400,8 +2640,13 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
           // way — it was model-visible — while only an answered turn recorded
           // an answer.
           session.messages = derivePiHistory(appendTurnRecord(session.record, recorder.entries))
-          if (iteration === 1 && contextPolicy.memoryWriteEnabled && !contextPolicy.temporary) {
-            const candidate = buildPiTurnMemory(prompt, { runId, sessionId, project: contextPolicy.project })
+          preparePiCompaction(session, runId, prompt, resolvedContextWindow)
+          // An explicit「請記住」is controlled by the memory master switch,
+          // not by automatic learning. Turning auto-learning off must not make
+          // a direct user instruction silently disappear.
+          if (iteration === 1 && contextPolicy.memoryEnabled && !contextPolicy.temporary) {
+            const coordinates = { runId, sessionId, project: contextPolicy.project }
+            const candidate = buildPiTurnMemoryCandidate(prompt, coordinates, contextPolicy.memoryWriteEnabled)
             if (candidate) {
               memory.add(candidate)
               state.snapshot.memories = memory.export()
@@ -2573,6 +2818,7 @@ export function createPiHostServer(
   },
   onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[]; attachments: PiHostAttachment[] }) => void,
   refreshConfig?: () => Promise<PiHostConfigStatus>,
+  checkpointWriter?: CompactionCheckpointWriter,
 ) {
   const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [], attachments: initialSnapshot.attachments || [] }
   const attachmentJournal = new PiHostAttachmentJournal({ records: snapshot.attachments }, (next) => {
@@ -2810,7 +3056,7 @@ export function createPiHostServer(
         // resulting auth-file revision in its session identity and rebuilds
         // the ModelRuntime instead of reusing an invalidated token snapshot.
         await refreshHostConfigForRequest(state, input, refreshConfig)
-        const messages = await handlePiHostRequest(state, request, send)
+        const messages = await handlePiHostRequest(state, request, send, checkpointWriter)
         const method = input?.method
         if (hostRequestMutatesState(method)) onStateChange?.(state.snapshot)
         for (const message of messages) send(message)

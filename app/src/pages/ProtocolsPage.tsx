@@ -49,6 +49,30 @@ import {
   finishComposerApprovalHandoff,
 } from '../agent/composerApprovalHandoff'
 
+function DesktopThreadListButton({ visible, onClick }: { visible: boolean; onClick: () => void }) {
+  if (!visible) return null
+  return (
+    <button
+      type="button"
+      className="hidden sm:inline-flex p-1.5 rounded-control hover:bg-hover-2 text-ink-3"
+      onClick={onClick}
+      title="Threads"
+    >
+      <Icon name="menu" size={18} />
+    </button>
+  )
+}
+
+function LiveRunBadge({ visible }: { visible: boolean }) {
+  if (!visible) return null
+  return (
+    <span className="flex items-center gap-1 text-[11px] text-accent-ink">
+      <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+      執行中
+    </span>
+  )
+}
+
 /**
  * OpenCode 風格：Build/Plan + 模型/深度 + Threads + 內嵌執行
  */
@@ -82,7 +106,6 @@ export function ProtocolsPage() {
   const {
     hydrate,
     activeId,
-    activeThread,
     showRunPanel,
     showThreadList,
     setShowRunPanel,
@@ -101,7 +124,6 @@ export function ProtocolsPage() {
   } = useThreadStore(useShallow((state) => ({
     hydrate: state.hydrate,
     activeId: state.activeId,
-    activeThread: state.activeThread,
     showRunPanel: state.showRunPanel,
     showThreadList: state.showThreadList,
     setShowRunPanel: state.setShowRunPanel,
@@ -129,7 +151,12 @@ export function ProtocolsPage() {
   const setSessionAllow = usePermissionAskStore((s) => s.setSessionAllow)
 
   const scrollRef = useRef<HTMLDivElement>(null)
-  const thread = activeThread()
+  // This is render state, so subscribe to the active thread object itself.
+  // Calling the stable `activeThread` getter here would not notify React when
+  // only `threads` changes (model, runner, depth, mode, bubbles, and so on).
+  const thread = useThreadStore((state) =>
+    state.threads.find((item) => item.id === state.activeId) || null,
+  )
   // 草稿跟著對話走：每個 thread 一份輸入草稿，切換任務互不干擾；
   // 沒有 active thread 時退回全域 draftInput。
   const threadDraft = useThreadStore((s) => (activeId ? s.draftByThread[activeId] || '' : ''))
@@ -493,16 +520,10 @@ export function ProtocolsPage() {
         {/* Top bar */}
         <div className="shrink-0 h-12 px-3 md:px-4 border-b border-line flex items-center justify-between gap-2 bg-surface">
           <div className="flex items-center gap-2 min-w-0">
-            {!showThreadList && (
-              <button
-                type="button"
-                className="hidden sm:inline-flex p-1.5 rounded-control hover:bg-hover-2 text-ink-3"
-                onClick={() => setShowThreadList(true)}
-                title="Threads"
-              >
-                <Icon name="menu" size={18} />
-              </button>
-            )}
+            <DesktopThreadListButton
+              visible={!showThreadList}
+              onClick={() => setShowThreadList(true)}
+            />
             <button
               type="button"
               aria-label="開啟對話列表"
@@ -515,12 +536,7 @@ export function ProtocolsPage() {
             <span className="font-semibold text-[13px] truncate max-w-[140px] md:max-w-[220px]">
               {thread?.title || '新對話'}
             </span>
-            {live && (
-              <span className="flex items-center gap-1 text-[11px] text-accent-ink">
-                <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-                執行中
-              </span>
-            )}
+            <LiveRunBadge visible={live} />
           </div>
         </div>
 

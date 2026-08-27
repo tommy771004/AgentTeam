@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { CompactionCheckpoint } from '../src/agent/compactionCheckpoint'
+import type { CompactionCheckpoint, CompactionCheckpointSaveInput } from '../src/agent/compactionCheckpoint'
 
 /**
  * Durable pre-compaction transcripts, one file per run.
@@ -17,16 +17,7 @@ export class JsonCompactionCheckpointStore {
     this.rootDir = rootDir
   }
 
-  save(input: {
-    runId: string
-    threadId?: string
-    summary: string
-    messages: unknown[]
-    objective?: string
-    parkedAtToolBoundary?: boolean
-    replaySafe?: boolean
-    effects?: string[]
-  }): { ok: boolean; checkpoint?: CompactionCheckpoint; error?: string } {
+  save(input: CompactionCheckpointSaveInput): { ok: boolean; checkpoint?: CompactionCheckpoint; error?: string } {
     const runId = input.runId.trim()
     if (!runId) return { ok: false, error: 'runId is required' }
     try {
@@ -47,6 +38,11 @@ export class JsonCompactionCheckpointStore {
         // checkpoint taken at a clean tool boundary can support the claim.
         replaySafe: input.replaySafe === true && input.parkedAtToolBoundary === true,
         effects: Array.isArray(input.effects) ? input.effects.slice(0, 500).map(String) : [],
+        reason: input.reason,
+        sourceHash: input.sourceHash,
+        estimatedTokens: Number.isFinite(input.estimatedTokens) ? Math.max(0, Math.floor(input.estimatedTokens!)) : undefined,
+        contextWindow: Number.isFinite(input.contextWindow) ? Math.max(0, Math.floor(input.contextWindow!)) : undefined,
+        manifest: input.manifest ? structuredClone(input.manifest) : undefined,
       }
       const file = this.fileFor(runId, checkpoint.sequence || existing.length + 1)
       fs.mkdirSync(path.dirname(file), { recursive: true })

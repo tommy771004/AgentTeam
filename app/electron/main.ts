@@ -252,6 +252,7 @@ const piHostSupervisor = new PiHostSupervisor(() =>
       SUBAGENTS_CODEX_AUTH_PATH: path.join(app.getPath('home'), '.codex', 'auth.json'),
       SUBAGENTS_CLAUDE_CREDENTIALS_PATH: path.join(app.getPath('home'), '.claude', '.credentials.json'),
       SUBAGENTS_PI_HOST_STATE_PATH: path.join(app.getPath('userData'), 'pi-host-state.json'),
+      SUBAGENTS_PI_CHECKPOINT_DIR: path.join(app.getPath('userData'), 'run-checkpoints'),
       SUBAGENTS_PI_SETTINGS_MIGRATION_PATH: path.join(app.getPath('userData'), 'pi-settings-migration.json'),
       SUBAGENTS_LEGACY_SETTINGS_PATH: settingsPath(),
     },

@@ -9,7 +9,7 @@ export function pagedText(text: string, maxChars: number): { content: Array<{ ty
     return { content: [{ type: 'text', text }], details: { ok: true, outputId: id, truncated: false, totalChars: text.length } }
   }
   return {
-    content: [{ type: 'text', text: `${text.slice(0, maxChars)}\n…（已截斷；用 tool_output_read 以 outputId 讀取全文）` }],
+    content: [{ type: 'text', text: `${text.slice(0, maxChars)}\n…（已截斷；用 tool_output_read({ outputId: "${id}" }) 讀取全文）` }],
     details: { ok: true, outputId: id, truncated: true, totalChars: text.length },
   }
 }

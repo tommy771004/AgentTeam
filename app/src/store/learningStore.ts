@@ -23,6 +23,64 @@ import type { ArchiveRecord } from '../agent/types.ts'
 import { isElectronPiProduction } from '../agent/piProduction.ts'
 import { useSettingsStore } from './settingsStore.ts'
 
+const projectedPiMemoryIds = new Set<string>()
+let piMemorySync = Promise.resolve()
+
+type PiHostMemoryProjection = {
+  id?: unknown
+  text?: unknown
+  createdAt?: unknown
+  tags?: unknown
+}
+
+function projectPiHostMemories(hostMemories: PiHostMemoryProjection[]) {
+  projectedPiMemoryIds.clear()
+  for (const item of hostMemories) {
+    if (typeof item.id === 'string') projectedPiMemoryIds.add(item.id)
+  }
+  const taggedText = (tag: string) => String(
+    hostMemories.find((item) => Array.isArray(item.tags) && item.tags.includes(tag))?.text || '',
+  )
+  return {
+    userProfile: taggedText('profile:user'),
+    memory: taggedText('memory:document'),
+    entries: hostMemories
+      .filter((item) => !Array.isArray(item.tags)
+        || (!item.tags.includes('profile:user') && !item.tags.includes('memory:document')))
+      .map((item) => ({
+        id: String(item.id || crypto.randomUUID()),
+        kind: 'memory' as const,
+        text: String(item.text || ''),
+        createdAt: String(item.createdAt || new Date().toISOString()),
+        tags: Array.isArray(item.tags) ? item.tags as string[] : [],
+      })),
+  }
+}
+
+function syncLearningMemoriesToPiHost(): void {
+  if (typeof window === 'undefined' || !isElectronPiProduction()) return
+  const add = window.subagents?.piHost?.memory?.add
+  if (!add) return
+  const pending = memoryStore.getBundle().entries
+    .filter((entry) => !projectedPiMemoryIds.has(entry.id))
+  if (!pending.length) return
+  for (const entry of pending) projectedPiMemoryIds.add(entry.id)
+  piMemorySync = piMemorySync.then(async () => {
+    for (const entry of pending) {
+      try {
+        await add({
+          id: entry.id,
+          text: entry.text,
+          tags: [...(entry.tags || []), `learning:${entry.kind}`],
+          createdAt: entry.createdAt,
+        })
+      } catch {
+        projectedPiMemoryIds.delete(entry.id)
+      }
+    }
+  })
+}
+
 export type PluginHealth = {
   ok: boolean
   status: 'ready' | 'error' | 'setup-required' | 'not-installed'
@@ -230,17 +288,7 @@ async function loadFromDisk() {
     try {
       const memories = await window.subagents?.piHost?.memory?.list?.()
       if (memories?.memories) {
-        memoryStore.loadBundle({
-          userProfile: '',
-          memory: '',
-          entries: memories.memories.map((item) => ({
-            id: String((item as { id?: unknown }).id || crypto.randomUUID()),
-            kind: 'memory' as const,
-            text: String((item as { text?: unknown }).text || ''),
-            createdAt: String((item as { createdAt?: unknown }).createdAt || new Date().toISOString()),
-            tags: Array.isArray((item as { tags?: unknown }).tags) ? (item as { tags: string[] }).tags : [],
-          })),
-        })
+        memoryStore.loadBundle(projectPiHostMemories(memories.memories as PiHostMemoryProjection[]))
       }
     } catch {
       /* Pi Host recovery will retry on the next bootstrap. */
@@ -426,6 +474,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
       memory: memoryStore.getBundle(),
       skills: skillsStore.list(),
     })
+    syncLearningMemoriesToPiHost()
     void get().persist()
   })
 
@@ -484,12 +533,42 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     },
 
     setUserProfile: async (text) => {
+      if (isElectronPiProduction()) {
+        const normalized = text.trim()
+        if (normalized) {
+          await window.subagents?.piHost?.memory?.add?.({
+            id: 'profile:user',
+            text: normalized,
+            tags: ['profile:user', 'always-recall'],
+            createdAt: new Date().toISOString(),
+          })
+        } else {
+          await window.subagents?.piHost?.memory?.delete?.('profile:user')
+        }
+        await get().load()
+        return
+      }
       memoryStore.setUserProfile(text)
       get().refresh()
       await get().persist()
     },
 
     setMemoryDoc: async (text) => {
+      if (isElectronPiProduction()) {
+        const normalized = text.trim()
+        if (normalized) {
+          await window.subagents?.piHost?.memory?.add?.({
+            id: 'memory:document',
+            text: normalized,
+            tags: ['memory:document', 'always-recall'],
+            createdAt: new Date().toISOString(),
+          })
+        } else {
+          await window.subagents?.piHost?.memory?.delete?.('memory:document')
+        }
+        await get().load()
+        return
+      }
       memoryStore.setMemoryDoc(text)
       get().refresh()
       await get().persist()
@@ -497,7 +576,14 @@ export const useLearningStore = create<LearningStore>((set, get) => {
 
     appendMemory: async (text) => {
       if (isElectronPiProduction()) {
-        await window.subagents?.piHost?.memory?.add?.({ text: text.trim(), tags: ['user'] })
+        const normalized = text.trim()
+        if (!normalized) return
+        await window.subagents?.piHost?.memory?.add?.({
+          id: `user-${crypto.randomUUID()}`,
+          text: normalized,
+          tags: ['user'],
+          createdAt: new Date().toISOString(),
+        })
         await get().load()
         return
       }

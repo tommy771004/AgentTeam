@@ -9,6 +9,26 @@
  * fallback — a checkpoint that cannot be written is reported as not written.
  */
 
+export type CompactionReason = 'auto' | 'manual' | 'emergency' | 'interrupt'
+
+/** Structured state retained across a context rewrite. */
+export interface CompactionManifest {
+  schemaVersion: 1
+  sessionId: string
+  runId: string
+  objective: string
+  constraints: string[]
+  changedFiles: string[]
+  decisions: Array<{ decision: string; reason?: string }>
+  unresolvedErrors: string[]
+  pendingWork: string[]
+  pendingApprovals: string[]
+  completedEffects: string[]
+  references: Array<{ kind: 'file' | 'tool-output' | 'turn-record'; target: string }>
+  sourceHash: string
+  latestSeq: number
+}
+
 export interface CompactionCheckpoint {
   runId: string
   at: string
@@ -42,6 +62,14 @@ export interface CompactionCheckpoint {
    * A resume replays none of them; the list is what makes that checkable.
    */
   effects?: string[]
+  /** Why this checkpoint was taken; older interruption records omit it. */
+  reason?: CompactionReason
+  /** Hash of the exact message range replaced by the compaction. */
+  sourceHash?: string
+  estimatedTokens?: number
+  contextWindow?: number
+  /** Machine-readable state; summary remains the model-facing projection. */
+  manifest?: CompactionManifest
   /** Set the moment a resume claims this checkpoint; one claim, ever. */
   resumeClaimedAt?: string
 }
@@ -56,6 +84,11 @@ export type CompactionCheckpointSaveInput = {
   parkedAtToolBoundary?: boolean
   replaySafe?: boolean
   effects?: string[]
+  reason?: CompactionReason
+  sourceHash?: string
+  estimatedTokens?: number
+  contextWindow?: number
+  manifest?: CompactionManifest
 }
 
 export type CompactionCheckpointBridge = {

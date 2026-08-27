@@ -50,6 +50,9 @@ export type WorkspaceSearchResult = {
 
 const SKIP_DIRECTORIES = new Set(['.git', 'node_modules'])
 const MAX_SEARCH_FILE_BYTES = 2 * 1024 * 1024
+const DEFAULT_GREP_RESULTS = 25
+const DEFAULT_GLOB_RESULTS = 100
+const MAX_MATCH_TEXT_CHARS = 300
 
 function normalizeRelative(value: string): string {
   return value.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '') || '.'
@@ -100,7 +103,7 @@ export function grepWorkspaceFiles(
 ): WorkspaceSearchResult {
   const matches: WorkspaceSearchMatch[] = []
   const files: string[] = []
-  const maxResults = Math.max(1, Math.min(500, Math.floor(opts.maxResults || 100)))
+  const maxResults = Math.max(1, Math.min(500, Math.floor(opts.maxResults || DEFAULT_GREP_RESULTS)))
   const pattern = query.trim()
   if (!pattern) return { ok: false, root, matches, files, truncated: false, error: 'query is required' }
   let matcher: RegExp
@@ -125,7 +128,7 @@ export function grepWorkspaceFiles(
       if (!matcher.test(lines[index])) continue
       fileMatched = true
       if (matches.length >= maxResults) { truncated = true; break }
-      matches.push({ path: relative, line: index + 1, text: lines[index].slice(0, 1_000) })
+      matches.push({ path: relative, line: index + 1, text: lines[index].slice(0, MAX_MATCH_TEXT_CHARS) })
     }
     if (fileMatched) files.push(relative)
     if (truncated) break
@@ -140,7 +143,7 @@ export function globWorkspaceFiles(
 ): WorkspaceSearchResult {
   const matches: WorkspaceSearchMatch[] = []
   const files: string[] = []
-  const maxResults = Math.max(1, Math.min(1_000, Math.floor(opts.maxResults || 200)))
+  const maxResults = Math.max(1, Math.min(1_000, Math.floor(opts.maxResults || DEFAULT_GLOB_RESULTS)))
   if (!pattern.trim()) return { ok: false, root, matches, files, truncated: false, error: 'pattern is required' }
   const matcher = globToRegExp(pattern)
   let truncated = false

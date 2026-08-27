@@ -15,15 +15,18 @@ export class PiMemoryExtension {
   clear() { this.memories = [] }
   recall(query: string, project?: string, limit = 5) {
     const queryTerms = terms(query)
-    if (!queryTerms.length) return []
     return this.memories
-      .filter((memory) => !project || memory.project === project)
+      // A memory without project scope is global. The old equality-only check
+      // made every Settings memory disappear as soon as a project was active.
+      .filter((memory) => !project || !memory.project || memory.project === project)
       .map((memory) => {
         const text = memory.text.toLowerCase()
         const tags = memory.tags.map((tag) => tag.toLowerCase())
         const matched = queryTerms.filter((term) => text.includes(term) || tags.some((tag) => tag.includes(term)))
         const exactTagMatches = queryTerms.filter((term) => tags.includes(term)).length
-        return { memory, score: matched.length / queryTerms.length + exactTagMatches * 0.25 }
+        const alwaysRecall = tags.includes('always-recall')
+        const relevance = queryTerms.length ? matched.length / queryTerms.length + exactTagMatches * 0.25 : 0
+        return { memory, score: alwaysRecall ? 2 + relevance : relevance }
       })
       .filter((candidate) => candidate.score > 0)
       .sort((a, b) => b.score - a.score || b.memory.createdAt.localeCompare(a.memory.createdAt))

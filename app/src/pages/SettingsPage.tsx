@@ -1157,8 +1157,8 @@ export function SettingsPage() {
                 }
               />
               <SettingsRow
-                title="自動寫入"
-                description="成功任務摘要與工具可寫入記憶"
+                title="自動學習"
+                description="任務完成後，自動擷取穩定偏好與專案慣例；明確的「請記住」不受此開關影響"
                 control={
                   <SettingsToggle
                     checked={settings.memoryWriteEnabled !== false}

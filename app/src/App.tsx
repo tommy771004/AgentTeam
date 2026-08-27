@@ -32,6 +32,7 @@ import { onSkillsChanged } from './agent/hermes/skills'
 import { pushSkillsToHost, syncSkillsToHost } from './agent/hermes/skillHostSync'
 import {
   completeStartupRecovery,
+  recordRunCompaction,
   waitForStartupRecovery,
 } from './agent/runJournal.ts'
 import { applyRendererStorageSnapshot } from './agent/updateMigration'
@@ -113,6 +114,18 @@ function PiHostEventBootstrap() {
     if (!onEvent) return
     const unsubscribe = onEvent((event) => {
       push(event)
+      if ((event as { event?: string }).event === 'host/context') {
+        const payload = (event as { payload?: Record<string, unknown> }).payload
+        if (payload?.phase === 'compacted' && typeof payload.runId === 'string') {
+          recordRunCompaction(payload.runId, {
+            replacedMessages: Number(payload.replacedMessages) || 0,
+            remainingMessages: Number(payload.remainingMessages) || 0,
+            summaryChars: Number(payload.summaryChars) || 0,
+            estimatedTokens: Number(payload.estimatedTokens) || 0,
+            contextWindow: Number(payload.contextWindowTokens) || 0,
+          })
+        }
+      }
       // In-turn asks ride the SAME HITL queue as every other approval: the
       // question surfaces in the permission panel and its answer resolves
       // back through approvals/resolve (user story 11).

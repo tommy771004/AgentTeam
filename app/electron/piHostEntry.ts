@@ -11,6 +11,7 @@ import { stopAllPiMcp } from './piMcpClient.ts'
 import { registerTrustedBuiltinShellSandboxAdapter } from './piBuiltinShellSandbox.ts'
 import { createSeatbeltBuiltinShellAdapter } from './piSeatbeltShellSandbox.ts'
 import { createBubblewrapBuiltinShellAdapter } from './piBubblewrapShellSandbox.ts'
+import { JsonCompactionCheckpointStore } from './compactionCheckpointStore.ts'
 
 type ParentPort = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
@@ -45,6 +46,8 @@ if (builtinShellAdapter) {
 
 const parentPort = (process as typeof process & { parentPort?: ParentPort }).parentPort
 const statePath = process.env.SUBAGENTS_PI_HOST_STATE_PATH || `${process.cwd()}/pi-host-state.json`
+const checkpointDir = process.env.SUBAGENTS_PI_CHECKPOINT_DIR || path.join(path.dirname(statePath), 'run-checkpoints')
+const compactionCheckpoints = new JsonCompactionCheckpointStore(checkpointDir)
 const storedState = await loadPiHostState(statePath)
 const userConfig = await bootstrapPiUserConfig()
 const migrationPath = process.env.SUBAGENTS_PI_SETTINGS_MIGRATION_PATH || path.join(path.dirname(statePath), 'pi-settings-migration.json')
@@ -157,10 +160,10 @@ const persist = (snapshot: typeof initialSnapshot) => {
 }
 
 if (parentPort) {
-  const server = createPiHostServer((message) => parentPort.postMessage(message), initialSnapshot, persist, refreshSubscriptionConfig)
+  const server = createPiHostServer((message) => parentPort.postMessage(message), initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints)
   parentPort.on('message', (event) => server.handle(event.data))
 } else {
-  const server = createPiHostServer((message) => process.stdout.write(`${JSON.stringify(message)}\n`), initialSnapshot, persist, refreshSubscriptionConfig)
+  const server = createPiHostServer((message) => process.stdout.write(`${JSON.stringify(message)}\n`), initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints)
   const input = createInterface({ input: process.stdin })
   input.on('line', (line) => {
     try {
