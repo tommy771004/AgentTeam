@@ -23,7 +23,6 @@ import {
   useGatewayStore,
 } from './store/gatewayStore'
 import { PermissionAskModal } from './components/PermissionAskModal'
-import { QuestionAskModal } from './components/QuestionAskModal'
 import type { ScheduledJob } from './agent/types'
 import { createScheduleTriggerSnapshot } from './agent/scheduler'
 import { scheduleSkillCurator } from './agent/hermes/curator'
@@ -1285,7 +1284,6 @@ export default function App() {
         <PluginTokenRefreshBootstrap />
         <PluginProjectRebindBootstrap />
         <PermissionAskModal />
-        <QuestionAskModal />
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<ProtocolsPage />} />

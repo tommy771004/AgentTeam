@@ -32,60 +32,96 @@ export function WorkingStateView({ projection }: { projection: WorkingStateProje
   }
 
   const verified = projection.verification === 'verified'
+  const completedCount = projection.goals.filter((goal) => goal.status === 'done').length
+  const blockedCount = projection.goals.filter((goal) => goal.status === 'blocked').length
+  const summary = projection.goals.length > 0
+    ? `${completedCount}/${projection.goals.length} 已驗證${blockedCount > 0 ? `，${blockedCount} 項受阻` : ''}`
+    : '尚無目標'
+
   return (
     <section
-      className="working-state-view bg-surface-container-low px-3.5 py-3 text-ink-2"
+      className="working-state-view bg-surface-container-low text-ink-2"
       aria-label="Working State"
+      aria-live="polite"
       data-working-state-verification={projection.verification}
       data-working-state-revision={projection.revision}
     >
-      <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <div>
-          <h4 className="text-[12px] font-semibold text-ink">工作狀態</h4>
-          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-2">
-            {verified ? '由 Pi Core Host Checker 驗證' : '相容模式投影，未經目前 Host 驗證'}
-          </p>
-        </div>
-        <span className="text-[12px] tabular-nums text-ink-2">Revision {projection.revision}</span>
-      </header>
+      <details open>
+        <summary className="working-state-summary flex cursor-pointer list-none items-center justify-between gap-4 px-3.5 py-3 text-left">
+          <span className="min-w-0">
+            <span className="block text-[12px] font-semibold text-ink">工作狀態</span>
+            <span className="mt-0.5 block text-[12px] leading-relaxed text-ink-2">{summary}</span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2 text-[11px] text-ink-3">
+            <span>{verified ? 'Host 已驗證' : '相容模式'}</span>
+            {projection.revision !== undefined ? (
+              <span className="font-[family-name:var(--font-mono)] tabular-nums">rev {projection.revision}</span>
+            ) : null}
+            <span className="working-state-chevron" aria-hidden="true">⌄</span>
+          </span>
+        </summary>
 
-      <div className="mt-3 space-y-3">
-        {projection.goals.map((goal, index) => (
-          <article key={goal.id} className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3">
-            <div className="text-[12px] font-semibold text-ink-2" aria-label={STATUS_COPY[goal.status]}>
-              <span
-                aria-hidden="true"
-                className={`mr-1.5 ${goal.status === 'blocked' ? 'text-orange' : goal.status === 'done' ? 'text-green' : 'text-ink-2'}`}
-              >
-                {STATUS_MARK[goal.status]}
-              </span>
-              {STATUS_COPY[goal.status]}
-            </div>
-            <div className="min-w-0">
-              <p className="text-[12px] leading-relaxed text-ink-2">
-                <span className="mr-1.5 tabular-nums text-ink-2">{index + 1}.</span>
-                {goal.description}
-              </p>
-              {goal.blocker ? (
-                <p className="mt-1 text-[12px] font-medium leading-relaxed text-ink-2">阻擋原因：{goal.blocker}</p>
-              ) : null}
-              {goal.evidence.length > 0 ? (
-                <div className="mt-1.5 space-y-0.5 text-[12px] leading-relaxed text-ink-2" aria-label="驗證證據">
-                  {goal.evidence.map((reference) => (
-                    <div key={`${reference.seq}:${reference.evidenceId}`} className="flex min-w-0 gap-2">
-                      <span className="shrink-0 tabular-nums">seq {reference.seq}</span>
-                      <span className="min-w-0 truncate font-[family-name:var(--font-mono)]">
-                        {reference.tool} · {evidenceLabel(reference.callId)}
-                      </span>
-                    </div>
-                  ))}
-                  {goal.hiddenEvidenceCount > 0 ? <div>另有 {goal.hiddenEvidenceCount} 筆較早證據</div> : null}
-                </div>
-              ) : null}
-            </div>
-          </article>
-        ))}
-      </div>
+        <div className="working-state-content px-3.5 pb-3">
+          {projection.objective ? (
+            <p className="mb-2.5 text-[12px] font-medium leading-relaxed text-ink">{projection.objective}</p>
+          ) : null}
+
+          {projection.goals.length > 0 ? (
+            <ol className="space-y-2" aria-label="工作目標">
+              {projection.goals.map((goal) => (
+                <li key={goal.id} className="working-state-goal flex min-w-0 items-start gap-2.5">
+                  <span
+                    aria-hidden="true"
+                    className={`working-state-mark mt-px shrink-0 font-semibold ${
+                      goal.status === 'blocked' ? 'text-orange' : goal.status === 'done' ? 'text-green' : 'text-ink-3'
+                    }`}
+                  >
+                    {STATUS_MARK[goal.status]}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12px] leading-relaxed text-ink-2">
+                      <span className="sr-only">{STATUS_COPY[goal.status]}：</span>
+                      {goal.description}
+                    </p>
+                    {goal.blocker ? (
+                      <p className="mt-1 text-[12px] font-medium leading-relaxed text-orange">阻擋原因：{goal.blocker}</p>
+                    ) : null}
+                    {goal.evidence.length > 0 ? (
+                      <details className="working-state-evidence mt-1">
+                        <summary className="cursor-pointer text-[11px] text-ink-3">
+                          驗證證據 {goal.evidence.length + goal.hiddenEvidenceCount} 筆
+                        </summary>
+                        <div className="mt-1 space-y-0.5 text-[11px] leading-relaxed text-ink-3" aria-label="驗證證據">
+                          {goal.evidence.map((reference) => (
+                            <div key={`${reference.seq}:${reference.evidenceId}`} className="flex min-w-0 gap-2">
+                              <span className="shrink-0 tabular-nums">seq {reference.seq}</span>
+                              <span className="min-w-0 truncate font-[family-name:var(--font-mono)]">
+                                {reference.tool} · {evidenceLabel(reference.callId)}
+                              </span>
+                            </div>
+                          ))}
+                          {goal.hiddenEvidenceCount > 0 ? <div>另有 {goal.hiddenEvidenceCount} 筆較早證據</div> : null}
+                        </div>
+                      </details>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-[12px] leading-relaxed text-ink-3">Host 尚未建立可驗證的工作目標。</p>
+          )}
+
+          {projection.constraints.length > 0 ? (
+            <details className="working-state-constraints mt-2.5">
+              <summary className="cursor-pointer text-[11px] text-ink-3">執行限制 {projection.constraints.length} 項</summary>
+              <ul className="mt-1 space-y-1 pl-4 text-[11px] leading-relaxed text-ink-3">
+                {projection.constraints.map((constraint) => <li key={constraint}>{constraint}</li>)}
+              </ul>
+            </details>
+          ) : null}
+        </div>
+      </details>
     </section>
   )
 }

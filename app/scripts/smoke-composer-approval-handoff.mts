@@ -25,11 +25,38 @@ import {
   listQueuedRuns,
   resetRunQueueForTests,
 } from '../src/agent/runQueue.ts'
+import {
+  canSubmitDecision,
+  nextSelectedOptions,
+  submitsChoiceImmediately,
+} from '../src/components/decisionPresentation.ts'
 
 function test(name: string, run: () => void) {
   run()
   console.log(`✓ ${name}`)
 }
+
+test('decision presentation keeps option and optional-comment submission coherent', () => {
+  assert.equal(submitsChoiceImmediately({ multiSelect: false, allowFreeform: false }), true)
+  assert.equal(submitsChoiceImmediately({ multiSelect: false, allowFreeform: true }), false)
+  assert.equal(submitsChoiceImmediately({ multiSelect: true, allowFreeform: false }), false)
+  assert.deepEqual(nextSelectedOptions(['先建立草稿'], '直接發佈', false), ['直接發佈'])
+  assert.deepEqual(nextSelectedOptions(['先建立草稿'], '直接發佈', true), ['先建立草稿', '直接發佈'])
+  assert.equal(canSubmitDecision({
+    isQuestion: true,
+    hasOptions: true,
+    hasSelection: true,
+    allowFreeform: true,
+    hasFreeform: false,
+  }), true)
+  assert.equal(canSubmitDecision({
+    isQuestion: true,
+    hasOptions: false,
+    hasSelection: false,
+    allowFreeform: true,
+    hasFreeform: false,
+  }), false)
+})
 
 test('composer selection overrides the Settings default for one submitted run', () => {
   assert.equal(resolveComposerApprovalMode('auto', 'always'), 'always')

@@ -5,7 +5,8 @@ export type PermissionAskRequest = {
   threadId?: string
   runId?: string
   tool: string
-  argsPreview: string
+  /** Complete serialized invocation input shown on the approval surface. */
+  argsJson: string
   reason: string
   /** HITL asks (ask_user) always pop — the sessionAllow shortcut skips only effect approvals. */
   hitl?: boolean
@@ -230,7 +231,7 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
       threadId: threadId?.trim() || undefined,
       runId: runId?.trim() || undefined,
       tool,
-      argsPreview: JSON.stringify(args, null, 2).slice(0, 1200),
+      argsJson: JSON.stringify(args, null, 2),
       reason: reason || `工具「${tool}」需要核准後才能執行`,
       ...(isHitl ? {
         hitl: true,

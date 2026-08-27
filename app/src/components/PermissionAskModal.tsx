@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icon'
+import { DecisionCard } from './DecisionCard'
+import { canSubmitDecision, nextSelectedOptions, submitsChoiceImmediately } from './decisionPresentation'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import { useAgentStore } from '../store/agentStore'
+
+const DECISION_COPY = {
+  question: { title: '回答問題', deny: '取消', primary: '送出回覆' },
+  approval: { title: '需要核准', deny: '拒絕', primary: '核准執行' },
+} as const
 
 /**
  * OpenCode-style ask permission HITL
@@ -52,6 +59,8 @@ export function PermissionAskModal() {
   const sessionAllow = getSessionAllow(current.threadId)
 
   const isQuestion = current.hitl === true
+  const decisionKind = isQuestion ? 'question' : 'approval'
+  const decisionCopy = DECISION_COPY[decisionKind]
   const options = current.options ?? []
   const hasOptions = options.length > 0
   const allowFreeform = current.allowFreeform === true
@@ -66,48 +75,42 @@ export function PermissionAskModal() {
   }
 
   const togglePick = (value: string) =>
-    setSelected((previous) =>
-      previous.includes(value) ? previous.filter((item) => item !== value) : [...previous, value],
-    )
+    setSelected((previous) => nextSelectedOptions(previous, value, current.multiSelect === true))
 
   // Single-select sends on click; the submit button exists for multi-select
   // picks, freeform-only answers, and the option-less confirm.
   const showSubmit = !(isQuestion && hasOptions && current.multiSelect !== true && !allowFreeform)
-  const canSubmit = !isQuestion
-    ? true
-    : current.multiSelect === true
-      ? selected.length > 0 || freeformText.length > 0
-      : hasOptions
-        ? freeformText.length > 0
-        : !allowFreeform || freeformText.length > 0
+  const canSubmit = canSubmitDecision({
+    isQuestion,
+    hasOptions,
+    hasSelection: selected.length > 0,
+    allowFreeform,
+    hasFreeform: freeformText.length > 0,
+  })
+  const showPrimary = !isQuestion || showSubmit
+  const approveCurrent = () => {
+    if (isQuestion) sendAnswer()
+    else resolve(current.id, 'allow')
+  }
+
+  const meta = `逾時 ${remainSec}s 自動拒絕${pendingBehind > 0 ? ` · 佇列尚有 ${pendingBehind} 筆` : ''}`
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/45 p-4 backdrop-blur-md animate-macos-fade">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="permission-title"
-        data-run-id={current.runId || undefined}
-        className="agent-approval-card w-full max-w-lg overflow-hidden rounded-card border bg-surface animate-macos-sheet"
-      >
-        <div className="primitive-card-pad flex items-start gap-3 border-b border-line bg-orange-tint">
-          <Icon name={isQuestion ? 'question_mark' : 'shield'} size={18} className="mt-0.5 shrink-0 text-orange" />
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 id="permission-title" className="font-semibold text-ink text-[14px]">
-                {isQuestion ? '回答問題' : '需要核准'}
-              </h2>
-              <span className="text-[10px] font-medium text-orange">等待你的決定</span>
-            </div>
-            <p className="text-[13px] text-ink-2 mt-0.5">{current.reason}</p>
-            <p className="text-[10px] text-ink-3 mt-1 font-[family-name:var(--font-mono)]">
-              逾時 {remainSec}s 自動拒絕
-              {pendingBehind > 0 ? ` · 佇列尚有 ${pendingBehind} 筆` : ''}
-            </p>
-          </div>
-        </div>
-
-        <div className="p-4 space-y-3">
+    <DecisionCard
+      key={current.id}
+      kind={decisionKind}
+      titleId="permission-title"
+      title={decisionCopy.title}
+      reason={current.reason}
+      meta={meta}
+      runId={current.runId}
+      denyLabel={decisionCopy.deny}
+      onDeny={() => resolve(current.id, 'deny')}
+      approveLabel={showPrimary ? decisionCopy.primary : undefined}
+      approveDisabled={!canSubmit}
+      onApprove={showPrimary ? approveCurrent : undefined}
+    >
+      <div className="space-y-3">
           {isQuestion && current.question ? (
             <p className="whitespace-pre-wrap text-[13px] font-medium leading-relaxed text-ink">{current.question}</p>
           ) : (
@@ -121,15 +124,14 @@ export function PermissionAskModal() {
               <div>
                 <div className="mb-1 text-[11px] font-medium text-ink-2">即將執行的內容</div>
                 <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-control border border-line bg-inset p-3 text-[11px] text-ink-2 font-[family-name:var(--font-mono)] custom-scrollbar">
-                  {current.argsPreview}
+                  {current.argsJson}
                 </pre>
               </div>
             </>
           )}
 
           {isQuestion && hasOptions ? (
-            /* 選項列沿用 QuestionAskModal 的語言：選取記號是唯一的狀態訊號，
-               選項本身不再各自成一張卡。 */
+            /* 選取記號是唯一的狀態訊號，選項本身不再各自成一張卡。 */
             <div className="flex flex-col gap-0.5">
               {options.map((option) => {
                 const checked = selected.includes(option)
@@ -137,8 +139,12 @@ export function PermissionAskModal() {
                   <button
                     key={option}
                     type="button"
-                    aria-pressed={current.multiSelect === true ? checked : undefined}
-                    onClick={() => (current.multiSelect === true ? togglePick(option) : sendAnswer(option))}
+                    aria-pressed={checked}
+                    onClick={() => (
+                      submitsChoiceImmediately({ multiSelect: current.multiSelect === true, allowFreeform })
+                        ? sendAnswer(option)
+                        : togglePick(option)
+                    )}
                     className="agent-question-option -mx-1.5 flex items-start gap-2.5 rounded-control px-1.5 py-1.5 text-left transition-colors"
                     data-selected={checked}
                   >
@@ -172,13 +178,16 @@ export function PermissionAskModal() {
           ) : null}
 
           {isQuestion && allowFreeform ? (
-            <textarea
-              value={freeform}
-              onChange={(event) => setFreeform(event.target.value)}
-              placeholder={hasOptions ? '補充說明（可選）' : '你的回答'}
-              rows={3}
-              className="w-full resize-none rounded-control border border-line bg-inset px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-3 focus:border-line-strong"
-            />
+            <label className="block text-[12px] text-ink-2" htmlFor={`${current.id}-freeform`}>
+              <span className="mb-1 block">{hasOptions ? '補充說明（可選）' : '你的回答'}</span>
+              <textarea
+                id={`${current.id}-freeform`}
+                value={freeform}
+                onChange={(event) => setFreeform(event.target.value)}
+                rows={3}
+                className="w-full resize-none rounded-control border border-line bg-inset px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-3 focus:border-line-strong"
+              />
+            </label>
           ) : null}
 
           {!isQuestion ? (
@@ -192,28 +201,7 @@ export function PermissionAskModal() {
               本次 session 其餘 ask 一律允許（代我核准）
             </label>
           ) : null}
-        </div>
-
-        <div className="primitive-card-footer flex justify-end gap-2 border-t border-line bg-inset">
-          <button
-            type="button"
-            onClick={() => resolve(current.id, 'deny')}
-            className="rounded-control px-3 py-1.5 text-[12px] font-semibold text-ink-2 transition-colors hover:bg-hover"
-          >
-            {isQuestion ? '取消' : '拒絕'}
-          </button>
-          {!isQuestion || showSubmit ? (
-            <button
-              type="button"
-              disabled={!canSubmit}
-              onClick={() => (isQuestion ? sendAnswer() : resolve(current.id, 'allow'))}
-              className="px-3 py-1.5 rounded-control bg-ink text-canvas text-[12px] font-semibold shadow-btn enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:bg-field disabled:text-ink-3 disabled:shadow-none"
-            >
-              {isQuestion ? '送出回覆' : '核准執行'}
-            </button>
-          ) : null}
-        </div>
       </div>
-    </div>
+    </DecisionCard>
   )
 }
