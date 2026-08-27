@@ -99,7 +99,7 @@
     "smoke:settings-lifecycle": "node scripts/smoke-settings-lifecycle-launch-path.mjs && node scripts/smoke-settings-lifecycle-e2e.mjs",
     "smoke:marketplace": "vite build --config scripts/vite.plugin-e2e.config.ts && node .tmp/plugin-e2e/plugin-installer-e2e.mjs",
     "smoke:plugin-install": "vite build --config scripts/vite.plugin-e2e.config.ts && node .tmp/plugin-e2e/plugin-installer-e2e.mjs --network",
-    "icons": "node scripts/render-icons.mjs && node scripts/make-ico.mjs",
+    "icons": "node scripts/render-icons.mjs && node --experimental-strip-types scripts/smoke-app-icon-assets.mts",
     "dist": "rm -rf release && npm run icons && npm run build && npm run smoke:after-build && npm run smoke:built && electron-builder && node --experimental-strip-types scripts/verify-mac-release-signature.mts",
     "dist:mac": "rm -rf release && npm run icons && npm run build && npm run smoke:after-build && npm run smoke:built && electron-builder --mac && node --experimental-strip-types scripts/verify-mac-release-signature.mts",
     "dist:win": "rm -rf release && npm run icons && npm run build && npm run smoke:after-build && npm run smoke:built && electron-builder --win",
@@ -185,7 +185,7 @@
       }
     ],
     "mac": {
-      "icon": "icons/icon.png",
+      "icon": "icons/icon-1024.png",
       "category": "public.app-category.developer-tools",
       "hardenedRuntime": true,
       "gatekeeperAssess": true,

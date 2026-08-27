@@ -2,11 +2,11 @@
 
 ## Mark concept
 
-**Multi-agent orbital loop** — three role nodes (Manager / Analyzer / Writer) on a continuous cycle around a shared core. Unique to this product (loop engine + sub-agents), not a Claude/Gemini/OpenAI clone.
+**Connected working set + independent candidate** — three linked nodes show shared execution context; the amber node remains deliberately independent until admitted. The geometry is a high-resolution reconstruction of the supplied app-icon reference.
 
 ## Style
 
-Same presentation language as model chips (squircle tile + flat geometric mark), with project cyan (`#14b8d4` → `#0e7490`) and core navy (`#0b1326`).
+Flat royal blue (`#0075DE`) squircle, white orthogonal links, white/ice-blue connected nodes, and one amber (`#FEB10F`) independent node. No gradient, shadow, blur, or texture.
 
 ## Files
 
@@ -15,7 +15,8 @@ Same presentation language as model chips (squircle tile + flat geometric mark),
 | `icon.svg` | Master (light / brand) |
 | `icon-dark.svg` | Dark chrome variant |
 | `icon-{16…1024}.png` | Raster pack |
-| `icon.png` | electron-builder default (512) |
+| `icon-1024.png` | macOS electron-builder source |
+| `icon.png` | 512px runtime compatibility copy |
 | `icon-dark-{32…512}.png` | Dark pack |
 
 Also copied to `public/favicon.svg`, `public/favicon-32.png`, `public/brand/`.
