@@ -9,6 +9,7 @@ import type {
   MemoryAppendInput,
   MemoryClearInput,
   MemoryDeleteInput,
+  MemoryDreamConsolidateInput,
   MemoryGetInput,
   MemoryListInput,
   MemoryRecallInput,
@@ -320,7 +321,7 @@ export class PiHostSupervisor {
   }
 
   private async durableMemoryRequest(
-    method: 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability',
+    method: 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream',
     params: Record<string, unknown>,
     operation: DurableMemoryProtocolResult['operation'],
   ): Promise<DurableMemoryProtocolResult> {
@@ -380,6 +381,10 @@ export class PiHostSupervisor {
 
   async durableMemoryDeletionCapability(access: MemoryAccessContext): Promise<DurableMemoryProtocolResult> {
     return this.durableMemoryRequest('memory/v1/deletion-capability', { access }, 'deletion-capability')
+  }
+
+  async consolidateDreamDurableMemory(input: MemoryDreamConsolidateInput): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/consolidate-dream', input, 'consolidate-dream')
   }
 
   async listCapabilities(): Promise<NonNullable<PiHostResponse['result']>['items']> {

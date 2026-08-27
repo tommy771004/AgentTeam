@@ -100,6 +100,7 @@ export type DurableMemoryProtocolResult = { version: 1; revision: number } & (
   | { operation: 'recall'; recall: MemoryRecallResult }
   | { operation: 'delete' | 'clear' | 'delete-entry' | 'clear-project' | 'clear-global' | 'clear-all'; mutation: MemoryMutationResult }
   | { operation: 'deletion-capability'; capability: MemoryDeletionCapability }
+  | { operation: 'consolidate-dream'; consolidation: MemoryDreamConsolidationResult }
 )
 
 export type MemoryStoreErrorCode =
@@ -226,6 +227,24 @@ export type MemoryConsolidationResult = MemoryMutationResult & {
   entry: DurableMemoryEntry
 }
 
+export type MemoryDreamFaultPoint = 'after-source-read' | 'after-source-delete' | 'after-merged-write'
+
+export type MemoryDreamConsolidateInput = {
+  access: MemoryAccessContext
+  scope: MemoryScope
+  operationId: string
+  force?: boolean
+  /** Store-contract fault injection only; protocol callers cannot set this. */
+  faultAt?: MemoryDreamFaultPoint
+}
+
+export type MemoryDreamConsolidationResult = MemoryMutationResult & {
+  deduped: string[]
+  merged: number
+  alreadyApplied: boolean
+  entry?: DurableMemoryEntry
+}
+
 export type MemoryExportInput = {
   access: MemoryAccessContext
   scope?: MemoryScope
@@ -267,6 +286,7 @@ export interface DurableMemoryStore {
   revision(): Promise<number>
   health(): Promise<MemoryHealth>
   consolidate(input: MemoryConsolidateInput): Promise<MemoryConsolidationResult>
+  consolidateDream(input: MemoryDreamConsolidateInput): Promise<MemoryDreamConsolidationResult>
   exportBundle(input: MemoryExportInput): Promise<DurableMemoryBundle>
   importBundle(input: MemoryImportInput): Promise<MemoryMutationResult>
   migrateLegacy(input: MemoryMigrationInput): Promise<MemoryMigrationResult>
@@ -441,6 +461,69 @@ export function memoryOperationPayload(input: MemoryEntryDraft): string {
     scope: memoryScopeKey(input.scope), logicalKey: input.logicalKey, kind: input.kind,
     text: input.text, tags: input.tags, createdAt: input.createdAt,
   })
+}
+
+const DREAM_DUP_THRESHOLD = 0.85
+const DREAM_MIN_CANDIDATES = 3
+const DREAM_MERGE_WHEN_OVER = 24
+const DREAM_MERGE_BATCH = 12
+const DREAM_MAX_CANDIDATES = 64
+
+function dreamSimilarity(left: string, right: string): number {
+  const terms = (value: string) => new Set(value.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) || [])
+  const a = terms(left)
+  const b = terms(right)
+  if (!a.size && !b.size) return 1
+  let overlap = 0
+  for (const term of a) if (b.has(term)) overlap += 1
+  return overlap / Math.max(1, a.size + b.size - overlap)
+}
+
+export type MemoryDreamPlan = {
+  duplicateKeys: string[]
+  mergeKeys: string[]
+  merged?: MemoryEntryDraft
+}
+
+export function planDreamConsolidation(
+  entries: Iterable<DurableMemoryEntry>,
+  scope: MemoryScope,
+  operationId: string,
+  force = false,
+): MemoryDreamPlan {
+  const candidates = [...entries]
+    .filter((entry) => memoryScopeKey(entry.scope) === memoryScopeKey(scope))
+    .filter((entry) => entry.kind === 'memory' && entry.tags.some((tag) => tag === 'auto' || tag === 'flush') && !entry.tags.includes('dream'))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.logicalKey.localeCompare(right.logicalKey))
+    .slice(0, DREAM_MAX_CANDIDATES)
+  if (!force && candidates.length < DREAM_MIN_CANDIDATES) return { duplicateKeys: [], mergeKeys: [] }
+  const duplicateKeys: string[] = []
+  for (let left = 0; left < candidates.length; left += 1) {
+    if (duplicateKeys.includes(candidates[left].logicalKey)) continue
+    for (let right = left + 1; right < candidates.length; right += 1) {
+      if (duplicateKeys.includes(candidates[right].logicalKey)) continue
+      if (dreamSimilarity(candidates[left].text, candidates[right].text) >= DREAM_DUP_THRESHOLD) {
+        duplicateKeys.push(candidates[right].logicalKey)
+      }
+    }
+  }
+  const remaining = candidates.filter((entry) => !duplicateKeys.includes(entry.logicalKey))
+  const mergeEntries = remaining.length > DREAM_MERGE_WHEN_OVER ? remaining.slice(0, DREAM_MERGE_BATCH) : []
+  if (!mergeEntries.length) return { duplicateKeys, mergeKeys: [] }
+  const digest = createHash('sha256').update(operationId).digest('hex').slice(0, 20)
+  const createdAt = mergeEntries.at(-1)?.createdAt || new Date(0).toISOString()
+  return {
+    duplicateKeys,
+    mergeKeys: mergeEntries.map((entry) => entry.logicalKey),
+    merged: {
+      scope,
+      logicalKey: `dream:${digest}`,
+      kind: 'memory',
+      text: `記憶整併（dream）：\n${mergeEntries.map((entry) => `- ${entry.text}`).join('\n').slice(0, 30_000)}`,
+      tags: ['auto', 'dream'],
+      createdAt,
+    },
+  }
 }
 
 export function appendMemoryDraft(existing: DurableMemoryEntry | undefined, input: MemoryEntryDraft): MemoryEntryDraft {
@@ -664,6 +747,7 @@ export function recallMemoryEntries(
 export class InMemoryDurableMemoryStore implements DurableMemoryStore {
   private readonly entries = new Map<string, DurableMemoryEntry>()
   private readonly operations = new Map<string, { hash: string; entryId: string }>()
+  private readonly dreamOperations = new Map<string, { payload: string; result: MemoryDreamConsolidationResult }>()
   private readonly limits: DurableMemoryLimits
   private nextIdentity = 1
   private currentRevision = 0
@@ -836,6 +920,46 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     this.entries.set(entryKey(entry.scope, entry.logicalKey), entry)
     this.currentRevision = revision
     return { changed: changed + 1, revision, entry: cloneEntry(entry) }
+  }
+
+  async consolidateDream(input: MemoryDreamConsolidateInput): Promise<MemoryDreamConsolidationResult> {
+    this.ensureOpen()
+    const scope = canonicalMemoryScope(input.scope)
+    authorizeMemoryAccess('consolidate', input.access, scope)
+    const operationId = canonicalMemoryLogicalKey(input.operationId, this.limits)
+    const payload = JSON.stringify(['dream-v1', memoryScopeKey(scope), operationId, Boolean(input.force)])
+    const prior = this.dreamOperations.get(operationId)
+    if (prior) {
+      if (prior.payload !== payload) throw new DurableMemoryStoreError('invalid_input', 'Dream operation identity was retried with different scope or policy')
+      return { ...structuredClone(prior.result), changed: 0, alreadyApplied: true }
+    }
+    const plan = planDreamConsolidation(this.entries.values(), scope, operationId, input.force)
+    if (input.faultAt === 'after-source-read') throw new DurableMemoryStoreError('unavailable', 'Injected dream fault after source read')
+    const draftEntries = new Map(this.entries)
+    for (const logicalKey of [...plan.duplicateKeys, ...plan.mergeKeys]) draftEntries.delete(entryKey(scope, logicalKey))
+    if (input.faultAt === 'after-source-delete') throw new DurableMemoryStoreError('unavailable', 'Injected dream fault after source delete')
+    const changedSources = new Set([...plan.duplicateKeys, ...plan.mergeKeys]).size
+    const revision = changedSources || plan.merged ? this.currentRevision + 1 : this.currentRevision
+    let entry: DurableMemoryEntry | undefined
+    const nextIdentityBefore = this.nextIdentity
+    if (plan.merged) {
+      entry = this.nextEntry(plan.merged, revision)
+      draftEntries.set(entryKey(scope, entry.logicalKey), entry)
+    }
+    if (input.faultAt === 'after-merged-write') {
+      this.nextIdentity = nextIdentityBefore
+      throw new DurableMemoryStoreError('unavailable', 'Injected dream fault after merged write')
+    }
+    this.entries.clear()
+    for (const [key, value] of draftEntries) this.entries.set(key, value)
+    this.currentRevision = revision
+    const result: MemoryDreamConsolidationResult = {
+      changed: changedSources + Number(Boolean(entry)), revision,
+      deduped: [...plan.duplicateKeys], merged: plan.mergeKeys.length,
+      alreadyApplied: false, ...(entry ? { entry: cloneEntry(entry) } : {}),
+    }
+    this.dreamOperations.set(operationId, { payload, result: structuredClone(result) })
+    return result
   }
 
   async exportBundle(input: MemoryExportInput): Promise<DurableMemoryBundle> {

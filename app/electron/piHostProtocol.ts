@@ -39,7 +39,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -162,7 +162,7 @@ export type PiHostEvent =
       payload: {
         version: 1
         revision: number
-        operation: 'upsert' | 'append' | 'delete' | 'clear' | 'delete-entry' | 'clear-project' | 'clear-global' | 'clear-all'
+        operation: 'upsert' | 'append' | 'delete' | 'clear' | 'delete-entry' | 'clear-project' | 'clear-global' | 'clear-all' | 'consolidate-dream'
         changed: number
         scope: 'global' | 'project' | 'all'
         project?: string
@@ -240,6 +240,7 @@ import {
   type MemoryAppendInput,
   type MemoryClearInput,
   type MemoryEntryDraft,
+  type MemoryDreamConsolidateInput,
   type MemoryListInput,
   type MemoryScope,
 } from './durableMemoryStore.ts'
@@ -1316,7 +1317,7 @@ function durableMemoryDraft(value: unknown): MemoryEntryDraft {
 }
 
 function durableMemoryChangedEvent(
-  operation: 'upsert' | 'append' | 'delete' | 'clear' | 'delete-entry' | 'clear-project' | 'clear-global' | 'clear-all',
+  operation: 'upsert' | 'append' | 'delete' | 'clear' | 'delete-entry' | 'clear-project' | 'clear-global' | 'clear-all' | 'consolidate-dream',
   revision: number,
   changed: number,
   scope: MemoryScope | { kind: 'all' },
@@ -1516,6 +1517,28 @@ async function deletionCapabilityDurableMemory(
   return [{ id, result: { memoryStore: { version: 1, operation: 'deletion-capability', revision, capability } } }]
 }
 
+async function consolidateDreamDurableMemory(
+  state: HostState,
+  params: DurableMemoryRequestParams,
+  access: MemoryAccessContext,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): Promise<PiHostMessage[]> {
+  const scope = durableMemoryScope(params.scope)
+  const operationId = typeof params.operationId === 'string' ? params.operationId : ''
+  if (!operationId) throw new DurableMemoryStoreError('invalid_input', 'Dream consolidation operationId is required')
+  const consolidation = await state.memoryStore.consolidateDream({
+    access, scope, operationId, force: params.force === true,
+  } as MemoryDreamConsolidateInput)
+  const event = durableMemoryChangedEvent('consolidate-dream', consolidation.revision, consolidation.changed, scope, '*')
+  const changed = claimMemoryRevision(state, consolidation.revision, consolidation.changed > 0)
+  if (changed && emit) emit(event)
+  return [...(changed && !emit ? [event] : []), {
+    id,
+    result: { memoryStore: { version: 1, operation: 'consolidate-dream', revision: consolidation.revision, consolidation } },
+  }]
+}
+
 function executeDurableMemoryRequest(
   state: HostState,
   method: string,
@@ -1537,6 +1560,7 @@ function executeDurableMemoryRequest(
     case 'memory/v1/clear-global': return clearTypedDurableMemory(state, 'clear-global', params, access, id, emit)
     case 'memory/v1/clear-all': return clearTypedDurableMemory(state, 'clear-all', params, access, id, emit)
     case 'memory/v1/deletion-capability': return deletionCapabilityDurableMemory(state, access, id)
+    case 'memory/v1/consolidate-dream': return consolidateDreamDurableMemory(state, params, access, id, emit)
     default: return Promise.resolve([errorResponse(id, 'unknown_method', `Unknown durable memory method: ${method}`)])
   }
 }

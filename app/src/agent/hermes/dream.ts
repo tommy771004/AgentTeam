@@ -14,6 +14,8 @@ import { learningLoop } from './learning.ts'
 import { memoryStore } from './memory.ts'
 import { textSimilarity } from './textSimilarity.ts'
 import type { MemoryEntry } from './types.ts'
+import { isElectronPiProduction } from '../piProduction.ts'
+import { memoryProjectionBridgeAvailable, type MemoryProjectionScope } from '../memoryProjection.ts'
 
 export const DREAM_MIN_HOURS = 4
 export const DREAM_MIN_NEW_ENTRIES = 3
@@ -37,6 +39,35 @@ export type DreamResult = {
   deduped: string[]
   merged: number
   usedModel: boolean
+}
+
+function hostDreamOperationId(scope: MemoryProjectionScope, nowMs: number, force: boolean): string {
+  const scopeText = scope.kind === 'global' ? 'global' : scope.project
+  let hash = 2166136261
+  for (const character of scopeText) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619)
+  return `dream-v1:${force ? 'force' : 'auto'}:${scope.kind}:${Math.floor(nowMs / (DREAM_MIN_HOURS * 3_600_000))}:${(hash >>> 0).toString(16)}`
+}
+
+async function runHostDreamConsolidation(scope: MemoryProjectionScope, force: boolean): Promise<DreamResult> {
+  const api = window.subagents?.piHost?.memoryProjection
+  if (!memoryProjectionBridgeAvailable(api) || !api) {
+    return { ran: false, reason: 'host-unavailable', deduped: [], merged: 0, usedModel: false }
+  }
+  const result = await api.consolidateDream({
+    scope,
+    operationId: hostDreamOperationId(scope, Date.now(), force),
+    force,
+  })
+  if (result.operation !== 'consolidate-dream') throw new Error('Host Dream consolidation response is invalid')
+  const consolidated = result.consolidation
+  if (consolidated.changed) learningLoop.onDreamConsolidation({ deduped: consolidated.deduped.length, merged: consolidated.merged })
+  return {
+    ran: !consolidated.alreadyApplied,
+    ...(consolidated.alreadyApplied ? { reason: 'already-applied' } : {}),
+    deduped: consolidated.deduped,
+    merged: consolidated.merged,
+    usedModel: false,
+  }
 }
 
 function readState(): DreamState {
@@ -134,13 +165,21 @@ async function mergeOldestWithModel(
 /** 跑一次整併。`force` 供手動觸發/驗證。 */
 export async function runDreamConsolidation(
   settings: LlmSettings,
-  opts?: { force?: boolean },
+  opts?: { force?: boolean; scope?: MemoryProjectionScope },
 ): Promise<DreamResult> {
   if (dreamRunning) {
     return { ran: false, reason: 'already-running', deduped: [], merged: 0, usedModel: false }
   }
   if (settings.memoryEnabled === false || settings.memoryWriteEnabled === false) {
     return { ran: false, reason: 'memory-disabled', deduped: [], merged: 0, usedModel: false }
+  }
+  if (isElectronPiProduction()) {
+    dreamRunning = true
+    try {
+      return await runHostDreamConsolidation(opts?.scope || { kind: 'global' }, opts?.force === true)
+    } finally {
+      dreamRunning = false
+    }
   }
   const entries = machineEntries()
   const state = readState()
@@ -184,11 +223,14 @@ export async function runDreamConsolidation(
 export function scheduleDreamConsolidation(
   settings: LlmSettings,
   idleDelayMs = IDLE_DELAY_MS,
+  project?: string,
 ) {
   if (idleTimer) clearTimeout(idleTimer)
-  const entries = machineEntries()
-  if (!dreamDue(Date.now(), readState().lastRunAt, newEntriesSince(entries, readState().lastRunAt))) {
-    return
+  if (!isElectronPiProduction()) {
+    const entries = machineEntries()
+    if (!dreamDue(Date.now(), readState().lastRunAt, newEntriesSince(entries, readState().lastRunAt))) {
+      return
+    }
   }
   idleTimer = setTimeout(() => {
     idleTimer = undefined
@@ -198,7 +240,12 @@ export function scheduleDreamConsolidation(
         import('../runQueue.ts'),
       ])
       if (!useAgentStore.getState().canStartRun().allowed || queueLength() > 0) return
-      await runDreamConsolidation(settings)
+      if (isElectronPiProduction()) {
+        await runDreamConsolidation(settings, { scope: { kind: 'global' } })
+        if (project) await runDreamConsolidation(settings, { scope: { kind: 'project', project } })
+      } else {
+        await runDreamConsolidation(settings)
+      }
     })()
   }, Math.max(0, idleDelayMs))
 }

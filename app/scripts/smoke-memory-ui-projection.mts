@@ -12,7 +12,7 @@ let state = { generation: 1, revision: 4, invalidatedRevision: 4 }
 assert.equal(memoryProjectionBridgeAvailable(undefined), false)
 assert.equal(memoryProjectionBridgeAvailable({
   list() {}, countAll() {}, get() {}, upsert() {}, deleteEntry() {}, clearProject() {},
-  clearGlobal() {}, clearAll() {}, deletionCapability() {},
+  clearGlobal() {}, clearAll() {}, deletionCapability() {}, consolidateDream() {},
 }), true)
 assert.equal(invalidateMemoryProjection(state, 3), state, 'out-of-order invalidation must be ignored')
 state = invalidateMemoryProjection(state, 6)

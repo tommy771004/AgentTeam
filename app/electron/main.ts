@@ -2474,6 +2474,17 @@ ipcMain.handle('pi-host:memory-projection:clear-all', async () =>
   piHostSupervisor.clearAllDurableMemory(memoryProjectionAdmin))
 ipcMain.handle('pi-host:memory-projection:deletion-capability', async () =>
   piHostSupervisor.durableMemoryDeletionCapability(memoryProjectionAdmin))
+ipcMain.handle('pi-host:memory-projection:consolidate-dream', async (_evt, input: { scope: MemoryProjectionScope; operationId: string; force?: boolean }) => {
+  const scope = projectionMemoryScope(input?.scope)
+  const access: MemoryAccessContext = {
+    origin: 'consolidation', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: false,
+    ...(scope.kind === 'project' ? { canonicalProject: scope.project } : {}),
+    callId: input?.operationId,
+  }
+  return piHostSupervisor.consolidateDreamDurableMemory({
+    access, scope, operationId: input?.operationId, force: input?.force === true,
+  })
+})
 ipcMain.handle('pi-host:capabilities:list', async () => ({ items: await piHostSupervisor.listCapabilities() }))
 ipcMain.handle('pi-host:capabilities:load', async (_evt, id: string) => piHostSupervisor.loadCapability(id))
 ipcMain.handle('pi-host:capabilities:search', async (_evt, query: string) => ({ items: await piHostSupervisor.searchCapabilities(query) }))

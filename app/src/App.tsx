@@ -632,18 +632,19 @@ function SkillCuratorBootstrap() {
   const isRunning = useAgentStore((s) => s.isRunning)
   const skillCount = useLearningStore((s) => s.skills.length)
   const settings = useSettingsStore((s) => s.settings)
+  const projectRoot = useProjectStore((s) => s.root)
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
       await waitForStartupRecovery()
-      if (cancelled || isRunning || isElectronPiProduction()) return
-      scheduleSkillCurator(settings)
+      if (cancelled || isRunning) return
+      if (!isElectronPiProduction()) scheduleSkillCurator(settings)
       // G6 dream:閒置時整併機器寫入記憶(gate:≥4h 且新條目 ≥3)
-      scheduleDreamConsolidation(settings)
+      scheduleDreamConsolidation(settings, undefined, projectRoot || undefined)
     })()
     return () => { cancelled = true }
-  }, [isRunning, skillCount, settings])
+  }, [isRunning, projectRoot, skillCount, settings])
 
   return null
 }

@@ -13,6 +13,7 @@ import {
   memoryOperationIdentity,
   memoryOperationPayload,
   memoryScopeKey,
+  planDreamConsolidation,
   recallMemoryEntries,
   prepareLegacyMemoryMigration,
   replayMemoryMigration,
@@ -33,6 +34,8 @@ import {
   type MemoryConsolidationResult,
   type MemoryDeleteInput,
   type MemoryDeletionCapability,
+  type MemoryDreamConsolidateInput,
+  type MemoryDreamConsolidationResult,
   type MemoryEntryDraft,
   type MemoryExportInput,
   type MemoryGetInput,
@@ -528,6 +531,48 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
       const entry = this.writeEntry(merged, input.access, revision, 'consolidate')
       this.setRevision(revision)
       return { changed: sources.length + 1, revision, entry }
+    })
+  }
+
+  async consolidateDream(input: MemoryDreamConsolidateInput): Promise<MemoryDreamConsolidationResult> {
+    const scope = canonicalMemoryScope(input.scope)
+    authorizeMemoryAccess('consolidate', input.access, scope)
+    const operationId = canonicalMemoryLogicalKey(input.operationId, this.limits)
+    const payload = JSON.stringify(['dream-v1', memoryScopeKey(scope), operationId, Boolean(input.force)])
+    return this.enqueueWrite(() => {
+      const prior = this.db.prepare(`
+        SELECT operation_hash, result_entry_id, result_revision
+        FROM memory_operations WHERE operation_id = ?
+      `).get(operationId) as { operation_hash?: string; result_entry_id?: string; result_revision?: number } | undefined
+      if (prior) {
+        const expected = createHash('sha256').update(payload).digest('hex')
+        if (prior.operation_hash !== expected) throw new DurableMemoryStoreError('invalid_input', 'Dream operation identity was retried with different scope or policy')
+        const entry = prior.result_entry_id ? this.readEntries().find((candidate) => candidate.id === prior.result_entry_id) : undefined
+        return {
+          changed: 0, revision: Number(prior.result_revision ?? this.currentRevision()),
+          deduped: [], merged: 0, alreadyApplied: true, ...(entry ? { entry } : {}),
+        }
+      }
+      const plan = planDreamConsolidation(this.readEntries(), scope, operationId, input.force)
+      if (input.faultAt === 'after-source-read') throw new DurableMemoryStoreError('unavailable', 'Injected dream fault after source read')
+      const sourceKeys = [...new Set([...plan.duplicateKeys, ...plan.mergeKeys])]
+      const remove = this.db.prepare('DELETE FROM memory_entries WHERE scope_kind = ? AND project_id = ? AND logical_key = ?')
+      const columns = scopeColumns(scope)
+      sourceKeys.forEach((logicalKey) => remove.run(columns.kind, columns.project, logicalKey))
+      if (input.faultAt === 'after-source-delete') throw new DurableMemoryStoreError('unavailable', 'Injected dream fault after source delete')
+      const revision = sourceKeys.length || plan.merged ? this.currentRevision() + 1 : this.currentRevision()
+      const entry = plan.merged
+        ? this.writeEntry(plan.merged, input.access, revision, 'dream-consolidate', operationId, payload)
+        : undefined
+      if (input.faultAt === 'after-merged-write') throw new DurableMemoryStoreError('unavailable', 'Injected dream fault after merged write')
+      if (!entry) this.recordOperation(revision, 'dream-consolidate', scope, undefined, undefined, provenance(input.access), operationId, payload)
+      this.db.prepare('UPDATE memory_operations SET result_revision = ? WHERE operation_id = ?').run(revision, operationId)
+      if (revision !== this.currentRevision()) this.setRevision(revision)
+      return {
+        changed: sourceKeys.length + Number(Boolean(entry)), revision,
+        deduped: [...plan.duplicateKeys], merged: plan.mergeKeys.length,
+        alreadyApplied: false, ...(entry ? { entry } : {}),
+      }
     })
   }
 

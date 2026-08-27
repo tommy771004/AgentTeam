@@ -27,6 +27,14 @@ export type MemoryProjectionResult = { version: 1; revision: number } & (
   | { operation: 'upsert'; entry: MemoryProjectionEntry }
   | { operation: 'delete' | 'clear' | 'delete-entry' | 'clear-project' | 'clear-global' | 'clear-all'; mutation: { changed: number; revision: number } }
   | { operation: 'deletion-capability'; capability: MemoryDeletionCapability }
+  | { operation: 'consolidate-dream'; consolidation: {
+      changed: number
+      revision: number
+      deduped: string[]
+      merged: number
+      alreadyApplied: boolean
+      entry?: MemoryProjectionEntry
+    } }
 )
 
 export type MemoryDeletionCapability = {
@@ -48,6 +56,7 @@ export function memoryProjectionBridgeAvailable(value: unknown): boolean {
   return [
     'list', 'countAll', 'get', 'upsert', 'deleteEntry',
     'clearProject', 'clearGlobal', 'clearAll', 'deletionCapability',
+    'consolidateDream',
   ].every((name) => typeof bridge[name] === 'function')
 }
 

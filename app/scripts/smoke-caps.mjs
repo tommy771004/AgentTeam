@@ -2161,8 +2161,11 @@ await test('drift guard: memory decay + staleness + dream wiring', async () => {
   assert.match(dream, /DREAM_MIN_HOURS = 4/)
   assert.match(dream, /DREAM_MIN_NEW_ENTRIES = 3/)
   assert.match(dream, /memoryEnabled === false \|\| settings\.memoryWriteEnabled === false/)
+  assert.match(dream, /api\.consolidateDream/)
+  const sqliteMemory = fs.readFileSync(path.join(appRoot, 'electron/sqliteDurableMemoryStore.ts'), 'utf8')
+  assert.match(sqliteMemory, /async consolidateDream/)
   const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
-  assert.match(app, /scheduleDreamConsolidation\(settings\)/)
+  assert.match(app, /scheduleDreamConsolidation\(settings, undefined, projectRoot \|\| undefined\)/)
 })
 
 await test('drift guard: rewind snapshots wired into write tools + thread rewind', async () => {

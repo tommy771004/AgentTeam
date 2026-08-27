@@ -146,6 +146,8 @@ const api = {
           ipcRenderer.invoke('pi-host:memory-projection:clear-all') as Promise<MemoryProjectionResult>,
         deletionCapability: () =>
           ipcRenderer.invoke('pi-host:memory-projection:deletion-capability') as Promise<MemoryProjectionResult>,
+        consolidateDream: (input: { scope: MemoryProjectionScope; operationId: string; force?: boolean }) =>
+          ipcRenderer.invoke('pi-host:memory-projection:consolidate-dream', input) as Promise<MemoryProjectionResult>,
       },
       capabilities: {
         list: () => ipcRenderer.invoke('pi-host:capabilities:list') as Promise<{ items: unknown[] }>,
