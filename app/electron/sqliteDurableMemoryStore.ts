@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
+import { MemoryStorageLifecycleError, storageLifecycleError } from './memoryStorageLifecycle.ts'
 import {
   planMemoryImport, checkedMemoryImportPlan, memoryImportOperationKey, memoryImportRequestHash, replayMemoryImport,
   type MemoryImportPreviewInput, type MemoryImportPreview, type MemoryImportApplyInput, type MemoryImportResult, type MemoryImportReceipt, type MemoryImportTestHooks,
@@ -65,6 +66,13 @@ import {
 
 const SCHEMA_VERSION = 2
 const BUSY_TIMEOUT_MS = 5_000
+const SHUTDOWN_TIMEOUT_MS = 5_000
+const REQUIRED_TABLES = ['memory_entries', 'memory_meta', 'memory_operations', 'memory_schema_migrations', 'memory_tags'] as const
+
+export type SqliteDurableMemoryTestHooks = MemoryImportTestHooks & {
+  afterExportEntriesRead?: () => void | Promise<void>
+  beforeWrite?: () => void | Promise<void>
+}
 
 type EntryRow = {
   id: string
@@ -119,91 +127,84 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
   private readonly limits: DurableMemoryLimits
   private readonly afterExportEntriesRead?: () => void | Promise<void>
   private readonly importTestHooks?: MemoryImportTestHooks
+  private readonly beforeWrite?: () => void | Promise<void>
   private writeTail: Promise<void> = Promise.resolve()
-  private closed = false
+  private lifecycle: 'open' | 'closing' | 'closed' = 'open'
   private closedRevision = 0
   private walCheckpoint: MemoryDeletionCapability['walCheckpoint'] = 'unavailable'
 
   private constructor(
     databasePath: string,
     limits?: Partial<DurableMemoryLimits>,
-    testHooks?: MemoryImportTestHooks & { afterExportEntriesRead?: () => void | Promise<void> },
+    testHooks?: SqliteDurableMemoryTestHooks,
   ) {
-    this.db = new DatabaseSync(databasePath)
+    try {
+      this.db = new DatabaseSync(databasePath)
+    } catch (error) {
+      throw storageLifecycleError(error, 'storage_unavailable', '無法開啟長期記憶資料庫；未建立替代 authority。')
+    }
     this.limits = durableMemoryLimits(limits)
     this.afterExportEntriesRead = testHooks?.afterExportEntriesRead
     this.importTestHooks = testHooks
-    this.migrate()
+    this.beforeWrite = testHooks?.beforeWrite
+    try {
+      this.preflight()
+      this.migrate()
+      this.validateSchema()
+    } catch (error) {
+      try { this.db.close() } catch { /* preserve validation failure */ }
+      throw storageLifecycleError(error, 'migration_failure', '長期記憶 schema migration 失敗；未覆寫原資料。')
+    }
   }
 
   static async open(
     databasePath: string,
     limits?: Partial<DurableMemoryLimits>,
-    testHooks?: MemoryImportTestHooks & { afterExportEntriesRead?: () => void | Promise<void> },
+    testHooks?: SqliteDurableMemoryTestHooks,
   ): Promise<SqliteDurableMemoryStore> {
     return new SqliteDurableMemoryStore(databasePath, limits, testHooks)
   }
 
   private migrate(): void {
-    this.db.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS};
-      PRAGMA foreign_keys = ON;
-      PRAGMA secure_delete = ON;
-      CREATE TABLE IF NOT EXISTS memory_schema_migrations (
-        version INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        applied_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS memory_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS memory_entries (
-        id TEXT PRIMARY KEY,
-        scope_kind TEXT NOT NULL CHECK (scope_kind IN ('global', 'project')),
-        project_id TEXT NOT NULL DEFAULT '',
-        logical_key TEXT NOT NULL,
-        kind TEXT NOT NULL CHECK (kind IN ('memory', 'profile', 'document')),
-        text TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        revision INTEGER NOT NULL,
-        content_hash TEXT NOT NULL,
-        provenance_json TEXT NOT NULL,
-        operation TEXT NOT NULL,
-        migration_version INTEGER NOT NULL,
-        UNIQUE (scope_kind, project_id, logical_key)
-      );
-      CREATE TABLE IF NOT EXISTS memory_tags (
-        memory_id TEXT NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,
-        position INTEGER NOT NULL,
-        tag TEXT NOT NULL,
-        normalized_tag TEXT NOT NULL,
-        PRIMARY KEY (memory_id, position)
-      );
-      CREATE INDEX IF NOT EXISTS memory_tags_normalized_idx ON memory_tags(normalized_tag);
-      CREATE TABLE IF NOT EXISTS memory_operations (
-        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-        revision INTEGER NOT NULL,
-        operation TEXT NOT NULL,
-        scope_kind TEXT,
-        project_id TEXT,
-        logical_key TEXT,
-        content_hash TEXT,
-        provenance_json TEXT NOT NULL,
-        migration_version INTEGER NOT NULL,
-        committed_at TEXT NOT NULL
-      );
-    `)
-    const migrations = this.db.prepare('SELECT version FROM memory_schema_migrations ORDER BY version').all() as Array<{ version: number }>
-    const latest = migrations.at(-1)?.version ?? 0
+    const latest = this.latestSchemaVersion()
     if (latest > SCHEMA_VERSION) {
-      throw new DurableMemoryStoreError('unavailable', `Unsupported durable memory schema version ${latest}`)
+      throw new MemoryStorageLifecycleError(
+        'unsupported_schema',
+        `長期記憶 schema v${latest} 高於此版本支援的 v${SCHEMA_VERSION}；請使用相容版本或先由相容版本明確匯出。`,
+        { recovery: 'use-compatible-version' },
+      )
     }
+    if (latest > 0) {
+      this.assertRequiredTables()
+      this.assertSchemaColumns(latest)
+    }
+    this.db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}; PRAGMA foreign_keys = ON;`)
     if (latest < 1) {
       this.db.exec('BEGIN IMMEDIATE')
       try {
+        this.db.exec(`
+          CREATE TABLE memory_schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
+          CREATE TABLE memory_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+          CREATE TABLE memory_entries(
+            id TEXT PRIMARY KEY, scope_kind TEXT NOT NULL CHECK (scope_kind IN ('global', 'project')),
+            project_id TEXT NOT NULL DEFAULT '', logical_key TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('memory', 'profile', 'document')), text TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL, revision INTEGER NOT NULL,
+            content_hash TEXT NOT NULL, provenance_json TEXT NOT NULL, operation TEXT NOT NULL,
+            migration_version INTEGER NOT NULL, UNIQUE (scope_kind, project_id, logical_key)
+          );
+          CREATE TABLE memory_tags(
+            memory_id TEXT NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL, tag TEXT NOT NULL, normalized_tag TEXT NOT NULL,
+            PRIMARY KEY (memory_id, position)
+          );
+          CREATE INDEX memory_tags_normalized_idx ON memory_tags(normalized_tag);
+          CREATE TABLE memory_operations(
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT, revision INTEGER NOT NULL, operation TEXT NOT NULL,
+            scope_kind TEXT, project_id TEXT, logical_key TEXT, content_hash TEXT,
+            provenance_json TEXT NOT NULL, migration_version INTEGER NOT NULL, committed_at TEXT NOT NULL
+          );
+        `)
         this.db.prepare('INSERT INTO memory_schema_migrations(version, name, applied_at) VALUES (?, ?, ?)')
           .run(1, 'initial-durable-memory-schema', new Date().toISOString())
         this.db.prepare("INSERT OR IGNORE INTO memory_meta(key, value) VALUES ('revision', '0'), ('next_identity', '1')").run()
@@ -232,10 +233,74 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
         throw error
       }
     }
+    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA secure_delete = ON;')
+  }
+
+  private assertSchemaColumns(version: number): void {
+    const columns = (table: string) => new Set((this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((row) => row.name))
+    const entries = columns('memory_entries')
+    const operations = columns('memory_operations')
+    const requiredEntries = ['id', 'scope_kind', 'project_id', 'logical_key', 'kind', 'text', 'created_at', 'updated_at', 'revision', 'content_hash', 'provenance_json', 'operation', 'migration_version']
+    const requiredOperations = ['sequence', 'revision', 'operation', 'scope_kind', 'project_id', 'logical_key', 'content_hash', 'provenance_json', 'migration_version', 'committed_at']
+    const missing = [...requiredEntries.filter((name) => !entries.has(name)), ...requiredOperations.filter((name) => !operations.has(name))]
+    const v2Columns = ['operation_id', 'operation_hash', 'result_entry_id', 'result_revision']
+    if (version >= 2) missing.push(...v2Columns.filter((name) => !operations.has(name)))
+    if (version === 1 && v2Columns.some((name) => operations.has(name))) missing.push('inconsistent-v1-operation-columns')
+    if (missing.length) throw new MemoryStorageLifecycleError('migration_failure', `長期記憶 schema columns 不一致：${missing.join(', ')}`)
+  }
+
+  private preflight(): void {
+    let row: { integrity_check?: string } | undefined
+    try {
+      row = this.db.prepare('PRAGMA integrity_check(1)').get() as { integrity_check?: string } | undefined
+    } catch (error) {
+      throw new MemoryStorageLifecycleError(
+        'sqlite_integrity_failure',
+        '長期記憶 SQLite integrity check 無法完成；未清空或取代原資料。',
+        { cause: error },
+      )
+    }
+    if (row?.integrity_check !== 'ok') {
+      throw new MemoryStorageLifecycleError(
+        'sqlite_integrity_failure',
+        `長期記憶 SQLite integrity check 失敗：${String(row?.integrity_check || 'unknown')}`,
+      )
+    }
+    const latest = this.latestSchemaVersion()
+    if (latest > SCHEMA_VERSION) {
+      throw new MemoryStorageLifecycleError(
+        'unsupported_schema',
+        `長期記憶 schema v${latest} 高於此版本支援的 v${SCHEMA_VERSION}；請使用相容版本或先由相容版本明確匯出。`,
+        { recovery: 'use-compatible-version' },
+      )
+    }
+  }
+
+  private latestSchemaVersion(): number {
+    const table = this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'memory_schema_migrations'").get() as { present?: number } | undefined
+    if (!table) return 0
+    const row = this.db.prepare('SELECT MAX(version) AS version FROM memory_schema_migrations').get() as { version?: number | null } | undefined
+    return Number(row?.version || 0)
+  }
+
+  private validateSchema(): void {
+    this.assertRequiredTables()
+    if (this.db.prepare('PRAGMA foreign_key_check').all().length) {
+      throw new MemoryStorageLifecycleError('sqlite_integrity_failure', '長期記憶 SQLite foreign key integrity check 失敗。')
+    }
+  }
+
+  private assertRequiredTables(): void {
+    const rows = this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>
+    const present = new Set(rows.map((row) => row.name))
+    const missing = REQUIRED_TABLES.filter((name) => !present.has(name))
+    if (missing.length) {
+      throw new MemoryStorageLifecycleError('migration_failure', `長期記憶 schema 不完整：缺少 ${missing.join(', ')}`)
+    }
   }
 
   private ensureOpen(): void {
-    if (this.closed) throw new DurableMemoryStoreError('closed', 'Durable memory store is closed')
+    if (this.lifecycle !== 'open') throw new DurableMemoryStoreError('closed', `Durable memory store is ${this.lifecycle}`)
   }
 
   private async settleWrites(): Promise<void> {
@@ -244,8 +309,10 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
   }
 
   private enqueueWrite<T>(operation: () => T, afterCommit?: (value: T) => void): Promise<T> {
-    const result = this.writeTail.then(() => {
-      this.ensureOpen()
+    if (this.lifecycle !== 'open') return Promise.reject(new DurableMemoryStoreError('closed', `Durable memory store is ${this.lifecycle}`))
+    const result = this.writeTail.then(async () => {
+      await this.beforeWrite?.()
+      if (this.lifecycle === 'closed') throw new DurableMemoryStoreError('closed', 'Durable memory store is closed')
       this.db.exec('BEGIN IMMEDIATE')
       try {
         const value = operation()
@@ -545,7 +612,8 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
   }
 
   async health(): Promise<MemoryHealth> {
-    if (this.closed) return { status: 'closed', revision: this.closedRevision }
+    if (this.lifecycle === 'closed') return { status: 'closed', revision: this.closedRevision }
+    if (this.lifecycle === 'closing') return { status: 'closing', revision: this.currentRevision() }
     await this.writeTail
     return { status: 'ready', revision: this.currentRevision() }
   }
@@ -694,14 +762,34 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     })
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return
-    await this.writeTail
-    const revision = this.currentRevision()
-    this.maintainDeletedPages()
-    this.db.close()
-    this.closed = true
-    this.closedRevision = revision
+  async close(timeoutMs = SHUTDOWN_TIMEOUT_MS): Promise<void> {
+    if (this.lifecycle === 'closed') return
+    if (this.lifecycle === 'closing') throw new DurableMemoryStoreError('closed', 'Durable memory store shutdown is already in progress')
+    this.lifecycle = 'closing'
+    const drain = this.writeTail.then(() => {
+      const revision = this.currentRevision()
+      const row = this.db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() as { busy?: number; log?: number; checkpointed?: number } | undefined
+      if (Number(row?.busy || 0) !== 0 || Number(row?.log || 0) !== Number(row?.checkpointed || 0)) {
+        throw new MemoryStorageLifecycleError('checkpoint_failure', '長期記憶 WAL checkpoint 未完成；關閉狀態不宣稱成功。')
+      }
+      this.db.close()
+      this.lifecycle = 'closed'
+      this.closedRevision = revision
+    })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        drain,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new MemoryStorageLifecycleError(
+            'shutdown_timeout',
+            `長期記憶關閉超過 ${timeoutMs}ms；已拒絕新 writes，但仍在等待已接受 transaction。`,
+          )), Math.max(1, timeoutMs))
+        }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   }
 
   private readMigrationReport(): MemoryMigrationReport | undefined {

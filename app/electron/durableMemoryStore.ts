@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, resolve } from 'node:path'
+import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
 import {
   planMemoryImport, checkedMemoryImportPlan, memoryImportOperationKey, memoryImportRequestHash, replayMemoryImport, sourceProvenance,
   type MemoryImportPreviewInput, type MemoryImportPreview, type MemoryImportApplyInput, type MemoryImportResult, type MemoryImportReceipt, type MemoryImportTestHooks,
@@ -162,10 +163,7 @@ function resolveProjectPath(path: string): string {
   }
 }
 
-export type MemoryHealth = {
-  status: 'ready' | 'closed'
-  revision: number
-}
+export type MemoryHealth = MemoryStorageHealth
 
 export type DurableMemoryProvenance = {
   origin: MemoryOrigin
@@ -389,7 +387,7 @@ export interface DurableMemoryStore {
   applyImport(input: MemoryImportApplyInput): Promise<MemoryImportResult>
   migrateLegacy(input: MemoryMigrationInput): Promise<MemoryMigrationResult>
   migrationStatus(): Promise<MemoryMigrationReport | undefined>
-  close(): Promise<void>
+  close(timeoutMs?: number): Promise<void>
 }
 
 export type MemoryAuthorityAction =

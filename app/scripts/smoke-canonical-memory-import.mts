@@ -32,8 +32,9 @@ async function client(store: DurableMemoryStore) {
   return { send, messages }
 }
 
-async function contract(store: DurableMemoryStore) {
-  const { send, messages } = await client(store)
+type ImportClient = Awaited<ReturnType<typeof client>>
+
+async function initialImportContract(store: DurableMemoryStore, send: ImportClient['send'], messages: PiHostMessage[]) {
   const response = await send('memory/v1/import-preview', { access, bundle, mode: 'skip' })
   assert.equal(response.error, undefined)
   const preview = response.result?.memoryStore?.preview
@@ -52,6 +53,15 @@ async function contract(store: DurableMemoryStore) {
   const exported = await store.exportBundle({ access })
   assert.equal(exported.revision, 1)
   assert.equal(exported.entries[0].text, '使用繁體中文')
+  await importedProvenanceContract(store, messages)
+  const exportResponse = await send('memory/v1/export', { access })
+  const roundTrip = exportResponse.result?.memoryStore?.bundle
+  assert.equal(roundTrip?.entries[0].tags[0], '臺灣')
+  return applyInput
+}
+
+async function importedProvenanceContract(store: DurableMemoryStore, messages: PiHostMessage[]) {
+  const exported = await store.exportBundle({ access })
   assert.deepEqual(exported.entries[0].provenance.importedFrom, bundle.entries[0].provenance)
   assert.equal(exported.entries[0].provenance.origin, 'admin')
   assert.equal(exported.entries[0].provenance.operation, 'import')
@@ -61,10 +71,9 @@ async function contract(store: DurableMemoryStore) {
   const revisionEvents = messages.filter((message) => 'event' in message && message.event === 'memory/changed')
   assert.equal(revisionEvents.length, 1)
   assert.equal(JSON.stringify(revisionEvents).includes('使用繁體中文'), false)
-  const exportResponse = await send('memory/v1/export', { access })
-  const roundTrip = exportResponse.result?.memoryStore?.bundle
-  assert.equal(roundTrip?.entries[0].tags[0], '臺灣')
+}
 
+async function conflictModesContract(store: DurableMemoryStore, send: ImportClient['send']) {
   for (const mode of ['skip', 'overwrite', 'rename']) {
     const changedBundle = structuredClone(bundle)
     changedBundle.entries[0].text = `mode-${mode}`
@@ -78,6 +87,9 @@ async function contract(store: DurableMemoryStore) {
   }
   const renamed = await store.get({ access, scope: { kind: 'global' }, logicalKey: 'language~import-1' })
   assert.equal(renamed?.text, 'mode-rename')
+}
+
+async function invalidImportContract(store: DurableMemoryStore, send: ImportClient['send'], applyInput: Record<string, unknown>) {
   const beforeInvalid = await store.revision()
   const badRows = [
     { ...bundle.entries[0], scope: { kind: 'project' } },
@@ -110,6 +122,13 @@ async function contract(store: DurableMemoryStore) {
   const stale = await send('memory/v1/import-preview', { access, bundle, mode: 'overwrite' })
   await store.upsert({ access, scope: { kind: 'global' }, logicalKey: 'outside-change', kind: 'memory', text: 'new', tags: [], createdAt: '2026-08-27T00:00:00.000Z' })
   assert.equal((await send('memory/v1/import-apply', { ...applyInput, mode: 'overwrite', operationId: 'stale', previewId: stale.result?.memoryStore?.preview?.previewId, expectedRevision: stale.result?.memoryStore?.preview?.revision })).error?.code, 'invalid_request')
+}
+
+async function contract(store: DurableMemoryStore) {
+  const { send, messages } = await client(store)
+  const applyInput = await initialImportContract(store, send, messages)
+  await conflictModesContract(store, send)
+  await invalidImportContract(store, send, applyInput)
   return applyInput
 }
 

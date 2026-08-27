@@ -4,13 +4,17 @@ import { PiHostAttachmentJournal, PI_HOST_ATTACHMENT_MAX_SUMMARY_BYTES } from '.
 import type { TurnRecordEntry } from '../src/agent/turnRecord.ts'
 
 class FakeChild {
-  private listeners = new Map<string, Array<(...args: any[]) => void>>()
+  protected listeners = new Map<string, Array<(...args: any[]) => void>>()
   on(event: string, listener: (...args: any[]) => void) {
     this.listeners.set(event, [...(this.listeners.get(event) || []), listener])
   }
   postMessage(message: { id: number; method: string }) {
     const result = message.method === 'initialize'
       ? { protocolVersion: 3, capabilities: ['turns', 'attachments-v1'], status: 'ready' }
+      : message.method === 'health/get'
+        ? { protocolVersion: 3, capabilities: ['turns', 'attachments-v1'], status: 'ready', memoryHealth: { status: 'ready', revision: 0 } }
+      : message.method === 'lifecycle/shutdown'
+        ? { memoryHealth: { status: 'closed', revision: 0 } }
       : message.method === 'runs/finalize-claim'
         ? { finalizationClaim: { runId: 'supervised-run', claimed: true, owner: true, state: 'claimed', claimEpoch: 1, leaseExpiresAt: 30_000 } }
         : message.method === 'runs/finalize-complete'
@@ -33,6 +37,22 @@ class HangingTurnChild extends FakeChild {
   override postMessage(message: { id: number; method: string }) {
     if (message.method === 'turn/submit' || message.method === 'turn/cancel') return
     super.postMessage(message)
+  }
+}
+
+class DegradedStorageChild extends FakeChild {
+  override postMessage(message: { id: number; method: string }) {
+    if (message.method !== 'initialize') return
+    queueMicrotask(() => {
+      this.listeners.get('message')?.forEach((listener) => listener({
+        event: 'host/storage-health',
+        payload: {
+          status: 'degraded', code: 'sqlite_integrity_failure',
+          message: 'integrity failed', recovery: 'preserve-storage', readOnlyExport: false,
+        },
+      }))
+      this.exit(78)
+    })
   }
 }
 
@@ -60,7 +80,7 @@ firstChild?.exit(1)
 for (let attempt = 0; attempt < 20 && spawnCount < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10))
 assert.equal(spawnCount, 2)
 assert.equal(supervisor.status().state, 'ready')
-supervisor.stop()
+await supervisor.stop()
 assert.equal(supervisor.status().state, 'stopped')
 
 const boundedSupervisor = new PiHostSupervisor(
@@ -72,7 +92,18 @@ await assert.rejects(
   boundedSupervisor.submitTurn('session-timeout', 'never settles', 'run-timeout'),
   /Pi Core Host turn\/submit timed out after 50ms/,
 )
-boundedSupervisor.stop()
+await boundedSupervisor.stop()
+
+const degradedSupervisor = new PiHostSupervisor(() => new DegradedStorageChild(), { requestTimeoutMs: 50 })
+await assert.rejects(degradedSupervisor.start(), /Pi Core Host exited/)
+assert.deepEqual(degradedSupervisor.status(), {
+  state: 'error', message: 'integrity failed',
+  memoryHealth: {
+    status: 'degraded', code: 'sqlite_integrity_failure',
+    message: 'integrity failed', recovery: 'preserve-storage', readOnlyExport: false,
+  },
+})
+await degradedSupervisor.stop()
 
 const entry = (seq: number): TurnRecordEntry => ({
   kind: seq === 1 ? 'turn-start' : seq === 4 ? 'turn-end' : 'assistant-text',

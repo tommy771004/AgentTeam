@@ -18,6 +18,7 @@ import type {
 } from '../src/agent/memoryProjection'
 import type { DurableMemoryBundle } from './durableMemoryStore'
 import type { MemoryImportApplyInput, MemoryImportMode, MemoryImportPreview, MemoryImportResult } from './durableMemoryImport'
+import type { MemoryStorageHealth } from './memoryStorageLifecycle'
 
 type PiHostThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 type PiHostSettings = {
@@ -62,11 +63,13 @@ const api = {
       exitCode?: number | null
       signal?: number
       message?: string
+      memoryHealth?: MemoryStorageHealth
     }>,
     health: () => ipcRenderer.invoke('pi-host:health') as Promise<{
       protocolVersion: number
       capabilities: string[]
       status: 'ready'
+      memoryHealth?: MemoryStorageHealth
     }>,
     settings: {
       get: () => ipcRenderer.invoke('pi-host:settings:get') as Promise<{

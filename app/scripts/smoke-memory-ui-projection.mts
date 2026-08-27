@@ -47,5 +47,7 @@ assert.match(appSource, /event === 'memory\/changed'/)
 assert.match(preloadSource, /pi-host:memory-projection:list/)
 assert.match(preloadSource, /pi-host:memory-projection:clear-all/)
 assert.doesNotMatch(settingsSource, /onChange=\{\(e\) => void setUserProfile/)
+assert.match(settingsSource, /目前數字不是 canonical count/)
+assert.match(settingsSource, /不會以空清單覆寫原資料/)
 
 console.log('memory UI projection smoke: ok')

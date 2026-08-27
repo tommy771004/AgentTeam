@@ -3,6 +3,7 @@ import type { PiHostFinalizationClaimResult, PiHostFinalizationCompleteResult } 
 import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
 import type { MemoryImportPreviewInput, MemoryImportApplyInput } from './durableMemoryImport.ts'
+import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
 import type {
   DurableMemoryProtocolResult,
   CanonicalProjectId,
@@ -20,9 +21,9 @@ import type {
 export type PiHostStatus =
   | { state: 'stopped' }
   | { state: 'starting' }
-  | { state: 'ready'; protocolVersion: number; capabilities: string[] }
+  | { state: 'ready'; protocolVersion: number; capabilities: string[]; memoryHealth?: MemoryStorageHealth }
   | { state: 'crashed'; exitCode: number | null; signal?: number }
-  | { state: 'error'; message: string }
+  | { state: 'error'; message: string; memoryHealth?: Extract<MemoryStorageHealth, { status: 'degraded' }> }
 
 type PiHostChild = {
   on(event: string, listener: (...args: any[]) => void): unknown
@@ -88,6 +89,9 @@ export class PiHostSupervisor {
     this.child = child
     child.on('message', (message: PiHostMessage) => {
       if ('event' in message) {
+        if (message.event === 'host/storage-health') {
+          this.statusValue = { state: 'error', message: message.payload.message, memoryHealth: message.payload }
+        }
         const runId = typeof message.payload === 'object' && message.payload && 'runId' in message.payload
           ? String((message.payload as { runId?: unknown }).runId || '')
           : ''
@@ -107,7 +111,9 @@ export class PiHostSupervisor {
         this.statusValue = { state: 'stopped' }
         return
       }
-      this.statusValue = { state: 'crashed', exitCode: code, signal }
+      if (this.statusValue.state !== 'error' || !this.statusValue.memoryHealth) {
+        this.statusValue = { state: 'crashed', exitCode: code, signal }
+      }
       for (const waiter of this.pending.values()) {
         if (waiter.timer) clearTimeout(waiter.timer)
         waiter.reject(new Error('Pi Core Host exited'))
@@ -125,10 +131,17 @@ export class PiHostSupervisor {
       this.statusValue = { state: 'error', message }
       throw new Error(message)
     }
+    const health = await this.request('health/get', {})
+    if (health.error || health.result?.memoryHealth?.status !== 'ready') {
+      const message = health.error?.message || 'Pi Core Host memory storage is not ready'
+      this.statusValue = { state: 'error', message }
+      throw new Error(message)
+    }
     this.statusValue = {
       state: 'ready',
       protocolVersion: response.result.protocolVersion ?? 1,
       capabilities: response.result.capabilities ? [...response.result.capabilities] : [],
+      memoryHealth: health.result.memoryHealth,
     }
     this.restartAttempts = 0
     return this.statusValue
@@ -525,20 +538,43 @@ export class PiHostSupervisor {
     return response.result
   }
 
-  stop(): void {
+  async stop(timeoutMs = 6_000): Promise<{ clean: boolean; message?: string }> {
     this.stopping = true
     if (this.restartTimer) {
       clearTimeout(this.restartTimer)
       this.restartTimer = undefined
     }
+    const child = this.child
+    let clean = !child
+    let message: string | undefined
+    if (child) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        const response = await Promise.race([
+          this.request('lifecycle/shutdown', {}),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`Pi Core Host shutdown timed out after ${timeoutMs}ms`)), Math.max(1, timeoutMs))
+          }),
+        ])
+        if (response.error || response.result?.memoryHealth?.status !== 'closed') {
+          throw new Error(response.error?.message || 'Pi Core Host memory storage did not confirm close')
+        }
+        clean = true
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error)
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
+    }
     for (const waiter of this.pending.values()) {
       if (waiter.timer) clearTimeout(waiter.timer)
-      waiter.reject(new Error('Pi Core Host stopped'))
+      waiter.reject(new Error(message || 'Pi Core Host stopped'))
     }
     this.pending.clear()
-    this.child?.kill()
+    child?.kill()
     this.child = null
     this.statusValue = { state: 'stopped' }
+    return { clean, ...(message ? { message } : {}) }
   }
 
   private scheduleRestart(): void {
@@ -555,7 +591,9 @@ export class PiHostSupervisor {
 
   private request(method: PiHostRequest['method'], params: Record<string, unknown>): Promise<PiHostResponse> {
     const child = this.child
-    if (!child) return Promise.reject(new Error('Pi Core Host is not running'))
+    if (!child) {
+      return Promise.reject(new Error(this.statusValue.state === 'error' ? this.statusValue.message : 'Pi Core Host is not running'))
+    }
     const id = this.nextRequestId++
     return new Promise((resolve, reject) => {
       const timeoutMs = method === 'turn/submit' ? this.turnIdleTimeoutMs : this.requestTimeoutMs

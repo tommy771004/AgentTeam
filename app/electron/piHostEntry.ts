@@ -13,6 +13,7 @@ import { createSeatbeltBuiltinShellAdapter } from './piSeatbeltShellSandbox.ts'
 import { createBubblewrapBuiltinShellAdapter } from './piBubblewrapShellSandbox.ts'
 import { JsonCompactionCheckpointStore } from './compactionCheckpointStore.ts'
 import { openPiHostStorage } from './piHostStorage.ts'
+import { MemoryStorageLifecycleError, storageLifecycleError } from './memoryStorageLifecycle.ts'
 
 type ParentPort = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
@@ -50,7 +51,17 @@ const statePath = process.env.SUBAGENTS_PI_HOST_STATE_PATH || `${process.cwd()}/
 const checkpointDir = process.env.SUBAGENTS_PI_CHECKPOINT_DIR || path.join(path.dirname(statePath), 'run-checkpoints')
 const compactionCheckpoints = new JsonCompactionCheckpointStore(checkpointDir)
 const durableMemoryPath = process.env.SUBAGENTS_DURABLE_MEMORY_DB_PATH || path.join(path.dirname(statePath), 'durable-memory.sqlite')
+const publishStorageFailure = (error: unknown) => {
+  const lifecycle = error instanceof MemoryStorageLifecycleError
+    ? error
+    : storageLifecycleError(error, 'storage_unavailable', '長期記憶 storage 啟動失敗；未覆寫原資料。')
+  const event: PiHostMessage = { event: 'host/storage-health', payload: lifecycle.health }
+  if (parentPort) parentPort.postMessage(event)
+  else process.stdout.write(`${JSON.stringify(event)}\n`)
+  return lifecycle
+}
 const { snapshot: storedState, memoryStore: durableMemoryStore } = await openPiHostStorage(statePath, durableMemoryPath)
+  .catch((error) => { throw publishStorageFailure(error) })
 const userConfig = await bootstrapPiUserConfig()
 const migrationPath = process.env.SUBAGENTS_PI_SETTINGS_MIGRATION_PATH || path.join(path.dirname(statePath), 'pi-settings-migration.json')
 let migratedSettings = storedState.settings
@@ -203,10 +214,15 @@ if (parentPort) {
   // generation when the supervising stdio channel closes, otherwise a clean
   // Host shutdown can hang after an extension reload qualification.
   input.on('close', async () => {
-    await Promise.all(inFlight)
-    await persistence
-    stopAllPiMcp()
-    await disposeAllPiSessions()
-    await durableMemoryStore.close()
+    try {
+      await Promise.all(inFlight)
+      await persistence
+      stopAllPiMcp()
+      await disposeAllPiSessions()
+      await durableMemoryStore.close()
+    } catch (error) {
+      process.exitCode = 1
+      console.error('[pi-host] bounded shutdown failed', publishStorageFailure(error))
+    }
   })
 }

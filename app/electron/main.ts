@@ -853,14 +853,27 @@ app.whenReady().then(async () => {
   })
 })
 
-app.on('before-quit', () => {
-  interruptExternalCliSessions('Electron host stopping; external session requires recovery')
-  piHostSupervisor.stop()
-  void stopOpenCodeServers()
+let appShutdownStarted = false
+let appShutdownComplete = false
+app.on('before-quit', (event) => {
   isQuitting = true
+  if (appShutdownComplete) return
+  event.preventDefault()
+  if (appShutdownStarted) return
+  appShutdownStarted = true
+  interruptExternalCliSessions('Electron host stopping; external session requires recovery')
+  void stopOpenCodeServers()
   mcpStdioStopAll()
   killAllTerms()
   void stopTelegramGateway()
+  void piHostSupervisor.stop().then((result) => {
+    if (!result.clean) console.error('[pi-host] shutdown degraded', result.message)
+  }).catch((error) => {
+    console.error('[pi-host] shutdown failed', error)
+  }).finally(() => {
+    appShutdownComplete = true
+    app.quit()
+  })
 })
 
 app.on('window-all-closed', () => {

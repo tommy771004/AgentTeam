@@ -3,6 +3,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
 import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatalog.ts'
+import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
 import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage, type PiHostFinalizationClaimResult, type PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
 
@@ -39,7 +40,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -49,6 +50,7 @@ export type PiHostResponse = {
     protocolVersion?: number
     capabilities?: PiHostCapability[]
     status?: 'ready'
+    memoryHealth?: MemoryStorageHealth
     cursor?: number
     sessions?: unknown[]
     settings?: PiSettings
@@ -123,6 +125,10 @@ export type PiHostResponse = {
 }
 
 export type PiHostEvent =
+  | {
+      event: 'host/storage-health'
+      payload: Extract<MemoryStorageHealth, { status: 'degraded' }>
+    }
   | {
       event: 'host/ready'
       payload: { protocolVersion: number; capabilities: PiHostCapability[] }
@@ -332,6 +338,7 @@ type HostState = {
    */
   catalogProjection: Map<string, PiCatalogEntry>
   attachmentJournal: PiHostAttachmentJournal
+  shuttingDown: boolean
 }
 
 export type PiToolAuditRecord = {
@@ -1720,7 +1727,9 @@ export function handlePiHostRequest(
   if (initialization) return initialization
 
   if (!state.initialized) return [errorResponse(id, 'not_initialized', 'Pi Host must be initialized first')]
-  if (input.method === 'health/get') return [{ id, result: readyResult(state.negotiatedProtocolVersion) }]
+  if (isPiHostLifecycleRequest(state, input.method)) {
+    return handlePiHostLifecycleRequest(state, input.method, id)
+  }
   if (input.method === 'runtime/status') return [{ id, result: piCoreRuntimeStatus() }]
   if (input.method === 'tools/list') {
     if (input.params?.requireContract === true && !state.toolContractNegotiated) {
@@ -3334,6 +3343,25 @@ export function handlePiHostRequest(
   return [errorResponse(id, 'unknown_method', `Unknown Pi Host method: ${input.method}`)]
 }
 
+function handlePiHostLifecycleRequest(
+  state: HostState,
+  method: PiHostRequest['method'],
+  id: string | number,
+): PiHostMessage[] | Promise<PiHostMessage[]> {
+  if (method === 'health/get') {
+    return state.memoryStore.health().then((memoryHealth) => [{ id, result: { ...readyResult(state.negotiatedProtocolVersion), memoryHealth } }])
+  }
+  if (method === 'lifecycle/shutdown') {
+    state.shuttingDown = true
+    return state.memoryStore.close().then(async () => [{ id, result: { memoryHealth: await state.memoryStore.health() } }])
+  }
+  return [errorResponse(id, 'closed', 'Pi Host is shutting down; new requests are refused')]
+}
+
+function isPiHostLifecycleRequest(state: HostState, method: PiHostRequest['method']): boolean {
+  return method === 'health/get' || method === 'lifecycle/shutdown' || state.shuttingDown
+}
+
 export function createPiHostServer(
   send: (message: PiHostMessage) => void,
   initialSnapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions?: PiExtension[]; attachments?: PiHostAttachment[] } = {
@@ -3376,6 +3404,7 @@ export function createPiHostServer(
     publishedMemoryRevisions: new Set(),
     catalogProjection: new Map(),
     attachmentJournal,
+    shuttingDown: false,
   }
   // A persisted active record has no live witness in a new Host child. Keep
   // the Host honest across process restart; renderer reloads do not recreate

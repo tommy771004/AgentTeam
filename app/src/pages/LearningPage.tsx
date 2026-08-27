@@ -11,6 +11,7 @@ import { buildLearningExportPlan } from '../agent/hermes/learningExport'
 import { failedSkillMigrations, useSkillMigrationStore } from '../store/skillMigrationStore'
 import { pushSkillsToHost } from '../agent/hermes/skillHostSync'
 import { MemoryImportPanel } from '../components/MemoryImportPanel'
+import type { MemoryEntry } from '../agent/hermes/types'
 
 const SECTIONS = [
   { id: 'memory', label: '持久記憶', icon: 'psychology' },
@@ -70,7 +71,7 @@ function LearningMemoryScopeBar() {
       <div className="app-panel px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold">記憶範圍</div>
-          <div className="text-[10px] text-outline">Host revision {projection.revision} · {projection.total} 筆</div>
+          <div className="text-[10px] text-outline">{projection.error ? '長期記憶 unavailable；目前數字不是 canonical count' : `Host revision ${projection.revision} · ${projection.total} 筆`}</div>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => void setScope({ kind: 'global' })} className={`px-3 py-1.5 rounded-lg text-xs ${projection.scope.kind === 'global' ? 'bg-primary/20 text-primary' : 'text-outline hover:bg-white/5'}`}>全域</button>
@@ -86,10 +87,11 @@ function LearningMemoryPagination() {
   const projection = useLearningStore((state) => state.memoryProjection)
   const next = useLearningStore((state) => state.nextMemoryPage)
   const previous = useLearningStore((state) => state.previousMemoryPage)
+  const disabled = memoryControlsDisabled(projection)
   return (
     <div className="flex items-center justify-end gap-2 text-[10px]">
-      <button type="button" disabled={!projection.previousCursors.length || projection.loading} onClick={() => void previous()} className="px-2 py-1 rounded border border-white/10 disabled:opacity-30">上一頁</button>
-      <button type="button" disabled={!projection.nextCursor || projection.loading} onClick={() => void next()} className="px-2 py-1 rounded border border-white/10 disabled:opacity-30">下一頁</button>
+      <button type="button" disabled={!projection.previousCursors.length || disabled} onClick={() => void previous()} className="px-2 py-1 rounded border border-white/10 disabled:opacity-30">上一頁</button>
+      <button type="button" disabled={!projection.nextCursor || disabled} onClick={() => void next()} className="px-2 py-1 rounded border border-white/10 disabled:opacity-30">下一頁</button>
     </div>
   )
 }
@@ -98,6 +100,30 @@ function requestMemoryEdit(id: string, text: string, update: (id: string, text: 
   const next = window.prompt('編輯記憶', text)
   if (next === null || next.trim() === text.trim()) return
   void update(id, next).catch(() => undefined)
+}
+
+function memoryControlsDisabled(projection: { loading: boolean; error: string | null }): boolean {
+  return projection.loading || Boolean(projection.error)
+}
+
+function LearningMemoryEntries({ error, entries, update, remove }: {
+  error: string | null
+  entries: MemoryEntry[]
+  update: (id: string, text: string) => Promise<void>
+  remove: (id: string) => Promise<void>
+}) {
+  if (error) return <p className="text-xs text-error">無法讀取 canonical memory；已停用寫入，不會把 unavailable 當成 0 筆。</p>
+  return <ul className="text-sm text-on-surface-variant space-y-1 max-h-40 overflow-y-auto custom-scrollbar">
+    {entries.map((entry) => (
+      <li key={entry.id} className="border-b border-white/5 py-1 flex items-start gap-2">
+        <span className="min-w-0 flex-1"><span className="text-[10px] text-outline font-[family-name:var(--font-mono)]">{entry.createdAt.slice(0, 16)}</span>{' '}{entry.text}</span>
+        <span className="flex gap-2 shrink-0">
+          <button type="button" className="text-[10px] text-primary" onClick={() => requestMemoryEdit(entry.id, entry.text, update)}>編輯</button>
+          <button type="button" className="text-[10px] text-error" onClick={() => void remove(entry.id).catch(() => undefined)}>刪除</button>
+        </span>
+      </li>
+    ))}
+  </ul>
 }
 
 async function canonicalMemoryExportFile(): Promise<{
@@ -174,6 +200,7 @@ export function LearningPage() {
   const loadArchive = useAgentStore((s) => s.loadArchive)
   const knowledge = useAgentStore((s) => s.agent.knowledge)
   const projectRoot = useProjectStore((s) => s.root)
+  const memoryDisabled = memoryControlsDisabled(memoryProjection)
 
   const [userEdit, setUserEdit] = useState('')
   const [memEdit, setMemEdit] = useState('')
@@ -294,7 +321,7 @@ export function LearningPage() {
               />
               <button
                 type="button"
-                disabled={memoryProjection.loading}
+                disabled={memoryDisabled}
                 onClick={() => void setUserProfile(userEdit).catch(() => undefined)}
                 className="px-3 py-2 rounded-lg bg-primary-container text-on-primary-container text-xs font-semibold"
               >
@@ -314,7 +341,7 @@ export function LearningPage() {
               />
               <button
                 type="button"
-                disabled={memoryProjection.loading}
+                disabled={memoryDisabled}
                 onClick={() => void setMemoryDoc(memEdit).catch(() => undefined)}
                 className="px-3 py-2 rounded-lg border border-primary/40 text-primary text-xs font-semibold"
               >
@@ -332,7 +359,7 @@ export function LearningPage() {
                 />
                 <button
                   type="button"
-                  disabled={memoryProjection.loading}
+                  disabled={memoryDisabled}
                   onClick={() => {
                     if (!note.trim()) return
                     void appendMemory(note.trim()).then(() => setNote('')).catch(() => undefined)
@@ -342,17 +369,7 @@ export function LearningPage() {
                   追加
                 </button>
               </div>
-              <ul className="text-sm text-on-surface-variant space-y-1 max-h-40 overflow-y-auto custom-scrollbar">
-                {memory.entries.map((e) => (
-                  <li key={e.id} className="border-b border-white/5 py-1 flex items-start gap-2">
-                    <span className="min-w-0 flex-1"><span className="text-[10px] text-outline font-[family-name:var(--font-mono)]">{e.createdAt.slice(0, 16)}</span>{' '}{e.text}</span>
-                    <span className="flex gap-2 shrink-0">
-                      <button type="button" className="text-[10px] text-primary" onClick={() => requestMemoryEdit(e.id, e.text, updateMemoryEntry)}>編輯</button>
-                      <button type="button" className="text-[10px] text-error" onClick={() => void deleteMemoryEntry(e.id).catch(() => undefined)}>刪除</button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <LearningMemoryEntries error={memoryProjection.error} entries={memory.entries} update={updateMemoryEntry} remove={deleteMemoryEntry} />
               <LearningMemoryPagination />
             </div>
           </div>

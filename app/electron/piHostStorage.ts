@@ -3,11 +3,35 @@ import { chmod, lstat, mkdir, open, readFile, rename } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { decodePiHostState, loadPiHostState, type PiHostSnapshot } from './piHostState.ts'
 import { SqliteDurableMemoryStore } from './sqliteDurableMemoryStore.ts'
+import { MemoryStorageLifecycleError, storageLifecycleError } from './memoryStorageLifecycle.ts'
 
 /** Startup owns this transition; no request is served until both authorities agree. */
 export type PiStorageTransition = 'backup-ready' | 'memory-committed' | 'legacy-retired' | 'state-installed'
 
 export async function openPiHostStorage(
+  statePath: string,
+  databasePath: string,
+  onTransition?: (phase: PiStorageTransition) => void,
+): Promise<{
+  snapshot: PiHostSnapshot
+  memoryStore: SqliteDurableMemoryStore
+}> {
+  try {
+    return await openPiHostStorageUnchecked(statePath, databasePath, onTransition)
+  } catch (error) {
+    if (error instanceof MemoryStorageLifecycleError) throw error
+    const message = error instanceof Error ? error.message : ''
+    if (message.includes('JSON 損壞')) {
+      throw new MemoryStorageLifecycleError('json_parse_failure', message, { cause: error })
+    }
+    if (message.includes('schema 不相容') || message.includes('schema v')) {
+      throw new MemoryStorageLifecycleError('unsupported_schema', message, { cause: error, recovery: 'use-compatible-version' })
+    }
+    throw storageLifecycleError(error, 'storage_unavailable', '長期記憶 storage readiness 檢查失敗；未覆寫原資料。')
+  }
+}
+
+async function openPiHostStorageUnchecked(
   statePath: string,
   databasePath: string,
   onTransition?: (phase: PiStorageTransition) => void,
@@ -53,7 +77,7 @@ export async function openPiHostStorage(
     onTransition?.('state-installed')
     return { snapshot: next, memoryStore }
   } catch (error) {
-    await memoryStore.close()
+    try { await memoryStore.close() } catch { /* preserve startup failure */ }
     throw error
   }
 }
@@ -65,11 +89,12 @@ async function openInstalledStorage(statePath: string, databasePath: string) {
   if (!(await lstat(databasePath)).isFile()) throw new Error('SQLite 記憶資料庫必須是一般檔案；拒絕啟動。')
   const memoryStore = await SqliteDurableMemoryStore.open(databasePath)
   try {
+    await restrictDatabaseFiles(databasePath)
     const report = await memoryStore.migrationStatus()
     if (!report || report.sourceHash !== snapshot.memoryAuthority.sourceHash) throw new Error('Host state 與 SQLite migration marker 不一致；請從相符備份復原。')
     return { snapshot, memoryStore }
   } catch (error) {
-    await memoryStore.close()
+    try { await memoryStore.close() } catch { /* preserve startup failure */ }
     throw error
   }
 }

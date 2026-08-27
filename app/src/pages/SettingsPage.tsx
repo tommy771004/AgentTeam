@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { MemoryImportPanel } from '../components/MemoryImportPanel'
+import type { MemoryEntry } from '../agent/hermes/types'
 import { APPROVAL_MODE_DEFS } from '../agent/approvalModes'
 import { exportRunMetricsJsonl, metricsSummary, resetRunMetrics } from '../agent/metrics'
 import { ThemePage } from '../components/SectionNav'
@@ -294,7 +295,7 @@ function SettingsMemoryScopeGroup() {
     <SettingsGroup title="記憶範圍">
       <SettingsRow
         title={`${memoryScopeLabel(projection.scope.kind)}記憶`}
-        description={`Host revision ${projection.revision} · ${projection.total} 筆`}
+        description={projection.error ? '長期記憶 unavailable；目前數字不是 canonical count' : `Host revision ${projection.revision} · ${projection.total} 筆`}
         control={
           <div className="flex gap-1">
             <button type="button" className={settingsBtnCls} disabled={projection.scope.kind === 'global'} onClick={() => void setScope({ kind: 'global' })}>全域</button>
@@ -311,10 +312,11 @@ function SettingsMemoryPagination() {
   const projection = useLearningStore((state) => state.memoryProjection)
   const next = useLearningStore((state) => state.nextMemoryPage)
   const previous = useLearningStore((state) => state.previousMemoryPage)
+  const disabled = memoryControlsDisabled(projection)
   return (
     <div className="flex justify-end gap-2 px-4 py-3">
-      <button type="button" className={settingsBtnCls} disabled={!projection.previousCursors.length || projection.loading} onClick={() => void previous()}>上一頁</button>
-      <button type="button" className={settingsBtnCls} disabled={!projection.nextCursor || projection.loading} onClick={() => void next()}>下一頁</button>
+      <button type="button" className={settingsBtnCls} disabled={!projection.previousCursors.length || disabled} onClick={() => void previous()}>上一頁</button>
+      <button type="button" className={settingsBtnCls} disabled={!projection.nextCursor || disabled} onClick={() => void next()}>下一頁</button>
     </div>
   )
 }
@@ -323,6 +325,32 @@ function requestSettingsMemoryEdit(id: string, text: string, update: (id: string
   const next = window.prompt('編輯記憶', text)
   if (next === null || next.trim() === text.trim()) return
   void update(id, next).catch(() => undefined)
+}
+
+function SettingsMemoryEntries({ error, entries, update, remove }: {
+  error: string | null
+  entries: MemoryEntry[]
+  update: (id: string, text: string) => Promise<void>
+  remove: (id: string) => Promise<void>
+}) {
+  if (error) return <div className="px-4 py-4 text-[12px] text-error">無法讀取 canonical memory；已停用新增、編輯與刪除，不會以空清單覆寫原資料。</div>
+  if (!entries.length) return <div className="px-4 py-4 text-[12px] text-outline">尚無記憶條目</div>
+  return entries.slice(0, 40).map((entry) => (
+    <SettingsRow
+      key={entry.id}
+      title={entry.text}
+      description={entry.createdAt?.slice(0, 19).replace('T', ' ')}
+      align="start"
+      control={<div className="flex items-center gap-1">
+        <button type="button" className="text-[12px] text-primary font-medium px-2" onClick={() => requestSettingsMemoryEdit(entry.id, entry.text, update)}>編輯</button>
+        <button type="button" className="text-[12px] text-error font-medium px-2" onClick={() => void remove(entry.id).catch(() => undefined)}>刪除</button>
+      </div>}
+    />
+  ))
+}
+
+function memoryControlsDisabled(projection: { loading: boolean; error: string | null }): boolean {
+  return projection.loading || Boolean(projection.error)
 }
 
 export function SettingsPage() {
@@ -360,6 +388,7 @@ export function SettingsPage() {
   const adoptOcCandidate = useOpenCodeConfigStore((s) => s.adoptCandidate)
   const memory = useLearningStore((s) => s.memory)
   const memoryProjection = useLearningStore((s) => s.memoryProjection)
+  const memoryDisabled = memoryControlsDisabled(memoryProjection)
   const loadLearning = useLearningStore((s) => s.load)
   const deleteMemoryEntry = useLearningStore((s) => s.deleteMemoryEntry)
   const clearMemories = useLearningStore((s) => s.clearMemories)
@@ -1248,7 +1277,7 @@ export function SettingsPage() {
                   onChange={(e) => setProfileDraft(e.target.value)}
                   placeholder="會優先進入提示…"
                 />
-                <button type="button" disabled={memoryProjection.loading} className={settingsBtnPrimaryCls} onClick={() => void setUserProfile(profileDraft).catch(() => undefined)}>儲存使用者檔案</button>
+                <button type="button" disabled={memoryDisabled} className={settingsBtnPrimaryCls} onClick={() => void setUserProfile(profileDraft).catch(() => undefined)}>儲存使用者檔案</button>
               </SettingsStack>
             </SettingsGroup>
             <SettingsGroup
@@ -1257,7 +1286,7 @@ export function SettingsPage() {
                 <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
-                    disabled={memoryProjection.loading}
+                    disabled={memoryDisabled}
                     className={settingsBtnCls + ' text-error border-error/30'}
                     onClick={() => {
                       const intent: MemoryClearIntent = memoryProjection.scope.kind === 'project'
@@ -1270,7 +1299,7 @@ export function SettingsPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={memoryProjection.loading}
+                    disabled={memoryDisabled}
                     className={settingsBtnCls + ' text-error border-error/30'}
                     onClick={() => {
                       void countAllMemories()
@@ -1295,6 +1324,7 @@ export function SettingsPage() {
                 <div className="flex gap-2">
                   <input
                     className={settingsInputCls + ' flex-1'}
+                    disabled={memoryDisabled}
                     value={newMemory}
                     onChange={(e) => setNewMemory(e.target.value)}
                     placeholder="輸入後 Enter 或按新增…"
@@ -1306,6 +1336,7 @@ export function SettingsPage() {
                   />
                   <button
                     type="button"
+                    disabled={memoryDisabled}
                     className={settingsBtnPrimaryCls + ' shrink-0'}
                     onClick={() => {
                       if (!newMemory.trim()) return
@@ -1316,24 +1347,7 @@ export function SettingsPage() {
                   </button>
                 </div>
               </SettingsStack>
-              {(memory.entries || []).length === 0 ? (
-                <div className="px-4 py-4 text-[12px] text-outline">尚無記憶條目</div>
-              ) : (
-                (memory.entries || []).slice(0, 40).map((e) => (
-                  <SettingsRow
-                    key={e.id}
-                    title={e.text}
-                    description={e.createdAt?.slice(0, 19).replace('T', ' ')}
-                    align="start"
-                    control={
-                      <div className="flex items-center gap-1">
-                        <button type="button" className="text-[12px] text-primary font-medium px-2" onClick={() => requestSettingsMemoryEdit(e.id, e.text, updateMemoryEntry)}>編輯</button>
-                        <button type="button" className="text-[12px] text-error font-medium px-2" onClick={() => void deleteMemoryEntry(e.id).catch(() => undefined)}>刪除</button>
-                      </div>
-                    }
-                  />
-                ))
-              )}
+              <SettingsMemoryEntries error={memoryProjection.error} entries={memory.entries || []} update={updateMemoryEntry} remove={deleteMemoryEntry} />
               <SettingsMemoryPagination />
             </SettingsGroup>
           </>
