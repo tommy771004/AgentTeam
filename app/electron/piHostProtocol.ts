@@ -39,7 +39,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -162,7 +162,7 @@ export type PiHostEvent =
       payload: {
         version: 1
         revision: number
-        operation: 'upsert' | 'append' | 'delete' | 'clear'
+        operation: 'upsert' | 'append' | 'delete' | 'clear' | 'delete-entry' | 'clear-project' | 'clear-global' | 'clear-all'
         changed: number
         scope: 'global' | 'project' | 'all'
         project?: string
@@ -230,6 +230,7 @@ import type { PiMemory } from './piMemoryExtension.ts'
 import { createPiDurableMemoryBridge, handleLegacyMemory, listPiMemories, piMemoryProjection, type PiMemoryChange } from './piDurableMemory.ts'
 import type { PiMemoryWriteReceipt } from './piPackBridges.ts'
 import {
+  authorizeMemoryAccess,
   canonicalMemoryDraft,
   canonicalProjectId,
   DurableMemoryStoreError,
@@ -239,6 +240,7 @@ import {
   type MemoryAppendInput,
   type MemoryClearInput,
   type MemoryEntryDraft,
+  type MemoryListInput,
   type MemoryScope,
 } from './durableMemoryStore.ts'
 import {
@@ -1314,7 +1316,7 @@ function durableMemoryDraft(value: unknown): MemoryEntryDraft {
 }
 
 function durableMemoryChangedEvent(
-  operation: 'upsert' | 'append' | 'delete' | 'clear',
+  operation: 'upsert' | 'append' | 'delete' | 'clear' | 'delete-entry' | 'clear-project' | 'clear-global' | 'clear-all',
   revision: number,
   changed: number,
   scope: MemoryScope | { kind: 'all' },
@@ -1421,6 +1423,7 @@ async function listDurableMemory(
   const page = await state.memoryStore.list({
     access,
     ...(scope ? { scope } : {}),
+    kinds: params.kinds as MemoryListInput['kinds'],
     cursor: params.cursor as string | undefined,
     limit: params.limit as number | undefined,
   })
@@ -1445,14 +1448,15 @@ async function deleteDurableMemory(
   access: MemoryAccessContext,
   id: string | number,
   emit?: (message: PiHostMessage) => void,
+  operation: 'delete' | 'delete-entry' = 'delete',
 ): Promise<PiHostMessage[]> {
   const scope = durableMemoryScope(params.scope)
   const logicalKey = durableMemoryLogicalKey(params)
-  const mutation = await state.memoryStore.delete({ access, scope, logicalKey })
-  const event = durableMemoryChangedEvent('delete', mutation.revision, mutation.changed, scope, logicalKey)
+  const mutation = await state.memoryStore.delete({ access, scope, logicalKey, auditOperation: operation })
+  const event = durableMemoryChangedEvent(operation, mutation.revision, mutation.changed, scope, logicalKey)
   const changed = claimMemoryRevision(state, mutation.revision, mutation.changed > 0)
   if (changed && emit) emit(event)
-  return [...(changed && !emit ? [event] : []), { id, result: { memoryStore: { version: 1, operation: 'delete', revision: mutation.revision, mutation } } }]
+  return [...(changed && !emit ? [event] : []), { id, result: { memoryStore: { version: 1, operation, revision: mutation.revision, mutation } } }]
 }
 
 async function clearDurableMemory(
@@ -1471,6 +1475,47 @@ async function clearDurableMemory(
   return [...(changed && !emit ? [event] : []), { id, result: { memoryStore: { version: 1, operation: 'clear', revision: mutation.revision, mutation } } }]
 }
 
+async function clearTypedDurableMemory(
+  state: HostState,
+  operation: 'clear-project' | 'clear-global' | 'clear-all',
+  params: DurableMemoryRequestParams,
+  access: MemoryAccessContext,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): Promise<PiHostMessage[]> {
+  if (params.scope !== undefined) throw new DurableMemoryStoreError('invalid_input', `${operation} does not accept a generic scope`)
+  if (operation !== 'clear-project' && params.project !== undefined) {
+    throw new DurableMemoryStoreError('invalid_input', `${operation} does not accept a project`)
+  }
+  const scope: MemoryClearInput['scope'] = operation === 'clear-project'
+    ? { kind: 'project', project: canonicalProjectId(typeof params.project === 'string' ? params.project : '') }
+    : operation === 'clear-global' ? { kind: 'global' } : { kind: 'all' }
+  const mutation = await state.memoryStore.clear({
+    access,
+    scope,
+    includeSpecial: operation === 'clear-all',
+    auditOperation: operation,
+  })
+  const event = durableMemoryChangedEvent(operation, mutation.revision, mutation.changed, scope, '*')
+  const changed = claimMemoryRevision(state, mutation.revision, mutation.changed > 0)
+  if (changed && emit) emit(event)
+  return [...(changed && !emit ? [event] : []), {
+    id,
+    result: { memoryStore: { version: 1, operation, revision: mutation.revision, mutation } },
+  }]
+}
+
+async function deletionCapabilityDurableMemory(
+  state: HostState,
+  access: MemoryAccessContext,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  authorizeMemoryAccess('clear', access, { kind: 'all' })
+  const capability = await state.memoryStore.deletionCapability()
+  const revision = await state.memoryStore.revision()
+  return [{ id, result: { memoryStore: { version: 1, operation: 'deletion-capability', revision, capability } } }]
+}
+
 function executeDurableMemoryRequest(
   state: HostState,
   method: string,
@@ -1487,6 +1532,11 @@ function executeDurableMemoryRequest(
     case 'memory/v1/recall': return recallDurableMemory(state, params, access, id)
     case 'memory/v1/delete': return deleteDurableMemory(state, params, access, id, emit)
     case 'memory/v1/clear': return clearDurableMemory(state, params, access, id, emit)
+    case 'memory/v1/delete-entry': return deleteDurableMemory(state, params, access, id, emit, 'delete-entry')
+    case 'memory/v1/clear-project': return clearTypedDurableMemory(state, 'clear-project', params, access, id, emit)
+    case 'memory/v1/clear-global': return clearTypedDurableMemory(state, 'clear-global', params, access, id, emit)
+    case 'memory/v1/clear-all': return clearTypedDurableMemory(state, 'clear-all', params, access, id, emit)
+    case 'memory/v1/deletion-capability': return deletionCapabilityDurableMemory(state, access, id)
     default: return Promise.resolve([errorResponse(id, 'unknown_method', `Unknown durable memory method: ${method}`)])
   }
 }

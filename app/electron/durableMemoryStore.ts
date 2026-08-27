@@ -85,13 +85,21 @@ export type MemoryMutationResult = {
   revision: number
 }
 
+export type MemoryDeletionCapability = {
+  mode: 'best-effort' | 'not-applicable'
+  secureDelete: boolean
+  walCheckpoint: 'truncated' | 'busy' | 'unavailable' | 'not-applicable'
+  limitations: string[]
+}
+
 export type DurableMemoryProtocolResult = { version: 1; revision: number } & (
   | { operation: 'upsert'; entry: DurableMemoryEntry }
   | { operation: 'append'; entry: DurableMemoryEntry }
   | { operation: 'get'; entry?: DurableMemoryEntry }
   | { operation: 'list'; page: MemoryPage }
   | { operation: 'recall'; recall: MemoryRecallResult }
-  | { operation: 'delete' | 'clear'; mutation: MemoryMutationResult }
+  | { operation: 'delete' | 'clear' | 'delete-entry' | 'clear-project' | 'clear-global' | 'clear-all'; mutation: MemoryMutationResult }
+  | { operation: 'deletion-capability'; capability: MemoryDeletionCapability }
 )
 
 export type MemoryStoreErrorCode =
@@ -187,15 +195,21 @@ export type MemoryRecallInput = {
 export type MemoryListInput = {
   access: MemoryAccessContext
   scope?: MemoryScope
+  kinds?: DurableMemoryKind[]
   cursor?: string
   limit?: number
 }
 
-export type MemoryDeleteInput = MemoryGetInput
+export type MemoryDeleteInput = MemoryGetInput & {
+  auditOperation?: 'delete' | 'delete-entry'
+}
 
 export type MemoryClearInput = {
   access: MemoryAccessContext
   scope: MemoryScope | { kind: 'all' }
+  /** Typed clear-global preserves profile/document; clear-all sets this true. */
+  includeSpecial?: boolean
+  auditOperation?: 'clear' | 'clear-project' | 'clear-global' | 'clear-all'
 }
 
 export type MemoryConsolidateInput = {
@@ -249,6 +263,7 @@ export interface DurableMemoryStore {
   list(input: MemoryListInput): Promise<MemoryPage>
   delete(input: MemoryDeleteInput): Promise<MemoryMutationResult>
   clear(input: MemoryClearInput): Promise<MemoryMutationResult>
+  deletionCapability(): Promise<MemoryDeletionCapability>
   revision(): Promise<number>
   health(): Promise<MemoryHealth>
   consolidate(input: MemoryConsolidateInput): Promise<MemoryConsolidationResult>
@@ -372,6 +387,14 @@ export function validateMemoryCursor(cursor: string | undefined): number {
     throw new DurableMemoryStoreError('invalid_input', 'Memory cursor must be a non-negative safe integer')
   }
   return Number(cursor)
+}
+
+export function validateMemoryKinds(kinds: DurableMemoryKind[] | undefined): DurableMemoryKind[] | undefined {
+  if (kinds === undefined) return undefined
+  if (!Array.isArray(kinds) || !kinds.length || kinds.some((kind) => !['memory', 'profile', 'document'].includes(kind))) {
+    throw new DurableMemoryStoreError('invalid_input', 'Memory kinds must be a non-empty supported list')
+  }
+  return [...new Set(kinds)]
 }
 
 export function validateMemoryImport(input: MemoryImportInput, limits: DurableMemoryLimits): void {
@@ -737,7 +760,9 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     this.ensureOpen()
     const scope = input.scope ? canonicalMemoryScope(input.scope) : undefined
     authorizeMemoryAccess('list', input.access, scope)
+    const kinds = validateMemoryKinds(input.kinds)
     const all = selectVisibleMemoryEntries(this.entries.values(), input.access, scope)
+      .filter((entry) => !kinds || kinds.includes(entry.kind))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
     const offset = validateMemoryCursor(input.cursor)
     const limit = validateMemoryPage(input.limit, this.limits)
@@ -767,6 +792,7 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     let changed = 0
     for (const [key, entry] of this.entries) {
       if (scope.kind !== 'all' && memoryScopeKey(entry.scope) !== memoryScopeKey(scope)) continue
+      if (input.includeSpecial === false && entry.kind !== 'memory') continue
       this.entries.delete(key)
       changed += 1
     }
@@ -781,6 +807,16 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
 
   async health(): Promise<MemoryHealth> {
     return { status: this.closed ? 'closed' : 'ready', revision: this.currentRevision }
+  }
+
+  async deletionCapability(): Promise<MemoryDeletionCapability> {
+    this.ensureOpen()
+    return {
+      mode: 'not-applicable',
+      secureDelete: false,
+      walCheckpoint: 'not-applicable',
+      limitations: ['In-memory storage has no SQLite pages, WAL, backups, or filesystem snapshots.'],
+    }
   }
 
   async consolidate(input: MemoryConsolidateInput): Promise<MemoryConsolidationResult> {

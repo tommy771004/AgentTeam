@@ -4,6 +4,8 @@ import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
 import type {
   DurableMemoryProtocolResult,
+  CanonicalProjectId,
+  MemoryAccessContext,
   MemoryAppendInput,
   MemoryClearInput,
   MemoryDeleteInput,
@@ -318,7 +320,7 @@ export class PiHostSupervisor {
   }
 
   private async durableMemoryRequest(
-    method: 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear',
+    method: 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability',
     params: Record<string, unknown>,
     operation: DurableMemoryProtocolResult['operation'],
   ): Promise<DurableMemoryProtocolResult> {
@@ -358,6 +360,26 @@ export class PiHostSupervisor {
 
   async clearDurableMemory(input: MemoryClearInput): Promise<DurableMemoryProtocolResult> {
     return this.durableMemoryRequest('memory/v1/clear', input, 'clear')
+  }
+
+  async deleteDurableMemoryEntry(input: MemoryDeleteInput): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/delete-entry', input, 'delete-entry')
+  }
+
+  async clearProjectDurableMemory(input: { access: MemoryAccessContext; project: CanonicalProjectId }): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/clear-project', input, 'clear-project')
+  }
+
+  async clearGlobalDurableMemory(access: MemoryAccessContext): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/clear-global', { access }, 'clear-global')
+  }
+
+  async clearAllDurableMemory(access: MemoryAccessContext): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/clear-all', { access }, 'clear-all')
+  }
+
+  async durableMemoryDeletionCapability(access: MemoryAccessContext): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/deletion-capability', { access }, 'deletion-capability')
   }
 
   async listCapabilities(): Promise<NonNullable<PiHostResponse['result']>['items']> {

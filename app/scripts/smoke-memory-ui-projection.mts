@@ -10,7 +10,10 @@ import {
 
 let state = { generation: 1, revision: 4, invalidatedRevision: 4 }
 assert.equal(memoryProjectionBridgeAvailable(undefined), false)
-assert.equal(memoryProjectionBridgeAvailable({ list() {}, get() {}, upsert() {}, delete() {}, clear() {} }), true)
+assert.equal(memoryProjectionBridgeAvailable({
+  list() {}, countAll() {}, get() {}, upsert() {}, deleteEntry() {}, clearProject() {},
+  clearGlobal() {}, clearAll() {}, deletionCapability() {},
+}), true)
 assert.equal(invalidateMemoryProjection(state, 3), state, 'out-of-order invalidation must be ignored')
 state = invalidateMemoryProjection(state, 6)
 assert.equal(state.invalidatedRevision, 6)
@@ -42,6 +45,7 @@ assert.match(learningStoreSource, /limit: MEMORY_PAGE_SIZE/)
 assert.match(learningStoreSource, /acceptsMemoryProjectionResponse/)
 assert.match(appSource, /event === 'memory\/changed'/)
 assert.match(preloadSource, /pi-host:memory-projection:list/)
+assert.match(preloadSource, /pi-host:memory-projection:clear-all/)
 assert.doesNotMatch(settingsSource, /onChange=\{\(e\) => void setUserProfile/)
 
 console.log('memory UI projection smoke: ok')

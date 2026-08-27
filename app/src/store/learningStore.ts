@@ -27,6 +27,7 @@ import {
   memoryProjectionBridgeAvailable,
   memoryProjectionBundle,
   type MemoryProjectionEntry,
+  type MemoryDeletionCapability,
   type MemoryProjectionScope,
   type MemoryProjectionSnapshot,
 } from '../agent/memoryProjection.ts'
@@ -106,6 +107,9 @@ interface LearningStore {
   updateMemoryEntry: (id: string, text: string) => Promise<void>
   deleteMemoryEntry: (id: string) => Promise<void>
   clearMemories: () => Promise<void>
+  clearAllMemories: () => Promise<void>
+  countAllMemories: () => Promise<number>
+  memoryDeletionCapability: () => Promise<MemoryDeletionCapability | undefined>
   loadMemoryProjection: (cursor?: string, resetHistory?: boolean, minimumRevision?: number) => Promise<void>
   setMemoryScope: (scope: MemoryProjectionScope) => Promise<void>
   nextMemoryPage: () => Promise<void>
@@ -645,7 +649,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
                 scope: GLOBAL_MEMORY_SCOPE, logicalKey: 'profile:user', kind: 'profile',
                 text: normalized, tags: ['profile:user', 'always-recall'], createdAt: new Date().toISOString(),
               })
-            : await memoryApi().delete({ scope: GLOBAL_MEMORY_SCOPE, logicalKey: 'profile:user' })
+            : await memoryApi().deleteEntry({ scope: GLOBAL_MEMORY_SCOPE, logicalKey: 'profile:user' })
           await refreshAfterMemoryMutation(result.revision)
           return
         } catch (error) {
@@ -667,7 +671,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
                 scope: GLOBAL_MEMORY_SCOPE, logicalKey: 'memory:document', kind: 'document',
                 text: normalized, tags: ['memory:document', 'always-recall'], createdAt: new Date().toISOString(),
               })
-            : await memoryApi().delete({ scope: GLOBAL_MEMORY_SCOPE, logicalKey: 'memory:document' })
+            : await memoryApi().deleteEntry({ scope: GLOBAL_MEMORY_SCOPE, logicalKey: 'memory:document' })
           await refreshAfterMemoryMutation(result.revision)
           return
         } catch (error) {
@@ -735,7 +739,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
         try {
           const entry = memoryEntriesById.get(id)
           if (!entry) throw new Error('找不到記憶條目的 Host identity，請重新整理後再試')
-          const result = await memoryApi().delete({ scope: get().memoryProjection.scope, logicalKey: entry.logicalKey })
+          const result = await memoryApi().deleteEntry({ scope: get().memoryProjection.scope, logicalKey: entry.logicalKey })
           await refreshAfterMemoryMutation(result.revision)
           return
         } catch (error) {
@@ -751,7 +755,10 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     clearMemories: async () => {
       if (isElectronPiProduction()) {
         try {
-          const result = await memoryApi().clear(get().memoryProjection.scope)
+          const scope = get().memoryProjection.scope
+          const result = scope.kind === 'project'
+            ? await memoryApi().clearProject(scope.project)
+            : await memoryApi().clearGlobal()
           await refreshAfterMemoryMutation(result.revision)
           return
         } catch (error) {
@@ -762,6 +769,39 @@ export const useLearningStore = create<LearningStore>((set, get) => {
       memoryStore.clearAll()
       get().refresh()
       await get().persist()
+    },
+
+    clearAllMemories: async () => {
+      if (isElectronPiProduction()) {
+        try {
+          const result = await memoryApi().clearAll()
+          await refreshAfterMemoryMutation(result.revision)
+          return
+        } catch (error) {
+          recordMemoryError(error)
+          throw error
+        }
+      }
+      memoryStore.clearAll()
+      get().refresh()
+      await get().persist()
+    },
+
+    countAllMemories: async () => {
+      if (!isElectronPiProduction()) {
+        const bundle = memoryStore.getBundle()
+        return bundle.entries.length + Number(Boolean(bundle.userProfile)) + Number(Boolean(bundle.memory))
+      }
+      const result = await memoryApi().countAll()
+      if (result.operation !== 'list') throw new Error('Host 記憶計數回應格式錯誤')
+      return result.page.total
+    },
+
+    memoryDeletionCapability: async () => {
+      if (!isElectronPiProduction()) return undefined
+      const result = await memoryApi().deletionCapability()
+      if (result.operation !== 'deletion-capability') throw new Error('Host 刪除能力回應格式錯誤')
+      return result.capability
     },
 
     setSoul: async (text) => {

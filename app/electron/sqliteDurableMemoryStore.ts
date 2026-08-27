@@ -19,6 +19,7 @@ import {
   selectVisibleMemoryEntries,
   validateMemoryCursor,
   validateMemoryImport,
+  validateMemoryKinds,
   validateMemoryMigration,
   validateMemoryPage,
   type DurableMemoryBundle,
@@ -31,6 +32,7 @@ import {
   type MemoryConsolidateInput,
   type MemoryConsolidationResult,
   type MemoryDeleteInput,
+  type MemoryDeletionCapability,
   type MemoryEntryDraft,
   type MemoryExportInput,
   type MemoryGetInput,
@@ -106,6 +108,7 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
   private writeTail: Promise<void> = Promise.resolve()
   private closed = false
   private closedRevision = 0
+  private walCheckpoint: MemoryDeletionCapability['walCheckpoint'] = 'unavailable'
 
   private constructor(databasePath: string, limits?: Partial<DurableMemoryLimits>) {
     this.db = new DatabaseSync(databasePath)
@@ -122,6 +125,7 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
       PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS};
       PRAGMA foreign_keys = ON;
+      PRAGMA secure_delete = ON;
       CREATE TABLE IF NOT EXISTS memory_schema_migrations (
         version INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
@@ -215,13 +219,14 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     this.ensureOpen()
   }
 
-  private enqueueWrite<T>(operation: () => T): Promise<T> {
+  private enqueueWrite<T>(operation: () => T, afterCommit?: (value: T) => void): Promise<T> {
     const result = this.writeTail.then(() => {
       this.ensureOpen()
       this.db.exec('BEGIN IMMEDIATE')
       try {
         const value = operation()
         this.db.exec('COMMIT')
+        afterCommit?.(value)
         return value
       } catch (error) {
         try { this.db.exec('ROLLBACK') } catch { /* preserve the original failure */ }
@@ -231,6 +236,15 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     })
     this.writeTail = result.then(() => undefined, () => undefined)
     return result
+  }
+
+  private maintainDeletedPages(): void {
+    try {
+      const row = this.db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() as { busy?: number } | undefined
+      this.walCheckpoint = Number(row?.busy || 0) === 0 ? 'truncated' : 'busy'
+    } catch {
+      this.walCheckpoint = 'unavailable'
+    }
   }
 
   private currentRevision(): number {
@@ -418,7 +432,9 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     await this.settleWrites()
     const scope = input.scope ? canonicalMemoryScope(input.scope) : undefined
     authorizeMemoryAccess('list', input.access, scope)
+    const kinds = validateMemoryKinds(input.kinds)
     const all = selectVisibleMemoryEntries(this.readEntries(), input.access, scope)
+      .filter((entry) => !kinds || kinds.includes(entry.kind))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
     const offset = validateMemoryCursor(input.cursor)
     const limit = validateMemoryPage(input.limit, this.limits)
@@ -445,10 +461,10 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
       if (!found) return { changed: 0, revision: this.currentRevision() }
       const revision = this.currentRevision() + 1
       this.db.prepare('DELETE FROM memory_entries WHERE id = ?').run(found.id)
-      this.recordOperation(revision, 'delete', found.scope, found.logicalKey, undefined, provenance(input.access))
+      this.recordOperation(revision, input.auditOperation || 'delete', found.scope, found.logicalKey, undefined, provenance(input.access))
       this.setRevision(revision)
       return { changed: 1, revision }
-    })
+    }, (mutation) => { if (mutation.changed) this.maintainDeletedPages() })
   }
 
   async clear(input: MemoryClearInput): Promise<MemoryMutationResult> {
@@ -459,14 +475,31 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
       const selected = requestedScope.kind === 'all'
         ? all
         : all.filter((entry) => memoryScopeKey(entry.scope) === memoryScopeKey(requestedScope))
-      if (!selected.length) return { changed: 0, revision: this.currentRevision() }
+      const removable = input.includeSpecial === false
+        ? selected.filter((entry) => entry.kind === 'memory')
+        : selected
+      if (!removable.length) return { changed: 0, revision: this.currentRevision() }
       const revision = this.currentRevision() + 1
       const remove = this.db.prepare('DELETE FROM memory_entries WHERE id = ?')
-      selected.forEach((entry) => remove.run(entry.id))
-      this.recordOperation(revision, 'clear', requestedScope.kind === 'all' ? undefined : requestedScope, undefined, undefined, provenance(input.access))
+      removable.forEach((entry) => remove.run(entry.id))
+      this.recordOperation(revision, input.auditOperation || 'clear', requestedScope.kind === 'all' ? undefined : requestedScope, undefined, undefined, provenance(input.access))
       this.setRevision(revision)
-      return { changed: selected.length, revision }
-    })
+      return { changed: removable.length, revision }
+    }, (mutation) => { if (mutation.changed) this.maintainDeletedPages() })
+  }
+
+  async deletionCapability(): Promise<MemoryDeletionCapability> {
+    await this.settleWrites()
+    const row = this.db.prepare('PRAGMA secure_delete').get() as { secure_delete?: number } | undefined
+    return {
+      mode: 'best-effort',
+      secureDelete: Number(row?.secure_delete || 0) === 1,
+      walCheckpoint: this.walCheckpoint,
+      limitations: [
+        'SQLite secure_delete and WAL truncation only cover pages controlled by this live database connection.',
+        'They cannot guarantee erasure from SSD wear-leveling, filesystem snapshots, backups, or copied database files.',
+      ],
+    }
   }
 
   async revision(): Promise<number> {
@@ -537,6 +570,7 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     if (this.closed) return
     await this.writeTail
     const revision = this.currentRevision()
+    this.maintainDeletedPages()
     this.db.close()
     this.closed = true
     this.closedRevision = revision

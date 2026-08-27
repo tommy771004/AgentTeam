@@ -2440,9 +2440,12 @@ ipcMain.handle('pi-host:memory-projection:list', async (_evt, input: { scope: Me
   piHostSupervisor.listDurableMemory({
     access: memoryProjectionAdmin,
     scope: projectionMemoryScope(input?.scope),
+    kinds: ['memory'],
     ...(input?.cursor ? { cursor: input.cursor } : {}),
     ...(input?.limit === undefined ? {} : { limit: input.limit }),
   }))
+ipcMain.handle('pi-host:memory-projection:count-all', async () =>
+  piHostSupervisor.listDurableMemory({ access: memoryProjectionAdmin, limit: 1 }))
 ipcMain.handle('pi-host:memory-projection:get', async (_evt, logicalKey: 'profile:user' | 'memory:document') => {
   if (logicalKey !== 'profile:user' && logicalKey !== 'memory:document') {
     throw new DurableMemoryStoreError('invalid_input', 'Memory special-entry key is invalid')
@@ -2457,14 +2460,20 @@ ipcMain.handle('pi-host:memory-projection:upsert', async (_evt, input: Omit<Memo
     ...input,
     scope: projectionMemoryScope(input?.scope),
   } as Parameters<typeof piHostSupervisor.upsertDurableMemory>[0]))
-ipcMain.handle('pi-host:memory-projection:delete', async (_evt, input: { scope: MemoryProjectionScope; logicalKey: string }) =>
-  piHostSupervisor.deleteDurableMemory({
+ipcMain.handle('pi-host:memory-projection:delete-entry', async (_evt, input: { scope: MemoryProjectionScope; logicalKey: string }) =>
+  piHostSupervisor.deleteDurableMemoryEntry({
     access: memoryProjectionAdmin,
     scope: projectionMemoryScope(input?.scope),
     logicalKey: input?.logicalKey,
   }))
-ipcMain.handle('pi-host:memory-projection:clear', async (_evt, scope: MemoryProjectionScope) =>
-  piHostSupervisor.clearDurableMemory({ access: memoryProjectionAdmin, scope: projectionMemoryScope(scope) }))
+ipcMain.handle('pi-host:memory-projection:clear-project', async (_evt, project: string) =>
+  piHostSupervisor.clearProjectDurableMemory({ access: memoryProjectionAdmin, project: canonicalProjectId(project) }))
+ipcMain.handle('pi-host:memory-projection:clear-global', async () =>
+  piHostSupervisor.clearGlobalDurableMemory(memoryProjectionAdmin))
+ipcMain.handle('pi-host:memory-projection:clear-all', async () =>
+  piHostSupervisor.clearAllDurableMemory(memoryProjectionAdmin))
+ipcMain.handle('pi-host:memory-projection:deletion-capability', async () =>
+  piHostSupervisor.durableMemoryDeletionCapability(memoryProjectionAdmin))
 ipcMain.handle('pi-host:capabilities:list', async () => ({ items: await piHostSupervisor.listCapabilities() }))
 ipcMain.handle('pi-host:capabilities:load', async (_evt, id: string) => piHostSupervisor.loadCapability(id))
 ipcMain.handle('pi-host:capabilities:search', async (_evt, query: string) => ({ items: await piHostSupervisor.searchCapabilities(query) }))

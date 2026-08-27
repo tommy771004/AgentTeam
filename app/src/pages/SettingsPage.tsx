@@ -42,6 +42,7 @@ import { useEntitlementStore } from '../store/entitlementStore'
 import { useSubscriptionStore } from '../store/subscriptionStore'
 import { SUBSCRIPTION_PRICING } from '../agent/subscription'
 import { useFeaturePackStore } from '../store/featurePackStore'
+import { confirmMemoryClear, MEMORY_HARD_DELETE_LIMITATION, type MemoryClearIntent } from '../agent/memoryDeletion'
 import {
   parseDeployOutboundGuard,
   type OutboundGuardMode,
@@ -361,6 +362,8 @@ export function SettingsPage() {
   const loadLearning = useLearningStore((s) => s.load)
   const deleteMemoryEntry = useLearningStore((s) => s.deleteMemoryEntry)
   const clearMemories = useLearningStore((s) => s.clearMemories)
+  const clearAllMemories = useLearningStore((s) => s.clearAllMemories)
+  const countAllMemories = useLearningStore((s) => s.countAllMemories)
   const appendMemory = useLearningStore((s) => s.appendMemory)
   const updateMemoryEntry = useLearningStore((s) => s.updateMemoryEntry)
   const setUserProfile = useLearningStore((s) => s.setUserProfile)
@@ -1250,17 +1253,43 @@ export function SettingsPage() {
             <SettingsGroup
               title="已存記憶"
               action={
-                <button
-                  type="button"
-                  className={settingsBtnCls + ' text-error border-error/30'}
-                  onClick={() => {
-                    if (confirm(`確定清除${memoryScopeLabel(memoryProjection.scope.kind)}記憶？`)) void clearMemories().catch(() => undefined)
-                  }}
-                >
-                  清除全部
-                </button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={memoryProjection.loading}
+                    className={settingsBtnCls + ' text-error border-error/30'}
+                    onClick={() => {
+                      const intent: MemoryClearIntent = memoryProjection.scope.kind === 'project'
+                        ? { operation: 'clear-project', scope: memoryProjection.scope }
+                        : { operation: 'clear-global', scope: memoryProjection.scope }
+                      void confirmMemoryClear(confirm, intent, undefined, clearMemories).catch(() => undefined)
+                    }}
+                  >
+                    清除{memoryScopeLabel(memoryProjection.scope.kind)}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={memoryProjection.loading}
+                    className={settingsBtnCls + ' text-error border-error/30'}
+                    onClick={() => {
+                      void countAllMemories()
+                        .then((count) => confirmMemoryClear(
+                          confirm,
+                          { operation: 'clear-all', scope: { kind: 'all' } },
+                          count,
+                          clearAllMemories,
+                        ))
+                        .catch(() => undefined)
+                    }}
+                  >
+                    清除所有記憶
+                  </button>
+                </div>
               }
             >
+              <SettingsStack title="刪除保障" description={MEMORY_HARD_DELETE_LIMITATION}>
+                <p className="text-xs text-muted">刪除後 Host 會先提交一致 revision，再刷新目前投影；舊請求結果不會覆蓋新 revision。</p>
+              </SettingsStack>
               <SettingsStack title="新增" description="手動寫入一條記憶">
                 <div className="flex gap-2">
                   <input

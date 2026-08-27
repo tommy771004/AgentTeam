@@ -124,6 +124,8 @@ const api = {
       memoryProjection: {
         list: (input: { scope: MemoryProjectionScope; cursor?: string; limit?: number }) =>
           ipcRenderer.invoke('pi-host:memory-projection:list', input) as Promise<MemoryProjectionResult>,
+        countAll: () =>
+          ipcRenderer.invoke('pi-host:memory-projection:count-all') as Promise<MemoryProjectionResult>,
         get: (logicalKey: 'profile:user' | 'memory:document') =>
           ipcRenderer.invoke('pi-host:memory-projection:get', logicalKey) as Promise<MemoryProjectionResult>,
         upsert: (input: {
@@ -134,10 +136,16 @@ const api = {
           tags: string[]
           createdAt: string
         }) => ipcRenderer.invoke('pi-host:memory-projection:upsert', input) as Promise<MemoryProjectionResult>,
-        delete: (input: { scope: MemoryProjectionScope; logicalKey: string }) =>
-          ipcRenderer.invoke('pi-host:memory-projection:delete', input) as Promise<MemoryProjectionResult>,
-        clear: (scope: MemoryProjectionScope) =>
-          ipcRenderer.invoke('pi-host:memory-projection:clear', scope) as Promise<MemoryProjectionResult>,
+        deleteEntry: (input: { scope: MemoryProjectionScope; logicalKey: string }) =>
+          ipcRenderer.invoke('pi-host:memory-projection:delete-entry', input) as Promise<MemoryProjectionResult>,
+        clearProject: (project: string) =>
+          ipcRenderer.invoke('pi-host:memory-projection:clear-project', project) as Promise<MemoryProjectionResult>,
+        clearGlobal: () =>
+          ipcRenderer.invoke('pi-host:memory-projection:clear-global') as Promise<MemoryProjectionResult>,
+        clearAll: () =>
+          ipcRenderer.invoke('pi-host:memory-projection:clear-all') as Promise<MemoryProjectionResult>,
+        deletionCapability: () =>
+          ipcRenderer.invoke('pi-host:memory-projection:deletion-capability') as Promise<MemoryProjectionResult>,
       },
       capabilities: {
         list: () => ipcRenderer.invoke('pi-host:capabilities:list') as Promise<{ items: unknown[] }>,
