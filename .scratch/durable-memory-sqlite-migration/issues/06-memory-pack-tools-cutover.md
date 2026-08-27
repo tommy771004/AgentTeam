@@ -22,3 +22,7 @@ Spec: `.scratch/durable-memory-sqlite-migration/spec.md`
 
 - 04 — JSON → SQLite 原子遷移與 authority cutover
 - 05 — Builtin Pi scoped recall 與 Turn Record provenance
+
+## 接續註記（#04）
+
+#04 已把 pack bridge 改成 scoped async store service，讀取 session/run binding 的 frozen flags，await commit 後才成功／發布 metadata-only revision。append key 使用 run/call identity，同 binding retry 保留 timestamp；無有效 binding 拒絕。仍需補真 Pi model tool-call／跨 restart payload preservation、typed failure metadata 與 Turn Record write identity 對帳。本票尚未 resolved，不能把直接 service fixture 當作完整真模型工具驗收。

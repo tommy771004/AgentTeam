@@ -7,6 +7,8 @@ Spec: `.scratch/durable-memory-sqlite-migration/spec.md`
 
 把明確「請記住」與 automatic learning 接進 Task run 的唯一 finalization，定義何時能 commit、何時必須不寫。External CLI 在尚未具備相同 scoped recall 前不得自動塑造 shared memory，避免只寫不讀的不對稱 lifecycle。
 
+#04 已把既有候選 write 接到 DurableMemoryStore、套用 frozen write flag，async storage error 會關閉同一份 Turn Record/attachment。但候選目前仍在舊 iteration commit 點；本票必須移到規定的 final settlement、補完整 DoD／取消／retry matrix，以及停用 External CLI asymmetric learning。
+
 ## Acceptance criteria
 
 - [ ] explicit remember 使用 deterministic source operation，只有成功 interpretation/response settlement 後 commit，retry 不重複

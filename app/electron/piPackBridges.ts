@@ -1,5 +1,7 @@
 import type { PiMemory } from './piMemoryExtension.ts'
 import type { PiContextPacket } from './piDelegationExtension.ts'
+import type { PiToolContext } from './piToolHost.ts'
+import { DurableMemoryStoreError } from './durableMemoryStore.ts'
 
 /**
  * The bridges between extension packs and Host-owned state.
@@ -13,10 +15,9 @@ import type { PiContextPacket } from './piDelegationExtension.ts'
  */
 
 export type PiMemoryBridgeAccess = {
-  recall: (query: string, project?: string, limit?: number) => PiMemory[]
-  search: (query: string, limit?: number) => PiMemory[]
-  get: (id: string) => PiMemory | undefined
-  add: (memory: PiMemory) => void
+  search: (query: string, limit: number, ctx: PiToolContext) => Promise<PiMemory[]>
+  get: (id: string, ctx: PiToolContext) => Promise<PiMemory | undefined>
+  add: (memory: PiMemory, ctx: PiToolContext) => Promise<PiMemory>
 }
 
 let memoryBridge: PiMemoryBridgeAccess | undefined
@@ -25,14 +26,10 @@ export function setPiMemoryBridge(access: PiMemoryBridgeAccess): void {
   memoryBridge = access
 }
 
-/** Absent-bridge reads answer empty rather than throwing a turn away. */
+/** Missing authority must never fabricate a successful read or durable write. */
 export function piMemoryBridge(): PiMemoryBridgeAccess {
-  return memoryBridge ?? {
-    recall: () => [],
-    search: () => [],
-    get: () => undefined,
-    add: () => {},
-  }
+  if (!memoryBridge) throw new DurableMemoryStoreError('unavailable', 'Durable memory store is unavailable')
+  return memoryBridge
 }
 
 export type PiDelegatedRunView = {

@@ -219,7 +219,8 @@ import { armTurnDeadline, clampTurnTimeout, systemTurnDeadlineClock, type TurnDe
 import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
-import { isPiMemory, PiMemoryExtension, type PiMemory } from './piMemoryExtension.ts'
+import type { PiMemory } from './piMemoryExtension.ts'
+import { createPiDurableMemoryBridge, handleLegacyMemory, listPiMemories, piMemoryProjection, writePiMemory, type PiMemoryChange } from './piDurableMemory.ts'
 import {
   canonicalMemoryDraft,
   canonicalProjectId,
@@ -1263,6 +1264,12 @@ function claimMemoryRevision(state: HostState, revision: number, changed: boolea
   return true
 }
 
+function publishPiMemoryChange(state: HostState, change: PiMemoryChange, emit: (message: PiHostEvent) => void): void {
+  if (claimMemoryRevision(state, change.revision, change.changed > 0)) {
+    emit(durableMemoryChangedEvent(change.operation, change.revision, change.changed, change.scope, change.logicalKey))
+  }
+}
+
 type DurableMemoryRequestParams = Record<string, unknown>
 
 function durableMemoryLogicalKey(params: DurableMemoryRequestParams): string {
@@ -2104,7 +2111,7 @@ export function handlePiHostRequest(
     })()
   }
   if (input.method === 'state/snapshot') {
-    return [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions], queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })), resources: state.snapshot.resources.map((resource) => ({ ...resource })), memories: new PiMemoryExtension(state.snapshot.memories).export() } }]
+    return listPiMemories(state.memoryStore).then((memories) => [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions], queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })), resources: state.snapshot.resources.map((resource) => ({ ...resource })), memories } }])
   }
   const attachmentResponse = handleAttachmentRequest(state, input, id)
   if (attachmentResponse) return attachmentResponse
@@ -2178,42 +2185,11 @@ export function handlePiHostRequest(
       result: { files },
     })).catch((error: unknown) => errorResponse(id, 'runtime_error', error instanceof Error ? error.message : 'Skill file read failed')).then((message) => [message])
   }
-  if (input.method === 'memory/list') {
-    const memory = new PiMemoryExtension(state.snapshot.memories)
-    return [{ id, result: { memories: memory.export() } }]
-  }
-  if (input.method === 'memory/add') {
-    const candidate = input.params?.memory
-    if (!isPiMemory(candidate)) return [errorResponse(id, 'invalid_request', 'memory must include id, text, tags, and createdAt')]
-    const memory = new PiMemoryExtension(state.snapshot.memories)
-    memory.add(candidate)
-    state.snapshot.memories = memory.export()
-    state.snapshot.cursor += 1
-    return [{ id, result: { memories: state.snapshot.memories } }]
-  }
-  if (input.method === 'memory/delete') {
-    const memoryId = typeof input.params?.id === 'string' ? input.params.id : ''
-    if (!memoryId) return [errorResponse(id, 'invalid_request', 'memory id is required')]
-    const memory = new PiMemoryExtension(state.snapshot.memories)
-    memory.delete(memoryId)
-    state.snapshot.memories = memory.export()
-    state.snapshot.cursor += 1
-    return [{ id, result: { memories: state.snapshot.memories } }]
-  }
-  if (input.method === 'memory/clear') {
-    const memory = new PiMemoryExtension(state.snapshot.memories)
-    memory.clear()
-    state.snapshot.memories = memory.export()
-    state.snapshot.cursor += 1
-    return [{ id, result: { memories: state.snapshot.memories } }]
-  }
-  if (input.method === 'memory/recall') {
-    const query = typeof input.params?.query === 'string' ? input.params.query : ''
-    if (!query.trim()) return [errorResponse(id, 'invalid_request', 'query is required')]
-    const project = typeof input.params?.project === 'string' ? input.params.project : undefined
-    const limit = typeof input.params?.limit === 'number' ? input.params.limit : 5
-    const memory = new PiMemoryExtension(state.snapshot.memories)
-    return [{ id, result: { memories: memory.recall(query, project, limit) } }]
+  if (['memory/list', 'memory/add', 'memory/delete', 'memory/clear', 'memory/recall'].includes(input.method)) {
+    const events: PiHostMessage[] = []
+    return handleLegacyMemory(state.memoryStore, input.method, input.params || {}, (change) => publishPiMemoryChange(state, change, emit || ((event) => events.push(event))))
+      .then((memories) => [...events, { id, result: { memories } }])
+      .catch((error) => [errorResponse(id, error instanceof DurableMemoryStoreError && error.code === 'invalid_input' ? 'invalid_request' : 'runtime_error', error instanceof Error ? error.message : 'Memory operation failed')])
   }
   const capabilityResponse = handleMemoryOrCapabilityRequest(state, input, id, emit)
   if (capabilityResponse) return capabilityResponse
@@ -2459,6 +2435,16 @@ export function handlePiHostRequest(
       ? input.params.cwd
       : undefined
     const cwd = explicitWorkspaceRoot || process.cwd()
+    // Validate memory scope before opening an attachment/recorder. A failed
+    // realpath must not leave an active run that can never settle or retry.
+    const contextPolicy = parsePiTurnContextPolicy(input.params?.contextPolicy)
+    const memoryAccess: MemoryAccessContext = {
+      origin: 'runtime', runId, sessionId,
+      memoryReadEnabled: contextPolicy.memoryEnabled,
+      memoryWriteEnabled: contextPolicy.memoryEnabled && contextPolicy.memoryWriteEnabled,
+      temporary: contextPolicy.temporary,
+      ...(contextPolicy.project ? { canonicalProject: canonicalProjectId(contextPolicy.project) } : {}),
+    }
     const patternValue = input.params?.pattern
     const pattern: PiLoopPattern = patternValue === 'Goal-based' || patternValue === 'Time-based' || patternValue === 'Proactive'
       ? patternValue
@@ -2507,7 +2493,6 @@ export function handlePiHostRequest(
     state.attachmentJournal.begin({ runId, sessionId, threadId: session.threadId, turn: recorder.turn })
     activeTurnRecorders.set(sessionId, recorder)
     recordTurnEntry(sessionId, { kind: 'turn-start', source: 'host' })
-    const contextPolicy = parsePiTurnContextPolicy(input.params?.contextPolicy)
     // Trusted Host verification starts from the admitted run/view. No field in
     // contextPolicy, model text, or tool args can supply or deserialize it.
     const shellSandboxVerification: Promise<BuiltinShellSandboxVerification> | undefined =
@@ -2549,7 +2534,6 @@ export function handlePiHostRequest(
     let profileCommitted = false
     let contractRevision: number | undefined
     let contractDigest: string | undefined
-    const memory = new PiMemoryExtension(state.snapshot.memories)
     // Skills ride Pi's `<available_skills>` block, which is only appended
     // when the `read` tool is active. A capability configuration that turns
     // `read` off would otherwise make EVERY skill vanish silently — exactly
@@ -2568,16 +2552,8 @@ export function handlePiHostRequest(
       if (emit) emit(event)
       else turnEvents.push(event)
     }
-    const recalled = contextPolicy.memoryEnabled && !contextPolicy.temporary
-      ? memory.recall(prompt, contextPolicy.project, 5)
-      : []
-    const memoryContext = buildPiMemoryContext(recalled)
-    const executionPrompt = withPiMemoryContext(prompt, recalled)
-    if (recalled.length) {
-      const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'memory-recalled', recalled: recalled.length } }
-      if (emit) emit(event)
-      else turnEvents.push(event)
-    }
+    let memoryContext = ''
+    let executionPrompt = prompt
     let contextPreflightComplete = false
     let resolvedContextWindow = contextPolicy.contextWindowTokens
     activeSessionRuns.set(sessionId, { runId, cancelled: false })
@@ -2589,6 +2565,7 @@ export function handlePiHostRequest(
       approvalMode: turnSettings.approvalMode,
       unattended: turnSettings.unattended,
       temporaryChat: contextPolicy.temporary,
+      memoryAccess,
       frozenPolicy: freezePiRunPolicy({
         approvalMode: turnSettings.approvalMode,
         unattended: turnSettings.unattended,
@@ -2655,7 +2632,7 @@ export function handlePiHostRequest(
           },
         })
       : Promise.resolve(undefined)
-    return pluginExecutionPromise.then((pluginExecution) => {
+    return pluginExecutionPromise.then(async (pluginExecution) => {
       if (pluginExecution && shouldStopForProviderProjection(pluginExecution)) {
         const settlement = pluginExecution.state === 'cancelled' ? 'cancelled' as const : 'failed' as const
         publishOrchestration(settlement === 'cancelled' ? 'cancelled' : 'settlement', 0, pluginExecution.state)
@@ -2685,6 +2662,16 @@ export function handlePiHostRequest(
       const orchestrationPrompt = pluginExecution
         ? `${prompt}\n\n## Trusted provider stage result\n${JSON.stringify(pluginExecution)}`
         : prompt
+      const recalled = memoryAccess.memoryReadEnabled && !memoryAccess.temporary
+        ? (await state.memoryStore.recall({ access: memoryAccess, query: prompt, limit: 5 })).items.map(piMemoryProjection)
+        : []
+      memoryContext = buildPiMemoryContext(recalled)
+      executionPrompt = withPiMemoryContext(prompt, recalled)
+      if (recalled.length) {
+        const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'memory-recalled', recalled: recalled.length } }
+        if (emit) emit(event)
+        else turnEvents.push(event)
+      }
       return runPiOrchestration({
       pattern,
       prompt: orchestrationPrompt,
@@ -2922,12 +2909,11 @@ export function handlePiHostRequest(
           // An explicit「請記住」is controlled by the memory master switch,
           // not by automatic learning. Turning auto-learning off must not make
           // a direct user instruction silently disappear.
-          if (iteration === 1 && contextPolicy.memoryEnabled && !contextPolicy.temporary) {
+          if (iteration === 1 && memoryAccess.memoryWriteEnabled && !memoryAccess.temporary) {
             const coordinates = { runId, sessionId, project: contextPolicy.project }
             const candidate = buildPiTurnMemoryCandidate(prompt, coordinates, contextPolicy.memoryWriteEnabled)
             if (candidate) {
-              memory.add(candidate)
-              state.snapshot.memories = memory.export()
+              await writePiMemory(state.memoryStore, { ...memoryAccess, callId: 'turn-memory' }, candidate, (change) => publishPiMemoryChange(state, change, emit || ((event) => turnEvents.push(event))))
               const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'memory-written', written: 1 } }
               if (emit) emit(event)
               else turnEvents.push(event)
@@ -3012,6 +2998,17 @@ export function handlePiHostRequest(
         },
       }]
       })
+      }).catch((error) => {
+        // Async storage failures must close the same record/attachment as a
+        // normal settlement, not just release the in-memory run lock.
+        const reason = error instanceof Error ? error.message : 'Pi Host turn failed'
+        flushReasoning(sessionId)
+        recordTurnEntry(sessionId, { kind: 'notice', source: 'host', topic: 'host-error', text: reason })
+        recordTurnEntry(sessionId, { kind: 'turn-end', source: 'host', settlement: 'failed' })
+        session.record = appendTurnRecord(session.record, recorder.entries)
+        state.snapshot.cursor += 1
+        state.attachmentJournal.settle(runId, 'failed', reason, session.record.entries.at(-1)?.seq)
+        return [...turnEvents, errorResponse(id, 'runtime_error', reason)]
       }).finally(() => {
       deadline?.cancel()
       cancelPiApprovalsForRun(runId)
@@ -3097,9 +3094,16 @@ export function createPiHostServer(
   onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[]; attachments: PiHostAttachment[] }) => void,
   refreshConfig?: () => Promise<PiHostConfigStatus>,
   checkpointWriter?: CompactionCheckpointWriter,
-  memoryStore: DurableMemoryStore = new InMemoryDurableMemoryStore(),
+  suppliedMemoryStore?: DurableMemoryStore,
 ) {
-  const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [], attachments: initialSnapshot.attachments || [] }
+  const memoryStore = suppliedMemoryStore || new InMemoryDurableMemoryStore()
+  // In-process callers seed the real contract once; the shipped entry passes
+  // an already-migrated SQLite store and an empty JSON projection.
+  if (suppliedMemoryStore && initialSnapshot.memories.length) throw new Error('SQLite authority cannot accept live JSON memories')
+  const memoryReady = !suppliedMemoryStore && initialSnapshot.memories.length
+    ? memoryStore.migrateLegacy({ access: { origin: 'migration', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: false }, sourceHash: schemaDigest(initialSnapshot.memories), sourceSchema: 2, memories: initialSnapshot.memories })
+    : Promise.resolve()
+  const snapshot = { ...initialSnapshot, memories: [], extensions: initialSnapshot.extensions || [], attachments: initialSnapshot.attachments || [] }
   const attachmentJournal = new PiHostAttachmentJournal({ records: snapshot.attachments }, (next) => {
     snapshot.attachments = next.records
     onStateChange?.(snapshot)
@@ -3131,17 +3135,7 @@ export function createPiHostServer(
   // Packs reach durable Host state ONLY through these accessors: one memory
   // store, the real child-session/run-queue path, and the live extension
   // registry. No pack holds a copy of any of them.
-  setPiMemoryBridge({
-    recall: (query, project, limit) => new PiMemoryExtension(state.snapshot.memories).recall(query, project, limit),
-    search: (query, limit) => new PiMemoryExtension(state.snapshot.memories).recall(query, undefined, limit),
-    get: (id) => state.snapshot.memories.find((memory) => memory.id === id),
-    add: (memory) => {
-      const store = new PiMemoryExtension(state.snapshot.memories)
-      store.add(memory)
-      state.snapshot.memories = store.export()
-      state.snapshot.cursor += 1
-    },
-  })
+  setPiMemoryBridge(createPiDurableMemoryBridge(memoryStore, (change) => publishPiMemoryChange(state, change, send)))
   setPiDelegationBridge({
     createChild: async ({ parentSessionId, role, profile, context, depth }) => {
       const request = {
@@ -3332,6 +3326,7 @@ export function createPiHostServer(
       const input = request && typeof request === 'object' ? request as Partial<PiHostRequest> : undefined
       const id = typeof input?.id === 'string' || typeof input?.id === 'number' ? input.id : ''
       try {
+        await memoryReady
         // Re-read CLI OAuth immediately before a builtin turn as well as when
         // Settings asks for status. Codex/Claude may rotate their credential
         // while this long-lived Host is running; piCoreRuntime includes the

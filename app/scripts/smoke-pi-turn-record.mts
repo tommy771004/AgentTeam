@@ -1,4 +1,5 @@
 import { strict as assert } from 'node:assert'
+import { resolvePiHostStateFile } from '../electron/piHostState.ts'
 import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
@@ -287,7 +288,7 @@ try {
   await first.stop()
 
   // ── The record survives a Host restart and keeps counting ────────────────
-  const persisted = JSON.parse(await readFile(statePath, 'utf8'))
+  const persisted = JSON.parse(await readFile(await resolvePiHostStateFile(statePath), 'utf8'))
   assert.ok(persisted.sessions.find((candidate: { id: string }) => candidate.id === sessionId)?.record?.entries?.length > 0)
 
   const second = await startHost()

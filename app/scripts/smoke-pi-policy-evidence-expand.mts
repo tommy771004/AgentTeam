@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { resolvePiHostStateFile } from '../electron/piHostState.ts'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { createInterface } from 'node:readline'
@@ -183,7 +184,7 @@ try {
   assert.equal(deniedEvidence.find((entry: any) => entry.phase === 'decision')?.decision, 'deny')
   assert.equal(deniedEvidence.at(-1)?.settlement, 'denied')
 
-  const persisted = JSON.parse(await readFile(statePath, 'utf8'))
+  const persisted = JSON.parse(await readFile(await resolvePiHostStateFile(statePath), 'utf8'))
   const persistedRecord = persisted.sessions.find((session: any) => session.id === sessionId)?.record
   const parsed = parseTurnRecord(persistedRecord)
   assert.equal(parsed.tornTail, false)

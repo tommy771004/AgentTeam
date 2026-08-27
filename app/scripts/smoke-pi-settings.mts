@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { resolvePiHostStateFile } from '../electron/piHostState.ts'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { once } from 'node:events'
 import { spawn } from 'node:child_process'
@@ -84,7 +85,7 @@ try {
   assert.equal(models.providers?.openrouter?.models?.some((model) => model.id === 'stealth/ox-alpha'), true)
   const auth = JSON.parse(await readFile(join(agentDir, 'auth.json'), 'utf8')) as Record<string, unknown>
   assert.deepEqual(auth.openrouter, { type: 'api_key', key: 'openrouter-smoke-secret' })
-  assert.doesNotMatch(await readFile(statePath, 'utf8'), /openrouter-smoke-secret/)
+  assert.doesNotMatch(await readFile(await resolvePiHostStateFile(statePath), 'utf8'), /openrouter-smoke-secret/)
 
   send(5, 'settings/profile', {
     role: { model: 'pi-writer-model', thinkingLevel: 'low', activeTools: ['write'] },

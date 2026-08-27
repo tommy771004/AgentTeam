@@ -6,7 +6,7 @@ import { structuredFailure, structuredOk } from './packResults.ts'
 /**
  * Memory pack（記憶包）— the model-facing half of ONE memory store.
  *
- * The store these tools read and write is the Host's PiMemoryExtension: the
+ * The store these tools read and write is the Host's DurableMemoryStore: the
  * same memories `memory/recall` answers from and the same ones a turn recalls
  * before it starts. There is no second copy (issue 06): writing in this turn
  * is recalling in the next.
@@ -35,13 +35,13 @@ const memorySet: PiPackTool = {
     const key = String(args.key || '').trim()
     const text = String(args.text || '').trim()
     if (!key || !text) return structuredFailure('key 與 text 必填')
-    piMemoryBridge().add({
+    await piMemoryBridge().add({
       id: key,
       project: ctx.cwd,
       text,
       tags: ['curated', `session:${ctx.sessionId}`],
       createdAt: new Date().toISOString(),
-    })
+    }, ctx)
     return structuredOk(`已記住 ${key}`, { id: key })
   },
 }
@@ -56,8 +56,8 @@ const memoryGet: PiPackTool = {
     properties: { id: { type: 'string', description: 'Memory id' } },
     required: ['id'],
   },
-  execute: async (args) => {
-    const found = piMemoryBridge().get(String(args.id || '').trim())
+  execute: async (args, ctx) => {
+    const found = await piMemoryBridge().get(String(args.id || '').trim(), ctx)
     if (!found) return structuredFailure(`找不到記憶：${String(args.id || '')}`)
     return structuredOk(found.text, found)
   },
@@ -82,8 +82,9 @@ const memoryAppend: PiPackTool = {
     if (!text) return structuredFailure('text 必填')
     const rawTags = Array.isArray(args.tags) ? args.tags : []
     const tags = ['auto', ...rawTags.map((tag) => String(tag)).filter(Boolean), `session:${ctx.sessionId}`]
-    const id = `mem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-    piMemoryBridge().add({ id, project: ctx.cwd, text, tags, createdAt: new Date().toISOString() })
+    if (!ctx.runId || !ctx.callId) return structuredFailure('記憶寫入缺少 run/call identity')
+    const id = `mem-${ctx.runId}-${ctx.callId}`
+    await piMemoryBridge().add({ id, project: ctx.cwd, text, tags, createdAt: new Date().toISOString() }, ctx)
     return structuredOk(`已附加記憶 ${id}`, { id })
   },
 }
@@ -101,11 +102,11 @@ const memorySearch: PiPackTool = {
     },
     required: ['query'],
   },
-  execute: async (args) => {
+  execute: async (args, ctx) => {
     const query = String(args.query || '').trim()
     if (!query) return structuredFailure('query 必填')
     const nowMs = Date.now()
-    const hits = piMemoryBridge().search(query, Math.max(1, Math.min(10, Number(args.limit) || 5)))
+    const hits = await piMemoryBridge().search(query, Math.max(1, Math.min(10, Number(args.limit) || 5)), ctx)
     // Staleness rides WITH the hit, so old automatic memories announce
     // themselves instead of reading as current fact.
     const lines = hits.map((hit) => `- [${hit.id}] ${hit.text}${memoryStalenessNote(hit, nowMs)}`)

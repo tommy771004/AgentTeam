@@ -18,6 +18,7 @@ import { decideBuiltinShellUnderProtection } from '../src/agent/outbound/cliSand
 import { admitBuiltinShellSandbox, releaseBuiltinShellExecution, wrapVerifiedBuiltinShellCommand, type BuiltinShellSandboxVerification } from './piBuiltinShellSandbox.ts'
 import { decideGitCommand, type GitCommandPolicy } from '../src/agent/tools/gitCommandPolicy.ts'
 import { schemaDigest, type PiToolCatalogEntry } from './piToolContract.ts'
+import type { MemoryAccessContext } from './durableMemoryStore.ts'
 import {
   evaluatePiInvocationPolicy,
   PiInvocationEvidence,
@@ -35,6 +36,7 @@ export type PiToolContext = {
   /** Absolute project root the turn runs against. */
   cwd: string
   runId?: string
+  callId?: string
   temporaryChat?: boolean
 }
 
@@ -192,6 +194,8 @@ type PiRunBinding = {
   approvalMode: 'always' | 'auto' | 'full'
   unattended: boolean
   temporaryChat?: boolean
+  memoryAccess?: Readonly<MemoryAccessContext>
+  memoryCreatedAt?: string
   shellPolicy?: {
     effectiveMode: 'required' | 'optional' | 'demo' | 'off'
     viewRoot?: string
@@ -209,6 +213,7 @@ export function bindPiSessionRun(sessionId: string, binding: {
   approvalMode?: PiRunBinding['approvalMode']
   unattended?: boolean
   temporaryChat?: boolean
+  memoryAccess?: MemoryAccessContext
   shellPolicy?: PiRunBinding['shellPolicy']
   gitPolicy?: PiRunBinding['gitPolicy']
   frozenPolicy?: PiFrozenRunPolicy
@@ -218,6 +223,7 @@ export function bindPiSessionRun(sessionId: string, binding: {
     approvalMode: binding.approvalMode || 'auto',
     unattended: binding.unattended === true,
     ...(binding.temporaryChat !== undefined ? { temporaryChat: binding.temporaryChat } : {}),
+    ...(binding.memoryAccess ? { memoryAccess: Object.freeze({ ...binding.memoryAccess }), memoryCreatedAt: new Date().toISOString() } : {}),
     ...(binding.shellPolicy ? { shellPolicy: binding.shellPolicy } : {}),
     ...(binding.gitPolicy ? { gitPolicy: binding.gitPolicy } : {}),
     ...(binding.frozenPolicy ? { frozenPolicy: binding.frozenPolicy } : {}),
@@ -526,7 +532,7 @@ async function executePiPackToolDefinition(
   options: { callId?: string } = {},
 ): Promise<PiPackExecutionOutcome> {
   try {
-    const result = await tool.execute(args, ctx)
+    const result = await tool.execute(args, { ...ctx, ...(options.callId ? { callId: options.callId } : {}) })
     return {
       ok: true,
       text: result.content.map((part) => part.text).join('\n'),
@@ -888,6 +894,7 @@ export function piPackExtensionFactories(
               sessionId: ctx.sessionId,
               cwd: migrated?.executionRoot || ctx.cwd,
               runId: binding?.runId,
+              callId: toolCallId,
               temporaryChat: binding?.temporaryChat || ctx.temporaryChat,
             })
             if (migrated) {

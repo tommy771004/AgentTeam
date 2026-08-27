@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { DEFAULT_PI_SETTINGS, isPiThinkingLevel, type PiSettings } from './piAgentProfile.ts'
 import type { PiHostConfigStatus } from './piHostProtocol.ts'
@@ -24,6 +24,7 @@ export type PiHostSnapshot = {
   extensions: PiExtension[]
   /** Host-canonical run attachment metadata; Turn Record entries are not copied. */
   attachments: PiHostAttachment[]
+  memoryAuthority?: { backend: 'sqlite'; sourceHash: string }
 }
 
 type StoredState = PiHostSnapshot & { schemaVersion: number }
@@ -92,6 +93,16 @@ function withValidatedTurnRecords(state: StoredState): StoredState {
   return { ...state, sessions }
 }
 
+function validateMemoryAuthority(value: Partial<StoredState>): void {
+  if (value.schemaVersion !== 3) {
+    if (value.memoryAuthority !== undefined) throw new Error('Legacy state 不可宣告 SQLite authority。')
+    return
+  }
+  if (value.memoryAuthority?.backend !== 'sqlite' || typeof value.memoryAuthority.sourceHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.memoryAuthority.sourceHash) || value.memories?.length !== 0) {
+    throw new Error('Pi Host SQLite authority marker 無效；未覆寫資料。')
+  }
+}
+
 function parseStoredPiHostState(source: string): StoredState {
   let value: Partial<StoredState>
   try {
@@ -100,9 +111,10 @@ function parseStoredPiHostState(source: string): StoredState {
     throw new Error('Pi Host state JSON 損壞；未覆寫資料，請從有效備份復原。')
   }
   if (!value || typeof value !== 'object') throw new Error('Pi Host state 格式無效；未覆寫資料。')
-  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) {
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3) {
     throw new Error('Pi Host state schema 不相容；未覆寫資料，請使用相容版本或明確匯出後再降級。')
   }
+  validateMemoryAuthority(value)
   if (
     typeof value.cursor !== 'number' ||
     !Array.isArray(value.sessions) ||
@@ -117,19 +129,31 @@ function parseStoredPiHostState(source: string): StoredState {
   return value as StoredState
 }
 
+export async function resolvePiHostStateFile(statePath: string): Promise<string> {
+  try { return (await lstat(statePath)).isDirectory() ? path.join(statePath, 'snapshot.json') : statePath } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return statePath
+    throw error
+  }
+}
+
 async function readStoredPiHostState(statePath: string): Promise<StoredState> {
+  const filePath = await resolvePiHostStateFile(statePath)
   let source: string
   try {
-    source = await readFile(statePath, 'utf8')
+    source = await readFile(filePath, 'utf8')
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyState()
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && filePath === statePath) return emptyState()
     throw new Error('Pi Host state 無法讀取；未覆寫資料，請檢查檔案權限或從備份復原。', { cause: error })
   }
+  return decodePiHostState(source)
+}
+
+export function decodePiHostState(source: string): StoredState {
   const value = parseStoredPiHostState(source)
   const settings = normalizeStoredSettings(value.settings)
   const legacyStateHasRuntimeOverride = hasRuntimeOverride(settings)
-  return {
-    schemaVersion: value.schemaVersion === 2 ? 2 : 1,
+  return withValidatedTurnRecords({
+    schemaVersion: value.schemaVersion,
     cursor: value.cursor,
     sessions: value.sessions.map((session) => ({
       ...session,
@@ -145,16 +169,20 @@ async function readStoredPiHostState(statePath: string): Promise<StoredState> {
     memories: Array.isArray(value.memories) ? value.memories.filter(isPiMemory) : [],
     extensions: Array.isArray(value.extensions) ? value.extensions : [],
     attachments: Array.isArray(value.attachments) ? value.attachments : [],
-  }
+    ...(value.memoryAuthority ? { memoryAuthority: value.memoryAuthority } : {}),
+  })
 }
 
 export async function loadPiHostState(statePath: string): Promise<StoredState> {
-  return withValidatedTurnRecords(await readStoredPiHostState(statePath))
+  return readStoredPiHostState(statePath)
 }
 
 export async function savePiHostState(statePath: string, snapshot: PiHostSnapshot): Promise<void> {
-  await mkdir(path.dirname(statePath), { recursive: true })
-  const temporaryPath = `${statePath}.${process.pid}.tmp`
-  await writeFile(temporaryPath, JSON.stringify({ schemaVersion: 2, ...snapshot }), 'utf8')
-  await rename(temporaryPath, statePath)
+  const filePath = await resolvePiHostStateFile(statePath)
+  if (snapshot.memoryAuthority && filePath === statePath) throw new Error('SQLite Host state 必須使用已切換的檔案佈局；拒絕恢復 legacy JSON。')
+  if (filePath !== statePath && !snapshot.memoryAuthority) throw new Error('拒絕以 legacy snapshot 覆寫 SQLite Host state。')
+  await mkdir(path.dirname(filePath), { recursive: true })
+  const temporaryPath = `${filePath}.${process.pid}.tmp`
+  await writeFile(temporaryPath, JSON.stringify({ ...snapshot, schemaVersion: snapshot.memoryAuthority ? 3 : 2, ...(snapshot.memoryAuthority ? { memories: [] } : {}) }), { mode: 0o600 })
+  await rename(temporaryPath, filePath)
 }

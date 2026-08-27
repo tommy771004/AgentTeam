@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { resolvePiHostStateFile } from '../electron/piHostState.ts'
 import { once } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -191,7 +192,7 @@ try {
   restarted.child.stdin.end()
   await once(restarted.child, 'exit')
 
-  const legacySnapshot = JSON.parse(await readFile(statePath, 'utf8')) as { memories?: unknown[] }
+  const legacySnapshot = JSON.parse(await readFile(await resolvePiHostStateFile(statePath), 'utf8')) as { memories?: unknown[] }
   assert.deepEqual(legacySnapshot.memories, [])
 
   const relay = new PiHostSupervisor(

@@ -6,6 +6,7 @@ import { createInterface } from 'node:readline'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { buildPiTurnMemory } from '../electron/piSessionContext.ts'
+import { canonicalProjectId } from '../electron/durableMemoryStore.ts'
 
 assert.equal(buildPiTurnMemory('ordinary chat', { runId: 'r1', sessionId: 's1' }), undefined)
 assert.deepEqual(buildPiTurnMemory('請記住我的偏好是繁體中文', {
@@ -28,6 +29,7 @@ type Message = {
 }
 
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-host-memory-'))
+const project = canonicalProjectId(join(stateDir, 'project'))
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
   env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json') },
   stdio: ['pipe', 'pipe', 'inherit'],
@@ -47,13 +49,13 @@ const send = (id: number, method: string, params: Record<string, unknown> = {}) 
 try {
   send(1, 'initialize', { protocolVersion: 2 })
   assert.equal((await waitFor(1)).error, undefined)
-  send(2, 'memory/add', { memory: { id: 'pref-language', project: 'demo', text: 'Use Traditional Chinese UI copy', tags: ['preference'], createdAt: '2026-07-22T00:00:00.000Z' } })
+  send(2, 'memory/add', { memory: { id: 'pref-language', project, text: 'Use Traditional Chinese UI copy', tags: ['preference'], createdAt: '2026-07-22T00:00:00.000Z' } })
   assert.equal((await waitFor(2)).error, undefined)
-  send(3, 'memory/recall', { query: 'traditional', project: 'demo' })
-  assert.deepEqual((await waitFor(3)).result?.memories, [{ id: 'pref-language', project: 'demo', text: 'Use Traditional Chinese UI copy', tags: ['preference'], createdAt: '2026-07-22T00:00:00.000Z' }])
+  send(3, 'memory/recall', { query: 'traditional', project })
+  assert.deepEqual((await waitFor(3)).result?.memories, [{ id: 'pref-language', project, text: 'Use Traditional Chinese UI copy', tags: ['preference'], createdAt: '2026-07-22T00:00:00.000Z' }])
   send(4, 'memory/list')
   assert.equal((await waitFor(4)).result?.memories?.length, 1)
-  send(5, 'memory/add', { memory: { id: 'pref-language', project: 'demo', text: 'Use Traditional Chinese UI copy', tags: ['preference', 'ui'], createdAt: '2026-07-22T00:00:00.000Z' } })
+  send(5, 'memory/add', { memory: { id: 'pref-language', project, text: 'Use Traditional Chinese UI copy', tags: ['preference', 'ui'], createdAt: '2026-07-22T00:00:00.000Z' } })
   assert.equal((await waitFor(5)).error, undefined)
   send(6, 'memory/recall', { query: 'ui' })
   assert.equal((await waitFor(6)).result?.memories?.[0]?.tags.includes('ui'), true)

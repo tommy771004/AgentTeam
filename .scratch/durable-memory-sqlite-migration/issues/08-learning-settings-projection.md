@@ -5,6 +5,8 @@ Spec: `.scratch/durable-memory-sqlite-migration/spec.md`
 
 ## What to build
 
+#04 已確保 legacy memory API 與 `state/snapshot.memories` 只從 SQLite 產生一次性相容 projection，並發布 post-commit revision；disk JSON 永遠 `memories: []`。本票仍需正式切換 paged capability、讓 UI invalidate/refetch，移除可回寫的 renderer collection／whole-list sync，不可把相容 projection 當另一份 authority。
+
 讓 Learning page 與 Settings 的記憶控制成為 paged Host projection。使用者手動新增、編輯、刪除、切換 project scope 或更新 profile/document 後，畫面依 Host revision 即時 invalidate/refetch，不必切頁，也不再把 renderer collection 同步回 Host。
 
 ## Acceptance criteria

@@ -2,7 +2,7 @@ import { createInterface } from 'node:readline'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createPiHostServer, type PiHostConfigStatus, type PiHostMessage } from './piHostProtocol.ts'
-import { loadPiHostState, savePiHostState, type PiHostSnapshot } from './piHostState.ts'
+import { savePiHostState, type PiHostSnapshot } from './piHostState.ts'
 import { migrateLegacySettings } from './piSettingsMigration.ts'
 import { buildPiSubscriptionModelView, disposeAllPiSessions, persistPiLegacyCredential, persistPiLegacyModelConfig } from './piCoreRuntime.ts'
 import { assembleSubscriptionCatalog, resolveCatalogPublication } from '../src/agent/subscriptionCatalog.ts'
@@ -12,7 +12,7 @@ import { registerTrustedBuiltinShellSandboxAdapter } from './piBuiltinShellSandb
 import { createSeatbeltBuiltinShellAdapter } from './piSeatbeltShellSandbox.ts'
 import { createBubblewrapBuiltinShellAdapter } from './piBubblewrapShellSandbox.ts'
 import { JsonCompactionCheckpointStore } from './compactionCheckpointStore.ts'
-import { SqliteDurableMemoryStore } from './sqliteDurableMemoryStore.ts'
+import { openPiHostStorage } from './piHostStorage.ts'
 
 type ParentPort = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
@@ -49,7 +49,8 @@ const parentPort = (process as typeof process & { parentPort?: ParentPort }).par
 const statePath = process.env.SUBAGENTS_PI_HOST_STATE_PATH || `${process.cwd()}/pi-host-state.json`
 const checkpointDir = process.env.SUBAGENTS_PI_CHECKPOINT_DIR || path.join(path.dirname(statePath), 'run-checkpoints')
 const compactionCheckpoints = new JsonCompactionCheckpointStore(checkpointDir)
-const storedState = await loadPiHostState(statePath)
+const durableMemoryPath = process.env.SUBAGENTS_DURABLE_MEMORY_DB_PATH || path.join(path.dirname(statePath), 'durable-memory.sqlite')
+const { snapshot: storedState, memoryStore: durableMemoryStore } = await openPiHostStorage(statePath, durableMemoryPath)
 const userConfig = await bootstrapPiUserConfig()
 const migrationPath = process.env.SUBAGENTS_PI_SETTINGS_MIGRATION_PATH || path.join(path.dirname(statePath), 'pi-settings-migration.json')
 let migratedSettings = storedState.settings
@@ -151,10 +152,8 @@ const refreshSubscriptionConfig = (): Promise<PiHostConfigStatus> => {
   })().finally(() => { refreshSubscriptionConfigInFlight = undefined })
   return refreshSubscriptionConfigInFlight
 }
-const initialSnapshot: PiHostSnapshot = { cursor: storedState.cursor, sessions: storedState.sessions, settings: effectiveSettings, settingsOrigin, config, queue: storedState.queue, resources: storedState.resources, memories: storedState.memories, extensions: storedState.extensions, attachments: storedState.attachments }
+const initialSnapshot: PiHostSnapshot = { ...storedState, settings: effectiveSettings, settingsOrigin, config }
 await savePiHostState(statePath, initialSnapshot)
-const durableMemoryPath = process.env.SUBAGENTS_DURABLE_MEMORY_DB_PATH || path.join(path.dirname(statePath), 'durable-memory.sqlite')
-const durableMemoryStore = await SqliteDurableMemoryStore.open(durableMemoryPath)
 let persistence = Promise.resolve()
 const persist = (snapshot: typeof initialSnapshot) => {
   persistence = persistence
@@ -186,20 +185,28 @@ if (parentPort) {
   parentPort.on('message', (event) => server.handle(event.data))
 } else {
   const server = createEntryHost((message) => process.stdout.write(`${JSON.stringify(message)}\n`), initialSnapshot, persist, refreshSubscriptionConfig)
+  const inFlight = new Set<Promise<void>>()
+  const dispatch = (request: unknown) => {
+    const pending = server.handle(request)
+    inFlight.add(pending)
+    void pending.finally(() => inFlight.delete(pending))
+  }
   const input = createInterface({ input: process.stdin })
   input.on('line', (line) => {
     try {
-      server.handle(JSON.parse(line) as unknown)
+      dispatch(JSON.parse(line) as unknown)
     } catch {
-      server.handle(null)
+      dispatch(null)
     }
   })
   // MCP stdio children retain pipe handles. Release every discovery
   // generation when the supervising stdio channel closes, otherwise a clean
   // Host shutdown can hang after an extension reload qualification.
-  input.on('close', () => {
+  input.on('close', async () => {
+    await Promise.all(inFlight)
+    await persistence
     stopAllPiMcp()
-    void disposeAllPiSessions()
-    void durableMemoryStore.close()
+    await disposeAllPiSessions()
+    await durableMemoryStore.close()
   })
 }

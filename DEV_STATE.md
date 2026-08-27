@@ -4,9 +4,9 @@
 
 ## 本日進展：durable memory SQLite migration
 
-`.scratch/durable-memory-sqlite-migration` #01–03 已 resolved：Host-owned async `DurableMemoryStore` 契約與共用 parity fixtures 已由 in-memory／SQLite adapter 同時通過；production SQLite adapter 具 versioned schema、WAL、busy timeout、transaction 與 serialized Host writes。Pi Host v4 的顯式 `memory-store-v1` 現涵蓋 scoped get/recall/list/set/append/delete/clear；單一 authority boundary 集中 realpath project identity、origin/action policy、runtime flags、validation、per-scope quota、credential rejection 與 deterministic retry idempotency。operation journal 只留 hash／identity／revision，concurrent retry 不會重複 revision event。現行 production supervisor 仍未協商新 capability，legacy JSON memory authority 尚未切換；frontier 推進 #04 JSON → SQLite 原子遷移與 authority cutover。`npm run build`、完整 `npm run smoke`、tsconfig.node typecheck、相關 oxlint 與 complexity gate 全綠。
+`.scratch/durable-memory-sqlite-migration` #01–04 已 resolved：Host-owned async `DurableMemoryStore` 契約與 in-memory／SQLite parity、scope/policy/idempotency、atomic legacy migration 全部接入 production。使用者核准 Host state 佈局後，舊 pathname 成為目錄 downgrade barrier；sessions/settings 等仍在 `snapshot.json`，長期記憶則只認 SQLite，原始 JSON 是 `0600` recovery evidence，不是 live authority。
 
-#04 已補 pre-cutover 核心：兩個 adapter 的 legacy migration transaction／source-hash marker／拒絕報告與真 Host corrupt/unknown-schema startup refusal。build、Pi parity qualification、Node typecheck、相關 lint/complexity 綠；本輪未重跑完整 smoke。#04 仍未 resolved，等待確認是否允許調整包含 sessions 的 Host state 檔案佈局，以阻擋既有舊 binary 忽略新 schema 後覆寫。正式 JSON authority 未切換，#05–13 尚未解鎖。
+#04 以真 Host 證明 v1/v2、invalid/quarantine、同 key 跨 scope、special entries、四個 crash boundary、commit 後 retry、clear 後不回放 backup、DB 遺失拒絕與 OS rename downgrade barrier。legacy protocol／turn／Memory Pack 的最小 adapter 均不再更新 JSON；pack policy 由 frozen run binding 提供。相關 oxlint、Node typecheck、complexity gate、`npm run build`、Pi parity/Host gates 與完整 `npm run smoke` 全綠。05/07/08/13 現為可並行 frontier；06 仍依賴 05，細項不可由 #04 的最小 adapter 提前翻牌。復原與證據界線見 `.scratch/durable-memory-sqlite-migration/cutover-recovery.md`。
 
 ## 本日收口：tracker 對帳
 
@@ -43,4 +43,4 @@
 
 ## 下一步
 
-依 `.scratch/INDEX.md` Active frontier 排工：durable-memory-sqlite-migration 從 #04 JSON → SQLite 原子遷移與 authority cutover 繼續；context-usage-panel 與 external-cli-durable-harness 仍可並行開工。
+依 `.scratch/INDEX.md` Active frontier 排工：durable-memory-sqlite-migration 的 #05／#07／#08／#13 可並行，#06 接 #05；context-usage-panel 與 external-cli-durable-harness 仍可並行開工。

@@ -1,0 +1,85 @@
+import assert from 'node:assert/strict'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { canonicalProjectId, type MemoryAccessContext } from '../electron/durableMemoryStore.ts'
+import { SqliteDurableMemoryStore } from '../electron/sqliteDurableMemoryStore.ts'
+import { createPiHostServer, type PiHostMessage } from '../electron/piHostProtocol.ts'
+import { bindPiSessionRun, executePiPackTool, unbindPiSessionRun } from '../electron/piToolHost.ts'
+
+const directory = await mkdtemp(join(tmpdir(), 'pi-memory-consumers-'))
+const database = join(directory, 'memory.sqlite')
+const store = await SqliteDurableMemoryStore.open(database)
+const project = canonicalProjectId(directory)
+const access: MemoryAccessContext = { origin: 'runtime', canonicalProject: project, memoryReadEnabled: true, memoryWriteEnabled: true, temporary: false, runId: 'run', sessionId: 'session' }
+const admin: MemoryAccessContext = { origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: false }
+const messages: PiHostMessage[] = []
+const snapshots: unknown[][] = []
+const server = createPiHostServer((message) => messages.push(message), undefined, (snapshot) => snapshots.push([...snapshot.memories]), undefined, undefined, store)
+const ctx = { sessionId: 'session', runId: 'run', cwd: '/untrusted/other-project' }
+let call = 0
+async function tool(name: string, args: Record<string, unknown>, callId = `call-${++call}`) {
+  const result = await executePiPackTool(name, args, ctx, { callId })
+  return { ...result, data: result.data as { ok?: boolean; id?: string } | undefined }
+}
+function bind(overrides: Partial<MemoryAccessContext> = {}) {
+  bindPiSessionRun('session', { runId: 'run', memoryAccess: { ...access, ...overrides } })
+}
+
+try {
+  await server.handle({ id: 1, method: 'initialize', params: { protocolVersion: 4, capabilities: ['memory-store-v1'] } })
+  bind()
+  assert.equal((await tool('memory_set', { key: 'rule', text: 'Use Traditional Chinese' }, 'set-rule')).data?.ok, true)
+  assert.equal((await store.get({ access: admin, scope: { kind: 'project', project }, logicalKey: 'rule' }))?.text, 'Use Traditional Chinese')
+  assert.equal((await tool('memory_get', { id: 'rule' })).data?.ok, true)
+  const appended = await tool('memory_append', { text: 'Append exactly once' }, 'append-once')
+  assert.equal(appended.data?.ok, true)
+  assert.equal((await tool('memory_append', { text: 'Append exactly once' }, 'append-once')).data?.id, appended.data?.id)
+  assert.equal((await store.list({ access: admin })).total, 2)
+
+  await store.upsert({ access: admin, scope: { kind: 'project', project: canonicalProjectId('/other-project') }, kind: 'memory', logicalKey: 'secret-other-project', text: 'Other project private note', tags: [], createdAt: '2026-08-27T00:00:00.000Z' })
+  assert.equal((await tool('memory_get', { id: 'secret-other-project' })).data?.ok, false)
+  assert.equal(JSON.stringify(await tool('memory_search', { query: 'private' })).includes('Other project private note'), false)
+  for (const disabled of [{ memoryReadEnabled: false, memoryWriteEnabled: false }, { temporary: true }]) {
+    bind(disabled)
+    assert.equal((await tool('memory_get', { id: 'rule' })).data?.ok, false)
+    assert.equal((await tool('memory_search', { query: 'Chinese' })).data?.ok, false)
+    assert.equal((await tool('memory_set', { key: 'denied', text: 'must not commit' })).data?.ok, false)
+  }
+  bind({ memoryWriteEnabled: false })
+  assert.equal((await tool('memory_get', { id: 'rule' })).data?.ok, true)
+  assert.equal((await tool('memory_append', { text: 'must not commit' })).data?.ok, false)
+  unbindPiSessionRun('session')
+  assert.equal((await tool('memory_set', { key: 'detached', text: 'must not commit' })).data?.ok, false)
+  assert.equal((await store.list({ access: admin })).total, 3)
+  const changes = messages.filter((message) => 'event' in message && message.event === 'memory/changed')
+  assert.equal(changes.length, 2, 'only the committed pack writes publish, not retry or denials')
+  assert.equal(JSON.stringify(changes).includes('Traditional Chinese'), false, 'change events omit private text')
+
+  await server.handle({ id: 2, method: 'memory/list' })
+  const listed = messages.find((message) => 'id' in message && message.id === 2)
+  assert.equal(listed && 'result' in listed ? listed.result?.memories?.length : undefined, 3)
+  assert.ok(snapshots.every((snapshot) => snapshot.length === 0), 'state callbacks never contain live memory bodies')
+  await server.handle({ id: 3, method: 'sessions/create', params: {} })
+  const created = messages.find((message) => 'id' in message && message.id === 3)
+  const sessionId = created && 'result' in created ? created.result?.sessionId : undefined
+  assert.ok(sessionId)
+  await server.handle({ id: 4, method: 'turn/submit', params: { sessionId, runId: 'bad-scope', prompt: 'test', contextPolicy: { memoryEnabled: false, project: 'invalid\u0000project' } } })
+  await server.handle({ id: 5, method: 'runs/active', params: {} })
+  const active = messages.find((message) => 'id' in message && message.id === 5)
+  assert.equal(JSON.stringify(active).includes('bad-scope'), false, 'failed scope admission must not leave a running attachment')
+  await store.close()
+  await server.handle({ id: 6, method: 'turn/submit', params: { sessionId, runId: 'closed-memory', prompt: 'test', contextPolicy: { memoryEnabled: true, project } } })
+  await server.handle({ id: 7, method: 'runs/active', params: {} })
+  const afterFailure = messages.find((message) => 'id' in message && message.id === 7)
+  assert.ok(afterFailure && 'result' in afterFailure)
+  assert.equal(afterFailure.result?.activeRuns?.some((run) => run.runId === 'closed-memory'), false, 'async memory failure must settle the run before releasing its binding')
+  assert.equal(afterFailure.result?.terminalRuns?.find((run) => run.runId === 'closed-memory')?.settlement, 'failed')
+  const restarted = await SqliteDurableMemoryStore.open(database)
+  try { assert.equal((await restarted.list({ access: admin })).total, 3) } finally { await restarted.close() }
+  console.log('Pi memory consumers: shared SQLite, scoped pack policy, commit-before-success, retry, and no JSON writes passed')
+} finally {
+  unbindPiSessionRun('session')
+  await store.close()
+  await rm(directory, { recursive: true, force: true })
+}

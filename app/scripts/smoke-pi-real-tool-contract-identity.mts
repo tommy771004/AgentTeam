@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { resolvePiHostStateFile } from '../electron/piHostState.ts'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { createInterface } from 'node:readline'
@@ -185,7 +186,7 @@ try {
   assert.deepEqual(pagedCalls.map(identityFields), calls.map(identityFields), 'protocol page exposes the same durable identities')
   await host.stop()
 
-  const persisted = JSON.parse(await readFile(statePath, 'utf8'))
+  const persisted = JSON.parse(await readFile(await resolvePiHostStateFile(statePath), 'utf8'))
   const persistedCalls = persisted.sessions.find((session: any) => session.id === sessionId)?.record?.entries?.filter((entry: any) => entry.kind === 'tool-call') || []
   assert.deepEqual(persistedCalls.map(identityFields), calls.map(identityFields), 'identity survives filesystem persistence')
 

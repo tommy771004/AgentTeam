@@ -21,3 +21,7 @@ Spec: `.scratch/durable-memory-sqlite-migration/spec.md`
 ## Blocked by
 
 04 — JSON → SQLite 原子遷移與 authority cutover
+
+## 接續註記（#04）
+
+#04 為避免切換後仍讀 JSON，已將 turn recall 改為 await DurableMemoryStore，並在建立 attachment 前驗證 frozen project/flags。此票仍需補 recalled identities/revision 的 Turn Record provenance、live/replay 與完整真 Host turn matrix；不要再引入 snapshot.memories owner。

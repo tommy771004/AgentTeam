@@ -5,6 +5,8 @@ Spec: `.scratch/durable-memory-sqlite-migration/spec.md`
 
 ## What to build
 
+#04 已落地核准的 state 目錄 barrier、私有 backup/report、重啟式 cutover，並使 stdio EOF 等待 in-flight request/persistence 後 close。詳見 [cutover-recovery.md](../cutover-recovery.md)。本票仍須 bounded shutdown、typed degraded health／Settings 呈現、integrity/corruption 與完整 WAL/permission matrix；目前的 OS rename barrier 測試不是歷史 Electron binary 測試。
+
 完成 memory database 的 startup/readiness/shutdown/recovery lifecycle。Host 只有在 DB open、integrity/schema validation 與 migration 成功後才 ready；關閉會 drain/checkpoint/close。corruption、unsupported schema 與 downgrade 都進入可見的 degraded/fail-closed 狀態，不會靜默生成空 authority。
 
 ## Acceptance criteria
