@@ -1,12 +1,23 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import {
   buildHandoffAvailability,
   buildHandoffDocument,
   buildComposerRunOverrides,
   buildComposerRunInput,
+  attachmentsForComposerScope,
+  isConversationComposerBusy,
+  replaceComposerScopeAttachments,
   resolveBuiltinRunnerTransition,
   resolveComposerApprovalMode,
 } from '../src/agent/composerRunControls.ts'
+import { resolveModelRunnerSelection } from '../src/agent/localCliRun.ts'
+import {
+  applyComposerApprovalHandoff,
+  beginComposerApprovalHandoff,
+  finishComposerApprovalHandoff,
+  resetComposerApprovalHandoffsForTests,
+} from '../src/agent/composerApprovalHandoff.ts'
 import { piThinkingLevelForDepth } from '../src/agent/thinking.ts'
 import {
   clearRunQueue,
@@ -65,6 +76,59 @@ test('composer plus-menu and Settings selections are frozen into one runTask inp
   assert.equal(input.overrides?.temporary, true)
   assert.ok((input.overrides?.maxIterations || 0) > 0)
   assert.ok((input.overrides?.maxToolRounds || 0) > 0)
+})
+
+test('composer attachments remain isolated by conversation thread', () => {
+  const attachment = {
+    id: 'attachment-a',
+    kind: 'text' as const,
+    name: 'thread-a.txt',
+    mimeType: 'text/plain',
+    textContent: 'thread A only',
+  }
+  const state = replaceComposerScopeAttachments({}, 'thread-a', [attachment])
+  assert.deepEqual(attachmentsForComposerScope(state, 'thread-a'), [attachment])
+  assert.deepEqual(attachmentsForComposerScope(state, 'thread-b'), [])
+})
+
+test('another conversation submission does not put this composer into steer mode', () => {
+  assert.equal(isConversationComposerBusy({ 'thread-a': 1 }, 'thread-b', false), false)
+  assert.equal(isConversationComposerBusy({ 'thread-a': 1 }, 'thread-a', false), true)
+  assert.equal(isConversationComposerBusy({}, 'thread-b', true), true)
+})
+
+test('a slash task consumes the composer approval override at task-run admission', () => {
+  resetComposerApprovalHandoffsForTests()
+  const lease = beginComposerApprovalHandoff('thread-a', 'always')
+  const admitted = applyComposerApprovalHandoff({
+    objective: 'inspect integrations',
+    sourceKind: 'slash',
+    reuseThreadId: 'thread-a',
+  })
+  assert.equal(admitted.overrides?.approvalMode, 'always')
+  assert.equal(finishComposerApprovalHandoff(lease), true)
+})
+
+test('a non-task slash command does not consume the composer approval override', () => {
+  resetComposerApprovalHandoffsForTests()
+  const lease = beginComposerApprovalHandoff('thread-a', 'full')
+  assert.equal(finishComposerApprovalHandoff(lease), false)
+})
+
+test('selecting a builtin model cannot leave an external runner selected', () => {
+  assert.deepEqual(
+    resolveModelRunnerSelection({
+      currentRunner: 'codex',
+      selectedModel: 'native-model',
+      providers: [{
+        id: 'codex',
+        enabled: true,
+        authorized: true,
+        models: [{ id: 'codex-model' }],
+      }],
+    }),
+    { threadModel: 'native-model', runner: 'builtin' },
+  )
 })
 
 test('Composer depth reaches the Pi Core task profile vocabulary', () => {
@@ -181,4 +245,9 @@ test('queued composer runs persist the captured approval mode', () => {
     if (previous) Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: previous })
     else delete (globalThis as { localStorage?: Storage }).localStorage
   }
+})
+
+execFileSync(process.execPath, ['scripts/protocols-page-component-fixture.mjs'], {
+  cwd: new URL('..', import.meta.url).pathname,
+  stdio: 'inherit',
 })

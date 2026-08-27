@@ -1,7 +1,7 @@
 /**
  * Compose a compliance report from evidence the product already produces.
  *
- * This module collects nothing new (ticket 16). Every field is a projection of
+ * This module collects nothing new. Every field is a projection of
  * an existing source — the run archive, `outbound/evidenceLedger.ts`,
  * `tools/toolPackage.ts` fingerprints and `entitlement.ts` — reshaped into the
  * exportable document. Raw credentials and payloads never enter it.

@@ -266,16 +266,22 @@ const designArtifactPatch: PiPackTool = {
     const rawScope = await readJson(scopePath) as Partial<PinnedPatchScope> | undefined
     let scope: PinnedPatchScope | undefined
     if (rawScope) {
-      if (rawScope.schemaVersion !== 1 || rawScope.artifactId !== artifactId || rawScope.revision !== validation.manifest.revision || !Array.isArray(rawScope.selectors)) {
+      if (rawScope.schemaVersion !== 1 || typeof rawScope.runId !== 'string' || rawScope.artifactId !== artifactId || rawScope.revision !== validation.manifest.revision || !Array.isArray(rawScope.selectors)) {
+        await unlink(scopePath).catch(() => undefined)
         return structuredFailure('pinned patch scope 與目前 artifact revision 不一致；請重新選取 pin。')
       }
       if (Date.parse(String(rawScope.expiresAt || '')) <= Date.now()) {
-        return structuredFailure('pinned patch scope 已過期；請重新選取 pin。')
+        await unlink(scopePath).catch(() => undefined)
+        if (args.scopeId) return structuredFailure('pinned patch scope 已過期；請重新選取 pin。')
+      } else {
+        if (rawScope.runId !== ctx.runId) {
+          return structuredFailure('pinned patch scope 不屬於目前 run。')
+        }
+        if (!args.scopeId || args.scopeId !== rawScope.scopeId) {
+          return structuredFailure('此 artifact 有啟用中的 pinned patch scope；scopeId 缺少或不一致。')
+        }
+        scope = rawScope as PinnedPatchScope
       }
-      if (!args.scopeId || args.scopeId !== rawScope.scopeId) {
-        return structuredFailure('此 artifact 有啟用中的 pinned patch scope；scopeId 缺少或不一致。')
-      }
-      scope = rawScope as PinnedPatchScope
     }
     const patched = await patchManifestFiles(ctx.cwd, validation.manifest, args.operations as never, scope)
     if (!patched.ok) return structuredFailure(patched.error)

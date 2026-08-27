@@ -2,7 +2,7 @@ import type { SubscriptionProviderCatalog } from '../../agent/subscriptionCatalo
 import { subscriptionCacheBadge, useSubscriptionCatalog } from '../../hooks/useSubscriptionCatalog'
 
 /**
- * ADR-0052 ticket 03 — sync-status summary for CLI-subscription connections.
+ * Sync-status summary for CLI-subscription connections.
  * Reads ONLY availability metadata from the Host snapshot config
  * (`config.subscriptionCatalog`) through the shared loader hook; raw tokens
  * never cross IPC and never reach this component. Rows relay the projection's

@@ -321,19 +321,6 @@ export function pickThreadPiSession(sessions: readonly unknown[], threadId: stri
 }
 
 /**
- * The answer a turn settles on is its LAST assistant message, never its first.
- *
- * A tool-using turn narrates before it works（「我先探索本地專案結構…」）and only
- * concludes after the tools return, so reading the first assistant message
- * publishes the preamble and eats the conclusion. The narration in between is
- * not lost: it already reaches the UI as `host/turn-item` events.
- *
- * When no assistant message carries text — the final message holds only
- * thinking/toolCall blocks, or message items were never projected — the
- * streamed `text_delta` content is what the user already watched arrive in
- * the feed, so the answer is rebuilt from it instead of collapsing to ''.
- */
-/**
  * Item types that end one assistant message.
  *
  * Streamed deltas belong to the message that produced them: a tool call, an
@@ -343,6 +330,11 @@ export function pickThreadPiSession(sessions: readonly unknown[], threadId: stri
  */
 const PI_MESSAGE_BOUNDARY_ITEMS = new Set(['message_start', 'tool_execution_start', 'assistant_message'])
 
+/**
+ * The answer a turn settles on is its last assistant message, never its first.
+ * Tool narration already reaches the UI as `host/turn-item` events. When no
+ * assistant message carries text, rebuild the answer from streamed deltas.
+ */
 export function piTurnFinalAnswer(items: unknown[]): string {
   const records = items.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
   const texts = records

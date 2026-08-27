@@ -99,10 +99,10 @@ const settingsOrigin = storedState.settingsOrigin === 'managed' ? 'managed' : 'n
 const effectiveSettings = settingsOrigin === 'native'
   ? { ...migratedSettings, ...userConfig.settings }
   : migratedSettings
-// ADR-0052 ticket 02: the selectable-subscription surface rides in the same
+// The selectable-subscription surface rides in the same
 // snapshot config as the OAuth status it projects from. A model-view failure
 // lands as per-provider reasons — the rows stay, honestly unavailable. When a
-// degraded build meets a last-good snapshot, ticket 02's offline fallback
+// degraded build meets a last-good snapshot, the offline fallback
 // republishes that cache marked stale instead of showing an empty world.
 async function buildSubscriptionConfig(
   currentUserConfig: Awaited<ReturnType<typeof bootstrapPiUserConfig>>,

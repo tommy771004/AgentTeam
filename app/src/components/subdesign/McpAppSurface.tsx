@@ -35,6 +35,7 @@ export type SurfaceFallbackActions = {
 
 type ToolProxyContext = {
   surfaceId: string
+  surfaceToken: string | null
   declaration: SurfaceDeclaration
   runId?: string
   threadId?: string
@@ -54,22 +55,59 @@ function postToolResult(context: ToolProxyContext, payload: Record<string, unkno
   }, '*')
 }
 
+function parseSurfaceToolRequest(rawPayload: unknown, declaration: SurfaceDeclaration): {
+  ok: true
+  coordinate: string
+  parsed: NonNullable<ReturnType<typeof parseMcpToolCoordinate>>
+  arguments: Record<string, unknown>
+  requestId: string
+} | { ok: false; coordinate: string } {
+  const payload = (rawPayload && typeof rawPayload === 'object' ? rawPayload : {}) as Record<string, unknown>
+  const coordinate = String(payload.tool || '')
+  const parsed = parseMcpToolCoordinate(coordinate)
+  if (!parsed || !isToolAllowed(declaration, coordinate)) return { ok: false, coordinate }
+  const arguments_ = payload.arguments && typeof payload.arguments === 'object' && !Array.isArray(payload.arguments)
+    ? payload.arguments as Record<string, unknown>
+    : {}
+  return {
+    ok: true,
+    coordinate,
+    parsed,
+    arguments: arguments_,
+    requestId: String(payload.requestId || '').slice(0, 80),
+  }
+}
+
 async function executeMcpSurfaceToolCall(
   rawPayload: unknown,
   context: ToolProxyContext,
 ): Promise<void> {
-  const payload = (rawPayload && typeof rawPayload === 'object' ? rawPayload : {}) as Record<string, unknown>
-  const coordinate = String(payload.tool || '')
-  const parsed = parseMcpToolCoordinate(coordinate)
-  if (!parsed || !isToolAllowed(context.declaration, coordinate)) {
+  const request = parseSurfaceToolRequest(rawPayload, context.declaration)
+  if (!request.ok) {
     context.setStatus('invalid')
-    context.setError(`disallowed tool: ${coordinate}`)
-    console.warn(`[mcp-apps] disallowed tool: ${coordinate}`)
+    context.setError(`disallowed tool: ${request.coordinate}`)
+    console.warn(`[mcp-apps] disallowed tool: ${request.coordinate}`)
     return
   }
-  const args = payload.arguments && typeof payload.arguments === 'object' && !Array.isArray(payload.arguments)
-    ? payload.arguments as Record<string, unknown>
-    : {}
+  const { coordinate, parsed, arguments: args, requestId } = request
+  const call = window.subagents?.subdesign?.callMcpAppTool
+  if (!call || !context.surfaceToken) {
+    context.setStatus('unavailable')
+    context.setError('目前的 Host 不支援 MCP Apps tool proxy。')
+    return
+  }
+  context.setStatus('loading')
+  const challenge = await call({
+    surfaceToken: context.surfaceToken,
+    coordinate,
+    arguments: args,
+  })
+  if (!challenge.approvalRequired || !challenge.approvalToken) {
+    postToolResult(context, { requestId, ...challenge })
+    context.setStatus(challenge.ok ? 'ready' : 'error')
+    context.setError(challenge.ok ? null : challenge.error || 'Host 未建立 MCP tool approval challenge')
+    return
+  }
   const decision = await usePermissionAskStore.getState().requestAsk({
     threadId: context.threadId,
     runId: context.runId,
@@ -77,25 +115,11 @@ async function executeMcpSurfaceToolCall(
     args: { extensionId: parsed.extensionId, toolName: parsed.toolName, arguments: args },
     reason: `互動表面要呼叫 MCP 工具 ${coordinate}`,
   })
-  const requestId = String(payload.requestId || '').slice(0, 80)
-  if (decision.decision !== 'allow') {
-    postToolResult(context, { requestId, ok: false, error: '使用者拒絕 MCP 工具呼叫。' })
-    return
-  }
-  const call = window.subagents?.subdesign?.callMcpAppTool
-  if (!call) {
-    context.setStatus('unavailable')
-    context.setError('目前的 Host 不支援 MCP Apps tool proxy。')
-    return
-  }
-  context.setStatus('loading')
   const result = await call({
+    surfaceToken: context.surfaceToken,
     coordinate,
-    allowlist: context.declaration.allowlist,
-    arguments: args,
-    runId: context.runId,
-    threadId: context.threadId,
-    projectRoot: context.projectRoot,
+    approvalToken: challenge.approvalToken,
+    approvalDecision: decision.decision === 'allow' ? 'allow' : 'deny',
   })
   postToolResult(context, { requestId, ...result })
   context.setStatus(result.ok ? 'ready' : 'error')
@@ -195,6 +219,7 @@ export function McpAppSurface(props: {
     onStatusChange?.(status, error ?? undefined)
   }, [enabled, status, error, onStatusChange])
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const [hostSurfaceToken, setHostSurfaceToken] = useState<string | null>(null)
   const persistenceQueue = useRef<Promise<unknown>>(Promise.resolve())
   const session = useRef<SurfaceSessionSnapshot | null>(resolution.ok
     ? createSurfaceSession(resolution.ref, props.declaration.kind, { expiresAt: props.expiresAt })
@@ -216,6 +241,41 @@ export function McpAppSurface(props: {
     setStatus(next.status)
     persistenceQueue.current = persistenceQueue.current.then(() => repository.save(next))
   }, [repository])
+
+  useEffect(() => {
+    const register = window.subagents?.subdesign?.registerMcpAppSurface
+    if (!enabled || !resolution.ok || !props.html || !register) {
+      setHostSurfaceToken(null)
+      return
+    }
+    let disposed = false
+    let token: string | undefined
+    void register({
+      surfaceId: props.surfaceId,
+      declaration: props.declaration,
+      runId: props.runId,
+      threadId: props.threadId,
+      projectRoot: props.projectRoot,
+      expiresAt: props.expiresAt,
+    }).then((result) => {
+      if (disposed) {
+        if (result.token) void window.subagents?.subdesign?.unregisterMcpAppSurface?.(result.token)
+        return
+      }
+      if (!result.ok || !result.token) {
+        setError(result.error || 'Host 無法註冊 MCP App surface。')
+        transition({ type: 'unavailable' })
+        return
+      }
+      token = result.token
+      setHostSurfaceToken(token)
+    })
+    return () => {
+      disposed = true
+      setHostSurfaceToken(null)
+      if (token) void window.subagents?.subdesign?.unregisterMcpAppSurface?.(token)
+    }
+  }, [enabled, props.declaration, props.expiresAt, props.html, props.projectRoot, props.runId, props.surfaceId, props.threadId, resolution, transition])
 
   const submit = useCallback(async (values: Record<string, unknown>, callback?: () => SubmissionResult) => {
     if (!draftRef || !callback) return
@@ -288,6 +348,7 @@ export function McpAppSurface(props: {
       if (msg.action === 'tool_call') {
         void executeMcpSurfaceToolCall(msg.payload, {
           surfaceId: props.surfaceId,
+          surfaceToken: hostSurfaceToken,
           declaration: props.declaration,
           runId: props.runId,
           threadId: props.threadId,
@@ -323,7 +384,7 @@ export function McpAppSurface(props: {
       clearTimeout(readyTimer)
       if (expiryTimer) clearTimeout(expiryTimer)
     }
-  }, [actions, enabled, props.surfaceId, props.declaration, props.html, props.expiresAt, props.projectRoot, props.runId, props.threadId, resolution, repository, saveDraft, transition])
+  }, [actions, enabled, hostSurfaceToken, props.surfaceId, props.declaration, props.html, props.expiresAt, props.projectRoot, props.runId, props.threadId, resolution, repository, saveDraft, transition])
 
   if (!enabled) {
     return <FallbackSwitch {...props} actions={actions} draft={draft} status="unavailable" />

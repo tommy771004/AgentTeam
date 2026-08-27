@@ -122,7 +122,8 @@ export function FloatingConsole() {
       </div>
 
       <div className="p-2 border-t border-line">
-        <CommandComposer
+      <CommandComposer
+        scopeKey="floating-console"
           value={composer}
           onChange={setComposer}
           compact

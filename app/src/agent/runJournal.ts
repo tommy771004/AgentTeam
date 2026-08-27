@@ -529,12 +529,6 @@ export function recordRunTerminal(input: {
 }
 
 /**
- * Mark a pending outcome as told, without changing the terminal status.
- *
- * Used by the live completion notice, so a run the user was shown while the app
- * was open is not narrated again as news on the next restart.
- */
-/**
  * Record one context compaction against its run.
  *
  * The event is what tells a later reader that the agent's view of the

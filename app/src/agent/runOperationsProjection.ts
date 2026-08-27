@@ -45,7 +45,6 @@ function base(entry: TurnRecordEntry) {
   return { id: `e${entry.seq}`, seq: entry.seq, turn: entry.turn, step: entry.step }
 }
 
-/** Row text from a declared card; falls back to the recorded names alone. */
 /** Row text from a declared card; the caller owns the fallback title. */
 function rowFromCard(
   card: ToolPresentation | undefined,

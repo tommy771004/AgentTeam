@@ -51,8 +51,8 @@ export function selectToolsForStep(
     typeof window.subagents?.piHost?.sessions?.list === 'function'
 
   for (const tool of TOOL_CATALOG) {
-    // Electron/Pi Host is the canonical Bash owner. The legacy renderer loop
-    // remains available only for plain-browser development fallback.
+    // Electron/Pi Host is the canonical tool owner. Plain-browser development
+    // may use the renderer compatibility catalog when no Host exists.
     if (electronPiHostOwnsTools && PI_HOST_OWNED_COMPAT_TOOLS.has(tool.name)) continue
     if (tool.name === 'web_search' && opts?.webSearchEnabled === false) continue
     if (tool.keywords.some((k) => hay.includes(k))) {

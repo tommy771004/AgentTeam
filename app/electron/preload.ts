@@ -517,23 +517,40 @@ const api = {
         operationCount?: number
         error?: string
       }>,
-    preparePinnedPatchScope: (input: { artifact: unknown; pins: unknown; projectRoot?: string }) =>
+    preparePinnedPatchScope: (input: { artifact: unknown; pins: unknown; runId: string; projectRoot?: string }) =>
       ipcRenderer.invoke('subdesign:preparePinnedPatchScope', input) as Promise<{
         ok: boolean
         scopeId?: string
         error?: string
       }>,
-    callMcpAppTool: (input: {
-      coordinate: string
-      allowlist: string[]
-      arguments?: Record<string, unknown>
+    clearPinnedPatchScope: (input: { artifactId: string; runId: string; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:clearPinnedPatchScope', input) as Promise<{ ok: boolean }>,
+    registerMcpAppSurface: (input: {
+      surfaceId: string
+      declaration: unknown
       runId?: string
       threadId?: string
       projectRoot?: string
+      expiresAt?: string
+    }) => ipcRenderer.invoke('subdesign:registerMcpAppSurface', input) as Promise<{
+      ok: boolean
+      token?: string
+      error?: string
+    }>,
+    unregisterMcpAppSurface: (token: string) =>
+      ipcRenderer.invoke('subdesign:unregisterMcpAppSurface', token) as Promise<{ ok: boolean }>,
+    callMcpAppTool: (input: {
+      surfaceToken: string
+      coordinate: string
+      arguments?: Record<string, unknown>
+      approvalToken?: string
+      approvalDecision?: 'allow' | 'deny'
     }) => ipcRenderer.invoke('subdesign:mcpAppToolCall', input) as Promise<{
       ok: boolean
       content?: unknown
       error?: string
+      approvalRequired?: boolean
+      approvalToken?: string
     }>,
     applyTweak: (input: { artifact: unknown; tweakId: string; value: string; projectRoot?: string }) =>
       ipcRenderer.invoke('subdesign:applyTweak', input) as Promise<{
@@ -742,7 +759,7 @@ const api = {
     openExternal: (url: string) =>
       ipcRenderer.invoke('shell:openExternal', url) as Promise<{ ok: boolean }>,
   },
-  /** P1-A: connector credential vault — metadata only; raw tokens stay in main */
+  /** Connector credential vault metadata; raw tokens stay in main. */
   secrets: {
     list: () =>
       ipcRenderer.invoke('secrets:list') as Promise<
@@ -919,7 +936,7 @@ const api = {
         ok: boolean
         error?: string
       }>,
-    /** W2: persistent project guidance (AGENTS.md / CLAUDE.md hierarchy, read-only).
+    /** Persistent project guidance (AGENTS.md / CLAUDE.md hierarchy, read-only).
      *  workPath: optional file/dir under root for subdirectory AGENTS layers. */
     agentsDocs: (root: string, workPath?: string) =>
       ipcRenderer.invoke('project:agentsDocs', root, workPath) as Promise<{
@@ -1032,7 +1049,7 @@ const api = {
         engine: 'seatbelt' | 'bwrap'
         viewRoot: string
       }
-      /** Effective outbound guard mode for main sandbox admission (ticket 20) */
+      /** Effective outbound guard mode for main sandbox admission. */
       effectiveMode?: 'off' | 'demo' | 'optional' | 'required'
       /** External CLI delegate/continue contract; no parent transcript. */
       externalCliContract?: unknown

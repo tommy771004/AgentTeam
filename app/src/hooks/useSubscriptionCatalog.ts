@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { SubscriptionProviderCatalog } from '../agent/subscriptionCatalog'
 
 /**
- * The ONE loader for the Host snapshot's subscription catalog (ticket 01).
+ * The single loader for the Host snapshot's subscription catalog.
  *
  * Both settings surfaces read through here so their loading behavior can never
  * drift apart, and so the offline-fallback metadata (`stale` / `cachedAt`)

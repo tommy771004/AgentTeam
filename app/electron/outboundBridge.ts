@@ -179,7 +179,7 @@ export async function prepareOutboundRunView(opts: {
   apiProvider?: string
   baseUrl?: string
   connectionId?: string
-  /** Effective outbound guard mode — required fails closed on policy load (ticket 17). */
+  /** Effective outbound guard mode; required fails closed on policy load. */
   effectiveMode?: OutboundGuardMode
   /**
    * Company classifier endpoint from Settings (issue 21). Absent means no

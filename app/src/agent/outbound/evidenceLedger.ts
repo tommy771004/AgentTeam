@@ -218,7 +218,7 @@ export type AppendEvidenceInput = {
   redactionSummary?: RedactionSummaryEntry[]
 }
 
-/** Event types that only main-internal control points may write (ticket 23 / ADR-0015). */
+/** Event types that only main-internal control points may write (ADR-0015). */
 const PRIVILEGED_EVIDENCE_TYPES = new Set([
   'outbound-decision',
   'restricted-view',

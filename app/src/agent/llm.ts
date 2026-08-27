@@ -309,7 +309,7 @@ export async function chatCompletionWithTools(
     toolChoice?: 'auto' | 'none' | 'required'
     /** retry / breaker 事件回報(進 run log) */
     onResilienceEvent?: (message: string) => void
-    /** Optional run id for outbound evidence correlation (later tickets). */
+    /** Optional run id for outbound evidence correlation. */
     runId?: string
   },
 ): Promise<LlmToolsResult> {

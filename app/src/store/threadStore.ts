@@ -159,7 +159,7 @@ export type Thread = {
    * Restored as preload on the next run (cross-run progressive disclosure).
    */
   lastCapabilityIds?: string[]
-  /** How each capability was obtained last run (ticket 03 provenance). */
+  /** How each capability was obtained during the last run. */
   lastCapabilityProvenance?: Record<string, CapabilityUnlockProvenance>
   /** tool_search unlock set from last run */
   lastUnlockedTools?: string[]

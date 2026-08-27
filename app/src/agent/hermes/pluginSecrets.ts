@@ -1,5 +1,5 @@
 /**
- * Connector secrets — P1-A vault client.
+ * Connector secrets vault client.
  *
  * Electron: raw tokens live ONLY in the main-process vault (safeStorage file).
  * The renderer holds a metadata mirror (hint / expiry / hasRefreshToken) and can

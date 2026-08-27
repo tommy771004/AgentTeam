@@ -56,7 +56,7 @@ class McpStdioSession {
   constructor(id: string, command: string, args: string[], env?: Record<string, string>) {
     this.id = id
     this.command = command
-    // P1-A: renderer sends {{secret:pluginId}} placeholders; raw tokens are
+    // Renderer sends {{secret:pluginId}} placeholders; raw tokens are
     // resolved here (main) at spawn time from the credential vault.
     const resolve = (v: string) =>
       hasSecretPlaceholder(v) ? resolveSecretPlaceholders(v).text : v

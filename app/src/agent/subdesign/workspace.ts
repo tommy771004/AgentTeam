@@ -218,8 +218,10 @@ export type SubDesignWorkspaceDependencies = {
   preparePinnedPatchScope?: (input: {
     artifact: { id: string; title?: string; revision: number }
     pins: SubDesignPinnedComment[]
+    runId: string
     projectRoot?: string
   }) => Promise<{ ok: true; scopeId: string } | { ok: false; error: string }>
+  clearPinnedPatchScope?: (input: { artifactId: string; runId: string; projectRoot?: string }) => Promise<void>
   refreshProviderState?: (projectRoot?: string, isCurrent?: () => boolean) => Promise<SubDesignWorkspaceProviderProjection>
   saveStorybookProviderSettings?: (
     value: Pick<StorybookProviderSettings, 'enabled' | 'endpoint'>,
@@ -543,14 +545,19 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
     unsubscribeModelChanges = undefined
   }
 
+  function preparedOrNewRunId(preparedRunId?: string): string {
+    return preparedRunId || deps.createRunId()
+  }
+
   async function runBrief(
     brief: SubDesignBrief,
     objective: string,
     runner?: ThreadRunner,
+    preparedRunId?: string,
   ): Promise<SubDesignWorkspaceActionResult> {
     if (state.runsByBriefId[brief.id]?.phase === 'starting') return commandFailure('busy', 'SubDesign 已有一個 run 正在準備中。')
 
-    const runId = deps.createRunId()
+    const runId = preparedOrNewRunId(preparedRunId)
     const runProjectRoot = state.projectRoot
     const runPluginInputs = { ...state.pluginInputs }
     const runModelId = state.selectedModelId.trim()
@@ -869,14 +876,16 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
         return commandFailure('busy', 'SubDesign 已有一個 run 正在準備中。')
       }
       if (!deps.preparePinnedPatchScope) return commandFailure('failed', 'Pin 修正需要 Electron Host scoped patch 支援。')
-      const scope = await deps.preparePinnedPatchScope({
-        artifact: input.artifact,
-        pins: parsed.pins,
-        projectRoot: state.projectRoot || undefined,
-      })
+      const runId = deps.createRunId()
+      const projectRoot = state.projectRoot || undefined
+      const scope = await deps.preparePinnedPatchScope({ artifact: input.artifact, pins: parsed.pins, runId, projectRoot })
       if (!scope.ok) return commandFailure('invalid', scope.error)
       const objective = buildPinnedCommentContext(input.artifact, parsed.pins, scope.scopeId)
-      return runBrief(brief, objective)
+      try {
+        return await runBrief(brief, objective, undefined, runId)
+      } finally {
+        await deps.clearPinnedPatchScope?.({ artifactId: input.artifact.id, runId, projectRoot })
+      }
     },
 
     restoreArtifactRevision: async (input) => {

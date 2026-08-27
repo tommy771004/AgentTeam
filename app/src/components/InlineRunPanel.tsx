@@ -136,7 +136,7 @@ function CompactStepList({ steps }: { steps: ExecutionStep[] }) {
 /**
  * The 上下文 section body as a self-subscribing leaf: the projection is
  * computed here and only while the section is open, so a usage-only update
- * never re-renders the rail's other sections (ticket 04).
+ * never re-renders the rail's other sections.
  */
 const RunContextBody = memo(function RunContextBody({
   runId,
@@ -358,7 +358,7 @@ export function InlineRunPanel({
 
   // 上下文 — the section head hosts a self-subscribing chip and the body is a
   // memo leaf with its own projection, so usage changes re-render neither the
-  // rail nor its sibling sections (ticket 04).
+  // rail nor its sibling sections.
   const contextSummary = !isExternal
     ? <ContextUsageChip runId={runId} variant="inline" />
     : agent.tokensUsed > 0

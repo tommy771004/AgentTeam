@@ -2,9 +2,9 @@ import type { LlmSettings } from './types.ts'
 import { isSubscriptionProviderPreset } from './apiProviders.ts'
 
 /**
- * Electron's Pi Host is the production runtime boundary. The renderer keeps
- * the legacy engine only for browser-only unit/smoke runs where no host can
- * exist; it must never become a second owner in a real Electron session.
+ * Electron's Pi Host is the production runtime boundary. Plain-browser tests
+ * may use the renderer compatibility path when no Host can exist; Electron
+ * must never gain a second execution owner.
  */
 export function hasPiHostBridge(): boolean {
   const renderer = (globalThis as typeof globalThis & { window?: { subagents?: { piHost?: { sessions?: { list?: unknown } } } } }).window
@@ -70,7 +70,7 @@ export function stripPiOwnedSettings(input: Partial<LlmSettings>): Partial<LlmSe
 }
 
 /**
- * Project the legacy UI shape into the Pi Host settings protocol.
+ * Project renderer settings into the Pi Host settings protocol.
  *
  * Driven by the ownership table rather than a hand-written list, so every key
  * the renderer stops persisting is a key that actually reaches the Host.

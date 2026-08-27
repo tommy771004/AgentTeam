@@ -207,6 +207,9 @@ export function createSubDesignWorkspaceDependencies(
         ? { ok: true, scopeId: result.scopeId }
         : { ok: false, error: result.error || 'Host 無法建立 pinned patch scope。' }
     },
+    clearPinnedPatchScope: async (input) => {
+      await window.subagents?.subdesign?.clearPinnedPatchScope?.(input)
+    },
     installOpenDesignPack: (record, projectRoot) => useOpenDesignPackStore.getState().install(record, projectRoot),
     setOpenDesignPackEnabled: (record, enabled) => useOpenDesignPackStore.getState().setEnabled(record, enabled),
     setRunPanel: (visible) => useThreadStore.getState().setShowRunPanel(visible),

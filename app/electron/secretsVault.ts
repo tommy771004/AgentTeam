@@ -1,5 +1,5 @@
 /**
- * P1-A (W5) — connector credential vault in the MAIN process.
+ * Connector credential vault in the main process.
  *
  * Tokens (PAT / API key / OAuth access+refresh) are stored in a
  * safeStorage-encrypted file under userData. The renderer can only:

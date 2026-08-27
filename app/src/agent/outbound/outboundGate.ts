@@ -1,8 +1,8 @@
 /**
  * Outbound Data Gate — final egress boundary for builtin LLM + external CLI.
  *
- * Ticket 01: establish the seam + guard mode resolution.
- * Later tickets fill sanitization, evidence, workspace, sandbox.
+ * Payload sanitization happens before this decision seam; evidence, restricted
+ * views and sandbox enforcement are handled by their dedicated boundaries.
  *
  * Only effective `off` bypasses inspection. Build flavor never bypasses the gate.
  */
@@ -73,7 +73,7 @@ export function isProtectionActive(mode: OutboundGuardMode): boolean {
   return mode !== 'off'
 }
 
-/** Admission outcome for Restricted Project View at Task run start (ticket 17). */
+/** Admission outcome for Restricted Project View at Task run start. */
 export type RestrictedViewAdmission =
   | { action: 'skip' }
   | { action: 'use-view'; viewRoot: string }
@@ -135,7 +135,7 @@ export function decideRestrictedViewAdmission(opts: {
   return { action: 'use-view', viewRoot }
 }
 
-/** Profile selection when building a Restricted Project View (ticket 17). */
+/** Profile selection when building a Restricted Project View. */
 export type ProtectedViewProfileDecision =
   | { action: 'use-ensured' }
   | { action: 'use-baseline'; degraded: true }
@@ -165,7 +165,7 @@ export function resolveProfileForProtectedView(opts: {
 export type OutboundInspectRequest = {
   channel: OutboundChannel
   runId?: string
-  /** Transport payload (messages body / CLI prompt bundle). Pass-through until sanitization tickets. */
+  /** Sanitized transport payload (messages body / CLI prompt bundle). */
   payload: unknown
   effectiveMode: OutboundGuardMode
   /** Orthogonal to guard — must never create a bypass. */
@@ -202,7 +202,7 @@ export function setOutboundGateObserver(fn: GateObserver | null): void {
 }
 
 /**
- * Final egress decision. Ticket 01: pass-through after mode resolution.
+ * Final egress decision after mode resolution and payload preparation.
  * Non-off modes always enter the gate (inspected=true) even when payload is unchanged.
  */
 export function inspectOutbound(req: OutboundInspectRequest): OutboundInspectResult {
@@ -225,7 +225,6 @@ export function inspectOutbound(req: OutboundInspectRequest): OutboundInspectRes
     return result
   }
 
-  // Future tickets: sanitize / block when baseline cannot run under mandatory protection.
   const result: OutboundInspectResult = {
     action: 'allow',
     inspected: true,
@@ -259,7 +258,7 @@ export function readBuildFlavorFromEnv(
 
 /**
  * Map Electron main `outbound:status` deploy field into a settings patch.
- * Runtime consumers must apply this so effective mode is main-owned (ticket 16),
+ * Runtime consumers must apply this so effective mode is main-owned,
  * not renderer process.env (often empty in Electron → silent `off`).
  */
 export function settingsPatchFromOutboundStatus(status: {
@@ -275,7 +274,7 @@ export function settingsPatchFromOutboundStatus(status: {
 
 /**
  * Apply main `outbound:status` deploy into settings-shaped fields + effective mode.
- * Used at settings load so coordinator / LLM / CLI share main-owned posture (ticket 16).
+ * Used at settings load so coordinator / LLM / CLI share main-owned posture.
  */
 export function applyMainOutboundStatusToSettings(
   settings: {

@@ -391,3 +391,21 @@ export function inferRunnerFromModel(
   }
   return 'builtin'
 }
+
+/** Keep the thread's model and execution adapter coherent after one selection. */
+export function resolveModelRunnerSelection(input: {
+  currentRunner: LocalRunnerKind | 'builtin'
+  selectedModel: string
+  providers: Array<{
+    id: string
+    authorized?: boolean
+    enabled?: boolean
+    models?: Array<{ id: string }>
+  }>
+}): { threadModel: string; runner: LocalRunnerKind | 'builtin' } {
+  const threadModel = input.selectedModel.trim()
+  return {
+    threadModel,
+    runner: inferRunnerFromModel(threadModel, input.providers),
+  }
+}

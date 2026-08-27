@@ -8,6 +8,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
   type ReactNode,
+  type SetStateAction,
 } from 'react'
 import { Icon } from './Icon'
 import { SlashCommandMenu } from './SlashCommandMenu'
@@ -29,6 +30,11 @@ import {
   formatBytes,
   MAX_ATTACHMENTS,
 } from '../lib/chatAttachments'
+import {
+  attachmentsForComposerScope,
+  replaceComposerScopeAttachments,
+  type ComposerAttachmentsByScope,
+} from '../agent/composerRunControls'
 
 type DictationRecognition = {
   lang: string
@@ -56,6 +62,8 @@ const DATA_SOURCES = [
 export type ComposerMode = 'agent' | 'workspace'
 
 export interface CommandComposerProps {
+  /** Runtime conversation identity used to isolate unsent attachments. */
+  scopeKey: string
   value: string
   onChange: (v: string) => void
   onSubmitLine: (line: string, attachments: ChatAttachment[]) => void | Promise<void>
@@ -102,6 +110,19 @@ function composerHasFooter(
   return Boolean(footerLeft || footerRight || quickActions) || !hideHints
 }
 
+function useComposerAttachments(scopeKey: string) {
+  const [attachmentsByScope, setAttachmentsByScope] = useState<ComposerAttachmentsByScope>({})
+  const attachments = attachmentsForComposerScope(attachmentsByScope, scopeKey)
+  const setAttachments = useCallback((next: SetStateAction<ChatAttachment[]>) => {
+    setAttachmentsByScope((current) => {
+      const previous = attachmentsForComposerScope(current, scopeKey)
+      const resolved = typeof next === 'function' ? next(previous) : next
+      return replaceComposerScopeAttachments(current, scopeKey, resolved)
+    })
+  }, [scopeKey])
+  return [attachments, setAttachments] as const
+}
+
 function ComposerActionButton({
   stopping,
   canSend,
@@ -137,6 +158,7 @@ function ComposerActionButton({
  * Codex / Claude Code 風格輸入列：/ 指令、↑ 歷史、Cmd+/ 聚焦、貼圖/上傳
  */
 export function CommandComposer({
+  scopeKey,
   value,
   onChange,
   onSubmitLine,
@@ -160,7 +182,7 @@ export function CommandComposer({
   const fileRef = useRef<HTMLInputElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
-  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [attachments, setAttachments] = useComposerAttachments(scopeKey)
   const [attachError, setAttachError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [attaching, setAttaching] = useState(false)
@@ -269,15 +291,19 @@ export function CommandComposer({
         setAttaching(false)
       }
     },
-    [attachments.length, canAttach],
+    [attachments.length, canAttach, setAttachments],
   )
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id))
-  }, [])
+  }, [setAttachments])
 
   const applyCommand = useCallback(
     (cmd: SlashCommand) => {
+      if (attachments.length > 0) {
+        setAttachError('斜線指令不會使用附件；請先移除附件，或改用一般訊息送出。')
+        return
+      }
       const next = cmd.needsArgs || cmd.argsHint ? `/${cmd.name} ` : `/${cmd.name}`
       onChange(next)
       setMenuOpen(false)
@@ -289,7 +315,7 @@ export function CommandComposer({
         onChange('')
       }
     },
-    [onChange, onSlashCommand, pushHistory],
+    [attachments.length, onChange, onSlashCommand, pushHistory],
   )
 
   const pickMention = useCallback(
@@ -354,13 +380,11 @@ export function CommandComposer({
     const line = value.trim()
     if (disabled || attaching) return
     if (!line && !attachments.length) return
-    // 先清輸入再送出：送出管線再慢或拋錯，都不該把已送出的字留在框裡。
-    const toSend = attachments
-    setAttachments([])
-    setAttachError(null)
-    histIdx.current = -1
-    // Slash commands ignore attachments for now
     if (line.startsWith('/')) {
+      if (attachments.length > 0) {
+        setAttachError('斜線指令不會使用附件；請先移除附件，或改用一般訊息送出。')
+        return
+      }
       pushHistory(line)
       setMentionOpen(false)
       const parsed = parseSlashLine(line)
@@ -380,6 +404,11 @@ export function CommandComposer({
         return
       }
     }
+    // 先清輸入再送出：送出管線再慢或拋錯，都不該把已送出的字留在框裡。
+    const toSend = attachments
+    setAttachments([])
+    setAttachError(null)
+    histIdx.current = -1
     pushHistory(line || `（${attachments.length} 個附件）`)
     setMenuOpen(false)
     onChange('')
@@ -393,6 +422,7 @@ export function CommandComposer({
     onSlashCommand,
     onSubmitLine,
     pushHistory,
+    setAttachments,
   ])
 
   const browseHistory = (dir: 'up' | 'down') => {

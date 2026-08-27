@@ -1,5 +1,5 @@
 /**
- * P1-B (W4) — ModelProfile: per-model capability facts with provenance.
+ * ModelProfile: per-model capability facts with provenance.
  *
  * Principles:
  * - Never auto-probe (probes cost tokens): 'verified' only via the explicit

@@ -51,6 +51,10 @@ try {
   await pinButton.click()
   assert.equal(await pinButton.getAttribute('aria-pressed'), 'true', 'fixture enters pinning')
 
+  await page.evaluate(() => window.postMessage({ type: 'subdesign-pin', selector: 'body', text: 'forged', region: { x: 0, y: 0, width: 1, height: 1 } }, '*'))
+  await page.waitForTimeout(50)
+  assert.equal(await page.getByText(/即將送出的 scoped 修正/).count(), 0, 'messages outside the preview iframe are ignored')
+
   const preview = page.frameLocator('iframe[title="Product strategy deck preview"]')
   await preview.locator('h1.title').click()
   await page.getByText('即將送出的 scoped 修正（1）').waitFor()

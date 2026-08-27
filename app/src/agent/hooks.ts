@@ -1,5 +1,5 @@
 /**
- * P1-D (W7) — controlled lifecycle hooks.
+ * Controlled lifecycle hooks.
  *
  * Hooks are DECLARATIVE RULES (pure data), never plugin-supplied JS:
  *   beforeRun  → deny / append-context / log / notify

@@ -54,6 +54,7 @@ export function ArtifactPreview({
   const projectRoot = useProjectStore((state) => state.root)
   const pinnedComments = useSubDesignPinnedCommentsStore()
   const deckContainerRef = useRef<HTMLDivElement>(null)
+  const previewFrameRef = useRef<HTMLIFrameElement>(null)
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -68,6 +69,7 @@ export function ArtifactPreview({
   useEffect(() => {
     if (!artifactId) return
     const handler = (event: MessageEvent) => {
+      if (!previewFrameRef.current || event.source !== previewFrameRef.current.contentWindow) return
       const data = event.data as { type?: string; selector?: unknown; text?: unknown; region?: unknown } | null
       if (!data || data.type !== 'subdesign-pin') return
       const parse = parsePinnedCommentPayload({ pins: [{ selector: data.selector, text: data.text, region: data.region }] })
@@ -225,6 +227,7 @@ export function ArtifactPreview({
         ) : artifact.renderer === 'deck-html' ? (
           <div ref={deckContainerRef} className="w-full overflow-hidden bg-black" style={{ height: `${900 * deckScale}px` }}>
             <iframe
+              ref={previewFrameRef}
               title={`${artifact.title} preview`}
               sandbox="allow-scripts"
               srcDoc={pinMode ? withPinCapture(withPreviewCsp(displayContent, artifact.renderer)) : withPreviewCsp(displayContent, artifact.renderer)}
@@ -234,7 +237,7 @@ export function ArtifactPreview({
           </div>
         ) : artifact.renderer === 'html' ? (
           <div ref={deckContainerRef}>
-            <iframe title={`${artifact.title} preview`} sandbox="allow-scripts" srcDoc={pinMode ? withPinCapture(withPreviewCsp(displayContent, artifact.renderer)) : withPreviewCsp(displayContent, artifact.renderer)} className="h-[min(54vh,560px)] min-h-[460px] w-full border-0 bg-white" />
+            <iframe ref={previewFrameRef} title={`${artifact.title} preview`} sandbox="allow-scripts" srcDoc={pinMode ? withPinCapture(withPreviewCsp(displayContent, artifact.renderer)) : withPreviewCsp(displayContent, artifact.renderer)} className="h-[min(54vh,560px)] min-h-[460px] w-full border-0 bg-white" />
           </div>
         ) : (
           <pre className="m-4 max-h-[620px] min-h-[460px] overflow-auto whitespace-pre-wrap rounded-lg bg-surface-container-lowest p-3 text-[12px] leading-relaxed text-on-surface-variant">{displayContent}</pre>

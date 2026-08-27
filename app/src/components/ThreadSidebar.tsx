@@ -25,7 +25,7 @@ function provenanceZh(value?: CapabilityUnlockProvenance): string {
   return value ? PROVENANCE_ZH[value] : '跨輪還原'
 }
 
-export function ThreadSidebar() {
+export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => void } = {}) {
   const {
     threads,
     activeId,
@@ -100,9 +100,15 @@ export function ThreadSidebar() {
                       className={`group flex items-center gap-1 pl-[38px] pr-1.5 py-1.5 cursor-pointer transition-colors ${
                         active ? 'bg-hover text-ink' : 'text-ink hover:bg-hover-2'
                       }`}
-                      onClick={() => selectThread(t.id)}
+                      onClick={() => {
+                        selectThread(t.id)
+                        onThreadSelected?.()
+                      }}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') selectThread(t.id)
+                        if (e.key === 'Enter') {
+                          selectThread(t.id)
+                          onThreadSelected?.()
+                        }
                       }}
                       role="button"
                       tabIndex={0}

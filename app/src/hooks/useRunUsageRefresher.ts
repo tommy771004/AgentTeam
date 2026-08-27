@@ -35,7 +35,7 @@ function pullLatestPage(runId: string): Promise<void> {
       const newestKnown = presentation?.recordEntries.at(-1)?.seq ?? 0
       if (newestPage <= newestKnown) return
       // 晚到的頁面不得翻轉已結束的 run：appendRecordEntries 會把 presentation
-      // 翻回 active，所以寫回前以活躍集合為最終裁決（ticket 04）。
+      // 翻回 active，所以寫回前以活躍集合為最終裁決。
       if (!useAgentStore.getState().activeRunIds.includes(runId)) return
       useRunActivityStore.getState().appendRecordEntries(entries, runId)
     } catch {

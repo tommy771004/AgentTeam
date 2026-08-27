@@ -70,11 +70,6 @@ export type RunTaskItem = {
 }
 
 /**
- * Bounded terminal snapshot kept after a run leaves the live execution path.
- * The snapshot is intentionally smaller than the live buffers so a completed
- * run can still render a useful digest without retaining an unbounded stream.
- */
-/**
  * How a run actually settled, recorded once when it leaves the live path.
  *
  * The shell reads this to announce a completion, so there is no second store

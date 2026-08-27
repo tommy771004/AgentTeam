@@ -1,5 +1,5 @@
 /**
- * Managed Device enrollment + Workspace Secure Envelope (ticket 11).
+ * Managed Device enrollment and Workspace Secure Envelope.
  */
 
 import crypto from 'node:crypto'

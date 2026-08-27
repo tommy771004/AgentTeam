@@ -1,5 +1,5 @@
 /**
- * projectContextResolver (W2 / P0-B) — load persistent project guidance
+ * Load persistent project guidance
  * (AGENTS.md / CLAUDE.md hierarchy) for the selected project root.
  *
  * Layering contract (highest wins on conflict, all layers are injected):

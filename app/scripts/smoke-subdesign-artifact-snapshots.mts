@@ -373,6 +373,7 @@ await test('controller submitPinnedComments compiles pins into a single runTask'
   const brief = { id: 'brief_pin', threadId: 'thread_pin', objective: 'x', stage: 'deliver', constraints: [], acceptanceCriteria: [], directions: [], createdAt: '', updatedAt: '' }
   const runs: unknown[] = []
   const preparedScopes: unknown[] = []
+  const clearedScopes: unknown[] = []
   let live = false
   const deps = {
     findBrief: (id: string) => id === 'brief_pin' ? brief : null,
@@ -386,6 +387,7 @@ await test('controller submitPinnedComments compiles pins into a single runTask'
       preparedScopes.push(input)
       return { ok: true, scopeId: 'pin_scope_qa' }
     },
+    clearPinnedPatchScope: async (input: unknown) => { clearedScopes.push(input) },
     runTask: async (input: { objective?: string }) => {
       runs.push(input)
       return { status: 'success', path: 'builtin', threadId: null, runId: 'run_pin' } as never
@@ -407,8 +409,12 @@ await test('controller submitPinnedComments compiles pins into a single runTask'
   const submitted = await workspace.submitPinnedComments({ artifact: { id: 'a', revision: 1 }, pins: [{ selector: 'h1', text: '改標題' }] })
   assert.equal(submitted.ok, true)
   assert.equal(preparedScopes.length, 1)
+  assert.equal(clearedScopes.length, 1)
   assert.equal(runs.length, 1)
-  const runInput = runs[0] as { objective?: string }
+  const runInput = runs[0] as { objective?: string; runId?: string }
+  assert.equal(runInput.runId, 'run_1')
+  assert.equal((preparedScopes[0] as { runId?: string }).runId, runInput.runId, 'scope is bound to the exact Task run')
+  assert.equal((clearedScopes[0] as { runId?: string }).runId, runInput.runId, 'settlement clears only its own scope')
   assert.match(String(runInput.objective), /scoped 修正/)
   assert.match(String(runInput.objective), /h1/)
   assert.match(String(runInput.objective), /pin_scope_qa/)
@@ -427,5 +433,7 @@ await test('production Host patch tool enforces the prepared pin scope', () => {
   assert.match(main, /resolvePinnedHtmlRanges\(content, selectors\)/)
   assert.match(hostPack, /validatePinnedPatchOperation/)
   assert.match(hostPack, /scopeId 缺少或不一致/)
+  assert.match(hostPack, /rawScope\.runId !== ctx\.runId/)
+  assert.match(main, /subdesign:clearPinnedPatchScope/)
   assert.match(hostPack, /unlink\(scopePath\)/)
 })

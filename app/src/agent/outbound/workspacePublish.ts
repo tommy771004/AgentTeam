@@ -1,5 +1,5 @@
 /**
- * Workspace publish + evidence verification helpers (ticket 14).
+ * Workspace publish + evidence verification helpers.
  */
 
 import type { PolicyDraft, ActivePolicySlot, PolicyAdminStore } from './policyAdmin.ts'

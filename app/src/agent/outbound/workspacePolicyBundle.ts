@@ -1,5 +1,5 @@
 /**
- * Atomic Workspace Policy Bundle sync (ticket 10).
+ * Atomic Workspace Policy Bundle sync.
  * local/workspace authority never auto-switches.
  */
 

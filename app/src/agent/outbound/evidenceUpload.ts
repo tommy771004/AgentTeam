@@ -1,5 +1,5 @@
 /**
- * Evidence background upload + device lifecycle (ticket 12).
+ * Evidence background upload and device lifecycle.
  */
 
 import type { EvidenceRecord } from './evidenceLedger.ts'

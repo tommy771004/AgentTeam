@@ -39,6 +39,7 @@ import { snapshotExternalCliConnectorRequirements } from './externalCliConnector
 import { orchestrationFromAgent } from './runLifecycle.ts'
 import { resolveTurnTimeout } from './turnTimeout.ts'
 import { clampContinueFreshnessMs, isSnapshotFresh } from './autoContinueFreshness.ts'
+import { applyComposerApprovalHandoff } from './composerApprovalHandoff.ts'
 
 import { v4 as uuid } from 'uuid'
 import {
@@ -2370,7 +2371,7 @@ async function coordinateTaskRun(
           'system',
           `出站資料閘門：Restricted Project View 已建立（exclusions=${prepare.exclusionCount} · skipped=${prepare.skippedCount} · connection=${prepare.connectionId}${deg}）`,
         )
-        // Evidence for restricted-view is appended in main prepareOutboundRunView (ticket 23).
+        // Main prepareOutboundRunView appends the restricted-view evidence.
       } else if (admission.action === 'continue-degraded') {
         thr.pushBubble(
           tid,
@@ -2458,7 +2459,7 @@ export async function runTask(input: TaskRunInput): Promise<TaskRunResult> {
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     await waitForStartupRecovery()
   }
-  const normalized = normalizeTaskRunInput(input)
+  const normalized = applyComposerApprovalHandoff(normalizeTaskRunInput(input))
   const runId = normalized.runId || `run_${uuid().slice(0, 12)}`
   if (coordinatingRunIds.has(runId)) {
     return {

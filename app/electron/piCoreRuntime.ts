@@ -191,7 +191,7 @@ export type PiLegacyModelConfig = {
 
 /**
  * The ModelRuntime view of each subscription provider's model catalog
- * (ADR-0052 ticket 02). Built with the SAME auth/models files a session uses,
+ * (ADR-0052). Built with the same auth/models files a session uses,
  * so what the catalog claims is exactly what a run would see. One provider's
  * failure never blanks the others: errors surface as per-provider reason
  * strings and the projection renders them honestly unavailable.

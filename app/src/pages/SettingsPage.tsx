@@ -1562,7 +1562,7 @@ export function SettingsPage() {
               <ProviderCredentialFields settings={settings} set={set} />
               <SettingsStack title="預設模型">
                 <ProviderModelInput settings={settings} set={set} />
-                {/* P1-B: capability profile — 已驗證 / 推測 / 未知 */}
+                {/* Capability profile — 已驗證 / 推測 / 未知 */}
                 {(() => {
                   const p = settings.modelProfiles?.[settings.model || '']
                   const badge = p
@@ -2833,7 +2833,7 @@ export function SettingsPage() {
                 </SettingsStack>
               )}
               {settings.capabilitiesEnabled !== false && <HostToolCatalogSection />}
-              {/* P1-D: declarative lifecycle hook rules */}
+              {/* Declarative lifecycle hook rules */}
               <SettingsStack title="Lifecycle hooks（宣告式規則）">
                 <p className="text-[11px] text-on-surface-variant mb-1 leading-relaxed">
                   純資料規則，只能限制/觀察：point（beforeRun/beforeTool/afterTool/afterRun）
@@ -3362,7 +3362,7 @@ export function SettingsPage() {
             </SettingsGroup>
 
             <SettingsGroup title="宣告式自訂工具">
-              {/* P1-C: tool packages awaiting privilege review */}
+              {/* Tool packages awaiting privilege review */}
               {(() => {
                 const pending = listPendingToolPackages()
                 if (!pending.length) return null
@@ -3690,7 +3690,7 @@ export function SettingsPage() {
               </pre>
             )}
 
-            {/* W3: OpenCode 匯入報告 — 每個欄位三擇一：暫時套用 / 待採用 / 不支援 */}
+            {/* OpenCode 匯入報告 — 每個欄位三擇一：暫時套用 / 待採用 / 不支援 */}
             <SettingsGroup title="OpenCode 匯入報告">
               <p className="text-[12px] text-on-surface-variant mb-2 leading-relaxed px-1">
                 偵測到的設定不會靜默覆蓋全域：暫時套用僅影響本 run；待採用需按「採用」；

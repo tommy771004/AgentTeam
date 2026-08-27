@@ -1,6 +1,6 @@
 /**
  * LLM egress: sanitize chat messages with company Provider Security Profile.
- * Ticket 19 — same profile semantics as Restricted Project View (not baseline-only).
+ * Uses the same profile semantics as Restricted Project View.
  */
 
 import type { OutboundGuardMode } from './outboundGate.ts'
@@ -118,11 +118,7 @@ export async function prepareLlmEgressMessages(opts: {
 }
 
 /**
- * Default company profile loader via Electron outbound.ensurePolicy.
- * Returns null when IPC is absent (browser / Node unit path without mock).
- */
-/**
- * Metadata-only LLM egress evidence input for main (ticket 24).
+ * Metadata-only LLM egress evidence input for main.
  * Never includes messages, content, or model output.
  */
 export function buildLlmEgressEvidenceMeta(opts: {

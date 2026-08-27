@@ -1,4 +1,4 @@
-/** How the current run obtained a capability or tool (ticket 03 audit). */
+/** How the current run obtained a capability or tool. */
 export type CapabilityUnlockProvenance =
   | 'always-on'
   | 'preloaded'

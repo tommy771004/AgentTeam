@@ -279,12 +279,6 @@ const HOST_TOOL_PRESENTATIONS: Record<string, ToolPresenter> = {
 }
 
 /**
- * Look up a call's declared presentation, safely.
- *
- * An unknown tool has nothing to declare (`undefined`); a malformed argument
- * must degrade to the same generic fallback rather than break replay.
- */
-/**
  * The presenter a tool declared, wherever it declared it.
  *
  * Catalog tools declare beside their schema; Pi Core's builtin loop tools
@@ -297,6 +291,7 @@ function presenterFor(tool: string): ToolPresenter | undefined {
   return HOST_TOOL_PRESENTATIONS[tool]
 }
 
+/** Unknown tools and malformed arguments fall back without breaking replay. */
 export function presentToolCall(tool: string, args: unknown): ToolPresentation | undefined {
   const present = presenterFor(tool)?.presentCall
   if (!present) return undefined

@@ -51,6 +51,37 @@ export function buildComposerRunOverrides(
   return { approvalMode: resolveComposerApprovalMode(settingsMode, selectedMode) }
 }
 
+export type ComposerAttachmentsByScope = Record<string, ChatAttachment[]>
+
+/** Runtime-only attachment drafts, isolated by conversation like text drafts. */
+export function attachmentsForComposerScope(
+  state: ComposerAttachmentsByScope,
+  scope: string,
+): ChatAttachment[] {
+  return state[scope] || []
+}
+
+export function replaceComposerScopeAttachments(
+  state: ComposerAttachmentsByScope,
+  scope: string,
+  attachments: ChatAttachment[],
+): ComposerAttachmentsByScope {
+  if (attachments.length === 0) {
+    const { [scope]: _removed, ...rest } = state
+    return rest
+  }
+  return { ...state, [scope]: attachments }
+}
+
+/** Composer activity belongs to its conversation; registry-wide activity does not. */
+export function isConversationComposerBusy(
+  submittingByThread: Record<string, number>,
+  threadId: string | null | undefined,
+  lifecycleLive: boolean,
+): boolean {
+  return lifecycleLive || Boolean(threadId && submittingByThread[threadId])
+}
+
 type BuiltinSubscriptionSettingsPatch = Pick<
   LlmSettings,
   'apiProvider' | 'model' | 'fallbackModels' | 'discoveredModels'

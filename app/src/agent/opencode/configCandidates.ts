@@ -1,5 +1,5 @@
 /**
- * W3 / P0-C — Discovered OpenCode config as reviewable candidates.
+ * Discovered OpenCode config as reviewable candidates.
  *
  * Every parsed field becomes exactly one of:
  *   temporary   — safely auto-applied for runs (instructions/compaction/agents…)

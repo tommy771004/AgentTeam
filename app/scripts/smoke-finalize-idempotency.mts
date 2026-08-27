@@ -375,6 +375,9 @@ await test('RecoveryBootstrap unlocks startup before terminal finalization can a
   )
   const startupComplete = app.indexOf('completeStartupRecovery()', recoveryEnd)
   assert.ok(startupComplete > recoveryEnd, 'the existing startup barrier still completes after required recovery work')
+  assert.match(reattachment, /const active = snapshot\.status === 'active'/, 'reattachment distinguishes active from terminal Host truth')
+  assert.match(reattachment, /setThreadRunning\(attachment\.threadId, active, attachment\.runId\)/, 'terminal attachment cannot resurrect the thread running flag')
+  assert.match(reattachment, /active \? 'running' : state\.status/, 'terminal attachment projects its Host settlement status')
 })
 
 await test('the real renderer-restart E2E is part of the release smoke chain', () => {

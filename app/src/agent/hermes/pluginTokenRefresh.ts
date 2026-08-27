@@ -1,6 +1,6 @@
 /**
  * Schedules OAuth access-token refresh for connectors that stored a refresh_token.
- * P1-A: on Electron the exchange happens in MAIN via `secrets:refresh` using the
+ * On Electron the exchange happens in main via `secrets:refresh` using the
  * vault's refresh_token — the renderer only sees metadata. Browser dev falls back
  * to the legacy raw-record flow.
  */

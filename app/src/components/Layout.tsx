@@ -28,8 +28,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: '自動化',
     items: [
-      // /automation, /scheduler and /events now redirect into the Ops console
-      // (ticket 12), so the console is the only nav entry for them.
+      // Redirected automation routes share this single Ops Console entry.
       { to: '/ops', label: 'Ops Console', icon: 'monitoring' },
       { to: '/content-publishing', label: '內容發布', icon: 'campaign' },
     ],

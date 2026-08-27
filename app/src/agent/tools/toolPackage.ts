@@ -1,5 +1,5 @@
 /**
- * P1-C (W6) — ToolPackageManifest: governed, versioned tool packages.
+ * ToolPackageManifest: governed, versioned tool packages.
  *
  * A plugin ships tools as a validated manifest where every tool declares its
  * operation class up front. Packages compile into the existing custom-tool

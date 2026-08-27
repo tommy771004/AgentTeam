@@ -39,7 +39,7 @@ interface OpenCodeConfigStore {
   /** OpenCode plugin references; displayed as review-only permission summary. */
   plugins: string[]
   lastProjectRoot: string
-  /** W3: every parsed field → temporary / review / unsupported（匯入報告） */
+  /** Every parsed field becomes temporary, review, or unsupported. */
   candidates: DiscoveredConfigCandidate[]
   /** Raw instructions entries for lastProjectRoot (temporary-applied per run) */
   instructionsEntries: string[]
@@ -144,7 +144,7 @@ export const useOpenCodeConfigStore = create<OpenCodeConfigStore>((set, get) => 
       }
       setHydratedOpenCodeConfig(full)
 
-      // W3: projection report — nothing parsed may silently disappear
+      // Projection report: no parsed field may silently disappear.
       const prevAdopted = new Set(
         get()
           .candidates.filter((c) => c.adopted)

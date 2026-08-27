@@ -32,7 +32,7 @@ export const MCP_SECRET_ENV_KEYS: Record<string, string[]> = {
 }
 
 function secretForPlugin(pluginId: string, settings?: Partial<LlmSettings> | null): string {
-  // P1-A: on Electron, send a placeholder — mcpBridge resolves the raw token
+  // On Electron, send a placeholder; mcpBridge resolves the raw token.
   // from the main-process vault at spawn time (never through the renderer).
   const hasVault = Boolean(
     (globalThis as unknown as { subagents?: { secrets?: unknown } }).subagents?.secrets,

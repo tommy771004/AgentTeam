@@ -5,7 +5,7 @@
 
 export type PolicyDetector = {
   id: string
-  /** JS-compatible source pattern; compiled carefully by sanitizer (ticket 03). */
+  /** JS-compatible source pattern compiled carefully by the sanitizer. */
   pattern: string
   flags?: string
   description?: string

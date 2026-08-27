@@ -198,7 +198,7 @@ import { writeLearningExport } from './learningExportWrite.ts'
 import { normalizeSubDesignCritique, critiqueAllowsDeliver } from '../src/agent/subdesign/critique'
 import { parsePinnedCommentPayload } from '../src/agent/subdesign/pinnedComments'
 import { createPinnedPatchScope, resolvePinnedHtmlRanges } from '../src/agent/subdesign/pinnedPatchScope'
-import { parseMcpToolCoordinate } from '../src/agent/subdesign/providers/mcpAppsProvider'
+import { parseMcpToolCoordinate, validateSurfaceDeclaration } from '../src/agent/subdesign/providers/mcpAppsProvider'
 import { isSubDesignMetadataKind, type SubDesignMetadataKind } from '../src/agent/subdesign/metadataKinds'
 import type {
   SubDesignArtifact,
@@ -927,7 +927,7 @@ ipcMain.handle(
       max_tokens?: number
       tools?: unknown[]
       tool_choice?: unknown
-      /** Outbound metadata only — main records evidence (ticket 24); never logs content. */
+      /** Outbound metadata only; main records evidence and never logs content. */
       runId?: string
       effectiveMode?: OutboundGuardMode
       providerConnectionId?: string
@@ -1266,7 +1266,7 @@ ipcMain.handle(
     _evt,
     input: { url: string; headers?: Record<string, string>; body: unknown },
   ) => {
-    // P1-A: resolve vault placeholders in MCP HTTP auth headers main-side
+    // Resolve vault placeholders in MCP HTTP auth headers main-side.
     const headers = Object.fromEntries(
       Object.entries(input?.headers || {}).map(([k, v]) => [
         k,
@@ -1520,7 +1520,7 @@ ipcMain.handle('project:getActiveRoot', async () => ({
 }))
 
 /**
- * W2 / P0-B: read persistent project guidance (AGENTS.md hierarchy).
+ * Read persistent project guidance from the AGENTS.md hierarchy.
  * Read-only, name-allowlisted, size-capped.
  *
  * When workPath is under project root, walks from the work file/dir UP to
@@ -1734,7 +1734,7 @@ ipcMain.handle(
         engine: 'seatbelt' | 'bwrap'
         viewRoot: string
       }
-      /** Renderer effective mode; main still re-enforces under required (ticket 20). */
+      /** Renderer effective mode; main still re-enforces required mode. */
       effectiveMode?: OutboundGuardMode
       /** External CLI delegate/continue contract; metadata only. */
       externalCliContract?: unknown
@@ -2598,6 +2598,113 @@ const SUBDESIGN_MAX_EXPORT_FILES = 80
 const SUBDESIGN_MAX_EXPORT_BYTES = 50 * 1024 * 1024
 const SUBDESIGN_MAX_METADATA_BYTES = 2 * 1024 * 1024
 
+type McpAppSurfaceSession = {
+  token: string
+  webContentsId: number
+  surfaceId: string
+  allowlist: Set<string>
+  runId?: string
+  threadId?: string
+  projectRoot?: string
+  expiresAt: number
+}
+
+const mcpAppSurfaceSessions = new Map<string, McpAppSurfaceSession>()
+const mcpAppToolApprovals = new Map<string, {
+  token: string
+  webContentsId: number
+  surfaceToken: string
+  coordinate: string
+  arguments: Record<string, unknown>
+  expiresAt: number
+}>()
+
+function registerMcpAppSurfaceSession(webContentsId: number, input: {
+  surfaceId?: unknown
+  declaration?: unknown
+  runId?: unknown
+  threadId?: unknown
+  projectRoot?: unknown
+  expiresAt?: unknown
+}) {
+  const surfaceId = String(input?.surfaceId || '').trim()
+  if (!/^[a-zA-Z0-9._-]{1,80}$/.test(surfaceId)) return { ok: false as const, error: 'surfaceId 不合法。' }
+  const declaration = validateSurfaceDeclaration(input?.declaration)
+  if (!declaration.ok) return { ok: false as const, error: declaration.reason }
+  const allowlist = [...new Set(declaration.decl.allowlist.map(String))]
+  if (allowlist.length > 32 || allowlist.some((coordinate) => !parseMcpToolCoordinate(coordinate))) {
+    return { ok: false as const, error: 'MCP App surface allowlist 不合法。' }
+  }
+  const runId = typeof input.runId === 'string' && input.runId.trim() ? input.runId : undefined
+  const threadId = typeof input.threadId === 'string' && input.threadId.trim() ? input.threadId : undefined
+  const projectRoot = typeof input.projectRoot === 'string' && input.projectRoot.trim() ? input.projectRoot : undefined
+  const scopeIdentity = declaration.decl.scope === 'run' ? runId : declaration.decl.scope === 'conversation' ? threadId : projectRoot
+  if (!scopeIdentity) return { ok: false as const, error: `${declaration.decl.scope} surface 缺少 scope identity。` }
+  const requestedExpiry = typeof input.expiresAt === 'string' ? Date.parse(input.expiresAt) : Number.NaN
+  const expiresAt = Math.min(
+    Number.isFinite(requestedExpiry) ? requestedExpiry : Date.now() + 30 * 60_000,
+    Date.now() + 30 * 60_000,
+  )
+  if (expiresAt <= Date.now()) return { ok: false as const, error: 'MCP App surface 已過期。' }
+  const token = `surface_${randomUUID().replaceAll('-', '')}`
+  mcpAppSurfaceSessions.set(token, {
+    token,
+    webContentsId,
+    surfaceId,
+    allowlist: new Set(allowlist),
+    runId,
+    threadId,
+    projectRoot,
+    expiresAt,
+  })
+  return { ok: true as const, token }
+}
+
+function consumeMcpAppSurfaceSession(webContentsId: number, token: unknown): McpAppSurfaceSession | null {
+  const key = typeof token === 'string' ? token : ''
+  const session = mcpAppSurfaceSessions.get(key)
+  if (!session || session.webContentsId !== webContentsId) return null
+  if (session.expiresAt <= Date.now()) {
+    mcpAppSurfaceSessions.delete(key)
+    return null
+  }
+  return session
+}
+
+function issueMcpAppToolApproval(input: {
+  webContentsId: number
+  surfaceToken: string
+  coordinate: string
+  arguments: Record<string, unknown>
+}): string {
+  const now = Date.now()
+  for (const [token, pending] of mcpAppToolApprovals) {
+    if (pending.expiresAt <= now) mcpAppToolApprovals.delete(token)
+  }
+  while (mcpAppToolApprovals.size >= 256) {
+    const oldest = mcpAppToolApprovals.keys().next().value
+    if (typeof oldest !== 'string') break
+    mcpAppToolApprovals.delete(oldest)
+  }
+  const token = `approval_${randomUUID().replaceAll('-', '')}`
+  mcpAppToolApprovals.set(token, { token, ...input, arguments: structuredClone(input.arguments), expiresAt: now + 90_000 })
+  return token
+}
+
+function takeMcpAppToolApproval(input: {
+  token: unknown
+  webContentsId: number
+  surfaceToken: string
+  coordinate: string
+}) {
+  const token = typeof input.token === 'string' ? input.token : ''
+  const pending = mcpAppToolApprovals.get(token)
+  mcpAppToolApprovals.delete(token)
+  if (!pending || pending.webContentsId !== input.webContentsId || pending.surfaceToken !== input.surfaceToken
+    || pending.coordinate !== input.coordinate || pending.expiresAt <= Date.now()) return null
+  return pending
+}
+
 function safeSubDesignExportName(value: string): string {
   const normalized = value.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
   return (normalized || 'subdesign-artifact').slice(0, 80)
@@ -2616,12 +2723,15 @@ function artifactFile(root: string, relativePath: string): string {
 function preparePinnedPatchScope(input: {
   artifact: unknown
   pins: unknown
+  runId?: unknown
   projectRoot?: string
 }) {
   const submitted = validateSubDesignArtifactManifest(input.artifact)
   if (!submitted.ok) return { ok: false as const, error: `artifact manifest invalid：${submitted.errors.join('；')}` }
   const parsedPins = parsePinnedCommentPayload({ pins: input.pins })
   if (!parsedPins.ok) return { ok: false as const, error: parsedPins.errors.join('；') }
+  const runId = typeof input.runId === 'string' ? input.runId.trim() : ''
+  if (!runId || runId.length > 160) return { ok: false as const, error: 'pinned patch scope 缺少合法 runId。' }
   const root = workspaceRootFor(input.projectRoot)
   const manifestPath = resolveWorkspacePath(
     `${SUBDESIGN_ARTIFACT_ROOT}/${safeSubDesignMetadataId(submitted.manifest.id)}/manifest.json`,
@@ -2639,6 +2749,7 @@ function preparePinnedPatchScope(input: {
   const scopeId = `pin_${randomUUID().replaceAll('-', '')}`
   const scope = createPinnedPatchScope({
     scopeId,
+    runId,
     artifactId: canonical.manifest.id,
     revision: canonical.manifest.revision,
     path: canonical.manifest.entry,
@@ -2651,6 +2762,22 @@ function preparePinnedPatchScope(input: {
   fs.mkdirSync(path.dirname(scopePath), { recursive: true })
   fs.writeFileSync(scopePath, `${JSON.stringify(scope, null, 2)}\n`, 'utf8')
   return { ok: true as const, scopeId }
+}
+
+function clearPinnedPatchScope(input: { artifactId?: unknown; runId?: unknown; projectRoot?: string }): { ok: boolean } {
+  try {
+    const artifactId = safeSubDesignMetadataId(input.artifactId)
+    const runId = typeof input.runId === 'string' ? input.runId : ''
+    if (!runId) return { ok: false }
+    const scopePath = resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/pin-scopes/${artifactId}.json`, workspaceRootFor(input.projectRoot))
+    if (!fs.existsSync(scopePath)) return { ok: true }
+    const scope = JSON.parse(fs.readFileSync(scopePath, 'utf8')) as { runId?: unknown }
+    if (scope.runId !== runId) return { ok: false }
+    fs.unlinkSync(scopePath)
+    return { ok: true }
+  } catch {
+    return { ok: false }
+  }
 }
 
 function patchSubDesignArtifact(input: {
@@ -4058,30 +4185,68 @@ ipcMain.handle('subdesign:preparePinnedPatchScope', async (_evt, input: Paramete
   }
 })
 
-ipcMain.handle('subdesign:mcpAppToolCall', async (_evt, input: {
+ipcMain.handle('subdesign:clearPinnedPatchScope', async (_evt, input: Parameters<typeof clearPinnedPatchScope>[0]) => {
+  return clearPinnedPatchScope(input)
+})
+
+ipcMain.handle('subdesign:registerMcpAppSurface', async (event, input: Parameters<typeof registerMcpAppSurfaceSession>[1]) => {
+  return registerMcpAppSurfaceSession(event.sender.id, input)
+})
+
+ipcMain.handle('subdesign:unregisterMcpAppSurface', async (event, token: unknown) => {
+  const surface = consumeMcpAppSurfaceSession(event.sender.id, token)
+  if (!surface) return { ok: false }
+  mcpAppSurfaceSessions.delete(surface.token)
+  for (const [approvalToken, pending] of mcpAppToolApprovals) {
+    if (pending.surfaceToken === surface.token) mcpAppToolApprovals.delete(approvalToken)
+  }
+  return { ok: true }
+})
+
+ipcMain.handle('subdesign:mcpAppToolCall', async (event, input: {
+  surfaceToken?: unknown
   coordinate?: unknown
-  allowlist?: unknown
   arguments?: unknown
-  runId?: unknown
-  threadId?: unknown
-  projectRoot?: unknown
+  approvalToken?: unknown
+  approvalDecision?: unknown
 }) => {
   try {
+    const surface = consumeMcpAppSurfaceSession(event.sender.id, input?.surfaceToken)
+    if (!surface) return { ok: false, error: 'MCP App surface session 不存在或已過期。' }
     const coordinate = String(input?.coordinate || '')
     const parsed = parseMcpToolCoordinate(coordinate)
-    const allowlist = Array.isArray(input?.allowlist) ? input.allowlist.map(String) : []
-    if (!parsed || !allowlist.includes(coordinate)) return { ok: false, error: 'MCP App tool 不在 surface allowlist。' }
-    const args = input.arguments && typeof input.arguments === 'object' && !Array.isArray(input.arguments)
+    if (!parsed || !surface.allowlist.has(coordinate)) return { ok: false, error: 'MCP App tool 不在 Host surface allowlist。' }
+    const submittedArgs = input.arguments && typeof input.arguments === 'object' && !Array.isArray(input.arguments)
       ? input.arguments as Record<string, unknown>
       : {}
+    const approvalToken = typeof input.approvalToken === 'string' ? input.approvalToken : ''
+    if (!approvalToken) {
+      const token = issueMcpAppToolApproval({
+        webContentsId: event.sender.id,
+        surfaceToken: surface.token,
+        coordinate,
+        arguments: submittedArgs,
+      })
+      return { ok: false, approvalRequired: true, approvalToken: token }
+    }
+    const pending = takeMcpAppToolApproval({
+      token: approvalToken,
+      webContentsId: event.sender.id,
+      surfaceToken: surface.token,
+      coordinate,
+    })
+    if (!pending) {
+      return { ok: false, error: 'MCP App approval challenge 不存在或已過期。' }
+    }
+    const decision = input.approvalDecision === 'allow' ? 'allow' : 'deny'
     const content = await piHostSupervisor.callPackTool('mcp_call', {
       extensionId: parsed.extensionId,
       toolName: parsed.toolName,
-      arguments: args,
+      arguments: pending.arguments,
     }, {
-      cwd: workspaceRootFor(typeof input.projectRoot === 'string' ? input.projectRoot : undefined),
-      ...(typeof input.runId === 'string' ? { runId: input.runId, callId: `mcp-app:${input.runId}:${coordinate}` } : {}),
-      approval: 'allow',
+      cwd: workspaceRootFor(surface.projectRoot),
+      ...(surface.runId ? { runId: surface.runId, callId: `mcp-app:${surface.runId}:${coordinate}` } : {}),
+      approval: decision,
     })
     return { ok: true, content }
   } catch (error) {
@@ -4599,7 +4764,7 @@ function currentCustomToolSecrets(): Record<string, string> {
 
 ipcMain.handle('tools:httpRequest', async (_evt, input: { url: string; method?: string; headers?: Record<string, string>; body?: string; maxChars?: number }) => {
   try {
-    // P1-A: resolve {{secret:key}} placeholders MAIN-side — raw tokens never
+    // Resolve {{secret:key}} placeholders main-side; raw tokens never
     // travel through / persist in the renderer.
     const custom = currentCustomToolSecrets()
     const missing: string[] = []
@@ -4628,7 +4793,7 @@ ipcMain.handle('tools:httpRequest', async (_evt, input: { url: string; method?: 
   } catch (e) { return { ok: false, text: e instanceof Error ? e.message : String(e), status: 0 } }
 })
 
-// ── P1-A: connector credential vault (renderer sees metadata only) ──
+// ── Connector credential vault (renderer sees metadata only) ──
 
 ipcMain.handle('secrets:list', async () => listVaultMeta())
 

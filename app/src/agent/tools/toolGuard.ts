@@ -102,7 +102,7 @@ export async function authorizeTool(opts: {
   unattended?: boolean
   runId?: string
   threadId?: string
-  /** Lifecycle hook context (P1-D) */
+  /** Lifecycle hook context. */
   sourceKind?: string
   objective?: string
   onLog?: (level: string, message: string) => void

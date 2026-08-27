@@ -1,5 +1,5 @@
 /**
- * Policy-authorized image vision + deterministic local masking (ticket 09).
+ * Policy-authorized image vision and deterministic local masking.
  * External AI only receives masked derivatives; originals never enter the view.
  */
 

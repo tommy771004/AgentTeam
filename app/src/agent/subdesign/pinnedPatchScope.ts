@@ -3,6 +3,7 @@ import type { SubDesignPinnedComment } from './pinnedComments.ts'
 export type PinnedPatchScope = {
   schemaVersion: 1
   scopeId: string
+  runId: string
   artifactId: string
   revision: number
   path: string
@@ -131,6 +132,7 @@ export function validatePinnedPatchOperation(opts: {
 
 export function createPinnedPatchScope(input: {
   scopeId: string
+  runId: string
   artifactId: string
   revision: number
   path: string
@@ -141,6 +143,7 @@ export function createPinnedPatchScope(input: {
   return {
     schemaVersion: 1,
     scopeId: input.scopeId,
+    runId: input.runId,
     artifactId: input.artifactId,
     revision: input.revision,
     path: input.path,

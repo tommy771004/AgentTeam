@@ -1,4 +1,4 @@
-import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
+import { registerPiExtensionPack, type PiPackTool, type PiToolResult } from '../piToolHost.ts'
 import {
   codegraphStatus,
   codegraphExplore,
@@ -28,6 +28,22 @@ const boundedInteger = (value: unknown, fallback: number, maximum: number): numb
     : fallback
 }
 
+async function requireIndexedCodegraph(
+  deps: CodegraphDependencies,
+  cwd: string,
+  messages: { unavailable: string; unindexed: string },
+): Promise<{ ok: true } | { ok: false; result: PiToolResult }> {
+  const status = await deps.status(cwd)
+  if (!status.installed) return { ok: false, result: structuredFailure(messages.unavailable) }
+  if (!status.indexed) {
+    return {
+      ok: false,
+      result: jsonOk({ indexed: false, note: messages.unindexed, projectRoot: status.projectRoot }),
+    }
+  }
+  return { ok: true }
+}
+
 /**
  * CodeGraph uses the same bridge and `<root>/.codegraph` index as the UI.
  * Dependencies are injectable so the Host-facing behavior can be tested
@@ -48,15 +64,11 @@ export function buildCodegraphPack(deps: CodegraphDependencies = DEFAULT_DEPENDE
       required: ['query'],
     },
     execute: async (args, ctx) => {
-      const status = await deps.status(ctx.cwd)
-      if (!status.installed) return structuredFailure('codegraph CLI 未安裝：無法探索程式圖')
-      if (!status.indexed) {
-        return jsonOk({
-          indexed: false,
-          note: `此專案尚未建立索引（${status.projectRoot}）；請先執行索引`,
-          projectRoot: status.projectRoot,
-        })
-      }
+      const ready = await requireIndexedCodegraph(deps, ctx.cwd, {
+        unavailable: 'codegraph CLI 未安裝：無法探索程式圖',
+        unindexed: '此專案尚未建立索引；請先執行索引',
+      })
+      if (!ready.ok) return ready.result
       const maxFiles = boundedInteger(args.limit, 20, 40)
       const result = await deps.explore(ctx.cwd, String(args.query || ''), { maxFiles })
       return jsonOk({ indexed: true, ...(result as Record<string, unknown>) })
@@ -92,15 +104,11 @@ export function buildCodegraphPack(deps: CodegraphDependencies = DEFAULT_DEPENDE
       required: ['symbol'],
     },
     execute: async (args, ctx) => {
-      const status = await deps.status(ctx.cwd)
-      if (!status.installed) return structuredFailure('codegraph CLI 未安裝')
-      if (!status.indexed) {
-        return jsonOk({
-          indexed: false,
-          note: '此專案尚未建立索引，無法評估影響面',
-          projectRoot: status.projectRoot,
-        })
-      }
+      const ready = await requireIndexedCodegraph(deps, ctx.cwd, {
+        unavailable: 'codegraph CLI 未安裝',
+        unindexed: '此專案尚未建立索引，無法評估影響面',
+      })
+      if (!ready.ok) return ready.result
       const result = await deps.impact(ctx.cwd, String(args.symbol || ''))
       return jsonOk({ indexed: true, ...(result as Record<string, unknown>) })
     },
@@ -117,15 +125,11 @@ export function buildCodegraphPack(deps: CodegraphDependencies = DEFAULT_DEPENDE
       required: ['symbol'],
     },
     execute: async (args, ctx) => {
-      const status = await deps.status(ctx.cwd)
-      if (!status.installed) return structuredFailure('codegraph CLI 未安裝')
-      if (!status.indexed) {
-        return jsonOk({
-          indexed: false,
-          note: '此專案尚未建立索引，沒有呼叫者資料',
-          projectRoot: status.projectRoot,
-        })
-      }
+      const ready = await requireIndexedCodegraph(deps, ctx.cwd, {
+        unavailable: 'codegraph CLI 未安裝',
+        unindexed: '此專案尚未建立索引，沒有呼叫者資料',
+      })
+      if (!ready.ok) return ready.result
       const result = await deps.callers(ctx.cwd, String(args.symbol || ''))
       return jsonOk({ indexed: true, ...(result as Record<string, unknown>) })
     },

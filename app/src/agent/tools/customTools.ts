@@ -25,7 +25,7 @@ export function customToolsForSettings(settings: LlmSettings): ResolvedCustomToo
   for (const plugin of pluginRegistry.list()) {
     if (!plugin.enabled) continue
     for (const tool of plugin.customTools || []) add(tool, plugin.id)
-    // P1-C: governed tool packages — validate + compile; unapproved privileged
+    // Governed tool packages: validate and compile; unapproved privileged
     // tools are withheld (read-only surface until user re-approves fingerprint)
     if (plugin.toolPackage) {
       const v = validateToolPackage(plugin.toolPackage)
@@ -38,7 +38,7 @@ export function customToolsForSettings(settings: LlmSettings): ResolvedCustomToo
   return [...byName.values()]
 }
 
-/** P1-C: packages awaiting privilege review（供 Settings/市集 UI）. */
+/** Packages awaiting privilege review（供 Settings/市集 UI）. */
 export function listPendingToolPackages(): Array<{
   pluginId: string
   packageId: string
@@ -218,7 +218,7 @@ function interpolate(
   missingSecrets?: string[],
   opts?: {
     /**
-     * P1-A: keep {{secret:key}} placeholders — main resolves them from the
+     * Keep {{secret:key}} placeholders; main resolves them from the
      * vault (tools:httpRequest / mcp spawn). Availability still checked here.
      */
     deferSecrets?: boolean

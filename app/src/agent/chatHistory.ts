@@ -5,10 +5,8 @@
 
 /**
  * Combined budget for "reference" context that lands in the same prompt slot:
- * intra-thread chat history (this module, built in runDispatch.ts) plus
- * cross-session recall (hermes/sessionSearch.ts, built later in engine.ts).
- * The two used to cap independently at ~6000 chars each with no shared
- * accounting — see docs/CONVERSATION_LOOP_HERMES_FLOW.md gap H6.
+ * intra-thread chat history (built in runDispatch.ts) plus cross-session recall
+ * from hermes/sessionSearch.ts. Both share this single accounting boundary.
  */
 export const REFERENCE_CONTEXT_BUDGET_CHARS = 6000
 /** Fixed slice reserved for hermes/sessionSearch.ts's cross-session recall block. */

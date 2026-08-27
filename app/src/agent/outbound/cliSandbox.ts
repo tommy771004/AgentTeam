@@ -209,12 +209,7 @@ export type MainCliSpawnAdmission = {
 }
 
 /**
- * Main-process spawn gate (ticket 20). Renderer-supplied isolationStatus is only
- * trusted when paired with a matching sandboxWrap; required mode demands both
- * wrap and verified isolation, and cwd must sit inside the bound view.
- */
-/**
- * Builtin shell (bash) under outbound protection (ticket 21).
+ * Builtin shell (bash) under outbound protection.
  * cwd pin alone is not isolation — required denies host shell without a verified
  * filesystem sandbox; optional/demo may run degraded (explicit mark).
  */

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Icon } from '../components/Icon'
 import { CommandComposer } from '../components/CommandComposer'
 import { ThreadSidebar } from '../components/ThreadSidebar'
@@ -15,7 +16,7 @@ import { useRunActivityStore } from '../store/runActivityStore'
 import { useSlashExecutor } from '../hooks/useSlashExecutor'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { useSettingsStore } from '../store/settingsStore'
-import { inferRunnerFromModel } from '../agent/localCliRun'
+import { resolveModelRunnerSelection } from '../agent/localCliRun'
 import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
 import type { AgentMode, LoopType } from '../agent/types'
 import type { ThinkingDepth } from '../agent/thinking'
@@ -39,9 +40,14 @@ import {
   buildComposerRunInput,
   buildHandoffAvailability,
   buildHandoffDocument,
+  isConversationComposerBusy,
   readArtifactIndex,
   resolveBuiltinRunnerTransition,
 } from '../agent/composerRunControls'
+import {
+  beginComposerApprovalHandoff,
+  finishComposerApprovalHandoff,
+} from '../agent/composerApprovalHandoff'
 
 /**
  * OpenCode 風格：Build/Plan + 模型/深度 + Threads + 內嵌執行
@@ -52,13 +58,19 @@ export function ProtocolsPage() {
     setDraftInput,
     selectedLoopType,
     setSelectedLoopType,
-    isRunning,
-    agent,
     stopExecution,
     getRunIdForThread,
     selectRun,
-  } = useAgentStore()
-  const [busy, setBusy] = useState(false)
+  } = useAgentStore(useShallow((state) => ({
+    draftInput: state.draftInput,
+    setDraftInput: state.setDraftInput,
+    selectedLoopType: state.selectedLoopType,
+    setSelectedLoopType: state.setSelectedLoopType,
+    stopExecution: state.stopExecution,
+    getRunIdForThread: state.getRunIdForThread,
+    selectRun: state.selectRun,
+  })))
+  const [submittingByThread, setSubmittingByThread] = useState<Record<string, number>>({})
   const [showTerminal, setShowTerminal] = useState(false)
   const [composerApprovalModes, setComposerApprovalModes] = useState<Record<string, ApprovalMode>>({})
   const { run: runSlash } = useSlashExecutor()
@@ -86,7 +98,26 @@ export function ProtocolsPage() {
     createThread,
     clearBubbles,
     setThreadDraft,
-  } = useThreadStore()
+  } = useThreadStore(useShallow((state) => ({
+    hydrate: state.hydrate,
+    activeId: state.activeId,
+    activeThread: state.activeThread,
+    showRunPanel: state.showRunPanel,
+    showThreadList: state.showThreadList,
+    setShowRunPanel: state.setShowRunPanel,
+    setShowThreadList: state.setShowThreadList,
+    setThreadStatus: state.setThreadStatus,
+    pushBubble: state.pushBubble,
+    setModel: state.setModel,
+    setThinkingDepth: state.setThinkingDepth,
+    setSpeed: state.setSpeed,
+    setAgentMode: state.setAgentMode,
+    setRunner: state.setRunner,
+    setLoopType: state.setLoopType,
+    createThread: state.createThread,
+    clearBubbles: state.clearBubbles,
+    setThreadDraft: state.setThreadDraft,
+  })))
   const selectActivityRun = useRunActivityStore((s) => s.selectRun)
   // Per-thread, matching where the grant is actually stored and enforced. The
   // legacy `sessionAllow` scalar is only ever set for a run with no thread, so
@@ -141,6 +172,8 @@ export function ProtocolsPage() {
     stopping: activity?.stopping,
   })
   const composerApprovalMode = activeId ? composerApprovalModes[activeId] : undefined
+  const composerBusy = isConversationComposerBusy(submittingByThread, activeId, lifecycle.live)
+  const runnerTransitionRevision = useRef(0)
   // Keep the latest run artifact index available for explicit handoff export.
   // Conversation UI no longer projects generic run evidence as workflow stages.
   const artifactIndex = readArtifactIndex(
@@ -172,7 +205,15 @@ export function ProtocolsPage() {
       top: scrollRef.current.scrollHeight,
       behavior: 'smooth',
     })
-  }, [thread?.bubbles.length, isRunning, agent.logs.length, agent.toolCalls?.length, agent.progress])
+  }, [
+    thread?.bubbles.length,
+    presentationActive,
+    presentationAgent.logs.length,
+    presentationAgent.toolCalls?.length,
+    presentationAgent.progress,
+    activity?.events.length,
+    activity?.draftText,
+  ])
 
   useEffect(() => {
     // Sync pin; null = auto classify for this thread
@@ -260,8 +301,6 @@ export function ProtocolsPage() {
 
     const conversationSuggestion =
       !pinnedLoopType && detectAutomationSuggestion(raw)
-    let suggestionOnly = false
-
     const { subagents } = parseSubagentMentions(raw)
     const runInput = buildComposerRunInput({
       objective: raw,
@@ -279,7 +318,15 @@ export function ProtocolsPage() {
       temporary: settings.temporaryChatDefault === true,
     })
 
-    setBusy(true)
+    const submissionThreadId = activeId
+    setSubmittingByThread((current) => ({
+      ...current,
+      [submissionThreadId]: (current[submissionThreadId] || 0) + 1,
+    }))
+    setComposerApprovalModes((current) => {
+      const { [submissionThreadId]: _consumed, ...rest } = current
+      return rest
+    })
     setComposerDraft('')
     if (thread?.loopType) setSelectedLoopType(thread.loopType)
     else setSelectedLoopType(null)
@@ -316,7 +363,6 @@ export function ProtocolsPage() {
       // Omit loopType when unpinned → engine auto-classifies (Chat-lite / Goal).
       const { runTask } = await import('../agent/taskRunCoordinator')
       const r = await runTask(runInput)
-      suggestionOnly = Boolean(r.suggestion)
       if (r.queued) {
         const n = queueLength()
         const pos =
@@ -340,8 +386,12 @@ export function ProtocolsPage() {
         `執行失敗：${e instanceof Error ? e.message : String(e)}`,
       )
     } finally {
-      setBusy(false)
-      setShowRunPanel(!suggestionOnly)
+      setSubmittingByThread((current) => {
+        const nextCount = Math.max(0, (current[submissionThreadId] || 0) - 1)
+        if (nextCount > 0) return { ...current, [submissionThreadId]: nextCount }
+        const { [submissionThreadId]: _finished, ...rest } = current
+        return rest
+      })
     }
   }
 
@@ -409,12 +459,34 @@ export function ProtocolsPage() {
     setComposerApprovalModes((current) => ({ ...current, [activeId]: mode }))
   }
 
+  const consumeComposerApprovalMode = (threadId: string) => {
+    setComposerApprovalModes((current) => {
+      const { [threadId]: _consumed, ...rest } = current
+      return rest
+    })
+  }
+
   return (
     <div className="h-full flex min-h-0 bg-canvas text-ink">
       {showThreadList && (
-        <aside className="w-[200px] md:w-[220px] shrink-0 hidden sm:flex flex-col min-h-0 border-r border-line">
-          <ThreadSidebar />
-        </aside>
+        <>
+          <button
+            type="button"
+            aria-label="關閉對話列表"
+            className="fixed inset-0 z-40 bg-black/35 sm:hidden"
+            onClick={() => setShowThreadList(false)}
+          />
+          <aside
+            aria-label="對話列表"
+            className="fixed inset-y-0 left-0 z-50 flex w-[min(86vw,320px)] shrink-0 flex-col border-r border-line sm:relative sm:inset-auto sm:z-auto sm:w-[200px] md:w-[220px]"
+          >
+            <ThreadSidebar
+              onThreadSelected={() => {
+                if (window.matchMedia('(max-width: 639px)').matches) setShowThreadList(false)
+              }}
+            />
+          </aside>
+        </>
       )}
 
       <div className="flex-1 min-w-0 flex flex-col min-h-0">
@@ -424,7 +496,7 @@ export function ProtocolsPage() {
             {!showThreadList && (
               <button
                 type="button"
-                className="p-1.5 rounded-control hover:bg-hover-2 text-ink-3"
+                className="hidden sm:inline-flex p-1.5 rounded-control hover:bg-hover-2 text-ink-3"
                 onClick={() => setShowThreadList(true)}
                 title="Threads"
               >
@@ -433,6 +505,7 @@ export function ProtocolsPage() {
             )}
             <button
               type="button"
+              aria-label="開啟對話列表"
               className="sm:hidden p-1.5 rounded-control hover:bg-hover-2 text-ink-3"
               onClick={() => setShowThreadList(!showThreadList)}
             >
@@ -525,6 +598,7 @@ export function ProtocolsPage() {
             <div className="shrink-0 w-full pt-3 pb-4 space-y-2">
               <ProjectContextBar />
               <CommandComposer
+                scopeKey={activeId || 'no-thread'}
                 value={activeId ? threadDraft : draftInput}
                 onChange={setComposerDraft}
                 mode="agent"
@@ -532,7 +606,7 @@ export function ProtocolsPage() {
                 autoFocus
                 disabled={false}
                 placeholder={
-                  busy || isRunning
+                  composerBusy
                     ? settings.followUpMode === 'queue'
                       ? '輸入追問（將排隊）…'
                       : '輸入以轉向目前任務…'
@@ -556,6 +630,7 @@ export function ProtocolsPage() {
                     onAgentModeChange={(mode) => activeId && setAgentMode(activeId, mode)}
                     onRunnerChange={(nextRunner) => {
                       if (!activeId) return
+                      const transitionRevision = ++runnerTransitionRevision.current
                       if (nextRunner !== 'builtin') {
                         setRunner(activeId, nextRunner)
                         return
@@ -569,9 +644,11 @@ export function ProtocolsPage() {
                         void (async () => {
                           try {
                             await updateSettings(settingsPatch)
+                            if (runnerTransitionRevision.current !== transitionRevision) return
                             setModel(activeId, transition.threadModel)
                             setRunner(activeId, 'builtin')
                           } catch (error) {
+                            if (runnerTransitionRevision.current !== transitionRevision) return
                             pushBubble(
                               activeId,
                               'system',
@@ -622,9 +699,19 @@ export function ProtocolsPage() {
                   if (runId) stopExecution(runId)
                 }}
                 onSlashCommand={async (cmd, args, raw) => {
-                  if (activeId) pushBubble(activeId, 'user', raw)
-                  if (cmd.name === 'clear' && activeId) clearBubbles(activeId)
-                  await runSlash(cmd, args, raw)
+                  const submissionThreadId = activeId
+                  if (submissionThreadId) pushBubble(submissionThreadId, 'user', raw)
+                  if (cmd.name === 'clear' && submissionThreadId) clearBubbles(submissionThreadId)
+                  const approvalHandoff = submissionThreadId && composerApprovalMode
+                    ? beginComposerApprovalHandoff(submissionThreadId, composerApprovalMode)
+                    : null
+                  try {
+                    await runSlash(cmd, args, raw)
+                  } finally {
+                    if (approvalHandoff && finishComposerApprovalHandoff(approvalHandoff)) {
+                      consumeComposerApprovalMode(approvalHandoff.threadId)
+                    }
+                  }
                 }}
                 footerLeft={
                   <div className="flex items-center gap-2">
@@ -654,9 +741,14 @@ export function ProtocolsPage() {
                     cliProviders={settings.cliProviders}
                     onModelChange={(m) => {
                       if (!activeId) return
-                      setModel(activeId, m)
-                      const inferred = inferRunnerFromModel(m, settings.cliProviders || [])
-                      if (inferred !== 'builtin') setRunner(activeId, inferred)
+                      runnerTransitionRevision.current += 1
+                      const transition = resolveModelRunnerSelection({
+                        currentRunner: runner,
+                        selectedModel: m,
+                        providers: settings.cliProviders || [],
+                      })
+                      setModel(activeId, transition.threadModel)
+                      setRunner(activeId, transition.runner)
                     }}
                     onDepthChange={(d) => activeId && setThinkingDepth(activeId, d)}
                     onSpeedChange={(s) => activeId && setSpeed(activeId, s)}

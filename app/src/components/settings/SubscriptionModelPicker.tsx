@@ -2,7 +2,7 @@ import type { ApiProviderPreset } from '../../agent/types'
 import { subscriptionCacheBadge, useSubscriptionCatalog } from '../../hooks/useSubscriptionCatalog'
 
 /**
- * ADR-0052 ticket 04 — fail-closed model picker for CLI-subscription
+ * Fail-closed model picker for CLI-subscription
  * connections. The list comes ONLY from the Host snapshot's projected catalog
  * (`config.subscriptionCatalog`); this component never uses the OpenAI-
  * compatible /models discovery path and never judges availability itself — it

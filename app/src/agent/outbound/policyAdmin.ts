@@ -1,7 +1,7 @@
 /**
- * Policy Admin local lifecycle — draft / validate / activate / rollback (ticket 13).
+ * Policy Admin local lifecycle — draft / validate / activate / rollback.
  * Does not bypass Outbound Data Gate; never exposes protected content.
- * Ticket 22: writes only when build flavor is policy-admin.
+ * Writes only when build flavor is policy-admin.
  */
 
 import { parseBuildFlavor } from './outboundGate.ts'

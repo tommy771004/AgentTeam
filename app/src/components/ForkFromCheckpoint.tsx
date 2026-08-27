@@ -1,5 +1,5 @@
 /**
- * Fork-and-rerun-from-step-N (ticket 02).
+ * Fork and rerun from a selected step.
  *
  * The steps a fork may start from are exactly the thread's replay-safe
  * checkpoints (ADR-0042). Selecting one reruns through the coordinator with

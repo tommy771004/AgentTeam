@@ -182,7 +182,7 @@ export interface DelegatePersona {
   description?: string
 }
 
-/** P1-B: how a model capability claim was established */
+/** How a model capability claim was established. */
 export type ModelCapabilitySource = 'verified' | 'assumed' | 'unknown' | 'discovered'
 
 /**
@@ -769,13 +769,13 @@ export interface LlmSettings {
   /** CodeMode: run_code capability — model-written JS batches tool calls in one round */
   codeModeEnabled: boolean
   /**
-   * P1-B: per-model capability profiles.
+   * Per-model capability profiles.
    * 'verified' comes only from an explicit user-run probe; 'assumed' from
    * model-id heuristics; unknown fields stay undefined (conservative).
    */
   modelProfiles: Record<string, ModelProfile>
   /**
-   * P1-D: user-defined lifecycle hook rules（宣告式，只能限制/觀察）。
+   * User-defined lifecycle hook rules（宣告式，只能限制/觀察）。
    * Plugin hooks 由 manifest 提供並經 sanitize；此欄僅存 user 規則。
    */
   hookRules: unknown[]

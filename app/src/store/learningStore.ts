@@ -120,7 +120,7 @@ interface LearningStore {
   /** Re-bind npm-mcp ${projectRoot} args after project switch. */
   rebindPluginProjectRoots: (projectRoot: string) => Promise<void>
   applyPlugins: () => void
-  /** P1-C: approve a tool package's privilege fingerprint (unlocks withheld tools). */
+  /** Approve a tool package's privilege fingerprint and unlock withheld tools. */
   approveToolPackage: (pluginId: string) => Promise<{ ok: boolean; message: string }>
 }
 
@@ -446,7 +446,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     pluginError: null,
 
     load: async () => {
-      // P1-A: hydrate vault metadata mirror + one-time localStorage → vault migration
+      // Hydrate the vault metadata mirror and run the one-time localStorage migration.
       try {
         const { hydratePluginSecrets } = await import('../agent/hermes/pluginSecrets.ts')
         await hydratePluginSecrets()

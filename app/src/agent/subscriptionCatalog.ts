@@ -84,7 +84,7 @@ const REASON_NO_CREDENTIAL = '尚未偵測到 CLI 登入；請先在對應 CLI�
 const REASON_NO_MODELS = '憑證已同步，但此訂閱目前沒有可解析的模型。'
 
 /**
- * The ONE row guard for subscription model facts (ticket 03).
+ * The single row guard for subscription model facts.
  *
  * Every producer of model rows — the catalog projection and the Host's
  * ModelRuntime view alike — routes raw entries through here, so the two can
@@ -188,7 +188,7 @@ export function assembleSubscriptionCatalog(
 }
 
 /**
- * The offline-fallback decision (ticket 02): publish a fresh build as-is, or —
+ * The offline-fallback decision: publish a fresh build as-is, or —
  * when the fresh build could not make ANY row available and a previous
  * snapshot carried at least one usable row — republish that last-good catalog
  * marked stale, with the moment the CACHE was built (not now) so the UI can

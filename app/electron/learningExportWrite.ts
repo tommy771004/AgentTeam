@@ -1,5 +1,5 @@
 /**
- * Scoped write for learning-loop exports (ticket 04).
+ * Scoped write for learning-loop exports.
  *
  * Confinement is enforced here rather than at the IPC handler so it is
  * testable: traversal, absolute paths and symlink escapes must all be refused

@@ -853,8 +853,7 @@ function WebhookBootstrap() {
   return null
 }
 
-/** Telegram messaging gateway + background job notifications */
-/** G10:monitor 事件流 → Proactive event matching(與 webhook 同紀律) */
+/** Monitor 事件流使用和 webhook 相同的 Proactive event matching 規則。 */
 function MonitorBootstrap() {
   const navigate = useNavigate()
   const matchEventEvidence = useScheduleStore((s) => s.matchEventEvidence)

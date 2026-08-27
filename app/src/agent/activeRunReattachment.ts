@@ -205,12 +205,13 @@ async function restoreAttachment(
   const restored = useAgentStore.getState().restoreRun({ runId: attachment.runId, threadId: attachment.threadId, state })
   if (!restored) throw new Error(`renderer run registry restore failed: ${attachment.runId}`)
   const thread = useThreadStore.getState()
-  thread.setThreadRunning(attachment.threadId, true, attachment.runId)
+  const active = snapshot.status === 'active'
+  thread.setThreadRunning(attachment.threadId, active, attachment.runId)
   thread.setAwaitingReply(attachment.threadId, false)
-  thread.setThreadStatus(attachment.threadId, 'running')
+  thread.setThreadStatus(attachment.threadId, active ? 'running' : state.status)
   projectRestoredActivity(attachment.runId, page, snapshot, reconciled)
   buffered.delete(attachment.runId)
-  presentReattachedApproval(snapshot.pendingApproval, snapshot.threadId)
+  if (active) presentReattachedApproval(snapshot.pendingApproval, snapshot.threadId)
   return snapshot.status === 'terminal'
     ? { runId: attachment.runId, threadId: attachment.threadId, objective, agent: state }
     : undefined
