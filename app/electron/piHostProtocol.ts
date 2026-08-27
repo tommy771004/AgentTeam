@@ -388,6 +388,21 @@ function projectSessionSummary(session: SessionRecord) {
   }
 }
 
+function projectPiHostStateSnapshot(state: HostState, id: string | number): PiHostMessage[] {
+  if (state.negotiatedProtocolVersion < 5) {
+    return [errorResponse(id, 'protocol_mismatch', 'state/snapshot without memories requires Pi Host Protocol v5')]
+  }
+  return [{
+    id,
+    result: {
+      cursor: state.snapshot.cursor,
+      sessions: [...state.snapshot.sessions],
+      queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })),
+      resources: state.snapshot.resources.map((resource) => ({ ...resource })),
+    },
+  }]
+}
+
 function workingStateForAdmittedTurn(
   session: SessionRecord,
   runId: string,
@@ -2558,7 +2573,7 @@ export function handlePiHostRequest(
     })()
   }
   if (input.method === 'state/snapshot') {
-    return [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions], queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })), resources: state.snapshot.resources.map((resource) => ({ ...resource })) } }]
+    return projectPiHostStateSnapshot(state, id)
   }
   const attachmentResponse = handleAttachmentRequest(state, input, id, emit)
   if (attachmentResponse) return attachmentResponse
