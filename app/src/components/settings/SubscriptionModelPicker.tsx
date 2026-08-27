@@ -1,6 +1,4 @@
-import { useEffect, useState } from 'react'
 import type { ApiProviderPreset } from '../../agent/types'
-import type { SubscriptionProviderCatalog } from '../../agent/subscriptionCatalog'
 import { subscriptionCacheBadge, useSubscriptionCatalog } from '../../hooks/useSubscriptionCatalog'
 
 /**

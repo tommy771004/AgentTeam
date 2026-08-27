@@ -336,90 +336,6 @@ export const TOOL_DEFINITIONS = {
     // Declared here, next to the schema (ADR-0050): the tool says it's a shell.
     presentCall: terminalCard,
   },
-  codegraph_explore: {
-    description: "Query local CodeGraph index for symbols/call paths (surgical code context). Requires codegraph CLI + project init.",
-    keywords: ["codegraph","call graph","callers","callees","impact","symbol","architecture","how does","code structure","blast radius","dependency"],
-    parameters: {
-      "type": "object",
-      "properties": {
-        "query": {
-          "type": "string",
-          "description": "Natural language or symbol name, e.g. \"how does X work\", \"UserService.login\""
-        },
-        "projectRoot": {
-          "type": "string",
-          "description": "Optional absolute project path (default: selected project)"
-        }
-      },
-      "required": [
-        "query"
-      ]
-    },
-    owningCapability: 'codegraph',
-    presentCall: searchMatchesCard('query'),
-  },
-  codegraph_status: {
-    description: "Check whether CodeGraph CLI is installed and project is indexed",
-    keywords: ["codegraph status","index status","code index"],
-    parameters: {
-      "type": "object",
-      "properties": {
-        "projectRoot": {
-          "type": "string",
-          "description": "Optional absolute project path"
-        }
-      }
-    },
-    owningCapability: 'codegraph',
-    presentCall: labelledCard('projectRoot', '程式圖狀態', 'search'),
-  },
-  codegraph_impact: {
-    description: "Blast radius: what is affected if symbol changes (CodeGraph impact)",
-    keywords: ["impact","blast radius","affected","breaking change","ripple"],
-    parameters: {
-      "type": "object",
-      "properties": {
-        "symbol": {
-          "type": "string",
-          "description": "Symbol name to analyze"
-        },
-        "depth": {
-          "type": "integer",
-          "description": "Traversal depth (default 2)",
-          "default": 2
-        },
-        "projectRoot": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "symbol"
-      ]
-    },
-    owningCapability: 'codegraph',
-    presentCall: labelledCard('symbol', '影響範圍', 'search'),
-  },
-  codegraph_callers: {
-    description: "Find callers of a symbol via CodeGraph",
-    keywords: ["callers","who calls","references","usages"],
-    parameters: {
-      "type": "object",
-      "properties": {
-        "symbol": {
-          "type": "string",
-          "description": "Symbol to find callers for"
-        },
-        "projectRoot": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "symbol"
-      ]
-    },
-    owningCapability: 'codegraph',
-    presentCall: labelledCard('symbol', '呼叫者', 'search'),
-  },
   datetime_now: {
     description: "Get current local datetime",
     keywords: ["schedule","time","daily","cron","timestamp","clock"],
@@ -1595,13 +1511,4 @@ export function toolCatalogEntries(): { name: ToolName; description: string; key
     description: def.description,
     keywords: [...def.keywords],
   }))
-}
-
-/** Parameter schema view. */
-export function toolParameters(): Record<ToolName, Record<string, unknown>> {
-  const out = {} as Record<ToolName, Record<string, unknown>>
-  for (const [name, def] of Object.entries(TOOL_DEFINITIONS) as [ToolName, ToolDefinition][]) {
-    out[name] = def.parameters as Record<string, unknown>
-  }
-  return out
 }

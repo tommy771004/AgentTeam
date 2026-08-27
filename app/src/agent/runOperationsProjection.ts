@@ -72,6 +72,48 @@ function rowFromCard(
   }
 }
 
+type ToolPair = {
+  call?: Extract<TurnRecordEntry, { kind: 'tool-call' }>
+  result?: Extract<TurnRecordEntry, { kind: 'tool-result' }>
+}
+
+function toolCardMetadata(card: ToolPresentation | undefined): Pick<RunOperationRow, 'added' | 'removed' | 'card'> {
+  if (!card) return {}
+  const stats = diffStats(card)
+  if (!stats) return { card }
+  const totals = stats.reduce(
+    (sum, stat) => ({ added: sum.added + stat.added, removed: sum.removed + stat.removed }),
+    { added: 0, removed: 0 },
+  )
+  return { ...totals, card }
+}
+
+function rowFromToolPair(pair: ToolPair): RunOperationRow | undefined {
+  if (!pair.call) return undefined
+  const result = pair.result
+  const args = 'args' in pair.call ? pair.call.args : undefined
+  const card = result
+    ? (presentToolResult(pair.call.tool, args, {
+        content: result.detail ?? '',
+        isError: result.settlement !== 'success',
+      }) ?? presentToolCall(pair.call.tool, args))
+    : presentToolCall(pair.call.tool, args)
+  const presented = rowFromCard(card, result ? `已執行 ${pair.call.tool}` : `執行 ${pair.call.tool}…`)
+  const failed = Boolean(result && result.settlement !== 'success')
+  return {
+    ...base(pair.call),
+    kind: failed ? 'error' : 'tool',
+    title: presented.title ?? (result ? `已執行 ${pair.call.tool}` : `執行 ${pair.call.tool}…`),
+    callId: pair.call.callId,
+    ...('path' in pair.call && pair.call.path ? { path: pair.call.path } : {}),
+    ...(presented.path ? { path: presented.path } : {}),
+    ...(result?.detail ? { detail: result.detail } : {}),
+    ...(presented.detail ? { detail: presented.detail } : {}),
+    ...(result ? { ok: !failed } : {}),
+    ...toolCardMetadata(card),
+  }
+}
+
 /**
  * Operation rows for one record, in recorded order.
  *
@@ -83,38 +125,12 @@ function rowFromCard(
  */
 export function projectRunOperations(record: TurnRecord | undefined): RunOperationRow[] {
   const rows: RunOperationRow[] = []
-  const open = new Map<string, { call?: Extract<TurnRecordEntry, { kind: 'tool-call' }>; result?: Extract<TurnRecordEntry, { kind: 'tool-result' }> }>()
+  const open = new Map<string, ToolPair>()
   const flushToolRow = (callId: string) => {
     const pair = open.get(callId)
-    if (!pair?.call) return
-    const result = pair.result
-    const args = 'args' in pair.call ? pair.call.args : undefined
-    const card =
-      result
-        ? (presentToolResult(pair.call.tool, args, {
-            content: result.detail ?? '',
-            isError: result.settlement !== 'success',
-          }) ?? presentToolCall(pair.call.tool, args))
-        : presentToolCall(pair.call.tool, args)
-    const presented = rowFromCard(card, result ? `已執行 ${pair.call.tool}` : `執行 ${pair.call.tool}…`)
-    const stats = card ? diffStats(card) : undefined
-    const added = stats?.reduce((total, stat) => total + stat.added, 0)
-    const removed = stats?.reduce((total, stat) => total + stat.removed, 0)
-    const failed = Boolean(result && result.settlement !== 'success')
-    rows.push({
-      ...base(pair.call),
-      kind: failed ? 'error' : 'tool',
-      title: presented.title ?? (result ? `已執行 ${pair.call.tool}` : `執行 ${pair.call.tool}…`),
-      callId: pair.call.callId,
-      ...('path' in pair.call && pair.call.path ? { path: pair.call.path } : {}),
-      ...(presented.path ? { path: presented.path } : {}),
-      ...(result?.detail ? { detail: result.detail } : {}),
-      ...(presented.detail ? { detail: presented.detail } : {}),
-      ...(result ? { ok: !failed } : {}),
-      ...(added !== undefined ? { added } : {}),
-      ...(removed !== undefined ? { removed } : {}),
-      ...(card ? { card } : {}),
-    })
+    if (!pair) return
+    const row = rowFromToolPair(pair)
+    if (row) rows.push(row)
     open.delete(callId)
   }
   for (const entry of turnRecordEntries(record)) {

@@ -1,24 +1,14 @@
 /**
  * Issue 09 — 簽章 Subscription Feature Pack smoke.
  *
- * Mirrors scripts/smoke-update-migration.mts's real-RSA verification pattern
- * (electron/updateVerification.ts runs on plain node:crypto, no Electron
- * runtime needed) and reuses issue 07/08's entitlement boundary + the
+ * Exercises the browser-safe manifest/lifecycle contract and reuses the
  * existing tools/toolPackage.ts permission model — no parallel gating path.
  */
 import assert from 'node:assert/strict'
-import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { sha256Hex } from '../electron/updateVerification.ts'
 import {
-  verifyFeaturePackManifestSignature,
-  verifyFeaturePackArtifactSignature,
-} from '../electron/featurePackVerification.ts'
-import {
-  unsignedFeaturePackManifestPayload,
-  featurePackArtifactSignaturePayload,
   validateFeaturePackManifest,
   type FeaturePackManifest,
 } from '../src/agent/featurePackContracts.ts'
@@ -38,10 +28,6 @@ import { resolveEntitlement, isCapabilityEntitled } from '../src/agent/entitleme
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = (rel: string) => fs.readFileSync(path.join(appRoot, rel), 'utf8')
 
-const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 })
-const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString()
-const sign = (payload: string) => crypto.createSign('RSA-SHA256').update(payload).end().sign(privateKey).toString('base64')
-
 const toolPackage = {
   schemaVersion: 1 as const,
   id: 'pro-refactor-pack',
@@ -51,16 +37,14 @@ const toolPackage = {
   ],
 }
 
-const bytes = Buffer.from('feature pack payload bytes')
 function buildManifest(overrides: Partial<FeaturePackManifest> = {}): FeaturePackManifest {
   const artifact = {
     url: 'https://packs.example.test/pro-refactor-pack-1.0.0.zip',
-    size: bytes.length,
-    sha256: sha256Hex(bytes),
-    signature: '',
+    size: 26,
+    sha256: 'a'.repeat(64),
+    signature: 'YQ==',
     signatureAlgorithm: 'rsa-sha256' as const,
   }
-  artifact.signature = sign(featurePackArtifactSignaturePayload(artifact))
   const manifest = {
     schemaVersion: 1 as const,
     id: 'pro-refactor-pack',
@@ -71,10 +55,9 @@ function buildManifest(overrides: Partial<FeaturePackManifest> = {}): FeaturePac
     toolPackage,
     artifact,
     publishedAt: new Date().toISOString(),
-    signature: '',
+    signature: 'Yg==',
     ...overrides,
   } as FeaturePackManifest
-  manifest.signature = sign(unsignedFeaturePackManifestPayload(manifest))
   return manifest
 }
 
@@ -90,16 +73,7 @@ function buildManifest(overrides: Partial<FeaturePackManifest> = {}): FeaturePac
   assert.equal(badToolPackage.ok, false, 'missing operationClass on a tool must fail validation')
 }
 
-// ── 2. Signature + hash verified before install/activation ──
-{
-  const manifest = buildManifest()
-  assert.equal(verifyFeaturePackManifestSignature(manifest, publicKeyPem), true)
-  assert.equal(verifyFeaturePackArtifactSignature(manifest.artifact, bytes, publicKeyPem), true)
-  assert.equal(verifyFeaturePackManifestSignature({ ...manifest, name: 'tampered' }, publicKeyPem), false, 'tampering must invalidate the manifest signature')
-  assert.equal(verifyFeaturePackArtifactSignature(manifest.artifact, Buffer.from('tampered bytes'), publicKeyPem), false, 'tampered bytes must fail the hash check even with a valid signature string')
-}
-
-// ── 3. Entitlement denial prevents download/activation without breaking Free Core ──
+// ── 2. Entitlement denial prevents download/activation without breaking Free Core ──
 {
   const manifest = buildManifest()
   const free = resolveEntitlement(undefined)
@@ -114,7 +88,7 @@ function buildManifest(overrides: Partial<FeaturePackManifest> = {}): FeaturePac
   assert.equal(allowed.ok, true)
 }
 
-// ── 4. Install / update / disable / enable / uninstall / rollback ──
+// ── 3. Install / update / disable / enable / uninstall / rollback ──
 {
   const manifest = buildManifest()
   const paid = resolveEntitlement({ tier: 'paid', grantedFeatures: ['pro-refactor-pack'] })
@@ -144,7 +118,7 @@ function buildManifest(overrides: Partial<FeaturePackManifest> = {}): FeaturePac
   assert.equal(noRollback.ok, false, 'a pack with no previous version cannot roll back')
 }
 
-// ── 5. Failed / incompatible pack cannot strand the app or local data ──
+// ── 4. Failed / incompatible pack cannot strand the app or local data ──
 {
   const manifest = buildManifest()
   const paid = resolveEntitlement({ tier: 'paid', grantedFeatures: ['pro-refactor-pack'] })
@@ -161,7 +135,7 @@ function buildManifest(overrides: Partial<FeaturePackManifest> = {}): FeaturePac
 assert.ok(!read('src/agent/settingsExport.ts').includes('featurePack') && !read('src/agent/settingsExport.ts').includes('feature-pack'),
   'export/redaction must stay feature-pack-agnostic — local data readability never depends on pack state')
 
-// ── 6. Audit evidence: version + digest only, never raw secrets or full prompts ──
+// ── 5. Audit evidence: version + digest only, never raw secrets or full prompts ──
 {
   const manifest = buildManifest()
   const event = featurePackAuditEvent('install', manifest)
@@ -174,7 +148,7 @@ assert.ok(!read('src/agent/settingsExport.ts').includes('featurePack') && !read(
     'reason must stay a short fixed explanation, never raw prompt/transcript content')
 }
 
-// ── 7. Runtime seam: feature packs reuse the existing capability + entitlement gate ──
+// ── 6. Runtime seam: feature packs reuse the existing capability + entitlement gate ──
 {
   const manifest = buildManifest()
   const paid = resolveEntitlement({ tier: 'paid', grantedFeatures: ['pro-refactor-pack'] })
@@ -188,11 +162,11 @@ const runtimeSrc = read('src/agent/capabilities/runtime.ts')
 assert.ok(!runtimeSrc.includes('featurePack') && !runtimeSrc.includes('feature-pack'),
   'capabilities/runtime.ts must NOT know about feature packs specifically — it already gates any requiresEntitlement generically')
 
-// ── 8. Store + UI seams ──
+// ── 7. Store + UI seams ──
 const storeSrc = read('src/store/featurePackStore.ts')
 assert.ok(storeSrc.includes('installFeaturePack') && storeSrc.includes('featurePackAuditEvent'),
   'featurePackStore must route through the shared pure lifecycle + audit builder, not reimplement them')
 const settingsPageSrc = read('src/pages/SettingsPage.tsx')
 assert.ok(settingsPageSrc.includes('useFeaturePackStore'), 'SettingsPage must surface feature pack lifecycle state')
 
-console.log('Feature pack smoke: 9 groups passed')
+console.log('Feature pack smoke: 7 groups passed')

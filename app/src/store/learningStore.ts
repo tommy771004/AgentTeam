@@ -212,6 +212,17 @@ async function stopMcpSessionsForSecretOwner(secretOwnerId: string) {
   }
 }
 
+async function hydrateHostSkills(): Promise<void> {
+  const listSkillFiles = window.subagents?.piHost?.resources?.listSkillFiles
+  if (!listSkillFiles) return
+  try {
+    const { files } = await listSkillFiles()
+    skillsStore.loadAll(files || [])
+  } catch {
+    /* hydration is best-effort; pushSkillsToHost refuses to fire while unhydrated */
+  }
+}
+
 async function loadFromDisk() {
   if (isElectronPiProduction()) {
     // Pi Host owns durable memories/extensions in Electron. Renderer state is
@@ -237,14 +248,7 @@ async function loadFromDisk() {
     // Skills: Pi Host owns the directory (ADR-0034), so the 技能庫 projects it
     // back in at boot. Without this, a full-state sync built from an unhydrated
     // store would reconcile REAL host skills away on the next mutation.
-    if (window.subagents?.piHost?.resources?.listSkillFiles) {
-      try {
-        const { files } = await window.subagents.piHost.resources.listSkillFiles()
-        skillsStore.loadAll(files || [])
-      } catch {
-        /* hydration is best-effort; pushSkillsToHost refuses to fire while unhydrated */
-      }
-    }
+    await hydrateHostSkills()
     pluginRegistry.apply()
     return
   }

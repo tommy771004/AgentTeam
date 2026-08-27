@@ -315,14 +315,14 @@ try {
   // ── Removal: the renderer handlers are GONE ──
   // The registered modules were deleted with the parity evidence above; the
   // dispatch layer answers honestly about who owns these tools now.
-  const { dispatchRegistered, registryHandlersComplete, HOST_OWNED_TOOL_NAMES } = await import('../src/agent/tools/toolRegistry.ts')
+  const { dispatchRegistered, registryHandlersComplete, HOST_OWNED_TOOL_NAMES, RENDERER_FALLBACK_TOOL_NAMES } = await import('../src/agent/tools/toolRegistry.ts')
   const dispatched = await dispatchRegistered('workspace_read', { path: 'alpha.txt' })
   assert.equal(dispatched.ok, false)
   assert.match(dispatched.output, /Pi Core Host 接管/, 'a removed renderer tool names its owner instead of pretending')
-  // Every OTHER definition still carries its handler; exactly the six
-  // equivalents are host-owned.
   assert.equal(registryHandlersComplete(), true)
-  assert.deepEqual([...HOST_OWNED_TOOL_NAMES].sort(), ['bash', 'workspace_glob', 'workspace_grep', 'workspace_list', 'workspace_read', 'workspace_write'])
+  assert.deepEqual([...RENDERER_FALLBACK_TOOL_NAMES].sort(), ['workspace_delete', 'workspace_diff', 'workspace_download', 'workspace_mkdir', 'workspace_move'])
+  assert.ok(HOST_OWNED_TOOL_NAMES.has('workspace_read'))
+  assert.ok(HOST_OWNED_TOOL_NAMES.has('ask_user'))
 
   console.log('Parity proven at the seam for all six equivalents — schema, success, error, project scope, mutation queue, streaming, cancellation, approval and session recording; renderer duplicates are gone — one implementation each')
 } finally {

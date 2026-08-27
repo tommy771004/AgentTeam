@@ -1,7 +1,8 @@
 /**
  * Hermes-style tool registry: register + discover + dispatch metadata.
  *
- * - Per-tool modules under tools/registered/*.ts call register() at import time.
+ * - The five non-equivalent workspace compatibility modules call register()
+ *   at import time. Every production tool is owned by Pi Core Host.
  * - ensureBuiltinRegistry() seeds any missing names from TOOL_DEFINITIONS (safety net).
  * - Catalog views are derived from the registry map (authority after seed+discover).
  */
@@ -68,20 +69,23 @@ export function registryCoversToolDefinitions(): boolean {
  * NEW renderer registration for any of them, must fail the build. Everything
  * outside this list still requires its own handler module.
  */
-export const HOST_OWNED_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'workspace_read',
-  'workspace_list',
-  'workspace_grep',
-  'workspace_glob',
-  'workspace_write',
-  'bash',
+export const RENDERER_FALLBACK_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'workspace_diff',
+  'workspace_download',
+  'workspace_mkdir',
+  'workspace_move',
+  'workspace_delete',
 ])
+
+export const HOST_OWNED_TOOL_NAMES: ReadonlySet<string> = new Set(
+  Object.keys(TOOL_DEFINITIONS).filter((name) => !RENDERER_FALLBACK_TOOL_NAMES.has(name)),
+)
 
 export function registryHandlersComplete(): boolean {
   ensureBuiltinRegistry()
   return Object.keys(TOOL_DEFINITIONS).every((n) => {
-    if (HOST_OWNED_TOOL_NAMES.has(n)) return true
-    return Boolean(_tools.get(n)?.handler)
+    if (RENDERER_FALLBACK_TOOL_NAMES.has(n)) return Boolean(_tools.get(n)?.handler)
+    return !_tools.get(n)?.handler
   })
 }
 

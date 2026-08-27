@@ -22,3 +22,7 @@ Right now it is entirely backend policy. Nobody can see it working.
 - [ ] A smoke asserts the projection contains the expected egress entries and no raw secret material.
 
 Files: `app/src/agent/outbound/outboundGate.ts`, `app/src/agent/outbound/evidenceLedger.ts`, `app/src/agent/outbound/textSanitize.ts`, `app/src/agent/outbound/imageSanitize.ts`, run detail view.
+
+## Implementation note (2026-08-27)
+
+Ops 現在以 active + retained run registry 建立 selector，切換後把所選 `runId` 傳給 `OutboundRunView`；不再固定顯示 `activeRuns[0]`。`smoke-outbound-run-view.mts` 釘住多 run 選擇與按 run 過濾 evidence。此票其餘 UX 驗收（例如顯示 redaction 類別而非只顯示數量）仍未全部完成，因此不標 resolved。

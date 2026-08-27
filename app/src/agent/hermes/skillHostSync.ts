@@ -30,12 +30,9 @@ export function buildHostSkillPayload(): Array<{ name: string; description: stri
   }))
 }
 
-/**
- * Push the full list now. Fire-and-forget by design: callers react to a
- * mutation and must never block or throw on the bridge being slow or absent.
- */
-export function pushSkillsToHost(): void {
-  void (async () => {
+let hostSyncTail: Promise<void> = Promise.resolve()
+
+async function syncSkillsToHostOnce(): Promise<void> {
     const sync = window.subagents?.piHost?.resources?.syncSkills
     if (!sync) return
     // Full-state sync REQUIRES a complete list. Both guards below refuse to
@@ -84,5 +81,20 @@ export function pushSkillsToHost(): void {
       })
       console.warn('[skills] 推送到 Host 技能目錄失敗', error)
     }
-  })()
+}
+
+/**
+ * Serialize full-state replacement calls. Each queued job builds its payload
+ * only when it reaches the Host, so a slow older write can never land after a
+ * newer mutation and restore stale skills.
+ */
+export function syncSkillsToHost(): Promise<void> {
+  const job = hostSyncTail.then(syncSkillsToHostOnce, syncSkillsToHostOnce)
+  hostSyncTail = job.catch(() => undefined)
+  return job
+}
+
+/** Mutation listeners remain fire-and-forget; serialization lives above. */
+export function pushSkillsToHost(): void {
+  void syncSkillsToHost()
 }

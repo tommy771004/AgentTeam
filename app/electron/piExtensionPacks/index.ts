@@ -12,7 +12,8 @@ import { ensureInteractionPlanningPacksRegistered } from './interactionPlanning.
 import { ensureBackgroundWorkPackRegistered } from './backgroundWork.ts'
 import { ensureWorkspaceExtraPackRegistered } from './workspaceExtra.ts'
 import { ensureWorkspaceTextSearchPackRegistered } from './workspaceTextSearch.ts'
-import { ensureUtilityCodegraphPacksRegistered } from './utilityCodegraph.ts'
+import { ensureUtilityPackRegistered } from './utility.ts'
+import { ensureCodegraphPackRegistered } from './codegraph.ts'
 import { ensureMcpBridgePackRegistered } from './mcpBridgePack.ts'
 import { ensureSubDesignPackRegistered } from './subdesignPack.ts'
 import { ensureFrameworkPackRegistered } from './framework.ts'
@@ -24,7 +25,8 @@ export function ensurePiPacksRegistered(): void {
   ensureBackgroundWorkPackRegistered()
   ensureWorkspaceExtraPackRegistered()
   ensureWorkspaceTextSearchPackRegistered()
-  ensureUtilityCodegraphPacksRegistered()
+  ensureUtilityPackRegistered()
+  ensureCodegraphPackRegistered()
   ensureMcpBridgePackRegistered()
   ensureSubDesignPackRegistered()
   ensureFrameworkPackRegistered()

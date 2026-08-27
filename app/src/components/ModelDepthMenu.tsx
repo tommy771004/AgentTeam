@@ -105,7 +105,11 @@ export function ModelDepthMenu({
           setOpen((o) => !o)
           setPanel('root')
         }}
-        className="inline-flex items-center gap-1 max-w-[220px] px-2.5 py-1 rounded-control border border-line bg-surface-container hover:bg-hover-2 text-[11px] text-on-surface-variant transition-colors"
+        className={`inline-flex h-7 max-w-[220px] items-center gap-1 rounded-control px-2 text-[11px] transition-colors ${
+          open
+            ? 'bg-hover-2 text-on-surface'
+            : 'text-on-surface-variant hover:bg-hover-2 hover:text-on-surface'
+        }`}
         title="模型與推理強度"
       >
         <span className="truncate font-medium text-on-surface">{pillLabel}</span>

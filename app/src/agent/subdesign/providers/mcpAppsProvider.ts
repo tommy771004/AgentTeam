@@ -71,4 +71,13 @@ export function isToolAllowed(surface: SurfaceDeclaration, toolName: string): bo
   return surface.allowlist.includes(toolName)
 }
 
+export function parseMcpToolCoordinate(value: string): { extensionId: string; toolName: string } | null {
+  const separator = value.indexOf('.')
+  if (separator <= 0 || separator === value.length - 1) return null
+  const extensionId = value.slice(0, separator)
+  const toolName = value.slice(separator + 1)
+  if (!/^[a-z0-9_-]{1,64}$/i.test(extensionId) || !/^[a-z_][a-z0-9_.-]{1,127}$/i.test(toolName)) return null
+  return { extensionId, toolName }
+}
+
 export const CSP_SANDBOX = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none';"

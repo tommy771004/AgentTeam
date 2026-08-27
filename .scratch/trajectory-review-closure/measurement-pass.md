@@ -4,38 +4,39 @@
 
 ## 準備
 
-1. 本分支（虛擬化已生效）。`npm run dev` 開 app。
-2. 任選一個有 Host session 的 thread，打開任一 run 的「執行軌跡」section。
-3. 臨時把面板改為吃 fixture（量完還原，`git checkout -- <file>`）：
+1. 從 `app/` 執行 `npx vite --host 127.0.0.1`。
+2. 開啟 `http://127.0.0.1:5173/#/trajectory-measurement`。
+3. 此 dev-only route 會以同一個 `createFixturePageLoader(20_000)`（80,000 entries）並排掛載：
+   - Windowed：production 視窗演算法。
+   - Full map baseline：`windowed={false}`，用來觀察全量 DOM 成長。
 
-```bash
-# 1) 把 fixture 複製到 src 底下（vite 才解析得到；scripts/ 在 renderer bundle 外）
-cp app/scripts/trajectory-measurement-fixture.mts app/src/dev-trajectory-fixture.mts
-```
-
-```tsx
-// 2) components/InlineRunPanel.tsx 內，僅供量測：
-import { createFixturePageLoader } from '../dev-trajectory-fixture'
-<TrajectoryPanel sessionId="fixture" loadPage={createFixturePageLoader(20_000)} />
-```
-
-> 20_000 turns ≈ 100_000 列。量完刪除 `app/src/dev-trajectory-fixture.mts` 還原兩處。
+不需修改 production 元件，也沒有量完需還原的檔案。
 
 ## 要量的數字
 
 在 DevTools console（面板展開、捲到中段時）：
 
 ```js
-const s = document.querySelector('[data-trajectory-scroll]')
-s.querySelectorAll('*').length                                  // A：掛載節點數
-Math.round(s.scrollHeight / s.querySelectorAll('button[aria-pressed]').length) // B：實際平均列高
+const [windowed, baseline] = document.querySelectorAll('[data-trajectory-scroll]')
+const measure = (s) => {
+  const rows = [...s.querySelectorAll('button[aria-pressed]')]
+  const tops = rows.slice(0, 10).map((row) => row.getBoundingClientRect().top)
+  return {
+    nodes: s.querySelectorAll('*').length,
+    mountedRows: rows.length,
+    rowHeight: rows[0]?.getBoundingClientRect().height,
+    rowStride: tops[1] - tops[0],
+    scrollHeight: s.scrollHeight,
+  }
+}
+[measure(windowed), measure(baseline)]
 ```
 
 | 量測 | 本分支（虛擬化） | main（全量 map） | 判讀 |
 |---|---|---|---|
 | A（捲到中段） | 待填 | 待填 | 本分支應 ≈ viewport/rowH+1+2×8 列 × 每列節點數，與總頁數無關 |
 | A（連按「載入更早」×10 後） | 待填 | 待填 | 本分支應幾乎不變；main 線性上升 |
-| B（實際列高 px） | 待填 | — | 若偏離 30，更新 `TRAJECTORY_ROW_HEIGHT` 並重跑 `smoke-trajectory-window` |
+| B（實際列距 px） | 待填 | — | 與 `TRAJECTORY_ROW_HEIGHT` 明顯偏離時才更新並重跑 `smoke-trajectory-window` |
 | 捲動主觀順暢度（快速拖曳捲軸 ×5 次） | 待記 | 待記 | 記錄是否有可感知卡頓 |
 
 ## 定案

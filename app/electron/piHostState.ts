@@ -41,6 +41,32 @@ const emptyState = (): StoredState => ({
   attachments: [],
 })
 
+function normalizeStoredSettings(settings: PiSettings): PiSettings {
+  return {
+    provider: settings.provider || DEFAULT_PI_SETTINGS.provider,
+    model: settings.model,
+    thinkingLevel: isPiThinkingLevel(settings.thinkingLevel) ? settings.thinkingLevel : DEFAULT_PI_SETTINGS.thinkingLevel,
+    activeTools: [...settings.activeTools],
+    compaction: settings.compaction === 'manual' ? 'manual' : 'auto',
+    approvalMode: settings.approvalMode === 'always' || settings.approvalMode === 'full' ? settings.approvalMode : DEFAULT_PI_SETTINGS.approvalMode,
+    bashRequireAsk: settings.bashRequireAsk !== false,
+    unattended: settings.unattended === true,
+    workspaceTextSearch: settings.workspaceTextSearch === true,
+  }
+}
+
+function hasRuntimeOverride(settings: PiSettings): boolean {
+  return settings.provider !== DEFAULT_PI_SETTINGS.provider
+    || settings.model !== DEFAULT_PI_SETTINGS.model
+    || settings.thinkingLevel !== DEFAULT_PI_SETTINGS.thinkingLevel
+    || settings.activeTools.length > 0
+    || settings.compaction !== DEFAULT_PI_SETTINGS.compaction
+    || settings.approvalMode !== DEFAULT_PI_SETTINGS.approvalMode
+    || settings.bashRequireAsk !== DEFAULT_PI_SETTINGS.bashRequireAsk
+    || settings.unattended !== DEFAULT_PI_SETTINGS.unattended
+    || settings.workspaceTextSearch !== DEFAULT_PI_SETTINGS.workspaceTextSearch
+}
+
 /**
  * Validate every session's Turn Record before the Host serves any of it.
  *
@@ -80,26 +106,8 @@ async function readStoredPiHostState(statePath: string): Promise<StoredState> {
     ) {
       return emptyState()
     }
-    const settings: PiSettings = {
-      provider: value.settings.provider || DEFAULT_PI_SETTINGS.provider,
-      model: value.settings.model,
-      thinkingLevel: isPiThinkingLevel(value.settings.thinkingLevel) ? value.settings.thinkingLevel : DEFAULT_PI_SETTINGS.thinkingLevel,
-      activeTools: [...value.settings.activeTools],
-      compaction: value.settings.compaction === 'manual' ? 'manual' : 'auto',
-      approvalMode: value.settings.approvalMode === 'always' || value.settings.approvalMode === 'full' ? value.settings.approvalMode : DEFAULT_PI_SETTINGS.approvalMode,
-      bashRequireAsk: value.settings.bashRequireAsk !== false,
-      unattended: value.settings.unattended === true,
-      workspaceTextSearch: value.settings.workspaceTextSearch === true,
-    }
-    const legacyStateHasRuntimeOverride = settings.provider !== DEFAULT_PI_SETTINGS.provider
-      || settings.model !== DEFAULT_PI_SETTINGS.model
-      || settings.thinkingLevel !== DEFAULT_PI_SETTINGS.thinkingLevel
-      || settings.activeTools.length > 0
-      || settings.compaction !== DEFAULT_PI_SETTINGS.compaction
-      || settings.approvalMode !== DEFAULT_PI_SETTINGS.approvalMode
-      || settings.bashRequireAsk !== DEFAULT_PI_SETTINGS.bashRequireAsk
-      || settings.unattended !== DEFAULT_PI_SETTINGS.unattended
-      || settings.workspaceTextSearch !== DEFAULT_PI_SETTINGS.workspaceTextSearch
+    const settings = normalizeStoredSettings(value.settings)
+    const legacyStateHasRuntimeOverride = hasRuntimeOverride(settings)
     return {
       schemaVersion: value.schemaVersion === 2 ? 2 : 1,
       cursor: value.cursor,

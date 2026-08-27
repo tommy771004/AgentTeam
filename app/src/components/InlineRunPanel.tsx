@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { memo, useEffect, useState, type ReactNode } from 'react'
 import { ContextUsageChip } from './ContextUsageChip'
 import { Icon } from './Icon'
 import { LogViewer } from './LogViewer'
@@ -27,8 +27,6 @@ import type { TurnRecordEntry } from '../agent/turnRecord'
 import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
 import type { ExecutionStep } from '../agent/types'
-import { projectLiveTimeline, runTimelineRows } from '../agent/liveTimeline'
-import { RunTimelineList } from './RunTimelineList'
 
 /**
  * CloudCLI-style embedded run progress — no page navigation.
@@ -55,6 +53,53 @@ function readStoredTrajectoryOpen(): boolean {
   } catch {
     return false
   }
+}
+
+function useTrajectoryBinding(threadId: string, recordEntryCount: number) {
+  const [open, setOpen] = useState(readStoredTrajectoryOpen)
+  const [sessionId, setSessionId] = useState<string | null | undefined>(undefined)
+  useEffect(() => {
+    if (!open || sessionId !== undefined) return
+    const bridge = window.subagents?.piHost?.sessions
+    if (typeof bridge?.record !== 'function' || typeof bridge.list !== 'function') {
+      setSessionId(null)
+      return
+    }
+    let cancelled = false
+    void bridge.list().then(({ sessions }) => {
+      if (cancelled) return
+      const match = pickThreadPiSession(sessions || [], threadId)
+      setSessionId(match ? match.id : recordEntryCount > 0 ? undefined : null)
+    }).catch(() => {
+      if (!cancelled) setSessionId(undefined)
+    })
+    return () => { cancelled = true }
+  }, [open, sessionId, threadId, recordEntryCount])
+  useEffect(() => setSessionId(undefined), [threadId])
+  const toggle = () => setOpen((value) => {
+    try { localStorage.setItem(TRAJECTORY_OPEN_KEY, String(!value)) } catch { /* blocked storage */ }
+    return !value
+  })
+  return { open, sessionId, toggle }
+}
+
+function honestProgress(
+  taskCount: number,
+  completedTasks: number,
+  isPiHost: boolean,
+  stepCount: number,
+  completedSteps: number,
+  agentProgress: number,
+) {
+  const summary = taskCount
+    ? `${completedTasks}/${taskCount}`
+    : !isPiHost && stepCount ? `${completedSteps}/${stepCount}` : undefined
+  const progress = taskCount
+    ? Math.round((completedTasks / taskCount) * 100)
+    : !isPiHost && stepCount
+      ? Math.min(100, Math.max(0, agentProgress))
+      : undefined
+  return { summary, progress }
 }
 
 function CompactStepList({ steps }: { steps: ExecutionStep[] }) {
@@ -105,6 +150,77 @@ const RunContextBody = memo(function RunContextBody({
   const contextUsage = useRunContextUsage(runId)
   return <ContextUsagePanel usage={contextUsage} fallbackTokens={fallbackTokens} degraded={degraded} />
 })
+
+function RunOverview({
+  status,
+  objective,
+  progress,
+  runnerSummary,
+  progressSummary,
+  live,
+  startedAt,
+}: {
+  status: string
+  objective: string
+  progress?: number
+  runnerSummary: string
+  progressSummary?: string
+  live: boolean
+  startedAt: number
+}) {
+  const timed = live && startedAt > 0
+  return (
+    <section className="border-b border-line px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold text-ink-3">目前狀態</p>
+          <p className={`mt-1 truncate text-[13px] font-medium ${live ? 'text-accent-ink' : 'text-ink'}`}>{status}</p>
+        </div>
+        {progress !== undefined ? (
+          <span className="shrink-0 font-[family-name:var(--font-mono)] text-[18px] font-semibold tabular-nums text-accent-ink">
+            {progress}%
+          </span>
+        ) : live ? <AgentThinking variant="spin" className="shrink-0 text-accent-ink" /> : null}
+      </div>
+      <p className="mt-3 line-clamp-3 text-[13px] leading-relaxed text-ink-2">{objective || '等待任務內容…'}</p>
+      <div className="mt-3">
+        {progress !== undefined ? (
+          <div className="h-1.5 overflow-hidden rounded-full bg-inset">
+            <div
+              className="h-full rounded-full bg-accent transition-[width] duration-500 motion-reduce:transition-none"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        ) : null}
+        <div className={`${progress !== undefined ? 'mt-2' : ''} flex items-center justify-between gap-2 text-[10px] text-ink-3`}>
+          <span className="truncate">{runnerSummary}</span>
+          <span className="shrink-0 font-[family-name:var(--font-mono)] tabular-nums">
+            {timed ? <ElapsedTime startedAt={startedAt} /> : null}
+            {timed ? ' · ' : ''}
+            {progressSummary || (live ? '即時更新中' : '無進度項目')}
+          </span>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function TrajectorySection({ binding }: { binding: ReturnType<typeof useTrajectoryBinding> }) {
+  if (!binding.sessionId) return null
+  return (
+    <PanelSection
+      id="run-trajectory"
+      title="執行軌跡"
+      summary="回看 Turn Record"
+      open={binding.open}
+      onToggle={binding.toggle}
+    >
+      <div className="h-72">
+        <TrajectoryPanel sessionId={binding.sessionId} />
+      </div>
+    </PanelSection>
+  )
+}
 
 function PanelSection({
   id,
@@ -168,10 +284,6 @@ export function InlineRunPanel({
   // sends the reader, so arriving on a collapsed section would answer nothing.
   const [contextOpen, setContextOpen] = useState(true)
   // 執行軌跡 — collapsed until asked; the choice persists across remounts.
-  const [trajectoryOpen, setTrajectoryOpen] = useState(readStoredTrajectoryOpen)
-  // undefined = not yet resolved; null = this run has no Host session binding
-  // (the section then stays hidden — absent, not broken).
-  const [trajectorySessionId, setTrajectorySessionId] = useState<string | null | undefined>(undefined)
 
   const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
@@ -222,43 +334,18 @@ export function InlineRunPanel({
   const isPiHost = !isExternal && agent.loopConfig.trigger === 'pi-host'
   const runnerCaps =
     agent.runnerCapabilities || capabilitiesForRunner(isExternal ? threadRunner : 'builtin')
-  // The Pi Host's fixed `pi-host-turn` step is an admission/settlement summary,
-  // not the work happening inside the turn. The right rail therefore reads the
-  // same append-only Turn Record as the center feed. This keeps both surfaces
-  // updating from one ordered source while tool calls and messages arrive.
-  const recordTimeline = useMemo(
-    () => runTimelineRows(
-      projectLiveTimeline(activity.recordEntries, activity.recordTotal),
-      activity.draftText,
-    ),
-    [activity.recordEntries, activity.recordTotal, activity.draftText],
-  )
+  // Chronological activity stays in the center feed. This rail reports only
+  // structured task/runner steps, so the two surfaces answer different needs.
   const completedTasks = tasks.filter((task) => task.status === 'done').length
   const completedSteps = agent.steps.filter((step) => step.status === 'COMPLETED').length
-  const recordToolCount = new Set(
-    recordTimeline
-      .filter((row) => row.kind === 'tool')
-      .map((row) => row.kind === 'tool' ? row.callId : ''),
-  ).size
-  const recordMessageCount = recordTimeline.filter((row) => row.kind === 'assistant').length
-  const recordSummary = [
-    recordToolCount ? `${recordToolCount} 工具` : '',
-    recordMessageCount ? `${recordMessageCount} 訊息` : '',
-  ].filter(Boolean).join(' · ')
-  const progressSummary = tasks.length
-    ? `${completedTasks}/${tasks.length}`
-    : recordSummary
-      ? recordSummary
-      : !isPiHost && agent.steps.length
-      ? `${completedSteps}/${agent.steps.length}`
-      : undefined
-  // A Host turn has no honest percentage until it publishes a finite plan.
-  // Keeping the old 15% until settlement looked precise but conveyed no fact.
-  const measuredProgress = tasks.length
-    ? Math.round((completedTasks / tasks.length) * 100)
-    : !isPiHost && agent.steps.length
-      ? Math.min(100, Math.max(0, agent.progress))
-      : undefined
+  const { summary: progressSummary, progress: measuredProgress } = honestProgress(
+    tasks.length,
+    completedTasks,
+    isPiHost,
+    agent.steps.length,
+    completedSteps,
+    agent.progress,
+  )
   const reasoningCount = activity.recordEntries.filter((entry) => entry.kind === 'reasoning').length
   const detailSummary = [
     reasoningCount ? `${reasoningCount} 段推理` : activity.thought ? '推理' : '',
@@ -286,45 +373,10 @@ export function InlineRunPanel({
   // list() while the run is producing record events stays undefined and
   // retries as events arrive — a binding created moments later is found,
   // instead of one unlucky race hiding the entry for the mount's lifetime.
-  const recordEntryCount = activity.recordEntries.length
-  useEffect(() => {
-    if (!trajectoryOpen || trajectorySessionId !== undefined) return
-    const bridge = window.subagents?.piHost?.sessions
-    if (typeof bridge?.record !== 'function' || typeof bridge.list !== 'function') {
-      setTrajectorySessionId(null)
-      return
-    }
-    let cancelled = false
-    void bridge
-      .list()
-      .then(({ sessions }) => {
-        if (cancelled) return
-        const match = pickThreadPiSession(sessions || [], threadId)
-        setTrajectorySessionId(match ? match.id : recordEntryCount > 0 ? undefined : null)
-      })
-      .catch(() => {
-        if (!cancelled) setTrajectorySessionId(undefined)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [trajectoryOpen, trajectorySessionId, threadId, recordEntryCount])
-
-  // A reused panel instance must not carry the previous thread's answer.
-  useEffect(() => {
-    setTrajectorySessionId(undefined)
-  }, [threadId])
-
-  const toggleTrajectory = () => {
-    setTrajectoryOpen((value) => {
-      try {
-        localStorage.setItem(TRAJECTORY_OPEN_KEY, String(!value))
-      } catch {
-        // A blocked localStorage must not break the toggle.
-      }
-      return !value
-    })
-  }
+  const trajectory = useTrajectoryBinding(threadId, activity.recordEntries.length)
+  const runnerSummary = isExternal
+    ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind ? ` · ${agent.externalRunnerKind}` : ''}`
+    : `${loopTypeZh(agent.loopConfig.loopType)} · 第 ${agent.currentIteration}/${agent.loopConfig.maxIterations} 回合`
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-line bg-surface text-ink">
@@ -337,7 +389,7 @@ export function InlineRunPanel({
           />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-semibold text-ink">執行摘要</span>
+              <span className="text-[13px] font-semibold text-ink">{live ? '任務狀態' : '結果摘要'}</span>
               <span className={`text-[11px] font-medium ${lifecycleToneClass(lifecycle.tone)}`}>
                 {lifecycle.label}
               </span>
@@ -360,55 +412,19 @@ export function InlineRunPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
-        <section className="border-b border-line px-4 py-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[10px] font-semibold text-ink-3">目前狀態</p>
-              <p className={`mt-1 truncate text-[13px] font-medium ${live ? 'text-accent-ink' : 'text-ink'}`}>
-                {currentStatus}
-              </p>
-            </div>
-            {measuredProgress !== undefined ? (
-              <span className="shrink-0 font-[family-name:var(--font-mono)] text-[18px] font-semibold tabular-nums text-accent-ink">
-                {measuredProgress}%
-              </span>
-            ) : live ? (
-              <AgentThinking variant="spin" className="shrink-0 text-accent-ink" />
-            ) : null}
-          </div>
-
-          <p className="mt-3 line-clamp-3 text-[13px] leading-relaxed text-ink-2">
-            {agent.objective || '等待任務內容…'}
-          </p>
-
-          <div className="mt-3">
-            {measuredProgress !== undefined ? (
-              <div className="h-1.5 overflow-hidden rounded-full bg-inset">
-                <div
-                  className="h-full rounded-full bg-accent transition-[width] duration-500 motion-reduce:transition-none"
-                  style={{ width: `${measuredProgress}%` }}
-                />
-              </div>
-            ) : null}
-            <div className={`${measuredProgress !== undefined ? 'mt-2' : ''} flex items-center justify-between gap-2 text-[10px] text-ink-3`}>
-              <span className="truncate">
-                {isExternal
-                  ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind ? ` · ${agent.externalRunnerKind}` : ''}`
-                  : `${loopTypeZh(agent.loopConfig.loopType)} · 第 ${agent.currentIteration}/${agent.loopConfig.maxIterations} 回合`}
-              </span>
-              <span className="shrink-0 font-[family-name:var(--font-mono)] tabular-nums">
-                {live && activity.startedAt > 0 ? <ElapsedTime startedAt={activity.startedAt} /> : null}
-                {live && activity.startedAt > 0 ? ' · ' : ''}
-                {progressSummary || (live ? '即時更新中' : '無進度項目')}
-              </span>
-            </div>
-          </div>
-
-        </section>
+        <RunOverview
+          status={currentStatus}
+          objective={agent.objective}
+          progress={measuredProgress}
+          runnerSummary={runnerSummary}
+          progressSummary={progressSummary}
+          live={live}
+          startedAt={activity.startedAt}
+        />
 
         <PanelSection
           id="run-progress"
-          title="執行進度"
+          title="任務步驟"
           summary={tasks.length && progressSummary ? `${progressSummary} 完成` : progressSummary}
           open={progressOpen}
           onToggle={() => setProgressOpen((value) => !value)}
@@ -448,10 +464,6 @@ export function InlineRunPanel({
                 </li>
               ))}
             </ul>
-          ) : recordTimeline.length > 0 ? (
-            <div className="agent-process-trace space-y-1" data-run-timeline="record">
-              <RunTimelineList rows={recordTimeline} />
-            </div>
           ) : isPiHost && live ? (
             <p className="flex items-center gap-2 text-[12px] text-ink-3" role="status">
               <AgentThinking variant="spin" className="text-accent-ink" />
@@ -465,7 +477,9 @@ export function InlineRunPanel({
               <ShimmerLabel active>正在分析任務…</ShimmerLabel>
             </p>
           ) : (
-            <p className="text-[12px] text-ink-3">等待引擎建立進度…</p>
+            <p className="text-[12px] text-ink-3">
+              {live ? '等待引擎建立任務步驟…' : '本次執行沒有結構化任務步驟。'}
+            </p>
           )}
 
           {tasks.length > 0 && !isPiHost && agent.steps.length > 0 ? (
@@ -531,19 +545,7 @@ export function InlineRunPanel({
           <RunContextBody runId={runId} fallbackTokens={agent.tokensUsed} degraded={isExternal} />
         </PanelSection>
 
-        {trajectorySessionId ? (
-          <PanelSection
-            id="run-trajectory"
-            title="執行軌跡"
-            summary="回看 Turn Record"
-            open={trajectoryOpen}
-            onToggle={toggleTrajectory}
-          >
-            <div className="h-72">
-              <TrajectoryPanel sessionId={trajectorySessionId} />
-            </div>
-          </PanelSection>
-        ) : null}
+        <TrajectorySection binding={trajectory} />
 
         {detailSummary || isExternal || agent.loadedCapabilityIds.length > 0 ? (
           <PanelSection

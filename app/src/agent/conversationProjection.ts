@@ -44,6 +44,42 @@ export type ConversationRow =
     }
   | { kind: 'notice'; id: string; seq: number; turn: number; content: string }
 
+type ToolCallEntry = Extract<TurnRecordEntry, { kind: 'tool-call' }>
+type ApprovalEntry = Extract<TurnRecordEntry, { kind: 'approval' }>
+
+function conversationToolCallRow(entry: ToolCallEntry): Extract<ConversationRow, { kind: 'tool' }> {
+  const presented = presentedToolSummary(entry.tool, 'args' in entry ? entry.args : undefined)
+  return {
+    id: `e${entry.seq}`,
+    seq: entry.seq,
+    turn: entry.turn,
+    kind: 'tool',
+    tool: entry.tool,
+    callId: entry.callId,
+    ...(entry.path ? { detail: entry.path } : {}),
+    ...(presented?.title ? { title: presented.title } : {}),
+    ...(presented?.path && !entry.path ? { detail: presented.path } : {}),
+    ...(presented?.added !== undefined ? { added: presented.added } : {}),
+    ...(presented?.removed !== undefined ? { removed: presented.removed } : {}),
+  }
+}
+
+function applyApprovalRow(rows: ConversationRow[], entry: ApprovalEntry): void {
+  const anchor = rows.find((row) => row.kind === 'tool' && row.callId === entry.callId)
+  if (anchor?.kind === 'tool') {
+    anchor.approval = entry.decision
+    if (entry.reason) anchor.approvalReason = entry.reason
+    return
+  }
+  rows.push({
+    id: `e${entry.seq}`,
+    seq: entry.seq,
+    turn: entry.turn,
+    kind: 'notice',
+    content: `${entry.tool}：${entry.decision}${entry.reason ? ` · ${entry.reason}` : ''}`,
+  })
+}
+
 /**
  * Rows for one record, in recorded order.
  *
@@ -71,18 +107,7 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
         // path, diff size — so a view merging call and result still shows
         // 「已編輯 x.ts +10 −0」 while the call is the only half recorded.
         // An undeclared or malformed call degrades to the plain name.
-        const presented = presentedToolSummary(entry.tool, 'args' in entry ? entry.args : undefined)
-        rows.push({
-          ...base,
-          kind: 'tool',
-          tool: entry.tool,
-          callId: entry.callId,
-          ...(entry.path ? { detail: entry.path } : {}),
-          ...(presented?.title ? { title: presented.title } : {}),
-          ...(presented?.path && !entry.path ? { detail: presented.path } : {}),
-          ...(presented?.added !== undefined ? { added: presented.added } : {}),
-          ...(presented?.removed !== undefined ? { removed: presented.removed } : {}),
-        })
+        rows.push(conversationToolCallRow(entry))
         break
       }
       case 'tool-result':
@@ -106,13 +131,7 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
         // tool row with that callId is the anchor — on a live page and on a
         // replayed one alike. A decision with no recorded call (an older
         // build's record, a transport gap) still reports, as a notice.
-        const anchor = rows.find((row) => row.kind === 'tool' && row.callId === entry.callId)
-        if (anchor && anchor.kind === 'tool') {
-          anchor.approval = entry.decision
-          if (entry.reason) anchor.approvalReason = entry.reason
-          break
-        }
-        rows.push({ ...base, kind: 'notice', content: `${entry.tool}：${entry.decision}${entry.reason ? ` · ${entry.reason}` : ''}` })
+        applyApprovalRow(rows, entry)
         break
       }
       case 'compaction':

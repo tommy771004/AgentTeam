@@ -127,7 +127,6 @@ export function Layout() {
   )
 
   const bareShell =
-    location.pathname.startsWith('/execution') ||
     location.pathname.startsWith('/success') ||
     location.pathname.startsWith('/failed')
 
@@ -150,7 +149,7 @@ export function Layout() {
 
   return (
     <div className="h-full flex bg-background text-on-background overflow-hidden">
-      {/* 左側主選單 — quiet material sidebar */}
+      {/* 左側主選單 — liquid glass sidebar */}
       <aside
         className={`sidebar-panel relative z-50 drag-region material-sidebar flex flex-col shrink-0 transition-[width] duration-300 ease-out ${
           collapsed ? 'w-[68px]' : 'w-[212px]'
@@ -233,10 +232,15 @@ export function Layout() {
 
       {/* 右側內容 */}
       <div className="relative z-10 flex-1 flex flex-col min-w-0 min-h-0">
+        {/*
+          首頁沒有功能頂欄，仍保留一條可靠的視窗拖曳帶；其餘頁面由
+          下方 titlebar 的整個非互動區負責拖曳。
+        */}
+        {isHome && <div className="page-window-drag-strip drag-region h-3 shrink-0" aria-hidden />}
         {/* 首頁（新任務）隱藏頂欄，更接近 Codex 沉浸式 */}
         {!isHome && (
-          <header className="h-11 shrink-0 border-b border-line bg-surface flex items-center justify-between px-4 drag-region">
-            <div className="no-drag text-xs text-on-surface-variant pl-2 md:pl-0 truncate max-[760px]:hidden">
+          <header className="app-window-titlebar h-11 shrink-0 border-b border-line bg-surface flex items-center justify-between px-4 drag-region">
+            <div className="flex flex-1 self-stretch items-center truncate pl-2 text-xs text-on-surface-variant md:pl-0 max-[760px]:hidden">
               本機多代理 · {primaryKey}/ 指令 · {primaryKey}. 小視窗
             </div>
             <div className="no-drag flex items-center gap-2">

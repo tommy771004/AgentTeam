@@ -515,6 +515,24 @@ const api = {
         operationCount?: number
         error?: string
       }>,
+    preparePinnedPatchScope: (input: { artifact: unknown; pins: unknown; projectRoot?: string }) =>
+      ipcRenderer.invoke('subdesign:preparePinnedPatchScope', input) as Promise<{
+        ok: boolean
+        scopeId?: string
+        error?: string
+      }>,
+    callMcpAppTool: (input: {
+      coordinate: string
+      allowlist: string[]
+      arguments?: Record<string, unknown>
+      runId?: string
+      threadId?: string
+      projectRoot?: string
+    }) => ipcRenderer.invoke('subdesign:mcpAppToolCall', input) as Promise<{
+      ok: boolean
+      content?: unknown
+      error?: string
+    }>,
     applyTweak: (input: { artifact: unknown; tweakId: string; value: string; projectRoot?: string }) =>
       ipcRenderer.invoke('subdesign:applyTweak', input) as Promise<{
         ok: boolean
@@ -1131,6 +1149,13 @@ const api = {
         installed: boolean
         binaryPath: string | null
         version: string | null
+      }>,
+    install: () =>
+      ipcRenderer.invoke('codegraph:install') as Promise<{
+        ok: boolean
+        output: string
+        version?: string | null
+        error?: string
       }>,
     status: (projectRoot?: string) =>
       ipcRenderer.invoke('codegraph:status', projectRoot) as Promise<{

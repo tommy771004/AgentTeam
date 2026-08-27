@@ -96,7 +96,7 @@ export type InstallResult =
   | { ok: false; error: string }
 
 /**
- * `verified` must come from a real signature+hash check (electron/featurePackVerification.ts).
+ * `verified` must come from the verifier injected at the store boundary.
  * An unverified pack is refused outright — it never becomes a record, active or not.
  */
 export function installFeaturePack(

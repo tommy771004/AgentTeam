@@ -4,7 +4,7 @@
 
 **Blocked by:** 無。
 
-**Status:** 可交給代理
+**Status:** resolved
 
 ## 問題
 
@@ -110,3 +110,9 @@ issue 18 讓 `buildRunContextPolicy` 多回 `gitPolicy`，期望值未更新。�
 - `smoke-pi-host-pack-tools` — 20s 等待對上 90s 核准逾時。修法是把 `approvalTimeoutMs` 從 renderer 接到 Host，順帶補上 `hitlTimeoutMs` 原本只到得了 browser loop 的缺口。
 - `smoke-pi-host-skills` — 兩處期望值釘的都是 ADR-0034 刻意換掉的路徑佈局。診斷本身**一直都有**被回報（`description is required`），只是斷言在找舊路徑裡的 `broken` 字樣。第二處更值得記：smoke 自行用 `skillsDir` 組出 SKILL.md 路徑去讀，而那是模型從未被給過的位置，被 Restricted Project View 正確拒絕。改為讀**系統提示實際公告的位置** —— 這才是該驗證的性質。
 - `smoke-pi-host-run-config` — 我自己在 issue 18 造成的。
+
+## 最終收口（2026-08-27）
+
+剩餘清單實際為 44 支，不是 tracker 沿用的 45 支。逐支執行與修正 stale expectations 後，37 支 deterministic tests 已接入 `smoke:orphan-closure`，並由主 `npm run smoke` 到達。舊 `smoke-coordinator-browser.mjs` 仍假設已移除的 renderer engine，已連同 npm alias 刪除，避免用相容實作粉飾。
+
+最後 6 支是刻意由 operator 執行的 credential/release qualifications，不是 automated smoke：它們改由語意明確的 `MANUAL_QUALIFICATION_TESTS` 列表管理，且 `qualify:pi-host` / `qualify:pi-sync` 也有明確 npm 入口。Guard 7 現在要求所有其餘 deterministic test 都必須從主 gate 可達；`npm run check:pi-contract` 已綠。

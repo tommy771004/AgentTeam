@@ -67,10 +67,12 @@ export function parsePinnedCommentPayload(payload: unknown): PinnedCommentParseR
 export function buildPinnedCommentContext(
   artifact: { id: string; title?: string; revision: number },
   pins: SubDesignPinnedComment[],
+  scopeId?: string,
 ): string {
   const lines = [
     '## 使用者指定的 scoped 修正（element-pinned comments）',
     `artifact：${artifact.id}（revision ${artifact.revision}${artifact.title ? ` · ${artifact.title}` : ''}）`,
+    ...(scopeId ? [`Host patch scope：${scopeId}（呼叫 design_artifact_patch 時必須原樣傳入 scopeId）`] : []),
     '請只修改下列 pin 對應的元素與其直接樣式；不要重排、重構或改動其他區域。',
     '',
     ...pins.map((pin, index) => {
@@ -78,7 +80,7 @@ export function buildPinnedCommentContext(
       return `${index + 1}. selector：\`${pin.selector}\`${region}\n   使用者回饋：${pin.text}`
     }),
     '',
-    '完成後以 design_artifact_register 登記新 revision，並說明每個 pin 的修正內容。',
+    '請以 design_artifact_patch 套用 exact replacements；Host 會驗證 scope 並遞增 revision。完成後說明每個 pin 的修正內容。',
   ]
   return lines.join('\n')
 }

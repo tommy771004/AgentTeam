@@ -38,9 +38,9 @@
 
 ## 3. 技術債，可直接派
 
-### 3.1 45 個測試檔仍不在任何 gate 上（issue 20）
+### 3.1 自動化測試 gate 收口（issue 20）—— 已完成
 
-`KNOWN_UNGATED_TESTS` 從 90 降到 45。清空它是 issue 20 的完成定義。每一支都要先查明「期望值過時」還是「程式真的壞了」—— 這批五支裡就有一支是**真的安全錯誤**（`full` 模式下危險指令免核准），不能假設剩下的都只是過時。
+2026-08-27 實際盤點為 44 支。37 支 deterministic tests 已逐支執行、修正 stale expectations 並接進主 gate；1 支依賴已移除 renderer engine 的 browser harness 已刪除。剩餘 6 支需真機憑證或 release evidence，改列 `MANUAL_QUALIFICATION_TESTS` 並提供明確 operator scripts，不再把人工 qualification 誤稱為自動化 gate 欠債。
 
 ### 3.2 inactive 路徑的 `session.toolAudit` phase 對稱性未驗證（issue 19）—— 已完成
 
@@ -64,7 +64,7 @@ Decision 之前就拒絕了，沒有裁決可記，補一個假的才是錯的�
 - [x] 1.1 五個欄位逐一決定並執行，`KNOWN_UNCONSUMED_SETTINGS` 清空。
 - [x] 1.2 `hermes/skills.ts` 過渡期改為版本到期，build 會自己提醒。
 - [ ] 2.1 CI 的 Linux job 首次綠燈，issue 14 的三條打勾。
-- [ ] 3.1 `KNOWN_UNGATED_TESTS` 清空，Guard 7 的欠債清單移除。
+- [x] 3.1 deterministic tests 全部進 gate；人工 qualification 與 automated smoke 分類明確。
 - [x] 3.2 補上 inactive 路徑的 toolAudit 斷言。
 - [x] 3.3 `types.ts` 還原完整性已用交叉比對驗證，不需人工過目。
 
@@ -90,6 +90,5 @@ Guard 3 原本只在註解寫「survives one release」，沒有任何機制提�
 
 ### 仍未完成
 
-- **3.1** 45 個測試檔不在 gate 上（建議下一個做，這次接上的那批就抓到一個真的安全漏洞）
 - **3.2** inactive 路徑的 toolAudit 對稱性未驗證
 - **2.1** Linux bubblewrap 等 CI 首次綠燈

@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import type { PiThinkingLevel } from './piAgentProfile.ts'
@@ -75,6 +76,15 @@ const activeTurns = new Map<string, PiActiveTurn>()
 const activeToolRuns = new Map<string, Set<{ controller: AbortController; cancelled: boolean }>>()
 /** A cancelled run id is a permanent tombstone; late calls may never succeed. */
 const cancelledToolRuns = new Set<string>()
+
+async function piAuthRevision(agentDir?: string): Promise<{ authPath?: string; revision: string }> {
+  const authPath = agentDir ? join(agentDir, 'auth.json') : undefined
+  if (!authPath || !existsSync(authPath)) return { authPath, revision: '' }
+  return {
+    authPath,
+    revision: createHash('sha256').update(await readFile(authPath)).digest('hex'),
+  }
+}
 
 const TOOL_FACTORIES = {
   bash: piCodingAgent.createBashToolDefinition,
@@ -344,8 +354,15 @@ export async function persistPiLegacyCredential(provider: string, apiKey: string
 async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string, settings: PiRuntimeSettings = {}) {
   const existing = sessionRuntimes.get(sessionId)
   const agentDir = resolvePiAgentDir()
+  // OAuth credentials can rotate outside this Host while the desktop app is
+  // still running (for example, Codex CLI refreshes or re-authenticates). A
+  // session runtime owns the ModelRuntime/AuthStorage snapshot it was created
+  // with, so credential bytes are part of the runtime identity just like the
+  // selected provider/model. Hash locally; no credential material leaves the
+  // utility process or reaches logs/IPC.
+  const { authPath, revision: authRevision } = await piAuthRevision(agentDir)
   const skillSnapshot = await snapshotPiSkillResources(agentDir, sessionId)
-  const activeToolsKey = JSON.stringify({ settings, cwd, skillSnapshotDigest: skillSnapshot?.digest })
+  const activeToolsKey = JSON.stringify({ settings, cwd, skillSnapshotDigest: skillSnapshot?.digest, authRevision })
   if (skillSnapshot) bindPiSessionSkillResourceView(sessionId, skillSnapshot)
   if (existing && existing.activeToolsKey === activeToolsKey) return existing
   try {
@@ -455,7 +472,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   if (agentDir) options.agentDir = agentDir
   if (settings.provider && settings.model && typeof piCodingAgent.ModelRuntime?.create === 'function') {
     const modelRuntime = await piCodingAgent.ModelRuntime.create({
-      authPath: agentDir ? join(agentDir, 'auth.json') : undefined,
+      authPath,
       modelsPath: agentDir ? join(agentDir, 'models.json') : undefined,
     })
     const model = modelRuntime.getModel(settings.provider, settings.model)

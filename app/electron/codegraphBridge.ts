@@ -149,6 +149,46 @@ export async function codegraphDetect(): Promise<{
   return { installed: true, binaryPath, version }
 }
 
+/** Install the fixed CodeGraph CLI package after an explicit renderer action. */
+export const codegraphInstallCommandFor = (npmPath: string): string =>
+  `${quoteShellArg(npmPath)} install --global --no-audit --no-fund @colbymchenry/codegraph@latest`
+
+export async function codegraphInstall(): Promise<{
+  ok: boolean
+  output: string
+  version?: string | null
+  error?: string
+}> {
+  const npmLookup = await runBash({
+    command: executableLookupCommand('npm'),
+    timeoutMs: 5000,
+    tag: 'codegraph-install',
+  })
+  const npmPath = firstExecutablePath(npmLookup.stdout)
+  if (!npmLookup.ok || !npmPath) {
+    return { ok: false, output: '', error: '找不到 npm；請先安裝 Node.js / npm' }
+  }
+
+  const result = await runBash({
+    command: codegraphInstallCommandFor(npmPath),
+    timeoutMs: 600_000,
+    tag: 'codegraph-install',
+  })
+  const output = combinedOutput(result.stdout, result.stderr).slice(0, 20_000)
+  if (!result.ok) {
+    return {
+      ok: false,
+      output,
+      error: result.stderr || `npm install exit ${result.code}`,
+    }
+  }
+
+  const detected = await codegraphDetect()
+  return detected.installed
+    ? { ok: true, output, version: detected.version }
+    : { ok: false, output, error: 'npm 已完成，但仍找不到 codegraph；請重新啟動 App 或檢查 npm global PATH' }
+}
+
 export async function codegraphStatus(projectRoot: string): Promise<CodegraphStatus> {
   const root = (projectRoot || '').trim()
   const indexPath = root ? path.join(root, '.codegraph') : null

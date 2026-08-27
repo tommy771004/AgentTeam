@@ -90,13 +90,14 @@ await check('message_send is not reportable as delivered without gateway evidenc
   assert.equal(gateSideEffect({ kind: 'message_send', evidence: undefined, result: { ok: true } }).ok, false)
 })
 
-await check('message_send handler requires the gateway snapshot rather than minting one', async () => {
+await check('Host message_send declares outbound side-effect policy and owns credentials', async () => {
   const source = await import('node:fs/promises').then((fs) =>
-    fs.readFile(new URL('../src/agent/tools/registered/message_send.ts', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../electron/piExtensionPacks/integrations.ts', import.meta.url), 'utf8'),
   )
   assert.doesNotMatch(source, /createSideEffectEvidence/)
-  assert.match(source, /gateSideEffect/)
-  assert.match(source, /rejectModelSuppliedEvidence/)
+  assert.match(source, /policyMigration: \{ outbound: true, sideEffect: true \}/)
+  assert.match(source, /configurePiMessagingGateway/)
+  assert.match(source, /A model may never supply its own execution credential/)
 })
 
 // ── exit: content publishing ─────────────────────────────────────

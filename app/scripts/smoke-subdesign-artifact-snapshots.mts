@@ -5,6 +5,7 @@
  * 與 smoke-subdesign-workspace 同一慣例）。
  */
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
   computeSnapshotFile,
@@ -14,6 +15,7 @@ import {
 import { useSubDesignArtifactStore } from '../src/store/subDesignArtifactStore.ts'
 
 const KNOWN_SHA256_ABC = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+const read = (relative: string) => readFileSync(new URL(`../${relative}`, import.meta.url), 'utf8')
 
 function resetStore() {
   const prior = {
@@ -336,16 +338,42 @@ await test('pinned comment payload validation is fail-closed', async () => {
   assert.equal(good.ok, true)
   if (!good.ok) return
   assert.equal(good.pins.length, 2)
-  const context = buildPinnedCommentContext({ id: 'artifact_pin_qa', revision: 2, title: 'Pin QA' }, good.pins)
+  const context = buildPinnedCommentContext({ id: 'artifact_pin_qa', revision: 2, title: 'Pin QA' }, good.pins, 'pin_scope_qa')
   assert.match(context, /scoped 修正/)
   assert.match(context, /button\.cta/)
   assert.match(context, /間距太大/)
+  assert.match(context, /design_artifact_patch/)
+  assert.match(context, /pin_scope_qa/)
+  assert.doesNotMatch(context, /design_artifact_register/)
+})
+
+await test('pinned patch scope rejects exact replacements outside the selected element', async () => {
+  const { resolvePinnedHtmlRanges, validatePinnedPatchOperation } = await import('../src/agent/subdesign/pinnedPatchScope.ts')
+  const html = '<main><button class="cta primary">Save</button><button class="secondary">Cancel</button></main>'
+  const resolved = resolvePinnedHtmlRanges(html, ['button.cta.primary'])
+  assert.equal(resolved.ok, true)
+  assert.deepEqual(validatePinnedPatchOperation({
+    content: html,
+    selectors: ['button.cta.primary'],
+    find: 'Save',
+    expectedMatches: 1,
+  }), { ok: true })
+  const outside = validatePinnedPatchOperation({
+    content: html,
+    selectors: ['button.cta.primary'],
+    find: 'Cancel',
+    expectedMatches: 1,
+  })
+  assert.equal(outside.ok, false)
+  if (!outside.ok) assert.match(outside.reason, /超出.*pin/)
 })
 
 await test('controller submitPinnedComments compiles pins into a single runTask', async () => {
   const { createSubDesignWorkspace } = await import('../src/agent/subdesign/workspace.ts')
   const brief = { id: 'brief_pin', threadId: 'thread_pin', objective: 'x', stage: 'deliver', constraints: [], acceptanceCriteria: [], directions: [], createdAt: '', updatedAt: '' }
   const runs: unknown[] = []
+  const preparedScopes: unknown[] = []
+  let live = false
   const deps = {
     findBrief: (id: string) => id === 'brief_pin' ? brief : null,
     getThread: () => ({ runner: 'builtin', loopType: null }),
@@ -354,6 +382,10 @@ await test('controller submitPinnedComments compiles pins into a single runTask'
     createBrief: () => { throw new Error('not used') },
     selectBrief: () => undefined,
     prepareRun: async () => ({ overrides: {} }),
+    preparePinnedPatchScope: async (input: unknown) => {
+      preparedScopes.push(input)
+      return { ok: true, scopeId: 'pin_scope_qa' }
+    },
     runTask: async (input: { objective?: string }) => {
       runs.push(input)
       return { status: 'success', path: 'builtin', threadId: null, runId: 'run_pin' } as never
@@ -363,7 +395,7 @@ await test('controller submitPinnedComments compiles pins into a single runTask'
     createRunId: (() => { let n = 0; return () => `run_${++n}` })(),
     getProjectRoot: () => '/project',
     getCapabilities: () => ({ electron: false, hostEvents: false }),
-    readPresentation: () => fakePresentation(false) as never,
+    readPresentation: () => fakePresentation(live) as never,
   } as never
   const workspace = createSubDesignWorkspace(deps)
   ;(workspace as unknown as { sync: (input: { routeBriefId: string | null }) => void }).sync({ routeBriefId: 'brief_pin' })
@@ -374,8 +406,26 @@ await test('controller submitPinnedComments compiles pins into a single runTask'
 
   const submitted = await workspace.submitPinnedComments({ artifact: { id: 'a', revision: 1 }, pins: [{ selector: 'h1', text: '改標題' }] })
   assert.equal(submitted.ok, true)
+  assert.equal(preparedScopes.length, 1)
   assert.equal(runs.length, 1)
   const runInput = runs[0] as { objective?: string }
   assert.match(String(runInput.objective), /scoped 修正/)
   assert.match(String(runInput.objective), /h1/)
+  assert.match(String(runInput.objective), /pin_scope_qa/)
+
+  live = true
+  const rejectedLive = await workspace.submitPinnedComments({ artifact: { id: 'a', revision: 1 }, pins: [{ selector: 'h1', text: '再改一次' }] })
+  assert.equal(rejectedLive.ok, false)
+  assert.equal(preparedScopes.length, 1)
+  assert.equal(runs.length, 1)
+})
+
+await test('production Host patch tool enforces the prepared pin scope', () => {
+  const hostPack = read('electron/piExtensionPacks/subdesignPack.ts')
+  const main = read('electron/main.ts')
+  assert.match(main, /subdesign:preparePinnedPatchScope/)
+  assert.match(main, /resolvePinnedHtmlRanges\(content, selectors\)/)
+  assert.match(hostPack, /validatePinnedPatchOperation/)
+  assert.match(hostPack, /scopeId 缺少或不一致/)
+  assert.match(hostPack, /unlink\(scopePath\)/)
 })

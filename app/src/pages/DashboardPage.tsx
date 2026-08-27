@@ -311,7 +311,7 @@ export function DashboardPage() {
             <Link to="/" className={settingsBtnPrimaryCls}>
               新任務
             </Link>
-            <Link to="/automation" className={settingsBtnCls}>
+            <Link to="/ops?tab=automation" className={settingsBtnCls}>
               自動化 / 佇列
             </Link>
             <Link to="/records?tab=logs" className={settingsBtnCls}>
@@ -425,10 +425,10 @@ export function DashboardPage() {
             )}
           </SettingsGroup>
           <div className="flex flex-wrap gap-2">
-            <Link to="/automation?tab=events" className={settingsBtnCls}>
+            <Link to="/ops?tab=automation" className={settingsBtnCls}>
               事件規則
             </Link>
-            <Link to="/automation" className={settingsBtnCls}>
+            <Link to="/ops?tab=automation" className={settingsBtnCls}>
               定時任務
             </Link>
             <Link to="/settings" className={settingsBtnPrimaryCls}>

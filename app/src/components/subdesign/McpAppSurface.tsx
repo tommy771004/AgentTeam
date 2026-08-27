@@ -7,16 +7,86 @@
  * - Falls back to native UI on crash / unsupported host / flag disabled
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { validateBridgeMessage, isToolAllowed, CSP_SANDBOX, type SurfaceDeclaration } from '../../agent/subdesign/providers/mcpAppsProvider.ts'
+import { validateBridgeMessage, isToolAllowed, parseMcpToolCoordinate, CSP_SANDBOX, type SurfaceDeclaration } from '../../agent/subdesign/providers/mcpAppsProvider.ts'
 import { isProviderEnabled } from '../../agent/subdesign/providers/providerFlags.ts'
 import { useSurfaceDraftStore } from '../../agent/subdesign/surfaceDraftStore.ts'
 import { surfaceFallsBack, type SurfaceStatus } from '../../agent/subdesign/surfaceStatus.ts'
+import { usePermissionAskStore } from '../../store/permissionAskStore.ts'
 
 export { SURFACE_STATUS_LABELS, type SurfaceStatus } from '../../agent/subdesign/surfaceStatus.ts'
 
 const TRUSTED_ORIGIN = 'null' // sandboxed iframe has opaque origin; host validates via expectedOrigin check in provider, not real network origin
 
 export type SurfaceChoiceOption = { id: string; label: string; summary?: string }
+
+type ToolProxyContext = {
+  surfaceId: string
+  declaration: SurfaceDeclaration
+  runId?: string
+  threadId?: string
+  projectRoot?: string
+  frame: HTMLIFrameElement | null
+  setStatus: (status: SurfaceStatus) => void
+  setError: (error: string | null) => void
+}
+
+function postToolResult(context: ToolProxyContext, payload: Record<string, unknown>): void {
+  context.frame?.contentWindow?.postMessage({
+    v: 1,
+    surfaceId: context.surfaceId,
+    kind: context.declaration.kind,
+    action: 'tool_result',
+    payload,
+  }, '*')
+}
+
+async function executeMcpSurfaceToolCall(
+  rawPayload: unknown,
+  context: ToolProxyContext,
+): Promise<void> {
+  const payload = (rawPayload && typeof rawPayload === 'object' ? rawPayload : {}) as Record<string, unknown>
+  const coordinate = String(payload.tool || '')
+  const parsed = parseMcpToolCoordinate(coordinate)
+  if (!parsed || !isToolAllowed(context.declaration, coordinate)) {
+    context.setStatus('invalid')
+    context.setError(`disallowed tool: ${coordinate}`)
+    console.warn(`[mcp-apps] disallowed tool: ${coordinate}`)
+    return
+  }
+  const args = payload.arguments && typeof payload.arguments === 'object' && !Array.isArray(payload.arguments)
+    ? payload.arguments as Record<string, unknown>
+    : {}
+  const decision = await usePermissionAskStore.getState().requestAsk({
+    threadId: context.threadId,
+    runId: context.runId,
+    tool: 'mcp_call',
+    args: { extensionId: parsed.extensionId, toolName: parsed.toolName, arguments: args },
+    reason: `互動表面要呼叫 MCP 工具 ${coordinate}`,
+  })
+  const requestId = String(payload.requestId || '').slice(0, 80)
+  if (decision.decision !== 'allow') {
+    postToolResult(context, { requestId, ok: false, error: '使用者拒絕 MCP 工具呼叫。' })
+    return
+  }
+  const call = window.subagents?.subdesign?.callMcpAppTool
+  if (!call) {
+    context.setStatus('unavailable')
+    context.setError('目前的 Host 不支援 MCP Apps tool proxy。')
+    return
+  }
+  context.setStatus('loading')
+  const result = await call({
+    coordinate,
+    allowlist: context.declaration.allowlist,
+    arguments: args,
+    runId: context.runId,
+    threadId: context.threadId,
+    projectRoot: context.projectRoot,
+  })
+  postToolResult(context, { requestId, ...result })
+  context.setStatus(result.ok ? 'ready' : 'error')
+  context.setError(result.ok ? null : result.error || 'MCP tool call failed')
+}
 
 function FallbackChoice(props: { options: readonly SurfaceChoiceOption[]; onSelect: (v: string) => void }) {
   if (!props.options.length) {
@@ -133,15 +203,17 @@ export function McpAppSurface(props: {
 
       // Allowlist enforcement — UI cannot call arbitrary tools
       if (msg.action === 'tool_call') {
-        const toolName = String((msg.payload as Record<string, unknown>)?.tool || '')
-        if (!isToolAllowed(props.declaration, toolName)) {
-          setStatus('invalid')
-          setError(`disallowed tool: ${toolName}`)
-          console.warn(`[mcp-apps] disallowed tool: ${toolName}`)
-          return
-        }
-        // Raw tokens never passed to surface; connector-needing ops are proxied via host/Pi Core
-        // Host would proxy here via window.subagents?.piHost — not via surface itself
+        void executeMcpSurfaceToolCall(msg.payload, {
+          surfaceId: props.surfaceId,
+          declaration: props.declaration,
+          runId: props.runId,
+          threadId: props.threadId,
+          projectRoot: props.projectRoot,
+          frame: iframeRef.current,
+          setStatus,
+          setError,
+        })
+        return
       }
 
       if (msg.action === 'choice_select' && props.onChoice) {
@@ -169,7 +241,7 @@ export function McpAppSurface(props: {
       window.removeEventListener('message', handler)
       clearTimeout(readyTimer)
     }
-  }, [enabled, props.surfaceId, props.declaration, scopeKey])
+  }, [enabled, props.surfaceId, props.declaration, props.runId, props.threadId, props.projectRoot, props.onChoice, props.onFormSubmit, props.onConfirm, scopeKey, draftStore])
 
   if (!enabled) {
     return <FallbackSwitch {...props} draft={draft} status="unavailable" />

@@ -93,6 +93,46 @@ export interface CommandComposerProps {
   onStop?: () => void
 }
 
+function composerHasFooter(
+  footerLeft: ReactNode,
+  footerRight: ReactNode,
+  quickActions: CommandComposerProps['quickActions'],
+  hideHints: boolean,
+): boolean {
+  return Boolean(footerLeft || footerRight || quickActions) || !hideHints
+}
+
+function ComposerActionButton({
+  stopping,
+  canSend,
+  enterBehavior,
+  onAction,
+}: {
+  stopping: boolean
+  canSend: boolean
+  enterBehavior: NonNullable<CommandComposerProps['enterBehavior']>
+  onAction: () => void
+}) {
+  const title = stopping
+    ? '停止執行'
+    : enterBehavior === 'cmdEnter'
+      ? '送出（⌘/Ctrl+Enter）'
+      : '送出（Enter）'
+  return (
+    <button
+      type="button"
+      data-action={stopping ? 'stop' : 'send'}
+      disabled={!stopping && !canSend}
+      onClick={onAction}
+      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-control ${stopping ? 'agent-composer-send agent-composer-stop' : 'agent-composer-send'}`}
+      aria-label={stopping ? '停止執行' : '送出'}
+      title={title}
+    >
+      <Icon name={stopping ? 'stop' : 'arrow_upward'} size={stopping ? 17 : 18} filled={stopping} />
+    </button>
+  )
+}
+
 /**
  * Codex / Claude Code 風格輸入列：/ 指令、↑ 歷史、Cmd+/ 聚焦、貼圖/上傳
  */
@@ -552,33 +592,15 @@ export function CommandComposer({
    * 單一動態按鈕：執行中＝停止（紅），否則＝送出。
    * 有底欄（模型選擇器所在列）時放在 footerRight 右側；無底欄的精簡模式保留在輸入列右端。
    */
-  const actionButton = (
-    <button
-      type="button"
-      data-action={stopActive ? 'stop' : 'send'}
-      disabled={!stopActive && !canSend}
-      onClick={() => {
-        if (stopActive) onStop?.()
-        else void submit()
-      }}
-      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-control ${
-        stopActive ? 'agent-composer-send agent-composer-stop' : 'agent-composer-send'
-      }`}
-      aria-label={stopActive ? '停止執行' : '送出'}
-      title={
-        stopActive
-          ? '停止執行'
-          : enterBehavior === 'cmdEnter'
-            ? '送出（⌘/Ctrl+Enter）'
-            : '送出（Enter）'
-      }
-    >
-      <Icon name={stopActive ? 'stop' : 'arrow_upward'} size={stopActive ? 17 : 18} filled={stopActive} />
-    </button>
-  )
+  const actionButton = <ComposerActionButton
+    stopping={stopActive}
+    canSend={canSend}
+    enterBehavior={enterBehavior}
+    onAction={() => stopActive ? onStop?.() : void submit()}
+  />
 
   /** 底欄是否存在（模型選擇器等 footer 內容會渲染） */
-  const hasFooter = Boolean(footerLeft || footerRight || quickActions) || !hideHints
+  const hasFooter = composerHasFooter(footerLeft, footerRight, quickActions, hideHints)
 
   return (
     <div

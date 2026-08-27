@@ -519,6 +519,109 @@ const finalizationClaims = new Map<string, FinalizationClaim>()
  */
 const MAX_FINALIZATION_CLAIMS = 256
 
+type SettleFinalization = (result: ExternalRunResult) => Promise<void>
+
+async function completePiHostFinalization(
+  runId: string,
+  claim: PiHostFinalizationClaim | undefined,
+  heartbeat: PiHostFinalizationHeartbeat | undefined,
+): Promise<void> {
+  if (!claim || heartbeat?.lostOwnership()) return
+  try {
+    const complete = await window.subagents?.piHost?.runs?.finalizeComplete?.(
+      runId,
+      claim.claimantId,
+      claim.claimEpoch,
+    )
+    if (!complete?.completed) return
+    piFinalizationAckable.add(runId)
+    await window.subagents?.piHost?.runs?.ack?.(runId)
+  } catch {
+    // Keep the terminal attachment pending; a later renderer retries.
+  }
+}
+
+async function recoverFinalizationFailure(
+  input: FinalizeTaskRunInput,
+  settle: SettleFinalization,
+  error: unknown,
+): Promise<ExternalRunResult> {
+  const message = error instanceof Error ? error.message : String(error)
+  const reason = `finalization 失敗：${message}`
+  const path = input.dispatchResult?.path || input.early?.path || 'builtin'
+  try {
+    if (!hasJournalledEnding(input.runId)) {
+      return await runFinalizationSequence({
+        ...input,
+        dispatchResult: undefined,
+        early: { error: reason, path, agent: input.early?.agent },
+      }, settle)
+    }
+  } catch {
+    /* the closeout is the last resort; it must not replace the reason */
+  }
+  const failed: ExternalRunResult = {
+    path,
+    status: 'failed',
+    error: reason,
+    threadId: input.threadId,
+    runId: input.runId,
+  }
+  try {
+    const { useThreadStore } = await import('../store/threadStore.ts')
+    useThreadStore.getState().setThreadRunning(input.threadId, false, input.runId)
+  } catch {
+    /* the thread may already be gone; release still has to happen */
+  }
+  await settle(failed)
+  return failed
+}
+
+async function cleanupFinalization(input: FinalizeTaskRunInput): Promise<void> {
+  // 5) release capacity
+  await releaseRunCapacity(input.runId)
+  // 6) queue drain
+  try {
+    const { drainExternalRunQueue } = await import('./runQueue.ts')
+    void drainExternalRunQueue((queued) => runTask({
+      ...queued,
+      _fromQueue: true,
+      sourceKind: queued.sourceKind || 'queue-drain',
+    }))
+  } catch {
+    /* a drain that cannot start is retried by the next finalization */
+  }
+  const mine = finalizationClaims.get(input.runId)
+  if (mine) mine.done = true
+  forgetSettledFinalizationClaims()
+}
+
+async function executeClaimedFinalization(
+  input: FinalizeTaskRunInput,
+  settle: SettleFinalization,
+): Promise<ExternalRunResult> {
+  let claim: PiHostFinalizationClaim | undefined
+  let heartbeat: PiHostFinalizationHeartbeat | undefined
+  try {
+    if (isPiHostFinalization(input)) {
+      const claimed = await claimPiHostFinalization(input)
+      if (claimed === 'unavailable') {
+        return syntheticPiFinalizationResult(input, 'Pi Host app-finalization claim unavailable; terminal attachment remains pending')
+      }
+      claim = claimed || undefined
+      if (claim) heartbeat = startPiHostFinalizationHeartbeat(input.runId, claim)
+    }
+    const result = await runFinalizationSequence(input, settle)
+    await completePiHostFinalization(input.runId, claim, heartbeat)
+    return result
+  } catch (error) {
+    return recoverFinalizationFailure(input, settle, error)
+  } finally {
+    await heartbeat?.stop()
+    await cleanupFinalization(input)
+  }
+}
+
 /**
  * Single finalization sequence for every terminal outcome:
  *   thread summary/bubble → afterRun → Archive → onSettled → release capacity → drain
@@ -574,107 +677,7 @@ export async function finalizeTaskRun(
     }
   }
 
-  const outcome = (async (): Promise<ExternalRunResult> => {
-    let piHostClaim: PiHostFinalizationClaim | undefined
-    let piHostHeartbeat: PiHostFinalizationHeartbeat | undefined
-    try {
-      if (isPiHostFinalization(input)) {
-        const claim = await claimPiHostFinalization(input)
-        if (claim === 'unavailable') return syntheticPiFinalizationResult(input, 'Pi Host app-finalization claim unavailable; terminal attachment remains pending')
-        piHostClaim = claim || undefined
-        if (piHostClaim) piHostHeartbeat = startPiHostFinalizationHeartbeat(input.runId, piHostClaim)
-      }
-      const result = await runFinalizationSequence(input, settleOnce)
-      if (piHostClaim) {
-        try {
-          if (piHostHeartbeat?.lostOwnership()) return result
-          const complete = await window.subagents?.piHost?.runs?.finalizeComplete?.(
-            input.runId,
-            piHostClaim.claimantId,
-            piHostClaim.claimEpoch,
-          )
-          if (complete?.completed) {
-            piFinalizationAckable.add(input.runId)
-            // The original renderer has no RecoveryBootstrap to send this
-            // acknowledgement, so complete→ack is one owned sequence here.
-            await window.subagents?.piHost?.runs?.ack?.(input.runId)
-          }
-        } catch {
-          // Keep the terminal attachment pending when completion/ack transport
-          // fails; a later renderer can retry after the finite claim lease.
-        }
-      }
-      return result
-    } catch (error) {
-      // Finalization is this run's last owner. An unexpected throw here used
-      // to reach the caller's catch, which restarted finalization from the
-      // top and ended the run twice. The claim forbids that, so the ending
-      // this run does get has to be written here — once.
-      const message = error instanceof Error ? error.message : String(error)
-      const reason = `finalization 失敗：${message}`
-      const path = input.dispatchResult?.path || input.early?.path || 'builtin'
-      try {
-        // The durable terminal marker is the witness that the run already has
-        // an ending — the same key finalizeRecoveredExternalRun keys on. With
-        // one, the thread and the journal are already settled and a second
-        // ending would contradict them. Without one, the sequence died before
-        // writing any evidence, and the early-terminal path (which every deny
-        // and recovery entry shares) writes it now.
-        if (!hasJournalledEnding(input.runId)) {
-          return await runFinalizationSequence(
-            {
-              ...input,
-              dispatchResult: undefined,
-              early: {
-                error: reason,
-                path,
-                agent: input.early?.agent,
-              },
-            },
-            settleOnce,
-          )
-        }
-      } catch {
-        /* the closeout is the last resort; it must not replace the reason */
-      }
-      const failed: ExternalRunResult = {
-        path,
-        status: 'failed',
-        error: reason,
-        threadId: input.threadId,
-        runId: input.runId,
-      }
-      try {
-        const { useThreadStore } = await import('../store/threadStore.ts')
-        useThreadStore.getState().setThreadRunning(input.threadId, false, input.runId)
-      } catch {
-        /* the thread may already be gone; release still has to happen */
-      }
-      // A run that died in finalization is still a settled run downstream.
-      await settleOnce(failed)
-      return failed
-    } finally {
-      await piHostHeartbeat?.stop()
-      // 5) release capacity
-      await releaseRunCapacity(input.runId)
-      // 6) queue drain — only finalization may drain
-      try {
-        const { drainExternalRunQueue } = await import('./runQueue.ts')
-        void drainExternalRunQueue((o) =>
-          runTask({
-            ...o,
-            _fromQueue: true,
-            sourceKind: o.sourceKind || 'queue-drain',
-          }),
-        )
-      } catch {
-        /* a drain that cannot start is retried by the next finalization */
-      }
-      const mine = finalizationClaims.get(input.runId)
-      if (mine) mine.done = true
-      forgetSettledFinalizationClaims()
-    }
-  })()
+  const outcome = executeClaimedFinalization(input, settleOnce)
 
   finalizationClaims.set(input.runId, { outcome, done: false })
   return outcome

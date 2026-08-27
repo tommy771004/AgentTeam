@@ -77,6 +77,53 @@ await test('removal propagates: the deleted skill leaves the next push', async (
   assert.ok(!pushed[0].some((skill) => skill.name === 'deploy-check'), 'the Host reconcile pass can only remove what the payload stops mentioning')
 })
 
+await test('overlapping full-state pushes cannot let an older payload win last', async () => {
+  const original = (globalThis as Record<string, unknown>).window
+  let releaseFirst: (() => void) | undefined
+  let firstStarted: (() => void) | undefined
+  const firstStartedPromise = new Promise<void>((resolve) => { firstStarted = resolve })
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
+  const committed: Array<Array<{ name?: string }>> = []
+  let calls = 0
+  ;(globalThis as Record<string, unknown>).window = {
+    subagents: {
+      piHost: {
+        resources: {
+          listSkillFiles: bridge.listSkillFiles,
+          syncSkills: async (skills: Array<{ name?: string }>) => {
+            calls += 1
+            if (calls === 1) {
+              firstStarted?.()
+              await firstGate
+            }
+            committed.push(skills)
+            return {
+              skillsDir: '/tmp/fake-skills',
+              results: skills.map((skill) => ({ name: skill.name, ok: true, slug: skill.name, filePath: '' })),
+            }
+          },
+        },
+      },
+    },
+  }
+  try {
+    skillsStore.save({ name: 'race-a', description: '', version: '1.0.0', author: 'user', createdBy: 'user' }, 'A')
+    pushSkillsToHost()
+    await firstStartedPromise
+    skillsStore.save({ name: 'race-b', description: '', version: '1.0.0', author: 'user', createdBy: 'user' }, 'B')
+    pushSkillsToHost()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    releaseFirst?.()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.ok(committed.at(-1)?.some((skill) => skill.name === 'race-b'),
+      'the final Host state must come from the newest full-state payload')
+  } finally {
+    ;(globalThis as Record<string, unknown>).window = original
+    skillsStore.remove('race-a')
+    skillsStore.remove('race-b')
+  }
+})
+
 await test('without the bridge (plain browser) the push is a silent no-op', async () => {
   const original = (globalThis as Record<string, unknown>).window
   ;(globalThis as Record<string, unknown>).window = {}
@@ -131,6 +178,14 @@ await test('App keeps subscribing after the one-shot migration flag flips', () =
   const bootstrap = app.slice(app.indexOf('function SkillsMigrationBootstrap'))
   assert.match(bootstrap, /onSkillsChanged\(pushSkillsToHost\)/,
     'every post-migration mutation must re-push through the same bridge')
+  assert.ok(
+    bootstrap.indexOf('useLearningStore.getState().load()') < bootstrap.indexOf('await syncSkillsToHost()'),
+    'first migration must finish learning hydration before any full-state replacement',
+  )
+  assert.match(bootstrap, /report\.outcomes\.every/,
+    'migration completion must use the normalized outcome that requires a valid slug')
+  assert.doesNotMatch(bootstrap, /report\.results\.every/,
+    'raw bridge ok flags cannot mark an invalid slug result complete')
 })
 
 await test('the migration diagnostics offer an immediate re-push, not just「重新啟動再試」', () => {

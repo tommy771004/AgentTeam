@@ -65,6 +65,35 @@ function kindIcon(kind: string): string {
 const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 })
 const EMPTY_EVENTS: RunActivityEvent[] = []
 const EMPTY_RECORD_ENTRIES: TurnRecordEntry[] = []
+
+function runPhaseLabel(reattaching: boolean, fallback: string): string {
+  return reattaching ? '正在重新附著…' : fallback
+}
+
+function ReattachmentNotices({
+  reattaching,
+  gap,
+}: {
+  reattaching: boolean
+  gap: { missingBefore: number; earliestSeq: number } | null
+}) {
+  return (
+    <>
+      {reattaching ? (
+        <div className="agent-process-recovery flex items-center gap-2 rounded-md border border-line-strong/60 bg-surface-2 px-3 py-2 text-[11px] text-ink-3" role="status" aria-label="Pi Core Host 重新附著中">
+          <Icon name="sync" size={14} className="shrink-0" />
+          <span>正在重新附著到 Pi Core Host；這不是執行失敗。</span>
+        </div>
+      ) : null}
+      {gap ? (
+        <div className="agent-process-recovery flex items-center gap-2 rounded-md border border-line-strong/60 bg-surface-2 px-3 py-2 text-[11px] text-ink-3" role="status">
+          <Icon name="history" size={14} className="shrink-0" />
+          <span>較早的 {gap.missingBefore} 筆紀錄不在目前保留範圍；時間軸從 seq {gap.earliestSeq} 開始。</span>
+        </div>
+      ) : null}
+    </>
+  )
+}
 const EMPTY_FILES: FileChangeRecord[] = []
 const EMPTY_TASKS: RunTaskItem[] = []
 
@@ -240,7 +269,7 @@ export function RunProcessFeed({
     interruptReason: agent.interruptReason,
     stopping: activity?.stopping,
   })
-  const phase = reattaching ? '正在重新附著…' : lifecycle.label
+  const phase = runPhaseLabel(reattaching, lifecycle.label)
   // One honest notice when a live run goes quiet — never a repeated alarm.
   const stall = useStallNotice(runId)
   // Counted from whichever source is actually on screen, so the header never
@@ -434,25 +463,7 @@ export function RunProcessFeed({
         ) : null}
       </div>
 
-      {reattaching ? (
-        <div
-          className="agent-process-recovery flex items-center gap-2 rounded-md border border-line-strong/60 bg-surface-2 px-3 py-2 text-[11px] text-ink-3"
-          role="status"
-          aria-label="Pi Core Host 重新附著中"
-        >
-          <Icon name="sync" size={14} className="shrink-0" />
-          <span>正在重新附著到 Pi Core Host；這不是執行失敗。</span>
-        </div>
-      ) : null}
-      {reattachGap ? (
-        <div
-          className="agent-process-recovery flex items-center gap-2 rounded-md border border-line-strong/60 bg-surface-2 px-3 py-2 text-[11px] text-ink-3"
-          role="status"
-        >
-          <Icon name="history" size={14} className="shrink-0" />
-          <span>較早的 {reattachGap.missingBefore} 筆紀錄不在目前保留範圍；時間軸從 seq {reattachGap.earliestSeq} 開始。</span>
-        </div>
-      ) : null}
+      <ReattachmentNotices reattaching={reattaching} gap={reattachGap} />
 
       {stall.stalled && !lifecycle.needsAttention ? (
         <div
@@ -528,37 +539,6 @@ export function RunProcessFeed({
               {interactionStatus ? <div className="text-[11px] text-ink-3">{interactionStatus}</div> : null}
             </div>
           ) : null}
-          {/* Task Rows keep a structured plan readable without turning the
-              process feed into a second full task-management panel. */}
-          {tasks.length > 0 ? (
-            <div className="agent-process-trace space-y-1">
-              <div className="agent-process-trace-head flex items-center justify-between px-1 text-[10px] font-semibold uppercase tracking-[0.12em]">
-                <span>任務進度</span>
-                <span className="normal-case tracking-normal">{completedTasks}/{tasks.length} 完成</span>
-              </div>
-              {tasks.map((task) => {
-                const failed = task.status === 'failed'
-                const active = task.status === 'active'
-                const done = task.status === 'done'
-                return (
-                  <div key={task.id} className={`agent-process-row flex max-w-full items-center gap-2 text-left text-[12px] ${failed ? 'text-red' : 'text-ink-2'}`}>
-                    <Icon
-                      name={done ? 'check_circle' : failed ? 'cancel' : active ? 'progress_activity' : 'radio_button_unchecked'}
-                      size={15}
-                      className={`shrink-0 ${done ? 'text-green' : failed ? 'text-red' : active ? 'animate-spin text-ink-2' : 'text-ink-3'}`}
-                    />
-                    <span className={`${done ? 'text-ink-2 opacity-70' : 'text-ink'} min-w-0 flex-1 truncate ${done ? 'line-through' : ''}`}>
-                      {task.text}
-                    </span>
-                    <span className="shrink-0 text-[10.5px] text-ink-3">
-                      {done ? '完成' : failed ? '失敗' : active ? '進行中' : '待處理'}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          ) : null}
-
           {/* The single timeline. Thinking, tools, results and the reply are one
               ordered stream here, so nobody has to read three panels to learn
               what happened — and it is the record's order, not the arrival

@@ -1,14 +1,12 @@
 /**
- * Shared tool permission + HITL ask — used by FC toolLoop AND heuristic
- * (via invokeGatedTool authorize adapter).
+ * Shared tool permission + HITL ask for active adapters and Host policy evidence.
  *
  * Decision layers 1–8 live in approvalDecision.decide() (effect-as-data).
  * This module is the adapter: resolve dynamic inputs, call decide(), apply
  * events/logs, then perform layer 9 HITL ask when needed.
  *
- * Auth+execute combo previously lived in guardAndExecuteTool; heuristic now
- * uses authorizeTool + execute via invokeGatedTool. Do not reintroduce a
- * parallel auth+execute entry without a real caller.
+ * Auth+execute combos belong to Pi Core Host. Do not reintroduce a renderer
+ * execution loop around this decision adapter.
  */
 import type { LlmSettings, PermissionPolicy, PermissionProjection } from '../types.ts'
 import {

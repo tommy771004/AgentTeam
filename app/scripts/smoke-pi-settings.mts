@@ -55,6 +55,7 @@ try {
     approvalMode: 'auto',
     bashRequireAsk: true,
     unattended: false,
+    workspaceTextSearch: false,
   })
 
   send(3, 'settings/update', { thinkingLevel: 'extreme' })
@@ -99,6 +100,7 @@ try {
     approvalMode: 'full',
     bashRequireAsk: true,
     unattended: true,
+    workspaceTextSearch: false,
   })
 } finally {
   host.stdin.end()

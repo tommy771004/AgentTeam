@@ -370,8 +370,8 @@ export class PiHostSupervisor {
   }
 
   /** One pack tool execution through the shared approval gate. */
-  async callPackTool(name: string, args: Record<string, unknown>, options: { cwd?: string; sessionId?: string; approval?: 'allow' | 'deny' } = {}): Promise<NonNullable<PiHostResponse['result']>> {
-    const response = await this.request('tools/pack', { name, arguments: args, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.sessionId ? { sessionId: options.sessionId } : {}), ...(options.approval ? { approval: options.approval } : {}) })
+  async callPackTool(name: string, args: Record<string, unknown>, options: { cwd?: string; sessionId?: string; runId?: string; callId?: string; approval?: 'allow' | 'deny' } = {}): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('tools/pack', { name, arguments: args, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.sessionId ? { sessionId: options.sessionId } : {}), ...(options.runId ? { runId: options.runId } : {}), ...(options.callId ? { callId: options.callId } : {}), ...(options.approval ? { approval: options.approval } : {}) })
     if (response.error) throw new Error(response.error.message)
     return response.result ?? {}
   }

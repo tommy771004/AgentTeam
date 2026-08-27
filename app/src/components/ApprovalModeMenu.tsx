@@ -31,7 +31,9 @@ export function ApprovalModeMenu({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-line bg-inset hover:bg-hover-2 text-[11px] text-ink-2 shadow-hairline transition-colors"
+        className={`inline-flex h-7 items-center gap-1 rounded-control px-2 text-[11px] transition-colors ${
+          open ? 'bg-hover-2 text-ink' : 'text-ink-2 hover:bg-hover-2 hover:text-ink'
+        }`}
         title="動作應如何核准？"
       >
         <Icon name={active.icon} size={13} className="shrink-0 opacity-80" />

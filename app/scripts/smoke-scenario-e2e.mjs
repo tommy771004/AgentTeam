@@ -1087,15 +1087,12 @@ await test('§7 plugin tool escalate: fingerprint change requires re-review (pur
   assert.equal(escalations.length > 0, true)
 })
 
-await test('§7 wiring contract: production sources pass sourceKind into hooks', () => {
+await test('§7 wiring contract: active production sources pass sourceKind into hooks', () => {
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
   assert.match(guard, /sourceKind: opts\.sourceKind/)
   assert.match(guard, /objective: opts\.objective/)
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  assert.match(loop, /sourceKind: ctx\.sourceKind/)
-  assert.match(loop, /objective: ctx\.objective/)
-  // The engine that used to forward sourceKind is deleted; the coordinator is
-  // now the only producer, asserted just below.
+  // The renderer engine and tool loop are deleted; the coordinator is now the
+  // only producer, asserted just below.
   const runX = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(runX, /sourceKind: opts\.sourceKind/)
   // put into RuntimeOverrides for tool layer

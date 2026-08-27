@@ -276,7 +276,7 @@ const waitForRecoveredTimeline = async (page, runId, kind, description) => {
   throw new Error(`${description}: timed out after ${timeout}ms; last state=${JSON.stringify(lastState)}`)
 }
 
-const runScenario = async (page, kind, iteration) => {
+const startScenario = async (page, kind, iteration) => {
   const token = `reattach-token-${kind}-${iteration}-${Date.now().toString(36)}`
   const objective = `Run ${kind} renderer reattach ${token}`
   const before = await page.evaluate(async () => {
@@ -284,12 +284,38 @@ const runScenario = async (page, kind, iteration) => {
     return [...(snapshot?.activeRuns || []), ...(snapshot?.terminalRuns || [])].map((item) => item.runId)
   })
   if (before.length) throw new Error(`previous attachments remain before ${kind}: ${before.join(', ')}`)
-
-  const composer = page.locator('textarea.composer-field').first()
-  await composer.fill(objective)
+  await page.locator('textarea.composer-field').first().fill(objective)
   await page.locator('.agent-composer-send').first().click()
   const attachment = await waitForRun(page, before, `${kind} run admission`)
   if (!attachment) throw new Error(`${kind} run admission returned no attachment`)
+  return { attachment, token }
+}
+
+const readRecoveredRun = async ({ id, sessionId }) => {
+  const runs = window.subagents.piHost.runs
+  const { activeRuns = [], terminalRuns = [] } = await runs.active()
+  const attachment = [...activeRuns, ...terminalRuns].find((item) => item.runId === id)
+  const { page: attachedPage } = await runs.attach(id, undefined, 200)
+  let page = attachedPage
+  if (!attachment) {
+    const recordResult = await window.subagents.piHost.sessions.record(sessionId, undefined, 200)
+    page = recordResult.page
+  }
+  const entries = page?.entries ?? []
+  const entryMaxSeq = entries.reduce((max, entry) => Math.max(max, entry.seq || 0), 0)
+  return {
+    attachment,
+    attachedPageLatestSeq: attachedPage?.latestSeq || 0,
+    attachmentLatestSeq: attachment?.latestSeq || 0,
+    entryMaxSeq,
+    latestSeq: Math.max(page?.latestSeq || 0, attachment?.latestSeq || 0, entryMaxSeq),
+    entries: entries.length,
+    hasGapField: Object.prototype.hasOwnProperty.call(page || {}, 'gap'),
+  }
+}
+
+const runScenario = async (page, kind, iteration) => {
+  const { attachment, token } = await startScenario(page, kind, iteration)
   assert.equal(attachment.status, 'active', `${kind} starts as Host active`)
   const runId = attachment.runId
   const threadId = attachment.threadId
@@ -405,29 +431,10 @@ const runScenario = async (page, kind, iteration) => {
     releaseFinalizeClaimGate(runId, terminalGateId)
   }
 
-  const recovered = await page.evaluate(async ({ id, sessionId }) => {
-    const runs = window.subagents?.piHost?.runs
-    const snapshot = await runs?.active?.()
-    const attachment = [...(snapshot?.activeRuns || []), ...(snapshot?.terminalRuns || [])].find((item) => item?.runId === id)
-    const pageResult = await runs?.attach?.(id, undefined, 200)
-    // RecoveryBootstrap may already have completed the replacement claim and
-    // acked the terminal attachment by the time the page is ready. The Host
-    // Turn Record remains durable, so read it directly for the record proof.
-    const recordResult = attachment
-      ? null
-      : await window.subagents?.piHost?.sessions?.record?.(sessionId, undefined, 200)
-    const page = pageResult?.page || recordResult?.page
-    const entryMaxSeq = page?.entries?.reduce((max, entry) => Math.max(max, entry?.seq || 0), 0) || 0
-    return {
-      attachment,
-      attachedPageLatestSeq: pageResult?.page?.latestSeq || 0,
-      attachmentLatestSeq: attachment?.latestSeq || 0,
-      entryMaxSeq,
-      latestSeq: Math.max(page?.latestSeq || 0, attachment?.latestSeq || 0, entryMaxSeq),
-      entries: page?.entries?.length || 0,
-      hasGapField: Object.prototype.hasOwnProperty.call(page || {}, 'gap'),
-    }
-  }, { id: runId, sessionId: attachment.sessionId })
+  // RecoveryBootstrap may already have completed the replacement claim and
+  // acked the terminal attachment by the time the page is ready. The Host
+  // Turn Record remains durable, so read it directly for the record proof.
+  const recovered = await page.evaluate(readRecoveredRun, { id: runId, sessionId: attachment.sessionId })
   assert.ok(kind === 'terminal' || recovered.attachment, `${kind} run remains retained through renderer destruction`)
   // A live Pi turn can have a journal high-watermark before its session page
   // is materialized; the terminal case below proves bounded entry replay.

@@ -28,6 +28,7 @@ import type {
   EnterBehavior,
   FollowUpMode,
   ApiProviderPreset,
+  LlmSettings,
   ModelProfile,
 } from '../agent/types'
 import {
@@ -196,6 +197,79 @@ async function openExternalLink(url: string) {
     return
   }
   window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+type SettingsPatch = (patch: Partial<LlmSettings>) => void
+
+function providerSettingsPatch(providerId: ApiProviderPreset): Partial<LlmSettings> {
+  const provider = apiProviderPreset(providerId)
+  if (provider.id === 'custom') return { apiProvider: 'custom' }
+  if (isSubscriptionProviderPreset(provider.id)) {
+    return { apiProvider: provider.id, model: '', fallbackModels: [], discoveredModels: [] }
+  }
+  return {
+    apiProvider: provider.id,
+    baseUrl: provider.baseUrl,
+    model: provider.defaultModel,
+    fallbackModels: provider.fallbackModels,
+    discoveredModels: [],
+  }
+}
+
+function ProviderCredentialFields({ settings, set }: { settings: LlmSettings; set: SettingsPatch }) {
+  const subscription = isSubscriptionProviderPreset(settings.apiProvider)
+  if (subscription) return <SubscriptionConnectionStatus />
+  return (
+    <>
+      <SettingsStack title="Base URL">
+        <input
+          value={settings.baseUrl}
+          onChange={(event) => set({ baseUrl: event.target.value })}
+          className={settingsInputCls}
+          placeholder="https://api.openai.com/v1"
+        />
+      </SettingsStack>
+      <SettingsStack title="API 金鑰">
+        <input
+          type="password"
+          value={settings.apiKey}
+          onChange={(event) => set({ apiKey: event.target.value })}
+          className={settingsInputCls}
+          placeholder="sk-..."
+          autoComplete="off"
+        />
+      </SettingsStack>
+    </>
+  )
+}
+
+function ProviderModelInput({ settings, set }: { settings: LlmSettings; set: SettingsPatch }) {
+  if (isSubscriptionProviderPreset(settings.apiProvider)) {
+    return (
+      <SubscriptionModelPicker
+        providerId={settings.apiProvider}
+        value={settings.model}
+        onChange={(model) => set({ model })}
+      />
+    )
+  }
+  return (
+    <>
+      <input
+        list="discovered-models"
+        value={settings.model}
+        onChange={(event) => set({ model: event.target.value })}
+        className={settingsInputCls}
+        placeholder="model id（由 CLI 偵測或手動填入）"
+      />
+      <datalist id="discovered-models">
+        {settings.discoveredModels.map((id) => <option key={id} value={id} />)}
+      </datalist>
+      {settings.discoveredModels.length > 0 ? (
+        <p className="mt-1 text-[11px] text-outline">已從 /models 自動帶入 {settings.discoveredModels.length} 個模型。</p>
+      ) : null}
+    </>
+  )
 }
 
 export function SettingsPage() {
@@ -646,7 +720,7 @@ export function SettingsPage() {
       onChange={setSection}
       hideNavTitle
     >
-      <div className="flex flex-col max-w-[820px] pb-10">
+      <>
         <SettingsHeader title={meta.title} subtitle={meta.subtitle} />
 
         {section === 'piCore' && <PiCoreSettingsSection />}
@@ -729,7 +803,7 @@ export function SettingsPage() {
               {subscriptionError && (
                 <div
                   role="status"
-                  className="mx-4 mb-3 flex items-start gap-2 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-[11px] leading-relaxed text-amber-200/90"
+                  className="mx-4 mb-3 flex items-start gap-2 rounded-control border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-[11px] leading-relaxed text-amber-200/90"
                 >
                   <Icon name="warning" size={15} className="mt-0.5 shrink-0 text-amber-300" />
                   <p>{subscriptionError}</p>
@@ -930,7 +1004,7 @@ export function SettingsPage() {
               )}
             </SettingsGroup>
             {(updateMsg || updateState?.lastError) && <p className="px-1 mb-3 text-[12px] text-on-surface-variant">{updateMsg || updateState?.lastError}</p>}
-            {(updateProgress > 0 || updateState?.status === 'downloaded') && <div className="mx-1 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-primary transition-all" style={{ width: `${Math.max(updateProgress, updateState?.status === 'downloaded' ? 100 : 0)}%` }} /></div>}
+            {(updateProgress > 0 || updateState?.status === 'downloaded') && <div className="mx-1 h-1.5 overflow-hidden rounded-full bg-inset"><div className="h-full bg-primary transition-all" style={{ width: `${Math.max(updateProgress, updateState?.status === 'downloaded' ? 100 : 0)}%` }} /></div>}
           </>
         )}
 
@@ -1340,8 +1414,8 @@ export function SettingsPage() {
                           type="button"
                           className={`text-[11px] px-2.5 py-1 rounded-full border font-[family-name:var(--font-mono)] ${
                             capturing
-                              ? 'border-primary/50 text-primary bg-primary/10'
-                              : 'bg-white/[0.06] border-white/10 text-on-surface-variant hover:border-primary/40'
+                              ? 'border-primary/50 bg-primary/10 text-primary'
+                              : 'border-line bg-inset text-on-surface-variant hover:border-primary/40 hover:bg-hover-2'
                           }`}
                           onClick={() => setCapturingId(capturing ? null : b.id)}
                           title="點擊後按下新快捷鍵"
@@ -1382,7 +1456,7 @@ export function SettingsPage() {
                   key={k + v}
                   title={v}
                   control={
-                    <kbd className="text-[11px] px-2.5 py-1 rounded-full bg-white/[0.06] border border-white/10 font-[family-name:var(--font-mono)] text-on-surface-variant">
+                    <kbd className="rounded-control border border-line bg-inset px-2.5 py-1 text-[11px] font-[family-name:var(--font-mono)] text-on-surface-variant">
                       {k}
                     </kbd>
                   }
@@ -1459,23 +1533,10 @@ export function SettingsPage() {
                   value={settings.apiProvider || 'custom'}
                   className={settingsInputCls}
                   onChange={(e) => {
-                    const provider = apiProviderPreset(e.target.value as ApiProviderPreset)
-                    if (provider.id === 'custom') {
-                      set({ apiProvider: 'custom' })
-                      return
-                    }
                     // ADR-0052: subscription presets carry no endpoint or key
                     // of their own — the credential lives Host-side and the
                     // model list comes from the snapshot catalog.
-                    set(isSubscriptionProviderPreset(provider.id)
-                      ? { apiProvider: provider.id, model: '', fallbackModels: [], discoveredModels: [] }
-                      : {
-                          apiProvider: provider.id,
-                          baseUrl: provider.baseUrl,
-                          model: provider.defaultModel,
-                          fallbackModels: provider.fallbackModels,
-                          discoveredModels: [],
-                        })
+                    set(providerSettingsPatch(e.target.value as ApiProviderPreset))
                   }}
                 >
                   {API_PROVIDER_PRESETS.map((provider) => (
@@ -1487,9 +1548,6 @@ export function SettingsPage() {
                 <p className="mt-1 text-[11px] text-outline">
                   {apiProviderPreset(settings.apiProvider || 'custom').note}
                 </p>
-                {isSubscriptionProvider && (
-                  <SubscriptionConnectionStatus />
-                )}
               </SettingsStack>
               <SettingsRow
                 title="啟用 LLM"
@@ -1501,52 +1559,9 @@ export function SettingsPage() {
                   />
                 }
               />
-              {!isSubscriptionProvider && (
-                <SettingsStack title="Base URL">
-                  <input
-                    value={settings.baseUrl}
-                    onChange={(e) => set({ baseUrl: e.target.value })}
-                    className={settingsInputCls}
-                    placeholder="https://api.openai.com/v1"
-                  />
-                </SettingsStack>
-              )}
-              {!isSubscriptionProvider && (
-                <SettingsStack title="API 金鑰">
-                  <input
-                    type="password"
-                    value={settings.apiKey}
-                    onChange={(e) => set({ apiKey: e.target.value })}
-                    className={settingsInputCls}
-                    placeholder="sk-..."
-                    autoComplete="off"
-                  />
-                </SettingsStack>
-              )}
+              <ProviderCredentialFields settings={settings} set={set} />
               <SettingsStack title="預設模型">
-                {isSubscriptionProvider ? (
-                  <SubscriptionModelPicker
-                    providerId={settings.apiProvider}
-                    value={settings.model}
-                    onChange={(model) => set({ model })}
-                  />
-                ) : (
-                  <>
-                    <input
-                      list="discovered-models"
-                      value={settings.model}
-                      onChange={(e) => set({ model: e.target.value })}
-                      className={settingsInputCls}
-                      placeholder="model id（由 CLI 偵測或手動填入）"
-                    />
-                    <datalist id="discovered-models">
-                      {(settings.discoveredModels || []).map((id) => <option key={id} value={id} />)}
-                    </datalist>
-                    {(settings.discoveredModels || []).length > 0 && (
-                      <p className="mt-1 text-[11px] text-outline">已從 /models 自動帶入 {settings.discoveredModels.length} 個模型。</p>
-                    )}
-                  </>
-                )}
+                <ProviderModelInput settings={settings} set={set} />
                 {/* P1-B: capability profile — 已驗證 / 推測 / 未知 */}
                 {(() => {
                   const p = settings.modelProfiles?.[settings.model || '']
@@ -1565,7 +1580,7 @@ export function SettingsPage() {
                             ? 'bg-primary/15 text-primary'
                             : badge === '推測'
                               ? 'bg-amber-500/15 text-amber-300'
-                              : 'bg-white/10 text-outline'
+                              : 'bg-inset text-outline'
                         }`}
                       >
                         {badge}
@@ -1752,7 +1767,7 @@ export function SettingsPage() {
                   const providerId = adapter.id === 'claude' ? 'anthropic' : adapter.id === 'gemini' ? 'google' : adapter.id
                   const provider = (settings.cliProviders || []).find((item) => item.id === providerId || item.id === adapter.id)
                   return (
-                    <div key={adapter.id} className="rounded-xl border border-white/[0.08] bg-white/[0.025] px-3 py-2.5">
+                    <div key={adapter.id} className="rounded-control border border-line bg-inset px-3 py-2.5">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-[12px] font-semibold text-on-surface">{adapter.displayName}</span>
                         <span className={`text-[10px] ${provider?.enabled && provider.authorized ? 'text-primary' : 'text-outline'}`}>
@@ -1775,7 +1790,7 @@ export function SettingsPage() {
             </SettingsGroup>
             <SettingsGroup title="廠商">
               {(settings.cliProviders || []).map((p, idx) => (
-                <div key={p.id} className="px-4 py-3 space-y-2 border-b border-white/[0.07] last:border-0">
+                <div key={p.id} className="space-y-2 border-b border-line px-4 py-3 last:border-0">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="text-[13px] font-medium">{p.name}</div>
                     <div className="flex items-center gap-3">
@@ -1978,7 +1993,7 @@ export function SettingsPage() {
               </button>
             </div>
             {cliMsg && (
-              <pre className="text-[11px] font-[family-name:var(--font-mono)] text-primary whitespace-pre-wrap rounded-2xl border border-white/10 bg-white/[0.03] p-3 max-h-40 overflow-y-auto custom-scrollbar">
+              <pre className="custom-scrollbar max-h-40 overflow-y-auto whitespace-pre-wrap rounded-control border border-line bg-inset p-3 text-[11px] font-[family-name:var(--font-mono)] text-primary">
                 {cliMsg}
               </pre>
             )}
@@ -2540,10 +2555,10 @@ export function SettingsPage() {
                         key={d.id}
                         type="button"
                         onClick={() => set({ approvalMode: d.id })}
-                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${
+                        className={`w-full flex items-start gap-3 rounded-control border px-3 py-2.5 text-left transition-colors ${
                           selected
                             ? 'border-primary/40 bg-primary/10'
-                            : 'border-white/10 hover:border-white/25'
+                            : 'border-line bg-inset hover:border-primary/30 hover:bg-hover-2'
                         }`}
                       >
                         <Icon
@@ -2665,7 +2680,7 @@ export function SettingsPage() {
                               ),
                             })
                           }
-                          className="w-20 bg-surface-container border border-white/10 rounded-lg px-2 py-1 text-[13px] text-right"
+                          className="w-20 rounded-control border border-line bg-inset px-2 py-1 text-right text-[13px] outline-none focus:border-primary/35"
                         />
                       }
                     />
@@ -2789,10 +2804,10 @@ export function SettingsPage() {
                                       disabled={c.isFixed}
                                       title={c.description}
                                       onClick={() => toggle(c.id, c.isFixed)}
-                                      className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
+                                      className={`rounded-control border px-2 py-1 text-[11px] font-medium transition-colors ${
                                         active
                                           ? 'border-primary/40 bg-primary/15 text-primary'
-                                          : 'border-white/10 text-on-surface-variant hover:border-white/25'
+                                          : 'border-line bg-inset text-on-surface-variant hover:border-primary/30 hover:bg-hover-2'
                                       } ${c.isFixed ? 'opacity-80 cursor-default' : ''}`}
                                     >
                                       {c.id.replace(/^(user|mcp|skill):/, '')}
@@ -3112,7 +3127,7 @@ export function SettingsPage() {
                 </p>
               </SettingsStack>
             </SettingsGroup>
-            <pre className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-[11px] font-[family-name:var(--font-mono)] text-on-surface-variant overflow-x-auto whitespace-pre-wrap mb-4">
+            <pre className="mb-4 overflow-x-auto whitespace-pre-wrap rounded-control border border-line bg-inset p-3 text-[11px] font-[family-name:var(--font-mono)] text-on-surface-variant">
               {`curl -X POST http://127.0.0.1:${settings.webhookPort || 8787}/webhook \\
   -H "Content-Type: application/json" \\
   -d '{"source":"email.received","subject":"Invoice 42","hasAttachment":true}'`}
@@ -3320,7 +3335,7 @@ export function SettingsPage() {
                               {servers.length === 0 ? (
                                 <span className="text-[11px] text-outline">尚無啟用中的 MCP server</span>
                               ) : servers.map((server) => (
-                                <label key={server.id} className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1.5 text-[11px]">
+                                <label key={server.id} className="flex items-center gap-1.5 rounded-control border border-line bg-inset px-2 py-1.5 text-[11px]">
                                   <input
                                     type="checkbox"
                                     checked={selected.has(server.id)}
@@ -3357,7 +3372,7 @@ export function SettingsPage() {
                       {pending.map((p) => (
                         <div
                           key={p.pluginId}
-                          className="flex items-start gap-2 px-3 py-2 rounded-xl border border-amber-500/25 bg-amber-500/5"
+                          className="flex items-start gap-2 rounded-control border border-amber-500/25 bg-amber-500/5 px-3 py-2"
                         >
                           <span className="min-w-0 flex-1">
                             <span className="block text-[12px] font-semibold text-on-surface font-[family-name:var(--font-mono)]">
@@ -3428,7 +3443,7 @@ export function SettingsPage() {
               {(settings.mcpServers || []).map((s, idx) => (
                 <div
                   key={s.id}
-                  className="border border-white/10 rounded-lg p-3 space-y-2 bg-surface/40"
+                  className="space-y-2 rounded-control border border-line bg-inset p-3"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <input
@@ -3563,7 +3578,7 @@ export function SettingsPage() {
                   set({ mcpServers: [...(settings.mcpServers || []), row],
                   })
                 }}
-                className="px-3 py-2 rounded border border-white/15 text-xs font-semibold hover:border-primary/40 hover:text-primary"
+                className={settingsBtnCls}
               >
                 新增伺服器
               </button>
@@ -3612,7 +3627,7 @@ export function SettingsPage() {
                     setMcpProbe(e instanceof Error ? e.message : String(e))
                   }
                 }}
-                className="px-3 py-2 rounded border border-primary/40 text-primary text-xs font-semibold"
+                className={settingsBtnPrimaryCls}
               >
                 探測工具列表
               </button>
@@ -3646,7 +3661,7 @@ export function SettingsPage() {
                     )
                   }
                 }}
-                className="px-3 py-2 rounded border border-white/15 text-xs font-semibold hover:border-primary/40 hover:text-primary"
+                className={settingsBtnCls}
               >
                 啟動長連線
               </button>
@@ -3659,18 +3674,18 @@ export function SettingsPage() {
                   await window.subagents?.mcp?.stdioStopAll?.()
                   setMcpSessions('已停止所有 stdio session')
                 }}
-                className="px-3 py-2 rounded border border-white/15 text-xs font-semibold"
+                className={settingsBtnCls}
               >
                 停止全部 session
               </button>
             </div>
             {mcpProbe && (
-              <pre className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-[11px] font-[family-name:var(--font-mono)] text-on-surface-variant whitespace-pre-wrap max-h-40 overflow-y-auto custom-scrollbar">
+              <pre className="custom-scrollbar max-h-40 overflow-y-auto whitespace-pre-wrap rounded-control border border-line bg-inset p-3 text-[11px] font-[family-name:var(--font-mono)] text-on-surface-variant">
                 {mcpProbe}
               </pre>
             )}
             {mcpSessions && (
-              <pre className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-[11px] font-[family-name:var(--font-mono)] text-on-surface-variant whitespace-pre-wrap max-h-32 overflow-y-auto custom-scrollbar mt-2">
+              <pre className="custom-scrollbar mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-control border border-line bg-inset p-3 text-[11px] font-[family-name:var(--font-mono)] text-on-surface-variant">
                 {mcpSessions}
               </pre>
             )}
@@ -3688,7 +3703,7 @@ export function SettingsPage() {
                   {ocCandidates.map((c) => (
                     <div
                       key={c.id}
-                      className="flex items-start gap-2 px-3 py-2 rounded-xl border border-white/10"
+                      className="flex items-start gap-2 rounded-control border border-line bg-inset px-3 py-2"
                     >
                       <span
                         className={`shrink-0 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
@@ -3696,7 +3711,7 @@ export function SettingsPage() {
                             ? 'bg-primary/15 text-primary'
                             : c.applyMode === 'review'
                               ? 'bg-amber-500/15 text-amber-300'
-                              : 'bg-white/10 text-outline'
+                              : 'bg-inset text-outline'
                         }`}
                       >
                         {c.applyMode === 'temporary'
@@ -3788,7 +3803,7 @@ export function SettingsPage() {
               ).map((row) => {
                 const live = settings.pluginOAuthClients?.[row.key] || { clientId: '', clientSecret: '' }
                 return (
-                  <div key={row.key} className="border-b border-white/[0.06] last:border-0 px-4 py-3 space-y-2">
+                  <div key={row.key} className="space-y-2 border-b border-line px-4 py-3 last:border-0">
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <div className="text-[13px] font-semibold text-on-surface capitalize">{row.key}</div>
@@ -3851,7 +3866,7 @@ export function SettingsPage() {
                   listPluginSecretMeta().map((meta) => (
                     <div
                       key={meta.id}
-                      className="flex items-center justify-between gap-2 border-b border-white/[0.05] py-1.5 last:border-0"
+                      className="flex items-center justify-between gap-2 border-b border-line py-1.5 last:border-0"
                     >
                       <span className="font-[family-name:var(--font-mono)] text-on-surface-variant truncate">
                         {meta.id}
@@ -3939,7 +3954,7 @@ export function SettingsPage() {
           </p>
         )}
         <p className="text-[11px] text-outline px-1 mt-2">變更會立即套用，無需儲存。</p>
-      </div>
+      </>
     </ThemePage>
   )
 }
@@ -3979,7 +3994,7 @@ function HostToolCatalogSection() {
         <span className="text-error mx-1">紅框</span>＝工具真的不可用。
       </p>
       {error ? (
-        <div className="rounded-lg border border-error/40 bg-error/10 px-3 py-2 text-[12px] text-error">
+        <div className="rounded-control border border-error/40 bg-error/10 px-3 py-2 text-[12px] text-error">
           工具目錄不可用：{error}。請確認 Pi Core Host 已啟動；此頁不會回退到本機清單。
         </div>
       ) : !catalog ? (
@@ -4017,7 +4032,7 @@ function HostToolCatalogSection() {
                       <span
                         key={entry.name}
                         title={describe(entry)}
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border ${
+                        className={`inline-flex items-center gap-1 rounded-control border px-2 py-1 text-[11px] font-medium ${
                           !entry.available
                             ? 'border-error/50 bg-error/10 text-error'
                             : entry.active
@@ -4050,7 +4065,7 @@ function HostToolCatalogSection() {
 
 function StatChip({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2">
+    <div className="rounded-control border border-line bg-inset px-3 py-2">
       <div className="text-[9px] uppercase tracking-wider text-outline font-semibold">
         {label}
       </div>

@@ -136,6 +136,16 @@ interface SettingsStore {
   importBundle: (json: string) => Promise<{ ok: boolean; message: string }>
 }
 
+function missingCredentialMessage(settings: LlmSettings): string {
+  return isSubscriptionProviderPreset(settings.apiProvider)
+    ? '訂閱連線由 Pi Core Host 提供；此環境沒有 Host。'
+    : 'API key is empty'
+}
+
+function shouldRejectBrowserProbe(settings: LlmSettings): boolean {
+  return isSubscriptionProviderPreset(settings.apiProvider) || !settings.apiKey
+}
+
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   settings: loadLocal(),
   loaded: false,
@@ -310,10 +320,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     // key to probe; its health is the Host's, already returned above in
     // Electron production. This check must precede the key check — subscription
     // connections never carry an apiKey, so "API key is empty" would be a lie.
-    if (isSubscriptionProviderPreset(s.apiProvider)) {
-      return { ok: false, message: '訂閱連線由 Pi Core Host 提供；此環境沒有 Host。' }
+    if (shouldRejectBrowserProbe(s)) {
+      return {
+        ok: false,
+        message: missingCredentialMessage(s),
+      }
     }
-    if (!s.apiKey) return { ok: false, message: 'API key is empty' }
     const m = model || s.model
     try {
       let discoveredModels: string[] = []

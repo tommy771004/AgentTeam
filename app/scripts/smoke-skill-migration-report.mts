@@ -50,14 +50,17 @@ test('an all-success report yields no diagnostic', () => {
 
 test('the bootstrap publishes every attempt, not just the complete one', () => {
   const app = read('src/App.tsx')
+  const syncOwner = read('src/agent/hermes/skillHostSync.ts')
   const bootstrap = app.slice(app.indexOf('function SkillsMigrationBootstrap'))
-  assert.match(bootstrap, /setReport\(/, 'the per-skill outcome reaches a store')
-  // The regression this guards: reading only `every(ok)` and dropping the rest.
-  const publishAt = bootstrap.indexOf('setReport(')
+  assert.match(syncOwner, /setReport\(/, 'the serialized Host sync publishes every per-skill outcome')
+  // The sync owner publishes before resolving. The bootstrap must await it,
+  // then read the published report, and only then decide migration completion.
+  const syncAt = bootstrap.indexOf('await syncSkillsToHost()')
+  const readReportAt = bootstrap.indexOf('getState().report')
   const completeGateAt = bootstrap.indexOf('if (complete)')
-  assert.ok(publishAt !== -1 && completeGateAt !== -1)
-  assert.ok(publishAt < completeGateAt,
-    'the report is published BEFORE the completion gate, so a partial migration still reports')
+  assert.ok(syncAt !== -1 && readReportAt !== -1 && completeGateAt !== -1)
+  assert.ok(syncAt < readReportAt && readReportAt < completeGateAt,
+    'the serialized sync report is read BEFORE the completion gate, so a partial migration still reports')
   assert.match(bootstrap, /unreachable: true/,
     'exhausting the retry budget is itself reported — "Host unreachable" and "migrated fine" must not look alike')
 })

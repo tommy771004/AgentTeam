@@ -257,14 +257,6 @@ await test('permissionAskStore tracks timedOut + runStats for archive', async ()
   assert.match(modal, /resolve\(current\.id, 'deny'\)/)
 })
 
-// ── codeMode worker source must disable fetch ──
-await test('codeMode worker source disables fetch', async () => {
-  const fs = await import('node:fs')
-  const p = path.join(appRoot, 'src/agent/tools/codeMode.ts')
-  const src = fs.readFileSync(p, 'utf8')
-  assert.match(src, /self\.fetch\s*=\s*undefined/)
-})
-
 // ── approvalMode decision: mirrors removed — see smoke-approval-decision.mts ──
 // Real import of decide() / decideApprovalNeed / effectiveApprovalMode lives there.
 
@@ -359,12 +351,9 @@ await test('Phase 2: OpenCode session todo/children/fork map into Thread state',
 await test('Phase 3: MCP access is per-agent allowlist with health/secret owner UX', async () => {
   const fs = await import('node:fs')
   const access = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/mcpAccess.ts'), 'utf8')
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
   assert.match(access, /mcpAgentServers/)
   assert.match(access, /hasOwnProperty\.call\(map, agentId\)/)
-  assert.match(loop, /mcpServersForAgent/)
-  assert.match(loop, /parentMcpAgentId/)
   assert.match(settings, /Per-agent MCP/)
   assert.match(settings, /secret owner/)
 })
@@ -390,8 +379,6 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   assert.match(runtime, /capability\.id !== 'delegate'/)
   assert.match(decision, /Sub Agent 功能目前已關閉/)
   assert.match(delegate, /settings\.subAgentsEnabled !== true/)
-  const regDelegate = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registered/delegate_task.ts'), 'utf8')
-  assert.match(regDelegate, /subAgentsEnabled !== true/)
   assert.match(background, /背景委派未排入/)
   assert.match(settings, /title="啟用 Sub Agent"/)
 })
@@ -409,14 +396,11 @@ await test('Phase 4/5: LSP adapter, provider adoption, and plugin summary stay e
   assert.match(config, /permission 需人工審核/)
 })
 
-await test('custom tools: bash_template always approval-gated; toolLoop passes sideEffect hint', async () => {
+await test('custom tools: bash_template always approval-gated', async () => {
   const fs = await import('node:fs')
   const custom = fs.readFileSync(path.join(appRoot, 'src/agent/tools/customTools.ts'), 'utf8')
   assert.match(custom, /kind === 'bash_template' \|\| tool\.requiresApproval === true/)
   assert.match(custom, /\^\[A-Za-z\]\[A-Za-z0-9_-\]\{0,63\}\$/)
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  assert.match(loop, /sideEffect: Boolean\(custom\)/)
-  assert.match(loop, /sideEffect: Boolean\(ctx\.customMap\.get\(name\)\)/)
 })
 
 await test('side-effect drift guard: every registry tool is read-only OR classified', async () => {
@@ -517,10 +501,8 @@ await test('W1: entry drift guard — no dispatchThreadTask outside controller',
     'src/App.tsx',
     'src/pages/FailedPage.tsx',
     'src/pages/RecordsPage.tsx',
-    'src/pages/LogsPage.tsx',
     'src/pages/SuccessPage.tsx',
-    'src/pages/EventsPage.tsx',
-    'src/pages/AutomationPage.tsx',
+    'src/pages/OpsPage.tsx',
   ]
   for (const f of files) {
     const src = fs.readFileSync(path.join(appRoot, f), 'utf8')
@@ -623,10 +605,7 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
     'src/App.tsx',
     'src/hooks/useSlashExecutor.ts',
     'src/pages/ProtocolsPage.tsx',
-    'src/pages/AutomationPage.tsx',
-    'src/pages/EventsPage.tsx',
     'src/pages/FailedPage.tsx',
-    'src/pages/LogsPage.tsx',
     'src/pages/RecordsPage.tsx',
     'src/pages/SuccessPage.tsx',
     'src/agent/subdesign/workspaceIntegration.ts',
@@ -711,10 +690,8 @@ await test('Ticket 04: lifecycle ownership drift stays blocked at module seams',
     'src/App.tsx',
     'src/hooks/useSlashExecutor.ts',
     'src/pages/ProtocolsPage.tsx',
-    'src/pages/AutomationPage.tsx',
-    'src/pages/EventsPage.tsx',
+    'src/pages/OpsPage.tsx',
     'src/pages/FailedPage.tsx',
-    'src/pages/LogsPage.tsx',
     'src/pages/RecordsPage.tsx',
     'src/pages/SuccessPage.tsx',
     'src/pages/SubDesignPage.tsx',
@@ -791,15 +768,18 @@ await test('Phase 3 item 4/5: unique finalization order; stop does not drain', a
   const a6 = coordinator.indexOf('// 6) queue drain')
   assert.ok(a2 < a3 && a3 < a4, 'finalization step comments stay ordered')
   assert.ok(a5 < a6, 'release still precedes the single drain')
-  // Steps 5/6 moved up to the per-run finalization claim: they are obligations
-  // of holding the claim (a finally), not steps an exception can skip.
-  const gateStart = coordinator.indexOf('export async function finalizeTaskRun')
+  // Steps 5/6 live in the cleanup helper invoked from the claim holder's
+  // finally: they remain obligations an exception cannot skip.
+  const cleanupStart = coordinator.indexOf('async function cleanupFinalization')
+  const gateStart = coordinator.indexOf('async function executeClaimedFinalization')
+  const publicStart = coordinator.indexOf('export async function finalizeTaskRun')
   const sequenceStart = coordinator.indexOf('async function runFinalizationSequence')
-  assert.ok(gateStart >= 0 && sequenceStart > gateStart, 'claim gate wraps a separate sequence')
-  assert.ok(a5 > gateStart && a6 < sequenceStart, 'release/drain live in the claim gate')
+  assert.ok(cleanupStart >= 0 && gateStart > cleanupStart && publicStart > gateStart && sequenceStart > publicStart, 'cleanup, claim gate, public seam and sequence remain separate owners')
+  assert.ok(a5 > cleanupStart && a6 < gateStart, 'release/drain live in the cleanup owner')
+  assert.match(coordinator.slice(gateStart, publicStart), /finally\s*\{[\s\S]*cleanupFinalization/, 'the claim holder finally invokes cleanup')
   assert.ok(a2 > sequenceStart, 'the ordered sequence steps live in the sequence')
   assert.match(coordinator.slice(gateStart, sequenceStart), /finalizationClaims/)
-  assert.match(coordinator.slice(gateStart, a5), /finally\s*\{/, 'release rides a finally')
+  assert.match(coordinator.slice(gateStart, publicStart), /finally\s*\{[\s\S]*cleanupFinalization/, 'release rides the claim holder finally through its cleanup owner')
   assert.doesNotMatch(types, /deferFinalization/)
   assert.doesNotMatch(agent, /deferFinalization/)
   assert.match(agent, /Phase 3 item 5: stop only terminates/)
@@ -1088,9 +1068,8 @@ await test('SubDesign Phase 6: canonical metadata, artifact IPC, bash gate, and 
   const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
   const critique = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/critique.ts'), 'utf8')
   const preview = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/ArtifactPreview.tsx'), 'utf8')
-  const executor = fs.readFileSync(path.join(appRoot, 'src/agent/tools/executor.ts'), 'utf8')
   const toolDefs = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolDefinitions.ts'), 'utf8')
-  const schemas = fs.readFileSync(path.join(appRoot, 'src/agent/tools/schemas.ts'), 'utf8')
+  const hostPack = fs.readFileSync(path.join(appRoot, 'electron/piExtensionPacks/subdesignPack.ts'), 'utf8')
   const capability = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/subDesign.ts'), 'utf8')
   const learning = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
   const preference = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/preference.ts'), 'utf8')
@@ -1139,13 +1118,10 @@ await test('SubDesign Phase 6: canonical metadata, artifact IPC, bash gate, and 
   assert.match(toolDefs, /design_artifact_capture:/)
   assert.match(toolDefs, /design_artifact_tweak:/)
   assert.match(toolDefs, /design_artifact_lint:/)
-  // parameters live in toolDefinitions; schemas re-exports PARAMS view
   assert.match(toolDefs, /expectedMatches/)
   assert.match(toolDefs, /"pptx"/)
   assert.match(toolDefs, /"mp4"/)
-  assert.match(schemas, /toolParameters/)
-  const designExport = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registered/design_artifact_export.ts'), 'utf8')
-  assert.match(designExport, /'pptx' \| 'mp4'/)
+  assert.match(hostPack, /name: 'design_artifact_export'/)
   assert.match(tweak, /exact patch/)
   assert.match(tweak, /requestAsk/)
   assert.match(tweak, /Structured|structured|inferred/)
@@ -1156,8 +1132,7 @@ await test('SubDesign Phase 6: canonical metadata, artifact IPC, bash gate, and 
   assert.match(delivery, /ffmpeg/)
   assert.match(delivery, /單頁摘要/)
   assert.match(delivery, /靜態縮圖/)
-  const designCritique = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registered/design_critique.ts'), 'utf8')
-  assert.match(designCritique, /onSubDesignPass/)
+  assert.match(hostPack, /name: 'design_critique'/)
   assert.match(capability, /design_artifact_capture/)
   assert.match(learning, /subdesign-preference/)
   assert.match(preference, /findLatestPassedSubDesignPreference/)
@@ -1399,7 +1374,7 @@ await test('P1-D: hook rules — deny wins, require-approval forces ask, prefix 
   assert.equal(evaluateHooksMirror(rules, { point: 'afterTool', tool: 'x', toolOk: false }).audits.length, 1)
 })
 
-await test('P1-D: wiring contract — hooks evaluated at all four points; sanitize caps plugin rules', async () => {
+await test('P1-D: active hook owners stay wired; sanitize caps plugin rules', async () => {
   const fs = await import('node:fs')
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
   const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
@@ -1415,9 +1390,6 @@ await test('P1-D: wiring contract — hooks evaluated at all four points; saniti
   assert.match(runX, /evaluateBeforeRunHooks/)
   assert.match(runX, /finalizeTaskRun/)
   assert.match(runX, /sourceKind: opts\.sourceKind/)
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  assert.match(loop, /point: 'afterTool'/)
-  assert.match(loop, /sourceKind: ctx\.sourceKind/)
   const hooks = fs.readFileSync(path.join(appRoot, 'src/agent/hooks.ts'), 'utf8')
   assert.match(hooks, /sanitizeHookRules/)
   assert.match(hooks, /no 'allow' action/i)
@@ -1623,7 +1595,6 @@ await test('Phase 2d: Next_State is consumed once with explicit webhook delivery
 await test('Loop plan: parser/evaluator/iteration contracts are wired', async () => {
   const fs = await import('node:fs')
   const parser = fs.readFileSync(path.join(appRoot, 'src/agent/parser.ts'), 'utf8')
-  const replan = fs.readFileSync(path.join(appRoot, 'src/agent/replan.ts'), 'utf8')
   // Loop Runner deepening (ticket 03): DoD/replan iteration wiring moved to
   // DoD evaluation and iteration are Pi Host orchestration now (ADR-0045); the
   // renderer keeps only Parse and the plan bubble.
@@ -1640,7 +1611,6 @@ await test('Loop plan: parser/evaluator/iteration contracts are wired', async ()
   assert.match(parser, /export function classifyLoopType/)
   assert.match(parser, /export function formatPlanBubble/)
   assert.match(parser, /個\|項\|款\|種/)
-  assert.match(replan, /export function replanCorrectiveSteps/)
 })
 
 await test('Phase 2e: plan bubble preserves source and classification reason', async () => {
@@ -1670,18 +1640,6 @@ await test('Phase 2e: plan bubble preserves source and classification reason', a
   assert.match(queue, /classificationReason: o\.classificationReason/)
 })
 
-// Mirror of replan.ts + chat-lite classify (conversation loop engineering)
-function replanCorrectiveStepsMirror(missing, objective, opts) {
-  const maxSteps = Math.max(1, Math.min(4, opts?.maxSteps ?? 3))
-  const gaps = (missing || []).map((item) => String(item).trim()).filter(Boolean).slice(0, Math.max(1, maxSteps - 1))
-  const sequence =
-    gaps.length > 0
-      ? gaps.map((gap) => `補齊缺口：${gap}`.slice(0, 240))
-      : [`依目標補齊未達標部分：${String(objective || '').slice(0, 120)}`]
-  if (sequence.length < maxSteps) sequence.push('依 Definition of Done 重新驗證並產出完整結果')
-  return sequence.slice(0, maxSteps)
-}
-
 function isChatLiteObjectiveMirror(input) {
   const text = (input || '').trim()
   if (!text || text.length > 100) return false
@@ -1697,14 +1655,6 @@ await test('Loop plan: chat-lite classifies short turns; complex goals do not', 
   assert.equal(isChatLiteObjectiveMirror('什麼是 React？'), true)
   assert.equal(isChatLiteObjectiveMirror('分析 2025 年 AI 市場趨勢並給出報告'), false)
   assert.equal(isChatLiteObjectiveMirror('找 3 個 AI 剪輯工具並比較價格'), false)
-})
-
-await test('Loop plan: replanCorrectiveSteps builds gap-driven steps', () => {
-  const steps = replanCorrectiveStepsMirror(['缺價格欄', '缺第三個工具'], '比較工具', { maxSteps: 3 })
-  assert.equal(steps.length, 3)
-  assert.match(steps[0], /缺價格欄/)
-  assert.match(steps[1], /缺第三個工具/)
-  assert.match(steps[2], /Definition of Done/)
 })
 
 await test('Loop plan: memory relevance, failure learning, unattended turn, and CJK matching are wired', async () => {
@@ -2023,9 +1973,8 @@ await test('ADR3 follow-up: interactive entry points snapshot projectRoot at dis
   assert.match(runContext, /should therefore be unreachable during a real run/)
 })
 
-// ── Phase 0 (grok-build plan G1/G3): LLM resilience + token estimation ──
-// Mirrors agent/llmResilience.ts CircuitBreaker / backoff and
-// agent/tokenEstimate.ts math. Keep in sync with the TS source.
+// ── Phase 0 (grok-build plan G1/G3): LLM resilience ──
+// Mirrors agent/llmResilience.ts CircuitBreaker / backoff.
 
 class MirrorBreaker {
   constructor(cfg, now) {
@@ -2167,170 +2116,6 @@ await test('llm retry: error classification + backoff math', () => {
   assert.equal(parseRetryAfter('LLM HTTP 500: x'), undefined)
 })
 
-await test('token estimate: bytes/4 heuristic + preflight gate', () => {
-  const estimate = (text) => (text ? Math.ceil(new TextEncoder().encode(text).length / 4) : 0)
-  assert.equal(estimate(''), 0)
-  assert.equal(estimate('abcd'), 1)
-  assert.equal(estimate('abcde'), 2)
-  // CJK: 3 bytes/char → 4 chars = 12 bytes = 3 tokens
-  assert.equal(estimate('中文字元'), 3)
-
-  const shouldCompact = (tokens, cw, reserve = 2500) => tokens > Math.max(1024, cw - reserve)
-  assert.equal(shouldCompact(61_000, 64_000), false)
-  assert.equal(shouldCompact(61_501, 64_000), true)
-  assert.equal(shouldCompact(1_025, 2_000), true, 'tiny window floors at 1024')
-  assert.equal(shouldCompact(1_000, 2_000), false)
-})
-
-await test('drift guard: llm.ts routes calls through callWithResilience', async () => {
-  const fs = await import('node:fs')
-  const llm = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
-  assert.match(llm, /callWithResilience\(/)
-  assert.match(llm, /breakerKey\(settings\.baseUrl/)
-  assert.match(llm, /maxAttempts: settings\.llmRetryMaxAttempts/)
-})
-
-await test('drift guard: toolLoop preflights context overflow via tokenEstimate', async () => {
-  const fs = await import('node:fs')
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  const gov = fs.readFileSync(path.join(appRoot, 'src/agent/tools/contextGovernor.ts'), 'utf8')
-  assert.match(loop, /createDefaultContextEngine/)
-  assert.match(loop, /contextEngine\.prepareRound/)
-  assert.match(gov, /createContextGovernor/)
-  assert.match(gov, /resolveContextWindow/)
-  assert.match(gov, /shouldPreflightCompact/)
-  assert.match(gov, /force: true/)
-})
-
-// ── Phase 1 (grok-build plan G2): tool-result pruning + compaction flush ──
-// Mirrors agent/contextPruning.ts. Keep in sync with the TS source.
-
-const HARD_CLEAR_MARKER = '〔工具結果已由 pruning 清除'
-const SOFT_TRIM_MARKER = '…〔pruning 截斷 '
-
-function pruneToolResults(messages, cfg) {
-  cfg = {
-    enabled: true, keepLastNRounds: 3, softTrimThresholdChars: 4000,
-    softTrimHeadChars: 1500, softTrimTailChars: 1500, hardClearAgeRounds: 10, ...cfg,
-  }
-  const stats = { changed: false, softTrimmed: 0, hardCleared: 0, savedChars: 0 }
-  if (!cfg.enabled) return { messages, stats }
-  const totalRounds = messages.filter((m) => m.role === 'assistant' && m.tool_calls?.length).length
-  if (totalRounds === 0) return { messages, stats }
-  let roundIdx = 0
-  const next = messages.map((m) => {
-    if (m.role === 'assistant' && m.tool_calls?.length) { roundIdx += 1; return m }
-    if (m.role !== 'tool' || typeof m.content !== 'string') return m
-    const age = totalRounds - roundIdx
-    if (age < cfg.keepLastNRounds) return m
-    const content = m.content
-    if (content.includes(HARD_CLEAR_MARKER) || content.includes(SOFT_TRIM_MARKER)) return m
-    if (age >= cfg.hardClearAgeRounds) {
-      const replaced = `${HARD_CLEAR_MARKER}（${age} 輪前，原 ${content.length} chars）— 需要此結果時請重新呼叫工具〕`
-      if (replaced.length >= content.length) return m
-      stats.changed = true
-      stats.hardCleared += 1
-      stats.savedChars += content.length - replaced.length
-      return { ...m, content: replaced }
-    }
-    if (content.length > cfg.softTrimThresholdChars) {
-      const head = content.slice(0, cfg.softTrimHeadChars)
-      const tail = content.slice(-cfg.softTrimTailChars)
-      const cut = content.length - head.length - tail.length
-      const trimmed = `${head}\n${SOFT_TRIM_MARKER}${cut} chars（${age} 輪前）〕\n${tail}`
-      if (trimmed.length >= content.length) return m
-      stats.changed = true
-      stats.softTrimmed += 1
-      stats.savedChars += content.length - trimmed.length
-      return { ...m, content: trimmed }
-    }
-    return m
-  })
-  return { messages: stats.changed ? next : messages, stats }
-}
-
-function fcRound(id, toolContent) {
-  return [
-    { role: 'assistant', content: null, tool_calls: [{ id, type: 'function', function: { name: 'bash', arguments: '{}' } }] },
-    { role: 'tool', tool_call_id: id, content: toolContent },
-  ]
-}
-
-await test('pruning: recent keepLastNRounds tool results stay untouched', () => {
-  const big = 'x'.repeat(6000)
-  const messages = [
-    { role: 'user', content: 'go' },
-    ...fcRound('a', big), ...fcRound('b', big), ...fcRound('c', big),
-  ]
-  const { messages: out, stats } = pruneToolResults(messages, { keepLastNRounds: 3 })
-  assert.equal(stats.changed, false)
-  assert.equal(out, messages, 'unchanged input returns same reference')
-})
-
-await test('pruning: old oversized tool result gets head/tail soft-trim', () => {
-  const big = 'H'.repeat(2000) + 'M'.repeat(3000) + 'T'.repeat(2000)
-  const messages = [
-    ...fcRound('a', big),
-    ...fcRound('b', 'ok'), ...fcRound('c', 'ok'), ...fcRound('d', 'ok'),
-  ]
-  const { messages: out, stats } = pruneToolResults(messages)
-  assert.equal(stats.softTrimmed, 1)
-  const pruned = out[1].content
-  assert.ok(pruned.startsWith('H'.repeat(1500)), 'head preserved')
-  assert.ok(pruned.endsWith('T'.repeat(1500)), 'tail preserved')
-  assert.ok(pruned.includes(SOFT_TRIM_MARKER))
-  assert.ok(pruned.length < big.length)
-})
-
-await test('pruning: tool results older than hardClearAgeRounds become placeholders', () => {
-  const rounds = []
-  for (let i = 0; i < 12; i++) rounds.push(...fcRound(`r${i}`, `result-${i} ` + 'z'.repeat(300)))
-  const { messages: out, stats } = pruneToolResults(rounds)
-  assert.ok(stats.hardCleared >= 1)
-  assert.ok(out[1].content.includes(HARD_CLEAR_MARKER), 'oldest round cleared')
-  // FC chain intact: every tool message still has its tool_call_id
-  for (const m of out) {
-    if (m.role === 'tool') assert.ok(m.tool_call_id, 'tool_call_id preserved')
-  }
-  assert.equal(out.filter((m) => m.role === 'assistant').length, 12, 'no messages removed')
-})
-
-await test('pruning: idempotent — second pass changes nothing', () => {
-  const rounds = []
-  for (let i = 0; i < 12; i++) rounds.push(...fcRound(`r${i}`, 'y'.repeat(5000)))
-  const first = pruneToolResults(rounds)
-  assert.equal(first.stats.changed, true)
-  const second = pruneToolResults(first.messages)
-  assert.equal(second.stats.changed, false, 'already-pruned content is skipped')
-})
-
-await test('drift guard: compaction applies pruning and returns pruneStats', async () => {
-  const fs = await import('node:fs')
-  const src = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/compaction.ts'), 'utf8')
-  assert.match(src, /pruneToolResults\(messages, DEFAULT_PRUNING_CONFIG\)/)
-  assert.match(src, /pruneStats\?: PruneStats/)
-})
-
-await test('drift guard: toolLoop wires checkpoint + memory flush + post-compaction recall', async () => {
-  const fs = await import('node:fs')
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  const gov = fs.readFileSync(path.join(appRoot, 'src/agent/tools/contextGovernor.ts'), 'utf8')
-  assert.match(loop, /await saveCompactionCheckpoint/)
-  assert.match(loop, /onPreCompactionFlush/)
-  // Checkpoints are durable main-process state now; the renderer must not keep
-  // a localStorage copy that a quota or LRU could silently reduce.
-  const checkpoint = fs.readFileSync(path.join(appRoot, 'src/agent/compactionCheckpoint.ts'), 'utf8')
-  assert.doesNotMatch(checkpoint, /localStorage/, 'compaction checkpoints must not fall back to renderer storage')
-  assert.doesNotMatch(checkpoint, /MAX_BYTES|MAX_RUNS/, 'durable checkpoints have no quota/LRU degradation path')
-  assert.match(checkpoint, /subagents\?\.checkpoints/, 'checkpoints go through the main-process bridge')
-  assert.match(gov, /壓縮後記憶召回/)
-  assert.match(gov, /onContextUsage/)
-  assert.match(loop, /onContextUsage/)
-  const learning = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/learning.ts'), 'utf8')
-  assert.match(learning, /onPreCompactionFlush\(input/)
-  assert.match(learning, /textSimilarity\(flushText, prev\.text\) >= 0\.85/)
-})
-
 // ── Phase 3 (grok-build plan G6): memory temporal decay + dream gates ──
 // Mirrors agent/hermes/memory.ts decay math and hermes/dream.ts gates.
 
@@ -2411,22 +2196,14 @@ await test('drift guard: plan mode enforced in toolGuard before approvalMode; cl
   assert.match(guard, /planModeToolDecision\(/)
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(coordinator, /clearPlanMode\(runId\)/)
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  assert.match(loop, /ENTER_PLAN_MODE_TOOL \|\| tc\.name === EXIT_PLAN_MODE_TOOL/)
-  assert.match(loop, /unattended/, 'plan tools gated for unattended runs')
 })
 
-await test('drift guard: new hook points are passive-only and wired', async () => {
+await test('drift guard: remaining hook points are passive-only and wired', async () => {
   const fs = await import('node:fs')
   const hooks = fs.readFileSync(path.join(appRoot, 'src/agent/hooks.ts'), 'utf8')
   for (const point of ['permissionDenied', 'beforeCompaction', 'afterCompaction', 'delegateStart', 'delegateEnd', 'userTurn']) {
     assert.match(hooks, new RegExp(`${point}: \\['log', 'notify'\\]`), `${point} passive-only`)
   }
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  const gov = fs.readFileSync(path.join(appRoot, 'src/agent/tools/contextGovernor.ts'), 'utf8')
-  assert.match(gov, /beforeCompaction/)
-  assert.match(gov, /afterCompaction/)
-  assert.match(loop, /evaluateHook|beforeCompaction|afterCompaction/)
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   assert.match(delegate, /'delegateStart'/)
   assert.match(delegate, /emitDelegateHook\('delegateEnd', r\.ok\)/)
@@ -2453,17 +2230,12 @@ await test('drift guard: delegate capability_mode stacks on role blocks; wait pr
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   assert.match(delegate, /blockedToolsForCapabilityMode\(input\.capabilityMode\)/)
   assert.match(delegate, /roleBlocked/)
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  assert.match(loop, /capability_mode/)
-  assert.match(loop, /parseCapabilityMode\(/)
   const jobs = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
   assert.match(jobs, /export async function waitBackgroundJobs/)
   assert.match(jobs, /wait_any/)
-  const regStatus = fs.readFileSync(path.join(appRoot, 'src/agent/tools/registered/delegate_status.ts'), 'utf8')
-  assert.match(regStatus, /waitBackgroundJobs\(/)
 })
 
-await test('drift guard: metrics recorded at coordinator settle + guard/loop bumps', async () => {
+await test('drift guard: metrics recorded at coordinator settle + guard decisions', async () => {
   const fs = await import('node:fs')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   // Settle moved onto the per-run finalization claim, so the once-per-run
@@ -2480,11 +2252,6 @@ await test('drift guard: metrics recorded at coordinator settle + guard/loop bum
   const guard = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolGuard.ts'), 'utf8')
   assert.match(guard, /bumpRunMetric\(opts\.runId, 'toolAsks'\)/)
   assert.match(guard, /'toolDenials'\)/)
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  const gov = fs.readFileSync(path.join(appRoot, 'src/agent/tools/contextGovernor.ts'), 'utf8')
-  assert.match(gov, /compactions/)
-  assert.match(loop, /bumpMetric|compactions/)
-  assert.match(loop, /'llmRetries'\)/)
 })
 
 // ── Phase 5 遞延項 (G9b/c/d + G10 monitor): wiring drift guards ──
@@ -2497,11 +2264,8 @@ await test('drift guard: persona resolution — role > persona > parent; unknown
   assert.match(delegate, /roleResolved\.source === 'role'\s*\?\s*roleResolved\.model\s*:\s*persona\?\.model/)
 })
 
-await test('drift guard: resume_from requires finished job; worktree isolation falls back safely', async () => {
+await test('drift guard: worktree isolation falls back safely', async () => {
   const fs = await import('node:fs')
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  assert.match(loop, /resume_from 失敗:找不到背景委派/)
-  assert.match(loop, /尚未完成/)
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   assert.match(delegate, /worktreeCreate\?\.\(/)
   assert.match(delegate, /回退共用 workspace/)
@@ -2538,10 +2302,10 @@ await test('drift guard: the Pi path\'s live timeline is the record projection, 
   assert.match(feed, /runTimelineRows\(recordView, draftText\)/,
     'and its rows are the fold over that projection — not a second synthesis')
   assert.match(feed, /const hasRecordTimeline = recordTimeline\.length > 0/)
-  assert.match(panel, /projectLiveTimeline\(activity\.recordEntries, activity\.recordTotal\)/,
-    'the right-side progress panel reads the same ordered Host record')
-  assert.match(panel, /\) : recordTimeline\.length > 0 \? \(/,
-    'record activity wins over the synthetic runner step in the progress panel')
+  assert.doesNotMatch(panel, /projectLiveTimeline|RunTimelineList|recordTimeline/,
+    'the right-side task panel must not duplicate the center timeline')
+  assert.match(panel, /title="任務步驟"/,
+    'the right-side panel owns structured task progress instead')
   assert.match(panel, /\) : !isPiHost && agent\.steps\.length > 0 \? \(/,
     'the fixed Pi Core Host turn is never presented as if it were live progress')
   assert.doesNotMatch(panel, /\{agent\.progress\}%/,

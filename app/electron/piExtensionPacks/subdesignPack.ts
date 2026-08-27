@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join, relative, resolve, isAbsolute } from 'node:path'
 import { registerPiExtensionPack, type PiPackTool, type PiToolContext } from '../piToolHost.ts'
@@ -18,6 +18,7 @@ import {
   normalizeSubDesignCritique,
 } from '../../src/agent/subdesign/critique.ts'
 import { validateSubDesignArtifactManifest } from '../../src/agent/subdesign/artifactManifest.ts'
+import { validatePinnedPatchOperation, type PinnedPatchScope } from '../../src/agent/subdesign/pinnedPatchScope.ts'
 import { jsonOk, structuredFailure } from './packResults.ts'
 
 /**
@@ -200,6 +201,7 @@ async function patchManifestFiles(
   root: string,
   manifest: { entry: string; supportingFiles: string[] },
   operations: Array<{ path?: unknown; find?: unknown; replace?: unknown; expectedMatches?: unknown }>,
+  scope?: PinnedPatchScope,
 ): Promise<{ ok: true; paths: string[] } | { ok: false; error: string }> {
   const allowedPaths = new Set([manifest.entry, ...manifest.supportingFiles])
   const nextByPath = new Map<string, string>()
@@ -217,6 +219,16 @@ async function patchManifestFiles(
       const bytes = await readFile(file)
       if (bytes.includes(0)) return { ok: false, error: `patch 只支援文字 artifact file：${relativePath}` }
       content = bytes.toString('utf8')
+    }
+    if (scope) {
+      if (relativePath !== scope.path) return { ok: false, error: `pinned patch 只允許修改 ${scope.path}。` }
+      const scoped = validatePinnedPatchOperation({
+        content,
+        selectors: scope.selectors,
+        find,
+        expectedMatches,
+      })
+      if (!scoped.ok) return { ok: false, error: scoped.reason }
     }
     const matches = content.split(find).length - 1
     if (matches !== expectedMatches) return { ok: false, error: `patch ${relativePath} 找到 ${matches} 個匹配，預期 ${expectedMatches} 個；為避免誤改已停止。` }
@@ -238,6 +250,7 @@ const designArtifactPatch: PiPackTool = {
     type: 'object',
     properties: {
       artifactId: { type: 'string' },
+      scopeId: { type: 'string', description: 'Pinned-comment run 提供的 Host patch scope id' },
       operations: { type: 'array', description: 'Each: {path, find, replace, expectedMatches}', items: { type: 'object' } },
     },
     required: ['artifactId', 'operations'],
@@ -249,11 +262,27 @@ const designArtifactPatch: PiPackTool = {
     const validation = await loadManifest(ctx, artifactId)
     if (!validation.ok) return structuredFailure(`artifact manifest invalid：${validation.errors.join('；')}`)
     if (!Array.isArray(args.operations) || !args.operations.length) return structuredFailure('operations 必須至少包含一個 exact replacement。')
-    const patched = await patchManifestFiles(ctx.cwd, validation.manifest, args.operations as never)
+    const scopePath = insideRoot(ctx.cwd, `${METADATA_ROOT}/pin-scopes/${artifactId}.json`)!
+    const rawScope = await readJson(scopePath) as Partial<PinnedPatchScope> | undefined
+    let scope: PinnedPatchScope | undefined
+    if (rawScope) {
+      if (rawScope.schemaVersion !== 1 || rawScope.artifactId !== artifactId || rawScope.revision !== validation.manifest.revision || !Array.isArray(rawScope.selectors)) {
+        return structuredFailure('pinned patch scope 與目前 artifact revision 不一致；請重新選取 pin。')
+      }
+      if (Date.parse(String(rawScope.expiresAt || '')) <= Date.now()) {
+        return structuredFailure('pinned patch scope 已過期；請重新選取 pin。')
+      }
+      if (!args.scopeId || args.scopeId !== rawScope.scopeId) {
+        return structuredFailure('此 artifact 有啟用中的 pinned patch scope；scopeId 缺少或不一致。')
+      }
+      scope = rawScope as PinnedPatchScope
+    }
+    const patched = await patchManifestFiles(ctx.cwd, validation.manifest, args.operations as never, scope)
     if (!patched.ok) return structuredFailure(patched.error)
     const next = { ...validation.manifest, revision: validation.manifest.revision + 1, updatedAt: new Date().toISOString() }
     const manifestPath = insideRoot(ctx.cwd, `${ARTIFACT_ROOT}/${artifactId}/manifest.json`)!
     await withFileMutationQueue(manifestPath, () => writeFile(manifestPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8'))
+    if (scope) await unlink(scopePath).catch(() => undefined)
     return jsonOk({ artifactId, revision: next.revision, paths: patched.paths })
   },
 }

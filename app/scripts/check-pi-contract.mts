@@ -28,40 +28,6 @@ const registeredFiles = readdirSync(registeredDir).filter((file) => file.endsWit
  * is the explicit act of extending the contract.
  */
 const FROZEN_REGISTERED = [
-  'ask_user.ts',
-  'codegraph_callers.ts',
-  'codegraph_explore.ts',
-  'codegraph_impact.ts',
-  'codegraph_status.ts',
-  'datetime_now.ts',
-  'delegate_status.ts',
-  'delegate_task.ts',
-  'design_artifact_capture.ts',
-  'design_artifact_export.ts',
-  'design_artifact_lint.ts',
-  'design_artifact_patch.ts',
-  'design_artifact_register.ts',
-  'design_artifact_tweak.ts',
-  'design_brief_update.ts',
-  'design_critique.ts',
-  'design_critique_note.ts',
-  'design_direction_select.ts',
-  'design_gate_contrast.ts',
-  'design_gates.ts',
-  'http_fetch.ts',
-  'json_extract_lite.ts',
-  'mcp_call.ts',
-  'mcp_list_tools.ts',
-  'memory_append.ts',
-  'memory_get.ts',
-  'memory_search.ts',
-  'memory_set.ts',
-  'message_send.ts',
-  'monitor.ts',
-  'table_parse.ts',
-  'tool_output_read.ts',
-  'update_plan.ts',
-  'web_search.ts',
   'workspace_delete.ts',
   'workspace_diff.ts',
   'workspace_download.ts',
@@ -72,7 +38,7 @@ const FROZEN_REGISTERED = [
 assert.deepEqual(registeredFiles, [...new Set(FROZEN_REGISTERED)].sort(), 'agent/tools/registered is frozen: a NEW renderer tool registration appeared — the Host catalog is the only catalog (ADR-0028). Remove it, or extend this contract explicitly.')
 
 // ── Guard 2: removed equivalents stay removed ──
-for (const removed of ['workspace_read.ts', 'workspace_list.ts', 'workspace_grep.ts', 'workspace_glob.ts', 'workspace_write.ts', 'bash.ts', 'skill_list.ts', 'skill_load.ts', 'skill_save.ts']) {
+for (const removed of ['workspace_read.ts', 'workspace_list.ts', 'workspace_grep.ts', 'workspace_glob.ts', 'workspace_write.ts', 'bash.ts', 'skill_list.ts', 'skill_load.ts', 'skill_save.ts', 'codegraph_explore.ts', 'codegraph_status.ts', 'codegraph_impact.ts', 'codegraph_callers.ts']) {
   const path = join(registeredDir, removed)
   assert.equal(existsSync(path), false, `${removed} was removed after parity evidence (ADR-0027 / issue 18); it must not return`)
 }
@@ -262,69 +228,25 @@ const runByGate = new Set((gateBody.match(/scripts\/[A-Za-z0-9._-]+\.(?:mts|mjs)
   .map((path) => path.slice('scripts/'.length)))
 const testFiles = readdirSync(join(root, 'scripts'))
   .filter((file) => /^smoke-.*\.(mts|mjs)$/.test(file) || file.startsWith('qualify-'))
-/**
- * Test files already orphaned when this guard was written.
- *
- * LISTED, not excused: 90 of 189 test files were unreachable from any gate.
- * Wiring them in means fixing whatever has rotted in each, which is issue 20's
- * work. Holding them here makes the guard bite on any NEW orphan immediately,
- * and shrinking this list is the definition of done.
+/** Release/credential qualifications are intentionally invoked by an operator.
+ * Every deterministic smoke still has to be reachable from the main gate.
  */
-const KNOWN_UNGATED_TESTS = new Set([
+const MANUAL_QUALIFICATION_TESTS = new Set([
   'qualify-pi-host.mts',
   'qualify-pi-sync.mts',
   'qualify-release.mts',
   // ADR-0052 ticket 06: real-credential qualification — needs a machine with
   // Codex/Claude CLI login, so it stays out of the chain by that ticket's own
   // decision (「兩者需真機憑證，不進 smoke chain」); manual runners:
-  // npm run qualify:subscription-snapshot / qualify:subscription-e2e.
+  // npm run qualify:subscription-snapshot / qualify:subscription-e2e /
+  // qualify:subscription-oauth-rotation.
   'qualify-subscription-e2e.mts',
+  'qualify-subscription-oauth-rotation-e2e.mts',
   'qualify-subscription-snapshot.mts',
-  'smoke-cli-doctor.mts',
-  'smoke-coordinator-browser.mjs',
-  'smoke-external-cli-primary-seam.mts',
-  'smoke-install-contract.mjs',
-  'smoke-pi-bash-single-owner.mts',
-  'smoke-pi-capabilities.mts',
-  'smoke-pi-child-runner.mts',
-  'smoke-pi-core-vendor.mts',
-  'smoke-pi-electron-cutover.mts',
-  'smoke-pi-equivalent-tools.mts',
-  'smoke-pi-extensions.mts',
-  'smoke-pi-external-sources.mts',
-  'smoke-pi-host-capabilities.mts',
-  'smoke-pi-host-direct-contract-validation.mts',
-  'smoke-pi-host-memory.mts',
-  'smoke-pi-host-queue-settlement.mts',
-  'smoke-pi-host-release-evidence.mts',
-  'smoke-pi-host-steer-queue.mts',
-  'smoke-pi-host-tool-registry.mts',
-  'smoke-pi-marketplace-pi-only.mts',
-  'smoke-pi-memory.mts',
-  'smoke-pi-orchestration-extension.mts',
-  'smoke-pi-policy.mts',
-  'smoke-pi-projection-merge.mts',
-  'smoke-pi-queue.mts',
-  'smoke-pi-resources.mts',
-  'smoke-pi-settings-migration.mts',
-  'smoke-pi-settings.mts',
-  'smoke-pi-skill-resource-view.mts',
-  'smoke-pi-sync-evidence.mts',
-  'smoke-pi-sync-gate.mts',
-  'smoke-pi-sync-release-record.mts',
-  'smoke-pi-sync-workflow.mts',
-  'smoke-pi-thread-hydration.mts',
-  'smoke-pi-user-config.mts',
-  'smoke-recovery-e2e.mjs',
-  'smoke-release-evidence.mjs',
-  'smoke-run-journal.mts',
-  'smoke-security.mts',
-  'smoke-update-migration-e2e.mjs',
-  'smoke-update-migration.mts',
 ])
-const newOrphans = testFiles.filter((file) => !runByGate.has(file) && !KNOWN_UNGATED_TESTS.has(file))
+const newOrphans = testFiles.filter((file) => !runByGate.has(file) && !MANUAL_QUALIFICATION_TESTS.has(file))
 assert.deepEqual(newOrphans, [], `these test files are not reachable from any gate, so nothing runs them: ${newOrphans.join(', ')}. Wire them into npm run smoke (issue 20).`)
-const nowGated = [...KNOWN_UNGATED_TESTS].filter((file) => runByGate.has(file))
-assert.deepEqual(nowGated, [], `these files are now gated and must be removed from KNOWN_UNGATED_TESTS: ${nowGated.join(', ')}`)
+const nowGated = [...MANUAL_QUALIFICATION_TESTS].filter((file) => runByGate.has(file))
+assert.deepEqual(nowGated, [], `these files are now gated and must be removed from MANUAL_QUALIFICATION_TESTS: ${nowGated.join(', ')}`)
 
-console.log('Pi contract drift guards passed: registrations frozen, equivalents removed, skills discovery single-owner, guidance agrees with the gate, settings fields have consumers, every test file is gated')
+console.log('Pi contract drift guards passed: registrations frozen, equivalents removed, skills discovery single-owner, guidance agrees with the gate, settings fields have consumers, every automated test is gated and manual qualifications are explicit')

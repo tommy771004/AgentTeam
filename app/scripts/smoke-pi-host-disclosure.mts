@@ -181,6 +181,29 @@ try {
   assert.equal(preloadedSettled.result.settlement, 'answered')
   assert.match(requests.at(-1) || '', /web_search/, 'a preloaded capability advertises its tools in the system prompt of the same run')
 
+  // Exercise CodeGraph through the shipped Host Protocol. The temporary
+  // workspace has no index, which is a readable result rather than an error.
+  send(23, 'turn/submit', {
+    sessionId,
+    runId: 'codegraph-contract-run',
+    cwd: workspace,
+    prompt: '載入程式圖工具',
+    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'full', unattended: true },
+    preloadedCapabilities: ['codegraph'],
+  })
+  const codegraphTurn = await waitFor(23)
+  assert.equal(codegraphTurn.error, undefined)
+  send(24, 'tools/pack', {
+    cwd: workspace,
+    sessionId,
+    contractRevision: Number(codegraphTurn.result?.contractRevision),
+    name: 'codegraph_explore',
+    arguments: { query: 'runTask', limit: 7 },
+  })
+  const codegraphUnindexed = await waitFor(24)
+  assert.equal(codegraphUnindexed.error, undefined, 'unindexed CodeGraph is a status result')
+  assert.match(JSON.stringify(codegraphUnindexed.result), /尚未建立索引/)
+
   // ── Code Mode nests extension tools through the same gate (issue 13) ──
   send(30, 'tools/code', {
     cwd: workspace,

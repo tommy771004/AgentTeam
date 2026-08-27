@@ -37,6 +37,16 @@ export function OpsPage() {
   const capacityActive = useAgentStore((state) => state.canStartRun().active)
   const capacityLimit = useAgentStore((state) => state.canStartRun().limit)
   const followUpMode = useSettingsStore((state) => state.settings.followUpMode)
+  const outboundRunIds = useMemo(
+    () => [...new Set([...activeRunIds, ...Object.keys(runStates)])],
+    [activeRunIds, runStates],
+  )
+  const [selectedOutboundRunId, setSelectedOutboundRunId] = useState('')
+
+  useEffect(() => {
+    if (selectedOutboundRunId && outboundRunIds.includes(selectedOutboundRunId)) return
+    setSelectedOutboundRunId(activeRunIds[0] || outboundRunIds[0] || '')
+  }, [activeRunIds, outboundRunIds, selectedOutboundRunId])
 
   useEffect(() => {
     hydrateRunQueue()
@@ -134,7 +144,22 @@ export function OpsPage() {
         </section>
       )}
 
-      <OutboundRunView runId={snapshot.activeRuns[0]?.runId} />
+      {outboundRunIds.length > 0 ? (
+        <label className="glass-panel flex items-center gap-3 rounded-xl px-5 py-3 text-xs text-on-surface-variant">
+          <span className="shrink-0 font-semibold text-on-surface">Outbound run</span>
+          <select
+            value={selectedOutboundRunId}
+            onChange={(event) => setSelectedOutboundRunId(event.target.value)}
+            className="min-w-0 flex-1 rounded-lg border border-line bg-surface-container-high px-3 py-2 font-[family-name:var(--font-mono)] text-xs text-on-surface"
+          >
+            {outboundRunIds.map((runId) => (
+              <option key={runId} value={runId}>{runId}{activeRunIds.includes(runId) ? ' · active' : ' · retained'}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
+      <OutboundRunView runId={selectedOutboundRunId} />
 
       <ComplianceReportExport activeRunIds={activeRunIds} />
 

@@ -351,11 +351,7 @@ export function KnowledgePage() {
             </p>
           )}
           {!cgStatus?.installed && (
-            <p className="text-[10px] text-outline leading-relaxed">
-              未偵測到 codegraph。安裝：
-              <code className="mx-1 text-primary/80">npm i -g @colbymchenry/codegraph</code>
-              後在專案執行 init，或開新終端跑官方 install script。
-            </p>
+            <CodegraphInstallAction onInstalled={refreshCg} />
           )}
         </div>
 
@@ -534,6 +530,42 @@ export function KnowledgePage() {
         </div>
       </div>
     </ThemePage>
+  )
+}
+
+function CodegraphInstallAction({ onInstalled }: { onInstalled: () => Promise<void> }) {
+  const [installing, setInstalling] = useState(false)
+  const [message, setMessage] = useState('')
+
+  const install = async () => {
+    if (!window.subagents?.codegraph?.install) {
+      setMessage('自動安裝需要 Electron。')
+      return
+    }
+    setInstalling(true)
+    setMessage('正在透過 npm 安裝 CodeGraph CLI…')
+    try {
+      const result = await window.subagents.codegraph.install()
+      setMessage(result.ok ? `安裝完成${result.version ? ` · ${result.version}` : ''}` : result.error || '安裝失敗')
+      if (result.ok) await onInstalled()
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[10px] text-outline leading-relaxed">
+      <span>未偵測到 CodeGraph CLI。</span>
+      <button
+        type="button"
+        disabled={installing}
+        onClick={() => void install()}
+        className="px-2.5 py-1 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 disabled:opacity-40"
+      >
+        {installing ? '安裝中…' : '安裝 CodeGraph CLI'}
+      </button>
+      {message && <span className="text-amber-200/90">{message}</span>}
+    </div>
   )
 }
 

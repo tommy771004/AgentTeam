@@ -141,6 +141,15 @@ export function serializePiSkill(input: { name: string; description: string; bod
 
 export type PiSkillsState = { version: 1; skills: Record<string, { status: PiSkillStatus; displayName?: string }> }
 
+type RendererSkillCandidate = { name?: unknown; description?: unknown; body?: unknown; status?: unknown }
+
+type SkillSyncContext = {
+  dir: string
+  state: PiSkillsState
+  claimed: Map<string, string>
+  attempted: Set<string>
+}
+
 async function readSkillsState(skillsDir: string): Promise<PiSkillsState> {
   try {
     const raw = JSON.parse(await readFile(join(skillsDir, 'skills-state.json'), 'utf8')) as PiSkillsState
@@ -153,6 +162,48 @@ async function readSkillsState(skillsDir: string): Promise<PiSkillsState> {
 
 async function writeSkillsState(skillsDir: string, state: PiSkillsState): Promise<void> {
   await writeFile(join(skillsDir, 'skills-state.json'), `${JSON.stringify(state, null, 2)}\n`, 'utf8')
+}
+
+async function syncRendererSkill(
+  context: SkillSyncContext,
+  candidate: RendererSkillCandidate,
+  index: number,
+): Promise<{ result: PiSkillSyncResult; synced?: PiSyncedSkill }> {
+  const fallbackName = typeof candidate?.name === 'string' && candidate.name.trim()
+    ? candidate.name.trim()
+    : `skill-${index + 1}`
+  try {
+    const name = slugifyPiSkillName(fallbackName)
+    context.attempted.add(name)
+    const description = typeof candidate.description === 'string' ? candidate.description : ''
+    const body = typeof candidate.body === 'string' ? candidate.body : ''
+    const status: PiSkillStatus = candidate.status === 'pinned' || candidate.status === 'archived'
+      ? candidate.status
+      : 'active'
+    if (!description && !body) throw new Error('skill requires a description or a body')
+    const previousOwner = context.claimed.get(name)
+    if (previousOwner && previousOwner !== fallbackName) {
+      throw new Error(`skill slug ${name} collides between "${previousOwner}" and "${fallbackName}"`)
+    }
+    const existing = context.state.skills[name]
+    if (existing?.displayName && existing.displayName !== fallbackName && !context.claimed.has(name)) {
+      throw new Error(`skill name collides with an existing skill: ${name}`)
+    }
+    context.claimed.set(name, fallbackName)
+    const skillDir = join(context.dir, safeSegment(name))
+    const filePath = join(skillDir, 'SKILL.md')
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(filePath, serializePiSkill({ name, description, body, status }), 'utf8')
+    context.state.skills[name] = { status, displayName: fallbackName }
+    return {
+      result: { name: fallbackName, ok: true, status, filePath, slug: name },
+      synced: { name, description, status, filePath },
+    }
+  } catch (error) {
+    return {
+      result: { name: fallbackName, ok: false, error: error instanceof Error ? error.message : String(error) },
+    }
+  }
 }
 
 /** The pinned names the turn should expand up front (issue 16). */
@@ -216,7 +267,7 @@ export async function loadPinnedPiSkillBodies(agentDir: string | undefined, skil
  */
 export async function syncPiSkillsFromRenderer(
   agentDir: string | undefined,
-  payload: { name?: unknown; description?: unknown; body?: unknown; status?: unknown }[],
+  payload: RendererSkillCandidate[],
 ): Promise<{ skillsDir: string; results: PiSkillSyncResult[]; synced: PiSyncedSkill[] }> {
   const dir = resolvePiSkillsDir(agentDir)
   if (!dir) throw new Error('Pi skills directory is not available')
@@ -230,33 +281,11 @@ export async function syncPiSkillsFromRenderer(
   // Slugs the payload ATTEMPTED, including ones whose write later failed —
   // reconciliation may only remove what the payload no longer mentions.
   const attempted = new Set<string>()
+  const context: SkillSyncContext = { dir, state, claimed, attempted }
   for (const [index, candidate] of payload.entries()) {
-    const fallbackName = typeof candidate?.name === 'string' && candidate.name.trim() ? candidate.name.trim() : `skill-${index + 1}`
-    try {
-      const displayName = fallbackName
-      const name = slugifyPiSkillName(displayName)
-      attempted.add(name)
-      const description = typeof candidate.description === 'string' ? candidate.description : ''
-      const body = typeof candidate.body === 'string' ? candidate.body : ''
-      const rawStatus = candidate.status === 'pinned' || candidate.status === 'archived' ? candidate.status : 'active'
-      if (!description && !body) throw new Error('skill requires a description or a body')
-      const previousOwner = claimed.get(name)
-      if (previousOwner && previousOwner !== displayName) throw new Error(`skill slug ${name} collides between "${previousOwner}" and "${displayName}"`)
-      const existing = state.skills[name]
-      if (existing?.displayName && existing.displayName !== displayName && !claimed.has(name)) {
-        throw new Error(`skill name collides with an existing skill: ${name}`)
-      }
-      claimed.set(name, displayName)
-      const skillDir = join(dir, safeSegment(name))
-      const filePath = join(skillDir, 'SKILL.md')
-      await mkdir(skillDir, { recursive: true })
-      await writeFile(filePath, serializePiSkill({ name, description, body, status: rawStatus }), 'utf8')
-      state.skills[name] = { status: rawStatus, displayName }
-      results.push({ name: displayName, ok: true, status: rawStatus, filePath, slug: name })
-      synced.push({ name, description, status: rawStatus, filePath })
-    } catch (error) {
-      results.push({ name: fallbackName, ok: false, error: error instanceof Error ? error.message : String(error) })
-    }
+    const outcome = await syncRendererSkill(context, candidate, index)
+    results.push(outcome.result)
+    if (outcome.synced) synced.push(outcome.synced)
   }
   // Removal pass: state entries absent from the payload were deleted (or
   // renamed) on the renderer side. Only entries THIS path wrote before are

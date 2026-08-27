@@ -8,7 +8,7 @@
 
 - [x] Pi Host Protocol 新增依 `seq` 定址的分頁讀取方法，回傳有界的一頁與游標
 - [x] 檢視開在尾端；到達已載入範圍頂端時載入前一頁，載入中有明確狀態
-- [~] prepend 之後既有列身分不變（以 `seq` 為 key）；**未**做視窗虛擬化 —— 見下方
+- [x] prepend 之後既有列身分不變（以 `seq` 為 key），且只掛載可見範圍＋overscan；真機量測見 `trajectory-review-closure/evidence/measurement-pass.md`
 - [x] 每列可讀出所屬回合與步驟；選取可看該步的 token 用量與時間
 - [x] 進行中的列顯示執行中但不顯示時長；尚未載入的前段以中性標示，不給未知歷史捏造長度
 - [x] 串流時貼底，往上捲即暫停跟隨
@@ -32,3 +32,5 @@ The panel opens at the tail, follows new rows while pinned to the bottom, and st
 **Not wired into a route yet.** `TrajectoryPanel` is feature-detected (`window.subagents?.piHost?.sessions?.record`) and returns null without a Host, so it is safe to mount anywhere; choosing where it belongs in the app's navigation is a product decision rather than part of this ticket.
 
 **Update (2026-08-26):** both residuals now have an owning effort: `.scratch/trajectory-review-closure/`. The panel is mounted as a PanelSection in InlineRunPanel with lazy session binding; windowing is a pure module (`computeTrajectoryWindow`) with deterministic smokes on the gate; the measurement pass remains deliberately human (see that effort's issue 03) and will close the `[~]` here when its evidence lands.
+
+**Closed (2026-08-27):** the real renderer measurement is recorded in `.scratch/trajectory-review-closure/evidence/measurement-pass.md`: after ten older-page loads the windowed panel mounted 165 DOM descendants／27 rows versus the full-map baseline's 1,653／275. Measured row stride (28.5 px) supports `TRAJECTORY_ROW_HEIGHT=28`; five rapid round trips showed no blank flash with `OVERSCAN=8`.

@@ -35,6 +35,7 @@ assert.match(app, /activity\.appendText\(update\.delta, update\.runId\)/)
 assert.match(app, /activity\.push\(/)
 
 const processFeed = await readFile(resolve(root, 'src/components/RunProcessFeed.tsx'), 'utf8')
+const runPanel = await readFile(resolve(root, 'src/components/InlineRunPanel.tsx'), 'utf8')
 assert.match(processFeed, /aria-expanded=\{processOpen\}/)
 assert.match(processFeed, /收合執行細節/)
 // The responding copy is owned by the lifecycle seam and reaches the feed as
@@ -43,8 +44,10 @@ const runLifecycleSource = await readFile(resolve(root, 'src/agent/runLifecycle.
 assert.match(runLifecycleSource, /正在撰寫回覆/)
 assert.match(processFeed, /statusLine/)
 assert.match(processFeed, /推理摘要/)
-assert.match(processFeed, /任務進度/)
-assert.match(processFeed, /tasks\.map/)
+assert.match(processFeed, /執行時間軸/)
+assert.doesNotMatch(processFeed, /任務進度/)
+assert.match(runPanel, /title="任務步驟"/)
+assert.match(runPanel, /tasks\.map/)
 assert.match(processFeed, /e\.kind === 'status'/)
 
 const preload = await readFile(resolve(root, 'electron/preload.ts'), 'utf8')

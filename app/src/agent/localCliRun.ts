@@ -17,8 +17,19 @@ import {
 import {
   effectiveOutboundGuardFromSettings,
   inspectOutbound,
+  isProtectionActive,
   readBuildFlavorFromEnv,
 } from './outbound/outboundGate.ts'
+import { connectionIdForCliProvider } from './outbound/providerConnectionId.ts'
+import {
+  BUILTIN_BASELINE_POLICY,
+  emptySupplementalPolicy,
+} from './outbound/policySchema.ts'
+import { compileProviderSecurityProfile } from './outbound/policyMerge.ts'
+import {
+  loadCompanyProfileViaOutboundIpc,
+  prepareLlmEgressMessages,
+} from './outbound/llmEgress.ts'
 import {
   detectFilesystemSandboxCapability,
   allocateForbiddenCanaryPath,
@@ -36,6 +47,41 @@ export type LocalCliAttachmentPayload = {
   kind?: 'image' | 'text' | 'binary'
   dataUrl?: string
   textContent?: string
+}
+
+function logCliAttachments(
+  attachments: LocalCliAttachmentPayload[] | undefined,
+  onLog: ((line: string) => void) | undefined,
+): void {
+  if (!attachments?.length) return
+  const imageCount = attachments.filter((item) => item.kind === 'image' || item.dataUrl).length
+  onLog?.(
+    `attachments: ${attachments.length}（圖 ${imageCount} · 檔 ${attachments.length - imageCount}）→ 寫入專案 .subagents/chat-attachments/`,
+  )
+}
+
+async function prepareCliOutboundPrompt(opts: {
+  prompt: string
+  effectiveMode: ReturnType<typeof effectiveOutboundGuardFromSettings>
+  connectionId: string
+  runId?: string
+}): Promise<{ ok: true; prompt: string } | { ok: false; reason: string }> {
+  if (!isProtectionActive(opts.effectiveMode)) return { ok: true, prompt: opts.prompt }
+  const prepared = await prepareLlmEgressMessages({
+    effectiveMode: opts.effectiveMode,
+    messages: [{ role: 'user', content: opts.prompt }],
+    baselineProfile: compileProviderSecurityProfile(
+      BUILTIN_BASELINE_POLICY,
+      emptySupplementalPolicy(opts.connectionId),
+    ),
+    loadCompanyProfile: () => loadCompanyProfileViaOutboundIpc(opts.connectionId),
+    cacheKey: opts.runId
+      ? `${opts.runId}:${opts.connectionId}`
+      : `norun:${opts.connectionId}`,
+  })
+  return prepared.ok
+    ? { ok: true, prompt: prepared.messages[0]?.content || '' }
+    : { ok: false, reason: prepared.reason }
 }
 
 export async function runPromptViaLocalCli(opts: {
@@ -83,13 +129,7 @@ export async function runPromptViaLocalCli(opts: {
   if (opts.cwd) opts.onLog?.(`cwd: ${opts.cwd}`)
   if (opts.model) opts.onLog?.(`model: ${opts.model}`)
   if (opts.depth) opts.onLog?.(`depth: ${opts.depth}`)
-  if (opts.attachments?.length) {
-    const nImg = opts.attachments.filter((a) => a.kind === 'image' || a.dataUrl).length
-    const nOther = opts.attachments.length - nImg
-    opts.onLog?.(
-      `attachments: ${opts.attachments.length}（圖 ${nImg} · 檔 ${nOther}）→ 寫入專案 .subagents/chat-attachments/`,
-    )
-  }
+  logCliAttachments(opts.attachments, opts.onLog)
   const approval = resolveCliApproval(
     opts.kind,
     opts.approvalMode,
@@ -110,6 +150,7 @@ export async function runPromptViaLocalCli(opts: {
     /* pure tests without store */
   }
   const effectiveMode = effectiveOutboundGuardFromSettings(gateSettings)
+  const connectionId = connectionIdForCliProvider({ id: opts.kind })
 
   let prompt = opts.prompt
   let cwd = opts.cwd
@@ -128,6 +169,23 @@ export async function runPromptViaLocalCli(opts: {
     })
     cwd = viewMeta.viewRoot
   }
+
+  const protectedPrompt = await prepareCliOutboundPrompt({
+    prompt,
+    effectiveMode,
+    connectionId,
+    runId: opts.runId,
+  })
+  if (!protectedPrompt.ok) {
+    return {
+      ok: false,
+      output: '',
+      command: '',
+      error: `出站資料閘門：無法建立公司保護設定檔（${protectedPrompt.reason}）`,
+      runId: opts.runId,
+    }
+  }
+  prompt = protectedPrompt.prompt
 
   // Required CLI needs verified filesystem sandbox; optional/demo may mark unverified.
   let isolationStatus = detectFilesystemSandboxCapability()
@@ -179,6 +237,7 @@ export async function runPromptViaLocalCli(opts: {
     payload: cliPayload,
     effectiveMode,
     buildFlavor: readBuildFlavorFromEnv(),
+    providerConnectionId: connectionId,
   })
   if (gate.action === 'block') {
     return {

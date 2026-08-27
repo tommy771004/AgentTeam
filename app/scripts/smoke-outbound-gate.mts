@@ -20,6 +20,8 @@ import {
   type OutboundGuardMode,
 } from '../src/agent/outbound/outboundGate.ts'
 import { chatCompletionWithTools, DEFAULT_LLM_SETTINGS } from '../src/agent/llm.ts'
+import { runPromptViaLocalCli } from '../src/agent/localCliRun.ts'
+import { useSettingsStore } from '../src/store/settingsStore.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -126,6 +128,42 @@ await test('inspectOutbound: CLI channel uses same gate contract', () => {
   })
   assert.equal(r.action, 'allow')
   if (r.action === 'allow') assert.equal(r.inspected, true)
+})
+
+await test('external CLI transport receives a sanitized prompt when protection is active', async () => {
+  const previousWindow = globalThis.window
+  const previousSettings = useSettingsStore.getState().settings
+  const secret = 'sk-live-cli-secret'
+  let transportedPrompt = ''
+  useSettingsStore.setState({
+    settings: {
+      ...previousSettings,
+      outboundGuardDeploy: 'demo',
+      outboundProtectionEnabled: true,
+    },
+  })
+  globalThis.window = {
+    subagents: {
+      cli: {
+        runAgent: async (payload) => {
+          transportedPrompt = payload.prompt
+          return { ok: true, output: 'ok', command: 'mock' }
+        },
+      },
+    },
+  } as typeof window
+  try {
+    const result = await runPromptViaLocalCli({
+      kind: 'codex',
+      prompt: `deploy with api_key=${secret}`,
+    })
+    assert.equal(result.ok, true)
+    assert.doesNotMatch(transportedPrompt, new RegExp(secret))
+    assert.match(transportedPrompt, /PROTECTED_EXCLUSION/)
+  } finally {
+    useSettingsStore.setState({ settings: previousSettings })
+    globalThis.window = previousWindow
+  }
 })
 
 await test('wiring: llm.ts and localCliRun call inspectOutbound before transport', () => {

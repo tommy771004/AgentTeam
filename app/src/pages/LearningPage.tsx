@@ -20,6 +20,36 @@ const SECTIONS = [
   { id: 'plugins', label: '擴充能力', icon: 'extension' },
 ]
 
+function SkillPinButton({
+  name,
+  pinned,
+  pin,
+  unpin,
+}: {
+  name: string
+  pinned: boolean
+  pin: (name: string) => Promise<void>
+  unpin: (name: string) => Promise<void>
+}) {
+  if (pinned) {
+    return (
+      <button type="button" onClick={() => void unpin(name)} className="text-xs text-outline hover:text-on-surface">
+        取消釘選
+      </button>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void pin(name)}
+      className="text-xs text-primary"
+      title="釘選後每次執行都會自動展開到系統提示，不需關鍵字匹配"
+    >
+      釘選（自動載入）
+    </button>
+  )
+}
+
 const SECTION_IDS = new Set(SECTIONS.map((s) => s.id))
 
 const META: Record<string, { title: string; subtitle: string }> = {
@@ -278,24 +308,12 @@ export function LearningPage() {
                       </button>
                     ) : (
                       <div className="flex items-center gap-3">
-                        {selected.meta.status === 'pinned' ? (
-                          <button
-                            type="button"
-                            onClick={() => void unpinSkill(selected.meta.name)}
-                            className="text-xs text-outline hover:text-on-surface"
-                          >
-                            取消釘選
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => void pinSkill(selected.meta.name)}
-                            className="text-xs text-primary"
-                            title="釘選後每次執行都會自動展開到系統提示，不需關鍵字匹配"
-                          >
-                            釘選（自動載入）
-                          </button>
-                        )}
+                        <SkillPinButton
+                          name={selected.meta.name}
+                          pinned={selected.meta.status === 'pinned'}
+                          pin={pinSkill}
+                          unpin={unpinSkill}
+                        />
                         <button
                           type="button"
                           onClick={() => void removeSkill(selected.meta.name)}

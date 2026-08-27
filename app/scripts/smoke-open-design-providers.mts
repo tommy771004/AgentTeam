@@ -14,7 +14,7 @@ import { DEFAULT_EXPERIMENTAL_SURFACE_SETTINGS, normalizeExperimentalSurfaceSett
 import { storybookAvailability, getStorybookContext, clearStorybookCache } from '../src/agent/subdesign/providers/storybookProvider.ts'
 import { cdtAvailability, cdtToProviderEvidence, chromeDevToolsEvidenceAllowsPass, normalizeCdtFixtureRaw } from '../src/agent/subdesign/providers/chromeDevToolsProvider.ts'
 import { createHarnessFakeSession, harnessAvailability, normalizeHarnessFixture } from '../src/agent/subdesign/providers/harnessProvider.ts'
-import { mcpAppsAvailability, validateBridgeMessage, validateSurfaceDeclaration, isToolAllowed } from '../src/agent/subdesign/providers/mcpAppsProvider.ts'
+import { mcpAppsAvailability, validateBridgeMessage, validateSurfaceDeclaration, isToolAllowed, parseMcpToolCoordinate } from '../src/agent/subdesign/providers/mcpAppsProvider.ts'
 import { SURFACE_STATUS_LABELS, surfaceFallsBack } from '../src/agent/subdesign/surfaceStatus.ts'
 import { createStreamingEnvelope, appendStreamingUpdate, finalizeEnvelope, reconcileUpdates, canRender } from '../src/agent/subdesign/streamingEnvelope.ts'
 import {
@@ -217,6 +217,8 @@ await test('mcp-apps: validation rejects untrusted origin / disallowed tool / ma
   assert.equal(decl.ok,true)
   if(decl.ok) assert.equal(isToolAllowed(decl.decl,'tool_a'),true)
   if(decl.ok) assert.equal(isToolAllowed(decl.decl,'tool_evil'),false)
+  assert.deepEqual(parseMcpToolCoordinate('github.create_issue'), { extensionId: 'github', toolName: 'create_issue' })
+  assert.equal(parseMcpToolCoordinate('missing-coordinate'), null)
   const mal=validateBridgeMessage({v:999,surfaceId:'',kind:'unknown',action:''})
   assert.equal(mal.ok,false)
   const nav=validateBridgeMessage({v:1,surfaceId:'s1',kind:'form',action:'x',payload:{navigate:'https://evil.com'}})
@@ -264,6 +266,19 @@ await test('mcp-apps: real fallback options, distinct states, no placeholder cho
   assert.match(studio,/onSelectDirection\(directionId\)/)
   assert.match(studio,/onStatusChange/)
   assert.match(studio,/pushRunActivity/)
+})
+
+await test('mcp-apps: allowlisted tool calls cross the approval store and Host MCP pack',()=>{
+  const surface=fs.readFileSync(path.join(appRoot,'src/components/subdesign/McpAppSurface.tsx'),'utf8')
+  const preload=fs.readFileSync(path.join(appRoot,'electron/preload.ts'),'utf8')
+  const main=fs.readFileSync(path.join(appRoot,'electron/main.ts'),'utf8')
+  assert.doesNotMatch(surface,/Host would proxy here/)
+  assert.match(surface,/requestAsk\(\{/)
+  assert.match(surface,/callMcpAppTool/)
+  assert.match(surface,/action: 'tool_result'/)
+  assert.match(preload,/subdesign:mcpAppToolCall/)
+  assert.match(main,/ipcMain\.handle\('subdesign:mcpAppToolCall'/)
+  assert.match(main,/callPackTool\('mcp_call'/)
 })
 
 await test('streaming envelope: ordered updates, duplicate/out-of-order, cancel, late event',()=>{

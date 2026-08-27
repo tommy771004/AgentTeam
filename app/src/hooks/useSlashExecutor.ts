@@ -825,7 +825,7 @@ export function useSlashExecutor() {
       case 'automation':
       case 'cron':
       case 'schedule':
-        navigate('/automation')
+        navigate('/ops?tab=automation')
         return
       case 'docs':
       case 'manual':

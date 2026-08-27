@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 02
 
-**Status:** 需人工處理
+**Status:** resolved
 
 本票本質是 spec 明文規定的人工證據（「量測 pass 是人工證據，不是 smoke」，比照 release qualification No-Go 慣例）。代理交付：fixture 產生器、量測程序文件、以及一切可機器證明的半部（見 01）。真機量測與 overscan 定案需有人在實際 app 操作。
 
@@ -12,8 +12,8 @@
 
 - [x] fixture 帳本產生器存在且可重跑。
 - [x] 量測程序文件存在：步驟、要量的數字、判讀方式。
-- [ ] 證據文件（含 before/after DOM 節點數與環境說明）落在本目錄。
-- [ ] overscan 預設由量測結果背書（或維持預設並記錄理由）。
+- [x] 證據文件（含 before/after DOM 節點數與環境說明）落在本目錄。
+- [x] overscan 預設由量測結果背書（或維持預設並記錄理由）。
 - [x] turn-record-fidelity #10 的 `[~]` 項更新為指向本 effort 證據。（指向已補；勾選以證據落地為準）
 
 ## Comments
@@ -25,6 +25,13 @@
 - trf#10 已補指向註記。
 
 **剩餘兩框需真機操作**（DevTools DOM 計數＋主觀捲動品質），依 spec 屬人工證據，fail-closed：無數字不勾。
+
+**2026-08-27 — 真機量測完成。**
+
+- 使用真實 Vite renderer 的 `#/trajectory-measurement` route，在同一頁以相同 80,000-entry fixture 並排比較 windowed 與 full-map baseline。
+- 載入更早 10 次後，中段掛載量為 165 nodes／27 rows 對 1,653 nodes／275 rows；windowed DOM 維持有界。
+- 實測列高 24.5 px、列距 28.5 px，故 `TRAJECTORY_ROW_HEIGHT=28` 維持；快速上下 5 次未見空白閃爍，`OVERSCAN=8` 維持。
+- 完整環境、方法與數字見 [evidence/measurement-pass.md](../evidence/measurement-pass.md)。
 
 ## Comments
 

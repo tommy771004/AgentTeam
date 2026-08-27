@@ -5,10 +5,10 @@
  *
  * Every interactive run-starting entry point (composer, slash, continueGoal ACK,
  * SubDesign) now snapshots the active project at dispatch time into
- * RuntimeOverrides.projectRoot, which engine.ts/toolLoop.ts thread through as
- * context.projectRoot on every tool call — see docs/adr/0003-concurrent-run-lock-removal.md.
+ * RuntimeOverrides.projectRoot. The surviving workspace compatibility handlers
+ * consume it as context.projectRoot — see docs/adr/0003-concurrent-run-lock-removal.md.
  * The UI-store fallback below should therefore be unreachable during a real run;
- * it only exists for genuinely legacy direct callers outside the engine.
+ * it only exists for the frozen compatibility handlers and diagnostic smokes.
  *
  * Ticket 18: Restricted Project View root is a single resolution order:
  * main viewRoot(runId) → local pin → explicit → UI store. Bound view always

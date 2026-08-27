@@ -44,15 +44,32 @@ function assertDegrade(panel: string): void {
   )
 }
 
+function assertMeasurementRouteIsDevOnly(app: string): void {
+  assert.ok(
+    app.includes("const DevTrajectoryMeasurement = import.meta.env.DEV"),
+    'trajectory measurement 元件必須由 DEV 條件控制的 lazy import 載入',
+  )
+  assert.ok(
+    app.includes("import.meta.env.DEV &&\n    window.location.hash === '#/trajectory-measurement'"),
+    'trajectory measurement route 必須在 production fail closed',
+  )
+  assert.ok(
+    !app.includes("import { DevTrajectoryMeasurement } from './DevTrajectoryMeasurement'"),
+    'production bundle 不得透過 static import 帶入量測 fixture',
+  )
+}
+
 // --- positive: today's tree ----------------------------------------------------
 
 const container = read('components/InlineRunPanel.tsx')
 const panel = read('components/TrajectoryPanel.tsx')
 const windowModule = read('agent/trajectoryWindow.ts')
+const app = read('App.tsx')
 
 assertMounted(container)
 assertWindowed(panel)
 assertDegrade(panel)
+assertMeasurementRouteIsDevOnly(app)
 
 assert.ok(
   windowModule.includes('export function computeTrajectoryWindow') &&
@@ -79,5 +96,8 @@ function expectRed(name: string, run: () => void): void {
 expectRed('unmount the panel', () => assertMounted(container.replace('<TrajectoryPanel', '<div data-was-panel')))
 expectRed('map every loaded row', () => assertWindowed(panel.replace('mountedRows.map', 'view?.rows.map(')))
 expectRed('delete the feature-detect', () => assertDegrade(panel.replace('piHost?.sessions?.record', 'piHost?.sessions')))
+expectRed('expose measurement route in production', () => assertMeasurementRouteIsDevOnly(
+  app.replace("import.meta.env.DEV &&\n    window.location.hash === '#/trajectory-measurement'", "window.location.hash === '#/trajectory-measurement'"),
+))
 
 console.log('smoke-trajectory-panel-mounted: green')

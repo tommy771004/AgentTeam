@@ -11,7 +11,7 @@ import { FakeExternalCliClock, type ExternalCliClock } from '../src/agent/extern
 import { runLocalCliAgent, type LocalCliRunInput } from '../electron/localCliRunner.ts'
 import type { BashResult } from '../electron/shellBridge.ts'
 
-if (typeof globalThis.localStorage === 'undefined') {
+if (typeof globalThis.localStorage?.setItem !== 'function') {
   const values = new Map<string, string>()
   ;(globalThis as typeof globalThis & { localStorage: Storage }).localStorage = {
     getItem: (key: string) => values.get(key) || null,

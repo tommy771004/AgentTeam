@@ -30,7 +30,7 @@ import {
   type ExperimentalSurfaceSettings,
   type StorybookProviderSettings,
 } from './providers/providerSettings.ts'
-import { buildPinnedCommentContext, parsePinnedCommentPayload } from './pinnedComments.ts'
+import { buildPinnedCommentContext, parsePinnedCommentPayload, type SubDesignPinnedComment } from './pinnedComments.ts'
 import { deriveSubDesignWorkspace, type SubDesignWorkspaceViewModel } from './workspaceProjection.ts'
 import { orchestrationFromAgent } from '../runLifecycle.ts'
 import type { SubDesignWorkspaceHostEventListener } from './workspaceHostEvents.ts'
@@ -215,6 +215,11 @@ export type SubDesignWorkspaceDependencies = {
   navigate: (path: string) => void
   hydrateProject?: (request: SubDesignWorkspaceHydrationRequest) => Promise<void>
   restoreArtifact?: (artifactId: string, revision: number, projectRoot?: string) => Promise<{ ok: true; artifact: SubDesignArtifact } | { ok: false; errors: string[] }>
+  preparePinnedPatchScope?: (input: {
+    artifact: { id: string; title?: string; revision: number }
+    pins: SubDesignPinnedComment[]
+    projectRoot?: string
+  }) => Promise<{ ok: true; scopeId: string } | { ok: false; error: string }>
   refreshProviderState?: (projectRoot?: string, isCurrent?: () => boolean) => Promise<SubDesignWorkspaceProviderProjection>
   saveStorybookProviderSettings?: (
     value: Pick<StorybookProviderSettings, 'enabled' | 'endpoint'>,
@@ -860,10 +865,17 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       const briefId = state.routeBriefId
       const brief = briefId ? deps.findBrief(briefId) : null
       if (!brief) return commandFailure('missing-brief', '目前沒有可執行的 SubDesign brief。')
-      if (state.runsByBriefId[brief.id]?.phase === 'starting') {
+      if (state.runsByBriefId[brief.id]?.phase === 'starting' || deps.readPresentation?.(brief.id)?.runIsLive === true) {
         return commandFailure('busy', 'SubDesign 已有一個 run 正在準備中。')
       }
-      const objective = buildPinnedCommentContext(input.artifact, parsed.pins)
+      if (!deps.preparePinnedPatchScope) return commandFailure('failed', 'Pin 修正需要 Electron Host scoped patch 支援。')
+      const scope = await deps.preparePinnedPatchScope({
+        artifact: input.artifact,
+        pins: parsed.pins,
+        projectRoot: state.projectRoot || undefined,
+      })
+      if (!scope.ok) return commandFailure('invalid', scope.error)
+      const objective = buildPinnedCommentContext(input.artifact, parsed.pins, scope.scopeId)
       return runBrief(brief, objective)
     },
 

@@ -204,13 +204,16 @@ html[data-theme='light'] .glass-panel {
 html[data-theme='light'] .material-sidebar,
 html[data-theme='light'] aside.sidebar-panel {
   /* 液態玻璃（淺色）— 以淺色表面為基底的半透明材質 */
-  --sidebar-glass-tint: rgba(251, 252, 250, 0.6);
+  --sidebar-glass-tint: rgba(251, 252, 250, 0.54);
   --sidebar-glass-sheen: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.42),
-    transparent 26%
+    rgba(255, 255, 255, 0.62),
+    rgba(255, 255, 255, 0.12) 24%,
+    transparent 46%
   );
-  --sidebar-glass-edge: rgba(255, 255, 255, 0.5);
+  --sidebar-glass-edge: rgba(255, 255, 255, 0.66);
+  --sidebar-glass-glow: rgba(255, 255, 255, 0.34);
+  --sidebar-glass-shadow: rgba(43, 55, 48, 0.1);
   border-color: var(--color-line);
 }
 
@@ -307,22 +310,66 @@ html[data-theme='light'] .app-panel {
 .material-sidebar {
   /* 液態玻璃 — 半透明 tint + 背景 blur/saturate + 邊緣高光（specular edge）。
      實體模式由 data-sidebar-solid='true' 覆寫為不透明。 */
-  --sidebar-glass-tint: rgba(20, 24, 21, 0.64);
+  --sidebar-glass-tint: rgba(20, 24, 21, 0.54);
   --sidebar-glass-sheen: linear-gradient(
     180deg,
-    rgba(52, 60, 55, 0.2),
-    transparent 26%
+    rgba(84, 98, 89, 0.24),
+    rgba(48, 58, 52, 0.08) 24%,
+    transparent 48%
   );
-  --sidebar-glass-edge: rgba(237, 242, 237, 0.05);
+  --sidebar-glass-edge: rgba(237, 242, 237, 0.1);
+  --sidebar-glass-glow: rgba(225, 244, 233, 0.1);
+  --sidebar-glass-shadow: rgba(0, 0, 0, 0.22);
+  isolation: isolate;
+  overflow: hidden;
   background:
     var(--sidebar-glass-sheen),
     var(--sidebar-glass-tint);
-  backdrop-filter: blur(32px) saturate(160%);
-  -webkit-backdrop-filter: blur(32px) saturate(160%);
+  backdrop-filter: blur(38px) saturate(180%);
+  -webkit-backdrop-filter: blur(38px) saturate(180%);
   border-right: 1px solid var(--color-line);
   box-shadow:
     inset 1px 0 0 var(--sidebar-glass-edge),
-    inset 0 1px 0 var(--sidebar-glass-edge);
+    inset 0 1px 0 var(--sidebar-glass-edge),
+    12px 0 32px var(--sidebar-glass-shadow);
+}
+
+/* Refractive highlights make the sidebar read as one continuous glass sheet. */
+html:not([data-sidebar-solid='true']) .sidebar-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(140px 240px at 0% 8%, var(--sidebar-glass-glow), transparent 72%),
+    radial-gradient(180px 320px at 104% 54%, color-mix(in srgb, var(--color-primary) 7%, transparent), transparent 74%),
+    linear-gradient(90deg, var(--sidebar-glass-edge), transparent 7%, transparent 92%, var(--sidebar-glass-edge));
+  opacity: 0.9;
+}
+
+html:not([data-sidebar-solid='true']) .sidebar-panel::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: 0;
+  width: 1px;
+  pointer-events: none;
+  background: linear-gradient(180deg, var(--sidebar-glass-edge), transparent 42%, var(--sidebar-glass-edge));
+}
+
+.sidebar-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Reliable Electron drag surfaces. Interactive controls remain `no-drag`. */
+.page-window-drag-strip {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 38%, transparent), transparent);
+}
+
+.app-window-titlebar {
+  -webkit-app-region: drag;
 }
 
 .material-header {
@@ -979,25 +1026,6 @@ html[data-theme='light'] .agent-summary-trace { border-color: rgba(15, 23, 42, 0
 .agent-chat-expand:hover { color: var(--color-primary-fixed); }
 html[data-theme='light'] .agent-chat-rewind:hover { background: rgba(15, 23, 42, 0.055); }
 
-/* Context and recommendations carry provenance before action: show the
-   repeated-use signal, then make accepting or deferring equally legible. */
-.agent-suggestion-panel { box-shadow: inset 0 1px 0 var(--color-line); }
-.agent-suggestion-card {
-  transition: border-color 150ms ease, background 150ms ease;
-}
-.agent-suggestion-card:hover {
-  border-color: color-mix(in srgb, var(--color-secondary) 35%, var(--color-line));
-  background: color-mix(in srgb, var(--color-secondary) 6%, transparent);
-}
-.agent-suggestion-signal { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-secondary) 16%, transparent); }
-.agent-suggestion-accept,
-.agent-suggestion-dismiss {
-  transition: transform 150ms var(--ease-spring), filter 150ms ease, background 150ms ease;
-}
-.agent-suggestion-accept:hover { filter: brightness(1.12); }
-.agent-suggestion-dismiss:hover { background: rgba(255, 255, 255, 0.06); }
-.agent-suggestion-accept:active,
-.agent-suggestion-dismiss:active { transform: scale(0.97); }
 .agent-attachment-image {
   overflow: hidden;
   border-radius: 9px;
@@ -1015,9 +1043,6 @@ html[data-theme='light'] .agent-chat-rewind:hover { background: rgba(15, 23, 42,
   background: var(--color-hover-2);
   color: var(--color-on-surface);
 }
-html[data-theme='light'] .agent-suggestion-card:hover { background: color-mix(in srgb, var(--color-secondary) 5%, transparent); }
-html[data-theme='light'] .agent-suggestion-dismiss:hover { background: rgba(15, 23, 42, 0.05); }
-
 /* Compact project context behaves like a source chip: enough provenance to
    orient the user, with richer repository detail kept one click away. */
 .agent-project-picker,
@@ -1412,24 +1437,6 @@ html:not([data-sidebar-solid='true']) .sidebar-panel {
 .agent-user-bubble {
   background: var(--color-field);
   box-shadow: none;
-}
-
-.agent-suggestion-panel {
-  box-shadow: none;
-}
-
-.agent-suggestion-card:hover {
-  border-color: var(--color-line-strong);
-  background: var(--color-hover-2);
-  transform: none;
-}
-
-.agent-suggestion-signal {
-  box-shadow: inset 0 0 0 1px var(--color-line);
-}
-
-html[data-theme='light'] .agent-suggestion-card:hover {
-  background: var(--color-hover-2);
 }
 
 html[data-theme='light'] .agent-composer {

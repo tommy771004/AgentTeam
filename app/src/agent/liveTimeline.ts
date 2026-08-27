@@ -127,6 +127,48 @@ export type RunTimelineRow = {
   | { kind: 'notice'; content: string }
 )
 
+type TrajectoryRow = TrajectoryView['rows'][number]
+type TrajectoryToolRow = Extract<TrajectoryRow, { kind: 'tool' }>
+
+function appendOrMergeToolRow(
+  rows: RunTimelineRow[],
+  indexes: Map<string, number>,
+  row: TrajectoryToolRow,
+): void {
+  const existing = indexes.get(row.callId)
+  if (existing === undefined) {
+    indexes.set(row.callId, rows.length)
+    rows.push({
+      id: row.id,
+      seq: row.seq,
+      turn: row.turn,
+      step: row.step,
+      kind: 'tool',
+      tool: row.tool,
+      callId: row.callId,
+      ...(row.timing ? { timing: row.timing } : {}),
+      ...(row.settlement ? { settlement: row.settlement } : {}),
+      ...(row.detail ? { detail: row.detail } : {}),
+      ...(row.title ? { title: row.title } : {}),
+      ...(row.added !== undefined ? { added: row.added } : {}),
+      ...(row.removed !== undefined ? { removed: row.removed } : {}),
+      ...(row.approval ? { approval: row.approval } : {}),
+      ...(row.approvalReason ? { approvalReason: row.approvalReason } : {}),
+    })
+    return
+  }
+  const merged = rows[existing]
+  if (merged.kind !== 'tool') return
+  rows[existing] = {
+    ...merged,
+    ...(row.settlement ? { settlement: row.settlement } : {}),
+    ...(merged.detail ? {} : row.detail ? { detail: row.detail } : {}),
+    ...(merged.approval ? {} : row.approval ? { approval: row.approval } : {}),
+    ...(merged.approvalReason ? {} : row.approvalReason ? { approvalReason: row.approvalReason } : {}),
+    ...(row.timing ? { timing: row.timing } : {}),
+  }
+}
+
 /**
  * The rows a run's timeline shows.
  *
@@ -160,38 +202,7 @@ export function runTimelineRows(view: TrajectoryView, draft?: string): RunTimeli
         rows.push({ ...base, kind: 'notice', content: row.content })
         break
       case 'tool': {
-        const existing = toolRowIndex.get(row.callId)
-        if (existing === undefined) {
-          toolRowIndex.set(row.callId, rows.length)
-          rows.push({
-            ...base,
-            kind: 'tool',
-            tool: row.tool,
-            callId: row.callId,
-            ...(row.settlement ? { settlement: row.settlement } : {}),
-            ...(row.detail ? { detail: row.detail } : {}),
-            ...(row.title ? { title: row.title } : {}),
-            ...(row.added !== undefined ? { added: row.added } : {}),
-            ...(row.removed !== undefined ? { removed: row.removed } : {}),
-            // The approval decision rides the invocation's own line (the
-            // conversation projection attached it there); keep it through the fold.
-            ...(row.approval ? { approval: row.approval } : {}),
-            ...(row.approvalReason ? { approvalReason: row.approvalReason } : {}),
-          })
-          break
-        }
-        const merged = rows[existing]
-        if (merged.kind !== 'tool') break
-        rows[existing] = {
-          ...merged,
-          ...(row.settlement ? { settlement: row.settlement } : {}),
-          // The call's own detail (its path) is the better label; a result
-          // only fills the gap when the call never carried one.
-          ...(merged.detail ? {} : row.detail ? { detail: row.detail } : {}),
-          ...(merged.approval ? {} : row.approval ? { approval: row.approval } : {}),
-          ...(merged.approvalReason ? {} : row.approvalReason ? { approvalReason: row.approvalReason } : {}),
-          ...(row.timing ? { timing: row.timing } : {}),
-        }
+        appendOrMergeToolRow(rows, toolRowIndex, row)
         break
       }
       default:

@@ -199,7 +199,8 @@ assert.match(entrySource, /initialSnapshot, persist, refreshSubscriptionConfig\)
 assert.match(entrySource, /subscriptionCatalog:\s*publishedCatalog\.catalog/, 'config carries exactly the publication decision')
 assert.match(entrySource, /subscriptionCatalogStale: true/, 'the stale marker rides only when the fallback fired')
 const protocolSource = await readFile(resolve(import.meta.dirname, '../electron/piHostProtocol.ts'), 'utf8')
-assert.match(protocolSource, /input\?\.method === 'settings\/get' && refreshConfig/, 'settings/get refreshes Host facts before returning its snapshot')
+assert.match(protocolSource, /method === 'settings\/get' \|\| method === 'turn\/submit'/, 'settings/get remains classified as requiring fresh Host facts')
+assert.match(protocolSource, /await refreshHostConfigForRequest\(state, input, refreshConfig\)/, 'the server refreshes Host facts before dispatching settings/get')
 assert.match(protocolSource, /PI_HOST_PROTOCOL_VERSION = 4 as const/, 'ADR-0052 rides protocol v4')
 assert.match(protocolSource, /requestedVersion !== PI_HOST_PROTOCOL_VERSION && requestedVersion !== 3 && requestedVersion !== 2/, 'v2/v3 peers stay readable across the v4 bump')
 assert.match(protocolSource, /subscriptionCatalog\?: readonly SubscriptionProviderCatalog\[\]/, 'snapshot config type carries the catalog')
@@ -219,7 +220,8 @@ assert.match(pickerSource, /onChange\(e\.target\.value\)/, 'selection writes the
 const productionSource = await readFile(resolve(import.meta.dirname, '../src/agent/piProduction.ts'), 'utf8')
 assert.match(productionSource, /model: 'model',/, 'the Host settings mapping stays an identity map for model ids')
 const storeSource = await readFile(resolve(import.meta.dirname, '../src/store/settingsStore.ts'), 'utf8')
-assert.match(storeSource, /isSubscriptionProviderPreset\(s\.apiProvider\)/, 'the browser test-connection path refuses subscription probes fail-closed')
+assert.match(storeSource, /shouldRejectBrowserProbe\(s\)/, 'the browser test-connection path refuses subscription probes fail-closed')
+assert.match(storeSource, /isSubscriptionProviderPreset\(settings\.apiProvider\) \|\| !settings\.apiKey/, 'the refusal helper covers both subscription and missing-key probes')
 
 // ── sanitizeModelRow is THE single row guard (ticket 03) ───────────────────
 const sanitized = sanitizeModelRow({ id: ' m2 ', label: 'M2', contextWindow: 1000, reasoning: true })
@@ -361,7 +363,8 @@ assert.ok(!storeSourceRecheck.includes('訂閲'), 'the variant 閲 must not appe
 assert.match(storeSourceRecheck, /訂閱連線由 Pi Core Host 提供/, 'the honest subscription message stays')
 // Ordering contract: the subscription branch is checked BEFORE the key check.
 assert.ok(
-  storeSourceRecheck.indexOf('isSubscriptionProviderPreset(s.apiProvider)') < storeSourceRecheck.indexOf("message: 'API key is empty'"),
+  storeSourceRecheck.indexOf('shouldRejectBrowserProbe(s)')
+    < storeSourceRecheck.indexOf('message: missingCredentialMessage(s)'),
   'no-Host must be judged before no-key',
 )
 

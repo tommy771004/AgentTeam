@@ -163,6 +163,7 @@ import {
   codegraphDetect,
   codegraphExplore,
   codegraphImpact,
+  codegraphInstall,
   codegraphInit,
   codegraphNode,
   codegraphQuery,
@@ -195,6 +196,9 @@ import {
 } from '../src/agent/subdesign/artifactManifest'
 import { writeLearningExport } from './learningExportWrite.ts'
 import { normalizeSubDesignCritique, critiqueAllowsDeliver } from '../src/agent/subdesign/critique'
+import { parsePinnedCommentPayload } from '../src/agent/subdesign/pinnedComments'
+import { createPinnedPatchScope, resolvePinnedHtmlRanges } from '../src/agent/subdesign/pinnedPatchScope'
+import { parseMcpToolCoordinate } from '../src/agent/subdesign/providers/mcpAppsProvider'
 import { isSubDesignMetadataKind, type SubDesignMetadataKind } from '../src/agent/subdesign/metadataKinds'
 import type {
   SubDesignArtifact,
@@ -2223,6 +2227,8 @@ ipcMain.handle('codegraph:status', async (_evt, projectRoot?: string) =>
   codegraphStatus(projectRoot || workspaceRoot()),
 )
 
+ipcMain.handle('codegraph:install', async () => codegraphInstall())
+
 ipcMain.handle('codegraph:init', async (_evt, projectRoot?: string) =>
   codegraphInit(projectRoot || workspaceRoot()),
 )
@@ -2603,6 +2609,46 @@ function artifactFile(root: string, relativePath: string): string {
   const realFile = fs.realpathSync(file)
   if (!isPathInside(realRoot, realFile)) throw new Error(`artifact symlink escapes workspace：${relativePath}`)
   return realFile
+}
+
+function preparePinnedPatchScope(input: {
+  artifact: unknown
+  pins: unknown
+  projectRoot?: string
+}) {
+  const submitted = validateSubDesignArtifactManifest(input.artifact)
+  if (!submitted.ok) return { ok: false as const, error: `artifact manifest invalid：${submitted.errors.join('；')}` }
+  const parsedPins = parsePinnedCommentPayload({ pins: input.pins })
+  if (!parsedPins.ok) return { ok: false as const, error: parsedPins.errors.join('；') }
+  const root = workspaceRootFor(input.projectRoot)
+  const manifestPath = resolveWorkspacePath(
+    `${SUBDESIGN_ARTIFACT_ROOT}/${safeSubDesignMetadataId(submitted.manifest.id)}/manifest.json`,
+    root,
+  )
+  const canonical = validateSubDesignArtifactManifest(JSON.parse(fs.readFileSync(manifestPath, 'utf8')))
+  if (!canonical.ok) return { ok: false as const, error: `Host artifact manifest invalid：${canonical.errors.join('；')}` }
+  if (canonical.manifest.revision !== submitted.manifest.revision) {
+    return { ok: false as const, error: `artifact revision 已變更：目前為 ${canonical.manifest.revision}。請重新選取 pin。` }
+  }
+  const content = fs.readFileSync(artifactFile(root, canonical.manifest.entry), 'utf8')
+  const selectors = parsedPins.pins.map((pin) => pin.selector)
+  const resolved = resolvePinnedHtmlRanges(content, selectors)
+  if (!resolved.ok) return { ok: false as const, error: resolved.reason }
+  const scopeId = `pin_${randomUUID().replaceAll('-', '')}`
+  const scope = createPinnedPatchScope({
+    scopeId,
+    artifactId: canonical.manifest.id,
+    revision: canonical.manifest.revision,
+    path: canonical.manifest.entry,
+    pins: parsedPins.pins,
+  })
+  const scopePath = resolveWorkspacePath(
+    `${SUBDESIGN_METADATA_ROOT}/pin-scopes/${safeSubDesignMetadataId(canonical.manifest.id)}.json`,
+    root,
+  )
+  fs.mkdirSync(path.dirname(scopePath), { recursive: true })
+  fs.writeFileSync(scopePath, `${JSON.stringify(scope, null, 2)}\n`, 'utf8')
+  return { ok: true as const, scopeId }
 }
 
 function patchSubDesignArtifact(input: {
@@ -3993,6 +4039,45 @@ ipcMain.handle('subdesign:revealProviderAttachment', async (_evt, input: { locat
 ipcMain.handle('subdesign:patchArtifact', async (_evt, input: Parameters<typeof patchSubDesignArtifact>[0]) => {
   try {
     return patchSubDesignArtifact(input)
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('subdesign:preparePinnedPatchScope', async (_evt, input: Parameters<typeof preparePinnedPatchScope>[0]) => {
+  try {
+    return preparePinnedPatchScope(input)
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+ipcMain.handle('subdesign:mcpAppToolCall', async (_evt, input: {
+  coordinate?: unknown
+  allowlist?: unknown
+  arguments?: unknown
+  runId?: unknown
+  threadId?: unknown
+  projectRoot?: unknown
+}) => {
+  try {
+    const coordinate = String(input?.coordinate || '')
+    const parsed = parseMcpToolCoordinate(coordinate)
+    const allowlist = Array.isArray(input?.allowlist) ? input.allowlist.map(String) : []
+    if (!parsed || !allowlist.includes(coordinate)) return { ok: false, error: 'MCP App tool 不在 surface allowlist。' }
+    const args = input.arguments && typeof input.arguments === 'object' && !Array.isArray(input.arguments)
+      ? input.arguments as Record<string, unknown>
+      : {}
+    const content = await piHostSupervisor.callPackTool('mcp_call', {
+      extensionId: parsed.extensionId,
+      toolName: parsed.toolName,
+      arguments: args,
+    }, {
+      cwd: workspaceRootFor(typeof input.projectRoot === 'string' ? input.projectRoot : undefined),
+      ...(typeof input.runId === 'string' ? { runId: input.runId, callId: `mcp-app:${input.runId}:${coordinate}` } : {}),
+      approval: 'allow',
+    })
+    return { ok: true, content }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }

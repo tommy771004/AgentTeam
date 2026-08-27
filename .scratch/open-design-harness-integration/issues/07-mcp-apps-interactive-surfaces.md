@@ -26,3 +26,7 @@ Status: 可交給代理
 ## Blocked by
 
 - 03 — 第一條 contract-driven pipeline Task run
+
+## Implementation note (2026-08-27)
+
+先前合法 `tool_call` 通過 allowlist 後會靜默 no-op，現已改為 renderer native approval → main-process IPC 二次驗證 → Pi Host `mcp_call` pack；結果以 versioned `tool_result` 回傳 iframe，raw connector token 不進 renderer。`smoke-open-design-providers.mts` 覆蓋合法呼叫、malformed/disallowed 拒絕與各 surface 狀態。整張票仍包含 persistence、native fallback 與完整 conversation projection 等較大範圍，故維持 `可交給代理`，不以這次修復冒充全數完成。

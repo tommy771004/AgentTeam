@@ -15,7 +15,6 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { unattendedInterventionTimeoutSec } from '../src/agent/hitlTimeout.ts'
 import {
   BUILTIN_RUNNER_CAPABILITIES,
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
@@ -122,16 +121,6 @@ test('runDispatch drives the CLI prompt through the shared contract builder', ()
   assert.match(dispatch, /formatCliContinueGoalPrompt\(continueContract\)/)
 })
 
-// ── HITL: an unattended run cannot wait forever for a human ──
-test('unattended intervention timeout policy (pure)', () => {
-  assert.equal(unattendedInterventionTimeoutSec(undefined), 45)
-  assert.equal(unattendedInterventionTimeoutSec(45_000), 45)
-  assert.equal(unattendedInterventionTimeoutSec(120_000), 120)
-  assert.equal(unattendedInterventionTimeoutSec(200_000), 120) // cap
-  assert.equal(unattendedInterventionTimeoutSec(500), 15) // hard floor 15s
-  assert.equal(unattendedInterventionTimeoutSec(10_000), 15) // sub-floor still floored
-})
-
 // ── Trigger admission: fail-closed, now at the coordinator's policy seam ──
 const base = (patch: Partial<ExternalRunOpts>): ExternalRunOpts =>
   ({ objective: 'do the thing', ...patch }) as ExternalRunOpts
@@ -175,4 +164,4 @@ test('automation sources are classified as automation', () => {
   assert.equal(explicitLoopTypeForConversation(base({ loopType: 'Goal-based' })), 'Goal-based')
 })
 
-console.log('runner contract, HITL timeout policy and fail-closed trigger admission are intact after the legacy loop removal')
+console.log('runner contract and fail-closed trigger admission are intact after the legacy loop removal')

@@ -9,6 +9,8 @@ import {
   getRegistryCatalog,
   getRegistryEntry,
   getRegistryToolNames,
+  HOST_OWNED_TOOL_NAMES,
+  RENDERER_FALLBACK_TOOL_NAMES,
   register,
   registryCoversToolDefinitions,
   registryHandlersComplete,
@@ -32,18 +34,16 @@ console.log('smoke-tool-registry')
 await test('registry covers every TOOL_DEFINITIONS key (big bang)', async () => {
   await discoverRegisteredToolModules()
   ensureBuiltinRegistry()
-  const { HOST_OWNED_TOOL_NAMES } = await import('../src/agent/tools/toolRegistry.ts')
   assert.equal(registryCoversToolDefinitions(), true)
-  // Handler completeness tolerates EXACTLY the host-owned equivalents
-  // (ADR-0027 removal): everything else must carry its own handler module.
-  assert.equal(registryHandlersComplete(), true, 'each tool module supplies handler except host-owned equivalents')
+  assert.equal(registryHandlersComplete(), true, 'only workspace compatibility tools carry renderer handlers')
   const names = getRegistryToolNames()
   for (const k of Object.keys(TOOL_DEFINITIONS)) {
     assert.ok(names.includes(k), `missing ${k}`)
-    if (HOST_OWNED_TOOL_NAMES.has(k)) {
-      assert.equal(getRegistryEntry(k)?.handler, undefined, `${k} is host-owned and must not regain a renderer handler`)
-    } else {
+    if (RENDERER_FALLBACK_TOOL_NAMES.has(k)) {
       assert.ok(getRegistryEntry(k)?.handler, `no handler ${k}`)
+    } else {
+      assert.ok(HOST_OWNED_TOOL_NAMES.has(k), `${k} must have an explicit owner`)
+      assert.equal(getRegistryEntry(k)?.handler, undefined, `${k} is host-owned and must not regain a renderer handler`)
     }
   }
 })
@@ -65,23 +65,17 @@ await test('register overrides / adds entry', () => {
   assert.equal(getRegistryEntry('__smoke_probe__')?.description, 'probe')
 })
 
-await test('toolLoop gated path uses invokeGatedTool + registry only', async () => {
+await test('legacy renderer loop is gone; only workspace compatibility handlers remain', async () => {
   const fs = await import('node:fs')
   const path = await import('node:path')
   const { fileURLToPath } = await import('node:url')
   const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  const loop = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts'), 'utf8')
-  assert.match(loop, /invokeGatedTool/)
-  assert.match(loop, /dispatchRegistered/)
-  assert.doesNotMatch(loop, /from '\.\/executor'|from \"\.\/executor\"/)
-  // The step strategies that also dispatched tools went with agent/loop; the
-  // tool loop above is now the single dispatcher, and no executor shim exists.
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/tools/toolLoop.ts')), false)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/tools/executor.ts')), false)
   assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/loop')), false)
   const regDir = path.join(appRoot, 'src/agent/tools/registered')
   const files = fs.readdirSync(regDir).filter((f) => f.endsWith('.ts') && f !== 'index.ts')
-  // The catalog shrinks as equivalents move to the Host (issues 14/15/18):
-  // the guard is a floor against mass deletion, not a target to grow back to.
-  assert.ok(files.length >= 35, `expected many per-tool modules, got ${files.length}`)
+  assert.deepEqual(files.sort(), [...RENDERER_FALLBACK_TOOL_NAMES].map((name) => `${name}.ts`).sort())
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   assert.doesNotMatch(delegate, /\brunDelegatedTask\b/)
   assert.doesNotMatch(delegate, /runFunctionCallingLoop/)

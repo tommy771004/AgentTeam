@@ -220,7 +220,7 @@ export function labelledCard(field: string, label: string, kind?: Extract<ToolPr
  * produced-files list can be derived from what the tool says it changes —
  * whether or not the model remembered to mention the file (ADR-0050).
  */
-const PI_BUILTIN_PRESENTATIONS: Record<string, ToolPresenter> = {
+const HOST_TOOL_PRESENTATIONS: Record<string, ToolPresenter> = {
   write: { presentCall: writeCard },
   edit: { presentCall: editCard },
   bash: { presentCall: terminalCard },
@@ -270,6 +270,12 @@ const PI_BUILTIN_PRESENTATIONS: Record<string, ToolPresenter> = {
       }
     },
   },
+  // Extension-pack schemas and execution stay Host-owned. These entries only
+  // preserve deterministic replay cards for calls recorded by the Host.
+  codegraph_explore: { presentCall: searchMatchesCard('query') },
+  codegraph_status: { presentCall: labelledCard('projectRoot', '程式圖狀態', 'search') },
+  codegraph_impact: { presentCall: labelledCard('symbol', '影響範圍', 'search') },
+  codegraph_callers: { presentCall: labelledCard('symbol', '呼叫者', 'search') },
 }
 
 /**
@@ -288,7 +294,7 @@ const PI_BUILTIN_PRESENTATIONS: Record<string, ToolPresenter> = {
 function presenterFor(tool: string): ToolPresenter | undefined {
   const declared = (TOOL_DEFINITIONS as Record<string, ToolPresenter | undefined>)[tool]
   if (declared?.presentCall || declared?.presentResult) return declared
-  return PI_BUILTIN_PRESENTATIONS[tool]
+  return HOST_TOOL_PRESENTATIONS[tool]
 }
 
 export function presentToolCall(tool: string, args: unknown): ToolPresentation | undefined {

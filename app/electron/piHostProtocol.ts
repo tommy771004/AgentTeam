@@ -820,6 +820,122 @@ export function setPiTurnDeadlineClock(clock: TurnDeadlineClock = systemTurnDead
   turnDeadlineClock = clock
 }
 
+function attachmentProtocolError(id: string | number, message: string): PiHostMessage[] {
+  return [errorResponse(id, 'protocol_mismatch', message)]
+}
+
+function attachRunSnapshot(state: HostState, input: Partial<InternalPiHostRequest>, id: string | number, runId: string): PiHostMessage[] {
+  const attachment = state.attachmentJournal.get(runId)
+  if (!attachment) return [{ id, result: { attachment: undefined, page: undefined } }]
+  const session = state.snapshot.sessions.find((candidate) => candidate.id === attachment.sessionId)
+  const limit = typeof input.params?.limit === 'number' ? input.params.limit : PI_HOST_ATTACHMENT_PAGE_LIMIT
+  const page = state.attachmentJournal.attach(runId, session?.record?.entries || [], input.params?.before as number | undefined, limit)
+  return [{ id, result: page ? { attachment: page.attachment, page } : {} }]
+}
+
+function claimRunFinalization(state: HostState, input: Partial<InternalPiHostRequest>, id: string | number, runId: string, claimantId: string): PiHostMessage[] {
+  const leaseMs = typeof input.params?.leaseMs === 'number' ? input.params.leaseMs : undefined
+  const finalizationClaim = state.attachmentJournal.claimFinalization(runId, claimantId, leaseMs)
+  return [{ id, result: { runId, finalizationClaim } }]
+}
+
+function completeRunFinalization(state: HostState, input: Partial<InternalPiHostRequest>, id: string | number, runId: string, claimantId: string): PiHostMessage[] {
+  const claimEpoch = typeof input.params?.claimEpoch === 'number' && Number.isFinite(input.params.claimEpoch)
+    ? Math.floor(input.params.claimEpoch)
+    : undefined
+  if (claimEpoch === undefined || claimEpoch < 1) {
+    return [errorResponse(id, 'invalid_request', 'runId, claimantId and a positive claimEpoch are required')]
+  }
+  const finalizationComplete = state.attachmentJournal.completeFinalization(runId, claimantId, claimEpoch)
+  return [{ id, result: { runId, finalizationComplete } }]
+}
+
+function handleAttachmentRequest(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+): PiHostMessage[] | undefined {
+  const method = input.method
+  if (!method?.startsWith('runs/')) return undefined
+  if (!['runs/active', 'runs/attach', 'runs/finalize-claim', 'runs/finalize-complete', 'runs/ack'].includes(method)) return undefined
+  if (state.negotiatedProtocolVersion < 3) return attachmentProtocolError(id, 'Pi Host attachment/finalization requires Protocol v3')
+  if (method === 'runs/active') {
+    return [{ id, result: { activeRuns: state.attachmentJournal.active(), terminalRuns: state.attachmentJournal.pendingTerminal() } }]
+  }
+  const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+  if (method === 'runs/attach') return attachRunSnapshot(state, input, id, runId)
+  if (method === 'runs/ack') {
+    if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
+    return [{ id, result: { runId, resolved: state.attachmentJournal.acknowledge(runId) } }]
+  }
+  const claimantId = typeof input.params?.claimantId === 'string' ? input.params.claimantId : ''
+  if (!runId || !claimantId) return [errorResponse(id, 'invalid_request', 'runId and claimantId are required')]
+  return method === 'runs/finalize-claim'
+    ? claimRunFinalization(state, input, id, runId, claimantId)
+    : completeRunFinalization(state, input, id, runId, claimantId)
+}
+
+function handleInitialization(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+): PiHostMessage[] | undefined {
+  if (input.method !== 'initialize') return undefined
+  const requestedVersion = (input.params as { protocolVersion?: unknown } | undefined)?.protocolVersion
+  if (requestedVersion !== PI_HOST_PROTOCOL_VERSION && requestedVersion !== 3 && requestedVersion !== 2) {
+    return [errorResponse(id, 'protocol_mismatch', `Unsupported Pi Host Protocol version: ${String(requestedVersion)}`)]
+  }
+  state.initialized = true
+  state.negotiatedProtocolVersion = requestedVersion as number
+  const requestedCapabilities = (input.params as { capabilities?: unknown } | undefined)?.capabilities
+  state.toolContractNegotiated = !Array.isArray(requestedCapabilities) || requestedCapabilities.includes('tool-contract-v1')
+  const result = readyResult(state.negotiatedProtocolVersion)
+  return [
+    { event: 'host/ready', payload: {
+      protocolVersion: result?.protocolVersion ?? state.negotiatedProtocolVersion,
+      capabilities: result?.capabilities ?? [...PI_HOST_CAPABILITIES],
+    } },
+    { id, result },
+  ]
+}
+
+function handleCapabilityRequest(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+): PiHostMessage[] | undefined {
+  if (!input.method?.startsWith('capabilities/')) return undefined
+  const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : undefined
+  const gate = workspaceTextSearchAvailability({
+    sessionId,
+    enabled: state.snapshot.settings.workspaceTextSearch === true,
+    workspaceRoot: typeof input.params?.cwd === 'string' ? input.params.cwd : undefined,
+  })
+  if (input.method === 'capabilities/list') {
+    return [{ id, result: { items: state.capabilities.catalog(sessionId)
+      .filter((capability) => gate.available || !isWorkspaceTextSearchCapability(capability.id)) } }]
+  }
+  if (input.method === 'capabilities/search') {
+    const query = typeof input.params?.query === 'string' ? input.params.query : ''
+    if (!query.trim()) return [errorResponse(id, 'invalid_request', 'query is required')]
+    return [{ id, result: { items: state.capabilities.search(
+      query,
+      sessionId,
+      (capability) => gate.available || !isWorkspaceTextSearchCapability(capability.id),
+    ) } }]
+  }
+  const capabilityId = typeof input.params?.id === 'string' ? input.params.id : ''
+  if (!capabilityId) return [errorResponse(id, 'invalid_request', 'capability id is required')]
+  if (isWorkspaceTextSearchCapability(capabilityId) && !gate.available) {
+    return [errorResponse(id, 'invalid_request', gate.reason || 'Workspace text search is unavailable')]
+  }
+  try {
+    return [{ id, result: { items: [state.capabilities.load(capabilityId, sessionId)], loaded: true } }]
+  } catch (error) {
+    return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Unknown Pi capability')]
+  }
+}
+
 export function handlePiHostRequest(state: HostState, request: unknown, emit?: (message: PiHostMessage) => void): PiHostMessage[] | Promise<PiHostMessage[]> {
   if (!request || typeof request !== 'object') {
     return [errorResponse('', 'invalid_request', 'Pi Host request must be an object')]
@@ -830,32 +946,8 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
   const id = typeof input.id === 'string' || typeof input.id === 'number' ? input.id : ''
   if (!input.method) return [errorResponse(id, 'invalid_request', 'Pi Host request method is required')]
 
-  if (input.method === 'initialize') {
-    const requestedVersion = (input.params as { protocolVersion?: unknown } | undefined)?.protocolVersion
-    // v1 peers would misread settlements and miss Turn Records entirely, so
-    // they are refused. v2/v3 remain readable for existing local clients;
-    // only the negotiated version exposes the newest contract surfaces.
-    if (requestedVersion !== PI_HOST_PROTOCOL_VERSION && requestedVersion !== 3 && requestedVersion !== 2) {
-      return [
-        errorResponse(
-          id,
-          'protocol_mismatch',
-          `Unsupported Pi Host Protocol version: ${String(requestedVersion)}`,
-        ),
-      ]
-    }
-    state.initialized = true
-    state.negotiatedProtocolVersion = requestedVersion as number
-    const requestedCapabilities = (input.params as { capabilities?: unknown } | undefined)?.capabilities
-    state.toolContractNegotiated = !Array.isArray(requestedCapabilities) || requestedCapabilities.includes('tool-contract-v1')
-    const result = readyResult(state.negotiatedProtocolVersion)
-    const protocolVersion = result?.protocolVersion ?? state.negotiatedProtocolVersion
-    const capabilities = result?.capabilities ?? [...PI_HOST_CAPABILITIES]
-    return [
-      { event: 'host/ready', payload: { protocolVersion, capabilities } },
-      { id, result },
-    ]
-  }
+  const initialization = handleInitialization(state, input, id)
+  if (initialization) return initialization
 
   if (!state.initialized) return [errorResponse(id, 'not_initialized', 'Pi Host must be initialized first')]
   if (input.method === 'health/get') return [{ id, result: readyResult(state.negotiatedProtocolVersion) }]
@@ -1478,6 +1570,8 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
   if (input.method === 'state/snapshot') {
     return [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions], queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })), resources: state.snapshot.resources.map((resource) => ({ ...resource })), memories: new PiMemoryExtension(state.snapshot.memories).export() } }]
   }
+  const attachmentResponse = handleAttachmentRequest(state, input, id)
+  if (attachmentResponse) return attachmentResponse
   // The list carries what a session IS, not everything it did: a long run's
   // record is read a page at a time through `sessions/record`, so listing
   // sessions cannot grow with the length of their history.
@@ -1494,48 +1588,6 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const before = typeof input.params?.before === 'number' ? input.params.before : undefined
     const limit = typeof input.params?.limit === 'number' ? input.params.limit : undefined
     return [{ id, result: { sessionId, page: pageTurnRecord(session.record, { before, limit }) } }]
-  }
-  if (input.method === 'runs/active') {
-    if (state.negotiatedProtocolVersion < 3) return [errorResponse(id, 'protocol_mismatch', 'Pi Host attachment requires Protocol v3')]
-    return [{ id, result: { activeRuns: state.attachmentJournal.active(), terminalRuns: state.attachmentJournal.pendingTerminal() } }]
-  }
-  if (input.method === 'runs/attach') {
-    if (state.negotiatedProtocolVersion < 3) return [errorResponse(id, 'protocol_mismatch', 'Pi Host attachment requires Protocol v3')]
-    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
-    const attachment = state.attachmentJournal.get(runId)
-    if (!attachment) return [{ id, result: { attachment: undefined, page: undefined } }]
-    const session = state.snapshot.sessions.find((candidate) => candidate.id === attachment.sessionId)
-    const page = state.attachmentJournal.attach(runId, session?.record?.entries || [], input.params?.before as number | undefined, typeof input.params?.limit === 'number' ? input.params.limit : PI_HOST_ATTACHMENT_PAGE_LIMIT)
-    return [{ id, result: page ? { attachment: page.attachment, page } : {} }]
-  }
-  if (input.method === 'runs/finalize-claim') {
-    if (state.negotiatedProtocolVersion < 3) return [errorResponse(id, 'protocol_mismatch', 'Pi Host finalization claim requires Protocol v3')]
-    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
-    const claimantId = typeof input.params?.claimantId === 'string' ? input.params.claimantId : ''
-    if (!runId || !claimantId) return [errorResponse(id, 'invalid_request', 'runId and claimantId are required')]
-    const leaseMs = typeof input.params?.leaseMs === 'number' ? input.params.leaseMs : undefined
-    const finalizationClaim = state.attachmentJournal.claimFinalization(runId, claimantId, leaseMs)
-    return [{ id, result: { runId, finalizationClaim } }]
-  }
-  if (input.method === 'runs/finalize-complete') {
-    if (state.negotiatedProtocolVersion < 3) return [errorResponse(id, 'protocol_mismatch', 'Pi Host finalization completion requires Protocol v3')]
-    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
-    const claimantId = typeof input.params?.claimantId === 'string' ? input.params.claimantId : ''
-    const claimEpoch = typeof input.params?.claimEpoch === 'number' && Number.isFinite(input.params.claimEpoch)
-      ? Math.floor(input.params.claimEpoch)
-      : undefined
-    if (!runId || !claimantId || claimEpoch === undefined || claimEpoch < 1) {
-      return [errorResponse(id, 'invalid_request', 'runId, claimantId and a positive claimEpoch are required')]
-    }
-    const finalizationComplete = state.attachmentJournal.completeFinalization(runId, claimantId, claimEpoch)
-    return [{ id, result: { runId, finalizationComplete } }]
-  }
-  if (input.method === 'runs/ack') {
-    if (state.negotiatedProtocolVersion < 3) return [errorResponse(id, 'protocol_mismatch', 'Pi Host acknowledgement requires Protocol v3')]
-    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
-    if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
-    const resolved = state.attachmentJournal.acknowledge(runId)
-    return [{ id, result: { runId, resolved } }]
   }
   if (input.method === 'resources/list') {
     // Skills come straight from what the resource loader actually found on
@@ -1627,40 +1679,8 @@ export function handlePiHostRequest(state: HostState, request: unknown, emit?: (
     const memory = new PiMemoryExtension(state.snapshot.memories)
     return [{ id, result: { memories: memory.recall(query, project, limit) } }]
   }
-  const capabilitySessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : undefined
-  const workspaceCapabilityGate = () => workspaceTextSearchAvailability({
-    sessionId: capabilitySessionId,
-    enabled: state.snapshot.settings.workspaceTextSearch === true,
-    workspaceRoot: typeof input.params?.cwd === 'string' ? input.params.cwd : undefined,
-  })
-  if (input.method === 'capabilities/list') {
-    const gate = workspaceCapabilityGate()
-    return [{ id, result: { items: state.capabilities.catalog(capabilitySessionId)
-      .filter((capability) => gate.available || !isWorkspaceTextSearchCapability(capability.id)) } }]
-  }
-  if (input.method === 'capabilities/load') {
-    const capabilityId = typeof input.params?.id === 'string' ? input.params.id : ''
-    if (!capabilityId) return [errorResponse(id, 'invalid_request', 'capability id is required')]
-    const gate = workspaceCapabilityGate()
-    if (isWorkspaceTextSearchCapability(capabilityId) && !gate.available) {
-      return [errorResponse(id, 'invalid_request', gate.reason || 'Workspace text search is unavailable')]
-    }
-    try {
-      return [{ id, result: { items: [state.capabilities.load(capabilityId, capabilitySessionId)], loaded: true } }]
-    } catch (error) {
-      return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Unknown Pi capability')]
-    }
-  }
-  if (input.method === 'capabilities/search') {
-    const query = typeof input.params?.query === 'string' ? input.params.query : ''
-    if (!query.trim()) return [errorResponse(id, 'invalid_request', 'query is required')]
-    const gate = workspaceCapabilityGate()
-    return [{ id, result: { items: state.capabilities.search(
-      query,
-      capabilitySessionId,
-      (capability) => gate.available || !isWorkspaceTextSearchCapability(capability.id),
-    ) } }]
-  }
+  const capabilityResponse = handleCapabilityRequest(state, input, id)
+  if (capabilityResponse) return capabilityResponse
   if (input.method === 'extensions/list') return [{ id, result: { extensions: state.extensions.list() } }]
   if (input.method === 'extensions/install' || input.method === 'extensions/update' || input.method === 'extensions/reload') {
     try {
@@ -2784,13 +2804,15 @@ export function createPiHostServer(
       const input = request && typeof request === 'object' ? request as Partial<PiHostRequest> : undefined
       const id = typeof input?.id === 'string' || typeof input?.id === 'number' ? input.id : ''
       try {
-        if (input?.method === 'settings/get' && refreshConfig) {
-          state.snapshot.config = await refreshConfig()
-          state.snapshot.cursor += 1
-        }
+        // Re-read CLI OAuth immediately before a builtin turn as well as when
+        // Settings asks for status. Codex/Claude may rotate their credential
+        // while this long-lived Host is running; piCoreRuntime includes the
+        // resulting auth-file revision in its session identity and rebuilds
+        // the ModelRuntime instead of reusing an invalidated token snapshot.
+        await refreshHostConfigForRequest(state, input, refreshConfig)
         const messages = await handlePiHostRequest(state, request, send)
         const method = input?.method
-        if (method?.startsWith('settings/') || method?.startsWith('sessions/') || method?.startsWith('runs/') || method?.startsWith('resources/') || method?.startsWith('memory/') || method?.startsWith('extensions/') || method === 'turn/submit') onStateChange?.(state.snapshot)
+        if (hostRequestMutatesState(method)) onStateChange?.(state.snapshot)
         for (const message of messages) send(message)
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Pi Core Host request failed'
@@ -2798,4 +2820,30 @@ export function createPiHostServer(
       }
     },
   }
+}
+
+function hostRequestNeedsFreshOAuth(method: string | undefined): boolean {
+  return method === 'settings/get' || method === 'turn/submit'
+}
+
+function hostRequestMutatesState(method: string | undefined): boolean {
+  return Boolean(method && (
+    method.startsWith('settings/')
+    || method.startsWith('sessions/')
+    || method.startsWith('runs/')
+    || method.startsWith('resources/')
+    || method.startsWith('memory/')
+    || method.startsWith('extensions/')
+    || method === 'turn/submit'
+  ))
+}
+
+async function refreshHostConfigForRequest(
+  state: HostState,
+  input: Partial<PiHostRequest> | undefined,
+  refreshConfig?: () => Promise<PiHostConfigStatus>,
+): Promise<void> {
+  if (!refreshConfig || !hostRequestNeedsFreshOAuth(input?.method)) return
+  state.snapshot.config = await refreshConfig()
+  state.snapshot.cursor += 1
 }

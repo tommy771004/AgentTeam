@@ -352,21 +352,25 @@ await test('a delayed recovered terminal finalizer does not release its capacity
 
 await test('RecoveryBootstrap unlocks startup before terminal finalization can await', () => {
   const app = read('src/App.tsx')
+  const reattachment = read('src/agent/activeRunReattachment.ts')
   const recoveryStart = app.indexOf('const hostTruth = await')
   const recoveryEnd = app.indexOf('const journalReport = await', recoveryStart)
   assert.ok(recoveryStart >= 0 && recoveryEnd > recoveryStart, 'Pi Host recovery seam is present')
   const hostRecovery = app.slice(recoveryStart, recoveryEnd)
   assert.doesNotMatch(hostRecovery, /void unsubscribe/, 'the temporary reattach listener must actually be released')
   assert.match(app, /recoveryUnsubscribe\?\.\(\)/, 'RecoveryBootstrap cleanup releases its temporary Host listener')
-  const registryReconciled = hostRecovery.lastIndexOf('markRunRegistryReconciled()')
+  assert.match(hostRecovery, /reattachPiHostRuns/, 'RecoveryBootstrap delegates to the reattachment owner')
+  const ownerStart = reattachment.indexOf('export async function reattachPiHostRuns')
+  const owner = reattachment.slice(ownerStart)
+  const registryReconciled = owner.lastIndexOf('markRunRegistryReconciled()')
   assert.ok(registryReconciled >= 0, 'Host projection recovery reconciles capacity explicitly')
   assert.equal(
-    hostRecovery.slice(0, registryReconciled).includes('await finalizeRecoveredPiHostRun'),
+    owner.slice(0, registryReconciled).includes('await finalizeRecoveredPiHostRun'),
     false,
     'a delayed terminal finalizer cannot hold the startup barrier',
   )
   assert.ok(
-    hostRecovery.indexOf('finalizeRecoveredPiHostRun', registryReconciled) > registryReconciled,
+    owner.indexOf('finalizeTerminalAttachments', registryReconciled) > registryReconciled,
     'terminal finalization is scheduled after capacity registry reconciliation',
   )
   const startupComplete = app.indexOf('completeStartupRecovery()', recoveryEnd)
@@ -405,13 +409,18 @@ await test('drift guard: one claim gate, release and drain in a finally', () => 
     'lease renewal cadence remains an explicit bounded contract',
   )
   const gate = coordinator.slice(
+    coordinator.indexOf('async function executeClaimedFinalization'),
     coordinator.indexOf('export async function finalizeTaskRun'),
-    coordinator.indexOf('async function runFinalizationSequence'),
+  )
+  const cleanup = coordinator.slice(
+    coordinator.indexOf('async function cleanupFinalization'),
+    coordinator.indexOf('async function executeClaimedFinalization'),
   )
   assert.ok(gate.length > 0, 'the claim gate and the sequence are separate functions')
   assert.match(gate, /finally\s*\{/, 'release/drain ride a finally, not a step of the sequence')
-  assert.match(gate, /releaseRunCapacity/, 'the claim holder owns release')
-  assert.match(gate, /drainOnce|drainExternalRunQueue/, 'the claim holder owns the single drain')
+  assert.match(gate, /cleanupFinalization/, 'the claim holder finally invokes the cleanup owner')
+  assert.match(cleanup, /releaseRunCapacity/, 'the cleanup owner releases capacity')
+  assert.match(cleanup, /drainOnce|drainExternalRunQueue/, 'the cleanup owner owns the single drain')
 
   const sequence = coordinator.slice(coordinator.indexOf('async function runFinalizationSequence'))
   const stray = sequence.slice(0, sequence.indexOf('export async function finalizeRecoveredExternalRun'))

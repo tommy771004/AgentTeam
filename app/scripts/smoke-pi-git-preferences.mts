@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { createInterface } from 'node:readline'
@@ -120,10 +120,8 @@ test('the Host applies Git preferences BEFORE the outbound shell gate', () => {
 })
 
 test('the renderer rewriter is gone, so there is one owner', () => {
-  for (const file of ['src/agent/tools/toolIoHelpers.ts', 'src/agent/tools/executor.ts']) {
-    assert.doesNotMatch(readSource(file), /applyGitSettingsToBash/,
-      `${file} must not carry a second Git-preference implementation`)
-  }
+  assert.doesNotMatch(readSource('src/agent/tools/toolIoHelpers.ts'), /applyGitSettingsToBash/)
+  assert.equal(existsSync(new URL('../src/agent/tools/executor.ts', import.meta.url)), false)
 })
 
 

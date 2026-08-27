@@ -42,6 +42,22 @@ function windowInputFrom(scroller: { scrollTop: number; clientHeight: number }, 
   }
 }
 
+function visibleTrajectoryRange(
+  windowed: boolean,
+  slice: TrajectoryWindowSlice | null,
+  element: { scrollTop: number; clientHeight: number } | null,
+  rowCount: number,
+): TrajectoryWindowSlice {
+  if (!windowed) {
+    return { startIndex: 0, endIndex: rowCount, topSpacerHeight: 0, bottomSpacerHeight: 0 }
+  }
+  return slice ?? computeTrajectoryWindow(windowInputFrom(element ?? { scrollTop: 0, clientHeight: 0 }, rowCount))
+}
+
+function trajectoryRows(view: ReturnType<typeof projectTrajectory> | null): TrajectoryRow[] {
+  return view ? view.rows : EMPTY_ROWS
+}
+
 function hostPageLoader(): RecordPageLoader | undefined {
   const read = window.subagents?.piHost?.sessions?.record
   if (typeof read !== 'function') return undefined
@@ -247,12 +263,10 @@ export function TrajectoryPanel({ sessionId, loadPage, windowed = true }: { sess
   if (!loader) return null
 
   const view = page ? projectTrajectory(page) : null
-  const rows = view?.rows ?? EMPTY_ROWS
+  const rows = trajectoryRows(view)
   // Before the first window sync lands, derive the range from the same real
   // metrics the sync would use — no hand-built literal, no full-list flash.
-  const range = windowed
-    ? slice ?? computeTrajectoryWindow(windowInputFrom(scroller.current ?? { scrollTop: 0, clientHeight: 0 }, rows.length))
-    : { startIndex: 0, endIndex: rows.length, topSpacerHeight: 0, bottomSpacerHeight: 0 }
+  const range = visibleTrajectoryRange(windowed, slice, scroller.current, rows.length)
   const mountedRows = rows.slice(range.startIndex, range.endIndex)
   const selectedRow = view?.rows.find((row) => row.seq === selected)
   const selectedStep = selectedRow

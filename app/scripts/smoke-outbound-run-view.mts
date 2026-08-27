@@ -9,6 +9,11 @@ import {
 } from '../src/agent/outbound/evidenceLedger.ts'
 import { projectOutboundRunEvidence } from '../src/agent/outbound/runEvidence.ts'
 
+const opsSource = fs.readFileSync(new URL('../src/pages/OpsPage.tsx', import.meta.url), 'utf8')
+assert.doesNotMatch(opsSource, /activeRuns\[0\].*OutboundRunView/)
+assert.match(opsSource, /selectedOutboundRunId/)
+assert.match(opsSource, /outboundRunIds\.map/)
+
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'subagents-outbound-view-'))
 try {
   const key = createMemoryHmacKeyProvider(Buffer.from('outbound-view-smoke-key-32-bytes!'))
