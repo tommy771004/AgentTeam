@@ -11,7 +11,11 @@ import type {
   MemoryControlPackage,
   MemoryControlPackageReader,
 } from '../src/agent/memoryControlPackage.ts'
-import { MEMORY_CONTROL_COMPONENT_KEYS } from '../src/agent/memoryControlPackage.ts'
+import { isMemoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS } from '../src/agent/memoryControlPackage.ts'
+import {
+  canonicalMemoryControlEvaluationJson,
+  type MemoryControlEvaluationReport,
+} from '../src/agent/memoryControlEvaluationContract.ts'
 
 type ComponentDraft = Omit<MemoryControlComponent, 'digest'> | MemoryControlComponent
 type PackageComponents = MemoryControlPackage['components']
@@ -22,15 +26,19 @@ export type MemoryControlPackageDocument = {
   activeRevision: number
   packages: MemoryControlPackage[]
   events: MemoryControlLifecycleEvent[]
+  evaluations: MemoryControlEvaluationReport[]
 }
 
 const sha256 = (value: unknown) => createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex')
+const sha256Text = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex')
 export const MAX_MEMORY_CONTROL_REPOSITORY_BYTES = 2 * 1024 * 1024
 export const MAX_MEMORY_CONTROL_PACKAGES = 128
 export const MAX_MEMORY_CONTROL_COMPONENT_BYTES = 64 * 1024
 export const MAX_MEMORY_CONTROL_PATCH_BYTES = 32 * 1024
 export const MAX_MEMORY_CONTROL_PATCH_OPERATIONS = 64
 export const MAX_MEMORY_CONTROL_LIFECYCLE_EVENTS = 512
+export const MAX_MEMORY_CONTROL_EVALUATION_REPORTS = 32
+export const MAX_MEMORY_CONTROL_EVALUATION_REPORT_BYTES = 256 * 1024
 export const MAX_MEMORY_CONTROL_REASON_BYTES = 2 * 1024
 const STALE_MEMORY_CONTROL_LOCK_MS = 30_000
 const MAX_COMPONENT_DEPTH = 32
@@ -142,11 +150,13 @@ export function memoryControlPackageDocument(
   packages: readonly MemoryControlPackage[],
   activeRevision: number,
   events: readonly MemoryControlLifecycleEvent[] = [],
+  evaluations: readonly MemoryControlEvaluationReport[] = [],
 ): MemoryControlPackageDocument {
   return {
     schemaVersion: 1,
     activeRevision,
     events: events.map((event) => immutableClone(event)),
+    evaluations: evaluations.map((report) => immutableClone(report)),
     packages: packages.map((entry) => immutableClone({
       ...entry,
       status: entry.revision === activeRevision ? 'active' : entry.status === 'active' ? 'rejected' : entry.status,
@@ -230,26 +240,108 @@ function validateLifecycleEvent(value: unknown, index: number): MemoryControlLif
   })
 }
 
+const exactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+  Object.keys(value).length === keys.length && Object.keys(value).every((key) => keys.includes(key))
+const unit = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
+const count = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= 100_000_000
+
+function validateEvaluationMetrics(value: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Memory-Control evaluation metrics are corrupt')
+  const metrics = value as Record<string, unknown>
+  if (!exactKeys(metrics, ['taskSuccessRate', 'falseDoneRate', 'requiredActionRecall', 'skillInvocationPrecision', 'skillInvocationReach', 'promptTokens', 'tokensPerSuccess'])
+    || !unit(metrics.taskSuccessRate) || !unit(metrics.falseDoneRate) || !unit(metrics.requiredActionRecall)
+    || !unit(metrics.skillInvocationPrecision) || !unit(metrics.skillInvocationReach) || !count(metrics.promptTokens)
+    || !(metrics.tokensPerSuccess === null || typeof metrics.tokensPerSuccess === 'number' && Number.isFinite(metrics.tokensPerSuccess) && metrics.tokensPerSuccess >= 0 && metrics.tokensPerSuccess <= 100_000_000)) {
+    throw new Error('Memory-Control evaluation metrics are corrupt')
+  }
+}
+
+function validateEvaluationTrace(value: unknown, runId: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Memory-Control evaluation trace is corrupt')
+  const trace = value as Record<string, unknown>
+  if (!exactKeys(trace, ['runId', 'firstSeq', 'lastSeq', 'entryCount', 'digest']) || trace.runId !== runId
+    || !Number.isSafeInteger(trace.firstSeq) || Number(trace.firstSeq) < 1
+    || !Number.isSafeInteger(trace.lastSeq) || Number(trace.lastSeq) < Number(trace.firstSeq)
+    || !Number.isSafeInteger(trace.entryCount) || Number(trace.entryCount) < 1 || Number(trace.entryCount) > 100_000
+    || typeof trace.digest !== 'string' || !/^[a-f0-9]{64}$/.test(trace.digest)) throw new Error('Memory-Control evaluation trace is corrupt')
+}
+
+function validateEvaluationRunMetrics(value: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Memory-Control evaluation run metrics are corrupt')
+  const metrics = value as Record<string, unknown>
+  if (!exactKeys(metrics, ['taskSuccess', 'falseDone', 'requiredActionRecall', 'skillInvocationPrecision', 'skillInvocationReach', 'promptTokens'])
+    || typeof metrics.taskSuccess !== 'boolean' || typeof metrics.falseDone !== 'boolean'
+    || !unit(metrics.requiredActionRecall) || !unit(metrics.skillInvocationPrecision) || !unit(metrics.skillInvocationReach)
+    || !count(metrics.promptTokens)) throw new Error('Memory-Control evaluation run metrics are corrupt')
+}
+
+function validateEvaluationRun(value: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Memory-Control evaluation run is corrupt')
+  const run = value as Record<string, unknown>
+  if (!exactKeys(run, ['phase', 'cohort', 'taskId', 'runId', 'governingPackage', 'metrics', 'traceRef'])
+    || !['baseline', 'candidate'].includes(String(run.phase)) || !['source-failure', 'held-out-anchor'].includes(String(run.cohort))
+    || typeof run.taskId !== 'string' || !run.taskId || run.taskId.length > 256
+    || typeof run.runId !== 'string' || !run.runId || run.runId.length > 512
+    || !isMemoryControlPackageIdentity(run.governingPackage)) throw new Error('Memory-Control evaluation run is corrupt')
+  validateEvaluationTrace(run.traceRef, run.runId)
+  validateEvaluationRunMetrics(run.metrics)
+}
+
+const validEvaluationReasons = (value: unknown): value is string[] => Array.isArray(value)
+  && value.length <= 64 && value.every((reason) => typeof reason === 'string' && reason.length > 0 && reason.length <= 2_000)
+const validEvaluationRuns = (value: unknown): value is unknown[] => Array.isArray(value) && value.length <= 64
+
+function evaluationReportEnvelope(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Memory-Control evaluation report is corrupt')
+  validateBoundedJson(value)
+  if (Buffer.byteLength(canonicalJson(value), 'utf8') > MAX_MEMORY_CONTROL_EVALUATION_REPORT_BYTES) throw new Error('Memory-Control evaluation report exceeds bounds')
+  const report = value as Record<string, unknown>
+  if (!exactKeys(report, ['schemaVersion', 'reportId', 'corpusVersion', 'baselinePackage', 'candidatePackage', 'decision', 'reasons', 'tokenBudget', 'runs', 'metrics'])
+    || report.schemaVersion !== 1 || typeof report.reportId !== 'string' || !/^[a-f0-9]{64}$/.test(report.reportId)
+    || typeof report.corpusVersion !== 'string' || !report.corpusVersion || report.corpusVersion.length > 128
+    || !isMemoryControlPackageIdentity(report.baselinePackage) || !isMemoryControlPackageIdentity(report.candidatePackage)
+    || !['promoted', 'rejected'].includes(String(report.decision)) || !validEvaluationReasons(report.reasons)
+    || !validEvaluationRuns(report.runs) || !report.tokenBudget || typeof report.tokenBudget !== 'object') {
+    throw new Error('Memory-Control evaluation report is corrupt')
+  }
+  return report
+}
+
+function validateEvaluationReport(value: unknown): MemoryControlEvaluationReport {
+  const report = evaluationReportEnvelope(value) as unknown as MemoryControlEvaluationReport
+  const budget = report.tokenBudget as Record<string, unknown>
+  if (!exactKeys(budget, ['maxRegressionRatio']) || !unit(budget.maxRegressionRatio) || (report.decision === 'promoted') !== (report.reasons.length === 0)) {
+    throw new Error('Memory-Control evaluation report decision or budget is corrupt')
+  }
+  report.runs.forEach(validateEvaluationRun)
+  validateEvaluationMetrics(report.metrics)
+  const { reportId: _reportId, ...body } = report
+  if (sha256Text(canonicalMemoryControlEvaluationJson(body)) !== report.reportId) throw new Error('Memory-Control evaluation report digest mismatch')
+  return immutableClone(report as unknown as MemoryControlEvaluationReport)
+}
+
 function parseDocument(source: string): MemoryControlPackageDocument {
   if (Buffer.byteLength(source, 'utf8') > MAX_MEMORY_CONTROL_REPOSITORY_BYTES) throw new Error('Memory-Control Package repository exceeds bounds')
   let value: unknown
   try { value = JSON.parse(source) } catch { throw new Error('Memory-Control Package repository is corrupt') }
   if (!value || typeof value !== 'object') throw new Error('Memory-Control Package repository is corrupt')
   const document = value as Record<string, unknown>
-  if (Object.keys(document).some((key) => !['schemaVersion', 'activeRevision', 'packages', 'events'].includes(key))
+  if (Object.keys(document).some((key) => !['schemaVersion', 'activeRevision', 'packages', 'events', 'evaluations'].includes(key))
     || document.schemaVersion !== 1 || !Number.isSafeInteger(document.activeRevision) || !Array.isArray(document.packages)
     || document.packages.length < 1 || document.packages.length > MAX_MEMORY_CONTROL_PACKAGES
-    || (document.events !== undefined && (!Array.isArray(document.events) || document.events.length > MAX_MEMORY_CONTROL_LIFECYCLE_EVENTS))) {
+    || (document.events !== undefined && (!Array.isArray(document.events) || document.events.length > MAX_MEMORY_CONTROL_LIFECYCLE_EVENTS))
+    || (document.evaluations !== undefined && (!Array.isArray(document.evaluations) || document.evaluations.length > MAX_MEMORY_CONTROL_EVALUATION_REPORTS))) {
     throw new Error('Memory-Control Package repository schema version or shape is invalid')
   }
   const packages = document.packages.map(validatePackage)
   const persistedEvents = (document.events || []).map(validateLifecycleEvent)
+  const evaluations = (document.evaluations || []).map(validateEvaluationReport)
   validatePackageLineage(packages, Number(document.activeRevision))
   const events = persistedEvents.length > 0
     ? persistedEvents
     : migrateLegacyLifecycle(packages, Number(document.activeRevision))
   validateLifecycleHistory(packages, events, Number(document.activeRevision))
-  return immutableClone({ schemaVersion: 1, activeRevision: Number(document.activeRevision), packages, events })
+  return immutableClone({ schemaVersion: 1, activeRevision: Number(document.activeRevision), packages, events, evaluations })
 }
 
 function diagnosisFor(parent: MemoryControlPackage, child: MemoryControlPackage): MemoryControlComponentKey | undefined {
@@ -533,6 +625,65 @@ function applyObjectPatch(parent: Record<string, unknown>, key: string, operatio
   else parent[key] = structuredClone(operation.value)
 }
 
+function assertEvaluationPackageBinding(
+  report: MemoryControlEvaluationReport,
+  active: MemoryControlPackage,
+  candidate: MemoryControlPackage,
+): void {
+  if (candidate.status !== 'candidate' || candidate.parentRevision !== active.revision
+    || report.baselinePackage.id !== active.id || report.baselinePackage.revision !== active.revision || report.baselinePackage.digest !== active.digest
+    || report.candidatePackage.id !== candidate.id || report.candidatePackage.revision !== candidate.revision || report.candidatePackage.digest !== candidate.digest) {
+    throw new Error('Memory-Control evaluation report lost its compare-and-swap package binding')
+  }
+}
+
+function assertEvaluationRunPairing(
+  report: MemoryControlEvaluationReport,
+  active: MemoryControlPackage,
+  candidate: MemoryControlPackage,
+): void {
+  const baselineRuns = report.runs.filter((run) => run.phase === 'baseline')
+  const candidateRuns = report.runs.filter((run) => run.phase === 'candidate')
+  if (!baselineRuns.length && !candidateRuns.length && report.decision === 'rejected') return
+  const baselineIds = new Set(baselineRuns.map((run) => run.taskId))
+  if (!baselineRuns.length || baselineRuns.length !== candidateRuns.length || baselineIds.size !== baselineRuns.length
+    || candidateRuns.some((run) => !baselineIds.has(run.taskId))
+    || baselineRuns.some((run) => run.governingPackage.revision !== active.revision || run.governingPackage.digest !== active.digest)
+    || candidateRuns.some((run) => run.governingPackage.revision !== candidate.revision || run.governingPackage.digest !== candidate.digest)) {
+    throw new Error('Memory-Control evaluation report run pairing or governing package is invalid')
+  }
+}
+
+function evaluationSettlementDocument(
+  document: MemoryControlPackageDocument,
+  rawReport: MemoryControlEvaluationReport,
+): { document: MemoryControlPackageDocument; revision: number } {
+  const report = validateEvaluationReport(rawReport)
+  if (document.evaluations.length >= MAX_MEMORY_CONTROL_EVALUATION_REPORTS) throw new Error('Memory-Control evaluation report limit reached')
+  if (document.evaluations.some((entry) => entry.reportId === report.reportId)) throw new Error('Memory-Control evaluation report is duplicated')
+  const active = document.packages.find((entry) => entry.revision === document.activeRevision)!
+  const candidate = document.packages.find((entry) => entry.revision === report.candidatePackage.revision)
+  if (!candidate) throw new Error('Memory-Control evaluation candidate is unknown')
+  assertEvaluationPackageBinding(report, active, candidate)
+  assertEvaluationRunPairing(report, active, candidate)
+  const reason = report.decision === 'promoted'
+    ? `evaluation ${report.corpusVersion} passed; report ${report.reportId}`
+    : `evaluation ${report.corpusVersion} rejected; report ${report.reportId}: ${report.reasons.join('; ')}`.slice(0, MAX_MEMORY_CONTROL_REASON_BYTES)
+  const event = lifecycleEvent(document, {
+    kind: report.decision === 'promoted' ? 'candidate-activated' : 'candidate-rejected',
+    revision: candidate.revision, fromRevision: active.revision,
+    ...(candidate.diagnosisComponent ? { diagnosisComponent: candidate.diagnosisComponent } : {}), reason,
+  })
+  const packages = report.decision === 'rejected'
+    ? document.packages.map((entry) => entry.revision === candidate.revision ? { ...entry, status: 'rejected' as const } : entry)
+    : document.packages
+  const activeRevision = report.decision === 'promoted' ? candidate.revision : active.revision
+  return {
+    document: memoryControlPackageDocument(packages, activeRevision, [...document.events, event], [...document.evaluations, report]),
+    revision: candidate.revision,
+  }
+}
+
 function lifecycleEvent(
   document: MemoryControlPackageDocument,
   input: Omit<MemoryControlLifecycleEvent, 'sequence' | 'reason'> & { reason: unknown },
@@ -589,6 +740,10 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
     })
   }
 
+  evaluationReports(): ReadonlyArray<MemoryControlEvaluationReport> {
+    return immutableClone(this.document.evaluations)
+  }
+
   createCandidate(input: {
     expectedActiveRevision: number
     diagnosisComponent: MemoryControlComponentKey
@@ -623,7 +778,7 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
         kind: 'candidate-created', revision: candidate.revision, fromRevision: parent.revision,
         diagnosisComponent: input.diagnosisComponent, reason: input.reason,
       })
-      await this.commit(memoryControlPackageDocument([...this.document.packages, candidate], this.document.activeRevision, [...this.document.events, event]))
+      await this.commit(memoryControlPackageDocument([...this.document.packages, candidate], this.document.activeRevision, [...this.document.events, event], this.document.evaluations))
       return this.read({ schemaVersion: 1, revision: candidate.revision })
     })
   }
@@ -639,7 +794,7 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
         kind: 'candidate-activated', revision: candidate.revision, fromRevision: this.document.activeRevision,
         ...(candidate.diagnosisComponent ? { diagnosisComponent: candidate.diagnosisComponent } : {}), reason: input.reason,
       })
-      await this.commit(memoryControlPackageDocument(this.document.packages, candidate.revision, [...this.document.events, event]))
+      await this.commit(memoryControlPackageDocument(this.document.packages, candidate.revision, [...this.document.events, event], this.document.evaluations))
       return this.admitActive()
     })
   }
@@ -654,8 +809,16 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
         ...(candidate.parentRevision ? { fromRevision: candidate.parentRevision } : {}),
         ...(candidate.diagnosisComponent ? { diagnosisComponent: candidate.diagnosisComponent } : {}), reason: input.reason,
       })
-      await this.commit(memoryControlPackageDocument(packages, this.document.activeRevision, [...this.document.events, event]))
+      await this.commit(memoryControlPackageDocument(packages, this.document.activeRevision, [...this.document.events, event], this.document.evaluations))
       return this.read({ schemaVersion: 1, revision: input.revision })
+    })
+  }
+
+  settleEvaluation(input: { report: MemoryControlEvaluationReport }): Promise<MemoryControlPackage> {
+    return this.mutate(async () => {
+      const settled = evaluationSettlementDocument(this.document, input.report)
+      await this.commit(settled.document)
+      return this.read({ schemaVersion: 1, revision: settled.revision })
     })
   }
 
@@ -669,7 +832,7 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
       const event = lifecycleEvent(this.document, {
         kind: 'rollback', revision: target.revision, fromRevision: this.document.activeRevision, reason: input.reason,
       })
-      await this.commit(memoryControlPackageDocument(this.document.packages, target.revision, [...this.document.events, event]))
+      await this.commit(memoryControlPackageDocument(this.document.packages, target.revision, [...this.document.events, event], this.document.evaluations))
       return this.admitActive()
     })
   }
@@ -708,5 +871,6 @@ export function baselineMemoryControlPackageReader(): MemoryControlPackageReader
       }],
       events: [],
     }),
+    evaluationReports: () => [],
   }
 }

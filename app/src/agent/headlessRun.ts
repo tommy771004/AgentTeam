@@ -18,6 +18,8 @@ export type HeadlessRunOptions = Omit<TaskRunInput, 'sourceKind' | 'unattended'>
   settingsPatch?: Partial<LlmSettings>
   /** Optional caller-owned storage for evaluation projections. */
   storage?: Storage
+  /** Evaluation-only bridge to a real Host lifecycle (never a renderer-owned runner). */
+  subagents?: NonNullable<Window['subagents']>
 }
 
 type HeadlessStorage = {
@@ -29,7 +31,7 @@ type HeadlessStorage = {
 
 let sharedNodeStorage: HeadlessStorage | undefined
 
-function installNodeGlobals(preferredStorage?: Storage): {
+function installNodeGlobals(preferredStorage?: Storage, subagents?: NonNullable<Window['subagents']>): {
   restore: () => void
   storage: HeadlessStorage
 } {
@@ -55,7 +57,7 @@ function installNodeGlobals(preferredStorage?: Storage): {
   if (replaceWindow) {
     Object.defineProperty(runtime, 'window', {
       configurable: true,
-      value: { subagents: {} },
+      value: { subagents: subagents || {} },
     })
   }
   if (replaceStorage) {
@@ -83,7 +85,7 @@ function installNodeGlobals(preferredStorage?: Storage): {
 
 /** Execute one task through taskRunCoordinator without importing UI modules. */
 export async function runHeadlessTask(opts: HeadlessRunOptions): Promise<TaskRunResult> {
-  const globals = installNodeGlobals(opts.storage)
+  const globals = installNodeGlobals(opts.storage, opts.subagents)
   const { useSettingsStore } = opts.settingsPatch
     ? await import('../store/settingsStore.ts')
     : { useSettingsStore: null }

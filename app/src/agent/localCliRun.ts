@@ -362,6 +362,7 @@ export function emptyAgentLike(partial: Partial<AgentState> & { objective: strin
     scheduleTrigger: partial.scheduleTrigger,
     eventTrigger: partial.eventTrigger,
     postState: partial.postState,
+    turnRecord: partial.turnRecord,
   }
 }
 

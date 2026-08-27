@@ -10,12 +10,15 @@ import {
 } from './runJournal.ts'
 import { runHeadlessTask, type HeadlessRunOptions } from './headlessRun.ts'
 import type { LoopType } from './types.ts'
+import type { TurnRecord } from './turnRecord.ts'
+import type { WorkingGoalCompletionPredicate } from './workingState.ts'
 
 export type EvaluationTask = {
   id: string
   objective: string
   loopType?: LoopType
   runner?: RunnerId
+  workingGoal?: WorkingGoalCompletionPredicate
 }
 
 export type EvaluationTaskResult = {
@@ -27,6 +30,7 @@ export type EvaluationTaskResult = {
   journal?: JournalEntry
   artifact?: ArtifactIndex
   score: number
+  turnRecord?: TurnRecord
 }
 
 export type EvaluationBatchResult = {
@@ -47,7 +51,7 @@ function scoreTask(status: string, artifact: ArtifactIndex | undefined): number 
 /** Run fixed tasks sequentially through the canonical headless coordinator. */
 export async function runEvaluationBatch(
   tasks: EvaluationTask[],
-  opts: Pick<HeadlessRunOptions, 'transport' | 'settingsPatch'> = {},
+  opts: Pick<HeadlessRunOptions, 'transport' | 'settingsPatch' | 'subagents'> = {},
 ): Promise<EvaluationBatchResult> {
   const results: EvaluationTaskResult[] = []
   const storage = createMemoryStorage()
@@ -58,8 +62,9 @@ export async function runEvaluationBatch(
       loopType: task.loopType,
       transport: opts.transport,
       settingsPatch: opts.settingsPatch,
+      subagents: opts.subagents,
       storage,
-      overrides: { useLlm: false },
+      overrides: { useLlm: false, workingGoal: task.workingGoal },
     })
     const journal = listJournalEntries(storage).find((entry) => entry.runId === run.runId)
     const artifact = loadArtifactIndexes(storage).find(
@@ -75,6 +80,7 @@ export async function runEvaluationBatch(
       journal,
       artifact,
       score,
+      turnRecord: run.turnRecord,
     })
   }
   const journal = listJournalEntries(storage)

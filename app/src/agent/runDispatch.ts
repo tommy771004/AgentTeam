@@ -172,6 +172,7 @@ export async function dispatchThreadTask(
       result: state.result,
       error: state.haltReason,
       postState: state.postState,
+      turnRecord: state.turnRecord,
     }
   }
 
@@ -439,5 +440,6 @@ export async function dispatchThreadTask(
     result: a.result,
     error: a.haltReason,
     postState: a.postState,
+    turnRecord: a.turnRecord,
   }
 }

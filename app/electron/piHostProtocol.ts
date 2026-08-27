@@ -55,6 +55,7 @@ export type PiHostResponse = {
     memoryHealth?: MemoryStorageHealth
     memoryControlPackage?: MemoryControlPackage
     memoryControlLineage?: MemoryControlLineage
+    memoryControlEvaluations?: ReadonlyArray<import('../src/agent/memoryControlEvaluationContract.ts').MemoryControlEvaluationReport>
     cursor?: number
     sessions?: unknown[]
     settings?: PiSettings
@@ -3294,7 +3295,7 @@ export function handlePiHostRequest(
     if (resumed.error) return [errorResponse(id, 'invalid_request', resumed.error)]
     const initialWorkingState = resumed.state
       || workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input), admittedWorkingGoals)
-    const governingPackage = memoryControlPackageIdentity(state.memoryControlPackages.admitActive())
+    const governingPackage = memoryControlPackageIdentity(admitMemoryControlEvaluationPackage(state, input.params))
     const recorder: ActiveTurnRecorder = {
       cwd,
       turn: nextTurnNumber(session.record),
@@ -3973,6 +3974,37 @@ function isPiHostLifecycleRequest(state: HostState, method: PiHostRequest['metho
   return method === 'health/get' || method === 'lifecycle/shutdown' || state.shuttingDown
 }
 
+function admitMemoryControlEvaluationPackage(
+  state: HostState,
+  params: Record<string, unknown> | undefined,
+): MemoryControlPackage {
+  const active = state.memoryControlPackages.admitActive()
+  const revision = params?.evaluationPackageRevision
+  if (revision === undefined) return active
+  if (!validMaintenanceToken(state.memoryControlMaintenanceToken, params?.evaluationToken)
+    || !Number.isSafeInteger(revision) || Number(revision) < 1) {
+    throw new Error('Memory-Control evaluation package authority is unavailable')
+  }
+  const requested = state.memoryControlPackages.read({ schemaVersion: 1, revision: Number(revision) })
+  if (requested.revision !== active.revision
+    && (requested.status !== 'candidate' || requested.parentRevision !== active.revision)) {
+    throw new Error('Memory-Control evaluation package is not the active revision or its candidate')
+  }
+  return requested
+}
+
+function readMemoryControlPackageView(
+  state: HostState,
+  view: unknown,
+  revision: unknown,
+  id: string | number,
+): PiHostResponse[] {
+  if (revision !== undefined) return [errorResponse(id, 'invalid_request', 'Memory-Control view does not accept revision')]
+  if (view === 'lineage') return [{ id, result: { memoryControlLineage: state.memoryControlPackages.lineage() } }]
+  if (view === 'evaluations') return [{ id, result: { memoryControlEvaluations: state.memoryControlPackages.evaluationReports() } }]
+  return [errorResponse(id, 'invalid_request', 'Memory-Control Package view is invalid')]
+}
+
 function handleMemoryControlPackageRead(
   state: HostState,
   input: Partial<PiHostRequest>,
@@ -3986,16 +4018,10 @@ function handleMemoryControlPackageRead(
     const schemaVersion = input.params?.schemaVersion
     const revision = input.params?.revision
     const view = input.params?.view
-    if (view !== undefined && view !== 'lineage') {
-      return [errorResponse(id, 'invalid_request', 'Memory-Control Package view is invalid')]
-    }
     if (schemaVersion !== 1 || (revision !== undefined && (!Number.isSafeInteger(revision) || Number(revision) < 1))) {
       return [errorResponse(id, 'invalid_request', 'Memory-Control Package read requires schemaVersion 1 and an optional positive revision')]
     }
-    if (view === 'lineage') {
-      if (revision !== undefined) return [errorResponse(id, 'invalid_request', 'Memory-Control Package lineage read does not accept revision')]
-      return [{ id, result: { memoryControlLineage: state.memoryControlPackages.lineage() } }]
-    }
+    if (view !== undefined) return readMemoryControlPackageView(state, view, revision, id)
     return [{ id, result: { memoryControlPackage: state.memoryControlPackages.read({
       schemaVersion: 1,
       ...(revision === undefined ? {} : { revision: Number(revision) }),
@@ -4009,6 +4035,7 @@ function isMemoryControlPackageAuthority(value: MemoryControlPackageReader): val
   const authority = value as Partial<MemoryControlPackageAuthority>
   return typeof authority.createCandidate === 'function' && typeof authority.activateCandidate === 'function'
     && typeof authority.rejectCandidate === 'function' && typeof authority.rollback === 'function'
+    && typeof authority.settleEvaluation === 'function'
 }
 
 function validMaintenanceToken(expected: string | undefined, supplied: unknown): boolean {
@@ -4066,6 +4093,10 @@ function executeMemoryControlMaintenance(
   const revision = Number(params.revision)
   const expectedActiveRevision = Number(params.expectedActiveRevision)
   const reason = typeof params.reason === 'string' ? params.reason : ''
+  if (operation === 'settle-evaluation') {
+    if (!params.report || typeof params.report !== 'object') return Promise.reject(new Error('Memory-Control evaluation report is required'))
+    return authority.settleEvaluation({ report: params.report as import('../src/agent/memoryControlEvaluationContract.ts').MemoryControlEvaluationReport })
+  }
   if (operation === 'create-candidate') {
     if (!MEMORY_CONTROL_COMPONENT_KEYS.includes(params.diagnosisComponent as MemoryControlComponentKey) || !Array.isArray(params.patch)) {
       return Promise.reject(new Error('Memory-Control candidate diagnosis and patch are required'))

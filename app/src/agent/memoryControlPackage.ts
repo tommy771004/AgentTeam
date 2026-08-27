@@ -52,6 +52,7 @@ export type MemoryControlPackageReader = {
   admitActive(): MemoryControlPackage
   read(input: { schemaVersion: 1; revision?: number }): MemoryControlPackage
   lineage(): MemoryControlLineage
+  evaluationReports(): ReadonlyArray<import('./memoryControlEvaluationContract.ts').MemoryControlEvaluationReport>
 }
 
 export type MemoryControlJsonPatchOperation = {
@@ -70,6 +71,7 @@ export type MemoryControlPackageAuthority = MemoryControlPackageReader & {
   activateCandidate(input: { revision: number; expectedActiveRevision: number; reason: string }): Promise<MemoryControlPackage>
   rejectCandidate(input: { revision: number; reason: string }): Promise<MemoryControlPackage>
   rollback(input: { revision: number; expectedActiveRevision: number; reason: string }): Promise<MemoryControlPackage>
+  settleEvaluation(input: { report: import('./memoryControlEvaluationContract.ts').MemoryControlEvaluationReport }): Promise<MemoryControlPackage>
 }
 
 const SHA256 = /^[a-f0-9]{64}$/
