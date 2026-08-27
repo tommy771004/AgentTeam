@@ -606,11 +606,11 @@ export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: 
         if (binding.completedFileEffects?.length && (toolName === 'write' || toolName === 'edit' || toolName === 'bash')) {
           const toolInput = (event.input as Record<string, unknown>) || {}
           const path = typeof toolInput.path === 'string' ? toolInput.path : ''
-          const canonicalPath = path ? canonicalReplayPath(frozenPolicy.projectRoot, path) : ''
+          const canonicalPath = path ? canonicalPiToolPath(frozenPolicy.projectRoot, path) : ''
           const protectedEffect = toolName === 'bash'
             ? binding.completedFileEffects[0]
             : binding.completedFileEffects.find((effect) =>
-                canonicalReplayPath(frozenPolicy.projectRoot, effect.path) === canonicalPath)
+                canonicalPiToolPath(frozenPolicy.projectRoot, effect.path) === canonicalPath)
           if (protectedEffect) {
             const reason = `resume replay refused for completed resource: ${protectedEffect.path}`
             markPiDeniedInTurnCall(ctx.sessionId, callId, reason)
@@ -813,7 +813,7 @@ const workingWriteCanonicalPaths = new Map<string, string>()
 
 const workingWriteEffectKey = (runId: string, callId: string) => `${runId}\u0000${callId}`
 
-function canonicalReplayPath(root: string, value: string): string {
+export function canonicalPiToolPath(root: string, value: string): string {
   let normalized = value.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
   if (normalized.startsWith('@')) normalized = normalized.slice(1)
   const path = normalized === '~'

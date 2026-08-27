@@ -52,7 +52,7 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
-assert.equal(TURN_RECORD_FORMAT_VERSION, 4, 'blocked/rebased Working State is an explicit Turn Record format evolution')
+assert.equal(TURN_RECORD_FORMAT_VERSION, 5, 'delegated Working State audit is an explicit Turn Record format evolution')
 const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
 assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')
@@ -113,6 +113,31 @@ for (const legacyVersion of [1, 2]) {
     version: legacyVersion,
     entries: [working.entries[0]],
   }), TurnRecordCorruptError, `v${legacyVersion} cannot smuggle a v3 Working State entry`)
+}
+const delegated = appendTurnRecord(undefined, [{
+  kind: 'delegation-assignment', source: 'host',
+  assignment: {
+    schemaVersion: 1,
+    delegationId: 'parent-run:delegation:1',
+    parentRunId: 'parent-run',
+    parentSessionId: 'parent-session',
+    childSessionId: 'child-session',
+    baseRevision: 1,
+    constraints: [],
+    goal: {
+      id: 'parent-run:goal:1',
+      description: 'delegated goal',
+      completionPredicate: { kind: 'file-content', path: 'delegated.txt', sha256: 'a'.repeat(64) },
+    },
+  },
+  turn: 1, step: 1, at: 1,
+}])
+assert.equal(parseTurnRecord({ version: 4, entries: continued.entries }).record.entries.length, 3, 'valid v4 history migrates intact')
+for (const legacyVersion of [1, 2, 3, 4]) {
+  assert.throws(() => parseTurnRecord({
+    version: legacyVersion,
+    entries: [delegated.entries[0]],
+  }), TurnRecordCorruptError, `v${legacyVersion} cannot smuggle a v5 delegation audit entry`)
 }
 assert.throws(() => parseTurnRecord({
   version: TURN_RECORD_FORMAT_VERSION,

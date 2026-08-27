@@ -233,7 +233,6 @@ import { armTurnDeadline, clampTurnTimeout, systemTurnDeadlineClock, type TurnDe
 import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
-import type { PiMemory } from './piMemory.ts'
 import { createPiDurableMemoryBridge, piMemoryProjection, type PiMemoryChange } from './piDurableMemory.ts'
 import type { PiMemoryWriteReceipt } from './piPackBridges.ts'
 import {
@@ -268,7 +267,9 @@ import { callPiMcpTool, listPiMcpTools, piMcpGenerationKey, reloadPiMcp, stopPiM
 import { isCompletedModelCall, isPiHostDefinitionOfDoneMet, isPiTurnSettlement, piTurnFinalAnswer, piTurnResultText, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
 import { appendTurnRecord, asTurnRecordMemoryWrite, derivePiHistory, nextTurnRecordSeq, pageTurnRecord, workingStateFromTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordEntry, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
 import {
+  checkDelegatedGoalObservation,
   checkWorkingStateProposal,
+  createDelegatedGoalAssignment,
   createInitialWorkingState,
   isWorkingExecutionEvidence,
   isWorkingGoalCompletionPredicate,
@@ -278,12 +279,16 @@ import {
   type WorkingState,
   type WorkingStateProposal,
   type WorkingToolSettlement,
+  type DelegatedGoalAssignment,
+  type DelegatedGoalObservation,
+  type WorkingEvidenceRef,
 } from '../src/agent/workingState.ts'
 import type { CompactionCheckpointSaveInput, CompactionManifest, CompactionReason } from '../src/agent/compactionCheckpoint.ts'
 import { cancelSubDesignProviderRun, executeSubDesignProviderStage } from './subDesignProviderRuntime.ts'
 import { shouldStopForProviderProjection, type SubDesignPluginExecutionProjection } from '../src/agent/subdesign/pluginExecution.ts'
 import {
   cancelPiApprovalsForRun,
+  canonicalPiToolPath,
   consumePiDeniedInTurnCall,
   consumePiWorkingWriteCanonicalPath,
   settlePiModelBuiltinInvocation,
@@ -413,12 +418,17 @@ function workingStateForAdmittedTurn(
   completionPredicate: unknown,
   goals: readonly WorkingGoalSeed[] | undefined,
 ): WorkingState {
+  const delegated = session.context?.delegatedGoal
   return createInitialWorkingState({
     runId,
-    objective,
+    objective: delegated?.goal.description || objective,
     constraints: session.context?.constraints,
     ...(isWorkingGoalCompletionPredicate(completionPredicate) ? { completionPredicate } : {}),
-    ...(goals?.length ? { goals } : {}),
+    ...(delegated
+      ? { goals: [{ description: delegated.goal.description, completionPredicate: delegated.goal.completionPredicate }] }
+      : goals?.length
+        ? { goals }
+        : {}),
   })
 }
 
@@ -441,6 +451,22 @@ function requestedWorkingGoals(input: { params?: Record<string, unknown> }): Wor
       ...(seed.completionPredicate ? { completionPredicate: seed.completionPredicate } : {}),
     }
   })
+}
+
+function admitRequestedWorkingGoals(
+  session: SessionRecord,
+  input: { params?: Record<string, unknown> },
+): { goals?: WorkingGoalSeed[]; error?: string } {
+  try {
+    const goals = requestedWorkingGoals(input)
+    if (session.context?.delegatedGoal
+      && (requestedWorkingGoal(input) !== undefined || goals !== undefined)) {
+      return { error: 'delegated child cannot replace its Host-assigned Working State goal' }
+    }
+    return { goals }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Invalid workingGoals' }
+  }
 }
 
 function resumeWorkingState(input: {
@@ -606,6 +632,8 @@ function resolveExistingPath(path: string): string {
  * must be recorded when it happens, not collected afterwards.
  */
 type ActiveTurnRecorder = {
+  /** Frozen project root used when the parent rechecks delegated file evidence. */
+  cwd: string
   turn: number
   step: number
   entries: TurnRecordAppend[]
@@ -615,6 +643,10 @@ type ActiveTurnRecorder = {
   stateProposals: Map<string, WorkingStateProposal>
   /** Immutable state all sibling tool drafts in the current model step saw. */
   proposalState: WorkingState
+  /** Parent Checker commits adopted child evidence here during a pack call. */
+  delegatedWorkingState?: WorkingState
+  /** Set by the mutating pack tool; consumed only after sibling effects settle. */
+  delegatedAdoptionRequested?: boolean
   /**
    * The seq the commit will start from, read once when the turn opened.
    * `session.record` does not change while a turn runs, so an entry's live
@@ -650,6 +682,145 @@ function recordTurnEntry(
   // is the entry's real seq and not a live-only placeholder.
   recorder.publish?.({ ...appended, seq: recorder.seqBase + recorder.entries.length - 1 } as TurnRecordEntry)
   recorder.onAppend?.({ ...appended, seq: recorder.seqBase + recorder.entries.length - 1 } as TurnRecordEntry)
+}
+
+function parentDelegationEntries(session: SessionRecord, recorder: ActiveTurnRecorder) {
+  return [...(session.record?.entries || []), ...recorder.entries]
+}
+
+function matchingDelegatedEvidenceEntry(
+  record: TurnRecord,
+  evidence: WorkingEvidenceRef | undefined,
+) {
+  if (!evidence) return undefined
+  return record.entries.find((entry) => entry.seq === evidence.seq
+    && entry.kind === 'tool-result'
+    && entry.executionEvidence?.evidenceId === evidence.evidenceId
+    && entry.executionEvidence.runId === evidence.runId
+    && entry.executionEvidence.tool === evidence.tool
+    && entry.executionEvidence.callId === evidence.callId
+    && entry.executionEvidence.contractDigest === evidence.contractDigest
+    && entry.executionEvidence.schemaDigest === evidence.schemaDigest
+    && entry.executionEvidence.receiptDigest === evidence.receiptDigest)
+}
+
+function delegatedChildSummary(record: TurnRecord): string {
+  return record.entries
+    .filter((entry) => entry.kind === 'assistant-text')
+    .at(-1)?.content.replace(/\s+/g, ' ').trim().slice(0, 800) || 'child returned no completion observation'
+}
+
+function delegatedObservationStatus(
+  verified: boolean,
+  evidenceStillApplicable: boolean,
+): DelegatedGoalObservation['status'] {
+  if (!verified) return 'unverified'
+  return evidenceStillApplicable ? 'verified' : 'invalidated'
+}
+
+function delegatedGoalObservationFromChild(
+  assignment: DelegatedGoalAssignment,
+  child: SessionRecord,
+  evidenceStillApplicable: boolean,
+): DelegatedGoalObservation | undefined {
+  const record = child.record
+  if (!record?.entries.some((entry) => entry.kind === 'turn-end')) return undefined
+  const childState = workingStateFromTurnRecord(record)
+  const childGoal = childState?.goals[0]
+  const evidence = childGoal?.status === 'done' ? childGoal.evidence.at(-1) : undefined
+  const terminal = matchingDelegatedEvidenceEntry(record, evidence)
+  const summary = delegatedChildSummary(record)
+  const verified = Boolean(childState && childGoal?.status === 'done' && evidence && terminal?.kind === 'tool-result')
+  const evidenceRef: WorkingEvidenceRef | undefined = verified && evidence ? {
+    ...evidence,
+    goalId: assignment.goal.id,
+    parentRunId: assignment.parentRunId,
+    delegationId: assignment.delegationId,
+    childSessionId: assignment.childSessionId,
+    childRecordSeq: evidence.seq,
+  } : undefined
+  return {
+    schemaVersion: 1,
+    delegationId: assignment.delegationId,
+    parentRunId: assignment.parentRunId,
+    parentSessionId: assignment.parentSessionId,
+    childSessionId: assignment.childSessionId,
+    childRunId: childState?.runId || 'unverified-child-run',
+    goalId: assignment.goal.id,
+    baseRevision: assignment.baseRevision,
+    status: delegatedObservationStatus(verified, evidenceStillApplicable),
+    summary,
+    ...(verified && childGoal?.completionPredicate && evidenceRef
+      ? { resource: childGoal.completionPredicate, evidenceRef }
+      : {}),
+  }
+}
+
+function delegatedEvidenceStillApplies(recorder: ActiveTurnRecorder, assignment: DelegatedGoalAssignment): boolean {
+  const predicate = assignment.goal.completionPredicate
+  const canonicalPath = canonicalPiToolPath(recorder.cwd, predicate.path)
+  if (!isWithinProject(recorder.cwd, canonicalPath)) return false
+  return proposalEvidenceStillApplies(canonicalPath, {
+    schemaVersion: 1,
+    proposalId: `delegation-recheck:${assignment.delegationId}`,
+    source: 'host',
+    baseRevision: assignment.baseRevision,
+    runId: assignment.parentRunId,
+    goalId: assignment.goal.id,
+    proposedStatus: 'done',
+    tool: 'write',
+    callId: assignment.delegationId,
+    file: predicate,
+  })
+}
+
+function collectDelegatedGoalResults(
+  state: HostState,
+  parentSessionId: string,
+): import('../src/agent/workingState.ts').DelegatedGoalCheck[] {
+  const parent = state.snapshot.sessions.find((session) => session.id === parentSessionId)
+  const recorder = activeTurnRecorders.get(parentSessionId)
+  if (!parent || !recorder) return []
+  const entries = parentDelegationEntries(parent, recorder)
+  const checkedIds = new Set(entries
+    .filter((entry) => entry.kind === 'delegation-check')
+    .map((entry) => entry.check.delegationId))
+  const assignments = entries
+    .filter((entry) => entry.kind === 'delegation-assignment')
+    .map((entry) => entry.assignment)
+  const checks: import('../src/agent/workingState.ts').DelegatedGoalCheck[] = []
+  let workingState = recorder.delegatedWorkingState || recorder.proposalState
+  for (const assignment of assignments) {
+    if (checkedIds.has(assignment.delegationId)) continue
+    const child = state.snapshot.sessions.find((session) => session.id === assignment.childSessionId)
+    if (!child) continue
+    const observation = delegatedGoalObservationFromChild(
+      assignment,
+      child,
+      delegatedEvidenceStillApplies(recorder, assignment),
+    )
+    if (!observation) continue
+    recordTurnEntry(parentSessionId, { kind: 'delegation-observation', source: 'host', observation })
+    const checked = checkDelegatedGoalObservation({ state: workingState, assignment, observation })
+    recordTurnEntry(parentSessionId, { kind: 'delegation-check', source: 'host', check: checked.check })
+    checks.push(checked.check)
+    if (!checked.state) continue
+    workingState = checked.state
+    recorder.delegatedWorkingState = checked.state
+    recordTurnEntry(parentSessionId, { kind: 'working-state', source: 'host', state: checked.state })
+  }
+  return checks
+}
+
+function adoptDelegatedWorkingState(current: WorkingState, recorder: ActiveTurnRecorder): WorkingState {
+  const delegated = recorder.delegatedWorkingState
+  return delegated && delegated.revision > current.revision ? delegated : current
+}
+
+function settleDelegatedGoalAdoption(state: HostState, sessionId: string, recorder: ActiveTurnRecorder): void {
+  if (!recorder.delegatedAdoptionRequested) return
+  collectDelegatedGoalResults(state, sessionId)
+  recorder.delegatedAdoptionRequested = false
 }
 
 /** Collect one thinking delta. Nothing is written yet, and nothing is dropped. */
@@ -3055,12 +3226,9 @@ export function handlePiHostRequest(
     const preloaded = Array.isArray(input.params?.preloadedCapabilities) ? input.params?.preloadedCapabilities : []
     // One turn, one record. Opened here so every later entry — the model's,
     // the tools', the approvals' — lands in the order it actually happened.
-    let admittedWorkingGoals: WorkingGoalSeed[] | undefined
-    try {
-      admittedWorkingGoals = requestedWorkingGoals(input)
-    } catch (error) {
-      return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid workingGoals')]
-    }
+    const workingGoalAdmission = admitRequestedWorkingGoals(session, input)
+    if (workingGoalAdmission.error) return [errorResponse(id, 'invalid_request', workingGoalAdmission.error)]
+    const admittedWorkingGoals = workingGoalAdmission.goals
     if (input.params?.resumeFromRunId !== undefined
       && (requestedWorkingGoal(input) !== undefined || admittedWorkingGoals !== undefined)) {
       return [errorResponse(id, 'invalid_request', 'resume cannot replace checkpoint Working State goals')]
@@ -3070,6 +3238,7 @@ export function handlePiHostRequest(
     const initialWorkingState = resumed.state
       || workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input), admittedWorkingGoals)
     const recorder: ActiveTurnRecorder = {
+      cwd,
       turn: nextTurnNumber(session.record),
       step: 1,
       entries: [],
@@ -3487,6 +3656,8 @@ export function handlePiHostRequest(
             turnEvents,
           })
         })
+        settleDelegatedGoalAdoption(state, sessionId, recorder)
+        workingState = adoptDelegatedWorkingState(workingState, recorder)
         // Arbitrate only after every sibling effect in this model step has
         // settled. A later write may invalidate an earlier read-back receipt;
         // that stale evidence is rejected rather than leaving a false `done`.
@@ -3798,6 +3969,48 @@ export function createPiHostServer(
       if (!response || response.error) throw new Error(response?.error?.message || 'child session failed')
       return { sessionId: String(response.result?.sessionId) }
     },
+    createGoalChild: async ({ parentSessionId, parentRunId, goalId, role, profile, depth }) => {
+      const recorder = activeTurnRecorders.get(parentSessionId)
+      if (!recorder || recorder.proposalState.runId !== parentRunId) throw new Error('parent delegated goal is not active')
+      const parentState = recorder.delegatedWorkingState || recorder.proposalState
+      const goal = parentState.goals.find((candidate) => candidate.id === goalId)
+      if (!goal || goal.status !== 'pending' || !goal.completionPredicate) throw new Error('assigned parent goal is not pending and verifiable')
+      const request = {
+        id: `pack-goal-child-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        method: 'sessions/create' as const,
+        params: {
+          parentSessionId,
+          role,
+          profile,
+          depth,
+          context: {
+            objective: goal.description,
+            facts: [],
+            constraints: [...parentState.constraints],
+          },
+        },
+      }
+      const responses = await Promise.resolve(handlePiHostRequest(state, request))
+      const response = (Array.isArray(responses) ? responses : []).find((message) => !('event' in message)) as PiHostResponse | undefined
+      if (!response || response.error) throw new Error(response?.error?.message || 'goal child session failed')
+      const childSessionId = String(response.result?.sessionId || '')
+      const child = state.snapshot.sessions.find((session) => session.id === childSessionId)
+      if (!child) throw new Error('goal child session was not persisted')
+      const assignment = createDelegatedGoalAssignment({
+        state: parentState,
+        goalId,
+        parentSessionId,
+        childSessionId,
+      })
+      child.context = {
+        objective: assignment.goal.description,
+        facts: [],
+        constraints: [...assignment.constraints],
+        delegatedGoal: assignment,
+      }
+      recordTurnEntry(parentSessionId, { kind: 'delegation-assignment', source: 'host', assignment })
+      return { sessionId: childSessionId, delegationId: assignment.delegationId, objective: assignment.goal.description }
+    },
     enqueueChildRun: async ({ runId, sessionId, prompt }) => {
       const queue = new PiRunQueue(24, state.snapshot.queue)
       const outcome = queue.enqueue({ runId, sessionId, prompt, trigger: 'interactive', profile: {}, status: 'queued' })
@@ -3815,6 +4028,11 @@ export function createPiHostServer(
         depth: state.snapshot.sessions.find((session) => session.id === run.sessionId)?.depth,
       })),
     ],
+    requestGoalAdoption: (parentSessionId) => {
+      const recorder = activeTurnRecorders.get(parentSessionId)
+      if (!recorder) throw new Error('parent delegated goal is not active')
+      recorder.delegatedAdoptionRequested = true
+    },
   })
   setPiMcpExtensionsLookup(() => state.extensions.list())
   // The framework pack's reserved verbs drive the SAME catalog instance the

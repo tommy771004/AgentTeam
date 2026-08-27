@@ -58,10 +58,14 @@ export type PiDelegatedRunView = {
 export type PiDelegationBridgeAccess = {
   /** Create a child session through the same validation as `sessions/create`. */
   createChild: (input: { parentSessionId: string; role: string; profile: Record<string, unknown>; context: PiContextPacket; depth: number }) => Promise<{ sessionId: string }>
+  /** Assign exactly one current parent goal; the Host authors the snapshot. */
+  createGoalChild: (input: { parentSessionId: string; parentRunId: string; goalId: string; role: string; profile: Record<string, unknown>; depth: number }) => Promise<{ sessionId: string; delegationId: string; objective: string }>
   /** Queue the child's first turn on the same run queue automation claims from. */
   enqueueChildRun: (input: { runId: string; sessionId: string; prompt: string }) => Promise<void>
   /** Every background work item this Host still knows about. */
   listRuns: () => PiDelegatedRunView[]
+  /** Stage parent adoption; the Host settles it only after all sibling effects. */
+  requestGoalAdoption: (parentSessionId: string) => void
 }
 
 let delegationBridge: PiDelegationBridgeAccess | undefined

@@ -1,6 +1,7 @@
 import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
 import { piDelegationBridge, type PiDelegatedRunView } from '../piPackBridges.ts'
 import { structuredFailure, structuredOk } from './packResults.ts'
+import type { PiDelegationBridgeAccess } from '../piPackBridges.ts'
 
 /**
  * Background work pack（背景工作包）— delegation and monitoring.
@@ -10,6 +11,26 @@ import { structuredFailure, structuredOk } from './packResults.ts'
  * fail-closed through the same `sessions/create` path the protocol uses, so
  * role, profile, context, and depth can never be quietly defaulted.
  */
+
+async function createDelegatedChild(
+  bridge: PiDelegationBridgeAccess,
+  args: Record<string, unknown>,
+  input: { parentSessionId: string; parentRunId: string; role: string; profile: Record<string, unknown>; depth: number },
+) {
+  const goalId = typeof args.goalId === 'string' ? args.goalId.trim() : ''
+  if (goalId) return bridge.createGoalChild({ ...input, goalId })
+  return bridge.createChild({
+    parentSessionId: input.parentSessionId,
+    role: input.role,
+    profile: input.profile,
+    depth: input.depth,
+    context: {
+      objective: String(args.objective || ''),
+      facts: Array.isArray(args.facts) ? args.facts.map((fact) => String(fact)) : [],
+      constraints: Array.isArray(args.constraints) ? args.constraints.map((constraint) => String(constraint)) : [],
+    },
+  })
+}
 
 const delegateTask: PiPackTool = {
   name: 'delegate_task',
@@ -25,6 +46,7 @@ const delegateTask: PiPackTool = {
       facts: { type: 'array', items: { type: 'string' }, description: 'Facts the child starts from' },
       constraints: { type: 'array', items: { type: 'string' }, description: 'Constraints binding the child' },
       depth: { type: 'integer', description: 'Delegation depth budget' },
+      goalId: { type: 'string', description: 'Optional parent Working State goal to assign by immutable snapshot' },
     },
     required: ['objective', 'role', 'profile', 'depth'],
   },
@@ -41,19 +63,21 @@ const delegateTask: PiPackTool = {
     // it starts must not start.
     if (!String(args.objective || '').trim()) return structuredFailure('child delegation 需要 objective')
     try {
-      const created = await bridge.createChild({
+      const created = await createDelegatedChild(bridge, args, {
         parentSessionId,
+        parentRunId: String(ctx.runId || ''),
         role,
         profile,
         depth,
-        context: {
-          objective: String(args.objective || ''),
-          facts: Array.isArray(args.facts) ? args.facts.map((fact) => String(fact)) : [],
-          constraints: Array.isArray(args.constraints) ? args.constraints.map((constraint) => String(constraint)) : [],
-        },
       })
-      await bridge.enqueueChildRun({ runId: `${ctx.runId || ctx.sessionId}-child-${created.sessionId}`, sessionId: created.sessionId, prompt: String(args.objective || '') })
-      return structuredOk(`已委派給子 session ${created.sessionId}`, { childSessionId: created.sessionId, parentSessionId })
+      const assignedObjective = 'objective' in created ? created.objective : undefined
+      const prompt = typeof assignedObjective === 'string' ? assignedObjective : String(args.objective || '')
+      await bridge.enqueueChildRun({ runId: `${ctx.runId || ctx.sessionId}-child-${created.sessionId}`, sessionId: created.sessionId, prompt })
+      return structuredOk(`已委派給子 session ${created.sessionId}`, {
+        childSessionId: created.sessionId,
+        parentSessionId,
+        ...('delegationId' in created ? { delegationId: created.delegationId } : {}),
+      })
     } catch (error) {
       return structuredFailure(error instanceof Error ? error.message : 'delegation failed')
     }
@@ -79,6 +103,23 @@ const delegateStatus: PiPackTool = {
     if (wanted && !runs.length) return structuredFailure(`查無背景工作：${wanted}`)
     const lines = runs.length ? runs.map((run: PiDelegatedRunView) => `- ${run.runId}: ${run.status}${run.settlement ? ` (${run.settlement})` : ''}${run.role ? ` [${run.role}]` : ''}`) : ['（目前沒有背景工作）']
     return structuredOk(lines.join('\n'), { runs })
+  },
+}
+
+const delegateAdoptResults: PiPackTool = {
+  name: 'delegate_adopt_results',
+  label: 'Adopt Delegated Results',
+  description: 'Run the parent Host Checker over terminal delegated goal evidence and commit accepted goals',
+  promptSnippet: 'adopt completed delegated goal results through the parent checker',
+  parameters: { type: 'object', properties: {} },
+  // This writes the canonical parent Working State. The resume fence must
+  // therefore treat it as a mutation, even though it performs no file I/O.
+  policyMigration: { sideEffect: true },
+  execute: async (_args, ctx) => {
+    const bridge = piDelegationBridge()
+    if (!bridge) return structuredFailure('delegation 在此 Host 無法使用')
+    bridge.requestGoalAdoption(ctx.sessionId)
+    return structuredOk('已排入 parent Checker，將在本 step 所有 sibling effects settled 後仲裁', { adoptionRequested: true })
   },
 }
 
@@ -108,7 +149,7 @@ export function buildBackgroundWorkPack() {
     name: 'Background Work',
     description: 'Sub-agent delegation and background monitoring',
     capability: 'delegate',
-    tools: [delegateTask, delegateStatus, monitor],
+    tools: [delegateTask, delegateStatus, delegateAdoptResults, monitor],
   }
 }
 

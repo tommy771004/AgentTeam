@@ -14,6 +14,9 @@
  */
 import type { PiTurnInterruptReason, PiTurnSettlement } from './piHostRun.ts'
 import {
+  isDelegatedGoalAssignment,
+  isDelegatedGoalCheck,
+  isDelegatedGoalObservation,
   isWorkingExecutionEvidence,
   isWorkingState,
   isWorkingStateCheck,
@@ -22,6 +25,9 @@ import {
   type WorkingState,
   type WorkingStateCheck,
   type WorkingStateProposal,
+  type DelegatedGoalAssignment,
+  type DelegatedGoalCheck,
+  type DelegatedGoalObservation,
 } from './workingState.ts'
 
 /**
@@ -30,9 +36,10 @@ import {
  * empty. Version 2 adds metadata-only durable-memory recall provenance.
  * Version 3 adds Host-owned Verified Working State snapshots.
  * Version 4 adds Host-authored blocked proposals and explicit rebase verdicts.
+ * Version 5 adds parent-owned delegated-goal assignment/observation/check audit.
  */
-export const TURN_RECORD_FORMAT_VERSION = 4
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3])
+export const TURN_RECORD_FORMAT_VERSION = 5
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -322,6 +329,9 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         source: 'host'
         state: WorkingState
       }
+    | { kind: 'delegation-assignment'; source: 'host'; assignment: DelegatedGoalAssignment }
+    | { kind: 'delegation-observation'; source: 'host'; observation: DelegatedGoalObservation }
+    | { kind: 'delegation-check'; source: 'host'; check: DelegatedGoalCheck }
     | {
         /** A fact the user must see that is not a tool call or a message. */
         kind: 'notice'
@@ -389,6 +399,9 @@ const KINDS = new Set([
   'state-proposal',
   'state-check',
   'working-state',
+  'delegation-assignment',
+  'delegation-observation',
+  'delegation-check',
   'notice',
 ])
 
@@ -409,8 +422,7 @@ function isMemoryRecallEntry(entry: Record<string, unknown>): boolean {
   })
 }
 
-function isHostContextEntry(entry: Record<string, unknown>): boolean {
-  if (entry.kind === 'memory-recall') return isMemoryRecallEntry(entry)
+function isWorkingStateContextEntry(entry: Record<string, unknown>): boolean | undefined {
   if (entry.kind === 'state-proposal') {
     return (entry.source === 'model' || entry.source === 'host')
       && Object.keys(entry).every((key) => ['kind', 'source', 'proposal', 'seq', 'turn', 'step', 'at'].includes(key))
@@ -427,6 +439,32 @@ function isHostContextEntry(entry: Record<string, unknown>): boolean {
       && Object.keys(entry).every((key) => ['kind', 'source', 'state', 'seq', 'turn', 'step', 'at'].includes(key))
       && isWorkingState(entry.state)
   }
+  return isDelegationContextEntry(entry)
+}
+
+function isDelegationContextEntry(entry: Record<string, unknown>): boolean | undefined {
+  if (entry.kind === 'delegation-assignment') {
+    return entry.source === 'host'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'assignment', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isDelegatedGoalAssignment(entry.assignment)
+  }
+  if (entry.kind === 'delegation-observation') {
+    return entry.source === 'host'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'observation', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isDelegatedGoalObservation(entry.observation)
+  }
+  if (entry.kind === 'delegation-check') {
+    return entry.source === 'host'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'check', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isDelegatedGoalCheck(entry.check)
+  }
+  return undefined
+}
+
+function isHostContextEntry(entry: Record<string, unknown>): boolean {
+  if (entry.kind === 'memory-recall') return isMemoryRecallEntry(entry)
+  const workingStateEntry = isWorkingStateContextEntry(entry)
+  if (workingStateEntry !== undefined) return workingStateEntry
   if (entry.kind === 'notice') return typeof entry.topic === 'string' && typeof entry.text === 'string'
   if (entry.kind === 'tool-result') {
     if (entry.memoryWrite !== undefined && !asTurnRecordMemoryWrite(entry.memoryWrite, String(entry.callId || ''))) return false
@@ -497,16 +535,7 @@ export function parseTurnRecord(value: unknown): { record: TurnRecord; tornTail:
   const kept: TurnRecordEntry[] = []
   let tornTail = false
   for (let index = 0; index < entries.length; index += 1) {
-    if (raw.version === 1
-      && entries[index] && typeof entries[index] === 'object'
-      && (entries[index] as Record<string, unknown>).kind === 'memory-recall') {
-      throw new TurnRecordCorruptError(index)
-    }
-    if ((raw.version === 1 || raw.version === 2)
-      && entries[index] && typeof entries[index] === 'object'
-      && (entries[index] as Record<string, unknown>).kind === 'working-state') {
-      throw new TurnRecordCorruptError(index)
-    }
+    if (isLegacyIncompatibleEntry(Number(raw.version), entries[index])) throw new TurnRecordCorruptError(index)
     if (isEntry(entries[index])) {
       kept.push(entries[index] as TurnRecordEntry)
       continue
@@ -518,6 +547,14 @@ export function parseTurnRecord(value: unknown): { record: TurnRecord; tornTail:
     throw new TurnRecordCorruptError(index)
   }
   return { record: { version: TURN_RECORD_FORMAT_VERSION, entries: kept }, tornTail }
+}
+
+function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const kind = String((value as Record<string, unknown>).kind || '')
+  if (version === 1 && kind === 'memory-recall') return true
+  if (version <= 2 && kind === 'working-state') return true
+  return version < 5 && ['delegation-assignment', 'delegation-observation', 'delegation-check'].includes(kind)
 }
 
 /**

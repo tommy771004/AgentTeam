@@ -26,6 +26,53 @@ export type WorkingEvidenceRef = {
   contractDigest: string
   schemaDigest: string
   receiptDigest: string
+  /** Present when a child effect is adopted by its parent Host Checker. */
+  parentRunId?: string
+  delegationId?: string
+  childSessionId?: string
+  childRecordSeq?: number
+}
+
+export type DelegatedGoalAssignment = {
+  schemaVersion: 1
+  delegationId: string
+  parentRunId: string
+  parentSessionId: string
+  childSessionId: string
+  baseRevision: number
+  constraints: string[]
+  goal: {
+    id: string
+    description: string
+    completionPredicate: WorkingGoalCompletionPredicate
+  }
+}
+
+export type DelegatedGoalObservation = {
+  schemaVersion: 1
+  delegationId: string
+  parentRunId: string
+  parentSessionId: string
+  childSessionId: string
+  childRunId: string
+  goalId: string
+  baseRevision: number
+  status: 'verified' | 'unverified' | 'invalidated'
+  summary: string
+  resource?: WorkingGoalCompletionPredicate
+  evidenceRef?: WorkingEvidenceRef
+}
+
+export type DelegatedGoalCheck = {
+  schemaVersion: 1
+  delegationId: string
+  parentRunId: string
+  goalId: string
+  baseRevision: number
+  currentRevision: number
+  verdict: 'accepted' | 'rejected' | 'rebased'
+  reason: string
+  committedRevision?: number
 }
 
 export type WorkingGoal = {
@@ -114,6 +161,13 @@ const boundedString = (value: unknown, max: number): value is string =>
 const isSha256 = (value: unknown): value is string =>
   typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
 
+function isDelegatedEvidenceIdentity(ref: Record<string, unknown>): boolean {
+  return (ref.parentRunId === undefined || boundedString(ref.parentRunId, 512))
+    && (ref.delegationId === undefined || boundedString(ref.delegationId, 2_048))
+    && (ref.childSessionId === undefined || boundedString(ref.childSessionId, 512))
+    && (ref.childRecordSeq === undefined || (Number.isSafeInteger(ref.childRecordSeq) && Number(ref.childRecordSeq) > 0))
+}
+
 export function isWorkingGoalCompletionPredicate(value: unknown): value is WorkingGoalCompletionPredicate {
   if (!value || typeof value !== 'object') return false
   const predicate = value as Record<string, unknown>
@@ -128,6 +182,7 @@ function isWorkingEvidenceRef(value: unknown): value is WorkingEvidenceRef {
   const ref = value as Record<string, unknown>
   if (Object.keys(ref).some((key) => ![
     'seq', 'evidenceId', 'runId', 'goalId', 'tool', 'callId', 'contractDigest', 'schemaDigest', 'receiptDigest',
+    'parentRunId', 'delegationId', 'childSessionId', 'childRecordSeq',
   ].includes(key))) return false
   if (!Number.isSafeInteger(ref.seq) || Number(ref.seq) < 1) return false
   return boundedString(ref.evidenceId, 512)
@@ -138,6 +193,7 @@ function isWorkingEvidenceRef(value: unknown): value is WorkingEvidenceRef {
     && isSha256(ref.contractDigest)
     && isSha256(ref.schemaDigest)
     && isSha256(ref.receiptDigest)
+    && isDelegatedEvidenceIdentity(ref)
 }
 
 function isWorkingGoal(value: unknown): value is WorkingGoal {
@@ -417,6 +473,197 @@ function acceptedStateCheck(
       verdict,
       reason,
       ...(evidenceRef ? { evidenceRef } : {}),
+    },
+  }
+}
+
+export function createDelegatedGoalAssignment(input: {
+  state: WorkingState
+  goalId: string
+  parentSessionId: string
+  childSessionId: string
+}): DelegatedGoalAssignment {
+  if (!isWorkingState(input.state)) throw new Error('parent Working State is malformed')
+  const goal = input.state.goals.find((candidate) => candidate.id === input.goalId)
+  if (!goal || goal.status !== 'pending') throw new Error('delegated goal must be pending')
+  if (!goal.completionPredicate) throw new Error('delegated goal requires a verifiable completion predicate')
+  if (!boundedString(input.parentSessionId, 512) || !boundedString(input.childSessionId, 512)) {
+    throw new Error('delegated session identity is malformed')
+  }
+  return {
+    schemaVersion: 1,
+    delegationId: `${input.state.runId}:delegation:${goal.id}:${input.childSessionId}`.slice(0, 2_048),
+    parentRunId: input.state.runId,
+    parentSessionId: input.parentSessionId,
+    childSessionId: input.childSessionId,
+    baseRevision: input.state.revision,
+    constraints: [...input.state.constraints],
+    goal: {
+      id: goal.id,
+      description: goal.description,
+      completionPredicate: { ...goal.completionPredicate },
+    },
+  }
+}
+
+export function isDelegatedGoalAssignment(value: unknown): value is DelegatedGoalAssignment {
+  if (!value || typeof value !== 'object') return false
+  const assignment = value as Record<string, unknown>
+  if (Object.keys(assignment).some((key) => ![
+    'schemaVersion', 'delegationId', 'parentRunId', 'parentSessionId', 'childSessionId', 'baseRevision', 'constraints', 'goal',
+  ].includes(key))) return false
+  if (assignment.schemaVersion !== 1
+    || !boundedString(assignment.delegationId, 2_048)
+    || !boundedString(assignment.parentRunId, 512)
+    || !boundedString(assignment.parentSessionId, 512)
+    || !boundedString(assignment.childSessionId, 512)
+    || !Number.isSafeInteger(assignment.baseRevision)
+    || Number(assignment.baseRevision) < 1
+    || !Array.isArray(assignment.constraints)
+    || assignment.constraints.length > 100
+    || !assignment.constraints.every((constraint) => boundedString(constraint, 400))
+    || !assignment.goal
+    || typeof assignment.goal !== 'object') return false
+  const goal = assignment.goal as Record<string, unknown>
+  return Object.keys(goal).every((key) => ['id', 'description', 'completionPredicate'].includes(key))
+    && boundedString(goal.id, 1_024)
+    && boundedString(goal.description, 800)
+    && isWorkingGoalCompletionPredicate(goal.completionPredicate)
+}
+
+export function isDelegatedGoalObservation(value: unknown): value is DelegatedGoalObservation {
+  if (!value || typeof value !== 'object') return false
+  const observation = value as Record<string, unknown>
+  if (Object.keys(observation).some((key) => ![
+    'schemaVersion', 'delegationId', 'parentRunId', 'parentSessionId', 'childSessionId', 'childRunId', 'goalId',
+    'baseRevision', 'status', 'summary', 'resource', 'evidenceRef',
+  ].includes(key))) return false
+  return observation.schemaVersion === 1
+    && boundedString(observation.delegationId, 2_048)
+    && boundedString(observation.parentRunId, 512)
+    && boundedString(observation.parentSessionId, 512)
+    && boundedString(observation.childSessionId, 512)
+    && boundedString(observation.childRunId, 512)
+    && boundedString(observation.goalId, 1_024)
+    && Number.isSafeInteger(observation.baseRevision)
+    && Number(observation.baseRevision) > 0
+    && (observation.status === 'verified' || observation.status === 'unverified' || observation.status === 'invalidated')
+    && boundedString(observation.summary, 800)
+    && (observation.resource === undefined || isWorkingGoalCompletionPredicate(observation.resource))
+    && (observation.evidenceRef === undefined || isWorkingEvidenceRef(observation.evidenceRef))
+}
+
+export function isDelegatedGoalCheck(value: unknown): value is DelegatedGoalCheck {
+  if (!value || typeof value !== 'object') return false
+  const check = value as Record<string, unknown>
+  if (Object.keys(check).some((key) => ![
+    'schemaVersion', 'delegationId', 'parentRunId', 'goalId', 'baseRevision', 'currentRevision', 'verdict', 'reason', 'committedRevision',
+  ].includes(key))) return false
+  return check.schemaVersion === 1
+    && boundedString(check.delegationId, 2_048)
+    && boundedString(check.parentRunId, 512)
+    && boundedString(check.goalId, 1_024)
+    && Number.isSafeInteger(check.baseRevision)
+    && Number(check.baseRevision) > 0
+    && Number.isSafeInteger(check.currentRevision)
+    && Number(check.currentRevision) > 0
+    && (check.verdict === 'accepted' || check.verdict === 'rejected' || check.verdict === 'rebased')
+    && boundedString(check.reason, 800)
+    && (check.committedRevision === undefined
+      || (Number.isSafeInteger(check.committedRevision) && Number(check.committedRevision) > Number(check.currentRevision)))
+}
+
+function delegatedRejected(
+  state: WorkingState,
+  assignment: DelegatedGoalAssignment,
+  reason: string,
+): { check: DelegatedGoalCheck; state?: undefined } {
+  return {
+    check: {
+      schemaVersion: 1,
+      delegationId: assignment.delegationId,
+      parentRunId: state.runId,
+      goalId: assignment.goal.id,
+      baseRevision: assignment.baseRevision,
+      currentRevision: state.revision,
+      verdict: 'rejected',
+      reason,
+    },
+  }
+}
+
+function delegatedIdentityFailure(
+  state: WorkingState,
+  assignment: DelegatedGoalAssignment,
+  observation: DelegatedGoalObservation,
+): string | undefined {
+  if (assignment.parentRunId !== state.runId || observation.parentRunId !== state.runId) return 'delegation-run-mismatch'
+  if (observation.delegationId !== assignment.delegationId
+    || observation.parentSessionId !== assignment.parentSessionId
+    || observation.childSessionId !== assignment.childSessionId
+    || observation.baseRevision !== assignment.baseRevision) return 'delegation-identity-mismatch'
+  if (observation.goalId !== assignment.goal.id) return 'delegation-goal-mismatch'
+  return undefined
+}
+
+function delegatedEvidenceFailure(
+  state: WorkingState,
+  assignment: DelegatedGoalAssignment,
+  observation: DelegatedGoalObservation,
+  goal: WorkingGoal,
+): string | undefined {
+  if (observation.status === 'invalidated') return 'delegated-evidence-invalidated'
+  if (observation.status !== 'verified' || !observation.resource || !observation.evidenceRef) return 'child-goal-not-verified'
+  const evidence = observation.evidenceRef
+  if (evidence.parentRunId !== state.runId
+    || evidence.goalId !== goal.id
+    || evidence.delegationId !== assignment.delegationId
+    || evidence.childSessionId !== assignment.childSessionId
+    || evidence.runId !== observation.childRunId
+    || evidence.childRecordSeq !== evidence.seq) return 'delegated-evidence-identity-mismatch'
+  if (!goal.completionPredicate
+    || JSON.stringify(observation.resource) !== JSON.stringify(goal.completionPredicate)
+    || JSON.stringify(assignment.goal.completionPredicate) !== JSON.stringify(goal.completionPredicate)) {
+    return 'delegated-goal-predicate-unmet'
+  }
+  return undefined
+}
+
+/** Parent-only CAS Checker for one Host-observed child result. */
+export function checkDelegatedGoalObservation(input: {
+  state: WorkingState
+  assignment: DelegatedGoalAssignment
+  observation: DelegatedGoalObservation
+}): { check: DelegatedGoalCheck; state?: WorkingState } {
+  const { state, assignment, observation } = input
+  if (!isWorkingState(state) || !isDelegatedGoalAssignment(assignment)) {
+    return delegatedRejected(state, assignment, 'delegation-assignment-malformed')
+  }
+  if (!isDelegatedGoalObservation(observation)) return delegatedRejected(state, assignment, 'delegation-observation-malformed')
+  const identityFailure = delegatedIdentityFailure(state, assignment, observation)
+  if (identityFailure) return delegatedRejected(state, assignment, identityFailure)
+  const goal = state.goals.find((candidate) => candidate.id === assignment.goal.id)
+  if (!goal) return delegatedRejected(state, assignment, 'delegation-goal-mismatch')
+  const stale = assignment.baseRevision < state.revision
+  if (assignment.baseRevision > state.revision) return delegatedRejected(state, assignment, 'future-base-revision')
+  if (stale && goal.status !== 'pending') return delegatedRejected(state, assignment, 'stale-goal-conflict')
+  if (goal.status !== 'pending') return delegatedRejected(state, assignment, 'illegal-parent-goal-transition')
+  const evidenceFailure = delegatedEvidenceFailure(state, assignment, observation, goal)
+  if (evidenceFailure) return delegatedRejected(state, assignment, evidenceFailure)
+  const next = commitGoalState(state, goal.id, { status: 'done', evidenceRef: observation.evidenceRef! })
+  const verdict = stale ? 'rebased' as const : 'accepted' as const
+  return {
+    state: next,
+    check: {
+      schemaVersion: 1,
+      delegationId: assignment.delegationId,
+      parentRunId: state.runId,
+      goalId: goal.id,
+      baseRevision: assignment.baseRevision,
+      currentRevision: state.revision,
+      committedRevision: next.revision,
+      verdict,
+      reason: stale ? 'delegated-goal-verified-rebased' : 'delegated-goal-verified',
     },
   }
 }
