@@ -7,6 +7,7 @@ import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
 import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage, type PiHostFinalizationClaimResult, type PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
 import { memoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS, type MemoryControlComponentKey, type MemoryControlJsonPatchOperation, type MemoryControlLineage, type MemoryControlPackage, type MemoryControlPackageAuthority, type MemoryControlPackageIdentity, type MemoryControlPackageReader } from '../src/agent/memoryControlPackage.ts'
+import { createMemoryControlMetaCandidate, type MemoryControlDiagnosis } from '../src/agent/memoryControlMetaAgent.ts'
 import { baselineMemoryControlPackageReader } from './memoryControlPackageRepository.ts'
 import { BUILTIN_RUNNER_CAPABILITIES } from '../src/agent/runners/types.ts'
 
@@ -57,6 +58,7 @@ export type PiHostResponse = {
     memoryControlPackage?: MemoryControlPackage
     memoryControlLineage?: MemoryControlLineage
     memoryControlEvaluations?: ReadonlyArray<import('../src/agent/memoryControlEvaluationContract.ts').MemoryControlEvaluationReport>
+    memoryControlDiagnosis?: MemoryControlDiagnosis
     cursor?: number
     sessions?: unknown[]
     settings?: PiSettings
@@ -4076,19 +4078,46 @@ function handleMemoryControlMaintenance(
   let releaseAuditBarrier = () => {}
   const auditBarrier = new Promise<void>((resolve) => { releaseAuditBarrier = resolve })
   recorder.pendingMemoryControlAudits.add(auditBarrier)
-  return executeMemoryControlMaintenance(state.memoryControlPackages, params)
-    .then((memoryControlPackage) => {
+  const operation = params.operation === 'create-meta-candidate'
+    ? executeMemoryControlMetaMaintenance(state, state.memoryControlPackages, params)
+    : executeMemoryControlMaintenance(state.memoryControlPackages, params).then((memoryControlPackage) => ({
+        memoryControlPackage,
+        memoryControlDiagnosis: undefined as MemoryControlDiagnosis | undefined,
+      }))
+  return operation
+    .then(({ memoryControlPackage, memoryControlDiagnosis }) => {
       const memoryControlLineage = state.memoryControlPackages.lineage()
       const event = memoryControlLineage.events.at(-1)
       if (!event) throw new Error('Memory-Control maintenance did not append lifecycle audit')
       recordTurnEntry(sessionId, { kind: 'memory-control-lifecycle', source: 'host', event })
-      return [{ id, result: { memoryControlPackage, memoryControlLineage } }]
+      return [{ id, result: { memoryControlPackage, memoryControlLineage, ...(memoryControlDiagnosis ? { memoryControlDiagnosis } : {}) } }]
     })
     .catch((error) => [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Memory-Control maintenance failed')])
     .finally(() => {
       releaseAuditBarrier()
       recorder.pendingMemoryControlAudits.delete(auditBarrier)
     })
+}
+
+async function executeMemoryControlMetaMaintenance(
+  state: HostState,
+  authority: MemoryControlPackageAuthority,
+  params: Record<string, unknown>,
+): Promise<{ memoryControlPackage: MemoryControlPackage; memoryControlDiagnosis: MemoryControlDiagnosis }> {
+  const sourceSessionId = typeof params.sourceSessionId === 'string' && params.sourceSessionId.length <= 512
+    ? params.sourceSessionId
+    : ''
+  const source = state.snapshot.sessions.find((session) => session.id === sourceSessionId)
+  if (!source?.record) throw new Error('Meta-Agent diagnosis requires a persisted source Turn Record')
+  const candidateOnlyAuthority = {
+    admitActive: () => authority.admitActive(),
+    read: (input: { schemaVersion: 1; revision?: number }) => authority.read(input),
+    lineage: () => authority.lineage(),
+    evaluationReports: () => authority.evaluationReports(),
+    createCandidate: (input: Parameters<MemoryControlPackageAuthority['createCandidate']>[0]) => authority.createCandidate(input),
+  }
+  const result = await createMemoryControlMetaCandidate({ packages: candidateOnlyAuthority, record: source.record, output: params.patch })
+  return { memoryControlPackage: result.candidate, memoryControlDiagnosis: result.diagnosis }
 }
 
 function executeMemoryControlMaintenance(
