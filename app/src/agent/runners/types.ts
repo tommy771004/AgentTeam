@@ -38,17 +38,26 @@ export type RunnerCapabilities = {
   progressiveCapabilities: boolean
   /** Run-scoped progress streams (activity / cancel by runId). */
   runScopedProgress: boolean
+  /** Host-authored, revisioned Working State snapshots. */
+  workingState: boolean
+  /** Host-owned Skill match / redraft / retry admission. */
+  skillPreflight: boolean
+  /** Host Checkers binding completion to execution evidence. */
+  checkers: boolean
 }
 
 /** Full Goal/Hermes loop, owned by Pi Core orchestration. */
-export const BUILTIN_RUNNER_CAPABILITIES: RunnerCapabilities = {
+export const BUILTIN_RUNNER_CAPABILITIES: Readonly<RunnerCapabilities> = Object.freeze({
   parse: true,
   validateDoD: true,
   iterate: true,
   continueGoal: true,
   progressiveCapabilities: true,
   runScopedProgress: true,
-}
+  workingState: true,
+  skillPreflight: true,
+  checkers: true,
+})
 
 /**
  * Local CLI specialists (codex / claude / …). They do not run the builtin
@@ -56,13 +65,61 @@ export const BUILTIN_RUNNER_CAPABILITIES: RunnerCapabilities = {
  * implemented by an explicit prompt contract, so it can be enabled without
  * claiming that the CLI performed builtin validation.
  */
-export const EXTERNAL_CLI_RUNNER_CAPABILITIES: RunnerCapabilities = {
+export const EXTERNAL_CLI_RUNNER_CAPABILITIES: Readonly<RunnerCapabilities> = Object.freeze({
   parse: false,
   validateDoD: false,
   iterate: false,
   continueGoal: true,
   progressiveCapabilities: false,
   runScopedProgress: true,
+  workingState: false,
+  skillPreflight: false,
+  checkers: false,
+})
+
+/** No Host record and no frozen run snapshot means no guarantee may be inferred. */
+export const UNAVAILABLE_RUNNER_CAPABILITIES: Readonly<RunnerCapabilities> = Object.freeze({
+  parse: false,
+  validateDoD: false,
+  iterate: false,
+  continueGoal: false,
+  progressiveCapabilities: false,
+  runScopedProgress: false,
+  workingState: false,
+  skillPreflight: false,
+  checkers: false,
+})
+
+export type RunnerCapabilitySnapshot = Readonly<{
+  runner?: string
+  guarantee: 'host-verified' | 'run-snapshot' | 'reduced' | 'unavailable'
+  capabilities: Readonly<RunnerCapabilities>
+}>
+
+/**
+ * Project only facts frozen when the run executed. Current Settings are not an
+ * input, so live, replay and Archive cannot rewrite historical guarantees.
+ */
+export function projectRunnerCapabilitySnapshot(
+  declaration?: { runner: string; capabilities?: RunnerCapabilities },
+  frozenRunCapabilities?: RunnerCapabilities,
+): RunnerCapabilitySnapshot {
+  const capabilities = declaration?.capabilities || frozenRunCapabilities
+  if (!capabilities) {
+    return Object.freeze({ guarantee: 'unavailable' as const, capabilities: UNAVAILABLE_RUNNER_CAPABILITIES })
+  }
+  const runner = declaration?.runner
+  const guarantee = runner
+    ? runner === 'builtin' ? 'host-verified' as const : 'reduced' as const
+    : 'run-snapshot' as const
+  return Object.freeze({
+    ...(runner ? { runner } : {}),
+    guarantee,
+    capabilities: Object.freeze({
+      ...UNAVAILABLE_RUNNER_CAPABILITIES,
+      ...capabilities,
+    }),
+  })
 }
 
 export function isBuiltinRunner(runner?: string | null): boolean {
@@ -96,6 +153,9 @@ export function formatRunnerCapabilitiesSummary(caps: RunnerCapabilities): strin
     ['continueGoal', 'continueGoal'],
     ['progressiveCapabilities', '能力包'],
     ['runScopedProgress', 'run 進度'],
+    ['workingState', 'Verified Working State'],
+    ['skillPreflight', 'Skill preflight'],
+    ['checkers', 'Checkers'],
   ]
   for (const [key, label] of labels) {
     if (caps[key]) on.push(label)

@@ -17,6 +17,7 @@ import {
   turnRecordEntries,
   type TurnRecord,
 } from '../src/agent/turnRecord.ts'
+import { BUILTIN_RUNNER_CAPABILITIES, EXTERNAL_CLI_RUNNER_CAPABILITIES } from '../src/agent/runners/types.ts'
 
 /**
  * Qualification for the Turn Record effort.
@@ -285,7 +286,10 @@ for (const kind of ['turn-start', 'step-start', 'user-text', 'assistant-text', '
 }
 assert.equal(conversationAnswer(external), '修好了。')
 assert.deepEqual(projectProducedFiles(external).map((file) => file.path), ['src/fix.ts'])
-assert.deepEqual(recordRunnerDeclaration(external)?.capabilities, { parse: false, validateDoD: false, iterate: false })
-assert.equal(recordRunnerDeclaration(answeredRecord), undefined, 'the builtin loop declares no external runner')
+assert.deepEqual(recordRunnerDeclaration(external)?.capabilities, EXTERNAL_CLI_RUNNER_CAPABILITIES)
+assert.deepEqual(recordRunnerDeclaration(answeredRecord), {
+  runner: 'builtin',
+  capabilities: BUILTIN_RUNNER_CAPABILITIES,
+}, 'the builtin Host freezes its verified Memory control guarantees')
 
 console.log('Turn Record fidelity qualified: settlements, restart, reload, paging, external parity, and the original defect')

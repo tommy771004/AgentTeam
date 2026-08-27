@@ -11,7 +11,8 @@ import { ForkFromCheckpoint } from '../components/ForkFromCheckpoint'
 import { WorkingStateView } from '../components/WorkingStateView'
 import { useAgentStore } from '../store/agentStore'
 import type { ArchiveRecord } from '../agent/types'
-import { turnRecordEntries } from '../agent/turnRecord'
+import { recordRunnerDeclaration, turnRecordEntries } from '../agent/turnRecord'
+import { formatRunnerCapabilitiesSummary, projectRunnerCapabilitySnapshot } from '../agent/runners'
 import { projectWorkingStateEntries, unavailableWorkingStateProjection } from '../agent/workingStateProjection'
 import { STATUS_ZH, loopTypeZh, statusZh } from '../i18n/zh'
 
@@ -30,6 +31,25 @@ function ArchiveWorkingState({ record, fallbackId }: { record?: ArchiveRecord['t
       )
     : unavailableWorkingStateProjection(fallbackId), [record, fallbackId])
   return <WorkingStateView projection={projection} />
+}
+
+function ArchiveRunnerGuarantee({ archive }: { archive: ArchiveRecord }) {
+  const snapshot = useMemo(() => projectRunnerCapabilitySnapshot(
+    recordRunnerDeclaration(archive.turnRecord),
+    archive.runnerCapabilities,
+  ), [archive.turnRecord, archive.runnerCapabilities])
+  const label = snapshot.guarantee === 'host-verified'
+    ? 'Host verified'
+    : snapshot.guarantee === 'reduced'
+      ? 'Reduced guarantee'
+      : snapshot.guarantee === 'run-snapshot'
+        ? 'Run snapshot'
+        : 'Unavailable / degraded'
+  return (
+    <p className="text-xs leading-relaxed text-on-surface-variant">
+      Runner guarantee: {label}. {formatRunnerCapabilitiesSummary(snapshot.capabilities)}
+    </p>
+  )
 }
 
 function PlainBrowserWorkingStateNotice() {
@@ -222,6 +242,7 @@ function ArchiveSection() {
             </div>
             <div className="p-5 overflow-y-auto custom-scrollbar space-y-3">
               <p className="text-sm">{selected.objective}</p>
+              <ArchiveRunnerGuarantee archive={selected} />
               <ArchiveWorkingState record={selected.turnRecord} fallbackId={selected.id} />
               {selected.result && (
                 <pre className="bg-surface border border-white/10 rounded-lg p-3 text-[12px] font-[family-name:var(--font-mono)] text-on-surface-variant whitespace-pre-wrap">

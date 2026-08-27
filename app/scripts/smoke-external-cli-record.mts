@@ -5,6 +5,7 @@ import { conversationAnswer, projectConversationRows } from '../src/agent/conver
 import { projectProducedFiles, projectRunOperations } from '../src/agent/runOperationsProjection.ts'
 import { isPiHostDefinitionOfDoneMet, PI_CORE_SETTLEMENT_DEFINITION_OF_DONE } from '../src/agent/piHostRun.ts'
 import { presentToolCall } from '../src/agent/tools/toolPresentation.ts'
+import { BUILTIN_RUNNER_CAPABILITIES, EXTERNAL_CLI_RUNNER_CAPABILITIES } from '../src/agent/runners/types.ts'
 
 /**
  * An external CLI run produces the same record shape as a builtin one — so the
@@ -30,7 +31,7 @@ const external = buildExternalCliRecord({
 
 // Same entry kinds as a builtin turn, in the same order.
 const builtin = appendTurnRecord(undefined, [
-  { kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 1, runner: 'builtin', capabilities: BUILTIN_RUNNER_CAPABILITIES },
   { kind: 'step-start', source: 'host', turn: 1, step: 1, at: 2 },
   { kind: 'user-text', source: 'user', content: 'x', turn: 1, step: 1, at: 3 },
   { kind: 'tool-call', source: 'model', tool: 'bash', callId: 'c1', turn: 1, step: 1, at: 4 },
@@ -63,8 +64,11 @@ assert.equal(presentToolCall('some_unknown_cli_tool', { detail: 'x' }), undefine
 // The capability declaration rides on the record and stays false.
 const declared = recordRunnerDeclaration(external)
 assert.equal(declared?.runner, 'codex')
-assert.deepEqual(declared?.capabilities, { parse: false, validateDoD: false, iterate: false })
-assert.equal(recordRunnerDeclaration(builtin), undefined, 'the builtin loop declares no external runner')
+assert.deepEqual(declared?.capabilities, EXTERNAL_CLI_RUNNER_CAPABILITIES)
+assert.deepEqual(recordRunnerDeclaration(builtin), { runner: 'builtin', capabilities: BUILTIN_RUNNER_CAPABILITIES })
+for (const hostGuaranteeEntry of ['working-state', 'state-check', 'skill-invocation']) {
+  assert.equal(kindsOf(external).includes(hostGuaranteeEntry as never), false, `external CLI cannot author ${hostGuaranteeEntry}`)
+}
 
 // CLI success is never Definition of Done met.
 assert.equal(isPiHostDefinitionOfDoneMet(PI_CORE_SETTLEMENT_DEFINITION_OF_DONE, 'answered', '已修好'), true)

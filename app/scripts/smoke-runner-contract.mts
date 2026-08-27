@@ -22,6 +22,7 @@ import {
   buildCliContinueGoalContract,
   formatCliContinueGoalPrompt,
   isCompleteCliContinueGoalContract,
+  projectRunnerCapabilitySnapshot,
 } from '../src/agent/runners/types.ts'
 
 import {
@@ -48,8 +49,35 @@ test('builtin declares the full loop; external CLI declares none of it', () => {
   assert.equal(EXTERNAL_CLI_RUNNER_CAPABILITIES.validateDoD, false)
   assert.equal(EXTERNAL_CLI_RUNNER_CAPABILITIES.iterate, false)
   assert.equal(EXTERNAL_CLI_RUNNER_CAPABILITIES.parse, false)
+  assert.deepEqual({
+    workingState: BUILTIN_RUNNER_CAPABILITIES.workingState,
+    skillPreflight: BUILTIN_RUNNER_CAPABILITIES.skillPreflight,
+    checkers: BUILTIN_RUNNER_CAPABILITIES.checkers,
+  }, { workingState: true, skillPreflight: true, checkers: true })
+  assert.deepEqual({
+    workingState: EXTERNAL_CLI_RUNNER_CAPABILITIES.workingState,
+    skillPreflight: EXTERNAL_CLI_RUNNER_CAPABILITIES.skillPreflight,
+    checkers: EXTERNAL_CLI_RUNNER_CAPABILITIES.checkers,
+  }, { workingState: false, skillPreflight: false, checkers: false })
   assert.deepEqual(capabilitiesForRunner('builtin'), BUILTIN_RUNNER_CAPABILITIES)
   assert.notEqual(capabilitiesForRunner('codex').validateDoD, true)
+})
+
+test('presentation uses only a declared or run-frozen capability snapshot', () => {
+  const unavailable = projectRunnerCapabilitySnapshot(undefined, undefined)
+  assert.equal(unavailable.guarantee, 'unavailable')
+  assert.deepEqual(unavailable.capabilities, {
+    parse: false, validateDoD: false, iterate: false, continueGoal: false,
+    progressiveCapabilities: false, runScopedProgress: false,
+    workingState: false, skillPreflight: false, checkers: false,
+  })
+  const external = projectRunnerCapabilitySnapshot(
+    { runner: 'codex', capabilities: EXTERNAL_CLI_RUNNER_CAPABILITIES },
+    BUILTIN_RUNNER_CAPABILITIES,
+  )
+  assert.equal(external.guarantee, 'reduced')
+  assert.equal(external.capabilities.checkers, false)
+  assert.equal(Object.isFrozen(external.capabilities), true)
 })
 
 // ── continueGoal contract: one builder, no per-runner prompt invention ──
@@ -119,6 +147,18 @@ test('runDispatch drives the CLI prompt through the shared contract builder', ()
   assert.match(dispatch, /buildCliContinueGoalContract\(snapshot\.overrides/)
   assert.match(dispatch, /isCompleteCliContinueGoalContract\(continueContract\)/)
   assert.match(dispatch, /formatCliContinueGoalPrompt\(continueContract\)/)
+})
+
+test('plain-browser and historical UI never infer Host guarantees from current settings', () => {
+  const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
+  const continuation = fs.readFileSync(path.join(appRoot, 'src/components/RunContinuationActions.tsx'), 'utf8')
+  const records = fs.readFileSync(path.join(appRoot, 'src/pages/RecordsPage.tsx'), 'utf8')
+  assert.match(dispatch, /Plain-browser mode: Pi Core Host capabilities are unavailable\/degraded/)
+  assert.doesNotMatch(dispatch, /agent\/loop\//)
+  assert.doesNotMatch(panel, /capabilitiesForRunner/)
+  assert.doesNotMatch(continuation, /capabilitiesForRunner/)
+  assert.match(records, /projectRunnerCapabilitySnapshot/)
 })
 
 // ── Trigger admission: fail-closed, now at the coordinator's policy seam ──

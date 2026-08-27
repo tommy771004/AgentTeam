@@ -24,6 +24,7 @@ import {
   type LocalRunnerKind,
 } from '../agent/localCliRun.ts'
 import {
+  BUILTIN_RUNNER_CAPABILITIES,
   EXTERNAL_CLI_DOD_LABEL,
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
 } from '../agent/runners/index.ts'
@@ -272,6 +273,7 @@ async function executePiHostTurn(
     progress: 15,
     loopConfig,
     executionKind: 'loop',
+    runnerCapabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
     startedAt,
     steps: [{ step: 1, action: 'pi-host-turn', description: 'Pi Core Host turn', status: 'IN_PROGRESS', modelSource: 'primary' }],
     logs: [{ id: 'pi-host-start', timestamp: startedAt, level: 'PROCESS', message: `Pi Core Host · runId=${runId}` }],
@@ -369,6 +371,7 @@ async function executePiHostTurn(
       confidence: settled.confidence,
       loopConfig,
       executionKind: 'loop',
+      runnerCapabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
       startedAt,
       finishedAt: new Date().toISOString(),
       logs: [{ id: 'pi-host-end', timestamp: new Date().toISOString(), level: settled.logLevel, message: `Pi Core Host settlement=${result.settlement}${interruptReason ? `(${interruptReason})` : ''}` }],
@@ -1055,6 +1058,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       }
       const record: ArchiveRecord = {
         turnRecord: agent.turnRecord,
+        runnerCapabilities: agent.runnerCapabilities,
+        executionKind: agent.executionKind,
         id: agent.id,
         status: toArchiveStatus(agent.status),
         objective: agent.objective,

@@ -9,6 +9,8 @@ export {
   executionKindForRunner,
   formatCliContinueGoalPrompt,
   formatRunnerCapabilitiesSummary,
+  projectRunnerCapabilitySnapshot,
+  UNAVAILABLE_RUNNER_CAPABILITIES,
   isBuiltinRunner,
   isCompleteCliContinueGoalContract,
   type CliContinueGoalPromptContract,

@@ -8,6 +8,7 @@ import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACH
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
 import { memoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS, type MemoryControlComponentKey, type MemoryControlJsonPatchOperation, type MemoryControlLineage, type MemoryControlPackage, type MemoryControlPackageAuthority, type MemoryControlPackageIdentity, type MemoryControlPackageReader } from '../src/agent/memoryControlPackage.ts'
 import { baselineMemoryControlPackageReader } from './memoryControlPackageRepository.ts'
+import { BUILTIN_RUNNER_CAPABILITIES } from '../src/agent/runners/types.ts'
 
 /**
  * Version 2 retired the ambiguous `success` turn settlement for the closed
@@ -3330,7 +3331,12 @@ export function handlePiHostRequest(
       }),
     })
     activeTurnRecorders.set(sessionId, recorder)
-    recordTurnEntry(sessionId, { kind: 'turn-start', source: 'host' })
+    recordTurnEntry(sessionId, {
+      kind: 'turn-start',
+      source: 'host',
+      runner: 'builtin',
+      capabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
+    })
     recordGoverningMemoryControlPackage(state, sessionId, governingPackage)
     let workingState = initialWorkingState
     recordTurnEntry(sessionId, { kind: 'working-state', source: 'host', state: workingState })

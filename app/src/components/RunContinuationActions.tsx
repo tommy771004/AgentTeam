@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { capabilitiesForRunner } from '../agent/runners'
 import { decideResume, isResumableTerminalRun, type ResumeDecision } from '../agent/runResume'
 import { Icon } from './Icon'
 import { useAgentStore } from '../store/agentStore'
@@ -59,7 +58,7 @@ export function RunContinuationActions({
   )
   const continueGoal = thread?.continueGoal || null
   const canContinueGoal = Boolean(
-    !live && continueGoal && capabilitiesForRunner(thread?.runner || 'builtin').continueGoal,
+    !live && continueGoal && runState?.runnerCapabilities?.continueGoal,
   )
   const hasPendingGoal = Boolean(!live && continueGoal)
 

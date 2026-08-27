@@ -62,11 +62,7 @@ export function buildExternalCliRecord(input: ExternalCliRecordInput): TurnRecor
       step: 1,
       at,
       runner: input.runner,
-      capabilities: {
-        parse: EXTERNAL_CLI_RUNNER_CAPABILITIES.parse,
-        validateDoD: EXTERNAL_CLI_RUNNER_CAPABILITIES.validateDoD,
-        iterate: EXTERNAL_CLI_RUNNER_CAPABILITIES.iterate,
-      },
+      capabilities: { ...EXTERNAL_CLI_RUNNER_CAPABILITIES },
     },
     { kind: 'step-start', source: 'host', turn: 1, step: 1, at },
     { kind: 'user-text', source: 'user', content: input.prompt, turn: 1, step: 1, at },

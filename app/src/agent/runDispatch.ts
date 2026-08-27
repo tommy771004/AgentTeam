@@ -124,11 +124,17 @@ export async function dispatchThreadTask(
   const electronRuntime = typeof window !== 'undefined' && typeof window.subagents?.platform === 'function'
   const piHostAvailable = typeof window !== 'undefined' && typeof window.subagents?.piHost?.sessions?.list === 'function'
 
-  // Electron production is fail-closed when its Pi Host bridge is unavailable.
-  // Plain-browser development keeps the compatibility path because it has no
-  // Electron bridge.
-  if (snapshot.runner === 'builtin' && electronRuntime && tid && !piHostAvailable) {
-    return { path: 'builtin', status: 'failed', error: 'Pi Core Host bridge is unavailable' }
+  // No renderer-owned compatibility loop exists. Electron fails closed when
+  // its bridge is broken; plain-browser preview reports the same capability as
+  // unavailable/degraded instead of pretending it executed Pi guarantees.
+  if (snapshot.runner === 'builtin' && !piHostAvailable) {
+    return {
+      path: 'builtin',
+      status: 'failed',
+      error: electronRuntime
+        ? 'Pi Core Host bridge is unavailable'
+        : 'Plain-browser mode: Pi Core Host capabilities are unavailable/degraded',
+    }
   }
 
   // Electron cutover: once the real Pi Host bridge is present, dispatch the

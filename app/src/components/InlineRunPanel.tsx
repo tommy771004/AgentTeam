@@ -10,9 +10,10 @@ import { emptyAgentLike } from '../agent/localCliRun'
 import { deriveRunLifecycle, lifecycleToneClass, orchestrationFromAgent } from '../agent/runLifecycle'
 import {
   EXTERNAL_CLI_UI_LABEL,
-  capabilitiesForRunner,
   formatRunnerCapabilitiesSummary,
+  projectRunnerCapabilitySnapshot,
 } from '../agent/runners'
+import { recordRunnerDeclaration, TURN_RECORD_FORMAT_VERSION } from '../agent/turnRecord'
 import { useAgentStore } from '../store/agentStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import { useRunActivityStore } from '../store/runActivityStore'
@@ -26,7 +27,7 @@ import { useRunUsageRefresher } from '../hooks/useRunUsageRefresher'
 import type { TurnRecordEntry } from '../agent/turnRecord'
 import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { loopTypeZh } from '../i18n/zh'
-import type { ExecutionStep } from '../agent/types'
+import type { AgentState, ExecutionStep } from '../agent/types'
 
 /**
  * CloudCLI-style embedded run progress — no page navigation.
@@ -46,6 +47,30 @@ const EMPTY_RUN_PLAN: ThreadPlanItem[] = []
 // The trajectory section remembers being opened across remounts — repeated
 // walks through a long run should not re-collapse it every time.
 const TRAJECTORY_OPEN_KEY = 'subagents.runPanel.trajectoryOpen.v1'
+const RUNNER_GUARANTEE_LABEL = {
+  'host-verified': 'Host verified',
+  'run-snapshot': 'Run snapshot',
+  reduced: 'Reduced guarantee',
+  unavailable: 'Unavailable / degraded',
+} as const
+
+function inlineRunnerPresentation(agent: AgentState, recordEntries: TurnRecordEntry[]) {
+  const liveRecord = recordEntries.length
+    ? { version: TURN_RECORD_FORMAT_VERSION, entries: recordEntries }
+    : agent.turnRecord
+  const declaration = recordRunnerDeclaration(liveRecord)
+  const isExternal = agent.executionKind === 'external'
+    || agent.loopConfig.trigger === 'local-cli'
+    || Boolean(declaration?.runner && declaration.runner !== 'builtin')
+  const snapshot = projectRunnerCapabilitySnapshot(declaration, agent.runnerCapabilities)
+  return {
+    declaration,
+    isExternal,
+    isPiHost: !isExternal && agent.loopConfig.trigger === 'pi-host',
+    capabilities: snapshot.capabilities,
+    guarantee: RUNNER_GUARANTEE_LABEL[snapshot.guarantee],
+  }
+}
 
 function readStoredTrajectoryOpen(): boolean {
   try {
@@ -276,9 +301,6 @@ export function InlineRunPanel({
         s.queue.some((item) => item.runId === runId),
     ),
   )
-  const threadRunner = useThreadStore(
-    (s) => s.threads.find((t) => t.id === threadId)?.runner || 'builtin',
-  )
   const persistedPlan = useThreadStore(
     (s) => s.threads.find((t) => t.id === threadId)?.runPlan || EMPTY_RUN_PLAN,
   )
@@ -309,13 +331,10 @@ export function InlineRunPanel({
   })
   const live = lifecycle.live
 
-  const isExternal =
-    agent.executionKind === 'external' ||
-    agent.loopConfig.trigger === 'local-cli' ||
-    threadRunner !== 'builtin'
-  const isPiHost = !isExternal && agent.loopConfig.trigger === 'pi-host'
-  const runnerCaps =
-    agent.runnerCapabilities || capabilitiesForRunner(isExternal ? threadRunner : 'builtin')
+  const runnerPresentation = inlineRunnerPresentation(agent, activity.recordEntries)
+  const { declaration: runnerDeclaration, isExternal, isPiHost } = runnerPresentation
+  const runnerCaps = runnerPresentation.capabilities
+  const runnerGuarantee = runnerPresentation.guarantee
   // Chronological activity stays in the center feed. This rail reports only
   // structured task/runner steps, so the two surfaces answer different needs.
   const completedTasks = tasks.filter((task) => task.status === 'done').length
@@ -533,16 +552,20 @@ export function InlineRunPanel({
                 </div>
               ) : null}
 
-              {isExternal || agent.loadedCapabilityIds.length > 0 ? (
+              {agent.executionKind || runnerDeclaration || agent.loadedCapabilityIds.length > 0 ? (
                 <div>
                   <p className="text-[11px] font-medium text-ink-2">執行資訊</p>
+                  <p className="mt-1 text-[10px] leading-snug text-ink-3">
+                    {runnerGuarantee}：{formatRunnerCapabilitiesSummary(runnerCaps)}
+                  </p>
                   {isExternal ? (
-                    <>
-                      <p className="mt-1 text-[10px] leading-snug text-ink-3">{formatRunnerCapabilitiesSummary(runnerCaps)}</p>
+                    <p className="mt-1 text-[10px] leading-snug text-orange">
+                      外部執行不代表內建 DoD、Verified Working State、Skill preflight 或 Checker 已執行。
+                    </p>
+                  ) : runnerGuarantee === 'Unavailable / degraded' ? (
                       <p className="mt-1 text-[10px] leading-snug text-orange">
-                        外部執行不代表內建 DoD 已滿足，也不顯示內建能力包進度。
+                        Pi Host capability snapshot 不可用；plain-browser 僅呈現降級狀態，不建立替代執行器。
                       </p>
-                    </>
                   ) : null}
                   {agent.loadedCapabilityIds.length > 0 ? (
                     <p className="mt-1 break-words text-[10px] leading-relaxed text-ink-3 font-[family-name:var(--font-mono)]">

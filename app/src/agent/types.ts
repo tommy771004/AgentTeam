@@ -476,6 +476,9 @@ export interface AgentState {
     continueGoal: boolean
     progressiveCapabilities: boolean
     runScopedProgress: boolean
+    workingState: boolean
+    skillPreflight: boolean
+    checkers: boolean
   }
   /** External CLI kind when executionKind=external (codex / claude / …). */
   externalRunnerKind?: string
@@ -523,8 +526,11 @@ export interface SubAgentNode {
 }
 
 export interface ArchiveRecord {
-  /** Canonical replay source; absent only on legacy or external-run archives. */
+  /** Canonical replay source; absent only on legacy or non-run synthetic archives. */
   turnRecord?: import('./turnRecord.ts').TurnRecord
+  /** Run-time frozen runner guarantees; never reconstructed from Settings. */
+  runnerCapabilities?: import('./runners/types.ts').RunnerCapabilities
+  executionKind?: 'loop' | 'external'
   id: string
   status: 'success' | 'failed' | 'warning' | 'running' | 'halted'
   objective: string

@@ -36,6 +36,7 @@ import {
   type SkillInvocationTrace,
 } from './skillPreflight.ts'
 import { isMemoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS, type MemoryControlLifecycleEvent, type MemoryControlPackageIdentity } from './memoryControlPackage.ts'
+import type { RunnerCapabilities } from './runners/types.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
@@ -232,7 +233,7 @@ export type TurnRecordEntry = TurnRecordCoordinates &
          * CLI produces the same rows while still declaring that it ran no
          * builtin Parse, no DoD validation and no iterate.
          */
-        capabilities?: { parse: boolean; validateDoD: boolean; iterate: boolean }
+        capabilities?: RunnerCapabilities
       }
     | {
         kind: 'turn-end'
@@ -836,7 +837,7 @@ export function stepTimings(record: TurnRecord | undefined): PiStepTimingView[] 
 /** What the record says about the runner that drove it. */
 export function recordRunnerDeclaration(
   record: TurnRecord | undefined,
-): { runner: string; capabilities?: { parse: boolean; validateDoD: boolean; iterate: boolean } } | undefined {
+): { runner: string; capabilities?: RunnerCapabilities } | undefined {
   for (const entry of turnRecordEntries(record)) {
     if (entry.kind !== 'turn-start') continue
     if (!entry.runner) continue

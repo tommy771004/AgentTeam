@@ -2,9 +2,9 @@ import type { LlmSettings } from './types.ts'
 import { isSubscriptionProviderPreset } from './apiProviders.ts'
 
 /**
- * Electron's Pi Host is the production runtime boundary. Plain-browser tests
- * may use the renderer compatibility path when no Host can exist; Electron
- * must never gain a second execution owner.
+ * Electron's Pi Host is the production runtime boundary. Plain-browser mode
+ * may inspect browser-safe projections, but has no renderer-owned replacement
+ * for execution or Host verification.
  */
 export function hasPiHostBridge(): boolean {
   const renderer = (globalThis as typeof globalThis & { window?: { subagents?: { piHost?: { sessions?: { list?: unknown } } } } }).window
