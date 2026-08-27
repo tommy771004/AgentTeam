@@ -114,6 +114,10 @@ function PiHostEventBootstrap() {
     if (!onEvent) return
     const unsubscribe = onEvent((event) => {
       push(event)
+      if ((event as { event?: string }).event === 'memory/changed') {
+        const revision = Number((event as { payload?: { revision?: unknown } }).payload?.revision)
+        if (Number.isFinite(revision)) useLearningStore.getState().invalidateMemoryRevision(revision)
+      }
       if ((event as { event?: string }).event === 'host/context') {
         const payload = (event as { payload?: Record<string, unknown> }).payload
         if (payload?.phase === 'compacted' && typeof payload.runId === 'string') {

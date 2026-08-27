@@ -238,6 +238,14 @@ import {
 import { safeOpenCodeServerOrigin } from '../src/agent/opencodeServerSafety'
 import { PiHostSupervisor } from './piHostSupervisor'
 import type { PiTurnSettlement } from '../src/agent/piHostRun'
+import {
+  canonicalProjectId,
+  DurableMemoryStoreError,
+  type MemoryAccessContext,
+  type MemoryEntryDraft,
+  type MemoryScope,
+} from './durableMemoryStore'
+import type { MemoryProjectionScope } from '../src/agent/memoryProjection'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const piHostSupervisor = new PiHostSupervisor(() =>
@@ -2418,6 +2426,45 @@ ipcMain.handle('pi-host:memory:add', async (_evt, memory: Record<string, unknown
 ipcMain.handle('pi-host:memory:delete', async (_evt, id: string) => ({ memories: await piHostSupervisor.deleteMemory(id) }))
 ipcMain.handle('pi-host:memory:clear', async () => ({ memories: await piHostSupervisor.clearMemories() }))
 ipcMain.handle('pi-host:memory:recall', async (_evt, query: string, project?: string, limit?: number) => ({ memories: await piHostSupervisor.recallMemory(query, project, limit) }))
+const memoryProjectionAdmin: MemoryAccessContext = {
+  origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: true,
+}
+function projectionMemoryScope(scope: MemoryProjectionScope): MemoryScope {
+  if (scope?.kind === 'global') return { kind: 'global' }
+  if (scope?.kind === 'project' && typeof scope.project === 'string') {
+    return { kind: 'project', project: canonicalProjectId(scope.project) }
+  }
+  throw new DurableMemoryStoreError('invalid_input', 'Memory projection scope is invalid')
+}
+ipcMain.handle('pi-host:memory-projection:list', async (_evt, input: { scope: MemoryProjectionScope; cursor?: string; limit?: number }) =>
+  piHostSupervisor.listDurableMemory({
+    access: memoryProjectionAdmin,
+    scope: projectionMemoryScope(input?.scope),
+    ...(input?.cursor ? { cursor: input.cursor } : {}),
+    ...(input?.limit === undefined ? {} : { limit: input.limit }),
+  }))
+ipcMain.handle('pi-host:memory-projection:get', async (_evt, logicalKey: 'profile:user' | 'memory:document') => {
+  if (logicalKey !== 'profile:user' && logicalKey !== 'memory:document') {
+    throw new DurableMemoryStoreError('invalid_input', 'Memory special-entry key is invalid')
+  }
+  return piHostSupervisor.getDurableMemory({
+    access: memoryProjectionAdmin, scope: { kind: 'global' }, logicalKey,
+  })
+})
+ipcMain.handle('pi-host:memory-projection:upsert', async (_evt, input: Omit<MemoryEntryDraft, 'scope'> & { scope: MemoryProjectionScope }) =>
+  piHostSupervisor.upsertDurableMemory({
+    access: memoryProjectionAdmin,
+    ...input,
+    scope: projectionMemoryScope(input?.scope),
+  } as Parameters<typeof piHostSupervisor.upsertDurableMemory>[0]))
+ipcMain.handle('pi-host:memory-projection:delete', async (_evt, input: { scope: MemoryProjectionScope; logicalKey: string }) =>
+  piHostSupervisor.deleteDurableMemory({
+    access: memoryProjectionAdmin,
+    scope: projectionMemoryScope(input?.scope),
+    logicalKey: input?.logicalKey,
+  }))
+ipcMain.handle('pi-host:memory-projection:clear', async (_evt, scope: MemoryProjectionScope) =>
+  piHostSupervisor.clearDurableMemory({ access: memoryProjectionAdmin, scope: projectionMemoryScope(scope) }))
 ipcMain.handle('pi-host:capabilities:list', async () => ({ items: await piHostSupervisor.listCapabilities() }))
 ipcMain.handle('pi-host:capabilities:load', async (_evt, id: string) => piHostSupervisor.loadCapability(id))
 ipcMain.handle('pi-host:capabilities:search', async (_evt, query: string) => ({ items: await piHostSupervisor.searchCapabilities(query) }))

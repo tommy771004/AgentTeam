@@ -21,64 +21,28 @@ import {
 import type { LearningEvent, MemoryBundle, SessionSearchHit, Skill } from '../agent/hermes/types.ts'
 import type { ArchiveRecord } from '../agent/types.ts'
 import { isElectronPiProduction } from '../agent/piProduction.ts'
+import {
+  acceptsMemoryProjectionResponse,
+  invalidateMemoryProjection,
+  memoryProjectionBridgeAvailable,
+  memoryProjectionBundle,
+  type MemoryProjectionEntry,
+  type MemoryProjectionScope,
+  type MemoryProjectionSnapshot,
+} from '../agent/memoryProjection.ts'
 import { useSettingsStore } from './settingsStore.ts'
 
-const projectedPiMemoryIds = new Set<string>()
-let piMemorySync = Promise.resolve()
+const MEMORY_PAGE_SIZE = 12
+const GLOBAL_MEMORY_SCOPE: MemoryProjectionScope = { kind: 'global' }
 
-type PiHostMemoryProjection = {
-  id?: unknown
-  text?: unknown
-  createdAt?: unknown
-  tags?: unknown
-}
-
-function projectPiHostMemories(hostMemories: PiHostMemoryProjection[]) {
-  projectedPiMemoryIds.clear()
-  for (const item of hostMemories) {
-    if (typeof item.id === 'string') projectedPiMemoryIds.add(item.id)
-  }
-  const taggedText = (tag: string) => String(
-    hostMemories.find((item) => Array.isArray(item.tags) && item.tags.includes(tag))?.text || '',
-  )
-  return {
-    userProfile: taggedText('profile:user'),
-    memory: taggedText('memory:document'),
-    entries: hostMemories
-      .filter((item) => !Array.isArray(item.tags)
-        || (!item.tags.includes('profile:user') && !item.tags.includes('memory:document')))
-      .map((item) => ({
-        id: String(item.id || crypto.randomUUID()),
-        kind: 'memory' as const,
-        text: String(item.text || ''),
-        createdAt: String(item.createdAt || new Date().toISOString()),
-        tags: Array.isArray(item.tags) ? item.tags as string[] : [],
-      })),
-  }
-}
-
-function syncLearningMemoriesToPiHost(): void {
-  if (typeof window === 'undefined' || !isElectronPiProduction()) return
-  const add = window.subagents?.piHost?.memory?.add
-  if (!add) return
-  const pending = memoryStore.getBundle().entries
-    .filter((entry) => !projectedPiMemoryIds.has(entry.id))
-  if (!pending.length) return
-  for (const entry of pending) projectedPiMemoryIds.add(entry.id)
-  piMemorySync = piMemorySync.then(async () => {
-    for (const entry of pending) {
-      try {
-        await add({
-          id: entry.id,
-          text: entry.text,
-          tags: [...(entry.tags || []), `learning:${entry.kind}`],
-          createdAt: entry.createdAt,
-        })
-      } catch {
-        projectedPiMemoryIds.delete(entry.id)
-      }
-    }
-  })
+export type LearningMemoryProjection = MemoryProjectionSnapshot & {
+  scope: MemoryProjectionScope
+  total: number
+  cursor?: string
+  nextCursor?: string
+  previousCursors: Array<string | undefined>
+  loading: boolean
+  error: string | null
 }
 
 export type PluginHealth = {
@@ -131,6 +95,7 @@ interface LearningStore {
   installingPluginId: string | null
   pluginHealth: Record<string, PluginHealth>
   pluginError: string | null
+  memoryProjection: LearningMemoryProjection
 
   load: () => Promise<void>
   persist: () => Promise<void>
@@ -138,8 +103,14 @@ interface LearningStore {
   setUserProfile: (text: string) => Promise<void>
   setMemoryDoc: (text: string) => Promise<void>
   appendMemory: (text: string) => Promise<void>
+  updateMemoryEntry: (id: string, text: string) => Promise<void>
   deleteMemoryEntry: (id: string) => Promise<void>
   clearMemories: () => Promise<void>
+  loadMemoryProjection: (cursor?: string, resetHistory?: boolean, minimumRevision?: number) => Promise<void>
+  setMemoryScope: (scope: MemoryProjectionScope) => Promise<void>
+  nextMemoryPage: () => Promise<void>
+  previousMemoryPage: () => Promise<void>
+  invalidateMemoryRevision: (revision: number) => void
   setSoul: (text: string) => Promise<void>
   setAgents: (text: string) => Promise<void>
   approveDraft: (name: string) => Promise<void>
@@ -283,16 +254,7 @@ async function hydrateHostSkills(): Promise<void> {
 
 async function loadFromDisk() {
   if (isElectronPiProduction()) {
-    // Pi Host owns durable memories/extensions in Electron. Renderer state is
-    // only a projection for existing Learning UI consumers.
-    try {
-      const memories = await window.subagents?.piHost?.memory?.list?.()
-      if (memories?.memories) {
-        memoryStore.loadBundle(projectPiHostMemories(memories.memories as PiHostMemoryProjection[]))
-      }
-    } catch {
-      /* Pi Host recovery will retry on the next bootstrap. */
-    }
+    // Pi Host owns durable memories/extensions; renderer only asks for bounded UI pages.
     // Skills: Pi Host owns the directory (ADR-0034), so the 技能庫 projects it
     // back in at boot. Without this, a full-state sync built from an unhydrated
     // store would reconcile REAL host skills away on the next mutation.
@@ -466,15 +428,41 @@ function buildTokenRefreshDeps(getStore: () => LearningStore) {
 
 export const useLearningStore = create<LearningStore>((set, get) => {
   let searchRequest = 0
+  let memoryRequestGeneration = 0
+  let memoryEntriesById = new Map<string, MemoryProjectionEntry>()
+
+  const memoryApi = () => {
+    const api = window.subagents?.piHost?.memoryProjection
+    if (!memoryProjectionBridgeAvailable(api)) throw new Error('目前執行環境不支援 Host 記憶管理')
+    // The preload type is the capability contract; the runtime guard above
+    // keeps older/plain-browser shells from being treated as successful writes.
+    if (!api) throw new Error('目前執行環境不支援 Host 記憶管理')
+    return api
+  }
+
+  const recordMemoryError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error || '記憶操作失敗')
+    set((state) => ({ memoryProjection: { ...state.memoryProjection, loading: false, error: message } }))
+  }
+
+  const refreshAfterMemoryMutation = async (revision: number) => {
+    set((state) => ({
+      memoryProjection: {
+        ...state.memoryProjection,
+        ...invalidateMemoryProjection(state.memoryProjection, revision),
+      },
+    }))
+    const projection = get().memoryProjection
+    await get().loadMemoryProjection(projection.cursor, false, revision)
+  }
 
   learningLoop.subscribe((events) => {
-    set({
+    set((state) => ({
       events,
       pendingDrafts: learningLoop.getPendingSkillDrafts(),
-      memory: memoryStore.getBundle(),
+      memory: isElectronPiProduction() ? state.memory : memoryStore.getBundle(),
       skills: skillsStore.list(),
-    })
-    syncLearningMemoriesToPiHost()
+    }))
     void get().persist()
   })
 
@@ -493,6 +481,16 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     installingPluginId: null,
     pluginHealth: {},
     pluginError: null,
+    memoryProjection: {
+      scope: GLOBAL_MEMORY_SCOPE,
+      generation: 0,
+      revision: 0,
+      invalidatedRevision: 0,
+      total: 0,
+      previousCursors: [],
+      loading: false,
+      error: null,
+    },
 
     load: async () => {
       // Hydrate the vault metadata mirror and run the one-time localStorage migration.
@@ -503,9 +501,10 @@ export const useLearningStore = create<LearningStore>((set, get) => {
         /* non-fatal */
       }
       await loadFromDisk()
+      if (isElectronPiProduction()) await get().loadMemoryProjection(undefined, true)
       set({
         loaded: true,
-        memory: memoryStore.getBundle(),
+        ...(!isElectronPiProduction() ? { memory: memoryStore.getBundle() } : {}),
         skills: skillsStore.list(),
         events: learningLoop.getEvents(),
         pendingDrafts: learningLoop.getPendingSkillDrafts(),
@@ -521,32 +520,138 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     },
 
     refresh: () => {
-      set({
-        memory: memoryStore.getBundle(),
+      set((state) => ({
+        memory: isElectronPiProduction() ? state.memory : memoryStore.getBundle(),
         skills: skillsStore.list(),
         events: learningLoop.getEvents(),
         pendingDrafts: learningLoop.getPendingSkillDrafts(),
         soul: getSoulDoc(),
         agents: getAgentsDoc(),
         plugins: pluginRegistry.list(),
-      })
+      }))
+    },
+
+    loadMemoryProjection: async (cursor, resetHistory = false, minimumRevision = 0) => {
+      if (!isElectronPiProduction()) return
+      const before = get().memoryProjection
+      const generation = ++memoryRequestGeneration
+      const requiredRevision = Math.max(before.revision, before.invalidatedRevision, minimumRevision)
+      set({ memoryProjection: {
+        ...before,
+        generation,
+        cursor,
+        ...(resetHistory ? { previousCursors: [] } : {}),
+        loading: true,
+        error: null,
+      } })
+      try {
+        const api = memoryApi()
+        const [listed, profileResult, documentResult] = await Promise.all([
+          api.list({ scope: before.scope, ...(cursor ? { cursor } : {}), limit: MEMORY_PAGE_SIZE }),
+          api.get('profile:user'),
+          api.get('memory:document'),
+        ])
+        if (listed.operation !== 'list' || profileResult.operation !== 'get' || documentResult.operation !== 'get') {
+          throw new Error('Host 記憶投影回應格式錯誤')
+        }
+        const responseRevision = Math.min(listed.revision, profileResult.revision, documentResult.revision)
+        const current = get().memoryProjection
+        if (!acceptsMemoryProjectionResponse(current, { generation, minimumRevision: requiredRevision }, responseRevision)) {
+          if (current.generation === generation) {
+            set({ memoryProjection: { ...current, loading: false } })
+            if (responseRevision < requiredRevision) queueMicrotask(() => {
+              void get().loadMemoryProjection(cursor, false, requiredRevision)
+            })
+          }
+          return
+        }
+        const profile = profileResult.entry as MemoryProjectionEntry | undefined
+        const document = documentResult.entry as MemoryProjectionEntry | undefined
+        memoryEntriesById = new Map(listed.page.items.map((entry) => [entry.id, entry]))
+        set({
+          memory: memoryProjectionBundle(listed.page, { profile, document }),
+          memoryProjection: {
+            ...current,
+            revision: responseRevision,
+            invalidatedRevision: responseRevision,
+            total: listed.page.total,
+            cursor,
+            nextCursor: listed.page.nextCursor,
+            loading: false,
+            error: null,
+          },
+        })
+        if (Math.max(listed.revision, profileResult.revision, documentResult.revision) > responseRevision) {
+          queueMicrotask(() => get().invalidateMemoryRevision(
+            Math.max(listed.revision, profileResult.revision, documentResult.revision),
+          ))
+        }
+      } catch (error) {
+        if (get().memoryProjection.generation === generation) recordMemoryError(error)
+      }
+    },
+
+    setMemoryScope: async (scope) => {
+      if (!isElectronPiProduction()) return
+      memoryEntriesById = new Map()
+      set((state) => ({
+        memory: { ...state.memory, entries: [] },
+        memoryProjection: {
+          ...state.memoryProjection,
+          scope,
+          cursor: undefined,
+          nextCursor: undefined,
+          previousCursors: [],
+          total: 0,
+          error: null,
+        },
+      }))
+      await get().loadMemoryProjection(undefined, true)
+    },
+
+    nextMemoryPage: async () => {
+      const current = get().memoryProjection
+      if (!current.nextCursor || current.loading) return
+      set({ memoryProjection: {
+        ...current,
+        previousCursors: [...current.previousCursors, current.cursor],
+      } })
+      await get().loadMemoryProjection(current.nextCursor)
+    },
+
+    previousMemoryPage: async () => {
+      const current = get().memoryProjection
+      if (!current.previousCursors.length || current.loading) return
+      const previousCursors = current.previousCursors.slice(0, -1)
+      const cursor = current.previousCursors.at(-1)
+      set({ memoryProjection: { ...current, previousCursors } })
+      await get().loadMemoryProjection(cursor)
+    },
+
+    invalidateMemoryRevision: (revision) => {
+      const current = get().memoryProjection
+      const invalidated = invalidateMemoryProjection(current, revision)
+      if (invalidated === current) return
+      set({ memoryProjection: { ...current, ...invalidated } })
+      void get().loadMemoryProjection(current.cursor, false, revision)
     },
 
     setUserProfile: async (text) => {
       if (isElectronPiProduction()) {
-        const normalized = text.trim()
-        if (normalized) {
-          await window.subagents?.piHost?.memory?.add?.({
-            id: 'profile:user',
-            text: normalized,
-            tags: ['profile:user', 'always-recall'],
-            createdAt: new Date().toISOString(),
-          })
-        } else {
-          await window.subagents?.piHost?.memory?.delete?.('profile:user')
+        try {
+          const normalized = text.trim()
+          const result = normalized
+            ? await memoryApi().upsert({
+                scope: GLOBAL_MEMORY_SCOPE, logicalKey: 'profile:user', kind: 'profile',
+                text: normalized, tags: ['profile:user', 'always-recall'], createdAt: new Date().toISOString(),
+              })
+            : await memoryApi().delete({ scope: GLOBAL_MEMORY_SCOPE, logicalKey: 'profile:user' })
+          await refreshAfterMemoryMutation(result.revision)
+          return
+        } catch (error) {
+          recordMemoryError(error)
+          throw error
         }
-        await get().load()
-        return
       }
       memoryStore.setUserProfile(text)
       get().refresh()
@@ -555,19 +660,20 @@ export const useLearningStore = create<LearningStore>((set, get) => {
 
     setMemoryDoc: async (text) => {
       if (isElectronPiProduction()) {
-        const normalized = text.trim()
-        if (normalized) {
-          await window.subagents?.piHost?.memory?.add?.({
-            id: 'memory:document',
-            text: normalized,
-            tags: ['memory:document', 'always-recall'],
-            createdAt: new Date().toISOString(),
-          })
-        } else {
-          await window.subagents?.piHost?.memory?.delete?.('memory:document')
+        try {
+          const normalized = text.trim()
+          const result = normalized
+            ? await memoryApi().upsert({
+                scope: GLOBAL_MEMORY_SCOPE, logicalKey: 'memory:document', kind: 'document',
+                text: normalized, tags: ['memory:document', 'always-recall'], createdAt: new Date().toISOString(),
+              })
+            : await memoryApi().delete({ scope: GLOBAL_MEMORY_SCOPE, logicalKey: 'memory:document' })
+          await refreshAfterMemoryMutation(result.revision)
+          return
+        } catch (error) {
+          recordMemoryError(error)
+          throw error
         }
-        await get().load()
-        return
       }
       memoryStore.setMemoryDoc(text)
       get().refresh()
@@ -576,27 +682,66 @@ export const useLearningStore = create<LearningStore>((set, get) => {
 
     appendMemory: async (text) => {
       if (isElectronPiProduction()) {
-        const normalized = text.trim()
-        if (!normalized) return
-        await window.subagents?.piHost?.memory?.add?.({
-          id: `user-${crypto.randomUUID()}`,
-          text: normalized,
-          tags: ['user'],
-          createdAt: new Date().toISOString(),
-        })
-        await get().load()
-        return
+        try {
+          const normalized = text.trim()
+          if (!normalized) return
+          const result = await memoryApi().upsert({
+            scope: get().memoryProjection.scope,
+            logicalKey: `user:${crypto.randomUUID()}`,
+            kind: 'memory', text: normalized, tags: ['user'], createdAt: new Date().toISOString(),
+          })
+          await refreshAfterMemoryMutation(result.revision)
+          return
+        } catch (error) {
+          recordMemoryError(error)
+          throw error
+        }
       }
       memoryStore.appendMemory(text)
       get().refresh()
       await get().persist()
     },
 
+    updateMemoryEntry: async (id, text) => {
+      if (!isElectronPiProduction()) {
+        const normalized = text.trim()
+        const existing = memoryStore.getBundle().entries.find((entry) => entry.id === id)
+        if (!normalized || !existing) return
+        memoryStore.deleteEntry(id)
+        memoryStore.appendMemory(normalized, existing.tags)
+        get().refresh()
+        await get().persist()
+        return
+      }
+      try {
+        const entry = memoryEntriesById.get(id)
+        if (!entry || entry.kind !== 'memory') throw new Error('找不到記憶條目的 Host identity，請重新整理後再試')
+        const normalized = text.trim()
+        if (!normalized) throw new Error('記憶內容不可為空白')
+        const result = await memoryApi().upsert({
+          scope: get().memoryProjection.scope,
+          logicalKey: entry.logicalKey,
+          kind: 'memory', text: normalized, tags: entry.tags, createdAt: entry.createdAt,
+        })
+        await refreshAfterMemoryMutation(result.revision)
+      } catch (error) {
+        recordMemoryError(error)
+        throw error
+      }
+    },
+
     deleteMemoryEntry: async (id) => {
       if (isElectronPiProduction()) {
-        await window.subagents?.piHost?.memory?.delete?.(id)
-        await get().load()
-        return
+        try {
+          const entry = memoryEntriesById.get(id)
+          if (!entry) throw new Error('找不到記憶條目的 Host identity，請重新整理後再試')
+          const result = await memoryApi().delete({ scope: get().memoryProjection.scope, logicalKey: entry.logicalKey })
+          await refreshAfterMemoryMutation(result.revision)
+          return
+        } catch (error) {
+          recordMemoryError(error)
+          throw error
+        }
       }
       memoryStore.deleteEntry(id)
       get().refresh()
@@ -605,9 +750,14 @@ export const useLearningStore = create<LearningStore>((set, get) => {
 
     clearMemories: async () => {
       if (isElectronPiProduction()) {
-        await window.subagents?.piHost?.memory?.clear?.()
-        await get().load()
-        return
+        try {
+          const result = await memoryApi().clear(get().memoryProjection.scope)
+          await refreshAfterMemoryMutation(result.revision)
+          return
+        } catch (error) {
+          recordMemoryError(error)
+          throw error
+        }
       }
       memoryStore.clearAll()
       get().refresh()

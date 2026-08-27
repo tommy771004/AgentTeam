@@ -272,6 +272,57 @@ function ProviderModelInput({ settings, set }: { settings: LlmSettings; set: Set
   )
 }
 
+function memoryScopeLabel(kind: 'global' | 'project') {
+  return kind === 'global' ? '全域' : '目前專案'
+}
+
+function SettingsMemoryScopeGroup() {
+  const projection = useLearningStore((state) => state.memoryProjection)
+  const setScope = useLearningStore((state) => state.setMemoryScope)
+  const projectRoot = useProjectStore((state) => state.root)
+  const chooseProject = () => {
+    if (projectRoot) void setScope({ kind: 'project', project: projectRoot })
+  }
+  useEffect(() => {
+    if (projection.scope.kind === 'project' && projectRoot && projection.scope.project !== projectRoot) {
+      void setScope({ kind: 'project', project: projectRoot })
+    }
+  }, [projectRoot, projection.scope, setScope])
+  return (
+    <SettingsGroup title="記憶範圍">
+      <SettingsRow
+        title={`${memoryScopeLabel(projection.scope.kind)}記憶`}
+        description={`Host revision ${projection.revision} · ${projection.total} 筆`}
+        control={
+          <div className="flex gap-1">
+            <button type="button" className={settingsBtnCls} disabled={projection.scope.kind === 'global'} onClick={() => void setScope({ kind: 'global' })}>全域</button>
+            <button type="button" className={settingsBtnCls} disabled={!projectRoot || projection.scope.kind === 'project'} onClick={chooseProject}>目前專案</button>
+          </div>
+        }
+      />
+      {projection.error ? <div className="px-4 py-3 text-[12px] text-error">{projection.error}</div> : null}
+    </SettingsGroup>
+  )
+}
+
+function SettingsMemoryPagination() {
+  const projection = useLearningStore((state) => state.memoryProjection)
+  const next = useLearningStore((state) => state.nextMemoryPage)
+  const previous = useLearningStore((state) => state.previousMemoryPage)
+  return (
+    <div className="flex justify-end gap-2 px-4 py-3">
+      <button type="button" className={settingsBtnCls} disabled={!projection.previousCursors.length || projection.loading} onClick={() => void previous()}>上一頁</button>
+      <button type="button" className={settingsBtnCls} disabled={!projection.nextCursor || projection.loading} onClick={() => void next()}>下一頁</button>
+    </div>
+  )
+}
+
+function requestSettingsMemoryEdit(id: string, text: string, update: (id: string, text: string) => Promise<void>) {
+  const next = window.prompt('編輯記憶', text)
+  if (next === null || next.trim() === text.trim()) return
+  void update(id, next).catch(() => undefined)
+}
+
 export function SettingsPage() {
   const { settings, update, testConnection, exportBundle, importBundle } = useSettingsStore()
   const [section, setSection] = useState('general')
@@ -306,12 +357,15 @@ export function SettingsPage() {
   const ocSources = useOpenCodeConfigStore((s) => s.sources)
   const adoptOcCandidate = useOpenCodeConfigStore((s) => s.adoptCandidate)
   const memory = useLearningStore((s) => s.memory)
+  const memoryProjection = useLearningStore((s) => s.memoryProjection)
   const loadLearning = useLearningStore((s) => s.load)
   const deleteMemoryEntry = useLearningStore((s) => s.deleteMemoryEntry)
   const clearMemories = useLearningStore((s) => s.clearMemories)
   const appendMemory = useLearningStore((s) => s.appendMemory)
+  const updateMemoryEntry = useLearningStore((s) => s.updateMemoryEntry)
   const setUserProfile = useLearningStore((s) => s.setUserProfile)
   const [newMemory, setNewMemory] = useState('')
+  const [profileDraft, setProfileDraft] = useState('')
   const shortcutBindings = useShortcutStore((s) => s.bindings)
   const setShortcutChord = useShortcutStore((s) => s.setChord)
   const resetShortcuts = useShortcutStore((s) => s.resetAll)
@@ -383,6 +437,10 @@ export function SettingsPage() {
   useEffect(() => {
     void loadLearning()
   }, [loadLearning])
+
+  useEffect(() => {
+    setProfileDraft(memory.userProfile || '')
+  }, [memory.userProfile])
 
   // Outbound Data Gate status (Electron main); browser shows null.
   // Ticket 16: keep settings.outboundGuardDeploy in sync with main so runtime
@@ -1145,6 +1203,7 @@ export function SettingsPage() {
 
         {section === 'memory' && (
           <>
+            <SettingsMemoryScopeGroup />
             <SettingsGroup title="記憶控制">
               <SettingsRow
                 title="啟用記憶"
@@ -1181,10 +1240,11 @@ export function SettingsPage() {
               <SettingsStack title="USER profile" description="穩定自我介紹／角色">
                 <textarea
                   className={settingsInputCls + ' min-h-[80px] resize-y'}
-                  value={memory.userProfile || ''}
-                  onChange={(e) => void setUserProfile(e.target.value)}
+                  value={profileDraft}
+                  onChange={(e) => setProfileDraft(e.target.value)}
                   placeholder="會優先進入提示…"
                 />
+                <button type="button" disabled={memoryProjection.loading} className={settingsBtnPrimaryCls} onClick={() => void setUserProfile(profileDraft).catch(() => undefined)}>儲存使用者檔案</button>
               </SettingsStack>
             </SettingsGroup>
             <SettingsGroup
@@ -1194,7 +1254,7 @@ export function SettingsPage() {
                   type="button"
                   className={settingsBtnCls + ' text-error border-error/30'}
                   onClick={() => {
-                    if (confirm('確定清除所有記憶與使用者檔案？')) void clearMemories()
+                    if (confirm(`確定清除${memoryScopeLabel(memoryProjection.scope.kind)}記憶？`)) void clearMemories().catch(() => undefined)
                   }}
                 >
                   清除全部
@@ -1210,7 +1270,7 @@ export function SettingsPage() {
                     placeholder="輸入後 Enter 或按新增…"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && newMemory.trim()) {
-                        void appendMemory(newMemory.trim()).then(() => setNewMemory(''))
+                        void appendMemory(newMemory.trim()).then(() => setNewMemory('')).catch(() => undefined)
                       }
                     }}
                   />
@@ -1219,7 +1279,7 @@ export function SettingsPage() {
                     className={settingsBtnPrimaryCls + ' shrink-0'}
                     onClick={() => {
                       if (!newMemory.trim()) return
-                      void appendMemory(newMemory.trim()).then(() => setNewMemory(''))
+                      void appendMemory(newMemory.trim()).then(() => setNewMemory('')).catch(() => undefined)
                     }}
                   >
                     新增
@@ -1236,17 +1296,15 @@ export function SettingsPage() {
                     description={e.createdAt?.slice(0, 19).replace('T', ' ')}
                     align="start"
                     control={
-                      <button
-                        type="button"
-                        className="text-[12px] text-error font-medium px-2"
-                        onClick={() => void deleteMemoryEntry(e.id)}
-                      >
-                        刪除
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button type="button" className="text-[12px] text-primary font-medium px-2" onClick={() => requestSettingsMemoryEdit(e.id, e.text, updateMemoryEntry)}>編輯</button>
+                        <button type="button" className="text-[12px] text-error font-medium px-2" onClick={() => void deleteMemoryEntry(e.id).catch(() => undefined)}>刪除</button>
+                      </div>
                     }
                   />
                 ))
               )}
+              <SettingsMemoryPagination />
             </SettingsGroup>
           </>
         )}

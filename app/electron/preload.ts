@@ -12,6 +12,10 @@ import type {
   ExternalCliRunPhase,
   ExternalCliTerminalClassification,
 } from '../src/agent/externalCliRunSession'
+import type {
+  MemoryProjectionResult,
+  MemoryProjectionScope,
+} from '../src/agent/memoryProjection'
 
 type PiHostThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 type PiHostSettings = {
@@ -116,6 +120,24 @@ const api = {
         delete: (id: string) => ipcRenderer.invoke('pi-host:memory:delete', id) as Promise<{ memories: unknown[] }>,
         clear: () => ipcRenderer.invoke('pi-host:memory:clear') as Promise<{ memories: unknown[] }>,
         recall: (query: string, project?: string, limit?: number) => ipcRenderer.invoke('pi-host:memory:recall', query, project, limit) as Promise<{ memories: unknown[] }>,
+      },
+      memoryProjection: {
+        list: (input: { scope: MemoryProjectionScope; cursor?: string; limit?: number }) =>
+          ipcRenderer.invoke('pi-host:memory-projection:list', input) as Promise<MemoryProjectionResult>,
+        get: (logicalKey: 'profile:user' | 'memory:document') =>
+          ipcRenderer.invoke('pi-host:memory-projection:get', logicalKey) as Promise<MemoryProjectionResult>,
+        upsert: (input: {
+          scope: MemoryProjectionScope
+          logicalKey: string
+          kind: 'memory' | 'profile' | 'document'
+          text: string
+          tags: string[]
+          createdAt: string
+        }) => ipcRenderer.invoke('pi-host:memory-projection:upsert', input) as Promise<MemoryProjectionResult>,
+        delete: (input: { scope: MemoryProjectionScope; logicalKey: string }) =>
+          ipcRenderer.invoke('pi-host:memory-projection:delete', input) as Promise<MemoryProjectionResult>,
+        clear: (scope: MemoryProjectionScope) =>
+          ipcRenderer.invoke('pi-host:memory-projection:clear', scope) as Promise<MemoryProjectionResult>,
       },
       capabilities: {
         list: () => ipcRenderer.invoke('pi-host:capabilities:list') as Promise<{ items: unknown[] }>,
