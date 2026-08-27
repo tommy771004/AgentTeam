@@ -244,6 +244,12 @@ const expandScript = (name: string, seen = new Set<string>()): string => {
   for (const referenced of body.match(/npm run [A-Za-z0-9:_-]+/g) || []) {
     body += ` ${expandScript(referenced.slice('npm run '.length), seen)}`
   }
+  // Cross-platform environment wrappers cannot be expressed as inline shell
+  // assignments. Their explicit target argument is still part of the static
+  // npm-script graph and must remain visible to the orphan-test guard.
+  for (const wrapped of body.matchAll(/scripts\/run-[A-Za-z0-9._-]+\.mts((?: [A-Za-z0-9:_-]+)+)/g)) {
+    for (const target of wrapped[1].trim().split(/\s+/)) body += ` ${expandScript(target, seen)}`
+  }
   return body
 }
 const gateBody = ['smoke', 'build', 'dist', 'dist:mac', 'dist:win', 'dist:all']

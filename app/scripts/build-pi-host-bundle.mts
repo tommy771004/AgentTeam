@@ -1,8 +1,9 @@
 /**
  * Pi Host bundle 新鮮度守衛（取代每次無條件 `vite build --config scripts/vite.pi-host.config.ts`）。
  *
- * 背景：`dist:mac` 的 smoke 鏈會巢狀觸發 `build:pi-host` 十餘次，且每次的
- * 產物完全相同——真正被打包進 app 的只有最後 `npm run build` 那一次。
+ * 背景：standalone smoke 及個別 qualification 可能巢狀觸發 `build:pi-host`，
+ * 且每次產物完全相同。release 的 after-build 模式會在更外層直接重用唯一
+ * 一次正式 build；此指紋仍保護一般開發與獨立 smoke 的重入成本。
  * 這裡以內容指紋判定 `dist-electron/pi-host.js` 是否仍新鮮：
  *
  *   fingerprint = sha256(

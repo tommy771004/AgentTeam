@@ -15,9 +15,9 @@ All from `app/`:
 ```bash
 npm run dev        # Vite + Electron; UI also works in plain browser at :5173
 npm run build      # tsc -b && vite build — use this as the typecheck
-npm run smoke      # full chain; dist* refuses to package if it fails
+npm run smoke      # full chain; standalone mode prepares its own build
 npx oxlint src     # lint
-npm run dist:mac   # smoke + build + electron-builder (also dist / dist:win / dist:all)
+npm run dist:mac   # build once + after-build smoke + electron-builder (also dist / dist:win / dist:all)
 ```
 
 No unit-test runner. Smokes import the shipped modules, so green means the shipped path is correct — never re-implement logic inline in a smoke, and never add a loader dependency to make an import work. Many are drift guards over source text: moving code can require repointing one at its new owner, never weakening it.
