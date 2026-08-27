@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { readFile as readSource } from 'node:fs/promises'
+import { projectConversationRows } from '../src/agent/conversationProjection.ts'
 import {
   TURN_RECORD_FORMAT_VERSION,
   derivePiHistory,
@@ -51,6 +52,44 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
+assert.equal(TURN_RECORD_FORMAT_VERSION, 2, 'memory-recall is an explicit Turn Record format evolution')
+const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
+assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
+assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')
+
+const recalled = appendTurnRecord(undefined, [{
+  kind: 'memory-recall', source: 'host', revision: 7,
+  items: [{ id: 'entry-1', logicalKey: 'profile:user', scope: 'global', memoryKind: 'profile', revision: 3 }],
+  turn: 1, step: 1, at: 1,
+}])
+assert.throws(() => parseTurnRecord({
+  version: 1,
+  entries: [recalled.entries[0], continued.entries[0]],
+}), TurnRecordCorruptError, 'v1 cannot smuggle a v2 memory-recall entry')
+assert.throws(() => parseTurnRecord({
+  version: 1,
+  entries: [recalled.entries[0]],
+}), TurnRecordCorruptError, 'a final v2 entry in v1 is incompatible, not a recoverable torn append')
+assert.equal(parseTurnRecord(recalled).record.entries[0]?.kind, 'memory-recall')
+assert.equal(projectConversationRows(recalled)[0]?.kind, 'notice')
+assert.equal(projectConversationRows(recalled)[0]?.kind === 'notice' ? projectConversationRows(recalled)[0]?.content : '', '已召回 1 則長期記憶（revision 7）')
+assert.throws(() => parseTurnRecord({
+  version: TURN_RECORD_FORMAT_VERSION,
+  entries: [
+    { ...recalled.entries[0], text: 'private memory must not fit the provenance schema' },
+    continued.entries[0],
+  ],
+}), TurnRecordCorruptError, 'memory provenance rejects copied private text')
+for (const invalid of [
+  { ...recalled.entries[0], source: 'model' },
+  { ...recalled.entries[0], privateMemory: 'must not survive replay' },
+  { ...recalled.entries[0], items: [{ ...recalled.entries[0].items[0], logicalKey: 'x'.repeat(257) }] },
+]) {
+  assert.throws(() => parseTurnRecord({
+    version: TURN_RECORD_FORMAT_VERSION,
+    entries: [invalid, continued.entries[0]],
+  }), TurnRecordCorruptError, 'memory provenance is Host-owned, exact-shape, and bounded')
+}
 
 // ── Usage fields are ADDITIONS, at the same format version ────────────────
 // The cache split and the cost are optional fields on an existing shape, so a

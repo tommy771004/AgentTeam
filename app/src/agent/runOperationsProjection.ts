@@ -13,6 +13,7 @@
  * presentation (ADR-0050), never from a filename regex.
  */
 import { turnRecordEntries, type TurnRecord, type TurnRecordEntry } from './turnRecord.ts'
+import { formatMemoryRecallNotice } from './memoryRecallPresentation.ts'
 import {
   diffPaths,
   diffStats,
@@ -189,12 +190,18 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
         // writes.
         break
       default:
-        rows.push({ ...base(entry), kind: 'notice', title: '未知的記錄項目' })
+        rows.push({ ...base(entry), kind: 'notice', title: unpairedRecordTitle(entry) })
         break
     }
   }
   for (const [callId] of open) flushToolRow(callId)
   return [...rows].sort((left, right) => left.seq - right.seq)
+}
+
+function unpairedRecordTitle(entry: TurnRecordEntry): string {
+  return entry.kind === 'memory-recall'
+    ? formatMemoryRecallNotice(entry)
+    : '未知的記錄項目'
 }
 
 /**

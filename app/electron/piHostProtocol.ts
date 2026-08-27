@@ -236,11 +236,10 @@ import {
 import {
   assessPiContextPressure,
   buildPiCompactionManifest,
-  buildPiMemoryContext,
   buildPiTurnMemoryCandidate,
   formatPiCompactionSummary,
   parsePiTurnContextPolicy,
-  withPiMemoryContext,
+  selectPiMemoryContext,
 } from './piSessionContext.ts'
 import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
 import { runPiOrchestration, type PiLoopPattern } from './piOrchestrationExtension.ts'
@@ -2438,12 +2437,21 @@ export function handlePiHostRequest(
     // Validate memory scope before opening an attachment/recorder. A failed
     // realpath must not leave an active run that can never settle or retry.
     const contextPolicy = parsePiTurnContextPolicy(input.params?.contextPolicy)
+    let canonicalWorkspace
+    try {
+      canonicalWorkspace = canonicalProjectId(cwd)
+      if (contextPolicy.project && canonicalProjectId(contextPolicy.project) !== canonicalWorkspace) {
+        return [errorResponse(id, 'invalid_request', 'Memory project must match the admitted workspace')]
+      }
+    } catch (error) {
+      return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid admitted workspace')]
+    }
     const memoryAccess: MemoryAccessContext = {
       origin: 'runtime', runId, sessionId,
       memoryReadEnabled: contextPolicy.memoryEnabled,
       memoryWriteEnabled: contextPolicy.memoryEnabled && contextPolicy.memoryWriteEnabled,
       temporary: contextPolicy.temporary,
-      ...(contextPolicy.project ? { canonicalProject: canonicalProjectId(contextPolicy.project) } : {}),
+      canonicalProject: canonicalWorkspace,
     }
     const patternValue = input.params?.pattern
     const pattern: PiLoopPattern = patternValue === 'Goal-based' || patternValue === 'Time-based' || patternValue === 'Proactive'
@@ -2662,13 +2670,27 @@ export function handlePiHostRequest(
       const orchestrationPrompt = pluginExecution
         ? `${prompt}\n\n## Trusted provider stage result\n${JSON.stringify(pluginExecution)}`
         : prompt
-      const recalled = memoryAccess.memoryReadEnabled && !memoryAccess.temporary
-        ? (await state.memoryStore.recall({ access: memoryAccess, query: prompt, limit: 5 })).items.map(piMemoryProjection)
-        : []
-      memoryContext = buildPiMemoryContext(recalled)
-      executionPrompt = withPiMemoryContext(prompt, recalled)
-      if (recalled.length) {
-        const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'memory-recalled', recalled: recalled.length } }
+      const recalledResult = memoryAccess.memoryReadEnabled && !memoryAccess.temporary
+        ? await state.memoryStore.recall({ access: memoryAccess, query: prompt, limit: 5 })
+        : undefined
+      const selectedMemory = selectPiMemoryContext(recalledResult?.items.map(piMemoryProjection) || [])
+      const recalledItems = recalledResult?.items.slice(0, selectedMemory.memories.length) || []
+      memoryContext = selectedMemory.context
+      executionPrompt = memoryContext ? `${memoryContext}\n## Current request\n${prompt}` : prompt
+      if (recalledItems.length && recalledResult) {
+        recordTurnEntry(sessionId, {
+          kind: 'memory-recall',
+          source: 'host',
+          revision: recalledResult.revision,
+          items: recalledItems.map((item) => ({
+            id: item.id,
+            logicalKey: item.logicalKey,
+            scope: item.scope.kind,
+            memoryKind: item.kind,
+            revision: item.revision,
+          })),
+        })
+        const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'memory-recalled', recalled: recalledItems.length } }
         if (emit) emit(event)
         else turnEvents.push(event)
       }

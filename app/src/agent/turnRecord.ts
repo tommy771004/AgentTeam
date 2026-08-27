@@ -15,10 +15,12 @@
 import type { PiTurnInterruptReason, PiTurnSettlement } from './piHostRun.ts'
 
 /**
- * On-disk format of the record. It rides the Pi Host Protocol version (ADR-0038):
- * a record this build cannot read is refused loudly, never treated as empty.
+ * On-disk format of the record. It is versioned inside the Pi Host Protocol
+ * payload: a record this build cannot read is refused loudly, never treated as
+ * empty. Version 2 adds metadata-only durable-memory recall provenance.
  */
-export const TURN_RECORD_FORMAT_VERSION = 1
+export const TURN_RECORD_FORMAT_VERSION = 2
+const LEGACY_TURN_RECORD_FORMAT_VERSION = 1
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -237,6 +239,19 @@ export type TurnRecordEntry = TurnRecordCoordinates &
     | { kind: 'approval'; source: 'host'; tool: string; callId: string; decision: string; reason?: string }
     | { kind: 'compaction'; source: 'host'; replaced: number; tokens?: number }
     | {
+        /** Bounded provenance only. Memory text stays in the Host context. */
+        kind: 'memory-recall'
+        source: 'host'
+        revision: number
+        items: Array<{
+          id: string
+          logicalKey: string
+          scope: 'global' | 'project'
+          memoryKind: 'memory' | 'profile' | 'document'
+          revision: number
+        }>
+      }
+    | {
         /** A fact the user must see that is not a tool call or a message. */
         kind: 'notice'
         source: 'host'
@@ -299,8 +314,32 @@ const KINDS = new Set([
   'tool-evidence',
   'approval',
   'compaction',
+  'memory-recall',
   'notice',
 ])
+
+const MEMORY_RECALL_ENTRY_KEYS = new Set(['kind', 'source', 'revision', 'items', 'seq', 'turn', 'step', 'at'])
+
+function isMemoryRecallEntry(entry: Record<string, unknown>): boolean {
+  if (entry.source !== 'host' || Object.keys(entry).some((key) => !MEMORY_RECALL_ENTRY_KEYS.has(key))) return false
+  if (!Number.isSafeInteger(entry.revision) || Number(entry.revision) < 0 || !Array.isArray(entry.items) || entry.items.length < 1 || entry.items.length > 100) return false
+  return entry.items.every((value) => {
+    if (!value || typeof value !== 'object') return false
+    const item = value as Record<string, unknown>
+    if (Object.keys(item).some((key) => !['id', 'logicalKey', 'scope', 'memoryKind', 'revision'].includes(key))) return false
+    return typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 512
+      && typeof item.logicalKey === 'string' && item.logicalKey.length > 0 && item.logicalKey.length <= 256
+      && (item.scope === 'global' || item.scope === 'project')
+      && (item.memoryKind === 'memory' || item.memoryKind === 'profile' || item.memoryKind === 'document')
+      && Number.isSafeInteger(item.revision) && Number(item.revision) > 0 && Number(item.revision) <= Number(entry.revision)
+  })
+}
+
+function isHostContextEntry(entry: Record<string, unknown>): boolean {
+  if (entry.kind === 'memory-recall') return isMemoryRecallEntry(entry)
+  if (entry.kind === 'notice') return typeof entry.topic === 'string' && typeof entry.text === 'string'
+  return true
+}
 
 function isEntry(value: unknown): value is TurnRecordEntry {
   if (!value || typeof value !== 'object') return false
@@ -339,7 +378,7 @@ function isEntry(value: unknown): value is TurnRecordEntry {
     if (entry.settlement !== undefined && entry.settlement !== 'success' && entry.settlement !== 'failed' && entry.settlement !== 'cancelled' && entry.settlement !== 'denied') return false
     if (entry.detail !== undefined && (typeof entry.detail !== 'string' || new TextEncoder().encode(entry.detail).byteLength > 1_024)) return false
   }
-  if (entry.kind === 'notice' && (typeof entry.topic !== 'string' || typeof entry.text !== 'string')) return false
+  if (!isHostContextEntry(entry)) return false
   return true
 }
 
@@ -357,11 +396,18 @@ export function parseTurnRecord(value: unknown): { record: TurnRecord; tornTail:
   if (value === undefined || value === null) return { record: { ...EMPTY_TURN_RECORD, entries: [] }, tornTail: false }
   if (typeof value !== 'object') throw new TurnRecordVersionError(value)
   const raw = value as { version?: unknown; entries?: unknown }
-  if (raw.version !== TURN_RECORD_FORMAT_VERSION) throw new TurnRecordVersionError(raw.version)
+  if (raw.version !== TURN_RECORD_FORMAT_VERSION && raw.version !== LEGACY_TURN_RECORD_FORMAT_VERSION) {
+    throw new TurnRecordVersionError(raw.version)
+  }
   const entries = Array.isArray(raw.entries) ? raw.entries : []
   const kept: TurnRecordEntry[] = []
   let tornTail = false
   for (let index = 0; index < entries.length; index += 1) {
+    if (raw.version === LEGACY_TURN_RECORD_FORMAT_VERSION
+      && entries[index] && typeof entries[index] === 'object'
+      && (entries[index] as Record<string, unknown>).kind === 'memory-recall') {
+      throw new TurnRecordCorruptError(index)
+    }
     if (isEntry(entries[index])) {
       kept.push(entries[index] as TurnRecordEntry)
       continue
@@ -384,7 +430,9 @@ export function parseTurnRecord(value: unknown): { record: TurnRecord; tornTail:
  * about order. One function decides it, so they cannot drift.
  */
 export function nextTurnRecordSeq(record: TurnRecord | undefined): number {
-  const base = record?.version === TURN_RECORD_FORMAT_VERSION ? record.entries : []
+  const base = record?.version === TURN_RECORD_FORMAT_VERSION || record?.version === LEGACY_TURN_RECORD_FORMAT_VERSION
+    ? record.entries
+    : []
   return (base.length > 0 ? base[base.length - 1].seq : 0) + 1
 }
 
@@ -398,7 +446,9 @@ export function appendTurnRecord(
   record: TurnRecord | undefined,
   entries: TurnRecordAppend[],
 ): TurnRecord {
-  const base = record?.version === TURN_RECORD_FORMAT_VERSION ? record.entries : []
+  const base = record?.version === TURN_RECORD_FORMAT_VERSION || record?.version === LEGACY_TURN_RECORD_FORMAT_VERSION
+    ? record.entries
+    : []
   let seq = nextTurnRecordSeq(record) - 1
   const appended = entries.map((entry) => {
     seq += 1

@@ -11,6 +11,7 @@
  * it runs on live turns and on replayed records alike.
  */
 import { turnRecordEntries, type TurnRecord, type TurnRecordEntry } from './turnRecord.ts'
+import { formatMemoryRecallNotice } from './memoryRecallPresentation.ts'
 import { presentedToolSummary } from './tools/toolPresentation.ts'
 
 export type ConversationRow =
@@ -136,6 +137,9 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
       }
       case 'compaction':
         rows.push({ ...base, kind: 'notice', content: `已壓縮 ${entry.replaced} 則上下文` })
+        break
+      case 'memory-recall':
+        rows.push({ ...base, kind: 'notice', content: formatMemoryRecallNotice(entry) })
         break
       case 'tool-evidence':
         // The Host's policy/evidence lifecycle for one invocation — start,

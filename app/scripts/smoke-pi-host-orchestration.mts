@@ -40,6 +40,7 @@ const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-elec
 })
 const output = createInterface({ input: host.stdout })
 const messages: Array<Record<string, any>> = []
+let hostStopped = false
 output.on('line', (line) => messages.push(JSON.parse(line) as Record<string, any>))
 const waitFor = async (id: number) => {
   for (;;) {
@@ -56,6 +57,14 @@ try {
   await waitFor(1)
   host.stdin.write(`${JSON.stringify({ id: 20, method: 'memory/add', params: { memory: { id: 'session-rule', project: process.cwd(), text: 'Keep model changes scoped to the active session', tags: ['session', 'model'], createdAt: '2026-08-20T00:00:00.000Z' } } })}\n`)
   await waitFor(20)
+  host.stdin.write(`${JSON.stringify({ id: 201, method: 'memory/add', params: { memory: { id: 'global-rule', text: 'Global model changes must be reviewed', tags: ['session', 'model'], createdAt: '2026-08-20T00:01:00.000Z' } } })}\n`)
+  await waitFor(201)
+  host.stdin.write(`${JSON.stringify({ id: 202, method: 'memory/add', params: { memory: { id: 'other-rule', project: join(stateDir, 'other-project'), text: 'OTHER PROJECT PRIVATE model changes', tags: ['session', 'model'], createdAt: '2026-08-20T00:02:00.000Z' } } })}\n`)
+  await waitFor(202)
+  host.stdin.write(`${JSON.stringify({ id: 220, method: 'memory/add', params: { memory: { id: 'profile:user', text: 'PROFILE ALWAYS use Traditional Chinese', tags: [], createdAt: '2026-08-20T00:03:00.000Z' } } })}\n`)
+  await waitFor(220)
+  host.stdin.write(`${JSON.stringify({ id: 221, method: 'memory/add', params: { memory: { id: 'memory:document', text: 'DOCUMENT ALWAYS architecture rule', tags: [], createdAt: '2026-08-20T00:04:00.000Z' } } })}\n`)
+  await waitFor(221)
   host.stdin.write(`${JSON.stringify({ id: 2, method: 'sessions/create', params: { title: 'Orchestration smoke' } })}\n`)
   const created = await waitFor(2)
   const sessionId = String(created.result.sessionId)
@@ -65,9 +74,42 @@ try {
   assert.deepEqual(settled.result.orchestration, { pattern: 'Goal-based', iterations: 2, maxIterations: 2, definitionOfDone: 'two successful Pi turns', dodMet: true })
   assert.equal(requests, 2)
   assert.match(requestBodies[0] || '', /Keep model changes scoped to the active session/)
+  assert.match(requestBodies[0] || '', /Global model changes must be reviewed/)
+  assert.match(requestBodies[0] || '', /PROFILE ALWAYS use Traditional Chinese/)
+  assert.match(requestBodies[0] || '', /DOCUMENT ALWAYS architecture rule/)
+  assert.doesNotMatch(requestBodies[0] || '', /OTHER PROJECT PRIVATE/)
+  const recalledEntry = settled.result.record.entries.find((entry: { kind?: string }) => entry.kind === 'memory-recall')
+  assert.equal(recalledEntry.revision, 5)
+  assert.deepEqual(recalledEntry.items.map((item: { logicalKey: string; scope: string; memoryKind: string }) => [item.logicalKey, item.scope, item.memoryKind]).sort(), [
+    ['global-rule', 'global', 'memory'], ['memory:document', 'global', 'document'], ['profile:user', 'global', 'profile'], ['session-rule', 'project', 'memory'],
+  ])
+  assert.doesNotMatch(JSON.stringify(recalledEntry), /Keep model changes|Global model changes|OTHER PROJECT PRIVATE|PROFILE ALWAYS|DOCUMENT ALWAYS/)
+  const liveRecall = messages.flatMap((item) => item.event === 'host/record-append' ? item.payload?.entries || [] : []).find((entry: { kind?: string }) => entry.kind === 'memory-recall')
+  assert.deepEqual(liveRecall, recalledEntry, 'live and returned record use the same provenance entry')
+  host.stdin.write(`${JSON.stringify({ id: 204, method: 'sessions/record', params: { sessionId } })}\n`)
+  const replayedRecall = (await waitFor(204)).result.page.entries.find((entry: { kind?: string }) => entry.kind === 'memory-recall')
+  assert.deepEqual(replayedRecall, recalledEntry, 'replay reads the same Turn Record provenance')
+
+  const requestsBeforeMismatch = requestBodies.length
+  host.stdin.write(`${JSON.stringify({ id: 206, method: 'turn/submit', params: { sessionId, runId: 'mismatched-memory-project', cwd: process.cwd(), prompt: 'review model changes', contextPolicy: { memoryEnabled: true, memoryWriteEnabled: false, temporary: false, project: join(stateDir, 'other-project') }, profile: { provider: 'loopback', model: 'orchestration-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false } } })}\n`)
+  const mismatched = await waitFor(206)
+  assert.equal(mismatched.error?.code, 'invalid_request')
+  assert.equal(requestBodies.length, requestsBeforeMismatch, 'a mismatched admitted project never reaches the model')
+
+  const requestsBeforeImplicitProject = requestBodies.length
+  host.stdin.write(`${JSON.stringify({ id: 207, method: 'turn/submit', params: { sessionId, runId: 'implicit-memory-project', cwd: process.cwd(), prompt: 'review model changes', contextPolicy: { memoryEnabled: true, memoryWriteEnabled: false, temporary: false }, profile: { provider: 'loopback', model: 'orchestration-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false } } })}\n`)
+  const implicitProject = await waitFor(207)
+  assert.match(requestBodies[requestsBeforeImplicitProject] || '', /Keep model changes scoped to the active session/)
+  assert.equal(implicitProject.result.record.entries.some((entry: { kind?: string }) => entry.kind === 'memory-recall'), true)
+
+  const requestsBeforeTemporary = requestBodies.length
+  host.stdin.write(`${JSON.stringify({ id: 205, method: 'turn/submit', params: { sessionId, runId: 'temporary-no-recall', cwd: process.cwd(), prompt: 'complete model changes temporarily', contextPolicy: { memoryEnabled: true, memoryWriteEnabled: true, temporary: true, project: process.cwd() }, profile: { provider: 'loopback', model: 'orchestration-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false } } })}\n`)
+  const temporary = await waitFor(205)
+  assert.equal(temporary.result.record.entries.some((entry: { kind?: string }) => entry.kind === 'memory-recall'), false)
+  assert.doesNotMatch(requestBodies[requestsBeforeTemporary] || '', /Keep model changes|Global model changes|OTHER PROJECT PRIVATE|PROFILE ALWAYS|DOCUMENT ALWAYS/)
   assert.equal(messages.filter((item) => item.event === 'host/turn-item').length > 0, true)
   assert.deepEqual(
-    messages.filter((item) => item.event === 'host/orchestration').map((item) => item.payload.phase),
+    messages.filter((item) => item.event === 'host/orchestration' && item.payload?.runId === 'orchestration-run').map((item) => item.payload.phase),
     ['parse', 'iterate', 'dod', 'replan', 'iterate', 'dod', 'settlement'],
   )
   for (const [id, text, contextWindowTokens] of [
@@ -75,8 +117,12 @@ try {
     [7, 'session continuation two', 4096],
     [8, 'switch to a smaller-context model', 4096],
   ] as const) {
+    const requestIndex = requestBodies.length
     host.stdin.write(`${JSON.stringify({ id, method: 'turn/submit', params: { sessionId, runId: `context-run-${id}`, cwd: process.cwd(), prompt: text, contextPolicy: { memoryEnabled: false, memoryWriteEnabled: true, temporary: false, project: process.cwd(), contextWindowTokens }, profile: { provider: 'loopback', model: id === 8 ? 'small-model' : 'orchestration-model', thinkingLevel: 'off', compaction: 'auto', approvalMode: 'full', unattended: false } } })}\n`)
-    assert.equal((await waitFor(id)).result.settlement, 'answered')
+    const disabled = await waitFor(id)
+    assert.equal(disabled.result.settlement, 'answered')
+    assert.equal(disabled.result.record.entries.some((entry: { kind?: string }) => entry.kind === 'memory-recall'), false)
+    assert.doesNotMatch(requestBodies[requestIndex] || '', /Keep model changes|Global model changes|OTHER PROJECT PRIVATE|PROFILE ALWAYS|DOCUMENT ALWAYS/)
   }
   assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'compacted'), true)
   assert.equal(messages.some((item) => item.event === 'host/context' && item.payload?.phase === 'compacted' && item.payload?.checkpointed === true), true)
@@ -129,9 +175,39 @@ try {
   assert.equal(unmet.result.settlement, 'failed')
   assert.deepEqual(unmet.result.orchestration, { pattern: 'Goal-based', iterations: 2, maxIterations: 2, definitionOfDone: 'non-empty assistant result', dodMet: false })
   assert.deepEqual(messages.filter((item) => item.event === 'host/orchestration' && item.payload?.runId === 'unmet-run').map((item) => item.payload.phase), ['parse', 'iterate', 'dod', 'replan', 'iterate', 'dod', 'settlement'])
-} finally {
+
   host.stdin.end()
   await once(host, 'exit')
+  hostStopped = true
+  const restarted = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
+    env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'), SUBAGENTS_PI_AGENT_DIR: agentDir },
+    stdio: ['pipe', 'pipe', 'inherit'],
+  })
+  const restartedOutput = createInterface({ input: restarted.stdout })
+  const restartedMessages: Array<Record<string, any>> = []
+  restartedOutput.on('line', (line) => restartedMessages.push(JSON.parse(line) as Record<string, any>))
+  const restartedWaitFor = async (id: number) => {
+    for (;;) {
+      const found = restartedMessages.find((item) => item.id === id)
+      if (found) return found
+      await once(restartedOutput, 'line')
+    }
+  }
+  restarted.stdin.write(`${JSON.stringify({ id: 300, method: 'initialize', params: { protocolVersion: 2 } })}\n`)
+  await restartedWaitFor(300)
+  const requestIndex = requestBodies.length
+  restarted.stdin.write(`${JSON.stringify({ id: 301, method: 'turn/submit', params: { sessionId, runId: 'restart-memory-recall', cwd: process.cwd(), prompt: 'review model changes after restart', contextPolicy: { memoryEnabled: true, memoryWriteEnabled: false, temporary: false, project: process.cwd() }, profile: { provider: 'loopback', model: 'orchestration-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false } } })}\n`)
+  const restartedTurn = await restartedWaitFor(301)
+  assert.match(requestBodies[requestIndex] || '', /Keep model changes scoped to the active session/)
+  assert.match(requestBodies[requestIndex] || '', /Global model changes must be reviewed/)
+  assert.equal(restartedTurn.result.record.entries.some((entry: { kind?: string }) => entry.kind === 'memory-recall'), true)
+  restarted.stdin.end()
+  await once(restarted, 'exit')
+} finally {
+  if (!hostStopped) {
+    host.stdin.end()
+    await once(host, 'exit')
+  }
   modelServer.close()
   await rm(agentDir, { recursive: true, force: true })
   await rm(stateDir, { recursive: true, force: true })

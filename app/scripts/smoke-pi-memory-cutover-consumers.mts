@@ -69,7 +69,7 @@ try {
   const active = messages.find((message) => 'id' in message && message.id === 5)
   assert.equal(JSON.stringify(active).includes('bad-scope'), false, 'failed scope admission must not leave a running attachment')
   await store.close()
-  await server.handle({ id: 6, method: 'turn/submit', params: { sessionId, runId: 'closed-memory', prompt: 'test', contextPolicy: { memoryEnabled: true, project } } })
+  await server.handle({ id: 6, method: 'turn/submit', params: { sessionId, runId: 'closed-memory', cwd: project, prompt: 'test', contextPolicy: { memoryEnabled: true, project } } })
   await server.handle({ id: 7, method: 'runs/active', params: {} })
   const afterFailure = messages.find((message) => 'id' in message && message.id === 7)
   assert.ok(afterFailure && 'result' in afterFailure)

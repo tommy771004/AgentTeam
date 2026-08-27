@@ -4,9 +4,9 @@
 
 ## 本日進展：durable memory SQLite migration
 
-`.scratch/durable-memory-sqlite-migration` #01–04 已 resolved：Host-owned async `DurableMemoryStore` 契約與 in-memory／SQLite parity、scope/policy/idempotency、atomic legacy migration 全部接入 production。使用者核准 Host state 佈局後，舊 pathname 成為目錄 downgrade barrier；sessions/settings 等仍在 `snapshot.json`，長期記憶則只認 SQLite，原始 JSON 是 `0600` recovery evidence，不是 live authority。
+`.scratch/durable-memory-sqlite-migration` #01–05 已 resolved：Host-owned async `DurableMemoryStore` 契約與 in-memory／SQLite parity、scope/policy/idempotency、atomic legacy migration、builtin Pi scoped recall 與 Turn Record provenance 全部接入 production。使用者核准 Host state 佈局後，舊 pathname 成為目錄 downgrade barrier；sessions/settings 等仍在 `snapshot.json`，長期記憶則只認 SQLite，原始 JSON 是 `0600` recovery evidence，不是 live authority。
 
-#04 以真 Host 證明 v1/v2、invalid/quarantine、同 key 跨 scope、special entries、四個 crash boundary、commit 後 retry、clear 後不回放 backup、DB 遺失拒絕與 OS rename downgrade barrier。legacy protocol／turn／Memory Pack 的最小 adapter 均不再更新 JSON；pack policy 由 frozen run binding 提供。相關 oxlint、Node typecheck、complexity gate、`npm run build`、Pi parity/Host gates 與完整 `npm run smoke` 全綠。05/07/08/13 現為可並行 frontier；06 仍依賴 05，細項不可由 #04 的最小 adapter 提前翻牌。復原與證據界線見 `.scratch/durable-memory-sqlite-migration/cutover-recovery.md`。
+#04 以真 Host 證明 v1/v2、invalid/quarantine、同 key 跨 scope、special entries、四個 crash boundary、commit 後 retry、clear 後不回放 backup、DB 遺失拒絕與 OS rename downgrade barrier。#05 將 canonical `cwd`、memory flags 與 temporary 凍結成同一 runtime access context；current project + global 召回經 bounded untrusted framing進入模型，只有真正貢獻 context bytes 的 identity、scope kind、entry/store revision 寫入 Turn Record v2，v1 記錄可無損升級。disabled／temporary 零讀取、other-project 隔離、live/replay 同源與 restart recall 均由真 Host smoke 證明。相關 oxlint、Node typecheck、complexity gate、`npm run build`、完整 `npm run smoke` 與修復後 Pi parity/Host gates 全綠。06/07/08/13 現為可並行 frontier。復原與證據界線見 `.scratch/durable-memory-sqlite-migration/cutover-recovery.md`。
 
 ## 本日收口：tracker 對帳
 
@@ -43,4 +43,4 @@
 
 ## 下一步
 
-依 `.scratch/INDEX.md` Active frontier 排工：durable-memory-sqlite-migration 的 #05／#07／#08／#13 可並行，#06 接 #05；context-usage-panel 與 external-cli-durable-harness 仍可並行開工。
+依 `.scratch/INDEX.md` Active frontier 排工：durable-memory-sqlite-migration 的 #06／#07／#08／#13 可並行；context-usage-panel 與 external-cli-durable-harness 仍可並行開工。
