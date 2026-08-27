@@ -1,6 +1,6 @@
 # 01 — Sidebar projection and search contract
 
-Status: 可交給代理
+Status: resolved
 Spec: `.scratch/sidebar-navigation-integration/spec.md`
 
 ## What to build
@@ -13,16 +13,20 @@ Do not read stores or browser state in the projection and do not create a second
 
 ## Acceptance criteria
 
-- [ ] One pure projection owns project grouping, title search, truncation and no-results metadata
-- [ ] Active project is first and may render empty outside an unmatched search result
-- [ ] Remaining projects are ordered by latest visible thread activity and unbound is last
-- [ ] Hidden threads never appear or match search
-- [ ] Query matching trims whitespace and ignores case
-- [ ] Search can return threads beyond the normal collapsed limit
-- [ ] Empty query preserves the current collapsed/show-more behavior
-- [ ] Existing grouping fixtures continue to pass and new search fixtures are added to the same smoke seam
-- [ ] The focused smoke is on both normal smoke gates
-- [ ] `npm run build` and the focused smoke pass
+- [x] One pure projection owns project grouping, title search, truncation and no-results metadata
+- [x] Active project is first and may render empty outside an unmatched search result
+- [x] Remaining projects are ordered by latest visible thread activity and unbound is last
+- [x] Hidden threads never appear or match search
+- [x] Query matching trims whitespace and ignores case
+- [x] Search can return threads beyond the normal collapsed limit
+- [x] Empty query preserves the current collapsed/show-more behavior
+- [x] Existing grouping fixtures continue to pass and new search fixtures are added to the same smoke seam
+- [x] The focused smoke is on both normal smoke gates
+- [x] `npm run build` and the focused smoke pass
+
+## Comments
+
+Resolved at `f5a589b`. `projectThreadSidebar` is the single pure seam and `smoke-thread-project-groups.mts` covers ordering, hidden exclusion, normalized search, retained active-project context, truncation and no-results. Full evidence: [`../qualification.md`](../qualification.md).
 
 ## Blocked by
 

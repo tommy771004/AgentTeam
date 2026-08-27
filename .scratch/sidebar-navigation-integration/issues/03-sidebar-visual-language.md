@@ -1,6 +1,6 @@
 # 03 — Shell and conversation visual language
 
-Status: 可交給代理
+Status: resolved
 Spec: `.scratch/sidebar-navigation-integration/spec.md`
 
 ## What to build
@@ -11,18 +11,22 @@ Reuse the existing icon system and design tokens. Remove or reduce material effe
 
 ## Acceptance criteria
 
-- [ ] Shell route rows and conversation rows share deliberate dimensions and state treatment
-- [ ] Shell remains the only owner of global route collapse
-- [ ] Pi Host status, live-run entry and macOS drag-safe region remain intact
-- [ ] Existing icons and tokens are reused; no new icon or glide dependency is added
-- [ ] Hover and active controls do not translate or scale
-- [ ] Required labels and controls are visible by default
-- [ ] Reduced-motion mode removes non-essential transition motion
-- [ ] Expanded and collapsed icons are mathematically and optically centered
-- [ ] Labels and focus rings clear all clipped or fixed-height edges
-- [ ] Material effects have no cut-off glow, radial halo or traceable hard shadow box
-- [ ] Text and active states meet readable contrast
-- [ ] `npm run build` and `npx oxlint src` pass
+- [x] Shell route rows and conversation rows share deliberate dimensions and state treatment
+- [x] Shell remains the only owner of global route collapse
+- [x] Pi Host status, live-run entry and macOS drag-safe region remain intact
+- [x] Existing icons and tokens are reused; no new icon or glide dependency is added
+- [x] Hover and active controls do not translate or scale
+- [x] Required labels and controls are visible by default
+- [x] Reduced-motion mode removes non-essential transition motion
+- [x] Expanded and collapsed icons are mathematically and optically centered
+- [x] Labels and focus rings clear all clipped or fixed-height edges
+- [x] Material effects have no cut-off glow, radial halo or traceable hard shadow box
+- [x] Text and active states meet readable contrast
+- [x] `npm run build` and `npx oxlint src` pass
+
+## Comments
+
+Resolved across `2988240` and `f5a589b`. The final anti-slop pass removed the decorative sidebar hairline and retained only restrained tonal material, stable hover states and visible-by-default content. Full evidence: [`../qualification.md`](../qualification.md).
 
 ## Blocked by
 

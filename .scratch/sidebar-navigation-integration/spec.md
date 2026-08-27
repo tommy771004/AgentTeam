@@ -1,6 +1,6 @@
 # Sidebar navigation integration
 
-Status: 可交給代理
+Status: resolved
 
 Design input: [`docs/ui/Sidebar Nav.md`](../../docs/ui/Sidebar%20Nav.md)
 

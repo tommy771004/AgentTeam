@@ -1,6 +1,6 @@
 # 02 — Conversation sidebar interactions
 
-Status: 可交給代理
+Status: resolved
 Spec: `.scratch/sidebar-navigation-integration/spec.md`
 
 ## What to build
@@ -13,20 +13,24 @@ Keep new conversation, running/parsing status, project selection follow behavior
 
 ## Acceptance criteria
 
-- [ ] Search opens, accepts input, filters immediately, clears and closes with Escape
-- [ ] A no-results state distinguishes an empty match from loading
-- [ ] Search results remain grouped by real project identity
-- [ ] Conversation rows are native selectable controls with selected/current semantics
-- [ ] One overflow trigger exposes delete, fork and replay-safe rerun without nested buttons
-- [ ] Menu dismissal restores focus to its trigger
-- [ ] Existing durable delete/archive behavior is reused
-- [ ] Existing local and external-session fork behavior is reused
-- [ ] Existing replay-safe checkpoint contract is reused
-- [ ] Running/parsing status remains visible and semantically labelled
-- [ ] Hidden background-worker threads remain absent
-- [ ] Mobile selection still closes the conversation drawer
-- [ ] No fake workspace, recent conversation, Upgrade, Invite, Sign out or New workspace UI is introduced
-- [ ] `npm run build` and `npx oxlint src` pass
+- [x] Search opens, accepts input, filters immediately, clears and closes with Escape
+- [x] A no-results state distinguishes an empty match from loading
+- [x] Search results remain grouped by real project identity
+- [x] Conversation rows are native selectable controls with selected/current semantics
+- [x] One overflow trigger exposes delete, fork and replay-safe rerun without nested buttons
+- [x] Menu dismissal restores focus to its trigger
+- [x] Existing durable delete/archive behavior is reused
+- [x] Existing local and external-session fork behavior is reused
+- [x] Existing replay-safe checkpoint contract is reused
+- [x] Running/parsing status remains visible and semantically labelled
+- [x] Hidden background-worker threads remain absent
+- [x] Mobile selection still closes the conversation drawer
+- [x] No fake workspace, recent conversation, Upgrade, Invite, Sign out or New workspace UI is introduced
+- [x] `npm run build` and `npx oxlint src` pass
+
+## Comments
+
+Resolved at `f5a589b`. Thread actions are delegated through `useThreadConversationActions`; the overflow is a Radix Dropdown Menu with verified arrow navigation and focus restoration. Full evidence: [`../qualification.md`](../qualification.md).
 
 ## Blocked by
 

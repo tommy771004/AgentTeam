@@ -8,7 +8,6 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 | Effort | Spec | Frontier | Notes |
 |--------|------|----------|-------|
-| **sidebar-navigation-integration** | [spec.md](sidebar-navigation-integration/spec.md) | [01 Sidebar projection and search contract](sidebar-navigation-integration/issues/01-sidebar-projection-search.md) · [03 Shell and conversation visual language](sidebar-navigation-integration/issues/03-sidebar-visual-language.md) | 5 張 `可交給代理` tickets。保留 shell route navigation 與 task conversation sidebar 的雙 owner；01 擴充既有 project-thread 純投影為唯一 semantic test seam，02/03 完成功能與視覺整合，04 移出 capability diagnostics，05 做 responsive/accessibility/anti-slop qualification。 |
 | **context-usage-panel** | [spec.md](context-usage-panel/spec.md) | [01 usage 記錄擴充 + Host 補抓](context-usage-panel/issues/01-usage-record-capture.md) | 8 張 `可交給代理` tickets（勾選框核實 0/38 勾，確實未動）。opencode 式 session 上下文面板：token/cost/快取落在 `step-end` usage（ADR-0039/0049 語意），單一測試接縫為 `projectContextUsage` 純投影。依賴：01 先行 → 02/03 並行 → 04/06/07 並行 → 05←03+04 → 08 收口。 |
 | **external-cli-durable-harness** | [spec.md](external-cli-durable-harness/spec.md) | [01 External CLI Run Session seam](external-cli-durable-harness/issues/01-expand-external-cli-run-session-seam.md) | 7 張 `可交給代理` tickets（2026-08-26 核實：66 個驗收框全開，確實未動）；01 先建立 expand seam，之後 02/03/05 可並行，04 依賴 02/03，06 依賴 02，07 為完整 qualification。trf#11 的 seam-1 真 CLI 斷言由本 effort 承接。 |
 | **harness-gap-closure** | [spec.md](harness-gap-closure/spec.md) | [01 統一架構敘述](harness-gap-closure/issues/01-unify-architecture-narrative.md) | #15 已補 active + retained run selector，不再固定顯示第一個 active run；其 redaction 類別 UX 仍待完成。其餘 frontier 維持 #01、#07、#10、#11 與 #09 範圍裁決。 |
@@ -20,6 +19,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 | Effort | Status | 一 hop 證據 |
 |--------|--------|------------|
+| sidebar-navigation-integration | resolved（5/5 tickets done；[spec.md](sidebar-navigation-integration/spec.md)） | [qualification.md](sidebar-navigation-integration/qualification.md)：Radix menu 鍵盤與回焦、desktop/mobile drawer、anti-slop 全項複查；乾淨 worktree `npm run build`、完整 `npm run smoke` 全綠 |
 | durable-memory-sqlite-migration | resolved（16/16 tickets done；[spec.md](durable-memory-sqlite-migration/spec.md)） | `smoke-durable-memory-workflow-qualification.mts` 固定 16 個 lifecycle gates 並做 protocol v5／single-authority audit；build、oxlint、完整 smoke 綠；[復原邊界](durable-memory-sqlite-migration/cutover-recovery.md) |
 | subscription-surface-hardening | resolved（5/5 tickets done；[spec.md](subscription-surface-hardening/spec.md)） | Settings／catalog／usage hardening smokes 全綠；finalization 啟動語意由 active-run-reattachment #12 owning；tracker #05 已完成三項對帳 |
 | trajectory-review-closure | resolved（3/3 tickets done；[spec.md](trajectory-review-closure/spec.md)） | 真 renderer 量測：[evidence](trajectory-review-closure/evidence/measurement-pass.md)；10 頁後 windowed 165 nodes／27 rows，full-map 1,653／275；rowHeight 28、overscan 8 定案 |
