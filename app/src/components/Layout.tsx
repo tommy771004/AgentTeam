@@ -150,8 +150,8 @@ export function Layout() {
     <div className="h-full flex bg-background text-on-background overflow-hidden">
       {/* 左側主選單 — liquid glass sidebar */}
       <aside
-        className={`sidebar-panel relative z-50 drag-region material-sidebar flex flex-col shrink-0 transition-[width] duration-300 ease-out ${
-          collapsed ? 'w-[68px]' : 'w-[212px]'
+        className={`sidebar-panel relative z-50 drag-region material-sidebar flex flex-col shrink-0 transition-[width] duration-200 ease-out ${
+          collapsed ? 'w-[60px]' : 'w-[216px]'
         }`}
       >
         {/*
@@ -169,7 +169,7 @@ export function Layout() {
           {NAV_GROUPS.map((group) => (
             <div key={group.title} className="stagger-children">
               {!collapsed && (
-                <p className="px-2.5 mb-1.5 text-[10px] font-semibold tracking-[0.14em] text-outline/90 uppercase">
+                <p className="px-2.5 mb-1 text-[11px] font-medium text-outline/90">
                   {group.title}
                 </p>
               )}
@@ -187,10 +187,9 @@ export function Layout() {
                       to={item.to}
                       end={item.end}
                       title={item.label}
-                      className={`macos-nav-item flex items-center gap-2.5 rounded-[11px] px-2.5 py-2 text-[13px] border ${
-                        active
-                          ? 'bg-hover text-on-surface border-transparent'
-                          : 'text-on-surface-variant hover:bg-hover-2 hover:text-on-surface border-transparent'
+                      aria-current={active ? 'page' : undefined}
+                      className={`macos-nav-item sidebar-nav-row ${collapsed ? 'justify-center' : ''} ${
+                        active ? 'is-active' : ''
                       }`}
                     >
                       <Icon name={item.icon} size={20} />

@@ -308,44 +308,37 @@ html[data-theme='light'] .app-panel {
 
 /* Sidebar / header material */
 .material-sidebar {
-  /* 液態玻璃 — 半透明 tint + 背景 blur/saturate + 邊緣高光（specular edge）。
-     實體模式由 data-sidebar-solid='true' 覆寫為不透明。 */
-  --sidebar-glass-tint: rgba(20, 24, 21, 0.54);
+  /* One quiet material sheet. Solid mode still overrides the tint, while the
+     translucent mode avoids radial halos and the former wide shadow bloom. */
+  --sidebar-glass-tint: rgba(20, 24, 21, 0.82);
   --sidebar-glass-sheen: linear-gradient(
     180deg,
-    rgba(84, 98, 89, 0.24),
-    rgba(48, 58, 52, 0.08) 24%,
-    transparent 48%
+    rgba(237, 242, 237, 0.055),
+    transparent 20%
   );
   --sidebar-glass-edge: rgba(237, 242, 237, 0.1);
-  --sidebar-glass-glow: rgba(225, 244, 233, 0.1);
-  --sidebar-glass-shadow: rgba(0, 0, 0, 0.22);
   isolation: isolate;
   overflow: hidden;
   background:
     var(--sidebar-glass-sheen),
     var(--sidebar-glass-tint);
-  backdrop-filter: blur(38px) saturate(180%);
-  -webkit-backdrop-filter: blur(38px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(125%);
+  -webkit-backdrop-filter: blur(20px) saturate(125%);
   border-right: 1px solid var(--color-line);
   box-shadow:
-    inset 1px 0 0 var(--sidebar-glass-edge),
     inset 0 1px 0 var(--sidebar-glass-edge),
-    12px 0 32px var(--sidebar-glass-shadow);
+    6px 0 14px rgba(0, 0, 0, 0.1);
 }
 
-/* Refractive highlights make the sidebar read as one continuous glass sheet. */
+/* Restrained top-light sheen. It never gates or overlays readable content. */
 html:not([data-sidebar-solid='true']) .sidebar-panel::before {
   content: '';
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background:
-    radial-gradient(140px 240px at 0% 8%, var(--sidebar-glass-glow), transparent 72%),
-    radial-gradient(180px 320px at 104% 54%, color-mix(in srgb, var(--color-primary) 7%, transparent), transparent 74%),
-    linear-gradient(90deg, var(--sidebar-glass-edge), transparent 7%, transparent 92%, var(--sidebar-glass-edge));
-  opacity: 0.9;
+  background: linear-gradient(180deg, var(--sidebar-glass-edge), transparent 18%);
+  opacity: 0.45;
 }
 
 html:not([data-sidebar-solid='true']) .sidebar-panel::after {
@@ -361,6 +354,125 @@ html:not([data-sidebar-solid='true']) .sidebar-panel::after {
 .sidebar-panel > * {
   position: relative;
   z-index: 1;
+}
+
+.sidebar-nav-row {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--color-on-surface-variant);
+  font-size: 13px;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.sidebar-nav-row:hover {
+  background: var(--color-hover-2);
+  color: var(--color-on-surface);
+}
+
+.sidebar-nav-row.is-active {
+  background: var(--color-hover);
+  color: var(--color-on-surface);
+}
+
+.sidebar-nav-row:focus-visible,
+.sidebar-icon-button:focus-visible,
+.sidebar-thread-select:focus-visible,
+.sidebar-menu-item:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline-offset: -2px;
+}
+
+.sidebar-icon-button {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--color-ink-3);
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.sidebar-icon-button:hover {
+  background: var(--color-hover-2);
+  color: var(--color-ink);
+}
+
+.sidebar-thread-row {
+  min-height: 34px;
+  border-radius: 8px;
+  transition: background-color 140ms ease;
+}
+
+.sidebar-thread-row:hover {
+  background: var(--color-hover-2);
+}
+
+.sidebar-thread-row.is-active {
+  background: var(--color-hover);
+}
+
+.sidebar-thread-select {
+  min-height: 34px;
+  border-radius: 8px;
+  transition: color 140ms ease;
+}
+
+.sidebar-thread-select:hover,
+.sidebar-thread-select.is-active {
+  color: var(--color-ink);
+}
+
+.sidebar-thread-menu-trigger {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+}
+
+.sidebar-thread-menu {
+  border-radius: 10px;
+  background: var(--color-surface-container-high);
+  box-shadow: 0 5px 12px rgba(0, 0, 0, 0.18);
+}
+
+.sidebar-menu-item {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 9px;
+  border-radius: 7px;
+  padding: 6px 8px;
+  color: var(--color-ink-2);
+  font-size: 12px;
+  text-align: left;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.sidebar-menu-item:hover,
+.sidebar-menu-item:focus-visible {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+
+.sidebar-menu-item.text-error {
+  color: var(--color-error);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-panel,
+  .sidebar-nav-row,
+  .sidebar-icon-button,
+  .sidebar-thread-row,
+  .sidebar-thread-select,
+  .sidebar-menu-item {
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Reliable Electron drag surfaces. Interactive controls remain `no-drag`. */

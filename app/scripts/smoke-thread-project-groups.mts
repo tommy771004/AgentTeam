@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict'
-import { buildProjectGroups, COLLAPSED_PER_PROJECT } from '../src/lib/threadProjectGroups.ts'
+import {
+  buildProjectGroups,
+  COLLAPSED_PER_PROJECT,
+  projectThreadSidebar,
+} from '../src/lib/threadProjectGroups.ts'
 import type { Thread } from '../src/store/threadStore.ts'
 
 function thread(partial: Partial<Thread> & { id: string }): Thread {
@@ -54,4 +58,62 @@ assert.equal(buildProjectGroups([thread({ id: 'w', projectRoot: 'C:\\src\\Taiwan
 
 assert.ok(COLLAPSED_PER_PROJECT > 0, '顯示更多 threshold must be positive')
 
-console.log('thread project groups smoke: active-first ordering, empty project row, hidden threads excluded')
+const sidebarThreads = [
+  thread({ id: 'a1', title: 'Release checklist', projectRoot: '/Users/me/AgentTeam', updatedAt: '2026-08-22T00:00:00.000Z' }),
+  thread({ id: 'a2', title: 'Sidebar navigation', projectRoot: '/Users/me/AgentTeam', updatedAt: '2026-08-21T00:00:00.000Z' }),
+  thread({ id: 'a3', title: 'Sidebar keyboard review', projectRoot: '/Users/me/AgentTeam', updatedAt: '2026-08-20T00:00:00.000Z' }),
+  thread({ id: 'a4', title: 'Sidebar mobile drawer', projectRoot: '/Users/me/AgentTeam', updatedAt: '2026-08-19T00:00:00.000Z' }),
+  thread({ id: 'a5', title: 'Sidebar older result', projectRoot: '/Users/me/AgentTeam', updatedAt: '2026-08-18T00:00:00.000Z' }),
+  thread({ id: 'p1', title: 'Sidebar from another project', projectRoot: '/Users/me/Productivity', updatedAt: '2026-08-23T00:00:00.000Z' }),
+  thread({ id: 'hidden-match', title: 'Sidebar hidden worker', projectRoot: '/Users/me/AgentTeam', hidden: true }),
+]
+
+const collapsedSidebar = projectThreadSidebar({
+  threads: sidebarThreads,
+  activeRoot: '/Users/me/AgentTeam',
+  activeName: 'AgentTeam',
+  query: '',
+  expanded: false,
+})
+assert.equal(collapsedSidebar.searching, false)
+assert.equal(collapsedSidebar.truncated, true)
+assert.equal(collapsedSidebar.noResults, false)
+assert.deepEqual(collapsedSidebar.groups[0].threads.map((item) => item.id), ['a1', 'a2', 'a3', 'a4'])
+
+const searchedSidebar = projectThreadSidebar({
+  threads: sidebarThreads,
+  activeRoot: '/Users/me/AgentTeam',
+  activeName: 'AgentTeam',
+  query: '  SIDEBAR  ',
+  expanded: false,
+})
+assert.equal(searchedSidebar.searching, true)
+assert.equal(searchedSidebar.truncated, false)
+assert.equal(searchedSidebar.noResults, false)
+assert.deepEqual(
+  searchedSidebar.groups.map((group) => [group.label, group.threads.map((item) => item.id)]),
+  [
+    ['AgentTeam', ['a2', 'a3', 'a4', 'a5']],
+    ['Productivity', ['p1']],
+  ],
+)
+
+const emptySearch = projectThreadSidebar({
+  threads: sidebarThreads,
+  activeRoot: '/Users/me/AgentTeam',
+  query: 'not present',
+  expanded: false,
+})
+assert.deepEqual(emptySearch.groups, [])
+assert.equal(emptySearch.noResults, true)
+
+const expandedSidebar = projectThreadSidebar({
+  threads: sidebarThreads,
+  activeRoot: '/Users/me/AgentTeam',
+  query: '',
+  expanded: true,
+})
+assert.deepEqual(expandedSidebar.groups[0].threads.map((item) => item.id), ['a1', 'a2', 'a3', 'a4', 'a5'])
+assert.equal(expandedSidebar.truncated, true)
+
+console.log('thread project groups smoke: grouping, hidden exclusion, search, truncation, empty results')

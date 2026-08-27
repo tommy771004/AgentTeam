@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { Icon } from '../components/Icon'
 import { CommandComposer } from '../components/CommandComposer'
 import { ThreadSidebar } from '../components/ThreadSidebar'
+import { ThreadCapabilityDiagnostics } from '../components/ThreadCapabilityDiagnostics'
 import { ModelDepthMenu } from '../components/ModelDepthMenu'
 import { ApprovalModeMenu } from '../components/ApprovalModeMenu'
 import { ProjectContextBar } from '../components/ProjectContextBar'
@@ -494,18 +495,18 @@ export function ProtocolsPage() {
   }
 
   return (
-    <div className="h-full flex min-h-0 bg-canvas text-ink">
+    <div className="relative h-full flex min-h-0 bg-canvas text-ink">
       {showThreadList && (
         <>
           <button
             type="button"
             aria-label="關閉對話列表"
-            className="fixed inset-0 z-40 bg-black/35 sm:hidden"
+            className="absolute inset-0 z-40 bg-black/35 sm:hidden"
             onClick={() => setShowThreadList(false)}
           />
           <aside
             aria-label="對話列表"
-            className="fixed inset-y-0 left-0 z-50 flex w-[min(86vw,320px)] shrink-0 flex-col border-r border-line sm:relative sm:inset-auto sm:z-auto sm:w-[200px] md:w-[220px]"
+            className="absolute inset-y-0 left-0 z-50 flex w-[min(86vw,320px)] shrink-0 flex-col border-r border-line sm:relative sm:inset-auto sm:z-auto sm:w-[200px] md:w-[220px]"
           >
             <ThreadSidebar
               onThreadSelected={() => {
@@ -538,6 +539,7 @@ export function ProtocolsPage() {
             </span>
             <LiveRunBadge visible={live} />
           </div>
+          <ThreadCapabilityDiagnostics />
         </div>
 
         {/*
