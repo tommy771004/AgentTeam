@@ -43,9 +43,16 @@ export type PiToolPolicyRequirements = Readonly<{
   /** Human-in-the-loop asks (ask_user) prompt even under complete/full access; unattended still denies. */
   hitl?: boolean
   sideEffect?: boolean
+  /** Explicit opt-in for a read-only contract that still requires Skill preflight. */
+  skillPreflight?: boolean
   outbound?: boolean
   pathArguments?: readonly string[]
 }>
+
+/** Contract-metadata classification; model or tool names never participate. */
+export function shouldRunSkillPreflight(requirements: PiToolPolicyRequirements): boolean {
+  return requirements.sideEffect === true || requirements.skillPreflight === true
+}
 
 export type PiPolicyEvaluation = {
   verdict: PiPolicyVerdict
@@ -58,6 +65,11 @@ export type PiPolicyEvaluation = {
     outboundDecision: 'not-applicable' | 'allow' | 'deny' | 'degraded'
     restrictedViewDecision: 'not-applicable' | 'allow' | 'deny'
     resourceViewDecision: 'not-applicable' | 'allow' | 'deny'
+  }>
+  /** Pure directive: the Host execution seam must consume this before execution. */
+  skillPreflight?: Readonly<{
+    required: true
+    trigger: 'state-changing-tool-call' | 'contract-required-tool-call'
   }>
 }
 
@@ -228,6 +240,14 @@ export function evaluatePiInvocationPolicy(input: {
     reason,
     normalizedArgs: freezeDeep(normalized),
     evidence,
+    ...(input.origin === 'model' && shouldRunSkillPreflight(input.requirements || {}) ? {
+      skillPreflight: Object.freeze({
+        required: true as const,
+        trigger: input.requirements?.sideEffect === true
+          ? 'state-changing-tool-call' as const
+          : 'contract-required-tool-call' as const,
+      }),
+    } : {}),
   })
 
   if (!input.coordinates.sessionId || !input.coordinates.runId || !input.coordinates.callId

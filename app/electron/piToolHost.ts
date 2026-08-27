@@ -32,6 +32,7 @@ import {
   type PiFrozenRunPolicy,
   type PiInvocationContractIdentity,
   type PiPolicyEvidenceEvent,
+  type PiPolicyEvaluation,
   type PiToolPolicyRequirements,
 } from './piPolicyEvidence.ts'
 
@@ -459,6 +460,45 @@ export function setPiPolicyEvidenceBridge(bridge: PiPolicyEvidenceBridge): void 
   policyEvidenceBridge = bridge
 }
 
+type PiSkillPreflightBridgeInput = {
+  sessionId: string
+  runId: string
+  callId: string
+  tool: string
+  args: Record<string, unknown>
+  identity: PiInvocationContractIdentity
+  trigger: NonNullable<PiPolicyEvaluation['skillPreflight']>['trigger']
+}
+
+let skillPreflightBridge: ((input: PiSkillPreflightBridgeInput) => void) | undefined
+
+/** Host-owned consumer for the pure policy directive. Missing ownership fails closed. */
+export function setPiSkillPreflightBridge(bridge: ((input: PiSkillPreflightBridgeInput) => void) | undefined): void {
+  skillPreflightBridge = bridge
+}
+
+export function consumePiSkillPreflightDirective(input: {
+  evaluation: PiPolicyEvaluation
+  sessionId: string
+  runId: string
+  callId: string
+  tool: string
+  args: Record<string, unknown>
+  identity: PiInvocationContractIdentity
+}): void {
+  if (!input.evaluation.skillPreflight) return
+  if (!skillPreflightBridge) throw new Error('Host Skill preflight owner is unavailable')
+  skillPreflightBridge({
+    sessionId: input.sessionId,
+    runId: input.runId,
+    callId: input.callId,
+    tool: input.tool,
+    args: input.args,
+    identity: input.identity,
+    trigger: input.evaluation.skillPreflight.trigger,
+  })
+}
+
 const migratedInvocations = new Map<string, {
   evidence: PiInvocationEvidence
   args: Readonly<Record<string, unknown>>
@@ -629,6 +669,15 @@ export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: 
           args: (event.input as Record<string, unknown>) || {},
           policy: frozenPolicy,
           requirements: builtinPolicyRequirements(toolName),
+        })
+        consumePiSkillPreflightDirective({
+          evaluation,
+          sessionId: ctx.sessionId,
+          runId: binding.runId,
+          callId,
+          tool: toolName,
+          args: evaluation.normalizedArgs as Record<string, unknown>,
+          identity: contract,
         })
         if (evaluation.verdict === 'deny') {
           evidence.decision('deny', evaluation.reason)
@@ -1048,6 +1097,15 @@ export function piPackExtensionFactories(
             args: (event.input as Record<string, unknown>) || {},
             policy: frozenPolicy,
             requirements,
+          })
+          consumePiSkillPreflightDirective({
+            evaluation,
+            sessionId: ctx.sessionId,
+            runId: binding.runId,
+            callId,
+            tool: toolName,
+            args: evaluation.normalizedArgs as Record<string, unknown>,
+            identity: contract,
           })
           let normalizedArgs = evaluation.normalizedArgs
           evidence.decision(evaluation.verdict, evaluation.reason)

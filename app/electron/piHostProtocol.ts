@@ -301,12 +301,14 @@ import {
   bindPiSessionRun,
   setPiPackSessionContractRefresh,
   setPiPolicyEvidenceBridge,
+  setPiSkillPreflightBridge,
   piSessionRunBinding,
   WORKING_EXECUTION_EVIDENCE_DETAIL_KEY,
   requestPiToolApproval,
   type PiCatalogEntry,
 } from './piToolHost.ts'
 import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
+import { createZeroHitSkillPreflight } from './piSkillPreflight.ts'
 import {
   bindWorkspaceTextSearchRun,
   isWorkspaceTextSearchCapability,
@@ -4188,6 +4190,20 @@ export function createPiHostServer(
         invocationOrigin: event.origin,
       })
     },
+  })
+  setPiSkillPreflightBridge((input) => {
+    const recorder = activeTurnRecorders.get(input.sessionId)
+    if (!recorder) throw new Error('Skill preflight requires an active Host turn recorder')
+    const invocation = createZeroHitSkillPreflight({
+      state: recorder.proposalState,
+      step: recorder.step,
+      tool: input.tool,
+      callId: input.callId,
+      identity: input.identity,
+      args: input.args,
+      trigger: input.trigger,
+    })
+    recordTurnEntry(input.sessionId, { kind: 'skill-invocation', source: 'host', invocation })
   })
   return {
     async handle(request: unknown) {

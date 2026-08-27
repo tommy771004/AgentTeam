@@ -19,6 +19,8 @@ import {
   stepTimings,
   turnRecordEntries,
 } from '../src/agent/turnRecord.ts'
+import { createInitialWorkingState } from '../src/agent/workingState.ts'
+import { createZeroHitSkillPreflight } from '../electron/piSkillPreflight.ts'
 
 /**
  * The Turn Record is the Host's ordered account of one turn. This asserts the
@@ -52,7 +54,7 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
-assert.equal(TURN_RECORD_FORMAT_VERSION, 5, 'delegated Working State audit is an explicit Turn Record format evolution')
+assert.equal(TURN_RECORD_FORMAT_VERSION, 6, 'Skill preflight audit is an explicit Turn Record format evolution')
 const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
 assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')
@@ -138,6 +140,31 @@ for (const legacyVersion of [1, 2, 3, 4]) {
     version: legacyVersion,
     entries: [delegated.entries[0]],
   }), TurnRecordCorruptError, `v${legacyVersion} cannot smuggle a v5 delegation audit entry`)
+}
+const skillInvocation = appendTurnRecord(undefined, [{
+  kind: 'skill-invocation', source: 'host',
+  invocation: createZeroHitSkillPreflight({
+    state: createInitialWorkingState({ runId: 'preflight-run', objective: 'write result' }),
+    step: 1,
+    tool: 'write',
+    callId: 'write-1',
+    identity: {
+      contractRevision: 1,
+      contractDigest: 'b'.repeat(64),
+      schemaDigest: 'c'.repeat(64),
+      toolSource: 'builtin',
+    },
+    args: { path: 'result.txt' },
+  }),
+  turn: 1, step: 1, at: 1,
+}])
+assert.equal(parseTurnRecord(skillInvocation).record.entries[0]?.kind, 'skill-invocation')
+assert.equal(parseTurnRecord({ version: 5, entries: continued.entries }).record.entries.length, 3, 'valid v5 history migrates intact')
+for (const legacyVersion of [1, 2, 3, 4, 5]) {
+  assert.throws(() => parseTurnRecord({
+    version: legacyVersion,
+    entries: [skillInvocation.entries[0]],
+  }), TurnRecordCorruptError, `v${legacyVersion} cannot smuggle a v6 Skill invocation entry`)
 }
 assert.throws(() => parseTurnRecord({
   version: TURN_RECORD_FORMAT_VERSION,

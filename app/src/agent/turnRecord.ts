@@ -29,6 +29,7 @@ import {
   type DelegatedGoalCheck,
   type DelegatedGoalObservation,
 } from './workingState.ts'
+import { isSkillInvocationTrace, type SkillInvocationTrace } from './skillPreflight.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
@@ -37,9 +38,10 @@ import {
  * Version 3 adds Host-owned Verified Working State snapshots.
  * Version 4 adds Host-authored blocked proposals and explicit rebase verdicts.
  * Version 5 adds parent-owned delegated-goal assignment/observation/check audit.
+ * Version 6 adds bounded, Host-authored Skill invocation decisions.
  */
-export const TURN_RECORD_FORMAT_VERSION = 5
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4])
+export const TURN_RECORD_FORMAT_VERSION = 6
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -332,6 +334,7 @@ export type TurnRecordEntry = TurnRecordCoordinates &
     | { kind: 'delegation-assignment'; source: 'host'; assignment: DelegatedGoalAssignment }
     | { kind: 'delegation-observation'; source: 'host'; observation: DelegatedGoalObservation }
     | { kind: 'delegation-check'; source: 'host'; check: DelegatedGoalCheck }
+    | { kind: 'skill-invocation'; source: 'host'; invocation: SkillInvocationTrace }
     | {
         /** A fact the user must see that is not a tool call or a message. */
         kind: 'notice'
@@ -402,6 +405,7 @@ const KINDS = new Set([
   'delegation-assignment',
   'delegation-observation',
   'delegation-check',
+  'skill-invocation',
   'notice',
 ])
 
@@ -457,6 +461,11 @@ function isDelegationContextEntry(entry: Record<string, unknown>): boolean | und
     return entry.source === 'host'
       && Object.keys(entry).every((key) => ['kind', 'source', 'check', 'seq', 'turn', 'step', 'at'].includes(key))
       && isDelegatedGoalCheck(entry.check)
+  }
+  if (entry.kind === 'skill-invocation') {
+    return entry.source === 'host'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'invocation', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isSkillInvocationTrace(entry.invocation)
   }
   return undefined
 }
@@ -554,6 +563,7 @@ function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
   const kind = String((value as Record<string, unknown>).kind || '')
   if (version === 1 && kind === 'memory-recall') return true
   if (version <= 2 && kind === 'working-state') return true
+  if (version < 6 && kind === 'skill-invocation') return true
   return version < 5 && ['delegation-assignment', 'delegation-observation', 'delegation-check'].includes(kind)
 }
 

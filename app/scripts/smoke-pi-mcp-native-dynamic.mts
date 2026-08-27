@@ -100,6 +100,7 @@ try {
   assert.equal(requests.length, 6)
   assert.ok(!(requests[0]?.tools || []).some((tool) => tool.function?.name === dynamicName), 'MCP schema is not active before capability load')
   const activeDefinition = (requests[2]?.tools || []).find((tool) => tool.function?.name === dynamicName)?.function
+  assert.ok(activeDefinition, `dynamic MCP definition missing from request 3: ${JSON.stringify({ tools: requests.map((request) => (request.tools || []).map((tool) => tool.function?.name)), messages: requests[2]?.messages })}`)
   assert.equal(activeDefinition?.description, 'Inspect one controlled MCP fixture item')
   assert.deepEqual(activeDefinition?.parameters, {
     type: 'object',
@@ -141,6 +142,19 @@ try {
   const evidence = entries.filter((entry: any) => entry.kind === 'tool-evidence' && entry.tool === dynamicName)
   assert.ok(evidence.some((entry: any) => entry.phase === 'decision' && entry.decision === 'allow'))
   assert.ok(evidence.every((entry: any) => entry.runId === 'mcp-native-run' && typeof entry.callId === 'string'))
+  const preflights = entries.filter((entry: any) => entry.kind === 'skill-invocation'
+    && entry.invocation?.toolIdentity?.tool === dynamicName)
+  assert.equal(preflights.length, 3, 'every model-originated MCP mutation crosses the Host Skill preflight seam')
+  for (const entry of preflights) {
+    const invocation = entry.invocation
+    const call = calls.find((candidate: any) => candidate.callId === invocation.callId)
+    assert.ok(call)
+    assert.equal(invocation.decision, 'pass-through')
+    assert.equal(invocation.matchCount, 0)
+    assert.equal(invocation.toolIdentity.toolSource, 'mcp')
+    assert.equal(invocation.toolIdentity.contractDigest, call.contractDigest)
+    assert.equal(invocation.toolIdentity.schemaDigest, call.schemaDigest)
+  }
 
   const revision = calls[0].contractRevision
   send(6, 'tools/contract', { sessionId, revision, toolName: dynamicName })

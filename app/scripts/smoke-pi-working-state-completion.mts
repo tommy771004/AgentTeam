@@ -429,6 +429,17 @@ try {
     version: TURN_RECORD_FORMAT_VERSION,
     entries: completed.result?.record?.entries || [],
   })
+  const skillInvocations = successEntries.filter((entry) => entry.kind === 'skill-invocation')
+  assert.equal(skillInvocations.length, 1, 'one state-changing draft receives one Host Skill preflight')
+  const skillInvocation = skillInvocations[0]?.invocation
+  assert.equal(skillInvocation?.decision, 'pass-through')
+  assert.equal(skillInvocation?.matchCount, 0)
+  assert.equal(skillInvocation?.workingStateRevision, 1)
+  assert.deepEqual(skillInvocation?.goalIds, ['working-success-run:goal:1'])
+  assert.equal(skillInvocation?.toolIdentity.tool, 'write')
+  assert.equal(skillInvocation?.toolIdentity.contractDigest, successEntries.find((entry) => entry.kind === 'tool-call' && entry.callId === 'call_write_verified' && 'contractDigest' in entry)?.contractDigest)
+  assert.equal(skillInvocation?.draft.sampleBytes !== undefined && skillInvocation.draft.sampleBytes <= 4_096, true)
+  assert.equal(JSON.stringify(skillInvocation).includes('verified\n'), false, 'preflight trace does not copy raw tool content')
   const orderedKinds = successEntries
     .filter((entry) => ['state-proposal', 'tool-result', 'state-check', 'working-state'].includes(entry.kind))
     .map((entry) => entry.kind)
@@ -441,6 +452,7 @@ try {
   assert.equal(stateCheck?.source, 'host')
   assert.equal(stateCheck && 'check' in stateCheck ? stateCheck.check.verdict : undefined, 'accepted')
   assert.equal(toolResult && 'executionEvidence' in toolResult ? toolResult.executionEvidence?.issuedBy : undefined, 'adapter')
+  assert.equal(successEntries.filter((entry) => entry.kind === 'tool-result' && entry.callId === 'call_write_verified').length, 1, 'preflight adds no second executor or terminal path')
   assert.deepEqual(
     toolResult && 'executionEvidence' in toolResult ? toolResult.executionEvidence?.resource : undefined,
     { kind: 'file-content', path: 'result.txt', sha256: sha256('verified\n') },
