@@ -13,7 +13,7 @@ import { piPackExtensionFactories } from './piToolHost.ts'
 import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, snapshotPiSkillResources } from './piSkills.ts'
 import { piCodingAgentModule as piCodingAgent, piVendorDir } from './piVendor.ts'
 import { sanitizeModelRow, SUBSCRIPTION_PROVIDERS, type SubscriptionModelInfo, type SubscriptionProviderId } from '../src/agent/subscriptionCatalog.ts'
-import { bindPiSessionSkillResourceView, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, piSkillPreflightExtensionFactory, piWorkingStateWriteToolDefinition, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
+import { bindPiSessionSkillResourceView, disposePiSkillPreflightSession, installPiSkillPreflightBatchBarrier, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, piSkillPreflightExtensionFactory, piWorkingStateWriteToolDefinition, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
 import { buildPiMcpDynamicPacks } from './piExtensionPacks/mcpBridgePack.ts'
 
 const vendorDir = piVendorDir
@@ -493,6 +493,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     contextWindowTokens = model.contextWindow
   }
   const created = await piCodingAgent.createAgentSession(options)
+  installPiSkillPreflightBatchBarrier(sessionId, created.session.agent)
   // The active set is stated explicitly so the model sees exactly what the
   // catalog projection claims: restricted allowlists union their unlocked
   // capability tools; an unrestricted run gets the Pi defaults plus every
@@ -802,6 +803,7 @@ export async function disposePiSession(sessionId: string) {
   const runtime = sessionRuntimes.get(sessionId)
   if (!runtime) return
   unregisterPiPackSession(sessionId)
+  disposePiSkillPreflightSession(sessionId)
   try {
     await runtime.session.dispose?.()
   } finally {

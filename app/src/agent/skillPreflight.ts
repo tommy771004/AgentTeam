@@ -22,11 +22,15 @@ export type SkillRevisionIdentity = {
 }
 
 export type SkillInvocationTrace = {
-  schemaVersion: 1
+  schemaVersion: 1 | 2
   invocationId: string
   runId: string
   step: number
   callId: string
+  /** Required by schema v2; absent only on legacy v1 invocation records. */
+  batchId?: string
+  /** Required by schema v2; exact idempotency identity for this original draft. */
+  identityDigest?: string
   trigger: 'state-changing-tool-call' | 'contract-required-tool-call'
   workingStateRevision: number
   goalIds: string[]
@@ -62,7 +66,7 @@ export function isSkillInvocationTrace(value: unknown): value is SkillInvocation
   if (!value || typeof value !== 'object') return false
   const trace = value as Record<string, unknown>
   if (Object.keys(trace).some((key) => ![
-    'schemaVersion', 'invocationId', 'runId', 'step', 'callId', 'trigger', 'workingStateRevision', 'goalIds',
+    'schemaVersion', 'invocationId', 'runId', 'step', 'callId', 'batchId', 'identityDigest', 'trigger', 'workingStateRevision', 'goalIds',
     'retrievalKeyDigest', 'matchCount', 'decision', 'selectedSkills', 'packageIdentity', 'toolIdentity', 'draft',
   ].includes(key))) return false
   return isSkillInvocationCoordinates(trace)
@@ -74,7 +78,10 @@ export function isSkillInvocationTrace(value: unknown): value is SkillInvocation
 }
 
 function isSkillInvocationCoordinates(trace: Record<string, unknown>): boolean {
-  return trace.schemaVersion === 1
+  return (trace.schemaVersion === 1 || trace.schemaVersion === 2)
+    && (trace.schemaVersion === 2
+      ? bounded(trace.batchId, 512) && typeof trace.identityDigest === 'string' && SHA256.test(trace.identityDigest)
+      : trace.batchId === undefined && trace.identityDigest === undefined)
     && bounded(trace.invocationId, 512)
     && bounded(trace.runId, 512)
     && Number.isSafeInteger(trace.step) && Number(trace.step) > 0

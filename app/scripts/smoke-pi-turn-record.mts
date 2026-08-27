@@ -54,7 +54,7 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
-assert.equal(TURN_RECORD_FORMAT_VERSION, 7, 'Skill redraft context is an explicit Turn Record format evolution')
+assert.equal(TURN_RECORD_FORMAT_VERSION, 8, 'Skill batch identity is an explicit Turn Record format evolution')
 const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
 assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')
@@ -146,6 +146,7 @@ const skillInvocation = appendTurnRecord(undefined, [{
   invocation: createZeroHitSkillPreflight({
     state: createInitialWorkingState({ runId: 'preflight-run', objective: 'write result' }),
     step: 1,
+    batchId: 'legacy-v6-batch',
     tool: 'write',
     callId: 'write-1',
     identity: {
@@ -160,12 +161,23 @@ const skillInvocation = appendTurnRecord(undefined, [{
 }])
 assert.equal(parseTurnRecord(skillInvocation).record.entries[0]?.kind, 'skill-invocation')
 assert.equal(parseTurnRecord({ version: 5, entries: continued.entries }).record.entries.length, 3, 'valid v5 history migrates intact')
-for (const legacyVersion of [1, 2, 3, 4, 5]) {
+for (const legacyVersion of [1, 2, 3, 4, 5, 6, 7]) {
   assert.throws(() => parseTurnRecord({
     version: legacyVersion,
     entries: [skillInvocation.entries[0]],
-  }), TurnRecordCorruptError, `v${legacyVersion} cannot smuggle a v6 Skill invocation entry`)
+  }), TurnRecordCorruptError, `v${legacyVersion} cannot smuggle a v8 batch Skill invocation entry`)
 }
+const legacySkillInvocation = appendTurnRecord(undefined, [{
+  ...skillInvocation.entries[0],
+  invocation: {
+    ...skillInvocation.entries[0].invocation,
+    schemaVersion: 1 as const,
+    batchId: undefined,
+    identityDigest: undefined,
+  },
+}])
+assert.equal(parseTurnRecord({ version: 6, entries: legacySkillInvocation.entries }).record.entries[0]?.kind, 'skill-invocation')
+assert.equal(parseTurnRecord({ version: 7, entries: legacySkillInvocation.entries }).record.entries[0]?.kind, 'skill-invocation')
 const skillContext = appendTurnRecord(undefined, [{
   kind: 'skill-context', source: 'host',
   injection: {
@@ -185,6 +197,7 @@ const redraftSkillInvocation = appendTurnRecord(undefined, [{
   invocation: createSkillPreflight({
     state: createInitialWorkingState({ runId: 'preflight-run', objective: 'write result' }),
     step: 1,
+    batchId: 'v7-redraft-batch',
     tool: 'write',
     callId: 'write-redraft-1',
     identity: {
@@ -204,6 +217,7 @@ const notExecutedResult = appendTurnRecord(undefined, [{
   turn: 1, step: 1, at: 3,
 }])
 assert.equal(parseTurnRecord({ version: 6, entries: continued.entries }).record.entries.length, 3, 'valid v6 history migrates intact')
+assert.equal(parseTurnRecord({ version: 7, entries: continued.entries }).record.entries.length, 3, 'valid v7 history migrates intact')
 assert.throws(() => parseTurnRecord({
   version: 6,
   entries: [redraftSkillInvocation.entries[0]],

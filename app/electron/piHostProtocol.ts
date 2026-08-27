@@ -4224,9 +4224,24 @@ export function createPiHostServer(
     },
   })
   setPiSkillPreflightBridge({
+    snapshot: (sessionId) => {
+      const recorder = activeTurnRecorders.get(sessionId)
+      if (!recorder) throw new Error('Skill preflight requires an active Host turn recorder')
+      const binding = piSessionRunBinding(sessionId)
+      if (!binding) throw new Error('Skill preflight requires an active Host run binding')
+      return {
+        runId: binding.runId,
+        step: recorder.step,
+        workingStateRevision: recorder.proposalState.revision,
+      }
+    },
     preflight: async (input) => {
       const recorder = activeTurnRecorders.get(input.sessionId)
       if (!recorder) throw new Error('Skill preflight requires an active Host turn recorder')
+      if (piSessionRunBinding(input.sessionId)?.runId !== input.runId || recorder.step !== input.step
+        || recorder.proposalState.revision !== input.workingStateRevision) {
+        throw new Error('Skill preflight coordinates changed before the decision was recorded')
+      }
       const resourceView = piSessionRunBinding(input.sessionId)?.frozenPolicy?.resourceView
       const skills = resourceView
         ? await selectFrozenPiPreflightSkills({ resourceView, exactTool: input.tool })
@@ -4234,6 +4249,7 @@ export function createPiHostServer(
       const identities = skills.map(({ body: _body, ...identity }) => identity)
       const invocation = createSkillPreflight({
         state: recorder.proposalState,
+        runId: input.runId,
         step: recorder.step,
         tool: input.tool,
         callId: input.callId,
@@ -4241,6 +4257,7 @@ export function createPiHostServer(
         args: input.args,
         trigger: input.trigger,
         selectedSkills: identities,
+        batchId: input.batchId,
       })
       recordTurnEntry(input.sessionId, { kind: 'skill-invocation', source: 'host', invocation })
       return skills.length ? { kind: 'redraft' as const, skills } : { kind: 'pass-through' as const }

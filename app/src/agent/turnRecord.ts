@@ -45,9 +45,10 @@ import {
  * Version 5 adds parent-owned delegated-goal assignment/observation/check audit.
  * Version 6 adds bounded, Host-authored Skill invocation decisions.
  * Version 7 adds immutable Skill context injection and not-executed outcomes.
+ * Version 8 adds batch-bound Skill preflight idempotency identities.
  */
-export const TURN_RECORD_FORMAT_VERSION = 7
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6])
+export const TURN_RECORD_FORMAT_VERSION = 8
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -578,17 +579,26 @@ function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
   const kind = String(entry.kind || '')
   if (version === 1 && kind === 'memory-recall') return true
   if (version <= 2 && kind === 'working-state') return true
+  if (isLegacySkillEntry(version, kind, entry)) return true
+  return version < 5 && ['delegation-assignment', 'delegation-observation', 'delegation-check'].includes(kind)
+}
+
+function isLegacySkillEntry(version: number, kind: string, entry: Record<string, unknown>): boolean {
   if (version < 6 && kind === 'skill-invocation') return true
   if (version < 7 && kind === 'skill-context') return true
   if (version < 7 && kind === 'tool-result' && entry.settlement === 'not-executed') return true
   if (version < 7 && kind === 'skill-invocation' && isRedraftSkillInvocation(entry.invocation)) return true
-  return version < 5 && ['delegation-assignment', 'delegation-observation', 'delegation-check'].includes(kind)
+  return version < 8 && kind === 'skill-invocation' && isBatchSkillInvocation(entry.invocation)
 }
 
 function isRedraftSkillInvocation(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const decision = value as Record<string, unknown>
   return decision.decision === 'redraft' || decision.matchCount !== 0 || decision.selectedSkills !== undefined
+}
+
+function isBatchSkillInvocation(value: unknown): boolean {
+  return Boolean(value && typeof value === 'object' && (value as Record<string, unknown>).schemaVersion === 2)
 }
 
 /**

@@ -7,7 +7,11 @@ import {
 } from '../electron/piSkillPreflight.ts'
 import { createInitialWorkingState } from '../src/agent/workingState.ts'
 import { evaluatePiInvocationPolicy, freezePiRunPolicy } from '../electron/piPolicyEvidence.ts'
-import { consumePiSkillPreflightDirective, setPiSkillPreflightBridge } from '../electron/piToolHost.ts'
+import {
+  consumePiSkillPreflightDirective,
+  installPiSkillPreflightBatchBarrier,
+  setPiSkillPreflightBridge,
+} from '../electron/piToolHost.ts'
 
 const state = createInitialWorkingState({
   runId: 'preflight-run',
@@ -38,6 +42,18 @@ const writeEvaluation = evaluatePiInvocationPolicy({
 })
 assert.deepEqual(writeEvaluation.skillPreflight, { required: true, trigger: 'state-changing-tool-call' })
 setPiSkillPreflightBridge(undefined)
+const ownerlessAgent: {
+  beforeToolCall?: (context: any) => Promise<{ block?: boolean; reason?: string } | undefined>
+} = {}
+installPiSkillPreflightBatchBarrier('ownerless-preflight-session', ownerlessAgent)
+const ownerlessBatch = await ownerlessAgent.beforeToolCall?.({
+  assistantMessage: { content: [{ type: 'toolCall', id: 'ownerless-write', name: 'write', arguments: { path: 'result.txt', content: 'unsafe\n' } }] },
+  toolCall: { id: 'ownerless-write', name: 'write', arguments: { path: 'result.txt', content: 'unsafe\n' } },
+  args: { path: 'result.txt', content: 'unsafe\n' },
+  context: { tools: [] },
+})
+assert.equal(ownerlessBatch?.block, true, 'a non-empty batch cannot pass when Host admission dependencies are absent')
+assert.match(ownerlessBatch?.reason || '', /unavailable/i)
 await assert.rejects(() => consumePiSkillPreflightDirective({
   evaluation: writeEvaluation,
   sessionId: 'preflight-session', runId: state.runId, callId: 'missing-owner-write', tool: 'write',
@@ -46,6 +62,7 @@ await assert.rejects(() => consumePiSkillPreflightDirective({
 
 const observedDrafts: Array<{ tool: string }> = []
 setPiSkillPreflightBridge({
+  snapshot: () => ({ runId: state.runId, step: 2, workingStateRevision: state.revision }),
   preflight: async (draft) => {
     observedDrafts.push({ tool: draft.tool })
     return { kind: 'pass-through' }
@@ -73,12 +90,16 @@ assert.deepEqual(observedDrafts, [{ tool: 'write' }], 'the common frozen-policy 
 const decision = createZeroHitSkillPreflight({
   state,
   step: 2,
+  batchId: 'batch-write-1',
   tool: 'write',
   callId: 'write-1',
   identity,
   args: { path: 'result.txt', content: 'x'.repeat(20_000) },
 })
 assert.equal(decision.decision, 'pass-through')
+assert.equal(decision.schemaVersion, 2)
+assert.equal(decision.batchId, 'batch-write-1')
+assert.match(String(decision.identityDigest), /^[a-f0-9]{64}$/)
 assert.equal(decision.matchCount, 0)
 assert.deepEqual(decision.goalIds, [state.goals[0].id])
 assert.equal(decision.workingStateRevision, 1)
@@ -96,12 +117,14 @@ const revised = createZeroHitSkillPreflight({ ...decision, state: { ...state, re
 assert.notEqual(revised.retrievalKeyDigest, decision.retrievalKeyDigest, 'Working State revision participates in retrieval identity')
 const otherContract = createZeroHitSkillPreflight({ ...decision, state, identity: { ...identity, contractRevision: 8 }, args: {} })
 assert.notEqual(otherContract.retrievalKeyDigest, decision.retrievalKeyDigest, 'immutable tool identity participates in retrieval identity')
-const suffixA = createZeroHitSkillPreflight({ state, step: 2, tool: 'write', callId: 'suffix-a', identity, args: { content: `${'p'.repeat(8_000)}a` } })
-const suffixB = createZeroHitSkillPreflight({ state, step: 2, tool: 'write', callId: 'suffix-b', identity, args: { content: `${'p'.repeat(8_000)}b` } })
+const otherBatch = createZeroHitSkillPreflight({ ...decision, state, batchId: 'batch-write-2', identity, args: { path: 'result.txt', content: 'x'.repeat(20_000) } })
+assert.notEqual(otherBatch.identityDigest, decision.identityDigest, 'batch identity participates in the exact preflight identity')
+const suffixA = createZeroHitSkillPreflight({ state, step: 2, batchId: 'batch-suffix-a', tool: 'write', callId: 'suffix-a', identity, args: { content: `${'p'.repeat(8_000)}a` } })
+const suffixB = createZeroHitSkillPreflight({ state, step: 2, batchId: 'batch-suffix-b', tool: 'write', callId: 'suffix-b', identity, args: { content: `${'p'.repeat(8_000)}b` } })
 assert.notEqual(suffixA.draft.digest, suffixB.draft.digest, 'full-draft identity distinguishes equal prefixes with different suffixes')
 assert.notEqual(suffixA.retrievalKeyDigest, suffixB.retrievalKeyDigest)
 assert.throws(() => createZeroHitSkillPreflight({
-  state, step: 2, tool: 'write', callId: 'oversized', identity,
+  state, step: 2, batchId: 'batch-oversized', tool: 'write', callId: 'oversized', identity,
   args: { content: 'z'.repeat(MAX_SKILL_PREFLIGHT_DRAFT_BYTES) },
 }), /draft exceeds 65536 bytes/, 'oversized drafts fail closed before execution')
 

@@ -88,14 +88,18 @@ function draftCharacteristics(args: Record<string, unknown>): SkillInvocationTra
 
 export function createSkillPreflight(input: {
   state: WorkingState
+  /** Active execution run; resumed Working State may retain the checkpoint owner's runId. */
+  runId?: string
   step: number
   tool: string
   callId: string
+  batchId: string
   identity: PiInvocationContractIdentity
   args: Record<string, unknown>
   trigger?: SkillInvocationTrace['trigger']
   selectedSkills?: SkillRevisionIdentity[]
 }): SkillInvocationTrace {
+  const runId = input.runId || input.state.runId
   const goalIds = input.state.goals
     .filter((goal) => goal.status === 'pending' || goal.status === 'blocked')
     .map((goal) => goal.id)
@@ -112,13 +116,24 @@ export function createSkillPreflight(input: {
     toolIdentity,
     draft,
   }))
+  const identityDigest = sha256(canonicalJson({
+    runId,
+    step: input.step,
+    batchId: input.batchId,
+    callId: input.callId,
+    workingStateRevision: input.state.revision,
+    toolIdentity,
+    draft,
+  }))
   const selectedSkills = input.selectedSkills?.slice(0, 2)
   return {
-    schemaVersion: 1,
-    invocationId: `skill-preflight:${input.state.runId}:${input.step}:${input.callId}:${input.state.revision}`.slice(0, 512),
-    runId: input.state.runId,
+    schemaVersion: 2,
+    invocationId: `skill-preflight:${runId}:${input.step}:${input.batchId}:${input.callId}:${input.state.revision}`.slice(0, 512),
+    runId,
     step: input.step,
     callId: input.callId,
+    batchId: input.batchId,
+    identityDigest,
     trigger: input.trigger || 'state-changing-tool-call',
     workingStateRevision: input.state.revision,
     goalIds,
