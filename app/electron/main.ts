@@ -237,6 +237,7 @@ import {
 } from './opencodeServerBridge'
 import { safeOpenCodeServerOrigin } from '../src/agent/opencodeServerSafety'
 import { PiHostSupervisor } from './piHostSupervisor'
+import { writeSettingsBundleExport } from './settingsBundleExportWrite'
 import type { PiTurnSettlement } from '../src/agent/piHostRun'
 import {
   canonicalProjectId,
@@ -266,6 +267,7 @@ const piHostSupervisor = new PiHostSupervisor(() =>
       SUBAGENTS_LEGACY_SETTINGS_PATH: settingsPath(),
     },
   }),
+  { requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1'] },
 )
 // Policy Admin / outbound policy dir default (node-safe modules read this env).
 try {
@@ -2474,6 +2476,25 @@ ipcMain.handle('pi-host:memory-projection:clear-all', async () =>
   piHostSupervisor.clearAllDurableMemory(memoryProjectionAdmin))
 ipcMain.handle('pi-host:memory-projection:deletion-capability', async () =>
   piHostSupervisor.durableMemoryDeletionCapability(memoryProjectionAdmin))
+ipcMain.handle('pi-host:memory-projection:export', async () => {
+  const result = await piHostSupervisor.exportDurableMemory(memoryProjectionAdmin)
+  if (result.operation !== 'export') throw new Error('Pi Host canonical memory export failed')
+  return result.bundle
+})
+ipcMain.handle('settings:export-bundle', async (_evt, input: { content?: string; suggestedName?: string }) => {
+  const suggested = path.basename(String(input?.suggestedName || 'subagents-bundle.json'))
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+  const filename = suggested.toLowerCase().endsWith('.json') ? suggested : `${suggested}.json`
+  const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getFocusedWindow()
+  const options = {
+    title: '匯出 SubAgents 設定與記憶',
+    defaultPath: path.join(app.getPath('downloads'), filename),
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  }
+  const selected = parent ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options)
+  if (selected.canceled || !selected.filePath) return { ok: false as const, cancelled: true as const }
+  return writeSettingsBundleExport(selected.filePath, String(input?.content || ''))
+})
 ipcMain.handle('pi-host:memory-projection:consolidate-dream', async (_evt, input: { scope: MemoryProjectionScope; operationId: string; force?: boolean }) => {
   const scope = projectionMemoryScope(input?.scope)
   const access: MemoryAccessContext = {

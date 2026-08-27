@@ -99,6 +99,29 @@ function requestMemoryEdit(id: string, text: string, update: (id: string, text: 
   void update(id, next).catch(() => undefined)
 }
 
+async function canonicalMemoryExportFile(): Promise<{
+  file?: ReturnType<typeof buildLearningExportPlan>[number]
+  status?: string
+}> {
+  const exportBundle = window.subagents?.piHost?.memoryProjection?.exportBundle
+  if (!exportBundle) {
+    return { status: '目前執行環境不支援 Host canonical memory export；未產生空白或 legacy 匯出檔。' }
+  }
+  if (!window.confirm('記憶匯出檔包含 plaintext user data，未加密。要繼續嗎？')) {
+    return { status: '已取消記憶匯出。' }
+  }
+  try {
+    const bundle = await exportBundle()
+    return { file: {
+      kind: 'memory',
+      relativePath: '.subagents/memory/durable-memory-v1.json',
+      content: `${JSON.stringify(bundle, null, 2)}\n`,
+    } }
+  } catch (error) {
+    return { status: `Host 記憶匯出失敗：${error instanceof Error ? error.message : String(error)}` }
+  }
+}
+
 const META: Record<string, { title: string; subtitle: string }> = {
   memory: { title: '持久記憶', subtitle: 'USER / MEMORY · 跨 session 保留。' },
   skills: { title: '技能庫', subtitle: 'SKILL.md 流程技能。' },
@@ -183,7 +206,15 @@ export function LearningPage() {
   const meta = META[section] || META.memory
 
   const exportLearning = async (kind: 'skill' | 'memory' | 'knowledge') => {
-    const files = buildLearningExportPlan({ skills, memory, knowledge }).filter((file) => file.kind === kind)
+    let files = buildLearningExportPlan({ skills, knowledge }).filter((file) => file.kind === kind)
+    if (kind === 'memory') {
+      const canonical = await canonicalMemoryExportFile()
+      if (!canonical.file) {
+        setExportStatus(canonical.status || 'Host 記憶匯出失敗。')
+        return
+      }
+      files = [canonical.file]
+    }
     if (!files.length) {
       setExportStatus('目前沒有可匯出的資料。')
       return

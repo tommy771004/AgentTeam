@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { writeLearningExport } from '../electron/learningExportWrite.ts'
+import { writeSettingsBundleExport } from '../electron/settingsBundleExportWrite.ts'
 import {
   buildLearningExportPlan,
   isSafeLearningExportPath,
@@ -56,8 +57,30 @@ check('a real write lands under the project root', () => {
   const written = path.join(projectRoot, '.subagents/skills/demo/SKILL.md')
   assert.equal(fs.existsSync(written), true)
   assert.equal(fs.readFileSync(written, 'utf8'), '# demo\n')
+  if (process.platform !== 'win32') assert.equal(fs.statSync(written).mode & 0o777, 0o600)
   // physically inside, not merely lexically
   assert.equal(fs.realpathSync(written).startsWith(fs.realpathSync(projectRoot)), true)
+})
+
+check('oversized exports fail without creating a misleading empty file', () => {
+  const relativePath = '.subagents/memory/oversized.json'
+  const result = writeLearningExport(
+    { relativePath, content: 'x'.repeat(16 * 1024 * 1024 + 1) },
+    resolveRoot,
+  )
+  assert.equal(result.ok, false)
+  if (!result.ok) assert.match(result.error, /大小上限/)
+  assert.equal(fs.existsSync(path.join(projectRoot, relativePath)), false)
+})
+
+check('Settings bundle writer uses the chosen JSON path with restrictive permissions', () => {
+  const target = path.join(outside, 'settings-backup.json')
+  const result = writeSettingsBundleExport(target, '{"version":3}\n')
+  assert.equal(result.ok, true)
+  assert.equal(fs.readFileSync(target, 'utf8'), '{"version":3}\n')
+  if (process.platform !== 'win32') assert.equal(fs.statSync(target).mode & 0o777, 0o600)
+  const refused = writeSettingsBundleExport(path.join(outside, 'not-json.txt'), '{}')
+  assert.equal(refused.ok, false)
 })
 
 check('an existing file is never silently overwritten', () => {
@@ -129,6 +152,17 @@ check('the export plan only ever emits confined paths', () => {
     assert.equal(writeLearningExport({ ...file, overwrite: true }, resolveRoot).ok, true)
   }
   assert.equal(files.some((file) => file.relativePath.includes('evil')), false)
+})
+
+check('memory UI exports from Host canonical memory and never renderer MemoryBundle', () => {
+  const learningSource = fs.readFileSync(new URL('../src/pages/LearningPage.tsx', import.meta.url), 'utf8')
+  const settingsStoreSource = fs.readFileSync(new URL('../src/store/settingsStore.ts', import.meta.url), 'utf8')
+  const preloadSource = fs.readFileSync(new URL('../electron/preload.ts', import.meta.url), 'utf8')
+  assert.match(learningSource, /memoryProjection\?\.exportBundle/)
+  assert.match(settingsStoreSource, /memoryProjection\?\.exportBundle/)
+  assert.match(preloadSource, /pi-host:memory-projection:export/)
+  assert.match(preloadSource, /settings:export-bundle/)
+  assert.doesNotMatch(settingsStoreSource, /Includes hermes skills\/memory/)
 })
 
 fs.rmSync(tmp, { recursive: true, force: true })

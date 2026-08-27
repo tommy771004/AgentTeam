@@ -62,7 +62,8 @@ export function bundleSensitivityNotice(): string {
   return (
     'API 金鑰與各類 token / secret 會自動遮罩（匯入後需重新輸入）。' +
     '但匯出檔仍包含：排程與事件定義（可能含提示詞、URL、路徑）、' +
-    'Hermes 技能與記憶（可能含過往任務的敏感內容）、以及模型端點設定。' +
-    '請確認要下載並自行妥善保管此檔案。'
+    'Hermes 技能、Host canonical 記憶（plaintext user data，未加密，可能含過往任務的敏感內容）、' +
+    '以及模型端點設定。' +
+      '請確認要匯出並自行妥善保管此檔案。'
   )
 }

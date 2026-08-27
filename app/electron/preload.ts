@@ -16,6 +16,7 @@ import type {
   MemoryProjectionResult,
   MemoryProjectionScope,
 } from '../src/agent/memoryProjection'
+import type { DurableMemoryBundle } from './durableMemoryStore'
 
 type PiHostThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 type PiHostSettings = {
@@ -148,6 +149,8 @@ const api = {
           ipcRenderer.invoke('pi-host:memory-projection:deletion-capability') as Promise<MemoryProjectionResult>,
         consolidateDream: (input: { scope: MemoryProjectionScope; operationId: string; force?: boolean }) =>
           ipcRenderer.invoke('pi-host:memory-projection:consolidate-dream', input) as Promise<MemoryProjectionResult>,
+        exportBundle: () =>
+          ipcRenderer.invoke('pi-host:memory-projection:export') as Promise<DurableMemoryBundle>,
       },
       capabilities: {
         list: () => ipcRenderer.invoke('pi-host:capabilities:list') as Promise<{ items: unknown[] }>,
@@ -491,6 +494,16 @@ const api = {
         path?: string
         bytes?: number
         exists?: boolean
+        error?: string
+      }>,
+  },
+  settingsBundle: {
+    export: (input: { content: string; suggestedName: string }) =>
+      ipcRenderer.invoke('settings:export-bundle', input) as Promise<{
+        ok: boolean
+        path?: string
+        bytes?: number
+        cancelled?: boolean
         error?: string
       }>,
   },

@@ -13,6 +13,8 @@ export type LearningExportWriteResult =
   | { ok: true; path: string; bytes: number }
   | { ok: false; error: string; exists?: boolean; path?: string }
 
+export const MAX_LEARNING_EXPORT_BYTES = 16 * 1024 * 1024
+
 /**
  * Resolve `child` against `root` with symlinks followed. `path.resolve` alone
  * is not enough: a symlinked directory inside the project resolves lexically to
@@ -58,7 +60,12 @@ export function writeLearningExport(input: {
     return { ok: false, exists: true, path: relativePath, error: '檔案已存在；請明確選擇覆寫。' }
   }
   const content = String(input.content || '')
+  const bytes = Buffer.byteLength(content, 'utf8')
+  if (bytes > MAX_LEARNING_EXPORT_BYTES) {
+    return { ok: false, error: `learning export 超過 ${MAX_LEARNING_EXPORT_BYTES} bytes 大小上限。` }
+  }
   fs.mkdirSync(path.dirname(real), { recursive: true })
-  fs.writeFileSync(real, content, 'utf8')
-  return { ok: true, path: relativePath, bytes: Buffer.byteLength(content, 'utf8') }
+  fs.writeFileSync(real, content, { encoding: 'utf8', mode: 0o600 })
+  if (process.platform !== 'win32') fs.chmodSync(real, 0o600)
+  return { ok: true, path: relativePath, bytes }
 }

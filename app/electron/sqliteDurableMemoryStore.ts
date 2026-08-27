@@ -8,23 +8,28 @@ import {
   canonicalMemoryLogicalKey,
   canonicalMemoryScope,
   canonicalMemorySourceKeys,
+  durableMemoryBundle,
   durableMemoryLimits,
+  durableMemoryProvenance,
   DurableMemoryStoreError,
   memoryOperationIdentity,
   memoryOperationPayload,
   memoryScopeKey,
   planDreamConsolidation,
+  parseDurableMemoryProvenance,
   recallMemoryEntries,
   prepareLegacyMemoryMigration,
   replayMemoryMigration,
   selectVisibleMemoryEntries,
   validateMemoryCursor,
+  validateMemoryExportBundle,
   validateMemoryImport,
   validateMemoryKinds,
   validateMemoryMigration,
   validateMemoryPage,
   type DurableMemoryBundle,
   type DurableMemoryEntry,
+  type DurableMemoryExportEntry,
   type DurableMemoryLimits,
   type DurableMemoryStore,
   type MemoryAccessContext,
@@ -69,6 +74,7 @@ type EntryRow = {
 }
 
 type TagRow = { memory_id: string; tag: string; position: number }
+type ProvenanceRow = { id: string; provenance_json: string; operation: string }
 
 function scopeColumns(scope: MemoryScope): { kind: 'global' | 'project'; project: string } {
   return scope.kind === 'global'
@@ -89,11 +95,9 @@ function contentHash(entry: Omit<DurableMemoryEntry, 'id' | 'revision'>): string
 }
 
 function provenance(access: MemoryAccessContext): string {
+  const { operation: _operation, ...identity } = durableMemoryProvenance(access, 'stored-separately')
   return JSON.stringify({
-    origin: access.origin,
-    ...(access.runId ? { runId: access.runId } : {}),
-    ...(access.sessionId ? { sessionId: access.sessionId } : {}),
-    ...(access.callId ? { callId: access.callId } : {}),
+    ...identity,
     temporary: access.temporary,
   })
 }
@@ -108,19 +112,29 @@ function provenance(access: MemoryAccessContext): string {
 export class SqliteDurableMemoryStore implements DurableMemoryStore {
   private readonly db: DatabaseSync
   private readonly limits: DurableMemoryLimits
+  private readonly afterExportEntriesRead?: () => void | Promise<void>
   private writeTail: Promise<void> = Promise.resolve()
   private closed = false
   private closedRevision = 0
   private walCheckpoint: MemoryDeletionCapability['walCheckpoint'] = 'unavailable'
 
-  private constructor(databasePath: string, limits?: Partial<DurableMemoryLimits>) {
+  private constructor(
+    databasePath: string,
+    limits?: Partial<DurableMemoryLimits>,
+    testHooks?: { afterExportEntriesRead?: () => void | Promise<void> },
+  ) {
     this.db = new DatabaseSync(databasePath)
     this.limits = durableMemoryLimits(limits)
+    this.afterExportEntriesRead = testHooks?.afterExportEntriesRead
     this.migrate()
   }
 
-  static async open(databasePath: string, limits?: Partial<DurableMemoryLimits>): Promise<SqliteDurableMemoryStore> {
-    return new SqliteDurableMemoryStore(databasePath, limits)
+  static async open(
+    databasePath: string,
+    limits?: Partial<DurableMemoryLimits>,
+    testHooks?: { afterExportEntriesRead?: () => void | Promise<void> },
+  ): Promise<SqliteDurableMemoryStore> {
+    return new SqliteDurableMemoryStore(databasePath, limits, testHooks)
   }
 
   private migrate(): void {
@@ -288,6 +302,18 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       revision: Number(row.revision),
+    }))
+  }
+
+  private readExportEntries(): DurableMemoryExportEntry[] {
+    const provenanceRows = this.db.prepare('SELECT id, provenance_json, operation FROM memory_entries').all() as ProvenanceRow[]
+    const provenanceById = new Map(provenanceRows.map((row) => [
+      row.id,
+      parseDurableMemoryProvenance(row.provenance_json, row.operation),
+    ] as const))
+    return this.readEntries().map((entry) => ({
+      ...entry,
+      provenance: provenanceById.get(entry.id) || { origin: 'migration', operation: 'migration' },
     }))
   }
 
@@ -580,10 +606,23 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     await this.settleWrites()
     const scope = input.scope ? canonicalMemoryScope(input.scope) : undefined
     authorizeMemoryAccess('export', input.access, scope)
-    const entries = selectVisibleMemoryEntries(this.readEntries(), input.access, scope)
-      .sort((left, right) => left.id.localeCompare(right.id))
-      .map((entry) => ({ ...entry, scope: entry.scope.kind === 'global' ? { kind: 'global' as const } : { ...entry.scope }, tags: [...entry.tags] }))
-    return { version: 1, revision: this.currentRevision(), entries }
+    this.db.exec('BEGIN DEFERRED')
+    try {
+      const exportEntries = this.readExportEntries()
+      if (this.afterExportEntriesRead) await this.afterExportEntriesRead()
+      const visibleIds = new Set(selectVisibleMemoryEntries(exportEntries, input.access, scope).map((entry) => entry.id))
+      const entries = exportEntries
+        .filter((entry) => visibleIds.has(entry.id))
+        .sort((left, right) => left.id.localeCompare(right.id))
+        .map((entry) => ({ ...entry, scope: entry.scope.kind === 'global' ? { kind: 'global' as const } : { ...entry.scope }, tags: [...entry.tags], provenance: { ...entry.provenance } }))
+      const bundle = validateMemoryExportBundle(durableMemoryBundle(this.currentRevision(), entries), this.limits)
+      this.db.exec('COMMIT')
+      return bundle
+    } catch (error) {
+      try { this.db.exec('ROLLBACK') } catch { /* preserve export failure */ }
+      if (error instanceof DurableMemoryStoreError) throw error
+      throw new DurableMemoryStoreError('unavailable', error instanceof Error ? error.message : 'SQLite memory export failed')
+    }
   }
 
   async importBundle(input: MemoryImportInput): Promise<MemoryMutationResult> {

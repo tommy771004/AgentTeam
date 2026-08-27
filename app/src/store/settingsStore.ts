@@ -19,6 +19,20 @@ export { SETTINGS_CUSTOM_MERGE_KEYS, type SettingsCustomMergeKey }
 
 const STORAGE_KEY = 'subagents.settings.v1'
 
+function withoutLegacyHermesMemory(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const { memory: _legacyMemory, ...rest } = value as Record<string, unknown>
+  return rest
+}
+
+async function readCanonicalMemoryExport(): Promise<unknown> {
+  const exportBundle = window.subagents?.piHost?.memoryProjection?.exportBundle
+  if (!exportBundle) {
+    throw new Error('目前執行環境不支援 Host canonical memory export；未產生不完整備份。')
+  }
+  return exportBundle()
+}
+
 /**
  * Deep-merge settings patches. Fields in SETTINGS_CUSTOM_MERGE_KEYS must have
  * explicit handling below — the completeness smoke fails if a new object/array
@@ -399,7 +413,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       }
     }
 
-    // Hermes learning assets (skills / memory / soul) — durable learning must export
+    // Legacy Hermes may still carry skills/soul for browser compatibility, but
+    // its renderer memory is never a backup authority.
     let hermes: unknown = null
     try {
       if (window.subagents?.hermes?.get) {
@@ -411,6 +426,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     } catch {
       hermes = null
     }
+    hermes = withoutLegacyHermesMemory(hermes)
+    const canonicalMemory = await readCanonicalMemoryExport()
 
     // Issue 06 — pattern-based 遮罩（settingsExport.ts）：新增祕密欄位不會漏
     const { settings: redactedSettings, redactedFields } = redactSettingsForExport(
@@ -419,14 +436,16 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
     return JSON.stringify(
       {
-        version: 2,
+        version: 3,
         exportedAt: new Date().toISOString(),
         settings: redactedSettings as unknown as LlmSettings,
         jobs,
         events,
         hermes,
+        canonicalMemory,
+        canonicalMemoryStatus: 'included',
         redactedFields,
-        note: 'Secrets redacted (apiKey / tokens). Re-enter after import. Includes hermes skills/memory when present.',
+        note: 'Secrets redacted (apiKey / tokens). Re-enter after import. Canonical memory is plaintext user data and is not encrypted.',
       },
       null,
       2,

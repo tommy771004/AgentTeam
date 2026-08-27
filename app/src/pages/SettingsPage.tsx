@@ -184,7 +184,7 @@ const SECTION_META: Record<string, { title: string; subtitle: string }> = {
   },
   bundle: {
     title: '匯出匯入',
-    subtitle: '設定、排程與事件規則備份（含 API 金鑰，請妥善保管）。',
+    subtitle: '設定、排程、事件規則與 Host canonical 記憶備份。祕密會遮罩，記憶正文仍是未加密 plaintext。',
   },
   updates: {
     title: '安全更新',
@@ -3985,7 +3985,7 @@ export function SettingsPage() {
           <SettingsGroup title="備份">
             <SettingsRow
               title="匯出設定包"
-              description="含設定、排程與事件；API 金鑰與 token 會自動遮罩"
+              description="含設定、排程、事件與 Host canonical 記憶；金鑰會遮罩，記憶 plaintext 未加密"
               control={
                 <button
                   type="button"
@@ -3996,15 +3996,22 @@ export function SettingsPage() {
                       setBundleMsg('已取消匯出。')
                       return
                     }
-                    const json = await exportBundle()
-                    const blob = new Blob([json], { type: 'application/json' })
-                    const url = URL.createObjectURL(blob)
-                    const a = document.createElement('a')
-                    a.href = url
-                    a.download = `subagents-bundle-${Date.now()}.json`
-                    a.click()
-                    URL.revokeObjectURL(url)
-                    setBundleMsg('已下載匯出檔。')
+                    try {
+                      const json = await exportBundle()
+                      const nativeExport = window.subagents?.settingsBundle?.export
+                      if (!nativeExport) throw new Error('目前執行環境不支援安全的 canonical memory 備份。')
+                      const saved = await nativeExport({
+                        content: json,
+                        suggestedName: `subagents-bundle-${Date.now()}.json`,
+                      })
+                      if (!saved.ok) {
+                        setBundleMsg(saved.cancelled ? '已取消匯出。' : `匯出失敗：${saved.error || '無法寫入檔案'}`)
+                        return
+                      }
+                      setBundleMsg('已安全寫入匯出檔。記憶內容為未加密 plaintext。')
+                    } catch (error) {
+                      setBundleMsg(`匯出失敗：${error instanceof Error ? error.message : String(error)}`)
+                    }
                   }}
                 >
                   匯出 JSON

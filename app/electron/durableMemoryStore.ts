@@ -36,6 +36,8 @@ export type DurableMemoryLimits = {
   maxTagLength: number
   maxPageSize: number
   maxImportBatch: number
+  maxExportEntries: number
+  maxExportBytes: number
   maxEntriesPerScope: number
 }
 
@@ -46,6 +48,8 @@ export const DEFAULT_DURABLE_MEMORY_LIMITS: DurableMemoryLimits = {
   maxTagLength: 64,
   maxPageSize: 100,
   maxImportBatch: 1_000,
+  maxExportEntries: 1_000,
+  maxExportBytes: 16 * 1024 * 1024,
   maxEntriesPerScope: 1_000,
 }
 
@@ -101,6 +105,7 @@ export type DurableMemoryProtocolResult = { version: 1; revision: number } & (
   | { operation: 'delete' | 'clear' | 'delete-entry' | 'clear-project' | 'clear-global' | 'clear-all'; mutation: MemoryMutationResult }
   | { operation: 'deletion-capability'; capability: MemoryDeletionCapability }
   | { operation: 'consolidate-dream'; consolidation: MemoryDreamConsolidationResult }
+  | { operation: 'export'; bundle: DurableMemoryBundle }
 )
 
 export type MemoryStoreErrorCode =
@@ -156,7 +161,89 @@ export type MemoryHealth = {
   revision: number
 }
 
+export type DurableMemoryProvenance = {
+  origin: MemoryOrigin
+  operation: string
+  runId?: string
+  sessionId?: string
+  callId?: string
+}
+
+export type DurableMemoryExportEntry = DurableMemoryEntry & {
+  provenance: DurableMemoryProvenance
+}
+
 export type DurableMemoryBundle = {
+  schema: 'subagents.durable-memory'
+  version: 1
+  generatedAt: string
+  revision: number
+  privacy: {
+    plaintext: true
+    warning: string
+  }
+  entries: DurableMemoryExportEntry[]
+}
+
+export const DURABLE_MEMORY_PLAINTEXT_WARNING = 'This export contains plaintext user data and is not encrypted.'
+
+export function durableMemoryProvenance(access: MemoryAccessContext, operation: string): DurableMemoryProvenance {
+  return {
+    origin: access.origin,
+    operation,
+    ...(access.runId ? { runId: access.runId } : {}),
+    ...(access.sessionId ? { sessionId: access.sessionId } : {}),
+    ...(access.callId ? { callId: access.callId } : {}),
+  }
+}
+
+export function parseDurableMemoryProvenance(value: string, operation: string): DurableMemoryProvenance {
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    const origin = ['runtime', 'admin', 'migration', 'consolidation'].includes(String(parsed.origin))
+      ? parsed.origin as MemoryOrigin
+      : 'migration'
+    return {
+      origin,
+      operation,
+      ...(typeof parsed.runId === 'string' ? { runId: parsed.runId } : {}),
+      ...(typeof parsed.sessionId === 'string' ? { sessionId: parsed.sessionId } : {}),
+      ...(typeof parsed.callId === 'string' ? { callId: parsed.callId } : {}),
+    }
+  } catch {
+    return { origin: 'migration', operation }
+  }
+}
+
+export function durableMemoryBundle(
+  revision: number,
+  entries: DurableMemoryExportEntry[],
+  generatedAt = new Date().toISOString(),
+): DurableMemoryBundle {
+  return {
+    schema: 'subagents.durable-memory',
+    version: 1,
+    generatedAt,
+    revision,
+    privacy: { plaintext: true, warning: DURABLE_MEMORY_PLAINTEXT_WARNING },
+    entries,
+  }
+}
+
+export function validateMemoryExportBundle(
+  bundle: DurableMemoryBundle,
+  limits: DurableMemoryLimits,
+): DurableMemoryBundle {
+  if (bundle.entries.length > limits.maxExportEntries) {
+    throw new DurableMemoryStoreError('invalid_input', `Memory export exceeds ${limits.maxExportEntries} entries`)
+  }
+  if (Buffer.byteLength(JSON.stringify(bundle), 'utf8') > limits.maxExportBytes) {
+    throw new DurableMemoryStoreError('invalid_input', `Memory export exceeds ${limits.maxExportBytes} bytes`)
+  }
+  return bundle
+}
+
+type LegacyDurableMemoryBundle = {
   version: 1
   revision: number
   entries: DurableMemoryEntry[]
@@ -252,7 +339,7 @@ export type MemoryExportInput = {
 
 export type MemoryImportInput = {
   access: MemoryAccessContext
-  bundle: DurableMemoryBundle
+  bundle: DurableMemoryBundle | LegacyDurableMemoryBundle
   mode: 'merge' | 'replace'
 }
 
@@ -746,6 +833,7 @@ export function recallMemoryEntries(
 
 export class InMemoryDurableMemoryStore implements DurableMemoryStore {
   private readonly entries = new Map<string, DurableMemoryEntry>()
+  private readonly provenanceByEntryId = new Map<string, DurableMemoryProvenance>()
   private readonly operations = new Map<string, { hash: string; entryId: string }>()
   private readonly dreamOperations = new Map<string, { payload: string; result: MemoryDreamConsolidationResult }>()
   private readonly limits: DurableMemoryLimits
@@ -803,6 +891,7 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     const revision = ++this.currentRevision
     const entry = this.nextEntry(draft, revision)
     this.entries.set(key, entry)
+    this.provenanceByEntryId.set(entry.id, durableMemoryProvenance(input.access, 'upsert'))
     if (operationId) this.operations.set(operationId, { hash: createHash('sha256').update(payload).digest('hex'), entryId: entry.id })
     return cloneEntry(entry)
   }
@@ -820,6 +909,7 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     const revision = ++this.currentRevision
     const entry = this.nextEntry(draft, revision)
     this.entries.set(entryKey(draft.scope, draft.logicalKey), entry)
+    this.provenanceByEntryId.set(entry.id, durableMemoryProvenance(input.access, 'append'))
     if (operationId) this.operations.set(operationId, { hash: createHash('sha256').update(payload).digest('hex'), entryId: entry.id })
     return cloneEntry(entry)
   }
@@ -864,7 +954,10 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     this.ensureOpen()
     const scope = canonicalMemoryScope(input.scope)
     authorizeMemoryAccess('delete', input.access, scope)
-    const changed = this.entries.delete(entryKey(scope, canonicalMemoryLogicalKey(input.logicalKey, this.limits))) ? 1 : 0
+    const key = entryKey(scope, canonicalMemoryLogicalKey(input.logicalKey, this.limits))
+    const removed = this.entries.get(key)
+    const changed = this.entries.delete(key) ? 1 : 0
+    if (removed) this.provenanceByEntryId.delete(removed.id)
     if (changed) this.currentRevision += 1
     return { changed, revision: this.currentRevision }
   }
@@ -878,6 +971,7 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
       if (scope.kind !== 'all' && memoryScopeKey(entry.scope) !== memoryScopeKey(scope)) continue
       if (input.includeSpecial === false && entry.kind !== 'memory') continue
       this.entries.delete(key)
+      this.provenanceByEntryId.delete(entry.id)
       changed += 1
     }
     if (changed) this.currentRevision += 1
@@ -915,9 +1009,12 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     const entry = this.nextEntry(draft, revision, sourceKeys.includes(draft.logicalKey))
     let changed = 0
     for (const logicalKey of sourceKeys) {
+      const source = this.entries.get(entryKey(scope, logicalKey))
       if (this.entries.delete(entryKey(scope, logicalKey))) changed += 1
+      if (source) this.provenanceByEntryId.delete(source.id)
     }
     this.entries.set(entryKey(entry.scope, entry.logicalKey), entry)
+    this.provenanceByEntryId.set(entry.id, durableMemoryProvenance(input.access, 'consolidate'))
     this.currentRevision = revision
     return { changed: changed + 1, revision, entry: cloneEntry(entry) }
   }
@@ -952,6 +1049,9 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     }
     this.entries.clear()
     for (const [key, value] of draftEntries) this.entries.set(key, value)
+    const survivingIds = new Set([...draftEntries.values()].map((candidate) => candidate.id))
+    for (const id of this.provenanceByEntryId.keys()) if (!survivingIds.has(id)) this.provenanceByEntryId.delete(id)
+    if (entry) this.provenanceByEntryId.set(entry.id, durableMemoryProvenance(input.access, 'dream-consolidate'))
     this.currentRevision = revision
     const result: MemoryDreamConsolidationResult = {
       changed: changedSources + Number(Boolean(entry)), revision,
@@ -968,8 +1068,11 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     authorizeMemoryAccess('export', input.access, scope)
     const entries = selectVisibleMemoryEntries(this.entries.values(), input.access, scope)
       .sort((left, right) => left.id.localeCompare(right.id))
-      .map(cloneEntry)
-    return { version: 1, revision: this.currentRevision, entries }
+      .map((entry) => ({
+        ...cloneEntry(entry),
+        provenance: structuredClone(this.provenanceByEntryId.get(entry.id) || { origin: 'migration' as const, operation: 'migration' }),
+      }))
+    return validateMemoryExportBundle(durableMemoryBundle(this.currentRevision, entries), this.limits)
   }
 
   async importBundle(input: MemoryImportInput): Promise<MemoryMutationResult> {
@@ -986,11 +1089,13 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     if (input.mode === 'replace') {
       changed += this.entries.size
       this.entries.clear()
+      this.provenanceByEntryId.clear()
     }
     const revision = drafts.length || changed ? this.currentRevision + 1 : this.currentRevision
     for (const draft of drafts) {
       const entry = this.nextEntry(draft, revision)
       this.entries.set(entryKey(entry.scope, entry.logicalKey), entry)
+      this.provenanceByEntryId.set(entry.id, durableMemoryProvenance(input.access, 'import'))
       changed += 1
     }
     this.currentRevision = revision
