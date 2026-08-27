@@ -14,10 +14,10 @@ import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement
  * Version 3 added the attachment contract. Version 4 (ADR-0052) exposes the
  * fail-closed subscription catalog in snapshot config; it is additive, so v3
  * and v2 peers stay readable and only v1 is refused.
- * memory-store-v1 is additive on v4 and must be capability-negotiated;
- * legacy peers continue to use the existing memory/* JSON-backed methods.
+ * Version 5 contracts the retired whole-bundle memory methods and snapshot
+ * field. Durable memory is available only through negotiated memory-store-v1.
  */
-export const PI_HOST_PROTOCOL_VERSION = 4 as const
+export const PI_HOST_PROTOCOL_VERSION = 5 as const
 export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
@@ -40,7 +40,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -93,7 +93,6 @@ export type PiHostResponse = {
     resolved?: boolean
     /** Structured payload of one tool execution (tools/pack). */
     item?: unknown
-    memories?: PiMemory[]
     memoryStore?: import('./durableMemoryStore.ts').DurableMemoryProtocolResult
     tool?: string
     code?: string
@@ -234,8 +233,8 @@ import { armTurnDeadline, clampTurnTimeout, systemTurnDeadlineClock, type TurnDe
 import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
-import type { PiMemory } from './piMemoryExtension.ts'
-import { createPiDurableMemoryBridge, handleLegacyMemory, listPiMemories, piMemoryProjection, type PiMemoryChange } from './piDurableMemory.ts'
+import type { PiMemory } from './piMemory.ts'
+import { createPiDurableMemoryBridge, piMemoryProjection, type PiMemoryChange } from './piDurableMemory.ts'
 import type { PiMemoryWriteReceipt } from './piPackBridges.ts'
 import {
   authorizeMemoryAccess,
@@ -330,7 +329,7 @@ import {
 type HostState = {
   initialized: boolean
   negotiatedProtocolVersion: number
-  snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[]; attachments: PiHostAttachment[] }
+  snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; extensions: PiExtension[]; attachments: PiHostAttachment[] }
   capabilities: PiCapabilityCatalog
   extensions: PiExtensionRegistry
   toolContracts: PiToolContractStore
@@ -1467,7 +1466,7 @@ function handleInitialization(
 ): PiHostMessage[] | undefined {
   if (input.method !== 'initialize') return undefined
   const requestedVersion = (input.params as { protocolVersion?: unknown } | undefined)?.protocolVersion
-  if (requestedVersion !== PI_HOST_PROTOCOL_VERSION && requestedVersion !== 3 && requestedVersion !== 2) {
+  if (requestedVersion !== PI_HOST_PROTOCOL_VERSION && requestedVersion !== 4 && requestedVersion !== 3 && requestedVersion !== 2) {
     return [errorResponse(id, 'protocol_mismatch', `Unsupported Pi Host Protocol version: ${String(requestedVersion)}`)]
   }
   state.initialized = true
@@ -2562,7 +2561,7 @@ export function handlePiHostRequest(
     })()
   }
   if (input.method === 'state/snapshot') {
-    return listPiMemories(state.memoryStore).then((memories) => [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions], queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })), resources: state.snapshot.resources.map((resource) => ({ ...resource })), memories } }])
+    return [{ id, result: { cursor: state.snapshot.cursor, sessions: [...state.snapshot.sessions], queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })), resources: state.snapshot.resources.map((resource) => ({ ...resource })) } }]
   }
   const attachmentResponse = handleAttachmentRequest(state, input, id, emit)
   if (attachmentResponse) return attachmentResponse
@@ -2630,12 +2629,6 @@ export function handlePiHostRequest(
       id,
       result: { files },
     })).catch((error: unknown) => errorResponse(id, 'runtime_error', error instanceof Error ? error.message : 'Skill file read failed')).then((message) => [message])
-  }
-  if (['memory/list', 'memory/add', 'memory/delete', 'memory/clear', 'memory/recall'].includes(input.method)) {
-    const events: PiHostMessage[] = []
-    return handleLegacyMemory(state.memoryStore, input.method, input.params || {}, (change) => publishPiMemoryChange(state, change, emit || ((event) => events.push(event))))
-      .then((memories) => [...events, { id, result: { memories } }])
-      .catch((error) => [errorResponse(id, error instanceof DurableMemoryStoreError && error.code === 'invalid_input' ? 'invalid_request' : 'runtime_error', error instanceof Error ? error.message : 'Memory operation failed')])
   }
   const capabilityResponse = handleMemoryOrCapabilityRequest(state, input, id, emit)
   if (capabilityResponse) return capabilityResponse
@@ -3567,29 +3560,23 @@ function isPiHostLifecycleRequest(state: HostState, method: PiHostRequest['metho
 
 export function createPiHostServer(
   send: (message: PiHostMessage) => void,
-  initialSnapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions?: PiExtension[]; attachments?: PiHostAttachment[] } = {
+  initialSnapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; extensions?: PiExtension[]; attachments?: PiHostAttachment[] } = {
     cursor: 0,
     sessions: [],
     settings: { ...DEFAULT_PI_SETTINGS },
     queue: [],
     resources: [],
-    memories: [],
     extensions: [],
     attachments: [],
   },
-  onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[]; attachments: PiHostAttachment[] }) => void,
+  onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; extensions: PiExtension[]; attachments: PiHostAttachment[] }) => void,
   refreshConfig?: () => Promise<PiHostConfigStatus>,
   checkpointWriter?: CompactionCheckpointWriter,
   suppliedMemoryStore?: DurableMemoryStore,
 ) {
   const memoryStore = suppliedMemoryStore || new InMemoryDurableMemoryStore()
-  // In-process callers seed the real contract once; the shipped entry passes
-  // an already-migrated SQLite store and an empty JSON projection.
-  if (suppliedMemoryStore && initialSnapshot.memories.length) throw new Error('SQLite authority cannot accept live JSON memories')
-  const memoryReady = !suppliedMemoryStore && initialSnapshot.memories.length
-    ? memoryStore.migrateLegacy({ access: { origin: 'migration', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: false }, sourceHash: schemaDigest(initialSnapshot.memories), sourceSchema: 2, memories: initialSnapshot.memories })
-    : Promise.resolve()
-  const snapshot = { ...initialSnapshot, memories: [], extensions: initialSnapshot.extensions || [], attachments: initialSnapshot.attachments || [] }
+  const memoryReady = Promise.resolve()
+  const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [], attachments: initialSnapshot.attachments || [] }
   const attachmentJournal = new PiHostAttachmentJournal({ records: snapshot.attachments }, (next) => {
     snapshot.attachments = next.records
     onStateChange?.(snapshot)
