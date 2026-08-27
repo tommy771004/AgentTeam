@@ -72,6 +72,10 @@ const REQUIRED_TABLES = ['memory_entries', 'memory_meta', 'memory_operations', '
 export type SqliteDurableMemoryTestHooks = MemoryImportTestHooks & {
   afterExportEntriesRead?: () => void | Promise<void>
   beforeWrite?: () => void | Promise<void>
+  /** Opens a deterministic contention window after mutation but before COMMIT. */
+  beforeCommitWrite?: () => void | Promise<void>
+  /** Test-only override; production always uses the five-second busy timeout. */
+  busyTimeoutMs?: number
 }
 
 type EntryRow = {
@@ -128,6 +132,8 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
   private readonly afterExportEntriesRead?: () => void | Promise<void>
   private readonly importTestHooks?: MemoryImportTestHooks
   private readonly beforeWrite?: () => void | Promise<void>
+  private readonly beforeCommitWrite?: () => void | Promise<void>
+  private readonly busyTimeoutMs: number
   private writeTail: Promise<void> = Promise.resolve()
   private lifecycle: 'open' | 'closing' | 'closed' = 'open'
   private closedRevision = 0
@@ -147,7 +153,14 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     this.afterExportEntriesRead = testHooks?.afterExportEntriesRead
     this.importTestHooks = testHooks
     this.beforeWrite = testHooks?.beforeWrite
+    this.beforeCommitWrite = testHooks?.beforeCommitWrite
+    this.busyTimeoutMs = Number.isSafeInteger(testHooks?.busyTimeoutMs) && Number(testHooks?.busyTimeoutMs) >= 1
+      ? Number(testHooks?.busyTimeoutMs)
+      : BUSY_TIMEOUT_MS
     try {
+      // Contention policy must exist before integrity/schema reads; two Host
+      // processes can legitimately overlap startup against the same WAL DB.
+      this.db.exec(`PRAGMA busy_timeout = ${this.busyTimeoutMs}`)
       this.preflight()
       this.migrate()
       this.validateSchema()
@@ -178,7 +191,7 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
       this.assertRequiredTables()
       this.assertSchemaColumns(latest)
     }
-    this.db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}; PRAGMA foreign_keys = ON;`)
+    this.db.exec(`PRAGMA busy_timeout = ${this.busyTimeoutMs}; PRAGMA foreign_keys = ON;`)
     if (latest < 1) {
       this.db.exec('BEGIN IMMEDIATE')
       try {
@@ -313,14 +326,17 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     const result = this.writeTail.then(async () => {
       await this.beforeWrite?.()
       if (this.lifecycle === 'closed') throw new DurableMemoryStoreError('closed', 'Durable memory store is closed')
-      this.db.exec('BEGIN IMMEDIATE')
+      let began = false
       try {
+        this.db.exec('BEGIN IMMEDIATE')
+        began = true
         const value = operation()
+        await this.beforeCommitWrite?.()
         this.db.exec('COMMIT')
         afterCommit?.(value)
         return value
       } catch (error) {
-        try { this.db.exec('ROLLBACK') } catch { /* preserve the original failure */ }
+        if (began) try { this.db.exec('ROLLBACK') } catch { /* preserve the original failure */ }
         if (error instanceof DurableMemoryStoreError) throw error
         throw new DurableMemoryStoreError('unavailable', error instanceof Error ? error.message : 'SQLite memory mutation failed')
       }
