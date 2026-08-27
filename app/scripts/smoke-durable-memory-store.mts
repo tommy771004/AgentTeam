@@ -142,7 +142,7 @@ assert.deepEqual(deleted, { changed: 1, revision: 4 })
 assert.equal(await store.get({ access: runtimeAccess(alphaProjectId), scope: projectAlpha, logicalKey: 'style' }), undefined)
 
 const cleared = await store.clear({
-  access: runtimeAccess(betaProjectId),
+  access: { ...runtimeAccess(betaProjectId), origin: 'admin' },
   scope: projectBeta,
 })
 assert.deepEqual(cleared, { changed: 1, revision: 5 })
@@ -287,7 +287,10 @@ for (const fixture of [
     createdAt: '2026-08-27T00:00:00.000Z',
   },
 ]) {
-  await parityStore.upsert({ access: parityAccess, ...fixture })
+  const access = fixture.scope.kind === 'project' && fixture.scope.project === betaProjectId
+    ? runtimeAccess(betaProjectId)
+    : parityAccess
+  await parityStore.upsert({ access, ...fixture })
 }
 
 const ranked = await parityStore.recall({

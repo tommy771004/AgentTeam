@@ -38,7 +38,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'memory/v1/upsert' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -115,7 +115,7 @@ export type PiHostResponse = {
     gap?: { missingBefore: number; earliestSeq: number }
   }
   error?: {
-    code: 'invalid_request' | 'protocol_mismatch' | 'not_initialized' | 'unknown_method' | 'runtime_error' | 'tool_contract_not_found' | 'tool_contract_unknown_tool' | 'tool_contract_stale' | 'tool_contract_session_mismatch' | 'tool_contract_inactive'
+    code: 'invalid_request' | 'protocol_mismatch' | 'not_initialized' | 'unknown_method' | 'runtime_error' | 'forbidden' | 'quota_exceeded' | 'not_found' | 'unavailable' | 'closed' | 'invalid_bundle' | 'tool_contract_not_found' | 'tool_contract_unknown_tool' | 'tool_contract_stale' | 'tool_contract_session_mismatch' | 'tool_contract_inactive'
     message: string
   }
 }
@@ -160,9 +160,9 @@ export type PiHostEvent =
       payload: {
         version: 1
         revision: number
-        operation: 'upsert' | 'delete'
+        operation: 'upsert' | 'append' | 'delete' | 'clear'
         changed: number
-        scope: 'global' | 'project'
+        scope: 'global' | 'project' | 'all'
         project?: string
         logicalKey: string
       }
@@ -227,6 +227,8 @@ import {
   InMemoryDurableMemoryStore,
   type DurableMemoryStore,
   type MemoryAccessContext,
+  type MemoryAppendInput,
+  type MemoryClearInput,
   type MemoryEntryDraft,
   type MemoryScope,
 } from './durableMemoryStore.ts'
@@ -306,6 +308,7 @@ type HostState = {
   toolContractNegotiated: boolean
   memoryStoreNegotiated: boolean
   memoryStore: DurableMemoryStore
+  publishedMemoryRevisions: Set<number>
   /**
    * The last catalog projection the Host published, by tool name (issue 19).
    *
@@ -1234,10 +1237,10 @@ function durableMemoryDraft(value: unknown): MemoryEntryDraft {
 }
 
 function durableMemoryChangedEvent(
-  operation: 'upsert' | 'delete',
+  operation: 'upsert' | 'append' | 'delete' | 'clear',
   revision: number,
   changed: number,
-  scope: MemoryScope,
+  scope: MemoryScope | { kind: 'all' },
   logicalKey: string,
 ): PiHostEvent {
   return {
@@ -1252,6 +1255,12 @@ function durableMemoryChangedEvent(
       logicalKey,
     },
   }
+}
+
+function claimMemoryRevision(state: HostState, revision: number, changed: boolean): boolean {
+  if (!changed || state.publishedMemoryRevisions.has(revision)) return false
+  state.publishedMemoryRevisions.add(revision)
+  return true
 }
 
 type DurableMemoryRequestParams = Record<string, unknown>
@@ -1269,10 +1278,27 @@ async function upsertDurableMemory(
   id: string | number,
   emit?: (message: PiHostMessage) => void,
 ): Promise<PiHostMessage[]> {
+  const beforeRevision = await state.memoryStore.revision()
   const entry = await state.memoryStore.upsert({ access, ...durableMemoryDraft(params.entry) })
   const event = durableMemoryChangedEvent('upsert', entry.revision, 1, entry.scope, entry.logicalKey)
-  if (emit) emit(event)
-  return [...(emit ? [] : [event]), { id, result: { memoryStore: { version: 1, operation: 'upsert', revision: entry.revision, entry } } }]
+  const changed = claimMemoryRevision(state, entry.revision, entry.revision > beforeRevision)
+  if (changed && emit) emit(event)
+  return [...(changed && !emit ? [event] : []), { id, result: { memoryStore: { version: 1, operation: 'upsert', revision: entry.revision, entry } } }]
+}
+
+async function appendDurableMemory(
+  state: HostState,
+  params: DurableMemoryRequestParams,
+  access: MemoryAccessContext,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): Promise<PiHostMessage[]> {
+  const beforeRevision = await state.memoryStore.revision()
+  const entry = await state.memoryStore.append({ access, ...durableMemoryDraft(params.entry) } as MemoryAppendInput)
+  const event = durableMemoryChangedEvent('append', entry.revision, 1, entry.scope, entry.logicalKey)
+  const changed = claimMemoryRevision(state, entry.revision, entry.revision > beforeRevision)
+  if (changed && emit) emit(event)
+  return [...(changed && !emit ? [event] : []), { id, result: { memoryStore: { version: 1, operation: 'append', revision: entry.revision, entry } } }]
 }
 
 async function getDurableMemory(
@@ -1296,8 +1322,8 @@ async function listDurableMemory(
   const page = await state.memoryStore.list({
     access,
     ...(scope ? { scope } : {}),
-    ...(typeof params.cursor === 'string' ? { cursor: params.cursor } : {}),
-    ...(typeof params.limit === 'number' ? { limit: params.limit } : {}),
+    cursor: params.cursor as string | undefined,
+    limit: params.limit as number | undefined,
   })
   return [{ id, result: { memoryStore: { version: 1, operation: 'list', revision: page.revision, page } } }]
 }
@@ -1310,7 +1336,7 @@ async function recallDurableMemory(
 ): Promise<PiHostMessage[]> {
   const query = typeof params.query === 'string' ? params.query : ''
   if (!query.trim()) throw new DurableMemoryStoreError('invalid_input', 'memory query is required')
-  const recall = await state.memoryStore.recall({ access, query, ...(typeof params.limit === 'number' ? { limit: params.limit } : {}) })
+  const recall = await state.memoryStore.recall({ access, query, limit: params.limit as number | undefined })
   return [{ id, result: { memoryStore: { version: 1, operation: 'recall', revision: recall.revision, recall } } }]
 }
 
@@ -1325,8 +1351,25 @@ async function deleteDurableMemory(
   const logicalKey = durableMemoryLogicalKey(params)
   const mutation = await state.memoryStore.delete({ access, scope, logicalKey })
   const event = durableMemoryChangedEvent('delete', mutation.revision, mutation.changed, scope, logicalKey)
-  if (mutation.changed && emit) emit(event)
-  return [...(mutation.changed && !emit ? [event] : []), { id, result: { memoryStore: { version: 1, operation: 'delete', revision: mutation.revision, mutation } } }]
+  const changed = claimMemoryRevision(state, mutation.revision, mutation.changed > 0)
+  if (changed && emit) emit(event)
+  return [...(changed && !emit ? [event] : []), { id, result: { memoryStore: { version: 1, operation: 'delete', revision: mutation.revision, mutation } } }]
+}
+
+async function clearDurableMemory(
+  state: HostState,
+  params: DurableMemoryRequestParams,
+  access: MemoryAccessContext,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): Promise<PiHostMessage[]> {
+  const rawScope = params.scope as { kind?: unknown } | undefined
+  const scope: MemoryClearInput['scope'] = rawScope?.kind === 'all' ? { kind: 'all' } : durableMemoryScope(params.scope)
+  const mutation = await state.memoryStore.clear({ access, scope })
+  const event = durableMemoryChangedEvent('clear', mutation.revision, mutation.changed, scope, '*')
+  const changed = claimMemoryRevision(state, mutation.revision, mutation.changed > 0)
+  if (changed && emit) emit(event)
+  return [...(changed && !emit ? [event] : []), { id, result: { memoryStore: { version: 1, operation: 'clear', revision: mutation.revision, mutation } } }]
 }
 
 function executeDurableMemoryRequest(
@@ -1339,10 +1382,12 @@ function executeDurableMemoryRequest(
 ): Promise<PiHostMessage[]> {
   switch (method) {
     case 'memory/v1/upsert': return upsertDurableMemory(state, params, access, id, emit)
+    case 'memory/v1/append': return appendDurableMemory(state, params, access, id, emit)
     case 'memory/v1/get': return getDurableMemory(state, params, access, id)
     case 'memory/v1/list': return listDurableMemory(state, params, access, id)
     case 'memory/v1/recall': return recallDurableMemory(state, params, access, id)
     case 'memory/v1/delete': return deleteDurableMemory(state, params, access, id, emit)
+    case 'memory/v1/clear': return clearDurableMemory(state, params, access, id, emit)
     default: return Promise.resolve([errorResponse(id, 'unknown_method', `Unknown durable memory method: ${method}`)])
   }
 }
@@ -1362,11 +1407,17 @@ function handleDurableMemoryRequest(
     return executeDurableMemoryRequest(state, input.method, params, durableMemoryAccess(params.access), id, emit)
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : 'Durable memory request failed'
-        return [errorResponse(id, error instanceof DurableMemoryStoreError && error.code === 'invalid_input' ? 'invalid_request' : 'runtime_error', message)]
+        const code = error instanceof DurableMemoryStoreError
+          ? error.code === 'invalid_input' ? 'invalid_request' : error.code
+          : 'runtime_error'
+        return [errorResponse(id, code, message)]
       })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Durable memory request failed'
-    return Promise.resolve([errorResponse(id, error instanceof DurableMemoryStoreError && error.code === 'invalid_input' ? 'invalid_request' : 'runtime_error', message)])
+    const code = error instanceof DurableMemoryStoreError
+      ? error.code === 'invalid_input' ? 'invalid_request' : error.code
+      : 'runtime_error'
+    return Promise.resolve([errorResponse(id, code, message)])
   }
 }
 
@@ -3063,6 +3114,7 @@ export function createPiHostServer(
     toolContractNegotiated: false,
     memoryStoreNegotiated: false,
     memoryStore,
+    publishedMemoryRevisions: new Set(),
     catalogProjection: new Map(),
     attachmentJournal,
   }

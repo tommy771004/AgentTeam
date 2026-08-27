@@ -3,6 +3,8 @@ import type { PiHostFinalizationClaimResult, PiHostFinalizationCompleteResult } 
 import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
 import type {
   DurableMemoryProtocolResult,
+  MemoryAppendInput,
+  MemoryClearInput,
   MemoryDeleteInput,
   MemoryGetInput,
   MemoryListInput,
@@ -310,7 +312,7 @@ export class PiHostSupervisor {
   }
 
   private async durableMemoryRequest(
-    method: 'memory/v1/upsert' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete',
+    method: 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear',
     params: Record<string, unknown>,
     operation: DurableMemoryProtocolResult['operation'],
   ): Promise<DurableMemoryProtocolResult> {
@@ -327,6 +329,11 @@ export class PiHostSupervisor {
     return this.durableMemoryRequest('memory/v1/upsert', { access, entry }, 'upsert')
   }
 
+  async appendDurableMemory(input: MemoryAppendInput): Promise<DurableMemoryProtocolResult> {
+    const { access, ...entry } = input
+    return this.durableMemoryRequest('memory/v1/append', { access, entry }, 'append')
+  }
+
   async getDurableMemory(input: MemoryGetInput): Promise<DurableMemoryProtocolResult> {
     return this.durableMemoryRequest('memory/v1/get', input, 'get')
   }
@@ -341,6 +348,10 @@ export class PiHostSupervisor {
 
   async deleteDurableMemory(input: MemoryDeleteInput): Promise<DurableMemoryProtocolResult> {
     return this.durableMemoryRequest('memory/v1/delete', input, 'delete')
+  }
+
+  async clearDurableMemory(input: MemoryClearInput): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/clear', input, 'clear')
   }
 
   async listCapabilities(): Promise<NonNullable<PiHostResponse['result']>['items']> {

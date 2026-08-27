@@ -4,7 +4,7 @@
 
 ## 本日進展：durable memory SQLite migration
 
-`.scratch/durable-memory-sqlite-migration` #01–02 已 resolved：Host-owned async `DurableMemoryStore` 契約與共用 parity fixtures 已由 in-memory／SQLite adapter 同時通過；production SQLite adapter 具 versioned schema、WAL、busy timeout、transaction 與 serialized Host writes。Pi Host v4 新增需顯式協商的 `memory-store-v1` scoped CRUD/recall、typed supervisor relay、post-commit `memory/changed` revision event 與 restart durability smoke。現行 production supervisor 未協商新 capability，legacy JSON memory authority 尚未切換；frontier 推進 #03 scope、policy 與 idempotency authority boundary。`npm run build`、完整 `npm run smoke`、tsconfig.node typecheck、相關 oxlint 與 complexity gate 全綠。
+`.scratch/durable-memory-sqlite-migration` #01–03 已 resolved：Host-owned async `DurableMemoryStore` 契約與共用 parity fixtures 已由 in-memory／SQLite adapter 同時通過；production SQLite adapter 具 versioned schema、WAL、busy timeout、transaction 與 serialized Host writes。Pi Host v4 的顯式 `memory-store-v1` 現涵蓋 scoped get/recall/list/set/append/delete/clear；單一 authority boundary 集中 realpath project identity、origin/action policy、runtime flags、validation、per-scope quota、credential rejection 與 deterministic retry idempotency。operation journal 只留 hash／identity／revision，concurrent retry 不會重複 revision event。現行 production supervisor 仍未協商新 capability，legacy JSON memory authority 尚未切換；frontier 推進 #04 JSON → SQLite 原子遷移與 authority cutover。`npm run build`、完整 `npm run smoke`、tsconfig.node typecheck、相關 oxlint 與 complexity gate 全綠。
 
 ## 本日收口：tracker 對帳
 
@@ -41,4 +41,4 @@
 
 ## 下一步
 
-依 `.scratch/INDEX.md` Active frontier 排工：durable-memory-sqlite-migration 從 #03 Authority boundary 的 scope、policy 與 idempotency 繼續；context-usage-panel（8 票未動）與 external-cli-durable-harness（7 票未動）仍可並行開工。
+依 `.scratch/INDEX.md` Active frontier 排工：durable-memory-sqlite-migration 從 #04 JSON → SQLite 原子遷移與 authority cutover 繼續；context-usage-panel 與 external-cli-durable-harness 仍可並行開工。

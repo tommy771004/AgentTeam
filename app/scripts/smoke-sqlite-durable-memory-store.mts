@@ -18,6 +18,9 @@ try {
     memoryReadEnabled: true,
     memoryWriteEnabled: true,
     temporary: false,
+    runId: 'run-sqlite-contract',
+    sessionId: 'session-sqlite-contract',
+    callId: 'call-sqlite-contract',
   }
   const beforeRestart = await SqliteDurableMemoryStore.open(restartPath)
   const acknowledged = await beforeRestart.upsert({

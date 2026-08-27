@@ -1,15 +1,29 @@
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import {
+  appendMemoryDraft,
+  assertMemoryQuota,
+  authorizeMemoryAccess,
   canonicalMemoryDraft,
+  canonicalMemoryLogicalKey,
+  canonicalMemoryScope,
+  canonicalMemorySourceKeys,
+  durableMemoryLimits,
   DurableMemoryStoreError,
+  memoryOperationIdentity,
+  memoryOperationPayload,
   memoryScopeKey,
   recallMemoryEntries,
   selectVisibleMemoryEntries,
+  validateMemoryCursor,
+  validateMemoryImport,
+  validateMemoryPage,
   type DurableMemoryBundle,
   type DurableMemoryEntry,
+  type DurableMemoryLimits,
   type DurableMemoryStore,
   type MemoryAccessContext,
+  type MemoryAppendInput,
   type MemoryClearInput,
   type MemoryConsolidateInput,
   type MemoryConsolidationResult,
@@ -28,7 +42,7 @@ import {
   type MemoryUpsertInput,
 } from './durableMemoryStore.ts'
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 const BUSY_TIMEOUT_MS = 5_000
 
 type EntryRow = {
@@ -82,17 +96,19 @@ function provenance(access: MemoryAccessContext): string {
  */
 export class SqliteDurableMemoryStore implements DurableMemoryStore {
   private readonly db: DatabaseSync
+  private readonly limits: DurableMemoryLimits
   private writeTail: Promise<void> = Promise.resolve()
   private closed = false
   private closedRevision = 0
 
-  private constructor(databasePath: string) {
+  private constructor(databasePath: string, limits?: Partial<DurableMemoryLimits>) {
     this.db = new DatabaseSync(databasePath)
+    this.limits = durableMemoryLimits(limits)
     this.migrate()
   }
 
-  static async open(databasePath: string): Promise<SqliteDurableMemoryStore> {
-    return new SqliteDurableMemoryStore(databasePath)
+  static async open(databasePath: string, limits?: Partial<DurableMemoryLimits>): Promise<SqliteDurableMemoryStore> {
+    return new SqliteDurableMemoryStore(databasePath, limits)
   }
 
   private migrate(): void {
@@ -157,6 +173,25 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
         this.db.prepare('INSERT INTO memory_schema_migrations(version, name, applied_at) VALUES (?, ?, ?)')
           .run(1, 'initial-durable-memory-schema', new Date().toISOString())
         this.db.prepare("INSERT OR IGNORE INTO memory_meta(key, value) VALUES ('revision', '0'), ('next_identity', '1')").run()
+        this.db.exec('COMMIT')
+      } catch (error) {
+        this.db.exec('ROLLBACK')
+        throw error
+      }
+    }
+    if (latest < 2) {
+      this.db.exec('BEGIN IMMEDIATE')
+      try {
+        this.db.exec(`
+          ALTER TABLE memory_operations ADD COLUMN operation_id TEXT;
+          ALTER TABLE memory_operations ADD COLUMN operation_hash TEXT;
+          ALTER TABLE memory_operations ADD COLUMN result_entry_id TEXT;
+          ALTER TABLE memory_operations ADD COLUMN result_revision INTEGER;
+          CREATE UNIQUE INDEX memory_operations_operation_id_idx
+            ON memory_operations(operation_id) WHERE operation_id IS NOT NULL;
+        `)
+        this.db.prepare('INSERT INTO memory_schema_migrations(version, name, applied_at) VALUES (?, ?, ?)')
+          .run(2, 'authority-policy-and-idempotency', new Date().toISOString())
         this.db.exec('COMMIT')
       } catch (error) {
         this.db.exec('ROLLBACK')
@@ -246,8 +281,10 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     access: MemoryAccessContext,
     revision: number,
     operation: string,
+    operationId?: string,
+    operationPayload?: string,
   ): DurableMemoryEntry {
-    const draft = canonicalMemoryDraft(draftInput)
+    const draft = canonicalMemoryDraft(draftInput, this.limits)
     const existing = this.findEntry(draft.scope, draft.logicalKey)
     const entry: DurableMemoryEntry = {
       id: existing?.id || this.nextId(),
@@ -280,7 +317,7 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     this.db.prepare('DELETE FROM memory_tags WHERE memory_id = ?').run(entry.id)
     const insertTag = this.db.prepare('INSERT INTO memory_tags(memory_id, position, tag, normalized_tag) VALUES (?, ?, ?, ?)')
     entry.tags.forEach((tag, position) => insertTag.run(entry.id, position, tag, tag.toLowerCase()))
-    this.recordOperation(revision, operation, entry.scope, entry.logicalKey, hash, origin)
+    this.recordOperation(revision, operation, entry.scope, entry.logicalKey, hash, origin, operationId, operationPayload, entry)
     return { ...entry, scope: entry.scope.kind === 'global' ? { kind: 'global' } : { ...entry.scope }, tags: [...entry.tags] }
   }
 
@@ -291,24 +328,65 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     logicalKey: string | undefined,
     hash: string | undefined,
     origin: string,
+    operationId?: string,
+    payload?: string,
+    result?: DurableMemoryEntry,
   ): void {
     const columns = scope ? scopeColumns(scope) : undefined
     this.db.prepare(`
       INSERT INTO memory_operations(
         revision, operation, scope_kind, project_id, logical_key, content_hash,
-        provenance_json, migration_version, committed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        provenance_json, migration_version, committed_at, operation_id, operation_hash,
+        result_entry_id, result_revision
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       revision, operation, columns?.kind ?? null, columns?.project ?? null,
       logicalKey ?? null, hash ?? null, origin, SCHEMA_VERSION, new Date().toISOString(),
+      operationId ?? null, payload ? createHash('sha256').update(payload).digest('hex') : null,
+      result?.id ?? null, result?.revision ?? null,
     )
   }
 
+  private idempotentResult(operationId: string | undefined, payload: string): DurableMemoryEntry | undefined {
+    if (!operationId) return undefined
+    const row = this.db.prepare('SELECT operation_hash, result_entry_id FROM memory_operations WHERE operation_id = ?').get(operationId) as { operation_hash?: string; result_entry_id?: string } | undefined
+    if (!row) return undefined
+    if (row.operation_hash !== createHash('sha256').update(payload).digest('hex') || !row.result_entry_id) {
+      throw new DurableMemoryStoreError('invalid_input', 'Idempotency operation was retried with different memory content')
+    }
+    const entry = this.readEntries().find((candidate) => candidate.id === row.result_entry_id)
+    if (!entry) throw new DurableMemoryStoreError('not_found', 'Idempotent memory result no longer exists')
+    return entry
+  }
+
   async upsert(input: MemoryUpsertInput): Promise<DurableMemoryEntry> {
-    const draft = canonicalMemoryDraft(input)
+    const draft = canonicalMemoryDraft(input, this.limits)
+    authorizeMemoryAccess('upsert', input.access, draft.scope)
+    const operationId = memoryOperationIdentity({ ...input, ...draft }, 'set')
+    const payload = memoryOperationPayload(draft)
     return this.enqueueWrite(() => {
+      const prior = this.idempotentResult(operationId, payload)
+      if (prior) return prior
+      assertMemoryQuota(this.readEntries(), draft.scope, draft.logicalKey, this.limits)
       const revision = this.currentRevision() + 1
-      const entry = this.writeEntry(draft, input.access, revision, 'upsert')
+      const entry = this.writeEntry(draft, input.access, revision, 'upsert', operationId, payload)
+      this.setRevision(revision)
+      return entry
+    })
+  }
+
+  async append(input: MemoryAppendInput): Promise<DurableMemoryEntry> {
+    const fragment = canonicalMemoryDraft(input, this.limits)
+    authorizeMemoryAccess('append', input.access, fragment.scope)
+    const operationId = memoryOperationIdentity({ ...input, ...fragment }, 'append')
+    const payload = memoryOperationPayload(fragment)
+    return this.enqueueWrite(() => {
+      const prior = this.idempotentResult(operationId, payload)
+      if (prior) return prior
+      assertMemoryQuota(this.readEntries(), fragment.scope, fragment.logicalKey, this.limits)
+      const draft = canonicalMemoryDraft(appendMemoryDraft(this.findEntry(fragment.scope, fragment.logicalKey), fragment), this.limits)
+      const revision = this.currentRevision() + 1
+      const entry = this.writeEntry(draft, input.access, revision, 'append', operationId, payload)
       this.setRevision(revision)
       return entry
     })
@@ -316,21 +394,28 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
 
   async get(input: MemoryGetInput): Promise<DurableMemoryEntry | undefined> {
     await this.settleWrites()
-    const found = this.findEntry(input.scope, input.logicalKey)
+    const scope = canonicalMemoryScope(input.scope)
+    authorizeMemoryAccess('get', input.access, scope)
+    const found = this.findEntry(scope, canonicalMemoryLogicalKey(input.logicalKey, this.limits))
     return found ? { ...found, scope: found.scope.kind === 'global' ? { kind: 'global' } : { ...found.scope }, tags: [...found.tags] } : undefined
   }
 
   async recall(input: MemoryRecallInput): Promise<MemoryRecallResult> {
     await this.settleWrites()
+    authorizeMemoryAccess('recall', input.access)
+    if (typeof input.query !== 'string' || input.query.length > this.limits.maxTextLength) throw new DurableMemoryStoreError('invalid_input', 'Memory recall query is invalid')
+    if (input.limit !== undefined) validateMemoryPage(input.limit, this.limits)
     return { items: recallMemoryEntries(this.readEntries(), input), revision: this.currentRevision() }
   }
 
   async list(input: MemoryListInput): Promise<MemoryPage> {
     await this.settleWrites()
-    const all = selectVisibleMemoryEntries(this.readEntries(), input.access, input.scope)
+    const scope = input.scope ? canonicalMemoryScope(input.scope) : undefined
+    authorizeMemoryAccess('list', input.access, scope)
+    const all = selectVisibleMemoryEntries(this.readEntries(), input.access, scope)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
-    const offset = Math.max(0, Number.parseInt(input.cursor || '0', 10) || 0)
-    const limit = Math.max(1, Math.floor(input.limit ?? 50))
+    const offset = validateMemoryCursor(input.cursor)
+    const limit = validateMemoryPage(input.limit, this.limits)
     const items = all.slice(offset, offset + limit).map((entry) => ({
       ...entry,
       scope: entry.scope.kind === 'global' ? { kind: 'global' as const } : { ...entry.scope },
@@ -346,8 +431,11 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
   }
 
   async delete(input: MemoryDeleteInput): Promise<MemoryMutationResult> {
+    const scope = canonicalMemoryScope(input.scope)
+    authorizeMemoryAccess('delete', input.access, scope)
+    const logicalKey = canonicalMemoryLogicalKey(input.logicalKey, this.limits)
     return this.enqueueWrite(() => {
-      const found = this.findEntry(input.scope, input.logicalKey)
+      const found = this.findEntry(scope, logicalKey)
       if (!found) return { changed: 0, revision: this.currentRevision() }
       const revision = this.currentRevision() + 1
       this.db.prepare('DELETE FROM memory_entries WHERE id = ?').run(found.id)
@@ -358,9 +446,10 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
   }
 
   async clear(input: MemoryClearInput): Promise<MemoryMutationResult> {
+    const requestedScope = input.scope.kind === 'all' ? input.scope : canonicalMemoryScope(input.scope)
+    authorizeMemoryAccess('clear', input.access, requestedScope)
     return this.enqueueWrite(() => {
       const all = this.readEntries()
-      const requestedScope = input.scope
       const selected = requestedScope.kind === 'all'
         ? all
         : all.filter((entry) => memoryScopeKey(entry.scope) === memoryScopeKey(requestedScope))
@@ -386,15 +475,18 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
   }
 
   async consolidate(input: MemoryConsolidateInput): Promise<MemoryConsolidationResult> {
+    const scope = canonicalMemoryScope(input.scope)
+    authorizeMemoryAccess('consolidate', input.access, scope)
+    const sourceKeys = canonicalMemorySourceKeys(input.sourceKeys, this.limits)
+    const merged = canonicalMemoryDraft({ ...input.merged, scope }, this.limits)
     return this.enqueueWrite(() => {
-      const sourceKeys = [...new Set(input.sourceKeys)]
-      const sources = sourceKeys.map((logicalKey) => this.findEntry(input.scope, logicalKey))
+      const sources = sourceKeys.map((logicalKey) => this.findEntry(scope, logicalKey))
       const missingAt = sources.findIndex((entry) => !entry)
       if (missingAt >= 0) throw new DurableMemoryStoreError('not_found', `Memory source not found: ${sourceKeys[missingAt]}`)
       const revision = this.currentRevision() + 1
       const remove = this.db.prepare('DELETE FROM memory_entries WHERE id = ?')
       sources.forEach((entry) => remove.run(entry!.id))
-      const entry = this.writeEntry({ scope: input.scope, ...input.merged }, input.access, revision, 'consolidate')
+      const entry = this.writeEntry(merged, input.access, revision, 'consolidate')
       this.setRevision(revision)
       return { changed: sources.length + 1, revision, entry }
     })
@@ -402,26 +494,25 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
 
   async exportBundle(input: MemoryExportInput): Promise<DurableMemoryBundle> {
     await this.settleWrites()
-    const entries = selectVisibleMemoryEntries(this.readEntries(), input.access, input.scope)
+    const scope = input.scope ? canonicalMemoryScope(input.scope) : undefined
+    authorizeMemoryAccess('export', input.access, scope)
+    const entries = selectVisibleMemoryEntries(this.readEntries(), input.access, scope)
       .sort((left, right) => left.id.localeCompare(right.id))
       .map((entry) => ({ ...entry, scope: entry.scope.kind === 'global' ? { kind: 'global' as const } : { ...entry.scope }, tags: [...entry.tags] }))
     return { version: 1, revision: this.currentRevision(), entries }
   }
 
   async importBundle(input: MemoryImportInput): Promise<MemoryMutationResult> {
-    if (!input.bundle || input.bundle.version !== 1 || !Array.isArray(input.bundle.entries)) {
-      throw new DurableMemoryStoreError('invalid_bundle', 'Unsupported durable memory bundle')
-    }
-    const drafts = input.bundle.entries.map((candidate) => canonicalMemoryDraft({
-      scope: candidate.scope,
-      logicalKey: candidate.logicalKey,
-      kind: candidate.kind,
-      text: candidate.text,
-      tags: candidate.tags,
-      createdAt: candidate.createdAt,
-    } as MemoryEntryDraft))
+    authorizeMemoryAccess('import', input.access)
+    validateMemoryImport(input, this.limits)
+    const drafts = input.bundle.entries.map((candidate) => canonicalMemoryDraft(candidate as MemoryEntryDraft, this.limits))
     return this.enqueueWrite(() => {
       let changed = 0
+      const projected = new Map((input.mode === 'replace' ? [] : this.readEntries()).map((entry) => [`${memoryScopeKey(entry.scope)}\u0000${entry.logicalKey}`, entry]))
+      for (const draft of drafts) {
+        assertMemoryQuota(projected.values(), draft.scope, draft.logicalKey, this.limits)
+        projected.set(`${memoryScopeKey(draft.scope)}\u0000${draft.logicalKey}`, { ...draft, id: 'quota-preview', updatedAt: draft.createdAt, revision: 0 })
+      }
       if (input.mode === 'replace') {
         changed += this.readEntries().length
         this.db.prepare('DELETE FROM memory_entries').run()

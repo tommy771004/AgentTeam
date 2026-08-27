@@ -24,7 +24,13 @@ const access: MemoryAccessContext = {
   temporary: false,
   runId: 'run-memory-v1',
   sessionId: 'session-memory-v1',
+  callId: 'call-memory-v1',
 }
+const betaProject = canonicalProjectId('/workspace/protocol-beta')
+const adminAccess: MemoryAccessContext = {
+  origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: true,
+}
+const children: ReturnType<typeof spawn>[] = []
 
 function launch() {
   const child = spawn(process.execPath, [hostBundle], {
@@ -36,6 +42,7 @@ function launch() {
     stdio: ['pipe', 'pipe', 'inherit'],
   })
   const lines = createInterface({ input: child.stdout })
+  children.push(child)
   const messages: PiHostMessage[] = []
   lines.on('line', (line) => messages.push(JSON.parse(line) as PiHostMessage))
   const waitFor = async (id: number): Promise<Response> => {
@@ -114,19 +121,73 @@ try {
   host.send(16, 'memory/v1/delete', { access, scope: { kind: 'project', project }, logicalKey: 'project-rule' })
   assert.deepEqual((await host.waitFor(16)).result?.memoryStore?.mutation, { changed: 1, revision: 3 })
 
+  host.send(17, 'memory/v1/upsert', {
+    access: adminAccess,
+    entry: {
+      scope: { kind: 'project', project: betaProject }, logicalKey: 'beta-rule', kind: 'memory',
+      text: 'Beta protocol memory', tags: ['beta'], createdAt: '2026-08-27T00:02:00.000Z',
+    },
+  })
+  assert.equal((await host.waitFor(17)).result?.memoryStore?.revision, 4)
+  host.send(18, 'memory/v1/get', { access, scope: { kind: 'project', project: betaProject }, logicalKey: 'beta-rule' })
+  assert.equal((await host.waitFor(18)).error?.code, 'forbidden')
+  host.send(19, 'memory/v1/list', { access: adminAccess })
+  assert.equal((await host.waitFor(19)).result?.memoryStore?.page?.total, 2)
+  host.send(20, 'memory/v1/clear', { access, scope: { kind: 'project', project } })
+  assert.equal((await host.waitFor(20)).error?.code, 'forbidden')
+  host.send(21, 'memory/v1/clear', { access: adminAccess, scope: { kind: 'project', project: betaProject } })
+  assert.deepEqual((await host.waitFor(21)).result?.memoryStore?.mutation, { changed: 1, revision: 5 })
+  const appendAccess = { ...access, callId: 'call-memory-append' }
+  const appendParams = {
+    access: appendAccess,
+    entry: {
+      scope: { kind: 'global' }, logicalKey: 'shared-rule', kind: 'memory',
+      text: 'Appended once', tags: ['append'], createdAt: '2026-08-27T00:03:00.000Z',
+    },
+  }
+  host.send(22, 'memory/v1/append', appendParams)
+  host.send(23, 'memory/v1/append', appendParams)
+  assert.equal((await host.waitFor(22)).result?.memoryStore?.revision, 6)
+  assert.equal((await host.waitFor(23)).result?.memoryStore?.revision, 6)
+  host.send(24, 'memory/v1/recall', { access: { ...access, memoryReadEnabled: false }, query: 'protocol' })
+  assert.equal((await host.waitFor(24)).error?.code, 'forbidden')
+  host.send(25, 'memory/v1/upsert', {
+    access: { ...access, memoryWriteEnabled: false, callId: 'write-disabled' },
+    entry: { scope: { kind: 'global' }, logicalKey: 'blocked', kind: 'memory', text: 'blocked', tags: [], createdAt: '2026-08-27T00:04:00.000Z' },
+  })
+  assert.equal((await host.waitFor(25)).error?.code, 'forbidden')
+  host.send(26, 'memory/v1/list', { access: { ...access, temporary: true } })
+  assert.equal((await host.waitFor(26)).error?.code, 'forbidden')
+  host.send(27, 'memory/v1/list', { access: { ...adminAccess, origin: 'migration' } })
+  assert.equal((await host.waitFor(27)).error?.code, 'forbidden')
+  host.send(28, 'memory/v1/upsert', {
+    access: { ...access, callId: 'secret-rejection' },
+    entry: { scope: { kind: 'global' }, logicalKey: 'secret', kind: 'memory', text: 'api_key=sk-proj-abcdefghijklmnopqrstuvwxyz', tags: [], createdAt: '2026-08-27T00:05:00.000Z' },
+  })
+  assert.equal((await host.waitFor(28)).error?.code, 'forbidden')
+
   const changes = host.messages.filter((message): message is Extract<PiHostMessage, { event: 'memory/changed' }> => 'event' in message && message.event === 'memory/changed')
-  assert.deepEqual(changes.map((event) => event.payload.revision), [1, 2, 3])
+  assert.deepEqual(changes.map((event) => event.payload.revision), [1, 2, 3, 4, 5, 6])
   assert.equal(changes.some((event) => JSON.stringify(event).includes('protocol memory')), false)
   host.child.stdin.end()
   await once(host.child, 'exit')
 
   const restarted = launch()
-  restarted.send(20, 'initialize', { protocolVersion: PI_HOST_PROTOCOL_VERSION, capabilities: ['memory-store-v1'] })
-  await restarted.waitFor(20)
-  restarted.send(21, 'memory/v1/get', { access, scope: { kind: 'global' }, logicalKey: 'shared-rule' })
-  const restored = (await restarted.waitFor(21)).result?.memoryStore
-  assert.equal(restored?.entry?.text, 'Global protocol memory')
-  assert.equal(restored?.revision, 3)
+  restarted.send(30, 'initialize', { protocolVersion: PI_HOST_PROTOCOL_VERSION, capabilities: ['memory-store-v1'] })
+  await restarted.waitFor(30)
+  restarted.send(31, 'memory/v1/get', { access, scope: { kind: 'global' }, logicalKey: 'shared-rule' })
+  const restored = (await restarted.waitFor(31)).result?.memoryStore
+  assert.equal(restored?.entry?.text, 'Global protocol memory\nAppended once')
+  assert.equal(restored?.revision, 6)
+  restarted.send(32, 'memory/v1/append', appendParams)
+  const restartRetry = (await restarted.waitFor(32)).result?.memoryStore
+  assert.equal(restartRetry?.revision, 6)
+  assert.equal(restartRetry?.entry?.text, restored?.entry?.text)
+  assert.equal(restarted.messages.some((message) => 'event' in message && message.event === 'memory/changed'), false)
+  restarted.send(33, 'memory/v1/delete', { access, scope: { kind: 'global' }, logicalKey: 'shared-rule' })
+  assert.equal((await restarted.waitFor(33)).result?.memoryStore?.revision, 7)
+  restarted.send(34, 'memory/v1/append', appendParams)
+  assert.equal((await restarted.waitFor(34)).error?.code, 'not_found')
   restarted.child.stdin.end()
   await once(restarted.child, 'exit')
 
@@ -153,5 +214,10 @@ try {
 
   console.log('Pi Host memory-store-v1: negotiation, scoped CRUD, revision events, restart, and supervisor relay passed')
 } finally {
+  await Promise.all(children.filter((child) => child.exitCode === null && child.signalCode === null).map(async (child) => {
+    const exited = once(child, 'exit')
+    child.kill()
+    await exited
+  }))
   await rm(stateDir, { recursive: true, force: true })
 }
