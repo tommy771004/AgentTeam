@@ -98,17 +98,22 @@ export function projectThreadSidebar({
   const truncated = groups.some((group) => group.threads.length > COLLAPSED_PER_PROJECT)
 
   if (searching) {
+    const activeKey = activeRoot.trim()
+    let matchCount = 0
     const matches = groups.flatMap((group) => {
       const matchingThreads = group.threads.filter((thread) =>
         thread.title.toLowerCase().includes(normalizedQuery),
       )
-      return matchingThreads.length > 0 ? [{ ...group, threads: matchingThreads }] : []
+      matchCount += matchingThreads.length
+      return matchingThreads.length > 0 || (activeKey && group.key === activeKey)
+        ? [{ ...group, threads: matchingThreads }]
+        : []
     })
     return {
       groups: matches,
       searching,
       truncated: false,
-      noResults: matches.length === 0,
+      noResults: matchCount === 0,
     }
   }
 

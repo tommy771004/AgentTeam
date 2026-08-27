@@ -1,21 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Icon } from './Icon'
 import { getThinkingDepth } from '../agent/thinking'
 import { getPrimaryAgent } from '../agent/opencode/agents'
-import { useThreadStore, type Thread } from '../store/threadStore'
+import { useThreadStore } from '../store/threadStore'
 import { useProjectStore } from '../store/projectStore'
 import { projectThreadSidebar } from '../lib/threadProjectGroups'
 import { useSettingsStore } from '../store/settingsStore'
-import { forkOpenCodeSession } from '../agent/opencode/serverClient'
-import { extractOpenCodeSessionId } from '../agent/opencode/sessionMapping'
-import { rerunFromReplaySafeCheckpoint } from '../agent/taskRunCoordinator'
+import { useThreadConversationActions } from '../hooks/useThreadConversationActions'
 
 export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => void } = {}) {
   const {
     threads,
     activeId,
     createThread,
-    forkThread,
     selectThread,
     deleteThread,
     setShowThreadList,
@@ -26,9 +24,8 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
   const [expanded, setExpanded] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const menuTriggerRefs = useRef(new Map<string, HTMLButtonElement>())
+  const { forkConversation, replayConversation } = useThreadConversationActions()
 
   const sidebar = useMemo(
     () => projectThreadSidebar({ threads, activeRoot, activeName, query, expanded }),
@@ -39,70 +36,9 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
     if (searchOpen) searchInputRef.current?.focus()
   }, [searchOpen])
 
-  useEffect(() => {
-    if (!openMenuId) return
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      const target = event.target
-      if (target instanceof Element && target.closest(`[data-thread-menu-id="${openMenuId}"]`)) return
-      setOpenMenuId(null)
-    }
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      setOpenMenuId(null)
-      menuTriggerRefs.current.get(openMenuId)?.focus()
-    }
-    document.addEventListener('pointerdown', closeOnOutsidePointer)
-    document.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.removeEventListener('pointerdown', closeOnOutsidePointer)
-      document.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [openMenuId])
-
   const selectConversation = (threadId: string) => {
     selectThread(threadId)
     onThreadSelected?.()
-  }
-
-  const closeMenu = (threadId: string, restoreFocus = true) => {
-    setOpenMenuId(null)
-    if (restoreFocus) requestAnimationFrame(() => menuTriggerRefs.current.get(threadId)?.focus())
-  }
-
-  const forkConversation = (thread: Thread) => {
-    const forkedId = forkThread(thread.id)
-    const sourceSession = thread.externalRun
-    if (!forkedId || sourceSession?.provider !== 'opencode' || !sourceSession.serverUrl || !sourceSession.sessionId) return
-    void forkOpenCodeSession(sourceSession.serverUrl, sourceSession.sessionId).then((raw) => {
-      const sessionId = extractOpenCodeSessionId(raw)
-      if (!sessionId) {
-        useThreadStore.getState().setExternalRun(forkedId, undefined)
-        useThreadStore.getState().pushBubble(forkedId, 'system', 'OpenCode fork 未回傳 session id，已保留為本地分支。')
-        return
-      }
-      useThreadStore.getState().setExternalRun(forkedId, {
-        ...sourceSession,
-        sessionId,
-        parentSessionId: sourceSession.sessionId,
-        childSessionIds: undefined,
-        status: 'starting',
-        completionReason: 'fork-created',
-        finishedAt: undefined,
-      })
-      useThreadStore.getState().pushBubble(forkedId, 'system', `OpenCode fork 已同步 · ${sessionId}`)
-    }).catch((error) => {
-      useThreadStore.getState().setExternalRun(forkedId, undefined)
-      useThreadStore.getState().pushBubble(forkedId, 'system', `OpenCode fork 失敗，已保留為本地分支：${error instanceof Error ? error.message : String(error)}`)
-    })
-  }
-
-  const replayConversation = (threadId: string) => {
-    void rerunFromReplaySafeCheckpoint({ sourceThreadId: threadId }).then((result) => {
-      if (result.skipped) {
-        useThreadStore.getState().pushBubble(threadId, 'system', result.error || '無法從 checkpoint 重跑。')
-      }
-    })
   }
 
   return (
@@ -194,12 +130,7 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-3">
         <div className="px-3 pt-3 pb-1 text-[11px] tracking-wide text-ink-3">專案</div>
 
-        {sidebar.noResults ? (
-          <div className="px-3 py-8 text-center text-[13px] text-ink-3">
-            找不到符合「{query.trim()}」的對話
-          </div>
-        ) : (
-          sidebar.groups.map((group) => (
+        {sidebar.groups.map((group) => (
             <div key={group.key} className="pt-2.5">
               <div
                 className="flex items-center gap-2 px-3 py-1 text-[13px] text-ink-2"
@@ -210,14 +141,20 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
               </div>
 
               {group.threads.length === 0 ? (
-                <div className="pl-[38px] pr-3 py-1.5 text-[13px] text-ink-3">沒有對話</div>
+                <div className="pl-[38px] pr-3 py-1.5 text-[13px] text-ink-3">
+                  {sidebar.searching ? '此專案沒有符合項目' : '沒有對話'}
+                </div>
               ) : (
                 group.threads.map((t) => {
                   const active = t.id === activeId
                   const depth = getThinkingDepth(t.thinkingDepth)
                   const agent = getPrimaryAgent(t.agentMode)
                   const modelLabel = t.model || globalModel || '—'
-                  const running = t.lastStatus === 'running' || t.lastStatus === 'parsing'
+                  const statusLabel = t.lastStatus === 'parsing'
+                    ? '解析中'
+                    : t.lastStatus === 'running'
+                      ? '執行中'
+                      : null
                   return (
                     <div
                       key={t.id}
@@ -233,105 +170,70 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
                           active ? 'is-active text-ink' : 'text-ink-2'
                         }`}
                       >
-                        {running && (
+                        {statusLabel && (
                           <span
                             className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
                             role="status"
-                            aria-label="執行中"
+                            aria-label={statusLabel}
                           />
                         )}
                         <span className="min-w-0 flex-1 truncate text-[13px]">{t.title}</span>
                       </button>
-                      <button
-                        ref={(element) => {
-                          if (element) menuTriggerRefs.current.set(t.id, element)
-                          else menuTriggerRefs.current.delete(t.id)
-                        }}
-                        type="button"
-                        aria-label={`${t.title} 的更多操作`}
-                        aria-haspopup="menu"
-                        aria-expanded={openMenuId === t.id}
-                        title="更多操作"
-                        onClick={() => {
-                          const willOpen = openMenuId !== t.id
-                          setOpenMenuId(willOpen ? t.id : null)
-                          if (willOpen) {
-                            requestAnimationFrame(() => {
-                              const menu = menuTriggerRefs.current.get(t.id)?.parentElement?.querySelector<HTMLElement>('[role="menu"]')
-                              menu?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
-                            })
-                          }
-                        }}
-                        className="sidebar-thread-menu-trigger sidebar-icon-button mr-0.5 shrink-0"
-                      >
-                        <Icon name="more_horiz" size={17} />
-                      </button>
-                      {openMenuId === t.id && (
-                        <div
-                          role="menu"
-                          aria-label={`${t.title} 的對話操作`}
-                          className="sidebar-thread-menu absolute right-1 top-9 z-30 w-[164px] p-1"
-                          onKeyDown={(event) => {
-                            const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-                            const currentIndex = items.indexOf(document.activeElement as HTMLElement)
-                            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                              event.preventDefault()
-                              const direction = event.key === 'ArrowDown' ? 1 : -1
-                              const nextIndex = (currentIndex + direction + items.length) % items.length
-                              items[nextIndex]?.focus()
-                            } else if (event.key === 'Home') {
-                              event.preventDefault()
-                              items[0]?.focus()
-                            } else if (event.key === 'End') {
-                              event.preventDefault()
-                              items.at(-1)?.focus()
-                            }
-                          }}
-                        >
+                      <DropdownMenu.Root>
+                        <DropdownMenu.Trigger asChild>
                           <button
                             type="button"
-                            role="menuitem"
-                            className="sidebar-menu-item"
-                            onClick={() => {
-                              forkConversation(t)
-                              closeMenu(t.id)
-                            }}
+                            aria-label={`${t.title} 的更多操作`}
+                            title="更多操作"
+                            className="sidebar-thread-menu-trigger sidebar-icon-button mr-0.5 shrink-0"
                           >
-                            <Icon name="call_split" size={16} />
-                            建立分支
+                            <Icon name="more_horiz" size={17} />
                           </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className="sidebar-menu-item"
-                            onClick={() => {
-                              replayConversation(t.id)
-                              closeMenu(t.id)
-                            }}
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Portal>
+                          <DropdownMenu.Content
+                            aria-label={`${t.title} 的對話操作`}
+                            align="end"
+                            side="bottom"
+                            sideOffset={4}
+                            collisionPadding={8}
+                            className="sidebar-thread-menu z-[100] w-[164px] p-1"
                           >
-                            <Icon name="replay" size={16} />
-                            從 checkpoint 重跑
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className="sidebar-menu-item text-error"
-                            onClick={() => {
-                              closeMenu(t.id, false)
-                              deleteThread(t.id)
-                            }}
-                          >
-                            <Icon name="delete" size={16} />
-                            刪除對話
-                          </button>
-                        </div>
-                      )}
+                            <DropdownMenu.Item
+                              className="sidebar-menu-item"
+                              onSelect={() => forkConversation(t)}
+                            >
+                              <Icon name="call_split" size={16} />
+                              建立分支
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item
+                              className="sidebar-menu-item"
+                              onSelect={() => replayConversation(t.id)}
+                            >
+                              <Icon name="replay" size={16} />
+                              從 checkpoint 重跑
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item
+                              className="sidebar-menu-item text-error"
+                              onSelect={() => deleteThread(t.id)}
+                            >
+                              <Icon name="delete" size={16} />
+                              刪除對話
+                            </DropdownMenu.Item>
+                          </DropdownMenu.Content>
+                        </DropdownMenu.Portal>
+                      </DropdownMenu.Root>
                     </div>
                   )
                 })
               )}
             </div>
-          ))
+          ))}
+
+        {sidebar.noResults && (
+          <div className="px-3 py-6 text-center text-[13px] text-ink-3">
+            找不到符合「{query.trim()}」的對話
+          </div>
         )}
 
         {sidebar.truncated && !sidebar.searching && (

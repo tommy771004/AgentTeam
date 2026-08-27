@@ -341,16 +341,6 @@ html:not([data-sidebar-solid='true']) .sidebar-panel::before {
   opacity: 0.45;
 }
 
-html:not([data-sidebar-solid='true']) .sidebar-panel::after {
-  content: '';
-  position: absolute;
-  inset: 0 0 0 auto;
-  z-index: 0;
-  width: 1px;
-  pointer-events: none;
-  background: linear-gradient(180deg, var(--sidebar-glass-edge), transparent 42%, var(--sidebar-glass-edge));
-}
-
 .sidebar-panel > * {
   position: relative;
   z-index: 1;
@@ -435,8 +425,10 @@ html:not([data-sidebar-solid='true']) .sidebar-panel::after {
 }
 
 .sidebar-thread-menu {
+  border: 0;
   border-radius: 10px;
   background: var(--color-surface-container-high);
+  color: var(--color-ink);
   box-shadow: 0 5px 12px rgba(0, 0, 0, 0.18);
 }
 
@@ -455,6 +447,7 @@ html:not([data-sidebar-solid='true']) .sidebar-panel::after {
 }
 
 .sidebar-menu-item:hover,
+.sidebar-menu-item[data-highlighted],
 .sidebar-menu-item:focus-visible {
   background: var(--color-hover);
   color: var(--color-ink);

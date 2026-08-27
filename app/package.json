@@ -115,6 +115,7 @@
     "verify:mac-signature": "node --experimental-strip-types scripts/verify-mac-release-signature.mts"
   },
   "dependencies": {
+    "@radix-ui/react-dropdown-menu": "^2.1.24",
     "ajv": "^8.20.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

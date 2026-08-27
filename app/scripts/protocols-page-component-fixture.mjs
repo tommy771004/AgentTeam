@@ -250,7 +250,7 @@ try {
   await desktop.getByRole('button', { name: '新增對話' }).click()
   assert.equal(await desktop.getByText('thread-a-notes.txt').count(), 0, 'new thread does not inherit attachments')
 
-  const threadRows = desktop.locator('[role="button"][title*="新對話"]')
+  const threadRows = desktop.locator('button.sidebar-thread-select[title*="新對話"]')
   assert.ok(await threadRows.count() >= 2, 'fixture created a second thread')
   await threadRows.last().click()
   await desktop.getByText('thread-a-notes.txt').waitFor()

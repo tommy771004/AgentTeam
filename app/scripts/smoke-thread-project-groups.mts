@@ -104,8 +104,26 @@ const emptySearch = projectThreadSidebar({
   query: 'not present',
   expanded: false,
 })
-assert.deepEqual(emptySearch.groups, [])
+assert.deepEqual(
+  emptySearch.groups.map((group) => [group.label, group.threads.length]),
+  [['AgentTeam', 0]],
+)
 assert.equal(emptySearch.noResults, true)
+
+const otherProjectSearch = projectThreadSidebar({
+  threads: sidebarThreads,
+  activeRoot: '/Users/me/AgentTeam',
+  activeName: 'AgentTeam',
+  query: 'another project',
+  expanded: false,
+})
+assert.deepEqual(
+  otherProjectSearch.groups.map((group) => [group.label, group.threads.map((item) => item.id)]),
+  [
+    ['AgentTeam', []],
+    ['Productivity', ['p1']],
+  ],
+)
 
 const expandedSidebar = projectThreadSidebar({
   threads: sidebarThreads,
