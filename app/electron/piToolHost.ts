@@ -23,6 +23,7 @@ import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { admitBuiltinShellSandbox, releaseBuiltinShellExecution, wrapVerifiedBuiltinShellCommand, type BuiltinShellSandboxVerification } from './piBuiltinShellSandbox.ts'
 import { decideGitCommand, type GitCommandPolicy } from '../src/agent/tools/gitCommandPolicy.ts'
+import type { SkillContextInjectionTrace, SkillRevisionIdentity } from '../src/agent/skillPreflight.ts'
 import { schemaDigest, type PiToolCatalogEntry } from './piToolContract.ts'
 import type { MemoryAccessContext } from './durableMemoryStore.ts'
 import type { WorkingExecutionEvidence } from '../src/agent/workingState.ts'
@@ -271,6 +272,14 @@ export function unbindPiSessionRun(sessionId: string): void {
   const binding = sessionRuns.get(sessionId)
   if (binding?.runId) releaseBuiltinShellExecution(binding.runId)
   sessionRuns.delete(sessionId)
+  pendingSkillContexts.delete(sessionId)
+  redraftAuthorizations.delete(sessionId)
+  for (const key of redraftedOriginalCalls.keys()) {
+    if (key.startsWith(`${sessionId}:`)) redraftedOriginalCalls.delete(key)
+  }
+  for (const key of notExecutedInTurnCalls.keys()) {
+    if (key.startsWith(`${sessionId}:`)) notExecutedInTurnCalls.delete(key)
+  }
 }
 
 export function piSessionRunBinding(sessionId: string): PiRunBinding | undefined {
@@ -284,6 +293,7 @@ export function bindPiSessionSkillResourceView(sessionId: string, resourceView: 
   const frozenResourceView = Object.freeze({
     ...resourceView,
     manifest: Object.freeze([...resourceView.manifest]),
+    ...(resourceView.fileDigests ? { fileDigests: Object.freeze({ ...resourceView.fileDigests }) } : {}),
   })
   sessionRuns.set(sessionId, {
     ...binding,
@@ -470,14 +480,51 @@ type PiSkillPreflightBridgeInput = {
   trigger: NonNullable<PiPolicyEvaluation['skillPreflight']>['trigger']
 }
 
-let skillPreflightBridge: ((input: PiSkillPreflightBridgeInput) => void) | undefined
+type PiSelectedPreflightSkill = SkillRevisionIdentity & { body: string }
+type PiSkillPreflightDecision =
+  | { kind: 'pass-through' }
+  | { kind: 'redraft'; skills: PiSelectedPreflightSkill[] }
+
+type PiSkillPreflightBridge = {
+  preflight: (input: PiSkillPreflightBridgeInput) => Promise<PiSkillPreflightDecision>
+  contextInjected: (sessionId: string, injection: SkillContextInjectionTrace) => void
+}
+
+let skillPreflightBridge: PiSkillPreflightBridge | undefined
+
+type PendingSkillContext = {
+  runId: string
+  originalCallId: string
+  tool: string
+  identity: PiInvocationContractIdentity
+  skills: PiSelectedPreflightSkill[]
+  reason: string
+}
+
+const redraftedOriginalCalls = new Map<string, PendingSkillContext>()
+const pendingSkillContexts = new Map<string, PendingSkillContext>()
+const redraftAuthorizations = new Map<string, PendingSkillContext>()
+const notExecutedInTurnCalls = new Map<string, string>()
 
 /** Host-owned consumer for the pure policy directive. Missing ownership fails closed. */
-export function setPiSkillPreflightBridge(bridge: ((input: PiSkillPreflightBridgeInput) => void) | undefined): void {
+export function setPiSkillPreflightBridge(bridge: PiSkillPreflightBridge | undefined): void {
   skillPreflightBridge = bridge
 }
 
-export function consumePiSkillPreflightDirective(input: {
+function samePreflightTool(left: PiInvocationContractIdentity, right: PiInvocationContractIdentity): boolean {
+  return left.contractRevision === right.contractRevision
+    && left.contractDigest === right.contractDigest
+    && left.schemaDigest === right.schemaDigest
+    && left.toolSource === right.toolSource
+    && left.toolPack === right.toolPack
+}
+
+function skillRedraftReason(input: PendingSkillContext): string {
+  const revisions = input.skills.map((skill) => `${skill.id}@${skill.version}#${skill.digest}`).join(', ')
+  return `Skill preflight intervened; original call ${input.originalCallId} was not executed. Apply ${revisions} and issue a fresh ${input.tool} call identity.`
+}
+
+export async function consumePiSkillPreflightDirective(input: {
   evaluation: PiPolicyEvaluation
   sessionId: string
   runId: string
@@ -485,10 +532,22 @@ export function consumePiSkillPreflightDirective(input: {
   tool: string
   args: Record<string, unknown>
   identity: PiInvocationContractIdentity
-}): void {
+}): Promise<{ block: true; reason: string } | undefined> {
   if (!input.evaluation.skillPreflight) return
+  const callKey = migratedInvocationKey(input.sessionId, input.callId)
+  const replay = redraftedOriginalCalls.get(callKey)
+  if (replay) {
+    notExecutedInTurnCalls.set(callKey, replay.reason)
+    return { block: true, reason: replay.reason }
+  }
+  const authorization = redraftAuthorizations.get(input.sessionId)
+  if (authorization && authorization.runId === input.runId && authorization.originalCallId !== input.callId && authorization.tool === input.tool
+    && samePreflightTool(authorization.identity, input.identity)) {
+    redraftAuthorizations.delete(input.sessionId)
+    return undefined
+  }
   if (!skillPreflightBridge) throw new Error('Host Skill preflight owner is unavailable')
-  skillPreflightBridge({
+  const decision = await skillPreflightBridge.preflight({
     sessionId: input.sessionId,
     runId: input.runId,
     callId: input.callId,
@@ -497,6 +556,27 @@ export function consumePiSkillPreflightDirective(input: {
     identity: input.identity,
     trigger: input.evaluation.skillPreflight.trigger,
   })
+  if (decision.kind === 'pass-through') return undefined
+  const pending: PendingSkillContext = {
+    runId: input.runId,
+    originalCallId: input.callId,
+    tool: input.tool,
+    identity: input.identity,
+    skills: decision.skills,
+    reason: '',
+  }
+  pending.reason = skillRedraftReason(pending)
+  redraftedOriginalCalls.set(callKey, pending)
+  pendingSkillContexts.set(input.sessionId, pending)
+  notExecutedInTurnCalls.set(callKey, pending.reason)
+  return { block: true, reason: pending.reason }
+}
+
+export function consumePiSkillNotExecutedInTurnCall(sessionId: string, callId: string): string | undefined {
+  const key = migratedInvocationKey(sessionId, callId)
+  const reason = notExecutedInTurnCalls.get(key)
+  if (reason !== undefined) notExecutedInTurnCalls.delete(key)
+  return reason
 }
 
 const migratedInvocations = new Map<string, {
@@ -610,6 +690,67 @@ type InlineExtensionFactoryInput = {
   }) => void
 }
 
+function skillRedraftContext(input: PendingSkillContext): string {
+  const bodies = input.skills.map((skill) => [
+    `Skill id: ${skill.id}`,
+    `Version: ${skill.version}`,
+    `Digest: ${skill.digest}`,
+    '<skill-body>',
+    skill.body,
+    '</skill-body>',
+  ].join('\n')).join('\n\n')
+  return [
+    '[HOST SKILL PREFLIGHT REDRAFT]',
+    `The original ${input.tool} call ${input.originalCallId} was NOT EXECUTED.`,
+    bodies,
+    `Draft a new ${input.tool} call that applies this exact immutable Skill revision.`,
+    `The new call MUST use a fresh call identity; never resend ${input.originalCallId}.`,
+  ].join('\n\n')
+}
+
+/** One per-session context hook injects a selected revision only on the next provider request. */
+export function piSkillPreflightExtensionFactory(ctx: { sessionId: string }): {
+  name: string
+  hidden: true
+  factory: (pi: InlineExtensionFactoryInput) => void
+} {
+  return {
+    name: 'subagents-skill-preflight-context',
+    hidden: true,
+    factory: (pi) => {
+      pi.on('context', (event) => {
+        const pending = pendingSkillContexts.get(ctx.sessionId)
+        if (!pending) return undefined
+        if (!skillPreflightBridge) throw new Error('Host Skill preflight owner is unavailable')
+        const content = skillRedraftContext(pending)
+        const contextBytes = Buffer.byteLength(content, 'utf8')
+        if (contextBytes > 24_576) throw new Error('Skill preflight injection exceeds the hard context budget')
+        const injection: SkillContextInjectionTrace = {
+          schemaVersion: 1,
+          runId: pending.runId,
+          originalCallId: pending.originalCallId,
+          tool: pending.tool,
+          skills: pending.skills.map(({ body: _body, ...identity }) => identity),
+          contextBytes,
+          contextDigest: createHash('sha256').update(content, 'utf8').digest('hex'),
+          freshCallRequired: true,
+        }
+        pendingSkillContexts.delete(ctx.sessionId)
+        redraftAuthorizations.set(ctx.sessionId, pending)
+        skillPreflightBridge.contextInjected(ctx.sessionId, injection)
+        const messages = Array.isArray(event.messages) ? event.messages : []
+        return {
+          messages: [...messages, {
+            role: 'user',
+            content: [{ type: 'text', text: content }],
+            timestamp: Date.now(),
+          }],
+        }
+      })
+    },
+  }
+}
+
 /**
  * The single model-builtin policy hook. Every Pi builtin first enters the
  * common frozen policy/evidence seam. Bash then receives ADR-0047's additional
@@ -659,18 +800,16 @@ export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: 
           }
         }
         const coordinates = { sessionId: ctx.sessionId, runId: binding.runId, callId }
-        const evidence = new PiInvocationEvidence({ ...coordinates, tool: toolName, origin: 'model', ...contract }, (entry) => policyEvidenceBridge!.append(ctx.sessionId, entry))
-        evidence.start()
         const evaluation = evaluatePiInvocationPolicy({
           coordinates,
           origin: 'model',
           tool: toolName,
           contract,
-          args: (event.input as Record<string, unknown>) || {},
+          args: Object(event.input) as Record<string, unknown>,
           policy: frozenPolicy,
           requirements: builtinPolicyRequirements(toolName),
         })
-        consumePiSkillPreflightDirective({
+        const redraftBlock = await consumePiSkillPreflightDirective({
           evaluation,
           sessionId: ctx.sessionId,
           runId: binding.runId,
@@ -679,6 +818,9 @@ export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: 
           args: evaluation.normalizedArgs as Record<string, unknown>,
           identity: contract,
         })
+        if (redraftBlock) return redraftBlock
+        const evidence = new PiInvocationEvidence({ ...coordinates, tool: toolName, origin: 'model', ...contract }, (entry) => policyEvidenceBridge!.append(ctx.sessionId, entry))
+        evidence.start()
         if (evaluation.verdict === 'deny') {
           evidence.decision('deny', evaluation.reason)
           evidence.result(false, evaluation.reason)
@@ -1066,7 +1208,7 @@ export function piPackExtensionFactories(
             })
             return { block: true, reason }
           }
-          const requirements = packPolicyRequirements(tool, (event.input as Record<string, unknown>) || {}, {
+          const requirements = packPolicyRequirements(tool, Object(event.input) as Record<string, unknown>, {
             sessionId: ctx.sessionId,
             cwd: ctx.cwd,
             runId: binding?.runId,
@@ -1082,23 +1224,16 @@ export function piPackExtensionFactories(
             return { block: true, reason }
           }
           const coordinates = { sessionId: ctx.sessionId, runId: binding.runId, callId }
-          const evidence = new PiInvocationEvidence({
-            ...coordinates,
-            tool: toolName,
-            origin: 'model',
-            ...contract,
-          }, (entry) => policyEvidenceBridge!.append(ctx.sessionId, entry))
-          evidence.start()
           const evaluation = evaluatePiInvocationPolicy({
             coordinates,
             origin: 'model',
             tool: toolName,
             contract,
-            args: (event.input as Record<string, unknown>) || {},
+            args: Object(event.input) as Record<string, unknown>,
             policy: frozenPolicy,
             requirements,
           })
-          consumePiSkillPreflightDirective({
+          const redraftBlock = await consumePiSkillPreflightDirective({
             evaluation,
             sessionId: ctx.sessionId,
             runId: binding.runId,
@@ -1107,6 +1242,14 @@ export function piPackExtensionFactories(
             args: evaluation.normalizedArgs as Record<string, unknown>,
             identity: contract,
           })
+          if (redraftBlock) return redraftBlock
+          const evidence = new PiInvocationEvidence({
+            ...coordinates,
+            tool: toolName,
+            origin: 'model',
+            ...contract,
+          }, (entry) => policyEvidenceBridge!.append(ctx.sessionId, entry))
+          evidence.start()
           let normalizedArgs = evaluation.normalizedArgs
           evidence.decision(evaluation.verdict, evaluation.reason)
           if (evaluation.verdict === 'deny') {

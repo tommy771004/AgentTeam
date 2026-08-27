@@ -34,7 +34,105 @@ export function resolvePiSkillsDir(agentDir: string | undefined): string | undef
   return join(agentDir, 'skills')
 }
 
-export type PiSkillResourceSnapshot = { root: string; digest: string; manifest: string[] }
+export type PiSkillResourceSnapshot = {
+  root: string
+  digest: string
+  manifest: readonly string[]
+  fileDigests?: Readonly<Record<string, string>>
+}
+
+export type PiPreflightSkillRevision = {
+  id: string
+  version: number
+  digest: string
+  body: string
+  bodyBytes: number
+}
+
+export const PI_PREFLIGHT_SKILL_BODY_BUDGET_BYTES = 16 * 1024
+export const PI_PREFLIGHT_SKILL_CONTEXT_BUDGET_BYTES = 24 * 1024
+
+function frontmatterValue(frontmatter: string, key: string): string | undefined {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return frontmatter.match(new RegExp(`^${escaped}:\\s*(.+?)\\s*$`, 'm'))?.[1]?.trim()
+}
+
+function parsePreflightSkill(raw: string, exactTool: string): PiPreflightSkillRevision | undefined {
+  const normalized = raw.replaceAll('\r\n', '\n')
+  if (!normalized.startsWith('---\n')) return undefined
+  const boundary = normalized.indexOf('\n---\n', 4)
+  if (boundary < 0) return undefined
+  const frontmatter = normalized.slice(4, boundary)
+  const tools = (frontmatterValue(frontmatter, 'preflight-tools') || '')
+    .replace(/^\[|\]$/g, '')
+    .split(',')
+    .map((tool) => tool.trim().replace(/^['"]|['"]$/g, ''))
+    .filter(Boolean)
+  if (!tools.includes(exactTool)) return undefined
+  const id = frontmatterValue(frontmatter, 'name') || ''
+  const version = Number(frontmatterValue(frontmatter, 'version'))
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id) || !Number.isSafeInteger(version) || version < 1) {
+    throw new Error('Preflight Skill requires a valid name and positive integer version')
+  }
+  const body = normalized.slice(boundary + 5).trim()
+  const bodyBytes = Buffer.byteLength(body, 'utf8')
+  if (!body || bodyBytes > PI_PREFLIGHT_SKILL_BODY_BUDGET_BYTES) {
+    throw new Error(`Preflight Skill ${id} exceeds its bounded body budget`)
+  }
+  return {
+    id,
+    version,
+    digest: createHash('sha256').update(raw, 'utf8').digest('hex'),
+    body,
+    bodyBytes,
+  }
+}
+
+async function readFrozenSkill(resourceView: PiSkillResourceSnapshot, relativePath: string): Promise<string | undefined> {
+  if (!/^[^/]+\/SKILL\.md$/.test(relativePath.replaceAll('\\', '/'))) return undefined
+  const absolute = join(resourceView.root, relativePath)
+  const rel = relative(resourceView.root, absolute)
+  if (rel.startsWith('..') || rel === '') throw new Error('Preflight Skill escaped the frozen Resource View')
+  const info = await lstat(absolute)
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 64 * 1024) return undefined
+  const raw = await readFile(absolute, 'utf8')
+  const expectedDigest = resourceView.fileDigests?.[relativePath]
+  if (!expectedDigest || createHash('sha256').update(raw, 'utf8').digest('hex') !== expectedDigest) {
+    throw new Error(`Frozen Skill Resource View digest mismatch: ${relativePath}`)
+  }
+  return raw
+}
+
+/**
+ * Versioned Host interface over the frozen Skill Resource View. It never
+ * consults mutable source files or durable-memory rows.
+ */
+export async function selectFrozenPiPreflightSkills(input: {
+  resourceView: PiSkillResourceSnapshot
+  exactTool: string
+  maxSkills?: 1 | 2
+  secondSkillReason?: string
+  contextBudgetBytes?: number
+}): Promise<PiPreflightSkillRevision[]> {
+  const maxSkills = input.maxSkills || 1
+  const budget = input.contextBudgetBytes || PI_PREFLIGHT_SKILL_CONTEXT_BUDGET_BYTES
+  if (maxSkills === 2 && (!input.secondSkillReason?.trim() || !Number.isSafeInteger(budget)
+    || budget < 1 || budget > PI_PREFLIGHT_SKILL_CONTEXT_BUDGET_BYTES)) {
+    throw new Error('A second preflight Skill requires an explicit reason and hard context budget')
+  }
+  const matches: PiPreflightSkillRevision[] = []
+  for (const relativePath of [...input.resourceView.manifest].sort()) {
+    const raw = await readFrozenSkill(input.resourceView, relativePath)
+    if (raw === undefined) continue
+    const selected = parsePreflightSkill(raw, input.exactTool)
+    if (selected) matches.push(selected)
+  }
+  const selected = matches.slice(0, maxSkills)
+  if (selected.reduce((sum, skill) => sum + skill.bodyBytes, 0) > budget) {
+    throw new Error('Selected preflight Skills exceed the hard context budget')
+  }
+  return selected
+}
 
 /** Host-only, bounded and symlink-free view of the files Pi may advertise. */
 export async function snapshotPiSkillResources(agentDir: string | undefined, scope = 'turn'): Promise<PiSkillResourceSnapshot | undefined> {
@@ -93,7 +191,16 @@ export async function snapshotPiSkillResources(agentDir: string | undefined, sco
     await writeFile(target, file.content, { mode: 0o444 })
     await chmod(target, 0o444)
   }
-  return { root, digest, manifest: files.filter((file) => file.granted).map((file) => relative(root, join(root, file.relativePath))) }
+  const granted = files.filter((file) => file.granted)
+  return {
+    root,
+    digest,
+    manifest: granted.map((file) => relative(root, join(root, file.relativePath))),
+    fileDigests: Object.freeze(Object.fromEntries(granted.map((file) => [
+      relative(root, join(root, file.relativePath)),
+      createHash('sha256').update(file.content).digest('hex'),
+    ]))),
+  }
 }
 
 /** Escape a user-facing skill name into a safe single-path directory segment. */

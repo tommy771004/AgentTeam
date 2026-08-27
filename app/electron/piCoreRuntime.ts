@@ -13,7 +13,7 @@ import { piPackExtensionFactories } from './piToolHost.ts'
 import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, snapshotPiSkillResources } from './piSkills.ts'
 import { piCodingAgentModule as piCodingAgent, piVendorDir } from './piVendor.ts'
 import { sanitizeModelRow, SUBSCRIPTION_PROVIDERS, type SubscriptionModelInfo, type SubscriptionProviderId } from '../src/agent/subscriptionCatalog.ts'
-import { bindPiSessionSkillResourceView, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, piWorkingStateWriteToolDefinition, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
+import { bindPiSessionSkillResourceView, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, piSkillPreflightExtensionFactory, piWorkingStateWriteToolDefinition, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
 import { buildPiMcpDynamicPacks } from './piExtensionPacks/mcpBridgePack.ts'
 
 const vendorDir = piVendorDir
@@ -411,6 +411,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
       additionalSkillPaths: piSkillsDir ? [piSkillsDir] : undefined,
       extensionFactories: [
         ...piPackExtensionFactories({ sessionId, cwd, temporaryChat: settings.temporaryChat }, mcpDynamic.packs),
+        piSkillPreflightExtensionFactory({ sessionId }),
         // ADR-0047: builtin shell stays outside the external-CLI sandbox and
         // fail-closed under Outbound Guard `required` — enforced here where
         // in-turn bash actually executes.

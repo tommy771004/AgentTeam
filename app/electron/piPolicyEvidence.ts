@@ -32,7 +32,12 @@ export type PiFrozenRunPolicy = Readonly<{
   }>
   deniedTools: readonly string[]
   approvalTools: readonly string[]
-  resourceView?: Readonly<{ root: string; digest: string; manifest: readonly string[] }>
+  resourceView?: Readonly<{
+    root: string
+    digest: string
+    manifest: readonly string[]
+    fileDigests?: Readonly<Record<string, string>>
+  }>
 }>
 
 export type PiToolPolicyRequirements = Readonly<{
@@ -108,6 +113,21 @@ function freezeDeep<T>(value: T): T {
   return Object.freeze(value)
 }
 
+function freezeResourceView(value: unknown): PiFrozenRunPolicy['resourceView'] | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const resource = value as Record<string, unknown>
+  return {
+    root: resolve(String(resource.root || '')),
+    digest: String(resource.digest || ''),
+    manifest: Array.isArray(resource.manifest)
+      ? resource.manifest.filter((item): item is string => typeof item === 'string')
+      : [],
+    ...(resource.fileDigests && typeof resource.fileDigests === 'object'
+      ? { fileDigests: { ...resource.fileDigests as Record<string, string> } }
+      : {}),
+  }
+}
+
 export function freezePiRunPolicy(input: {
   approvalMode?: unknown
   unattended?: unknown
@@ -127,6 +147,7 @@ export function freezePiRunPolicy(input: {
     || input.outboundMode === 'demo' || input.outboundMode === 'off'
     ? input.outboundMode
     : 'off'
+  const resourceView = freezeResourceView(input.resourceView)
   return freezeDeep({
     approvalMode: input.approvalMode === 'always' || input.approvalMode === 'full'
       ? input.approvalMode
@@ -146,14 +167,7 @@ export function freezePiRunPolicy(input: {
     approvalTools: Array.isArray(input.approvalTools)
       ? input.approvalTools.filter((name): name is string => typeof name === 'string')
       : [],
-    ...(input.resourceView && typeof input.resourceView === 'object' ? {
-      resourceView: {
-        root: resolve(String((input.resourceView as any).root || '')),
-        digest: String((input.resourceView as any).digest || ''),
-        manifest: Array.isArray((input.resourceView as any).manifest)
-          ? (input.resourceView as any).manifest.filter((item: unknown): item is string => typeof item === 'string') : [],
-      },
-    } : {}),
+    ...(resourceView ? { resourceView } : {}),
   })
 }
 

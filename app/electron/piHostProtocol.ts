@@ -158,7 +158,7 @@ export type PiHostEvent =
     }
   | {
       event: 'host/tool-start' | 'host/tool-decision' | 'host/tool-result'
-      payload: { runId: string; tool: string; callId?: string; parentRunId?: string; decision?: 'allow' | 'ask' | 'deny'; settlement?: 'success' | 'failed' | 'cancelled' | 'denied'; reason?: string; item?: unknown; executionEvidence?: WorkingExecutionEvidence; contractRevision?: number; contractDigest?: string; schemaDigest?: string; toolSource?: 'builtin' | 'extension-pack' | 'mcp'; toolPack?: string; invocationOrigin?: PiInvocationOrigin }
+      payload: { runId: string; tool: string; callId?: string; parentRunId?: string; decision?: 'allow' | 'ask' | 'deny'; settlement?: 'success' | 'failed' | 'cancelled' | 'denied' | 'not-executed'; reason?: string; item?: unknown; executionEvidence?: WorkingExecutionEvidence; contractRevision?: number; contractDigest?: string; schemaDigest?: string; toolSource?: 'builtin' | 'extension-pack' | 'mcp'; toolPack?: string; invocationOrigin?: PiInvocationOrigin }
     }
   | {
       event: 'host/orchestration'
@@ -290,6 +290,7 @@ import {
   cancelPiApprovalsForRun,
   canonicalPiToolPath,
   consumePiDeniedInTurnCall,
+  consumePiSkillNotExecutedInTurnCall,
   consumePiWorkingWriteCanonicalPath,
   settlePiModelBuiltinInvocation,
   executePiPackTool,
@@ -308,7 +309,7 @@ import {
   type PiCatalogEntry,
 } from './piToolHost.ts'
 import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
-import { createZeroHitSkillPreflight } from './piSkillPreflight.ts'
+import { createSkillPreflight } from './piSkillPreflight.ts'
 import {
   bindWorkspaceTextSearchRun,
   isWorkspaceTextSearchCapability,
@@ -317,7 +318,7 @@ import {
   workspaceTextSearchAvailability,
 } from './piWorkspaceTextSearchRuntime.ts'
 import { configurePiMessagingGateway } from './piExtensionPacks/integrations.ts'
-import { discoveredPiSkills, readPiSkillFiles, syncPiSkillsFromRenderer, type PiSkillSyncResult } from './piSkills.ts'
+import { discoveredPiSkills, readPiSkillFiles, selectFrozenPiPreflightSkills, syncPiSkillsFromRenderer, type PiSkillSyncResult } from './piSkills.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
 import { setPiDelegationBridge, setPiMemoryBridge } from './piPackBridges.ts'
 import { setPiPlanAnnouncer as installPlanAnnouncer } from './piExtensionPacks/interactionPlanning.ts'
@@ -369,7 +370,7 @@ export type PiToolAuditRecord = {
   tool: string
   phase: 'start' | 'decision' | 'result'
   decision?: 'allow' | 'ask' | 'deny'
-  settlement?: 'success' | 'failed' | 'cancelled' | 'denied'
+  settlement?: 'success' | 'failed' | 'cancelled' | 'denied' | 'not-executed'
   reason?: string
   path?: string
   at: number
@@ -1176,6 +1177,12 @@ function piToolExecutionFailed(event: Record<string, unknown>, toolName: string)
   return Boolean(details && typeof details === 'object' && (details as { ok?: unknown }).ok === false)
 }
 
+function turnRecordToolSettlement(value: PiToolAuditRecord['settlement']): Extract<TurnRecordEntry, { kind: 'tool-result' }>['settlement'] {
+  return value === 'success' || value === 'denied' || value === 'cancelled' || value === 'not-executed'
+    ? value
+    : 'failed'
+}
+
 function recordToolAudit(state: HostState, sessionId: unknown, event: PiHostEvent): void {
   if (typeof sessionId !== 'string') return
   const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
@@ -1209,9 +1216,7 @@ function recordToolAudit(state: HostState, sessionId: unknown, event: PiHostEven
       source: 'host',
       tool: record.tool,
       callId: record.callId,
-      settlement: record.settlement === 'success' || record.settlement === 'denied' || record.settlement === 'cancelled'
-        ? record.settlement
-        : 'failed',
+      settlement: turnRecordToolSettlement(record.settlement),
       ...(record.reason ? { detail: record.reason } : {}),
       ...memoryWriteRecordFields(payload.item, record.callId),
       ...workingExecutionEvidenceRecordFields(payload.executionEvidence),
@@ -1235,6 +1240,7 @@ function publishModelToolTerminal(input: {
   tool: string
   callId: string
   denialReason: string | undefined
+  notExecutedReason: string | undefined
   toolFailed: boolean
   identity: TurnRecordToolContractIdentity | undefined
   proposal: WorkingStateProposal | undefined
@@ -1242,6 +1248,20 @@ function publishModelToolTerminal(input: {
   trustedResult: unknown
   eventIsError: boolean
 }): WorkingToolSettlement {
+  if (input.notExecutedReason !== undefined) {
+    publishInTurnToolEvent(input.state, input.sessionId, input.emit, {
+      event: 'host/tool-result',
+      payload: {
+        runId: input.runId,
+        tool: input.tool,
+        callId: input.callId,
+        settlement: 'not-executed',
+        reason: input.notExecutedReason,
+        ...(input.identity || {}),
+      },
+    })
+    return 'not-executed'
+  }
   if (input.denialReason !== undefined) return 'denied'
   const catalogued = input.state.catalogProjection.get(input.tool)
   const refusedAsInactive = input.eventIsError
@@ -1275,6 +1295,17 @@ function publishModelToolTerminal(input: {
     },
   })
   return settlement
+}
+
+function consumeModelToolInterception(sessionId: string, callId: string): {
+  notExecutedReason: string | undefined
+  denialReason: string | undefined
+} {
+  const notExecutedReason = consumePiSkillNotExecutedInTurnCall(sessionId, callId)
+  return {
+    notExecutedReason,
+    denialReason: notExecutedReason === undefined ? consumePiDeniedInTurnCall(sessionId, callId) : undefined,
+  }
 }
 
 function commitCheckedWorkingState(input: {
@@ -3576,7 +3607,7 @@ export function handlePiHostRequest(
             // no" are different facts.
             const toolCallId = typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`
             const toolName = typeof event.toolName === 'string' ? event.toolName : 'tool'
-            const denialReason = consumePiDeniedInTurnCall(sessionId, toolCallId)
+            const { notExecutedReason, denialReason } = consumeModelToolInterception(sessionId, toolCallId)
             const toolFailed = piToolExecutionFailed(event, toolName)
             settlePiModelBuiltinInvocation({
               sessionId,
@@ -3597,6 +3628,7 @@ export function handlePiHostRequest(
               tool: toolName,
               callId: toolCallId,
               denialReason,
+              notExecutedReason,
               toolFailed,
               identity,
               proposal,
@@ -4191,19 +4223,31 @@ export function createPiHostServer(
       })
     },
   })
-  setPiSkillPreflightBridge((input) => {
-    const recorder = activeTurnRecorders.get(input.sessionId)
-    if (!recorder) throw new Error('Skill preflight requires an active Host turn recorder')
-    const invocation = createZeroHitSkillPreflight({
-      state: recorder.proposalState,
-      step: recorder.step,
-      tool: input.tool,
-      callId: input.callId,
-      identity: input.identity,
-      args: input.args,
-      trigger: input.trigger,
-    })
-    recordTurnEntry(input.sessionId, { kind: 'skill-invocation', source: 'host', invocation })
+  setPiSkillPreflightBridge({
+    preflight: async (input) => {
+      const recorder = activeTurnRecorders.get(input.sessionId)
+      if (!recorder) throw new Error('Skill preflight requires an active Host turn recorder')
+      const resourceView = piSessionRunBinding(input.sessionId)?.frozenPolicy?.resourceView
+      const skills = resourceView
+        ? await selectFrozenPiPreflightSkills({ resourceView, exactTool: input.tool })
+        : []
+      const identities = skills.map(({ body: _body, ...identity }) => identity)
+      const invocation = createSkillPreflight({
+        state: recorder.proposalState,
+        step: recorder.step,
+        tool: input.tool,
+        callId: input.callId,
+        identity: input.identity,
+        args: input.args,
+        trigger: input.trigger,
+        selectedSkills: identities,
+      })
+      recordTurnEntry(input.sessionId, { kind: 'skill-invocation', source: 'host', invocation })
+      return skills.length ? { kind: 'redraft' as const, skills } : { kind: 'pass-through' as const }
+    },
+    contextInjected: (sessionId, injection) => {
+      recordTurnEntry(sessionId, { kind: 'skill-context', source: 'host', injection })
+    },
   })
   return {
     async handle(request: unknown) {

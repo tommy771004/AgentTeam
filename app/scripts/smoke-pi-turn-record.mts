@@ -20,7 +20,7 @@ import {
   turnRecordEntries,
 } from '../src/agent/turnRecord.ts'
 import { createInitialWorkingState } from '../src/agent/workingState.ts'
-import { createZeroHitSkillPreflight } from '../electron/piSkillPreflight.ts'
+import { createSkillPreflight, createZeroHitSkillPreflight } from '../electron/piSkillPreflight.ts'
 
 /**
  * The Turn Record is the Host's ordered account of one turn. This asserts the
@@ -54,7 +54,7 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
-assert.equal(TURN_RECORD_FORMAT_VERSION, 6, 'Skill preflight audit is an explicit Turn Record format evolution')
+assert.equal(TURN_RECORD_FORMAT_VERSION, 7, 'Skill redraft context is an explicit Turn Record format evolution')
 const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
 assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')
@@ -165,6 +165,58 @@ for (const legacyVersion of [1, 2, 3, 4, 5]) {
     version: legacyVersion,
     entries: [skillInvocation.entries[0]],
   }), TurnRecordCorruptError, `v${legacyVersion} cannot smuggle a v6 Skill invocation entry`)
+}
+const skillContext = appendTurnRecord(undefined, [{
+  kind: 'skill-context', source: 'host',
+  injection: {
+    schemaVersion: 1,
+    runId: 'preflight-run',
+    originalCallId: 'write-1',
+    tool: 'write',
+    skills: [{ id: 'safe-write', version: 1, digest: 'd'.repeat(64), bodyBytes: 20 }],
+    contextBytes: 200,
+    contextDigest: 'e'.repeat(64),
+    freshCallRequired: true,
+  },
+  turn: 1, step: 1, at: 2,
+}])
+const redraftSkillInvocation = appendTurnRecord(undefined, [{
+  kind: 'skill-invocation', source: 'host',
+  invocation: createSkillPreflight({
+    state: createInitialWorkingState({ runId: 'preflight-run', objective: 'write result' }),
+    step: 1,
+    tool: 'write',
+    callId: 'write-redraft-1',
+    identity: {
+      contractRevision: 1,
+      contractDigest: 'b'.repeat(64),
+      schemaDigest: 'c'.repeat(64),
+      toolSource: 'builtin',
+    },
+    args: { path: 'result.txt' },
+    selectedSkills: [{ id: 'safe-write', version: 1, digest: 'd'.repeat(64), bodyBytes: 20 }],
+  }),
+  turn: 1, step: 1, at: 2,
+}])
+const notExecutedResult = appendTurnRecord(undefined, [{
+  kind: 'tool-result', source: 'host', tool: 'write', callId: 'write-redraft-1',
+  settlement: 'not-executed', detail: 'Skill preflight requires a fresh call identity.',
+  turn: 1, step: 1, at: 3,
+}])
+assert.equal(parseTurnRecord({ version: 6, entries: continued.entries }).record.entries.length, 3, 'valid v6 history migrates intact')
+assert.throws(() => parseTurnRecord({
+  version: 6,
+  entries: [redraftSkillInvocation.entries[0]],
+}), TurnRecordCorruptError, 'v6 cannot smuggle a v7 Skill redraft decision')
+assert.throws(() => parseTurnRecord({
+  version: 6,
+  entries: [notExecutedResult.entries[0]],
+}), TurnRecordCorruptError, 'v6 cannot smuggle a v7 not-executed settlement')
+for (const legacyVersion of [1, 2, 3, 4, 5, 6]) {
+  assert.throws(() => parseTurnRecord({
+    version: legacyVersion,
+    entries: [skillContext.entries[0]],
+  }), TurnRecordCorruptError, `v${legacyVersion} cannot smuggle a v7 Skill context entry`)
 }
 assert.throws(() => parseTurnRecord({
   version: TURN_RECORD_FORMAT_VERSION,

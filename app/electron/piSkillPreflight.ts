@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { canonicalJson } from './piToolContract.ts'
 import { shouldRunSkillPreflight, type PiInvocationContractIdentity } from './piPolicyEvidence.ts'
-import type { SkillInvocationTrace, SkillPreflightPackageIdentity } from '../src/agent/skillPreflight.ts'
+import type { SkillInvocationTrace, SkillPreflightPackageIdentity, SkillRevisionIdentity } from '../src/agent/skillPreflight.ts'
 import type { WorkingState } from '../src/agent/workingState.ts'
 
 const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex')
@@ -86,7 +86,7 @@ function draftCharacteristics(args: Record<string, unknown>): SkillInvocationTra
   }
 }
 
-export function createZeroHitSkillPreflight(input: {
+export function createSkillPreflight(input: {
   state: WorkingState
   step: number
   tool: string
@@ -94,6 +94,7 @@ export function createZeroHitSkillPreflight(input: {
   identity: PiInvocationContractIdentity
   args: Record<string, unknown>
   trigger?: SkillInvocationTrace['trigger']
+  selectedSkills?: SkillRevisionIdentity[]
 }): SkillInvocationTrace {
   const goalIds = input.state.goals
     .filter((goal) => goal.status === 'pending' || goal.status === 'blocked')
@@ -111,6 +112,7 @@ export function createZeroHitSkillPreflight(input: {
     toolIdentity,
     draft,
   }))
+  const selectedSkills = input.selectedSkills?.slice(0, 2)
   return {
     schemaVersion: 1,
     invocationId: `skill-preflight:${input.state.runId}:${input.step}:${input.callId}:${input.state.revision}`.slice(0, 512),
@@ -121,10 +123,15 @@ export function createZeroHitSkillPreflight(input: {
     workingStateRevision: input.state.revision,
     goalIds,
     retrievalKeyDigest,
-    matchCount: 0,
-    decision: 'pass-through',
+    matchCount: (selectedSkills?.length || 0) as 0 | 1 | 2,
+    decision: selectedSkills?.length ? 'redraft' : 'pass-through',
+    ...(selectedSkills?.length ? { selectedSkills } : {}),
     packageIdentity: BASELINE_MEMORY_CONTROL_PACKAGE,
     toolIdentity,
     draft,
   }
+}
+
+export function createZeroHitSkillPreflight(input: Omit<Parameters<typeof createSkillPreflight>[0], 'selectedSkills'>): SkillInvocationTrace {
+  return createSkillPreflight(input)
 }

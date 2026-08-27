@@ -38,14 +38,20 @@ const writeEvaluation = evaluatePiInvocationPolicy({
 })
 assert.deepEqual(writeEvaluation.skillPreflight, { required: true, trigger: 'state-changing-tool-call' })
 setPiSkillPreflightBridge(undefined)
-assert.throws(() => consumePiSkillPreflightDirective({
+await assert.rejects(() => consumePiSkillPreflightDirective({
   evaluation: writeEvaluation,
   sessionId: 'preflight-session', runId: state.runId, callId: 'missing-owner-write', tool: 'write',
   args: { path: 'result.txt' }, identity,
 }), /preflight owner is unavailable/, 'a state-changing draft cannot pass when the Host preflight owner is absent')
 
 const observedDrafts: Array<{ tool: string }> = []
-setPiSkillPreflightBridge((draft) => observedDrafts.push({ tool: draft.tool }))
+setPiSkillPreflightBridge({
+  preflight: async (draft) => {
+    observedDrafts.push({ tool: draft.tool })
+    return { kind: 'pass-through' }
+  },
+  contextInjected: () => undefined,
+})
 for (const [tool, requirements] of [['read', {}], ['write', { sideEffect: true }]] as const) {
   const evaluation = evaluatePiInvocationPolicy({
     coordinates: { sessionId: 'preflight-session', runId: state.runId, callId: `${tool}-call` },
@@ -56,7 +62,7 @@ for (const [tool, requirements] of [['read', {}], ['write', { sideEffect: true }
     policy,
     requirements,
   })
-  consumePiSkillPreflightDirective({
+  await consumePiSkillPreflightDirective({
     evaluation,
     sessionId: 'preflight-session', runId: state.runId, callId: `${tool}-call`, tool,
     args: { path: 'result.txt' }, identity,

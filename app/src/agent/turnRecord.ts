@@ -29,7 +29,12 @@ import {
   type DelegatedGoalCheck,
   type DelegatedGoalObservation,
 } from './workingState.ts'
-import { isSkillInvocationTrace, type SkillInvocationTrace } from './skillPreflight.ts'
+import {
+  isSkillContextInjectionTrace,
+  isSkillInvocationTrace,
+  type SkillContextInjectionTrace,
+  type SkillInvocationTrace,
+} from './skillPreflight.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
@@ -39,9 +44,10 @@ import { isSkillInvocationTrace, type SkillInvocationTrace } from './skillPrefli
  * Version 4 adds Host-authored blocked proposals and explicit rebase verdicts.
  * Version 5 adds parent-owned delegated-goal assignment/observation/check audit.
  * Version 6 adds bounded, Host-authored Skill invocation decisions.
+ * Version 7 adds immutable Skill context injection and not-executed outcomes.
  */
-export const TURN_RECORD_FORMAT_VERSION = 6
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5])
+export const TURN_RECORD_FORMAT_VERSION = 7
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -278,7 +284,7 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         source: 'host'
         tool: string
         callId: string
-        settlement: 'success' | 'failed' | 'cancelled' | 'denied'
+        settlement: 'success' | 'failed' | 'cancelled' | 'denied' | 'not-executed'
         detail?: string
         memoryWrite?: TurnRecordMemoryWrite
         /** Adapter-issued, bounded identity for a verified state-changing result. */
@@ -335,6 +341,7 @@ export type TurnRecordEntry = TurnRecordCoordinates &
     | { kind: 'delegation-observation'; source: 'host'; observation: DelegatedGoalObservation }
     | { kind: 'delegation-check'; source: 'host'; check: DelegatedGoalCheck }
     | { kind: 'skill-invocation'; source: 'host'; invocation: SkillInvocationTrace }
+    | { kind: 'skill-context'; source: 'host'; injection: SkillContextInjectionTrace }
     | {
         /** A fact the user must see that is not a tool call or a message. */
         kind: 'notice'
@@ -406,6 +413,7 @@ const KINDS = new Set([
   'delegation-observation',
   'delegation-check',
   'skill-invocation',
+  'skill-context',
   'notice',
 ])
 
@@ -467,6 +475,11 @@ function isDelegationContextEntry(entry: Record<string, unknown>): boolean | und
       && Object.keys(entry).every((key) => ['kind', 'source', 'invocation', 'seq', 'turn', 'step', 'at'].includes(key))
       && isSkillInvocationTrace(entry.invocation)
   }
+  if (entry.kind === 'skill-context') {
+    return entry.source === 'host'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'injection', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isSkillContextInjectionTrace(entry.injection)
+  }
   return undefined
 }
 
@@ -476,6 +489,7 @@ function isHostContextEntry(entry: Record<string, unknown>): boolean {
   if (workingStateEntry !== undefined) return workingStateEntry
   if (entry.kind === 'notice') return typeof entry.topic === 'string' && typeof entry.text === 'string'
   if (entry.kind === 'tool-result') {
+    if (!['success', 'failed', 'cancelled', 'denied', 'not-executed'].includes(String(entry.settlement))) return false
     if (entry.memoryWrite !== undefined && !asTurnRecordMemoryWrite(entry.memoryWrite, String(entry.callId || ''))) return false
     return entry.executionEvidence === undefined || isWorkingExecutionEvidence(entry.executionEvidence)
   }
@@ -560,11 +574,21 @@ export function parseTurnRecord(value: unknown): { record: TurnRecord; tornTail:
 
 function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
-  const kind = String((value as Record<string, unknown>).kind || '')
+  const entry = value as Record<string, unknown>
+  const kind = String(entry.kind || '')
   if (version === 1 && kind === 'memory-recall') return true
   if (version <= 2 && kind === 'working-state') return true
   if (version < 6 && kind === 'skill-invocation') return true
+  if (version < 7 && kind === 'skill-context') return true
+  if (version < 7 && kind === 'tool-result' && entry.settlement === 'not-executed') return true
+  if (version < 7 && kind === 'skill-invocation' && isRedraftSkillInvocation(entry.invocation)) return true
   return version < 5 && ['delegation-assignment', 'delegation-observation', 'delegation-check'].includes(kind)
+}
+
+function isRedraftSkillInvocation(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const decision = value as Record<string, unknown>
+  return decision.decision === 'redraft' || decision.matchCount !== 0 || decision.selectedSkills !== undefined
 }
 
 /**
