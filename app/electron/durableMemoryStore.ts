@@ -61,6 +61,14 @@ export type MemoryMutationResult = {
   revision: number
 }
 
+export type DurableMemoryProtocolResult = { version: 1; revision: number } & (
+  | { operation: 'upsert'; entry: DurableMemoryEntry }
+  | { operation: 'get'; entry?: DurableMemoryEntry }
+  | { operation: 'list'; page: MemoryPage }
+  | { operation: 'recall'; recall: MemoryRecallResult }
+  | { operation: 'delete'; mutation: MemoryMutationResult }
+)
+
 export type MemoryStoreErrorCode =
   | 'closed'
   | 'invalid_bundle'
@@ -203,12 +211,12 @@ function terms(value: string): string[] {
   return [...new Set(normalized(value).match(/[\p{L}\p{N}_-]+/gu) || [])]
 }
 
-function scopeKey(scope: MemoryScope): string {
+export function memoryScopeKey(scope: MemoryScope): string {
   return scope.kind === 'global' ? 'global' : `project:${scope.project}`
 }
 
 function entryKey(scope: MemoryScope, logicalKey: string): string {
-  return `${scopeKey(scope)}\u0000${logicalKey}`
+  return `${memoryScopeKey(scope)}\u0000${logicalKey}`
 }
 
 function cloneScope(scope: MemoryScope): MemoryScope {
@@ -224,17 +232,17 @@ function visibleToAccess(entry: DurableMemoryEntry, access: MemoryAccessContext)
     || (access.canonicalProject !== undefined && entry.scope.project === access.canonicalProject)
 }
 
-function selectEntries(
+export function selectVisibleMemoryEntries(
   entries: Iterable<DurableMemoryEntry>,
   access: MemoryAccessContext,
   requestedScope?: MemoryScope,
 ): DurableMemoryEntry[] {
   return [...entries].filter((entry) => requestedScope
-    ? scopeKey(entry.scope) === scopeKey(requestedScope)
+    ? memoryScopeKey(entry.scope) === memoryScopeKey(requestedScope)
     : visibleToAccess(entry, access))
 }
 
-function canonicalDraft(input: MemoryEntryDraft): MemoryEntryDraft {
+export function canonicalMemoryDraft(input: MemoryEntryDraft): MemoryEntryDraft {
   if (input.kind === 'memory') {
     if (input.scope.kind === 'global' && (input.logicalKey === 'profile:user' || input.logicalKey === 'memory:document')) {
       throw new DurableMemoryStoreError('invalid_input', `${input.logicalKey} is reserved for its global special memory kind`)
@@ -265,6 +273,30 @@ function decayMetadata(entry: DurableMemoryEntry, nowMs: number): Pick<MemoryRec
   }
 }
 
+export function recallMemoryEntries(
+  entries: Iterable<DurableMemoryEntry>,
+  input: MemoryRecallInput,
+): MemoryRecallItem[] {
+  const queryTerms = terms(input.query)
+  return selectVisibleMemoryEntries(entries, input.access)
+    .map((entry) => {
+      const text = normalized(entry.text)
+      const tags = entry.tags.map(normalized)
+      const matched = queryTerms.filter((term) => text.includes(term) || tags.some((tag) => tag.includes(term)))
+      const exactTagMatches = queryTerms.filter((term) => tags.includes(term)).length
+      const relevance = queryTerms.length ? matched.length / queryTerms.length + exactTagMatches * 0.25 : 0
+      const score = tags.includes('always-recall') ? 2 + relevance : relevance
+      return { entry, score }
+    })
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score || right.entry.createdAt.localeCompare(left.entry.createdAt))
+    .slice(0, Math.max(1, Math.floor(input.limit ?? 5)))
+    .map(({ entry }): MemoryRecallItem => ({
+      ...cloneEntry(entry),
+      ...decayMetadata(entry, input.nowMs ?? Date.now()),
+    }))
+}
+
 export class InMemoryDurableMemoryStore implements DurableMemoryStore {
   private readonly entries = new Map<string, DurableMemoryEntry>()
   private nextIdentity = 1
@@ -276,7 +308,7 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
   }
 
   private nextEntry(input: MemoryEntryDraft, revision: number): DurableMemoryEntry {
-    const draft = canonicalDraft(input)
+    const draft = canonicalMemoryDraft(input)
     const key = entryKey(draft.scope, draft.logicalKey)
     const existing = this.entries.get(key)
     return {
@@ -294,7 +326,7 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
 
   async upsert(input: MemoryUpsertInput): Promise<DurableMemoryEntry> {
     this.ensureOpen()
-    const draft = canonicalDraft(input)
+    const draft = canonicalMemoryDraft(input)
     const key = entryKey(draft.scope, draft.logicalKey)
     const revision = ++this.currentRevision
     const entry = this.nextEntry(draft, revision)
@@ -310,30 +342,12 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
 
   async recall(input: MemoryRecallInput): Promise<MemoryRecallResult> {
     this.ensureOpen()
-    const queryTerms = terms(input.query)
-    const items = selectEntries(this.entries.values(), input.access)
-      .map((entry) => {
-        const text = normalized(entry.text)
-        const tags = entry.tags.map(normalized)
-        const matched = queryTerms.filter((term) => text.includes(term) || tags.some((tag) => tag.includes(term)))
-        const exactTagMatches = queryTerms.filter((term) => tags.includes(term)).length
-        const relevance = queryTerms.length ? matched.length / queryTerms.length + exactTagMatches * 0.25 : 0
-        const score = tags.includes('always-recall') ? 2 + relevance : relevance
-        return { entry, score }
-      })
-      .filter((candidate) => candidate.score > 0)
-      .sort((left, right) => right.score - left.score || right.entry.createdAt.localeCompare(left.entry.createdAt))
-      .slice(0, Math.max(1, Math.floor(input.limit ?? 5)))
-      .map(({ entry }): MemoryRecallItem => ({
-        ...cloneEntry(entry),
-        ...decayMetadata(entry, input.nowMs ?? Date.now()),
-      }))
-    return { items, revision: this.currentRevision }
+    return { items: recallMemoryEntries(this.entries.values(), input), revision: this.currentRevision }
   }
 
   async list(input: MemoryListInput): Promise<MemoryPage> {
     this.ensureOpen()
-    const all = selectEntries(this.entries.values(), input.access, input.scope)
+    const all = selectVisibleMemoryEntries(this.entries.values(), input.access, input.scope)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
     const offset = Math.max(0, Number.parseInt(input.cursor || '0', 10) || 0)
     const limit = Math.max(1, Math.floor(input.limit ?? 50))
@@ -358,7 +372,7 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     this.ensureOpen()
     let changed = 0
     for (const [key, entry] of this.entries) {
-      if (input.scope.kind !== 'all' && scopeKey(entry.scope) !== scopeKey(input.scope)) continue
+      if (input.scope.kind !== 'all' && memoryScopeKey(entry.scope) !== memoryScopeKey(input.scope)) continue
       this.entries.delete(key)
       changed += 1
     }
@@ -393,7 +407,7 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
 
   async exportBundle(input: MemoryExportInput): Promise<DurableMemoryBundle> {
     this.ensureOpen()
-    const entries = selectEntries(this.entries.values(), input.access, input.scope)
+    const entries = selectVisibleMemoryEntries(this.entries.values(), input.access, input.scope)
       .sort((left, right) => left.id.localeCompare(right.id))
       .map(cloneEntry)
     return { version: 1, revision: this.currentRevision, entries }
@@ -404,7 +418,7 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
     if (!input.bundle || input.bundle.version !== 1 || !Array.isArray(input.bundle.entries)) {
       throw new DurableMemoryStoreError('invalid_bundle', 'Unsupported durable memory bundle')
     }
-    const drafts = input.bundle.entries.map((candidate) => canonicalDraft({
+    const drafts = input.bundle.entries.map((candidate) => canonicalMemoryDraft({
       scope: candidate.scope,
       logicalKey: candidate.logicalKey,
       kind: candidate.kind,

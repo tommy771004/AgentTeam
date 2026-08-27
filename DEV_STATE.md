@@ -1,10 +1,10 @@
 # Development State
 
-截至 2026-08-27。目前工作基準 commit `bc7e737`，另含本次未提交修復。
+截至 2026-08-27。
 
 ## 本日進展：durable memory SQLite migration
 
-`.scratch/durable-memory-sqlite-migration` #01 已 resolved：新增 Host-owned async `DurableMemoryStore` 契約與不依賴 Electron／SQLite／renderer 的 in-memory adapter，固定 global + current-project scope、特殊 profile/document、logical key、tags、ranking、recency 與 decay parity。新 `smoke-durable-memory-store.mts` 已由 `smoke:pi-parity-qualification` 掛入主鏈；`npm run build`、完整 `npm run smoke` 與 Standards／Spec 雙軸 code review 全綠。Production authority 尚未切換，frontier 推進 #02 SQLite Host protocol vertical slice。
+`.scratch/durable-memory-sqlite-migration` #01–02 已 resolved：Host-owned async `DurableMemoryStore` 契約與共用 parity fixtures 已由 in-memory／SQLite adapter 同時通過；production SQLite adapter 具 versioned schema、WAL、busy timeout、transaction 與 serialized Host writes。Pi Host v4 新增需顯式協商的 `memory-store-v1` scoped CRUD/recall、typed supervisor relay、post-commit `memory/changed` revision event 與 restart durability smoke。現行 production supervisor 未協商新 capability，legacy JSON memory authority 尚未切換；frontier 推進 #03 scope、policy 與 idempotency authority boundary。`npm run build`、完整 `npm run smoke`、tsconfig.node typecheck、相關 oxlint 與 complexity gate 全綠。
 
 ## 本日收口：tracker 對帳
 
@@ -41,4 +41,4 @@
 
 ## 下一步
 
-依 `.scratch/INDEX.md` Active frontier 排工：durable-memory-sqlite-migration 從 #02 SQLite Host protocol vertical slice 繼續；context-usage-panel（8 票未動）與 external-cli-durable-harness（7 票未動）仍可並行開工。
+依 `.scratch/INDEX.md` Active frontier 排工：durable-memory-sqlite-migration 從 #03 Authority boundary 的 scope、policy 與 idempotency 繼續；context-usage-panel（8 票未動）與 external-cli-durable-harness（7 票未動）仍可並行開工。

@@ -12,6 +12,7 @@ import { registerTrustedBuiltinShellSandboxAdapter } from './piBuiltinShellSandb
 import { createSeatbeltBuiltinShellAdapter } from './piSeatbeltShellSandbox.ts'
 import { createBubblewrapBuiltinShellAdapter } from './piBubblewrapShellSandbox.ts'
 import { JsonCompactionCheckpointStore } from './compactionCheckpointStore.ts'
+import { SqliteDurableMemoryStore } from './sqliteDurableMemoryStore.ts'
 
 type ParentPort = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
@@ -152,6 +153,8 @@ const refreshSubscriptionConfig = (): Promise<PiHostConfigStatus> => {
 }
 const initialSnapshot: PiHostSnapshot = { cursor: storedState.cursor, sessions: storedState.sessions, settings: effectiveSettings, settingsOrigin, config, queue: storedState.queue, resources: storedState.resources, memories: storedState.memories, extensions: storedState.extensions, attachments: storedState.attachments }
 await savePiHostState(statePath, initialSnapshot)
+const durableMemoryPath = process.env.SUBAGENTS_DURABLE_MEMORY_DB_PATH || path.join(path.dirname(statePath), 'durable-memory.sqlite')
+const durableMemoryStore = await SqliteDurableMemoryStore.open(durableMemoryPath)
 let persistence = Promise.resolve()
 const persist = (snapshot: typeof initialSnapshot) => {
   persistence = persistence
@@ -159,11 +162,30 @@ const persist = (snapshot: typeof initialSnapshot) => {
     .catch((error) => console.error('[pi-host] state persistence failed', error))
 }
 
+type HostSend = (message: PiHostMessage) => void
+type InitialSnapshot = typeof initialSnapshot
+type Persist = typeof persist
+type RefreshSubscriptionConfig = typeof refreshSubscriptionConfig
+type CompactionCheckpoints = typeof compactionCheckpoints
+const createConfiguredHost = (
+  send: HostSend,
+  initialSnapshot: InitialSnapshot,
+  persist: Persist,
+  refreshSubscriptionConfig: RefreshSubscriptionConfig,
+  compactionCheckpoints: CompactionCheckpoints,
+) => createPiHostServer(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints, durableMemoryStore)
+const createEntryHost = (
+  send: HostSend,
+  initialSnapshot: InitialSnapshot,
+  persist: Persist,
+  refreshSubscriptionConfig: RefreshSubscriptionConfig,
+) => createConfiguredHost(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints)
+
 if (parentPort) {
-  const server = createPiHostServer((message) => parentPort.postMessage(message), initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints)
+  const server = createEntryHost((message) => parentPort.postMessage(message), initialSnapshot, persist, refreshSubscriptionConfig)
   parentPort.on('message', (event) => server.handle(event.data))
 } else {
-  const server = createPiHostServer((message) => process.stdout.write(`${JSON.stringify(message)}\n`), initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints)
+  const server = createEntryHost((message) => process.stdout.write(`${JSON.stringify(message)}\n`), initialSnapshot, persist, refreshSubscriptionConfig)
   const input = createInterface({ input: process.stdin })
   input.on('line', (line) => {
     try {
@@ -178,5 +200,6 @@ if (parentPort) {
   input.on('close', () => {
     stopAllPiMcp()
     void disposeAllPiSessions()
+    void durableMemoryStore.close()
   })
 }

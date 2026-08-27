@@ -192,4 +192,4 @@ renderer 只保留 paged UI Projection，收到 revision event 後 invalidate/re
 | 15 | [Contract 舊 JSON 與 renderer memory owners](issues/15-contract-legacy-memory-owners.md) | 05–14 |
 | 16 | [全 workflow qualification 與 tracker 收口](issues/16-workflow-qualification.md) | 15 |
 
-**開工順序：** 01 已 resolved，02 是目前唯一 frontier。主幹為 02 → 03 → 04；04 完成後 05、07、08、13 可並行，06 接 05，09–12 接各自的 UI／export 前置，14 統合 failure matrix，15 才 contract 舊 owners，16 最終 qualification。每張票依 `origin → access policy → Host authority → transaction/commit → event/revision → renderer projection → restart/export → smoke` 檢查其適用的 workflow 節點，避免只改上游而漏掉下游。
+**開工順序：** 01–02 已 resolved，03 是目前唯一 frontier。主幹為 03 → 04；04 完成後 05、07、08、13 可並行，06 接 05，09–12 接各自的 UI／export 前置，14 統合 failure matrix，15 才 contract 舊 owners，16 最終 qualification。每張票依 `origin → access policy → Host authority → transaction/commit → event/revision → renderer projection → restart/export → smoke` 檢查其適用的 workflow 節點，避免只改上游而漏掉下游。

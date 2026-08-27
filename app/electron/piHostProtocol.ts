@@ -12,9 +12,11 @@ import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACH
  * Version 3 added the attachment contract. Version 4 (ADR-0052) exposes the
  * fail-closed subscription catalog in snapshot config; it is additive, so v3
  * and v2 peers stay readable and only v1 is refused.
+ * memory-store-v1 is additive on v4 and must be capability-negotiated;
+ * legacy peers continue to use the existing memory/* JSON-backed methods.
  */
 export const PI_HOST_PROTOCOL_VERSION = 4 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'capabilities'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
@@ -36,7 +38,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory/list' | 'memory/add' | 'memory/delete' | 'memory/clear' | 'memory/recall' | 'memory/v1/upsert' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -87,6 +89,7 @@ export type PiHostResponse = {
     /** Structured payload of one tool execution (tools/pack). */
     item?: unknown
     memories?: PiMemory[]
+    memoryStore?: import('./durableMemoryStore.ts').DurableMemoryProtocolResult
     tool?: string
     code?: string
     content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>
@@ -153,6 +156,18 @@ export type PiHostEvent =
       payload: { runId: string; sessionId: string; phase: 'parse' | 'iterate' | 'dod' | 'replan' | 'settlement' | 'cancelled'; iteration?: number; pattern?: PiLoopPattern; detail?: string }
     }
   | {
+      event: 'memory/changed'
+      payload: {
+        version: 1
+        revision: number
+        operation: 'upsert' | 'delete'
+        changed: number
+        scope: 'global' | 'project'
+        project?: string
+        logicalKey: string
+      }
+    }
+  | {
       event: 'host/context'
       payload: {
         runId: string
@@ -205,6 +220,16 @@ import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
 import { isPiMemory, PiMemoryExtension, type PiMemory } from './piMemoryExtension.ts'
+import {
+  canonicalMemoryDraft,
+  canonicalProjectId,
+  DurableMemoryStoreError,
+  InMemoryDurableMemoryStore,
+  type DurableMemoryStore,
+  type MemoryAccessContext,
+  type MemoryEntryDraft,
+  type MemoryScope,
+} from './durableMemoryStore.ts'
 import {
   assessPiContextPressure,
   buildPiCompactionManifest,
@@ -279,6 +304,8 @@ type HostState = {
   extensions: PiExtensionRegistry
   toolContracts: PiToolContractStore
   toolContractNegotiated: boolean
+  memoryStoreNegotiated: boolean
+  memoryStore: DurableMemoryStore
   /**
    * The last catalog projection the Host published, by tool name (issue 19).
    *
@@ -1142,6 +1169,7 @@ function handleInitialization(
   state.negotiatedProtocolVersion = requestedVersion as number
   const requestedCapabilities = (input.params as { capabilities?: unknown } | undefined)?.capabilities
   state.toolContractNegotiated = !Array.isArray(requestedCapabilities) || requestedCapabilities.includes('tool-contract-v1')
+  state.memoryStoreNegotiated = Array.isArray(requestedCapabilities) && requestedCapabilities.includes('memory-store-v1')
   const result = readyResult(state.negotiatedProtocolVersion)
   return [
     { event: 'host/ready', payload: {
@@ -1150,6 +1178,196 @@ function handleInitialization(
     } },
     { id, result },
   ]
+}
+
+function durableMemoryScope(value: unknown): MemoryScope {
+  if (!value || typeof value !== 'object') throw new DurableMemoryStoreError('invalid_input', 'memory scope is required')
+  const scope = value as { kind?: unknown; project?: unknown }
+  if (scope.kind === 'global') return { kind: 'global' }
+  if (scope.kind === 'project' && typeof scope.project === 'string') {
+    return { kind: 'project', project: canonicalProjectId(scope.project) }
+  }
+  throw new DurableMemoryStoreError('invalid_input', 'memory scope must be global or a canonical project')
+}
+
+function durableMemoryAccess(value: unknown): MemoryAccessContext {
+  if (!value || typeof value !== 'object') throw new DurableMemoryStoreError('invalid_input', 'memory access context is required')
+  const access = value as Partial<MemoryAccessContext> & { canonicalProject?: unknown }
+  if (!['runtime', 'admin', 'migration', 'consolidation'].includes(String(access.origin))) {
+    throw new DurableMemoryStoreError('invalid_input', 'memory access origin is invalid')
+  }
+  if (typeof access.memoryReadEnabled !== 'boolean' || typeof access.memoryWriteEnabled !== 'boolean' || typeof access.temporary !== 'boolean') {
+    throw new DurableMemoryStoreError('invalid_input', 'memory access flags are required')
+  }
+  return {
+    origin: access.origin as MemoryAccessContext['origin'],
+    ...(typeof access.canonicalProject === 'string' ? { canonicalProject: canonicalProjectId(access.canonicalProject) } : {}),
+    memoryReadEnabled: access.memoryReadEnabled,
+    memoryWriteEnabled: access.memoryWriteEnabled,
+    temporary: access.temporary,
+    ...(typeof access.runId === 'string' ? { runId: access.runId } : {}),
+    ...(typeof access.sessionId === 'string' ? { sessionId: access.sessionId } : {}),
+    ...(typeof access.callId === 'string' ? { callId: access.callId } : {}),
+  }
+}
+
+function durableMemoryDraft(value: unknown): MemoryEntryDraft {
+  if (!value || typeof value !== 'object') throw new DurableMemoryStoreError('invalid_input', 'memory entry is required')
+  const draft = value as Partial<MemoryEntryDraft> & { scope?: unknown }
+  if (typeof draft.logicalKey !== 'string' || !draft.logicalKey.trim()) {
+    throw new DurableMemoryStoreError('invalid_input', 'memory logicalKey is required')
+  }
+  if (draft.kind !== 'memory' && draft.kind !== 'profile' && draft.kind !== 'document') {
+    throw new DurableMemoryStoreError('invalid_input', 'memory kind is invalid')
+  }
+  if (typeof draft.text !== 'string' || typeof draft.createdAt !== 'string' || !Array.isArray(draft.tags) || !draft.tags.every((tag) => typeof tag === 'string')) {
+    throw new DurableMemoryStoreError('invalid_input', 'memory text, tags, and createdAt are required')
+  }
+  return canonicalMemoryDraft({
+    scope: durableMemoryScope(draft.scope),
+    logicalKey: draft.logicalKey,
+    kind: draft.kind,
+    text: draft.text,
+    tags: draft.tags,
+    createdAt: draft.createdAt,
+  } as MemoryEntryDraft)
+}
+
+function durableMemoryChangedEvent(
+  operation: 'upsert' | 'delete',
+  revision: number,
+  changed: number,
+  scope: MemoryScope,
+  logicalKey: string,
+): PiHostEvent {
+  return {
+    event: 'memory/changed',
+    payload: {
+      version: 1,
+      revision,
+      operation,
+      changed,
+      scope: scope.kind,
+      ...(scope.kind === 'project' ? { project: scope.project } : {}),
+      logicalKey,
+    },
+  }
+}
+
+type DurableMemoryRequestParams = Record<string, unknown>
+
+function durableMemoryLogicalKey(params: DurableMemoryRequestParams): string {
+  const logicalKey = typeof params.logicalKey === 'string' ? params.logicalKey : ''
+  if (!logicalKey) throw new DurableMemoryStoreError('invalid_input', 'memory logicalKey is required')
+  return logicalKey
+}
+
+async function upsertDurableMemory(
+  state: HostState,
+  params: DurableMemoryRequestParams,
+  access: MemoryAccessContext,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): Promise<PiHostMessage[]> {
+  const entry = await state.memoryStore.upsert({ access, ...durableMemoryDraft(params.entry) })
+  const event = durableMemoryChangedEvent('upsert', entry.revision, 1, entry.scope, entry.logicalKey)
+  if (emit) emit(event)
+  return [...(emit ? [] : [event]), { id, result: { memoryStore: { version: 1, operation: 'upsert', revision: entry.revision, entry } } }]
+}
+
+async function getDurableMemory(
+  state: HostState,
+  params: DurableMemoryRequestParams,
+  access: MemoryAccessContext,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  const entry = await state.memoryStore.get({ access, scope: durableMemoryScope(params.scope), logicalKey: durableMemoryLogicalKey(params) })
+  const revision = await state.memoryStore.revision()
+  return [{ id, result: { memoryStore: { version: 1, operation: 'get', revision, ...(entry ? { entry } : {}) } } }]
+}
+
+async function listDurableMemory(
+  state: HostState,
+  params: DurableMemoryRequestParams,
+  access: MemoryAccessContext,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  const scope = params.scope === undefined ? undefined : durableMemoryScope(params.scope)
+  const page = await state.memoryStore.list({
+    access,
+    ...(scope ? { scope } : {}),
+    ...(typeof params.cursor === 'string' ? { cursor: params.cursor } : {}),
+    ...(typeof params.limit === 'number' ? { limit: params.limit } : {}),
+  })
+  return [{ id, result: { memoryStore: { version: 1, operation: 'list', revision: page.revision, page } } }]
+}
+
+async function recallDurableMemory(
+  state: HostState,
+  params: DurableMemoryRequestParams,
+  access: MemoryAccessContext,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  const query = typeof params.query === 'string' ? params.query : ''
+  if (!query.trim()) throw new DurableMemoryStoreError('invalid_input', 'memory query is required')
+  const recall = await state.memoryStore.recall({ access, query, ...(typeof params.limit === 'number' ? { limit: params.limit } : {}) })
+  return [{ id, result: { memoryStore: { version: 1, operation: 'recall', revision: recall.revision, recall } } }]
+}
+
+async function deleteDurableMemory(
+  state: HostState,
+  params: DurableMemoryRequestParams,
+  access: MemoryAccessContext,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): Promise<PiHostMessage[]> {
+  const scope = durableMemoryScope(params.scope)
+  const logicalKey = durableMemoryLogicalKey(params)
+  const mutation = await state.memoryStore.delete({ access, scope, logicalKey })
+  const event = durableMemoryChangedEvent('delete', mutation.revision, mutation.changed, scope, logicalKey)
+  if (mutation.changed && emit) emit(event)
+  return [...(mutation.changed && !emit ? [event] : []), { id, result: { memoryStore: { version: 1, operation: 'delete', revision: mutation.revision, mutation } } }]
+}
+
+function executeDurableMemoryRequest(
+  state: HostState,
+  method: string,
+  params: DurableMemoryRequestParams,
+  access: MemoryAccessContext,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): Promise<PiHostMessage[]> {
+  switch (method) {
+    case 'memory/v1/upsert': return upsertDurableMemory(state, params, access, id, emit)
+    case 'memory/v1/get': return getDurableMemory(state, params, access, id)
+    case 'memory/v1/list': return listDurableMemory(state, params, access, id)
+    case 'memory/v1/recall': return recallDurableMemory(state, params, access, id)
+    case 'memory/v1/delete': return deleteDurableMemory(state, params, access, id, emit)
+    default: return Promise.resolve([errorResponse(id, 'unknown_method', `Unknown durable memory method: ${method}`)])
+  }
+}
+
+function handleDurableMemoryRequest(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): Promise<PiHostMessage[]> | undefined {
+  if (!input.method?.startsWith('memory/v1/')) return undefined
+  if (state.negotiatedProtocolVersion !== PI_HOST_PROTOCOL_VERSION || !state.memoryStoreNegotiated) {
+    return Promise.resolve([errorResponse(id, 'protocol_mismatch', 'memory-store-v1 capability was not negotiated')])
+  }
+  const params = input.params || {}
+  try {
+    return executeDurableMemoryRequest(state, input.method, params, durableMemoryAccess(params.access), id, emit)
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Durable memory request failed'
+        return [errorResponse(id, error instanceof DurableMemoryStoreError && error.code === 'invalid_input' ? 'invalid_request' : 'runtime_error', message)]
+      })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Durable memory request failed'
+    return Promise.resolve([errorResponse(id, error instanceof DurableMemoryStoreError && error.code === 'invalid_input' ? 'invalid_request' : 'runtime_error', message)])
+  }
 }
 
 function handleCapabilityRequest(
@@ -1187,6 +1405,15 @@ function handleCapabilityRequest(
   } catch (error) {
     return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Unknown Pi capability')]
   }
+}
+
+function handleMemoryOrCapabilityRequest(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
+  return handleDurableMemoryRequest(state, input, id, emit) || handleCapabilityRequest(state, input, id)
 }
 
 export function handlePiHostRequest(
@@ -1937,7 +2164,7 @@ export function handlePiHostRequest(
     const memory = new PiMemoryExtension(state.snapshot.memories)
     return [{ id, result: { memories: memory.recall(query, project, limit) } }]
   }
-  const capabilityResponse = handleCapabilityRequest(state, input, id)
+  const capabilityResponse = handleMemoryOrCapabilityRequest(state, input, id, emit)
   if (capabilityResponse) return capabilityResponse
   if (input.method === 'extensions/list') return [{ id, result: { extensions: state.extensions.list() } }]
   if (input.method === 'extensions/install' || input.method === 'extensions/update' || input.method === 'extensions/reload') {
@@ -2819,6 +3046,7 @@ export function createPiHostServer(
   onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; memories: PiMemory[]; extensions: PiExtension[]; attachments: PiHostAttachment[] }) => void,
   refreshConfig?: () => Promise<PiHostConfigStatus>,
   checkpointWriter?: CompactionCheckpointWriter,
+  memoryStore: DurableMemoryStore = new InMemoryDurableMemoryStore(),
 ) {
   const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [], attachments: initialSnapshot.attachments || [] }
   const attachmentJournal = new PiHostAttachmentJournal({ records: snapshot.attachments }, (next) => {
@@ -2833,6 +3061,8 @@ export function createPiHostServer(
     extensions: new PiExtensionRegistry(snapshot.extensions),
     toolContracts: new PiToolContractStore(snapshot.sessions.flatMap((session) => session.toolContracts || [])),
     toolContractNegotiated: false,
+    memoryStoreNegotiated: false,
+    memoryStore,
     catalogProjection: new Map(),
     attachmentJournal,
   }

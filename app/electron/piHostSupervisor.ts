@@ -1,6 +1,14 @@
 import { PI_HOST_PROTOCOL_VERSION, type PiHostEvent, type PiHostMessage, type PiHostRequest, type PiHostResponse } from './piHostProtocol.ts'
 import type { PiHostFinalizationClaimResult, PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
+import type {
+  DurableMemoryProtocolResult,
+  MemoryDeleteInput,
+  MemoryGetInput,
+  MemoryListInput,
+  MemoryRecallInput,
+  MemoryUpsertInput,
+} from './durableMemoryStore.ts'
 
 export type PiHostStatus =
   | { state: 'stopped' }
@@ -18,6 +26,7 @@ type PiHostFork = () => PiHostChild
 type PiHostSupervisorOptions = {
   requestTimeoutMs?: number
   turnIdleTimeoutMs?: number
+  requestedCapabilities?: string[]
 }
 type PendingRequest = {
   resolve: (response: PiHostResponse) => void
@@ -32,6 +41,7 @@ export class PiHostSupervisor {
   private readonly fork: PiHostFork
   private readonly requestTimeoutMs: number
   private readonly turnIdleTimeoutMs: number
+  private readonly requestedCapabilities: string[]
   private child: PiHostChild | null = null
   private nextRequestId = 1
   private statusValue: PiHostStatus = { state: 'stopped' }
@@ -45,6 +55,9 @@ export class PiHostSupervisor {
     this.fork = fork
     this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000
     this.turnIdleTimeoutMs = options.turnIdleTimeoutMs ?? 5 * 60_000
+    this.requestedCapabilities = options.requestedCapabilities
+      ? [...options.requestedCapabilities]
+      : ['attachments-v1', 'tool-contract-v1']
   }
 
   status(): PiHostStatus {
@@ -99,7 +112,7 @@ export class PiHostSupervisor {
       this.statusValue = { state: 'error', message: error.message }
     })
 
-    const response = await this.request('initialize', { protocolVersion: PI_HOST_PROTOCOL_VERSION, client: 'subagents-electron', capabilities: ['attachments-v1', 'tool-contract-v1'] })
+    const response = await this.request('initialize', { protocolVersion: PI_HOST_PROTOCOL_VERSION, client: 'subagents-electron', capabilities: this.requestedCapabilities })
     if (response.error || !response.result) {
       const message = response.error?.message || 'Pi Core Host did not initialize'
       this.statusValue = { state: 'error', message }
@@ -294,6 +307,40 @@ export class PiHostSupervisor {
     const response = await this.request('memory/recall', { query, ...(project ? { project } : {}), ...(limit === undefined ? {} : { limit }) })
     if (response.error || !response.result?.memories) throw new Error(response.error?.message || 'Pi memory recall failed')
     return response.result.memories
+  }
+
+  private async durableMemoryRequest(
+    method: 'memory/v1/upsert' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete',
+    params: Record<string, unknown>,
+    operation: DurableMemoryProtocolResult['operation'],
+  ): Promise<DurableMemoryProtocolResult> {
+    const response = await this.request(method, params)
+    const result = response.result?.memoryStore
+    if (response.error || !result || result.version !== 1 || result.operation !== operation) {
+      throw new Error(response.error?.message || `Pi durable memory ${operation} failed`)
+    }
+    return result
+  }
+
+  async upsertDurableMemory(input: MemoryUpsertInput): Promise<DurableMemoryProtocolResult> {
+    const { access, ...entry } = input
+    return this.durableMemoryRequest('memory/v1/upsert', { access, entry }, 'upsert')
+  }
+
+  async getDurableMemory(input: MemoryGetInput): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/get', input, 'get')
+  }
+
+  async listDurableMemory(input: MemoryListInput): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/list', input, 'list')
+  }
+
+  async recallDurableMemory(input: MemoryRecallInput): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/recall', input, 'recall')
+  }
+
+  async deleteDurableMemory(input: MemoryDeleteInput): Promise<DurableMemoryProtocolResult> {
+    return this.durableMemoryRequest('memory/v1/delete', input, 'delete')
   }
 
   async listCapabilities(): Promise<NonNullable<PiHostResponse['result']>['items']> {

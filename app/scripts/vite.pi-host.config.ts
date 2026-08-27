@@ -16,7 +16,7 @@ export default defineConfig({
       fileName: () => 'pi-host.js',
     },
     rollupOptions: {
-      external: ['node:crypto', 'node:readline', 'node:path', 'node:url', 'node:fs', 'node:fs/promises', 'node:os', 'node:vm', 'node:child_process'],
+      external: ['node:crypto', 'node:readline', 'node:path', 'node:url', 'node:fs', 'node:fs/promises', 'node:os', 'node:sqlite', 'node:vm', 'node:child_process'],
       output: { inlineDynamicImports: true },
     },
   },

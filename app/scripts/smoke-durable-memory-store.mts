@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import {
   canonicalProjectId,
   DurableMemoryStoreError,
   InMemoryDurableMemoryStore,
+  type DurableMemoryStore,
   type MemoryAccessContext,
   type MemoryScope,
   type MemoryUpsertInput,
 } from '../electron/durableMemoryStore.ts'
+
+export async function runDurableMemoryContract(
+  createStore: () => DurableMemoryStore | Promise<DurableMemoryStore>,
+): Promise<void> {
 
 const alphaProjectId = canonicalProjectId('/workspace/alpha/')
 const betaProjectId = canonicalProjectId('\\workspace\\beta')
@@ -31,7 +38,7 @@ const runtimeAccess = (canonicalProject: typeof alphaProjectId): MemoryAccessCon
   callId: 'call-1',
 })
 
-const store = new InMemoryDurableMemoryStore()
+const store = await createStore()
 await store.upsert({
   access: runtimeAccess(alphaProjectId),
   scope: globalScope,
@@ -142,7 +149,7 @@ assert.deepEqual(cleared, { changed: 1, revision: 5 })
 assert.equal((await store.list({ access: runtimeAccess(betaProjectId) })).total, 1)
 assert.equal(await store.revision(), 5)
 
-const lifecycleStore = new InMemoryDurableMemoryStore()
+const lifecycleStore = await createStore()
 await lifecycleStore.upsert({
   access: runtimeAccess(alphaProjectId),
   scope: projectAlpha,
@@ -183,7 +190,7 @@ const bundle = await lifecycleStore.exportBundle({
 assert.equal(bundle.version, 1)
 assert.equal(bundle.entries[0]?.logicalKey, 'package-manager')
 
-const importedStore = new InMemoryDurableMemoryStore()
+const importedStore = await createStore()
 const imported = await importedStore.importBundle({
   access: { ...runtimeAccess(alphaProjectId), origin: 'migration' },
   bundle,
@@ -204,7 +211,7 @@ await assert.rejects(
   (error: unknown) => error instanceof DurableMemoryStoreError && error.code === 'closed',
 )
 
-const parityStore = new InMemoryDurableMemoryStore()
+const parityStore = await createStore()
 const parityAccess = runtimeAccess(alphaProjectId)
 for (const fixture of [
   {
@@ -333,4 +340,40 @@ await assert.rejects(
   (error: unknown) => error instanceof DurableMemoryStoreError && error.code === 'invalid_bundle',
 )
 
-console.log('durable memory contract: scoped recall, lifecycle, consolidation and transfer')
+const rollbackStore = await createStore()
+for (const logicalKey of ['rollback-a', 'rollback-b']) {
+  await rollbackStore.upsert({
+    access: runtimeAccess(alphaProjectId),
+    scope: globalScope,
+    logicalKey,
+    kind: 'memory',
+    text: `Source ${logicalKey}`,
+    tags: ['rollback'],
+    createdAt: '2026-08-27T00:00:00.000Z',
+  })
+}
+await assert.rejects(
+  rollbackStore.consolidate({
+    access: { ...runtimeAccess(alphaProjectId), origin: 'consolidation' },
+    scope: globalScope,
+    sourceKeys: ['rollback-a', 'rollback-b'],
+    merged: {
+      logicalKey: 'profile:user',
+      kind: 'memory',
+      text: 'This invalid reserved target must roll back',
+      tags: [],
+      createdAt: '2026-08-27T00:01:00.000Z',
+    },
+  }),
+  (error: unknown) => error instanceof DurableMemoryStoreError && error.code === 'invalid_input',
+)
+assert.equal((await rollbackStore.list({ access: runtimeAccess(alphaProjectId) })).total, 2)
+assert.equal(await rollbackStore.revision(), 2)
+
+await Promise.all([store.close(), lifecycleStore.close(), parityStore.close(), rollbackStore.close()])
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await runDurableMemoryContract(() => new InMemoryDurableMemoryStore())
+  console.log('durable memory contract: scoped recall, lifecycle, consolidation and transfer')
+}
