@@ -215,14 +215,16 @@ export function isPiHostDefinitionOfDoneMet(
   settlement: PiTurnSettlement,
   workingState?: WorkingState | string,
 ): boolean | undefined {
+  if (isWorkingState(workingState) && workingState.goals.some((goal) => goal.completionPredicate !== undefined)) {
+    return workingState.goals.every((goal) => goal.status === 'done' && goal.evidence.length > 0)
+  }
   if (!definitionOfDone) return undefined
   if (definitionOfDone === PI_CORE_SETTLEMENT_DEFINITION_OF_DONE) {
     // Only an answered turn met a settlement-shaped DoD: an empty turn
     // settled without producing the thing the DoD asks for.
     return settlement === 'answered'
   }
-  return isWorkingState(workingState)
-    && workingState.goals.every((goal) => goal.status === 'done' && goal.evidence.length > 0)
+  return false
 }
 
 /** Keep the renderer cutover's loop defaults aligned with the builtin parser. */

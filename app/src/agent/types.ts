@@ -286,6 +286,8 @@ export interface RunContextPolicy {
 export interface RuntimeOverrides {
   /** Stable trace id assigned by runTask controller; engine adopts it as state.id */
   runId?: string
+  /** Explicit Host-verifiable goal contract; never inferred from model prose. */
+  workingGoal?: import('./workingState.ts').WorkingGoalCompletionPredicate
   /**
    * Run entry source for lifecycle hooks (composer / schedule / webhook / …).
    * Set by runTask; tools forward it into beforeTool/afterTool evaluation.

@@ -117,6 +117,12 @@ function sourceForTool(definition: PiSessionToolDefinition): {
   if (definition.sourceInfo?.source === 'builtin' || (typeof definition.sourceInfo?.path === 'string' && /^<builtin(?::[^>]+)?>$/.test(definition.sourceInfo.path))) {
     return { source: 'builtin' }
   }
+  // The Host replaces only Pi's builtin write definition through the SDK seam
+  // so the performing adapter can attach execution evidence. It remains the
+  // builtin capability and contract, not an installed extension pack.
+  if (definition.name === 'write' && definition.sourceInfo?.path === '<sdk:write>') {
+    return { source: 'builtin' }
+  }
   const pack = extensionPackFromPath(definition.sourceInfo?.path)
   const mcp = mcpToolProvenance.get(definition.name)
   if (mcp) return { source: 'mcp', pack: pack || `mcp-${mcp.extensionId}`, ...mcp }

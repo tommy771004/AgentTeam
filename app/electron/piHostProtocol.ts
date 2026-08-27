@@ -270,6 +270,7 @@ import { appendTurnRecord, asTurnRecordMemoryWrite, derivePiHistory, nextTurnRec
 import {
   checkWorkingStateProposal,
   createInitialWorkingState,
+  isWorkingExecutionEvidence,
   isWorkingGoalCompletionPredicate,
   type WorkingExecutionEvidence,
   type WorkingState,
@@ -293,6 +294,7 @@ import {
   setPiPackSessionContractRefresh,
   setPiPolicyEvidenceBridge,
   piSessionRunBinding,
+  WORKING_EXECUTION_EVIDENCE_DETAIL_KEY,
   requestPiToolApproval,
   type PiCatalogEntry,
 } from './piToolHost.ts'
@@ -445,32 +447,27 @@ function hostFileWriteEvidence(input: {
     || input.identity?.toolSource !== 'builtin'
     || typeof input.identity.contractDigest !== 'string'
     || typeof input.identity.schemaDigest !== 'string') return undefined
-  const trustedResultDigest = createHash('sha256').update(JSON.stringify(input.trustedResult) || '').digest('hex')
-  const receiptDigest = createHash('sha256').update(JSON.stringify({
-    version: 1,
-    runId: input.state.runId,
-    goalId: input.proposal.goalId,
-    tool: input.proposal.tool,
-    callId: input.proposal.callId,
-    contractDigest: input.identity.contractDigest,
-    schemaDigest: input.identity.schemaDigest,
-    resource: input.proposal.file,
-    trustedResultDigest,
+  if (!input.trustedResult || typeof input.trustedResult !== 'object') return undefined
+  const details = (input.trustedResult as { details?: unknown }).details
+  if (!details || typeof details !== 'object') return undefined
+  const evidence = (details as Record<string, unknown>)[WORKING_EXECUTION_EVIDENCE_DETAIL_KEY]
+  if (!isWorkingExecutionEvidence(evidence)) return undefined
+  if (evidence.runId !== input.state.runId
+    || evidence.tool !== input.proposal.tool
+    || evidence.callId !== input.proposal.callId
+    || evidence.contractDigest !== input.identity.contractDigest
+    || evidence.schemaDigest !== input.identity.schemaDigest) return undefined
+  const expectedReceiptDigest = createHash('sha256').update(JSON.stringify({
+    schemaVersion: evidence.schemaVersion,
+    runId: evidence.runId,
+    tool: evidence.tool,
+    callId: evidence.callId,
+    contractDigest: evidence.contractDigest,
+    schemaDigest: evidence.schemaDigest,
+    resource: evidence.resource,
   })).digest('hex')
-  return {
-    schemaVersion: 1,
-    evidenceId: `execution:${receiptDigest}`,
-    runId: input.state.runId,
-    goalId: input.proposal.goalId,
-    tool: input.proposal.tool,
-    callId: input.proposal.callId,
-    contractDigest: input.identity.contractDigest,
-    schemaDigest: input.identity.schemaDigest,
-    receiptDigest,
-    resource: { kind: 'file-content', ...input.proposal.file },
-    issuedBy: 'host',
-    attestation: 'non-model',
-  }
+  if (evidence.receiptDigest !== expectedReceiptDigest || evidence.evidenceId !== `execution:${expectedReceiptDigest}`) return undefined
+  return evidence
 }
 
 type CompactionCheckpointWriter = {

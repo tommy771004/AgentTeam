@@ -13,7 +13,7 @@ import { piPackExtensionFactories } from './piToolHost.ts'
 import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, snapshotPiSkillResources } from './piSkills.ts'
 import { piCodingAgentModule as piCodingAgent, piVendorDir } from './piVendor.ts'
 import { sanitizeModelRow, SUBSCRIPTION_PROVIDERS, type SubscriptionModelInfo, type SubscriptionProviderId } from '../src/agent/subscriptionCatalog.ts'
-import { bindPiSessionSkillResourceView, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
+import { bindPiSessionSkillResourceView, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, piWorkingStateWriteToolDefinition, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
 import { buildPiMcpDynamicPacks } from './piExtensionPacks/mcpBridgePack.ts'
 
 const vendorDir = piVendorDir
@@ -469,6 +469,11 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     ])]
   }
   if (settings.thinkingLevel) options.thinkingLevel = settings.thinkingLevel
+  options.customTools = [piWorkingStateWriteToolDefinition({
+    sessionId,
+    cwd,
+    factory: piCodingAgent.createWriteToolDefinition,
+  })]
   if (agentDir) options.agentDir = agentDir
   if (settings.provider && settings.model && typeof piCodingAgent.ModelRuntime?.create === 'function') {
     const modelRuntime = await piCodingAgent.ModelRuntime.create({

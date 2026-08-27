@@ -7,6 +7,7 @@ import {
 import { runPiOrchestration } from '../electron/piOrchestrationExtension.ts'
 import { DEFAULT_LLM_SETTINGS } from '../src/agent/llm.ts'
 import { buildRunContextPolicy, resolveRunSettingsOverrides, snapshotRunSettings } from '../src/agent/runSettingsSnapshot.ts'
+import { createInitialWorkingState } from '../src/agent/workingState.ts'
 
 const mutableSettings = {
   ...DEFAULT_LLM_SETTINGS,
@@ -59,6 +60,15 @@ assert.equal(isPiHostDefinitionOfDoneMet(PI_CORE_SETTLEMENT_DEFINITION_OF_DONE, 
 assert.equal(isPiHostDefinitionOfDoneMet(PI_CORE_SETTLEMENT_DEFINITION_OF_DONE, 'failed', ''), false)
 assert.equal(isPiHostDefinitionOfDoneMet('non-empty assistant result', 'answered', ''), false)
 assert.equal(isPiHostDefinitionOfDoneMet('non-empty assistant result', 'answered', 'done'), false, 'assistant prose cannot satisfy custom DoD')
+assert.equal(isPiHostDefinitionOfDoneMet(
+  PI_CORE_SETTLEMENT_DEFINITION_OF_DONE,
+  'answered',
+  createInitialWorkingState({
+    runId: 'pending-file-run',
+    objective: 'write result.txt',
+    completionPredicate: { kind: 'file-content', path: 'result.txt', sha256: 'a'.repeat(64) },
+  }),
+), false, 'an explicit file goal overrides the default answered-settlement fallback')
 
 // A turn that ran tools and said nothing settles `empty`, and an empty turn
 // never satisfies a settlement-shaped DoD: it produced nothing to satisfy it

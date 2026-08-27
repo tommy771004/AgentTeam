@@ -65,14 +65,13 @@ export type WorkingExecutionEvidence = {
   schemaVersion: 1
   evidenceId: string
   runId: string
-  goalId: string
   tool: string
   callId: string
   contractDigest: string
   schemaDigest: string
   receiptDigest: string
   resource: WorkingFileContentPredicate
-  issuedBy: 'host'
+  issuedBy: 'adapter'
   attestation: 'non-model'
 }
 
@@ -203,19 +202,18 @@ export function isWorkingExecutionEvidence(value: unknown): value is WorkingExec
   if (!value || typeof value !== 'object') return false
   const evidence = value as Record<string, unknown>
   if (Object.keys(evidence).some((key) => ![
-    'schemaVersion', 'evidenceId', 'runId', 'goalId', 'tool', 'callId', 'contractDigest', 'schemaDigest', 'receiptDigest', 'resource', 'issuedBy', 'attestation',
+    'schemaVersion', 'evidenceId', 'runId', 'tool', 'callId', 'contractDigest', 'schemaDigest', 'receiptDigest', 'resource', 'issuedBy', 'attestation',
   ].includes(key))) return false
   return evidence.schemaVersion === 1
     && boundedString(evidence.evidenceId, 512)
     && boundedString(evidence.runId, 512)
-    && boundedString(evidence.goalId, 1_024)
     && boundedString(evidence.tool, 256)
     && boundedString(evidence.callId, 512)
     && isSha256(evidence.contractDigest)
     && isSha256(evidence.schemaDigest)
     && isSha256(evidence.receiptDigest)
     && isWorkingGoalCompletionPredicate(evidence.resource)
-    && evidence.issuedBy === 'host'
+    && evidence.issuedBy === 'adapter'
     && evidence.attestation === 'non-model'
 }
 
@@ -290,7 +288,6 @@ export function checkWorkingStateProposal(input: {
   const evidence = input.evidence
   if (evidence.evidenceId !== `execution:${evidence.receiptDigest}`) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-identity-mismatch' })
   if (evidence.runId !== input.state.runId || evidence.runId !== input.proposal.runId) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-run-mismatch' })
-  if (evidence.goalId !== goal.id || evidence.goalId !== input.proposal.goalId) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-goal-mismatch' })
   if (evidence.tool !== input.proposal.tool) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-tool-mismatch' })
   if (evidence.callId !== input.proposal.callId) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-call-mismatch' })
   if (evidence.resource.path !== input.proposal.file.path || evidence.resource.sha256 !== input.proposal.file.sha256) {
@@ -303,7 +300,7 @@ export function checkWorkingStateProposal(input: {
     seq: input.evidenceSeq,
     evidenceId: evidence.evidenceId,
     runId: evidence.runId,
-    goalId: evidence.goalId,
+    goalId: goal.id,
     tool: evidence.tool,
     callId: evidence.callId,
     contractDigest: evidence.contractDigest,

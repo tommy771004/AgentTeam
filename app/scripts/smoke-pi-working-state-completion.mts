@@ -8,15 +8,18 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInitialWorkingState, checkWorkingStateProposal, type WorkingExecutionEvidence, type WorkingStateProposal } from '../src/agent/workingState.ts'
 import { TURN_RECORD_FORMAT_VERSION, turnRecordEntries } from '../src/agent/turnRecord.ts'
+import { wrapPiBuiltinWriteWithEvidence } from '../electron/piToolHost.ts'
+import { piCodingAgentModule } from '../electron/piVendor.ts'
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
 const digest = sha256('fixture')
+const workspace = await mkdtemp(join(tmpdir(), 'pi-working-state-'))
 
 // The Checker contract is fail-closed even when fed deserialised/cast input.
 const checkerState = createInitialWorkingState({
   runId: 'checker-run',
   objective: 'write result.txt',
-  completionPredicate: { kind: 'file-content', path: 'result.txt', sha256: sha256('verified\n') },
+  completionPredicate: { kind: 'file-content', path: '@result.txt', sha256: sha256('verified\n') },
 })
 const checkerProposal: WorkingStateProposal = {
   schemaVersion: 1,
@@ -28,22 +31,16 @@ const checkerProposal: WorkingStateProposal = {
   proposedStatus: 'done',
   tool: 'write',
   callId: 'call-1',
-  file: { path: 'result.txt', sha256: sha256('verified\n') },
+  file: { path: '@result.txt', sha256: sha256('verified\n') },
 }
-const checkerEvidence: WorkingExecutionEvidence = {
-  schemaVersion: 1,
-  evidenceId: `execution:${digest}`,
-  runId: 'checker-run',
-  goalId: 'checker-run:goal:1',
-  tool: 'write',
-  callId: 'call-1',
-  contractDigest: digest,
-  schemaDigest: digest,
-  receiptDigest: digest,
-  resource: { kind: 'file-content', path: 'result.txt', sha256: sha256('verified\n') },
-  issuedBy: 'host',
-  attestation: 'non-model',
-}
+const checkerWrite = wrapPiBuiltinWriteWithEvidence({
+  cwd: workspace,
+  factory: piCodingAgentModule.createWriteToolDefinition,
+  evidenceContext: () => ({ runId: 'checker-run', contractDigest: digest, schemaDigest: digest }),
+})
+const checkerWriteResult = await checkerWrite.execute('call-1', { path: '@result.txt', content: 'verified\n' })
+const checkerEvidence = (checkerWriteResult.details as Record<string, unknown> | undefined)?.workingExecutionEvidence as WorkingExecutionEvidence
+assert.equal(await readFile(join(workspace, 'result.txt'), 'utf8'), 'verified\n')
 const accepted = checkWorkingStateProposal({
   state: checkerState,
   proposal: checkerProposal,
@@ -57,9 +54,9 @@ assert.equal(accepted.state?.goals[0]?.status, 'done')
 
 for (const [label, patch] of [
   ['wrong run', { runId: 'other-run' }],
-  ['wrong goal', { goalId: 'other-goal' }],
   ['wrong tool', { tool: 'edit' }],
   ['wrong call', { callId: 'other-call' }],
+  ['host attested', { issuedBy: 'host' }],
   ['model attested', { attestation: 'model' }],
   ['malformed receipt', { receiptDigest: 'not-a-digest' }],
 ] as const) {
@@ -91,7 +88,6 @@ assert.equal(checkWorkingStateProposal({
   evidenceSeq: 3,
 }).verdict, 'rejected', 'missing evidence fails closed')
 
-const workspace = await mkdtemp(join(tmpdir(), 'pi-working-state-'))
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-working-state-host-'))
 const agentDir = await mkdtemp(join(tmpdir(), 'pi-working-state-agent-'))
 const statePath = join(stateDir, 'state.json')
@@ -195,7 +191,7 @@ try {
     workingGoal: { kind: 'file-content', path: 'result.txt', sha256: sha256('verified\n') },
   })
   const completed = await waitFor(3)
-  assert.equal(completed.result?.settlement, 'answered')
+  assert.equal(completed.result?.settlement, 'answered', JSON.stringify(completed.result?.record?.entries || []))
   assert.equal(await readFile(join(workspace, 'result.txt'), 'utf8'), 'verified\n')
   assert.equal(completed.result?.orchestration?.dodMet, true)
   assert.equal(completed.result?.workingState?.revision, 2)
@@ -216,6 +212,12 @@ try {
   assert.equal(toolResult?.source, 'host')
   assert.equal(stateCheck?.source, 'host')
   assert.equal(stateCheck && 'check' in stateCheck ? stateCheck.check.verdict : undefined, 'accepted')
+  assert.equal(toolResult && 'executionEvidence' in toolResult ? toolResult.executionEvidence?.issuedBy : undefined, 'adapter')
+  assert.deepEqual(
+    toolResult && 'executionEvidence' in toolResult ? toolResult.executionEvidence?.resource : undefined,
+    { kind: 'file-content', path: 'result.txt', sha256: sha256('verified\n') },
+    'builtin write adapter attests the bytes read back from disk',
+  )
 
   send(4, 'sessions/create', { title: 'False done refusal' })
   const falseDoneSessionId = String((await waitFor(4)).result?.sessionId)

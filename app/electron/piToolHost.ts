@@ -15,10 +15,13 @@
  */
 
 import { decideBuiltinShellUnderProtection } from '../src/agent/outbound/cliSandbox.ts'
+import { createHash } from 'node:crypto'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { admitBuiltinShellSandbox, releaseBuiltinShellExecution, wrapVerifiedBuiltinShellCommand, type BuiltinShellSandboxVerification } from './piBuiltinShellSandbox.ts'
 import { decideGitCommand, type GitCommandPolicy } from '../src/agent/tools/gitCommandPolicy.ts'
 import { schemaDigest, type PiToolCatalogEntry } from './piToolContract.ts'
 import type { MemoryAccessContext } from './durableMemoryStore.ts'
+import type { WorkingExecutionEvidence } from '../src/agent/workingState.ts'
 import {
   evaluatePiInvocationPolicy,
   PiInvocationEvidence,
@@ -769,6 +772,153 @@ export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: 
         return { block: true, reason: verdict.reason || 'builtin shell denied by outbound protection' }
       })
     },
+  }
+}
+
+export const WORKING_EXECUTION_EVIDENCE_DETAIL_KEY = 'workingExecutionEvidence'
+
+type PiWriteToolDefinition = {
+  execute: (
+    toolCallId: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    onUpdate?: (update: unknown) => void,
+    context?: unknown,
+  ) => Promise<{ content: unknown[]; details?: unknown; isError?: boolean }>
+  [key: string]: unknown
+}
+
+type PiWriteEvidenceContext = {
+  runId: string
+  contractDigest: string
+  schemaDigest: string
+}
+
+type PiWriteToolFactory = (
+  cwd: string,
+  options: {
+    operations: {
+      mkdir: (directory: string) => Promise<void>
+      writeFile: (absolutePath: string, content: string) => Promise<void>
+    }
+  },
+) => PiWriteToolDefinition
+
+/**
+ * Wrap Pi's builtin write execution boundary so only that invocation can issue
+ * a receipt. The wrapper delegates the mutation first, then reads back the
+ * effect before returning the same tool result to Pi.
+ */
+export function wrapPiBuiltinWriteWithEvidence(input: {
+  cwd: string
+  factory: PiWriteToolFactory
+  evidenceContext: () => PiWriteEvidenceContext | undefined
+}): PiWriteToolDefinition {
+  let activeEffect: { absolutePath?: string } | undefined
+  let executionQueue: Promise<void> = Promise.resolve()
+  const definition = input.factory(input.cwd, {
+    operations: {
+      mkdir: (directory) => mkdir(directory, { recursive: true }).then(() => undefined),
+      writeFile: async (absolutePath, content) => {
+        await writeFile(absolutePath, content, 'utf8')
+        if (activeEffect) activeEffect.absolutePath = absolutePath
+      },
+    },
+  })
+  return {
+    ...definition,
+    async execute(toolCallId, args, signal, onUpdate, context) {
+      const run = async () => {
+        const effect: { absolutePath?: string } = {}
+        activeEffect = effect
+        try {
+          const result = await definition.execute(toolCallId, args, signal, onUpdate, context)
+          const path = typeof args.path === 'string' ? args.path : ''
+          const identity = input.evidenceContext()
+          if (result.isError === true || !path || !effect.absolutePath || !identity) return result
+          try {
+            const evidence = await attestBuiltinWriteEffect({
+              absolutePath: effect.absolutePath,
+              runId: identity.runId,
+              callId: toolCallId,
+              path,
+              contractDigest: identity.contractDigest,
+              schemaDigest: identity.schemaDigest,
+            })
+            return { ...result, details: { [WORKING_EXECUTION_EVIDENCE_DETAIL_KEY]: evidence } }
+          } catch {
+            return result
+          }
+        } finally {
+          activeEffect = undefined
+        }
+      }
+      const outcome = executionQueue.then(run, run)
+      executionQueue = outcome.then(() => undefined, () => undefined)
+      return outcome
+    },
+  }
+}
+
+/** Bind the builtin wrapper to the Host's frozen run and tool contract. */
+export function piWorkingStateWriteToolDefinition(input: {
+  sessionId: string
+  cwd: string
+  factory: PiWriteToolFactory
+}): PiWriteToolDefinition {
+  return wrapPiBuiltinWriteWithEvidence({
+    cwd: input.cwd,
+    factory: input.factory,
+    evidenceContext: () => {
+      const binding = piSessionRunBinding(input.sessionId)
+      const identity = policyEvidenceBridge?.contractIdentity(input.sessionId, 'write')
+      if (!binding || identity?.toolSource !== 'builtin') return undefined
+      if (typeof identity.contractDigest !== 'string' || typeof identity.schemaDigest !== 'string') return undefined
+      return {
+        runId: binding.runId,
+        contractDigest: identity.contractDigest,
+        schemaDigest: identity.schemaDigest,
+      }
+    },
+  })
+}
+
+/** Read back one just-completed builtin write effect and issue its receipt. */
+async function attestBuiltinWriteEffect(input: {
+  absolutePath: string
+  runId: string
+  callId: string
+  path: string
+  contractDigest: string
+  schemaDigest: string
+}): Promise<WorkingExecutionEvidence> {
+  const observed = await readFile(input.absolutePath)
+  const resource = {
+    kind: 'file-content' as const,
+    path: input.path,
+    sha256: createHash('sha256').update(observed).digest('hex'),
+  }
+  const receiptDigest = createHash('sha256').update(JSON.stringify({
+    schemaVersion: 1,
+    runId: input.runId,
+    tool: 'write',
+    callId: input.callId,
+    contractDigest: input.contractDigest,
+    schemaDigest: input.schemaDigest,
+    resource,
+  })).digest('hex')
+  return {
+    schemaVersion: 1,
+    evidenceId: `execution:${receiptDigest}`,
+    runId: input.runId,
+    tool: 'write',
+    callId: input.callId,
+    contractDigest: input.contractDigest,
+    schemaDigest: input.schemaDigest,
+    receiptDigest,
+    resource,
+    issuedBy: 'adapter',
+    attestation: 'non-model',
   }
 }
 
