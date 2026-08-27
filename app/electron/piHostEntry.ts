@@ -68,6 +68,8 @@ const { snapshot: storedState, memoryStore: durableMemoryStore } = await openPiH
 // Deliberately separate from DurableMemoryStore/SQLite: package lineage has
 // its own fail-closed repository and does not share memory migrations or CRUD.
 const memoryControlPackages = await JsonMemoryControlPackageRepository.open(memoryControlPackagePath)
+const memoryControlMaintenanceToken = process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
+delete process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
 const userConfig = await bootstrapPiUserConfig()
 const migrationPath = process.env.SUBAGENTS_PI_SETTINGS_MIGRATION_PATH || path.join(path.dirname(statePath), 'pi-settings-migration.json')
 let migratedSettings = storedState.settings
@@ -189,7 +191,7 @@ const createConfiguredHost = (
   persist: Persist,
   refreshSubscriptionConfig: RefreshSubscriptionConfig,
   compactionCheckpoints: CompactionCheckpoints,
-) => createPiHostServer(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints, durableMemoryStore, memoryControlPackages)
+) => createPiHostServer(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints, durableMemoryStore, memoryControlPackages, memoryControlMaintenanceToken)
 const createEntryHost = (
   send: HostSend,
   initialSnapshot: InitialSnapshot,

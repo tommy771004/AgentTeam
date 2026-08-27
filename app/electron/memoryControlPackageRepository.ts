@@ -1,12 +1,17 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { canonicalJson } from './piToolContract.ts'
 import type {
   MemoryControlComponent,
+  MemoryControlComponentKey,
+  MemoryControlJsonPatchOperation,
+  MemoryControlLifecycleEvent,
+  MemoryControlLineage,
   MemoryControlPackage,
   MemoryControlPackageReader,
 } from '../src/agent/memoryControlPackage.ts'
+import { MEMORY_CONTROL_COMPONENT_KEYS } from '../src/agent/memoryControlPackage.ts'
 
 type ComponentDraft = Omit<MemoryControlComponent, 'digest'> | MemoryControlComponent
 type PackageComponents = MemoryControlPackage['components']
@@ -16,12 +21,18 @@ export type MemoryControlPackageDocument = {
   schemaVersion: 1
   activeRevision: number
   packages: MemoryControlPackage[]
+  events: MemoryControlLifecycleEvent[]
 }
 
 const sha256 = (value: unknown) => createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex')
 export const MAX_MEMORY_CONTROL_REPOSITORY_BYTES = 2 * 1024 * 1024
 export const MAX_MEMORY_CONTROL_PACKAGES = 128
 export const MAX_MEMORY_CONTROL_COMPONENT_BYTES = 64 * 1024
+export const MAX_MEMORY_CONTROL_PATCH_BYTES = 32 * 1024
+export const MAX_MEMORY_CONTROL_PATCH_OPERATIONS = 64
+export const MAX_MEMORY_CONTROL_LIFECYCLE_EVENTS = 512
+export const MAX_MEMORY_CONTROL_REASON_BYTES = 2 * 1024
+const STALE_MEMORY_CONTROL_LOCK_MS = 30_000
 const MAX_COMPONENT_DEPTH = 32
 const MAX_COMPONENT_NODES = 10_000
 const MAX_CONTAINER_ITEMS = 1_024
@@ -77,14 +88,19 @@ export function createMemoryControlPackage(input: {
   id: string
   revision: number
   parentRevision?: number
+  diagnosisComponent?: MemoryControlComponentKey
   status: MemoryControlPackage['status']
   components: PackageComponentDrafts
 }): MemoryControlPackage {
+  if (input.status === 'candidate' && !input.diagnosisComponent) {
+    throw new Error('Memory-Control Package candidate must declare one diagnosis component')
+  }
   const components = Object.fromEntries(Object.entries(input.components).map(([key, value]) => [key, component(value)])) as PackageComponents
   const identityBody = {
     id: input.id,
     revision: input.revision,
     ...(input.parentRevision ? { parentRevision: input.parentRevision } : {}),
+    ...(input.diagnosisComponent ? { diagnosisComponent: input.diagnosisComponent } : {}),
     components: Object.fromEntries(Object.entries(components).map(([key, value]) => [key, {
       id: value.id, revision: value.revision, digest: value.digest,
     }])),
@@ -125,10 +141,12 @@ export const BASELINE_MEMORY_CONTROL_PACKAGE = createMemoryControlPackage({
 export function memoryControlPackageDocument(
   packages: readonly MemoryControlPackage[],
   activeRevision: number,
+  events: readonly MemoryControlLifecycleEvent[] = [],
 ): MemoryControlPackageDocument {
   return {
     schemaVersion: 1,
     activeRevision,
+    events: events.map((event) => immutableClone(event)),
     packages: packages.map((entry) => immutableClone({
       ...entry,
       status: entry.revision === activeRevision ? 'active' : entry.status === 'active' ? 'rejected' : entry.status,
@@ -153,26 +171,63 @@ function validateComponent(value: unknown): MemoryControlComponent {
 function validatePackage(value: unknown): MemoryControlPackage {
   if (!value || typeof value !== 'object') throw new Error('Memory-Control Package is corrupt')
   const item = value as Record<string, unknown>
-  if (Object.keys(item).some((key) => !['schemaVersion', 'id', 'revision', 'parentRevision', 'digest', 'status', 'components'].includes(key))
-    || item.schemaVersion !== 1 || typeof item.id !== 'string' || !item.id || item.id.length > 256
-    || !Number.isSafeInteger(item.revision) || Number(item.revision) < 1
-    || (item.parentRevision !== undefined && (!Number.isSafeInteger(item.parentRevision) || Number(item.parentRevision) < 1))
-    || !['candidate', 'active', 'rejected'].includes(String(item.status))
-    || !item.components || typeof item.components !== 'object' || Array.isArray(item.components)) {
-    throw new Error('Memory-Control Package is corrupt')
-  }
+  validatePackageEnvelope(item)
   const raw = item.components as Record<string, unknown>
   const keys = ['experientialSkills', 'workingMemorySpec', 'invocationPolicy', 'checkers'] as const
   if (Object.keys(raw).length !== keys.length || keys.some((key) => !(key in raw))) throw new Error('Memory-Control Package components are incomplete')
   const rebuilt = createMemoryControlPackage({
-    id: item.id,
+    id: String(item.id),
     revision: Number(item.revision),
     ...(item.parentRevision === undefined ? {} : { parentRevision: Number(item.parentRevision) }),
+    ...(item.diagnosisComponent === undefined ? {} : { diagnosisComponent: item.diagnosisComponent as MemoryControlComponentKey }),
     status: item.status as MemoryControlPackage['status'],
     components: Object.fromEntries(keys.map((key) => [key, validateComponent(raw[key])])) as PackageComponentDrafts,
   })
   if (rebuilt.digest !== item.digest) throw new Error(`Memory-Control Package digest mismatch: ${item.id}@${item.revision}`)
   return rebuilt
+}
+
+function validatePackageEnvelope(item: Record<string, unknown>): void {
+  const allowed = ['schemaVersion', 'id', 'revision', 'parentRevision', 'diagnosisComponent', 'digest', 'status', 'components']
+  const invalidParent = item.parentRevision !== undefined
+    && (!Number.isSafeInteger(item.parentRevision) || Number(item.parentRevision) < 1)
+  const invalidDiagnosis = item.diagnosisComponent !== undefined
+    && !MEMORY_CONTROL_COMPONENT_KEYS.includes(item.diagnosisComponent as MemoryControlComponentKey)
+  const invalidComponents = !item.components || typeof item.components !== 'object' || Array.isArray(item.components)
+  if (Object.keys(item).some((key) => !allowed.includes(key))
+    || item.schemaVersion !== 1 || typeof item.id !== 'string' || !item.id || item.id.length > 256
+    || !Number.isSafeInteger(item.revision) || Number(item.revision) < 1
+    || invalidParent || invalidDiagnosis || !['candidate', 'active', 'rejected'].includes(String(item.status)) || invalidComponents) {
+    throw new Error('Memory-Control Package is corrupt')
+  }
+}
+
+function validateReason(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value, 'utf8') > MAX_MEMORY_CONTROL_REASON_BYTES) {
+    throw new Error('Memory-Control Package lifecycle reason is invalid or exceeds bounds')
+  }
+  return value.trim()
+}
+
+function validateLifecycleEvent(value: unknown, index: number): MemoryControlLifecycleEvent {
+  if (!value || typeof value !== 'object') throw new Error('Memory-Control Package lifecycle event is corrupt')
+  const item = value as Record<string, unknown>
+  if (Object.keys(item).some((key) => !['sequence', 'kind', 'revision', 'fromRevision', 'diagnosisComponent', 'reason'].includes(key))
+    || item.sequence !== index + 1
+    || !['candidate-created', 'candidate-activated', 'candidate-rejected', 'rollback'].includes(String(item.kind))
+    || !Number.isSafeInteger(item.revision) || Number(item.revision) < 1
+    || (item.fromRevision !== undefined && (!Number.isSafeInteger(item.fromRevision) || Number(item.fromRevision) < 1))
+    || (item.diagnosisComponent !== undefined && !MEMORY_CONTROL_COMPONENT_KEYS.includes(item.diagnosisComponent as MemoryControlComponentKey))) {
+    throw new Error('Memory-Control Package lifecycle event is corrupt')
+  }
+  return immutableClone({
+    sequence: Number(item.sequence),
+    kind: item.kind as MemoryControlLifecycleEvent['kind'],
+    revision: Number(item.revision),
+    ...(item.fromRevision === undefined ? {} : { fromRevision: Number(item.fromRevision) }),
+    ...(item.diagnosisComponent === undefined ? {} : { diagnosisComponent: item.diagnosisComponent as MemoryControlComponentKey }),
+    reason: validateReason(item.reason),
+  })
 }
 
 function parseDocument(source: string): MemoryControlPackageDocument {
@@ -181,12 +236,60 @@ function parseDocument(source: string): MemoryControlPackageDocument {
   try { value = JSON.parse(source) } catch { throw new Error('Memory-Control Package repository is corrupt') }
   if (!value || typeof value !== 'object') throw new Error('Memory-Control Package repository is corrupt')
   const document = value as Record<string, unknown>
-  if (Object.keys(document).some((key) => !['schemaVersion', 'activeRevision', 'packages'].includes(key))
+  if (Object.keys(document).some((key) => !['schemaVersion', 'activeRevision', 'packages', 'events'].includes(key))
     || document.schemaVersion !== 1 || !Number.isSafeInteger(document.activeRevision) || !Array.isArray(document.packages)
-    || document.packages.length < 1 || document.packages.length > MAX_MEMORY_CONTROL_PACKAGES) {
+    || document.packages.length < 1 || document.packages.length > MAX_MEMORY_CONTROL_PACKAGES
+    || (document.events !== undefined && (!Array.isArray(document.events) || document.events.length > MAX_MEMORY_CONTROL_LIFECYCLE_EVENTS))) {
     throw new Error('Memory-Control Package repository schema version or shape is invalid')
   }
   const packages = document.packages.map(validatePackage)
+  const persistedEvents = (document.events || []).map(validateLifecycleEvent)
+  validatePackageLineage(packages, Number(document.activeRevision))
+  const events = persistedEvents.length > 0
+    ? persistedEvents
+    : migrateLegacyLifecycle(packages, Number(document.activeRevision))
+  validateLifecycleHistory(packages, events, Number(document.activeRevision))
+  return immutableClone({ schemaVersion: 1, activeRevision: Number(document.activeRevision), packages, events })
+}
+
+function diagnosisFor(parent: MemoryControlPackage, child: MemoryControlPackage): MemoryControlComponentKey | undefined {
+  if (child.diagnosisComponent) return child.diagnosisComponent
+  const changed = MEMORY_CONTROL_COMPONENT_KEYS.filter((key) => child.components[key].digest !== parent.components[key].digest)
+  return changed.length === 1 ? changed[0] : undefined
+}
+
+function migrateLegacyLifecycle(
+  packages: readonly MemoryControlPackage[],
+  activeRevision: number,
+): MemoryControlLifecycleEvent[] {
+  if (activeRevision === 1) return []
+  const chain: MemoryControlPackage[] = []
+  let current = packages.find((entry) => entry.revision === activeRevision)
+  while (current?.parentRevision !== undefined) {
+    chain.push(current)
+    current = packages.find((entry) => entry.revision === current?.parentRevision)
+  }
+  if (!current || current.revision !== 1 || chain.length + 1 !== packages.length) {
+    throw new Error('Memory-Control Package legacy lifecycle is ambiguous')
+  }
+  const events: MemoryControlLifecycleEvent[] = []
+  for (const entry of chain.reverse()) {
+    const parent = packages.find((candidate) => candidate.revision === entry.parentRevision)!
+    const diagnosisComponent = diagnosisFor(parent, entry)
+    if (!diagnosisComponent) throw new Error('Memory-Control Package legacy diagnosis is ambiguous')
+    events.push({
+      sequence: events.length + 1, kind: 'candidate-created', revision: entry.revision,
+      fromRevision: parent.revision, diagnosisComponent, reason: 'legacy schema-v1 lineage migration',
+    })
+    events.push({
+      sequence: events.length + 1, kind: 'candidate-activated', revision: entry.revision,
+      fromRevision: parent.revision, diagnosisComponent, reason: 'legacy schema-v1 active revision migration',
+    })
+  }
+  return events
+}
+
+function validatePackageLineage(packages: readonly MemoryControlPackage[], activeRevision: number): void {
   const revisions = new Set<number>()
   for (const entry of packages) {
     if (revisions.has(entry.revision)) throw new Error('Memory-Control Package revision is duplicated')
@@ -199,12 +302,92 @@ function parseDocument(source: string): MemoryControlPackageDocument {
     if (!parent || parent.id !== entry.id || parent.revision >= entry.revision) {
       throw new Error('Memory-Control Package parent lineage is unknown or corrupt')
     }
+    const changedComponents = MEMORY_CONTROL_COMPONENT_KEYS.filter((key) => entry.components[key].digest !== parent.components[key].digest)
+    const diagnosisComponent = entry.diagnosisComponent || (changedComponents.length === 1 ? changedComponents[0] : undefined)
+    if (!diagnosisComponent) throw new Error('Memory-Control Package non-root revision has no unambiguous diagnosis component')
+    validateComponentLineage(parent, entry, diagnosisComponent)
   }
-  const active = packages.find((entry) => entry.revision === document.activeRevision)
+  const active = packages.find((entry) => entry.revision === activeRevision)
   if (!active || active.status !== 'active' || packages.filter((entry) => entry.status === 'active').length !== 1) {
     throw new Error('Memory-Control Package active revision is unknown or corrupt')
   }
-  return immutableClone({ schemaVersion: 1, activeRevision: Number(document.activeRevision), packages })
+}
+
+function validateComponentLineage(
+  parent: MemoryControlPackage,
+  child: MemoryControlPackage,
+  diagnosisComponent: MemoryControlComponentKey,
+): void {
+  for (const key of MEMORY_CONTROL_COMPONENT_KEYS) {
+    const childComponent = child.components[key]
+    const parentComponent = parent.components[key]
+    if (key !== diagnosisComponent && childComponent.digest !== parentComponent.digest) {
+      throw new Error('Memory-Control Package lineage changed an undiagnosed component')
+    }
+    if (key === diagnosisComponent
+      && (childComponent.digest === parentComponent.digest || childComponent.id !== parentComponent.id
+        || childComponent.revision !== parentComponent.revision + 1)) {
+      throw new Error('Memory-Control Package diagnosed component revision is invalid')
+    }
+  }
+}
+
+function validateLifecycleHistory(
+  packages: readonly MemoryControlPackage[],
+  events: readonly MemoryControlLifecycleEvent[],
+  activeRevision: number,
+): void {
+  const byRevision = new Map(packages.map((entry) => [entry.revision, entry]))
+  const statuses = new Map(packages.map((entry) => [entry.revision, entry.revision === 1 ? 'active' : 'unseen']))
+  const previouslyActive = new Set([1])
+  let active = 1
+  for (const event of events) {
+    const entry = byRevision.get(event.revision)
+    if (!entry || (event.fromRevision !== undefined && !byRevision.has(event.fromRevision))) throw new Error('Memory-Control Package lifecycle event references an unknown revision')
+    if (event.kind === 'candidate-created') validateCandidateCreatedEvent(entry, event, statuses, byRevision)
+    else if (event.kind === 'candidate-activated') {
+      if (statuses.get(entry.revision) !== 'candidate' || event.fromRevision !== active || entry.parentRevision !== active
+        || !lifecycleDiagnosisMatches(entry, event, byRevision)) throw new Error('Memory-Control Package activation history is corrupt')
+      statuses.set(active, 'rejected')
+      statuses.set(entry.revision, 'active')
+      active = entry.revision
+      previouslyActive.add(active)
+    } else if (event.kind === 'candidate-rejected') {
+      if (statuses.get(entry.revision) !== 'candidate' || event.fromRevision !== entry.parentRevision
+        || !lifecycleDiagnosisMatches(entry, event, byRevision)) throw new Error('Memory-Control Package rejection history is corrupt')
+      statuses.set(entry.revision, 'rejected')
+    } else {
+      if (event.fromRevision !== active || !previouslyActive.has(entry.revision)) throw new Error('Memory-Control Package rollback history is corrupt')
+      statuses.set(active, 'rejected')
+      statuses.set(entry.revision, 'active')
+      active = entry.revision
+    }
+  }
+  if (active !== activeRevision || packages.some((entry) => statuses.get(entry.revision) !== entry.status)) {
+    throw new Error('Memory-Control Package lifecycle status projection is corrupt')
+  }
+}
+
+function lifecycleDiagnosisMatches(
+  entry: MemoryControlPackage,
+  event: MemoryControlLifecycleEvent,
+  packages: Map<number, MemoryControlPackage>,
+): boolean {
+  const parent = entry.parentRevision === undefined ? undefined : packages.get(entry.parentRevision)
+  return Boolean(parent) && event.diagnosisComponent === diagnosisFor(parent!, entry)
+}
+
+function validateCandidateCreatedEvent(
+  entry: MemoryControlPackage,
+  event: MemoryControlLifecycleEvent,
+  statuses: Map<number, string>,
+  packages: Map<number, MemoryControlPackage>,
+): void {
+  const parent = entry.parentRevision === undefined ? undefined : packages.get(entry.parentRevision)
+  const diagnosisComponent = parent ? diagnosisFor(parent, entry) : undefined
+  if (!parent || statuses.get(entry.revision) !== 'unseen' || event.fromRevision !== parent.revision
+    || event.diagnosisComponent !== diagnosisComponent) throw new Error('Memory-Control Package candidate creation history is corrupt')
+  statuses.set(entry.revision, 'candidate')
 }
 
 async function atomicWrite(path: string, document: MemoryControlPackageDocument): Promise<void> {
@@ -214,10 +397,157 @@ async function atomicWrite(path: string, document: MemoryControlPackageDocument)
   await rename(temporary, path)
 }
 
-export class JsonMemoryControlPackageRepository implements MemoryControlPackageReader {
-  private readonly document: MemoryControlPackageDocument
+async function readDocument(path: string): Promise<MemoryControlPackageDocument> {
+  const metadata = await stat(path)
+  if (metadata.size > MAX_MEMORY_CONTROL_REPOSITORY_BYTES) throw new Error('Memory-Control Package repository exceeds bounds')
+  return parseDocument(await readFile(path, 'utf8'))
+}
 
-  private constructor(document: MemoryControlPackageDocument) {
+async function withRepositoryLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  const lockPath = `${path}.lock`
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    try {
+      const lock = await open(lockPath, 'wx', 0o600)
+      try {
+        await lock.writeFile(JSON.stringify({ pid: process.pid }))
+        return await operation()
+      } finally {
+        await lock.close()
+        await unlink(lockPath).catch(() => undefined)
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      if (await recoverDeadRepositoryLock(lockPath)) continue
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+  }
+  throw new Error('Memory-Control Package repository lock timed out')
+}
+
+async function recoverDeadRepositoryLock(lockPath: string): Promise<boolean> {
+  try {
+    const raw = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: unknown }
+    if (!Number.isSafeInteger(raw.pid) || Number(raw.pid) < 1) return recoverStaleInvalidLock(lockPath)
+    try {
+      process.kill(Number(raw.pid), 0)
+      return false
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false
+      await unlink(lockPath)
+      return true
+    }
+  } catch {
+    return recoverStaleInvalidLock(lockPath)
+  }
+}
+
+async function recoverStaleInvalidLock(lockPath: string): Promise<boolean> {
+  try {
+    const metadata = await stat(lockPath)
+    if (Date.now() - metadata.mtimeMs <= STALE_MEMORY_CONTROL_LOCK_MS) return false
+    await unlink(lockPath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function decodePointer(path: string): string[] {
+  if (!path.startsWith('/') || path.length > 1_024) throw new Error('Memory-Control Package patch path is invalid')
+  return path.slice(1).split('/').map((part) => {
+    if (/~(?:[^01]|$)/.test(part)) throw new Error('Memory-Control Package patch path is invalid')
+    const decoded = part.replace(/~1/g, '/').replace(/~0/g, '~')
+    if (!decoded || ['__proto__', 'prototype', 'constructor'].includes(decoded)) throw new Error('Memory-Control Package patch path is unsafe')
+    return decoded
+  })
+}
+
+function validatePatch(patch: unknown): MemoryControlJsonPatchOperation[] {
+  if (!Array.isArray(patch) || patch.length < 1 || patch.length > MAX_MEMORY_CONTROL_PATCH_OPERATIONS) {
+    throw new Error('Memory-Control Package patch is empty or exceeds bounds')
+  }
+  validateBoundedJson(patch)
+  if (Buffer.byteLength(canonicalJson(patch), 'utf8') > MAX_MEMORY_CONTROL_PATCH_BYTES) {
+    throw new Error('Memory-Control Package patch is empty or exceeds bounds')
+  }
+  return patch.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Memory-Control Package patch operation is invalid')
+    const operation = value as Record<string, unknown>
+    if (Object.keys(operation).some((key) => !['op', 'path', 'value'].includes(key))
+      || !['add', 'remove', 'replace'].includes(String(operation.op)) || typeof operation.path !== 'string'
+      || (operation.op === 'remove' ? 'value' in operation : !('value' in operation))) {
+      throw new Error('Memory-Control Package patch operation is invalid')
+    }
+    decodePointer(operation.path)
+    return immutableClone(operation as unknown as MemoryControlJsonPatchOperation)
+  })
+}
+
+function applyPatch(body: Readonly<Record<string, unknown>>, input: unknown): Readonly<Record<string, unknown>> {
+  const result = structuredClone(body) as Record<string, unknown>
+  for (const operation of validatePatch(input)) applyPatchOperation(result, operation)
+  validateComponentBody(result)
+  return result
+}
+
+function applyPatchOperation(result: Record<string, unknown>, operation: MemoryControlJsonPatchOperation): void {
+  const segments = decodePointer(operation.path)
+  const parent = resolvePatchParent(result, segments.slice(0, -1))
+  const key = segments.at(-1)!
+  if (Array.isArray(parent)) applyArrayPatch(parent, key, operation)
+  else if (parent && typeof parent === 'object') applyObjectPatch(parent as Record<string, unknown>, key, operation)
+  else throw new Error('Memory-Control Package patch parent is not a container')
+}
+
+function resolvePatchParent(root: Record<string, unknown>, segments: readonly string[]): unknown {
+  let parent: unknown = root
+  for (const segment of segments) {
+    if (Array.isArray(parent)) {
+      if (!/^\d+$/.test(segment) || Number(segment) >= parent.length) throw new Error('Memory-Control Package patch path is unknown')
+      parent = parent[Number(segment)]
+      continue
+    }
+    if (parent && typeof parent === 'object' && Object.prototype.hasOwnProperty.call(parent, segment)) {
+      parent = (parent as Record<string, unknown>)[segment]
+      continue
+    }
+    throw new Error('Memory-Control Package patch path is unknown')
+  }
+  return parent
+}
+
+function applyArrayPatch(parent: unknown[], key: string, operation: MemoryControlJsonPatchOperation): void {
+  const index = key === '-' && operation.op === 'add' ? parent.length : Number(key)
+  if (!Number.isSafeInteger(index) || index < 0 || index > parent.length
+    || (operation.op !== 'add' && index >= parent.length)) throw new Error('Memory-Control Package patch array index is invalid')
+  if (operation.op === 'add') parent.splice(index, 0, structuredClone(operation.value))
+  else if (operation.op === 'remove') parent.splice(index, 1)
+  else parent[index] = structuredClone(operation.value)
+}
+
+function applyObjectPatch(parent: Record<string, unknown>, key: string, operation: MemoryControlJsonPatchOperation): void {
+  const exists = Object.prototype.hasOwnProperty.call(parent, key)
+  if (operation.op === 'add') parent[key] = structuredClone(operation.value)
+  else if (!exists) throw new Error('Memory-Control Package patch path is unknown')
+  else if (operation.op === 'remove') delete parent[key]
+  else parent[key] = structuredClone(operation.value)
+}
+
+function lifecycleEvent(
+  document: MemoryControlPackageDocument,
+  input: Omit<MemoryControlLifecycleEvent, 'sequence' | 'reason'> & { reason: unknown },
+): MemoryControlLifecycleEvent {
+  if (document.events.length >= MAX_MEMORY_CONTROL_LIFECYCLE_EVENTS) throw new Error('Memory-Control Package lifecycle history exceeds bounds')
+  return immutableClone({ ...input, sequence: document.events.length + 1, reason: validateReason(input.reason) })
+}
+
+export class JsonMemoryControlPackageRepository implements MemoryControlPackageReader {
+  private readonly path: string
+  private document: MemoryControlPackageDocument
+  private mutationTail: Promise<void> = Promise.resolve()
+
+  private constructor(path: string, document: MemoryControlPackageDocument) {
+    this.path = path
     this.document = document
   }
 
@@ -233,7 +563,7 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
       await atomicWrite(path, initial)
       source = JSON.stringify(initial)
     }
-    return new JsonMemoryControlPackageRepository(parseDocument(source))
+    return new JsonMemoryControlPackageRepository(path, parseDocument(source))
   }
 
   admitActive(): MemoryControlPackage {
@@ -247,6 +577,117 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
     if (!found) throw new Error(`Unknown Memory-Control Package revision: ${revision}`)
     return immutableClone(found)
   }
+
+  lineage(): MemoryControlLineage {
+    return immutableClone({
+      activeRevision: this.document.activeRevision,
+      packages: this.document.packages.map(({ id, revision, parentRevision, diagnosisComponent, digest, status }) => ({
+        id, revision, ...(parentRevision === undefined ? {} : { parentRevision }),
+        ...(diagnosisComponent === undefined ? {} : { diagnosisComponent }), digest, status,
+      })),
+      events: this.document.events,
+    })
+  }
+
+  createCandidate(input: {
+    expectedActiveRevision: number
+    diagnosisComponent: MemoryControlComponentKey
+    patch: readonly MemoryControlJsonPatchOperation[]
+    reason: string
+  }): Promise<MemoryControlPackage> {
+    return this.mutate(async () => {
+      if (!MEMORY_CONTROL_COMPONENT_KEYS.includes(input.diagnosisComponent)) throw new Error('Memory-Control Package diagnosis component is invalid')
+      if (this.document.activeRevision !== input.expectedActiveRevision) throw new Error('Memory-Control Package active revision changed')
+      if (this.document.packages.length >= MAX_MEMORY_CONTROL_PACKAGES) throw new Error('Memory-Control Package repository package limit reached')
+      const parent = this.read({ schemaVersion: 1, revision: input.expectedActiveRevision })
+      const body = applyPatch(parent.components[input.diagnosisComponent].body, input.patch)
+      const nextRevision = Math.max(...this.document.packages.map((entry) => entry.revision)) + 1
+      const diagnosed = parent.components[input.diagnosisComponent]
+      const candidate = createMemoryControlPackage({
+        id: parent.id,
+        revision: nextRevision,
+        parentRevision: parent.revision,
+        diagnosisComponent: input.diagnosisComponent,
+        status: 'candidate',
+        components: {
+          ...parent.components,
+          [input.diagnosisComponent]: { id: diagnosed.id, revision: diagnosed.revision + 1, body },
+        },
+      })
+      for (const key of MEMORY_CONTROL_COMPONENT_KEYS) {
+        if (key !== input.diagnosisComponent && candidate.components[key].digest !== parent.components[key].digest) {
+          throw new Error('Memory-Control Package candidate changed an undiagnosed component')
+        }
+      }
+      const event = lifecycleEvent(this.document, {
+        kind: 'candidate-created', revision: candidate.revision, fromRevision: parent.revision,
+        diagnosisComponent: input.diagnosisComponent, reason: input.reason,
+      })
+      await this.commit(memoryControlPackageDocument([...this.document.packages, candidate], this.document.activeRevision, [...this.document.events, event]))
+      return this.read({ schemaVersion: 1, revision: candidate.revision })
+    })
+  }
+
+  activateCandidate(input: { revision: number; expectedActiveRevision: number; reason: string }): Promise<MemoryControlPackage> {
+    return this.mutate(async () => {
+      if (this.document.activeRevision !== input.expectedActiveRevision) throw new Error('Memory-Control Package activation lost its compare-and-swap race')
+      const candidate = this.read({ schemaVersion: 1, revision: input.revision })
+      if (candidate.status !== 'candidate' || candidate.parentRevision !== input.expectedActiveRevision) {
+        throw new Error('Memory-Control Package candidate is not promotable from the active revision')
+      }
+      const event = lifecycleEvent(this.document, {
+        kind: 'candidate-activated', revision: candidate.revision, fromRevision: this.document.activeRevision,
+        ...(candidate.diagnosisComponent ? { diagnosisComponent: candidate.diagnosisComponent } : {}), reason: input.reason,
+      })
+      await this.commit(memoryControlPackageDocument(this.document.packages, candidate.revision, [...this.document.events, event]))
+      return this.admitActive()
+    })
+  }
+
+  rejectCandidate(input: { revision: number; reason: string }): Promise<MemoryControlPackage> {
+    return this.mutate(async () => {
+      const candidate = this.read({ schemaVersion: 1, revision: input.revision })
+      if (candidate.status !== 'candidate') throw new Error('Memory-Control Package revision is not a candidate')
+      const packages = this.document.packages.map((entry) => entry.revision === input.revision ? { ...entry, status: 'rejected' as const } : entry)
+      const event = lifecycleEvent(this.document, {
+        kind: 'candidate-rejected', revision: candidate.revision,
+        ...(candidate.parentRevision ? { fromRevision: candidate.parentRevision } : {}),
+        ...(candidate.diagnosisComponent ? { diagnosisComponent: candidate.diagnosisComponent } : {}), reason: input.reason,
+      })
+      await this.commit(memoryControlPackageDocument(packages, this.document.activeRevision, [...this.document.events, event]))
+      return this.read({ schemaVersion: 1, revision: input.revision })
+    })
+  }
+
+  rollback(input: { revision: number; expectedActiveRevision: number; reason: string }): Promise<MemoryControlPackage> {
+    return this.mutate(async () => {
+      if (this.document.activeRevision !== input.expectedActiveRevision) throw new Error('Memory-Control Package rollback lost its compare-and-swap race')
+      const target = this.read({ schemaVersion: 1, revision: input.revision })
+      const wasPreviouslyActive = target.revision === 1 || this.document.events.some((event) =>
+        event.revision === target.revision && (event.kind === 'candidate-activated' || event.kind === 'rollback'))
+      if (!wasPreviouslyActive) throw new Error('Memory-Control Package rollback target was never validated and active')
+      const event = lifecycleEvent(this.document, {
+        kind: 'rollback', revision: target.revision, fromRevision: this.document.activeRevision, reason: input.reason,
+      })
+      await this.commit(memoryControlPackageDocument(this.document.packages, target.revision, [...this.document.events, event]))
+      return this.admitActive()
+    })
+  }
+
+  private mutate<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.mutationTail.then(() => withRepositoryLock(this.path, async () => {
+      this.document = await readDocument(this.path)
+      return operation()
+    }))
+    this.mutationTail = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  private async commit(document: MemoryControlPackageDocument): Promise<void> {
+    const validated = parseDocument(JSON.stringify(document))
+    await atomicWrite(this.path, validated)
+    this.document = validated
+  }
 }
 
 export function baselineMemoryControlPackageReader(): MemoryControlPackageReader {
@@ -257,5 +698,15 @@ export function baselineMemoryControlPackageReader(): MemoryControlPackageReader
       if (input.revision !== undefined && input.revision !== 1) throw new Error(`Unknown Memory-Control Package revision: ${input.revision}`)
       return immutableClone(BASELINE_MEMORY_CONTROL_PACKAGE)
     },
+    lineage: () => immutableClone({
+      activeRevision: 1,
+      packages: [{
+        id: BASELINE_MEMORY_CONTROL_PACKAGE.id,
+        revision: 1,
+        digest: BASELINE_MEMORY_CONTROL_PACKAGE.digest,
+        status: 'active' as const,
+      }],
+      events: [],
+    }),
   }
 }

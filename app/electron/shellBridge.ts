@@ -31,6 +31,12 @@ type ActiveRun = {
 
 const activeRuns = new Map<string, ActiveRun>()
 
+function sanitizedChildEnvironment(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const environment = { ...process.env, ...overrides }
+  delete environment.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
+  return environment
+}
+
 export function listActiveBashRuns(): Array<{ runId: string; tag?: string }> {
   return [...activeRuns.entries()].map(([runId, v]) => ({ runId, tag: v.tag }))
 }
@@ -186,15 +192,14 @@ function runSpawnedProcess(
     let settled = false
     const child = spawn(file, args, {
       cwd,
-      env: {
-        ...process.env,
+      env: sanitizedChildEnvironment({
         ...(opts.env || {}),
         HOME: os.homedir(),
         // Force non-interactive: never block waiting for a TTY prompt
         CI: process.env.CI || '1',
         NO_COLOR: '1',
         TERM: process.env.TERM || 'dumb',
-      },
+      }),
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: !isWindows,
       windowsHide: true,

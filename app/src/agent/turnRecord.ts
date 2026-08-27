@@ -35,7 +35,7 @@ import {
   type SkillContextInjectionTrace,
   type SkillInvocationTrace,
 } from './skillPreflight.ts'
-import { isMemoryControlPackageIdentity, type MemoryControlPackageIdentity } from './memoryControlPackage.ts'
+import { isMemoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS, type MemoryControlLifecycleEvent, type MemoryControlPackageIdentity } from './memoryControlPackage.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
@@ -48,9 +48,10 @@ import { isMemoryControlPackageIdentity, type MemoryControlPackageIdentity } fro
  * Version 7 adds immutable Skill context injection and not-executed outcomes.
  * Version 8 adds batch-bound Skill preflight idempotency identities.
  * Version 9 adds the governing Memory-Control Package and Checker linkage.
+ * Version 10 adds the bounded activation/rollback event governing the run.
  */
-export const TURN_RECORD_FORMAT_VERSION = 9
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8])
+export const TURN_RECORD_FORMAT_VERSION = 10
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -345,7 +346,8 @@ export type TurnRecordEntry = TurnRecordCoordinates &
     | { kind: 'delegation-assignment'; source: 'host'; assignment: DelegatedGoalAssignment }
     | { kind: 'delegation-observation'; source: 'host'; observation: DelegatedGoalObservation }
     | { kind: 'delegation-check'; source: 'host'; check: DelegatedGoalCheck; packageIdentity?: MemoryControlPackageIdentity }
-    | { kind: 'memory-control-package'; source: 'host'; packageIdentity: MemoryControlPackageIdentity }
+    | { kind: 'memory-control-package'; source: 'host'; packageIdentity: MemoryControlPackageIdentity; lifecycleEvent?: MemoryControlLifecycleEvent }
+    | { kind: 'memory-control-lifecycle'; source: 'host'; event: MemoryControlLifecycleEvent }
     | { kind: 'skill-invocation'; source: 'host'; invocation: SkillInvocationTrace }
     | { kind: 'skill-context'; source: 'host'; injection: SkillContextInjectionTrace }
     | {
@@ -419,12 +421,25 @@ const KINDS = new Set([
   'delegation-observation',
   'delegation-check',
   'memory-control-package',
+  'memory-control-lifecycle',
   'skill-invocation',
   'skill-context',
   'notice',
 ])
 
 const MEMORY_RECALL_ENTRY_KEYS = new Set(['kind', 'source', 'revision', 'items', 'seq', 'turn', 'step', 'at'])
+
+function isMemoryControlLifecycleEvent(value: unknown): value is MemoryControlLifecycleEvent {
+  if (!value || typeof value !== 'object') return false
+  const event = value as Record<string, unknown>
+  return Object.keys(event).every((key) => ['sequence', 'kind', 'revision', 'fromRevision', 'diagnosisComponent', 'reason'].includes(key))
+    && Number.isSafeInteger(event.sequence) && Number(event.sequence) > 0
+    && ['candidate-created', 'candidate-activated', 'candidate-rejected', 'rollback'].includes(String(event.kind))
+    && Number.isSafeInteger(event.revision) && Number(event.revision) > 0
+    && (event.fromRevision === undefined || (Number.isSafeInteger(event.fromRevision) && Number(event.fromRevision) > 0))
+    && (event.diagnosisComponent === undefined || MEMORY_CONTROL_COMPONENT_KEYS.includes(event.diagnosisComponent as never))
+    && typeof event.reason === 'string' && event.reason.length > 0 && new TextEncoder().encode(event.reason).byteLength <= 2 * 1024
+}
 
 function isMemoryRecallEntry(entry: Record<string, unknown>): boolean {
   if (entry.source !== 'host' || Object.keys(entry).some((key) => !MEMORY_RECALL_ENTRY_KEYS.has(key))) return false
@@ -443,9 +458,12 @@ function isMemoryRecallEntry(entry: Record<string, unknown>): boolean {
 
 function isWorkingStateContextEntry(entry: Record<string, unknown>): boolean | undefined {
   if (entry.kind === 'memory-control-package') {
+    return isMemoryControlPackageEntry(entry)
+  }
+  if (entry.kind === 'memory-control-lifecycle') {
     return entry.source === 'host'
-      && Object.keys(entry).every((key) => ['kind', 'source', 'packageIdentity', 'seq', 'turn', 'step', 'at'].includes(key))
-      && isMemoryControlPackageIdentity(entry.packageIdentity)
+      && Object.keys(entry).every((key) => ['kind', 'source', 'event', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isMemoryControlLifecycleEvent(entry.event)
   }
   if (entry.kind === 'state-proposal') {
     return (entry.source === 'model' || entry.source === 'host')
@@ -465,6 +483,16 @@ function isWorkingStateContextEntry(entry: Record<string, unknown>): boolean | u
       && isWorkingState(entry.state)
   }
   return isDelegationContextEntry(entry)
+}
+
+function isMemoryControlPackageEntry(entry: Record<string, unknown>): boolean {
+  if (entry.source !== 'host'
+    || Object.keys(entry).some((key) => !['kind', 'source', 'packageIdentity', 'lifecycleEvent', 'seq', 'turn', 'step', 'at'].includes(key))
+    || !isMemoryControlPackageIdentity(entry.packageIdentity)) return false
+  if (entry.lifecycleEvent === undefined) return true
+  return isMemoryControlLifecycleEvent(entry.lifecycleEvent)
+    && ['candidate-activated', 'rollback'].includes(entry.lifecycleEvent.kind)
+    && entry.lifecycleEvent.revision === entry.packageIdentity.revision
 }
 
 function isDelegationContextEntry(entry: Record<string, unknown>): boolean | undefined {
@@ -594,6 +622,8 @@ function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
   if (version <= 2 && kind === 'working-state') return true
   if (version < 9 && (kind === 'memory-control-package'
     || ((kind === 'state-check' || kind === 'delegation-check') && entry.packageIdentity !== undefined))) return true
+  if (version < 10 && kind === 'memory-control-package' && entry.lifecycleEvent !== undefined) return true
+  if (version < 10 && kind === 'memory-control-lifecycle') return true
   if (isLegacySkillEntry(version, kind, entry)) return true
   return version < 5 && ['delegation-assignment', 'delegation-observation', 'delegation-check'].includes(kind)
 }

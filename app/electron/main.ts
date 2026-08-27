@@ -250,6 +250,8 @@ import {
 import type { MemoryProjectionScope } from '../src/agent/memoryProjection'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const memoryControlMaintainerToken = process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
+delete process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
 const piHostSupervisor = new PiHostSupervisor(() =>
   utilityProcess.fork(path.join(__dirname, 'pi-host.js'), [], {
     serviceName: 'SubAgents Pi Core Host',
@@ -266,9 +268,12 @@ const piHostSupervisor = new PiHostSupervisor(() =>
       SUBAGENTS_PI_CHECKPOINT_DIR: path.join(app.getPath('userData'), 'run-checkpoints'),
       SUBAGENTS_PI_SETTINGS_MIGRATION_PATH: path.join(app.getPath('userData'), 'pi-settings-migration.json'),
       SUBAGENTS_LEGACY_SETTINGS_PATH: settingsPath(),
+      ...(memoryControlMaintainerToken
+        ? { SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN: memoryControlMaintainerToken }
+        : {}),
     },
   }),
-  { requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1'] },
+  { requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1'] },
 )
 // Policy Admin / outbound policy dir default (node-safe modules read this env).
 try {

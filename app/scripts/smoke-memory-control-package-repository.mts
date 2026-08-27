@@ -34,6 +34,7 @@ try {
     id: first.id,
     revision: 2,
     parentRevision: 1,
+    diagnosisComponent: 'invocationPolicy',
     status: 'active',
     components: {
       ...first.components,
@@ -50,6 +51,30 @@ try {
   assert.equal(restarted.read({ schemaVersion: 1, revision: 1 }).digest, first.digest)
   assert.equal(restarted.read({ schemaVersion: 1, revision: 2 }).components.experientialSkills.digest,
     first.components.experientialSkills.digest, 'unchanged component identity survives lineage')
+
+  const legacySecond = createMemoryControlPackage({
+    id: first.id,
+    revision: 2,
+    parentRevision: 1,
+    status: 'active',
+    components: second.components,
+  })
+  await writeFile(repositoryPath, JSON.stringify(memoryControlPackageDocument([first, legacySecond], 2)), { mode: 0o600 })
+  const migratedLegacy = await JsonMemoryControlPackageRepository.open(repositoryPath)
+  assert.equal(migratedLegacy.admitActive().digest, legacySecond.digest,
+    'legacy schema-v1 non-root packages infer their sole changed component without rewriting identity')
+  const legacyChild = await migratedLegacy.createCandidate({
+    expectedActiveRevision: 2,
+    diagnosisComponent: 'checkers',
+    patch: [{ op: 'add', path: '/legacyRollbackQualification', value: true }],
+    reason: 'qualify rollback provenance after legacy migration',
+  })
+  await migratedLegacy.activateCandidate({
+    revision: legacyChild.revision, expectedActiveRevision: 2, reason: 'legacy child passed qualification',
+  })
+  assert.equal((await migratedLegacy.rollback({
+    revision: 2, expectedActiveRevision: legacyChild.revision, reason: 'legacy active revision remains rollback eligible',
+  })).revision, 2)
 
   for (const invalid of [
     createMemoryControlPackage({ ...second, parentRevision: 2, components: second.components }),
@@ -95,3 +120,5 @@ try {
 } finally {
   await rm(directory, { recursive: true, force: true })
 }
+
+await import('./memory-control-package-candidates.mts')

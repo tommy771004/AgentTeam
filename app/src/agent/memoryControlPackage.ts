@@ -11,9 +11,34 @@ export type MemoryControlComponent = {
   body: Readonly<Record<string, unknown>>
 }
 
+export const MEMORY_CONTROL_COMPONENT_KEYS = [
+  'experientialSkills',
+  'workingMemorySpec',
+  'invocationPolicy',
+  'checkers',
+] as const
+
+export type MemoryControlComponentKey = typeof MEMORY_CONTROL_COMPONENT_KEYS[number]
+
+export type MemoryControlLifecycleEvent = {
+  sequence: number
+  kind: 'candidate-created' | 'candidate-activated' | 'candidate-rejected' | 'rollback'
+  revision: number
+  fromRevision?: number
+  diagnosisComponent?: MemoryControlComponentKey
+  reason: string
+}
+
+export type MemoryControlLineage = {
+  activeRevision: number
+  packages: ReadonlyArray<Pick<MemoryControlPackage, 'id' | 'revision' | 'parentRevision' | 'digest' | 'status' | 'diagnosisComponent'>>
+  events: ReadonlyArray<MemoryControlLifecycleEvent>
+}
+
 export type MemoryControlPackage = MemoryControlPackageIdentity & {
   schemaVersion: 1
   parentRevision?: number
+  diagnosisComponent?: MemoryControlComponentKey
   status: 'candidate' | 'active' | 'rejected'
   components: {
     experientialSkills: MemoryControlComponent
@@ -26,6 +51,25 @@ export type MemoryControlPackage = MemoryControlPackageIdentity & {
 export type MemoryControlPackageReader = {
   admitActive(): MemoryControlPackage
   read(input: { schemaVersion: 1; revision?: number }): MemoryControlPackage
+  lineage(): MemoryControlLineage
+}
+
+export type MemoryControlJsonPatchOperation = {
+  op: 'add' | 'remove' | 'replace'
+  path: string
+  value?: unknown
+}
+
+export type MemoryControlPackageAuthority = MemoryControlPackageReader & {
+  createCandidate(input: {
+    expectedActiveRevision: number
+    diagnosisComponent: MemoryControlComponentKey
+    patch: readonly MemoryControlJsonPatchOperation[]
+    reason: string
+  }): Promise<MemoryControlPackage>
+  activateCandidate(input: { revision: number; expectedActiveRevision: number; reason: string }): Promise<MemoryControlPackage>
+  rejectCandidate(input: { revision: number; reason: string }): Promise<MemoryControlPackage>
+  rollback(input: { revision: number; expectedActiveRevision: number; reason: string }): Promise<MemoryControlPackage>
 }
 
 const SHA256 = /^[a-f0-9]{64}$/

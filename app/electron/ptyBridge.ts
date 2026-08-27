@@ -35,6 +35,12 @@ type Session = {
 
 const sessions = new Map<string, Session>()
 
+function sanitizedTerminalEnvironment(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const environment = { ...process.env, ...overrides }
+  delete environment.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
+  return environment
+}
+
 function shellCmd(): CommandSpec {
   if (isWindows) {
     return spawnCommandSpec(process.env.COMSPEC || 'cmd.exe', ['/d'])
@@ -68,11 +74,10 @@ export function createTermSession(opts: {
   const shell = shellCmd()
   const child = spawn(shell.file, shell.args, {
     cwd,
-    env: {
-      ...process.env,
+    env: sanitizedTerminalEnvironment({
       TERM: process.env.TERM || 'xterm-256color',
       HOME: os.homedir(),
-    },
+    }),
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: !isWindows,
     windowsHide: true,

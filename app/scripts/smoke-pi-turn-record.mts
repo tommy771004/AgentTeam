@@ -54,7 +54,7 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
-assert.equal(TURN_RECORD_FORMAT_VERSION, 9, 'governing Memory-Control Package identity is an explicit Turn Record evolution')
+assert.equal(TURN_RECORD_FORMAT_VERSION, 10, 'Memory-Control lifecycle audit is an explicit Turn Record evolution')
 const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
 assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')
@@ -189,6 +189,34 @@ for (const legacyVersion of [1, 2, 3, 4, 5, 6, 7, 8]) {
     entries: governingPackage.entries,
   }), TurnRecordCorruptError, `v${legacyVersion} cannot smuggle a v9 governing package entry`)
 }
+const promotedPackage = appendTurnRecord(undefined, [{
+  kind: 'memory-control-package', source: 'host', packageIdentity: BASELINE_MEMORY_CONTROL_PACKAGE,
+  lifecycleEvent: {
+    sequence: 2, kind: 'candidate-activated', revision: 1, fromRevision: 2,
+    diagnosisComponent: 'checkers', reason: 'bounded evaluation passed',
+  },
+  turn: 1, step: 1, at: 1,
+}])
+assert.equal(parseTurnRecord(promotedPackage).record.entries[0]?.kind, 'memory-control-package')
+assert.throws(() => parseTurnRecord({ version: 9, entries: promotedPackage.entries }), TurnRecordCorruptError,
+  'v9 cannot smuggle a v10 package lifecycle event')
+for (const lifecycleEvent of [
+  { sequence: 3, kind: 'candidate-rejected', revision: 1, reason: 'not governing' },
+  { sequence: 4, kind: 'candidate-activated', revision: 2, fromRevision: 1, reason: 'wrong revision' },
+]) {
+  assert.throws(() => parseTurnRecord({
+    version: TURN_RECORD_FORMAT_VERSION,
+    entries: [{ ...promotedPackage.entries[0], lifecycleEvent }, continued.entries[0]],
+  }), TurnRecordCorruptError, 'governing lifecycle audit must be an activation/rollback for the same package revision')
+}
+const rejectedLifecycle = appendTurnRecord(undefined, [{
+  kind: 'memory-control-lifecycle', source: 'host',
+  event: { sequence: 5, kind: 'candidate-rejected', revision: 3, fromRevision: 1, diagnosisComponent: 'checkers', reason: 'held-out regression' },
+  turn: 1, step: 1, at: 1,
+}])
+assert.equal(parseTurnRecord(rejectedLifecycle).record.entries[0]?.kind, 'memory-control-lifecycle')
+assert.throws(() => parseTurnRecord({ version: 9, entries: rejectedLifecycle.entries }), TurnRecordCorruptError,
+  'v9 cannot smuggle a v10 lifecycle audit entry')
 const skillContext = appendTurnRecord(undefined, [{
   kind: 'skill-context', source: 'host',
   injection: {

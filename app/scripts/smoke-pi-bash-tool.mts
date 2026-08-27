@@ -9,7 +9,11 @@ import { spawn } from 'node:child_process'
 const root = await mkdtemp(join(tmpdir(), 'pi-bash-'))
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-bash-state-'))
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
-  env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json') },
+  env: {
+    ...process.env,
+    SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'),
+    SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN: 'must-never-reach-shell',
+  },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 const output = createInterface({ input: host.stdout })
@@ -45,6 +49,13 @@ try {
   const result = await waitFor(6)
   assert.equal(result.result?.tool, 'bash')
   assert.equal(result.result?.content?.[0]?.text, 'hello bash')
+  send(14, 'tools/bash', {
+    cwd: root,
+    sessionId,
+    command: 'printf %s "$SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN"',
+    approval: 'allow',
+  })
+  assert.equal((await waitFor(14)).result?.content?.[0]?.text, '(no output)', 'maintainer token is scrubbed before builtin shell spawn')
 
   // The Host applies the same segment-aware Bash decision before execution,
   // including when approvalMode=full: dangerous commands cannot be silently

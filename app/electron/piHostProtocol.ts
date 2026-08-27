@@ -1,12 +1,12 @@
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { createHash } from 'node:crypto'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
 import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatalog.ts'
 import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
 import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage, type PiHostFinalizationClaimResult, type PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
-import { memoryControlPackageIdentity, type MemoryControlPackage, type MemoryControlPackageIdentity, type MemoryControlPackageReader } from '../src/agent/memoryControlPackage.ts'
+import { memoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS, type MemoryControlComponentKey, type MemoryControlJsonPatchOperation, type MemoryControlLineage, type MemoryControlPackage, type MemoryControlPackageAuthority, type MemoryControlPackageIdentity, type MemoryControlPackageReader } from '../src/agent/memoryControlPackage.ts'
 import { baselineMemoryControlPackageReader } from './memoryControlPackageRepository.ts'
 
 /**
@@ -54,6 +54,7 @@ export type PiHostResponse = {
     status?: 'ready'
     memoryHealth?: MemoryStorageHealth
     memoryControlPackage?: MemoryControlPackage
+    memoryControlLineage?: MemoryControlLineage
     cursor?: number
     sessions?: unknown[]
     settings?: PiSettings
@@ -354,6 +355,7 @@ type HostState = {
   memoryControlNegotiated: boolean
   memoryStore: DurableMemoryStore
   memoryControlPackages: MemoryControlPackageReader
+  memoryControlMaintenanceToken?: string
   publishedMemoryRevisions: Set<number>
   /**
    * The last catalog projection the Host published, by tool name (issue 19).
@@ -653,6 +655,10 @@ type ActiveTurnRecorder = {
   proposalState: WorkingState
   /** Atomically admitted package identity; later activation cannot rewrite it. */
   governingPackage: MemoryControlPackageIdentity
+  /** Host maintenance already admitted to this run and not yet durably audited. */
+  pendingMemoryControlAudits: Set<Promise<void>>
+  /** Settlement closes admission synchronously before awaiting reserved audits. */
+  memoryControlAuditsClosed: boolean
   /** Parent Checker commits adopted child evidence here during a pack call. */
   delegatedWorkingState?: WorkingState
   /** Set by the mutating pack tool; consumed only after sibling effects settle. */
@@ -1500,7 +1506,9 @@ function validateDirectToolCall(
 const INTERNAL_INVOCATION_ORIGIN = Symbol('pi-host-invocation-origin')
 const INTERNAL_OUTER_CODE_APPROVED = Symbol('pi-host-outer-code-approved')
 
-type InternalPiHostRequest = PiHostRequest & {
+type MemoryControlMaintenanceRequest = Omit<PiHostRequest, 'method'> & { method: 'memory-control/v1/maintain' }
+
+type InternalPiHostRequest = (PiHostRequest | MemoryControlMaintenanceRequest) & {
   [INTERNAL_INVOCATION_ORIGIN]?: 'code-mode'
   [INTERNAL_OUTER_CODE_APPROVED]?: true
 }
@@ -2290,8 +2298,9 @@ export function handlePiHostRequest(
   if (initialization) return initialization
 
   if (!state.initialized) return [errorResponse(id, 'not_initialized', 'Pi Host must be initialized first')]
-  if (isPiHostLifecycleRequest(state, input.method)) {
-    return handlePiHostLifecycleRequest(state, input.method, id)
+  const standardInput = input as Partial<PiHostRequest>
+  if (isPiHostLifecycleRequest(state, standardInput.method!)) {
+    return handlePiHostLifecycleRequest(state, standardInput.method!, id)
   }
   if (input.method === 'runtime/status') return [{ id, result: piCoreRuntimeStatus() }]
   if (input.method === 'tools/list') {
@@ -3295,6 +3304,8 @@ export function handlePiHostRequest(
       stateProposals: new Map(),
       proposalState: initialWorkingState,
       governingPackage,
+      pendingMemoryControlAudits: new Set(),
+      memoryControlAuditsClosed: false,
       seqBase: nextTurnRecordSeq(session.record),
       reasoning: [],
       // Only when there is a live stream to feed. A batch caller receives the
@@ -3319,7 +3330,7 @@ export function handlePiHostRequest(
     })
     activeTurnRecorders.set(sessionId, recorder)
     recordTurnEntry(sessionId, { kind: 'turn-start', source: 'host' })
-    recordTurnEntry(sessionId, { kind: 'memory-control-package', source: 'host', packageIdentity: governingPackage })
+    recordGoverningMemoryControlPackage(state, sessionId, governingPackage)
     let workingState = initialWorkingState
     recordTurnEntry(sessionId, { kind: 'working-state', source: 'host', state: workingState })
     // Trusted Host verification starts from the admitted run/view. No field in
@@ -3803,7 +3814,9 @@ export function handlePiHostRequest(
           result: stoppedText,
         }
       },
-      }).then((orchestration) => {
+      }).then(async (orchestration) => {
+      recorder.memoryControlAuditsClosed = true
+      await Promise.all([...recorder.pendingMemoryControlAudits])
       publishOrchestration(
         orchestration.settlement === 'cancelled' || orchestration.settlement === 'interrupted' ? 'cancelled' : 'settlement',
         orchestration.iterations,
@@ -3858,7 +3871,9 @@ export function handlePiHostRequest(
         },
       }]
       })
-      }).catch((error) => {
+      }).catch(async (error) => {
+        recorder.memoryControlAuditsClosed = true
+        await Promise.all([...recorder.pendingMemoryControlAudits])
         // Async storage failures must close the same record/attachment as a
         // normal settlement, not just release the in-memory run lock.
         const reason = error instanceof Error ? error.message : 'Pi Host turn failed'
@@ -3970,8 +3985,16 @@ function handleMemoryControlPackageRead(
   try {
     const schemaVersion = input.params?.schemaVersion
     const revision = input.params?.revision
+    const view = input.params?.view
+    if (view !== undefined && view !== 'lineage') {
+      return [errorResponse(id, 'invalid_request', 'Memory-Control Package view is invalid')]
+    }
     if (schemaVersion !== 1 || (revision !== undefined && (!Number.isSafeInteger(revision) || Number(revision) < 1))) {
       return [errorResponse(id, 'invalid_request', 'Memory-Control Package read requires schemaVersion 1 and an optional positive revision')]
+    }
+    if (view === 'lineage') {
+      if (revision !== undefined) return [errorResponse(id, 'invalid_request', 'Memory-Control Package lineage read does not accept revision')]
+      return [{ id, result: { memoryControlLineage: state.memoryControlPackages.lineage() } }]
     }
     return [{ id, result: { memoryControlPackage: state.memoryControlPackages.read({
       schemaVersion: 1,
@@ -3982,14 +4005,111 @@ function handleMemoryControlPackageRead(
   }
 }
 
+function isMemoryControlPackageAuthority(value: MemoryControlPackageReader): value is MemoryControlPackageAuthority {
+  const authority = value as Partial<MemoryControlPackageAuthority>
+  return typeof authority.createCandidate === 'function' && typeof authority.activateCandidate === 'function'
+    && typeof authority.rejectCandidate === 'function' && typeof authority.rollback === 'function'
+}
+
+function validMaintenanceToken(expected: string | undefined, supplied: unknown): boolean {
+  if (!expected || typeof supplied !== 'string' || supplied.length > 512) return false
+  const expectedBytes = Buffer.from(expected)
+  const suppliedBytes = Buffer.from(supplied)
+  return expectedBytes.length === suppliedBytes.length && timingSafeEqual(expectedBytes, suppliedBytes)
+}
+
+function handleMemoryControlMaintenance(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+): Promise<PiHostMessage[]> | undefined {
+  if (input.method !== 'memory-control/v1/maintain') return undefined
+  if (state.negotiatedProtocolVersion !== PI_HOST_PROTOCOL_VERSION || !state.memoryControlNegotiated) {
+    return Promise.resolve([errorResponse(id, 'protocol_mismatch', 'memory-control-v1 capability was not negotiated')])
+  }
+  const params = input.params || {}
+  const sessionId = typeof params.sessionId === 'string' ? params.sessionId : ''
+  if (!validMaintenanceToken(state.memoryControlMaintenanceToken, params.maintenanceToken)
+    || !isMemoryControlPackageAuthority(state.memoryControlPackages)) {
+    return Promise.resolve([errorResponse(id, 'invalid_request', 'Memory-Control maintenance authority is unavailable')])
+  }
+  const recorder = activeTurnRecorders.get(sessionId)
+  if (!sessionId || !recorder) {
+    return Promise.resolve([errorResponse(id, 'invalid_request', 'Memory-Control maintenance requires an active audit Task run')])
+  }
+  if (recorder.memoryControlAuditsClosed) {
+    return Promise.resolve([errorResponse(id, 'invalid_request', 'Memory-Control audit Task run is settling; maintenance admission is closed')])
+  }
+  let releaseAuditBarrier = () => {}
+  const auditBarrier = new Promise<void>((resolve) => { releaseAuditBarrier = resolve })
+  recorder.pendingMemoryControlAudits.add(auditBarrier)
+  return executeMemoryControlMaintenance(state.memoryControlPackages, params)
+    .then((memoryControlPackage) => {
+      const memoryControlLineage = state.memoryControlPackages.lineage()
+      const event = memoryControlLineage.events.at(-1)
+      if (!event) throw new Error('Memory-Control maintenance did not append lifecycle audit')
+      recordTurnEntry(sessionId, { kind: 'memory-control-lifecycle', source: 'host', event })
+      return [{ id, result: { memoryControlPackage, memoryControlLineage } }]
+    })
+    .catch((error) => [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Memory-Control maintenance failed')])
+    .finally(() => {
+      releaseAuditBarrier()
+      recorder.pendingMemoryControlAudits.delete(auditBarrier)
+    })
+}
+
+function executeMemoryControlMaintenance(
+  authority: MemoryControlPackageAuthority,
+  params: Record<string, unknown>,
+): Promise<MemoryControlPackage> {
+  const operation = params.operation
+  const revision = Number(params.revision)
+  const expectedActiveRevision = Number(params.expectedActiveRevision)
+  const reason = typeof params.reason === 'string' ? params.reason : ''
+  if (operation === 'create-candidate') {
+    if (!MEMORY_CONTROL_COMPONENT_KEYS.includes(params.diagnosisComponent as MemoryControlComponentKey) || !Array.isArray(params.patch)) {
+      return Promise.reject(new Error('Memory-Control candidate diagnosis and patch are required'))
+    }
+    return authority.createCandidate({
+      expectedActiveRevision,
+      diagnosisComponent: params.diagnosisComponent as MemoryControlComponentKey,
+      patch: params.patch as MemoryControlJsonPatchOperation[],
+      reason,
+    })
+  }
+  if (!Number.isSafeInteger(revision) || revision < 1) return Promise.reject(new Error('Memory-Control revision is invalid'))
+  if (operation === 'reject-candidate') return authority.rejectCandidate({ revision, reason })
+  if (!Number.isSafeInteger(expectedActiveRevision) || expectedActiveRevision < 1) {
+    return Promise.reject(new Error('Memory-Control expected active revision is invalid'))
+  }
+  if (operation === 'activate-candidate') return authority.activateCandidate({ revision, expectedActiveRevision, reason })
+  if (operation === 'rollback') return authority.rollback({ revision, expectedActiveRevision, reason })
+  return Promise.reject(new Error('Memory-Control maintenance operation is invalid'))
+}
+
+function recordGoverningMemoryControlPackage(
+  state: HostState,
+  sessionId: string,
+  packageIdentity: MemoryControlPackageIdentity,
+): void {
+  const lifecycleEvent = [...state.memoryControlPackages.lineage().events].reverse()
+    .find((event) => event.revision === packageIdentity.revision
+      && (event.kind === 'candidate-activated' || event.kind === 'rollback'))
+  recordTurnEntry(sessionId, {
+    kind: 'memory-control-package', source: 'host', packageIdentity,
+    ...(lifecycleEvent ? { lifecycleEvent } : {}),
+  })
+}
+
 function handleBoundedHostRead(
   state: HostState,
-  input: Partial<PiHostRequest>,
+  input: Partial<InternalPiHostRequest>,
   id: string | number,
   emit?: (message: PiHostMessage) => void,
 ): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
-  return handleMemoryControlPackageRead(state, input, id)
-    || handleAttachmentRequest(state, input, id, emit)
+  return handleMemoryControlMaintenance(state, input, id)
+    || handleMemoryControlPackageRead(state, input as Partial<PiHostRequest>, id)
+    || handleAttachmentRequest(state, input as Partial<PiHostRequest>, id, emit)
 }
 
 export function createPiHostServer(
@@ -4008,6 +4128,7 @@ export function createPiHostServer(
   checkpointWriter?: CompactionCheckpointWriter,
   suppliedMemoryStore?: DurableMemoryStore,
   suppliedMemoryControlPackages?: MemoryControlPackageReader,
+  suppliedMemoryControlMaintenanceToken?: string,
 ) {
   const memoryStore = suppliedMemoryStore || new InMemoryDurableMemoryStore()
   const memoryControlPackages = suppliedMemoryControlPackages || baselineMemoryControlPackageReader()
@@ -4029,6 +4150,7 @@ export function createPiHostServer(
     memoryControlNegotiated: false,
     memoryStore,
     memoryControlPackages,
+    memoryControlMaintenanceToken: suppliedMemoryControlMaintenanceToken,
     publishedMemoryRevisions: new Set(),
     catalogProjection: new Map(),
     attachmentJournal,
