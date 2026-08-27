@@ -2,6 +2,7 @@ import type { LoopType, RunContextPolicy } from './types.ts'
 import type { TurnRecord } from './turnRecord.ts'
 import { clampPiIterations } from './loopBounds.ts'
 import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from './subdesign/pluginExecution.ts'
+import { isWorkingState, type WorkingGoalCompletionPredicate, type WorkingState } from './workingState.ts'
 
 export type PiHostRunConfigInput = {
   forceLoopType?: LoopType
@@ -212,7 +213,7 @@ export const PI_CORE_SETTLEMENT_DEFINITION_OF_DONE = 'Pi Core settlement returne
 export function isPiHostDefinitionOfDoneMet(
   definitionOfDone: string | undefined,
   settlement: PiTurnSettlement,
-  assistantContent?: string,
+  workingState?: WorkingState | string,
 ): boolean | undefined {
   if (!definitionOfDone) return undefined
   if (definitionOfDone === PI_CORE_SETTLEMENT_DEFINITION_OF_DONE) {
@@ -220,7 +221,8 @@ export function isPiHostDefinitionOfDoneMet(
     // settled without producing the thing the DoD asks for.
     return settlement === 'answered'
   }
-  return Boolean(assistantContent?.trim())
+  return isWorkingState(workingState)
+    && workingState.goals.every((goal) => goal.status === 'done' && goal.evidence.length > 0)
 }
 
 /** Keep the renderer cutover's loop defaults aligned with the builtin parser. */
@@ -255,12 +257,13 @@ export type PiHostRunnerApi = {
     createChild?: (input: { title?: string; parentSessionId: string; role: string; profile: Record<string, unknown>; context: { objective: string; facts: string[]; constraints: string[] }; depth: number }) => Promise<{ sessionId: string; sessions: unknown[] }>
   }
   turn: {
-    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => Promise<{
+    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; workingGoal?: WorkingGoalCompletionPredicate; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => Promise<{
       sessionId: string
       runId: string
       settlement: string
       items?: unknown[]
       record?: TurnRecord
+      workingState?: WorkingState
       interruptReason?: PiTurnInterruptReason
       orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
       pluginExecution?: SubDesignPluginExecutionProjection
@@ -280,6 +283,7 @@ export type SubmitPiHostRunInput = {
   pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
   maxIterations?: number
   definitionOfDone?: string
+  workingGoal?: WorkingGoalCompletionPredicate
   /** Per-turn deadline decided at admission; absent means the Host arms none. */
   timeoutMs?: number
   pluginExecution?: SubDesignPluginExecutionRequest
@@ -295,6 +299,7 @@ export type SubmitPiHostRunResult = {
   items: unknown[]
   /** What this turn appended to the session's Turn Record. */
   record?: TurnRecord
+  workingState?: WorkingState
   orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
   pluginExecution?: SubDesignPluginExecutionProjection
 }
@@ -413,6 +418,7 @@ export async function submitPiHostRun(
     pattern: input.pattern,
     maxIterations: input.maxIterations,
     definitionOfDone: input.definitionOfDone,
+    workingGoal: input.workingGoal,
     timeoutMs: input.timeoutMs,
     pluginExecution: input.pluginExecution,
   })
@@ -427,6 +433,7 @@ export async function submitPiHostRun(
     result: piTurnFinalAnswer(items),
     items,
     ...(turn.record ? { record: turn.record } : {}),
+    ...(turn.workingState ? { workingState: turn.workingState } : {}),
     orchestration: turn.orchestration,
     pluginExecution: turn.pluginExecution,
   }

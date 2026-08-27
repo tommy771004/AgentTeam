@@ -72,6 +72,8 @@ export type PiHostResponse = {
     items?: unknown[]
     /** The entries this turn appended to the session's Turn Record. */
     record?: TurnRecord
+    /** Latest canonical Working State for the admitted builtin Task run. */
+    workingState?: WorkingState
     contractRevision?: number
     contractDigest?: string
     contract?: PiTurnToolContract
@@ -157,7 +159,7 @@ export type PiHostEvent =
     }
   | {
       event: 'host/tool-start' | 'host/tool-decision' | 'host/tool-result'
-      payload: { runId: string; tool: string; callId?: string; parentRunId?: string; decision?: 'allow' | 'ask' | 'deny'; settlement?: 'success' | 'failed' | 'cancelled' | 'denied'; reason?: string; item?: unknown; contractRevision?: number; contractDigest?: string; schemaDigest?: string; toolSource?: 'builtin' | 'extension-pack' | 'mcp'; toolPack?: string; invocationOrigin?: PiInvocationOrigin }
+      payload: { runId: string; tool: string; callId?: string; parentRunId?: string; decision?: 'allow' | 'ask' | 'deny'; settlement?: 'success' | 'failed' | 'cancelled' | 'denied'; reason?: string; item?: unknown; executionEvidence?: WorkingExecutionEvidence; contractRevision?: number; contractDigest?: string; schemaDigest?: string; toolSource?: 'builtin' | 'extension-pack' | 'mcp'; toolPack?: string; invocationOrigin?: PiInvocationOrigin }
     }
   | {
       event: 'host/orchestration'
@@ -265,7 +267,16 @@ import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
 import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
 import { callPiMcpTool, listPiMcpTools, piMcpGenerationKey, reloadPiMcp, stopPiMcp } from './piMcpClient.ts'
 import { isCompletedModelCall, isPiHostDefinitionOfDoneMet, isPiTurnSettlement, piTurnFinalAnswer, piTurnResultText, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
-import { appendTurnRecord, asTurnRecordMemoryWrite, derivePiHistory, nextTurnRecordSeq, pageTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordEntry, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
+import { appendTurnRecord, asTurnRecordMemoryWrite, derivePiHistory, nextTurnRecordSeq, pageTurnRecord, workingStateFromTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordEntry, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
+import {
+  checkWorkingStateProposal,
+  createInitialWorkingState,
+  isWorkingGoalCompletionPredicate,
+  type WorkingExecutionEvidence,
+  type WorkingState,
+  type WorkingStateProposal,
+  type WorkingToolSettlement,
+} from '../src/agent/workingState.ts'
 import type { CompactionCheckpointSaveInput, CompactionManifest, CompactionReason } from '../src/agent/compactionCheckpoint.ts'
 import { cancelSubDesignProviderRun, executeSubDesignProviderStage } from './subDesignProviderRuntime.ts'
 import { shouldStopForProviderProjection, type SubDesignPluginExecutionProjection } from '../src/agent/subdesign/pluginExecution.ts'
@@ -364,6 +375,105 @@ type PreparedPiCompaction = {
 
 export type SessionRecord = { id: string; title: string; threadId?: string; parentSessionId?: string; role?: string; profile?: Record<string, unknown>; context?: PiContextPacket; depth?: number; messages: PiRecordedMessage[]; toolAudit?: PiToolAuditRecord[]; archived?: boolean; piSessionFile?: string; record?: TurnRecord; toolContracts?: PiTurnToolContract[]; toolContractRevisionFloor?: number; preparedCompaction?: PreparedPiCompaction }
 
+function projectSessionSummary(session: SessionRecord) {
+  const { record, toolContracts: _toolContracts, toolContractRevisionFloor: _toolContractRevisionFloor, ...summary } = session
+  const workingState = workingStateFromTurnRecord(record)
+  return {
+    ...summary,
+    messages: [...session.messages],
+    ...(session.toolAudit ? { toolAudit: [...session.toolAudit] } : {}),
+    ...(record ? { recordSummary: { version: record.version, entries: record.entries.length, latestSeq: record.entries.at(-1)?.seq ?? 0 } } : {}),
+    ...(workingState ? { workingState } : {}),
+  }
+}
+
+function workingStateForAdmittedTurn(
+  session: SessionRecord,
+  runId: string,
+  objective: string,
+  completionPredicate: unknown,
+): WorkingState {
+  return createInitialWorkingState({
+    runId,
+    objective,
+    constraints: session.context?.constraints,
+    ...(isWorkingGoalCompletionPredicate(completionPredicate) ? { completionPredicate } : {}),
+  })
+}
+
+function requestedWorkingGoal(input: { params?: Record<string, unknown> }): unknown {
+  return input.params?.workingGoal
+}
+
+function fileWriteStateProposal(
+  state: WorkingState,
+  tool: string,
+  callId: string,
+  args: unknown,
+): WorkingStateProposal | undefined {
+  const goal = state.goals.find((candidate) => candidate.status === 'pending' && candidate.completionPredicate?.kind === 'file-content')
+  if (!goal || tool !== 'write' || !args || typeof args !== 'object') return undefined
+  const values = args as Record<string, unknown>
+  if (typeof values.path !== 'string' || !values.path || typeof values.content !== 'string') return undefined
+  const modelEvidenceClaimed = Object.keys(values).some((key) => /^(evidence|evidenceId|attestation|issuedBy)$/i.test(key))
+  return {
+    schemaVersion: 1,
+    proposalId: `proposal:${state.runId}:${callId}`,
+    source: 'model',
+    baseRevision: state.revision,
+    runId: state.runId,
+    goalId: goal.id,
+    proposedStatus: 'done',
+    tool,
+    callId,
+    file: {
+      path: values.path,
+      sha256: createHash('sha256').update(values.content).digest('hex'),
+    },
+    ...(modelEvidenceClaimed ? { modelEvidenceClaimed: true } : {}),
+  }
+}
+
+function hostFileWriteEvidence(input: {
+  state: WorkingState
+  proposal: WorkingStateProposal
+  identity: TurnRecordToolContractIdentity | undefined
+  settlement: WorkingToolSettlement
+  trustedResult: unknown
+}): WorkingExecutionEvidence | undefined {
+  if (input.settlement !== 'success'
+    || input.proposal.tool !== 'write'
+    || input.identity?.toolSource !== 'builtin'
+    || typeof input.identity.contractDigest !== 'string'
+    || typeof input.identity.schemaDigest !== 'string') return undefined
+  const trustedResultDigest = createHash('sha256').update(JSON.stringify(input.trustedResult) || '').digest('hex')
+  const receiptDigest = createHash('sha256').update(JSON.stringify({
+    version: 1,
+    runId: input.state.runId,
+    goalId: input.proposal.goalId,
+    tool: input.proposal.tool,
+    callId: input.proposal.callId,
+    contractDigest: input.identity.contractDigest,
+    schemaDigest: input.identity.schemaDigest,
+    resource: input.proposal.file,
+    trustedResultDigest,
+  })).digest('hex')
+  return {
+    schemaVersion: 1,
+    evidenceId: `execution:${receiptDigest}`,
+    runId: input.state.runId,
+    goalId: input.proposal.goalId,
+    tool: input.proposal.tool,
+    callId: input.proposal.callId,
+    contractDigest: input.identity.contractDigest,
+    schemaDigest: input.identity.schemaDigest,
+    receiptDigest,
+    resource: { kind: 'file-content', ...input.proposal.file },
+    issuedBy: 'host',
+    attestation: 'non-model',
+  }
+}
+
 type CompactionCheckpointWriter = {
   save(input: CompactionCheckpointSaveInput): { ok: boolean; error?: string }
 }
@@ -425,6 +535,8 @@ type ActiveTurnRecorder = {
   entries: TurnRecordAppend[]
   /** Frozen at tool start so a mid-call capability load cannot rewrite history. */
   toolIdentities: Map<string, TurnRecordToolContractIdentity>
+  /** Model-authored completion proposals awaiting the exact terminal result. */
+  stateProposals: Map<string, WorkingStateProposal>
   /**
    * The seq the commit will start from, read once when the turn opened.
    * `session.record` does not change while a turn runs, so an entry's live
@@ -786,6 +898,12 @@ function memoryWriteToolResultFields(value: unknown, callId: string): { item?: {
   return memoryWrite?.callId === callId ? { item: { memoryWrite } } : {}
 }
 
+function workingExecutionEvidenceRecordFields(
+  evidence: WorkingExecutionEvidence | undefined,
+): { executionEvidence?: WorkingExecutionEvidence } {
+  return evidence ? { executionEvidence: evidence } : {}
+}
+
 function piToolExecutionFailed(event: Record<string, unknown>, toolName: string): boolean {
   if (event.isError === true) return true
   // Memory writes promise commit durability, so their typed CONTENT failure
@@ -835,6 +953,7 @@ function recordToolAudit(state: HostState, sessionId: unknown, event: PiHostEven
         : 'failed',
       ...(record.reason ? { detail: record.reason } : {}),
       ...memoryWriteRecordFields(payload.item, record.callId),
+      ...workingExecutionEvidenceRecordFields(payload.executionEvidence),
       ...(payload.contractRevision !== undefined ? {
         contractRevision: payload.contractRevision,
         contractDigest: payload.contractDigest,
@@ -845,6 +964,102 @@ function recordToolAudit(state: HostState, sessionId: unknown, event: PiHostEven
       } : {}),
     })
   }
+}
+
+function publishModelToolTerminal(input: {
+  state: HostState
+  sessionId: string
+  emit: ((message: PiHostMessage) => void) | undefined
+  runId: string
+  tool: string
+  callId: string
+  denialReason: string | undefined
+  toolFailed: boolean
+  identity: TurnRecordToolContractIdentity | undefined
+  proposal: WorkingStateProposal | undefined
+  workingState: WorkingState
+  trustedResult: unknown
+  eventIsError: boolean
+}): WorkingToolSettlement {
+  if (input.denialReason !== undefined) return 'denied'
+  const catalogued = input.state.catalogProjection.get(input.tool)
+  const refusedAsInactive = input.eventIsError
+    && input.identity?.contractStatus === 'catalogued-not-in-turn-contract'
+    && catalogued?.available === true
+    && catalogued.active === false
+    ? catalogued.reason || `${input.tool} is not active in this turn`
+    : undefined
+  const settlement = refusedAsInactive ? 'denied' as const : input.toolFailed ? 'failed' as const : 'success' as const
+  const executionEvidence = input.proposal
+    ? hostFileWriteEvidence({
+        state: input.workingState,
+        proposal: input.proposal,
+        identity: input.identity,
+        settlement,
+        trustedResult: input.trustedResult,
+      })
+    : undefined
+  publishInTurnToolEvent(input.state, input.sessionId, input.emit, {
+    event: 'host/tool-result',
+    payload: {
+      runId: input.runId,
+      tool: input.tool,
+      callId: input.callId,
+      settlement,
+      ...(refusedAsInactive ? { reason: refusedAsInactive } : {}),
+      ...memoryWriteToolResultFields(input.trustedResult, input.callId),
+      ...workingExecutionEvidenceRecordFields(executionEvidence),
+      ...(input.identity || {}),
+    },
+  })
+  return settlement
+}
+
+function commitCheckedWorkingState(input: {
+  sessionId: string
+  recorder: ActiveTurnRecorder
+  workingState: WorkingState
+  proposal: WorkingStateProposal | undefined
+  callId: string
+  settlement: WorkingToolSettlement
+}): WorkingState {
+  if (!input.proposal) return input.workingState
+  let terminalIndex = -1
+  for (let index = input.recorder.entries.length - 1; index >= 0; index -= 1) {
+    const entry = input.recorder.entries[index]
+    if (entry?.kind === 'tool-result' && entry.callId === input.callId) {
+      terminalIndex = index
+      break
+    }
+  }
+  const terminalEntry = terminalIndex >= 0 ? input.recorder.entries[terminalIndex] : undefined
+  const executionEvidence = terminalEntry?.kind === 'tool-result' ? terminalEntry.executionEvidence : undefined
+  const settlement = terminalEntry?.kind === 'tool-result' ? terminalEntry.settlement : input.settlement
+  const checked = checkWorkingStateProposal({
+    state: input.workingState,
+    proposal: input.proposal,
+    settlement,
+    evidence: executionEvidence,
+    evidenceSeq: terminalIndex >= 0 ? input.recorder.seqBase + terminalIndex : 0,
+  })
+  recordTurnEntry(input.sessionId, { kind: 'state-check', source: 'host', check: checked.check })
+  if (checked.verdict !== 'accepted') return input.workingState
+  recordTurnEntry(input.sessionId, { kind: 'working-state', source: 'host', state: checked.state })
+  return checked.state
+}
+
+function recordFileWriteStateProposal(input: {
+  sessionId: string
+  recorder: ActiveTurnRecorder
+  workingState: WorkingState
+  tool: string
+  callId: string
+  args: unknown
+}): void {
+  const proposal = fileWriteStateProposal(input.workingState, input.tool, input.callId, input.args)
+  if (!proposal) return
+  input.recorder.stateProposals.set(input.callId, proposal)
+  recordTurnEntry(input.sessionId, { kind: 'state-proposal', source: 'model', proposal })
 }
 
 const DIRECT_TOOL_ENVELOPE_FIELDS = new Set([
@@ -2354,12 +2569,7 @@ export function handlePiHostRequest(
   // The list carries what a session IS, not everything it did: a long run's
   // record is read a page at a time through `sessions/record`, so listing
   // sessions cannot grow with the length of their history.
-  if (input.method === 'sessions/list') return [{ id, result: { sessions: state.snapshot.sessions.map(({ record, toolContracts: _toolContracts, toolContractRevisionFloor: _toolContractRevisionFloor, ...session }) => ({
-    ...session,
-    messages: [...session.messages],
-    ...(session.toolAudit ? { toolAudit: [...session.toolAudit] } : {}),
-    ...(record ? { recordSummary: { version: record.version, entries: record.entries.length, latestSeq: record.entries[record.entries.length - 1]?.seq ?? 0 } } : {}),
-  })) } }]
+  if (input.method === 'sessions/list') return [{ id, result: { sessions: state.snapshot.sessions.map(projectSessionSummary) } }]
   if (input.method === 'sessions/record') {
     const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
     const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
@@ -2727,6 +2937,7 @@ export function handlePiHostRequest(
       step: 1,
       entries: [],
       toolIdentities: new Map(),
+      stateProposals: new Map(),
       seqBase: nextTurnRecordSeq(session.record),
       reasoning: [],
       // Only when there is a live stream to feed. A batch caller receives the
@@ -2751,6 +2962,8 @@ export function handlePiHostRequest(
     })
     activeTurnRecorders.set(sessionId, recorder)
     recordTurnEntry(sessionId, { kind: 'turn-start', source: 'host' })
+    let workingState = workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input))
+    recordTurnEntry(sessionId, { kind: 'working-state', source: 'host', state: workingState })
     // Trusted Host verification starts from the admitted run/view. No field in
     // contextPolicy, model text, or tool args can supply or deserialize it.
     const shellSandboxVerification: Promise<BuiltinShellSandboxVerification> | undefined =
@@ -2912,6 +3125,7 @@ export function handlePiHostRequest(
             settlement,
             items: [{ type: 'assistant_message', content: pluginExecution.summary }],
             record: stoppedRecord,
+            workingState,
             pluginExecution,
             orchestration: { pattern, iterations: 0, maxIterations: iterationLimit, definitionOfDone, dodMet: false },
           },
@@ -3022,6 +3236,7 @@ export function handlePiHostRequest(
               ...(event.args !== undefined ? { args: event.args } : {}),
               ...(identity || {}),
             })
+            recordFileWriteStateProposal({ sessionId, recorder, workingState, tool: toolName, callId, args: event.args })
             // Issue 16: an in-turn call gets the same observable lifecycle as
             // a direct-protocol one — start, decision, exactly one terminal.
             // Previously only the DENY path published anything terminal, so an
@@ -3048,48 +3263,35 @@ export function handlePiHostRequest(
               detail: denialReason,
             })
             const identity = recorder.toolIdentities.get(toolCallId)
-            recorder.toolIdentities.delete(toolCallId)
+            const proposal = recorder.stateProposals.get(toolCallId)
             // The in-turn denial audit already emitted and durably recorded
             // its one terminal result. Pi's blocked execution_end confirms the
             // gate held, but must not create a second terminal result.
-            if (denialReason === undefined) {
-              // A tool the catalog knows but this turn never activated did not
-              // "fail" — it was refused. Reporting it as a failure makes a
-              // policy outcome look like a broken tool, and hides the one thing
-              // that would fix it: the capability the catalog names (issue 19).
-              // Narrow on purpose. `available: false` covers a tool that is
-              // catalogued but BROKEN — a failed MCP transport, a missing
-              // binary — and those really did fail; relabelling them as
-              // refusals would hide a fault behind a policy message. The
-              // refusal case is a tool that works and simply was not activated
-              // for this turn, which is exactly what the identity fallback
-              // above already had to conclude to reach `catalogued-…`.
-              const catalogued = state.catalogProjection.get(toolName)
-              const refusedAsInactive = event.isError === true
-                && identity?.contractStatus === 'catalogued-not-in-turn-contract'
-                && catalogued?.available === true
-                && catalogued.active === false
-                ? catalogued.reason || `${toolName} is not active in this turn`
-                : undefined
-              const settlement = refusedAsInactive
-                ? 'denied' as const
-                : toolFailed ? 'failed' as const : 'success' as const
-              // The one terminal for this call, in the event stream, the
-              // session audit and the durable record. `recordToolAudit` is the
-              // single writer of the record entry — writing it here as well
-              // produced TWO terminal results for one call. The deny path
-              // already published its own, which is why this is gated on the
-              // absence of a denial rather than emitted unconditionally.
-              publishInTurnToolEvent(state, sessionId, emit, {
-                event: 'host/tool-result',
-                payload: {
-                  runId, tool: toolName, callId: toolCallId, settlement,
-                  ...(refusedAsInactive ? { reason: refusedAsInactive } : {}),
-                  ...memoryWriteToolResultFields(event.result, toolCallId),
-                  ...(identity || {}),
-                },
-              })
-            }
+            const terminalSettlement = publishModelToolTerminal({
+              state,
+              sessionId,
+              emit,
+              runId,
+              tool: toolName,
+              callId: toolCallId,
+              denialReason,
+              toolFailed,
+              identity,
+              proposal,
+              workingState,
+              trustedResult: event.result,
+              eventIsError: event.isError === true,
+            })
+            workingState = commitCheckedWorkingState({
+              sessionId,
+              recorder,
+              workingState,
+              proposal,
+              callId: toolCallId,
+              settlement: terminalSettlement,
+            })
+            recorder.toolIdentities.delete(toolCallId)
+            recorder.stateProposals.delete(toolCallId)
           }
           /* Events are collected below so the response remains ordered after them. */
           // Real progress resets the budget: a turn still emitting work is
@@ -3186,7 +3388,7 @@ export function handlePiHostRequest(
           const done = isPiHostDefinitionOfDoneMet(
             definitionOfDone,
             turn.settlement,
-            answer,
+            workingState,
           )
           if (definitionOfDone) {
             publishOrchestration('dod', iteration, done ? 'met' : 'unmet')
@@ -3251,6 +3453,7 @@ export function handlePiHostRequest(
             : {}),
           items: orchestration.result ? [{ type: 'assistant_message', content: orchestration.result }] : [],
           record: turnRecordSlice,
+          workingState,
           orchestration: {
             pattern: orchestration.pattern,
             iterations: orchestration.iterations,

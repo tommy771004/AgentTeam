@@ -13,14 +13,25 @@
  * Nothing here executes anything, so both halves can import it.
  */
 import type { PiTurnInterruptReason, PiTurnSettlement } from './piHostRun.ts'
+import {
+  isWorkingExecutionEvidence,
+  isWorkingState,
+  isWorkingStateCheck,
+  isWorkingStateProposal,
+  type WorkingExecutionEvidence,
+  type WorkingState,
+  type WorkingStateCheck,
+  type WorkingStateProposal,
+} from './workingState.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
  * payload: a record this build cannot read is refused loudly, never treated as
  * empty. Version 2 adds metadata-only durable-memory recall provenance.
+ * Version 3 adds Host-owned Verified Working State snapshots.
  */
-export const TURN_RECORD_FORMAT_VERSION = 2
-const LEGACY_TURN_RECORD_FORMAT_VERSION = 1
+export const TURN_RECORD_FORMAT_VERSION = 3
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -176,7 +187,16 @@ export function asTurnRecordMemoryWrite(value: unknown, expectedCallId?: string)
   if (write.operation !== 'set' && write.operation !== 'append') return undefined
   if (write.scope !== 'project' || !Number.isSafeInteger(write.revision) || Number(write.revision) < 1) return undefined
   if (expectedCallId !== undefined && write.callId !== expectedCallId) return undefined
-  return write as TurnRecordMemoryWrite
+  return {
+    operation: write.operation,
+    id: write.id as string,
+    logicalKey: write.logicalKey as string,
+    scope: write.scope,
+    revision: Number(write.revision),
+    runId: write.runId as string,
+    sessionId: write.sessionId as string,
+    callId: write.callId as string,
+  }
 }
 
 export type TurnRecordEntry = TurnRecordCoordinates &
@@ -251,6 +271,8 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         settlement: 'success' | 'failed' | 'cancelled' | 'denied'
         detail?: string
         memoryWrite?: TurnRecordMemoryWrite
+        /** Adapter-issued, bounded identity for a verified state-changing result. */
+        executionEvidence?: WorkingExecutionEvidence
       } & TurnRecordToolContractIdentity)
     | ({
         /** Host-owned policy/evidence lifecycle for a migrated invocation. */
@@ -280,6 +302,24 @@ export type TurnRecordEntry = TurnRecordCoordinates &
           memoryKind: 'memory' | 'profile' | 'document'
           revision: number
         }>
+      }
+    | {
+        /** What model-authored tool arguments propose, never a completion fact. */
+        kind: 'state-proposal'
+        source: 'model'
+        proposal: WorkingStateProposal
+      }
+    | {
+        /** Host Checker verdict over one exact proposal and result identity. */
+        kind: 'state-check'
+        source: 'host'
+        check: WorkingStateCheck
+      }
+    | {
+        /** Canonical Host snapshot for one Task run; models can only observe it. */
+        kind: 'working-state'
+        source: 'host'
+        state: WorkingState
       }
     | {
         /** A fact the user must see that is not a tool call or a message. */
@@ -345,6 +385,9 @@ const KINDS = new Set([
   'approval',
   'compaction',
   'memory-recall',
+  'state-proposal',
+  'state-check',
+  'working-state',
   'notice',
 ])
 
@@ -367,9 +410,25 @@ function isMemoryRecallEntry(entry: Record<string, unknown>): boolean {
 
 function isHostContextEntry(entry: Record<string, unknown>): boolean {
   if (entry.kind === 'memory-recall') return isMemoryRecallEntry(entry)
+  if (entry.kind === 'state-proposal') {
+    return entry.source === 'model'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'proposal', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isWorkingStateProposal(entry.proposal)
+  }
+  if (entry.kind === 'state-check') {
+    return entry.source === 'host'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'check', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isWorkingStateCheck(entry.check)
+  }
+  if (entry.kind === 'working-state') {
+    return entry.source === 'host'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'state', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isWorkingState(entry.state)
+  }
   if (entry.kind === 'notice') return typeof entry.topic === 'string' && typeof entry.text === 'string'
   if (entry.kind === 'tool-result') {
-    return entry.memoryWrite === undefined || Boolean(asTurnRecordMemoryWrite(entry.memoryWrite, String(entry.callId || '')))
+    if (entry.memoryWrite !== undefined && !asTurnRecordMemoryWrite(entry.memoryWrite, String(entry.callId || ''))) return false
+    return entry.executionEvidence === undefined || isWorkingExecutionEvidence(entry.executionEvidence)
   }
   return true
 }
@@ -429,16 +488,21 @@ export function parseTurnRecord(value: unknown): { record: TurnRecord; tornTail:
   if (value === undefined || value === null) return { record: { ...EMPTY_TURN_RECORD, entries: [] }, tornTail: false }
   if (typeof value !== 'object') throw new TurnRecordVersionError(value)
   const raw = value as { version?: unknown; entries?: unknown }
-  if (raw.version !== TURN_RECORD_FORMAT_VERSION && raw.version !== LEGACY_TURN_RECORD_FORMAT_VERSION) {
+  if (raw.version !== TURN_RECORD_FORMAT_VERSION && !LEGACY_TURN_RECORD_FORMAT_VERSIONS.has(Number(raw.version))) {
     throw new TurnRecordVersionError(raw.version)
   }
   const entries = Array.isArray(raw.entries) ? raw.entries : []
   const kept: TurnRecordEntry[] = []
   let tornTail = false
   for (let index = 0; index < entries.length; index += 1) {
-    if (raw.version === LEGACY_TURN_RECORD_FORMAT_VERSION
+    if (raw.version === 1
       && entries[index] && typeof entries[index] === 'object'
       && (entries[index] as Record<string, unknown>).kind === 'memory-recall') {
+      throw new TurnRecordCorruptError(index)
+    }
+    if ((raw.version === 1 || raw.version === 2)
+      && entries[index] && typeof entries[index] === 'object'
+      && (entries[index] as Record<string, unknown>).kind === 'working-state') {
       throw new TurnRecordCorruptError(index)
     }
     if (isEntry(entries[index])) {
@@ -463,7 +527,7 @@ export function parseTurnRecord(value: unknown): { record: TurnRecord; tornTail:
  * about order. One function decides it, so they cannot drift.
  */
 export function nextTurnRecordSeq(record: TurnRecord | undefined): number {
-  const base = record?.version === TURN_RECORD_FORMAT_VERSION || record?.version === LEGACY_TURN_RECORD_FORMAT_VERSION
+  const base = record && (record.version === TURN_RECORD_FORMAT_VERSION || LEGACY_TURN_RECORD_FORMAT_VERSIONS.has(record.version))
     ? record.entries
     : []
   return (base.length > 0 ? base[base.length - 1].seq : 0) + 1
@@ -479,7 +543,7 @@ export function appendTurnRecord(
   record: TurnRecord | undefined,
   entries: TurnRecordAppend[],
 ): TurnRecord {
-  const base = record?.version === TURN_RECORD_FORMAT_VERSION || record?.version === LEGACY_TURN_RECORD_FORMAT_VERSION
+  const base = record && (record.version === TURN_RECORD_FORMAT_VERSION || LEGACY_TURN_RECORD_FORMAT_VERSIONS.has(record.version))
     ? record.entries
     : []
   let seq = nextTurnRecordSeq(record) - 1
@@ -488,6 +552,20 @@ export function appendTurnRecord(
     return { ...entry, seq } as TurnRecordEntry
   })
   return { version: TURN_RECORD_FORMAT_VERSION, entries: [...base, ...appended] }
+}
+
+/** Latest canonical state in the record, optionally scoped to one Task run. */
+export function workingStateFromTurnRecord(
+  record: TurnRecord | undefined,
+  runId?: string,
+): WorkingState | undefined {
+  let latest: WorkingState | undefined
+  for (const entry of turnRecordEntries(record)) {
+    if (entry.kind !== 'working-state') continue
+    if (runId !== undefined && entry.state.runId !== runId) continue
+    if (!latest || entry.state.revision >= latest.revision) latest = entry.state
+  }
+  return latest
 }
 
 /** One message as the model's own history carries it. */

@@ -52,10 +52,13 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
-assert.equal(TURN_RECORD_FORMAT_VERSION, 2, 'memory-recall is an explicit Turn Record format evolution')
+assert.equal(TURN_RECORD_FORMAT_VERSION, 3, 'Working State is an explicit Turn Record format evolution')
 const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
 assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')
+const migratedV2 = parseTurnRecord({ version: 2, entries: continued.entries })
+assert.equal(migratedV2.record.version, TURN_RECORD_FORMAT_VERSION)
+assert.deepEqual(migratedV2.record.entries, continued.entries, 'v2 records migrate without losing their ordered history')
 
 const recalled = appendTurnRecord(undefined, [{
   kind: 'memory-recall', source: 'host', revision: 7,
@@ -71,6 +74,7 @@ assert.throws(() => parseTurnRecord({
   entries: [recalled.entries[0]],
 }), TurnRecordCorruptError, 'a final v2 entry in v1 is incompatible, not a recoverable torn append')
 assert.equal(parseTurnRecord(recalled).record.entries[0]?.kind, 'memory-recall')
+assert.equal(parseTurnRecord({ version: 2, entries: recalled.entries }).record.entries[0]?.kind, 'memory-recall')
 assert.equal(projectConversationRows(recalled)[0]?.kind, 'notice')
 assert.equal(projectConversationRows(recalled)[0]?.kind === 'notice' ? projectConversationRows(recalled)[0]?.content : '', '已召回 1 則長期記憶（revision 7）')
 assert.throws(() => parseTurnRecord({
@@ -90,6 +94,30 @@ for (const invalid of [
     entries: [invalid, continued.entries[0]],
   }), TurnRecordCorruptError, 'memory provenance is Host-owned, exact-shape, and bounded')
 }
+
+const working = appendTurnRecord(undefined, [{
+  kind: 'working-state', source: 'host',
+  state: {
+    schemaVersion: 1,
+    runId: 'run-1',
+    revision: 1,
+    objective: '完成一件事',
+    constraints: [],
+    goals: [{ id: 'run-1:goal:1', description: '完成一件事', status: 'pending', evidence: [] }],
+  },
+  turn: 1, step: 1, at: 1,
+}])
+assert.equal(parseTurnRecord(working).record.entries[0]?.kind, 'working-state')
+for (const legacyVersion of [1, 2]) {
+  assert.throws(() => parseTurnRecord({
+    version: legacyVersion,
+    entries: [working.entries[0]],
+  }), TurnRecordCorruptError, `v${legacyVersion} cannot smuggle a v3 Working State entry`)
+}
+assert.throws(() => parseTurnRecord({
+  version: TURN_RECORD_FORMAT_VERSION,
+  entries: [{ ...working.entries[0], source: 'model' }, continued.entries[0]],
+}), TurnRecordCorruptError, 'Working State is Host-owned')
 
 // ── Usage fields are ADDITIONS, at the same format version ────────────────
 // The cache split and the cost are optional fields on an existing shape, so a
@@ -238,6 +266,7 @@ const profile = {
   approvalMode: 'full',
   unattended: true,
 }
+const stopHosts: Array<() => Promise<void>> = []
 
 async function startHost() {
   const host = spawn(process.execPath, [hostPath], { env, stdio: ['pipe', 'pipe', 'inherit'] })
@@ -255,10 +284,16 @@ async function startHost() {
     }
   }
   const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+  let stopped = false
   const stop = async () => {
-    host.stdin.end()
-    await once(host, 'exit')
+    if (stopped) return
+    stopped = true
+    if (host.exitCode === null && host.signalCode === null) {
+      host.stdin.end()
+      await once(host, 'exit')
+    }
   }
+  stopHosts.push(stop)
   return { host, waitFor, send, stop }
 }
 
@@ -274,6 +309,26 @@ try {
   first.send(4, 'turn/submit', { sessionId, runId: 'record-run-1', cwd: workspace, prompt: '分析這個專案', profile })
   const settled = await first.waitFor((message) => message.id === 4, 'settlement')
   assert.equal(settled.result?.settlement, 'answered')
+  const expectedWorkingState = {
+    schemaVersion: 1,
+    runId: 'record-run-1',
+    revision: 1,
+    objective: '分析這個專案',
+    constraints: [],
+    goals: [{
+      id: 'record-run-1:goal:1',
+      description: '分析這個專案',
+      status: 'pending',
+      evidence: [],
+    }],
+  }
+  assert.deepEqual(
+    settled.result?.workingState,
+    expectedWorkingState,
+    'the Host returns the canonical revision-1 Working State for the admitted run',
+  )
+  const liveWorkingState = settled.result?.record?.entries.find((entry: { kind?: string }) => entry.kind === 'working-state')
+  assert.deepEqual(liveWorkingState?.state, expectedWorkingState, 'the live turn slice carries the same Host state')
 
   first.send(5, 'sessions/list')
   const listed = await first.waitFor((message) => message.id === 5, 'sessions')
@@ -283,10 +338,14 @@ try {
   assert.equal(projected.record, undefined)
   assert.equal(projected.recordSummary.version, TURN_RECORD_FORMAT_VERSION)
   assert.ok(projected.recordSummary.entries > 0)
+  assert.deepEqual(projected.workingState, expectedWorkingState, 'session projection comes from the Host record')
   first.send(6, 'sessions/record', { sessionId })
   const paged = await first.waitFor((message) => message.id === 6, 'record page')
   const entries = turnRecordEntries({ version: TURN_RECORD_FORMAT_VERSION, entries: paged.result.page.entries })
   assert.equal(paged.result.page.hasOlder, false, 'this run fits in one page')
+  const replayedWorkingState = entries.find((entry) => entry.kind === 'working-state')
+  assert.deepEqual(replayedWorkingState && 'state' in replayedWorkingState ? replayedWorkingState.state : undefined, expectedWorkingState)
+  assert.deepEqual(replayedWorkingState, liveWorkingState, 'live and replay use the exact same sequenced state entry')
 
   const kinds = entries.map((entry) => entry.kind)
   assert.equal(kinds[0], 'turn-start', 'the record opens with the turn')
@@ -345,6 +404,7 @@ try {
   assert.deepEqual([...new Set(after.map((entry) => entry.turn))], [1, 2], 'the second turn is turn 2')
   await second.stop()
 } finally {
+  await Promise.all(stopHosts.map((stop) => stop()))
   modelServer.close()
   await rm(agentDir, { recursive: true, force: true })
   await rm(stateDir, { recursive: true, force: true })

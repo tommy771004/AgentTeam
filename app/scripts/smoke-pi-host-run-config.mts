@@ -58,7 +58,7 @@ assert.equal(isPiHostDefinitionOfDoneMet(PI_CORE_SETTLEMENT_DEFINITION_OF_DONE, 
 assert.equal(isPiHostDefinitionOfDoneMet(PI_CORE_SETTLEMENT_DEFINITION_OF_DONE, 'empty', ''), false)
 assert.equal(isPiHostDefinitionOfDoneMet(PI_CORE_SETTLEMENT_DEFINITION_OF_DONE, 'failed', ''), false)
 assert.equal(isPiHostDefinitionOfDoneMet('non-empty assistant result', 'answered', ''), false)
-assert.equal(isPiHostDefinitionOfDoneMet('non-empty assistant result', 'answered', 'done'), true)
+assert.equal(isPiHostDefinitionOfDoneMet('non-empty assistant result', 'answered', 'done'), false, 'assistant prose cannot satisfy custom DoD')
 
 // A turn that ran tools and said nothing settles `empty`, and an empty turn
 // never satisfies a settlement-shaped DoD: it produced nothing to satisfy it
