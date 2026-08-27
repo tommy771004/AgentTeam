@@ -195,7 +195,7 @@ const entrySource = await readFile(resolve(import.meta.dirname, '../electron/piH
 assert.match(entrySource, /buildPiSubscriptionModelView\(\)/, 'piHostEntry must build the model view at startup')
 assert.match(entrySource, /resolveCatalogPublication\(/, 'piHostEntry must publish through the offline-fallback decision, not hand-pick rows')
 assert.match(entrySource, /refreshSubscriptionConfig/, 'piHostEntry exposes one real OAuth + model catalog refresh owner')
-assert.match(entrySource, /initialSnapshot, persist, refreshSubscriptionConfig\)/, 'settings/get is wired to the real Host refresh owner')
+assert.match(entrySource, /initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints\)/, 'settings/get is wired to the real Host refresh owner')
 assert.match(entrySource, /subscriptionCatalog:\s*publishedCatalog\.catalog/, 'config carries exactly the publication decision')
 assert.match(entrySource, /subscriptionCatalogStale: true/, 'the stale marker rides only when the fallback fired')
 const protocolSource = await readFile(resolve(import.meta.dirname, '../electron/piHostProtocol.ts'), 'utf8')

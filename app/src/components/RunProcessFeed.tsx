@@ -41,6 +41,36 @@ function basen(p: string) {
   return p.replace(/\\/g, '/').split('/').filter(Boolean).pop() || p
 }
 
+type DisplayFileChange = { path: string; action: string; added?: number; removed?: number }
+
+function FileDiffChips({ files }: { files: readonly DisplayFileChange[] }) {
+  if (files.length === 0) return null
+  const visible = files.slice(-8)
+  const hidden = files.length - visible.length
+  return (
+    <div className="agent-process-files">
+      <div className="mb-1.5 text-[11px] text-ink-3">已變更 {files.length} 個檔案</div>
+      <div className="flex flex-wrap gap-1.5">
+        {visible.map((file, index) => (
+          <span
+            key={file.path}
+            className="agent-file-chip rounded-chip font-[family-name:var(--font-mono)]"
+            title={`${file.action}: ${file.path.replace(/\\/g, '/')}`}
+            style={{ animation: `pop-in 250ms cubic-bezier(0.23,1,0.32,1) ${index * 60}ms both` }}
+          >
+            <span className="max-w-48 min-w-0 truncate">{basen(file.path)}</span>
+            {file.added !== undefined ? <span className="shrink-0 text-green tabular-nums">+{file.added}</span> : null}
+            {file.removed !== undefined && file.removed > 0 ? <span className="shrink-0 text-red tabular-nums">−{file.removed}</span> : null}
+          </span>
+        ))}
+        {hidden > 0 ? (
+          <span className="inline-flex h-7 items-center px-1.5 font-[family-name:var(--font-mono)] text-[11px] text-ink-3">+{hidden} 個</span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 function kindIcon(kind: string): string {
   switch (kind) {
     case 'tool':
@@ -673,32 +703,7 @@ export function RunProcessFeed({
             </div>
           ) : null}
 
-          {/* Files touched so far */}
-          {allFiles.length > 0 ? (
-            <div className="agent-process-files">
-              <div className="mb-1.5 text-[11px] text-ink-3">已變更 {allFiles.length} 個檔案</div>
-              <div className="flex flex-wrap gap-1.5">
-              {allFiles.slice(-8).map((f, i) => (
-                <button
-                  type="button"
-                  key={f.path}
-                  className="agent-file-chip"
-                  title={`${f.action}: ${f.path.replace(/\\/g, '/')}`}
-                  style={{ animation: `pop-in 250ms cubic-bezier(0.23,1,0.32,1) ${i * 60}ms both` }}
-                >
-                  <Icon name="edit" size={14} className="shrink-0" />
-                  <span className="max-w-48 truncate">{basen(f.path)}</span>
-                  {f.added !== undefined ? (
-                    <span className="shrink-0 text-emerald-400 tabular-nums">+{f.added}</span>
-                  ) : null}
-                  {f.removed !== undefined && f.removed > 0 ? (
-                    <span className="shrink-0 text-rose-300 tabular-nums">−{f.removed}</span>
-                  ) : null}
-                </button>
-              ))}
-              </div>
-            </div>
-          ) : null}
+          <FileDiffChips files={allFiles} />
         </div>
       </Reveal>
 
@@ -717,7 +722,7 @@ export function RunProcessFeed({
             className="agent-streaming-body"
             style={{ animation: 'stream-in 420ms cubic-bezier(0.22,0.61,0.25,1) both' }}
           >
-            <MarkdownBody content={draftText} />
+            <MarkdownBody content={draftText} streaming />
           </div>
         </div>
       ) : null}

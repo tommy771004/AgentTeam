@@ -5,7 +5,7 @@ import { LogViewer } from './LogViewer'
 import { ElapsedTime } from './primitives/ElapsedTime'
 import { AgentThinking } from './primitives/AgentThinking'
 import { ShimmerLabel } from './primitives/ShimmerLabel'
-import { SpinnerRing } from './primitives/SpinnerRing'
+import { RunTaskRow } from './RunTaskRow'
 import { emptyAgentLike } from '../agent/localCliRun'
 import { deriveRunLifecycle, lifecycleToneClass, orchestrationFromAgent } from '../agent/runLifecycle'
 import {
@@ -102,33 +102,15 @@ function honestProgress(
   return { summary, progress }
 }
 
-function CompactStepList({ steps }: { steps: ExecutionStep[] }) {
+const STEP_ROW_STATUS = { PENDING: 'pending', IN_PROGRESS: 'active', COMPLETED: 'done', FAILED: 'failed', SKIPPED: 'skipped' } as const
+
+function CompactStepList({ steps, live }: { steps: ExecutionStep[]; live: boolean }) {
   return (
     <ol className="space-y-2" aria-label="執行步驟">
-      {steps.map((step, index) => {
-        const isDone = step.status === 'COMPLETED'
-        const isActive = step.status === 'IN_PROGRESS'
-        const isFailed = step.status === 'FAILED'
-        const tone = isFailed ? 'text-red' : isActive ? 'text-accent-ink' : isDone ? 'text-green' : 'text-ink-3'
-
-        return (
-          <li key={step.step} className="flex min-w-0 items-center gap-2 text-[12px]">
-            <span
-              className={`flex size-[18px] shrink-0 items-center justify-center rounded-full border text-[10px] font-[family-name:var(--font-mono)] ${
-                isDone ? 'border-green bg-green text-white' : isFailed ? 'border-red bg-red text-white' : isActive ? 'border-accent text-accent-ink' : 'border-line-strong text-ink-3'
-              }`}
-            >
-              {isDone ? <Icon name="check" size={11} filled /> : isFailed ? <Icon name="close" size={11} /> : index + 1}
-            </span>
-            <span className={`min-w-0 flex-1 truncate ${isActive ? 'font-medium text-ink' : 'text-ink-2'}`}>
-              {step.description}
-            </span>
-            <span className={`shrink-0 text-[10px] ${tone}`}>
-              {isFailed ? '失敗' : isActive ? '進行中' : isDone ? (step.durationMs != null ? `${(step.durationMs / 1000).toFixed(1)}s` : '完成') : '待處理'}
-            </span>
-          </li>
-        )
-      })}
+      {steps.map((step, index) => (
+        <RunTaskRow key={step.step} text={step.description} status={STEP_ROW_STATUS[step.status]} index={index} live={live}
+          detail={step.result} meta={step.durationMs != null ? `${(step.durationMs / 1000).toFixed(1)}s` : undefined} />
+      ))}
     </ol>
   )
 }
@@ -430,38 +412,9 @@ export function InlineRunPanel({
           onToggle={() => setProgressOpen((value) => !value)}
         >
           {tasks.length > 0 ? (
-            <ul className="space-y-2">
+            <ul className="space-y-2" aria-label="任務步驟">
               {tasks.map((task, index) => (
-                <li key={task.id} className="flex items-start gap-2 text-[12px]">
-                  {task.status === 'done' || task.status === 'failed' ? (
-                    <span
-                      className={`mt-px flex size-[18px] shrink-0 items-center justify-center rounded-full ${
-                        task.status === 'failed' ? 'bg-red text-white' : 'bg-green text-white'
-                      }`}
-                    >
-                      <Icon name={task.status === 'failed' ? 'close' : 'check'} size={12} filled={task.status === 'done'} />
-                    </span>
-                  ) : (
-                    <SpinnerRing
-                      size={18}
-                      active={task.status === 'active'}
-                      tone={task.status === 'active' ? 'active' : 'idle'}
-                    >
-                      {index + 1}
-                    </SpinnerRing>
-                  )}
-                  <span
-                    className={
-                      task.status === 'done'
-                        ? 'text-ink-3 line-through'
-                        : task.status === 'active'
-                          ? 'text-ink'
-                          : 'text-ink-2'
-                    }
-                  >
-                    {task.text}
-                  </span>
-                </li>
+                <RunTaskRow key={`${runId}:${task.id}`} text={task.text} status={task.status} index={index} live={live} />
               ))}
             </ul>
           ) : isPiHost && live ? (
@@ -470,7 +423,7 @@ export function InlineRunPanel({
               <ShimmerLabel active>{currentStatus}</ShimmerLabel>
             </p>
           ) : !isPiHost && agent.steps.length > 0 ? (
-            <CompactStepList steps={agent.steps} />
+            <CompactStepList key={runId} steps={agent.steps} live={live} />
           ) : live && agent.loopConfig.trigger === 'local-cli' ? (
             <p className="flex items-center gap-2 text-[12px] text-ink-3">
               <AgentThinking variant="spin" className="text-accent-ink" />
@@ -494,7 +447,7 @@ export function InlineRunPanel({
                 <span className="font-[family-name:var(--font-mono)]">{agent.steps.length}</span>
                 <Icon name={stepsOpen ? 'expand_less' : 'expand_more'} size={15} />
               </button>
-              {stepsOpen ? <div className="mt-3"><CompactStepList steps={agent.steps} /></div> : null}
+              {stepsOpen ? <div className="mt-3"><CompactStepList key={runId} steps={agent.steps} live={live} /></div> : null}
             </div>
           ) : null}
 

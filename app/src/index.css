@@ -870,7 +870,7 @@ html:not([data-sidebar-solid='true']) .sidebar-panel::after {
 .agent-streaming-answer { border-top: 1px solid var(--color-line); }
 /* Caret rides the last rendered block, so it lands at the end of the streamed
    prose instead of on a line of its own. */
-.agent-streaming-body .markdown-body > :last-child::after {
+.agent-streaming-body .markdown-body > :last-child:not(.agent-code-block)::after {
   content: '';
   display: inline-block;
   width: 2px;
@@ -880,6 +880,26 @@ html:not([data-sidebar-solid='true']) .sidebar-panel::after {
   border-radius: 999px;
   background: var(--color-primary);
   animation: fade-in 150ms ease-out both;
+}
+.markdown-body .agent-source-link {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  border-radius: 5px;
+  padding: 1px 4px;
+  vertical-align: 1px;
+  background: var(--color-inset);
+  box-shadow: var(--shadow-hairline);
+  color: var(--color-ink-2);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  line-height: 1.35;
+  text-decoration: none;
+  transition: background 150ms ease, color 150ms ease;
+}
+.markdown-body .agent-source-link:hover {
+  background: var(--color-hover-2);
+  color: var(--color-ink);
 }
 .agent-result-actions {
   display: grid;
@@ -1064,35 +1084,53 @@ html[data-theme='light'] .agent-project-picker:hover,
 html[data-theme='light'] .agent-project-source:hover,
 html[data-theme='light'] .agent-project-branch:hover { background: rgba(14, 116, 144, 0.06); }
 
-/* Code and diff output are evidence, not a wall of terminal text. The header
-   keeps language and copy affordance discoverable while preserving selection.
-   The code surface stays dark in BOTH themes, so everything inside it uses
-   fixed light-on-dark values — routing these through --color-on-surface makes
-   them near-black and invisible once the light theme flips that token. */
-.agent-code-block { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045); }
+/* Code Block uses the same theme tokens as the surrounding conversation. */
+.agent-code-block { max-width: 100%; border-color: var(--color-line); background: var(--color-surface); }
 .agent-code-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 31px;
-  padding: 0 8px 0 11px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(232, 238, 252, 0.55);
-  font: 10px var(--font-mono);
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 10px 4px 12px;
+  border-bottom: 1px solid var(--color-line);
+  color: var(--color-ink-2);
+  font-size: 11.5px;
 }
 .agent-code-header button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  min-height: 24px;
   border-radius: 6px;
   padding: 3px 6px;
-  color: rgba(232, 238, 252, 0.72);
+  color: var(--color-ink-2);
   transition: color 120ms ease, background 120ms ease;
 }
-.agent-code-header button:hover { background: rgba(255, 255, 255, 0.07); color: rgba(232, 238, 252, 0.98); }
-.agent-code-header button[data-copied] { color: #34d399; }
-.agent-code-title { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; }
-.agent-code-lang { color: rgba(232, 238, 252, 0.95); font-weight: 500; }
-.agent-code-count { color: rgba(232, 238, 252, 0.5); }
+.agent-code-header button:hover { background: var(--color-hover); color: var(--color-ink); }
+.agent-code-header button:focus-visible,
+.agent-code-body:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.agent-code-header button[data-copy-state='success'] { color: var(--color-green); }
+.agent-code-header button[data-copy-state='error'] { color: var(--color-red); }
+.agent-code-copy-icon { position: relative; width: 12px; height: 12px; }
+.agent-code-copy-icon::before,
+.agent-code-copy-icon::after { content: ''; position: absolute; width: 8px; height: 8px; border: 1px solid currentColor; border-radius: 2px; }
+.agent-code-copy-icon::after { top: 3px; left: 3px; background: var(--color-surface); }
+[data-copy-state='success'] .agent-code-copy-icon::before { width: 9px; height: 5px; top: 2px; border-width: 0 0 1.5px 1.5px; border-radius: 0; transform: rotate(-45deg); }
+[data-copy-state='success'] .agent-code-copy-icon::after { display: none; }
+.agent-code-title { display: inline-flex; flex: 1; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.agent-code-filename { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink); font: 500 12px var(--font-mono); }
+.agent-code-lang { color: var(--color-ink-2); overflow-wrap: anywhere; }
+.agent-code-count { color: var(--color-ink-2); white-space: nowrap; }
+.agent-code-body { margin: 0; background: var(--color-inset); color: var(--color-ink-2); line-height: 1.7; tab-size: 2; }
+.agent-code-keyword { color: var(--color-accent-ink); font-weight: 500; }
+.agent-code-string { color: var(--color-green); }
+.agent-code-number { color: var(--color-orange); }
+.agent-code-function { color: var(--color-ink); }
+.agent-code-comment { color: var(--color-ink-3); }
 /* Line numbers come from a counter, so they never enter the copied text. */
-.agent-code-body code { counter-reset: agent-code-line; }
+.agent-code-body code { display: block; counter-reset: agent-code-line; }
 .agent-code-line { counter-increment: agent-code-line; }
 .agent-code-line::before {
   content: counter(agent-code-line);
@@ -1100,9 +1138,20 @@ html[data-theme='light'] .agent-project-branch:hover { background: rgba(14, 116,
   width: 2.5em;
   padding-right: 1em;
   text-align: right;
-  color: rgba(232, 238, 252, 0.42);
+  color: var(--color-ink-3);
   user-select: none;
   -webkit-user-select: none;
+}
+.agent-code-block[data-streaming] .agent-code-line:last-child::after,
+.agent-code-block[data-streaming] code:empty::after {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -0.14em;
+  border-radius: 999px;
+  background: var(--color-accent);
 }
 .agent-log-row { padding: 1px 4px; margin: 0 -4px; border-radius: 5px; transition: background 100ms ease; }
 .agent-log-row:hover { background: rgba(255, 255, 255, 0.04); }
@@ -1112,8 +1161,6 @@ html[data-theme='light'] .agent-project-branch:hover { background: rgba(14, 116,
 .agent-run-queue-header:hover { background: rgba(255, 255, 255, 0.045); }
 .agent-run-queue-item { transition: border-color 120ms ease, background 120ms ease; }
 .agent-run-queue-item:hover { border-color: var(--color-line-strong); background: var(--color-hover-2); }
-/* No light override for .agent-code-header — its surface is dark in both
-   themes, so a dark border / dark hover would disappear against it. */
 html[data-theme='light'] .agent-log-row:hover,
 html[data-theme='light'] .agent-run-queue-header:hover { background: rgba(15, 23, 42, 0.045); }
 
@@ -1326,19 +1373,7 @@ html[data-theme='light'] .agent-file-chip,
 html[data-theme='light'] .agent-summary-card,
 html[data-theme='light'] .agent-question-card { background: var(--color-surface); }
 
-.agent-code-block { border-color: var(--color-line); background: var(--color-surface); }
-.agent-code-header {
-  min-height: 34px;
-  padding: 0 10px 0 12px;
-  border-bottom-color: var(--color-line);
-  color: var(--color-ink-3);
-}
-.agent-code-lang { color: var(--color-ink); }
-.agent-code-count { color: var(--color-ink-3); }
-.agent-code-header button { color: var(--color-ink-3); }
-.agent-code-header button:hover { background: var(--color-hover-2); color: var(--color-ink); }
-.agent-code-body { background: var(--color-inset); color: var(--color-ink-2); }
-.agent-streaming-body .markdown-body > * { animation: stream-in 420ms cubic-bezier(0.22, 0.61, 0.25, 1) both; }
+.agent-streaming-body .markdown-body > :not(.agent-code-block) { animation: stream-in 420ms cubic-bezier(0.22, 0.61, 0.25, 1) both; }
 
 /* ── Calm workspace refinement ────────────────────────────
    The product is information-dense, so hierarchy comes from tone and spacing.

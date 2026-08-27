@@ -4,6 +4,7 @@ import type { ThreadRunSummary } from '../store/threadStore'
 import { deriveRunLifecycle, lifecycleToneClass } from '../agent/runLifecycle'
 import { Icon } from './Icon'
 import { RunTimelineList, type TimelineItem } from './RunTimelineList'
+import { RunTaskRow } from './RunTaskRow'
 import { contextSummary, groupProcessOperations } from '../lib/runPresentation'
 import { formatTokensCompact, formatUsd } from '../agent/contextUsageView'
 
@@ -141,20 +142,11 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
               <div className="border-b border-line px-2.5 py-2 text-[11px] font-medium text-ink-2">
                 任務計畫 · {summary.plan.filter((item) => item.status === 'done').length}/{summary.plan.length}
               </div>
-              <div className="space-y-1 px-2.5 py-2">
-                {summary.plan.map((item) => (
-                  <div key={item.id} className="flex items-start gap-2 text-[11px]">
-                    <Icon
-                      name={item.status === 'done' ? 'check_circle' : item.status === 'failed' ? 'cancel' : item.status === 'active' ? 'progress_activity' : 'radio_button_unchecked'}
-                      size={14}
-                      className={item.status === 'done' ? 'text-green' : item.status === 'failed' ? 'text-red' : item.status === 'active' ? 'animate-spin text-accent-ink' : 'text-ink-3'}
-                    />
-                    <span className={item.status === 'done' ? 'text-ink-2 line-through opacity-70' : 'text-ink-2'}>
-                      {item.text}
-                    </span>
-                  </div>
+              <ul aria-label="任務計畫">
+                {summary.plan.map((item, index) => (
+                  <RunTaskRow key={item.id} text={item.text} status={item.status} index={index} variant="list" />
                 ))}
-              </div>
+              </ul>
             </div>
           ) : null}
 

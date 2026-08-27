@@ -6,6 +6,7 @@ import { projectContextUsage } from '../src/agent/contextUsageProjection.ts'
 import { computeUsageCostUsd } from '../src/agent/usagePricing.ts'
 import { reducePiStepUsage } from '../src/agent/piStepUsage.ts'
 import {
+  contextUsageActivityMicrocopy,
   contextUsageMicrocopy,
   contextUsageReportLines,
   formatTokensCompact,
@@ -121,6 +122,29 @@ assert.equal(running.runningSteps, 1, 'the unfinished step reads as running')
 assert.equal(running.measuredSteps, 1, 'and contributes no measurement')
 assert.equal(running.tokens.total, 4_200, 'an unmeasured step adds no tokens')
 assert.equal(running.contextTokens, 4_000, 'fullness comes from the last MEASURED step')
+
+// Before the first provider settlement there are no honest token figures yet,
+// but the live Turn Record already contains useful activity. The context panel
+// must keep changing with those entries instead of looking frozen until the run
+// ends.
+let preSettlement = appendTurnRecord(undefined, [
+  { kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 0 },
+  { kind: 'step-start', source: 'host', turn: 1, step: 1, at: 1 },
+  { kind: 'user-text', source: 'user', content: 'inspect', turn: 1, step: 1, at: 2 },
+])
+assert.equal(
+  contextUsageActivityMicrocopy(projectContextUsage(preSettlement)),
+  '訊息 1 · 工具 0 · 步驟 1',
+  'the panel exposes live structural activity before the first token settlement',
+)
+preSettlement = appendTurnRecord(preSettlement, [
+  { kind: 'tool-call', source: 'model', tool: 'read', callId: 'live-1', args: { path: 'src/App.tsx' }, turn: 1, step: 1, at: 3 },
+])
+assert.equal(
+  contextUsageActivityMicrocopy(projectContextUsage(preSettlement)),
+  '訊息 1 · 工具 1 · 步驟 1',
+  'new live entries change the context activity immediately',
+)
 
 // ── Absent is not zero ─────────────────────────────────────────────────────
 let unpriced = appendTurnRecord(undefined, [{ kind: 'turn-start', source: 'host', turn: 1, step: 1, at: 0 }])
@@ -433,5 +457,6 @@ assert.match(refresherSource, /newestPage <= newestKnown/, 'a page bringing noth
 assert.match(refresherSource, /clearInterval/, 'the polling interval is cleared on unmount/deactivate — lifecycle contract')
 assert.match(refresherSource, /inflight/, 'concurrent polls for one run are deduplicated across mounting surfaces')
 assert.match(refresherSource, /typeof attach !== 'function'/, 'the bridge is feature-detected before use')
+assert.match(refresherSource, /void pullLatestPage\(runId\)[\s\S]*setInterval/, 'mounting an active panel synchronizes immediately before interval polling begins')
 
 console.log('what a run spent is one pure projection of the Turn Record; unmeasured stays unmeasured')

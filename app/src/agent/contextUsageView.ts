@@ -77,6 +77,12 @@ export function contextUsageMicrocopy(usage: ContextUsage): string {
   return usage.ratio === undefined ? total : `${total} (${formatRatio(usage.ratio)})`
 }
 
+/** Live facts that exist before a provider has settled the first token bill. */
+export function contextUsageActivityMicrocopy(usage: ContextUsage): string {
+  const messages = usage.messages.user + usage.messages.assistant
+  return `訊息 ${messages} · 工具 ${usage.toolCalls} · 步驟 ${usage.steps}`
+}
+
 /**
  * `/cost`'s lines, built from the projection so the composer and the panel
  * cannot drift. A figure nobody measured contributes no line at all — an

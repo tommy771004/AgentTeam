@@ -1,20 +1,102 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useThreadStore, type ThreadBubble } from '../store/threadStore'
+import { extractMarkdownSources } from '../lib/markdownSources'
 import { AttachmentThumb } from './AttachmentThumb'
 import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
+import { Reveal } from './primitives/Reveal'
 
 const COLLAPSE_AT = 1_200
 
+function AssistantBubbleContent({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [sourcesOpen, setSourcesOpen] = useState(false)
+  const sources = useMemo(() => extractMarkdownSources(content), [content])
+  const canCollapse = content.length > COLLAPSE_AT
+  const collapsed = canCollapse && !expanded
+
+  const copyAnswer = async () => {
+    if (!navigator.clipboard?.writeText) return
+    await navigator.clipboard.writeText(content)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <>
+      <div className="agent-assistant-label mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider">
+        <span className="text-ink-3" aria-hidden="true">✦</span>
+        assistant
+      </div>
+      <div className={collapsed ? 'relative max-h-80 overflow-hidden' : ''}>
+        <MarkdownBody content={content} />
+        {collapsed ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background to-transparent" /> : null}
+      </div>
+      {canCollapse ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="agent-chat-expand mt-2 inline-flex items-center gap-1 text-[11px] text-accent-ink"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <Icon name={expanded ? 'expand_less' : 'expand_more'} size={15} />
+          {expanded ? '收合輸出' : `展開完整輸出（${content.length.toLocaleString()} 字）`}
+        </button>
+      ) : null}
+      <div className="agent-chat-actions mt-1.5 flex items-center gap-0.5" aria-label="回答操作" style={{ animation: 'fade-in 350ms ease-out both' }}>
+        <button type="button" className="agent-chat-action" onClick={() => void copyAnswer()} aria-label="複製回答" title={copied ? '已複製' : '複製回答'}>
+          <Icon name={copied ? 'check' : 'content_copy'} size={14} />
+        </button>
+        <span className="ml-1 text-[10px] text-ink-3" aria-live="polite">{copied ? '已複製' : ''}</span>
+        {sources.length > 0 ? (
+          <button
+            type="button"
+            aria-expanded={sourcesOpen}
+            className="ml-1.5 inline-flex items-center gap-1.5 rounded-control px-1.5 py-0.5 text-[11px] text-ink-2 transition-colors hover:bg-hover-2"
+            onClick={() => setSourcesOpen((value) => !value)}
+          >
+            <span className="flex -space-x-1" aria-hidden="true">
+              {sources.slice(0, 3).map((source) => (
+                <span key={source.href} className="inline-flex size-4 items-center justify-center rounded-full bg-inset text-ink-3 shadow-[0_0_0_1.5px_var(--color-background)]">
+                  <Icon name="language" size={10} />
+                </span>
+              ))}
+            </span>
+            {sources.length} 個來源
+            <Icon name="expand_more" size={13} className={`transition-transform duration-300 ${sourcesOpen ? 'rotate-180' : ''}`} />
+          </button>
+        ) : null}
+      </div>
+      {sources.length > 0 ? (
+        <Reveal open={sourcesOpen}>
+          <div className="mt-1.5 flex flex-col rounded-[10px] bg-inset p-1 shadow-hairline" aria-label="回答引用來源">
+            {sources.map((source, index) => (
+              <a
+                key={source.href}
+                href={source.href}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-control px-1.5 py-1 text-[12px] text-ink-2 transition-colors hover:bg-hover hover:text-ink"
+                style={{ animation: `fade-up 320ms cubic-bezier(0.23,1,0.32,1) ${index * 60}ms both` }}
+              >
+                <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-[4px] bg-surface text-ink-3 shadow-hairline"><Icon name="language" size={11} /></span>
+                <span className="min-w-0 flex-1 truncate font-medium">{source.label}</span>
+                <span className="shrink-0 font-[family-name:var(--font-mono)] text-[10.5px] text-ink-3">{source.domain}</span>
+              </a>
+            ))}
+          </div>
+        </Reveal>
+      ) : null}
+    </>
+  )
+}
+
 /** Main conversation row: user bubbles keep their shape; assistant output stays borderless. */
 export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
-  const [expanded, setExpanded] = useState(false)
   const [rewinding, setRewinding] = useState(false)
-  const [copied, setCopied] = useState(false)
   const isUser = bubble.role === 'user'
   const isAssistant = bubble.role === 'assistant'
-  const canCollapse = isAssistant && bubble.content.length > COLLAPSE_AT
-  const collapsed = canCollapse && !expanded
   // G5 rewind:僅 Electron(有快照橋)且非執行中才提供
   const canRewind = isUser && Boolean(window.subagents?.rewind)
 
@@ -36,13 +118,6 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
     } finally {
       setRewinding(false)
     }
-  }
-
-  const copyAnswer = async () => {
-    if (!navigator.clipboard?.writeText) return
-    await navigator.clipboard.writeText(bubble.content)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1500)
   }
 
   if (bubble.role === 'system') {
@@ -86,43 +161,7 @@ export function ChatBubble({ bubble }: { bubble: ThreadBubble }) {
         ) : null}
 
         {isAssistant ? (
-          <>
-            <div className="agent-assistant-label mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider">
-              <span className="text-ink-3" aria-hidden="true">✦</span>
-              assistant
-            </div>
-            <div className={collapsed ? 'relative max-h-80 overflow-hidden' : ''}>
-              <MarkdownBody content={bubble.content} />
-              {collapsed ? (
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background to-transparent" />
-              ) : null}
-            </div>
-            {canCollapse ? (
-              <button
-                type="button"
-                aria-expanded={expanded}
-                className="agent-chat-expand mt-2 inline-flex items-center gap-1 text-[11px] text-accent-ink"
-                onClick={() => setExpanded((value) => !value)}
-              >
-                <Icon name={expanded ? 'expand_less' : 'expand_more'} size={15} />
-                {expanded ? '收合輸出' : `展開完整輸出（${bubble.content.length.toLocaleString()} 字）`}
-              </button>
-            ) : null}
-            <div className="agent-chat-actions mt-1.5 flex items-center gap-0.5" aria-label="回答操作">
-              <button
-                type="button"
-                className="agent-chat-action"
-                onClick={() => void copyAnswer()}
-                aria-label="複製回答"
-                title={copied ? '已複製' : '複製回答'}
-              >
-                <Icon name={copied ? 'check' : 'content_copy'} size={14} />
-              </button>
-              <span className="ml-1 text-[10px] text-ink-3" aria-live="polite">
-                {copied ? '已複製' : ''}
-              </span>
-            </div>
-          </>
+          <AssistantBubbleContent content={bubble.content} />
         ) : (
           <div className="whitespace-pre-wrap">{bubble.content}</div>
         )}

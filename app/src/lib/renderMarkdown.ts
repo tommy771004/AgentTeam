@@ -1,3 +1,5 @@
+import { codeBlockHtml, readCodeFence } from './codeBlockHtml'
+
 /**
  * Lightweight markdown → safe HTML for chat / report (Codex-style reading).
  * No external deps; escapes HTML first, then applies a small subset.
@@ -39,35 +41,12 @@ function inline(s: string) {
     .replace(/~~(.+?)~~/g, '<del class="text-ink-3">$1</del>')
     .replace(
       /\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
-      '<a href="$2" target="_blank" rel="noreferrer" class="text-primary underline underline-offset-2">$1</a>',
+      '<a href="$2" target="_blank" rel="noreferrer" class="agent-source-link text-primary">$1</a>',
     )
 
   return marked.replace(/<!c(\d+)!>/g, (_match, index: string) =>
     '<code class="px-1 py-0.5 rounded-[5px] bg-inset text-accent-ink shadow-hairline font-[family-name:var(--font-mono)] text-[12px]">' +
     `${codeSpans[Number(index)]}</code>`,
-  )
-}
-
-/**
- * docs/ui「Code Block」：標頭放語言與行數、右側是複製，程式碼本體帶行號側欄。
- * 每一行包成 span 並保留行內的 \n，行號是 CSS counter 產生的 ::before，
- * 所以 `code.textContent`（複製按鈕的來源）拿到的仍是乾淨的原始程式碼。
- */
-function codeBlockHtml(language: string, lines: string[]): string {
-  const body = lines
-    .map(
-      (line, i) =>
-        `<span class="agent-code-line">${esc(line)}${i === lines.length - 1 ? '' : '\n'}</span>`,
-    )
-    .join('')
-  return (
-    '<div class="agent-code-block my-2.5 overflow-hidden rounded-card border border-line bg-surface shadow-card">' +
-    '<div class="agent-code-header border-b border-line">' +
-    `<span class="agent-code-title"><span class="agent-code-lang">${esc(language)}</span>` +
-    `<span class="agent-code-count">${lines.length} 行</span></span>` +
-    '<button type="button" data-copy-code aria-label="複製程式碼">複製</button></div>' +
-    '<pre class="agent-code-body overflow-x-auto bg-inset py-2.5 pr-3 pl-2 font-[family-name:var(--font-mono)] text-[12px] text-ink-2">' +
-    `<code>${body}</code></pre></div>`
   )
 }
 
@@ -109,13 +88,14 @@ const LIST_OPEN: Record<'ul' | 'ol', string> = {
 const LIST_INDENT_PER_LEVEL = 2
 const MAX_LIST_DEPTH = 3
 
-export function renderMarkdown(md: string): string {
+export function renderMarkdown(md: string, streaming?: boolean): string {
   if (!md) return ''
   const lines = md.replace(/\r\n/g, '\n').split('\n')
   const html: string[] = []
   let inCode = false
   let codeBuf: string[] = []
   let codeLanguage = 'code'
+  let codeMarker = ''
   /**
    * Open lists, outermost first.
    *
@@ -169,16 +149,19 @@ export function renderMarkdown(md: string): string {
 
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li]
-    if (line.startsWith('```')) {
+    const fence = readCodeFence(line, codeMarker)
+    if (fence) {
       if (inCode) {
         html.push(codeBlockHtml(codeLanguage, codeBuf))
         codeBuf = []
         codeLanguage = 'code'
+        codeMarker = ''
         inCode = false
       } else {
         flushBlocks()
         inCode = true
-        codeLanguage = line.slice(3).trim() || 'code'
+        codeLanguage = fence.info || 'code'
+        codeMarker = fence.marker
       }
       continue
     }
@@ -294,7 +277,7 @@ export function renderMarkdown(md: string): string {
   }
   flushBlocks()
   if (inCode) {
-    html.push(codeBlockHtml(codeLanguage, codeBuf))
+    html.push(codeBlockHtml(codeLanguage, codeBuf, streaming))
   }
   return html.join('\n')
 }

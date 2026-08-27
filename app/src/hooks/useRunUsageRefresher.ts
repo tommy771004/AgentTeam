@@ -52,6 +52,7 @@ export function useRunUsageRefresher(runId: string | undefined, active: boolean)
   useEffect(() => {
     if (!runId || !active) return
     if (typeof window.subagents?.piHost?.runs?.attach !== 'function') return
+    void pullLatestPage(runId)
     const timer = window.setInterval(() => {
       // 隱藏時跳過——推送事件不受可見度影響，輪詢只是自癒，聚焦後自然追上。
       if (document.visibilityState === 'hidden') return

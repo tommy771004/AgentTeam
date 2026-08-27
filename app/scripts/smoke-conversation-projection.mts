@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { conversationAnswer, projectConversationRows } from '../src/agent/conversationProjection.ts'
 import { runTimelineRows } from '../src/agent/liveTimeline.ts'
 import { appendTurnRecord } from '../src/agent/turnRecord.ts'
+import { extractMarkdownSources } from '../src/lib/markdownSources.ts'
 
 /**
  * Seam 2: the conversation is a pure projection of the Turn Record.
@@ -35,6 +36,17 @@ assert.deepEqual(rows.map((row) => row.seq), [3, 4, 5, 6, 7], 'rows keep the rec
 // own, never the answer — the defect this whole effort exists to close.
 assert.equal(conversationAnswer(record), '結論：Host 擁有迴圈。')
 assert.notEqual(conversationAnswer(record), '我先探索本地專案結構。')
+
+// Streaming Text template: settled actions expose only sources the answer
+// actually cited, deduplicated in first-appearance order.
+assert.deepEqual(
+  extractMarkdownSources('[官方文件](https://example.com/docs) 與 [重複](https://example.com/docs)；[狀態](https://status.example.org/)'),
+  [
+    { href: 'https://example.com/docs', label: '官方文件', domain: 'example.com' },
+    { href: 'https://status.example.org/', label: '狀態', domain: 'status.example.org' },
+  ],
+)
+assert.deepEqual(extractMarkdownSources('[本機](file:///tmp/a) [壞連結](not-a-url)'), [])
 
 // A silent turn has no answer to offer, and says so with `undefined` rather
 // than an invented placeholder.

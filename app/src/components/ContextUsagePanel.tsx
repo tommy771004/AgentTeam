@@ -1,6 +1,7 @@
 import type { ContextUsage } from '../agent/contextUsageProjection'
 import {
   CONTEXT_BREAKDOWN_ORDER,
+  contextUsageActivityMicrocopy,
   formatRatio,
   formatTokens,
   formatUsd,
@@ -164,20 +165,37 @@ export function ContextUsagePanel({
   /** True for a runner that publishes no Turn Record at all. */
   degraded?: boolean
 }) {
-  // A runner with no record, or one whose provider never reported usage, gets
-  // the scalar it actually has — and no breakdown invented around it.
-  if (degraded || usage.measuredSteps === 0) {
+  // A runner with no Turn Record gets only the scalar it actually reported.
+  if (degraded) {
     return (
       <div>
         <p className="font-[family-name:var(--font-mono)] text-[13px] tabular-nums text-ink">
           {fallbackTokens && fallbackTokens > 0 ? `${formatTokens(fallbackTokens)} tokens` : '尚無用量資料'}
         </p>
         <p className="mt-2 text-[10px] leading-relaxed text-ink-3">
-          {degraded
-            ? '這個 runner 只回報總量，沒有輸入／輸出／快取的分解。'
-            : usage.runningSteps > 0
-              ? '步驟尚未結束，用量要等結算後才會出現。'
-              : 'provider 未回報用量分解，面板不代為推算。'}
+          這個 runner 只回報總量，沒有輸入／輸出／快取的分解。
+        </p>
+      </div>
+    )
+  }
+
+  // Exact token usage arrives at step settlement. Until then, keep the panel
+  // visibly live with facts already present in the Turn Record; none of these
+  // counts guesses token usage.
+  if (usage.measuredSteps === 0) {
+    return (
+      <div>
+        <p className="font-[family-name:var(--font-mono)] text-[13px] tabular-nums text-ink">
+          {fallbackTokens && fallbackTokens > 0 ? `${formatTokens(fallbackTokens)} tokens` : '執行中'}
+        </p>
+        <BreakdownBar breakdown={usage.breakdown} />
+        <p className="mt-3 text-[10px] text-ink-3">
+          {contextUsageActivityMicrocopy(usage)}
+        </p>
+        <p className="mt-2 text-[10px] leading-relaxed text-ink-3">
+          {usage.runningSteps > 0
+            ? '即時活動持續更新；token 用量會在目前步驟結算後計入。'
+            : 'provider 未回報用量分解，面板不代為推算。'}
         </p>
       </div>
     )
@@ -238,9 +256,9 @@ export function ContextUsagePanel({
       <BreakdownBar breakdown={usage.breakdown} />
 
       <p className="mt-3 text-[10px] text-ink-3">
-        訊息 <span className="font-[family-name:var(--font-mono)] tabular-nums">{usage.messages.user + usage.messages.assistant}</span>
-        {' · '}工具 <span className="font-[family-name:var(--font-mono)] tabular-nums">{usage.toolCalls}</span>
-        {' · '}步驟 <span className="font-[family-name:var(--font-mono)] tabular-nums">{usage.steps}</span>
+        <span className="font-[family-name:var(--font-mono)] tabular-nums">
+          {contextUsageActivityMicrocopy(usage)}
+        </span>
       </p>
 
       {/* Every qualification the numbers need, stated rather than implied. */}
