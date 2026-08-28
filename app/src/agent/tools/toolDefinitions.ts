@@ -499,7 +499,6 @@ export const TOOL_DEFINITIONS = {
             "codex",
             "claude",
             "grok",
-            "opencode",
             "gemini",
             "cursor"
           ],

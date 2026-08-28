@@ -18,7 +18,6 @@ export const RUNNER_IDS = [
   'codex',
   'claude',
   'grok',
-  'opencode',
   'gemini',
   'cursor',
 ] as const

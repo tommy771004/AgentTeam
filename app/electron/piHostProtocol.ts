@@ -11,6 +11,7 @@ import { createMemoryControlMetaCandidate, type MemoryControlDiagnosis } from '.
 import { baselineMemoryControlPackageReader } from './memoryControlPackageRepository.ts'
 import type { MemoryControlEvaluationAuthority } from './memoryControlEvaluationAuthority.ts'
 import { BUILTIN_RUNNER_CAPABILITIES } from '../src/agent/runners/types.ts'
+import { piToolFailureDetail } from './piToolFailureDetail.ts'
 
 /**
  * Version 2 retired the ambiguous `success` turn settlement for the closed
@@ -242,7 +243,7 @@ import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, execute
 import { cancelPiCodeMode, runPiCodeMode } from './piCodeMode.ts'
 import { armTurnDeadline, clampTurnTimeout, systemTurnDeadlineClock, type TurnDeadlineClock } from './piTurnDeadline.ts'
 import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
-import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
+import type { PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
 import { createPiDurableMemoryBridge, piMemoryProjection, type PiMemoryChange } from './piDurableMemory.ts'
 import { compileMemoryControlRuntime, type MemoryControlRuntime } from './memoryControlRuntime.ts'
@@ -272,10 +273,13 @@ import {
 } from './piSessionContext.ts'
 import { settlePiRunLearning, type PiRunLearningSettlement } from './piRunLearningSettlement.ts'
 import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
+import { handlePiHostCapabilityDomain } from './piHostCapabilityDomain.ts'
+import { handlePiHostResourceDomain } from './piHostResourceDomain.ts'
+import { handlePiHostExtensionDomain } from './piHostExtensionDomain.ts'
 import { runPiOrchestration, type PiLoopPattern, type PiOrchestrationTurn } from './piOrchestrationExtension.ts'
 import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
 import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
-import { callPiMcpTool, listPiMcpTools, piMcpGenerationKey, reloadPiMcp, stopPiMcp } from './piMcpClient.ts'
+import { callPiMcpTool, listPiMcpTools, piMcpGenerationKey } from './piMcpClient.ts'
 import { isCompletedModelCall, isPiHostDefinitionOfDoneMet, isPiTurnSettlement, piTurnFinalAnswer, piTurnResultText, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
 import { appendTurnRecord, asTurnRecordMemoryWrite, derivePiHistory, nextTurnRecordSeq, pageTurnRecord, workingStateFromTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordEntry, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
 import {
@@ -334,8 +338,7 @@ import {
   workspaceTextSearchAvailability,
 } from './piWorkspaceTextSearchRuntime.ts'
 import { configurePiMessagingGateway } from './piExtensionPacks/integrations.ts'
-import { discoveredPiSkills, readPiSkillCatalog, selectFrozenPiPreflightSkills, syncPiSkillsFromRenderer, type PiSkillSyncResult } from './piSkills.ts'
-import { resolvePiAgentDir } from './piUserConfig.ts'
+import { discoveredPiSkills, selectFrozenPiPreflightSkills, type PiSkillSyncResult } from './piSkills.ts'
 import {
   clearPiPlanGateCandidate,
   clearPiContinuationItems,
@@ -1382,6 +1385,9 @@ function publishModelToolTerminal(input: {
     ? catalogued.reason || `${input.tool} is not active in this turn`
     : undefined
   const settlement = refusedAsInactive ? 'denied' as const : input.toolFailed ? 'failed' as const : 'success' as const
+  const failureReason = input.toolFailed
+    ? piToolFailureDetail(input.trustedResult) || '工具執行失敗，Host 未收到錯誤說明'
+    : undefined
   const executionEvidence = input.proposal
     ? hostFileWriteEvidence({
         state: input.workingState,
@@ -1399,7 +1405,7 @@ function publishModelToolTerminal(input: {
       tool: input.tool,
       callId: input.callId,
       settlement,
-      ...(refusedAsInactive ? { reason: refusedAsInactive } : {}),
+      ...(refusedAsInactive ? { reason: refusedAsInactive } : failureReason ? { reason: failureReason } : {}),
       ...memoryWriteToolResultFields(input.trustedResult, input.callId),
       ...workingExecutionEvidenceRecordFields(executionEvidence),
       ...(input.identity || {}),
@@ -2602,55 +2608,21 @@ function handleDurableMemoryRequest(
   }
 }
 
-function handleCapabilityRequest(
-  state: HostState,
-  input: Partial<InternalPiHostRequest>,
-  id: string | number,
-): PiHostMessage[] | undefined {
-  if (!input.method?.startsWith('capabilities/')) return undefined
-  const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : undefined
-  const gate = workspaceTextSearchAvailability({
-    sessionId,
-    enabled: state.snapshot.settings.workspaceTextSearch === true,
-    workspaceRoot: typeof input.params?.cwd === 'string' ? input.params.cwd : undefined,
-  })
-  if (input.method === 'capabilities/list') {
-    return [{ id, result: { items: state.capabilities.catalog(sessionId)
-      .filter((capability) => gate.available || !isWorkspaceTextSearchCapability(capability.id)) } }]
-  }
-  if (input.method === 'capabilities/search') {
-    const query = typeof input.params?.query === 'string' ? input.params.query : ''
-    if (!query.trim()) return [errorResponse(id, 'invalid_request', 'query is required')]
-    return [{ id, result: { items: state.capabilities.search(
-      query,
-      sessionId,
-      (capability) => gate.available || !isWorkspaceTextSearchCapability(capability.id),
-    ) } }]
-  }
-  const capabilityId = typeof input.params?.id === 'string' ? input.params.id : ''
-  if (!capabilityId) return [errorResponse(id, 'invalid_request', 'capability id is required')]
-  if (isWorkspaceTextSearchCapability(capabilityId) && !gate.available) {
-    return [errorResponse(id, 'invalid_request', gate.reason || 'Workspace text search is unavailable')]
-  }
-  try {
-    return [{ id, result: { items: [state.capabilities.load(capabilityId, sessionId)], loaded: true } }]
-  } catch (error) {
-    return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Unknown Pi capability')]
-  }
-}
-
 function handleMemoryOrCapabilityRequest(
   state: HostState,
   input: Partial<InternalPiHostRequest>,
   id: string | number,
   emit?: (message: PiHostMessage) => void,
 ): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
-  return handleDurableMemoryRequest(state, input, id, emit) || handleCapabilityRequest(state, input, id)
-}
-
-function requestedSkillCatalogProjectRoot(params: Record<string, unknown> | undefined): string | undefined {
-  const value = params?.projectRoot
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+  return handleDurableMemoryRequest(state, input, id, emit) || (input.method ? handlePiHostCapabilityDomain({
+    state: {
+      capabilities: state.capabilities,
+      workspaceTextSearchEnabled: state.snapshot.settings.workspaceTextSearch === true,
+    },
+    method: input.method,
+    params: input.params,
+    id,
+  }) : undefined)
 }
 
 function frozenRunLearningCandidate(input: {
@@ -3340,111 +3312,26 @@ export function handlePiHostRequest(
     const limit = typeof input.params?.limit === 'number' ? input.params.limit : undefined
     return [{ id, result: { sessionId, page: pageTurnRecord(session.record, { before, limit }) } }]
   }
-  if (input.method === 'resources/list') {
-    // Skills come straight from what the resource loader actually found on
-    // its last reload, so the registry describes reality instead of an empty
-    // array (issue 02). A skill archived via disable-model-invocation stays
-    // listed here while staying out of <available_skills>.
-    const found = discoveredPiSkills()
-    // Each skill entry carries its own availability fact (issue 03/17):
-    // with `read` disabled the whole advertised block disappears from the
-    // prompt, and the projection says exactly that per entry.
-    const readActive = state.snapshot.settings.activeTools.length === 0 || state.snapshot.settings.activeTools.includes('read')
-    const skillResources: Array<PiResource & { reason?: string }> = found.skills
-      .filter((skill) => skill.name)
-      .map((skill) => ({
-        id: skill.name,
-        kind: 'skill' as const,
-        source: skill.filePath,
-        enabled: !skill.disableModelInvocation,
-        ...(!readActive && !skill.disableModelInvocation ? { reason: 'read 工具未啟用：此技能在 run 中不可用' } : {}),
-      }))
-    return [{ id, result: { resources: [...skillResources, ...state.snapshot.resources.map((resource) => ({ ...resource }))].sort((left, right) => left.id.localeCompare(right.id)), ...(found.diagnostics.length ? { diagnostics: found.diagnostics.map((diagnostic) => ({ path: diagnostic.path, message: diagnostic.message })) } : {}) } }]
-  }
-  if (input.method === 'resources/reload') {
-    const resources = input.params?.resources
-    if (!Array.isArray(resources)) return [errorResponse(id, 'invalid_request', 'resources must be an array')]
-    const registry = new PiResourceRegistry()
-    try {
-      registry.reload(resources as PiResource[])
-    } catch (error) {
-      return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid Pi resources')]
-    }
-    state.snapshot.resources = registry.list(); state.snapshot.cursor += 1
-    return [{ id, result: { resources: state.snapshot.resources.map((resource) => ({ ...resource })) } }]
-  }
-  if (input.method === 'resources/sync-skills') {
-    // One-way migration from the renderer's localStorage copy into the
-    // Host-owned skills directory. Per-skill results travel back so a partial
-    // migration is visible rather than assumed (issue 16).
-    const skills = input.params?.skills
-    if (!Array.isArray(skills)) return [errorResponse(id, 'invalid_request', 'skills must be an array')]
-    return syncPiSkillsFromRenderer(resolvePiAgentDir(), skills as never).then((report) => ({
-      id,
-      result: { report: { skillsDir: report.skillsDir, results: report.results } },
-    })).catch((error: unknown) => errorResponse(id, 'runtime_error', error instanceof Error ? error.message : 'Skill sync failed')).then((message) => [message])
-  }
-  if (input.method === 'resources/read-skill-files') {
-    // The renderer projects the Host-owned skills directory into the 技能庫
-    // (ADR-0034: Pi is the only discovery system). Read-only by contract —
-    // writes go back through resources/sync-skills.
-    return readPiSkillCatalog({
-      agentDir: resolvePiAgentDir(),
-      projectRoot: requestedSkillCatalogProjectRoot(input.params),
-    }).then(({ files, diagnostics }) => ({
-      id,
-      result: { files, skillDiagnostics: diagnostics },
-    })).catch((error: unknown) => errorResponse(id, 'runtime_error', error instanceof Error ? error.message : 'Skill file read failed')).then((message) => [message])
-  }
+  const resourceResponse = handlePiHostResourceDomain({
+    method: input.method,
+    params: input.params,
+    id,
+    resources: state.snapshot.resources,
+    activeTools: state.snapshot.settings.activeTools,
+    commit: (resources) => { state.snapshot.resources = resources; state.snapshot.cursor += 1 },
+  })
+  if (resourceResponse) return resourceResponse
   const capabilityResponse = handleMemoryOrCapabilityRequest(state, input, id, emit)
   if (capabilityResponse) return capabilityResponse
-  if (input.method === 'extensions/list') return [{ id, result: { extensions: state.extensions.list() } }]
-  if (input.method === 'extensions/install' || input.method === 'extensions/update' || input.method === 'extensions/reload') {
-    try {
-      const extension = input.method === 'extensions/install'
-        ? state.extensions.install(input.params || {})
-        : state.extensions.update(input.params || {})
-      const action = input.method === 'extensions/install' ? 'installed' as const : 'updated' as const
-      if (extension.kind === 'mcp') reloadPiMcp(extension.id)
-      const event: PiHostEvent = { event: 'host/extension', payload: { action, extension } }
-      if (emit) emit(event)
-      state.snapshot.extensions = state.extensions.list()
-      state.snapshot.cursor += 1
-      return [...(emit ? [] : [event]), { id, result: { extension } }]
-    } catch (error) {
-      return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid Pi extension')]
-    }
-  }
-  if (input.method === 'extensions/set-enabled') {
-    const extensionId = typeof input.params?.id === 'string' ? input.params.id : ''
-    if (!extensionId || typeof input.params?.enabled !== 'boolean') return [errorResponse(id, 'invalid_request', 'id and enabled are required')]
-    try {
-      const extension = state.extensions.setEnabled(extensionId, input.params.enabled)
-      if (extension.kind === 'mcp') reloadPiMcp(extension.id)
-      const event: PiHostEvent = { event: 'host/extension', payload: { action: extension.enabled ? 'enabled' : 'disabled', extension } }
-      if (emit) emit(event)
-      state.snapshot.extensions = state.extensions.list(); state.snapshot.cursor += 1
-      return [...(emit ? [] : [event]), { id, result: { extension } }]
-    } catch (error) {
-      return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Unknown Pi extension')]
-    }
-  }
-  if (input.method === 'extensions/uninstall') {
-    const extensionId = typeof input.params?.id === 'string' ? input.params.id : ''
-    if (!extensionId) return [errorResponse(id, 'invalid_request', 'id is required')]
-    const extension = state.extensions.list().find((candidate) => candidate.id === extensionId)
-    if (!extension) return [errorResponse(id, 'invalid_request', `Unknown Pi extension: ${extensionId}`)]
-    try {
-      state.extensions.uninstall(extensionId)
-      if (extension.kind === 'mcp') stopPiMcp(extensionId)
-      const event: PiHostEvent = { event: 'host/extension', payload: { action: 'uninstalled', extension } }
-      if (emit) emit(event)
-      state.snapshot.extensions = state.extensions.list(); state.snapshot.cursor += 1
-      return [...(emit ? [] : [event]), { id, result: { removed: true } }]
-    } catch (error) {
-      return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Unable to uninstall Pi extension')]
-    }
-  }
+  const extensionResponse = handlePiHostExtensionDomain({
+    method: input.method,
+    params: input.params,
+    id,
+    registry: state.extensions,
+    emit,
+    commit: (extensions) => { state.snapshot.extensions = extensions; state.snapshot.cursor += 1 },
+  })
+  if (extensionResponse) return extensionResponse
     if (input.method === 'runs/list') return [{ id, result: { queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })) } }]
   if (input.method === 'runs/claim') {
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : undefined
@@ -4428,6 +4315,36 @@ export function handlePiHostRequest(
   return [errorResponse(id, 'unknown_method', `Unknown Pi Host method: ${input.method}`)]
 }
 
+export type PiHostDispatchOutcome = {
+  messages: PiHostMessage[]
+  /** Explicit canonical snapshot commit decision for the server adapter. */
+  commit: 'none' | 'snapshot'
+  cursorBefore: number
+  cursorAfter: number
+}
+
+/**
+ * Central commit seam for protocol domains. A domain mutation is observable
+ * through the canonical cursor it owns; read-only requests cannot be persisted
+ * merely because their method happens to share a prefix with a writer.
+ */
+async function dispatchPiHostRequest(
+  state: HostState,
+  request: unknown,
+  emit?: (message: PiHostMessage) => void,
+  checkpointWriter?: CompactionCheckpointWriter,
+): Promise<PiHostDispatchOutcome> {
+  const cursorBefore = state.snapshot.cursor
+  const messages = await handlePiHostRequest(state, request, emit, checkpointWriter)
+  const cursorAfter = state.snapshot.cursor
+  return {
+    messages,
+    commit: cursorAfter === cursorBefore ? 'none' : 'snapshot',
+    cursorBefore,
+    cursorAfter,
+  }
+}
+
 function handlePiHostLifecycleRequest(
   state: HostState,
   method: PiHostRequest['method'],
@@ -5015,10 +4932,9 @@ export function createPiHostServer(
         // resulting auth-file revision in its session identity and rebuilds
         // the ModelRuntime instead of reusing an invalidated token snapshot.
         await refreshHostConfigForRequest(state, input, refreshConfig)
-        const messages = await handlePiHostRequest(state, request, send, checkpointWriter)
-        const method = input?.method
-        if (hostRequestMutatesState(method)) onStateChange?.(state.snapshot)
-        for (const message of messages) send(message)
+        const outcome = await dispatchPiHostRequest(state, request, send, checkpointWriter)
+        if (outcome.commit === 'snapshot') onStateChange?.(state.snapshot)
+        for (const message of outcome.messages) send(message)
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Pi Core Host request failed'
         send(errorResponse(id, 'runtime_error', message))
@@ -5029,18 +4945,6 @@ export function createPiHostServer(
 
 function hostRequestNeedsFreshOAuth(method: string | undefined): boolean {
   return method === 'settings/get' || method === 'turn/submit'
-}
-
-function hostRequestMutatesState(method: string | undefined): boolean {
-  return Boolean(method && (
-    method.startsWith('settings/')
-    || method.startsWith('sessions/')
-    || method.startsWith('runs/')
-    || method.startsWith('resources/')
-    || method.startsWith('memory/')
-    || method.startsWith('extensions/')
-    || method === 'turn/submit'
-  ))
 }
 
 async function refreshHostConfigForRequest(

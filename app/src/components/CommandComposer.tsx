@@ -21,7 +21,6 @@ import {
   type SlashCommand,
 } from '../commands/registry'
 import { useLearningStore } from '../store/learningStore'
-import { useOpenCodeConfigStore } from '../store/opencodeConfigStore'
 import {
   FOCUS_COMPOSER_EVENT,
   useCommandHistoryStore,
@@ -228,7 +227,6 @@ export function CommandComposer({
   const [activeIndex, setActiveIndex] = useState(0)
   const [selectedSkill, setSelectedSkill] = useState<SlashCommand | null>(null)
   const skillCatalog = useLearningStore((state) => state.skillCatalog)
-  const openCodeCommands = useOpenCodeConfigStore((state) => state.commands)
   const [attachments, setAttachments] = useComposerAttachments(scopeKey)
   const [attachError, setAttachError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -263,11 +261,11 @@ export function CommandComposer({
 
   const filtered = useMemo(() => {
     if (slashQuery === null) return []
-    return filterSlashCommands(slashQuery, openCodeCommands, skillCatalog)
-  }, [openCodeCommands, skillCatalog, slashQuery])
+    return filterSlashCommands(slashQuery, [], skillCatalog)
+  }, [skillCatalog, slashQuery])
   const commandCount = useMemo(
-    () => getAllSlashCommands(openCodeCommands, skillCatalog).length,
-    [openCodeCommands, skillCatalog],
+    () => getAllSlashCommands([], skillCatalog).length,
+    [skillCatalog],
   )
 
   const showMenu = menuOpen && slashQuery !== null
@@ -456,7 +454,7 @@ export function CommandComposer({
       setSelectedSkill(null)
       onChange('')
       if (parsed) {
-        const cmd = resolveSlashCommand(parsed.cmd, openCodeCommands, skillCatalog)
+        const cmd = resolveSlashCommand(parsed.cmd, [], skillCatalog)
         if (cmd) {
           setMenuOpen(false)
           await onSlashCommand(cmd, parsed.args, parsed.raw)
@@ -485,7 +483,6 @@ export function CommandComposer({
     attaching,
     attachments,
     selectedSkill,
-    openCodeCommands,
     skillCatalog,
     onChange,
     onSlashCommand,

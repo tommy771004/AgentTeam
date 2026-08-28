@@ -22,7 +22,8 @@ import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycl
 import type { AgentMode, LoopType } from '../agent/types'
 import type { ThinkingDepth } from '../agent/thinking'
 import { getThinkingDepth } from '../agent/thinking'
-import { nextPrimaryAgent, parseSubagentMentions } from '../agent/opencode/agents'
+import { nextPrimaryAgent } from '../agent/agentModes'
+import { parseSubagentMentions } from '../agent/subagentMentions'
 import type { ChatAttachment } from '../agent/types'
 import { detectAutomationSuggestion } from '../agent/automationSuggestion'
 import {
@@ -75,7 +76,7 @@ function LiveRunBadge({ visible }: { visible: boolean }) {
 }
 
 /**
- * OpenCode 風格：Build/Plan + 模型/深度 + Threads + 內嵌執行
+ * Build/Plan + 模型/深度 + Threads + 內嵌執行
  */
 export function ProtocolsPage() {
   const {
@@ -295,12 +296,6 @@ export function ProtocolsPage() {
       blurb: '本機 CLI：訂閱/登入；無權限細粒度 · 無 FC 工具迴圈',
     },
     {
-      id: 'opencode',
-      label: 'OpenCode',
-      ready: authorizedRunners.some((p) => p.id === 'opencode'),
-      blurb: '本機 CLI：agents/commands 另見設定；此路徑不跑內建工具',
-    },
-    {
       id: 'gemini',
       label: 'Gemini',
       ready: authorizedRunners.some((p) => p.id === 'google' || p.id === 'gemini'),
@@ -327,9 +322,9 @@ export function ProtocolsPage() {
     if (!raw) return
     if (!activeId) return
 
+    const { subagents } = parseSubagentMentions(raw)
     const conversationSuggestion =
       !pinnedLoopType && detectAutomationSuggestion(raw)
-    const { subagents } = parseSubagentMentions(raw)
     const runInput = buildComposerRunInput({
       objective: raw,
       threadId: activeId,
@@ -423,7 +418,7 @@ export function ProtocolsPage() {
     }
   }
 
-  // Tab（空輸入）切換 Build/Plan — OpenCode
+  // Tab（空輸入）切換 Build/Plan
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Tab' || e.metaKey || e.ctrlKey || e.altKey) return

@@ -51,7 +51,6 @@ import {
 } from '../agent/outbound/outboundGate'
 import { connectionIdForBuiltinLlm } from '../agent/outbound/providerConnectionId'
 import { parsePolicySourceMode } from '../agent/outbound/policySourceMode'
-import { useOpenCodeConfigStore } from '../store/opencodeConfigStore'
 import { useProjectStore } from '../store/projectStore'
 import { getLiveSlashCommands } from '../commands/registry'
 import { applyRendererStorageSnapshot } from '../agent/updateMigration'
@@ -74,12 +73,6 @@ import {
 import { listPluginSecretMeta, secretNeedsRefresh } from '../agent/hermes/pluginSecrets'
 import { customToolsForSettings, listPendingToolPackages } from '../agent/tools/customTools'
 import { pluginRegistry } from '../agent/hermes/plugins'
-import { mapOpenCodeProviderCatalog } from '../agent/opencode/providerAdapter'
-import {
-  getOpenCodeProviderCatalog,
-  inspectOpenCodeServer,
-  unwrapOpenCodeServerValue,
-} from '../agent/opencode/serverClient'
 
 const SECTION_GROUPS = [
   { id: 'personal', label: '個人' },
@@ -101,7 +94,6 @@ const SECTIONS = [
   { id: 'roles', label: '角色模型', icon: 'groups', group: 'agent' },
   { id: 'llm', label: '語言模型', icon: 'smart_toy', group: 'agent' },
   { id: 'cli', label: 'CLI 授權', icon: 'terminal', group: 'agent' },
-  { id: 'opencode', label: 'OpenCode', icon: 'auto_awesome', group: 'agent' },
   { id: 'git', label: 'Git', icon: 'commit', group: 'integrate' },
   { id: 'webhook', label: 'Webhook', icon: 'webhook', group: 'integrate' },
   { id: 'gateway', label: '訊息閘道', icon: 'forum', group: 'integrate' },
@@ -159,10 +151,6 @@ const SECTION_META: Record<string, { title: string; subtitle: string }> = {
   cli: {
     title: 'CLI 授權',
     subtitle: '各家 CLI／API 與模型目錄，供對話右下角選單使用。',
-  },
-  opencode: {
-    title: 'OpenCode',
-    subtitle: '合併 opencode.json 與 agents／commands。',
   },
   git: {
     title: 'Git',
@@ -402,7 +390,6 @@ export function SettingsPage() {
   const [mcpProbe, setMcpProbe] = useState<string | null>(null)
   const [mcpSessions, setMcpSessions] = useState<string | null>(null)
   const [mcpHealthById, setMcpHealthById] = useState<Record<string, string>>({})
-  const [ocProviderMsg, setOcProviderMsg] = useState<string | null>(null)
   const [gatewayMsg, setGatewayMsg] = useState<string | null>(null)
   const [cliMsg, setCliMsg] = useState<string | null>(null)
   const [dataMsg, setDataMsg] = useState<string | null>(null)
@@ -421,10 +408,6 @@ export function SettingsPage() {
   const gatewayInbound = useGatewayStore((s) => s.inbound)
   const bgJobs = useGatewayStore((s) => s.jobs)
   const projectRoot = useProjectStore((s) => s.root)
-  const oc = useOpenCodeConfigStore()
-  const ocCandidates = useOpenCodeConfigStore((s) => s.candidates)
-  const ocSources = useOpenCodeConfigStore((s) => s.sources)
-  const adoptOcCandidate = useOpenCodeConfigStore((s) => s.adoptCandidate)
   const memory = useLearningStore((s) => s.memory)
   const memoryProjection = useLearningStore((s) => s.memoryProjection)
   const memoryDisabled = memoryControlsDisabled(memoryProjection)
@@ -569,11 +552,6 @@ export function SettingsPage() {
     section,
     update,
   ])
-
-  useEffect(() => {
-    if (section === 'opencode') void oc.hydrate(projectRoot)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section, projectRoot])
 
   // Auto-apply webhook when related settings change
   useEffect(() => {
@@ -1988,8 +1966,7 @@ export function SettingsPage() {
                       />
                     </div>
                   )}
-                  {(p.kind === 'opencode' ||
-                    p.kind === 'cursor' ||
+                  {(p.kind === 'cursor' ||
                     p.kind === 'codex' ||
                     p.kind === 'anthropic' ||
                     p.kind === 'google') && (
@@ -2052,7 +2029,7 @@ export function SettingsPage() {
                 className={settingsBtnPrimaryCls}
                 onClick={async () => {
                   if (!window.subagents?.cli?.applyDiscovery) {
-                    setCliMsg('一鍵偵測需 Electron（會讀本機 ~/.codex、~/.claude、~/.grok、opencode.jsonc）')
+                    setCliMsg('一鍵偵測需 Electron（會讀本機 Codex、Claude、Grok、Gemini 與 Cursor 設定）')
                     return
                   }
                   setCliMsg('掃描本機 CLI 與設定中…')
@@ -2091,56 +2068,6 @@ export function SettingsPage() {
               >
                 一鍵偵測本機 CLI 並匯入模型
               </button>
-              <button
-                type="button"
-                className={settingsBtnCls}
-                onClick={async () => {
-                  if (!window.subagents?.opencode) {
-                    setCliMsg('opencode 掃描需 Electron')
-                    return
-                  }
-                  const d = await window.subagents.opencode.detect()
-                  const { useOpenCodeConfigStore } = await import('../store/opencodeConfigStore')
-                  const { useProjectStore } = await import('../store/projectStore')
-                  await useOpenCodeConfigStore
-                    .getState()
-                    .hydrate(useProjectStore.getState().root)
-                  const oc = useOpenCodeConfigStore.getState()
-                  const primaries = oc.agents.filter((a) => a.kind === 'primary')
-                  const subs = oc.agents.filter((a) => a.kind === 'subagent')
-                  setCliMsg(
-                    [
-                      d.found ? `CLI ${d.path} (${d.version || '?'})` : 'opencode CLI 未找到',
-                      `config sources: ${oc.sources.length}`,
-                      ...oc.sources.map((s) => `  · ${s}`),
-                      `agents: primary=${primaries.length} subagent=${subs.length}`,
-                      ...oc.agents
-                        .filter((a) => a.source !== 'builtin')
-                        .slice(0, 12)
-                        .map(
-                          (a) =>
-                            `  · ${a.id} [${a.kind}/${a.source}] ${a.model || 'model=default'}`,
-                        ),
-                      oc.commands.length ? `commands: ${oc.commands.length}` : '',
-                      oc.model ? `default model: ${oc.model}` : '',
-                      oc.small_model ? `small_model: ${oc.small_model}` : '',
-                      oc.error || '',
-                    ]
-                      .filter(Boolean)
-                      .join('\n'),
-                  )
-                  if (d.found || oc.sources.length) {
-                    const next = [...(settings.cliProviders || [])]
-                    const i = next.findIndex((x) => x.id === 'opencode')
-                    if (i >= 0) {
-                      next[i] = { ...next[i], enabled: true, authorized: true }
-                      set({ cliProviders: next })
-                    }
-                  }
-                }}
-              >
-                掃描 OpenCode agents
-              </button>
             </div>
             {cliMsg && (
               <pre className="custom-scrollbar max-h-40 overflow-y-auto whitespace-pre-wrap rounded-control border border-line bg-inset p-3 text-[11px] font-[family-name:var(--font-mono)] text-primary">
@@ -2150,186 +2077,7 @@ export function SettingsPage() {
           </>
         )}
 
-        {section === 'opencode' && (
-          <div className="space-y-1 animate-macos-enter">
-            <SettingsGroup
-              title="狀態"
-              action={
-                <div className="flex gap-1.5">
-                  <button
-                    type="button"
-                    disabled={oc.loading}
-                    onClick={() => void oc.hydrate(projectRoot)}
-                    className={settingsBtnCls + ' disabled:opacity-40'}
-                  >
-                    {oc.loading ? '載入中…' : '重新整理'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setOcProviderMsg('讀取 OpenCode provider catalog…')
-                      const health = await inspectOpenCodeServer()
-                      if (!health.ok || !health.baseUrl) {
-                        setOcProviderMsg(health.error || '找不到 localhost OpenCode server；先啟動 server。')
-                        return
-                      }
-                      const raw = await getOpenCodeProviderCatalog(health.baseUrl)
-                      const mapped = mapOpenCodeProviderCatalog(
-                        unwrapOpenCodeServerValue(raw) as Parameters<typeof mapOpenCodeProviderCatalog>[0],
-                      )
-                      if (!mapped.modelIds.length) {
-                        setOcProviderMsg('server 沒有回傳可採用的 model candidate。')
-                        return
-                      }
-                      const existing = settings.modelProfiles || {}
-                      const profiles = { ...existing }
-                      for (const id of mapped.modelIds) {
-                        if (!profiles[id]) profiles[id] = mapped.profiles[id]
-                      }
-                      set({
-                        discoveredModels: [...new Set([...(settings.discoveredModels || []), ...mapped.modelIds])],
-                        modelProfiles: profiles,
-                      })
-                      setOcProviderMsg(`已採用 ${mapped.modelIds.length} 個 server model candidate（不覆蓋既有模型設定）。`)
-                    }}
-                    className={settingsBtnCls}
-                  >
-                    採用 Provider candidates
-                  </button>
-                </div>
-              }
-            >
-              <div className="px-4 py-3 text-[11px] text-outline leading-relaxed">
-                合併{' '}
-                <code className="text-primary/80 font-mono">使用者資料目錄/opencode/opencode.json</code>
-                、專案 <code className="text-primary/80 font-mono">opencode.json</code> 與{' '}
-                <code className="text-primary/80 font-mono">.opencode/agents|commands</code>
-                。Commands 會自動匯入為 slash（/cmd）。
-              </div>
-              <div className="grid grid-cols-2 gap-2 px-4 pb-3">
-                <StatChip label="Config 來源" value={String(oc.sources.length)} />
-                <StatChip label="Agents" value={String(oc.agents.length)} />
-                <StatChip label="Commands" value={String(oc.commands.length)} />
-                <StatChip
-                  label="Slash 總數"
-                  value={String(getLiveSlashCommands().length)}
-                />
-              </div>
-              {oc.model && <Row k="default model" v={oc.model} mono />}
-              {oc.small_model && <Row k="small_model" v={oc.small_model} mono />}
-              {oc.default_agent && <Row k="default_agent" v={oc.default_agent} mono />}
-              {oc.error && (
-                <p className="text-[11px] text-amber-200/90 px-4 pb-3">{oc.error}</p>
-              )}
-              {ocProviderMsg && (
-                <p className="text-[11px] text-primary/90 px-4 pb-3">{ocProviderMsg}</p>
-              )}
-            </SettingsGroup>
-
-            <SettingsGroup title="Config 路徑">
-              {oc.sources.length === 0 ? (
-                <div className="px-4 py-3 text-[12px] text-outline">
-                  尚未找到 opencode.json（可選建立）
-                </div>
-              ) : (
-                oc.sources.map((s) => (
-                  <div
-                    key={s}
-                    className="px-4 py-2.5 text-[11px] font-mono text-white/60 break-all"
-                  >
-                    {s}
-                  </div>
-                ))
-              )}
-            </SettingsGroup>
-
-            <SettingsGroup title="Project permissions">
-              {Object.keys(oc.permission).length === 0 ? (
-                <div className="px-4 py-3 text-[12px] text-outline">
-                  未設定專案／全域 OpenCode permission；使用內建 Build / Plan 預設規則。
-                </div>
-              ) : (
-                <>
-                  <div className="px-4 py-2 text-[10px] text-outline">
-                    這些規則只會套用到目前載入的專案 run；deny 優先於 ask，bash pattern 依檔案順序由後到前覆蓋。
-                  </div>
-                  {Object.entries(oc.permission).map(([key, value]) => (
-                    <SettingsRow
-                      key={key}
-                      title={key}
-                      description={
-                        typeof value === 'string'
-                          ? value
-                          : `${Object.keys(value || {}).length} pattern 規則`
-                      }
-                      control={
-                        <span
-                          className={`text-[10px] font-mono ${
-                            value === 'deny'
-                              ? 'text-error'
-                              : value === 'ask'
-                                ? 'text-amber-300'
-                                : 'text-emerald-300'
-                          }`}
-                        >
-                          {typeof value === 'string' ? value : 'pattern'}
-                        </span>
-                      }
-                    />
-                  ))}
-                </>
-              )}
-            </SettingsGroup>
-
-            <SettingsGroup title="Agents 註冊表">
-              <div className="max-h-56 overflow-y-auto custom-scrollbar">
-                {oc.agents.map((a) => (
-                  <SettingsRow
-                    key={`${a.source}-${a.id}`}
-                    title={`${a.label} (${a.id})`}
-                    description={`${a.kind} · ${a.source}${a.model ? ` · ${a.model}` : ''}`}
-                    control={
-                      a.hidden ? (
-                        <span className="text-[10px] text-outline">hidden</span>
-                      ) : (
-                        <span />
-                      )
-                    }
-                  />
-                ))}
-              </div>
-            </SettingsGroup>
-
-            <SettingsGroup title="Commands → Slash">
-              {oc.commands.length === 0 ? (
-                <div className="px-4 py-3 text-[12px] text-outline">
-                  無自訂 command。可在{' '}
-                  <code className="font-mono text-primary/70">.opencode/commands/*.md</code>{' '}
-                  新增。
-                </div>
-              ) : (
-                oc.commands.map((c) => (
-                  <SettingsRow
-                    key={c.path || c.id}
-                    title={`/${c.id}`}
-                    description={c.description || c.template.slice(0, 100)}
-                    control={
-                      c.agent ? (
-                        <span className="text-[11px] text-outline font-mono">
-                          agent={c.agent}
-                        </span>
-                      ) : (
-                        <span />
-                      )
-                    }
-                  />
-                ))
-              )}
-            </SettingsGroup>
-          </div>
-        )}
-
-        {section === 'roles' && (
+       {section === 'roles' && (
           <>
             <SettingsGroup
               title="各角色模型"
@@ -3424,24 +3172,9 @@ export function SettingsPage() {
               />
             </SettingsGroup>
 
-            <SettingsGroup title="Plugin permission summary">
-              {oc.plugins.length === 0 ? (
-                <p className="px-4 py-3 text-[12px] text-outline">目前 config 沒有 npm plugin reference；`.opencode/plugins` 本地檔案仍維持 OpenCode 自己的載入範圍。</p>
-              ) : (
-                <div className="divide-y divide-white/10">
-                  {oc.plugins.map((plugin) => (
-                    <div key={plugin} className="px-4 py-2.5">
-                      <div className="text-[12px] font-mono text-on-surface">{plugin}</div>
-                      <div className="text-[10px] text-amber-300/90 mt-0.5">permission：未知（manifest reference only） · 不自動安裝／不執行 plugin code</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </SettingsGroup>
-
             <SettingsGroup title="Per-agent MCP 存取">
               <div className="px-4 py-2 text-[11px] text-outline leading-relaxed">
-                未設定 agent 會沿用全域 MCP；一旦切換成自訂清單，空清單代表該 agent 完全不能使用 MCP。這是 allowlist，不會放寬 OpenCode permission deny。
+                未設定 agent 會沿用全域 MCP；一旦切換成自訂清單，空清單代表該 agent 完全不能使用 MCP。
               </div>
               {(() => {
                 const servers = (settings.mcpServers || []).filter((server) => server.enabled)
@@ -3449,13 +3182,7 @@ export function SettingsPage() {
                 const agentRows = [
                   { id: 'build', label: 'Build（內建）' },
                   { id: 'plan', label: 'Plan（內建）' },
-                  ...oc.agents
-                    .filter((agent) => !agent.hidden && agent.id !== 'build' && agent.id !== 'plan')
-                    .map((agent) => ({ id: agent.id, label: `${agent.label}（${agent.id}）` })),
                 ].filter((agent, index, rows) => rows.findIndex((x) => x.id === agent.id) === index)
-                if (!agentRows.length) {
-                  return <p className="px-4 py-3 text-[12px] text-outline">尚未載入 OpenCode agent；先到 OpenCode 分頁重新整理。</p>
-                }
                 return (
                   <div className="divide-y divide-white/10">
                     {agentRows.map((agent) => {
@@ -3840,66 +3567,6 @@ export function SettingsPage() {
               </pre>
             )}
 
-            {/* OpenCode 匯入報告 — 每個欄位三擇一：暫時套用 / 待採用 / 不支援 */}
-            <SettingsGroup title="OpenCode 匯入報告">
-              <p className="text-[12px] text-on-surface-variant mb-2 leading-relaxed px-1">
-                偵測到的設定不會靜默覆蓋全域：暫時套用僅影響本 run；待採用需按「採用」；
-                不支援欄位顯式列出。來源：{ocSources.join('、') || '（尚未偵測到 opencode 設定）'}
-              </p>
-              {ocCandidates.length === 0 ? (
-                <p className="text-[12px] text-outline px-1">無設定候選。</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {ocCandidates.map((c) => (
-                    <div
-                      key={c.id}
-                      className="flex items-start gap-2 rounded-control border border-line bg-inset px-3 py-2"
-                    >
-                      <span
-                        className={`shrink-0 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                          c.applyMode === 'temporary'
-                            ? 'bg-primary/15 text-primary'
-                            : c.applyMode === 'review'
-                              ? 'bg-amber-500/15 text-amber-300'
-                              : 'bg-inset text-outline'
-                        }`}
-                      >
-                        {c.applyMode === 'temporary'
-                          ? '暫時套用'
-                          : c.applyMode === 'review'
-                            ? c.adopted
-                              ? '已採用'
-                              : '待採用'
-                            : '不支援'}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[12px] font-semibold text-on-surface font-[family-name:var(--font-mono)]">
-                          {c.field}
-                        </span>
-                        <span className="block text-[11px] text-on-surface-variant truncate">
-                          {c.value}
-                        </span>
-                        {c.note && (
-                          <span className="block text-[10px] text-outline mt-0.5">{c.note}</span>
-                        )}
-                      </span>
-                      {c.applyMode === 'review' && !c.adopted && (
-                        <button
-                          type="button"
-                          className={`${settingsBtnCls} shrink-0`}
-                          onClick={async () => {
-                            const r = await adoptOcCandidate(c.id)
-                            setMcpProbe(r.message)
-                          }}
-                        >
-                          採用
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </SettingsGroup>
           </>
         )}
 

@@ -24,7 +24,6 @@ import type {
   CapabilityRuntimeState,
   CapabilityUnlockProvenance,
 } from './types.ts'
-import { mcpServersForAgent } from '../opencode/mcpAccess.ts'
 import { resolveEntitlement, isCapabilityEntitled, type EntitlementSnapshot } from '../entitlement.ts'
 
 export { LOAD_CAPABILITY_TOOL, RUN_CODE_TOOL, TOOL_SEARCH_TOOL }
@@ -56,7 +55,7 @@ export type AssembleOpts = {
   blockedTools?: string[]
   /** Restore tool_search unlock set (cross-step / cross-run) */
   preloadUnlockedTools?: string[]
-  /** OpenCode agent id used to filter per-agent MCP access. */
+  /** Agent id used to filter per-agent MCP access. */
   agentId?: string
   /**
    * Issue 07 — the one entitlement decision point. Defaults to a bare Free
@@ -85,7 +84,11 @@ function skillCaps(): AgentCapability[] {
 
 function mcpCaps(settings: LlmSettings, agentId?: string): AgentCapability[] {
   if (!settings.mcpEnabled || !settings.mcpServers?.length) return []
-  return mcpServersForAgent(settings, agentId)
+  const allowlist = agentId && Object.prototype.hasOwnProperty.call(settings.mcpAgentServers || {}, agentId)
+    ? new Set(settings.mcpAgentServers?.[agentId] || [])
+    : null
+  return settings.mcpServers
+    .filter((server) => server.enabled && (!allowlist || allowlist.has(server.id)))
     .map((s) => ({
       id: `mcp:${s.id}`,
       description: `MCP server「${s.name}」tools (load to expose schemas).`,

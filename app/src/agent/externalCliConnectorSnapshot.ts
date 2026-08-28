@@ -7,7 +7,7 @@ import type { LlmSettings, RuntimeOverrides } from './types.ts'
  * The producer is the configured/selected MCP capability set, not provider
  * stderr text. Explicit per-run requirements remain authoritative (including
  * an explicit empty list), while a missing override is derived from enabled
- * servers allowed for the selected OpenCode agent.
+ * servers allowed for the selected agent.
  */
 export function resolveExternalCliRequiredConnectors(
   settings: Pick<LlmSettings, 'mcpEnabled' | 'mcpServers' | 'mcpAgentServers'>,
@@ -21,7 +21,7 @@ export function resolveExternalCliRequiredConnectors(
     }))
   }
   if (settings.mcpEnabled !== true) return []
-  // agentMode is the selected OpenCode capability when callers have not
+  // agentMode is the selected capability when callers have not
   // supplied the more explicit MCP id. This keeps the admission producer in
   // lockstep with the same per-agent access mapping used by the tool loop.
   const agentId = overrides?.mcpAgentId || overrides?.agentMode

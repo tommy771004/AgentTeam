@@ -8,7 +8,8 @@ import type { MemoryEntry } from '../hermes/types.ts'
 import type { CliProviderConfig } from '../cliProviders.ts'
 import type { Thread, ThreadRunner } from '../../store/threadStore.ts'
 import type { SubDesignModelDiscovery } from './modelDiscovery.ts'
-import { createStreamingEnvelope, mergeStreamingUpdate, pluginRunArtifactId, type StreamingEnvelope } from './streamingEnvelope.ts'
+import { createStreamingEnvelope, pluginRunArtifactId, type StreamingEnvelope } from './streamingEnvelope.ts'
+import { projectSubDesignStreaming, type SubDesignStreamingPresentation } from './streamingProjection.ts'
 import { isProviderEnabled } from './providers/providerFlags.ts'
 import type {
   SubDesignBrief,
@@ -171,6 +172,7 @@ export type SubDesignWorkspaceProjection = {
   modelDiscoveryStatus: 'idle' | 'loading' | 'ready' | 'failed'
   modelDiscoveryWarning?: string
   streams: Record<string, StreamingEnvelope>
+  streamPresentations: Record<string, SubDesignStreamingPresentation>
   capabilities: SubDesignWorkspaceCapabilities
   presentation: SubDesignWorkspacePresentation
   workspace: SubDesignWorkspaceViewModel | null
@@ -473,6 +475,13 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       modelDiscoveryStatus: state.modelDiscoveryStatus,
       modelDiscoveryWarning: state.modelDiscoveryWarning,
       streams: { ...state.streams },
+      streamPresentations: Object.fromEntries(visibleArtifacts.map((artifact) => [artifact.id, projectSubDesignStreaming({
+        snapshot: {
+          artifact,
+          liveEnvelope: state.streams[artifact.id],
+          providerRuns: state.provider.providerRuns,
+        },
+      })])),
       capabilities: { ...deps.getCapabilities() },
       presentation,
       workspace,
@@ -526,9 +535,28 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
         runId,
         stageId,
       })
-      const merged = mergeStreamingUpdate(base, update)
-      if (merged.envelope === base) return
-      state.streams = { ...state.streams, [artifactId]: merged.envelope }
+      const artifact = projection.presentation.artifacts.find((candidate) => candidate.id === artifactId)
+      const authoritativeArtifact = artifact || {
+        id: artifactId,
+        briefId: projection.activeBrief?.id || '',
+        kind: base.artifactKind,
+        title: artifactId,
+        entry: '',
+        renderer: 'html' as const,
+        exports: [],
+        supportingFiles: [],
+        status: 'streaming' as const,
+        revision: 1,
+        createdAt: '',
+        updatedAt: '',
+      }
+      const projected = projectSubDesignStreaming({
+        snapshot: { artifact: authoritativeArtifact, liveEnvelope: base },
+        events: [update],
+      })
+      if (projected.envelope === base) return
+      if (!projected.envelope) return
+      state.streams = { ...state.streams, [artifactId]: projected.envelope }
       publish()
     })
   }

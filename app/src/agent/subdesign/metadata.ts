@@ -19,6 +19,7 @@ export type SubDesignMetadataSnapshot = {
   openDesignProviderSettings: unknown[]
   openDesignProviderRuns: unknown[]
   openDesignSurfaceSessions: unknown[]
+  pinnedComments: unknown[]
 }
 
 type MetadataPayload = SubDesignBrief | SubDesignArtifact | SubDesignCritique | SubDesignExportRecord | OpenDesignContentPackManifest | PluginResolvedSnapshot | StorybookProviderSettings | ChromeDevToolsProviderSettings | HarnessProviderSettings | ExperimentalSurfaceSettings | SubDesignPluginExecutionProjection | SubDesignPinnedCommentAuditRecord | { schemaVersion: 1; id: string; [key: string]: unknown }
@@ -38,6 +39,7 @@ export async function readSubDesignMetadata(projectRoot?: string): Promise<SubDe
     openDesignProviderSettings: Array.isArray(result.openDesignProviderSettings) ? result.openDesignProviderSettings : [],
     openDesignProviderRuns: Array.isArray(result.openDesignProviderRuns) ? result.openDesignProviderRuns : [],
     openDesignSurfaceSessions: Array.isArray(result.openDesignSurfaceSessions) ? result.openDesignSurfaceSessions : [],
+    pinnedComments: Array.isArray(result.pinnedComments) ? result.pinnedComments : [],
   }
 }
 

@@ -24,7 +24,6 @@ export type ExternalCliAdapter =
   | 'grok'
   | 'gemini'
   | 'cursor'
-  | 'opencode'
   | (string & {})
 
 export type ExternalCliRunPhase =

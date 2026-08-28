@@ -8,7 +8,6 @@
 
 import type {
   AgentMode,
-  CliConfigSnapshot,
   ExternalRunRef,
   LlmSettings,
   RuntimeOverrides,
@@ -17,12 +16,6 @@ import type { ThinkingDepth } from './thinking.ts'
 import type { LocalRunnerKind } from './localCliRun.ts'
 import { useAgentStore } from '../store/agentStore.ts'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore.ts'
-import { parseSubagentMentions } from './opencode/agents.ts'
-import {
-  openCodeRuntimeOverrides,
-  getRegistryAgent,
-  parseRegistryMentions,
-} from './opencode/agentRegistry.ts'
 import { buildIntentPreloadIds } from './intentPreload.ts'
 import { buildSubDesignRuntimeContext } from './subdesign/prompt.ts'
 import { getSubDesignBriefForThread } from '../store/subDesignStore.ts'
@@ -32,6 +25,7 @@ import {
   defaultGoalForAttachments,
 } from '../lib/chatAttachments.ts'
 import { buildPiTurnContext, withPiTurnContext } from './piTurnContext.ts'
+import { parseSubagentMentions } from './subagentMentions.ts'
 import type { RunDispatchSnapshot } from './taskRunCoordinator.ts'
 
 export type { DispatchResult } from './dispatchResult.ts'
@@ -67,49 +61,6 @@ function isRunnerAuthorized(kind: LocalRunnerKind, settings: LlmSettings): boole
     (p) =>
       (p.id === mapId || p.id === kind) && p.enabled !== false && p.authorized,
   )
-}
-
-async function captureOpenCodeConfigSnapshot(
-  projectRoot: string,
-  agentMode: AgentMode,
-  model: string,
-): Promise<CliConfigSnapshot> {
-  const { useOpenCodeConfigStore } = await import('../store/opencodeConfigStore.ts')
-  const store = useOpenCodeConfigStore.getState()
-  if (!store.loaded || store.lastProjectRoot !== projectRoot) {
-    await store.hydrate(projectRoot)
-  }
-  const current = useOpenCodeConfigStore.getState()
-  const agent = getRegistryAgent(agentMode)
-  let instructions: CliConfigSnapshot['instructions']
-  if (window.subagents?.opencode?.resolveInstructions) {
-    try {
-      const resolved = await window.subagents.opencode.resolveInstructions(
-        projectRoot,
-        current.instructionsByRoot[projectRoot] || current.instructionsEntries,
-      )
-      instructions = resolved.map((item) => ({
-        entry: item.entry,
-        path: item.path,
-        bytes: item.bytes,
-        sha256: item.sha256,
-      }))
-    } catch {
-      instructions = undefined
-    }
-  }
-  return {
-    provider: 'opencode',
-    sources: [...(current.sources || [])].slice(0, 12),
-    agent: agent?.id || agentMode,
-    model: model || current.model || undefined,
-    permission: agent?.permissionProjection || {
-      rules: {},
-      unsupported: [],
-    },
-    instructions,
-    capturedAt: new Date().toISOString(),
-  }
 }
 
 /**
@@ -200,10 +151,9 @@ export async function dispatchThreadTask(
   const agent = useAgentStore.getState()
 
   const runner: ThreadRunner = snapshot.runner
-  const mentioned = parseRegistryMentions(raw)
-  const legacy = parseSubagentMentions(raw)
-  const subId = mentioned.subagents[0] || legacy.subagents[0]
-  let text = mentioned.cleaned || legacy.cleaned || raw
+  const mentioned = parseSubagentMentions(raw)
+  const subId = mentioned.subagents[0]
+  let text = mentioned.cleaned || raw
   const depth = (snapshot.overrides.thinkingDepth ||
     thread?.thinkingDepth ||
     'deep') as ThinkingDepth
@@ -228,10 +178,6 @@ export async function dispatchThreadTask(
 
   if (runner !== 'builtin') {
     const kind = runner as LocalRunnerKind
-    const configSnapshot =
-      kind === 'opencode'
-        ? await captureOpenCodeConfigSnapshot(projectRoot, agentMode, model)
-        : undefined
     if (!isRunnerAuthorized(kind, settings)) {
       return {
         path: 'cli',
@@ -316,7 +262,6 @@ export async function dispatchThreadTask(
       attachments: cliAttachments.length ? cliAttachments : undefined,
       runId: snapshot.runId,
       threadId: tid || undefined,
-      configSnapshot,
       loopType: snapshot.forceLoopType,
       maxIterations: snapshot.overrides.maxIterations,
       scheduleTrigger: snapshot.overrides.scheduleTrigger,
@@ -371,13 +316,13 @@ export async function dispatchThreadTask(
     text = `${text}\n\n${appendix}`.slice(0, 120_000)
   }
 
-  const baseOverrides: RuntimeOverrides = openCodeRuntimeOverrides({
+  const baseOverrides: RuntimeOverrides = {
     agentMode,
     model,
-    depth,
+    thinkingDepth: depth,
     speed,
-    subagent: subId,
-  })
+    subagentId: subId,
+  }
 
   // Chat history: recent verbatim + older condensed (budget-friendly).
   let extra = baseOverrides.extraSystemContext || ''

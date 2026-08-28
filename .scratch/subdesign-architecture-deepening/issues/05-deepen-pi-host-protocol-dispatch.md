@@ -2,6 +2,10 @@
 
 Status: 可交給代理
 
+## Comments
+
+- 2026-08-28 staged safely, not yet resolved: capability、resources、extensions 已各自移入 deletion-test domain module；server persistence 改由 cursor-based `PiHostDispatchOutcome.commit` 決定並刪除 method-prefix heuristic。Sessions/runs/tools 尚未完成 domain extraction，因此本票保持 open。
+
 Blocked by: 02, 03
 
 ## Parent

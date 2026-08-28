@@ -22,7 +22,7 @@ import { ExperimentalSurfaceControl } from './ExperimentalSurfaceControl'
 import { StorybookContextControl } from './StorybookContextControl'
 import type { ExperimentalSurfaceSettings, StorybookProviderSettings } from '../../agent/subdesign/providers/providerSettings.ts'
 import type { SubDesignPluginExecutionProjection } from '../../agent/subdesign/pluginExecution.ts'
-import type { StreamingEnvelope } from '../../agent/subdesign/streamingEnvelope.ts'
+import type { SubDesignStreamingPresentation } from '../../agent/subdesign/streamingProjection.ts'
 import type { PluginInputValues } from '../../agent/subdesign/pluginInputs.ts'
 import type { PluginInput } from '../../agent/openDesign/pluginContract.ts'
 
@@ -43,7 +43,7 @@ type SubDesignProjectStudioProps = {
   onStartRun: () => void
   onStopRun: () => void
   onSubmitFollowUp: (value: string) => Promise<void>
-  onSubmitPinnedComments?: (input: { artifact: { id: string; title?: string; revision: number }; pins: SubDesignPinnedComment[] }) => Promise<{ ok: boolean; runId?: string }>
+  onSubmitPinnedComments?: (input: { artifact: { id: string; title?: string; revision: number }; pins: SubDesignPinnedComment[] }) => Promise<{ ok: boolean; runId?: string; error?: string }>
   onOpenTranscript: () => void
   onSelectArtifact: (artifact: SubDesignArtifact) => void
   onSelectDirection: (directionId: string) => void
@@ -55,7 +55,7 @@ type SubDesignProjectStudioProps = {
     value: Pick<ExperimentalSurfaceSettings, 'mcpApps' | 'streaming'>,
   ) => Promise<{ ok: boolean; reason?: string }>
   /** Stream projection for the selected artifact, recovered from Host state. */
-  artifactStream?: StreamingEnvelope | null
+  artifactStream?: SubDesignStreamingPresentation | null
   /** The plugin's declared inputs, shown when a run is blocked on them. */
   pluginDeclaredInputs?: readonly PluginInput[]
   onSubmitPluginInputs?: (values: PluginInputValues) => void
@@ -124,6 +124,11 @@ export function SubDesignProjectStudio({
   onSaveStorybookSettings,
 }: SubDesignProjectStudioProps) {
   const projectRoot = useProjectStore((state) => state.root)
+
+  useEffect(() => {
+    if (!projectRoot) return
+    void useSubDesignPinnedCommentsStore.getState().hydrateCanonical(projectRoot)
+  }, [projectRoot])
   const [tab, setTab] = useState<StudioTab>('files')
   const [previewMode, setPreviewMode] = useState<'preview' | 'source' | 'diff'>('preview')
   const [candidateDirectionId, setCandidateDirectionId] = useState(brief.selectedDirectionId || '')
@@ -285,18 +290,21 @@ export function SubDesignProjectStudio({
                   <ArtifactPreview
                     artifact={selectedArtifact}
                     mode={previewMode === 'source' ? 'source' : 'preview'}
-                    envelope={artifactStream}
+                    streaming={artifactStream}
                     onSubmitPinnedComments={onSubmitPinnedComments && !runIsLive ? async (pins) => {
                       const result = await onSubmitPinnedComments({ artifact: { id: selectedArtifact.id, title: selectedArtifact.title, revision: selectedArtifact.revision }, pins })
-                      if (!result.ok) return false
-                      useSubDesignPinnedCommentsStore.getState().recordSubmission({
+                      if (!result.ok) return { ok: false, error: result.error || '無法啟動 pin 修正。' }
+                      if (!projectRoot) return { ok: true, warning: '修正已送出，但目前沒有 projectRoot，稽核記錄尚未同步。' }
+                      const audit = await useSubDesignPinnedCommentsStore.getState().recordSubmission({
                         artifactId: selectedArtifact.id,
                         revision: selectedArtifact.revision,
                         briefId: selectedArtifact.briefId,
                         runId: result.runId,
                         pins,
-                      })
-                      return true
+                      }, projectRoot)
+                      return audit.persisted
+                        ? { ok: true }
+                        : { ok: true, warning: '修正已送出，但 canonical 稽核記錄寫入失敗；已保留本機副本。' }
                     } : undefined}
                   />
                 ) : (

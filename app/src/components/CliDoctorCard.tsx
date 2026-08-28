@@ -67,7 +67,7 @@ export function CliDoctorCard({ onStartTask }: { onStartTask?: () => void }) {
           <div className="min-w-0">
             <h2 className="text-sm font-semibold">首次啟動環境檢查</h2>
             <p className="mt-1 text-xs text-outline">
-              檢查 Git、Codex、Claude Code、OpenCode 與其他本機 CLI；不會讀取或複製 token。
+              檢查 Git、Codex、Claude Code、Grok、Gemini、Cursor 與其他本機 CLI；不會讀取或複製 token。
             </p>
           </div>
         </div>

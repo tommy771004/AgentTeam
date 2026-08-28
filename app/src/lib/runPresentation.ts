@@ -32,7 +32,7 @@ export type ProcessOperationGroup =
 const CONTEXT_OPERATION =
   /\b(read|cat|glob|grep|rg|search|list|find|ls|tree|codegraph|web[_ -]?search|http_fetch)\b/i
 
-/** OpenCode-style context work: compact consecutive read/search operations. */
+/** Context work: compact consecutive read/search operations. */
 export function isContextOperation(operation: ProcessOperation) {
   if (operation.kind !== 'tool' && operation.kind !== 'status') return false
   return CONTEXT_OPERATION.test(`${operation.title}\n${operation.detail || ''}`)

@@ -30,6 +30,7 @@ export type TimelineItem =
       title?: string
       settlement?: string
       detail?: string
+      resultDetail?: string
       diff?: string
       added?: number
       removed?: number
@@ -121,31 +122,79 @@ function settledToolIcon(tool: string): string {
   }
 }
 
-function ToolTimelineRow({ row, open, toggle, index }: { row: Extract<TimelineItem, { kind: 'tool' }>; open: boolean; toggle: () => void; index: number }) {
+function toolRowState(row: Extract<TimelineItem, { kind: 'tool' }>, grouped: boolean) {
   const pending = row.settlement === undefined
   const failed = row.settlement !== undefined && row.settlement !== 'success'
-  const label = row.title || (pending ? `執行 ${row.tool}…` : failed ? `${row.tool} ${row.settlement}` : `已執行 ${row.tool}`)
-  const search = isSearchTool(row.tool)
-  const expandable = Boolean(row.diff || row.detail)
+  return {
+    pending,
+    failed,
+    search: isSearchTool(row.tool),
+    expandable: Boolean(row.diff || (!grouped && row.resultDetail)),
+    label: row.title || (pending ? `執行 ${row.tool}…` : failed ? `${row.tool} ${row.settlement}` : `已執行 ${row.tool}`),
+  }
+}
+
+function ToolRowIcon({ row, pending, failed, expandable, open }: {
+  row: Extract<TimelineItem, { kind: 'tool' }>
+  pending: boolean
+  failed: boolean
+  expandable: boolean
+  open: boolean
+}) {
+  const name = pending ? 'progress_activity' : failed ? 'error' : settledToolIcon(row.tool)
+  return (
+    <span className="relative flex size-4 shrink-0 items-center justify-center">
+      <Icon
+        name={name}
+        size={15}
+        className={`${pending ? 'animate-spin text-ink' : 'text-ink-3'} transition-opacity duration-100 ${expandable ? `group-hover/tool:opacity-0 ${open ? 'opacity-0' : ''}` : ''}`}
+      />
+      {expandable ? (
+        <span className={`absolute inline-flex text-ink-3 transition-[opacity,transform] duration-150 group-hover/tool:opacity-100 ${open ? 'rotate-0 opacity-100' : '-rotate-90 opacity-0'}`}>
+          <Icon name="expand_more" size={13} />
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+function ToolRowDisclosure({ row, open, failed, grouped, expandable }: {
+  row: Extract<TimelineItem, { kind: 'tool' }>
+  open: boolean
+  failed: boolean
+  grouped: boolean
+  expandable: boolean
+}) {
+  return (
+    <>
+      {expandable ? (
+        <Reveal open={open}>
+          {row.diff ? (
+            <div className="agent-process-detail ml-5 mt-1 overflow-hidden rounded-control border border-line">
+              <UnifiedDiffView diff={row.diff} maxHeightClass="max-h-[320px]" />
+            </div>
+          ) : (
+            <pre className={`agent-process-detail ml-6 mt-1 whitespace-pre-wrap break-words text-[11px] font-[family-name:var(--font-mono)] ${failed ? 'text-red' : 'text-ink-2'}`}>{row.resultDetail}</pre>
+          )}
+        </Reveal>
+      ) : null}
+      {grouped && row.resultDetail ? (
+        <pre className={`ml-6 mt-1 whitespace-pre-wrap break-words text-[11px] leading-relaxed font-[family-name:var(--font-mono)] ${failed ? 'text-red' : 'text-ink-3'}`} data-tool-result-detail>{row.resultDetail}</pre>
+      ) : null}
+    </>
+  )
+}
+
+function ToolTimelineRow({ row, open, toggle, index, grouped = false }: { row: Extract<TimelineItem, { kind: 'tool' }>; open: boolean; toggle: () => void; index: number; grouped?: boolean }) {
+  const { pending, failed, label, search, expandable } = toolRowState(row, grouped)
   const rowClass = `agent-process-row group/tool flex w-full max-w-full min-w-0 items-center gap-2 text-left text-[12px] ${failed ? 'text-red' : 'text-ink-2'}`
   const rowContent = (
     <>
-      <span className="relative flex size-4 shrink-0 items-center justify-center">
-        <Icon
-          name={pending ? 'progress_activity' : failed ? 'error' : settledToolIcon(row.tool)}
-          size={15}
-          className={`${pending ? 'animate-spin text-ink' : 'text-ink-3'} transition-opacity duration-100 ${expandable ? `group-hover/tool:opacity-0 ${open ? 'opacity-0' : ''}` : ''}`}
-        />
-        {expandable ? (
-          <span className={`absolute inline-flex text-ink-3 transition-[opacity,transform] duration-150 group-hover/tool:opacity-100 ${open ? 'rotate-0 opacity-100' : '-rotate-90 opacity-0'}`}>
-            <Icon name="expand_more" size={13} />
-          </span>
-        ) : null}
-      </span>
+      <ToolRowIcon row={row} pending={pending} failed={failed} expandable={expandable} open={open} />
       <ShimmerLabel active={pending} className="shrink-0 font-medium">{label}</ShimmerLabel>
       <ToolDiffStats row={row} />
       <ToolApproval row={row} />
-      {row.detail ? <span className="agent-process-chip inline-flex min-w-0 max-w-full shrink truncate px-1.5 py-0.5 text-[11.5px] font-[family-name:var(--font-mono)]">{row.detail}</span> : null}
+      {row.detail ? <span className="min-w-0 max-w-full shrink truncate text-[11.5px] text-ink-3 font-[family-name:var(--font-mono)]">{row.detail}</span> : null}
     </>
   )
   return (
@@ -155,26 +204,18 @@ function ToolTimelineRow({ row, open, toggle, index }: { row: Extract<TimelineIt
       ) : (
         <div data-timeline-row="tool" data-tool-variant={search ? 'search' : 'coding'} className={rowClass}>{rowContent}</div>
       )}
-      <Reveal open={open && expandable}>
-        {row.diff ? (
-          <div className="agent-process-detail ml-5 mt-1 overflow-hidden rounded-control border border-line">
-            <UnifiedDiffView diff={row.diff} maxHeightClass="max-h-[320px]" />
-          </div>
-        ) : (
-          <pre className="agent-process-detail ml-5 mt-0.5 whitespace-pre-wrap break-all text-[11px] text-ink-2 font-[family-name:var(--font-mono)] line-clamp-5">{row.detail}</pre>
-        )}
-      </Reveal>
+      <ToolRowDisclosure row={row} open={open} failed={failed} grouped={grouped} expandable={expandable} />
     </div>
   )
 }
 
-function TimelineRowView({ row, open, toggle, index }: { row: TimelineItem; open: boolean; toggle: () => void; index: number }) {
+function TimelineRowView({ row, open, toggle, index, grouped = false }: { row: TimelineItem; open: boolean; toggle: () => void; index: number; grouped?: boolean }) {
   switch (row.kind) {
     case 'reasoning': return <ReasoningTimelineRow row={row} open={open} toggle={toggle} index={index} />
     case 'context': return <ContextTimelineRow row={row} open={open} toggle={toggle} index={index} />
     case 'assistant': return <AssistantTimelineRow row={row} />
     case 'notice': return <div className="agent-process-row flex max-w-full items-center gap-2 text-[12px] text-ink-3"><Icon name="info" size={15} className="shrink-0" /><span className="min-w-0 flex-1 truncate">{row.content}</span></div>
-    case 'tool': return <ToolTimelineRow row={row} open={open} toggle={toggle} index={index} />
+    case 'tool': return <ToolTimelineRow row={row} open={open} toggle={toggle} index={index} grouped={grouped} />
   }
 }
 
@@ -212,11 +253,13 @@ function TimelineActivityGroup({
   toggleRow: (id: string) => void
 }) {
   const presentation = groupPresentation(group)
+  const detailId = `timeline-group-${group.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   return (
     <div data-timeline-group={group.key} style={rowAnimation(group.index)}>
       <button
         type="button"
         aria-expanded={open}
+        aria-controls={detailId}
         className={`agent-process-row flex w-full max-w-full items-center gap-2 text-left text-[12px] ${presentation.failed ? 'text-red' : 'text-ink-3'}`}
         onClick={toggle}
       >
@@ -225,7 +268,7 @@ function TimelineActivityGroup({
         <TraceChevron open={open} />
       </button>
       <Reveal open={open}>
-        <div className="ml-5 mt-1 space-y-1 border-l border-stroke pl-3" data-timeline-group-detail>
+        <div id={detailId} className="ml-6 mt-1.5 space-y-1.5" data-timeline-group-detail>
           {group.rows.map((row, offset) => (
             <TimelineRowView
               key={row.id}
@@ -233,6 +276,7 @@ function TimelineActivityGroup({
               index={group.index + offset}
               open={expandedRow === row.id}
               toggle={() => toggleRow(row.id)}
+              grouped
             />
           ))}
         </div>

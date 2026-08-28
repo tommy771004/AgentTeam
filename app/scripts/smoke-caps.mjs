@@ -12,13 +12,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.resolve(__dirname, '..')
 
 function readTaskRunRuntimeSource(fs) {
-  // runExternal.ts retired — policy + coordinator + types + OpenCode mapping/sync
+  // runExternal.ts retired: policy + coordinator + types own the runtime contract.
   return [
     fs.readFileSync(path.join(appRoot, 'src/agent/taskRunTypes.ts'), 'utf8'),
     fs.readFileSync(path.join(appRoot, 'src/agent/taskRunPolicy.ts'), 'utf8'),
     fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8'),
-    fs.readFileSync(path.join(appRoot, 'src/agent/opencode/sessionMapping.ts'), 'utf8'),
-    fs.readFileSync(path.join(appRoot, 'src/agent/opencode/sessionSync.ts'), 'utf8'),
   ].join('\n')
 }
 
@@ -297,7 +295,6 @@ await test('CLI approval + headless flags for all runners', async () => {
   assert.match(source, /--always-approve/)
   assert.match(source, /--max-turns/)
   assert.match(source, /case 'cursor'/)
-  assert.match(source, /case 'opencode'/)
   assert.match(source, /stripAnsi/)
   assert.match(source, /createCliStreamParser|onStream/)
   // No bare shell fallback that opens TUI
@@ -306,55 +303,12 @@ await test('CLI approval + headless flags for all runners', async () => {
   assert.match(discover, /whichCodex|whichCursorAgent/)
 })
 
-await test('Phase 0: OpenCode CLI has explicit agent/file/JSON event contract', async () => {
-  const fs = await import('node:fs')
-  const source = fs.readFileSync(path.join(appRoot, 'electron/localCliRunner.ts'), 'utf8')
-  assert.match(source, /args\.push\('--agent', input\.agentMode\)/)
-  assert.match(source, /args\.push\('--format', 'json'\)/)
-  assert.match(source, /function opencodeArgv/)
-  assert.match(source, /args\.push\('--file', attachment\)/)
-  assert.match(source, /normalizeOpenCodeEvent/)
-  assert.match(source, /permissionRequest/)
-})
-
-await test('Phase 1: OpenCode server adapter is localhost-only and has safe fallback', async () => {
-  const fs = await import('node:fs')
-  const bridge = fs.readFileSync(path.join(appRoot, 'electron/opencodeServerBridge.ts'), 'utf8')
-  const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
-  assert.match(bridge, /\/global\/health/)
-  assert.match(bridge, /\/doc/)
-  assert.match(bridge, /\/session\//)
-  assert.match(bridge, /\/global\/event/)
-  assert.match(bridge, /\/abort/)
-  assert.match(bridge, /127\.0\.0\.1/)
-  assert.doesNotMatch(bridge, /--mdns/)
-  assert.doesNotMatch(bridge, /--cors/)
-  assert.doesNotMatch(bridge, /0\.0\.0\.0/)
-  assert.match(main, /serverMode \|\| 'auto'/)
-  assert.match(main, /runLocalCliAgent/)
-})
-
-await test('Phase 2: OpenCode session todo/children/fork map into Thread state', async () => {
-  const fs = await import('node:fs')
-  const mapping = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/sessionMapping.ts'), 'utf8')
-  const runExternal = readTaskRunRuntimeSource(fs)
-  const serverClient = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/serverClient.ts'), 'utf8')
-  const thread = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
-  assert.match(mapping, /normalizeOpenCodeTodo/)
-  assert.match(mapping, /normalizeOpenCodeChildren/)
-  assert.match(runExternal, /syncOpenCodeSessionMapping/)
-  assert.match(runExternal, /setRunPlan\(threadId, plan\)/)
-  assert.match(runExternal, /createThread\(/)
-  assert.match(serverClient, /forkOpenCodeSession/)
-  assert.match(thread, /fork-pending/)
-})
-
 await test('Phase 3: MCP access is per-agent allowlist with health/secret owner UX', async () => {
   const fs = await import('node:fs')
-  const access = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/mcpAccess.ts'), 'utf8')
+  const runtime = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/runtime.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
-  assert.match(access, /mcpAgentServers/)
-  assert.match(access, /hasOwnProperty\.call\(map, agentId\)/)
+  assert.match(runtime, /mcpAgentServers/)
+  assert.match(runtime, /hasOwnProperty\.call\(settings\.mcpAgentServers/)
   assert.match(settings, /Per-agent MCP/)
   assert.match(settings, /secret owner/)
 })
@@ -382,19 +336,6 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   assert.match(delegate, /settings\.subAgentsEnabled !== true/)
   assert.match(background, /背景委派未排入/)
   assert.match(settings, /title="啟用 Sub Agent"/)
-})
-
-await test('Phase 4/5: LSP adapter, provider adoption, and plugin summary stay explicit', async () => {
-  const fs = await import('node:fs')
-  const lsp = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/codeIntelligenceAdapter.ts'), 'utf8')
-  const graph = fs.readFileSync(path.join(appRoot, 'src/agent/codegraphClient.ts'), 'utf8')
-  const provider = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/providerAdapter.ts'), 'utf8')
-  const config = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/configCandidates.ts'), 'utf8')
-  assert.match(lsp, /incomingCalls/)
-  assert.match(lsp, /goToDefinition|definition/)
-  assert.match(graph, /parseOpenCodeLspToGraph/)
-  assert.match(provider, /source: 'discovered'/)
-  assert.match(config, /permission 需人工審核/)
 })
 
 await test('custom tools: bash_template always approval-gated', async () => {
@@ -661,7 +602,6 @@ await test('Task run deepening: coordinator owns orchestration; runExternal shel
   assert.match(coordinator, /dispatchThreadTask\(snapshot\)/)
   assert.match(coordinator, /enqueueExternalRun/)
   assert.match(coordinator, /evaluateBeforeRunHooks/)
-  assert.match(coordinator, /opencode\/sessionSync/)
   assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/runExternal.ts')), false)
 })
 
@@ -962,37 +902,6 @@ await test('Phase 1: finalization summary derives from the Turn Record, never th
   // longer an input to anything the summary persists.
   assert.doesNotMatch(controller, /getPresentation\(runId\)/)
   assert.match(projection, /sort\(\(left, right\) => left\.seq - right\.seq\)/)
-})
-
-// ── W3: config candidates — every field temporary / review / unsupported ──
-function classifyOpenCodeField(field) {
-  if (['instructions', 'compaction', 'small_model', 'default_agent', 'permission'].includes(field))
-    return 'temporary'
-  if (field === 'model' || field.startsWith('mcp.')) return 'review'
-  return 'unsupported'
-}
-
-await test('W3: opencode fields classify to temporary / review / unsupported — never silent', () => {
-  assert.equal(classifyOpenCodeField('instructions'), 'temporary')
-  assert.equal(classifyOpenCodeField('compaction'), 'temporary')
-  assert.equal(classifyOpenCodeField('model'), 'review')
-  assert.equal(classifyOpenCodeField('mcp.linear'), 'review')
-  assert.equal(classifyOpenCodeField('theme'), 'unsupported')
-  assert.equal(classifyOpenCodeField('keybinds'), 'unsupported')
-})
-
-await test('Phase 3: OpenCode permission projection preserves patterns and restrictive merge', async () => {
-  const fs = await import('node:fs')
-  const config = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/configTypes.ts'), 'utf8')
-  const permissions = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/permissions.ts'), 'utf8')
-  const registry = fs.readFileSync(path.join(appRoot, 'src/agent/opencode/agentRegistry.ts'), 'utf8')
-  const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
-  assert.match(config, /projectOpenCodePermissions/)
-  assert.match(config, /mergePermissionProjectionsRestrictive/)
-  assert.match(permissions, /checkProjectedToolPermission/)
-  assert.match(permissions, /mcp_/)
-  assert.match(registry, /restrictivePermission/)
-  assert.match(decision, /OpenCode permission deny/)
 })
 
 await test('W3: mcp candidate mapping (url → http, command → stdio, no secrets)', () => {
@@ -1945,7 +1854,7 @@ await test('Open Design Phase 3: shared adapter contract and Gemini diagnostic',
   const discover = fs.readFileSync(path.join(appRoot, 'electron/cliDiscover.ts'), 'utf8')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
   assert.match(adapters, /export type CliAdapterDefinition/)
-  for (const id of ['codex', 'claude', 'opencode', 'gemini', 'cursor']) assert.match(adapters, new RegExp(`id: '${id}'`))
+  for (const id of ['codex', 'claude', 'gemini', 'cursor']) assert.match(adapters, new RegExp(`id: '${id}'`))
   assert.match(adapters, /buildInvocation/)
   assert.match(adapters, /parseEvent/)
   assert.match(adapters, /DISCOVERY_ONLY_AGENT_ADAPTERS/)

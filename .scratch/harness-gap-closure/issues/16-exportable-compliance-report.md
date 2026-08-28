@@ -4,7 +4,7 @@
 
 **Blocked by:** 15 — Show what a run sent outbound.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 The governance stack has depth that the compared harness has no counterpart for — `toolPackage.ts` compiles unapproved privilege surfaces read-only and forces re-approval when a fingerprint changes; `modelProfile.ts` carries per-model capability facts with provenance and degrades before calls fail; `secretsVault.ts` keeps tokens in main-process encrypted storage with metadata-only in the renderer; `hooks.ts` rules can only restrict or observe, never allow, and `require-approval` overrides approval mode `full`; `approvalModes.ts` downgrades `full` to `auto` for unattended runs; `entitlement.ts` fails closed to `free` and never throws or silently grants.
 
@@ -26,6 +26,8 @@ Nothing new is collected — this composes what `security:gates`, `release:quali
 Files: `app/src/agent/outbound/evidenceLedger.ts`, `app/src/agent/tools/toolPackage.ts`, `app/src/agent/entitlement.ts`, `app/scripts/security-gates.mjs`, `app/scripts/release-evidence.mjs`.
 
 ## Comments
+
+- 2026-08-28 tracker reconciliation: `smoke-compliance-report.mts` 覆蓋授權、credential reference、file change、blocked tool 與 secret redaction。
 
 **2026-08-17.** `buildComplianceReport` took every input as a caller-supplied
 array and had no caller, so no export existed. Added:

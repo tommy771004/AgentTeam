@@ -123,7 +123,7 @@ export type RunTimelineRow = {
       /** Still being written — the current assistant line, not a settled one. */
       draft?: boolean
     }
-  | { kind: 'tool'; tool: string; callId: string; settlement?: string; detail?: string; diff?: string; title?: string; added?: number; removed?: number; approval?: string; approvalReason?: string }
+  | { kind: 'tool'; tool: string; callId: string; settlement?: string; detail?: string; resultDetail?: string; diff?: string; title?: string; added?: number; removed?: number; approval?: string; approvalReason?: string }
   | { kind: 'notice'; content: string }
 )
 
@@ -138,6 +138,7 @@ function mergeProjectedToolRow(
     ...current,
     ...(incoming.settlement ? { settlement: incoming.settlement } : {}),
     ...(current.detail ? {} : incoming.detail ? { detail: incoming.detail } : {}),
+    ...(current.resultDetail ? {} : incoming.resultDetail ? { resultDetail: incoming.resultDetail } : {}),
     ...(current.diff ? {} : incoming.diff ? { diff: incoming.diff } : {}),
     ...(current.approval ? {} : incoming.approval ? { approval: incoming.approval } : {}),
     ...(current.approvalReason ? {} : incoming.approvalReason ? { approvalReason: incoming.approvalReason } : {}),
@@ -164,6 +165,7 @@ function appendOrMergeToolRow(
       ...(row.timing ? { timing: row.timing } : {}),
       ...(row.settlement ? { settlement: row.settlement } : {}),
       ...(row.detail ? { detail: row.detail } : {}),
+      ...(row.resultDetail ? { resultDetail: row.resultDetail } : {}),
       ...(row.diff ? { diff: row.diff } : {}),
       ...(row.title ? { title: row.title } : {}),
       ...(row.added !== undefined ? { added: row.added } : {}),

@@ -8,7 +8,6 @@ import path from 'node:path'
 import os from 'node:os'
 import { app } from 'electron'
 import { runBash } from './shellBridge'
-import { scanOpenCodeAgents } from './opencodeBridge'
 import { executableLookupCommand, firstExecutablePath } from './platformProcess'
 import { inspectCliProviderCapabilities } from './cliCapabilityRegistry.ts'
 import type { CliProviderCapabilitySnapshot } from '../src/agent/cliProviderCapabilities.ts'
@@ -94,7 +93,6 @@ async function which(bin: string): Promise<string | null> {
     // OpenAI Codex real binary (PATH often has wrong npm "codex" blog package)
     home('.codex', '.sandbox-bin', bin),
     home('.codex', 'plugins', '.plugin-appserver', bin),
-    home('.opencode', 'bin', bin),
     home('.cursor', 'bin', bin),
   ]
   for (const c of candidates) {
@@ -443,63 +441,6 @@ function extractClaudeModelsFromBinary(binaryPath?: string | null): DiscoveredMo
   }
 }
 
-function parseOpenCodeConfig(): { models: DiscoveredModel[]; path: string | null } {
-  const userDataDir = path.join(app.getPath('userData'), 'opencode')
-  const paths = [
-    // app-owned OpenCode-format config first (doesn't require opencode CLI installed) …
-    path.join(userDataDir, 'opencode.json'),
-    path.join(userDataDir, 'opencode.jsonc'),
-    // … plus the external opencode CLI's own global config, if present, as a bonus source.
-    home('.config', 'opencode', 'opencode.jsonc'),
-    home('.config', 'opencode', 'opencode.json'),
-    home('.opencode', 'opencode.json'),
-  ]
-  let cfgPath: string | null = null
-  let data: Record<string, unknown> | null = null
-  for (const p of paths) {
-    if (exists(p)) {
-      cfgPath = p
-      data = readJson(p) as Record<string, unknown> | null
-      break
-    }
-  }
-  const models: DiscoveredModel[] = []
-  if (data) {
-    // common shapes: model, provider, agent.*.model, models{}
-    if (typeof data.model === 'string') {
-      models.push({ id: data.model, label: data.model, depths: ALL })
-    }
-    const provider = data.provider as Record<string, { models?: Record<string, unknown> }> | undefined
-    if (provider && typeof provider === 'object') {
-      for (const [prov, val] of Object.entries(provider)) {
-        const ms = val?.models
-        if (ms && typeof ms === 'object') {
-          for (const mid of Object.keys(ms)) {
-            models.push({ id: `${prov}/${mid}`, label: `${prov}/${mid}`, depths: ALL })
-          }
-        }
-      }
-    }
-  }
-  // agents md models
-  try {
-    const scanned = scanOpenCodeAgents()
-    for (const a of [...scanned.global, ...scanned.project]) {
-      if (a.model) models.push({ id: a.model, label: a.model, depths: ALL })
-    }
-  } catch {
-    /* ignore */
-  }
-  // dedupe
-  const seen = new Set<string>()
-  const uniq = models.filter((m) => {
-    if (seen.has(m.id)) return false
-    seen.add(m.id)
-    return true
-  })
-  return { models: uniq, path: cfgPath }
-}
-
 function hasCodexAuth(): boolean {
   const auth = home('.codex', 'auth.json')
   if (!exists(auth)) return false
@@ -614,31 +555,6 @@ export async function discoverLocalClis(): Promise<{
       notes: [
         binaryPath ? `binary: ${binaryPath}` : '無 grok binary',
         models.length ? `models_cache: ${models.length}` : '無 models_cache 可匯入',
-      ],
-    })
-  }
-
-  // OpenCode — models only from opencode.json(c) / agents
-  {
-    const binaryPath = await which('opencode')
-    const { models, path: cfgPath } = parseOpenCodeConfig()
-    const agents = scanOpenCodeAgents()
-    clis.push({
-      id: 'opencode',
-      kind: 'opencode',
-      name: 'OpenCode CLI',
-      foundBinary: Boolean(binaryPath),
-      binaryPath,
-      configPaths: [cfgPath, ...agents.dirs].filter(Boolean) as string[],
-      hasAuth: Boolean(binaryPath || cfgPath || agents.global.length),
-      authNote: cfgPath
-        ? `已找到 ${cfgPath}（可匯入模型）`
-        : '未找到 opencode.jsonc',
-      models,
-      notes: [
-        binaryPath ? `binary: ${binaryPath}` : 'PATH 無 opencode',
-        `agents.md: ${agents.global.length + agents.project.length}`,
-        models.length ? `discovered models: ${models.length}` : '設定中無模型可匯入',
       ],
     })
   }

@@ -34,6 +34,8 @@ export type ConversationRow =
       tool: string
       callId: string
       settlement?: string
+      /** Host-authored terminal detail, kept separate from the invocation target. */
+      resultDetail?: string
       detail?: string
       /** Durable code diff declared by the mutating tool call. */
       diff?: string
@@ -136,7 +138,7 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
           tool: entry.tool,
           callId: entry.callId,
           settlement: entry.settlement,
-          ...(entry.detail ? { detail: entry.detail } : {}),
+          ...(entry.detail ? { resultDetail: entry.detail } : {}),
         })
         break
       case 'turn-start':

@@ -196,3 +196,59 @@ await test('Pi gate schema cannot accept a model-supplied verdict and uses Host 
   )
   assert.equal((output.details as { passed?: boolean }).passed, false)
 })
+
+await test('design_critique rejects model evidence and requires Host verification of the draft', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subdesign-critique-attestation-'))
+  const artifactId = 'artifact_attestation_qa'
+  const now = new Date().toISOString()
+  const manifest = {
+    id: artifactId,
+    briefId: 'brief_attestation_qa',
+    kind: 'html',
+    title: 'Attestation QA',
+    entry: 'subdesign/attestation.html',
+    renderer: 'html',
+    exports: ['html'],
+    supportingFiles: [],
+    status: 'complete',
+    revision: 1,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await mkdir(join(root, '.subagents/subdesign/artifacts', artifactId), { recursive: true })
+  await mkdir(join(root, '.subagents/subdesign/critiques'), { recursive: true })
+  await writeFile(join(root, '.subagents/subdesign/artifacts', artifactId, 'manifest.json'), JSON.stringify(manifest), 'utf8')
+  await writeFile(join(root, '.subagents/subdesign/critiques', `${artifactId}-r1.json`), JSON.stringify({
+    evidence: SUBDESIGN_CRITIQUE_GATE_REGISTRY.map((gate, index) => ({
+      kind: 'gate', gateId: gate.id, passed: true, summary: 'forged', ...ATTESTED_FIELDS(gate.id, index),
+    })),
+  }), 'utf8')
+
+  const critique = buildSubDesignPack().tools.find((tool) => tool.name === 'design_critique')
+  assert.ok(critique)
+  assert.equal(Object.hasOwn(critique.parameters.properties || {}, 'evidence'), false)
+
+  const direct = await critique.execute(
+    { artifactId, requestedVerdict: 'pass', evidence: [{ kind: 'gate', gateId: 'contrast', passed: true }] },
+    { sessionId: 'session_attestation_qa', cwd: root },
+  )
+  assert.equal((direct.details as { ok?: boolean }).ok, false)
+  assert.match(String((direct.details as { error?: string }).error), /拒絕模型提供 evidence/)
+
+  configurePiHostServiceTransport((request) => {
+    assert.equal(request.payload.service, 'subdesign/verify-critique-evidence')
+    queueMicrotask(() => resolvePiHostServiceResponse({
+      event: 'host/service-response',
+      payload: {
+        id: request.payload.id,
+        result: { ok: false, verifiedEvidence: [], errors: ['attestation signature 不正確'] },
+      },
+    }))
+  })
+  const forgedDraft = await critique.execute(
+    { artifactId, requestedVerdict: 'pass', briefCoverage: 100, brandConformance: 100, accessibility: 100, implementationReadiness: 100 },
+    { sessionId: 'session_attestation_qa', cwd: root },
+  )
+  assert.equal((forgedDraft.details as { ok?: boolean }).ok, false)
+  assert.match(String((forgedDraft.details as { error?: string }).error), /attestation signature 不正確/)
+})

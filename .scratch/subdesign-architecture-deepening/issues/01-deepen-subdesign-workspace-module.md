@@ -1,6 +1,10 @@
 # 01 — Deepen the SubDesign workspace module
 
-Status: 可交給代理
+Status: resolved
+
+## Comments
+
+- 2026-08-28 reconciliation: `workspace.ts` 已集中 create/start/resume/follow-up、hydrate、route、model、plugin 與 admission；`npm run smoke:subdesign-workspace` 從公開 controller seam 驗證並在主鏈通過。
 
 Blocked by: None
 

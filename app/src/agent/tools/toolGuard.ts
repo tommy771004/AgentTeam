@@ -135,27 +135,10 @@ export async function authorizeTool(opts: {
     /* Optional SubDesign store is unavailable in pure/unit contexts. */
   }
 
-  let resolveBash:
-    | ((candidate: string, fallback: 'allow' | 'ask' | 'deny') => 'allow' | 'ask' | 'deny')
-    | undefined
-  if (tool === 'bash' || (tool === 'monitor' && String(input.action || '') === 'start')) {
-    let agentId: string | undefined
-    try {
-      const { useThreadStore } = await import('../../store/threadStore.ts')
-      const thr = useThreadStore.getState()
-      const runThreadId = opts.threadId
-      const t = thr.threads.find((x) => x.id === (runThreadId || thr.activeId))
-      agentId = t?.agentMode
-    } catch {
-      /* ignore */
-    }
-    try {
-      const { resolveBashAction } = await import('../opencode/agentRegistry.ts')
-      resolveBash = (candidate, fb) => resolveBashAction(agentId, candidate, fb)
-    } catch {
-      /* bash resolver unavailable — decide() falls back to bashRequireAsk */
-    }
-  }
+  const resolveBash =
+    tool === 'bash' || (tool === 'monitor' && String(input.action || '') === 'start')
+      ? (_candidate: string, fallback: 'allow' | 'ask' | 'deny') => fallback
+      : undefined
 
   let hookRules: DecisionHookRule[] | undefined
   try {

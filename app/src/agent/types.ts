@@ -157,10 +157,10 @@ export interface InterventionState {
   timeoutSec: number
 }
 
-/** OpenCode-style permission action */
+/** Permission action used by builtin and external adapters. */
 export type PermissionAction = 'allow' | 'ask' | 'deny'
 
-/** A raw OpenCode permission value, including its fine-grained glob map. */
+/** A permission value, including its fine-grained glob map. */
 export type PermissionRuleValue = PermissionAction | Record<string, PermissionAction>
 
 /** Lossless permission projection used by builtin and external adapters. */
@@ -235,10 +235,10 @@ export type PermissionKey =
 
 export type PermissionPolicy = Partial<Record<PermissionKey, PermissionAction>>
 
-/** OpenCode primary agent modes */
+/** Primary agent modes. */
 export type AgentMode = 'build' | 'plan'
 
-/** OpenCode subagent ids */
+/** Builtin subagent ids. */
 export type SubagentId = 'general' | 'explore'
 
 /** Settings-derived context policy frozen when taskRunCoordinator admits a run. */
@@ -333,19 +333,19 @@ export interface RuntimeOverrides {
   attachedSkills?: string[]
   /** Extra system context (e.g. MCP notes) */
   extraSystemContext?: string
-  /** OpenCode-style primary agent */
+  /** Primary agent mode. */
   agentMode?: AgentMode
   /** What the Host does after a structured Plan Gate passes. */
   planCompletionAction?: 'wait_for_user' | 'auto_start_build'
   /** Per-run composer override; Settings remains the default for other runs. */
   approvalMode?: ApprovalMode
-  /** Inherited OpenCode agent id for per-agent MCP restrictions. */
+  /** Inherited agent id for per-agent MCP restrictions. */
   mcpAgentId?: string
-  /** OpenCode-style subagent */
+  /** Builtin subagent. */
   subagentId?: SubagentId
   /** Permission policy for tools */
   permissionPolicy?: PermissionPolicy
-  /** Lossless OpenCode permission rules; deny/ask is evaluated before coarse policy. */
+  /** Lossless permission rules; deny/ask is evaluated before coarse policy. */
   permissionProjection?: PermissionProjection
   /** Hard-blocked tool names (merged with policy deny) */
   blockedTools?: string[]
@@ -463,7 +463,6 @@ export interface AgentState {
   violation: SupervisorViolationState | null
   /** External runner/session/config lineage. */
   externalRun?: ExternalRunRef
-  cliConfigSnapshot?: CliConfigSnapshot
   /**
    * Phase 5: how this run was executed — builtin Goal/Hermes loop vs external CLI.
    * UI must not show DoD iteration chrome for `external`.
@@ -561,7 +560,6 @@ export interface ArchiveRecord {
   }
   /** External runner/session/config lineage; secrets are never included. */
   externalRun?: ExternalRunRef
-  cliConfigSnapshot?: CliConfigSnapshot
   /** Canonical trigger snapshot retained for audit/archive. */
   scheduleTrigger?: ScheduleTriggerSnapshot
   /** Canonical matcher evidence retained for audit/archive. */
@@ -573,7 +571,7 @@ export interface ArchiveRecord {
 export type ExternalRunStatus = 'starting' | 'running' | 'success' | 'failed' | 'aborted' | 'interrupted'
 
 export interface ExternalRunRef {
-  /** Adapter/provider id; opencode keeps its existing session lineage fields. */
+  /** Adapter/provider id. */
   provider: string
   adapter?: string
   runId?: string
@@ -582,7 +580,7 @@ export interface ExternalRunRef {
   serverUrl?: string
   sessionId?: string
   parentSessionId?: string
-  /** Child sessions observed from OpenCode /session/:id/children. */
+  /** Child sessions observed from a provider. */
   childSessionIds?: string[]
   lastTodoAt?: string
   lastChildrenAt?: string
@@ -596,17 +594,6 @@ export interface ExternalRunRef {
   outputOmittedBytes?: number
   startedAt?: string
   finishedAt?: string
-}
-
-/** Safe, renderer-visible OpenCode config lineage; never contains secret values. */
-export interface CliConfigSnapshot {
-  provider: 'opencode'
-  sources: string[]
-  agent: string
-  model?: string
-  permission: PermissionProjection
-  instructions?: Array<{ entry: string; path?: string; bytes: number; sha256: string }>
-  capturedAt: string
 }
 
 export interface ParseResult {
@@ -629,7 +616,6 @@ export type CliKind =
   | 'openai'
   | 'anthropic'
   | 'google'
-  | 'opencode'
   | 'cursor'
   | 'codex'
   | 'grok'
@@ -749,7 +735,7 @@ export interface LlmSettings {
   /** MCP servers (minimal client) */
   mcpServers: McpServerConfig[]
   mcpEnabled: boolean
-  /** Optional per-OpenCode-agent allowlist; missing key keeps global behavior. */
+  /** Optional per-agent allowlist; missing key keeps global behavior. */
   mcpAgentServers: Record<string, string[]>
   /** Messaging gateway (Phase 5 — Telegram etc.) */
   telegramEnabled: boolean
@@ -935,7 +921,7 @@ export interface EventTriggerSnapshot {
 }
 
 /** Runner id stored on jobs (mirrors thread runners; avoid importing threadStore here) */
-export type JobRunner = 'builtin' | 'codex' | 'claude' | 'grok' | 'opencode' | 'cursor'
+export type JobRunner = 'builtin' | 'codex' | 'claude' | 'grok' | 'cursor'
 
 export interface ScheduledJob {
   id: string

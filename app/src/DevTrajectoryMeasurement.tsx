@@ -15,6 +15,25 @@ const fixtureDiff = `--- a/app/src/agent/updateContracts.ts
 
 export function DevTrajectoryMeasurement() {
   const loader = useMemo(() => createFixturePageLoader(20_000), [])
+  if (window.location.search === '?view=activity') {
+    return (
+      <MemoryRouter>
+        <main className="min-h-screen w-screen bg-canvas p-8 text-ink">
+          <section className="mx-auto w-full max-w-3xl rounded-card bg-surface px-6 py-5" aria-label="執行活動群組預覽">
+            <RunTimelineList rows={[
+              { id: 'say-1', kind: 'assistant', content: '我先檢查搜尋工具的實際結果，再判斷是搜尋無結果或執行錯誤。' },
+              { id: 'cmd-1', kind: 'tool', tool: 'exec_command', title: '執行 rg --version', settlement: 'success', detail: 'rg --version' },
+              { id: 'cmd-2', kind: 'tool', tool: 'exec_command', title: '執行 npm --version', settlement: 'success', detail: 'npm --version' },
+              { id: 'say-2', kind: 'assistant', content: '兩個基礎指令都完成，接著重現搜尋失敗。' },
+              { id: 'grep-1', kind: 'tool', tool: 'grep', title: '搜尋 contentToPlainText|compact|image', settlement: 'failed', detail: 'contentToPlainText|compact|image', resultDetail: 'spawn rg ENOENT' },
+              { id: 'grep-2', kind: 'tool', tool: 'grep', title: '搜尋 runTask|objective|history', settlement: 'failed', detail: 'runTask|objective|history', resultDetail: 'Tool argument validation failed: path must be a string' },
+              { id: 'say-3', kind: 'assistant', content: '失敗原因現在會和呼叫參數一起保留在 Turn Record，重新開啟任務後仍可追查。' },
+            ]} />
+          </section>
+        </main>
+      </MemoryRouter>
+    )
+  }
   if (window.location.search === '?view=diff') {
     const files = [
       { path: 'app/scripts/build-update-manifest.mjs', action: 'edit', added: 3, removed: 1 },

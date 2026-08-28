@@ -1,4 +1,4 @@
-export type CliAdapterId = 'codex' | 'claude' | 'opencode' | 'gemini' | 'cursor'
+export type CliAdapterId = 'codex' | 'claude' | 'gemini' | 'cursor'
 export type CliApprovalMode = 'always' | 'auto' | 'full'
 
 export type AdapterDiagnostics = {
@@ -126,19 +126,6 @@ const definitions: CliAdapterDefinition[] = [
       return { file, args, displayCommand: [file, ...args].map(quote).join(' ') }
     },
     parseEvent: (line) => parseJsonEvent(line, ['text', 'delta', 'content']),
-  },
-  {
-    id: 'opencode', displayName: 'OpenCode CLI', binaryCandidates: ['opencode'], credentialMode: 'provider-config', promptTransport: 'argv', streamFormat: 'text',
-    supports: { resume: false, images: false, mcp: true, sandbox: 'subagents-gated' },
-    discover: () => adapterDiscovery('opencode', 'OpenCode CLI', 'opencode', 'provider-config'),
-    buildInvocation: (input) => {
-      const file = input.binary || 'opencode'
-      const args = ['run']
-      if (input.model) args.push('--model', input.model)
-      args.push(input.prompt)
-      return { file, args, displayCommand: [file, ...args].map(quote).join(' ') }
-    },
-    parseEvent: (line) => parseJsonEvent(line, ['text', 'content']),
   },
   {
     id: 'gemini', displayName: 'Gemini CLI', binaryCandidates: ['gemini'], credentialMode: 'cli-login', promptTransport: 'argv', streamFormat: 'provider-json',

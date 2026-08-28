@@ -1,6 +1,5 @@
 import { useNavigate } from 'react-router-dom'
 import { getLiveSlashCommands, type SlashCommand } from '../commands/registry'
-import { expandCommandTemplate } from '../agent/opencode/configLoader'
 import { useAgentStore } from '../store/agentStore'
 import { useLearningStore } from '../store/learningStore'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
@@ -12,10 +11,8 @@ import type { LoopType } from '../agent/types'
 import { skillsStore } from '../agent/hermes/skills'
 import { buildPromptLayers } from '../agent/hermes/promptBuilder'
 import { getThinkingDepth, type ThinkingDepth } from '../agent/thinking'
-import {
-  parseSubagentMentions,
-  getPrimaryAgent,
-} from '../agent/opencode/agents'
+import { getPrimaryAgent } from '../agent/agentModes'
+import { parseSubagentMentions } from '../agent/subagentMentions'
 import type { AgentMode } from '../agent/types'
 import { useProjectStore } from '../store/projectStore'
 import { projectContextUsage } from '../agent/contextUsageProjection'
@@ -32,25 +29,7 @@ async function runDynamicSlashCommand(
     await runEmbedded(`/skill:${cmd.skillName}${task ? ` ${task}` : ''}`, { skipUserBubble: true })
     return true
   }
-  if (cmd.source !== 'opencode' || !cmd.template) return false
-
-  const prompt = expandCommandTemplate(cmd.template, args)
-  if (!prompt.trim()) {
-    log(`/${cmd.name} 模板為空`)
-    return true
-  }
-  log(`OpenCode command /${cmd.name}${cmd.agentHint ? ` · agent=${cmd.agentHint}` : ''}`)
-  const thr = useThreadStore.getState()
-  if (thr.activeId) {
-    if (cmd.agentHint === 'plan' || cmd.agentHint === 'build') {
-      thr.setAgentMode(thr.activeId, cmd.agentHint)
-    }
-    if (cmd.modelHint) thr.setModel(thr.activeId, cmd.modelHint)
-    thr.pushBubble(thr.activeId, 'user', `/${cmd.name}${args ? ` ${args}` : ''}`)
-    thr.pushBubble(thr.activeId, 'system', prompt.slice(0, 500))
-  }
-  await runEmbedded(prompt, { skipUserBubble: true })
-  return true
+  return false
 }
 
 /**
@@ -139,8 +118,7 @@ export function useSlashExecutor() {
       return
     }
 
-    // Dynamic commands are handled outside the large builtin switch. Skill
-    // shortcuts become Pi-native /skill:<name>; OpenCode keeps its template path.
+    // Dynamic skill shortcuts become Pi-native /skill:<name>.
     if (await runDynamicSlashCommand(cmd, args, log, runEmbedded)) return
 
     switch (name) {
@@ -152,7 +130,7 @@ export function useSlashExecutor() {
           if (!byCat.has(k)) byCat.set(k, [])
           byCat.get(k)!.push(`/${c.name}`)
         }
-        log(`共 ${all.length} 個指令（含 OpenCode）。⌘/ 開啟選單 · ↑ 歷史`)
+        log(`共 ${all.length} 個指令。⌘/ 開啟選單 · ↑ 歷史`)
         for (const [cat, names] of byCat) {
           log(`${cat}: ${names.slice(0, 12).join(' ')}${names.length > 12 ? ' …' : ''}`)
         }
@@ -399,12 +377,12 @@ export function useSlashExecutor() {
       case 'build': {
         const thr = useThreadStore.getState()
         if (thr.activeId) thr.setAgentMode(thr.activeId, 'build')
-        log('Agent → Build（完整工具，靈感自 OpenCode）')
+        log('Agent → Build（完整工具）')
         if (args.trim()) await runEmbedded(args, { skipUserBubble: true })
         return
       }
       case 'plan': {
-        // OpenCode Plan mode (read-only), optional goal after
+        // Plan mode (read-only), optional goal after.
         const thr = useThreadStore.getState()
         if (thr.activeId) thr.setAgentMode(thr.activeId, 'plan')
         log('Agent → Plan（唯讀規劃，禁止寫入）')
@@ -435,41 +413,6 @@ export function useSlashExecutor() {
         const t = thr.threads.find((x) => x.id === thr.activeId)
         log(`目前：${getPrimaryAgent(t?.agentMode).label}`)
         log('用法：/agent build|plan  或 /build /plan · Tab 空輸入切換')
-        return
-      }
-      case 'opencode': {
-        if (!window.subagents?.opencode) {
-          log('opencode 僅 Electron')
-          return
-        }
-        const sub = args.toLowerCase().trim()
-        if (sub === 'detect' || sub === '') {
-          const d = await window.subagents.opencode.detect()
-          log(
-            d.found
-              ? `opencode CLI：${d.path} · ${d.version || '?'}`
-              : '未找到 opencode（PATH）',
-          )
-          return
-        }
-        if (sub === 'agents' || sub === 'scan') {
-          const s = await window.subagents.opencode.scanAgents()
-          log(`掃描目錄：${(s.dirs || []).join(', ')}`)
-          const all = [...(s.global || []), ...(s.project || [])]
-          if (!all.length) log('（無 agents/*.md）')
-          all.forEach((a) =>
-            log(`· ${a.name} [${a.mode || '?'}] ${a.description || a.path}`),
-          )
-          return
-        }
-        if (sub.startsWith('run ')) {
-          const prompt = args.slice(4).trim()
-          log('呼叫 opencode CLI…')
-          const r = await window.subagents.opencode.run({ prompt })
-          log(r.ok ? r.output.slice(0, 1500) : r.error || 'failed')
-          return
-        }
-        log('用法：/opencode · /opencode agents · /opencode run <提示>')
         return
       }
       case 'codegraph':

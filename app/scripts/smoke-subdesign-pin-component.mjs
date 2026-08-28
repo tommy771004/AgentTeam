@@ -57,9 +57,13 @@ try {
 
   const preview = page.frameLocator('iframe[title="Product strategy deck preview"]')
   await preview.locator('h1.title').click()
+  await page.getByLabel('留言內容').fill('把主標題的間距縮小，保留其他區域不變。')
+  await page.getByRole('button', { name: '加入修正' }).click()
   await page.getByText('即將送出的 scoped 修正（1）').waitFor()
 
-  await page.getByRole('button', { name: '送出修正（單次 runTask）' }).click()
+  await page.getByRole('button', { name: '檢查並送出' }).click()
+  await page.getByText('確認以單次 runTask 送出這 1 項修正？').waitFor()
+  await page.getByRole('button', { name: '確認送出' }).click()
   await page.locator('[data-testid="pin-fixture-state"]').filter({ hasText: 'submitted' }).waitFor()
   assert.equal(await pinButton.getAttribute('aria-pressed'), 'false', 'successful submission returns to idle')
 

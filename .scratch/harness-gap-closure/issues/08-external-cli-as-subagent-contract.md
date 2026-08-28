@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 A user who selects a CLI provider silently gets a different product. `CLAUDE.md` states that `executionKind: 'external'` has run-scoped progress only, with no Parse, no DoD, no iteration, and no `continueGoal`, and that a CLI must not present as DoD met. Three and a half of the four loop patterns stop working. The CLI provider is an executor, not a subagent.
 
@@ -23,6 +23,8 @@ The comparison's reference point is a harness that puts every driver behind one 
 Files: `app/src/agent/cliAdapters.ts`, `app/src/agent/localCliRun.ts`, `app/src/agent/hermes/delegate.ts`, `app/src/agent/runners/`, `CLAUDE.md`.
 
 ## Comments
+
+- 2026-08-28 tracker reconciliation: external CLI continuation/delegation contract 已由 runner、orchestration、record 與 durable-harness smokes 在完整主鏈驗證。
 
 **2026-08-17.** `continueGoal: true` is earned by the prompt contract in
 `runners/types.ts`, consumed in `runDispatch.ts`. The contract-building logic

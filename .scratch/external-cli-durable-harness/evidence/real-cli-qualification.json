@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "qualifiedAt": "2026-08-28T14:35:54.702Z",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "providers": [
+    {
+      "provider": "codex",
+      "installed": true,
+      "version": "codex-cli 0.150.1",
+      "ok": true,
+      "qualification": "pass",
+      "terminalClassification": "success",
+      "eventCount": 26,
+      "eventKinds": [
+        "status",
+        "chunk",
+        "log",
+        "text",
+        "done"
+      ],
+      "outputBytes": 15,
+      "outputSha256": "929cdd381610b65fce0fe34cb75acf9e5e77e889b29bd7c3a76cb6f419e372b0",
+      "markerMatched": true,
+      "checkpointCaptured": true,
+      "restartClassification": "interrupted",
+      "automaticRetry": false,
+      "recordKinds": [
+        "turn-start",
+        "step-start",
+        "user-text",
+        "assistant-text",
+        "step-end",
+        "turn-end"
+      ]
+    },
+    {
+      "provider": "claude",
+      "installed": true,
+      "version": "2.1.246 (Claude Code)",
+      "ok": true,
+      "qualification": "pass",
+      "terminalClassification": "success",
+      "eventCount": 31,
+      "eventKinds": [
+        "status",
+        "chunk",
+        "log",
+        "text",
+        "error",
+        "done"
+      ],
+      "outputBytes": 16,
+      "outputSha256": "a2d04b566b53f85455fbbe894b0d4bb784f22ce4ac03b312598946bb1c6a7eba",
+      "markerMatched": true,
+      "checkpointCaptured": true,
+      "restartClassification": "interrupted",
+      "automaticRetry": false,
+      "recordKinds": [
+        "turn-start",
+        "step-start",
+        "user-text",
+        "assistant-text",
+        "step-end",
+        "turn-end"
+      ]
+    },
+    {
+      "provider": "grok",
+      "installed": true,
+      "version": "grok 0.2.106 (bde89716f679) [stable]",
+      "ok": false,
+      "qualification": "blocked-auth",
+      "terminalClassification": "process-exit-failure",
+      "eventCount": 20,
+      "eventKinds": [
+        "status",
+        "chunk",
+        "log",
+        "error"
+      ],
+      "outputBytes": 1026,
+      "outputSha256": "0f8ee64674c65e8e1f02e5df17bd33f7b1c28facb113d32aa72fe8fa8811114b",
+      "markerMatched": false,
+      "checkpointCaptured": true,
+      "restartClassification": "interrupted",
+      "automaticRetry": false,
+      "recordKinds": [
+        "turn-start",
+        "step-start",
+        "user-text",
+        "assistant-text",
+        "step-end",
+        "turn-end"
+      ],
+      "error": "Provider CLI authentication is unavailable on this machine."
+    },
+    {
+      "provider": "gemini",
+      "installed": false
+    },
+    {
+      "provider": "cursor",
+      "installed": false
+    }
+  ]
+}

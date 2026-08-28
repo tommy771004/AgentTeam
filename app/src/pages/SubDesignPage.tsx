@@ -59,7 +59,6 @@ const RUNNER_LABELS: Partial<Record<ThreadRunner, string>> = {
   codex: 'Codex CLI',
   claude: 'Claude CLI',
   grok: 'Grok CLI',
-  opencode: 'OpenCode CLI',
   gemini: 'Gemini CLI',
   cursor: 'Cursor CLI',
 }
@@ -111,7 +110,6 @@ export function SubDesignPage() {
   const cliProviders = presentation.cliProviders
   const storybookSettings = presentation.storybookSettings
   const storybookRuns = presentation.storybookRuns
-  const providerRuns = presentation.providerRuns
   const experimentalSettings = presentation.experimentalSettings
   const linkedThread = presentation.linkedThread
   const linkedThreadRunId = presentation.linkedThreadRunId
@@ -129,7 +127,7 @@ export function SubDesignPage() {
   const modelDiscovery = workspaceProjection.modelDiscovery
   const modelDiscoveryStatus = workspaceProjection.modelDiscoveryStatus
   const modelDiscoveryWarning = workspaceProjection.modelDiscoveryWarning || ''
-  const liveStreams = workspaceProjection.streams
+  const streamPresentations = workspaceProjection.streamPresentations
 
   const activeSurface = useMemo(
     () => SURFACES.find((surface) => surface.id === surfaceId) || SURFACES[0],
@@ -184,7 +182,7 @@ export function SubDesignPage() {
         ? 'claude'
         : provider.kind === 'google'
           ? 'gemini'
-          : provider.kind === 'opencode' || provider.kind === 'cursor' || provider.kind === 'codex' || provider.kind === 'grok'
+          : provider.kind === 'cursor' || provider.kind === 'codex' || provider.kind === 'grok'
             ? provider.kind
             : null
       if (candidate && !values.includes(candidate)) values.push(candidate)
@@ -374,9 +372,7 @@ export function SubDesignPage() {
         onSubmitPluginInputs={(values) => workspaceController.setPluginInputs(values)}
         artifactStream={
           selectedArtifact
-            ? liveStreams[selectedArtifact.id]
-              || providerRuns.find((run) => run.artifact?.id === selectedArtifact.id)?.stream
-              || null
+            ? streamPresentations[selectedArtifact.id] || null
             : null
         }
         onSaveStorybookSettings={(value) => workspaceController.saveStorybookProviderSettings(value, projectRoot || undefined)}

@@ -65,6 +65,26 @@ async function writeJson(path: string, value: unknown): Promise<void> {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
 }
 
+async function mergeCritiqueEvidence(
+  root: string,
+  artifactId: string,
+  revision: number,
+  incoming: Record<string, unknown>[],
+): Promise<void> {
+  const draftPath = insideRoot(root, `${METADATA_ROOT}/critiques/${artifactId}-r${revision}.json`)!
+  const draft = (await readJson(draftPath) || {}) as Record<string, unknown>
+  const replacements = new Set(incoming.map((item) => `${String(item.kind || '')}:${String(item.gateId || '')}`))
+  const existing = Array.isArray(draft.evidence)
+    ? draft.evidence.filter((entry) => {
+      if (!entry || typeof entry !== 'object') return false
+      const item = entry as Record<string, unknown>
+      return !replacements.has(`${String(item.kind || '')}:${String(item.gateId || '')}`)
+    })
+    : []
+  draft.evidence = [...existing, ...incoming]
+  await writeJson(draftPath, draft)
+}
+
 async function loadManifest(ctx: PiToolContext, artifactId: string) {
   const validation = validateSubDesignArtifactManifest(await readJson(insideRoot(ctx.cwd, `${ARTIFACT_ROOT}/${artifactId}/manifest.json`)!))
   if (!validation.ok) return validation
@@ -190,9 +210,17 @@ const designArtifactCapture: PiPackTool = {
     if (!artifactId) return structuredFailure('不安全的 artifactId')
     const validation = await loadManifest(ctx, artifactId)
     if (!validation.ok) return structuredFailure(`artifact manifest invalid：${validation.errors.join('；')}`)
-    const entryPath = insideRoot(ctx.cwd, validation.manifest.entry)
-    const entryContent = entryPath && existsSync(entryPath) ? (await readFile(entryPath, 'utf8')).slice(0, 20_000) : ''
-    return jsonOk({ artifact: validation.manifest, entryContent })
+    const captured: Record<string, unknown>[] = []
+    for (const kind of ['screenshot', 'dom'] as const) {
+      const result = await requestPiHostService<{ ok: boolean; error?: string } & Record<string, unknown>>(
+        'subdesign/capture-evidence',
+        { artifact: validation.manifest, projectRoot: ctx.cwd, kind },
+      )
+      if (!result.ok) return structuredFailure(result.error || `${kind} evidence capture 失敗`)
+      captured.push({ kind, summary: `Host 已擷取 ${kind} evidence。`, ...result })
+    }
+    await mergeCritiqueEvidence(ctx.cwd, artifactId, validation.manifest.revision, captured)
+    return jsonOk({ artifactId, revision: validation.manifest.revision, evidenceKinds: captured.map((item) => item.kind) })
   },
 }
 
@@ -344,12 +372,13 @@ const designArtifactLint: PiPackTool = {
     if (!artifactId) return structuredFailure('不安全的 artifactId')
     const validation = await loadManifest(ctx, artifactId)
     if (!validation.ok) return structuredFailure(`artifact manifest invalid：${validation.errors.join('；')}`)
-    const problems: string[] = []
-    for (const relativePath of [validation.manifest.entry, ...validation.manifest.supportingFiles]) {
-      const abs = insideRoot(ctx.cwd, relativePath)
-      if (!abs || !existsSync(abs)) problems.push(`缺少檔案：${relativePath}`)
-    }
-    return problems.length ? structuredFailure(problems.join('；')) : jsonOk({ lint: 'pass', filesChecked: validation.manifest.supportingFiles.length + 1 })
+    const result = await requestPiHostService<{ ok: boolean; evidence?: Record<string, unknown>; findings?: unknown[]; error?: string }>(
+      'subdesign/lint-evidence',
+      { artifact: validation.manifest, projectRoot: ctx.cwd },
+    )
+    if (!result.ok || !result.evidence) return structuredFailure(result.error || 'lint evidence 產生失敗')
+    await mergeCritiqueEvidence(ctx.cwd, artifactId, validation.manifest.revision, [{ kind: 'lint', ...result.evidence }])
+    return jsonOk({ artifactId, revision: validation.manifest.revision, lint: 'measured', findings: result.findings?.length || 0 })
   },
 }
 
@@ -445,11 +474,13 @@ const designCritique: PiPackTool = {
       brandConformance: { type: 'number' },
       accessibility: { type: 'number' },
       implementationReadiness: { type: 'number' },
-      evidence: { type: 'array', items: { type: 'object' }, description: 'Additional non-gate evidence entries' },
     },
     required: ['artifactId'],
   },
   execute: async (args, ctx) => {
+    if (Object.hasOwn(args, 'evidence')) {
+      return structuredFailure('design_critique 拒絕模型提供 evidence；請先執行 Host capture、lint 與 gate tools。')
+    }
     const artifactId = safeId(args.artifactId)
     if (!artifactId) return structuredFailure('不安全的 artifactId')
     const validation = await loadManifest(ctx, artifactId)
@@ -457,13 +488,24 @@ const designCritique: PiPackTool = {
     const revision = validation.manifest.revision
     const draftPath = insideRoot(ctx.cwd, `${METADATA_ROOT}/critiques/${artifactId}-r${revision}.json`)!
     const draft = (await readJson(draftPath) || {}) as Record<string, unknown>
-    const extraEvidence = Array.isArray(args.evidence) ? args.evidence : []
+    const evidenceCheck = await requestPiHostService<{
+      ok: boolean
+      verifiedEvidence?: unknown[]
+      errors?: string[]
+    }>('subdesign/verify-critique-evidence', {
+      artifact: validation.manifest,
+      evidence: Array.isArray(draft.evidence) ? draft.evidence : [],
+      projectRoot: ctx.cwd,
+    })
+    if (!evidenceCheck.ok) {
+      return structuredFailure(`Critique evidence 驗證失敗：${(evidenceCheck.errors || ['Host verifier 拒絕 evidence']).join('；')}`)
+    }
     const input = {
       artifactId,
       briefId: typeof draft.briefId === 'string' ? draft.briefId : undefined,
       revision,
       findings: draft.findings,
-      evidence: [...(Array.isArray(draft.evidence) ? draft.evidence : []), ...extraEvidence],
+      evidence: evidenceCheck.verifiedEvidence || [],
       briefCoverage: typeof args.briefCoverage === 'number' ? clampScore(args.briefCoverage) : undefined,
       brandConformance: typeof args.brandConformance === 'number' ? clampScore(args.brandConformance) : undefined,
       accessibility: typeof args.accessibility === 'number' ? clampScore(args.accessibility) : undefined,
@@ -508,7 +550,13 @@ const designArtifactExport: PiPackTool = {
     // Deliver fails closed unless the PERSISTED critique still normalizes to
     // a passing verdict — re-reading from disk, not trusting the model's claim.
     if (!normalized.ok) return structuredFailure(`critique 無法讀取：${normalized.errors.join('；')}`)
-    if (!critiqueAllowsDeliver(normalized.critique)) return structuredFailure('critique 尚未允許 deliver：verdict 或證據不足')
+    const evidenceCheck = await requestPiHostService<{ ok: boolean; verifiedEvidence?: unknown[]; errors?: string[] }>(
+      'subdesign/verify-critique-evidence',
+      { artifact: validation.manifest, evidence: normalized.critique.evidence, projectRoot: ctx.cwd },
+    )
+    if (!evidenceCheck.ok) return structuredFailure(`critique evidence 無法驗證：${(evidenceCheck.errors || []).join('；')}`)
+    const verified = normalizeSubDesignCritique({ ...normalized.critique, evidence: evidenceCheck.verifiedEvidence || [] })
+    if (!verified.ok || !critiqueAllowsDeliver(verified.critique)) return structuredFailure('critique 尚未允許 deliver：verdict 或證據不足')
     const exportRecord = { artifactId, revision, exportedAt: new Date().toISOString(), by: ctx.runId || ctx.sessionId }
     await writeJson(insideRoot(ctx.cwd, `${METADATA_ROOT}/exports/${artifactId}-r${revision}.json`)!, exportRecord)
     return jsonOk({ artifactId, revision, exported: true })

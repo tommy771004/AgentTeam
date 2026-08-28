@@ -275,6 +275,9 @@ const MANUAL_QUALIFICATION_TESTS = new Set([
   'qualify-subscription-e2e.mts',
   'qualify-subscription-oauth-rotation-e2e.mts',
   'qualify-subscription-snapshot.mts',
+  // Real shipped CLI binaries require machine-local installs, provider login,
+  // and network access. Keep the qualification explicit and out of build.
+  'qualify-external-cli-real.mts',
 ])
 const newOrphans = testFiles.filter((file) => !runByGate.has(file) && !MANUAL_QUALIFICATION_TESTS.has(file))
 assert.deepEqual(newOrphans, [], `these test files are not reachable from any gate, so nothing runs them: ${newOrphans.join(', ')}. Wire them into npm run smoke (issue 20).`)

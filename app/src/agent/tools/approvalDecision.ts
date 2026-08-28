@@ -19,7 +19,7 @@ import type {
 import {
   checkProjectedToolPermission,
   checkToolPermission,
-} from '../opencode/toolPermissionMap.ts'
+} from '../toolPermissionMap.ts'
 import { decideBashAction, type BashPermissionAction } from './shellCommandParser.ts'
 import { isSideEffectTool, isSubDesignWritableBashCommand } from './toolGuardShared.ts'
 
@@ -302,11 +302,11 @@ export function decide(input: DecideInput): ApprovalDecision {
   if (input.permissionProjection?.unsupported.length) {
     logs.push({
       level: 'WARN',
-      message: `OpenCode unsupported permission keys：${input.permissionProjection.unsupported.join(', ')}`,
+      message: `Unsupported permission keys：${input.permissionProjection.unsupported.join(', ')}`,
     })
   }
   if (projected === 'deny') {
-    return deny(tool, 'projection_deny', `OpenCode permission deny：${tool}`, logs, events)
+    return deny(tool, 'projection_deny', `Permission deny：${tool}`, logs, events)
   }
   if (projected === 'ask') needAsk = true
 

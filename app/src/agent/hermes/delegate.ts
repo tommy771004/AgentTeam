@@ -66,7 +66,7 @@ export interface DelegateTaskInput {
   /** Parent policy is inherited only restrictively by the child. */
   parentPermissionPolicy?: PermissionPolicy
   parentPermissionProjection?: PermissionProjection
-  /** Restrictive MCP allowlist inherited from the parent OpenCode agent. */
+  /** Restrictive MCP allowlist inherited from the parent agent. */
   parentMcpAgentId?: string
 }
 

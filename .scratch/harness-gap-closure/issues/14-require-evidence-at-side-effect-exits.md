@@ -4,7 +4,7 @@
 
 **Blocked by:** 13 — Write the ADR: a model cannot manufacture its own execution credential.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 The unforgeable-evidence guarantee currently protects one class of action — time-based and proactive execution. Every other outward action is protected only by approval flow, which is human-in-the-loop authorisation and does not constrain what happens after authorisation is granted.
 
@@ -23,6 +23,8 @@ Apply the same shape elsewhere: each side-effect exit requires an evidence snaps
 Files: `app/src/agent/tools/registered/`, `app/src/agent/contentPublishing.ts`, `app/src/agent/paidWorkflow.ts`, `app/src/agent/tools/toolGuard.ts`.
 
 ## Comments
+
+- 2026-08-28 tracker reconciliation: `smoke-side-effect-evidence.mts` 覆蓋 message、publish、paid workflow exit，完整 smoke 主鏈通過。
 
 **2026-08-17.** The first implementation stamped evidence on the way *out* —
 `message_send` minted its own snapshot from `r.ok`, and the publish registry

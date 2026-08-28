@@ -67,7 +67,6 @@ export function sanitizeCliDoctorProviders(input: unknown[]): CliDoctorConfigure
 const providerBinaryNames: Record<string, string> = {
   codex: 'codex',
   anthropic: 'claude',
-  opencode: 'opencode',
   google: 'gemini',
   cursor: 'cursor-agent',
   grok: 'grok',

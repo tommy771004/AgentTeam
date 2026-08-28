@@ -1,6 +1,10 @@
 # 02 — Deepen the Host provider adapter module
 
-Status: 可交給代理
+Status: resolved
+
+## Comments
+
+- 2026-08-28 implemented: `subDesignProviderAdapters.ts` registry 隱藏四個 concrete adapters，`executeSubDesignProviderStage` 僅消費 normalized result；OpenDesign provider/pipeline smokes 與 build gate 為 owning evidence。
 
 Blocked by: None
 

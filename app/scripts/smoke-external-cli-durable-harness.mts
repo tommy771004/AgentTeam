@@ -149,7 +149,7 @@ await test('yield and reconnect return ordered bounded snapshots without killing
   const session = new ExternalCliRunSession({
     runId: 'run-reconnect',
     conversationId: 'conversation-b',
-    adapter: 'opencode',
+    adapter: 'gemini',
     clock,
     transport: fake.transport,
     policy: { outputHeadBytes: 8, outputTailBytes: 8 },
@@ -177,7 +177,7 @@ await test('reconnect reports a bounded event-log gap and returns retained repla
   const session = new ExternalCliRunSession({
     runId: 'run-replay-gap',
     conversationId: 'conversation-b',
-    adapter: 'opencode',
+    adapter: 'gemini',
     clock: new FakeExternalCliClock(),
   })
   session.start()
@@ -636,13 +636,6 @@ await test('connector requirements are produced from the selected configured cap
   // An explicit empty selection is authoritative and must not be replaced by
   // a later settings read or an inferred stderr connector name.
   assert.deepEqual(resolveExternalCliRequiredConnectors(settings, { externalCliRequiredConnectors: [] }), [])
-})
-
-await test('OpenCode server origin metadata rejects credential-bearing loopback URLs', async () => {
-  const { safeOpenCodeServerOrigin } = await import('../src/agent/opencodeServerSafety.ts')
-  assert.equal(safeOpenCodeServerOrigin('http://user:secret@127.0.0.1:4096/api'), null)
-  assert.equal(safeOpenCodeServerOrigin('https://127.0.0.1:4096/api'), 'https://127.0.0.1:4096')
-  assert.equal(safeOpenCodeServerOrigin('http://127.0.0.1:4096/api?token=secret'), 'http://127.0.0.1:4096')
 })
 
 await test('shipped adapters retain the coordinator and Host ownership boundaries', () => {

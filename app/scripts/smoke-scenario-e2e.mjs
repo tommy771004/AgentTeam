@@ -905,19 +905,6 @@ await test('§7 project A → B: agents hash does not residual-leak across threa
   assert.equal(ctrl.threads.get(rA.threadId).agentsHash, 'hash-A')
 })
 
-await test('§7 OpenCode field classification never silent-drops', () => {
-  function classify(field) {
-    if (['instructions', 'compaction', 'small_model', 'default_agent', 'permission'].includes(field))
-      return 'temporary'
-    if (field === 'model' || field.startsWith('mcp.')) return 'review'
-    return 'unsupported'
-  }
-  for (const f of ['instructions', 'model', 'mcp.foo', 'theme', 'keybinds']) {
-    assert.ok(['temporary', 'review', 'unsupported'].includes(classify(f)))
-  }
-  assert.equal(classify('theme'), 'unsupported')
-})
-
 await test('§7 model+image: vision=false degrades to path note (no crash)', () => {
   function degradeAttachments(profile, attachments) {
     if (profile.vision === false) {

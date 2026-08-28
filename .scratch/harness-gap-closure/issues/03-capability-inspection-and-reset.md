@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 Progressive disclosure persists correctly and invisibly. `state.loadedCapabilityIds` is preloaded each step; after a run, ids and `unlockedToolNames` are stored on the thread as `lastCapabilityIds` / `lastUnlockedTools` and re-injected on the next dispatch. The mechanism is right, but the user cannot see what is unlocked and cannot lock anything back, so a capability unlocked by mistake is undiagnosable and permanent for the life of the thread.
 
@@ -21,6 +21,8 @@ This reads data that already exists. No new persistence layer.
 Files: `app/src/agent/capabilities/runtime.ts`, thread sidebar component, `app/scripts/smoke-caps.mjs`.
 
 ## Comments
+
+- 2026-08-28 tracker reconciliation: capability inspection/reset 由 `smoke-capability-inspection.mts` 覆蓋並已在完整 smoke 主鏈通過。
 
 **2026-08-17.** The sidebar was labelling entries by identity
 (`skill`/`mcp`/`builtin`) rather than by how they were unlocked. Provenance is

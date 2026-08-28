@@ -259,14 +259,15 @@ const groupedTimeline = groupTimelineItems([
   { id: 'say-1', kind: 'assistant', content: '接著執行檢查。' },
   { id: 'run-1', kind: 'tool', tool: 'bash', settlement: 'success', detail: 'npm test' },
   { id: 'run-2', kind: 'tool', tool: 'exec_command', settlement: 'success', detail: 'npm run build' },
-  { id: 'read-failed', kind: 'tool', tool: 'read', settlement: 'error', detail: 'missing.ts' },
+  { id: 'read-failed', kind: 'tool', tool: 'read', settlement: 'error', detail: 'missing.ts', resultDetail: 'ENOENT' },
+  { id: 'read-failed-2', kind: 'tool', tool: 'read', settlement: 'error', detail: 'absent.ts', resultDetail: 'ENOENT' },
 ] as const)
-assert.deepEqual(groupedTimeline.map((entry) => entry.type), ['group', 'single', 'group', 'single'])
+assert.deepEqual(groupedTimeline.map((entry) => entry.type), ['group', 'single', 'group', 'group'])
 assert.deepEqual(groupedTimeline.map((entry) => entry.type === 'group' ? entry.rows.map((row) => row.id) : [entry.row.id]), [
   ['read-1', 'read-2'],
   ['say-1'],
   ['run-1', 'run-2'],
-  ['read-failed'],
+  ['read-failed', 'read-failed-2'],
 ], 'same-type activities collapse without crossing prose or mixing a failure into success')
 
 // Purity is a contract, not a hope: the module may not reach for I/O, stores,

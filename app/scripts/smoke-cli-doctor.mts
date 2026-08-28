@@ -31,15 +31,6 @@ const probes: Probe[] = [
     authVerified: false,
     authNote: '未偵測到 Claude 設定',
   },
-  {
-    id: 'opencode',
-    name: 'OpenCode CLI',
-    foundBinary: true,
-    binaryPath: '/usr/local/bin/opencode',
-    hasAuth: true,
-    authVerified: true,
-    authNote: '已找到本機設定',
-  },
 ]
 
 const sanitized = sanitizeCliDoctorProviders([
@@ -77,7 +68,6 @@ const ready = buildCliDoctorReport({
 })
 assert.equal(ready.readyToRun, true)
 assert.equal(ready.checks.find((check) => check.id === 'git')?.status, 'ready')
-assert.equal(ready.checks.find((check) => check.id === 'opencode')?.status, 'ready')
 assert.match(ready.summary, /首次任務|ready/i)
 assert.ok(ready.checkedAt)
 

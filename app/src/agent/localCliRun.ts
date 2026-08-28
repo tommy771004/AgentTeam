@@ -2,7 +2,7 @@
  * Renderer helper: run prompt via local CLI and synthesize AgentState-like result
  */
 
-import type { AgentState, ApprovalMode, CliConfigSnapshot, ExternalRunRef, RuntimeOverrides } from './types.ts'
+import type { AgentState, ApprovalMode, ExternalRunRef, RuntimeOverrides } from './types.ts'
 import type {
   ExternalCliConnectorRequirement,
   ExternalCliRunPolicy,
@@ -38,8 +38,7 @@ import {
   rewriteCliPromptForView,
 } from './outbound/cliSandbox.ts'
 
-export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
-export type LocalCliConfigSnapshot = CliConfigSnapshot
+export type LocalRunnerKind = 'codex' | 'claude' | 'grok' | 'gemini' | 'cursor'
 
 export type LocalCliAttachmentPayload = {
   name: string
@@ -116,7 +115,6 @@ export async function runPromptViaLocalCli(opts: {
   conversationId?: string
   /** Legacy name retained at the renderer store boundary. */
   threadId?: string
-  configSnapshot?: LocalCliConfigSnapshot
   /** Materialized on disk by Electron for CLI vision/file tools */
   attachments?: LocalCliAttachmentPayload[]
   /** External CLI delegate/continue contract; contains no parent transcript. */
@@ -293,7 +291,6 @@ export async function runPromptViaLocalCli(opts: {
     conversationId: opts.conversationId || opts.threadId,
     runId: opts.runId,
     attachments: (gated.attachments as typeof opts.attachments) ?? opts.attachments,
-    configSnapshot: opts.configSnapshot,
     externalCliContract: opts.externalCliContract,
   })
   if (r.cancelled) {
@@ -374,7 +371,6 @@ export function emptyAgentLike(partial: Partial<AgentState> & { objective: strin
     // for external runs instead of travelling as an unmet DoD.
     orchestration: isExternal ? undefined : partial.orchestration,
     externalRun: partial.externalRun,
-    cliConfigSnapshot: partial.cliConfigSnapshot,
     scheduleTrigger: partial.scheduleTrigger,
     eventTrigger: partial.eventTrigger,
     postState: partial.postState,
@@ -402,7 +398,6 @@ export function inferRunnerFromModel(
     if (p.id === 'codex') return 'codex'
     if (p.id === 'anthropic' || p.id === 'claude') return 'claude'
     if (p.id === 'grok') return 'grok'
-    if (p.id === 'opencode') return 'opencode'
     if (p.id === 'google' || p.id === 'gemini') return 'gemini'
     if (p.id === 'cursor') return 'cursor'
   }

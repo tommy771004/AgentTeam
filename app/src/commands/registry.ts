@@ -1,7 +1,6 @@
 /**
- * Slash command registry — Claude Code / Codex / OpenCode 風格
+ * Slash command registry for the composer.
  * 輸入 `/` 或 ⌘/ 時彈出可篩選指令列表
- * OpenCode commands/*.md 與 opencode.json command 會動態合併進來
  */
 
 export type SlashCommandCategory =
@@ -12,7 +11,6 @@ export type SlashCommandCategory =
   | 'tools'
   | 'learning'
   | 'skill'
-  | 'opencode'
 
 export interface SlashCommand {
   name: string
@@ -23,20 +21,18 @@ export interface SlashCommand {
   argsHint?: string
   /** 若為 true，需要額外參數才執行 */
   needsArgs?: boolean
-  /** Dynamic OpenCode command or Host-discovered skill shortcut. */
-  source?: 'builtin' | 'opencode' | 'skill'
+  /** Builtin command or Host-discovered skill shortcut. */
+  source?: 'builtin' | 'skill'
   /** Exact Host skill id; slash name may be sanitized or collision-prefixed. */
   skillName?: string
   /** Human-facing skill name shown in the composer chip. */
   displayName?: string
-  /** Template with $ARGUMENTS for OpenCode commands */
-  template?: string
   /** Prefer agent for this command */
   agentHint?: string
   modelHint?: string
 }
 
-/** Built-in static list (OpenCode dynamics appended at runtime) */
+/** Built-in static list. */
 export const SLASH_COMMANDS: SlashCommand[] = [
   // ── Session ───────────────────────────────────────────
   {
@@ -76,13 +72,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: '推理強度：快思|中|高|極高|超高',
     category: 'session',
     argsHint: '[fast|standard|deep|max|ultra]',
-  },
-  {
-    name: 'opencode',
-    aliases: ['oc'],
-    description: 'OpenCode：detect / agents / run',
-    category: 'tools',
-    argsHint: '[detect|agents|run …]',
   },
   {
     name: 'codegraph',
@@ -151,13 +140,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'build',
-    description: 'OpenCode Build：完整工具實作模式',
+    description: 'Build：完整工具實作模式',
     category: 'agent',
     argsHint: '[目標…]',
   },
   {
     name: 'plan',
-    description: 'OpenCode Plan：唯讀分析規劃（禁止寫入）',
+    description: 'Plan：唯讀分析規劃（禁止寫入）',
     category: 'agent',
     argsHint: '[目標…]',
   },
@@ -361,14 +350,13 @@ const CATEGORY_ZH: Record<SlashCommandCategory, string> = {
   tools: '工具',
   learning: '學習',
   skill: '技能',
-  opencode: 'OpenCode',
 }
 
 export function categoryLabel(c: SlashCommandCategory) {
   return CATEGORY_ZH[c]
 }
 
-/** Sanitize OpenCode command id → slash name */
+/** Sanitize a skill id into a slash-command name. */
 export function sanitizeSlashName(id: string): string {
   return id
     .trim()
@@ -397,36 +385,16 @@ export type SkillSlashCommandDef = {
 }
 
 /**
- * Merge builtin + OpenCode dynamic commands.
- * Dynamic names that collide with builtin get `oc-` prefix.
+ * Merge builtin commands with Host-discovered skills.
  */
 export function getAllSlashCommands(
-  dynamic: DynamicCmd[] = [],
+  _dynamic: DynamicCmd[] = [],
   skills: SkillSlashCommandDef[] = [],
 ): SlashCommand[] {
   const claimedNames = new Set(
     SLASH_COMMANDS.flatMap((c) => [c.name, ...(c.aliases || [])]),
   )
   const extra: SlashCommand[] = []
-  for (const d of dynamic) {
-    if (!d.template?.trim()) continue
-    let name = sanitizeSlashName(d.id || d.name)
-    if (claimedNames.has(name)) name = `oc-${name}`
-    if (extra.some((e) => e.name === name)) continue
-    claimedNames.add(name)
-    extra.push({
-      name,
-      description: d.description || `OpenCode: ${d.name || d.id}`,
-      category: 'opencode',
-      argsHint: d.template.includes('$ARGUMENTS') ? '<args>' : undefined,
-      needsArgs: d.template.includes('$ARGUMENTS'),
-      source: 'opencode',
-      template: d.template,
-      agentHint: d.agent,
-      modelHint: d.model,
-      aliases: d.name && sanitizeSlashName(d.name) !== name ? [sanitizeSlashName(d.name)] : undefined,
-    })
-  }
   for (const skill of skills) {
     const skillName = skill.meta.name.trim()
     if (!skillName || skill.meta.status === 'archived') continue
@@ -450,19 +418,9 @@ export function getAllSlashCommands(
   ]
 }
 
-/** Live list (builtin + hydrated OpenCode commands + Host skill projection). */
+/** Live list of builtin commands plus the Host skill projection. */
 export function getLiveSlashCommands(): SlashCommand[] {
-  let dynamic: DynamicCmd[] = []
   let skills: SkillSlashCommandDef[] = []
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('../store/opencodeConfigStore') as {
-      useOpenCodeConfigStore: { getState: () => { commands?: DynamicCmd[] } }
-    }
-    dynamic = mod.useOpenCodeConfigStore.getState().commands || []
-  } catch {
-    // Plain browser/test callers can still use the builtin list.
-  }
   try {
     // Read the Host-owned catalog projection, never the legacy Hermes skill copy.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -473,7 +431,7 @@ export function getLiveSlashCommands(): SlashCommand[] {
   } catch {
     // The catalog hydrates asynchronously; it will appear on the next read.
   }
-  return getAllSlashCommands(dynamic, skills)
+  return getAllSlashCommands([], skills)
 }
 
 export function resolveSlashCommand(

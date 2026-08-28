@@ -14,7 +14,7 @@ import { requireSideEffectEvidence, type SideEffectEvidence } from './evidence/s
 
 export const PAID_WORKFLOW_FEATURE_ID = 'paid-spec-ticket-tdd-review' as FeatureId
 
-export type WorkflowRunner = 'codex' | 'claude' | 'opencode'
+export type WorkflowRunner = 'codex' | 'claude'
 export type WorkflowSpecStatus = 'draft' | 'approved'
 export type WorkflowStatus =
   | 'spec-draft'
@@ -141,12 +141,6 @@ const RUNNER_DETAILS: Record<WorkflowRunner, Omit<WorkflowRunnerResolution, 'run
   },
   claude: {
     displayName: 'Claude Code',
-    executionKind: 'external',
-    capabilities: { parseDoD: false, iterate: false, continueGoal: false, runScopedProgress: true },
-    limitation: '外部 CLI 不回報內建 DoD／iterate／continueGoal 語意；需在本工作流層保留證據。',
-  },
-  opencode: {
-    displayName: 'OpenCode',
     executionKind: 'external',
     capabilities: { parseDoD: false, iterate: false, continueGoal: false, runScopedProgress: true },
     limitation: '外部 CLI 不回報內建 DoD／iterate／continueGoal 語意；需在本工作流層保留證據。',

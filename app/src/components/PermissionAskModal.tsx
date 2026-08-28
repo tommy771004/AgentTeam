@@ -11,7 +11,7 @@ const DECISION_COPY = {
 } as const
 
 /**
- * OpenCode-style ask permission HITL
+ * Ask-permission HITL.
  *
  * ask_user-shaped asks (hitl) surface the question itself: options from the
  * tool call become the decision surface (single-select sends on click,

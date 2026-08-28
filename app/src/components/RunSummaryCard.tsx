@@ -31,7 +31,12 @@ function timelineItems(operations: ThreadRunSummary['operations']): TimelineItem
       tool: operation.title,
       title: operation.title,
       settlement: operation.ok === false ? 'failed' : 'success',
-      detail: operation.path && operation.path !== operation.detail ? `${operation.path}\n${operation.detail || ''}` : operation.detail,
+      ...(operation.ok === false
+        ? {
+            ...(operation.path ? { detail: operation.path } : {}),
+            ...(operation.detail ? { resultDetail: operation.detail } : {}),
+          }
+        : { detail: operation.path && operation.path !== operation.detail ? `${operation.path}\n${operation.detail || ''}` : operation.detail }),
       added: operation.added,
       removed: operation.removed,
     }

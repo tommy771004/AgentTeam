@@ -542,7 +542,11 @@ try {
   assert.equal(blockedRun.result?.settlement, 'failed')
   assert.equal(blockedRun.result?.workingState?.revision, 2)
   assert.equal(blockedRun.result?.workingState?.goals[0]?.status, 'blocked')
-  assert.match(blockedRun.result?.workingState?.goals[0]?.blocker || '', /write failed/)
+  assert.match(
+    blockedRun.result?.workingState?.goals[0]?.blocker || '',
+    /EEXIST: file already exists, mkdir .*blocked-parent/,
+    'blocked Working State must preserve the Host tool failure detail instead of replacing it with a generic label',
+  )
   assert.ok((blockedRun.result?.workingState?.goals[0]?.blocker || '').length <= 800)
   const blockedEntries = turnRecordEntries({
     version: TURN_RECORD_FORMAT_VERSION,

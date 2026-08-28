@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 The property already holds in code and has never been written down on its own terms. `LoopRequest`'s `'time'` and `'proactive'` variants require a `ScheduleTriggerSnapshot` / `EventTriggerSnapshot` at the type level, so an evidence-free request is unrepresentable; `runLoop`'s entry refuses one again at runtime in case the type system is bypassed. Conversation text carrying cron or event intent produces an `automationSuggestion.ts` suggestion, never execution. `eventMatcher.ts` deliberately does not inspect target text — it derives canonical evidence only from an adapter-supplied rule and a normalized payload.
 
@@ -24,6 +24,8 @@ ADR-0026 preserves the loop patterns but does not state evidence unforgeability 
 Files: `docs/adr/`, `CONTEXT.md`.
 
 ## Comments
+
+- 2026-08-28 tracker reconciliation: ADR-0048 與 evidence-ledger/side-effect evidence gates 已落地；模型輸出不能成為執行 credential。
 
 **2026-08-17.** ADR-0048 was rewritten. The original stated the property as a
 reporting convention ("a side-effect result is reportable only when…"), which

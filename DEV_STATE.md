@@ -1,6 +1,12 @@
 # Development State
 
-截至 2026-08-27。
+截至 2026-08-28。
+
+## 本日進展：SubDesign deep modules 與 tracker 修正
+
+SubDesign architecture deepening #01–#04 已收口：既有 `workspace.ts` 公開 controller 經驗證為單一 renderer workflow seam；Host provider 改為 registry + normalized adapter result；`streamingProjection.ts` 由 Host snapshot + typed events 同時推導 preview/activity、terminal 與 static fallback；`applyOpenDesignPack` 將 Electron copy、canonical metadata、local projection 與 audit 串成 fail-closed transition。#05 已移出 capability/resources/extensions domains，並以 canonical cursor 產生 explicit commit outcome、刪除 method-prefix persistence heuristic；sessions/runs/tools 尚未通過 deletion test，故維持 open。
+
+`smoke-pi-git-preferences.mts` 現在明確清除 `SUBAGENTS_PI_NATIVE_AGENT_DIR`，不再讀取使用者 `~/.pi/agent`。harness-gap closure #02–#05、#08、#12–#14、#16–#17 依既有 gate evidence 翻 resolved；SubDesign pinned audit #06 補齊 canonical project-relative 記錄與 UI 回查後翻 resolved。vendored Pi TODO/FIXME 保留給 upstream sync，本輪未改 vendor。
 
 ## 本日進展：durable memory SQLite migration
 
@@ -20,7 +26,7 @@ Ticket 15 完成 contract：Pi Host Protocol v5 移除 whole-bundle `memory/*` �
 
 - **remove-legacy-engine（PR #8–#13 合併）**：`agent/engine.ts` 與 `agent/loop/` 自程式碼刪除，Pi Core Host 為唯一 tool-loop owner；ADR-0045 初始化門檻已過。loop-runner-deepening effort 隨之收口（目錄已移除）。
 - **pi-host-tool-and-skill-parity**：19/19 票驗收框全滿翻 resolved——十個 extension pack 落地、`pi.registerTool()`／`additionalSkillPaths` 接縫通、renderer 等價工具與 `piTurnContext` 技能注入刪除；唯一 `[~]`（hermes/skills.ts 唯讀回滾版本）入 INDEX known residuals。
-- **pi-agent-runtime-contract**：22 張中 19 張完成；殘餘 #14（Linux bwrap 真機 qualification，需 Linux CI 首綠）、#18（git `--force` 移除裁決）、#22 rollup。
+- **pi-agent-runtime-contract**：22 張中 20 張完成；#18 已採 Host enforcement 收口，殘餘 #14（Linux bwrap 真機 qualification，需 Linux CI 首綠）與 #22 rollup。
 - **active-run-reattachment**：12/12 resolved；Pi Host attachment journal、renderer bootstrap、finalization CAS、restart e2e 與「terminal finalization 不阻塞啟動」owning ticket 均已歸位。
 - **turn-record-fidelity**（12/12）、**cli-subscription-pi-loop**（ADR-0052，含真機 E2E）、**subscription-surface-hardening**（5/5）皆 resolved。
 - **trajectory-review-closure** 3/3 resolved：真 renderer 同頁比較 windowed／full-map；載入十頁後為 165 nodes／27 rows 對 1,653／275，實測列距 28.5 px，維持 rowHeight 28、overscan 8。
@@ -34,7 +40,7 @@ Ticket 15 完成 contract：Pi Host Protocol v5 移除 whole-bundle `memory/*` �
 
 1. paid-beta #14 release qualification——需 clean-machine signed 安裝等真機證據（目錄已移除，殘餘遷記 Remaining blocked）。
 2. runtime-contract #14——Linux CI 首綠後補勾三框。
-3. harness-gap-closure #09、runtime-contract #18——待維護者裁決。
+3. harness-gap-closure #09——待維護者裁決。
 
 ## 延續未解（自 08-15 記載）
 
@@ -43,4 +49,4 @@ Ticket 15 完成 contract：Pi Host Protocol v5 移除 whole-bundle `memory/*` �
 
 ## 下一步
 
-依 `.scratch/INDEX.md` Active frontier 排工：context-usage-panel 與 external-cli-durable-harness 仍可並行開工；durable-memory-sqlite-migration 已移至 resolved。
+依 `.scratch/INDEX.md` Active frontier 排工：優先完成 subdesign-architecture-deepening #05 的其餘 protocol domain extraction；external-cli-durable-harness #07 的未安裝 provider 真機證據仍需外部環境。

@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { pluginRegistry } from '../agent/hermes/plugins.ts'
 import {
-  createOpenDesignContentPack,
   normalizeOpenDesignContentPack,
   openDesignPackId,
   openDesignSkillPlugin,
@@ -11,6 +10,7 @@ import {
 } from '../agent/openDesign/packs.ts'
 import { readOpenDesignText, type OpenDesignCatalogRecord } from '../agent/openDesign/catalog.ts'
 import { persistSubDesignMetadata } from '../agent/subdesign/metadata.ts'
+import { applyOpenDesignPack } from '../agent/openDesign/packApplication.ts'
 
 const PACKS_KEY = 'subagents.open-design.packs.v1'
 const AUDIT_KEY = 'subagents.open-design.audit.v1'
@@ -83,38 +83,32 @@ export const useOpenDesignPackStore = create<OpenDesignPackStore>((set, get) => 
   install: async (record, projectRoot) => {
     const id = openDesignPackId(record)
     set({ busyId: id, error: null })
-    try {
-      let pack = createOpenDesignContentPack(record)
-      const existing = get().packs.find((item) => item.id === id)
-      if (existing && existing.digest === pack.digest) pack = { ...existing, sourcePath: record.sourcePath, assetPaths: record.assetPaths, licensePaths: record.licensePaths }
-
-      // Vendor files stay immutable. An explicit install copies the selected
-      // pack into a project-owned path through the specialized main-process IPC.
-      if (projectRoot && window.subagents?.subdesign?.copyVendorPack) {
-        const copied = await window.subagents.subdesign.copyVendorPack({
-          sourcePath: record.sourcePath,
-          assetPaths: record.assetPaths,
-          targetId: id,
-          digest: record.digest,
-          kind: record.kind,
-          projectRoot,
-        })
-        if (!copied.ok) throw new Error(copied.error || '無法複製 Open Design project-owned pack')
-        pack = { ...pack, projectPath: copied.path }
-      }
-
-      const packs = [pack, ...get().packs.filter((item) => item.id !== id)].slice(0, 500)
-      persist(PACKS_KEY, packs)
-      set({ packs, busyId: null })
-      persistSubDesignMetadata('open-design-pack', pack, projectRoot || get().projectRoot)
-      addAudit(set, { at: new Date().toISOString(), action: 'install', packId: id, digest: pack.digest })
-      return pack
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      set({ busyId: null, error: message })
-      addAudit(set, { at: new Date().toISOString(), action: 'reject', packId: id, reason: message })
-      return null
-    }
+    const root = projectRoot || get().projectRoot
+    const result = await applyOpenDesignPack({
+      record,
+      projectRoot: root,
+      existing: get().packs.find((item) => item.id === id),
+      dependencies: {
+        copyToProject: async (copyInput) => {
+          const copy = window.subagents?.subdesign?.copyVendorPack
+          if (!copy) return { ok: false, error: '目前的 Electron Host 不支援 Open Design pack copy。' }
+          const copied = await copy(copyInput)
+          return copied.ok && copied.path
+            ? { ok: true, path: copied.path }
+            : { ok: false, error: copied.error || 'Open Design pack copy 失敗。' }
+        },
+        persistCanonical: (pack, canonicalRoot) => persistSubDesignMetadata('open-design-pack', pack, canonicalRoot),
+        commitProjection: (pack) => {
+          const packs = [pack, ...get().packs.filter((item) => item.id !== id)].slice(0, 500)
+          persist(PACKS_KEY, packs)
+          set({ packs, busyId: null, error: null })
+        },
+        appendAudit: (event) => addAudit(set, event),
+      },
+    })
+    if (result.ok) return result.pack
+    set({ busyId: null, error: result.reason })
+    return null
   },
 
   setEnabled: async (record, enabled) => {

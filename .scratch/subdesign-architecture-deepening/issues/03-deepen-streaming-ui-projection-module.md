@@ -1,6 +1,10 @@
 # 03 — Deepen streaming into the UI Projection module
 
-Status: 可交給代理
+Status: resolved
+
+## Comments
+
+- 2026-08-28 implemented: `streamingProjection.ts` 由 Host snapshot + typed events 同時推導 preview/activity、cursor、fallback 與 terminal status；`smoke-subdesign-architecture.mts` 覆蓋 out-of-order、replay、conflict、terminal 及 renderer fallback，已掛 `smoke:open-design` 主鏈。
 
 Blocked by: 01
 

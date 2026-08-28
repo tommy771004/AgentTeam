@@ -3,7 +3,6 @@ import type {
   AgentState,
   ApprovalMode,
   ArchiveRecord,
-  CliConfigSnapshot,
   LoopType,
   PostStateOutcome,
   RuntimeOverrides,
@@ -123,8 +122,6 @@ interface AgentStore {
     /** Correlate with runTask trace */
     runId?: string
     threadId?: string
-    /** Safe OpenCode config lineage captured before dispatch */
-    configSnapshot?: CliConfigSnapshot
     /** Preserve loop type in agent state (not always Goal-based) */
     loopType?: LoopType
     /** Host-owned process-iteration budget for external orchestration. */
@@ -940,7 +937,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           haltReason: r.ok
             ? orchestrationStopReason
             : [r.terminalClassification, r.error].filter(Boolean).join(' · '),
-          cliConfigSnapshot: opts.configSnapshot,
           externalRun: r.externalRun,
           scheduleTrigger: opts.scheduleTrigger,
           eventTrigger: opts.eventTrigger,
@@ -1016,7 +1012,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             },
           ],
           finishedAt: new Date().toISOString(),
-          cliConfigSnapshot: opts.configSnapshot,
           scheduleTrigger: opts.scheduleTrigger,
           eventTrigger: opts.eventTrigger,
         })
@@ -1136,7 +1131,6 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           : undefined,
         tokensUsed: agent.tokensUsed || undefined,
         hitl,
-        cliConfigSnapshot: agent.cliConfigSnapshot,
         externalRun: agent.externalRun,
         scheduleTrigger: agent.scheduleTrigger,
         eventTrigger: agent.eventTrigger,

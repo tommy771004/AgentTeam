@@ -10,9 +10,7 @@ import type {
   SubDesignPluginExecutionProjection,
   SubDesignPluginExecutionRequest,
 } from '../src/agent/subdesign/pluginExecution.ts'
-import { fakePipelineProvider } from '../src/agent/subdesign/providers/fakePipelineProvider.ts'
 import {
-  DEFAULT_OUTPUT_BUDGET_BYTES,
   DEFAULT_PROVIDER_TIMEOUT_MS,
   rejectModelAttestedEvidence,
   type ProviderEvidence,
@@ -34,10 +32,11 @@ import {
   type StreamingEventInput,
   type StreamingUpdate,
 } from '../src/agent/subdesign/streamingEnvelope.ts'
-import { executeStorybookContextAdapter } from './subDesignStorybookAdapter.ts'
-import { executeChromeDevToolsEvidenceAdapter } from './subDesignChromeDevToolsAdapter.ts'
 import type { ProviderAttachmentPayload } from './subDesignProviderAttachments.ts'
-import { executeHarnessGoalAdapter } from './subDesignHarnessAdapter.ts'
+import {
+  isSubDesignProviderAvailable,
+  resolveSubDesignProviderAdapter,
+} from './subDesignProviderAdapters.ts'
 
 export type SubDesignProviderStageEvent = {
   runId: string
@@ -255,7 +254,7 @@ export async function executeSubDesignProviderStage(input: {
     emit('blocked', result.summary)
     return result
   }
-  if (request.providerId !== 'fake-pipeline' && request.providerId !== 'storybook' && request.providerId !== 'chrome-devtools' && request.providerId !== 'harness') {
+  if (!isSubDesignProviderAvailable(request.providerId)) {
     const result = blockedProjection(request, input.runId, `Provider unavailable: ${request.providerId}`, startedAt)
     emit('blocked', result.summary)
     return result
@@ -292,52 +291,31 @@ export async function executeSubDesignProviderStage(input: {
   emitStream({ kind: 'tool-call', tool: request.providerId, callId: `${input.runId}:${request.stageId}`, text: `開始 ${request.providerId}/${request.stageId}` })
   try {
     const timeoutMs = request.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS
-    const outcome = request.providerId === 'storybook'
-      ? await executeStorybookContextAdapter({ request, runId: input.runId, signal: controller.signal, timeoutMs })
-      : request.providerId === 'chrome-devtools'
-        ? await executeChromeDevToolsEvidenceAdapter({ request, runId: input.runId, signal: controller.signal, timeoutMs })
-      : request.providerId === 'harness'
-        ? await executeHarnessGoalAdapter({
-            request,
-            runId: input.runId,
-            projectRoot: input.projectRoot,
-            signal: controller.signal,
-            timeoutMs,
-            onProgress: (summary) => {
-              emit('running', summary)
-              emitStream({ kind: 'thinking', text: summary })
-            },
-          })
-      : await (async () => {
-          const session = fakePipelineProvider.execute({
-            stageId: request.stageId,
-            atoms: validation.atoms,
-            inputs: validation.inputs,
-          }, {
-            runId: input.runId,
-            stageId: request.stageId,
-            threadId: input.threadId,
-            timeoutMs,
-            outputBudgetBytes: request.outputBudgetBytes ?? DEFAULT_OUTPUT_BUDGET_BYTES,
-            signal: controller.signal,
-          })
-          const [receipt, evidence] = await Promise.all([session.promise, session.evidence])
-          return { receipt, evidence }
-        })()
-    const { receipt, evidence } = outcome
-    const providerContext = 'context' in outcome
-      ? outcome.context as SubDesignPluginExecutionProjection['context']
-      : undefined
-    const providerFindings = 'findings' in outcome
-      ? outcome.findings as SubDesignPluginExecutionProjection['findings']
-      : undefined
-    const providerAttachments = 'attachments' in outcome
-      ? outcome.attachments as ProviderAttachmentPayload[] | undefined
-      : undefined
-    const providerPartial = 'partial' in outcome ? outcome.partial === true : false
-    const providerGoalResult = 'goalResult' in outcome
-      ? outcome.goalResult as SubDesignPluginExecutionProjection['goalResult']
-      : undefined
+    const adapter = resolveSubDesignProviderAdapter(request.providerId)
+    if (!adapter) throw new Error(`Provider adapter unavailable: ${request.providerId}`)
+    const outcome = await adapter.execute({
+      request,
+      runId: input.runId,
+      threadId: input.threadId,
+      projectRoot: input.projectRoot,
+      signal: controller.signal,
+      timeoutMs,
+      atoms: validation.atoms,
+      inputs: validation.inputs,
+      onProgress: (summary) => {
+        emit('running', summary)
+        emitStream({ kind: 'thinking', text: summary })
+      },
+    })
+    const {
+      receipt,
+      evidence,
+      context: providerContext,
+      findings: providerFindings,
+      attachments: providerAttachments,
+      partial: providerPartial = false,
+      goalResult: providerGoalResult,
+    } = outcome
     if (active.cancelled) {
       emitStream({ kind: 'cancelled', text: '已取消（late result ignored）' })
       liveEnvelope = finalizeEnvelope(liveEnvelope, 'cancelled')

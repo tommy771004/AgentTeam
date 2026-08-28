@@ -105,6 +105,7 @@ Reviewed: 2026-08-28
 - P3: language-aware token highlighting could be added later if the product adopts a shared code highlighter; it is not required to understand the diff.
 
 final result: passed
+
 - `npm run smoke` - passed
 - `smoke-subdesign-studio.mts` - 9 tests passed
 - `git diff --check` - passed
@@ -287,6 +288,107 @@ final result: passed
 - `npx oxlint src/pages/RecordsPage.tsx` — passed.
 - `npx tsc -b --pretty false` — passed.
 - `git diff --check -- src/pages/RecordsPage.tsx` — passed.
+
+Final severity count: **P0 0 · P1 0 · P2 0**
+
+final result: passed
+
+---
+
+# Design QA - 執行活動折疊群組
+
+Reviewed: 2026-08-28
+
+## Visual comparison
+
+- Reference: `/var/folders/05/x61j217d49g9k0_kccntyzsr0000gn/T/codex-clipboard-fbf26c66-e3b4-481b-bd6c-ec3206ddcc11.png`
+- Implementation capture: `/tmp/agentstudio-activity-reference-size.png`
+- Desktop viewport: 758 x 767; narrow viewport: 390 x 844.
+- Preview: `http://127.0.0.1:5174/?view=activity#/trajectory-measurement`.
+
+## Findings
+
+- Matched the reference hierarchy: prose stays primary, repeated activity becomes a low-emphasis one-line disclosure, and the chevron sits beside the summary.
+- Failure groups use the existing error tone. Expanded content is indented by spacing only, with no decorative rail, chip background, glow, hover lift, or extra card.
+- One expansion exposes both original invocations and both Host-recorded failure details.
+- Group buttons expose `aria-expanded` and a stable `aria-controls` target.
+- At 390 px, prose wraps without clipping, horizontal overflow, or text touching the viewport edge.
+- Existing icons, type, canvas, surface, ink, and error tokens are preserved. No new gradient, shadow, pill, entrance-hidden content, fake control, or asset was introduced.
+
+## Verification
+
+- Pointer disclosure and initial collapsed state: passed.
+- TypeScript, Vite production build, targeted oxlint, live/replay projection, grouping, and failure-detail smokes: passed.
+- Full `npm run build`: blocked before compilation by the pre-existing `src/agent/cliProviderCapabilities.ts::capabilitiesFromCliHelp` complexity 28 > 20. The changed timeline function now passes the same complexity gate.
+
+Final severity count: **P0 0 · P1 0 · P2 0**
+
+final result: passed
+---
+
+# Design QA - 原生文字右鍵選單
+
+Reviewed: 2026-08-28
+
+## Source and implementation
+
+- Reference: `/var/folders/05/x61j217d49g9k0_kccntyzsr0000gn/T/codex-clipboard-1f1f0bb2-d50a-401c-904a-7ae84e251e25.png`.
+- Implementation owner: Electron main process `webContents` `context-menu` event.
+- Visual surface: native macOS `Menu`; AgentStudio does not draw or style a substitute popover.
+
+## Functional verification
+
+- Selected, non-editable text produces `Look Up “…”`, `Search with Google`, a separator, and native `Copy` in that order.
+- `Look Up` delegates to `webContents.showDefinitionForSelection()` on macOS.
+- Google search uses a fixed `https://www.google.com/search` origin and opens only after an explicit menu click.
+- Search text is bounded, Unicode-safe, and never included in AgentStudio logs.
+- Editable fields retain Undo, Redo, Cut, Paste, Delete, and Select All.
+- Blank non-editable surfaces produce no irrelevant menu.
+- TypeScript, Vite production renderer/main/preload bundles, targeted oxlint, and `smoke:text-context-menu` passed.
+- Full repository complexity gate remains blocked by the unrelated pre-existing `src/agent/cliProviderCapabilities.ts::capabilitiesFromCliHelp` complexity 28 > 20.
+
+## Visual QA blocker
+
+- The AgentStudio development Electron window launched and rendered correctly.
+- Automated Computer Use could read and capture the window, but its native action pipe closed on every pointer action, so it could not select text and capture the open OS menu from this build.
+- Because the actual open-menu state could not be captured and compared beside the reference, pixel-level visual QA is not claimed. The menu's appearance itself is OS-owned and the shipped native template is covered by the functional smoke.
+
+Final severity count: **P0 0 · P1 0 · P2 0 · visual capture blocked 1**
+
+final result: blocked
+
+---
+
+# Design QA - Pinned comment preview flow
+
+Reviewed: 2026-08-28
+
+## Interaction and information architecture
+
+- A real pointer click inside the sandboxed artifact selects only the target; it never silently turns captured element text into a user comment.
+- The comment textarea is visible immediately after selection, has a persistent label, a bounded length, autofocus, a resize affordance, and a clear focus-border state.
+- Adding a draft and sending it are separate actions. Sending requires an explicit review step and a second confirmation, and all comments are dispatched through one `runTask`.
+- Draft clearing is one deliberate control for the whole draft, not a repeated destructive action on every row.
+- Canonical audit history uses a native `details` disclosure, remains collapsed by default, and is populated from project metadata rather than a second UI-only record.
+- Failure and degraded-persistence outcomes remain visible with `alert` semantics; success uses `status` semantics.
+
+## Anti-slop and accessibility re-check
+
+- Content is visible by default. No entrance animation, opacity gate, scroll reveal, floating motion, hover lift, scaling button, or animated underline was introduced.
+- The flow reuses the existing AgentStudio surface, typography, color, icon, radius, and density system. It introduces no gradient, glow, halo, shadow, glass, background blob/grid, fake window, decorative rule, icon tile, badge wall, or new font.
+- Controls are real native button/textarea/details elements. Disabled states, `aria-pressed`, labelled confirmation grouping, alert/status roles, iframe titles, and keyboard submission are present.
+- Labels and copy keep deliberate gutters. Text wraps or truncates inside `min-width: 0` containers; the iframe and preview shell retain their existing bounded overflow behavior, with no text touching or being sliced by an edge.
+- Primary and secondary actions are not presented as the stock filled-plus-outlined CTA pair. Tonal text actions handle cancel/back/clear; the single committed action uses the existing primary treatment.
+- Contrast uses established theme tokens. No new saturated accent palette or low-contrast text-on-fill combination was added.
+- The UI remains compact and product-specific rather than adding a new card stack, pricing-like comparison grid, hero composition, decorative metadata chips, testimonial pattern, or other page-template element.
+
+## Verification
+
+- Real-pointer browser fixture: idle -> select target -> enter comment -> add draft -> review -> confirm -> submitted.
+- Canonical audit smoke: project-relative persistence and hydration passed.
+- `npm run build`: passed, including complexity, TypeScript, and production bundles.
+- Full `npm run smoke`: passed, including SubDesign workspace, critique attestation, snapshot/pin scope, and Electron renderer E2E suites.
+- `git diff --check`: passed.
 
 Final severity count: **P0 0 · P1 0 · P2 0**
 

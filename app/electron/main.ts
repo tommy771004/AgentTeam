@@ -20,6 +20,7 @@ import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { googleSelectionSearchUrl, textContextMenuTemplate } from './textContextMenu'
 import {
   clearVaultSecret,
   getVaultSecret,
@@ -101,14 +102,6 @@ import {
   stopMonitor,
   type MonitorEmit,
 } from './monitorBridge'
-import {
-  detectOpenCodeCli,
-  loadOpenCodeBundle,
-  runOpenCodePrompt,
-  resolveOpenCodeInstructions,
-  scanOpenCodeAgents,
-  spawnOpenCodeInteractive,
-} from './opencodeBridge'
 import {
   applyWorktree,
   createWorktree,
@@ -195,7 +188,7 @@ import {
   validateSubDesignArtifactManifest,
 } from '../src/agent/subdesign/artifactManifest'
 import { writeLearningExport } from './learningExportWrite.ts'
-import { normalizeSubDesignCritique, critiqueAllowsDeliver } from '../src/agent/subdesign/critique'
+import { normalizeEvidence, normalizeSubDesignCritique, critiqueAllowsDeliver } from '../src/agent/subdesign/critique'
 import { parsePinnedCommentPayload } from '../src/agent/subdesign/pinnedComments'
 import { createPinnedPatchScope, resolvePinnedHtmlRanges } from '../src/agent/subdesign/pinnedPatchScope'
 import { parseMcpToolCoordinate, validateSurfaceDeclaration } from '../src/agent/subdesign/providers/mcpAppsProvider'
@@ -205,7 +198,6 @@ import type {
   SubDesignArtifactPatchOperation,
   SubDesignExportFormat,
 } from '../src/agent/subdesign/types'
-import type { CliConfigSnapshot } from '../src/agent/types'
 import {
   formatExternalCliTerminal,
   normalizeExternalCliRunPolicy,
@@ -225,17 +217,6 @@ import {
   rollbackUpdate,
   updatePublicKeyFromEnv,
 } from './updateManager'
-import {
-  abortOpenCodeRun,
-  checkOpenCodeServer,
-  getOpenCodeServerInfo,
-  openCodeServerRequest,
-  runOpenCodeServerPrompt,
-  startOpenCodeServer,
-  stopOpenCodeServers,
-  type OpenCodeServerMode,
-} from './opencodeServerBridge'
-import { safeOpenCodeServerOrigin } from '../src/agent/opencodeServerSafety'
 import { PiHostSupervisor } from './piHostSupervisor'
 import { writeSettingsBundleExport } from './settingsBundleExportWrite'
 import type { MemoryImportApplyInput, MemoryImportMode } from './durableMemoryImport'
@@ -674,6 +655,26 @@ function createAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+function installTextContextMenu(win: BrowserWindow): void {
+  win.webContents.on('context-menu', (_event, params) => {
+    const template = textContextMenuTemplate(params, process.platform, {
+      lookUpSelection: () => win.webContents.showDefinitionForSelection(),
+      searchWithGoogle: (selection) => {
+        void shell.openExternal(googleSelectionSearchUrl(selection)).catch(() => {
+          // Never log the external URL: its query contains the user's selection.
+          console.error('[context-menu] Google search failed')
+        })
+      },
+    })
+    if (!template.length) return
+    Menu.buildFromTemplate(template).popup({
+      window: win,
+      ...(params.frame ? { frame: params.frame } : {}),
+      sourceType: params.menuSourceType,
+    })
+  })
+}
+
 function createTray() {
   let icon = loadAppIcon('tray')
   if (icon.isEmpty()) {
@@ -754,6 +755,7 @@ function createWindow() {
 
   // Constructor icon is flaky on Windows — re-apply after create + before show
   applyWindowIcon(mainWindow)
+  installTextContextMenu(mainWindow)
 
   mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
     console.error('[preload-error]', preloadPath, error)
@@ -926,7 +928,6 @@ app.on('before-quit', (event) => {
   if (appShutdownStarted) return
   appShutdownStarted = true
   interruptExternalCliSessions('Electron host stopping; external session requires recovery')
-  void stopOpenCodeServers()
   mcpStdioStopAll()
   killAllTerms()
   void stopTelegramGateway()
@@ -1447,115 +1448,6 @@ ipcMain.handle(
   },
 )
 
-// ── OpenCode interop ────────────────────────────────────────────
-
-ipcMain.handle('opencode:scanAgents', async (_evt, projectRoot?: string) => {
-  try {
-    return scanOpenCodeAgents(projectRoot || workspaceRoot())
-  } catch (e) {
-    return {
-      global: [],
-      project: [],
-      dirs: [],
-      error: e instanceof Error ? e.message : String(e),
-    }
-  }
-})
-
-/** Full bundle: merged json layers + agents/commands markdown */
-ipcMain.handle('opencode:loadBundle', async (_evt, projectRoot?: string) => {
-  try {
-    return loadOpenCodeBundle(projectRoot || workspaceRoot())
-  } catch (e) {
-    return {
-      layers: [],
-      agents: [],
-      commands: [],
-      sources: [],
-      error: e instanceof Error ? e.message : String(e),
-    }
-  }
-})
-
-ipcMain.handle('opencode:detect', async () => detectOpenCodeCli())
-
-ipcMain.handle(
-  'opencode:run',
-  async (_evt, input: { prompt: string; timeoutMs?: number; cwd?: string }) =>
-    runOpenCodePrompt({
-      ...input,
-      cwd: input.cwd || workspaceRoot(),
-    }),
-)
-
-ipcMain.handle('opencode:hint', async () => spawnOpenCodeInteractive({ cwd: workspaceRoot() }))
-ipcMain.handle('opencode:resolveInstructions', async (_evt, input: { projectRoot?: string; entries?: string[] }) =>
-  resolveOpenCodeInstructions(
-    input?.projectRoot && fs.existsSync(input.projectRoot) ? input.projectRoot : workspaceRoot(),
-    Array.isArray(input?.entries) ? input.entries : [],
-  ),
-)
-
-// ── OpenCode localhost server adapter ──────────────────────────
-
-ipcMain.handle('opencodeServer:health', async (_evt, url?: string) => checkOpenCodeServer(url))
-ipcMain.handle('opencodeServer:info', async (_evt, url?: string) => getOpenCodeServerInfo(url))
-ipcMain.handle('opencodeServer:start', async (_evt, opts?: { cwd?: string; port?: number }) =>
-  startOpenCodeServer({
-    cwd: opts?.cwd && fs.existsSync(opts.cwd) ? opts.cwd : workspaceRoot(),
-    port: opts?.port,
-  }),
-)
-ipcMain.handle('opencodeServer:stop', async () => stopOpenCodeServers())
-ipcMain.handle('opencodeServer:abort', async (_evt, runId?: string) => abortOpenCodeRun(runId))
-ipcMain.handle('opencodeServer:config', async (_evt, url: string) =>
-  openCodeServerRequest(url, '/config'),
-)
-ipcMain.handle('opencodeServer:providers', async (_evt, url: string) =>
-  openCodeServerRequest(url, '/config/providers'),
-)
-ipcMain.handle('opencodeServer:experimentalToolIds', async (_evt, url: string) =>
-  openCodeServerRequest(url, '/experimental/tool/ids'),
-)
-ipcMain.handle('opencodeServer:sessions', async (_evt, url: string) =>
-  openCodeServerRequest(url, '/session'),
-)
-ipcMain.handle('opencodeServer:children', async (_evt, input: { url: string; sessionId: string }) =>
-  openCodeServerRequest(input.url, `/session/${encodeURIComponent(input.sessionId)}/children`),
-)
-ipcMain.handle('opencodeServer:todo', async (_evt, input: { url: string; sessionId: string }) =>
-  openCodeServerRequest(input.url, `/session/${encodeURIComponent(input.sessionId)}/todo`),
-)
-ipcMain.handle('opencodeServer:fork', async (_evt, input: { url: string; sessionId: string; messageId?: string }) =>
-  openCodeServerRequest(input.url, `/session/${encodeURIComponent(input.sessionId)}/fork`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input.messageId ? { messageID: input.messageId } : {}),
-  }),
-)
-ipcMain.handle('opencodeServer:diff', async (_evt, input: { url: string; sessionId: string }) =>
-  openCodeServerRequest(input.url, `/session/${encodeURIComponent(input.sessionId)}/diff`),
-)
-ipcMain.handle('opencodeServer:revert', async (_evt, input: { url: string; sessionId: string; messageId: string; partId?: string }) =>
-  openCodeServerRequest(input.url, `/session/${encodeURIComponent(input.sessionId)}/revert`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messageID: input.messageId, partID: input.partId }),
-  }),
-)
-ipcMain.handle('opencodeServer:lsp', async (_evt, url: string) =>
-  openCodeServerRequest(url, '/lsp'),
-)
-ipcMain.handle('opencodeServer:formatter', async (_evt, url: string) =>
-  openCodeServerRequest(url, '/formatter'),
-)
-ipcMain.handle('opencodeServer:mcp', async (_evt, url: string) =>
-  openCodeServerRequest(url, '/mcp'),
-)
-ipcMain.handle('opencodeServer:agents', async (_evt, url: string) =>
-  openCodeServerRequest(url, '/agent'),
-)
-
 // ── Project / Git worktree ──────────────────────────────────────
 
 ipcMain.handle(
@@ -1803,8 +1695,6 @@ ipcMain.handle(
       agentMode?: string
       thinkingVariant?: string
       showThinking?: boolean
-      serverMode?: OpenCodeServerMode
-      serverUrl?: string
       approvalMode?: 'always' | 'auto' | 'full'
       unattended?: boolean
       timeoutMs?: number
@@ -1812,7 +1702,6 @@ ipcMain.handle(
       conversationId?: string
       externalCliPolicy?: Record<string, number>
       requiredConnectors?: ExternalCliConnectorRequirement[]
-      configSnapshot?: CliConfigSnapshot
       attachments?: Array<{
         name: string
         mimeType?: string
@@ -1896,7 +1785,6 @@ ipcMain.handle(
         code: 1,
         error: admission.reason || 'Main 拒絕未通過 filesystem sandbox 的 CLI spawn',
         runId: input.runId,
-        configSnapshot: input.configSnapshot,
       }
     }
 
@@ -1938,203 +1826,6 @@ ipcMain.handle(
         filePath: typeof a.filePath === 'string' ? a.filePath.slice(0, 1200) : undefined,
       }
     })
-    if (input.kind === 'opencode' && input.serverMode === 'server' && attachments.length > 0) {
-      return {
-        ok: false,
-        output: '',
-        command: 'opencode server',
-        kind: 'opencode' as const,
-        code: 2,
-        error: 'OpenCode server mode 暫不接受附件；請改用 auto/cli 以走一次性 CLI attachment adapter。',
-        runId: input.runId,
-        configSnapshot: input.configSnapshot,
-      }
-    }
-    if (input.kind === 'opencode' && input.serverMode !== 'cli' && attachments.length === 0) {
-      const serverRunId = input.runId || `oc_${Date.now().toString(36)}`
-      const externalStartedAt = new Date().toISOString()
-      const serverPolicy = normalizeExternalCliRunPolicy(input.externalCliPolicy)
-      const serverSession = externalCliSessions.create({
-        runId: serverRunId,
-        conversationId: input.conversationId || serverRunId,
-        adapter: 'opencode',
-        policy: serverPolicy,
-        unattended: input.unattended,
-        requiredConnectors: input.requiredConnectors,
-        processId: `opencode-server:${serverRunId}`,
-        transport: {
-          processId: `opencode-server:${serverRunId}`,
-          terminateTree: async () => {
-            const result = await abortOpenCodeRun(serverRunId)
-            return { confirmed: result.ok }
-          },
-        },
-      })
-      serverSession.start()
-      let server
-      try {
-        server = await runOpenCodeServerPrompt({
-          mode: input.serverMode || 'auto',
-          baseUrl: input.serverUrl,
-          prompt: input.prompt,
-          cwd,
-          model: input.model,
-          agent: input.agentMode === 'plan' ? 'plan' : 'build',
-          runId: serverRunId,
-          timeoutMs: serverPolicy.absoluteMs,
-          onStarted: (providerSessionId) => {
-            // A server health check is not a provider lifecycle event.  Only
-            // the created session identity proves this run has started.
-            serverSession.observe({
-              type: 'process_started',
-              processId: `opencode-server:${serverRunId}`,
-              providerSessionId,
-              detail: 'OpenCode provider session created',
-            })
-          },
-          onEvent: (event) => {
-            if (event.sessionPhase === 'waiting_for_user' || event.sessionPhase === 'waiting_for_approval') {
-              serverSession.observe({ type: event.sessionPhase, detail: event.detail || event.title })
-            } else if (event.kind === 'text') {
-              serverSession.observe({ type: 'model_activity', detail: event.delta || event.detail })
-            } else if (event.kind === 'tool' || event.kind === 'file') {
-              serverSession.observe({ type: 'tool_completed', tool: event.tool, detail: event.detail, ok: event.ok })
-            } else if (event.kind === 'error') {
-              const detail = event.detail || event.title || 'OpenCode server error'
-              const diagnostic = classifyExternalCliDiagnostic(detail, {
-                adapter: 'opencode',
-                operation: event.tool,
-                headless: true,
-              })
-              if (diagnostic.kind === 'connector-authentication-required') {
-                const required = diagnostic.required === true || serverSession.isRequiredConnector(diagnostic)
-                serverSession.observe({
-                  type: 'connector_authentication_required',
-                  connector: diagnostic.connector,
-                  server: diagnostic.server,
-                  operation: diagnostic.operation,
-                  required,
-                  detail: diagnostic.detail,
-                })
-              } else {
-                serverSession.observe({ type: 'diagnostic', detail, severity: 'error' })
-              }
-            } else {
-              serverSession.observe({ type: 'provider_activity', detail: event.detail || event.title })
-            }
-            const cursor = serverSession.snapshot().eventCursor
-            try {
-              const target = mainWindow?.webContents
-              if (target && !target.isDestroyed()) target.send('cli:stream', {
-                ...event,
-                runId: serverRunId,
-                sequence: cursor,
-                sessionPhase: serverSession.snapshot().phase,
-                providerSessionId: serverSession.snapshot().providerSessionId,
-              })
-            } catch {
-              /* ignore */
-            }
-          },
-        })
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error)
-        if (!serverSession.snapshot().terminal) serverSession.failTransport(detail)
-        const sessionSnapshot = serverSession.snapshot()
-        return {
-          ok: false,
-          output: sessionSnapshot.output.head,
-          command: `opencode server ${safeOpenCodeServerOrigin(input.serverUrl) || 'loopback'}`,
-          kind: 'opencode' as const,
-          code: 1,
-          error: formatExternalCliTerminal(sessionSnapshot.terminal || {
-            classification: 'transport-failure',
-            phase: 'failed',
-            at: Date.now(),
-            reason: detail,
-          }, { headless: true }),
-          runId: serverRunId,
-          terminalClassification: sessionSnapshot.terminal?.classification || 'transport-failure',
-          configSnapshot: input.configSnapshot,
-          externalRun: {
-            provider: 'opencode' as const,
-            adapter: 'opencode',
-            runId: serverRunId,
-            conversationId: input.conversationId || serverRunId,
-            processId: sessionSnapshot.processId,
-            status: 'failed' as const,
-            completionReason: detail,
-            terminalClassification: sessionSnapshot.terminal?.classification || 'transport-failure',
-            eventCursor: sessionSnapshot.eventCursor,
-            outputOmittedBytes: sessionSnapshot.output.omittedBytes,
-            startedAt: externalStartedAt,
-            finishedAt: new Date().toISOString(),
-          },
-        }
-      }
-      if (server.used) {
-        if (server.sessionId) {
-          serverSession.observe({
-            type: 'provider_activity',
-            providerSessionId: server.sessionId,
-            detail: 'OpenCode provider session identity observed',
-          })
-        }
-        if (server.timedOut && !serverSession.snapshot().terminal) {
-          serverSession.forceTimeout(serverSession.snapshot().firstValidLifecycleAt === undefined ? 'startup-timeout' : 'absolute-timeout')
-        }
-        else if (server.cancelled && !serverSession.snapshot().terminal) serverSession.cancelObserved('使用者取消')
-        else if (!serverSession.snapshot().terminal) serverSession.observe({ type: 'process_exit', code: server.ok ? 0 : 1, detail: server.error })
-        const sessionSnapshot = serverSession.snapshot()
-        const terminal = sessionSnapshot.terminal
-        const safeServerOrigin = safeOpenCodeServerOrigin(server.baseUrl || input.serverUrl) || 'loopback'
-        // The Host session classification wins over an adapter's raw HTTP
-        // result, including a provider that exits zero after required auth or
-        // cancellation has already settled the run.
-        const resultOk = terminal ? terminal.classification === 'success' : server.ok
-        const result = {
-          ok: resultOk,
-          output: server.output,
-          command: `opencode server ${safeServerOrigin} session=${server.sessionId || '—'}`,
-          kind: 'opencode' as const,
-          code: resultOk ? 0 : 1,
-          timedOut: server.timedOut,
-          cancelled: server.cancelled,
-          error: terminal ? formatExternalCliTerminal(terminal, { headless: true }) : server.error,
-          runId: serverRunId,
-          terminalClassification: terminal?.classification,
-          configSnapshot: input.configSnapshot,
-          externalRun: {
-            provider: 'opencode' as const,
-            serverUrl: safeServerOrigin,
-            sessionId: server.sessionId,
-            version: server.version,
-            configFingerprint: input.configSnapshot
-              ? createHash('sha256').update(JSON.stringify(input.configSnapshot)).digest('hex').slice(0, 16)
-              : undefined,
-            status: terminal?.classification === 'success' ? 'success' as const : terminal?.classification === 'user-cancelled' ? 'aborted' as const : terminal?.classification === 'interrupted' ? 'interrupted' as const : 'failed' as const,
-            completionReason: server.completionReason,
-            runId: serverRunId,
-            adapter: 'opencode',
-            conversationId: input.conversationId || serverRunId,
-            processId: sessionSnapshot.processId,
-            terminalClassification: terminal?.classification,
-            eventCursor: sessionSnapshot.eventCursor,
-            outputOmittedBytes: sessionSnapshot.output.omittedBytes,
-            startedAt: externalStartedAt,
-            finishedAt: new Date().toISOString(),
-          },
-        }
-        return result
-      }
-      if (!serverSession.snapshot().terminal) {
-        serverSession.failTransport(server.error || 'OpenCode server unavailable; falling back to CLI')
-      }
-      // This terminal session represents only the failed server attempt; the
-      // same run id is handed to the one-shot CLI adapter below. Explicitly
-      // acknowledge that internal attempt before replacing its live owner.
-      externalCliSessions.acknowledgeTerminal(serverRunId)
-    }
     return runLocalCliAgent({
       ...input,
       cwd,
@@ -2160,11 +1851,8 @@ ipcMain.handle('cli:cancel', async (_evt, runId?: string) => {
     const sessionCancel = await cancelExternalCliSession(runId)
     if (sessionCancel.ok) return { ok: true, killed: 1, confirmed: sessionCancel.confirmed === true }
   }
-  const [cli, server] = await Promise.all([
-    cancelBashAndWait(runId ? { runId } : { tag: 'cli-agent' }),
-    abortOpenCodeRun(runId),
-  ])
-  return { ok: cli.ok || server.ok, killed: cli.killed + server.killed, confirmed: cli.confirmed || server.ok }
+  const cli = await cancelBashAndWait(runId ? { runId } : { tag: 'cli-agent' })
+  return { ok: cli.ok, killed: cli.killed, confirmed: cli.confirmed }
 })
 
 /** Reconnect to a Host-owned external session after renderer reload. */
@@ -3087,6 +2775,9 @@ function subDesignMetadataFile(root: string, kind: SubDesignMetadataKind, payloa
   if (kind === 'open-design-surface-session') {
     return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/surface-sessions/${safeSubDesignMetadataId(payload.id)}.json`, root)
   }
+  if (kind === 'pinned-comment') {
+    return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/pinned-comments/${safeSubDesignMetadataId(payload.id)}.json`, root)
+  }
   return resolveWorkspacePath(`${SUBDESIGN_METADATA_ROOT}/exports/${safeSubDesignMetadataId(payload.id)}.json`, root)
 }
 
@@ -3460,7 +3151,8 @@ function readAndVerifyEvidenceAttestation(root: string, artifact: SubDesignArtif
   const signature = createHmac('sha256', evidenceSecret()).update(JSON.stringify(payload)).digest('hex')
   if (signature !== parsed.signature) throw new Error('attestation signature 不正確')
   if (payload.artifactId !== artifact.id || payload.revision !== artifact.revision || payload.kind !== kind || payload.path !== relativePath) throw new Error('attestation 與目前 artifact revision/kind/path 不一致')
-  if (!['subdesign:captureEvidence', 'subdesign:lintArtifact', 'subdesign:contrastGate'].includes(payload.source)) throw new Error('evidence source 不可信')
+  const trustedGateSource = /^subdesign:(?:contrast|console-error|build-success|responsive-overflow|token-consistency)Gate$/.test(payload.source)
+  if (!trustedGateSource && !['subdesign:captureEvidence', 'subdesign:lintArtifact'].includes(payload.source)) throw new Error('evidence source 不可信')
   const actualHash = sha256File(file)
   if (actualHash !== payload.sha256) throw new Error('evidence sha256 與檔案內容不一致')
   return { ...payload, signature: String(parsed.signature) }
@@ -3506,6 +3198,64 @@ function subDesignPatchDirectionGateError(root: string, briefId: string): string
     return 'SubDesign direction gate：canonical brief 無法驗證，請先選定 direction。'
   }
   return 'SubDesign direction gate：請先選定 direction，再使用 design_artifact_patch。'
+}
+
+function verifyGateCandidateFields(input: {
+  item: Record<string, unknown>
+  artifact: SubDesignArtifact
+  root: string
+  realFile: string
+}): void {
+  const gate = JSON.parse(fs.readFileSync(input.realFile, 'utf8')) as Record<string, unknown>
+  verifyGateEvidenceSemantics(gate, input.artifact, artifactFile(input.root, input.artifact.entry))
+  if (String(input.item.gateId || '') !== String(gate.gateId || '')) throw new Error('提交的 gateId 與 Host evidence 不一致')
+  if (input.item.passed !== gate.passed) throw new Error('提交的 gate verdict 與 Host measurement 不一致')
+}
+
+function verifyAdditionalEvidenceCandidate(input: {
+  item: Record<string, unknown>
+  relativePath: string
+  artifact: SubDesignArtifact
+  root: string
+  evidenceDir: string
+}): void {
+  if (!isProjectRelativePath(input.relativePath)) throw new Error('path 不是 project-relative')
+  const file = resolveWorkspacePath(input.relativePath, input.root)
+  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error('檔案不存在')
+  const realFile = fs.realpathSync(file)
+  if (!isPathInside(fs.realpathSync(input.root), realFile)) throw new Error('symlink escapes workspace')
+  if (!isPathInside(input.evidenceDir, realFile)) throw new Error('非必要 evidence 必須位於 Host evidence store')
+  const candidateKind = String(input.item.kind || 'evidence')
+  const attestation = readAndVerifyEvidenceAttestation(input.root, input.artifact, candidateKind, input.relativePath, realFile)
+  if (input.item.sha256 && String(input.item.sha256).toLowerCase() !== attestation.sha256) throw new Error('提交的 sha256 與 attestation 不一致')
+  if (input.item.evidenceId && String(input.item.evidenceId) !== attestation.evidenceId) throw new Error('提交的 evidenceId 與 attestation 不一致')
+  verifySubDesignEvidenceContent(candidateKind, realFile)
+  if (candidateKind === 'gate') {
+    verifyGateCandidateFields({ item: input.item, artifact: input.artifact, root: input.root, realFile })
+  }
+}
+
+function verifyAdditionalSubDesignEvidence(input: {
+  rawEvidence: unknown[]
+  requiredKinds: readonly string[]
+  artifact: SubDesignArtifact
+  root: string
+  evidenceDir: string
+}): string[] {
+  const errors: string[] = []
+  for (const candidate of input.rawEvidence) {
+    if (!candidate || typeof candidate !== 'object') continue
+    const item = candidate as Record<string, unknown>
+    const relativePath = String(item.path || '').trim().replaceAll('\\', '/')
+    if (!relativePath || input.requiredKinds.includes(String(item.kind || ''))) continue
+    try {
+      verifyAdditionalEvidenceCandidate({ item, relativePath, artifact: input.artifact, root: input.root, evidenceDir: input.evidenceDir })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      errors.push(`${String(item.kind || 'evidence')} path ${relativePath} 無效：${message}`)
+    }
+  }
+  return errors
 }
 
 function verifySubDesignEvidence(input: {
@@ -3567,34 +3317,11 @@ function verifySubDesignEvidence(input: {
     }
   }
 
-  for (const candidate of rawEvidence) {
-    if (!candidate || typeof candidate !== 'object') continue
-    const item = candidate as Record<string, unknown>
-    const relativePath = String(item.path || '').trim().replaceAll('\\', '/')
-    if (!relativePath || requiredKinds.includes(item.kind as typeof requiredKinds[number])) continue
-    try {
-      if (!isProjectRelativePath(relativePath)) throw new Error('path 不是 project-relative')
-      const file = resolveWorkspacePath(relativePath, root)
-      if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error('檔案不存在')
-      const realRoot = fs.realpathSync(root)
-      const realFile = fs.realpathSync(file)
-      if (!isPathInside(realRoot, realFile)) throw new Error('symlink escapes workspace')
-      if (!isPathInside(evidenceDir, realFile) && !allowedFiles.has(path.resolve(file))) throw new Error('path 不在 artifact evidence 或 supporting files 範圍')
-      const candidateKind = String(item.kind || 'evidence')
-      if (isPathInside(evidenceDir, realFile)) readAndVerifyEvidenceAttestation(root, artifact, candidateKind, relativePath, realFile)
-      verifySubDesignEvidenceContent(candidateKind, realFile)
-      if (candidateKind === 'gate') {
-        const gate = JSON.parse(fs.readFileSync(realFile, 'utf8')) as Record<string, unknown>
-        const entryFile = artifactFile(root, artifact.entry)
-        verifyGateEvidenceSemantics(gate, artifact, entryFile)
-      }
-    } catch (error) {
-      errors.push(`${String(item.kind || 'evidence')} path ${relativePath} 無效：${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
+  errors.push(...verifyAdditionalSubDesignEvidence({ rawEvidence, requiredKinds, artifact, root, evidenceDir }))
   return {
     ok: requiredKinds.every((kind) => validKinds.has(kind)) && errors.length === 0,
     validKinds: [...validKinds],
+    verifiedEvidence: errors.length === 0 ? normalizeEvidence(rawEvidence) : [],
     errors,
   }
 }
@@ -4040,8 +3767,17 @@ async function tokenConsistencyGateSubDesignArtifact(input: { artifact: unknown;
 }
 
 async function runPiHostMainService(service: string, input: Record<string, unknown>): Promise<unknown> {
-  if (service !== 'subdesign/run-gate') throw new Error(`Unsupported Pi Host main service: ${service}`)
   const request = { artifact: input.artifact, projectRoot: String(input.projectRoot || '') || undefined }
+  if (service === 'subdesign/capture-evidence') {
+    const kind = input.kind === 'screenshot' || input.kind === 'dom' ? input.kind : undefined
+    if (!kind) throw new Error('Unsupported SubDesign capture kind')
+    return captureSubDesignEvidence({ ...request, kind })
+  }
+  if (service === 'subdesign/lint-evidence') return lintSubDesignArtifact(request)
+  if (service === 'subdesign/verify-critique-evidence') {
+    return verifySubDesignEvidence({ ...request, evidence: input.evidence })
+  }
+  if (service !== 'subdesign/run-gate') throw new Error(`Unsupported Pi Host main service: ${service}`)
   switch (String(input.gateId || '')) {
     case 'contrast':
       return contrastGateSubDesignArtifact(request)
@@ -4310,9 +4046,10 @@ ipcMain.handle('subdesign:readMetadata', async (_evt, projectRoot?: string) => {
       openDesignProviderSettings: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/providers`, 40),
       openDesignProviderRuns: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/provider-runs`, 160),
       openDesignSurfaceSessions: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/surface-sessions`, 160),
+      pinnedComments: readJsonDirectory(root, `${SUBDESIGN_METADATA_ROOT}/pinned-comments`, 160),
     }
   } catch (error) {
-    return { ok: false, briefs: [], artifacts: [], critiques: [], exports: [], openDesignPacks: [], openDesignSnapshots: [], openDesignProviderSettings: [], openDesignProviderRuns: [], openDesignSurfaceSessions: [], error: error instanceof Error ? error.message : String(error) }
+    return { ok: false, briefs: [], artifacts: [], critiques: [], exports: [], openDesignPacks: [], openDesignSnapshots: [], openDesignProviderSettings: [], openDesignProviderRuns: [], openDesignSurfaceSessions: [], pinnedComments: [], error: error instanceof Error ? error.message : String(error) }
   }
 })
 

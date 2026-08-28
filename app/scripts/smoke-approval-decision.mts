@@ -278,7 +278,7 @@ test('clean read tool under auto allows with no events', () => {
 // Permission map shared with FC path — every ToolName (+ mcp sample) agrees.
 await test('toolPermissionMap matches for built-in tools and mcp samples', async () => {
   const { toolPermissionKey, checkToolPermission } = await import(
-    '../src/agent/opencode/toolPermissionMap.ts'
+    '../src/agent/toolPermissionMap.ts'
   )
   const { TOOL_DEFINITIONS } = await import('../src/agent/tools/toolDefinitions.ts')
   const names = Object.keys(TOOL_DEFINITIONS)

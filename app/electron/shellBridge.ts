@@ -166,6 +166,8 @@ type RunProcessCore = {
   timeoutMs?: number
   /** External CLI session owns startup/idle/absolute deadlines. */
   externalSession?: boolean
+  /** Close immediately for one-shot CLIs that wait for piped prompt EOF. */
+  stdinMode?: 'interactive' | 'closed'
   env?: Record<string, string>
   runId?: string
   tag?: string
@@ -213,6 +215,7 @@ function runSpawnedProcess(
     } catch {
       /* lifecycle projections cannot abort process ownership */
     }
+    if (opts.stdinMode === 'closed') child.stdin?.end()
 
     const finish = (result: BashResult) => {
       if (settled) return
@@ -310,6 +313,7 @@ export async function runArgv(input: {
   cwd?: string
   timeoutMs?: number
   externalSession?: boolean
+  stdinMode?: 'interactive' | 'closed'
   env?: Record<string, string>
   runId?: string
   tag?: string

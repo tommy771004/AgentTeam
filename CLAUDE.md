@@ -32,7 +32,7 @@ No unit-test runner. Smokes import the shipped modules, so green means the shipp
 
 **Runners** (`agent/runners/`). Builtin is `executionKind: 'loop'` with full parse/DoD/iterate/continueGoal; external CLI is `'external'` with those false — **CLI success is never DoD met**, and its `continueGoal` works only via the explicit prompt contract in `runners/types.ts`.
 
-**Project context.** `agent/projectContext.ts` injects the project's real `AGENTS.md` / `CLAUDE.md` (walking up ≤3 levels, stopping at `.git`) ABOVE Hermes user guidance via ContextPacket slots, logging path/hash/bytes. OpenCode `instructions` apply the same way; other opencode fields become Settings candidates, never silent writes.
+**Project context.** `agent/projectContext.ts` injects the project's real `AGENTS.md` / `CLAUDE.md` (walking up ≤3 levels, stopping at `.git`) ABOVE Hermes user guidance via ContextPacket slots, logging path/hash/bytes.
 
 **Pi Core owns the loop.** Pi Core in the supervised Electron utility process is the production owner of the tool loop, execution, approvals, and settlement; `agent/engine.ts` / `runDispatch.ts` are adapters (Parse, continueGoal restore, project guidance, trigger verification, HITL timeout policy) handing it the snapshot. `agent/loop/` is a removable plain-browser seam, not a second owner — nothing outside the existing allowlist may import it and a drift guard fails on a new import or string reference (ADR-0045). Its fallback paths bottom out in simulation with no LLM, so every feature must degrade gracefully to that. Every LLM call goes through `chatCompletionWithTools`, below the Outbound Data Gate.
 

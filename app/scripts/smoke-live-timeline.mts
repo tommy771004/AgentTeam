@@ -86,6 +86,20 @@ assert.equal(toolRow?.kind === 'tool' ? toolRow.detail : undefined, 'CLAUDE.md',
 assert.ok(shown.findIndex((row) => row.kind === 'reasoning') < shown.findIndex((row) => row.kind === 'tool'),
   'the thought is readable before the action it explains')
 
+// Invocation context and terminal failure detail are different facts. Keeping
+// both is what lets a folded group say which search ran, then explain why that
+// search failed after the group is opened.
+const failedSearch = appendTurnRecord(undefined, [
+  { kind: 'tool-call', source: 'model', tool: 'grep', callId: 'g1', args: { pattern: 'contentToPlainText', path: 'app/src' }, turn: 1, step: 1, at: 1 },
+  { kind: 'tool-result', source: 'host', tool: 'grep', callId: 'g1', settlement: 'failed', detail: 'spawn rg ENOENT', turn: 1, step: 1, at: 2 },
+])
+const failedSearchRow = runTimelineRows(projectLiveTimeline(failedSearch.entries, failedSearch.entries.length))[0]
+assert.equal(failedSearchRow.kind, 'tool')
+assert.match(failedSearchRow.kind === 'tool' ? `${failedSearchRow.title || ''} ${failedSearchRow.detail || ''}` : '', /contentToPlainText/,
+  'the merged row keeps the search invocation')
+assert.equal(failedSearchRow.kind === 'tool' ? failedSearchRow.resultDetail : undefined, 'spawn rg ENOENT',
+  'and independently keeps the Host-recorded failure cause')
+
 // A mutating call's merged line keeps the diff size its own declaration
 // derived from the recorded args — live rows and replayed rows alike.
 const mutating = appendTurnRecord(undefined, [

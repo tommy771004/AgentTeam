@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 `hermes/learning.ts` drafts skills from successful runs, `hermes/dream.ts` consolidates memory, and `knowledge.ts` extracts entities — and every product stays in local browser storage. It cannot be committed, shared, or reviewed. The learning loop has no exit.
 
@@ -22,6 +22,8 @@
 Files: `app/src/agent/hermes/skills.ts`, `app/src/agent/hermes/learning.ts`, `app/src/agent/hermes/dream.ts`, `app/src/agent/knowledge.ts`, `app/electron/projectBridge.ts`, `app/src/pages/LearningPage.tsx`.
 
 ## Comments
+
+- 2026-08-28 tracker reconciliation: project-relative learning export、confinement 與 round-trip 由 `smoke-learning-export.mts` 及完整 smoke 主鏈驗證。
 
 **2026-08-17.** The required path smoke found a real hole: the write handler
 resolved paths with `path.resolve` + a lexical inside-root check, which accepts

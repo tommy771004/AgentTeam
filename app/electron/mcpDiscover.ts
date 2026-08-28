@@ -2,7 +2,6 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { app } from 'electron'
 
 export type ImportedMcpServer = {
   id: string; name: string; enabled: boolean; transport: 'http' | 'stdio'; url?: string; command?: string; args?: string[]
@@ -30,12 +29,6 @@ export function discoverMcpServers(projectRoot?: string): { servers: ImportedMcp
     path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
     path.join(appData, 'Claude', 'claude_desktop_config.json'),
     projectRoot ? path.join(projectRoot, '.mcp.json') : '',
-    projectRoot ? path.join(projectRoot, 'opencode.jsonc') : '',
-    // app-owned OpenCode-format config first (doesn't require opencode CLI installed) …
-    path.join(app.getPath('userData'), 'opencode', 'opencode.json'),
-    path.join(app.getPath('userData'), 'opencode', 'opencode.jsonc'),
-    // … plus the external opencode CLI's own global config, if present, as a bonus source.
-    path.join(home, '.config', 'opencode', 'opencode.jsonc'),
   ].filter(Boolean)
   const servers: ImportedMcpServer[] = []; const used = new Set<string>(); const sources: string[] = []
   for (const file of paths) {

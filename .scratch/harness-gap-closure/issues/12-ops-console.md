@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 The lifecycle governance layer is the strongest asset in the product and it has no screen. `taskRunCoordinator.runTask` is the sole ingress for eight `sourceKind`s, `resolveBusyPolicy` decides queue versus steer, `runQueue.ts` is a persisted FIFO with dedupe and a cap of 24, `runConcurrency.ts` is a capped registry per ADR-0003, and `runJournal.ts` provides crash recovery with an eight-state `JournalStatus`, a 300-entry ring buffer, deliberately synchronous writes, and a `RecoveryReport` that `runTask` awaits before doing anything else.
 
@@ -26,6 +26,8 @@ This is a projection of existing state. It adds no lifecycle behaviour.
 Files: `app/src/pages/SchedulerPage.tsx`, `app/src/pages/EventsPage.tsx`, `app/src/pages/ExecutionPage.tsx`, `app/src/agent/taskRunCoordinator.ts`, `app/src/agent/runQueue.ts`, `app/src/agent/runConcurrency.ts`, `app/src/agent/runJournal.ts`.
 
 ## Comments
+
+- 2026-08-28 tracker reconciliation: `smoke-ops-console.mts` 與 journal/coordinator recovery smokes 已覆蓋統一 operations projection 並在主鏈通過。
 
 **2026-08-17.** `OpsQueueItem.reason` was a hardcoded `'capacity'` literal, so
 "why was this queued rather than steered" was unanswerable. `resolveBusyPolicy`

@@ -540,6 +540,7 @@ const api = {
         openDesignProviderSettings: unknown[]
         openDesignProviderRuns: unknown[]
         openDesignSurfaceSessions: unknown[]
+        pinnedComments: unknown[]
         error?: string
       }>,
     writeMetadata: (input: { kind: SubDesignMetadataKind; payload: unknown; projectRoot?: string }) =>
@@ -1078,7 +1079,7 @@ const api = {
         suggestedDepth?: string
       }>,
     runAgent: (input: {
-      kind: 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
+      kind: 'codex' | 'claude' | 'grok' | 'gemini' | 'cursor'
       binary?: string
       prompt: string
       cwd?: string
@@ -1093,7 +1094,6 @@ const api = {
       conversationId?: string
       externalCliPolicy?: Record<string, number>
       requiredConnectors?: ExternalCliConnectorRequirement[]
-      configSnapshot?: unknown
       /** Chat attachments (images as data URL) — written to disk for the CLI */
       attachments?: Array<{
         name: string
@@ -1375,85 +1375,6 @@ const api = {
       ipcRenderer.on('term:exit', handler)
       return () => ipcRenderer.removeListener('term:exit', handler)
     },
-  },
-  opencode: {
-    scanAgents: (projectRoot?: string) =>
-      ipcRenderer.invoke('opencode:scanAgents', projectRoot) as Promise<{
-        global: Array<Record<string, unknown>>
-        project: Array<Record<string, unknown>>
-        dirs: string[]
-        configHint?: string | null
-        error?: string
-      }>,
-    loadBundle: (projectRoot?: string) =>
-      ipcRenderer.invoke('opencode:loadBundle', projectRoot) as Promise<{
-        layers: Array<{ path: string; data: Record<string, unknown> }>
-        agents: Array<Record<string, unknown>>
-        commands: Array<Record<string, unknown>>
-        sources: string[]
-        error?: string
-      }>,
-    detect: () =>
-      ipcRenderer.invoke('opencode:detect') as Promise<{
-        found: boolean
-        path: string | null
-        version: string | null
-      }>,
-    run: (input: { prompt: string; timeoutMs?: number; cwd?: string }) =>
-      ipcRenderer.invoke('opencode:run', input) as Promise<{
-        ok: boolean
-        output: string
-        error?: string
-      }>,
-    hint: () =>
-      ipcRenderer.invoke('opencode:hint') as Promise<{ ok: boolean; message: string }>,
-    resolveInstructions: (projectRoot: string, entries: string[]) =>
-      ipcRenderer.invoke('opencode:resolveInstructions', { projectRoot, entries }) as Promise<
-        Array<{ entry: string; path?: string; text: string; bytes: number; sha256: string }>
-      >,
-  },
-  opencodeServer: {
-    health: (url?: string) =>
-      ipcRenderer.invoke('opencodeServer:health', url) as Promise<{
-        ok: boolean
-        baseUrl: string
-        version?: string
-        error?: string
-      }>,
-    info: (url?: string) =>
-      ipcRenderer.invoke('opencodeServer:info', url) as Promise<{
-        ok: boolean
-        baseUrl: string
-        version?: string
-        error?: string
-      }>,
-    start: (opts?: { cwd?: string; port?: number }) =>
-      ipcRenderer.invoke('opencodeServer:start', opts) as Promise<{
-        ok: boolean
-        started?: boolean
-        baseUrl: string
-        version?: string
-        pid?: number
-        error?: string
-      }>,
-    stop: () =>
-      ipcRenderer.invoke('opencodeServer:stop') as Promise<{ ok: boolean; killed: number }>,
-    abort: (runId?: string) =>
-      ipcRenderer.invoke('opencodeServer:abort', runId) as Promise<{ ok: boolean; killed: number }>,
-    config: (url: string) => ipcRenderer.invoke('opencodeServer:config', url) as Promise<unknown>,
-    providers: (url: string) => ipcRenderer.invoke('opencodeServer:providers', url) as Promise<unknown>,
-    experimentalToolIds: (url: string) => ipcRenderer.invoke('opencodeServer:experimentalToolIds', url) as Promise<unknown>,
-    sessions: (url: string) => ipcRenderer.invoke('opencodeServer:sessions', url) as Promise<unknown>,
-    children: (url: string, sessionId: string) => ipcRenderer.invoke('opencodeServer:children', { url, sessionId }) as Promise<unknown>,
-    todo: (url: string, sessionId: string) => ipcRenderer.invoke('opencodeServer:todo', { url, sessionId }) as Promise<unknown>,
-    fork: (url: string, sessionId: string, messageId?: string) => ipcRenderer.invoke('opencodeServer:fork', { url, sessionId, messageId }) as Promise<unknown>,
-    diff: (url: string, sessionId: string) => ipcRenderer.invoke('opencodeServer:diff', { url, sessionId }) as Promise<unknown>,
-    revert: (url: string, sessionId: string, messageId: string, partId?: string) =>
-      ipcRenderer.invoke('opencodeServer:revert', { url, sessionId, messageId, partId }) as Promise<unknown>,
-    lsp: (url: string) => ipcRenderer.invoke('opencodeServer:lsp', url) as Promise<unknown>,
-    formatter: (url: string) => ipcRenderer.invoke('opencodeServer:formatter', url) as Promise<unknown>,
-    mcp: (url: string) => ipcRenderer.invoke('opencodeServer:mcp', url) as Promise<unknown>,
-    agents: (url: string) => ipcRenderer.invoke('opencodeServer:agents', url) as Promise<unknown>,
   },
   gateway: {
     telegramStart: (opts: { token: string; allowedChatIds?: string }) =>

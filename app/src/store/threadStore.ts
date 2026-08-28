@@ -14,7 +14,7 @@ const KEY = 'subagents.threads.v5'
 const BACKUP_KEY = `${KEY}.backup`
 
 /** builtin = 內建 engine；其餘 = 本機 CLI 訂閱 */
-export type ThreadRunner = 'builtin' | 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | 'cursor'
+export type ThreadRunner = 'builtin' | 'codex' | 'claude' | 'grok' | 'gemini' | 'cursor'
 const MAX_THREADS = 40
 const MAX_BUBBLES = 100
 const MAX_BUBBLE_CONTENT_CHARS = 32_000
@@ -136,7 +136,7 @@ export type Thread = {
   thinkingDepth: ThinkingDepth
   /** 速度偏好（附圖「速度」） */
   speed: SpeedMode
-  /** OpenCode primary agent: build | plan */
+  /** Primary agent mode: build | plan */
   agentMode: AgentMode
   /** 執行引擎：內建 or 本機 CLI */
   runner: ThreadRunner
@@ -172,7 +172,7 @@ export type Thread = {
    * Cleared on Goal success.
    */
   continueGoal?: ContinueGoalSnapshot | null
-  /** Last external OpenCode session attached to this thread. */
+  /** Last external CLI session attached to this thread. */
   externalRun?: ExternalRunRef
   /**
    * Last run ended with loopConfig.nextState='Await User Input' (the result
@@ -493,7 +493,7 @@ function migrateThread(raw: Record<string, unknown>): Thread {
   const speed = (raw.speed as SpeedMode) || 'standard'
   const agentMode = (raw.agentMode as AgentMode) || 'build'
   const runnerRaw = String(raw.runner || 'builtin') as ThreadRunner
-  const runners: ThreadRunner[] = ['builtin', 'codex', 'claude', 'grok', 'opencode', 'gemini', 'cursor']
+  const runners: ThreadRunner[] = ['builtin', 'codex', 'claude', 'grok', 'gemini', 'cursor']
   const depthOk = ['fast', 'standard', 'deep', 'max', 'ultra'].includes(depth)
   const rawPlan = Array.isArray(raw.runPlan) ? raw.runPlan : []
   const runPlan = rawPlan
@@ -787,19 +787,8 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
         id: uid('b'),
       })),
       runPlan: source.runPlan?.map((item) => ({ ...item })),
-      // A fork must never silently keep pointing at the source session. The
-      // sidebar completes this pending lineage through OpenCode's fork API.
-      externalRun: source.externalRun
-        ? {
-            ...source.externalRun,
-            sessionId: undefined,
-            parentSessionId: source.externalRun.sessionId,
-            childSessionIds: undefined,
-            status: 'starting',
-            completionReason: 'fork-pending',
-            finishedAt: undefined,
-          }
-        : undefined,
+      // A local fork never inherits a provider-owned session identity.
+      externalRun: undefined,
       createdAt: now,
       updatedAt: now,
       lastStatus: 'idle',

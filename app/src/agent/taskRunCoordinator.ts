@@ -883,13 +883,6 @@ async function runFinalizationSequence(
     )
   }
 
-  try {
-    const { syncOpenCodeSessionMapping } = await import('./opencode/sessionSync.ts')
-    await syncOpenCodeSessionMapping(tid, finalAgent.externalRun)
-  } catch {
-    /* OpenCode mapping is optional; keep finalization resilient. */
-  }
-
   if (finalAgent.steps?.length > 0) {
     thr.setRunPlan(
       tid,

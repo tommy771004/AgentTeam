@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 This is the highest-frequency action for an agent product and the product has no entry point for it, even though all the data exists. `agent/runJournal.ts`, `electron/rewindBridge.ts`, and `agent/compactionCheckpoint.ts` already hold what is needed, and ADR-0042 already decided that retries start only from a replay-safe checkpoint. The user-facing side is split across four separate pages — `LogsPage`, `RecordsPage`, `ArchivePage`, `FailedPage` — none of which offers "fork from step N". `sessionSearch.ts` exists but serves the agent, not the user.
 
@@ -19,6 +19,8 @@ This is the highest-frequency action for an agent product and the product has no
 Files: `app/src/pages/ExecutionPage.tsx`, `app/src/pages/RecordsPage.tsx`, `app/src/agent/taskRunCoordinator.ts`, `app/src/agent/runJournal.ts`, `app/src/agent/compactionCheckpoint.ts`, `app/electron/rewindBridge.ts`.
 
 ## Comments
+
+- 2026-08-28 tracker reconciliation: acceptance 已全數實作；owning evidence 為主鏈 `smoke-fork-from-step.mts`、coordinator/finalization smokes 與完整 `npm run smoke`。
 
 **2026-08-17.** The coordinator entry already accepted `checkpointBubbleId`, but
 no UI passed one, so the fork always used the last user bubble and steps were

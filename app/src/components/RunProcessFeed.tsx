@@ -1,5 +1,5 @@
 /**
- * Live in-chat process feed (OpenCode-style parts).
+ * Live in-chat process feed.
  * Always visible while a run is active; completed work is also written into
  * ThreadRunSummary bubbles via runExternal (RunSummaryCard).
  */
@@ -176,7 +176,7 @@ export function RunProcessFeed({
   const recordTotal = activity?.recordTotal ?? 0
   const reattaching = activity?.reattaching ?? false
   const reattachGap = activity?.reattachGap ?? null
-  // OpenCode keeps reasoning compact by default; raw streamed thought remains
+  // Keep reasoning compact by default; raw streamed thought remains
   // available for inspection without pushing the answer below the fold.
   const [thoughtOpen, setThoughtOpen] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -398,7 +398,7 @@ export function RunProcessFeed({
         setRecoveryActionStatus('找不到可重播的使用者任務；請重新提交原任務')
         return
       }
-      const supportedRunner = new Set<ThreadRunner>(['codex', 'claude', 'grok', 'opencode', 'gemini', 'cursor'])
+      const supportedRunner = new Set<ThreadRunner>(['codex', 'claude', 'grok', 'gemini', 'cursor'])
       const runner = supportedRunner.has(recovery.adapter as ThreadRunner)
         ? recovery.adapter as ThreadRunner
         : recoveryThread?.runner && recoveryThread.runner !== 'builtin'

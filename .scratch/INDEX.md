@@ -9,11 +9,11 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 | Effort | Spec | Frontier | Notes |
 |--------|------|----------|-------|
 | **context-usage-panel** | [spec.md](context-usage-panel/spec.md) | [08 qualification](context-usage-panel/issues/08-qualification.md) | 實作已存在：`ContextUsagePanel`、`projectContextUsage` 與 context projection smoke 均在主鏈；2026-08-28 focused smoke 通過。票內 acceptance 尚未逐條對帳，手動 UI／舊記錄 replay 證據仍須補齊，故不宣稱 resolved。 |
-| **external-cli-durable-harness** | [spec.md](external-cli-durable-harness/spec.md) | [07 qualification](external-cli-durable-harness/issues/07-conversation-concurrency-release-qualification.md) | Durable harness 已落地且 2026-08-28 focused smoke 25/25 通過（fake clock / controllable transport）；不得再記為「確實未動」。真 Codex／Claude 等 CLI end-to-end record qualification 仍是 residual，未取得實機證據前不標 resolved。 |
-| **harness-gap-closure** | [spec.md](harness-gap-closure/spec.md) | [01 統一架構敘述](harness-gap-closure/issues/01-unify-architecture-narrative.md) | #15 已補 active + retained run selector，不再固定顯示第一個 active run；其 redaction 類別 UX 仍待完成。其餘 frontier 維持 #01、#07、#10、#11 與 #09 範圍裁決。 |
+| **external-cli-durable-harness** | [spec.md](external-cli-durable-harness/spec.md) | [07 qualification](external-cli-durable-harness/issues/07-conversation-concurrency-release-qualification.md) | Durable harness 已落地且 focused smoke 通過。2026-08-28 真機 Codex 0.150.1、Claude 2.1.246 execution/checkpoint/restart/record qualification 通過；Grok blocked-auth，Gemini／Cursor 未安裝，故維持 open。證據見 [real CLI report](external-cli-durable-harness/evidence/real-cli-qualification.md)。 |
+| **harness-gap-closure** | [spec.md](harness-gap-closure/spec.md) | [01 統一架構敘述](harness-gap-closure/issues/01-unify-architecture-narrative.md) | 2026-08-28 對帳後 #02–#05、#08、#12–#14、#16–#17 依既有主鏈 evidence 翻 resolved；#15 已補 active + retained run selector。frontier 維持 #01、#07、#10、#11、#15 redaction UX 與 #09 範圍裁決。 |
 | **pi-agent-runtime-contract** | spec（見目錄） | [#14 Linux bwrap 真機](pi-agent-runtime-contract/issues/14-linux-bubblewrap-builtin-shell-tracer.md) · [#22 rollup](pi-agent-runtime-contract/issues/22-remaining-work-rollup.md) | Automated test gate 已收口。#18 已採 Host enforcement：force push deny、不靜默改寫、gate 前套用，focused smoke 12/12（含真實 turn）通過；剩餘 frontier 是 #14 Linux CI 首綠與 #22 外部證據。 |
-| **subdesign-p0-harness-gaps** | [spec.md](subdesign-p0-harness-gaps/spec.md) | [01 Gate evidence contract](subdesign-p0-harness-gaps/issues/01-gate-evidence-contract-fail-closed.md) | #05 pin fixture 與 #07 transactional snapshots 已於 2026-08-28 收口。Pi Core gate 已移除模型 verdict，改由 Electron main 真實 runner 量測並簽章；尚需依 #01 原票語意對帳 store「拒絕」與目前 normalizer「降級 needs-revision」差異。 |
-| **subdesign-architecture-deepening** | [spec.md](subdesign-architecture-deepening/spec.md) | [01 SubDesign workspace module](subdesign-architecture-deepening/issues/01-deepen-subdesign-workspace-module.md) | 5 張 `可交給代理` tickets；01 與 02 可先行，03/04 依賴 01，05 依賴 02/03 |
+| **subdesign-p0-harness-gaps** | [spec.md](subdesign-p0-harness-gaps/spec.md) | [01 Gate evidence contract](subdesign-p0-harness-gaps/issues/01-gate-evidence-contract-fail-closed.md) | #05–#07 已於 2026-08-28 收口，含 canonical pinned-comment audit 與 UI 回查。Pi Core gate 已移除模型 verdict，改由 Electron main 真實 runner 量測並簽章；尚需依 #01 原票語意對帳 store「拒絕」與目前 normalizer「降級 needs-revision」差異。 |
+| **subdesign-architecture-deepening** | [spec.md](subdesign-architecture-deepening/spec.md) | [05 Pi Host protocol dispatch](subdesign-architecture-deepening/issues/05-deepen-pi-host-protocol-dispatch.md) | #01–#04 resolved：workspace controller、provider registry、streaming UI projection 與 atomic pack application 已有主鏈 smoke。#05 已完成 explicit cursor commit 與 capability/resources/extensions domains，仍需 sessions/runs/tools deletion-test extraction，故保持 open。 |
 
 ## Resolved this session chain
 
@@ -48,6 +48,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 - **trf#04** — `toolAudit` 未改為投影：它涵蓋回合之外的工具呼叫，純推導會遺失那些記錄（設計決策，票內有說明）。
 - **trf#11** — 外部 CLI record 的 seam-1 真 CLI 斷言：形狀以純 builder fixture 斷言（`smoke-external-cli-record`）；跑真 CLI 的端到端歸 external-cli-durable-harness effort。
 - **parity#18** — `hermes/skills.ts` 以 READ-ONLY 形式留一個版本作為遷移回滾（`check-pi-contract.mts` Guard 3 凍結其 4 個消費者）；收口追蹤於 runtime-contract #17。
+- **vendored Pi TODO/FIXME** — `vendor/pi/packages/ai/src/api/openai-codex-responses.ts:961` 與 vendored image/token tests 的 TODO 屬 upstream-owned code；本輪不改 vendor，待下一次 upstream sync 對帳。
 
 ## 待維護者裁決 queue（顯式，不埋在雜訊裡）
 

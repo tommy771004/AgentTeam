@@ -189,7 +189,14 @@ await writeFile(join(agentDir, 'auth.json'), JSON.stringify({ loopback: { type: 
 await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'loopback', defaultModel: 'smoke-model', defaultThinkingLevel: 'off' }))
 
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
-  env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'), SUBAGENTS_PI_AGENT_DIR: agentDir },
+  env: {
+    ...process.env,
+    SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'),
+    SUBAGENTS_PI_AGENT_DIR: agentDir,
+    // The production resolver intentionally prefers a configured native Pi
+    // directory. This smoke must never inherit the developer's ~/.pi/agent.
+    SUBAGENTS_PI_NATIVE_AGENT_DIR: '',
+  },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 const output = createInterface({ input: host.stdout })

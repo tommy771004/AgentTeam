@@ -1,6 +1,10 @@
 # 04 — Deepen OpenDesign pack application
 
-Status: 可交給代理
+Status: resolved
+
+## Comments
+
+- 2026-08-28 implemented: `applyOpenDesignPack` 集中 catalog validation、Electron copy、canonical metadata、local projection 與 audit；canonical persist 失敗不 commit projection。`smoke-subdesign-architecture.mts` 已掛主鏈。
 
 Blocked by: 01
 

@@ -9,7 +9,6 @@ export type CliKind =
   | 'openai'
   | 'anthropic'
   | 'google'
-  | 'opencode'
   | 'cursor'
   | 'codex'
   | 'grok'
@@ -76,15 +75,6 @@ export const DEFAULT_CLI_PROVIDERS: CliProviderConfig[] = [
     authorized: false,
     baseUrl: '',
     cliBinary: 'gemini',
-    models: [],
-  },
-  {
-    id: 'opencode',
-    kind: 'opencode',
-    name: 'OpenCode CLI',
-    enabled: false,
-    authorized: false,
-    cliBinary: 'opencode',
     models: [],
   },
   {

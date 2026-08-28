@@ -76,8 +76,8 @@ const session: WorkflowSession = {
   threadId: 'thread-12',
   runId: 'run-12',
   status: 'review',
-  runner: 'opencode',
-  runnerCapabilities: resolveWorkflowRunner('opencode').capabilities,
+  runner: 'claude',
+  runnerCapabilities: resolveWorkflowRunner('claude').capabilities,
   spec: approved,
   tickets: [green.ticket],
   reviewFindings: [],
@@ -140,7 +140,6 @@ assert.deepEqual(resolveWorkflowRunner('codex').capabilities, {
   runScopedProgress: true,
 })
 assert.equal(resolveWorkflowRunner('claude').displayName, 'Claude Code')
-assert.equal(resolveWorkflowRunner('opencode').displayName, 'OpenCode')
 
 assert.equal(recordReviewFindings(reviewed, [], '2026-07-19T01:08:00.000Z').status, 'ready-for-approval')
 assert.throws(() => approveWorkflowSpec({ ...draft.spec, status: 'approved' }, '2026-07-19T01:09:00.000Z'), /already approved/i)

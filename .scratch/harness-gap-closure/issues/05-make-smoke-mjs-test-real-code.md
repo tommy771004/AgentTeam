@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 `scripts/smoke.mjs` declares the problem in its own header: "Minimal re-implementations mirrored from source for CI without TS build". It inlines `computeNextRun` and the other logic it claims to cover, so it validates an algorithm's shape rather than the code path that ships. Scheduler maths, supervisor truncation, and loop classification are currently false green lights.
 
@@ -21,6 +21,8 @@
 Files: `app/scripts/smoke.mjs`, `app/src/agent/scheduler.ts`, `app/src/agent/supervisor.ts`, `app/src/agent/parser.ts`, `app/src/agent/eventMatcher.ts`.
 
 ## Comments
+
+- 2026-08-28 tracker reconciliation: smoke 已匯入 shipped modules；主鏈 smoke 及 falsification guards 通過，不再保留 inline mirror。
 
 **2026-08-17 — falsification recorded (spec line 97).** `scripts/smoke.mjs` now
 re-execs itself with `--experimental-strip-types` and imports `scheduler.ts`,

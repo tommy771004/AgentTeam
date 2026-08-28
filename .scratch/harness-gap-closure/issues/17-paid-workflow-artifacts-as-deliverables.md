@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 The vertical workflows are the moat. The compared harness is deliberately general — not one of its builtin tools is vertical — while this product ships 14 SubDesign tools, the SubDesign and OpenDesign studios, `contentPublishing.ts` multi-platform scheduling, and the `paidWorkflow.ts` Goal → Spec → Tickets → TDD → Review state machine.
 
@@ -22,6 +22,8 @@ But the value of a vertical workflow is its deliverables, not its state machine.
 Files: `app/src/agent/paidWorkflow.ts`, artifact index module, workflow UI surface.
 
 ## Comments
+
+- 2026-08-28 tracker reconciliation: `smoke-paid-workflow.mts` 與 artifact index handoff 覆蓋 reject-and-return、持久 artifact 與 side-effect 邊界。
 
 **2026-08-17.** `WorkflowDeliverablesPanel` existed but was imported by nothing.
 Deliverables are now derived from the persisted artifact index

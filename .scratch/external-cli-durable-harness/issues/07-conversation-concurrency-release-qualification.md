@@ -6,6 +6,30 @@
 
 **Status:** 可交給代理
 
+## 2026-08-28 real-machine evidence
+
+`app/scripts/qualify-external-cli-real.mts` now exercises the shipped
+`runLocalCliAgent` boundary with installed provider binaries and writes a
+metadata-only report to
+`../evidence/real-cli-qualification.md` / `.json`. The prompt and provider
+output bodies are deliberately excluded.
+
+- Codex CLI 0.150.1: pass. Real response marker observed; active checkpoint
+  captured; a fresh Host registry projected the captured run as `interrupted`
+  with `automaticRetry: false`; external Turn Record ownership passed.
+- Claude Code 2.1.246: pass with the same execution, checkpoint, restart, and
+  Turn Record assertions.
+- Grok 0.2.106: runner/checkpoint/restart path executed, but provider execution
+  is `blocked-auth` because this machine's authentication is unavailable.
+- Gemini and Cursor Agent are not installed on this machine and are
+  not claimed as qualified.
+
+During qualification, Codex exposed a real adapter defect: `codex exec` waits
+for EOF when its stdin is a pipe. The shipped process contract now closes stdin
+only for the one-shot Codex invocation; Claude and Grok retain interactive
+stdin. The qualification ticket remains open until the blocked/absent shipped
+adapters and the complete release suites have evidence.
+
 - [ ] Two different conversation threads can run external sessions independently up to `maxConcurrentRuns` without sharing activity, deadlines, output, cancellation, or settlement.
 - [ ] Same-thread follow-ups retain the configured steer/queue ordering and do not start an overlapping external process accidentally.
 - [ ] Every shipped external adapter uses the common session lifecycle and centrally defined timing policy or returns an explicit unsupported capability.
@@ -17,4 +41,3 @@
 - [ ] The focused durable-harness smoke exercises the highest approved seam with fake time and fake transport and completes in seconds.
 - [ ] Existing loop parity, Pi Host protocol, coordinator, sandbox, outbound, automation, provider, build, lint, and complete smoke suites pass.
 - [ ] Legacy blanket five-minute deadline logic and obsolete generic timeout copy are removed only after every adapter is qualified on the new path.
-

@@ -4,7 +4,7 @@ import { filterModelChoices } from '../src/components/modelMenuSearch.ts'
 const models = [
   { id: 'gpt-5.2-codex', label: 'GPT 5.2 Codex', hint: 'OpenAI Codex' },
   { id: 'claude-sonnet-4', label: 'Claude Sonnet 4', hint: 'Anthropic' },
-  { id: 'qwen3-coder', label: 'Qwen 3 Coder', hint: 'OpenCode' },
+  { id: 'qwen3-coder', label: 'Qwen 3 Coder', hint: 'Local provider' },
 ]
 
 assert.deepEqual(filterModelChoices(models, ''), models)

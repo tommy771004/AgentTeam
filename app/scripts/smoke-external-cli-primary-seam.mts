@@ -77,6 +77,7 @@ function fakeRunAgent(input: {
   }, {
     clock,
     runArgv: async (options) => {
+      assert.equal(options.stdinMode, 'closed', 'Codex one-shot execution must receive EOF')
       request.started = true
       options.onStarted?.(`fake-process:${runId}`)
       options.onStdout?.('{"type":"text","data":"fake model activity"}\n')

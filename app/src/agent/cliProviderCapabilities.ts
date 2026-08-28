@@ -29,6 +29,80 @@ function detectedServiceTiers(help: string): string[] {
   return has(help, '--service-tier') ? ['standard', 'priority', 'flex'] : []
 }
 
+type CapabilityDefaults = Pick<
+  CliProviderCapabilitySnapshot,
+  'provider' | 'binaryPath' | 'version' | 'revision' | 'detectedAt' | 'serviceTiers'
+>
+
+function supportWhen(condition: boolean, supported: CliCapabilitySupport): CliCapabilitySupport {
+  return condition ? supported : 'unsupported'
+}
+
+function codexCapabilities(defaults: CapabilityDefaults, help: string): CliProviderCapabilitySnapshot {
+  return Object.freeze({
+    ...defaults,
+    approval: Object.freeze({
+      always: supportWhen(has(help, '--config'), 'provider-config'),
+      auto: supportWhen(has(help, '--approve-for-me'), 'native'),
+      full: supportWhen(has(help, '--dangerously-bypass-approvals-and-sandbox'), 'native'),
+    }),
+    agentMode: Object.freeze({ build: 'native', plan: supportWhen(has(help, 'read-only'), 'native') }),
+    thinkingEffort: supportWhen(has(help, '--config'), 'provider-config'),
+    maxTurns: 'unsupported',
+    runtimeInput: 'stdin',
+  })
+}
+
+function claudeOrGrokCapabilities(
+  defaults: CapabilityDefaults,
+  help: string,
+  provider: 'claude' | 'grok',
+): CliProviderCapabilitySnapshot {
+  const modes = has(help, '--permission-mode')
+  const fullFlag = provider === 'claude' ? '--dangerously-skip-permissions' : '--always-approve'
+  return Object.freeze({
+    ...defaults,
+    approval: Object.freeze({
+      always: supportWhen(modes, 'native'),
+      auto: supportWhen(modes, 'native'),
+      full: supportWhen(has(help, fullFlag), 'native'),
+    }),
+    agentMode: Object.freeze({
+      build: modes ? 'native' : 'provider-default',
+      plan: supportWhen(has(help, 'plan'), 'native'),
+    }),
+    thinkingEffort: supportWhen(has(help, '--effort') || has(help, '--reasoning-effort'), 'native'),
+    maxTurns: supportWhen(has(help, '--max-turns'), 'native'),
+    runtimeInput: has(help, 'stream-json') && has(help, '--input-format') ? 'typed-json' : 'stdin',
+  })
+}
+
+function cursorCapabilities(defaults: CapabilityDefaults, help: string): CliProviderCapabilitySnapshot {
+  return Object.freeze({
+    ...defaults,
+    approval: Object.freeze({
+      always: 'provider-default',
+      auto: 'provider-default',
+      full: supportWhen(has(help, '--force'), 'native'),
+    }),
+    agentMode: Object.freeze({ build: 'provider-default', plan: 'unsupported' }),
+    thinkingEffort: 'unsupported',
+    maxTurns: 'unsupported',
+    runtimeInput: 'stdin',
+  })
+}
+
+function fallbackCapabilities(defaults: CapabilityDefaults): CliProviderCapabilitySnapshot {
+  return Object.freeze({
+    ...defaults,
+    approval: Object.freeze({ always: 'provider-default', auto: 'provider-default', full: 'unsupported' }),
+    agentMode: Object.freeze({ build: 'provider-default', plan: 'unsupported' }),
+    thinkingEffort: 'unsupported',
+    maxTurns: 'unsupported',
+    runtimeInput: 'none',
+  })
+}
+
 /** Interpret one exact binary/version help snapshot; no filesystem access. */
 export function capabilitiesFromCliHelp(input: {
   provider: string
@@ -50,61 +124,8 @@ export function capabilitiesFromCliHelp(input: {
     detectedAt: input.detectedAt,
     serviceTiers: detectedServiceTiers(help),
   }
-  if (provider === 'codex') {
-    return Object.freeze({
-      ...defaults,
-      approval: Object.freeze({
-        always: has(help, '--config') ? 'provider-config' as const : 'unsupported' as const,
-        auto: has(help, '--approve-for-me') ? 'native' as const : 'unsupported' as const,
-        full: has(help, '--dangerously-bypass-approvals-and-sandbox') ? 'native' as const : 'unsupported' as const,
-      }),
-      agentMode: Object.freeze({ build: 'native' as const, plan: has(help, 'read-only') ? 'native' as const : 'unsupported' as const }),
-      thinkingEffort: has(help, '--config') ? 'provider-config' as const : 'unsupported' as const,
-      maxTurns: 'unsupported' as const,
-      runtimeInput: 'stdin' as const,
-    })
-  }
-  if (provider === 'claude' || provider === 'grok') {
-    const modes = has(help, '--permission-mode')
-    return Object.freeze({
-      ...defaults,
-      approval: Object.freeze({
-        always: modes ? 'native' as const : 'unsupported' as const,
-        auto: modes ? 'native' as const : 'unsupported' as const,
-        full: has(help, provider === 'claude' ? '--dangerously-skip-permissions' : '--always-approve') ? 'native' as const : 'unsupported' as const,
-      }),
-      agentMode: Object.freeze({ build: modes ? 'native' as const : 'provider-default' as const, plan: has(help, 'plan') ? 'native' as const : 'unsupported' as const }),
-      thinkingEffort: has(help, '--effort') || has(help, '--reasoning-effort') ? 'native' as const : 'unsupported' as const,
-      maxTurns: has(help, '--max-turns') ? 'native' as const : 'unsupported' as const,
-      runtimeInput: has(help, 'stream-json') && has(help, '--input-format') ? 'typed-json' as const : 'stdin' as const,
-    })
-  }
-  if (provider === 'opencode') {
-    return Object.freeze({
-      ...defaults,
-      approval: Object.freeze({ always: 'provider-config' as const, auto: 'provider-config' as const, full: 'unsupported' as const }),
-      agentMode: Object.freeze({ build: has(help, '--agent') ? 'native' as const : 'provider-config' as const, plan: has(help, '--agent') ? 'native' as const : 'provider-config' as const }),
-      thinkingEffort: has(help, '--variant') ? 'provider-config' as const : 'unsupported' as const,
-      maxTurns: 'unsupported' as const,
-      runtimeInput: 'none' as const,
-    })
-  }
-  if (provider === 'cursor') {
-    return Object.freeze({
-      ...defaults,
-      approval: Object.freeze({ always: 'provider-default' as const, auto: 'provider-default' as const, full: has(help, '--force') ? 'native' as const : 'unsupported' as const }),
-      agentMode: Object.freeze({ build: 'provider-default' as const, plan: 'unsupported' as const }),
-      thinkingEffort: 'unsupported' as const,
-      maxTurns: 'unsupported' as const,
-      runtimeInput: 'stdin' as const,
-    })
-  }
-  return Object.freeze({
-    ...defaults,
-    approval: Object.freeze({ always: 'provider-default' as const, auto: 'provider-default' as const, full: 'unsupported' as const }),
-    agentMode: Object.freeze({ build: 'provider-default' as const, plan: 'unsupported' as const }),
-    thinkingEffort: 'unsupported' as const,
-    maxTurns: 'unsupported' as const,
-    runtimeInput: 'none' as const,
-  })
+  if (provider === 'codex') return codexCapabilities(defaults, help)
+  if (provider === 'claude' || provider === 'grok') return claudeOrGrokCapabilities(defaults, help, provider)
+  if (provider === 'cursor') return cursorCapabilities(defaults, help)
+  return fallbackCapabilities(defaults)
 }

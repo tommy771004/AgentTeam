@@ -64,7 +64,7 @@ The user will see whether a run is starting, active, waiting on a tool, waiting 
 34. As an operator, I want meaningful activity timestamps without prompt or token contents, so that supervision is observable without leaking protected data.
 35. As a security owner, I want the Sanitized Workspace and filesystem sandbox contract preserved for the full CLI lifetime, so that longer execution does not expand authority.
 36. As a security owner, I want connector credentials to remain outside renderer events, so that authentication diagnostics never expose raw tokens.
-37. As a developer, I want one External CLI Run Session contract across CLI adapters, so that Codex, Claude, Grok, Gemini, Cursor, and OpenCode do not invent separate timeout semantics.
+37. As a developer, I want one External CLI Run Session contract across CLI adapters, so that Codex, Claude, Grok, Gemini, and Cursor do not invent separate timeout semantics.
 38. As a developer, I want timeout policy defined centrally, so that adapters cannot reintroduce arbitrary wall-clock deadlines.
 39. As a developer, I want a deterministic fake clock and process transport, so that long-duration behavior is tested in seconds.
 40. As a developer, I want lifecycle tests to observe only public events and settlement, so that implementation can evolve without rewriting brittle source assertions.
