@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { diffPiVendorTrees, hashPiVendorTree, listPiVendorFiles, PI_LEDGER_FILE, PI_PIN_FILE } from './piVendorTree.mts'
+import { parseBuildablePiUpstreamPin } from './piUpstreamPin.mts'
 
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(name)
@@ -22,10 +23,12 @@ const fromCommit = requiredArg('--from-commit')
 const toCommit = requiredArg('--to-commit')
 const releaseSourceAsset = requiredArg('--release-source-asset')
 const releaseSourceSha256 = requiredArg('--release-source-sha256')
+const releaseModelDataManifestSha256 = requiredArg('--release-model-data-manifest-sha256')
 assert.match(fromCommit, /^[0-9a-f]{40}$/)
 assert.match(toCommit, /^[0-9a-f]{40}$/)
 assert.match(releaseSourceAsset, /^pi-\d+\.\d+\.\d+-source\.tar\.gz$/)
 assert.match(releaseSourceSha256, /^[0-9a-f]{64}$/)
+assert.match(releaseModelDataManifestSha256, /^[0-9a-f]{64}$/)
 assert.notEqual(fromCommit, toCommit, 'synchronization must advance to a different commit')
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..')
@@ -95,10 +98,12 @@ try {
   ) as { version?: string }
   assert.match(packageJson.version || '', /^\d+\.\d+\.\d+$/,
     'Pi coding-agent package must declare a release version')
-  let tag: string | null = null
-  try { tag = git(['describe', '--tags', '--exact-match', toCommit]) || null } catch { /* untagged reviewed commit */ }
+  const expectedTag = `v${packageJson.version}`
+  const tags = git(['tag', '--points-at', toCommit]).split('\n').filter(Boolean)
+  assert.ok(tags.includes(expectedTag), `Pi sync target must be the exact release tag ${expectedTag}`)
+  const tag = expectedTag
   const treeSha256 = await hashPiVendorTree(vendorRoot)
-  await writeFile(pinPath, `${JSON.stringify({
+  const nextPin = parseBuildablePiUpstreamPin({
     ...pin,
     tag,
     commit: toCommit,
@@ -106,9 +111,13 @@ try {
     releaseSourceArchive: {
       asset: releaseSourceAsset,
       sha256: releaseSourceSha256,
+      modelDataManifestSha256: releaseModelDataManifestSha256,
     },
     treeSha256,
-  }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+  })
+  const temporaryPinPath = `${pinPath}.next`
+  await writeFile(temporaryPinPath, `${JSON.stringify(nextPin, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+  await rename(temporaryPinPath, pinPath)
 
   const manifest = {
     schemaVersion: 2,

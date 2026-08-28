@@ -4,9 +4,11 @@ import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { hashPiVendorTree } from './piVendorTree.mts'
 import { resolveNpmCliInvocation } from './npm-cli-invocation.mts'
 import { relinkPiBuildWorkspaces } from './piBuildWorkspaceLinks.mts'
+import { readBuildablePiUpstreamPin } from './piUpstreamPin.mts'
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..')
 const appRoot = path.resolve(import.meta.dirname, '..')
@@ -53,6 +55,14 @@ async function modelDataManifestSha256(root = vendorRoot): Promise<string | unde
   } catch {
     return undefined
   }
+}
+
+async function validateModelDataDirectory(root: string): Promise<void> {
+  const modulePath = path.join(root, 'packages/ai/scripts/model-data.ts')
+  const validator = await import(pathToFileURL(modulePath).href) as {
+    validateGeneratedModelData: (packageRoot: string) => void
+  }
+  validator.validateGeneratedModelData(path.join(root, 'packages/ai'))
 }
 
 function runNpm(args: string[], cwd: string): void {
@@ -144,25 +154,10 @@ async function prepareBuildWorkspace(root: string): Promise<string> {
 }
 
 async function hydratePinnedReleaseModelData(stagingVendor: string): Promise<void> {
-  const pin = JSON.parse(await readFile(path.join(vendorRoot, 'PI_UPSTREAM_PIN.json'), 'utf8')) as {
-    repository?: string
-    tag?: string
-    packageVersion?: string
-    releaseSourceArchive?: { asset?: string, sha256?: string, modelDataManifestSha256?: string }
-  }
-  if (!pin.repository || !pin.tag || !pin.packageVersion) throw new Error('Pi pin is missing release identity')
-  const asset = pin.releaseSourceArchive?.asset
-  const expectedSha256 = pin.releaseSourceArchive?.sha256
-  const expectedModelDataManifestSha256 = pin.releaseSourceArchive?.modelDataManifestSha256
-  if (!asset || !/^pi-\d+\.\d+\.\d+-source\.tar\.gz$/.test(asset)) {
-    throw new Error('Pi pin is missing a valid release source archive asset')
-  }
-  if (!expectedSha256 || !/^[0-9a-f]{64}$/.test(expectedSha256)) {
-    throw new Error('Pi pin is missing a valid release source archive SHA-256')
-  }
-  if (!expectedModelDataManifestSha256 || !/^[0-9a-f]{64}$/.test(expectedModelDataManifestSha256)) {
-    throw new Error('Pi pin is missing a valid model-data manifest SHA-256')
-  }
+  const pin = await readBuildablePiUpstreamPin(path.join(vendorRoot, 'PI_UPSTREAM_PIN.json'))
+  const asset = pin.releaseSourceArchive.asset
+  const expectedSha256 = pin.releaseSourceArchive.sha256
+  const expectedModelDataManifestSha256 = pin.releaseSourceArchive.modelDataManifestSha256
 
   const repository = pin.repository.replace(/\.git$/, '')
   const url = `${repository}/releases/download/${encodeURIComponent(pin.tag)}/${encodeURIComponent(asset)}`
@@ -201,6 +196,7 @@ async function hydratePinnedReleaseModelData(stagingVendor: string): Promise<voi
     recursive: true,
     force: true,
   })
+  await validateModelDataDirectory(stagingVendor)
 }
 
 async function copyBuildArtifacts(stagingVendor: string): Promise<void> {
@@ -218,10 +214,8 @@ const packageJson = JSON.parse(
   await readFile(path.join(vendorRoot, 'packages/coding-agent/package.json'), 'utf8'),
 ) as { version?: string }
 const previous = await readBuildCache()
-const pin = JSON.parse(await readFile(path.join(vendorRoot, 'PI_UPSTREAM_PIN.json'), 'utf8')) as {
-  releaseSourceArchive?: { modelDataManifestSha256?: string }
-}
-const pinnedModelDataManifestSha256 = pin.releaseSourceArchive?.modelDataManifestSha256
+const pin = await readBuildablePiUpstreamPin(path.join(vendorRoot, 'PI_UPSTREAM_PIN.json'))
+const pinnedModelDataManifestSha256 = pin.releaseSourceArchive.modelDataManifestSha256
 const currentModelDataManifestSha256 = await modelDataManifestSha256()
 const forceBuild = process.env.SUBAGENTS_PI_VENDOR_FORCE_BUILD === '1'
 if (
@@ -232,6 +226,7 @@ if (
   && currentModelDataManifestSha256 === pinnedModelDataManifestSha256
   && hasRequiredArtifacts()
 ) {
+  await validateModelDataDirectory(vendorRoot)
   if (!hasRuntimeDependencies()) runNpm(['ci', '--omit=dev', '--ignore-scripts'], vendorRoot)
   console.log(`Pi vendor dist is ready (${packageJson.version ?? 'unknown'})`)
   process.exit(0)
@@ -254,6 +249,7 @@ try {
   await rm(vendorModelData, { recursive: true, force: true })
   await mkdir(path.dirname(vendorModelData), { recursive: true })
   await cp(pinnedModelData, vendorModelData, { recursive: true, force: true })
+  await validateModelDataDirectory(vendorRoot)
 
   await copyBuildArtifacts(stagingVendor)
   runNpm(['prune', '--omit=dev', '--ignore-scripts'], vendorRoot)

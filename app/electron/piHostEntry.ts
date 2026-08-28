@@ -15,6 +15,7 @@ import { JsonCompactionCheckpointStore } from './compactionCheckpointStore.ts'
 import { openPiHostStorage } from './piHostStorage.ts'
 import { MemoryStorageLifecycleError, storageLifecycleError } from './memoryStorageLifecycle.ts'
 import { JsonMemoryControlPackageRepository } from './memoryControlPackageRepository.ts'
+import { loadMemoryControlEvaluationAuthority } from './memoryControlEvaluationAuthority.ts'
 
 type ParentPort = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
@@ -68,6 +69,9 @@ const { snapshot: storedState, memoryStore: durableMemoryStore } = await openPiH
 // Deliberately separate from DurableMemoryStore/SQLite: package lineage has
 // its own fail-closed repository and does not share memory migrations or CRUD.
 const memoryControlPackages = await JsonMemoryControlPackageRepository.open(memoryControlPackagePath)
+const memoryControlEvaluationAuthority = await loadMemoryControlEvaluationAuthority(
+  process.env.SUBAGENTS_MEMORY_CONTROL_EVALUATION_CORPUS_PATH,
+)
 const memoryControlMaintenanceToken = process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
 delete process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
 const userConfig = await bootstrapPiUserConfig()
@@ -191,7 +195,7 @@ const createConfiguredHost = (
   persist: Persist,
   refreshSubscriptionConfig: RefreshSubscriptionConfig,
   compactionCheckpoints: CompactionCheckpoints,
-) => createPiHostServer(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints, durableMemoryStore, memoryControlPackages, memoryControlMaintenanceToken)
+) => createPiHostServer(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints, durableMemoryStore, memoryControlPackages, memoryControlMaintenanceToken, memoryControlEvaluationAuthority)
 const createEntryHost = (
   send: HostSend,
   initialSnapshot: InitialSnapshot,

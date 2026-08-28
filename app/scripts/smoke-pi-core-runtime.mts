@@ -1,13 +1,17 @@
 import { strict as assert } from 'node:assert'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 
 const stateDir = await mkdtemp(`${tmpdir()}/pi-runtime-`)
 const entry = resolve(import.meta.dirname, '../dist-electron/pi-host.js')
+const runtimeSource = await readFile(resolve(import.meta.dirname, '../electron/piCoreRuntime.ts'), 'utf8')
+const adapterSource = await readFile(resolve(import.meta.dirname, '../electron/piCoreAdapter.ts'), 'utf8')
+assert.doesNotMatch(runtimeSource, /dist\/core\/auth-storage\.js/)
+assert.match(adapterSource, /dist\/core\/auth-storage\.js/)
 const host = spawn(process.execPath, [entry], {
   env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: `${stateDir}/state.json` },
   stdio: ['pipe', 'pipe', 'inherit'],

@@ -56,6 +56,22 @@ class DegradedStorageChild extends FakeChild {
   }
 }
 
+let releaseEnvironment!: () => void
+let coldChildCreated = false
+const environmentReady = new Promise<void>((resolve) => { releaseEnvironment = resolve })
+const coldStartSupervisor = new PiHostSupervisor(async () => {
+  await environmentReady
+  coldChildCreated = true
+  return new FakeChild()
+})
+const coldStart = coldStartSupervisor.start()
+await Promise.resolve()
+assert.equal(coldChildCreated, false, 'Pi Host fork must wait for asynchronous user-environment warm-up')
+releaseEnvironment()
+await coldStart
+assert.equal(coldChildCreated, true)
+await coldStartSupervisor.stop()
+
 let spawnCount = 0
 let firstChild: FakeChild | undefined
 const supervisor = new PiHostSupervisor(() => {

@@ -2299,9 +2299,14 @@ await test('drift guard: the Pi path\'s live timeline is the record projection, 
   // must therefore reach its rows through the shared projection and through
   // nothing else.
   const feed = fs.readFileSync(path.join(appRoot, 'src/components/RunProcessFeed.tsx'), 'utf8')
+  const paging = fs.readFileSync(path.join(appRoot, 'src/hooks/useRunTimelinePaging.ts'), 'utf8')
   const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
-  assert.match(feed, /const recordView = useMemo\(\s*\(\) => projectLiveTimeline\(recordEntries, recordTotal\)/,
-    'the timeline view is projected from the record entries the run published')
+  assert.match(feed, /useRunTimelinePaging\(runId, recordEntries, recordTotal\)/,
+    'the feed sends the run\'s published record entries through the paging owner')
+  assert.match(paging, /for \(const entry of tail\) bySeq\.set\(entry\.seq, entry\)/,
+    'the paging owner keeps the published tail in its ordered record input')
+  assert.match(paging, /projectLiveTimeline\(entries, total,/,
+    'the timeline view is projected from the complete visible record window')
   assert.match(feed, /runTimelineRows\(recordView, draftText\)/,
     'and its rows are the fold over that projection — not a second synthesis')
   assert.match(feed, /const hasRecordTimeline = recordTimeline\.length > 0/)

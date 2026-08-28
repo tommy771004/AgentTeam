@@ -8,11 +8,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { emptyAgentLike } from '../agent/localCliRun'
 import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
 import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
-import { projectLiveTimeline, runTimelineRows } from '../agent/liveTimeline'
+import { runTimelineRows } from '../agent/liveTimeline'
 import type { TurnRecordEntry } from '../agent/turnRecord'
 import { mergeWorkingStateProjection, projectWorkingStateEntries } from '../agent/workingStateProjection'
 import { ContextUsageChip } from './ContextUsageChip'
 import { useRunUsageRefresher } from '../hooks/useRunUsageRefresher'
+import { useRunTimelinePaging } from '../hooks/useRunTimelinePaging'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
@@ -42,6 +43,22 @@ import {
 
 function basen(p: string) {
   return p.replace(/\\/g, '/').split('/').filter(Boolean).pop() || p
+}
+
+function OlderTimelineControl({ unloadedBefore, loading, error, onLoad }: {
+  unloadedBefore: number
+  loading: boolean
+  error: string
+  onLoad: () => void
+}) {
+  return <>
+    {unloadedBefore > 0 ? (
+      <button type="button" className="agent-process-link mb-1" disabled={loading} onClick={onLoad}>
+        {loading ? '載入中…' : `載入更早的 ${Math.min(128, unloadedBefore)} 筆（尚有 ${unloadedBefore} 筆）`}
+      </button>
+    ) : null}
+    {error ? <p className="text-[11px] text-red">{error}</p> : null}
+  </>
 }
 
 type DisplayFileChange = { path: string; action: string; added?: number; removed?: number }
@@ -290,10 +307,8 @@ export function RunProcessFeed({
    * keeps no record at all (external CLI), and it renders only when this is
    * empty.
    */
-  const recordView = useMemo(
-    () => projectLiveTimeline(recordEntries, recordTotal),
-    [recordEntries, recordTotal],
-  )
+  const { view: recordView, loading: loadingOlder, error: olderError, loadOlder: loadOlderRecordEntries } =
+    useRunTimelinePaging(runId, recordEntries, recordTotal)
   const recordTimeline = useMemo(
     () => runTimelineRows(recordView, draftText),
     [recordView, draftText],
@@ -522,9 +537,19 @@ export function RunProcessFeed({
           remain visible in one sequence. Only each row's detail is disclosed;
           collapsing run diagnostics must not reorder or hide the conversation. */}
       {hasRecordTimeline ? (
-        <div className="agent-conversation-timeline space-y-1" data-run-timeline="record">
+        <section
+          aria-label="執行時間軸"
+          className="agent-conversation-timeline space-y-1"
+          data-run-timeline="record"
+        >
+          <OlderTimelineControl
+            unloadedBefore={recordView.unloadedBefore}
+            loading={loadingOlder}
+            error={olderError}
+            onLoad={() => { void loadOlderRecordEntries() }}
+          />
           <RunTimelineList rows={recordTimeline} />
-        </div>
+        </section>
       ) : null}
 
       <Reveal open={processOpen}>

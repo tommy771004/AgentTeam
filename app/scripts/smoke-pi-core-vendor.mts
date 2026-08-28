@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { cp, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { validateGeneratedModelData } from '../../vendor/pi/packages/ai/scripts/model-data.ts'
 
 const root = resolve(import.meta.dirname, '../../vendor/pi')
+const runtimeSource = await readFile(resolve(import.meta.dirname, '../electron/piCoreRuntime.ts'), 'utf8')
+const adapterSource = await readFile(resolve(import.meta.dirname, '../electron/piCoreAdapter.ts'), 'utf8')
+assert.doesNotMatch(runtimeSource, /dist\/core\/auth-storage\.js/, 'runtime callers stay behind the Pi compatibility Adapter')
+assert.match(adapterSource, /dist\/core\/auth-storage\.js/, 'the deep import has one qualified owner')
 const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as {
   version?: string
   license?: string
@@ -42,6 +48,20 @@ for (const [directory, expectedName] of expectedPackages) {
   assert.equal(packageJson.name, expectedName)
   assert.equal(packageJson.version, '0.84.3')
   assert.equal(packageJson.license, 'MIT')
+}
+
+validateGeneratedModelData(resolve(root, 'packages/ai'))
+const tamperRoot = await mkdtemp(join(tmpdir(), 'pi-model-data-'))
+try {
+  await cp(resolve(root, 'packages/ai/src'), resolve(tamperRoot, 'src'), { recursive: true })
+  const dataDir = resolve(tamperRoot, 'src/providers/data')
+  const provider = (await readdir(dataDir)).find((entry) => entry.endsWith('.json') && entry !== '.manifest.json')
+  assert.ok(provider)
+  const providerPath = resolve(dataDir, provider)
+  await writeFile(providerPath, `${await readFile(providerPath, 'utf8')}\n`)
+  assert.throws(() => validateGeneratedModelData(tamperRoot), /manifest hash/i)
+} finally {
+  await rm(tamperRoot, { recursive: true, force: true })
 }
 
 console.log('pi core vendor metadata is valid')

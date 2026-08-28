@@ -32,13 +32,14 @@ try {
   run(['add', '.'])
   run(['commit', '-qm', 'new'])
   const toCommit = git(['rev-parse', 'HEAD'])
+  run(['tag', 'v2.0.0', toCommit])
 
   await writeFile(join(vendor, 'README.md'), 'old upstream\n')
   await writeFile(join(vendor, 'package.json'), JSON.stringify({ name: 'pi-sync-fixture', version: '0.0.3', scripts: { test: 'node --test' } }) + '\n')
   await writeFile(join(vendor, 'packages', 'coding-agent', 'package.json'), JSON.stringify({ name: '@fixture/pi-coding-agent', version: '1.0.0' }) + '\n')
   await writeFile(join(vendor, 'fixture.test.mjs'), "import test from 'node:test'; test('fixture upstream tests', () => {})\n")
   await writeFile(join(vendor, 'test.sh'), '#!/usr/bin/env bash\nset -euo pipefail\nnpm test\n')
-  await writeFile(join(vendor, 'PI_UPSTREAM_PIN.json'), JSON.stringify({ repository: 'fixture', tag: null, commit: fromCommit, packageVersion: '1.0.0', treeSha256: 'fixture' }) + '\n')
+  await writeFile(join(vendor, 'PI_UPSTREAM_PIN.json'), JSON.stringify({ repository: 'https://github.com/example/pi.git', tag: 'v1.0.0', commit: fromCommit, packageVersion: '1.0.0', treeSha256: 'c'.repeat(64) }) + '\n')
   await writeFile(join(vendor, 'PI_CORE_PATCH_LEDGER.md'), '# Core Patch Ledger\nNo undocumented core edits.\n')
 
   execFileSync(process.execPath, [
@@ -46,6 +47,7 @@ try {
     '--from-commit', fromCommit, '--to-commit', toCommit,
     '--release-source-asset', 'pi-2.0.0-source.tar.gz',
     '--release-source-sha256', 'a'.repeat(64),
+    '--release-model-data-manifest-sha256', 'b'.repeat(64),
     '--source-dir', upstream, '--vendor-dir', vendor, '--output', output,
   ], { cwd: resolve(import.meta.dirname, '..'), stdio: 'pipe' })
   const manifest = JSON.parse(await readFile(output, 'utf8')) as Record<string, unknown>
@@ -58,13 +60,14 @@ try {
   const pin = JSON.parse(await readFile(join(vendor, 'PI_UPSTREAM_PIN.json'), 'utf8')) as {
     commit: string
     packageVersion: string
-    releaseSourceArchive: { asset: string, sha256: string }
+    releaseSourceArchive: { asset: string, sha256: string, modelDataManifestSha256: string }
   }
   assert.equal(pin.commit, toCommit)
   assert.equal(pin.packageVersion, '2.0.0')
   assert.deepEqual(pin.releaseSourceArchive, {
     asset: 'pi-2.0.0-source.tar.gz',
     sha256: 'a'.repeat(64),
+    modelDataManifestSha256: 'b'.repeat(64),
   })
 } finally {
   await rm(directory, { recursive: true, force: true })

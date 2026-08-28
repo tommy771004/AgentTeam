@@ -322,6 +322,26 @@ function validateEvaluationReport(value: unknown): MemoryControlEvaluationReport
   return immutableClone(report as unknown as MemoryControlEvaluationReport)
 }
 
+function migrateUnqualifiedActive(
+  packages: readonly MemoryControlPackage[],
+  events: readonly MemoryControlLifecycleEvent[],
+  evaluations: readonly MemoryControlEvaluationReport[],
+  activeRevision: number,
+): MemoryControlPackageDocument {
+  const qualified = new Set([1, ...evaluations.filter((report) => report.decision === 'promoted').map((report) => report.candidatePackage.revision)])
+  if (qualified.has(activeRevision)) return memoryControlPackageDocument(packages, activeRevision, events, evaluations)
+  const fallbackRevision = [...qualified]
+    .filter((revision) => packages.some((entry) => entry.revision === revision))
+    .sort((left, right) => right - left)[0] || 1
+  return memoryControlPackageDocument(packages, fallbackRevision, [...events, {
+    sequence: events.length + 1,
+    kind: 'rollback',
+    revision: fallbackRevision,
+    fromRevision: activeRevision,
+    reason: 'legacy-unqualified activation migration; requalification required',
+  }], evaluations)
+}
+
 function parseDocument(source: string): MemoryControlPackageDocument {
   if (Buffer.byteLength(source, 'utf8') > MAX_MEMORY_CONTROL_REPOSITORY_BYTES) throw new Error('Memory-Control Package repository exceeds bounds')
   let value: unknown
@@ -342,8 +362,9 @@ function parseDocument(source: string): MemoryControlPackageDocument {
   const events = persistedEvents.length > 0
     ? persistedEvents
     : migrateLegacyLifecycle(packages, Number(document.activeRevision))
-  validateLifecycleHistory(packages, events, Number(document.activeRevision))
-  return immutableClone({ schemaVersion: 1, activeRevision: Number(document.activeRevision), packages, events, evaluations })
+  const migrated = migrateUnqualifiedActive(packages, events, evaluations, Number(document.activeRevision))
+  validateLifecycleHistory(migrated.packages, migrated.events, migrated.activeRevision)
+  return immutableClone(migrated)
 }
 
 function diagnosisFor(parent: MemoryControlPackage, child: MemoryControlPackage): MemoryControlComponentKey | undefined {
@@ -789,7 +810,12 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
       await atomicWrite(path, initial)
       source = JSON.stringify(initial)
     }
-    return new JsonMemoryControlPackageRepository(path, parseDocument(source))
+    const document = parseDocument(source)
+    const persisted = JSON.parse(source) as { activeRevision?: unknown; events?: unknown[] }
+    if (persisted.activeRevision !== document.activeRevision || (persisted.events?.length || 0) !== document.events.length) {
+      await atomicWrite(path, document)
+    }
+    return new JsonMemoryControlPackageRepository(path, document)
   }
 
   admitActive(): MemoryControlPackage {
@@ -805,11 +831,14 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
   }
 
   lineage(): MemoryControlLineage {
+    const evaluated = new Set(this.document.evaluations.filter((report) => report.decision === 'promoted').map((report) => report.candidatePackage.revision))
+    const legacyActivated = new Set(this.document.events.filter((event) => event.kind === 'candidate-activated' && !evaluated.has(event.revision)).map((event) => event.revision))
     return immutableClone({
       activeRevision: this.document.activeRevision,
       packages: this.document.packages.map(({ id, revision, parentRevision, diagnosisComponent, digest, status }) => ({
         id, revision, ...(parentRevision === undefined ? {} : { parentRevision }),
         ...(diagnosisComponent === undefined ? {} : { diagnosisComponent }), digest, status,
+        qualification: revision === 1 ? 'baseline' : evaluated.has(revision) ? 'evaluated' : legacyActivated.has(revision) ? 'legacy-unqualified' : 'unevaluated',
       })),
       events: this.document.events,
     })
@@ -886,8 +915,8 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
     return this.mutate(async () => {
       if (this.document.activeRevision !== input.expectedActiveRevision) throw new Error('Memory-Control Package rollback lost its compare-and-swap race')
       const target = this.read({ schemaVersion: 1, revision: input.revision })
-      const wasPreviouslyActive = target.revision === 1 || this.document.events.some((event) =>
-        event.revision === target.revision && (event.kind === 'candidate-activated' || event.kind === 'rollback'))
+      const wasPreviouslyActive = target.revision === 1 || this.document.evaluations.some((report) =>
+        report.decision === 'promoted' && report.candidatePackage.revision === target.revision)
       if (!wasPreviouslyActive) throw new Error('Memory-Control Package rollback target was never validated and active')
       compileMemoryControlRuntime(target)
       const event = lifecycleEvent(this.document, {
@@ -929,6 +958,7 @@ export function baselineMemoryControlPackageReader(): MemoryControlPackageReader
         revision: 1,
         digest: BASELINE_MEMORY_CONTROL_PACKAGE.digest,
         status: 'active' as const,
+        qualification: 'baseline' as const,
       }],
       events: [],
     }),

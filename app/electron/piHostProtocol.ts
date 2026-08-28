@@ -9,6 +9,7 @@ import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement
 import { memoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS, type MemoryControlComponentKey, type MemoryControlJsonPatchOperation, type MemoryControlLineage, type MemoryControlPackage, type MemoryControlPackageAuthority, type MemoryControlPackageIdentity, type MemoryControlPackageReader } from '../src/agent/memoryControlPackage.ts'
 import { createMemoryControlMetaCandidate, type MemoryControlDiagnosis } from '../src/agent/memoryControlMetaAgent.ts'
 import { baselineMemoryControlPackageReader } from './memoryControlPackageRepository.ts'
+import type { MemoryControlEvaluationAuthority } from './memoryControlEvaluationAuthority.ts'
 import { BUILTIN_RUNNER_CAPABILITIES } from '../src/agent/runners/types.ts'
 
 /**
@@ -361,6 +362,7 @@ type HostState = {
   memoryControlNegotiated: boolean
   memoryStore: DurableMemoryStore
   memoryControlPackages: MemoryControlPackageReader
+  memoryControlEvaluationAuthority?: MemoryControlEvaluationAuthority
   memoryControlMaintenanceToken?: string
   publishedMemoryRevisions: Set<number>
   /**
@@ -4109,7 +4111,7 @@ function handleMemoryControlMaintenance(
   recorder.pendingMemoryControlAudits.add(auditBarrier)
   const operation = params.operation === 'create-meta-candidate'
     ? executeMemoryControlMetaMaintenance(state, state.memoryControlPackages, params)
-    : executeMemoryControlMaintenance(state.memoryControlPackages, params).then((memoryControlPackage) => ({
+    : executeMemoryControlMaintenance(state, state.memoryControlPackages, params).then((memoryControlPackage) => ({
         memoryControlPackage,
         memoryControlDiagnosis: undefined as MemoryControlDiagnosis | undefined,
       }))
@@ -4149,7 +4151,8 @@ async function executeMemoryControlMetaMaintenance(
   return { memoryControlPackage: result.candidate, memoryControlDiagnosis: result.diagnosis }
 }
 
-function executeMemoryControlMaintenance(
+async function executeMemoryControlMaintenance(
+  state: HostState,
   authority: MemoryControlPackageAuthority,
   params: Record<string, unknown>,
 ): Promise<MemoryControlPackage> {
@@ -4159,7 +4162,12 @@ function executeMemoryControlMaintenance(
   const reason = typeof params.reason === 'string' ? params.reason : ''
   if (operation === 'settle-evaluation') {
     if (!params.report || typeof params.report !== 'object') return Promise.reject(new Error('Memory-Control evaluation report is required'))
-    return authority.settleEvaluation({ report: params.report as import('../src/agent/memoryControlEvaluationContract.ts').MemoryControlEvaluationReport })
+    if (!state.memoryControlEvaluationAuthority) throw new Error('Memory-Control Host evaluation authority is unavailable')
+    const report = state.memoryControlEvaluationAuthority.verify(
+      params.report as import('../src/agent/memoryControlEvaluationContract.ts').MemoryControlEvaluationReport,
+      state.snapshot.sessions,
+    )
+    return authority.settleEvaluation({ report })
   }
   if (operation === 'create-candidate') {
     if (!MEMORY_CONTROL_COMPONENT_KEYS.includes(params.diagnosisComponent as MemoryControlComponentKey) || !Array.isArray(params.patch)) {
@@ -4223,6 +4231,7 @@ export function createPiHostServer(
   suppliedMemoryStore?: DurableMemoryStore,
   suppliedMemoryControlPackages?: MemoryControlPackageReader,
   suppliedMemoryControlMaintenanceToken?: string,
+  suppliedMemoryControlEvaluationAuthority?: MemoryControlEvaluationAuthority,
 ) {
   const memoryStore = suppliedMemoryStore || new InMemoryDurableMemoryStore()
   const memoryControlPackages = suppliedMemoryControlPackages || baselineMemoryControlPackageReader()
@@ -4244,6 +4253,7 @@ export function createPiHostServer(
     memoryControlNegotiated: false,
     memoryStore,
     memoryControlPackages,
+    memoryControlEvaluationAuthority: suppliedMemoryControlEvaluationAuthority,
     memoryControlMaintenanceToken: suppliedMemoryControlMaintenanceToken,
     publishedMemoryRevisions: new Set(),
     catalogProjection: new Map(),

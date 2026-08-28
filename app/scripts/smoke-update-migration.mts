@@ -32,6 +32,12 @@ manifest.signature = sign(unsignedManifestPayload(manifest))
 
 const valid = validateUpdateManifest(manifest, { platform: testPlatform, arch: 'x64', currentVersion: '1.0.0' })
 assert.equal(valid.ok, true)
+const legacyManifest = { ...manifest, product: 'SubAgents AI' as const }
+legacyManifest.signature = sign(unsignedManifestPayload(legacyManifest))
+assert.equal(
+  validateUpdateManifest(legacyManifest, { platform: testPlatform, arch: 'x64', currentVersion: '1.0.0' }).ok,
+  true,
+)
 assert.equal(verifyManifestSignature(manifest, publicKey.export({ type: 'spki', format: 'pem' }).toString()), true)
 assert.equal(verifyArtifactSignature(artifact, bytes, publicKey.export({ type: 'spki', format: 'pem' }).toString()), true)
 assert.equal(validateUpdateManifest({ ...manifest, artifact: { ...artifact, url: 'http://evil.test/a.exe' } }).ok, false)
@@ -59,6 +65,11 @@ const generatedManifest = await buildSignedUpdateManifest({
 assert.equal(verifyManifestSignature(generatedManifest, publicKey.export({ type: 'spki', format: 'pem' }).toString()), true)
 assert.equal((await fs.readFile(path.join(manifestOutput, 'manifest.json'), 'utf8')).includes(installerName), true)
 assert.equal(generatedManifest.platform, testPlatform)
+assert.equal(generatedManifest.product, 'SubAgents AI', 'schema-v1 producer must remain readable by N-1 clients')
+// Frozen compatibility assertion for the last pre-rename client. Do not
+// replace this with validateUpdateManifest: it intentionally preserves the
+// old binary's strict product check.
+assert.equal(generatedManifest.schemaVersion === 1 && generatedManifest.product === 'SubAgents AI', true)
 await assert.rejects(
   buildSignedUpdateManifest({ artifactDir: manifestArtifacts, outputDir: manifestOutput, version: '1.1.0', platform: testPlatform, arch: 'x64', baseUrl: 'http://insecure.example.test', privateKeyPem: privateKey.export({ type: 'pkcs1', format: 'pem' }).toString() }),
   /HTTPS URL/,

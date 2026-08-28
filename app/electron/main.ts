@@ -248,7 +248,7 @@ import {
   type MemoryScope,
 } from './durableMemoryStore'
 import type { MemoryProjectionScope } from '../src/agent/memoryProjection'
-import { buildUserEnvironment, configuredUserPath, warmUserEnvironment } from './userEnvironment'
+import { configuredUserPath, warmUserEnvironment } from './userEnvironment'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // `productName` is now AgentStudio, but changing Electron's default userData
@@ -258,14 +258,15 @@ const explicitUserData = process.argv.some((argument) => argument === '--user-da
 if (app.isPackaged && !explicitUserData) app.setPath('userData', path.join(app.getPath('appData'), 'SubAgents AI'))
 const memoryControlMaintainerToken = process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
 delete process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
-void warmUserEnvironment()
-const piHostSupervisor = new PiHostSupervisor(() => {
+const userEnvironment = warmUserEnvironment()
+const piHostSupervisor = new PiHostSupervisor(async () => {
+  const environment = await userEnvironment
   const userHome = app.getPath('home')
   const userData = app.getPath('userData')
   return utilityProcess.fork(path.join(__dirname, 'pi-host.js'), [], {
     serviceName: 'AgentStudio Pi Core Host',
     env: {
-      ...buildUserEnvironment(),
+      ...environment,
       SUBAGENTS_PI_VENDOR_DIR: path.resolve(__dirname, '../../vendor/pi'),
       SUBAGENTS_PI_AGENT_DIR: configuredUserPath(
         process.env,

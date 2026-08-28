@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { buildPiSyncEvidence, type PiSyncArtifact } from '../src/agent/piSyncEvidence.ts'
+import { readBuildablePiUpstreamPin } from './piUpstreamPin.mts'
+import { PI_GATE_NAMES, runPiQualificationGates } from './piQualificationRunner.mts'
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name)
@@ -9,26 +11,24 @@ function argument(name: string): string | undefined {
 }
 
 const repositoryRoot = resolve(import.meta.dirname, '../..')
-const pin = JSON.parse(await readFile(resolve(repositoryRoot, 'vendor/pi/PI_UPSTREAM_PIN.json'), 'utf8')) as { repository?: string; commit?: string; tag?: string; treeSha256?: string; releaseSourceArchive?: { modelDataManifestSha256?: string } }
+const pin = await readBuildablePiUpstreamPin(resolve(repositoryRoot, 'vendor/pi/PI_UPSTREAM_PIN.json'))
 const artifactPath = resolve(import.meta.dirname, '../dist-electron/pi-host.js')
 const artifactBytes = await readFile(artifactPath).catch(() => Buffer.from(''))
 const artifact: PiSyncArtifact = { path: 'dist-electron/pi-host.js', sha256: createHash('sha256').update(artifactBytes).digest('hex') }
 const fromCommit = argument('--from-commit') || ''
 const toCommit = argument('--to-commit') || pin.commit || ''
-if (process.argv.includes('--all-gates')) throw new Error('--all-gates was removed because a flag is not qualification evidence; supply --gate-results')
-const gateResultPath = argument('--gate-results')
-type GateName = 'ledgerReconciled' | 'upstreamTests' | 'protocolCompatibility' | 'equivalentToolParity' | 'settingsSessionMigration' | 'electronSmoke' | 'recovery' | 'security' | 'packaging'
-type GateResult = { passed: boolean; command: string; completedAt: string }
-const gateNames: GateName[] = ['ledgerReconciled', 'upstreamTests', 'protocolCompatibility', 'equivalentToolParity', 'settingsSessionMigration', 'electronSmoke', 'recovery', 'security', 'packaging']
-const gateResults = gateResultPath
-  ? JSON.parse(await readFile(resolve(gateResultPath), 'utf8')) as Partial<Record<GateName, GateResult>>
-  : {}
-const gates = Object.fromEntries(gateNames.map((name) => {
-  const result = gateResults[name]
-  const valid = result?.passed === true && typeof result.command === 'string' && result.command.trim().length > 0
-    && typeof result.completedAt === 'string' && Number.isFinite(Date.parse(result.completedAt))
-  return [name, valid]
-})) as Record<GateName, boolean>
+if (process.argv.includes('--all-gates') || process.argv.includes('--gate-results')) {
+  throw new Error('qualification conclusions cannot be supplied by the caller; fixed gates are executed by the runner')
+}
+const profile = process.argv.includes('--test-only-gates') ? 'test-only' as const : 'production' as const
+const gateResults = await runPiQualificationGates({
+  appRoot: resolve(import.meta.dirname, '..'),
+  repositoryRoot,
+  logDir: resolve(repositoryRoot, argument('--log-dir') || 'release-evidence/pi-sync-logs'),
+  binding: { toCommit, treeSha256: pin.treeSha256, artifactSha256: artifact.sha256 },
+  profile,
+})
+const gates = Object.fromEntries(PI_GATE_NAMES.map((name) => [name, gateResults[name]?.passed === true])) as Record<typeof PI_GATE_NAMES[number], boolean>
 const evidence = buildPiSyncEvidence({
   fromCommit,
   toCommit,
@@ -47,9 +47,9 @@ const record = {
   fromCommit,
   toCommit,
   artifact,
-  decision: evidence.decision,
-  ready: evidence.ready,
-  failedCriteria: evidence.failedCriteria,
+  decision: profile === 'production' ? evidence.decision : 'TEST-ONLY',
+  ready: profile === 'production' && evidence.ready,
+  failedCriteria: profile === 'production' ? evidence.failedCriteria : ['test-only qualification cannot release'],
   generatedAt: new Date().toISOString(),
 }
 const output = resolve(argument('--output') || 'release-evidence/pi-sync-release-record.json')

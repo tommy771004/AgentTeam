@@ -30,7 +30,7 @@ type PiHostChild = {
   postMessage(message: unknown): void
   kill(): void
 }
-type PiHostFork = () => PiHostChild
+type PiHostFork = () => PiHostChild | Promise<PiHostChild>
 type PiHostSupervisorOptions = {
   requestTimeoutMs?: number
   turnIdleTimeoutMs?: number
@@ -85,7 +85,7 @@ export class PiHostSupervisor {
       this.restartTimer = undefined
     }
     this.statusValue = { state: 'starting' }
-    const child = this.fork()
+    const child = await this.fork()
     this.child = child
     child.on('message', (message: PiHostMessage) => {
       if ('event' in message) {

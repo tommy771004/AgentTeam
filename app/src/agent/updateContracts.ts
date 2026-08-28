@@ -11,9 +11,19 @@ export interface UpdateArtifactDescriptor {
   signatureAlgorithm: 'rsa-sha256' | 'ed25519'
 }
 
+/**
+ * Schema-v1 shipped before the display-name migration and used `product` as
+ * its protocol identity. Keep both values readable during the transition;
+ * producers must continue emitting the legacy value until the N-1 population
+ * has crossed this compatibility release.
+ */
+export const UPDATE_MANIFEST_LEGACY_PRODUCT = 'SubAgents AI' as const
+export const UPDATE_MANIFEST_TRANSITION_PRODUCT = 'AgentStudio' as const
+export type UpdateManifestProduct = typeof UPDATE_MANIFEST_LEGACY_PRODUCT | typeof UPDATE_MANIFEST_TRANSITION_PRODUCT
+
 export interface SignedUpdateManifest {
   schemaVersion: 1
-  product: 'AgentStudio'
+  product: UpdateManifestProduct
   channel: 'beta'
   version: string
   platform: UpdatePlatform
@@ -103,7 +113,7 @@ export function validateUpdateManifest(raw: unknown, target?: UpdateTarget): Man
   const manifestKeys = new Set(['schemaVersion', 'product', 'channel', 'version', 'platform', 'arch', 'mandatory', 'releaseNotes', 'publishedAt', 'artifact', 'signature'])
   for (const key of Object.keys(raw)) if (!manifestKeys.has(key)) errors.push(`unknown manifest field: ${key}`)
   if (raw.schemaVersion !== 1) errors.push('unsupported schemaVersion')
-  if (raw.product !== 'AgentStudio') errors.push('unexpected product')
+  if (![UPDATE_MANIFEST_LEGACY_PRODUCT, UPDATE_MANIFEST_TRANSITION_PRODUCT].includes(raw.product as UpdateManifestProduct)) errors.push('unexpected product')
   if (raw.channel !== 'beta') errors.push('only beta channel is supported')
   if (typeof raw.version !== 'string' || !VERSION.test(raw.version)) errors.push('invalid version')
   if (raw.platform !== 'win32' && raw.platform !== 'darwin') errors.push('unsupported platform')

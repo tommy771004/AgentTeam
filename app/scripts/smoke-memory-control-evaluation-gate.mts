@@ -14,6 +14,7 @@ const root = await mkdtemp(join(tmpdir(), 'memory-control-evaluation-'))
 const agentDir = join(root, 'agent')
 const packagePath = join(root, 'packages.json')
 const statePath = join(root, 'state.json')
+const corpusPath = join(root, 'evaluation-corpora.json')
 const token = 'ticket-12-evaluation-secret'
 const repository = await JsonMemoryControlPackageRepository.open(packagePath)
 const candidates = await Promise.all(['false-done', 'tokens'].map((name) => repository.createCandidate({
@@ -80,10 +81,25 @@ await writeFile(join(agentDir, 'models.json'), JSON.stringify({ providers: { loo
 } } }))
 await writeFile(join(agentDir, 'auth.json'), JSON.stringify({ loopback: { type: 'api_key', key: 'test-key' } }))
 await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'loopback', defaultModel: 'smoke-model', defaultThinkingLevel: 'off' }))
+await writeFile(corpusPath, JSON.stringify({ schemaVersion: 1, corpora: [
+  { version: 'ticket-12-write', tasks: [
+    { id: 'source', cohort: 'source-failure', loopType: 'Turn-based', expected: { requiredActions: ['write'], requiredSkills: [], allowedSkills: [], maxPromptTokens: 120 } },
+    { id: 'anchor', cohort: 'held-out-anchor', loopType: 'Turn-based', expected: { requiredActions: [], requiredSkills: [], allowedSkills: [], maxPromptTokens: 120 } },
+  ] },
+  { version: 'ticket-12-success', tasks: [
+    { id: 'source', cohort: 'source-failure', loopType: 'Turn-based', expected: { requiredActions: [], requiredSkills: [], allowedSkills: [], maxPromptTokens: 120 } },
+    { id: 'anchor', cohort: 'held-out-anchor', loopType: 'Turn-based', expected: { requiredActions: [], requiredSkills: [], allowedSkills: [], maxPromptTokens: 120 } },
+  ] },
+  { version: 'actual-package-behavior', tasks: [
+    { id: 'source', cohort: 'source-failure', loopType: 'Goal-based', expected: { requiredActions: ['write'], requiredSkills: ['package-repair'], allowedSkills: ['package-repair'], maxPromptTokens: 1_000 } },
+    { id: 'anchor', cohort: 'held-out-anchor', loopType: 'Turn-based', expected: { requiredActions: [], requiredSkills: [], allowedSkills: [], maxPromptTokens: 1_000 } },
+  ] },
+] }))
 
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
   env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: statePath, SUBAGENTS_PI_AGENT_DIR: agentDir,
-    SUBAGENTS_MEMORY_CONTROL_PACKAGE_PATH: packagePath, SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN: token },
+    SUBAGENTS_MEMORY_CONTROL_PACKAGE_PATH: packagePath, SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN: token,
+    SUBAGENTS_MEMORY_CONTROL_EVALUATION_CORPUS_PATH: corpusPath },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 let nextId = 1
@@ -181,7 +197,7 @@ const settleThroughAuditRun = async (
   releaseAudit = undefined
   const lifecycleEntries = audit.record.entries.filter((entry: any) => entry.kind === 'memory-control-lifecycle')
   if (expected === 'rejected') {
-    assert.match(String(settlementError), /digest mismatch|aggregate metrics/i)
+    assert.match(String(settlementError), /digest mismatch|aggregate metrics|Host corpus|Host evidence/i)
     assert.equal(lifecycleEntries.length, 0)
     return undefined
   }

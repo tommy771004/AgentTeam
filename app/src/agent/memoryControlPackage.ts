@@ -31,7 +31,9 @@ export type MemoryControlLifecycleEvent = {
 
 export type MemoryControlLineage = {
   activeRevision: number
-  packages: ReadonlyArray<Pick<MemoryControlPackage, 'id' | 'revision' | 'parentRevision' | 'digest' | 'status' | 'diagnosisComponent'>>
+  packages: ReadonlyArray<Pick<MemoryControlPackage, 'id' | 'revision' | 'parentRevision' | 'digest' | 'status' | 'diagnosisComponent'> & {
+    qualification: 'baseline' | 'evaluated' | 'legacy-unqualified' | 'unevaluated'
+  }>
   events: ReadonlyArray<MemoryControlLifecycleEvent>
 }
 

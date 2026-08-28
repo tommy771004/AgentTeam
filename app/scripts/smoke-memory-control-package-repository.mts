@@ -66,7 +66,8 @@ try {
   })
   await writeFile(repositoryPath, `${JSON.stringify(memoryControlPackageDocument([first, second], 2))}\n`, { mode: 0o600 })
   const restarted = await JsonMemoryControlPackageRepository.open(repositoryPath)
-  assert.equal(restarted.admitActive().revision, 2)
+  assert.equal(restarted.admitActive().revision, 1, 'an active revision without a promoted evaluation fails closed')
+  assert.equal(restarted.lineage().packages.find((entry) => entry.revision === 2)?.qualification, 'legacy-unqualified')
   assert.equal(restarted.read({ schemaVersion: 1, revision: 1 }).digest, first.digest)
   assert.equal(restarted.read({ schemaVersion: 1, revision: 2 }).components.experientialSkills.digest,
     first.components.experientialSkills.digest, 'unchanged component identity survives lineage')
@@ -80,19 +81,21 @@ try {
   })
   await writeFile(repositoryPath, JSON.stringify(memoryControlPackageDocument([first, legacySecond], 2)), { mode: 0o600 })
   const migratedLegacy = await JsonMemoryControlPackageRepository.open(repositoryPath)
-  assert.equal(migratedLegacy.admitActive().digest, legacySecond.digest,
-    'legacy schema-v1 non-root packages infer their sole changed component without rewriting identity')
+  assert.equal(migratedLegacy.admitActive().digest, first.digest,
+    'legacy schema-v1 active packages are preserved for audit but cannot bypass qualification')
   const legacyChild = await migratedLegacy.createCandidate({
-    expectedActiveRevision: 2,
+    expectedActiveRevision: 1,
     diagnosisComponent: 'workingMemorySpec',
     patch: [{ op: 'add', path: '/maxGoals', value: 50 }],
     reason: 'candidate remains inactive before canonical evaluation',
   })
   assert.equal(compileMemoryControlRuntime(legacyChild).maxGoals, 50)
-  assert.equal(migratedLegacy.admitActive().revision, 2)
+  assert.equal(migratedLegacy.admitActive().revision, 1)
   await migratedLegacy.rejectCandidate({ revision: legacyChild.revision, reason: 'evaluation not supplied' })
-  assert.equal((await migratedLegacy.rollback({ revision: 1, expectedActiveRevision: 2, reason: 'legacy rollback eligibility' })).revision, 1)
-  assert.equal((await migratedLegacy.rollback({ revision: 2, expectedActiveRevision: 1, reason: 'legacy active revision remains rollback eligible' })).revision, 2)
+  await assert.rejects(
+    migratedLegacy.rollback({ revision: 2, expectedActiveRevision: 1, reason: 'legacy active revision must be requalified' }),
+    /never validated/i,
+  )
 
   for (const invalid of [
     createMemoryControlPackage({ ...second, parentRevision: 2, components: second.components }),

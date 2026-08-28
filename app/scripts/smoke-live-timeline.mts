@@ -345,5 +345,9 @@ const source = await readFile(resolve(import.meta.dirname, '../src/agent/liveTim
 for (const forbidden of [/Date\.now/, /Math\.random/, /useState|useStore|zustand/, /require\(|await import\(/, /window\./]) {
   assert.doesNotMatch(source, forbidden, `the live projection must stay pure: ${forbidden}`)
 }
+const feedSource = await readFile(resolve(import.meta.dirname, '../src/components/RunProcessFeed.tsx'), 'utf8')
+const pagingSource = await readFile(resolve(import.meta.dirname, '../src/hooks/useRunTimelinePaging.ts'), 'utf8')
+assert.match(feedSource, /unloadedBefore=\{recordView\.unloadedBefore\}/, 'the visible timeline says when an older prefix exists')
+assert.match(pagingSource, /attach\(runId, before, 128\)/, 'the visible timeline can load the older Host page')
 
 console.log('The live timeline and the replayed one are the same projection of the same record')

@@ -1,5 +1,4 @@
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -11,25 +10,11 @@ import type { PiRecordedMessage, PiStepTiming } from '../src/agent/turnRecord.ts
 import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
 import { piPackExtensionFactories } from './piToolHost.ts'
 import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, snapshotPiSkillResources } from './piSkills.ts'
-import { piCodingAgentModule as piCodingAgent, piVendorDir } from './piVendor.ts'
+import { piCodingAgentModule as piCodingAgent } from './piVendor.ts'
+import { piCoreCompatibility } from './piCoreAdapter.ts'
 import { sanitizeModelRow, SUBSCRIPTION_PROVIDERS, type SubscriptionModelInfo, type SubscriptionProviderId } from '../src/agent/subscriptionCatalog.ts'
 import { bindPiSessionSkillResourceView, disposePiSkillPreflightSession, installPiSkillPreflightBatchBarrier, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, piSkillPreflightExtensionFactory, piWorkingStateWriteToolDefinition, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
 import { buildPiMcpDynamicPacks } from './piExtensionPacks/mcpBridgePack.ts'
-
-const vendorDir = piVendorDir
-const piConfig = await import(/* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/config.js')).href)
-const piAuthStorage = await import(
-  /* @vite-ignore */ pathToFileURL(join(vendorDir, 'packages/coding-agent/dist/core/auth-storage.js')).href
-) as {
-  AuthStorage: {
-    create: (authPath: string) => {
-      modify: (
-        provider: string,
-        update: (current: unknown) => Promise<{ type: 'api_key'; key: string }>,
-      ) => Promise<unknown>
-    }
-  }
-}
 
 type PiSessionRuntime = {
   activeToolsKey: string
@@ -101,8 +86,8 @@ export type PiBuiltinToolName = keyof typeof TOOL_FACTORIES
 export function piCoreRuntimeStatus() {
   return {
     loaded: Object.values(TOOL_FACTORIES).every((factory) => typeof factory === 'function'),
-    package: piConfig.PACKAGE_NAME,
-    version: piConfig.VERSION,
+    package: piCoreCompatibility.packageName,
+    version: piCoreCompatibility.version,
     builtinTools: Object.keys(TOOL_FACTORIES).sort(),
   }
 }
@@ -344,7 +329,7 @@ export async function readPiLegacyProviderBaseUrl(provider: string): Promise<str
 export async function persistPiLegacyCredential(provider: string, apiKey: string): Promise<void> {
   const agentDir = resolvePiAgentDir()
   if (!agentDir || !provider.trim() || !apiKey.trim()) return
-  const authStorage = piAuthStorage.AuthStorage.create(join(agentDir, 'auth.json'))
+  const authStorage = piCoreCompatibility.createAuthStorage(join(agentDir, 'auth.json'))
   await authStorage.modify(
     provider.trim(),
     async () => ({ type: 'api_key', key: apiKey.trim() }),
