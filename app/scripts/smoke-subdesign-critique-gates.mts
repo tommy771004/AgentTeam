@@ -6,7 +6,12 @@
  * modules 的慣例相同。
  */
 import assert from 'node:assert/strict'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
+import { buildSubDesignPack } from '../electron/piExtensionPacks/subdesignPack.ts'
+import { configurePiHostServiceTransport, resolvePiHostServiceResponse } from '../electron/piHostServices.ts'
 import {
   SUBDESIGN_CRITIQUE_GATE_REGISTRY,
   SUBDESIGN_SCORE_GATE_MAP,
@@ -138,4 +143,56 @@ await test('self-asserted gate evidence without attested fields is dropped fail-
   if (!result.ok) return
   const gateEvidence = result.critique.evidence.filter((item) => item.kind === 'gate')
   assert.equal(gateEvidence.length, 0)
+})
+
+await test('Pi gate schema cannot accept a model-supplied verdict and uses Host measurement', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subdesign-gate-'))
+  const artifactId = 'artifact_host_gate_qa'
+  const manifest = {
+    id: artifactId,
+    briefId: 'brief_host_gate_qa',
+    kind: 'html',
+    title: 'Host gate QA',
+    entry: 'subdesign/gate.html',
+    renderer: 'html',
+    exports: ['html'],
+    supportingFiles: [],
+    status: 'complete',
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+  const manifestDir = join(root, '.subagents/subdesign/artifacts', artifactId)
+  await mkdir(manifestDir, { recursive: true })
+  await writeFile(join(manifestDir, 'manifest.json'), JSON.stringify(manifest), 'utf8')
+
+  const gate = buildSubDesignPack().tools.find((tool) => tool.name === 'design_gate_contrast')
+  assert.ok(gate)
+  const properties = (gate.parameters.properties || {}) as Record<string, unknown>
+  assert.deepEqual(Object.keys(properties), ['artifactId'])
+  assert.deepEqual(gate.parameters.required, ['artifactId'])
+
+  configurePiHostServiceTransport((request) => {
+    assert.equal(request.payload.service, 'subdesign/run-gate')
+    assert.equal(request.payload.input.gateId, 'contrast')
+    queueMicrotask(() => resolvePiHostServiceResponse({
+      event: 'host/service-response',
+      payload: {
+        id: request.payload.id,
+        result: {
+          ok: true,
+          evidence: {
+            kind: 'gate', gateId: 'contrast', passed: false, summary: 'Host measured a violation.',
+            path: '.subagents/subdesign/artifacts/evidence.json', sha256: 'a'.repeat(64),
+            evidenceId: 'evidence_hostmeasure000001', capturedAt: new Date().toISOString(),
+          },
+        },
+      },
+    }))
+  })
+  const output = await gate.execute(
+    { artifactId, passed: true, summary: '模型宣稱通過' },
+    { sessionId: 'session_gate_qa', cwd: root },
+  )
+  assert.equal((output.details as { passed?: boolean }).passed, false)
 })

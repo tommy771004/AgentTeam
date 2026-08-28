@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { memoryStore } from '../agent/hermes/memory.ts'
-import { skillsStore } from '../agent/hermes/skills.ts'
+import { parseSkillMarkdown, skillsStore } from '../agent/hermes/skills.ts'
 import { learningLoop } from '../agent/hermes/learning.ts'
 import { searchSessions, summarizeSessionHits } from '../agent/hermes/sessionSearch.ts'
 import { getAgentsDoc, getSoulDoc, setAgentsDoc, setSoulDoc } from '../agent/hermes/promptBuilder.ts'
@@ -53,6 +53,38 @@ export type PluginHealth = {
   error?: string
 }
 
+export type InstalledSkill = Skill & {
+  source: 'agentstudio' | 'project' | 'user' | 'system'
+  scope: string
+  managed: boolean
+  readOnly: boolean
+}
+
+type HostSkillCatalogFile = {
+  name: string
+  description: string
+  path: string
+  raw: string
+  source: InstalledSkill['source']
+  scope: string
+  managed: boolean
+  readOnly: boolean
+  status: 'active' | 'pinned' | 'archived'
+}
+
+let hydratedSkillCatalog: InstalledSkill[] = []
+let hydratedSkillDiagnostics: Array<{ path: string; message: string }> = []
+
+function browserSkillCatalog(): InstalledSkill[] {
+  return skillsStore.list().map((skill) => ({
+    ...skill,
+    source: 'agentstudio' as const,
+    scope: 'AgentStudio',
+    managed: true,
+    readOnly: false,
+  }))
+}
+
 type PluginLifecycleApi = {
   save?: (manifest: PluginManifest) => Promise<{ ok: boolean; path: string }>
   delete?: (id: string) => Promise<{ ok: boolean }>
@@ -85,6 +117,8 @@ interface LearningStore {
   loaded: boolean
   memory: MemoryBundle
   skills: Skill[]
+  skillCatalog: InstalledSkill[]
+  skillDiagnostics: Array<{ path: string; message: string }>
   events: LearningEvent[]
   pendingDrafts: Array<{ name: string; description: string; body: string }>
   soul: string
@@ -99,6 +133,7 @@ interface LearningStore {
   memoryProjection: LearningMemoryProjection
 
   load: () => Promise<void>
+  loadSkillCatalog: (projectRoot?: string) => Promise<void>
   persist: () => Promise<void>
   refresh: () => void
   setUserProfile: (text: string) => Promise<void>
@@ -245,12 +280,23 @@ async function stopMcpSessionsForSecretOwner(secretOwnerId: string) {
   }
 }
 
-async function hydrateHostSkills(): Promise<void> {
+async function hydrateHostSkills(projectRoot?: string): Promise<void> {
   const listSkillFiles = window.subagents?.piHost?.resources?.listSkillFiles
   if (!listSkillFiles) return
   try {
-    const { files } = await listSkillFiles()
-    skillsStore.loadAll(files || [])
+    const { files, diagnostics } = await listSkillFiles(projectRoot)
+    const catalogFiles = (files || []) as HostSkillCatalogFile[]
+    skillsStore.loadAll(catalogFiles.filter((file) => file.managed))
+    hydratedSkillCatalog = catalogFiles.flatMap((file) => {
+      try {
+        const parsed = parseSkillMarkdown(file.raw, file.path)
+        parsed.meta.status = file.status
+        return [{ ...parsed, source: file.source, scope: file.scope, managed: file.managed, readOnly: file.readOnly }]
+      } catch {
+        return []
+      }
+    })
+    hydratedSkillDiagnostics = Array.isArray(diagnostics) ? diagnostics : []
   } catch {
     /* hydration is best-effort; pushSkillsToHost refuses to fire while unhydrated */
   }
@@ -474,6 +520,8 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     loaded: false,
     memory: memoryStore.getBundle(),
     skills: skillsStore.list(),
+    skillCatalog: browserSkillCatalog(),
+    skillDiagnostics: [],
     events: learningLoop.getEvents(),
     pendingDrafts: learningLoop.getPendingSkillDrafts(),
     soul: getSoulDoc(),
@@ -510,6 +558,8 @@ export const useLearningStore = create<LearningStore>((set, get) => {
         loaded: true,
         ...(!isElectronPiProduction() ? { memory: memoryStore.getBundle() } : {}),
         skills: skillsStore.list(),
+        skillCatalog: isElectronPiProduction() ? hydratedSkillCatalog : browserSkillCatalog(),
+        skillDiagnostics: isElectronPiProduction() ? hydratedSkillDiagnostics : [],
         events: learningLoop.getEvents(),
         pendingDrafts: learningLoop.getPendingSkillDrafts(),
         soul: getSoulDoc(),
@@ -517,6 +567,19 @@ export const useLearningStore = create<LearningStore>((set, get) => {
         plugins: pluginRegistry.list(),
       })
       await Promise.all(pluginRegistry.list().map((plugin) => get().checkPlugin(plugin.id)))
+    },
+
+    loadSkillCatalog: async (projectRoot) => {
+      if (!isElectronPiProduction()) {
+        set({ skillCatalog: browserSkillCatalog(), skillDiagnostics: [] })
+        return
+      }
+      await hydrateHostSkills(projectRoot)
+      set({
+        skills: skillsStore.list(),
+        skillCatalog: hydratedSkillCatalog,
+        skillDiagnostics: hydratedSkillDiagnostics,
+      })
     },
 
     persist: async () => {
@@ -527,6 +590,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
       set((state) => ({
         memory: isElectronPiProduction() ? state.memory : memoryStore.getBundle(),
         skills: skillsStore.list(),
+        skillCatalog: isElectronPiProduction() ? state.skillCatalog : browserSkillCatalog(),
         events: learningLoop.getEvents(),
         pendingDrafts: learningLoop.getPendingSkillDrafts(),
         soul: getSoulDoc(),

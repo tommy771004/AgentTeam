@@ -112,8 +112,21 @@ const api = {
         reload: (resources: unknown[]) => ipcRenderer.invoke('pi-host:resources:reload', resources) as Promise<{ resources: unknown[] }>,
         syncSkills: (skills: Array<{ name?: string; description?: string; body?: string; status?: string }>) =>
           ipcRenderer.invoke('pi-host:resources:sync-skills', skills) as Promise<{ skillsDir: string; results: Array<{ name: string; ok: boolean; status?: string; filePath?: string; slug?: string; error?: string }> }>,
-        listSkillFiles: () =>
-          ipcRenderer.invoke('pi-host:resources:list-skill-files') as Promise<{ files: Array<{ path: string; raw: string }> }>,
+        listSkillFiles: (projectRoot?: string) =>
+          ipcRenderer.invoke('pi-host:resources:list-skill-files', projectRoot) as Promise<{
+            files: Array<{
+              name: string
+              description: string
+              path: string
+              raw: string
+              source: 'agentstudio' | 'project' | 'user' | 'system'
+              scope: string
+              managed: boolean
+              readOnly: boolean
+              status: 'active' | 'pinned' | 'archived'
+            }>
+            diagnostics: Array<{ path: string; message: string }>
+          }>,
       },
       approvals: {
         resolve: (input: { runId: string; callId: string; decision: 'allow' | 'deny'; answer?: string }) =>

@@ -8,7 +8,11 @@ const root = resolve(import.meta.dirname, '../../vendor/pi')
 const runtimeSource = await readFile(resolve(import.meta.dirname, '../electron/piCoreRuntime.ts'), 'utf8')
 const adapterSource = await readFile(resolve(import.meta.dirname, '../electron/piCoreAdapter.ts'), 'utf8')
 assert.doesNotMatch(runtimeSource, /dist\/core\/auth-storage\.js/, 'runtime callers stay behind the Pi compatibility Adapter')
-assert.match(adapterSource, /dist\/core\/auth-storage\.js/, 'the deep import has one qualified owner')
+assert.doesNotMatch(adapterSource, /dist\/(?:core\/auth-storage|config)\.js/, 'adapter uses only the package public root export')
+assert.match(adapterSource, /packages\/coding-agent\/dist\/index\.js/, 'adapter loads the pinned public package entry')
+const publicIndexSource = await readFile(resolve(root, 'packages/coding-agent/src/index.ts'), 'utf8')
+assert.match(publicIndexSource, /PACKAGE_NAME[\s\S]*VERSION/, 'public package entry exports compatibility metadata')
+assert.match(publicIndexSource, /AuthStorage/, 'public package entry exports AuthStorage')
 const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as {
   version?: string
   license?: string

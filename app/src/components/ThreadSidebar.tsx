@@ -17,6 +17,7 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
     selectThread,
     deleteThread,
     setShowThreadList,
+    runningThreadIds,
   } = useThreadStore()
   const activeRoot = useProjectStore((s) => s.root)
   const activeName = useProjectStore((s) => s.name)
@@ -150,11 +151,7 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
                   const depth = getThinkingDepth(t.thinkingDepth)
                   const agent = getPrimaryAgent(t.agentMode)
                   const modelLabel = t.model || globalModel || '—'
-                  const statusLabel = t.lastStatus === 'parsing'
-                    ? '解析中'
-                    : t.lastStatus === 'running'
-                      ? '執行中'
-                      : null
+                  const running = runningThreadIds.includes(t.id)
                   return (
                     <div
                       key={t.id}
@@ -170,13 +167,19 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
                           active ? 'is-active text-ink' : 'text-ink-2'
                         }`}
                       >
-                        {statusLabel && (
+                        {running ? (
                           <span
-                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+                            className="inline-flex shrink-0"
                             role="status"
-                            aria-label={statusLabel}
-                          />
-                        )}
+                            aria-label="執行中"
+                          >
+                            <Icon
+                              name="progress_activity"
+                              size={15}
+                              className="animate-spin text-accent"
+                            />
+                          </span>
+                        ) : null}
                         <span className="min-w-0 flex-1 truncate text-[13px]">{t.title}</span>
                       </button>
                       <DropdownMenu.Root>

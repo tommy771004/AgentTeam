@@ -13,22 +13,21 @@ export type PiCoreCompatibility = {
 }
 
 /**
- * The sole compatibility Adapter for Pi coding-agent internals. Upstream does
- * not yet export AuthStorage publicly; pin upgrades fail here, before a turn
- * can observe a half-compatible runtime.
+ * The sole compatibility Adapter for the pinned Pi coding-agent public entry.
+ * Vendor upgrades fail here, before a turn can observe a half-compatible
+ * runtime; no unpublished dist internals are imported.
  */
 async function loadPiCoreCompatibility(): Promise<PiCoreCompatibility> {
-  const config = await import(/* @vite-ignore */ pathToFileURL(join(piVendorDir, 'packages/coding-agent/dist/config.js')).href) as Record<string, unknown>
-  const authModule = await import(
-    /* @vite-ignore */ pathToFileURL(join(piVendorDir, 'packages/coding-agent/dist/core/auth-storage.js')).href
+  const publicApi = await import(
+    /* @vite-ignore */ pathToFileURL(join(piVendorDir, 'packages/coding-agent/dist/index.js')).href
   ) as Record<string, unknown>
-  const authStorage = authModule.AuthStorage as { create?: (path: string) => AuthStorageInstance } | undefined
-  if (typeof config.PACKAGE_NAME !== 'string' || typeof config.VERSION !== 'string' || typeof authStorage?.create !== 'function') {
+  const authStorage = publicApi.AuthStorage as { create?: (path: string) => AuthStorageInstance } | undefined
+  if (typeof publicApi.PACKAGE_NAME !== 'string' || typeof publicApi.VERSION !== 'string' || typeof authStorage?.create !== 'function') {
     throw new Error('Pinned Pi Core compatibility exports are unavailable')
   }
   return Object.freeze({
-    packageName: config.PACKAGE_NAME,
-    version: config.VERSION,
+    packageName: publicApi.PACKAGE_NAME,
+    version: publicApi.VERSION,
     createAuthStorage: (authPath: string) => authStorage.create!(authPath),
   })
 }

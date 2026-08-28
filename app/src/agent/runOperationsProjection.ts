@@ -42,6 +42,20 @@ export type RunOperationRow = {
 
 export type ProducedFile = { path: string; action: 'create' | 'edit'; seq: number }
 
+const NON_OPERATION_ENTRY_KINDS = new Set<TurnRecordEntry['kind']>([
+  'tool-evidence',
+  'state-proposal',
+  'state-check',
+  'working-state',
+  'delegation-assignment',
+  'delegation-observation',
+  'delegation-check',
+  'memory-control-package',
+  'memory-control-lifecycle',
+  'skill-invocation',
+  'skill-context',
+])
+
 function base(entry: TurnRecordEntry) {
   return { id: `e${entry.seq}`, seq: entry.seq, turn: entry.turn, step: entry.step }
 }
@@ -134,6 +148,7 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
     open.delete(callId)
   }
   for (const entry of turnRecordEntries(record)) {
+    if (NON_OPERATION_ENTRY_KINDS.has(entry.kind)) continue
     switch (entry.kind) {
       case 'tool-call': {
         flushToolRow(entry.callId)
@@ -181,13 +196,6 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
         break
       case 'turn-end':
       case 'step-end':
-      case 'tool-evidence':
-        // The policy/evidence lifecycle rides alongside every invocation's
-        // call and result entries; the merged row above already carries the
-        // settlement a reader acts on. Named here on purpose: it is a kind
-        // this build knows and deliberately leaves to the audit record, which
-        // is a different fact from the unknown-entry notice the default arm
-        // writes.
         break
       default:
         rows.push({ ...base(entry), kind: 'notice', title: unpairedRecordTitle(entry) })

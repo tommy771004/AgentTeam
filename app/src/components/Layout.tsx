@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Icon } from './Icon'
-import { useAgentStore } from '../store/agentStore'
 import { FloatingConsole } from './FloatingConsole'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { useThreadStore } from '../store/threadStore'
@@ -19,9 +18,9 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: '執行',
     items: [
-      { to: '/', label: '新任務', icon: 'auto_awesome', end: true },
-      { to: '/subdesign', label: 'SubDesign', icon: 'palette' },
-      { to: '/dashboard', label: '系統總覽', icon: 'dashboard' },
+      { to: '/', label: 'AgentChat', icon: 'auto_awesome', end: true },
+      { to: '/subdesign', label: 'AgentDesign', icon: 'palette' },
+      { to: '/dashboard', label: 'SystemOverview', icon: 'dashboard' },
       { to: '/learning?tab=plugins', label: '擴充', icon: 'extension' },
     ],
   },
@@ -37,7 +36,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: '資料',
     items: [
       { to: '/knowledge', label: '知識圖譜', icon: 'hub' },
-      { to: '/learning', label: '學習中心', icon: 'school' },
+
     ],
   },
   {
@@ -108,8 +107,6 @@ function SidebarCollapseButton({ collapsed, onToggle }: { collapsed: boolean; on
 export function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
-  const isRunning = useAgentStore((s) => s.isRunning)
-  const agentStatus = useAgentStore((s) => s.agent.status)
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.innerWidth < 760
@@ -119,7 +116,6 @@ export function Layout() {
   const setLayoutMode = useWorkspaceUiStore((s) => s.setLayoutMode)
   const setShowRunPanel = useThreadStore((s) => s.setShowRunPanel)
   const selectThread = useThreadStore((s) => s.selectThread)
-  const runningThreadIds = useThreadStore((s) => s.runningThreadIds)
   useGlobalShortcuts()
   // Shell-level completion reachability: a run that ends while the user is
   // elsewhere still reaches them, on every route including the bare shell.
@@ -127,12 +123,6 @@ export function Layout() {
   const bridge = useMemo(() => getElectronBridgeStatus(), [])
   const isMac = useIsMacDesktop()
   const primaryKey = isMac ? '⌘' : 'Ctrl+'
-
-  const openLiveRun = () => {
-    navigate('/')
-    if (runningThreadIds[0]) selectThread(runningThreadIds[0])
-    setShowRunPanel(true)
-  }
 
   const openCompletedRun = (notice: { runId: string; threadId?: string }) => {
     navigate('/')
@@ -227,20 +217,6 @@ export function Layout() {
           ))}
         </nav>
 
-        <div className="no-drag border-t border-line p-2 space-y-2">
-          <PiHostStatusPill collapsed={collapsed} />
-          {(isRunning || agentStatus === 'running') && (
-            <button
-              type="button"
-              onClick={openLiveRun}
-              title="開啟新任務右側 Run 面板"
-              className="w-full flex items-center gap-2 rounded-control px-2.5 py-2 text-xs font-semibold text-primary bg-primary/10 border border-primary/25 hover:bg-primary/15 text-left"
-            >
-              <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
-              {!collapsed && '執行中…'}
-            </button>
-          )}
-        </div>
       </aside>
 
       {/* 右側內容 */}
@@ -308,6 +284,12 @@ export function Layout() {
         <main className="flex-1 min-h-0 overflow-hidden">
           <Outlet />
         </main>
+        <footer
+          className="app-status-bar no-drag flex h-7 shrink-0 items-center justify-end border-t border-line bg-surface/90"
+          aria-label="應用程式狀態"
+        >
+          <PiHostStatusPill />
+        </footer>
         <FloatingConsole />
         {completionToasts}
       </div>

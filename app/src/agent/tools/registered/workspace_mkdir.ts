@@ -18,8 +18,6 @@ register({
     const context = ctx as ToolExecutionContext | undefined
     const api = window.subagents?.tools
     const projectRoot = await resolveEffectiveProjectRoot(context?.projectRoot, context?.runId)
-    const runId = context?.runId
-    const threadId = context?.threadId
     try {
     if (!api?.workspaceMkdir) return { ok: false, output: 'workspace_mkdir requires Electron' }
     const r = await api.workspaceMkdir(String(input.path || ''), projectRoot)

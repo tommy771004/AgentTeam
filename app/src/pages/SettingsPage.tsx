@@ -647,6 +647,7 @@ export function SettingsPage() {
     return { orchestrator: strongest, synthesizer: strongest, analyst: fastest, executor: fastest }
   }, [roleModelGroups, settings.model, settings.discoveredModels])
   const customToolSecretKeys = useMemo(() => {
+    void pluginsTick
     const found = new Set<string>()
     const re = /{{\s*secret:([A-Za-z0-9_.-]+)\s*}}/g
     // Settings custom tools + enabled plugin/connector templates
@@ -670,7 +671,7 @@ export function SettingsPage() {
     for (const key of Object.keys(settings.customToolSecrets || {})) found.add(key)
     for (const { id } of listPluginSecretMeta()) found.add(id)
     return [...found].sort()
-  }, [settings.customTools, settings.customToolSecrets, pluginsTick])
+  }, [settings, pluginsTick])
   const toolTuning = useMemo(
     () => recommendToolTuning(settings.model || settings.roleModels?.orchestrator || ''),
     [settings.model, settings.roleModels?.orchestrator],

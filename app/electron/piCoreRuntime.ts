@@ -346,7 +346,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   // selected provider/model. Hash locally; no credential material leaves the
   // utility process or reaches logs/IPC.
   const { authPath, revision: authRevision } = await piAuthRevision(agentDir)
-  const skillSnapshot = await snapshotPiSkillResources(agentDir, sessionId)
+  const skillSnapshot = await snapshotPiSkillResources(agentDir, sessionId, cwd)
   const activeToolsKey = JSON.stringify({ settings, cwd, skillSnapshotDigest: skillSnapshot?.digest, authRevision })
   if (skillSnapshot) bindPiSessionSkillResourceView(sessionId, skillSnapshot)
   if (existing && existing.activeToolsKey === activeToolsKey) return existing

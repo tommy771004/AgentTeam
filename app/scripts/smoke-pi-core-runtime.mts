@@ -11,7 +11,8 @@ const entry = resolve(import.meta.dirname, '../dist-electron/pi-host.js')
 const runtimeSource = await readFile(resolve(import.meta.dirname, '../electron/piCoreRuntime.ts'), 'utf8')
 const adapterSource = await readFile(resolve(import.meta.dirname, '../electron/piCoreAdapter.ts'), 'utf8')
 assert.doesNotMatch(runtimeSource, /dist\/core\/auth-storage\.js/)
-assert.match(adapterSource, /dist\/core\/auth-storage\.js/)
+assert.doesNotMatch(adapterSource, /dist\/(?:core\/auth-storage|config)\.js/)
+assert.match(adapterSource, /packages\/coding-agent\/dist\/index\.js/)
 const host = spawn(process.execPath, [entry], {
   env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: `${stateDir}/state.json` },
   stdio: ['pipe', 'pipe', 'inherit'],

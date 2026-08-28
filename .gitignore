@@ -51,9 +51,5 @@ test-results/
 
 .agents/*
 .claude/*
-docs/ui/sample/ApprovalCard/ApprovalCard.module.css
-docs/ui/sample/ApprovalCard/ApprovalCard.tsx
-docs/ui/sample/TodoList/TodoList.module.css
-docs/ui/sample/TodoList/TodoList.tsx
-.subagents/memory/runs/2026-08-28-run_3a06c2ea-a21.md
-.subagents/memory/runs/2026-08-28-run_d157c965-08c.md
+docs/ui/sample/*
+.subagents/memory/runs/*

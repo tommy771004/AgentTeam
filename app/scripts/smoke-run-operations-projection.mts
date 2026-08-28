@@ -5,6 +5,8 @@ import {
 } from '../src/agent/turnRecord.ts'
 import { projectRunOperations, projectProducedFiles } from '../src/agent/runOperationsProjection.ts'
 import { TOOL_DEFINITIONS } from '../src/agent/tools/toolDefinitions.ts'
+import { createInitialWorkingState } from '../src/agent/workingState.ts'
+import { createZeroHitSkillPreflight } from '../electron/piSkillPreflight.ts'
 
 /**
  * The execution-process record is derived from the Turn Record and from
@@ -130,6 +132,26 @@ assert.equal(evidencedRows[0].callId, 'c1')
 assert.equal(evidencedRows[0].kind, 'error', 'the merged row still reads the denied settlement')
 assert.ok(evidencedRows.every((row) => row.title !== '未知的記錄項目'),
   'a kind this build knows must never reach the unknown-entry arm')
+
+const withSkillPreflight = appendTurnRecord(undefined, [{
+  kind: 'skill-invocation', source: 'host',
+  invocation: createZeroHitSkillPreflight({
+    state: createInitialWorkingState({ runId: 'skill-run', objective: 'write result' }),
+    step: 1,
+    batchId: 'batch-1',
+    tool: 'write',
+    callId: 'call-1',
+    identity: {
+      contractRevision: 1,
+      contractDigest: 'a'.repeat(64),
+      schemaDigest: 'b'.repeat(64),
+      toolSource: 'builtin',
+    },
+    args: { path: 'result.txt', content: 'done' },
+  }),
+}])
+assert.deepEqual(projectRunOperations(withSkillPreflight), [],
+  'Skill preflight audit metadata must not surface as an unknown operation row')
 
 // ── Fallbacks: undeclared tools and malformed arguments degrade safely ──────
 let degraded = appendTurnRecord(undefined, [{ kind: 'turn-start', source: 'host' }])

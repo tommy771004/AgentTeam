@@ -14,7 +14,10 @@ export type LearningExportFile = {
 /** Names become one project-relative path segment; traversal is never accepted. */
 export function safeLearningName(input: string): string | null {
   const name = input.trim()
-  if (!name || name === '.' || name === '..' || /[\\/\x00-\x1f]/.test(name)) return null
+  if (!name || name === '.' || name === '..' || [...name].some((character) => {
+    const code = character.codePointAt(0) || 0
+    return character === '\\' || character === '/' || code <= 31
+  })) return null
   const normalized = name.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
   return normalized && normalized !== '.' && normalized !== '..' ? normalized.slice(0, 80) : null
 }
@@ -81,4 +84,3 @@ export function buildLearningExportPlan(input: {
   }
   return files.filter((file) => isSafeLearningExportPath(file.relativePath))
 }
-

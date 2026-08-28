@@ -75,10 +75,12 @@ function tryUtf8(bytes: Uint8Array): string | null {
   try {
     const text = Buffer.from(bytes).toString('utf8')
     // Reject if too many replacement chars / nulls (likely binary)
-    const nulls = (text.match(/\u0000/g) || []).length
-    if (nulls > 0) return null
-    const printable = text.replace(/[\x09\x0a\x0d\x20-\x7e\u4e00-\u9fff]/g, '')
-    if (printable.length > text.length * 0.3 && text.length > 32) return null
+    if (text.includes(String.fromCharCode(0))) return null
+    const nonPrintable = [...text].filter((character) => {
+      const code = character.codePointAt(0) || 0
+      return code !== 9 && code !== 10 && code !== 13 && !(code >= 32 && code <= 126) && !(code >= 0x4e00 && code <= 0x9fff)
+    }).length
+    if (nonPrintable > text.length * 0.3 && text.length > 32) return null
     return text
   } catch {
     return null

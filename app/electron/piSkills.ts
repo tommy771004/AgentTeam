@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { chmod, lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { resolveUserPathValue } from './userEnvironment.ts'
+import { piCodingAgentModule } from './piVendor.ts'
 
 /**
  * Host-owned skills（技能目錄）— one SKILL.md per skill, discovered by Pi's
@@ -44,6 +46,143 @@ export type PiSkillResourceSnapshot = {
   digest: string
   manifest: readonly string[]
   fileDigests?: Readonly<Record<string, string>>
+}
+
+export type PiSkillCatalogSource = 'agentstudio' | 'project' | 'user' | 'system'
+
+export type PiSkillCatalogFile = {
+  name: string
+  description: string
+  path: string
+  raw: string
+  source: PiSkillCatalogSource
+  scope: string
+  managed: boolean
+  readOnly: boolean
+  status: PiSkillStatus
+}
+
+export type PiSkillCatalog = {
+  files: PiSkillCatalogFile[]
+  diagnostics: Array<{ path: string; message: string }>
+}
+
+type PiLoadedSkill = {
+  name: string
+  description: string
+  filePath: string
+  disableModelInvocation?: boolean
+}
+
+type PiLoadSkills = (input: {
+  cwd: string
+  agentDir: string
+  skillPaths: string[]
+  includeDefaults: boolean
+}) => {
+  skills: PiLoadedSkill[]
+  diagnostics: Array<{ path?: string; message?: unknown }>
+}
+
+type SkillCatalogRoot = {
+  path: string
+  source: PiSkillCatalogSource
+  scope: string
+  managed: boolean
+}
+
+const PI_SKILL_CATALOG_MAX_FILES = 256
+const skillSourceRank: Record<PiSkillCatalogSource, number> = {
+  agentstudio: 0,
+  project: 1,
+  user: 2,
+  system: 3,
+}
+
+function pathIsWithin(root: string, target: string): boolean {
+  const rel = relative(resolve(root), resolve(target))
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function catalogRoots(agentDir: string | undefined, projectRoot: string | undefined, home: string): SkillCatalogRoot[] {
+  const roots: SkillCatalogRoot[] = []
+  const managed = resolvePiSkillsDir(agentDir, process.env, home)
+  if (managed) roots.push({ path: managed, source: 'agentstudio', scope: 'AgentStudio', managed: true })
+  if (projectRoot) {
+    const projectName = projectRoot.split(/[\\/]/).filter(Boolean).at(-1) || '目前專案'
+    roots.push(
+      { path: join(projectRoot, '.agents', 'skills'), source: 'project', scope: projectName, managed: false },
+      { path: join(projectRoot, '.pi', 'skills'), source: 'project', scope: projectName, managed: false },
+      { path: join(projectRoot, '.codex', 'skills'), source: 'project', scope: projectName, managed: false },
+    )
+  }
+  roots.push(
+    { path: join(home, '.codex', 'skills', '.system'), source: 'system', scope: '系統', managed: false },
+    { path: join(home, '.agents', 'skills'), source: 'user', scope: '本機', managed: false },
+    { path: join(home, '.pi', 'agent', 'skills'), source: 'user', scope: '本機', managed: false },
+    { path: join(home, '.codex', 'skills'), source: 'user', scope: '本機', managed: false },
+  )
+  return roots
+}
+
+/**
+ * Host-owned projection of every installed local Skill. Pi's loader remains
+ * the only parser/discovery system; this function only supplies its approved
+ * roots and adds ownership metadata for the renderer.
+ */
+export async function readPiSkillCatalog(input: {
+  agentDir: string | undefined
+  projectRoot?: string
+  home?: string
+}): Promise<PiSkillCatalog> {
+  const home = input.home || homedir()
+  const roots = catalogRoots(input.agentDir, input.projectRoot, home)
+  const existingRoots = roots.filter((entry) => existsSync(entry.path))
+  const loadSkills = (piCodingAgentModule as Partial<{ loadSkills: PiLoadSkills }>).loadSkills
+  if (typeof loadSkills !== 'function') throw new Error('Pi Skill discovery is unavailable')
+  const result = loadSkills({
+    cwd: input.projectRoot || home,
+    agentDir: join(home, '.pi', 'agent'),
+    skillPaths: existingRoots.map((entry) => entry.path),
+    includeDefaults: false,
+  })
+  const state = await readSkillsStateSafely(input.agentDir)
+  const files: PiSkillCatalogFile[] = []
+  const diagnostics = result.diagnostics.map((entry) => ({
+    path: typeof entry.path === 'string' ? entry.path : '',
+    message: typeof entry.message === 'string' ? entry.message : String(entry.message || 'Skill discovery warning'),
+  }))
+  for (const skill of result.skills.slice(0, PI_SKILL_CATALOG_MAX_FILES)) {
+    try {
+      const info = await lstat(skill.filePath)
+      if (!info.isFile() || info.size > PI_SKILL_FILE_MAX_BYTES) continue
+      const owner = [...existingRoots]
+        .sort((a, b) => b.path.length - a.path.length)
+        .find((entry) => pathIsWithin(entry.path, skill.filePath))
+      if (!owner) continue
+      const status = owner.managed
+        ? state.skills[skill.name]?.status || (skill.disableModelInvocation ? 'archived' : 'active')
+        : skill.disableModelInvocation ? 'archived' : 'active'
+      files.push({
+        name: skill.name,
+        description: skill.description || '',
+        path: skill.filePath,
+        raw: await readFile(skill.filePath, 'utf8'),
+        source: owner.source,
+        scope: owner.scope,
+        managed: owner.managed,
+        readOnly: !owner.managed,
+        status,
+      })
+    } catch (error) {
+      diagnostics.push({ path: skill.filePath, message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  if (result.skills.length > PI_SKILL_CATALOG_MAX_FILES) {
+    diagnostics.push({ path: '', message: `Skill catalog exceeds ${PI_SKILL_CATALOG_MAX_FILES} entries` })
+  }
+  files.sort((a, b) => skillSourceRank[a.source] - skillSourceRank[b.source] || a.name.localeCompare(b.name))
+  return { files, diagnostics }
 }
 
 export type PiPreflightSkillRevision = {
@@ -151,11 +290,32 @@ function skillMatchesGoal(skill: PiPreflightSkillRevision, context: string): boo
 }
 
 /** Host-only, bounded and symlink-free view of the files Pi may advertise. */
-export async function snapshotPiSkillResources(agentDir: string | undefined, scope = 'turn'): Promise<PiSkillResourceSnapshot | undefined> {
+export async function snapshotPiSkillResources(
+  agentDir: string | undefined,
+  scope = 'turn',
+  projectRoot?: string,
+  home = homedir(),
+): Promise<PiSkillResourceSnapshot | undefined> {
   const source = resolvePiSkillsDir(agentDir)
   if (!source) return undefined
   const files: Array<{ relativePath: string; content: Buffer; granted: boolean }> = []
   let bytes = 0
+  const appendFile = async (relativePath: string, absolute: string, granted: boolean, strict = true): Promise<boolean> => {
+    if (files.length >= 128) {
+      if (strict) throw new Error('Skill Resource View exceeds 128 files')
+      return false
+    }
+    const stat = await lstat(absolute)
+    if (!stat.isFile() || stat.isSymbolicLink()) return false
+    const content = await readFile(absolute)
+    if (bytes + content.byteLength > 2 * 1024 * 1024) {
+      if (strict) throw new Error('Skill Resource View exceeds 2 MiB')
+      return false
+    }
+    bytes += content.byteLength
+    files.push({ relativePath, content, granted })
+    return true
+  }
   const visit = async (dir: string, prefix = ''): Promise<void> => {
     let entries
     try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
@@ -180,13 +340,68 @@ export async function snapshotPiSkillResources(agentDir: string | undefined, sco
       if (!stat.isFile()) continue
       // Root metadata is needed for pinned semantics but is never granted to tools.
       if (!prefix && entry.name !== 'skills-state.json') continue
-      const content = await readFile(absolute)
-      bytes += content.byteLength
-      if (bytes > 2 * 1024 * 1024) throw new Error('Skill Resource View exceeds 2 MiB')
-      files.push({ relativePath, content, granted: Boolean(prefix) })
+      await appendFile(relativePath, absolute, Boolean(prefix))
     }
   }
-  await visit(source)
+  const collectBundleFiles = async (dir: string, prefix: string, collected: Array<{ relativePath: string; absolute: string }>): Promise<void> => {
+    let entries
+    try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const absolute = join(dir, entry.name)
+      const relativePath = join(prefix, entry.name)
+      const stat = await lstat(absolute)
+      if (stat.isSymbolicLink()) continue
+      if (stat.isDirectory()) await collectBundleFiles(absolute, relativePath, collected)
+      else if (stat.isFile()) collected.push({ relativePath, absolute })
+    }
+  }
+  if (projectRoot) {
+    // Pinned status is Host-owned metadata. Keep it in the frozen view so the
+    // prompt expansion reads the same immutable revision as Pi's loader, but
+    // never grant tools direct access to it.
+    const stateFile = join(source, 'skills-state.json')
+    if (existsSync(stateFile)) await appendFile('skills-state.json', stateFile, false)
+    const catalog = await readPiSkillCatalog({ agentDir, projectRoot, home })
+    const supportingFiles: Array<{ relativePath: string; absolute: string }> = []
+    const includedManifests = new Set<string>()
+    // Preserve every Host-managed bundle, including a malformed one that Pi
+    // must diagnose and a body-only pinned skill that is expanded separately.
+    // The catalog intentionally contains only skills accepted by Pi's parser,
+    // so it cannot be the transport source for these files.
+    for (const managed of await readPiSkillFiles(agentDir)) {
+      const prefix = safeSegment(basename(dirname(managed.path)))
+      await appendFile(join(prefix, 'SKILL.md'), managed.path, true)
+      includedManifests.add(resolve(managed.path))
+      const bundleFiles: Array<{ relativePath: string; absolute: string }> = []
+      await collectBundleFiles(dirname(managed.path), prefix, bundleFiles)
+      supportingFiles.push(...bundleFiles.filter((file) => resolve(file.absolute) !== resolve(managed.path)))
+    }
+    for (const skill of catalog.files) {
+      if (includedManifests.has(resolve(skill.path))) continue
+      const prefix = slugifyPiSkillName(skill.name)
+      if (skill.path.endsWith(`${join('', 'SKILL.md')}`)) {
+        await appendFile(join(prefix, 'SKILL.md'), skill.path, true)
+        const bundleFiles: Array<{ relativePath: string; absolute: string }> = []
+        await collectBundleFiles(dirname(skill.path), prefix, bundleFiles)
+        supportingFiles.push(...bundleFiles.filter((file) => resolve(file.absolute) !== resolve(skill.path)))
+      } else {
+        const relativePath = join(prefix, 'SKILL.md')
+        const content = Buffer.from(skill.raw, 'utf8')
+        bytes += content.byteLength
+        if (files.length >= 128) throw new Error('Skill Resource View exceeds 128 files')
+        if (bytes > 2 * 1024 * 1024) throw new Error('Skill Resource View exceeds 2 MiB')
+        files.push({ relativePath, content, granted: true })
+      }
+    }
+    // Every installed skill manifest is guaranteed to enter the immutable
+    // view. Supporting files fill the remaining bounded budget in stable
+    // order; a large library can never prevent the turn from starting.
+    for (const file of supportingFiles.sort((a, b) => a.relativePath.localeCompare(b.relativePath))) {
+      await appendFile(file.relativePath, file.absolute, true, false)
+    }
+  } else {
+    await visit(source)
+  }
   const hash = createHash('sha256')
   for (const file of files) hash.update(file.relativePath).update('\0').update(file.content).update('\0')
   const digest = hash.digest('hex')

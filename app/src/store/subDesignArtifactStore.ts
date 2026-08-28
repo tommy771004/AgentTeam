@@ -17,6 +17,11 @@ import type { SubDesignArtifact } from '../agent/subdesign/types.ts'
 const STORAGE_KEY = 'subagents.subdesign.artifacts.v1'
 const SNAPSHOT_STORAGE_KEY = 'subagents.subdesign.artifact-snapshots.v1'
 
+function snapshotStorageKey(projectRoot: string): string {
+  const scope = projectRoot.trim().replaceAll('\\', '/').replace(/\/$/, '') || 'browser-preview'
+  return `${SNAPSHOT_STORAGE_KEY}:${encodeURIComponent(scope)}`
+}
+
 function loadArtifacts(): SubDesignArtifact[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -34,9 +39,9 @@ function loadArtifacts(): SubDesignArtifact[] {
   }
 }
 
-function loadSnapshots(): SubDesignArtifactSnapshotIndex {
+function loadSnapshots(projectRoot = ''): SubDesignArtifactSnapshotIndex {
   try {
-    const raw = localStorage.getItem(SNAPSHOT_STORAGE_KEY)
+    const raw = localStorage.getItem(snapshotStorageKey(projectRoot))
     const parsed = raw ? JSON.parse(raw) : {}
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
     return parsed as SubDesignArtifactSnapshotIndex
@@ -53,9 +58,9 @@ function persist(artifacts: SubDesignArtifact[]) {
   }
 }
 
-function persistSnapshots(snapshots: SubDesignArtifactSnapshotIndex) {
+function persistSnapshots(snapshots: SubDesignArtifactSnapshotIndex, projectRoot: string) {
   try {
-    localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshots))
+    localStorage.setItem(snapshotStorageKey(projectRoot), JSON.stringify(snapshots))
   } catch {
     /* localStorage is optional in browser preview. */
   }
@@ -67,6 +72,7 @@ function workspaceTools() {
 
 export type SnapshotResult = { ok: true; files: number } | { ok: false; reason: string }
 export type RestoreResult = { ok: true; artifact: SubDesignArtifact } | { ok: false; errors: string[] }
+type RegisterResult = { ok: true; artifact: SubDesignArtifact } | { ok: false; errors: string[] }
 
 interface SubDesignArtifactStore {
   artifacts: SubDesignArtifact[]
@@ -74,9 +80,7 @@ interface SubDesignArtifactStore {
   projectRoot: string
   setProjectRoot: (root: string) => void
   hydrateCanonical: (items: unknown[]) => void
-  register: (input: unknown, defaults?: { briefId?: string }, projectRoot?: string) =>
-    | { ok: true; artifact: SubDesignArtifact }
-    | { ok: false; errors: string[] }
+  register: (input: unknown, defaults?: { briefId?: string }, projectRoot?: string) => Promise<RegisterResult>
   remove: (id: string) => void
   findByBriefId: (briefId: string) => SubDesignArtifact[]
   findById: (id: string) => SubDesignArtifact | null
@@ -93,7 +97,7 @@ export const useSubDesignArtifactStore = create<SubDesignArtifactStore>((set, ge
   snapshots: loadSnapshots(),
   projectRoot: '',
 
-  setProjectRoot: (root) => set({ projectRoot: root }),
+  setProjectRoot: (root) => set({ projectRoot: root, snapshots: loadSnapshots(root) }),
 
   hydrateCanonical: (items) => {
     const artifacts = items
@@ -107,19 +111,41 @@ export const useSubDesignArtifactStore = create<SubDesignArtifactStore>((set, ge
     persist(artifacts)
   },
 
-  register: (input, defaults, projectRoot) => {
+  register: async (input, defaults, projectRoot) => {
     const result = validateSubDesignArtifactManifest(input, defaults)
     if (!result.ok) return result
     const existing = get().artifacts.find((item) => item.id === result.manifest.id)
     const artifact = existing
       ? { ...result.manifest, createdAt: existing.createdAt, revision: Math.max(existing.revision + 1, result.manifest.revision), updatedAt: new Date().toISOString() }
       : result.manifest
-    const artifacts = [artifact, ...get().artifacts].slice(0, 80)
-    set({ artifacts })
+    const root = projectRoot || get().projectRoot
+    const api = workspaceTools()
+    if (!api?.workspaceRead || !api?.workspaceWrite) {
+      return { ok: false, errors: ['artifact register 需要 Electron workspace API 以建立耐久快照。'] }
+    }
+    const paths = [artifact.entry, ...artifact.supportingFiles].filter(isSafeSnapshotPath).slice(0, SUBDESIGN_SNAPSHOT_MAX_FILES)
+    const files = []
+    for (const filePath of paths) {
+      const read = await api.workspaceRead(filePath, root)
+      if (!read.ok || typeof read.content !== 'string') continue
+      const copyPath = snapshotCopyPath(artifact.id, artifact.revision, filePath)
+      const copied = await api.workspaceWrite(copyPath, read.content, root)
+      if (!copied.ok) return { ok: false, errors: [`快照寫入失敗：${copyPath} ${copied.error || ''}`] }
+      files.push(await computeSnapshotFile(filePath, read.content))
+    }
+    if (!files.some((file) => file.path === artifact.entry)) {
+      return { ok: false, errors: [`快照無法讀取 entry：${artifact.entry}`] }
+    }
+    const snapshots = appendSnapshot(get().snapshots, artifact.id, {
+      revision: artifact.revision,
+      createdAt: new Date().toISOString(),
+      files,
+    })
+    const artifacts = [artifact, ...get().artifacts.filter((item) => item.id !== artifact.id)].slice(0, 80)
+    set({ artifacts, snapshots })
     persist(artifacts)
-    persistSubDesignMetadata('artifact', artifact, projectRoot || get().projectRoot)
-    // Register 成功即自動快照（fire-and-forget）；無 workspace API 時靜默略過。
-    void get().captureSnapshot(artifact.id, projectRoot || get().projectRoot)
+    persistSnapshots(snapshots, root)
+    persistSubDesignMetadata('artifact', artifact, root)
     return { ok: true, artifact }
   },
 
@@ -155,7 +181,7 @@ export const useSubDesignArtifactStore = create<SubDesignArtifactStore>((set, ge
     const snapshot = { revision: artifact.revision, createdAt: new Date().toISOString(), files }
     const snapshots = appendSnapshot(get().snapshots, artifactId, snapshot)
     set({ snapshots })
-    persistSnapshots(snapshots)
+    persistSnapshots(snapshots, projectRoot || get().projectRoot)
     return { ok: true, files: files.length }
   },
 
@@ -175,7 +201,7 @@ export const useSubDesignArtifactStore = create<SubDesignArtifactStore>((set, ge
       const write = await api.workspaceWrite(file.path, historical.content, projectRoot)
       if (!write.ok) return { ok: false, errors: [`還原寫入失敗：${file.path} ${write.error || ''}`] }
     }
-    const result = get().register(
+    const result = await get().register(
       {
         ...artifact,
         revision: undefined,

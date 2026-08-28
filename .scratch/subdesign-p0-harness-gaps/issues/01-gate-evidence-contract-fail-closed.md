@@ -11,3 +11,7 @@
 - [ ] design_critique tool 的輸出路徑同樣被此規則約束（不能繞過 store 驗證）
 - [ ] Store-level smoke：fail-closed 拒絕 + 帶齊通過兩條路徑都斷言
 - [ ] Drift guard 固定「gate 未執行不得宣稱分數」合約
+
+## Comments
+
+**2026-08-28 Pi Core owner 修復**：Pi extension gate schema 已移除模型可寫的 `passed`／`summary`／`evidencePath`。工具透過受限 Host service RPC 要求 Electron main 執行既有 contrast、console-error、build-success、responsive-overflow、token-consistency runner；verdict、summary、hash 與 HMAC attestation 均由 main 根據量測產生。`smoke-subdesign-critique-gates.mts` 新增 public pack seam 斷言，證明即使呼叫者夾帶 `passed: true`，輸出仍採 Host 的 failed measurement（9/9 通過）。原票要求 store 拒絕整筆；目前 shared normalizer 採 fail-closed 降級為 `needs-revision`，此產品語意差異仍需對帳後才能將本票標 resolved。

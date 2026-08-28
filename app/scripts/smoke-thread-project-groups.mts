@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import {
   buildProjectGroups,
   COLLAPSED_PER_PROJECT,
@@ -133,5 +134,17 @@ const expandedSidebar = projectThreadSidebar({
 })
 assert.deepEqual(expandedSidebar.groups[0].threads.map((item) => item.id), ['a1', 'a2', 'a3', 'a4', 'a5'])
 assert.equal(expandedSidebar.truncated, true)
+
+const threadSidebarSource = await readFile(new URL('../src/components/ThreadSidebar.tsx', import.meta.url), 'utf8')
+assert.match(threadSidebarSource, /runningThreadIds\.includes\(t\.id\)/,
+  'conversation rows derive their live indicator from the run registry')
+assert.match(threadSidebarSource, /role="status"[\s\S]*aria-label="執行中"[\s\S]*name="progress_activity"[\s\S]*animate-spin/,
+  'the running conversation renders an accessible animated spinner')
+assert.doesNotMatch(threadSidebarSource, /t\.lastStatus === 'running'/,
+  'a persisted terminal status must not leave a stale running indicator')
+
+const layoutSource = await readFile(new URL('../src/components/Layout.tsx', import.meta.url), 'utf8')
+assert.doesNotMatch(layoutSource, /開啟新任務右側 Run 面板|>執行中…</,
+  'the global sidebar no longer duplicates the per-conversation running state')
 
 console.log('thread project groups smoke: grouping, hidden exclusion, search, truncation, empty results')

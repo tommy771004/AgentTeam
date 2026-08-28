@@ -18,8 +18,6 @@ register({
     const context = ctx as ToolExecutionContext | undefined
     const api = window.subagents?.tools
     const projectRoot = await resolveEffectiveProjectRoot(context?.projectRoot, context?.runId)
-    const runId = context?.runId
-    const threadId = context?.threadId
     try {
     if (!api?.workspaceDiff) return { ok: false, output: 'workspace_diff requires Electron' }
     const paths = Array.isArray(input.paths)

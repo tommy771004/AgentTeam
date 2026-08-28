@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
 import { join, relative, resolve, isAbsolute } from 'node:path'
 import { registerPiExtensionPack, type PiPackTool, type PiToolContext } from '../piToolHost.ts'
 import { withFileMutationQueue } from '../piVendor.ts'
@@ -20,6 +19,7 @@ import {
 import { validateSubDesignArtifactManifest } from '../../src/agent/subdesign/artifactManifest.ts'
 import { validatePinnedPatchOperation, type PinnedPatchScope } from '../../src/agent/subdesign/pinnedPatchScope.ts'
 import { jsonOk, structuredFailure } from './packResults.ts'
+import { requestPiHostService } from '../piHostServices.ts'
 
 /**
  * SubDesign pack（設計流程包）— brief → direction → build → critique →
@@ -393,72 +393,40 @@ const designCritiqueNote: PiPackTool = {
  * in `.subagents/subdesign/evidence/`. The model cannot manufacture a pass —
  * there is no parameter that asserts one without a file behind it.
  */
-async function recordGateEvidence(
-  ctx: PiToolContext,
-  artifactId: string,
-  revision: number,
-  gateId: string,
-  args: Record<string, unknown>,
-): Promise<{ ok: true; evidence: Record<string, unknown> } | { ok: false; error: string }> {
-  const rel = String(args.evidencePath || '').trim()
-  const abs = rel ? insideRoot(ctx.cwd, rel) : undefined
-  if (!abs || !existsSync(abs)) return { ok: false, error: `${gateId} gate 需要已存在的證據檔（evidencePath）` }
-  const bytes = await readFile(abs)
-  if (bytes.includes(0)) return { ok: false, error: 'gate 證據必須是文字檔' }
-  const content = bytes.toString('utf8').slice(0, 200_000)
-  const sha256 = createHash('sha256').update(content).digest('hex')
-  const evidenceId = `evidence_${sha256.slice(0, 24)}`
-  const record = {
-    kind: 'gate',
-    gateId,
-    passed: args.passed !== false,
-    summary: String(args.summary || `${gateId} gate`).slice(0, 1000),
-    path: rel.replaceAll('\\', '/'),
-    sha256,
-    evidenceId,
-    capturedAt: new Date().toISOString(),
-    source: 'pi-host-design-gate',
-    artifactId,
-    revision,
-  }
-  await writeJson(insideRoot(ctx.cwd, `${METADATA_ROOT}/evidence/${artifactId}-r${revision}-${gateId}.json`)!, record)
-  return { ok: true, evidence: record }
-}
-
 type GateSpec = { id: string; label: string }
 
 function gateTool(spec: GateSpec): PiPackTool {
   return {
     name: `design_gate_${spec.id.replace(/-/g, '_')}`,
     label: spec.label,
-    description: `Record the ${spec.id} verification gate result against an evidence file`,
-    promptSnippet: `record ${spec.id} gate evidence (fail-closed)`,
+    description: `Run the ${spec.id} verification gate in Electron main and return Host-attested evidence`,
+    promptSnippet: `run ${spec.id} gate measurement (Host-owned, fail-closed)`,
     parameters: {
       type: 'object',
       properties: {
         artifactId: { type: 'string' },
-        passed: { type: 'boolean', description: 'Whether the measured gate passed' },
-        summary: { type: 'string', description: 'What was measured and the result' },
-        evidencePath: { type: 'string', description: 'Project-relative path of the gate output file' },
       },
-      required: ['artifactId', 'passed', 'summary', 'evidencePath'],
+      required: ['artifactId'],
     },
     execute: async (args, ctx) => {
       const artifactId = safeId(args.artifactId)
       if (!artifactId) return structuredFailure('不安全的 artifactId')
       const validation = await loadManifest(ctx, artifactId)
       if (!validation.ok) return structuredFailure(`artifact manifest invalid：${validation.errors.join('；')}`)
-      const recorded = await recordGateEvidence(ctx, artifactId, validation.manifest.revision, spec.id, args)
-      if (!recorded.ok) return structuredFailure(recorded.error)
+      const measured = await requestPiHostService<{ ok: boolean; evidence?: Record<string, unknown>; error?: string }>(
+        'subdesign/run-gate',
+        { gateId: spec.id, artifact: validation.manifest, projectRoot: ctx.cwd },
+      )
+      if (!measured.ok || !measured.evidence) return structuredFailure(measured.error || `${spec.id} gate 量測失敗`)
       // The gate evidence merges into the working critique draft immediately,
       // so the eventual normalization sees it.
       const revision = validation.manifest.revision
       const draftPath = insideRoot(ctx.cwd, `${METADATA_ROOT}/critiques/${artifactId}-r${revision}.json`)!
       const draft = (await readJson(draftPath) || {}) as Record<string, unknown>
       const existing = Array.isArray(draft.evidence) ? draft.evidence.filter((entry) => !((entry as Record<string, unknown>).gateId === spec.id && (entry as Record<string, unknown>).kind === 'gate')) : []
-      draft.evidence = [...existing, recorded.evidence]
+      draft.evidence = [...existing, measured.evidence]
       await writeJson(draftPath, draft)
-      return jsonOk({ gate: spec.id, passed: (recorded.evidence as { passed: boolean }).passed, artifactId, revision })
+      return jsonOk({ gate: spec.id, passed: (measured.evidence as { passed: boolean }).passed, artifactId, revision })
     },
   }
 }

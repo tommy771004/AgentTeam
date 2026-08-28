@@ -348,106 +348,105 @@ function LogsSection() {
   }
 
   return (
-    <div className="app-panel overflow-hidden border border-white/10 min-h-[60vh] flex flex-col">
-      <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-        <div className="flex items-center gap-2">
-          <Icon name="warning" className={halted ? 'text-error' : 'text-primary'} size={22} filled />
-          <h2 className="font-semibold">
-            {halted ? '執行中斷' : '執行日誌'}
-          </h2>
-          {halted && (
-            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-error/20 text-error">
-              結束碼 {exitCode}
-            </span>
-          )}
-        </div>
-        <div className="flex gap-1">
-          <button
-            type="button"
-            onClick={downloadLogs}
-            className="p-1.5 rounded hover:bg-white/5 text-outline"
-            title="下載"
-          >
-            <Icon name="download" size={16} />
-          </button>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-12 flex-1 min-h-0">
-        <aside className="lg:col-span-4 border-b lg:border-b-0 lg:border-r border-white/10 p-4 space-y-4">
-          <div>
-            <p className="text-[10px] tracking-widest text-outline mb-1">目前狀態</p>
-            <p className={`font-semibold ${halted ? 'text-error' : 'text-primary'}`}>
-              {halted ? '已中止' : statusZh(agent.status)}
-            </p>
-            <p className="text-sm text-on-surface-variant mt-1">
-              {agent.haltReason ||
-                agent.violation?.detail ||
-                (agent.status === 'success'
-                  ? '循環已成功完成並封存。'
-                  : '此工作階段沒有嚴重違規紀錄。')}
-            </p>
+    <div className="flex flex-col">
+      <div className="flex flex-1 min-h-0 flex-col">
+        <aside className="grid grid-cols-1 gap-4 border-b border-white/10 p-4 xl:grid-cols-[minmax(12rem,0.8fr)_minmax(24rem,1.7fr)]">
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-[10px] tracking-widest text-outline mb-1">目前狀態</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className={`font-semibold ${halted ? 'text-error' : 'text-primary'}`}>
+                    {halted ? '已中止' : statusZh(agent.status)}
+                  </p>
+                  {halted && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-error/20 text-error">
+                      結束碼 {exitCode}
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-on-surface-variant mt-1">
+                  {agent.haltReason ||
+                    agent.violation?.detail ||
+                    (agent.status === 'success'
+                      ? '循環已成功完成並封存。'
+                      : '此工作階段沒有嚴重違規紀錄。')}
+                </p>
+              </div>
+              {agent.logs.length > 0 && (
+                <button
+                  type="button"
+                  onClick={downloadLogs}
+                  className="shrink-0 p-1.5 rounded hover:bg-white/5 text-outline"
+                  title="下載日誌"
+                  aria-label="下載日誌"
+                >
+                  <Icon name="download" size={16} />
+                </button>
+              )}
+            </div>
+            {agent.violation && (
+              <div className="rounded-lg border border-error/30 bg-error/10 p-3">
+                <p className="font-semibold text-error text-sm">{agent.violation.code}</p>
+                <p className="text-sm text-on-surface-variant mt-1">{agent.violation.detail}</p>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={async () => {
+                const input = draftInput || agent.objective
+                reset()
+                if (!input) {
+                  navigate('/')
+                  return
+                }
+                navigate('/')
+                const { runTask } = await import('../agent/taskRunCoordinator')
+                await runTask({
+                  sourceKind: 'retry',
+                  objective: input,
+                  title: '日誌重啟',
+                  loopType: agent.loopConfig.loopType || 'Goal-based',
+                  eventPreMatched: agent.loopConfig.loopType === 'Proactive',
+                  sourceLabel: '自日誌重新啟動',
+                  meta: { eventTrigger: agent.eventTrigger },
+                })
+              }}
+              className="w-full py-2 rounded-lg border border-white/15 text-xs font-semibold hover:border-primary/40 hover:text-primary flex items-center justify-center gap-1"
+            >
+              <Icon name="refresh" size={16} />
+              重新啟動代理
+            </button>
           </div>
           <div>
-            <p className="text-[10px] tracking-widest text-outline mb-1">追蹤脈絡</p>
-            <dl className="text-xs space-y-2 text-on-surface-variant">
-              <div>
-                <dt className="text-outline">代理 ID</dt>
-                <dd className="font-[family-name:var(--font-mono)] text-primary break-all">
+            <p className="text-[10px] tracking-widest text-outline mb-2">追蹤脈絡</p>
+            <dl className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.025] text-xs text-on-surface-variant divide-y divide-white/10">
+              <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-3 px-3 py-2.5">
+                <dt className="text-outline leading-5">代理 ID</dt>
+                <dd className="min-w-0 font-[family-name:var(--font-mono)] text-primary break-all leading-5">
                   {agent.id || '—'}
                 </dd>
               </div>
-              <div>
-                <dt className="text-outline">任務定義</dt>
-                <dd>{agent.objective || '—'}</dd>
+              <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-3 px-3 py-2.5">
+                <dt className="text-outline leading-5">任務定義</dt>
+                <dd className="min-w-0 whitespace-pre-wrap break-words leading-5 text-on-surface">
+                  {agent.objective || '—'}
+                </dd>
               </div>
-              <div>
-                <dt className="text-outline">工具 / Token</dt>
-                <dd>
+              <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-3 px-3 py-2.5">
+                <dt className="text-outline leading-5">工具 / Token</dt>
+                <dd className="min-w-0 leading-5 tabular-nums">
                   {agent.toolCalls.length} 次工具 · {agent.tokensUsed} tokens
                 </dd>
               </div>
             </dl>
           </div>
-          {agent.violation && (
-            <div className="rounded-lg border border-error/30 bg-error/10 p-3">
-              <p className="font-semibold text-error text-sm">{agent.violation.code}</p>
-              <p className="text-sm text-on-surface-variant mt-1">{agent.violation.detail}</p>
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={async () => {
-              const input = draftInput || agent.objective
-              reset()
-              if (!input) {
-                navigate('/')
-                return
-              }
-              navigate('/')
-              const { runTask } = await import('../agent/taskRunCoordinator')
-              await runTask({
-                sourceKind: 'retry',
-                objective: input,
-                title: '日誌重啟',
-                loopType: agent.loopConfig.loopType || 'Goal-based',
-                eventPreMatched: agent.loopConfig.loopType === 'Proactive',
-                sourceLabel: '自日誌重新啟動',
-                meta: { eventTrigger: agent.eventTrigger },
-              })
-            }}
-            className="w-full py-2 rounded-lg border border-white/15 text-xs font-semibold hover:border-primary/40 hover:text-primary flex items-center justify-center gap-1"
-          >
-            <Icon name="refresh" size={16} />
-            重新啟動代理
-          </button>
         </aside>
-        <section className="lg:col-span-8 min-h-[320px] bg-[#060e20]">
-          {agent.logs.length === 0 ? (
-            <p className="p-6 text-sm text-outline">尚無日誌。請先執行一次代理循環。</p>
-          ) : (
+        {agent.logs.length > 0 && (
+          <section className="min-h-[320px] flex-1 bg-[#060e20]">
             <LogViewer logs={agent.logs} />
-          )}
-        </section>
+          </section>
+        )}
       </div>
     </div>
   )

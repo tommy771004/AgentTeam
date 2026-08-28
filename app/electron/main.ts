@@ -329,7 +329,10 @@ const piHostSupervisor = new PiHostSupervisor(async () => {
     },
   })
 },
-  { requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1'] },
+  {
+    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1'],
+    serviceHandler: runPiHostMainService,
+  },
 )
 // Policy Admin / outbound policy dir default (node-safe modules read this env).
 try {
@@ -2601,7 +2604,7 @@ ipcMain.handle('pi-host:extensions:uninstall', async (_evt, id: string) => piHos
 ipcMain.handle('pi-host:tools:list', async () => ({ builtinTools: await piHostSupervisor.listTools() }))
 ipcMain.handle('pi-host:tools:catalog', async () => ({ catalog: await piHostSupervisor.listCatalog() }))
 ipcMain.handle('pi-host:resources:sync-skills', async (_evt, skills: Array<{ name?: string; description?: string; body?: string; status?: string }>) => piHostSupervisor.syncSkills(skills || []))
-ipcMain.handle('pi-host:resources:list-skill-files', async () => piHostSupervisor.readSkillFiles())
+ipcMain.handle('pi-host:resources:list-skill-files', async (_evt, projectRoot?: string) => piHostSupervisor.readSkillFiles(projectRoot))
 ipcMain.handle('pi-host:approvals:resolve', async (_evt, input: { runId: string; callId: string; decision: 'allow' | 'deny'; answer?: string }) => {
   const response = await piHostSupervisor.resolveApproval(input)
   return response
@@ -4032,6 +4035,25 @@ async function tokenConsistencyGateSubDesignArtifact(input: { artifact: unknown;
     return { ok: true as const, evidence: { summary, capturedAt: evidence.attestation.createdAt, gateId: 'token-consistency', passed, ...evidence.attestation }, violations }
   } catch (error) {
     return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function runPiHostMainService(service: string, input: Record<string, unknown>): Promise<unknown> {
+  if (service !== 'subdesign/run-gate') throw new Error(`Unsupported Pi Host main service: ${service}`)
+  const request = { artifact: input.artifact, projectRoot: String(input.projectRoot || '') || undefined }
+  switch (String(input.gateId || '')) {
+    case 'contrast':
+      return contrastGateSubDesignArtifact(request)
+    case 'console-error':
+      return consoleErrorGateSubDesignArtifact(request)
+    case 'build-success':
+      return buildSuccessGateSubDesignArtifact(request)
+    case 'responsive-overflow':
+      return responsiveOverflowGateSubDesignArtifact(request)
+    case 'token-consistency':
+      return tokenConsistencyGateSubDesignArtifact(request)
+    default:
+      throw new Error(`Unsupported SubDesign gate: ${String(input.gateId || '')}`)
   }
 }
 

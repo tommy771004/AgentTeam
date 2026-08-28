@@ -10,6 +10,7 @@ export {
 	getExamplesPath,
 	getPackageDir,
 	getReadmePath,
+	PACKAGE_NAME,
 	VERSION,
 } from "./config.ts";
 export {
@@ -23,7 +24,7 @@ export {
 	parseSkillBlock,
 	type SessionStats,
 } from "./core/agent-session.ts";
-export { readStoredCredential } from "./core/auth-storage.ts";
+export { AuthStorage, readStoredCredential } from "./core/auth-storage.ts";
 // Compaction
 export {
 	type BranchPreparation,

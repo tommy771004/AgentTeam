@@ -19,6 +19,22 @@ type SessionWithRecord = { id: string; record?: TurnRecord }
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex')
 const same = (left: unknown, right: unknown): boolean => canonicalMemoryControlEvaluationJson(left) === canonicalMemoryControlEvaluationJson(right)
 
+function assertCorpusIdentity(corpus: Corpus, registry: ReadonlyMap<string, Corpus>): void {
+  if (typeof corpus.version !== 'string' || !corpus.version || corpus.version.length > 128
+    || !Array.isArray(corpus.tasks) || corpus.tasks.length < 1 || corpus.tasks.length > 32
+    || registry.has(corpus.version)) throw new Error('Memory-Control evaluation corpus identity is invalid')
+}
+
+function assertCorpusTask(task: CorpusTask, ids: ReadonlySet<string>): void {
+  const expected = task.expected
+  if (typeof task.id !== 'string' || !task.id || task.id.length > 256 || ids.has(task.id)
+    || !['source-failure', 'held-out-anchor'].includes(task.cohort)
+    || task.loopType !== undefined && !['Turn-based', 'Goal-based'].includes(task.loopType)
+    || !expected || !Array.isArray(expected.requiredActions) || !Array.isArray(expected.requiredSkills)
+    || !Array.isArray(expected.allowedSkills) || !Number.isSafeInteger(expected.maxPromptTokens)
+    || expected.maxPromptTokens < 0 || expected.maxPromptTokens > 100_000_000) throw new Error('Memory-Control evaluation corpus task is invalid')
+}
+
 function parseCorpusRegistry(value: unknown): Map<string, Corpus> {
   if (!value || typeof value !== 'object' || (value as { schemaVersion?: unknown }).schemaVersion !== 1
     || !Array.isArray((value as { corpora?: unknown }).corpora)) throw new Error('Memory-Control evaluation corpus registry is invalid')
@@ -26,18 +42,10 @@ function parseCorpusRegistry(value: unknown): Map<string, Corpus> {
   for (const raw of (value as { corpora: unknown[] }).corpora) {
     if (!raw || typeof raw !== 'object') throw new Error('Memory-Control evaluation corpus is invalid')
     const corpus = raw as Corpus
-    if (typeof corpus.version !== 'string' || !corpus.version || corpus.version.length > 128
-      || !Array.isArray(corpus.tasks) || corpus.tasks.length < 1 || corpus.tasks.length > 32
-      || registry.has(corpus.version)) throw new Error('Memory-Control evaluation corpus identity is invalid')
+    assertCorpusIdentity(corpus, registry)
     const ids = new Set<string>()
     for (const task of corpus.tasks) {
-      const expected = task.expected
-      if (typeof task.id !== 'string' || !task.id || task.id.length > 256 || ids.has(task.id)
-        || !['source-failure', 'held-out-anchor'].includes(task.cohort)
-        || task.loopType !== undefined && !['Turn-based', 'Goal-based'].includes(task.loopType)
-        || !expected || !Array.isArray(expected.requiredActions) || !Array.isArray(expected.requiredSkills)
-        || !Array.isArray(expected.allowedSkills) || !Number.isSafeInteger(expected.maxPromptTokens)
-        || expected.maxPromptTokens < 0 || expected.maxPromptTokens > 100_000_000) throw new Error('Memory-Control evaluation corpus task is invalid')
+      assertCorpusTask(task, ids)
       ids.add(task.id)
     }
     registry.set(corpus.version, structuredClone(corpus))

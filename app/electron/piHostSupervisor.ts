@@ -35,6 +35,7 @@ type PiHostSupervisorOptions = {
   requestTimeoutMs?: number
   turnIdleTimeoutMs?: number
   requestedCapabilities?: string[]
+  serviceHandler?: (service: string, input: Record<string, unknown>) => Promise<unknown>
 }
 type PendingRequest = {
   resolve: (response: PiHostResponse) => void
@@ -50,6 +51,7 @@ export class PiHostSupervisor {
   private readonly requestTimeoutMs: number
   private readonly turnIdleTimeoutMs: number
   private readonly requestedCapabilities: string[]
+  private readonly serviceHandler?: PiHostSupervisorOptions['serviceHandler']
   private child: PiHostChild | null = null
   private nextRequestId = 1
   private statusValue: PiHostStatus = { state: 'stopped' }
@@ -66,6 +68,7 @@ export class PiHostSupervisor {
     this.requestedCapabilities = options.requestedCapabilities
       ? [...options.requestedCapabilities]
       : ['attachments-v1', 'tool-contract-v1']
+    this.serviceHandler = options.serviceHandler
   }
 
   status(): PiHostStatus {
@@ -88,6 +91,22 @@ export class PiHostSupervisor {
     const child = await this.fork()
     this.child = child
     child.on('message', (message: PiHostMessage) => {
+      const serviceMessage = message as unknown as { event?: string; payload?: { id?: string; service?: string; input?: Record<string, unknown> } }
+      if (serviceMessage.event === 'host/service-request') {
+        const id = String(serviceMessage.payload?.id || '')
+        const service = String(serviceMessage.payload?.service || '')
+        const input = serviceMessage.payload?.input || {}
+        void Promise.resolve()
+          .then(() => {
+            if (!this.serviceHandler) throw new Error(`Host service is not configured: ${service}`)
+            return this.serviceHandler(service, input)
+          })
+          .then(
+            (result) => child.postMessage({ event: 'host/service-response', payload: { id, result } }),
+            (error) => child.postMessage({ event: 'host/service-response', payload: { id, error: error instanceof Error ? error.message : String(error) } }),
+          )
+        return
+      }
       if ('event' in message) {
         if (message.event === 'host/storage-health') {
           this.statusValue = { state: 'error', message: message.payload.message, memoryHealth: message.payload }
@@ -465,10 +484,13 @@ export class PiHostSupervisor {
 
   /** Sync renderer skills into the Host-owned skills directory; per-skill results come back. */
   /** Read the Host skills directory back out for renderer hydration. */
-  async readSkillFiles(): Promise<{ files: Array<{ path: string; raw: string }> }> {
-    const response = await this.request('resources/read-skill-files', {})
-    const files = (response.result as { files?: Array<{ path: string; raw: string }> } | undefined)?.files
-    return { files: Array.isArray(files) ? files : [] }
+  async readSkillFiles(projectRoot?: string): Promise<{ files: import('./piSkills.ts').PiSkillCatalogFile[]; diagnostics: Array<{ path: string; message: string }> }> {
+    const response = await this.request('resources/read-skill-files', projectRoot ? { projectRoot } : {})
+    const result = response.result as { files?: import('./piSkills.ts').PiSkillCatalogFile[]; skillDiagnostics?: Array<{ path: string; message: string }> } | undefined
+    return {
+      files: Array.isArray(result?.files) ? result.files : [],
+      diagnostics: Array.isArray(result?.skillDiagnostics) ? result.skillDiagnostics : [],
+    }
   }
 
   async syncSkills(skills: Array<{ name?: string; description?: string; body?: string; status?: string }>): Promise<{ skillsDir: string; results: Array<{ name: string; ok: boolean; status?: string; filePath?: string; slug?: string; error?: string }> }> {

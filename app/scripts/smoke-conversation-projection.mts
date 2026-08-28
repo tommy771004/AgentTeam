@@ -6,6 +6,8 @@ import { runTimelineRows } from '../src/agent/liveTimeline.ts'
 import { appendTurnRecord } from '../src/agent/turnRecord.ts'
 import { extractMarkdownSources } from '../src/lib/markdownSources.ts'
 import { groupTimelineItems } from '../src/components/timelineGrouping.ts'
+import { createInitialWorkingState } from '../src/agent/workingState.ts'
+import { createZeroHitSkillPreflight } from '../electron/piSkillPreflight.ts'
 
 /**
  * Seam 2: the conversation is a pure projection of the Turn Record.
@@ -116,6 +118,29 @@ assert.deepEqual(spoken.map((row) => row.kind), ['notice'])
 assert.equal(spoken[0].kind === 'notice' ? spoken[0].content : '', '技能在此 run 不可用：read 工具未啟用。')
 assert.doesNotMatch(spoken[0].kind === 'notice' ? spoken[0].content : '', /未知的記錄項目/,
   'a kind this build knows must never reach the unknown-entry arm')
+
+// Host Skill preflight is audit metadata, not user-facing conversation. It is
+// emitted before the tool call, so falling through here used to show the
+// internal kind itself as an error in the live task timeline.
+const withSkillPreflight = appendTurnRecord(undefined, [{
+  kind: 'skill-invocation', source: 'host',
+  invocation: createZeroHitSkillPreflight({
+    state: createInitialWorkingState({ runId: 'skill-run', objective: 'write result' }),
+    step: 1,
+    batchId: 'batch-1',
+    tool: 'write',
+    callId: 'call-1',
+    identity: {
+      contractRevision: 1,
+      contractDigest: 'a'.repeat(64),
+      schemaDigest: 'b'.repeat(64),
+      toolSource: 'builtin',
+    },
+    args: { path: 'result.txt', content: 'done' },
+  }),
+}])
+assert.deepEqual(projectConversationRows(withSkillPreflight), [],
+  'Skill preflight audit metadata must not surface as an unknown conversation row')
 
 // ── tool-evidence is known, and deliberately never becomes a row ───────────
 // The Host writes the policy/evidence lifecycle (start, decision, result,

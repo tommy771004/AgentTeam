@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import { ThemePage } from '../components/SectionNav'
 import { SettingsHeader } from '../components/settings/SettingsChrome'
-import { useLearningStore } from '../store/learningStore'
+import { useLearningStore, type InstalledSkill } from '../store/learningStore'
 import { useAgentStore } from '../store/agentStore'
 import { PluginMarketplace } from '../components/PluginMarketplace'
 import { useProjectStore } from '../store/projectStore'
@@ -49,6 +49,229 @@ function SkillPinButton({
     >
       釘選（自動載入）
     </button>
+  )
+}
+
+const SKILL_SOURCE_LABEL: Record<InstalledSkill['source'], string> = {
+  agentstudio: 'AgentStudio',
+  project: '專案',
+  user: '本機',
+  system: '系統',
+}
+
+const SKILL_SOURCE_ICON: Record<InstalledSkill['source'], string> = {
+  agentstudio: 'auto_awesome',
+  project: 'folder_open',
+  user: 'extension',
+  system: 'settings_suggest',
+}
+
+function projectVisibleSkills(input: {
+  catalog: InstalledSkill[]
+  query: string
+  scope: string
+  showAllInstalled: boolean
+}): { normalizedQuery: string; scopedMatches: InstalledSkill[]; visibleSkills: InstalledSkill[] } {
+  const normalizedQuery = input.query.trim().toLocaleLowerCase()
+  const queryMatches = input.catalog.filter((skill) => !normalizedQuery
+    || `${skill.meta.name} ${skill.meta.description} ${skill.scope}`.toLocaleLowerCase().includes(normalizedQuery))
+  const scopedMatches = input.scope === 'all'
+    ? queryMatches
+    : queryMatches.filter((skill) => `${skill.source}:${skill.scope}` === input.scope)
+  const visibleSkills = input.scope === 'all' && !normalizedQuery && !input.showAllInstalled
+    ? scopedMatches.slice(0, 6)
+    : scopedMatches
+  return { normalizedQuery, scopedMatches, visibleSkills }
+}
+
+function SkillLibrary({
+  catalog,
+  diagnostics,
+  projectRoot,
+  saveSkill,
+  pinSkill,
+  unpinSkill,
+  restoreSkill,
+  removeSkill,
+  reload,
+  exportSkills,
+  exportStatus,
+}: {
+  catalog: InstalledSkill[]
+  diagnostics: Array<{ path: string; message: string }>
+  projectRoot?: string
+  saveSkill: (name: string, description: string, body: string) => Promise<void>
+  pinSkill: (name: string) => Promise<void>
+  unpinSkill: (name: string) => Promise<void>
+  restoreSkill: (name: string) => Promise<void>
+  removeSkill: (name: string) => Promise<void>
+  reload: (projectRoot?: string) => Promise<void>
+  exportSkills: () => void
+  exportStatus: string
+}) {
+  const [query, setQuery] = useState('')
+  const [scope, setScope] = useState('all')
+  const [showAllInstalled, setShowAllInstalled] = useState(false)
+  const [selectedName, setSelectedName] = useState<string | null>(null)
+  const [showCreate, setShowCreate] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newDescription, setNewDescription] = useState('')
+  const [newBody, setNewBody] = useState('')
+
+  const scopeOptions = [...new Map(catalog.map((skill) => [`${skill.source}:${skill.scope}`, {
+    id: `${skill.source}:${skill.scope}`,
+    label: skill.scope,
+  }])).values()]
+  const { normalizedQuery, scopedMatches, visibleSkills } = projectVisibleSkills({
+    catalog,
+    query,
+    scope,
+    showAllInstalled,
+  })
+  const selected = catalog.find((skill) => skill.meta.name === selectedName)
+
+  useEffect(() => {
+    setSelectedName(null)
+  }, [query, scope])
+
+  const mutate = async (operation: () => Promise<void>) => {
+    await operation()
+    await reload(projectRoot)
+  }
+
+  const create = async () => {
+    if (!newName.trim() || !newBody.trim()) return
+    await mutate(() => saveSkill(newName.trim(), newDescription.trim(), newBody.trim()))
+    setNewName('')
+    setNewDescription('')
+    setNewBody('')
+    setShowCreate(false)
+    setSelectedName(newName.trim())
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-5xl space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-3xl font-medium tracking-tight text-on-surface">技能</h2>
+          <p className="mt-1 text-sm text-outline">用任務專用技能擴充 AgentStudio</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={exportSkills} className="rounded-lg px-3 py-2 text-xs text-outline hover:bg-white/5 hover:text-on-surface">
+            匯出技能
+          </button>
+          <button type="button" onClick={() => setShowCreate((value) => !value)} className="rounded-lg bg-primary/15 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/20">
+            {showCreate ? '取消新增' : '新增技能'}
+          </button>
+        </div>
+      </div>
+
+      <label className="flex h-12 items-center gap-3 rounded-full border border-white/15 bg-white/[0.055] px-4 text-outline focus-within:border-primary/55 focus-within:text-on-surface">
+        <Icon name="search" size={21} />
+        <span className="sr-only">搜尋技能</span>
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="搜尋技能"
+          className="min-w-0 flex-1 bg-transparent text-sm text-on-surface outline-none placeholder:text-outline"
+        />
+        {query && <button type="button" onClick={() => setQuery('')} aria-label="清除搜尋"><Icon name="close" size={18} /></button>}
+      </label>
+
+      {showCreate && (
+        <section className="app-panel space-y-3 p-4" aria-label="新增技能">
+          <div className="grid gap-3 md:grid-cols-2">
+            <input className={input} placeholder="技能名稱" value={newName} onChange={(event) => setNewName(event.target.value)} />
+            <input className={input} placeholder="簡短描述" value={newDescription} onChange={(event) => setNewDescription(event.target.value)} />
+          </div>
+          <textarea className={`${input} min-h-36 font-[family-name:var(--font-mono)]`} placeholder="SKILL.md 指引內容" value={newBody} onChange={(event) => setNewBody(event.target.value)} />
+          <div className="flex justify-end"><button type="button" onClick={() => void create()} className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-on-primary">建立技能</button></div>
+        </section>
+      )}
+
+      <section aria-labelledby="installed-skills-title">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 id="installed-skills-title" className="text-sm font-semibold text-on-surface">{scope === 'all' ? '已安裝' : scopeOptions.find((option) => option.id === scope)?.label || '已安裝'}</h3>
+          <span className="text-xs text-outline">{scopedMatches.length} / {catalog.length}</span>
+        </div>
+        {visibleSkills.length ? (
+          <div className="grid grid-cols-1 gap-x-8 gap-y-2 md:grid-cols-2" role="listbox" aria-label="已安裝技能">
+            {visibleSkills.map((skill) => {
+              const active = selected?.meta.name === skill.meta.name
+              return (
+                <button
+                  key={`${skill.source}:${skill.path}`}
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  onClick={() => setSelectedName(active ? null : skill.meta.name)}
+                  className={`group flex min-w-0 items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors ${active ? 'bg-white/8' : 'hover:bg-white/[0.045]'}`}
+                >
+                  <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-black/20 text-outline"><Icon name={SKILL_SOURCE_ICON[skill.source]} size={22} /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-on-surface">{skill.meta.name}</span>
+                    <span className="mt-0.5 block truncate text-xs text-outline">{skill.meta.description || '沒有描述'}</span>
+                  </span>
+                  <Icon name={skill.readOnly ? 'lock' : 'check'} size={19} className="shrink-0 text-outline/80" />
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-outline">找不到符合條件的技能。</p>
+        )}
+        {scope === 'all' && !normalizedQuery && scopedMatches.length > 6 && (
+          <button type="button" onClick={() => setShowAllInstalled((value) => !value)} className="mt-3 text-xs text-outline hover:text-on-surface">
+            {showAllInstalled ? '收起完整清單' : `查看另外 ${scopedMatches.length - 6} 項`}
+          </button>
+        )}
+      </section>
+
+      <div className="flex gap-1 overflow-x-auto border-b border-white/8 pb-2 custom-scrollbar" role="tablist" aria-label="技能來源">
+        <button type="button" role="tab" aria-selected={scope === 'all'} onClick={() => setScope('all')} className={`shrink-0 rounded-lg px-3 py-1.5 text-xs ${scope === 'all' ? 'bg-white/8 text-on-surface' : 'text-outline hover:text-on-surface'}`}>全部</button>
+        {scopeOptions.map((option) => (
+          <button key={option.id} type="button" role="tab" aria-selected={scope === option.id} onClick={() => setScope(option.id)} className={`shrink-0 rounded-lg px-3 py-1.5 text-xs ${scope === option.id ? 'bg-white/8 text-on-surface' : 'text-outline hover:text-on-surface'}`}>{option.label}</button>
+        ))}
+      </div>
+
+      {selected && (
+        <section className="app-panel space-y-4 p-5" aria-label={`${selected.meta.name} 詳細資料`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-semibold text-on-surface">{selected.meta.name}</h3>
+                <span className="rounded-full bg-white/7 px-2 py-0.5 text-[10px] text-outline">{SKILL_SOURCE_LABEL[selected.source]} · {selected.scope}</span>
+                {selected.readOnly && <span className="rounded-full bg-white/7 px-2 py-0.5 text-[10px] text-outline">唯讀</span>}
+              </div>
+              <p className="mt-1 text-xs text-outline">{selected.meta.description || '沒有描述'}</p>
+              <p className="mt-2 break-all font-[family-name:var(--font-mono)] text-[10px] text-outline/80">{selected.path}</p>
+            </div>
+            {selected.managed && (
+              <div className="flex items-center gap-3">
+                {selected.meta.status === 'archived' ? (
+                  <button type="button" onClick={() => void mutate(() => restoreSkill(selected.meta.name))} className="text-xs text-primary">復原技能</button>
+                ) : (
+                  <SkillPinButton name={selected.meta.name} pinned={selected.meta.status === 'pinned'} pin={(name) => mutate(() => pinSkill(name))} unpin={(name) => mutate(() => unpinSkill(name))} />
+                )}
+                <button type="button" onClick={() => void mutate(() => removeSkill(selected.meta.name)).then(() => setSelectedName(null))} className="text-xs text-error">刪除</button>
+              </div>
+            )}
+          </div>
+          <details className="rounded-lg border border-white/10 bg-surface px-3 py-2">
+            <summary className="cursor-pointer text-xs text-outline">查看 SKILL.md</summary>
+            <pre className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap text-[12px] text-on-surface-variant custom-scrollbar font-[family-name:var(--font-mono)]">{selected.raw}</pre>
+          </details>
+        </section>
+      )}
+
+      {diagnostics.length > 0 && (
+        <details className="text-xs text-outline">
+          <summary className="cursor-pointer">{diagnostics.length} 個技能載入提示</summary>
+          <ul className="mt-2 space-y-1 pl-4">{diagnostics.slice(0, 20).map((item, index) => <li key={`${item.path}:${index}`}>{item.message}{item.path ? ` · ${item.path}` : ''}</li>)}</ul>
+        </details>
+      )}
+      {exportStatus && <p className="text-xs text-outline">{exportStatus}</p>}
+    </div>
   )
 }
 
@@ -151,7 +374,7 @@ async function canonicalMemoryExportFile(): Promise<{
 
 const META: Record<string, { title: string; subtitle: string }> = {
   memory: { title: '持久記憶', subtitle: 'USER / MEMORY · 跨 session 保留。' },
-  skills: { title: '技能庫', subtitle: 'SKILL.md 流程技能。' },
+  skills: { title: '技能', subtitle: '用任務專用技能擴充 AgentStudio。' },
   drafts: { title: '學習草稿', subtitle: '成功執行後自動產生的技能草稿。' },
   search: { title: '跨會話搜尋', subtitle: '在記憶、技能與封存中檢索。' },
   prompt: { title: '人格與上下文', subtitle: 'SOUL / AGENTS 穩定提示層。' },
@@ -173,6 +396,8 @@ export function LearningPage() {
     memory,
     memoryProjection,
     skills,
+    skillCatalog,
+    skillDiagnostics,
     events,
     pendingDrafts,
     soul,
@@ -194,7 +419,7 @@ export function LearningPage() {
     unpinSkill,
     restoreSkill,
     removeSkill,
-    refresh,
+    loadSkillCatalog,
   } = useLearningStore()
   const archive = useAgentStore((s) => s.archive)
   const loadArchive = useAgentStore((s) => s.loadArchive)
@@ -208,16 +433,16 @@ export function LearningPage() {
   const [query, setQuery] = useState('')
   const [soulEdit, setSoulEdit] = useState('')
   const [agentsEdit, setAgentsEdit] = useState('')
-  const [newSkillName, setNewSkillName] = useState('')
-  const [newSkillDesc, setNewSkillDesc] = useState('')
-  const [newSkillBody, setNewSkillBody] = useState('')
-  const [selectedSkill, setSelectedSkill] = useState<string | null>(null)
   const [exportStatus, setExportStatus] = useState('')
 
   useEffect(() => {
     void load()
     void loadArchive()
   }, [load, loadArchive])
+
+  useEffect(() => {
+    if (section === 'skills') void loadSkillCatalog(projectRoot)
+  }, [loadSkillCatalog, projectRoot, section])
 
   useEffect(() => {
     setUserEdit(memory.userProfile)
@@ -228,8 +453,6 @@ export function LearningPage() {
     setSoulEdit(soul)
     setAgentsEdit(agents)
   }, [soul, agents])
-
-  const selected = skills.find((s) => s.meta.name === selectedSkill) || skills[0]
 
   const meta = META[section] || META.memory
 
@@ -289,11 +512,11 @@ export function LearningPage() {
       sections={SECTIONS}
       activeId={section}
       onChange={setSection}
-      narrow={section !== 'plugins'}
+      narrow={section !== 'plugins' && section !== 'skills'}
       immersive={section === 'plugins'}
     >
-      {section !== 'plugins' && <SettingsHeader title={meta.title} subtitle={meta.subtitle} />}
-      {section !== 'plugins' && (
+      {section !== 'plugins' && section !== 'skills' && <SettingsHeader title={meta.title} subtitle={meta.subtitle} />}
+      {section !== 'plugins' && section !== 'skills' && (
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className="text-[10px] text-outline">Project learning export</span>
           <button type="button" onClick={() => void exportLearning('skill')} className="px-2.5 py-1.5 rounded border border-primary/30 text-primary text-[10px] font-semibold">匯出技能</button>
@@ -377,111 +600,19 @@ export function LearningPage() {
 
         {section === 'skills' && <SkillMigrationDiagnostics />}
         {section === 'skills' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="app-panel overflow-hidden md:col-span-1">
-              <div className="px-3 py-2 border-b border-white/10 text-sm font-semibold">
-                技能（{skills.length}）
-              </div>
-              <div className="max-h-80 overflow-y-auto custom-scrollbar">
-                {skills.map((s) => (
-                  <button
-                    key={s.meta.name}
-                    type="button"
-                    onClick={() => setSelectedSkill(s.meta.name)}
-                    className={`w-full text-left px-3 py-2 border-b border-white/5 text-sm hover:bg-white/5 ${
-                      selected?.meta.name === s.meta.name ? 'bg-primary/10 text-primary' : ''
-                    }`}
-                  >
-                    <div className="font-medium">{s.meta.name}</div>
-                    <div className="text-[11px] text-outline truncate">{s.meta.description}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="app-panel p-4 md:col-span-2 space-y-2">
-              {selected ? (
-                <>
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold">{selected.meta.name}</h3>
-                    {selected.meta.status === 'archived' ? (
-                      <button
-                        type="button"
-                        onClick={() => void restoreSkill(selected.meta.name)}
-                        className="text-xs text-primary"
-                      >
-                        復原技能
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-3">
-                        <SkillPinButton
-                          name={selected.meta.name}
-                          pinned={selected.meta.status === 'pinned'}
-                          pin={pinSkill}
-                          unpin={unpinSkill}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => void removeSkill(selected.meta.name)}
-                          className="text-xs text-error"
-                        >
-                          刪除
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-xs text-outline">
-                    {selected.meta.createdBy === 'agent' ? '代理建立' : '使用者'} · v
-                    {selected.meta.version || '—'} · {selected.meta.status || 'active'}
-                  </p>
-                  <pre className="bg-surface border border-white/10 rounded-lg p-3 text-[12px] font-[family-name:var(--font-mono)] text-on-surface-variant max-h-96 overflow-y-auto custom-scrollbar whitespace-pre-wrap">
-                    {selected.raw}
-                  </pre>
-                </>
-              ) : (
-                <p className="text-sm text-outline">選擇左側技能</p>
-              )}
-              <div className="border-t border-white/10 pt-3 space-y-2">
-                <h4 className="text-sm font-semibold">新增技能</h4>
-                <input
-                  className={input}
-                  placeholder="名稱"
-                  value={newSkillName}
-                  onChange={(e) => setNewSkillName(e.target.value)}
-                />
-                <input
-                  className={input}
-                  placeholder="描述（≤60 字）"
-                  value={newSkillDesc}
-                  onChange={(e) => setNewSkillDesc(e.target.value)}
-                />
-                <textarea
-                  className={ta}
-                  rows={5}
-                  placeholder="Markdown 正文…"
-                  value={newSkillBody}
-                  onChange={(e) => setNewSkillBody(e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!newSkillName.trim() || !newSkillBody.trim()) return
-                    void saveSkill(
-                      newSkillName.trim(),
-                      newSkillDesc.trim() || newSkillName.trim(),
-                      newSkillBody,
-                    )
-                    setNewSkillName('')
-                    setNewSkillDesc('')
-                    setNewSkillBody('')
-                    refresh()
-                  }}
-                  className="px-3 py-2 rounded-lg bg-primary-container text-on-primary-container text-xs font-semibold"
-                >
-                  儲存技能
-                </button>
-              </div>
-            </div>
-          </div>
+          <SkillLibrary
+            catalog={skillCatalog}
+            diagnostics={skillDiagnostics}
+            projectRoot={projectRoot || undefined}
+            saveSkill={saveSkill}
+            pinSkill={pinSkill}
+            unpinSkill={unpinSkill}
+            restoreSkill={restoreSkill}
+            removeSkill={removeSkill}
+            reload={loadSkillCatalog}
+            exportSkills={() => void exportLearning('skill')}
+            exportStatus={exportStatus}
+          />
         )}
 
         {section === 'drafts' && (

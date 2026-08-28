@@ -98,7 +98,8 @@ export type PiHostResponse = {
     diagnostics?: Array<{ path: string; message?: unknown }>
     report?: { skillsDir?: string; results?: PiSkillSyncResult[] }
     /** The Host skills directory projected back out for renderer hydration (resources/read-skill-files). */
-    files?: Array<{ path: string; raw: string }>
+    files?: import('./piSkills.ts').PiSkillCatalogFile[]
+    skillDiagnostics?: Array<{ path: string; message: string }>
     resolved?: boolean
     /** Structured payload of one tool execution (tools/pack). */
     item?: unknown
@@ -329,7 +330,7 @@ import {
   workspaceTextSearchAvailability,
 } from './piWorkspaceTextSearchRuntime.ts'
 import { configurePiMessagingGateway } from './piExtensionPacks/integrations.ts'
-import { discoveredPiSkills, readPiSkillFiles, selectFrozenPiPreflightSkills, syncPiSkillsFromRenderer, type PiSkillSyncResult } from './piSkills.ts'
+import { discoveredPiSkills, readPiSkillCatalog, selectFrozenPiPreflightSkills, syncPiSkillsFromRenderer, type PiSkillSyncResult } from './piSkills.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
 import { setPiDelegationBridge, setPiMemoryBridge } from './piPackBridges.ts'
 import { setPiPlanAnnouncer as installPlanAnnouncer } from './piExtensionPacks/interactionPlanning.ts'
@@ -2279,6 +2280,11 @@ function handleMemoryOrCapabilityRequest(
   return handleDurableMemoryRequest(state, input, id, emit) || handleCapabilityRequest(state, input, id)
 }
 
+function requestedSkillCatalogProjectRoot(params: Record<string, unknown> | undefined): string | undefined {
+  const value = params?.projectRoot
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
 function frozenRunLearningCandidate(input: {
   prompt: string
   runId: string
@@ -3014,9 +3020,12 @@ export function handlePiHostRequest(
     // The renderer projects the Host-owned skills directory into the 技能庫
     // (ADR-0034: Pi is the only discovery system). Read-only by contract —
     // writes go back through resources/sync-skills.
-    return readPiSkillFiles(resolvePiAgentDir()).then((files) => ({
+    return readPiSkillCatalog({
+      agentDir: resolvePiAgentDir(),
+      projectRoot: requestedSkillCatalogProjectRoot(input.params),
+    }).then(({ files, diagnostics }) => ({
       id,
-      result: { files },
+      result: { files, skillDiagnostics: diagnostics },
     })).catch((error: unknown) => errorResponse(id, 'runtime_error', error instanceof Error ? error.message : 'Skill file read failed')).then((message) => [message])
   }
   const capabilityResponse = handleMemoryOrCapabilityRequest(state, input, id, emit)

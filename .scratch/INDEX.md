@@ -8,11 +8,11 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 | Effort | Spec | Frontier | Notes |
 |--------|------|----------|-------|
-| **context-usage-panel** | [spec.md](context-usage-panel/spec.md) | [01 usage 記錄擴充 + Host 補抓](context-usage-panel/issues/01-usage-record-capture.md) | 8 張 `可交給代理` tickets（勾選框核實 0/38 勾，確實未動）。opencode 式 session 上下文面板：token/cost/快取落在 `step-end` usage（ADR-0039/0049 語意），單一測試接縫為 `projectContextUsage` 純投影。依賴：01 先行 → 02/03 並行 → 04/06/07 並行 → 05←03+04 → 08 收口。 |
-| **external-cli-durable-harness** | [spec.md](external-cli-durable-harness/spec.md) | [01 External CLI Run Session seam](external-cli-durable-harness/issues/01-expand-external-cli-run-session-seam.md) | 7 張 `可交給代理` tickets（2026-08-26 核實：66 個驗收框全開，確實未動）；01 先建立 expand seam，之後 02/03/05 可並行，04 依賴 02/03，06 依賴 02，07 為完整 qualification。trf#11 的 seam-1 真 CLI 斷言由本 effort 承接。 |
+| **context-usage-panel** | [spec.md](context-usage-panel/spec.md) | [08 qualification](context-usage-panel/issues/08-qualification.md) | 實作已存在：`ContextUsagePanel`、`projectContextUsage` 與 context projection smoke 均在主鏈；2026-08-28 focused smoke 通過。票內 acceptance 尚未逐條對帳，手動 UI／舊記錄 replay 證據仍須補齊，故不宣稱 resolved。 |
+| **external-cli-durable-harness** | [spec.md](external-cli-durable-harness/spec.md) | [07 qualification](external-cli-durable-harness/issues/07-conversation-concurrency-release-qualification.md) | Durable harness 已落地且 2026-08-28 focused smoke 25/25 通過（fake clock / controllable transport）；不得再記為「確實未動」。真 Codex／Claude 等 CLI end-to-end record qualification 仍是 residual，未取得實機證據前不標 resolved。 |
 | **harness-gap-closure** | [spec.md](harness-gap-closure/spec.md) | [01 統一架構敘述](harness-gap-closure/issues/01-unify-architecture-narrative.md) | #15 已補 active + retained run selector，不再固定顯示第一個 active run；其 redaction 類別 UX 仍待完成。其餘 frontier 維持 #01、#07、#10、#11 與 #09 範圍裁決。 |
-| **pi-agent-runtime-contract** | spec（見目錄） | [#14 Linux bwrap 真機](pi-agent-runtime-contract/issues/14-linux-bubblewrap-builtin-shell-tracer.md) · [#18 git preferences 裁決](pi-agent-runtime-contract/issues/18-git-preferences-reach-no-runtime.md) · [#22 rollup](pi-agent-runtime-contract/issues/22-remaining-work-rollup.md) | Automated test gate 已收口：37 支 deterministic tests 接進主鏈、1 支過時 renderer harness 移除、6 支真機/release qualification 明確列為 manual。殘餘為 #14 Linux CI 首綠、#18 git `--force` 裁決與 #22 對應外部證據。 |
-| **subdesign-p0-harness-gaps** | [spec.md](subdesign-p0-harness-gaps/spec.md) | [01 Gate evidence contract](subdesign-p0-harness-gaps/issues/01-gate-evidence-contract-fail-closed.md) · [05 Pin 模式端到端](subdesign-p0-harness-gaps/issues/05-pin-mode-end-to-end.md) · [07 Register 快照 + restore](subdesign-p0-harness-gaps/issues/07-register-snapshot-restore.md) | #05 Host-side selector→range scope、一次性 scopeId 與 patch enforcement 已完成；只剩元件層 idle→pinning→submitted fixture，故未標 resolved。其餘 gates/snapshots 線維持原 frontier。 |
+| **pi-agent-runtime-contract** | spec（見目錄） | [#14 Linux bwrap 真機](pi-agent-runtime-contract/issues/14-linux-bubblewrap-builtin-shell-tracer.md) · [#22 rollup](pi-agent-runtime-contract/issues/22-remaining-work-rollup.md) | Automated test gate 已收口。#18 已採 Host enforcement：force push deny、不靜默改寫、gate 前套用，focused smoke 12/12（含真實 turn）通過；剩餘 frontier 是 #14 Linux CI 首綠與 #22 外部證據。 |
+| **subdesign-p0-harness-gaps** | [spec.md](subdesign-p0-harness-gaps/spec.md) | [01 Gate evidence contract](subdesign-p0-harness-gaps/issues/01-gate-evidence-contract-fail-closed.md) | #05 pin fixture 與 #07 transactional snapshots 已於 2026-08-28 收口。Pi Core gate 已移除模型 verdict，改由 Electron main 真實 runner 量測並簽章；尚需依 #01 原票語意對帳 store「拒絕」與目前 normalizer「降級 needs-revision」差異。 |
 | **subdesign-architecture-deepening** | [spec.md](subdesign-architecture-deepening/spec.md) | [01 SubDesign workspace module](subdesign-architecture-deepening/issues/01-deepen-subdesign-workspace-module.md) | 5 張 `可交給代理` tickets；01 與 02 可先行，03/04 依賴 01，05 依賴 02/03 |
 
 ## Resolved this session chain
@@ -52,7 +52,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 ## 待維護者裁決 queue（顯式，不埋在雜訊裡）
 
 1. **harness-gap-closure #09** — builtin shell 是否納入 ADR-0022 sandbox 義務（範圍決策）。
-2. **runtime-contract #18** — git `--force` 語意移除裁決（傾向 deny + reason，與 gate 一致；若移除需連動 Settings UI／`LlmSettings` 欄位／re-export）。
+2. （已裁決）**runtime-contract #18** — 採 Host enforcement：不允許時 deny + reason，不靜默移除 `--force`；focused smoke 12/12。
 
 ## Remaining blocked / non-agent
 

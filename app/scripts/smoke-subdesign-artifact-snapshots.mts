@@ -49,7 +49,7 @@ await test('captureSnapshot reads workspace files and stores a per-revision snap
         },
       },
     }
-    const registered = useSubDesignArtifactStore.getState().register({
+    const registered = await useSubDesignArtifactStore.getState().register({
       id: 'artifact_snap_qa',
       briefId: 'brief_snap_qa',
       kind: 'html',
@@ -61,8 +61,6 @@ await test('captureSnapshot reads workspace files and stores a per-revision snap
       status: 'complete',
     })
     assert.equal(registered.ok, true)
-    const result = await useSubDesignArtifactStore.getState().captureSnapshot('artifact_snap_qa')
-    assert.equal(result.ok, true)
     const index = useSubDesignArtifactStore.getState().snapshots
     const snapshot = findSnapshot(index as SubDesignArtifactSnapshotIndex, 'artifact_snap_qa', 1)
     assert.ok(snapshot)
@@ -89,7 +87,7 @@ await test('restoreRevision writes files back and appends a new revision without
         },
       },
     }
-    useSubDesignArtifactStore.getState().register({
+    await useSubDesignArtifactStore.getState().register({
       id: 'artifact_restore_qa',
       briefId: 'brief_restore_qa',
       kind: 'html',
@@ -100,9 +98,8 @@ await test('restoreRevision writes files back and appends a new revision without
       supportingFiles: [],
       status: 'complete',
     })
-    await useSubDesignArtifactStore.getState().captureSnapshot('artifact_restore_qa')
-    // r2：內容變更後的修訂。自動快照是 fire-and-forget，先讓它落地。
-    useSubDesignArtifactStore.getState().register({
+    // r2：register 只有在快照落地後才回傳成功。
+    await useSubDesignArtifactStore.getState().register({
       id: 'artifact_restore_qa',
       briefId: 'brief_restore_qa',
       kind: 'html',
@@ -113,7 +110,6 @@ await test('restoreRevision writes files back and appends a new revision without
       supportingFiles: [],
       status: 'complete',
     })
-    await new Promise((resolve) => setTimeout(resolve, 10))
     const before = useSubDesignArtifactStore.getState().findById('artifact_restore_qa')
     assert.equal(before?.revision, 2)
 
@@ -121,7 +117,6 @@ await test('restoreRevision writes files back and appends a new revision without
     assert.equal(result.ok, true)
     if (!result.ok) return
     assert.equal(result.artifact.revision, 3)
-    await new Promise((resolve) => setTimeout(resolve, 10))
     const after = useSubDesignArtifactStore.getState().findById('artifact_restore_qa')
     assert.equal(after?.revision, 3)
     assert.equal(after?.title, 'Restore QA')
@@ -136,11 +131,11 @@ await test('restoreRevision writes files back and appends a new revision without
   }
 })
 
-await test('restoreRevision fails gracefully when the revision has no snapshot', async () => {
+await test('register fails closed and does not commit when snapshot APIs are unavailable', async () => {
   const restore = resetStore()
   try {
     ;(globalThis as { window?: unknown }).window = { subagents: { tools: {} } }
-    useSubDesignArtifactStore.getState().register({
+    const registered = await useSubDesignArtifactStore.getState().register({
       id: 'artifact_nosnap_qa',
       briefId: 'brief_nosnap_qa',
       kind: 'html',
@@ -151,10 +146,10 @@ await test('restoreRevision fails gracefully when the revision has no snapshot',
       supportingFiles: [],
       status: 'complete',
     })
-    const result = await useSubDesignArtifactStore.getState().restoreRevision('artifact_nosnap_qa', 1)
-    assert.equal(result.ok, false)
-    if (result.ok) return
-    assert.match(result.errors.join('；'), /快照/)
+    assert.equal(registered.ok, false)
+    if (registered.ok) return
+    assert.match(registered.errors.join('；'), /耐久快照/)
+    assert.equal(useSubDesignArtifactStore.getState().findById('artifact_nosnap_qa'), null)
   } finally {
     useSubDesignArtifactStore.setState(restore)
     ;(globalThis as { window?: unknown }).window = priorWindow

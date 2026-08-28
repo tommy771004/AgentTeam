@@ -2377,6 +2377,8 @@ await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and r
   const projection = fs.readFileSync(path.join(appRoot, 'src/agent/workingStateProjection.ts'), 'utf8')
   const store = fs.readFileSync(path.join(appRoot, 'src/store/workingStateProjectionStore.ts'), 'utf8')
   const view = fs.readFileSync(path.join(appRoot, 'src/components/WorkingStateView.tsx'), 'utf8')
+  const progress = fs.readFileSync(path.join(appRoot, 'src/components/ExecutionStepsProgress.tsx'), 'utf8')
+  const feed = fs.readFileSync(path.join(appRoot, 'src/components/RunProcessFeed.tsx'), 'utf8')
   const archivePage = fs.readFileSync(path.join(appRoot, 'src/pages/RecordsPage.tsx'), 'utf8')
   const threadStore = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
   assert.match(app, /hydrateHostSessions\(sessions\)/)
@@ -2392,6 +2394,15 @@ await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and r
   assert.match(view, /data-working-state-verification/)
   assert.doesNotMatch(view, /<input|<textarea|contentEditable|onChange|onSubmit/,
     'the renderer may inspect Working State but cannot edit or submit it')
+  assert.doesNotMatch(feed, /WorkingStateView/,
+    'the full Working State document must not appear in the conversation feed')
+  assert.match(feed, /<ExecutionStepsProgress tasks=\{tasks\} \/>[\s\S]*data-run-timeline="record"/,
+    'compact live step progress stays directly above the conversation timeline')
+  assert.match(progress, /執行步驟：\{completed\}\/\{tasks\.length\}/)
+  assert.match(progress, /onMouseEnter=\{\(\) => setHoverOpen\(true\)\}/)
+  assert.match(progress, /aria-expanded=\{open\}/)
+  assert.match(progress, /task\.status === 'done'[\s\S]*check_circle/,
+    'completed agent-returned steps render with a check mark')
   assert.match(archivePage, /projectWorkingStateEntries\([\s\S]*?turnRecordEntries\(record\),\s*false,/,
     'a renderer archive stays unverified until it is matched to Host-owned identity')
   assert.match(threadStore, /hydrateHostSessions\(\[\{ \.\.\.session, archived: true \}\]\)/,

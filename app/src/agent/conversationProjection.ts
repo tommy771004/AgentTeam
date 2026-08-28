@@ -48,6 +48,20 @@ export type ConversationRow =
 type ToolCallEntry = Extract<TurnRecordEntry, { kind: 'tool-call' }>
 type ApprovalEntry = Extract<TurnRecordEntry, { kind: 'approval' }>
 
+const NON_CONVERSATION_ENTRY_KINDS = new Set<TurnRecordEntry['kind']>([
+  'tool-evidence',
+  'state-proposal',
+  'state-check',
+  'working-state',
+  'delegation-assignment',
+  'delegation-observation',
+  'delegation-check',
+  'memory-control-package',
+  'memory-control-lifecycle',
+  'skill-invocation',
+  'skill-context',
+])
+
 function conversationToolCallRow(entry: ToolCallEntry): Extract<ConversationRow, { kind: 'tool' }> {
   const presented = presentedToolSummary(entry.tool, 'args' in entry ? entry.args : undefined)
   return {
@@ -92,6 +106,7 @@ function applyApprovalRow(rows: ConversationRow[], entry: ApprovalEntry): void {
 export function projectConversationRows(record: TurnRecord | undefined): ConversationRow[] {
   const rows: ConversationRow[] = []
   for (const entry of turnRecordEntries(record)) {
+    if (NON_CONVERSATION_ENTRY_KINDS.has(entry.kind)) continue
     const base = { id: `e${entry.seq}`, seq: entry.seq, turn: entry.turn }
     switch (entry.kind) {
       case 'user-text':
@@ -140,16 +155,6 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
         break
       case 'memory-recall':
         rows.push({ ...base, kind: 'notice', content: formatMemoryRecallNotice(entry) })
-        break
-      case 'tool-evidence':
-        // The Host's policy/evidence lifecycle for one invocation — start,
-        // decision, result, settlement — several entries per tool call. Its
-        // readable facts already surface as the tool-call/tool-result pair
-        // and any approval notice; projecting the lifecycle itself would
-        // repeat each action four times over. Named here on purpose: it is a
-        // kind this build knows and deliberately leaves to the record, which
-        // is a different fact from the unknown-entry notice the default arm
-        // writes.
         break
       case 'notice':
         // The entry kind whose whole purpose is to be read. It used to fall

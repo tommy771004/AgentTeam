@@ -3,7 +3,7 @@ import { usePiHostEventStore } from '../store/piHostEventStore'
 
 type PiHostState = 'stopped' | 'starting' | 'ready' | 'crashed' | 'error'
 
-export function PiHostStatusPill({ collapsed = false }: { collapsed?: boolean }) {
+export function PiHostStatusPill() {
   const [state, setState] = useState<PiHostState>('starting')
   const latestToolEvent = usePiHostEventStore((store) => store.events.filter((event) => event.event.startsWith('host/tool-')).at(-1))
 
@@ -29,11 +29,13 @@ export function PiHostStatusPill({ collapsed = false }: { collapsed?: boolean })
 
   return (
     <div
-      className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[10px] text-outline border border-white/8 bg-white/[0.03]"
+      className="flex h-full max-w-[45vw] items-center gap-1.5 px-3 text-[10px] text-outline"
       title={`${label}${toolHint}`}
+      role="status"
+      aria-live="polite"
     >
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${tone}`} />
-      {!collapsed && <span className="truncate">{label}{toolHint}</span>}
+      <span className="truncate">{label}{toolHint}</span>
     </div>
   )
 }

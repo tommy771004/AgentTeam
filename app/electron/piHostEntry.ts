@@ -16,10 +16,11 @@ import { openPiHostStorage } from './piHostStorage.ts'
 import { MemoryStorageLifecycleError, storageLifecycleError } from './memoryStorageLifecycle.ts'
 import { JsonMemoryControlPackageRepository } from './memoryControlPackageRepository.ts'
 import { loadMemoryControlEvaluationAuthority } from './memoryControlEvaluationAuthority.ts'
+import { configurePiHostServiceTransport, resolvePiHostServiceResponse } from './piHostServices.ts'
 
 type ParentPort = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
-  postMessage(message: PiHostMessage): void
+  postMessage(message: unknown): void
 }
 
 /**
@@ -204,8 +205,12 @@ const createEntryHost = (
 ) => createConfiguredHost(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints)
 
 if (parentPort) {
+  configurePiHostServiceTransport((message) => parentPort.postMessage(message))
   const server = createEntryHost((message) => parentPort.postMessage(message), initialSnapshot, persist, refreshSubscriptionConfig)
-  parentPort.on('message', (event) => server.handle(event.data))
+  parentPort.on('message', (event) => {
+    if (resolvePiHostServiceResponse(event.data)) return
+    void server.handle(event.data)
+  })
 } else {
   const server = createEntryHost((message) => process.stdout.write(`${JSON.stringify(message)}\n`), initialSnapshot, persist, refreshSubscriptionConfig)
   const inFlight = new Set<Promise<void>>()

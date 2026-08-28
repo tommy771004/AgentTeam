@@ -331,7 +331,7 @@ async function executePiHostTurn(
     }
     if (result.pluginExecution?.state === 'completed' && result.pluginExecution.artifact) {
       const { useSubDesignArtifactStore } = await import('./subDesignArtifactStore.ts')
-      const registered = useSubDesignArtifactStore.getState().register(
+      const registered = await useSubDesignArtifactStore.getState().register(
         result.pluginExecution.artifact,
         { briefId: result.pluginExecution.briefId },
         overrides.projectRoot,
