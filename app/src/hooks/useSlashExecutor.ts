@@ -21,6 +21,38 @@ import { useProjectStore } from '../store/projectStore'
 import { projectContextUsage } from '../agent/contextUsageProjection'
 import { contextUsageReportLines, resolveKnownContextWindow } from '../agent/contextUsageView'
 
+async function runDynamicSlashCommand(
+  cmd: SlashCommand,
+  args: string,
+  log: (line: string) => void,
+  runEmbedded: (goal: string, opts?: { skipUserBubble?: boolean }) => Promise<void>,
+): Promise<boolean> {
+  if (cmd.source === 'skill' && cmd.skillName) {
+    const task = args.trim()
+    await runEmbedded(`/skill:${cmd.skillName}${task ? ` ${task}` : ''}`, { skipUserBubble: true })
+    return true
+  }
+  if (cmd.source !== 'opencode' || !cmd.template) return false
+
+  const prompt = expandCommandTemplate(cmd.template, args)
+  if (!prompt.trim()) {
+    log(`/${cmd.name} 模板為空`)
+    return true
+  }
+  log(`OpenCode command /${cmd.name}${cmd.agentHint ? ` · agent=${cmd.agentHint}` : ''}`)
+  const thr = useThreadStore.getState()
+  if (thr.activeId) {
+    if (cmd.agentHint === 'plan' || cmd.agentHint === 'build') {
+      thr.setAgentMode(thr.activeId, cmd.agentHint)
+    }
+    if (cmd.modelHint) thr.setModel(thr.activeId, cmd.modelHint)
+    thr.pushBubble(thr.activeId, 'user', `/${cmd.name}${args ? ` ${args}` : ''}`)
+    thr.pushBubble(thr.activeId, 'system', prompt.slice(0, 500))
+  }
+  await runEmbedded(prompt, { skipUserBubble: true })
+  return true
+}
+
 /**
  * Shared slash command handler — Claude / Codex style
  */
@@ -107,26 +139,9 @@ export function useSlashExecutor() {
       return
     }
 
-    // OpenCode dynamic commands → expand template → run as task
-    if (cmd.source === 'opencode' && cmd.template) {
-      const prompt = expandCommandTemplate(cmd.template, args)
-      if (!prompt.trim()) {
-        log(`/${name} 模板為空`)
-        return
-      }
-      log(`OpenCode command /${name}${cmd.agentHint ? ` · agent=${cmd.agentHint}` : ''}`)
-      const thr = useThreadStore.getState()
-      if (thr.activeId) {
-        if (cmd.agentHint === 'plan' || cmd.agentHint === 'build') {
-          thr.setAgentMode(thr.activeId, cmd.agentHint)
-        }
-        if (cmd.modelHint) thr.setModel(thr.activeId, cmd.modelHint)
-        thr.pushBubble(thr.activeId, 'user', `/${name}${args ? ` ${args}` : ''}`)
-        thr.pushBubble(thr.activeId, 'system', prompt.slice(0, 500))
-      }
-      await runEmbedded(prompt, { skipUserBubble: true })
-      return
-    }
+    // Dynamic commands are handled outside the large builtin switch. Skill
+    // shortcuts become Pi-native /skill:<name>; OpenCode keeps its template path.
+    if (await runDynamicSlashCommand(cmd, args, log, runEmbedded)) return
 
     switch (name) {
       case 'help': {

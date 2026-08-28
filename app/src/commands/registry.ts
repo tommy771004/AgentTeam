@@ -11,6 +11,7 @@ export type SlashCommandCategory =
   | 'nav'
   | 'tools'
   | 'learning'
+  | 'skill'
   | 'opencode'
 
 export interface SlashCommand {
@@ -22,8 +23,12 @@ export interface SlashCommand {
   argsHint?: string
   /** 若為 true，需要額外參數才執行 */
   needsArgs?: boolean
-  /** Dynamic OpenCode command */
-  source?: 'builtin' | 'opencode'
+  /** Dynamic OpenCode command or Host-discovered skill shortcut. */
+  source?: 'builtin' | 'opencode' | 'skill'
+  /** Exact Host skill id; slash name may be sanitized or collision-prefixed. */
+  skillName?: string
+  /** Human-facing skill name shown in the composer chip. */
+  displayName?: string
   /** Template with $ARGUMENTS for OpenCode commands */
   template?: string
   /** Prefer agent for this command */
@@ -355,6 +360,7 @@ const CATEGORY_ZH: Record<SlashCommandCategory, string> = {
   nav: '導覽',
   tools: '工具',
   learning: '學習',
+  skill: '技能',
   opencode: 'OpenCode',
 }
 
@@ -382,21 +388,32 @@ type DynamicCmd = {
   source?: string
 }
 
+export type SkillSlashCommandDef = {
+  meta: {
+    name: string
+    description?: string
+    status?: 'active' | 'pinned' | 'archived'
+  }
+}
+
 /**
  * Merge builtin + OpenCode dynamic commands.
  * Dynamic names that collide with builtin get `oc-` prefix.
  */
-export function getAllSlashCommands(dynamic: DynamicCmd[] = []): SlashCommand[] {
-  const builtinNames = new Set(
+export function getAllSlashCommands(
+  dynamic: DynamicCmd[] = [],
+  skills: SkillSlashCommandDef[] = [],
+): SlashCommand[] {
+  const claimedNames = new Set(
     SLASH_COMMANDS.flatMap((c) => [c.name, ...(c.aliases || [])]),
   )
   const extra: SlashCommand[] = []
   for (const d of dynamic) {
     if (!d.template?.trim()) continue
     let name = sanitizeSlashName(d.id || d.name)
-    if (builtinNames.has(name)) name = `oc-${name}`
+    if (claimedNames.has(name)) name = `oc-${name}`
     if (extra.some((e) => e.name === name)) continue
-    builtinNames.add(name)
+    claimedNames.add(name)
     extra.push({
       name,
       description: d.description || `OpenCode: ${d.name || d.id}`,
@@ -410,35 +427,72 @@ export function getAllSlashCommands(dynamic: DynamicCmd[] = []): SlashCommand[] 
       aliases: d.name && sanitizeSlashName(d.name) !== name ? [sanitizeSlashName(d.name)] : undefined,
     })
   }
+  for (const skill of skills) {
+    const skillName = skill.meta.name.trim()
+    if (!skillName || skill.meta.status === 'archived') continue
+    const baseName = sanitizeSlashName(skillName)
+    const name = claimedNames.has(baseName) ? `skill-${baseName}` : baseName
+    if (claimedNames.has(name)) continue
+    claimedNames.add(name)
+    extra.push({
+      name,
+      description: skill.meta.description || `使用 ${skillName} 技能`,
+      category: 'skill',
+      argsHint: '[任務…]',
+      source: 'skill',
+      skillName,
+      displayName: skillName,
+    })
+  }
   return [
     ...SLASH_COMMANDS.map((c) => ({ ...c, source: c.source || ('builtin' as const) })),
     ...extra,
   ]
 }
 
-/** Live list (builtin + hydrated OpenCode commands). Safe for non-React call sites. */
+/** Live list (builtin + hydrated OpenCode commands + Host skill projection). */
 export function getLiveSlashCommands(): SlashCommand[] {
+  let dynamic: DynamicCmd[] = []
+  let skills: SkillSlashCommandDef[] = []
   try {
-    // Dynamic import avoided: store is lightweight; only read getState
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require('../store/opencodeConfigStore') as {
       useOpenCodeConfigStore: { getState: () => { commands?: DynamicCmd[] } }
     }
-    return getAllSlashCommands(mod.useOpenCodeConfigStore.getState().commands || [])
+    dynamic = mod.useOpenCodeConfigStore.getState().commands || []
   } catch {
-    return getAllSlashCommands()
+    // Plain browser/test callers can still use the builtin list.
   }
+  try {
+    // Read the Host-owned catalog projection, never the legacy Hermes skill copy.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('../store/learningStore') as {
+      useLearningStore: { getState: () => { skillCatalog?: SkillSlashCommandDef[] } }
+    }
+    skills = mod.useLearningStore.getState().skillCatalog || []
+  } catch {
+    // The catalog hydrates asynchronously; it will appear on the next read.
+  }
+  return getAllSlashCommands(dynamic, skills)
 }
 
-export function resolveSlashCommand(token: string): SlashCommand | undefined {
+export function resolveSlashCommand(
+  token: string,
+  dynamic?: DynamicCmd[],
+  skills?: SkillSlashCommandDef[],
+): SlashCommand | undefined {
   const name = token.replace(/^\//, '').toLowerCase()
-  const all = getLiveSlashCommands()
+  const all = dynamic || skills ? getAllSlashCommands(dynamic, skills) : getLiveSlashCommands()
   return all.find((c) => c.name === name || c.aliases?.some((a) => a === name))
 }
 
 /** Filter commands by query after `/` */
-export function filterSlashCommands(query: string): SlashCommand[] {
-  const all = getLiveSlashCommands()
+export function filterSlashCommands(
+  query: string,
+  dynamic?: DynamicCmd[],
+  skills?: SkillSlashCommandDef[],
+): SlashCommand[] {
+  const all = dynamic || skills ? getAllSlashCommands(dynamic, skills) : getLiveSlashCommands()
   const q = query.replace(/^\//, '').toLowerCase().trim()
   if (!q) return all
   return all.filter((c) => {

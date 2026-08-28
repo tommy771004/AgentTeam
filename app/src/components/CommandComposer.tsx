@@ -15,11 +15,13 @@ import { SlashCommandMenu } from './SlashCommandMenu'
 import { ComposerLoader } from './primitives/ComposerLoader'
 import {
   filterSlashCommands,
+  getAllSlashCommands,
   parseSlashLine,
   resolveSlashCommand,
   type SlashCommand,
-  getLiveSlashCommands,
 } from '../commands/registry'
+import { useLearningStore } from '../store/learningStore'
+import { useOpenCodeConfigStore } from '../store/opencodeConfigStore'
 import {
   FOCUS_COMPOSER_EVENT,
   useCommandHistoryStore,
@@ -123,6 +125,48 @@ function useComposerAttachments(scopeKey: string) {
   return [attachments, setAttachments] as const
 }
 
+function isSkillSlashCommand(cmd: SlashCommand): boolean {
+  return cmd.source === 'skill' && Boolean(cmd.skillName)
+}
+
+function hasComposerSubmission(
+  line: string,
+  attachmentCount: number,
+  selectedSkill: SlashCommand | null,
+): boolean {
+  return Boolean(line || attachmentCount || selectedSkill)
+}
+
+function effectiveSubmissionLine(selectedSkill: SlashCommand | null, line: string): string {
+  if (!selectedSkill) return line
+  return `/${selectedSkill.name}${line ? ` ${line}` : ''}`
+}
+
+function SelectedSkillChip({
+  skill,
+  onRemove,
+}: {
+  skill: SlashCommand | null
+  onRemove: () => void
+}) {
+  if (!skill) return null
+  return (
+    <span className="mb-0.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control bg-accent-tint px-2 text-[13px] font-medium text-accent-ink shadow-hairline">
+      <Icon name="deployed_code" size={16} />
+      {skill.displayName || skill.skillName || skill.name}
+      <button
+        type="button"
+        aria-label="移除技能"
+        title="移除技能"
+        onClick={onRemove}
+        className="ml-0.5 flex size-4 items-center justify-center rounded-full text-current opacity-60 hover:bg-hover-2 hover:opacity-100"
+      >
+        <Icon name="close" size={12} />
+      </button>
+    </span>
+  )
+}
+
 function ComposerActionButton({
   stopping,
   canSend,
@@ -182,6 +226,9 @@ export function CommandComposer({
   const fileRef = useRef<HTMLInputElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
+  const [selectedSkill, setSelectedSkill] = useState<SlashCommand | null>(null)
+  const skillCatalog = useLearningStore((state) => state.skillCatalog)
+  const openCodeCommands = useOpenCodeConfigStore((state) => state.commands)
   const [attachments, setAttachments] = useComposerAttachments(scopeKey)
   const [attachError, setAttachError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -194,6 +241,10 @@ export function CommandComposer({
   useEffect(() => {
     return () => recognitionRef.current?.stop()
   }, [])
+
+  useEffect(() => {
+    setSelectedSkill(null)
+  }, [scopeKey])
   /** -1 = not browsing history */
   const histIdx = useRef(-1)
   const draftBeforeHist = useRef('')
@@ -212,8 +263,12 @@ export function CommandComposer({
 
   const filtered = useMemo(() => {
     if (slashQuery === null) return []
-    return filterSlashCommands(slashQuery)
-  }, [slashQuery])
+    return filterSlashCommands(slashQuery, openCodeCommands, skillCatalog)
+  }, [openCodeCommands, skillCatalog, slashQuery])
+  const commandCount = useMemo(
+    () => getAllSlashCommands(openCodeCommands, skillCatalog).length,
+    [openCodeCommands, skillCatalog],
+  )
 
   const showMenu = menuOpen && slashQuery !== null
   const safeIndex =
@@ -304,6 +359,15 @@ export function CommandComposer({
         setAttachError('斜線指令不會使用附件；請先移除附件，或改用一般訊息送出。')
         return
       }
+      if (isSkillSlashCommand(cmd)) {
+        setSelectedSkill(cmd)
+        onChange('')
+        setMenuOpen(false)
+        histIdx.current = -1
+        taRef.current?.focus()
+        return
+      }
+      setSelectedSkill(null)
       const next = cmd.needsArgs || cmd.argsHint ? `/${cmd.name} ` : `/${cmd.name}`
       onChange(next)
       setMenuOpen(false)
@@ -379,18 +443,20 @@ export function CommandComposer({
   const submit = useCallback(async () => {
     const line = value.trim()
     if (disabled || attaching) return
-    if (!line && !attachments.length) return
-    if (line.startsWith('/')) {
+    if (!hasComposerSubmission(line, attachments.length, selectedSkill)) return
+    const submissionLine = effectiveSubmissionLine(selectedSkill, line)
+    if (submissionLine.startsWith('/')) {
       if (attachments.length > 0) {
         setAttachError('斜線指令不會使用附件；請先移除附件，或改用一般訊息送出。')
         return
       }
-      pushHistory(line)
+      pushHistory(submissionLine)
       setMentionOpen(false)
-      const parsed = parseSlashLine(line)
+      const parsed = parseSlashLine(submissionLine)
+      setSelectedSkill(null)
       onChange('')
       if (parsed) {
-        const cmd = resolveSlashCommand(parsed.cmd)
+        const cmd = resolveSlashCommand(parsed.cmd, openCodeCommands, skillCatalog)
         if (cmd) {
           setMenuOpen(false)
           await onSlashCommand(cmd, parsed.args, parsed.raw)
@@ -418,6 +484,9 @@ export function CommandComposer({
     disabled,
     attaching,
     attachments,
+    selectedSkill,
+    openCodeCommands,
+    skillCatalog,
     onChange,
     onSlashCommand,
     onSubmitLine,
@@ -776,6 +845,7 @@ export function CommandComposer({
       )}
 
       <div className={`flex items-end gap-2 ${compact ? 'p-2' : 'px-3 py-3 md:px-3.5'}`}>
+        <SelectedSkillChip skill={selectedSkill} onRemove={() => setSelectedSkill(null)} />
         <textarea
           ref={taRef}
           value={value}
@@ -854,7 +924,7 @@ export function CommandComposer({
           <div className="flex items-center gap-2 shrink-0">
             {footerRight}
             {!footerRight && !hideHints && (
-              <span className="text-[10px] text-accent-ink">{getLiveSlashCommands().length} 指令</span>
+              <span className="text-[10px] text-accent-ink">{commandCount} 指令</span>
             )}
             {actionButton}
           </div>

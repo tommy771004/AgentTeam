@@ -1236,6 +1236,8 @@ export default function App() {
       await loadSettings()
       await loadLearning()
       if (cancelled) return
+      await useLearningStore.getState().loadSkillCatalog(useProjectStore.getState().root || undefined)
+      if (cancelled) return
       // OpenCode config merge (opencode.json + agents/*.md)
       void import('./store/opencodeConfigStore').then(({ useOpenCodeConfigStore }) => {
         void useOpenCodeConfigStore.getState().hydrate()
@@ -1247,6 +1249,7 @@ export default function App() {
             void import('./store/opencodeConfigStore').then(({ useOpenCodeConfigStore }) => {
               void useOpenCodeConfigStore.getState().hydrate(s.root)
             })
+            void useLearningStore.getState().loadSkillCatalog(s.root || undefined)
           }
         })
       })
