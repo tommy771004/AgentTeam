@@ -5,7 +5,8 @@
   "packageVersion": "0.84.3",
   "releaseSourceArchive": {
     "asset": "pi-0.84.3-source.tar.gz",
-    "sha256": "056f84c467450fb5700ad4df9c8cc669bf7f6046976eed7a19eadbc7553b6500"
+    "sha256": "056f84c467450fb5700ad4df9c8cc669bf7f6046976eed7a19eadbc7553b6500",
+    "modelDataManifestSha256": "c07d6856bbf58cc771ea3c0ae77432584794fd819caba6c29d2395a86e45d6ad"
   },
   "treeSha256": "441444e99a87049ab53d2018e0002c167e126379bbe4e84eadd3b6813a03c929"
 }

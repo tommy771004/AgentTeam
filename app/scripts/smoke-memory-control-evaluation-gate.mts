@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { JsonMemoryControlPackageRepository } from '../electron/memoryControlPackageRepository.ts'
 import { createCanonicalMemoryControlEvaluationExecutor, evaluateMemoryControlCandidate, sealMemoryControlEvaluationCorpus } from '../src/agent/memoryControlEvaluationGate.ts'
+import { canonicalMemoryControlEvaluationJson } from '../src/agent/memoryControlEvaluationContract.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'memory-control-evaluation-'))
 const agentDir = join(root, 'agent')
@@ -180,7 +181,7 @@ const settleThroughAuditRun = async (
   releaseAudit = undefined
   const lifecycleEntries = audit.record.entries.filter((entry: any) => entry.kind === 'memory-control-lifecycle')
   if (expected === 'rejected') {
-    assert.match(String(settlementError), /digest mismatch/i)
+    assert.match(String(settlementError), /digest mismatch|aggregate metrics/i)
     assert.equal(lifecycleEntries.length, 0)
     return undefined
   }
@@ -207,6 +208,11 @@ try {
   const tampered = structuredClone(falseDone)
   tampered.metrics.promptTokens += 1
   await settleThroughAuditRun(tampered, 'rejected')
+  const rehashedTampered = structuredClone(falseDone)
+  rehashedTampered.metrics.promptTokens += 1
+  const { reportId: _reportId, ...rehashedBody } = rehashedTampered
+  rehashedTampered.reportId = createHash('sha256').update(canonicalMemoryControlEvaluationJson(rehashedBody)).digest('hex')
+  await settleThroughAuditRun(rehashedTampered, 'rejected')
   const unchanged = await rpc('memory-control/v1/package/get', { schemaVersion: 1, view: 'evaluations' })
   const unchangedLineage = await rpc('memory-control/v1/package/get', { schemaVersion: 1, view: 'lineage' })
   const unchangedCandidate = await rpc('memory-control/v1/package/get', { schemaVersion: 1, revision: candidates[0].revision })

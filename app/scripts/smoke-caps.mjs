@@ -2305,6 +2305,13 @@ await test('drift guard: the Pi path\'s live timeline is the record projection, 
   assert.match(feed, /runTimelineRows\(recordView, draftText\)/,
     'and its rows are the fold over that projection — not a second synthesis')
   assert.match(feed, /const hasRecordTimeline = recordTimeline\.length > 0/)
+  assert.match(feed, /agent-conversation-timeline[\s\S]*data-run-timeline="record"[\s\S]*<RunTimelineList rows=\{recordTimeline\}/,
+    'the canonical conversation stays in the visible flow instead of the diagnostics disclosure')
+  const timelineList = fs.readFileSync(path.join(appRoot, 'src/components/RunTimelineList.tsx'), 'utf8')
+  assert.doesNotMatch(timelineList, /agent-process-chip[^"\n]*flex-1/,
+    'timeline chips size to their text instead of filling the remaining row')
+  assert.doesNotMatch(timelineList, />assistant\{row\.draft/,
+    'assistant narration reads as prose in the sequence, not as a competing labelled panel')
   assert.doesNotMatch(panel, /projectLiveTimeline|RunTimelineList|recordTimeline/,
     'the right-side task panel must not duplicate the center timeline')
   assert.match(panel, /title="任務步驟"/,
@@ -2490,7 +2497,7 @@ await test('Ticket 10: each Task run freezes one active Memory-Control Package r
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-memory-control-package-lifecycle\.mts/)
 })
 
-await test('Ticket 11: Memory-Control candidates are component-local, CAS-promoted, and rollback-safe', async () => {
+await test('Ticket 11: Memory-Control candidates are component-local, evaluation-promoted, and rollback-safe', async () => {
   const fs = await import('node:fs')
   const repository = fs.readFileSync(path.join(appRoot, 'electron/memoryControlPackageRepository.ts'), 'utf8')
   const host = fs.readFileSync(path.join(appRoot, 'electron/piHostProtocol.ts'), 'utf8')
@@ -2501,9 +2508,9 @@ await test('Ticket 11: Memory-Control candidates are component-local, CAS-promot
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   const repositorySmoke = fs.readFileSync(path.join(appRoot, 'scripts/smoke-memory-control-package-repository.mts'), 'utf8')
   assert.match(repository, /createCandidate\(/)
-  assert.match(repository, /activateCandidate\(/)
+  assert.doesNotMatch(repository, /activateCandidate\(/)
+  assert.match(repository, /settleEvaluation\(/)
   assert.match(repository, /rollback\(/)
-  assert.match(repository, /activation lost its compare-and-swap race/)
   assert.match(repository, /changed an undiagnosed component/)
   assert.match(repository, /rollback target was never validated and active/)
   assert.match(repository, /withRepositoryLock/)

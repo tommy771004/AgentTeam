@@ -44,8 +44,8 @@ try {
       expectedActiveRevision: 1, diagnosisComponent: component,
       patch: [{ op: field === 'unknownField' ? 'add' : 'replace', path: `/${field}`, value }], reason: 'unsupported runtime policy',
     })
-    await assert.rejects(() => repository.activateCandidate({ revision: candidate.revision, expectedActiveRevision: 1,
-      reason: 'must fail closed before activation' }), /unsupported/i)
+    assert.throws(() => compileMemoryControlRuntime(candidate), /unsupported|mandatory Host invariant/i)
+    await repository.rejectCandidate({ revision: candidate.revision, reason: 'unsupported runtime policy' })
     assert.equal(repository.admitActive().revision, 1)
   }
 
@@ -84,16 +84,15 @@ try {
     'legacy schema-v1 non-root packages infer their sole changed component without rewriting identity')
   const legacyChild = await migratedLegacy.createCandidate({
     expectedActiveRevision: 2,
-    diagnosisComponent: 'checkers',
-    patch: [{ op: 'replace', path: '/fileContent', value: 0 }],
-    reason: 'qualify rollback provenance after legacy migration',
+    diagnosisComponent: 'workingMemorySpec',
+    patch: [{ op: 'add', path: '/maxGoals', value: 50 }],
+    reason: 'candidate remains inactive before canonical evaluation',
   })
-  await migratedLegacy.activateCandidate({
-    revision: legacyChild.revision, expectedActiveRevision: 2, reason: 'legacy child passed qualification',
-  })
-  assert.equal((await migratedLegacy.rollback({
-    revision: 2, expectedActiveRevision: legacyChild.revision, reason: 'legacy active revision remains rollback eligible',
-  })).revision, 2)
+  assert.equal(compileMemoryControlRuntime(legacyChild).maxGoals, 50)
+  assert.equal(migratedLegacy.admitActive().revision, 2)
+  await migratedLegacy.rejectCandidate({ revision: legacyChild.revision, reason: 'evaluation not supplied' })
+  assert.equal((await migratedLegacy.rollback({ revision: 1, expectedActiveRevision: 2, reason: 'legacy rollback eligibility' })).revision, 1)
+  assert.equal((await migratedLegacy.rollback({ revision: 2, expectedActiveRevision: 1, reason: 'legacy active revision remains rollback eligible' })).revision, 2)
 
   for (const invalid of [
     createMemoryControlPackage({ ...second, parentRevision: 2, components: second.components }),

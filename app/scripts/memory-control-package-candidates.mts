@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { JsonMemoryControlPackageRepository, MAX_MEMORY_CONTROL_REASON_BYTES } from '../electron/memoryControlPackageRepository.ts'
+import { compileMemoryControlRuntime } from '../electron/memoryControlRuntime.ts'
 
 const directory = await mkdtemp(join(tmpdir(), 'memory-control-candidates-'))
 const repositoryPath = join(directory, 'packages.json')
@@ -32,42 +33,24 @@ try {
     patch: [{ op: 'replace', path: '/fileContent', value: 0 }],
     reason: 'checker accepted an unsupported completion claim',
   })
-  const competingRepository = await JsonMemoryControlPackageRepository.open(repositoryPath)
-  const race = await Promise.allSettled([
-    repository.activateCandidate({ revision: policyCandidate.revision, expectedActiveRevision: 1, reason: 'evaluation gate passed' }),
-    competingRepository.activateCandidate({ revision: checkerCandidate.revision, expectedActiveRevision: 1, reason: 'competing evaluation gate passed' }),
-  ])
-  assert.equal(race.filter((result) => result.status === 'fulfilled').length, 1, 'activation CAS admits exactly one winner')
-  assert.equal(race.filter((result) => result.status === 'rejected').length, 1, 'activation CAS rejects the stale contender')
-  const winner = repository.admitActive()
-  assert.ok([policyCandidate.revision, checkerCandidate.revision].includes(winner.revision))
-  assert.equal(Object.isFrozen(winner.components), true)
-
-  const loser = winner.revision === policyCandidate.revision ? checkerCandidate : policyCandidate
-  await repository.rejectCandidate({ revision: loser.revision, reason: 'lost promotion race; evaluation must be repeated' })
-  assert.equal(repository.read({ schemaVersion: 1, revision: loser.revision }).status, 'rejected')
-  assert.equal(repository.admitActive().revision, winner.revision)
+  assert.throws(() => compileMemoryControlRuntime(checkerCandidate), /cannot be disabled/i)
+  assert.equal('activateCandidate' in repository, false, 'promotion authority exists only on settleEvaluation')
+  await repository.rejectCandidate({ revision: checkerCandidate.revision, reason: 'mandatory checker invariant rejected candidate' })
+  await repository.rejectCandidate({ revision: policyCandidate.revision, reason: 'candidate requires canonical evaluation before promotion' })
+  assert.equal(repository.admitActive().revision, 1)
   await assert.rejects(() => repository.rollback({
-    revision: loser.revision,
-    expectedActiveRevision: winner.revision,
+    revision: checkerCandidate.revision,
+    expectedActiveRevision: 1,
     reason: 'must not reactivate a failed candidate',
   }), /never validated and active/i)
-
-  const rolledBack = await repository.rollback({
-    revision: 1,
-    expectedActiveRevision: winner.revision,
-    reason: 'post-promotion production invariant regressed',
-  })
-  assert.equal(rolledBack.revision, 1)
-  assert.equal(rolledBack.digest, baseline.digest, 'rollback selects immutable history instead of rewriting it')
 
   const lineage = repository.lineage()
   assert.equal(lineage.activeRevision, 1)
   assert.deepEqual(lineage.events.map((event) => event.kind), [
-    'candidate-created', 'candidate-created', 'candidate-activated', 'candidate-rejected', 'rollback',
+    'candidate-created', 'candidate-created', 'candidate-rejected', 'candidate-rejected',
   ])
   assert.equal(Object.isFrozen(lineage.events), true)
-  assert.match(lineage.events.at(-1)?.reason || '', /production invariant/)
+  assert.match(lineage.events.at(-1)?.reason || '', /canonical evaluation/)
 
   await assert.rejects(() => repository.createCandidate({
     expectedActiveRevision: 1,
@@ -130,9 +113,9 @@ try {
   forgedHistory.events.push({
     sequence: forgedHistory.events.length + 1,
     kind: 'candidate-activated',
-    revision: loser.revision,
+    revision: checkerCandidate.revision,
     fromRevision: 1,
-    diagnosisComponent: loser.diagnosisComponent,
+    diagnosisComponent: checkerCandidate.diagnosisComponent,
     reason: 'forged activation must not establish rollback provenance',
   })
   await writeFile(repositoryPath, JSON.stringify(forgedHistory), { mode: 0o600 })
@@ -147,7 +130,7 @@ try {
   assert.equal(restarted.admitActive().revision, 1)
   assert.equal(restarted.lineage().events.length, finalLineage.events.length)
 
-  console.log('Memory-Control candidates are component-local, CAS-activated, auditable, and rollback selects immutable history')
+  console.log('Memory-Control candidates are component-local, evaluation-only promoted, auditable, and rollback-safe')
 } finally {
   await rm(directory, { recursive: true, force: true })
 }

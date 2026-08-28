@@ -14,6 +14,7 @@ import {
   interactiveUserShellSpec,
   resolveUserPathValue,
   resolveUserShell,
+  warmUserEnvironment,
 } from '../electron/userEnvironment.ts'
 
 let passed = 0
@@ -91,6 +92,22 @@ await test('GUI launch recovers the account shell and its executable PATH', () =
     }).PATH,
     '/sandbox/bin',
   )
+})
+
+await test('GUI login PATH is warmed asynchronously and reused without a main-thread probe', async () => {
+  const minimal = { HOME: '/Users/async', PATH: '/usr/bin:/bin' }
+  let probes = 0
+  const warmed = await warmUserEnvironment({}, minimal, {
+    platform: 'darwin',
+    accountShell: '/bin/zsh',
+    captureLoginPathAsync: async () => {
+      probes += 1
+      return '/Users/async/.local/bin:/usr/bin'
+    },
+  })
+  assert.equal(warmed.PATH, '/Users/async/.local/bin:/usr/bin:/bin')
+  assert.equal(buildUserEnvironment({}, minimal, { platform: 'darwin', accountShell: '/bin/zsh' }).PATH, warmed.PATH)
+  assert.equal(probes, 1)
 })
 
 await test('user-configured paths expand home without a fixed account name', () => {

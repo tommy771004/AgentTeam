@@ -116,7 +116,7 @@ export function createTermSession(opts: {
 
   // welcome
   setTimeout(() => {
-    emit(`# SubAgents terminal · ${cwd}\r\n`, 'stdout')
+    emit(`# AgentStudio terminal · ${cwd}\r\n`, 'stdout')
   }, 50)
 
   return {

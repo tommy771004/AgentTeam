@@ -4070,7 +4070,7 @@ function handleMemoryControlPackageRead(
 
 function isMemoryControlPackageAuthority(value: MemoryControlPackageReader): value is MemoryControlPackageAuthority {
   const authority = value as Partial<MemoryControlPackageAuthority>
-  return typeof authority.createCandidate === 'function' && typeof authority.activateCandidate === 'function'
+  return typeof authority.createCandidate === 'function'
     && typeof authority.rejectCandidate === 'function' && typeof authority.rollback === 'function'
     && typeof authority.settleEvaluation === 'function'
 }
@@ -4177,7 +4177,6 @@ function executeMemoryControlMaintenance(
   if (!Number.isSafeInteger(expectedActiveRevision) || expectedActiveRevision < 1) {
     return Promise.reject(new Error('Memory-Control expected active revision is invalid'))
   }
-  if (operation === 'activate-candidate') return authority.activateCandidate({ revision, expectedActiveRevision, reason })
   if (operation === 'rollback') return authority.rollback({ revision, expectedActiveRevision, reason })
   return Promise.reject(new Error('Memory-Control maintenance operation is invalid'))
 }

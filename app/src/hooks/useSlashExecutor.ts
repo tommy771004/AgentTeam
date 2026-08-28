@@ -286,7 +286,7 @@ export function useSlashExecutor() {
       case 'export':
       case 'copy': {
         const text = [
-          `# SubAgents session`,
+          `# AgentStudio session`,
           `mode: ${selectedLoopType || agent.loopConfig.loopType}`,
           `status: ${agent.status}`,
           `objective: ${agent.objective || draftInput || '—'}`,
@@ -642,7 +642,7 @@ export function useSlashExecutor() {
         return
       }
       case 'init': {
-        const body = `# AGENTS.md\n\n> SubAgents / Hermes 風格專案指引\n\n## 目標\n\n- \n\n## 約束\n\n- \n\n## 偏好\n\n- 回覆使用繁體中文\n`
+        const body = `# AGENTS.md\n\n> AgentStudio / Hermes 風格專案指引\n\n## 目標\n\n- \n\n## 約束\n\n- \n\n## 偏好\n\n- 回覆使用繁體中文\n`
         const root = projectRoot()
         if (window.subagents?.tools?.workspaceWrite && root) {
           const r = await window.subagents.tools.workspaceWrite('AGENTS.md', body)

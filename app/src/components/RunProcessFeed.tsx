@@ -298,7 +298,6 @@ export function RunProcessFeed({
     () => runTimelineRows(recordView, draftText),
     [recordView, draftText],
   )
-  const unloadedBefore = recordView.unloadedBefore
   const hasRecordTimeline = recordTimeline.length > 0
   const lifecycle = deriveRunLifecycle({
     phase: activityPhase,
@@ -459,8 +458,8 @@ export function RunProcessFeed({
       aria-busy={lifecycle.live && !lifecycle.needsAttention}
       data-run-phase={lifecycle.phase}
     >
-      {/* ChatGPT Desktop-style compact run header. The current phase and counts
-          stay visible; the noisy execution trace lives behind one disclosure. */}
+      {/* Compact run status remains independently collapsible; the canonical
+          Turn Record stays in the conversation itself, in recorded order. */}
       <div className={`agent-process-status flex w-full items-center gap-2.5 text-left text-[13px] text-ink-2 ${lifecycle.needsAttention ? 'text-orange' : ''}`}>
         <button
           type="button"
@@ -516,6 +515,15 @@ export function RunProcessFeed({
         >
           <Icon name="hourglass_top" size={14} className="shrink-0 text-orange" />
           <span>{stall.label}</span>
+        </div>
+      ) : null}
+
+      {/* Codex-style conversation stream: narration, reasoning and tool calls
+          remain visible in one sequence. Only each row's detail is disclosed;
+          collapsing run diagnostics must not reorder or hide the conversation. */}
+      {hasRecordTimeline ? (
+        <div className="agent-conversation-timeline space-y-1" data-run-timeline="record">
+          <RunTimelineList rows={recordTimeline} />
         </div>
       ) : null}
 
@@ -583,24 +591,6 @@ export function RunProcessFeed({
               {interactionStatus ? <div className="text-[11px] text-ink-3">{interactionStatus}</div> : null}
             </div>
           ) : null}
-          {/* The single timeline. Thinking, tools, results and the reply are one
-              ordered stream here, so nobody has to read three panels to learn
-              what happened — and it is the record's order, not the arrival
-              order the transport happened to produce. */}
-          {hasRecordTimeline ? (
-            <div className="agent-process-trace space-y-1" data-run-timeline="record">
-              <div className="agent-process-trace-head flex items-center justify-between px-1 text-[10px] font-semibold uppercase tracking-[0.12em]">
-                <span>執行時間軸</span>
-                <span className="normal-case tracking-normal">
-                  {unloadedBefore > 0 ? `尚有 ${unloadedBefore} 筆更早 · ` : ''}
-                  {toolCount} 個工具 · {messageCount} 則訊息{taskSummary}
-                  <ContextUsageChip runId={runId} variant="inline" />
-                </span>
-              </div>
-              <RunTimelineList rows={recordTimeline} />
-            </div>
-          ) : null}
-
           {/* Reasoning is an optional detail, not a competing second answer.
               Only on the fallback path: a run with a Turn Record shows its
               thinking inside the timeline above, in the place it happened. */}

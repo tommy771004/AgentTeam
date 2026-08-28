@@ -61,8 +61,9 @@ const canonicalExecutors = new WeakSet<MemoryControlEvaluationExecutor>()
 type SealedExpectedCorpus = ReadonlyMap<string, Readonly<MemoryControlExpectedOutcome>>
 const sealedExpectations = new WeakMap<MemoryControlEvaluationCorpus, SealedExpectedCorpus>()
 const SHA256 = /^[a-f0-9]{64}$/
-const MAX_TASKS = 100
-const MAX_TRACE_REFS = 64
+// A report carries both phases, while the durable report contract admits at
+// most 64 run references. Keep the corpus bound representable by construction.
+const MAX_TASKS = 32
 const MAX_ID = 256
 
 const frozen = <T>(value: T): T => {
@@ -370,7 +371,7 @@ export async function evaluateMemoryControlCandidate(input: {
     decision,
     reasons,
     tokenBudget: { maxRegressionRatio: ratio },
-    runs: [...baselineRuns, ...candidateRuns].slice(0, MAX_TRACE_REFS),
+    runs: [...baselineRuns, ...candidateRuns],
     metrics: candidateMetrics,
   }
   return frozen({ ...reportBody, reportId: await sha256(canonicalMemoryControlEvaluationJson(reportBody)) })

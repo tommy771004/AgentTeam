@@ -5,6 +5,7 @@ import { conversationAnswer, projectConversationRows } from '../src/agent/conver
 import { runTimelineRows } from '../src/agent/liveTimeline.ts'
 import { appendTurnRecord } from '../src/agent/turnRecord.ts'
 import { extractMarkdownSources } from '../src/lib/markdownSources.ts'
+import { groupTimelineItems } from '../src/components/timelineGrouping.ts'
 
 /**
  * Seam 2: the conversation is a pure projection of the Turn Record.
@@ -220,6 +221,24 @@ assert.deepEqual(
   'usage on a step-end changes no conversation row',
 )
 assert.ok(withStepUsage().every((row) => row.kind !== 'notice' || row.title !== '未知的記錄項目'))
+
+// Presentation compaction is adjacency-only: repeated gray activities share
+// one disclosure, while narration and failure state remain hard boundaries.
+const groupedTimeline = groupTimelineItems([
+  { id: 'read-1', kind: 'tool', tool: 'read', settlement: 'success', detail: 'a.ts' },
+  { id: 'read-2', kind: 'tool', tool: 'view_file', settlement: 'success', detail: 'b.ts' },
+  { id: 'say-1', kind: 'assistant', content: '接著執行檢查。' },
+  { id: 'run-1', kind: 'tool', tool: 'bash', settlement: 'success', detail: 'npm test' },
+  { id: 'run-2', kind: 'tool', tool: 'exec_command', settlement: 'success', detail: 'npm run build' },
+  { id: 'read-failed', kind: 'tool', tool: 'read', settlement: 'error', detail: 'missing.ts' },
+] as const)
+assert.deepEqual(groupedTimeline.map((entry) => entry.type), ['group', 'single', 'group', 'single'])
+assert.deepEqual(groupedTimeline.map((entry) => entry.type === 'group' ? entry.rows.map((row) => row.id) : [entry.row.id]), [
+  ['read-1', 'read-2'],
+  ['say-1'],
+  ['run-1', 'run-2'],
+  ['read-failed'],
+], 'same-type activities collapse without crossing prose or mixing a failure into success')
 
 // Purity is a contract, not a hope: the module may not reach for I/O, stores,
 // the clock, or randomness, because it replays.

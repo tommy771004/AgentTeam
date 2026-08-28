@@ -14,6 +14,7 @@ import { MarkdownBody } from './MarkdownBody'
 import { ContextCards } from './ContextCards'
 import { Reveal } from './primitives/Reveal'
 import { ShimmerLabel } from './primitives/ShimmerLabel'
+import { groupTimelineItems, timelineToolKind, type TimelineDisplayEntry } from './timelineGrouping'
 import type { ProcessOperation } from '../lib/runPresentation'
 
 export type TimelineItem =
@@ -52,10 +53,10 @@ function rowAnimation(index: number) {
 function ReasoningTimelineRow({ row, open, toggle, index }: { row: Extract<TimelineItem, { kind: 'reasoning' }>; open: boolean; toggle: () => void; index: number }) {
   return (
     <div style={rowAnimation(index)}>
-      <button type="button" aria-expanded={open} data-timeline-row="reasoning" className="agent-process-row flex w-full max-w-full items-center gap-2 text-left text-[12px] text-ink-2" onClick={toggle}>
+      <button type="button" aria-expanded={open} data-timeline-row="reasoning" className="agent-process-row flex w-full max-w-full min-w-0 items-center gap-2 text-left text-[12px] text-ink-2" onClick={toggle}>
         <Icon name="auto_awesome" size={15} className="shrink-0 text-ink-3" />
         <span className="shrink-0 font-medium">已思考</span>
-        <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px]">{row.chars.toLocaleString()} 字</span>
+        <span className="agent-process-chip inline-flex min-w-0 max-w-full shrink truncate px-1.5 py-0.5 text-[11.5px]">{row.chars.toLocaleString()} 字</span>
         <TraceChevron open={open} />
       </button>
       <Reveal open={open}>
@@ -68,10 +69,10 @@ function ReasoningTimelineRow({ row, open, toggle, index }: { row: Extract<Timel
 function ContextTimelineRow({ row, open, toggle, index }: { row: Extract<TimelineItem, { kind: 'context' }>; open: boolean; toggle: () => void; index: number }) {
   return (
     <div style={rowAnimation(index)}>
-      <button type="button" aria-expanded={open} data-timeline-row="context" className="agent-process-row flex w-full max-w-full items-center gap-2 text-left text-[12px] text-ink-2" onClick={toggle}>
+      <button type="button" aria-expanded={open} data-timeline-row="context" className="agent-process-row flex w-full max-w-full min-w-0 items-center gap-2 text-left text-[12px] text-ink-2" onClick={toggle}>
         <Icon name="travel_explore" size={15} className="shrink-0 text-ink-3" />
         <span className="shrink-0 font-medium">已搜尋上下文</span>
-        <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px]">{row.summary}</span>
+        <span className="agent-process-chip inline-flex min-w-0 max-w-full shrink truncate px-1.5 py-0.5 text-[11.5px]">{row.summary}</span>
         <TraceChevron open={open} />
       </button>
       <Reveal open={open}><ContextCards operations={row.operations} /></Reveal>
@@ -81,11 +82,7 @@ function ContextTimelineRow({ row, open, toggle, index }: { row: Extract<Timelin
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineItem, { kind: 'assistant' }> }) {
   return (
-    <div className={row.draft ? 'agent-streaming-answer pt-1' : 'pt-1'} data-timeline-row={row.draft ? 'assistant-draft' : 'assistant'}>
-      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
-        <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
-        assistant{row.draft ? ' · 回覆中' : ''}
-      </div>
+    <div className={row.draft ? 'agent-streaming-answer py-2' : 'py-2'} data-timeline-row={row.draft ? 'assistant-draft' : 'assistant'}>
       <div className={row.draft ? 'agent-streaming-body' : ''} style={row.draft ? { animation: 'stream-in 420ms cubic-bezier(0.22,0.61,0.25,1) both' } : undefined}>
         <MarkdownBody content={row.content} streaming={row.draft} />
       </div>
@@ -109,15 +106,17 @@ function ToolApproval({ row }: { row: Extract<TimelineItem, { kind: 'tool' }> })
 }
 
 function isSearchTool(tool: string): boolean {
-  return /(?:search|grep|glob|find|web|fetch|browser)/i.test(tool)
+  return timelineToolKind(tool) === 'search'
 }
 
 function settledToolIcon(tool: string): string {
-  if (isSearchTool(tool)) return 'search'
-  if (/(?:write|edit|patch|create|replace)/i.test(tool)) return 'edit_note'
-  if (/(?:read|view|open|image)/i.test(tool)) return 'description'
-  if (/(?:bash|shell|exec|run|command|terminal)/i.test(tool)) return 'terminal'
-  return 'extension'
+  switch (timelineToolKind(tool)) {
+    case 'search': return 'search'
+    case 'edit': return 'edit_note'
+    case 'read': return 'description'
+    case 'command': return 'terminal'
+    case 'tool': return 'extension'
+  }
 }
 
 function ToolTimelineRow({ row, open, toggle, index }: { row: Extract<TimelineItem, { kind: 'tool' }>; open: boolean; toggle: () => void; index: number }) {
@@ -126,7 +125,7 @@ function ToolTimelineRow({ row, open, toggle, index }: { row: Extract<TimelineIt
   const label = row.title || (pending ? `執行 ${row.tool}…` : failed ? `${row.tool} ${row.settlement}` : `已執行 ${row.tool}`)
   const search = isSearchTool(row.tool)
   const expandable = Boolean(row.detail)
-  const rowClass = `agent-process-row group/tool flex w-full max-w-full items-center gap-2 text-left text-[12px] ${failed ? 'text-red' : 'text-ink-2'}`
+  const rowClass = `agent-process-row group/tool flex w-full max-w-full min-w-0 items-center gap-2 text-left text-[12px] ${failed ? 'text-red' : 'text-ink-2'}`
   const rowContent = (
     <>
       <span className="relative flex size-4 shrink-0 items-center justify-center">
@@ -144,7 +143,7 @@ function ToolTimelineRow({ row, open, toggle, index }: { row: Extract<TimelineIt
       <ShimmerLabel active={pending} className="shrink-0 font-medium">{label}</ShimmerLabel>
       <ToolDiffStats row={row} />
       <ToolApproval row={row} />
-      {row.detail ? <span className="agent-process-chip inline-flex min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11.5px] font-[family-name:var(--font-mono)]">{row.detail}</span> : null}
+      {row.detail ? <span className="agent-process-chip inline-flex min-w-0 max-w-full shrink truncate px-1.5 py-0.5 text-[11.5px] font-[family-name:var(--font-mono)]">{row.detail}</span> : null}
     </>
   )
   return (
@@ -171,7 +170,82 @@ function TimelineRowView({ row, open, toggle, index }: { row: TimelineItem; open
   }
 }
 
+function groupPresentation(group: Extract<TimelineDisplayEntry, { type: 'group' }>): { icon: string; label: string; failed: boolean } {
+  const first = group.rows[0]
+  const count = group.rows.length
+  if (first.kind === 'reasoning') return { icon: 'auto_awesome', label: `已思考 ${count} 次`, failed: false }
+  if (first.kind === 'context') return { icon: 'travel_explore', label: `已搜尋 ${count} 次上下文`, failed: false }
+  if (first.kind !== 'tool') return { icon: 'more_horiz', label: `${count} 項活動`, failed: false }
+
+  const failed = first.settlement !== undefined && first.settlement !== 'success'
+  const pending = first.settlement === undefined
+  if (failed) return { icon: 'error', label: `${count} 項工具執行失敗`, failed: true }
+  if (pending) return { icon: 'progress_activity', label: `正在執行 ${count} 項活動…`, failed: false }
+  switch (timelineToolKind(first.tool)) {
+    case 'search': return { icon: 'search', label: `已搜尋 ${count} 項`, failed: false }
+    case 'edit': return { icon: 'edit_note', label: `已編輯 ${count} 項`, failed: false }
+    case 'read': return { icon: 'description', label: `已查看 ${count} 項`, failed: false }
+    case 'command': return { icon: 'terminal', label: `執行了 ${count} 個指令`, failed: false }
+    case 'tool': return { icon: 'extension', label: `已使用 ${count} 項工具`, failed: false }
+  }
+}
+
+function TimelineActivityGroup({
+  group,
+  open,
+  toggle,
+  expandedRow,
+  toggleRow,
+}: {
+  group: Extract<TimelineDisplayEntry, { type: 'group' }>
+  open: boolean
+  toggle: () => void
+  expandedRow: string | null
+  toggleRow: (id: string) => void
+}) {
+  const presentation = groupPresentation(group)
+  return (
+    <div data-timeline-group={group.key} style={rowAnimation(group.index)}>
+      <button
+        type="button"
+        aria-expanded={open}
+        className={`agent-process-row flex w-full max-w-full items-center gap-2 text-left text-[12px] ${presentation.failed ? 'text-red' : 'text-ink-3'}`}
+        onClick={toggle}
+      >
+        <Icon name={presentation.icon} size={15} className={`shrink-0 ${group.key.endsWith(':pending') ? 'animate-spin' : ''}`} />
+        <span className="font-medium">{presentation.label}</span>
+        <TraceChevron open={open} />
+      </button>
+      <Reveal open={open}>
+        <div className="ml-5 mt-1 space-y-1 border-l border-stroke pl-3" data-timeline-group-detail>
+          {group.rows.map((row, offset) => (
+            <TimelineRowView
+              key={row.id}
+              row={row}
+              index={group.index + offset}
+              open={expandedRow === row.id}
+              toggle={() => toggleRow(row.id)}
+            />
+          ))}
+        </div>
+      </Reveal>
+    </div>
+  )
+}
+
 export function RunTimelineList({ rows }: { rows: readonly TimelineItem[] }) {
-  const [expanded, setExpanded] = useState<string | null>(null)
-  return <>{rows.map((row, index) => <TimelineRowView key={row.id} row={row} index={index} open={expanded === row.id} toggle={() => setExpanded((id) => (id === row.id ? null : row.id))} />)}</>
+  const [expandedRow, setExpandedRow] = useState<string | null>(null)
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set())
+  const entries = groupTimelineItems(rows)
+  const toggleRow = (id: string) => setExpandedRow((current) => (current === id ? null : id))
+  const toggleGroup = (id: string) => setExpandedGroups((current) => {
+    const next = new Set(current)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
+
+  return <>{entries.map((entry) => entry.type === 'single'
+    ? <TimelineRowView key={entry.row.id} row={entry.row} index={entry.index} open={expandedRow === entry.row.id} toggle={() => toggleRow(entry.row.id)} />
+    : <TimelineActivityGroup key={entry.id} group={entry} open={expandedGroups.has(entry.id)} toggle={() => toggleGroup(entry.id)} expandedRow={expandedRow} toggleRow={toggleRow} />)}</>
 }

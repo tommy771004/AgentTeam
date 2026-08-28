@@ -29,7 +29,7 @@ export const useWorkspaceUiStore = create<WorkspaceUiStore>((set, get) => ({
   floatOpen: false,
   floatPos: { x: 24, y: 80 },
   composer: '',
-  terminalLog: ['SubAgents 控制台就緒。輸入 / 查看指令。'],
+  terminalLog: ['AgentStudio 控制台就緒。輸入 / 查看指令。'],
 
   setLayoutMode: (m) =>
     set({

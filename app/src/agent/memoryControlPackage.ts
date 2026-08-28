@@ -68,7 +68,6 @@ export type MemoryControlPackageAuthority = MemoryControlPackageReader & {
     patch: readonly MemoryControlJsonPatchOperation[]
     reason: string
   }): Promise<MemoryControlPackage>
-  activateCandidate(input: { revision: number; expectedActiveRevision: number; reason: string }): Promise<MemoryControlPackage>
   rejectCandidate(input: { revision: number; reason: string }): Promise<MemoryControlPackage>
   rollback(input: { revision: number; expectedActiveRevision: number; reason: string }): Promise<MemoryControlPackage>
   settleEvaluation(input: { report: import('./memoryControlEvaluationContract.ts').MemoryControlEvaluationReport }): Promise<MemoryControlPackage>

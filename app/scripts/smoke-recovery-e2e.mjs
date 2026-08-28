@@ -168,14 +168,31 @@ async function runCycle(mode, queuedSchedule = false) {
     const page = await restarted.firstWindow()
     await page.waitForSelector('textarea', { timeout: 120_000 })
     try {
-      await page.waitForFunction(() => {
+      await page.waitForFunction(({ suffix, queuedSchedule }) => {
         try {
           const journal = JSON.parse(localStorage.getItem('subagents.runJournal.v1') || '{}')
+          if (queuedSchedule) {
+            const queueEntry = (journal.entries || []).find(
+              (entry) => entry.kind === 'queue' && entry.id === `real-queue-${suffix}`,
+            )
+            const reports = JSON.parse(localStorage.getItem('subagents.recoveryReports.v1') || '[]')
+            const scheduleResumes = reports.flatMap((report) => report.items || []).filter(
+              (item) => item.kind === 'schedule' &&
+                item.id === `real-schedule-${suffix}` &&
+                item.action === 'resume-once',
+            )
+            // The durable queue is intentionally drained after startup recovery.
+            // Wait for its exactly-once claim instead of racing the brief queued
+            // marker that exists before RunQueueBootstrap's 900 ms delay expires.
+            return queueEntry?.attempt === 2 &&
+              queueEntry.status !== 'queued' &&
+              scheduleResumes.length === 1
+          }
           return (journal.entries || []).some((entry) => entry.status === 'interrupted' || entry.status === 'queued')
         } catch {
           return false
         }
-      }, undefined, { timeout: 30_000 })
+      }, { suffix: mode, queuedSchedule }, { timeout: 30_000 })
     } catch (error) {
       const debug = await page.evaluate(() => ({
         journal: localStorage.getItem('subagents.runJournal.v1'),
@@ -186,12 +203,21 @@ async function runCycle(mode, queuedSchedule = false) {
     }
     const evidence = await page.evaluate(async (suffix) => {
       const journal = JSON.parse(localStorage.getItem('subagents.runJournal.v1') || '{}')
-    const threadState = JSON.parse(localStorage.getItem('subagents.threads.v5') || '{}')
+      const reports = JSON.parse(localStorage.getItem('subagents.recoveryReports.v1') || '[]')
       const jobs = (await window.subagents?.scheduler?.list?.()) || []
       const entries = (journal.entries || []).filter((entry) => entry.id.endsWith(`-${suffix}`))
+      const queueEntry = entries.find((entry) => entry.kind === 'queue')
       return {
         threadInterrupted: (journal.entries || []).some((entry) => entry.kind === 'run' && entry.status === 'interrupted'),
         journalStatuses: entries.map((entry) => entry.status),
+        runStatus: entries.find((entry) => entry.kind === 'run')?.status,
+        queueStatus: queueEntry?.status,
+        queueAttempt: queueEntry?.attempt,
+        scheduleResumeCount: reports.flatMap((report) => report.items || []).filter(
+          (item) => item.kind === 'schedule' &&
+            item.id === `real-schedule-${suffix}` &&
+            item.action === 'resume-once',
+        ).length,
         scheduleStatus: jobs.find((job) => job.id === `real-schedule-${suffix}`)?.lastStatus,
         queueStillEmpty: (() => {
           try {
@@ -209,10 +235,23 @@ async function runCycle(mode, queuedSchedule = false) {
       assert.deepEqual(evidence.journalStatuses, ['interrupted', 'interrupted', 'interrupted'])
       assert.equal(evidence.scheduleStatus, 'interrupted', `${mode}: once job was not reconciled`)
     } else {
-      assert.equal(evidence.journalStatuses.includes('queued'), true, `${mode}: queued marker was not preserved`)
-      assert.equal(evidence.scheduleStatus, 'running', `${mode}: queued schedule was not safely rebound`)
-      assert.equal(evidence.queueStillEmpty, false, `${mode}: queued work was silently dropped`)
-      assert.equal(evidence.journalStatuses.includes('queued'), true, `${mode}: recovery kept the queued marker visible`)
+      assert.equal(evidence.queueAttempt, 2, `${mode}: recovered queue was not claimed exactly once`)
+      assert.equal(evidence.scheduleResumeCount, 1, `${mode}: schedule recovery was not reported exactly once`)
+      assert.ok(
+        ['dispatching', 'success', 'failed', 'cancelled'].includes(evidence.queueStatus),
+        `${mode}: recovered queue did not enter a claimed or terminal state`,
+      )
+      assert.equal(evidence.queueStillEmpty, true, `${mode}: claimed queue item remained pending and could replay`)
+      assert.ok(
+        ['running', 'success', 'failed'].includes(evidence.scheduleStatus),
+        `${mode}: queued schedule was not safely rebound or settled`,
+      )
+      if (evidence.queueStatus === 'dispatching') {
+        assert.ok(
+          ['admitted', 'running'].includes(evidence.runStatus),
+          `${mode}: dispatching queue has no admitted run owner`,
+        )
+      }
     }
     if (!queuedSchedule) {
       assert.equal(evidence.queueStillEmpty, true, `${mode}: uncertain queue work was replayed`)
@@ -230,7 +269,7 @@ try {
   const queuedSchedule = requested && requested !== 'queued-schedule'
     ? null
     : await runCycle('queued-schedule', true)
-  console.log('Recovery E2E: renderer/main termination, queue drain interruption, queued schedule resume, and once-job settlement passed')
+  console.log('Recovery E2E: renderer/main termination, queue drain interruption, and queued schedule exactly-once resume passed')
   console.log(JSON.stringify({ renderer, main, queuedSchedule }))
 } finally {
   fs.rmSync(root, { recursive: true, force: true })

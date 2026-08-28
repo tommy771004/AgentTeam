@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -179,42 +179,37 @@ try {
   assert.equal((await maintain(10, 'reject-candidate', {
     revision: rejectedRevision, reason: 'held-out checker anchor regressed',
   })).result?.memoryControlPackage?.status, 'rejected')
-  await writeFile(`${packagePath}.lock`, JSON.stringify({ pid: process.pid }), { mode: 0o600 })
-  const activation = maintain(11, 'activate-candidate', {
+  const activation = await maintain(11, 'activate-candidate', {
     revision: secondRevision, expectedActiveRevision: 1,
-    reason: 'candidate passed bounded lifecycle qualification',
+    reason: 'direct promotion must be unavailable',
   })
+  assert.match(activation.error?.message || '', /operation is invalid/i)
   releaseFirstResponse?.()
   while (completion < 2) await new Promise((resolve) => setTimeout(resolve, 5))
-  await new Promise((resolve) => setTimeout(resolve, 20))
-  assert.equal(firstHost.messages.some((message) => message.id === 6), false,
-    'turn settlement waits for an admitted maintenance audit blocked on repository I/O')
   firstHost.send(16, 'memory-control/v1/maintain', {
     maintenanceToken: 'ticket-11-maintainer-secret', sessionId, operation: 'create-candidate',
     expectedActiveRevision: 1, diagnosisComponent: 'workingMemorySpec',
     patch: [{ op: 'add', path: '/tooLate', value: true }], reason: 'must not enter after settlement closes audit admission',
   })
-  assert.match((await firstHost.waitFor(16)).error?.message || '', /settling.*closed/i)
-  await unlink(`${packagePath}.lock`)
-  assert.equal((await activation).error, undefined)
+  assert.match((await firstHost.waitFor(16)).error?.message || '', /settling.*closed|active audit Task run/i)
   const firstTurn = await firstHost.waitFor(6)
   assert.equal(firstTurn.error, undefined, JSON.stringify(firstTurn))
   assertPackageLinks(firstTurn.result?.record?.entries || [], 1)
   const firstLifecycle = firstTurn.result?.record?.entries
     ?.filter((entry: any) => entry.kind === 'memory-control-lifecycle') || []
   assert.deepEqual(firstLifecycle.map((entry: any) => entry.event.kind), [
-    'candidate-created', 'candidate-created', 'candidate-rejected', 'candidate-activated',
+    'candidate-created', 'candidate-created', 'candidate-rejected',
   ])
   assert.match(firstLifecycle[2]?.event?.reason || '', /held-out checker anchor regressed/)
 
   firstHost.send(12, 'memory-control/v1/package/get', { schemaVersion: 1 })
-  assert.equal((await firstHost.waitFor(12)).result?.memoryControlPackage?.revision, 2)
+  assert.equal((await firstHost.waitFor(12)).result?.memoryControlPackage?.revision, 1)
   firstHost.send(13, 'memory-control/v1/package/get', { schemaVersion: 1, revision: 1 })
   assert.equal((await firstHost.waitFor(13)).result?.memoryControlPackage?.digest, BASELINE_MEMORY_CONTROL_PACKAGE.digest)
   firstHost.send(14, 'memory-control/v1/package/get', { schemaVersion: 1, view: 'lineage' })
   const lineage = (await firstHost.waitFor(14)).result?.memoryControlLineage
-  assert.equal(lineage?.activeRevision, 2)
-  assert.match(lineage?.events?.at(-1)?.reason || '', /bounded lifecycle qualification/)
+  assert.equal(lineage?.activeRevision, 1)
+  assert.match(lineage?.events?.at(-1)?.reason || '', /held-out checker anchor regressed/)
   firstHost.send(15, 'turn/submit', {
     sessionId, runId: 'package-run-two', cwd: workspace, prompt: 'write second.txt',
     profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: ['write'], approvalMode: 'full', unattended: false, compaction: 'manual' },
@@ -223,16 +218,16 @@ try {
   })
   const secondTurn = await firstHost.waitFor(15)
   assert.equal(secondTurn.error, undefined, JSON.stringify(secondTurn))
-  assertPackageLinks(secondTurn.result?.record?.entries || [], 2, /bounded lifecycle qualification/)
+  assertPackageLinks(secondTurn.result?.record?.entries || [], 1)
   await stopHost(firstHost)
 
   const secondHost = startHost()
   secondHost.send(20, 'initialize', { protocolVersion: 5, capabilities: ['memory-control-v1'] })
   assert.equal((await secondHost.waitFor(20)).error, undefined)
   secondHost.send(21, 'memory-control/v1/package/get', { schemaVersion: 1 })
-  assert.equal((await secondHost.waitFor(21)).result?.memoryControlPackage?.revision, 2)
+  assert.equal((await secondHost.waitFor(21)).result?.memoryControlPackage?.revision, 1)
   await stopHost(secondHost)
-  console.log('Host-owned candidate activation preserves admitted runs, governs later runs live, and survives restart')
+  console.log('Direct candidate activation is unavailable; inactive candidates and audit history survive restart')
 } finally {
   releaseFirstResponse?.()
   modelServer.close()

@@ -16,6 +16,7 @@ import { isMemoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS } from '.
 import {
   canonicalMemoryControlEvaluationJson,
   type MemoryControlEvaluationReport,
+  type MemoryControlEvaluationRun,
 } from '../src/agent/memoryControlEvaluationContract.ts'
 
 type ComponentDraft = Omit<MemoryControlComponent, 'digest'> | MemoryControlComponent
@@ -649,9 +650,81 @@ function assertEvaluationRunPairing(
   const baselineIds = new Set(baselineRuns.map((run) => run.taskId))
   if (!baselineRuns.length || baselineRuns.length !== candidateRuns.length || baselineIds.size !== baselineRuns.length
     || candidateRuns.some((run) => !baselineIds.has(run.taskId))
+    || new Set(candidateRuns.map((run) => run.taskId)).size !== candidateRuns.length
+    || new Set(report.runs.map((run) => run.runId)).size !== report.runs.length
+    || candidateRuns.some((run) => baselineRuns.find((entry) => entry.taskId === run.taskId)?.cohort !== run.cohort)
     || baselineRuns.some((run) => run.governingPackage.revision !== active.revision || run.governingPackage.digest !== active.digest)
     || candidateRuns.some((run) => run.governingPackage.revision !== candidate.revision || run.governingPackage.digest !== candidate.digest)) {
     throw new Error('Memory-Control evaluation report run pairing or governing package is invalid')
+  }
+}
+
+function aggregateEvaluationRuns(runs: readonly MemoryControlEvaluationRun[]): MemoryControlEvaluationReport['metrics'] {
+  const count = runs.length || 1
+  const successes = runs.filter((run) => run.metrics.taskSuccess).length
+  const promptTokens = runs.reduce((sum, run) => sum + run.metrics.promptTokens, 0)
+  return {
+    taskSuccessRate: successes / count,
+    falseDoneRate: runs.filter((run) => run.metrics.falseDone).length / count,
+    requiredActionRecall: runs.reduce((sum, run) => sum + run.metrics.requiredActionRecall, 0) / count,
+    skillInvocationPrecision: runs.reduce((sum, run) => sum + run.metrics.skillInvocationPrecision, 0) / count,
+    skillInvocationReach: runs.reduce((sum, run) => sum + run.metrics.skillInvocationReach, 0) / count,
+    promptTokens,
+    tokensPerSuccess: successes ? promptTokens / successes : null,
+  }
+}
+
+/** Re-derive promotion semantics inside the Host-owned repository. */
+function recomputedEvaluationReasons(
+  report: MemoryControlEvaluationReport,
+  baseline: readonly MemoryControlEvaluationRun[],
+  candidate: readonly MemoryControlEvaluationRun[],
+): string[] {
+  const reasons: string[] = []
+  for (const run of baseline) {
+    if (run.cohort === 'held-out-anchor' && !run.metrics.taskSuccess) {
+      reasons.push(`${run.taskId}: held-out baseline anchor is not successful`)
+    }
+  }
+  const sourceImproved = candidate.some((run) => {
+    if (run.cohort !== 'source-failure') return false
+    const before = baseline.find((entry) => entry.taskId === run.taskId)!
+    return Number(run.metrics.taskSuccess) > Number(before.metrics.taskSuccess)
+      || run.metrics.requiredActionRecall > before.metrics.requiredActionRecall
+      || run.metrics.skillInvocationReach > before.metrics.skillInvocationReach
+  })
+  if (!sourceImproved) reasons.push('candidate did not improve a source-failure task')
+  for (const run of candidate) {
+    const before = baseline.find((entry) => entry.taskId === run.taskId)!
+    if (run.metrics.falseDone) reasons.push(`${run.taskId}: false-done`)
+    if (!run.metrics.taskSuccess) reasons.push(`${run.taskId}: task success requirement missed`)
+    if (run.metrics.requiredActionRecall < 1 || run.metrics.requiredActionRecall < before.metrics.requiredActionRecall) {
+      reasons.push(`${run.taskId}: required-action recall regression`)
+    }
+    if (run.metrics.skillInvocationReach < 1) reasons.push(`${run.taskId}: required Skill was missed`)
+    if (run.metrics.skillInvocationPrecision < 1) reasons.push(`${run.taskId}: unjustified Skill invocation`)
+    const comparativeLimit = Math.floor(before.metrics.promptTokens * (1 + report.tokenBudget.maxRegressionRatio))
+    if (run.metrics.promptTokens > comparativeLimit) reasons.push(`${run.taskId}: token regression exceeded explicit budget`)
+  }
+  return [...new Set(reasons)]
+}
+
+function assertEvaluationSemantics(report: MemoryControlEvaluationReport): void {
+  const baseline = report.runs.filter((run) => run.phase === 'baseline')
+  const candidate = report.runs.filter((run) => run.phase === 'candidate')
+  if (canonicalJson(aggregateEvaluationRuns(candidate)) !== canonicalJson(report.metrics)) {
+    throw new Error('Memory-Control evaluation aggregate metrics do not match the paired candidate runs')
+  }
+  if (!baseline.length && !candidate.length) {
+    if (report.decision !== 'rejected' || report.reasons.length === 0) throw new Error('Memory-Control evaluation without runs must fail closed')
+    return
+  }
+  const requiredReasons = recomputedEvaluationReasons(report, baseline, candidate)
+  if (report.decision === 'promoted' && requiredReasons.length > 0) {
+    throw new Error(`Memory-Control evaluation promotion contradicts Host-recomputed semantics: ${requiredReasons.join('; ')}`)
+  }
+  if (report.decision === 'rejected' && requiredReasons.some((reason) => !report.reasons.includes(reason))) {
+    throw new Error('Memory-Control evaluation rejection omits a Host-recomputed reason')
   }
 }
 
@@ -667,6 +740,7 @@ function evaluationSettlementDocument(
   if (!candidate) throw new Error('Memory-Control evaluation candidate is unknown')
   assertEvaluationPackageBinding(report, active, candidate)
   assertEvaluationRunPairing(report, active, candidate)
+  assertEvaluationSemantics(report)
   const reason = report.decision === 'promoted'
     ? `evaluation ${report.corpusVersion} passed; report ${report.reportId}`
     : `evaluation ${report.corpusVersion} rejected; report ${report.reportId}: ${report.reasons.join('; ')}`.slice(0, MAX_MEMORY_CONTROL_REASON_BYTES)
@@ -781,23 +855,6 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
       })
       await this.commit(memoryControlPackageDocument([...this.document.packages, candidate], this.document.activeRevision, [...this.document.events, event], this.document.evaluations))
       return this.read({ schemaVersion: 1, revision: candidate.revision })
-    })
-  }
-
-  activateCandidate(input: { revision: number; expectedActiveRevision: number; reason: string }): Promise<MemoryControlPackage> {
-    return this.mutate(async () => {
-      if (this.document.activeRevision !== input.expectedActiveRevision) throw new Error('Memory-Control Package activation lost its compare-and-swap race')
-      const candidate = this.read({ schemaVersion: 1, revision: input.revision })
-      if (candidate.status !== 'candidate' || candidate.parentRevision !== input.expectedActiveRevision) {
-        throw new Error('Memory-Control Package candidate is not promotable from the active revision')
-      }
-      compileMemoryControlRuntime(candidate)
-      const event = lifecycleEvent(this.document, {
-        kind: 'candidate-activated', revision: candidate.revision, fromRevision: this.document.activeRevision,
-        ...(candidate.diagnosisComponent ? { diagnosisComponent: candidate.diagnosisComponent } : {}), reason: input.reason,
-      })
-      await this.commit(memoryControlPackageDocument(this.document.packages, candidate.revision, [...this.document.events, event], this.document.evaluations))
-      return this.admitActive()
     })
   }
 

@@ -239,7 +239,7 @@ export async function downloadUpdate(options: { publicKeyPem: string; onProgress
   if (bytes.byteLength !== state.manifest.artifact.size || !verifyArtifactSignature(state.manifest.artifact, bytes, options.publicKeyPem)) {
     throw new Error('更新檔案雜湊或簽章驗證失敗')
   }
-  const sourceName = path.basename(new URL(state.manifest.artifact.url).pathname).replace(/[^A-Za-z0-9._-]+/g, '-') || 'SubAgents-AI-update.bin'
+  const sourceName = path.basename(new URL(state.manifest.artifact.url).pathname).replace(/[^A-Za-z0-9._-]+/g, '-') || 'AgentStudio-update.bin'
   const file = path.join(updatesRoot(), `${state.manifest.version}-${state.manifest.platform}-${state.manifest.arch}-${sourceName}`)
   fs.writeFileSync(file, bytes, { mode: 0o600 })
   return writeState({ ...state, status: 'downloaded', downloadedPath: file, progress: 100, lastError: undefined, updatedAt: new Date().toISOString() })

@@ -23,8 +23,8 @@ function count(value: unknown, max: number): number {
 }
 
 function checker(value: unknown): boolean {
-  if (value !== 0 && value !== 1) throw new Error('Unsupported Memory-Control Checker version')
-  return value === 1
+  if (value !== 1) throw new Error('Memory-Control Checker is a mandatory Host invariant and cannot be disabled')
+  return true
 }
 
 function overrides(value: unknown): Readonly<Record<string, string>> {

@@ -38,10 +38,21 @@ const requiredArtifacts = [
 ]
 
 type PiBuildCache = {
-  schemaVersion: 1
+  schemaVersion: 2
   sourceTreeSha256: string
   packageVersion: string
   buildMode: 'offline' | 'network'
+  modelDataManifestSha256: string
+}
+
+async function modelDataManifestSha256(root = vendorRoot): Promise<string | undefined> {
+  try {
+    return createHash('sha256')
+      .update(await readFile(path.join(root, 'packages/ai/src/providers/data/.manifest.json')))
+      .digest('hex')
+  } catch {
+    return undefined
+  }
 }
 
 function runNpm(args: string[], cwd: string): void {
@@ -84,9 +95,10 @@ async function readBuildCache(): Promise<PiBuildCache | undefined> {
   try {
     const parsed = JSON.parse(await readFile(buildCachePath, 'utf8')) as Partial<PiBuildCache>
     if (
-      parsed.schemaVersion !== 1
+      parsed.schemaVersion !== 2
       || typeof parsed.sourceTreeSha256 !== 'string'
       || typeof parsed.packageVersion !== 'string'
+      || typeof parsed.modelDataManifestSha256 !== 'string'
       || (parsed.buildMode !== 'offline' && parsed.buildMode !== 'network')
     ) return undefined
     return parsed as PiBuildCache
@@ -136,16 +148,20 @@ async function hydratePinnedReleaseModelData(stagingVendor: string): Promise<voi
     repository?: string
     tag?: string
     packageVersion?: string
-    releaseSourceArchive?: { asset?: string, sha256?: string }
+    releaseSourceArchive?: { asset?: string, sha256?: string, modelDataManifestSha256?: string }
   }
   if (!pin.repository || !pin.tag || !pin.packageVersion) throw new Error('Pi pin is missing release identity')
   const asset = pin.releaseSourceArchive?.asset
   const expectedSha256 = pin.releaseSourceArchive?.sha256
+  const expectedModelDataManifestSha256 = pin.releaseSourceArchive?.modelDataManifestSha256
   if (!asset || !/^pi-\d+\.\d+\.\d+-source\.tar\.gz$/.test(asset)) {
     throw new Error('Pi pin is missing a valid release source archive asset')
   }
   if (!expectedSha256 || !/^[0-9a-f]{64}$/.test(expectedSha256)) {
     throw new Error('Pi pin is missing a valid release source archive SHA-256')
+  }
+  if (!expectedModelDataManifestSha256 || !/^[0-9a-f]{64}$/.test(expectedModelDataManifestSha256)) {
+    throw new Error('Pi pin is missing a valid model-data manifest SHA-256')
   }
 
   const repository = pin.repository.replace(/\.git$/, '')
@@ -176,6 +192,10 @@ async function hydratePinnedReleaseModelData(stagingVendor: string): Promise<voi
   if (!existsSync(path.join(sourceModelData, '.manifest.json'))) {
     throw new Error('Pinned Pi release source archive is missing model data')
   }
+  const actualModelDataManifestSha256 = await modelDataManifestSha256(path.join(extractionRoot, `pi-${pin.packageVersion}`))
+  if (actualModelDataManifestSha256 !== expectedModelDataManifestSha256) {
+    throw new Error(`Pinned Pi model-data manifest checksum mismatch: expected ${expectedModelDataManifestSha256}, got ${actualModelDataManifestSha256 || 'missing'}`)
+  }
   await rm(path.join(stagingVendor, 'packages/ai/src/providers/data'), { recursive: true, force: true })
   await cp(sourceModelData, path.join(stagingVendor, 'packages/ai/src/providers/data'), {
     recursive: true,
@@ -198,11 +218,18 @@ const packageJson = JSON.parse(
   await readFile(path.join(vendorRoot, 'packages/coding-agent/package.json'), 'utf8'),
 ) as { version?: string }
 const previous = await readBuildCache()
+const pin = JSON.parse(await readFile(path.join(vendorRoot, 'PI_UPSTREAM_PIN.json'), 'utf8')) as {
+  releaseSourceArchive?: { modelDataManifestSha256?: string }
+}
+const pinnedModelDataManifestSha256 = pin.releaseSourceArchive?.modelDataManifestSha256
+const currentModelDataManifestSha256 = await modelDataManifestSha256()
 const forceBuild = process.env.SUBAGENTS_PI_VENDOR_FORCE_BUILD === '1'
 if (
   !forceBuild
   && previous?.sourceTreeSha256 === sourceTreeSha256
   && previous.packageVersion === packageJson.version
+  && previous.modelDataManifestSha256 === pinnedModelDataManifestSha256
+  && currentModelDataManifestSha256 === pinnedModelDataManifestSha256
   && hasRequiredArtifacts()
 ) {
   if (!hasRuntimeDependencies()) runNpm(['ci', '--omit=dev', '--ignore-scripts'], vendorRoot)
@@ -216,23 +243,17 @@ const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'subagents-pi-build-'))
 let buildMode: PiBuildCache['buildMode'] = 'network'
 try {
   const stagingVendor = await prepareBuildWorkspace(temporaryRoot)
-  const hasModelData = existsSync(path.join(stagingVendor, 'packages/ai/src/providers/data'))
-  if (hasModelData) {
-    buildMode = 'offline'
-    try {
-      runNpm(['run', 'build:offline'], stagingVendor)
-    } catch {
-      // Replace stale local data with the checksummed snapshot shipped for the
-      // pinned release. Live catalogs can drift beyond this source version.
-      await hydratePinnedReleaseModelData(stagingVendor)
-      buildMode = 'offline'
-      runNpm(['run', 'build:offline'], stagingVendor)
-    }
-  } else {
-    await hydratePinnedReleaseModelData(stagingVendor)
-    buildMode = 'offline'
-    runNpm(['run', 'build:offline'], stagingVendor)
-  }
+  // A cache miss always rebuilds from the archive-pinned model-data snapshot;
+  // an unpinned local catalog can no longer silently satisfy offline build.
+  await hydratePinnedReleaseModelData(stagingVendor)
+  buildMode = 'offline'
+  runNpm(['run', 'build:offline'], stagingVendor)
+
+  const pinnedModelData = path.join(stagingVendor, 'packages/ai/src/providers/data')
+  const vendorModelData = path.join(vendorRoot, 'packages/ai/src/providers/data')
+  await rm(vendorModelData, { recursive: true, force: true })
+  await mkdir(path.dirname(vendorModelData), { recursive: true })
+  await cp(pinnedModelData, vendorModelData, { recursive: true, force: true })
 
   await copyBuildArtifacts(stagingVendor)
   runNpm(['prune', '--omit=dev', '--ignore-scripts'], vendorRoot)
@@ -244,10 +265,11 @@ try {
   }
   await mkdir(path.dirname(buildCachePath), { recursive: true })
   await writeFile(buildCachePath, `${JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     sourceTreeSha256,
     packageVersion: packageJson.version ?? 'unknown',
     buildMode,
+    modelDataManifestSha256: pinnedModelDataManifestSha256!,
   } satisfies PiBuildCache, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
   console.log(`Built Pi vendor dist (${packageJson.version ?? 'unknown'}, ${buildMode})`)
 } finally {

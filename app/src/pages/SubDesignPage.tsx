@@ -420,7 +420,7 @@ export function SubDesignPage() {
           <h1 className="font-[family-name:var(--font-sora)] text-[34px] font-semibold tracking-tight text-on-surface md:text-[42px]">
             {activeBrief ? '建立另一個設計' : '你今天想設計什麼？'}
           </h1>
-          <p className="mt-3 text-[14px] text-outline">{activeBrief ? '目前專案狀態保留在上方；你可以從新的 brief 開始另一個設計。' : '從一個 brief 開始，交給 SubAgents 完成設計流程。'}</p>
+          <p className="mt-3 text-[14px] text-outline">{activeBrief ? '目前專案狀態保留在上方；你可以從新的 brief 開始另一個設計。' : '從一個 brief 開始，交給 AgentStudio 完成設計流程。'}</p>
         </section>
 
         <section className="mx-auto mt-7 max-w-[820px]">

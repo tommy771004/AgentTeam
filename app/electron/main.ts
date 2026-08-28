@@ -248,7 +248,7 @@ import {
   type MemoryScope,
 } from './durableMemoryStore'
 import type { MemoryProjectionScope } from '../src/agent/memoryProjection'
-import { configuredUserPath } from './userEnvironment'
+import { buildUserEnvironment, configuredUserPath, warmUserEnvironment } from './userEnvironment'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // `productName` is now AgentStudio, but changing Electron's default userData
@@ -258,13 +258,14 @@ const explicitUserData = process.argv.some((argument) => argument === '--user-da
 if (app.isPackaged && !explicitUserData) app.setPath('userData', path.join(app.getPath('appData'), 'SubAgents AI'))
 const memoryControlMaintainerToken = process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
 delete process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
+void warmUserEnvironment()
 const piHostSupervisor = new PiHostSupervisor(() => {
   const userHome = app.getPath('home')
   const userData = app.getPath('userData')
   return utilityProcess.fork(path.join(__dirname, 'pi-host.js'), [], {
-    serviceName: 'SubAgents Pi Core Host',
+    serviceName: 'AgentStudio Pi Core Host',
     env: {
-      ...process.env,
+      ...buildUserEnvironment(),
       SUBAGENTS_PI_VENDOR_DIR: path.resolve(__dirname, '../../vendor/pi'),
       SUBAGENTS_PI_AGENT_DIR: configuredUserPath(
         process.env,
@@ -350,7 +351,7 @@ piHostSupervisor.onEvent((event) => {
 })
 
 /**
- * Resolve SubAgents brand icon for window / tray / notifications.
+ * Resolve AgentStudio brand icon for window / tray / notifications.
  *
  * Search order (real filesystem paths first — Windows shell cannot use asar paths):
  * 1. Packaged extraResources → resources/app-icons/ (from build/icons + public/brand)
@@ -2555,7 +2556,7 @@ ipcMain.handle('settings:export-bundle', async (_evt, input: { content?: string;
   const filename = suggested.toLowerCase().endsWith('.json') ? suggested : `${suggested}.json`
   const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getFocusedWindow()
   const options = {
-    title: '匯出 SubAgents 設定與記憶',
+    title: '匯出 AgentStudio 設定與記憶',
     defaultPath: path.join(app.getPath('downloads'), filename),
     filters: [{ name: 'JSON', extensions: ['json'] }],
   }

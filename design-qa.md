@@ -63,3 +63,48 @@ Target: combined SubDesign conversation, lifecycle, artifact canvas, and directi
 - `git diff --check` - passed
 
 Final severity count: **P0 0 · P1 0 · P2 0**
+
+---
+
+# Design QA — collapsible conversation activities
+
+## Source visual truth
+
+- `/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/codex-clipboard-f697a375-ff68-4d90-9a77-40bf8c8e0ee4.png`
+- Source pixels: 1482 × 1544. The reference is a long Codex Desktop conversation capture; its gray activity rows are the behavior and visual target.
+
+## Rendered implementation
+
+- Collapsed: `.scratch/visual-qa/timeline-groups-collapsed.png`
+- Expanded: `.scratch/visual-qa/timeline-groups-expanded.png`
+- Combined source/state comparison: `.scratch/visual-qa/timeline-group-comparison.png`
+- Browser viewport: 1280 × 720 CSS px; DPR 2. Browser captures are normalized to 1280 × 720 pixels by the in-app capture API.
+- Comparison normalization: collapsed and expanded captures were each scaled to 741 px wide and placed together beneath the 1482 px-wide source.
+
+## State and interaction coverage
+
+- Default collapsed state shows `已查看 3 項` and `執行了 2 個指令`.
+- Clicking `已查看 3 項` changes `aria-expanded` from `false` to `true` and reveals exactly three original tool rows in Turn Record order.
+- Assistant prose remains a hard boundary, so read and command groups stay separate.
+- Browser console errors checked: none.
+
+## Full-view and focused comparison
+
+- Full view: the implementation keeps white narration and gray activity summaries interleaved like the source, without turning activities into a separate panel.
+- Focused activity region: the collapsed line uses the existing AgentStudio icon, muted color, text density, and chevron treatment. The expanded state adds a quiet left rule and preserves the original per-tool rows and intrinsic-width path chips.
+
+## Required fidelity surfaces
+
+- Fonts and typography: existing Inter and JetBrains Mono hierarchy retained; gray activity summaries use the product's 12 px secondary text treatment.
+- Spacing and layout rhythm: summaries occupy one compact row; expanded children use the existing row rhythm with a 20 px indentation.
+- Colors and tokens: existing `text-ink-3`, `border-stroke`, failure red, and background tokens retained.
+- Image and icon fidelity: no new raster assets were needed; the existing Material Symbols Outlined icon set matches the product and source behavior.
+- Copy and content: counts use Traditional Chinese labels tied to semantic activity type; original titles and details remain visible after expansion.
+
+## Findings and comparison history
+
+- No actionable P0, P1, or P2 mismatch remains.
+- Initial implementation behavior already passed the first comparison: adjacent activities of the same semantic kind collapse, while prose, different kinds, pending state, and failures create boundaries.
+- P3: the source capture uses larger apparent typography than the existing AgentStudio density. Existing product typography was intentionally preserved.
+
+final result: passed

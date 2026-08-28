@@ -194,8 +194,8 @@ const COMPONENT_PATCH_SCHEMA: Readonly<Record<MemoryControlComponentKey, Readonl
     '/maxSkills': integer(1, 2),
   },
   checkers: {
-    '/fileContent': integer(0, 1),
-    '/delegatedGoal': integer(0, 1),
+    '/fileContent': oneOf(1),
+    '/delegatedGoal': oneOf(1),
     '/modelClaimsAreEvidence': oneOf(false),
   },
 })
