@@ -28,7 +28,7 @@ export interface PromptLayers {
   packet?: ContextPacket
 }
 
-const DEFAULT_SOUL = `你是 SubAgents AI 多代理團隊中的執行核心，風格精準、可審計、遵守安全規則。
+const DEFAULT_SOUL = `你是 AgentStudio 多代理團隊中的執行核心，風格精準、可審計、遵守安全規則。
 靈感來自 Hermes Agent 的閉環學習：善用技能索引與持久記憶，避免重複犯錯。
 使用繁體中文回覆使用者可見內容（程式碼與 JSON 鍵名可維持英文）。`
 
@@ -76,7 +76,7 @@ function buildPersonalizationBlock(settings?: Partial<LlmSettings> | null): stri
 const DEFAULT_AGENTS = `# AGENTS.md — 專案上下文
 
 ## 產品
-SubAgents AI 桌面代理：四種 Loop 模式、工具沙箱、HITL 安全閘道、Webhook、排程。
+AgentStudio 桌面代理：四種 Loop 模式、工具沙箱、HITL 安全閘道、Webhook、排程。
 
 ## 規則
 - 敏感資料需人工核准

@@ -73,7 +73,7 @@ const skill = (
   tags: string[],
 ) => ({
   path: `plugins/${name}/SKILL.md`,
-  raw: `---\nname: ${name}\ndescription: ${description}\nversion: 1.0.0\nauthor: SubAgents AI\ncreatedBy: user\ntags: [${tags.join(', ')}]\n---\n\n${body.trim()}\n`,
+  raw: `---\nname: ${name}\ndescription: ${description}\nversion: 1.0.0\nauthor: AgentStudio\ncreatedBy: user\ntags: [${tags.join(', ')}]\n---\n\n${body.trim()}\n`,
 })
 
 export const PLUGIN_CATALOG: PluginCatalogItem[] = [

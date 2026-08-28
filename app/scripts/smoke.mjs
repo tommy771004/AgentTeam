@@ -54,7 +54,7 @@ async function test(name, fn) {
   }
 }
 
-console.log('SubAgents AI smoke tests\n')
+console.log('AgentStudio smoke tests\n')
 
 await test('classifyLoopType goal', () => {
   assert.equal(

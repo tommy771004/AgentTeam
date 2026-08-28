@@ -2,8 +2,8 @@
   "name": "subagents-ai",
   "private": true,
   "version": "1.1.0",
-  "description": "SubAgents AI — Multi-agent loop framework desktop app",
-  "author": "SubAgents AI",
+  "description": "AgentStudio — Multi-agent loop framework desktop app",
+  "author": "AgentStudio",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -149,7 +149,7 @@
   },
   "build": {
     "appId": "ai.subagents.desktop",
-    "productName": "SubAgents AI",
+    "productName": "AgentStudio",
     "directories": {
       "output": "release",
       "buildResources": "build"

@@ -1,10 +1,10 @@
-# SubAgents AI 安全白皮書（Security Whitepaper）
+# AgentStudio 安全白皮書（Security Whitepaper）
 
 > 狀態：**Draft 草稿** — 公開前需法務與安全審閱。對應內部基線：`docs/SECURITY_BASELINE.md`。
 
 ## 產品定位
 
-SubAgents AI 是 **local-first** 的桌面多代理自動化應用（Windows / macOS，Electron）。
+AgentStudio 是 **local-first** 的桌面多代理自動化應用（Windows / macOS，Electron）。
 你的對話、排程、技能與記憶都存放在**你自己的裝置**；我們不經營集中式的推理後端，
 LLM 呼叫直接從你的裝置送往**你自己設定**的模型端點（OpenAI 相容 API、本機 Ollama 等）。
 

@@ -49,7 +49,7 @@ export async function createCycloneDxSbom({ packageLockPath, outputPath }) {
     version: 1,
     metadata: {
       timestamp: new Date().toISOString(),
-      tools: [{ vendor: 'SubAgents AI', name: 'release-evidence', version: '1.0.0' }],
+      tools: [{ vendor: 'AgentStudio', name: 'release-evidence', version: '1.0.0' }],
     },
     components,
   }
@@ -157,7 +157,7 @@ export async function buildReleaseEvidence({
 
   const manifest = {
     schemaVersion: 1,
-    product: 'SubAgents AI',
+    product: 'AgentStudio',
     version: String(version).replace(/^v/, ''),
     channel,
     platform,

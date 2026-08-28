@@ -251,6 +251,11 @@ import type { MemoryProjectionScope } from '../src/agent/memoryProjection'
 import { configuredUserPath } from './userEnvironment'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// `productName` is now AgentStudio, but changing Electron's default userData
+// directory would make an upgrade look like a clean install. Keep the existing
+// on-disk authority unless a test or operator supplied an explicit directory.
+const explicitUserData = process.argv.some((argument) => argument === '--user-data-dir' || argument.startsWith('--user-data-dir='))
+if (app.isPackaged && !explicitUserData) app.setPath('userData', path.join(app.getPath('appData'), 'SubAgents AI'))
 const memoryControlMaintainerToken = process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
 delete process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
 const piHostSupervisor = new PiHostSupervisor(() => {
@@ -675,10 +680,10 @@ function createTray() {
     icon = nativeImage.createFromBuffer(png)
   }
   tray = new Tray(icon)
-  tray.setToolTip('SubAgents AI')
+  tray.setToolTip('AgentStudio')
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: '顯示 SubAgents AI',
+      label: '顯示 AgentStudio',
       click: () => {
         if (!mainWindow) createWindow()
         mainWindow?.show()
@@ -725,7 +730,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'SubAgents AI',
+    title: 'AgentStudio',
     backgroundColor: '#0b1326',
     // Window / taskbar icon (dev + packaged). Packaged .exe also uses build/icon.ico.
     ...winIconOpt,
@@ -764,7 +769,7 @@ function createWindow() {
       if (Notification.isSupported()) {
         const nIcon = loadAppIcon('tray')
         new Notification({
-          title: 'SubAgents AI',
+          title: 'AgentStudio',
           body: '已在背景執行，排程仍會持續運作。',
           ...(nIcon.isEmpty() ? {} : { icon: nIcon }),
         }).show()
@@ -849,7 +854,7 @@ app.whenReady().then(async () => {
     }
     if (Notification.isSupported()) {
       new Notification({
-        title: 'SubAgents AI · Webhook',
+        title: 'AgentStudio · Webhook',
         body: `已收到 ${payload.source || '事件'}`,
       }).show()
     }
@@ -862,7 +867,7 @@ app.whenReady().then(async () => {
     }
     if (Notification.isSupported()) {
       new Notification({
-        title: `SubAgents AI · ${msg.channel}`,
+        title: `AgentStudio · ${msg.channel}`,
         body: `${msg.from || msg.chatId}: ${msg.text.slice(0, 120)}`,
       }).show()
     }
@@ -3313,8 +3318,8 @@ function buildPptxFiles(artifact: SubDesignArtifact, content: string): Array<{ n
   const slideMaster = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld name="Master"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:sldLayoutIdLst><p:sldLayoutId id="1" r:id="rId1"/></p:sldLayoutIdLst><p:txStyles><p:titleStyle/><p:bodyStyle/><p:otherStyle/></p:txStyles></p:sldMaster>`
   const theme = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="SubAgents"><a:themeElements><a:clrScheme name="SubAgents"><a:dk1><a:srgbClr val="11191D"/></a:dk1><a:lt1><a:srgbClr val="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="18262C"/></a:dk2><a:lt2><a:srgbClr val="E8F1F5"/></a:lt2><a:accent1><a:srgbClr val="7DD8F0"/></a:accent1><a:accent2><a:srgbClr val="F2B48F"/></a:accent2><a:accent3><a:srgbClr val="A5D6A7"/></a:accent3><a:accent4><a:srgbClr val="C5B5F5"/></a:accent4><a:accent5><a:srgbClr val="F1D06B"/></a:accent5><a:accent6><a:srgbClr val="8EA6B0"/></a:accent6><a:hlink><a:srgbClr val="7DD8F0"/></a:hlink><a:folHlink><a:srgbClr val="C5B5F5"/></a:folHlink></a:clrScheme><a:fontScheme name="SubAgents"><a:majorFont><a:latin typeface="Aptos Display"/><a:ea typeface="Noto Sans CJK TC"/></a:majorFont><a:minorFont><a:latin typeface="Aptos"/><a:ea typeface="Noto Sans CJK TC"/></a:minorFont></a:fontScheme><a:fmtScheme name="SubAgents"><a:fillStyleLst/><a:lnStyleLst/><a:effectStyleLst/><a:bgFillStyleLst/></a:fmtScheme></a:themeElements></a:theme>`
   const presentation = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000" type="screen16x9"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`
-  const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${xmlEscape(title)}</dc:title><dc:creator>SubAgents AI</dc:creator><cp:lastModifiedBy>SubAgents AI</cp:lastModifiedBy></cp:coreProperties>`
-  const appProps = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>SubAgents AI</Application><PresentationFormat>Widescreen</PresentationFormat><Slides>1</Slides></Properties>`
+  const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${xmlEscape(title)}</dc:title><dc:creator>AgentStudio</dc:creator><cp:lastModifiedBy>AgentStudio</cp:lastModifiedBy></cp:coreProperties>`
+  const appProps = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>AgentStudio</Application><PresentationFormat>Widescreen</PresentationFormat><Slides>1</Slides></Properties>`
   return [
     { name: '[Content_Types].xml', data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`, 'utf8') },
     { name: '_rels/.rels', data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`, 'utf8') },

@@ -391,7 +391,7 @@ export function buildHandoffDocument(input: {
   const generatedAt = input.generatedAt || new Date().toISOString()
   const stale = hasStaleReference(input.index)
   const lines = [
-    '# SubAgents AI Handoff',
+    '# AgentStudio Handoff',
     '',
     `- Thread: ${compact(input.threadId, 160)}`,
     `- Run: ${compact(input.runId, 160)}`,

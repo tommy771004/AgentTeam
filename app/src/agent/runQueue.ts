@@ -279,7 +279,7 @@ function fromPersisted(p: PersistedQueueItem): QueuedExternalRun {
         }
         await mark(jobId, r.status === 'success' ? 'success' : 'failed')
         void window.subagents?.notify?.(
-          'SubAgents AI · 排程',
+          'AgentStudio · 排程',
           `佇列補跑完成 · ${r.status}`,
         )
       } catch {

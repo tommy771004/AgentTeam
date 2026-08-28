@@ -59,7 +59,7 @@ async function emitPermissionDenied(
     })
     for (const line of ev.audits) onLog?.('INFO', line)
     for (const n of ev.notifications) {
-      void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+      void window.subagents?.notify?.('AgentStudio · Hook', n.slice(0, 160))
     }
   } catch {
     /* hooks unavailable — never block on hook infra */

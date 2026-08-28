@@ -17,7 +17,7 @@ const artifact = { url: `https://updates.example.test/beta/${installerName}`, si
 artifact.signature = sign(artifactSignaturePayload(artifact))
 const manifest = {
   schemaVersion: 1 as const,
-  product: 'SubAgents AI' as const,
+  product: 'AgentStudio' as const,
   channel: 'beta' as const,
   version: '1.1.0',
   platform: testPlatform,

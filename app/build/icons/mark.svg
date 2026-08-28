@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  SubAgents AI — Brand mark (transparent)
+  AgentStudio — Brand mark (transparent)
 
   The app-icon tile (icon.svg) keeps its cyan squircle, because macOS and
   Windows expect an app icon to carry its own shape. This is the tile-less
@@ -23,7 +23,7 @@
   visibly closer to the edge than everything else. It is centred on the content
   box (512, 495) instead, which puts equal margin above and below.
 -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="184 166 657 657" fill="none" role="img" aria-label="SubAgents AI">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="184 166 657 657" fill="none" role="img" aria-label="AgentStudio">
   <defs>
     <linearGradient id="orbit" x1="280" y1="240" x2="760" y2="800" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#14b8d4"/>

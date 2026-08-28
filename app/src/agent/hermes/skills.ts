@@ -12,7 +12,7 @@ const DEFAULT_SKILLS: Array<{ path: string; raw: string }> = [
 name: web-research
 description: 網路研究與來源整理流程。
 version: 1.0.0
-author: SubAgents AI
+author: AgentStudio
 createdBy: user
 tags: [research, web]
 ---
@@ -39,7 +39,7 @@ tags: [research, web]
 name: safe-export
 description: 安全匯出與人工核准流程。
 version: 1.0.0
-author: SubAgents AI
+author: AgentStudio
 createdBy: user
 tags: [safety, export]
 ---

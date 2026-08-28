@@ -1,10 +1,10 @@
-# SubAgents AI 隱私權政策（Privacy Policy）
+# AgentStudio 隱私權政策（Privacy Policy）
 
 > 狀態：**Draft 草稿** — 公開前需法務審閱；生效日期待定。
 
 ## 我們的原則
 
-SubAgents AI 是 local-first 桌面應用。**預設情況下，我們收集不到你的任何資料**，
+AgentStudio 是 local-first 桌面應用。**預設情況下，我們收集不到你的任何資料**，
 因為沒有任何對話、檔案或憑證會傳送到我們的伺服器。
 
 ## 我們處理的資料

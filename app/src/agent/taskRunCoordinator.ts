@@ -298,7 +298,7 @@ export async function evaluateBeforeRunHooks(
     })
     for (const line of ev.audits) thr.pushBubble(opts.threadId, 'system', line)
     for (const n of ev.notifications) {
-      void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+      void window.subagents?.notify?.('AgentStudio · Hook', n.slice(0, 160))
     }
     if (ev.deny) {
       // afterRun is owned by finalizeTaskRun — do not evaluate it here.
@@ -760,7 +760,7 @@ async function runFinalizationSequence(
       })
       for (const line of ev.audits) thr.pushBubble(tid, 'system', line)
       for (const n of ev.notifications) {
-        void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+        void window.subagents?.notify?.('AgentStudio · Hook', n.slice(0, 160))
       }
     } catch {
       /* non-fatal */
@@ -985,7 +985,7 @@ async function runFinalizationSequence(
     })
     for (const line of ev.audits) thr.pushBubble(tid, 'system', line)
     for (const n of ev.notifications) {
-      void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+      void window.subagents?.notify?.('AgentStudio · Hook', n.slice(0, 160))
     }
   } catch {
     /* non-fatal */
@@ -2243,7 +2243,7 @@ async function coordinateTaskRun(
       })
       for (const line of ev.audits) thr.pushBubble(tid, 'system', line)
       for (const n of ev.notifications) {
-        void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+        void window.subagents?.notify?.('AgentStudio · Hook', n.slice(0, 160))
       }
     } catch {
       /* non-fatal */

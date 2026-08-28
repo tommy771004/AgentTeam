@@ -13,7 +13,7 @@ export interface UpdateArtifactDescriptor {
 
 export interface SignedUpdateManifest {
   schemaVersion: 1
-  product: 'SubAgents AI'
+  product: 'AgentStudio'
   channel: 'beta'
   version: string
   platform: UpdatePlatform
@@ -103,7 +103,7 @@ export function validateUpdateManifest(raw: unknown, target?: UpdateTarget): Man
   const manifestKeys = new Set(['schemaVersion', 'product', 'channel', 'version', 'platform', 'arch', 'mandatory', 'releaseNotes', 'publishedAt', 'artifact', 'signature'])
   for (const key of Object.keys(raw)) if (!manifestKeys.has(key)) errors.push(`unknown manifest field: ${key}`)
   if (raw.schemaVersion !== 1) errors.push('unsupported schemaVersion')
-  if (raw.product !== 'SubAgents AI') errors.push('unexpected product')
+  if (raw.product !== 'AgentStudio') errors.push('unexpected product')
   if (raw.channel !== 'beta') errors.push('only beta channel is supported')
   if (typeof raw.version !== 'string' || !VERSION.test(raw.version)) errors.push('invalid version')
   if (raw.platform !== 'win32' && raw.platform !== 'darwin') errors.push('unsupported platform')

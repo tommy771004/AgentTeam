@@ -340,7 +340,7 @@ export async function spawnDelegateViaRunTask(
       })
       for (const line of ev.audits) opts?.onLog?.(line)
       for (const n of ev.notifications) {
-        void window.subagents?.notify?.('SubAgents AI · Hook', n.slice(0, 160))
+        void window.subagents?.notify?.('AgentStudio · Hook', n.slice(0, 160))
       }
     } catch {
       /* non-fatal */

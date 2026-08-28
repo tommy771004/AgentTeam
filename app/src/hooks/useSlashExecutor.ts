@@ -327,7 +327,7 @@ export function useSlashExecutor() {
           log('僅 Electron 可隱藏到系統匣')
         }
         // close via hide: no direct hide API — notify
-        void window.subagents?.notify?.('SubAgents AI', '請用視窗關閉按鈕隱藏到系統匣')
+        void window.subagents?.notify?.('AgentStudio', '請用視窗關閉按鈕隱藏到系統匣')
         log('提示：關閉視窗可隱藏到系統匣')
         return
       }

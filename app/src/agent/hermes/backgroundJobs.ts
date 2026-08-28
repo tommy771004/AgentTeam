@@ -344,7 +344,7 @@ export function enqueueBackgroundDelegate(
 
       if (notifyOnComplete) {
         await notifyDesktop(
-          result.ok ? 'SubAgents AI · 委派完成' : 'SubAgents AI · 委派失敗',
+          result.ok ? 'AgentStudio · 委派完成' : 'AgentStudio · 委派失敗',
           `${input.goal.slice(0, 60)}\n${(result.summary || '').slice(0, 120)}`,
         )
       }
@@ -363,7 +363,7 @@ export function enqueueBackgroundDelegate(
         status: 'failed',
       })
       if (notifyOnComplete) {
-        await notifyDesktop('SubAgents AI · 委派失敗', job.error.slice(0, 160))
+        await notifyDesktop('AgentStudio · 委派失敗', job.error.slice(0, 160))
       }
       void archiveBackgroundJob(job)
     }

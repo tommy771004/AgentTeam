@@ -1,4 +1,4 @@
-# SubAgents AI 退款政策（Refund Policy）
+# AgentStudio 退款政策（Refund Policy）
 
 > 狀態：**Draft 草稿** — 公開前需法務與金流方案審閱。
 

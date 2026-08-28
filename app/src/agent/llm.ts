@@ -494,11 +494,11 @@ export async function runSubAgentTask(
   },
 ): Promise<LlmChatResult> {
   const system = settings.subAgentsEnabled === true
-    ? `You are the "${role}" sub-agent in SubAgents AI multi-agent framework.
+    ? `You are the "${role}" sub-agent in AgentStudio multi-agent framework.
 Follow the loop protocol: process only your assigned step, be concise, factual, and structured in Markdown.
 Use tool results as primary evidence. Never invent credentials or private data. If data is unavailable mark as N/A.
 If the user message includes images, describe and use them as primary evidence.`
-    : `You are the primary agent in SubAgents AI.
+    : `You are the primary agent in AgentStudio.
 Process the assigned step directly using the available evidence, be concise, factual, and structured in Markdown.
 Never invent credentials or private data. If data is unavailable mark as N/A.
 If the user message includes images, describe and use them as primary evidence.`

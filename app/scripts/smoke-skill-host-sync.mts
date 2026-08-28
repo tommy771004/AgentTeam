@@ -45,6 +45,18 @@ const { skillsStore } = await import('../src/agent/hermes/skills.ts')
 const { buildHostSkillPayload, pushSkillsToHost } = await import('../src/agent/hermes/skillHostSync.ts')
 const { useSkillMigrationStore } = await import('../src/store/skillMigrationStore.ts')
 
+async function captureExpectedWarnings(run: () => Promise<void>): Promise<unknown[][]> {
+  const original = console.warn
+  const warnings: unknown[][] = []
+  console.warn = (...args: unknown[]) => { warnings.push(args) }
+  try {
+    await run()
+    return warnings
+  } finally {
+    console.warn = original
+  }
+}
+
 await test('the payload is the WHOLE current list with mapped statuses', () => {
   skillsStore.save({ name: 'deploy-check', description: '部署前檢查', version: '1.0.0', author: 'user', createdBy: 'user' }, '- CI 綠燈')
   const web = skillsStore.get('web-research')
@@ -142,12 +154,17 @@ await test('a failing bridge is REPORTED, not left looking like the last success
     subagents: { piHost: { resources: { listSkillFiles: async () => ({ files: [] }), syncSkills: async () => { throw new Error('host is down') } } } },
   }
   try {
-    useSkillMigrationStore.getState().setReport({
-      at: '2026-08-26T00:00:00.000Z', skillsDir: '/tmp/fake-skills', complete: true,
-      outcomes: [{ name: 'old', ok: true as const, slug: 'old' }],
+    const warnings = await captureExpectedWarnings(async () => {
+      useSkillMigrationStore.getState().setReport({
+        at: '2026-08-26T00:00:00.000Z', skillsDir: '/tmp/fake-skills', complete: true,
+        outcomes: [{ name: 'old', ok: true as const, slug: 'old' }],
+      })
+      pushSkillsToHost()
+      await new Promise((resolve) => setTimeout(resolve, 0))
     })
-    pushSkillsToHost()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(warnings.length, 1, 'the expected failed push emits exactly one diagnostic')
+    assert.match(String(warnings[0]?.[0]), /推送到 Host 技能目錄失敗/)
+    assert.match(String(warnings[0]?.[1]), /host is down/)
     const report = useSkillMigrationStore.getState().report
     assert.ok(report && !report.complete && report.unreachable,
       '「Host 沒同步」與「上一次同步成功」不能長得一樣')
@@ -164,8 +181,12 @@ await test('version skew（old preload，syncSkills 但無 listSkillFiles）degr
   }
   pushed.length = 0
   try {
-    pushSkillsToHost()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    const warnings = await captureExpectedWarnings(async () => {
+      pushSkillsToHost()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    assert.equal(warnings.length, 1, 'version skew emits one bounded diagnostic')
+    assert.match(String(warnings[0]?.[0]), /preload 缺少 listSkillFiles/)
     assert.equal(pushed.length, 0,
       'without the read bridge a complete list cannot be established — skipping beats reconciling real Host skills away')
   } finally {

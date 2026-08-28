@@ -83,6 +83,28 @@ function useIsMacDesktop() {
   }, [])
 }
 
+function SidebarCollapseButton({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const label = collapsed ? '展開側邊欄' : '收合側邊欄'
+  return (
+    <div className={`no-drag flex h-10 shrink-0 items-center px-2 ${collapsed ? 'justify-center' : 'justify-between'}`}>
+      {!collapsed && <span className="min-w-0 truncate px-1.5 text-[13px] font-semibold tracking-tight text-on-surface">AgentStudio</span>}
+      <button
+        type="button"
+        onClick={onToggle}
+        title={label}
+        aria-label={label}
+        aria-expanded={!collapsed}
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-outline transition-colors hover:bg-hover-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="2.75" y="3.25" width="18.5" height="17.5" rx="3.5" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M16.25 4.25V19.75" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
 export function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -165,6 +187,7 @@ export function Layout() {
             aria-hidden
           />
         )}
+        <SidebarCollapseButton collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} />
         <nav className="flex-1 overflow-y-auto custom-scrollbar no-drag py-3 px-2 space-y-4">
           {NAV_GROUPS.map((group) => (
             <div key={group.title} className="stagger-children">
@@ -217,14 +240,6 @@ export function Layout() {
               {!collapsed && '執行中…'}
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setCollapsed((c) => !c)}
-            className="w-full flex items-center justify-center gap-1 rounded-lg py-2 text-outline hover:bg-hover-2 hover:text-on-surface text-xs"
-          >
-            <Icon name={collapsed ? 'chevron_right' : 'chevron_left'} size={18} />
-            {!collapsed && '收合選單'}
-          </button>
         </div>
       </aside>
 

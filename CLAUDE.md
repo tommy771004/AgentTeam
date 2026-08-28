@@ -4,7 +4,7 @@ Guidance for Claude Code here. `AGENTS.md` points at this file — keep this one
 
 ## Layout
 
-The product is **`app/`** — Electron + React 19 + TypeScript + Vite + zustand ("SubAgents AI"). Everything else at the root is design input: `docs/0{1,2,3}_…` are the loop spec the engine implements, `docs/adr/` holds decisions, `CONTEXT.md` is the domain language — read it before naming anything. **No in-repo `RTK.md`**; agent guidance is `AGENTS.md` / `CLAUDE.md` / `CONTEXT.md` / `docs/*` only.
+The product is **`app/`** — Electron + React 19 + TypeScript + Vite + zustand ("AgentStudio"). Everything else at the root is design input: `docs/0{1,2,3}_…` are the loop spec the engine implements, `docs/adr/` holds decisions, `CONTEXT.md` is the domain language — read it before naming anything. **No in-repo `RTK.md`**; agent guidance is `AGENTS.md` / `CLAUDE.md` / `CONTEXT.md` / `docs/*` only.
 
 UI copy, logs, and some comments are Traditional Chinese mixed with English — keep that style. Renderer code must feature-detect `window.subagents?.x`; the app also runs in a plain browser. Issues and specs live as local Markdown under `.scratch/<feature-slug>/`; `docs/agents/` covers the issue tracker, the `Status:` vocabulary, and the domain setup.
 

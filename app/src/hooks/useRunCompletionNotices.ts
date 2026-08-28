@@ -75,7 +75,7 @@ export function useRunCompletionNotices() {
 
         if (notice.osNotify) {
           void window.subagents?.notify?.(
-            `SubAgents AI · ${notice.title}`,
+            `AgentStudio · ${notice.title}`,
             notice.body.slice(0, 160),
           )
           if (settings.soundOnComplete) playCompletionTone(notice.tone)

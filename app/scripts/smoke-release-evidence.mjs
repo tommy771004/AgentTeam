@@ -28,7 +28,7 @@ await test('release evidence manifest contains artifact hash, SBOM, and provenan
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'subagents-release-evidence-'))
   const artifacts = path.join(root, 'artifacts')
   await fs.mkdir(artifacts)
-  await fs.writeFile(path.join(artifacts, 'SubAgents AI Setup 1.0.0.exe'), 'signed-later')
+  await fs.writeFile(path.join(artifacts, 'AgentStudio Setup 1.0.0.exe'), 'signed-later')
   await fs.writeFile(path.join(artifacts, 'sbom.cdx.json'), '{"bomFormat":"CycloneDX"}')
   const releaseNotesPath = path.join(root, 'RELEASE_NOTES.md')
   await fs.writeFile(releaseNotesPath, '# Beta release\n\nEvidence pipeline baseline.\n')
@@ -55,20 +55,20 @@ await test('release evidence manifest contains artifact hash, SBOM, and provenan
   assert.equal(await fs.readFile(path.join(root, 'release-notes.md'), 'utf8'), await fs.readFile(releaseNotesPath, 'utf8'))
   assert.match(
     await fs.readFile(path.join(root, 'checksums.txt'), 'utf8'),
-    new RegExp(`${manifest.artifacts[0].sha256}  SubAgents AI Setup 1\\.0\\.0\\.exe`),
+    new RegExp(`${manifest.artifacts[0].sha256}  AgentStudio Setup 1\\.0\\.0\\.exe`),
   )
   assert.equal(manifest.provenance.runId, '123')
   assert.equal(manifest.artifacts.length, 1)
   assert.match(manifest.artifacts[0].sha256, /^[a-f0-9]{64}$/)
-  assert.equal(manifest.artifacts[0].name, 'SubAgents AI Setup 1.0.0.exe')
+  assert.equal(manifest.artifacts[0].name, 'AgentStudio Setup 1.0.0.exe')
 })
 
 await test('release manifest verification matches exact nested paths and rejects extras', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'subagents-release-manifest-'))
   const artifacts = path.join(root, 'artifacts')
-  await fs.mkdir(path.join(artifacts, 'SubAgents AI.app', 'Contents'), { recursive: true })
+  await fs.mkdir(path.join(artifacts, 'AgentStudio.app', 'Contents'), { recursive: true })
   await fs.mkdir(path.join(artifacts, 'backup'), { recursive: true })
-  await fs.writeFile(path.join(artifacts, 'SubAgents AI.app', 'Contents', 'Info.plist'), 'expected')
+  await fs.writeFile(path.join(artifacts, 'AgentStudio.app', 'Contents', 'Info.plist'), 'expected')
   await fs.writeFile(path.join(artifacts, 'backup', 'Info.plist'), 'same basename, different path')
   const sbomPath = path.join(root, 'sbom.cdx.json')
   await fs.writeFile(sbomPath, '{"bomFormat":"CycloneDX"}')
@@ -85,13 +85,13 @@ await test('release manifest verification matches exact nested paths and rejects
     releaseNotesPath,
   })
 
-  await fs.rm(path.join(artifacts, 'SubAgents AI.app', 'Contents', 'Info.plist'))
+  await fs.rm(path.join(artifacts, 'AgentStudio.app', 'Contents', 'Info.plist'))
   await assert.rejects(
     verifyArtifactManifest({ manifest, artifactDir: artifacts }),
-    /Missing packaged artifact SubAgents AI\.app[\\/]Contents[\\/]Info\.plist/,
+    /Missing packaged artifact AgentStudio\.app[\\/]Contents[\\/]Info\.plist/,
   )
 
-  await fs.writeFile(path.join(artifacts, 'SubAgents AI.app', 'Contents', 'Info.plist'), 'expected')
+  await fs.writeFile(path.join(artifacts, 'AgentStudio.app', 'Contents', 'Info.plist'), 'expected')
   await fs.writeFile(path.join(artifacts, 'unexpected.bin'), 'not in manifest')
   await assert.rejects(
     verifyArtifactManifest({ manifest, artifactDir: artifacts }),

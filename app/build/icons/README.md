@@ -1,4 +1,4 @@
-# SubAgents AI — App Icons
+# AgentStudio — App Icons
 
 ## Mark concept
 
@@ -32,4 +32,4 @@ npm run icons
 1. **`public/` is not the Electron source of truth.** Master is `build/icons/icon.svg`. `npm run icons` writes PNGs to `build/icons/` and *copies* them to `public/favicon*` + `public/brand/`. Editing only `public/` does not update `.exe` / window icons until you change the master and re-run `icons` (or place matching files under `build/icons`).
 2. **Windows `.exe` needs `.ico`** — `build/icon.ico` (multi-size). PNG alone is not enough for the installer/exe shell icon.
 3. **Runtime window/tray** (`main.ts` `loadAppIcon`): packaged `resources/app-icons/` → dev `build/icons/` → fallback `public/brand` / `dist/brand`.
-4. After changing icons: `npm run icons && npm run dist:win`, then reinstall or run `release/win-unpacked/SubAgents AI.exe`. Clear Windows icon cache if the taskbar still shows the old Electron icon.
+4. After changing icons: `npm run icons && npm run dist:win`, then reinstall or run `release/win-unpacked/AgentStudio.exe`. Clear Windows icon cache if the taskbar still shows the old Electron icon.

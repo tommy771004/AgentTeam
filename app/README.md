@@ -1,4 +1,4 @@
-# SubAgents AI
+# AgentStudio
 
 Cross-platform desktop app (macOS & Windows) for the **AI Agent Loop** multi-agent framework.
 

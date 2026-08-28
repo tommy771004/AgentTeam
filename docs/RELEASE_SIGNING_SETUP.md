@@ -1,6 +1,6 @@
 # Release signing 與更新通道設定手冊
 
-> 適用專案：SubAgents AI / AgentTeam  
+> 適用專案：AgentStudio / AgentTeam
 > 對應 workflow：`.github/workflows/release.yml`  
 > 最後查核：2026-08-20
 
@@ -35,7 +35,7 @@ Authenticode、Gatekeeper 與 notarization 證據 fail-closed。不要填假值�
 | `APPLE_ID` | Apple Developer 帳號 | Apple Account 電子郵件 |
 | `APPLE_APP_SPECIFIC_PASSWORD` | Apple Account 網站 | app-specific password，不是登入密碼 |
 | `APPLE_TEAM_ID` | Apple Developer Membership | 10 字元 Team ID |
-| `UPDATE_PRIVATE_KEY` | SubAgents AI 更新簽章金鑰 | PEM PKCS#8 RSA 私鑰；必須匹配 app 內建公鑰 |
+| `UPDATE_PRIVATE_KEY` | AgentStudio 更新簽章金鑰 | PEM PKCS#8 RSA 私鑰；必須匹配 app 內建公鑰 |
 | `UPDATE_PUBLISH_TOKEN` | 自行部署的更新發布服務 | 可執行 HTTP PUT 的 Bearer token |
 
 ### GitHub Environment variables
@@ -208,7 +208,7 @@ App Store 上的產品 ID、bundle ID 或 Team ID。
 
 1. 登入 [account.apple.com](https://account.apple.com/)。
 2. 進入 **Sign-In and Security → App-Specific Passwords**。
-3. 建立一組只供 `SubAgents AI GitHub notarization` 使用的密碼。
+3. 建立一組只供 `AgentStudio GitHub notarization` 使用的密碼。
 4. 立即複製，存為 `APPLE_APP_SPECIFIC_PASSWORD`。
 
 這不是 Apple Account 主密碼。重設 Apple Account 主密碼會撤銷既有 app-specific

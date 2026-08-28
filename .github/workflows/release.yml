@@ -348,7 +348,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "SubAgents AI release verification"
+            echo "AgentStudio release verification"
             echo "platform=${RELEASE_PLATFORM}"
             echo "arch=${RELEASE_ARCH}"
             echo "attempt=${{ github.run_attempt }}"

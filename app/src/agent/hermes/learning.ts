@@ -326,7 +326,7 @@ ${toolsMd ? `\n## 成功工具序列\n${toolsMd}\n` : ''}
         name: draft.name,
         description: draft.description,
         version: '0.1.0',
-        author: 'SubAgents AI',
+        author: 'AgentStudio',
         createdBy: 'agent',
         tags: ['auto', 'draft-approved'],
       },

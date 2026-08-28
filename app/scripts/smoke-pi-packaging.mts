@@ -104,7 +104,7 @@ async function hostRound(label: string, hostEntry: string, vendorDir: string, st
 }
 
 try {
-  const macResources = join(temporaryRoot, 'mac', 'SubAgents AI.app', 'Contents', 'Resources')
+  const macResources = join(temporaryRoot, 'mac', 'AgentStudio.app', 'Contents', 'Resources')
   const winResources = join(temporaryRoot, 'win', 'resources')
   // electron-builder places the main/utility-process bundle under app.asar;
   // extraResources keeps vendor/pi outside the archive for native/runtime loads.

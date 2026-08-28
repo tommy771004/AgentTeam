@@ -1,4 +1,4 @@
-# SubAgents AI 服務條款（Terms of Service）
+# AgentStudio 服務條款（Terms of Service）
 
 > 狀態：**Draft 草稿** — 公開前需法務審閱。
 

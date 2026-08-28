@@ -50,7 +50,7 @@ export async function buildSignedUpdateManifest({ artifactDir, outputDir, versio
     descriptor.signature = sign(canonical({ sha256: descriptor.sha256, size: descriptor.size, url: descriptor.url }), privateKeyPem)
     artifacts.push(descriptor)
   }
-  const manifest = { schemaVersion: 1, product: 'SubAgents AI', channel, version: String(version).replace(/^v/, ''), platform, arch, mandatory: false, releaseNotes: process.env.UPDATE_RELEASE_NOTES || `SubAgents AI ${version}`, publishedAt: new Date().toISOString(), artifact: artifacts[0], signature: '' }
+  const manifest = { schemaVersion: 1, product: 'AgentStudio', channel, version: String(version).replace(/^v/, ''), platform, arch, mandatory: false, releaseNotes: process.env.UPDATE_RELEASE_NOTES || `AgentStudio ${version}`, publishedAt: new Date().toISOString(), artifact: artifacts[0], signature: '' }
   const unsignedManifest = { ...manifest }
   delete unsignedManifest.signature
   manifest.signature = sign(canonical(unsignedManifest), privateKeyPem)

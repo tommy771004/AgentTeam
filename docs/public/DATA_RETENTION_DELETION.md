@@ -1,11 +1,11 @@
-# SubAgents AI 資料保存與刪除（Data Retention & Deletion）
+# AgentStudio 資料保存與刪除（Data Retention & Deletion）
 
 > 狀態：**Draft 草稿** — 公開前需審閱。
 
 ## 本機資料（你的裝置）
 
-所有執行資料都在你裝置的應用資料夾（Windows：`%APPDATA%/SubAgents AI`；
-macOS：`~/Library/Application Support/SubAgents AI`）：
+為了讓既有安裝升級後保留全部資料，AgentStudio 沿用原產品的相容資料路徑
+（Windows：`%APPDATA%/SubAgents AI`；macOS：`~/Library/Application Support/SubAgents AI`）：
 
 | 資料 | 保存 | 刪除方式 |
 | --- | --- | --- |

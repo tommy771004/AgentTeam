@@ -250,7 +250,7 @@ async function verifyWindows() {
     const installedExecutables = filesUnder(installDir).filter((file) =>
       /\.exe$/i.test(file) && !/unins|uninstall|elevate|update/i.test(path.basename(file)),
     )
-    executable = installedExecutables.find((file) => path.basename(file) === 'SubAgents AI.exe') || installedExecutables[0]
+    executable = installedExecutables.find((file) => path.basename(file) === 'AgentStudio.exe') || installedExecutables[0]
     if (!executable) throw new Error('Installed application executable was not found')
 
     smokeProject = createSmokeProject()

@@ -164,7 +164,7 @@ export async function startWebhookServer(opts: {
     if (method === 'GET' && (url === '/' || url === '/health')) {
       sendJson(res, 200, {
         ok: true,
-        service: 'SubAgents AI Webhook',
+        service: 'AgentStudio Webhook',
         endpoints: ['POST /webhook', 'POST /events', 'GET /health'],
         hits: status.hitCount,
       })

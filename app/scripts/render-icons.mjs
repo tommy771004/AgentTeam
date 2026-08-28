@@ -1,5 +1,5 @@
 /**
- * Render SubAgents AI app icon SVG → PNG pack + favicon.
+ * Render AgentStudio app icon SVG → PNG pack + favicon.
  * Uses Playwright (already a devDependency) for crisp rasterization.
  *
  *   node scripts/render-icons.mjs

@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  SubAgents AI app icon.
+  AgentStudio app icon.
   Deterministic high-resolution reconstruction of the supplied 39x36 source:
   one connected white/ice-blue cluster plus one independent amber node.
 -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none" role="img" aria-label="SubAgents AI">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none" role="img" aria-label="AgentStudio">
   <!-- Transparent safe area lets macOS and Windows apply their own masks. -->
   <rect x="80" y="80" width="864" height="864" rx="216" fill="#0075DE"/>
 

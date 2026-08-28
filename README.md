@@ -1,4 +1,4 @@
-# SubAgents AI — Multi-Agent Team Framework
+# AgentStudio — Multi-Agent Team Framework
 
 AI Agent Loop 桌面應用（React + TypeScript + Electron，支援 **macOS** 與 **Windows**）。
 

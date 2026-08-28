@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- SubAgents AI — dark tile variant (matches app chrome #0b1326) -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none" role="img" aria-label="SubAgents AI">
+<!-- AgentStudio — dark tile variant (matches app chrome #0b1326) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none" role="img" aria-label="AgentStudio">
   <defs>
     <linearGradient id="tile" x1="80" y1="60" x2="960" y2="980" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#131b2e"/>

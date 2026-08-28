@@ -1,4 +1,4 @@
-# SubAgents AI — dual-platform verify (app/)
+# AgentStudio — dual-platform verify (app/)
 # Runs build + stable smoke matrix on Ubuntu and Windows.
 # Linux additionally proves the bubblewrap builtin-shell sandbox (ADR-0051).
 # Marketplace E2E is optional (continue-on-error) due to Electron/CJS fragility.

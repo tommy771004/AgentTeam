@@ -1,4 +1,4 @@
-# SubAgents AI
+# AgentStudio
 
 An Electron desktop app (`app/`) running an agent loop (Turn/Goal/Time-based/Proactive) over local tools, capabilities, and CLI providers. SubDesign and OpenDesign are workflows within it, not separate products.
 

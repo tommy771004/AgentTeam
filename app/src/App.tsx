@@ -60,7 +60,7 @@ function RunQueueBootstrap() {
       const n = hydrateRunQueue()
       if (n > 0) {
         void window.subagents?.notify?.(
-          'SubAgents AI · 佇列',
+          'AgentStudio · 佇列',
           `已恢復 ${n} 筆待跑自動化任務`,
         )
       }
@@ -558,7 +558,7 @@ function RecoveryBootstrap() {
         )
       }
       void window.subagents?.notify?.(
-        'SubAgents AI · 啟動復原',
+        'AgentStudio · 啟動復原',
         `${items.length} 項本機狀態已標記為中斷或安全補跑。`,
       )
       } catch (error) {
@@ -575,7 +575,7 @@ function RecoveryBootstrap() {
         if (activeId) {
           useThreadStore.getState().pushBubble(activeId, 'system', `啟動復原報告（失敗）\n${detail}`)
         }
-        void window.subagents?.notify?.('SubAgents AI · 啟動復原', detail)
+        void window.subagents?.notify?.('AgentStudio · 啟動復原', detail)
       } finally {
         completeStartupRecovery()
         // StartupGate can now mount PiHostEventBootstrap. Release this
@@ -686,7 +686,7 @@ function SchedulerBootstrap() {
       void (async () => {
         const scheduleTrigger = createScheduleTriggerSnapshot(job)
         await markJobResult(job.id, 'running')
-        void window.subagents?.notify?.('SubAgents AI · 排程', `執行任務：${job.name}`)
+        void window.subagents?.notify?.('AgentStudio · 排程', `執行任務：${job.name}`)
         navigate('/')
         const { runTask } = await import('./agent/taskRunCoordinator')
         const settleJob = async (r: {
@@ -699,7 +699,7 @@ function SchedulerBootstrap() {
             if (r.skipReason === 'cancelled') {
               await markJobResult(job.id, 'skipped')
               void window.subagents?.notify?.(
-                'SubAgents AI · 排程',
+                'AgentStudio · 排程',
                 `任務 ${job.name}：已從佇列取消`,
               )
             }
@@ -708,7 +708,7 @@ function SchedulerBootstrap() {
           const ok = r.status === 'success'
           await markJobResult(job.id, ok ? 'success' : 'failed')
           void window.subagents?.notify?.(
-            'SubAgents AI · 排程',
+            'AgentStudio · 排程',
             `任務 ${job.name}：${ok ? '成功' : '失敗'}`,
           )
         }
@@ -734,14 +734,14 @@ function SchedulerBootstrap() {
         if (r.skipped) {
           if (r.queued) {
             void window.subagents?.notify?.(
-              'SubAgents AI · 排程',
+              'AgentStudio · 排程',
               `任務 ${job.name}：忙碌，已加入待跑佇列（完成後回寫狀態）`,
             )
             return
           }
           await markJobResult(job.id, 'skipped')
           void window.subagents?.notify?.(
-            'SubAgents AI · 排程',
+            'AgentStudio · 排程',
             `任務 ${job.name}：忙碌略過`,
           )
           return
@@ -828,7 +828,7 @@ function WebhookBootstrap() {
       })
       if (!matched) {
         void window.subagents?.notify?.(
-          'SubAgents AI · Webhook',
+          'AgentStudio · Webhook',
           `沒有規則匹配：${payload.source || 'event'}`,
         )
         return
@@ -837,7 +837,7 @@ function WebhookBootstrap() {
         const event = matched.event
         await recordEventTrigger(event.id, matched.trigger)
         void window.subagents?.notify?.(
-          'SubAgents AI · Webhook',
+          'AgentStudio · Webhook',
           `已匹配 rule: ${event.name}`,
         )
         navigate('/')
@@ -864,7 +864,7 @@ function WebhookBootstrap() {
         })
         if (r.skipped) {
           void window.subagents?.notify?.(
-              'SubAgents AI · Webhook',
+              'AgentStudio · Webhook',
             r.queued
               ? `已匹配 ${event.name}：忙碌，已加入待跑佇列`
               : `已匹配 ${event.name}，但代理忙碌 — 已略過`,
@@ -927,7 +927,7 @@ function MonitorBootstrap() {
       unsubStopped = monitorApi.onStopped?.((payload) => {
       if (payload.reason === 'volume' || payload.reason === 'error') {
         void window.subagents?.notify?.(
-          'SubAgents AI · Monitor',
+          'AgentStudio · Monitor',
           `monitor ${payload.description} 已停止（${payload.reason}）${payload.detail ? `：${payload.detail.slice(0, 100)}` : ''}`,
         )
       }
@@ -1022,7 +1022,7 @@ function GatewayBootstrap() {
         void window.subagents?.gateway?.send({
           channel: msg.channel,
           chatId: msg.chatId,
-          text: `SubAgents AI 在線 · running=${useAgentStore.getState().isRunning}`,
+          text: `AgentStudio 在線 · running=${useAgentStore.getState().isRunning}`,
           token: useSettingsStore.getState().settings.telegramBotToken || undefined,
         })
         return
@@ -1034,7 +1034,7 @@ function GatewayBootstrap() {
 
       void (async () => {
         void window.subagents?.notify?.(
-          'SubAgents AI · Telegram',
+          'AgentStudio · Telegram',
           `${msg.from || msg.chatId}: ${(text || '（附件）').slice(0, 80)}`,
         )
         navigate('/')

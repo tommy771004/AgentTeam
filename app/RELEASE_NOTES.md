@@ -1,4 +1,4 @@
-# SubAgents AI Beta Release Notes
+# AgentStudio Beta Release Notes
 
 This release is packaged by the required Windows and macOS release-evidence workflow.
 

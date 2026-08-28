@@ -20,7 +20,7 @@ export const app = {
     if (name === 'temp') return os.tmpdir()
     return os.tmpdir()
   },
-  getName: () => 'SubAgents AI E2E',
+  getName: () => 'AgentStudio E2E',
   getVersion: () => '0.0.0-e2e',
   isReady: () => true,
   whenReady: () => Promise.resolve(),
