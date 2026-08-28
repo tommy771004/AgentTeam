@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { canonicalJson } from './piToolContract.ts'
+import { compileMemoryControlRuntime } from './memoryControlRuntime.ts'
 import type {
   MemoryControlComponent,
   MemoryControlComponentKey,
@@ -790,6 +791,7 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
       if (candidate.status !== 'candidate' || candidate.parentRevision !== input.expectedActiveRevision) {
         throw new Error('Memory-Control Package candidate is not promotable from the active revision')
       }
+      compileMemoryControlRuntime(candidate)
       const event = lifecycleEvent(this.document, {
         kind: 'candidate-activated', revision: candidate.revision, fromRevision: this.document.activeRevision,
         ...(candidate.diagnosisComponent ? { diagnosisComponent: candidate.diagnosisComponent } : {}), reason: input.reason,
@@ -817,6 +819,7 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
   settleEvaluation(input: { report: MemoryControlEvaluationReport }): Promise<MemoryControlPackage> {
     return this.mutate(async () => {
       const settled = evaluationSettlementDocument(this.document, input.report)
+      compileMemoryControlRuntime(settled.document.packages.find((entry) => entry.revision === settled.document.activeRevision)!)
       await this.commit(settled.document)
       return this.read({ schemaVersion: 1, revision: settled.revision })
     })
@@ -829,6 +832,7 @@ export class JsonMemoryControlPackageRepository implements MemoryControlPackageR
       const wasPreviouslyActive = target.revision === 1 || this.document.events.some((event) =>
         event.revision === target.revision && (event.kind === 'candidate-activated' || event.kind === 'rollback'))
       if (!wasPreviouslyActive) throw new Error('Memory-Control Package rollback target was never validated and active')
+      compileMemoryControlRuntime(target)
       const event = lifecycleEvent(this.document, {
         kind: 'rollback', revision: target.revision, fromRevision: this.document.activeRevision, reason: input.reason,
       })

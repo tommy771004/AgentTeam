@@ -99,6 +99,7 @@ function checkerSignal(entries: readonly TurnRecordEntry[]): TurnRecordEntry[] |
 function workingMemorySignal(entries: readonly TurnRecordEntry[]): TurnRecordEntry[] | undefined {
   for (const checked of entries) {
     if (checked.kind !== 'state-check' || checked.check.verdict !== 'accepted' || checked.check.committedRevision === undefined) continue
+    if (checked.check.reason === 'completed-predicate-invalidated' || checked.check.reason.startsWith('goal-blocked:')) continue
     const state = entries.find((entry) => entry.seq > checked.seq && entry.kind === 'working-state'
       && entry.state.revision === checked.check.committedRevision)
     if (state?.kind !== 'working-state') continue
@@ -174,28 +175,27 @@ export async function diagnoseMemoryControlFailure(record: TurnRecord): Promise<
 type ValueRule = (value: unknown) => boolean
 const integer = (minimum: number, maximum: number): ValueRule =>
   (value) => Number.isSafeInteger(value) && Number(value) >= minimum && Number(value) <= maximum
-const boolean: ValueRule = (value) => typeof value === 'boolean'
 const oneOf = (...values: readonly unknown[]): ValueRule => (value) => values.includes(value)
 
 const COMPONENT_PATCH_SCHEMA: Readonly<Record<MemoryControlComponentKey, Readonly<Record<string, ValueRule>>>> = frozen({
   experientialSkills: {
-    '/source': oneOf('frozen-skill-resource-view', 'curated-skill-resource-view'),
+    '/source': oneOf('frozen-skill-resource-view'),
     '/selection': oneOf('exact-tool', 'tool-and-goal'),
     '/maxSelectedSkills': integer(1, 2),
   },
   workingMemorySpec: {
     '/schemaVersion': oneOf(1),
     '/authority': oneOf('pi-core-host'),
-    '/optimisticConcurrency': boolean,
+    '/optimisticConcurrency': oneOf(true),
   },
   invocationPolicy: {
     '/trigger': oneOf('state-changing-or-contract-required', 'contract-required'),
-    '/batchBarrier': boolean,
+    '/batchBarrier': oneOf(true),
     '/maxSkills': integer(1, 2),
   },
   checkers: {
-    '/fileContent': integer(0, 10),
-    '/delegatedGoal': integer(0, 10),
+    '/fileContent': integer(0, 1),
+    '/delegatedGoal': integer(0, 1),
     '/modelClaimsAreEvidence': oneOf(false),
   },
 })

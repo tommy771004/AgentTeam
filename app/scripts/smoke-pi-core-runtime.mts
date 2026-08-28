@@ -30,7 +30,7 @@ try {
   assert.deepEqual(response.result, {
     loaded: true,
     package: '@earendil-works/pi-coding-agent',
-    version: '0.81.1',
+    version: '0.84.3',
     builtinTools: ['bash', 'edit', 'find', 'grep', 'ls', 'read', 'write'],
   })
 } finally {

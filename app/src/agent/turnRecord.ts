@@ -50,9 +50,10 @@ import type { RunnerCapabilities } from './runners/types.ts'
  * Version 8 adds batch-bound Skill preflight idempotency identities.
  * Version 9 adds the governing Memory-Control Package and Checker linkage.
  * Version 10 adds the bounded activation/rollback event governing the run.
+ * Version 11 preserves exact bounded Skill redraft context after resource cleanup.
  */
-export const TURN_RECORD_FORMAT_VERSION = 10
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9])
+export const TURN_RECORD_FORMAT_VERSION = 11
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -315,6 +316,7 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         /** Bounded provenance only. Memory text stays in the Host context. */
         kind: 'memory-recall'
         source: 'host'
+        callId?: string
         revision: number
         items: Array<{
           id: string
@@ -428,7 +430,7 @@ const KINDS = new Set([
   'notice',
 ])
 
-const MEMORY_RECALL_ENTRY_KEYS = new Set(['kind', 'source', 'revision', 'items', 'seq', 'turn', 'step', 'at'])
+const MEMORY_RECALL_ENTRY_KEYS = new Set(['kind', 'source', 'revision', 'items', 'callId', 'seq', 'turn', 'step', 'at'])
 
 function isMemoryControlLifecycleEvent(value: unknown): value is MemoryControlLifecycleEvent {
   if (!value || typeof value !== 'object') return false
@@ -444,6 +446,7 @@ function isMemoryControlLifecycleEvent(value: unknown): value is MemoryControlLi
 
 function isMemoryRecallEntry(entry: Record<string, unknown>): boolean {
   if (entry.source !== 'host' || Object.keys(entry).some((key) => !MEMORY_RECALL_ENTRY_KEYS.has(key))) return false
+  if (entry.callId !== undefined && (typeof entry.callId !== 'string' || !entry.callId.length || entry.callId.length > 512)) return false
   if (!Number.isSafeInteger(entry.revision) || Number(entry.revision) < 0 || !Array.isArray(entry.items) || entry.items.length < 1 || entry.items.length > 100) return false
   return entry.items.every((value) => {
     if (!value || typeof value !== 'object') return false
@@ -630,6 +633,7 @@ function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
 }
 
 function isLegacySkillEntry(version: number, kind: string, entry: Record<string, unknown>): boolean {
+  if (version < 11 && kind === 'skill-context' && (entry.injection as SkillContextInjectionTrace | undefined)?.schemaVersion === 2) return true
   if (version < 6 && kind === 'skill-invocation') return true
   if (version < 7 && kind === 'skill-context') return true
   if (version < 7 && kind === 'tool-result' && entry.settlement === 'not-executed') return true

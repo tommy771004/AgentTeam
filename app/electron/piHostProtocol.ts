@@ -242,6 +242,7 @@ import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import { PiResourceRegistry, type PiResource } from './piResourceRegistry.ts'
 import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
 import { createPiDurableMemoryBridge, piMemoryProjection, type PiMemoryChange } from './piDurableMemory.ts'
+import { compileMemoryControlRuntime, type MemoryControlRuntime } from './memoryControlRuntime.ts'
 import type { PiMemoryWriteReceipt } from './piPackBridges.ts'
 import {
   authorizeMemoryAccess,
@@ -277,6 +278,7 @@ import { appendTurnRecord, asTurnRecordMemoryWrite, derivePiHistory, nextTurnRec
 import {
   checkDelegatedGoalObservation,
   checkWorkingStateProposal,
+  invalidateCompletedWorkingGoal,
   createDelegatedGoalAssignment,
   createInitialWorkingState,
   isWorkingExecutionEvidence,
@@ -659,6 +661,7 @@ type ActiveTurnRecorder = {
   proposalState: WorkingState
   /** Atomically admitted package identity; later activation cannot rewrite it. */
   governingPackage: MemoryControlPackageIdentity
+  memoryControl: MemoryControlRuntime
   /** Host maintenance already admitted to this run and not yet durably audited. */
   pendingMemoryControlAudits: Set<Promise<void>>
   /** Settlement closes admission synchronously before awaiting reserved audits. */
@@ -821,7 +824,7 @@ function collectDelegatedGoalResults(
     )
     if (!observation) continue
     recordTurnEntry(parentSessionId, { kind: 'delegation-observation', source: 'host', observation })
-    const checked = checkDelegatedGoalObservation({ state: workingState, assignment, observation })
+    const checked = checkDelegatedGoalObservation({ state: workingState, assignment, observation, enabled: recorder.memoryControl.delegatedGoalChecker })
   recordTurnEntry(parentSessionId, {
     kind: 'delegation-check', source: 'host', check: checked.check,
     packageIdentity: recorder.governingPackage,
@@ -1357,6 +1360,7 @@ function commitCheckedWorkingState(input: {
     recordTurnEntry(input.sessionId, { kind: 'state-proposal', source: 'host', proposal })
   }
   const checked = checkWorkingStateProposal({
+    enabled: input.recorder.memoryControl.fileContentChecker,
     state: input.workingState,
     proposal,
     settlement,
@@ -1382,6 +1386,27 @@ function proposalEvidenceStillApplies(canonicalPath: string | undefined, proposa
   } catch {
     return false
   }
+}
+
+/** Recheck every done predicate, including goals completed in earlier iterations. */
+function revalidateCompletedGoals(sessionId: string, recorder: ActiveTurnRecorder, state: WorkingState): WorkingState {
+  let current = state
+  for (const goal of state.goals) {
+    if (goal.status !== 'done' || goal.completionPredicate?.kind !== 'file-content') continue
+    let valid = false
+    try {
+      const path = canonicalPiToolPath(recorder.cwd, goal.completionPredicate.path)
+      valid = isWithinProject(recorder.cwd, path)
+        && createHash('sha256').update(readFileSync(path)).digest('hex') === goal.completionPredicate.sha256
+    } catch { /* unavailable evidence cannot continue supporting done */ }
+    if (valid) continue
+    const invalidated = invalidateCompletedWorkingGoal(current, goal.id)
+    recordTurnEntry(sessionId, { kind: 'state-check', source: 'host', check: invalidated.check, packageIdentity: recorder.governingPackage })
+    current = invalidated.state
+    recordTurnEntry(sessionId, { kind: 'working-state', source: 'host', state: current })
+  }
+  recorder.proposalState = current
+  return current
 }
 
 function blockedProposalFromToolOutcome(
@@ -3298,7 +3323,9 @@ export function handlePiHostRequest(
     if (resumed.error) return [errorResponse(id, 'invalid_request', resumed.error)]
     const initialWorkingState = resumed.state
       || workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input), admittedWorkingGoals)
-    const governingPackage = memoryControlPackageIdentity(admitMemoryControlEvaluationPackage(state, input.params))
+    const admittedPackage = admitMemoryControlEvaluationPackage(state, input.params)
+    const governingPackage = memoryControlPackageIdentity(admittedPackage)
+    const memoryControl = compileMemoryControlRuntime(admittedPackage, initialWorkingState.goals.length)
     const recorder: ActiveTurnRecorder = {
       cwd,
       turn: nextTurnNumber(session.record),
@@ -3308,6 +3335,7 @@ export function handlePiHostRequest(
       stateProposals: new Map(),
       proposalState: initialWorkingState,
       governingPackage,
+      memoryControl,
       pendingMemoryControlAudits: new Set(),
       memoryControlAuditsClosed: false,
       seqBase: nextTurnRecordSeq(session.record),
@@ -3755,6 +3783,7 @@ export function handlePiHostRequest(
             executionRunId: runId,
           })
         }
+        workingState = revalidateCompletedGoals(sessionId, recorder, workingState)
         session.piSessionFile ||= getPiSessionFile(sessionId)
         // A completed model call records its round; only an answered one has
         // text to join the conversation history.
@@ -4235,7 +4264,10 @@ export function createPiHostServer(
   // Packs reach durable Host state ONLY through these accessors: one memory
   // store, the real child-session/run-queue path, and the live extension
   // registry. No pack holds a copy of any of them.
-  setPiMemoryBridge(createPiDurableMemoryBridge(memoryStore, (change) => publishPiMemoryChange(state, change, send)))
+  setPiMemoryBridge(createPiDurableMemoryBridge(memoryStore,
+    (change) => publishPiMemoryChange(state, change, send),
+    (sessionId, entry) => recordTurnEntry(sessionId, entry),
+  ))
   setPiDelegationBridge({
     createChild: async ({ parentSessionId, role, profile, context, depth }) => {
       const request = {
@@ -4488,8 +4520,16 @@ export function createPiHostServer(
         throw new Error('Skill preflight coordinates changed before the decision was recorded')
       }
       const resourceView = piSessionRunBinding(input.sessionId)?.frozenPolicy?.resourceView
-      const skills = resourceView
-        ? await selectFrozenPiPreflightSkills({ resourceView, exactTool: input.tool })
+      const control = recorder.memoryControl
+      const enabled = control.trigger !== 'contract-required' || input.trigger === 'contract-required-tool-call'
+      const skills = enabled && resourceView
+        ? await selectFrozenPiPreflightSkills({ resourceView, exactTool: input.tool,
+          maxSkills: control.maxSkills, secondSkillReason: control.secondSkillReason,
+          overrides: control.skillOverrides,
+          ...(control.selection === 'tool-and-goal' ? { goalContext: [recorder.proposalState.objective,
+            ...recorder.proposalState.goals.filter((goal) => goal.status !== 'done').map((goal) => goal.description),
+            ...recorder.proposalState.constraints].join('\n') } : {}),
+        })
         : []
       const identities = skills.map(({ body: _body, ...identity }) => identity)
       const invocation = createSkillPreflight({

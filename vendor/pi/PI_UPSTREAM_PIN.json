@@ -1,7 +1,11 @@
 {
   "repository": "https://github.com/earendil-works/pi.git",
-  "commit": "20be4b18d4c57487f8993d2762bace129f0cf7c6",
-  "tag": "v0.81.1",
-  "packageVersion": "0.81.1",
-  "treeSha256": "71ec0c1a265197605ea2d6498d88d9ef36f06e3599782a6f39834cbe214b5e50"
+  "commit": "4e58f324fae8ebfa98a3d45181fb248072a2afac",
+  "tag": "v0.84.3",
+  "packageVersion": "0.84.3",
+  "releaseSourceArchive": {
+    "asset": "pi-0.84.3-source.tar.gz",
+    "sha256": "056f84c467450fb5700ad4df9c8cc669bf7f6046976eed7a19eadbc7553b6500"
+  },
+  "treeSha256": "441444e99a87049ab53d2018e0002c167e126379bbe4e84eadd3b6813a03c929"
 }

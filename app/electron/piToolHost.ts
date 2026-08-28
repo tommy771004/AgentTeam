@@ -971,7 +971,8 @@ export function piSkillPreflightExtensionFactory(ctx: { sessionId: string }): {
         const contextBytes = Buffer.byteLength(content, 'utf8')
         if (contextBytes > 24_576) throw new Error('Skill preflight injection exceeds the hard context budget')
         const injection: SkillContextInjectionTrace = {
-          schemaVersion: 1,
+          schemaVersion: 2,
+          context: content,
           runId: pending.runId,
           originalCallId: pending.originalCallId,
           tool: pending.tool,

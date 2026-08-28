@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -14,16 +15,23 @@ const buildCachePath = path.join(appRoot, '.cache/pi-vendor-build.json')
 
 const buildPackages = [
   'packages/tui',
+  'packages/telemetry',
   'packages/ai',
   'packages/agent',
-  'packages/storage/sqlite-node',
-  'packages/coding-agent',
+  'packages/session-backends/sqlite-node',
+  'packages/protocol',
+  'packages/client',
   'packages/server',
+  'packages/coding-agent',
 ]
 
 const requiredArtifacts = [
+  'packages/telemetry/dist/index.js',
   'packages/ai/dist/index.js',
   'packages/agent/dist/index.js',
+  'packages/session-backends/sqlite-node/dist/index.js',
+  'packages/protocol/dist/index.js',
+  'packages/client/dist/index.js',
   'packages/coding-agent/dist/index.js',
   'packages/coding-agent/dist/config.js',
   'packages/server/dist/index.js',
@@ -50,6 +58,10 @@ function hasRuntimeDependencies(): boolean {
     'node_modules/.package-lock.json',
     'node_modules/@earendil-works/pi-ai',
     'node_modules/@earendil-works/pi-agent-core',
+    'node_modules/@earendil-works/pi-client',
+    'node_modules/@earendil-works/pi-protocol',
+    'node_modules/@earendil-works/pi-session-backend-sqlite-node',
+    'node_modules/@earendil-works/pi-telemetry',
     'node_modules/@earendil-works/pi-tui',
     'node_modules/chalk',
     'node_modules/typebox',
@@ -119,6 +131,58 @@ async function prepareBuildWorkspace(root: string): Promise<string> {
   return stagingVendor
 }
 
+async function hydratePinnedReleaseModelData(stagingVendor: string): Promise<void> {
+  const pin = JSON.parse(await readFile(path.join(vendorRoot, 'PI_UPSTREAM_PIN.json'), 'utf8')) as {
+    repository?: string
+    tag?: string
+    packageVersion?: string
+    releaseSourceArchive?: { asset?: string, sha256?: string }
+  }
+  if (!pin.repository || !pin.tag || !pin.packageVersion) throw new Error('Pi pin is missing release identity')
+  const asset = pin.releaseSourceArchive?.asset
+  const expectedSha256 = pin.releaseSourceArchive?.sha256
+  if (!asset || !/^pi-\d+\.\d+\.\d+-source\.tar\.gz$/.test(asset)) {
+    throw new Error('Pi pin is missing a valid release source archive asset')
+  }
+  if (!expectedSha256 || !/^[0-9a-f]{64}$/.test(expectedSha256)) {
+    throw new Error('Pi pin is missing a valid release source archive SHA-256')
+  }
+
+  const repository = pin.repository.replace(/\.git$/, '')
+  const url = `${repository}/releases/download/${encodeURIComponent(pin.tag)}/${encodeURIComponent(asset)}`
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`Failed to download pinned Pi release source (${response.status})`)
+  const archiveBytes = Buffer.from(await response.arrayBuffer())
+  const actualSha256 = createHash('sha256').update(archiveBytes).digest('hex')
+  if (actualSha256 !== expectedSha256) {
+    throw new Error(`Pinned Pi release source checksum mismatch: expected ${expectedSha256}, got ${actualSha256}`)
+  }
+
+  const workspaceRoot = path.dirname(stagingVendor)
+  const archivePath = path.join(workspaceRoot, asset)
+  const extractionRoot = path.join(workspaceRoot, 'release-source')
+  await writeFile(archivePath, archiveBytes, { mode: 0o600 })
+  const entries = execFileSync('tar', ['-tzf', archivePath], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
+  if (entries.some((entry) => path.posix.isAbsolute(entry) || entry.split('/').includes('..'))) {
+    throw new Error('Pinned Pi release source archive contains an unsafe path')
+  }
+  await mkdir(extractionRoot, { recursive: true })
+  execFileSync('tar', ['-xzf', archivePath, '-C', extractionRoot])
+  const sourceModelData = path.join(
+    extractionRoot,
+    `pi-${pin.packageVersion}`,
+    'packages/ai/src/providers/data',
+  )
+  if (!existsSync(path.join(sourceModelData, '.manifest.json'))) {
+    throw new Error('Pinned Pi release source archive is missing model data')
+  }
+  await rm(path.join(stagingVendor, 'packages/ai/src/providers/data'), { recursive: true, force: true })
+  await cp(sourceModelData, path.join(stagingVendor, 'packages/ai/src/providers/data'), {
+    recursive: true,
+    force: true,
+  })
+}
+
 async function copyBuildArtifacts(stagingVendor: string): Promise<void> {
   for (const relative of buildPackages) {
     const source = path.join(stagingVendor, relative, 'dist')
@@ -130,7 +194,9 @@ async function copyBuildArtifacts(stagingVendor: string): Promise<void> {
 }
 
 const sourceTreeSha256 = await hashPiVendorTree(vendorRoot)
-const packageJson = JSON.parse(await readFile(path.join(vendorRoot, 'package.json'), 'utf8')) as { version?: string }
+const packageJson = JSON.parse(
+  await readFile(path.join(vendorRoot, 'packages/coding-agent/package.json'), 'utf8'),
+) as { version?: string }
 const previous = await readBuildCache()
 const forceBuild = process.env.SUBAGENTS_PI_VENDOR_FORCE_BUILD === '1'
 if (
@@ -156,14 +222,16 @@ try {
     try {
       runNpm(['run', 'build:offline'], stagingVendor)
     } catch {
-      // A stale local model-data cache must not leave a half-built vendor. The
-      // isolated workspace can safely refresh its generated catalog instead.
-      await rm(path.join(stagingVendor, 'packages/ai/src/providers/data'), { recursive: true, force: true })
-      buildMode = 'network'
-      runNpm(['run', 'build'], stagingVendor)
+      // Replace stale local data with the checksummed snapshot shipped for the
+      // pinned release. Live catalogs can drift beyond this source version.
+      await hydratePinnedReleaseModelData(stagingVendor)
+      buildMode = 'offline'
+      runNpm(['run', 'build:offline'], stagingVendor)
     }
   } else {
-    runNpm(['run', 'build'], stagingVendor)
+    await hydratePinnedReleaseModelData(stagingVendor)
+    buildMode = 'offline'
+    runNpm(['run', 'build:offline'], stagingVendor)
   }
 
   await copyBuildArtifacts(stagingVendor)

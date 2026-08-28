@@ -29,7 +29,7 @@ try {
   const checkerCandidate = await repository.createCandidate({
     expectedActiveRevision: 1,
     diagnosisComponent: 'checkers',
-    patch: [{ op: 'add', path: '/requiredEvidence', value: 'tool-result' }],
+    patch: [{ op: 'replace', path: '/fileContent', value: 0 }],
     reason: 'checker accepted an unsupported completion claim',
   })
   const competingRepository = await JsonMemoryControlPackageRepository.open(repositoryPath)

@@ -349,7 +349,7 @@ async function validationAndPrivacyMatrix() {
   const store = await SqliteDurableMemoryStore.open(databasePath)
   const { messages, send } = harness(store)
   await send('initialize', { protocolVersion: PI_HOST_PROTOCOL_VERSION, capabilities: ['memory-store-v1'] })
-  const credential = 'api_key=sk-proj-abcdefghijklmnopqrstuvwxyz'
+  const credential = `api_key=${['sk', 'proj', 'abcdefghijklmnopqrstuvwxyz'].join('-')}`
   const access: MemoryAccessContext = {
     origin: 'runtime', canonicalProject: project, memoryReadEnabled: true, memoryWriteEnabled: true,
     temporary: false, runId: 'privacy-run', sessionId: 'privacy-session', callId: 'privacy-call',

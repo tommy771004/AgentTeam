@@ -100,11 +100,14 @@ export type {
 	KeybindingsManager,
 	LoadExtensionsResult,
 	LsToolCallEvent,
+	MarkdownTransformContext,
+	MarkdownTransformer,
 	MessageEndEvent,
 	MessageRenderer,
 	MessageRenderOptions,
 	MessageStartEvent,
 	MessageUpdateEvent,
+	PowerShellToolCallEvent,
 	ProjectTrustContext,
 	ProjectTrustEvent,
 	ProjectTrustEventDecision,
@@ -157,6 +160,7 @@ export {
 	isFindToolResult,
 	isGrepToolResult,
 	isLsToolResult,
+	isPowerShellToolResult,
 	isReadToolResult,
 	isToolCallEventType,
 	isWriteToolResult,
@@ -177,6 +181,8 @@ export {
 } from "./core/model-resolver.ts";
 export {
 	type CreateModelRuntimeOptions,
+	CredentialSynchronizationError,
+	type CredentialSynchronizationOperation,
 	ModelRuntime,
 	type ModelRuntimeAuthOverrides,
 } from "./core/model-runtime.ts";
@@ -214,6 +220,7 @@ export {
 	createFindTool,
 	createGrepTool,
 	createLsTool,
+	createPowerShellTool,
 	createReadOnlyTools,
 	createReadTool,
 	createWriteTool,
@@ -248,11 +255,13 @@ export {
 export {
 	type CompactionSettings,
 	type DefaultProjectTrust,
+	type FullscreenExitOutput,
 	type ImageSettings,
 	type PackageSource,
 	type RetrySettings,
 	SettingsManager,
 	type SettingsManagerCreateOptions,
+	type TuiMode,
 } from "./core/settings-manager.ts";
 // Skills
 export {
@@ -279,7 +288,9 @@ export {
 	createFindToolDefinition,
 	createGrepToolDefinition,
 	createLocalBashOperations,
+	createLocalPowerShellOperations,
 	createLsToolDefinition,
+	createPowerShellToolDefinition,
 	createReadToolDefinition,
 	createWriteToolDefinition,
 	DEFAULT_MAX_BYTES,
@@ -301,6 +312,12 @@ export {
 	type LsToolDetails,
 	type LsToolInput,
 	type LsToolOptions,
+	type PowerShellOperations,
+	type PowerShellSpawnContext,
+	type PowerShellSpawnHook,
+	type PowerShellToolDetails,
+	type PowerShellToolInput,
+	type PowerShellToolOptions,
 	type ReadOperations,
 	type ReadToolDetails,
 	type ReadToolInput,
@@ -329,6 +346,7 @@ export { type MainOptions, main } from "./main.ts";
 export {
 	InteractiveMode,
 	type InteractiveModeOptions,
+	type JsonAgentSessionEvent,
 	type ModelInfo,
 	type PrintModeOptions,
 	RpcClient,
@@ -398,4 +416,4 @@ export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.ts";
 export { convertToPng } from "./utils/image-convert.ts";
 export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
 // Shell utilities
-export { getShellConfig } from "./utils/shell.ts";
+export { getPowerShellConfig, getShellConfig } from "./utils/shell.ts";

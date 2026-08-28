@@ -161,9 +161,10 @@ try {
   assert.equal((await host.waitFor(26)).error?.code, 'forbidden')
   host.send(27, 'memory/v1/list', { access: { ...adminAccess, origin: 'migration' } })
   assert.equal((await host.waitFor(27)).error?.code, 'forbidden')
+  const fakeProjectKey = ['sk', 'proj', 'abcdefghijklmnopqrstuvwxyz'].join('-')
   host.send(28, 'memory/v1/upsert', {
     access: { ...access, callId: 'secret-rejection' },
-    entry: { scope: { kind: 'global' }, logicalKey: 'secret', kind: 'memory', text: 'api_key=sk-proj-abcdefghijklmnopqrstuvwxyz', tags: [], createdAt: '2026-08-27T00:05:00.000Z' },
+    entry: { scope: { kind: 'global' }, logicalKey: 'secret', kind: 'memory', text: `api_key=${fakeProjectKey}`, tags: [], createdAt: '2026-08-27T00:05:00.000Z' },
   })
   assert.equal((await host.waitFor(28)).error?.code, 'forbidden')
 

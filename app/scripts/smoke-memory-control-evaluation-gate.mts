@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { JsonMemoryControlPackageRepository } from '../electron/memoryControlPackageRepository.ts'
@@ -14,13 +15,20 @@ const packagePath = join(root, 'packages.json')
 const statePath = join(root, 'state.json')
 const token = 'ticket-12-evaluation-secret'
 const repository = await JsonMemoryControlPackageRepository.open(packagePath)
-const candidates = await Promise.all(['false-done', 'tokens', 'improving'].map((name) => repository.createCandidate({
+const candidates = await Promise.all(['false-done', 'tokens'].map((name) => repository.createCandidate({
   expectedActiveRevision: 1, diagnosisComponent: 'invocationPolicy',
-  patch: [{ op: 'add', path: `/${name}`, value: true }], reason: `source diagnosis ${name}`,
+  patch: [{ op: 'replace', path: '/maxSkills', value: 1 }], reason: `source diagnosis ${name}`,
 })))
+const repairSkill = '---\nname: package-repair\nversion: 1\npreflight-tools: write\n---\nWrite package-result.txt with VERIFIED, not the original wrong draft.'
+candidates.push(await repository.createCandidate({
+  expectedActiveRevision: 1, diagnosisComponent: 'experientialSkills',
+  patch: [{ op: 'add', path: '/overrides', value: { 'package-repair': repairSkill } }],
+  reason: 'repair the source failure through actual immutable Skill content',
+}))
 
 type ModelReply = { content: string; promptTokens: number }
 let replies: ModelReply[] = []
+let behaviorEvaluation = false
 let auditStarted: (() => void) | undefined
 let releaseAudit: (() => void) | undefined
 const modelServer = createServer(async (request, response) => {
@@ -28,6 +36,23 @@ const modelServer = createServer(async (request, response) => {
   request.setEncoding('utf8')
   request.on('data', (chunk) => { body += chunk })
   await once(request, 'end')
+  if (behaviorEvaluation) {
+    const messages = JSON.parse(body).messages as Array<Record<string, any>>
+    const source = body.includes('package behavior source')
+    const redraft = body.includes('[HOST SKILL PREFLIGHT REDRAFT]')
+    const completedWrite = messages.some((message) => message.role === 'tool' &&
+      (message.tool_call_id === 'package-redraft' || !redraft && message.tool_call_id === 'package-original'))
+    const delta = !source || completedWrite ? { role: 'assistant', content: 'fixture finished' }
+      : { role: 'assistant', tool_calls: [{ index: 0, id: redraft ? 'package-redraft' : 'package-original', type: 'function',
+        function: { name: 'write', arguments: JSON.stringify({ path: 'package-result.txt', content: redraft ? 'VERIFIED' : 'WRONG' }) },
+      }] }
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.end(`data: ${JSON.stringify({ id: 'package-behavior', object: 'chat.completion.chunk', model: 'smoke-model',
+      choices: [{ index: 0, delta, finish_reason: 'tool_calls' in delta ? 'tool_calls' : 'stop' }],
+      usage: { prompt_tokens: 80, completion_tokens: 2, total_tokens: 82 },
+    })}\n\ndata: [DONE]\n\n`)
+    return
+  }
   const isAudit = body.includes('evaluation settlement audit')
   if (isAudit) {
     auditStarted?.()
@@ -93,7 +118,10 @@ const bridgeFor = (revision: number) => ({
   piHost: {
     sessions: { list: () => rpc('sessions/list'), create: (title?: string, threadId?: string) => rpc('sessions/create', { title, threadId }) },
     turn: { submit: async (input: Record<string, unknown>) => {
-      const result = await rpc('turn/submit', { ...input, evaluationPackageRevision: revision, evaluationToken: token })
+      // Both phases receive the same explicit fixture authority to write only
+      // within this disposable project; unattended production defaults deny writes.
+      const profile = behaviorEvaluation ? { ...(input.profile as object), approvalMode: 'full', unattended: false } : input.profile
+      const result = await rpc('turn/submit', { ...input, cwd: root, maxIterations: 1, profile, evaluationPackageRevision: revision, evaluationToken: token })
       assert.ok(result.record, `Host evaluation turn ${String(input.runId)} returned no Turn Record`)
       return result
     } },
@@ -120,6 +148,7 @@ let lastAudit: any
 const settleThroughAuditRun = async (
   report: Awaited<ReturnType<typeof evaluateMemoryControlCandidate>>,
   expected: 'settled' | 'rejected' = 'settled',
+  rollbackRevision?: number,
 ) => {
   const session = await rpc('sessions/create', { title: 'evaluation settlement audit' })
   const started = new Promise<void>((resolveStarted) => { auditStarted = resolveStarted })
@@ -135,7 +164,9 @@ const settleThroughAuditRun = async (
   let settlementError: unknown
   try {
     settled = await rpc('memory-control/v1/maintain', {
-      maintenanceToken: token, sessionId: session.sessionId, operation: 'settle-evaluation', report,
+      maintenanceToken: token, sessionId: session.sessionId,
+      ...(rollbackRevision === undefined ? { operation: 'settle-evaluation', report }
+        : { operation: 'rollback', revision: rollbackRevision, expectedActiveRevision: report.candidatePackage.revision, reason: 'verify executable rollback' }),
     })
   } catch (error) {
     settlementError = error
@@ -194,15 +225,26 @@ try {
   assert.match(tokenRegression.reasons.join(' '), /token regression/i)
   await settleThroughAuditRun(tokenRegression)
 
-  replies = [{ content: '', promptTokens: 80 }, { content: 'anchor', promptTokens: 80 },
-    { content: 'fixed source', promptTokens: 80 }, { content: 'anchor', promptTokens: 80 }]
-  const improving = await evaluateMemoryControlCandidate({
-    packages: repository, corpus: corpus(), candidateRevision: candidates[2].revision,
-    tokenBudget: { maxRegressionRatio: 0.1 }, execute,
+  behaviorEvaluation = true
+  const behaviorCorpus = sealMemoryControlEvaluationCorpus({
+    version: 'actual-package-behavior',
+    sourceFailures: [{ task: { id: 'source', objective: 'package behavior source: write package-result.txt correctly', loopType: 'Goal-based',
+      workingGoal: { kind: 'file-content', path: 'package-result.txt', sha256: createHash('sha256').update('VERIFIED').digest('hex') } },
+      expected: { requiredActions: ['write'], requiredSkills: ['package-repair'], allowedSkills: ['package-repair'], maxPromptTokens: 1_000 } }],
+    heldOutAnchors: [{ task: tasks.anchor,
+      expected: { requiredActions: [], requiredSkills: [], allowedSkills: [], maxPromptTokens: 1_000 } }],
   })
-  assert.equal(improving.decision, 'promoted')
-  assert.deepEqual(improving.metrics, { taskSuccessRate: 1, falseDoneRate: 0, requiredActionRecall: 1,
-    skillInvocationPrecision: 1, skillInvocationReach: 1, promptTokens: 160, tokensPerSuccess: 80 })
+  const improving = await evaluateMemoryControlCandidate({
+    packages: repository, corpus: behaviorCorpus, candidateRevision: candidates[2].revision,
+    // One additional real preflight redraft is explicitly budgeted.
+    tokenBudget: { maxRegressionRatio: 0.5 }, execute,
+  })
+  behaviorEvaluation = false
+  assert.equal(improving.decision, 'promoted', JSON.stringify(improving))
+  assert.equal(improving.metrics.taskSuccessRate, 1)
+  assert.equal(improving.metrics.falseDoneRate, 0)
+  assert.equal(improving.runs.find((run) => run.phase === 'baseline' && run.taskId === 'source')?.metrics.taskSuccess, false)
+  assert.equal(await readFile(join(root, 'package-result.txt'), 'utf8'), 'VERIFIED')
   await settleThroughAuditRun(improving)
 
   const auditPackage = lastAudit.record.entries.find((entry: any) => entry.kind === 'memory-control-package')
@@ -227,6 +269,23 @@ try {
   assert.equal(reopened.read({ schemaVersion: 1, revision: candidates[1].revision }).status, 'rejected')
   assert.equal(reopened.evaluationReports().length, 3)
   assert.equal(replies.length, 0)
+  const verifyActiveBehavior = async (expectedContent: string, expectedDone: boolean) => {
+    behaviorEvaluation = true
+    try {
+      const session = await rpc('sessions/create', { title: 'active package behavior' })
+      const run = await rpc('turn/submit', {
+        sessionId: session.sessionId, runId: `active-behavior-${expectedContent}`, cwd: root,
+        prompt: 'package behavior source: write package-result.txt correctly', pattern: 'Goal-based', maxIterations: 1,
+        workingGoal: { kind: 'file-content', path: 'package-result.txt', sha256: createHash('sha256').update('VERIFIED').digest('hex') },
+        profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: ['write'], approvalMode: 'full', unattended: false, compaction: 'manual' },
+      })
+      assert.equal(run.orchestration.dodMet, expectedDone)
+      assert.equal(await readFile(join(root, 'package-result.txt'), 'utf8'), expectedContent)
+    } finally { behaviorEvaluation = false }
+  }
+  await verifyActiveBehavior('VERIFIED', true)
+  await settleThroughAuditRun(improving, 'settled', 1)
+  await verifyActiveBehavior('WRONG', false)
   console.log('smoke-memory-control-evaluation-gate: canonical Host promotion + regressions passed')
 } finally {
   releaseAudit?.()

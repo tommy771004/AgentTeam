@@ -167,6 +167,11 @@ try {
   assert.deepEqual(writes.slice(1).map((entry: any) => entry.memoryWrite.revision), [2, 2], 'same run/call retry reuses one append revision')
   assert.deepEqual(writes.map((entry: any) => entry.callId), ['call_set_a', 'call_append_a', 'call_append_a'])
   assert.ok(writes.every((entry: any) => entry.memoryWrite.callId === entry.callId))
+  const reads = projectATurn.settled.result?.record?.entries?.filter((entry: any) => entry.kind === 'memory-recall') || []
+  assert.deepEqual(reads.map((entry: any) => entry.callId), ['call_get_a', 'call_search_a'])
+  assert.ok(reads.every((entry: any) => entry.revision === 2 && entry.items.some((item: any) =>
+    item.id === writes[0].memoryWrite.id && item.logicalKey === 'shared-rule' && item.scope === 'project' && item.revision === 1)))
+  assert.doesNotMatch(JSON.stringify(reads), /private rule|Append exactly once/, 'read receipts never retain private bodies')
 
   const writtenEvents = host.messages.filter((message) => message.event === 'host/context' && message.payload?.runId === 'memory-a' && message.payload?.phase === 'memory-written')
   const changedEvents = host.messages.filter((message) => message.event === 'memory/changed')

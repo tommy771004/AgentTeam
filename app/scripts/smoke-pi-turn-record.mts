@@ -54,7 +54,7 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
-assert.equal(TURN_RECORD_FORMAT_VERSION, 10, 'Memory-Control lifecycle audit is an explicit Turn Record evolution')
+assert.equal(TURN_RECORD_FORMAT_VERSION, 11, 'Exact Skill context is an explicit Turn Record evolution')
 const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
 assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')
@@ -231,6 +231,21 @@ const skillContext = appendTurnRecord(undefined, [{
   },
   turn: 1, step: 1, at: 2,
 }])
+const reconstructibleContext = structuredClone(skillContext)
+const contextEntry = reconstructibleContext.entries[0]
+assert.equal(contextEntry.kind, 'skill-context')
+if (contextEntry.kind === 'skill-context') {
+  contextEntry.injection = { ...contextEntry.injection, schemaVersion: 2, context: 'exact Skill input', contextBytes: 17 }
+}
+assert.deepEqual(parseTurnRecord(reconstructibleContext).record.entries, reconstructibleContext.entries)
+assert.throws(() => parseTurnRecord({ version: 10, entries: reconstructibleContext.entries }), TurnRecordCorruptError,
+  'v10 cannot smuggle a v11 reconstructible Skill context')
+const malformedContext = structuredClone(reconstructibleContext)
+if (malformedContext.entries[0].kind === 'skill-context') malformedContext.entries[0].injection.contextBytes += 1
+assert.equal(parseTurnRecord(malformedContext).tornTail, true, 'mismatched context bytes must not be accepted as a valid final entry')
+assert.equal(parseTurnRecord(malformedContext).record.entries.length, 0)
+assert.equal(parseTurnRecord({ version: 10, entries: skillContext.entries }).record.entries.length, 1,
+  'legacy metadata-only Skill context remains readable')
 const redraftSkillInvocation = appendTurnRecord(undefined, [{
   kind: 'skill-invocation', source: 'host',
   invocation: createSkillPreflight({

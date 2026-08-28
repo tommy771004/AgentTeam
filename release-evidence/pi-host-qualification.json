@@ -1,0 +1,25 @@
+{
+  "protocol": true,
+  "utilityProcess": true,
+  "sessions": true,
+  "extensions": true,
+  "protocolVersion": 2,
+  "capabilities": [
+    "health",
+    "settings",
+    "sessions",
+    "turns",
+    "runtime",
+    "tools",
+    "tool-contract-v1",
+    "attachments-v1",
+    "events",
+    "automation",
+    "resources",
+    "memory",
+    "memory-store-v1",
+    "memory-control-v1",
+    "capabilities"
+  ],
+  "checkedAt": "2026-08-28T02:14:09.946Z"
+}

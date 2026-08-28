@@ -8,24 +8,32 @@ const root = await mkdtemp(path.join(tmpdir(), 'pi-workspace-links-'))
 try {
   const sourceVendor = path.join(root, 'source-pi')
   const stagingVendor = path.join(root, 'staging-pi')
-  const externalAgent = path.join(sourceVendor, 'packages', 'agent')
-  const stagingAgent = path.join(stagingVendor, 'packages', 'agent')
-  const link = path.join(stagingVendor, 'node_modules', '@earendil-works', 'pi-agent-core')
-  await mkdir(externalAgent, { recursive: true })
-  for (const workspacePath of [
-    'packages/tui',
-    'packages/ai',
-    'packages/agent',
-    'packages/storage/sqlite-node',
-    'packages/coding-agent',
-    'packages/server',
-  ]) await mkdir(path.join(stagingVendor, workspacePath), { recursive: true })
-  await mkdir(path.dirname(link), { recursive: true })
-  await symlink(externalAgent, link, process.platform === 'win32' ? 'junction' : 'dir')
+  const workspaces = [
+    ['@earendil-works/pi-tui', 'packages/tui'],
+    ['@earendil-works/pi-telemetry', 'packages/telemetry'],
+    ['@earendil-works/pi-ai', 'packages/ai'],
+    ['@earendil-works/pi-agent-core', 'packages/agent'],
+    ['@earendil-works/pi-session-backend-sqlite-node', 'packages/session-backends/sqlite-node'],
+    ['@earendil-works/pi-protocol', 'packages/protocol'],
+    ['@earendil-works/pi-client', 'packages/client'],
+    ['@earendil-works/pi-server', 'packages/server'],
+    ['@earendil-works/pi-coding-agent', 'packages/coding-agent'],
+  ] as const
+  for (const [packageName, workspacePath] of workspaces) {
+    const externalWorkspace = path.join(sourceVendor, workspacePath)
+    const link = path.join(stagingVendor, 'node_modules', ...packageName.split('/'))
+    await mkdir(externalWorkspace, { recursive: true })
+    await mkdir(path.join(stagingVendor, workspacePath), { recursive: true })
+    await mkdir(path.dirname(link), { recursive: true })
+    await symlink(externalWorkspace, link, process.platform === 'win32' ? 'junction' : 'dir')
+  }
 
   await relinkPiBuildWorkspaces(stagingVendor)
 
-  assert.equal(await realpath(link), await realpath(stagingAgent))
+  for (const [packageName, workspacePath] of workspaces) {
+    const link = path.join(stagingVendor, 'node_modules', ...packageName.split('/'))
+    assert.equal(await realpath(link), await realpath(path.join(stagingVendor, workspacePath)))
+  }
 } finally {
   await rm(root, { recursive: true, force: true })
 }

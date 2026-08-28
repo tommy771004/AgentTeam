@@ -372,6 +372,7 @@ export interface DurableMemoryStore {
   upsert(input: MemoryUpsertInput): Promise<DurableMemoryEntry>
   append(input: MemoryAppendInput): Promise<DurableMemoryEntry>
   get(input: MemoryGetInput): Promise<DurableMemoryEntry | undefined>
+  getSnapshot(input: MemoryGetInput): Promise<{ entry?: DurableMemoryEntry; revision: number }>
   recall(input: MemoryRecallInput): Promise<MemoryRecallResult>
   list(input: MemoryListInput): Promise<MemoryPage>
   delete(input: MemoryDeleteInput): Promise<MemoryMutationResult>
@@ -927,11 +928,15 @@ export class InMemoryDurableMemoryStore implements DurableMemoryStore {
   }
 
   async get(input: MemoryGetInput): Promise<DurableMemoryEntry | undefined> {
+    return (await this.getSnapshot(input)).entry
+  }
+
+  async getSnapshot(input: MemoryGetInput): Promise<{ entry?: DurableMemoryEntry; revision: number }> {
     this.ensureOpen()
     const scope = canonicalMemoryScope(input.scope)
     authorizeMemoryAccess('get', input.access, scope)
     const found = this.entries.get(entryKey(scope, canonicalMemoryLogicalKey(input.logicalKey, this.limits)))
-    return found ? cloneEntry(found) : undefined
+    return { entry: found ? cloneEntry(found) : undefined, revision: this.currentRevision }
   }
 
   async recall(input: MemoryRecallInput): Promise<MemoryRecallResult> {

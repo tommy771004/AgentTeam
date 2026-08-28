@@ -164,7 +164,7 @@ try {
   assert.match((await firstHost.waitFor(7)).error?.message || '', /authority is unavailable/i)
   const created = await maintain(8, 'create-candidate', {
     expectedActiveRevision: 1, diagnosisComponent: 'invocationPolicy',
-    patch: [{ op: 'add', path: '/qualification', value: 'revision-two' }],
+    patch: [{ op: 'replace', path: '/maxSkills', value: 1 }],
     reason: 'source trace diagnosis localized to invocation policy',
   })
   const secondRevision = Number(created.result?.memoryControlPackage?.revision)

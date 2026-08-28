@@ -6,13 +6,14 @@ import { tmpdir } from 'node:os'
 
 const directory = await mkdtemp(join(tmpdir(), 'pi-sync-release-record-'))
 const recordPath = join(directory, 'pi-sync-release-record.json')
-const toCommit = '3333333333333333333333333333333333333333'
+const fromCommit = '3333333333333333333333333333333333333333'
 try {
-  execFileSync(process.execPath, ['--experimental-strip-types', 'scripts/qualify-pi-sync.mts', '--to-commit', toCommit, '--all-gates', '--output', recordPath], { cwd: process.cwd(), stdio: 'pipe' })
+  execFileSync(process.execPath, ['--experimental-strip-types', 'scripts/qualify-pi-sync.mts', '--from-commit', fromCommit, '--all-gates', '--output', recordPath], { cwd: process.cwd(), stdio: 'pipe' })
   const record = JSON.parse(await readFile(recordPath, 'utf8')) as { decision?: string; fromCommit?: string; toCommit?: string; artifact?: { sha256?: string } }
   assert.equal(record.decision, 'GO')
-  assert.match(record.fromCommit || '', /^[0-9a-f]{40}$/)
-  assert.equal(record.toCommit, toCommit)
+  assert.equal(record.fromCommit, fromCommit)
+  assert.match(record.toCommit || '', /^[0-9a-f]{40}$/)
+  assert.notEqual(record.toCommit, fromCommit)
   assert.match(record.artifact?.sha256 || '', /^[0-9a-f]{64}$/)
 
   const noGoPath = join(directory, 'no-go.json')

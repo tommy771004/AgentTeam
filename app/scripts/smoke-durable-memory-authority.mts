@@ -66,9 +66,10 @@ async function runAuthorityContract(createStore: StoreFactory): Promise<void> {
   await assert.rejects(store.upsert({ ...setInput, access: { ...admin, origin: 'consolidation' } }), expectCode('forbidden'))
 
   const revisionBeforeSecret = await store.revision()
+  const fakeProjectKey = ['sk', 'proj', 'abcdefghijklmnopqrstuvwxyz'].join('-')
   await assert.rejects(store.upsert({
     ...setInput, access: runtime(alpha, { callId: 'secret' }), logicalKey: 'secret',
-    text: 'Authorization: Bearer sk-proj-abcdefghijklmnopqrstuvwxyz',
+    text: `Authorization: Bearer ${fakeProjectKey}`,
   }), expectCode('forbidden'))
   await assert.rejects(store.upsert({
     ...setInput, access: admin, logicalKey: 'admin-secret', text: 'password=hunter2',
@@ -78,7 +79,7 @@ async function runAuthorityContract(createStore: StoreFactory): Promise<void> {
     bundle: {
       version: 1, revision: 0, entries: [{
         id: 'import-secret', scope: globalScope, logicalKey: 'import-secret', kind: 'memory',
-        text: 'api_key=sk-proj-abcdefghijklmnopqrstuvwxyz', tags: [], createdAt: '2026-08-27T00:00:00.000Z',
+        text: `api_key=${fakeProjectKey}`, tags: [], createdAt: '2026-08-27T00:00:00.000Z',
         updatedAt: '2026-08-27T00:00:00.000Z', revision: 0,
       }],
     },

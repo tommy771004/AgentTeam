@@ -13,8 +13,8 @@ const pin = JSON.parse(await readFile(resolve(repositoryRoot, 'vendor/pi/PI_UPST
 const artifactPath = resolve(import.meta.dirname, '../dist-electron/pi-host.js')
 const artifactBytes = await readFile(artifactPath).catch(() => Buffer.from(''))
 const artifact: PiSyncArtifact = { path: 'dist-electron/pi-host.js', sha256: createHash('sha256').update(artifactBytes).digest('hex') }
-const fromCommit = pin.commit || ''
-const toCommit = argument('--to-commit') || ''
+const fromCommit = argument('--from-commit') || ''
+const toCommit = argument('--to-commit') || pin.commit || ''
 const allGates = process.argv.includes('--all-gates')
 const evidence = buildPiSyncEvidence({
   fromCommit,

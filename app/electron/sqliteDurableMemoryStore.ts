@@ -533,11 +533,30 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
   }
 
   async get(input: MemoryGetInput): Promise<DurableMemoryEntry | undefined> {
+    return (await this.getSnapshot(input)).entry
+  }
+
+  async getSnapshot(input: MemoryGetInput): Promise<{ entry?: DurableMemoryEntry; revision: number }> {
     await this.settleWrites()
     const scope = canonicalMemoryScope(input.scope)
     authorizeMemoryAccess('get', input.access, scope)
-    const found = this.findEntry(scope, canonicalMemoryLogicalKey(input.logicalKey, this.limits))
-    return found ? { ...found, scope: found.scope.kind === 'global' ? { kind: 'global' } : { ...found.scope }, tags: [...found.tags] } : undefined
+    return this.readSnapshot(() => ({
+      entry: this.findEntry(scope, canonicalMemoryLogicalKey(input.logicalKey, this.limits)),
+      revision: this.currentRevision(),
+    }))
+  }
+
+  /** Body, tags and provenance revision must observe the same SQLite snapshot. */
+  private readSnapshot<T>(read: () => T): T {
+    this.db.exec('BEGIN DEFERRED')
+    try {
+      const result = read()
+      this.db.exec('COMMIT')
+      return result
+    } catch (error) {
+      try { this.db.exec('ROLLBACK') } catch { /* preserve read failure */ }
+      throw error
+    }
   }
 
   async recall(input: MemoryRecallInput): Promise<MemoryRecallResult> {
@@ -545,7 +564,7 @@ export class SqliteDurableMemoryStore implements DurableMemoryStore {
     authorizeMemoryAccess('recall', input.access)
     if (typeof input.query !== 'string' || input.query.length > this.limits.maxTextLength) throw new DurableMemoryStoreError('invalid_input', 'Memory recall query is invalid')
     if (input.limit !== undefined) validateMemoryPage(input.limit, this.limits)
-    return { items: recallMemoryEntries(this.readEntries(), input), revision: this.currentRevision() }
+    return this.readSnapshot(() => ({ items: recallMemoryEntries(this.readEntries(), input), revision: this.currentRevision() }))
   }
 
   async list(input: MemoryListInput): Promise<MemoryPage> {

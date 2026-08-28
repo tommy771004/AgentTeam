@@ -9,6 +9,7 @@ import {
   MAX_MEMORY_CONTROL_PACKAGES,
   memoryControlPackageDocument,
 } from '../electron/memoryControlPackageRepository.ts'
+import { compileMemoryControlRuntime } from '../electron/memoryControlRuntime.ts'
 
 const directory = await mkdtemp(join(tmpdir(), 'memory-control-package-'))
 const repositoryPath = join(directory, 'packages.json')
@@ -29,6 +30,24 @@ try {
   }
   assert.deepEqual(repository.read({ schemaVersion: 1, revision: 1 }), first)
   assert.throws(() => repository.read({ schemaVersion: 2 as 1 }), /schema version/i)
+  assert.equal(compileMemoryControlRuntime(first).fileContentChecker, true)
+  assert.throws(() => compileMemoryControlRuntime(first, 101), /goals exceed/i)
+  for (const [component, field, value] of [
+    ['checkers', 'fileContent', 2],
+    ['checkers', 'modelClaimsAreEvidence', true],
+    ['invocationPolicy', 'batchBarrier', false],
+    ['workingMemorySpec', 'optimisticConcurrency', false],
+    ['experientialSkills', 'source', 'curated-skill-resource-view'],
+    ['experientialSkills', 'unknownField', true],
+  ] as const) {
+    const candidate = await repository.createCandidate({
+      expectedActiveRevision: 1, diagnosisComponent: component,
+      patch: [{ op: field === 'unknownField' ? 'add' : 'replace', path: `/${field}`, value }], reason: 'unsupported runtime policy',
+    })
+    await assert.rejects(() => repository.activateCandidate({ revision: candidate.revision, expectedActiveRevision: 1,
+      reason: 'must fail closed before activation' }), /unsupported/i)
+    assert.equal(repository.admitActive().revision, 1)
+  }
 
   const second = createMemoryControlPackage({
     id: first.id,
@@ -66,7 +85,7 @@ try {
   const legacyChild = await migratedLegacy.createCandidate({
     expectedActiveRevision: 2,
     diagnosisComponent: 'checkers',
-    patch: [{ op: 'add', path: '/legacyRollbackQualification', value: true }],
+    patch: [{ op: 'replace', path: '/fileContent', value: 0 }],
     reason: 'qualify rollback provenance after legacy migration',
   })
   await migratedLegacy.activateCandidate({

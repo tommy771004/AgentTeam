@@ -3,11 +3,14 @@ import path from 'node:path'
 
 const PI_BUILD_WORKSPACES = [
   ['@earendil-works/pi-tui', 'packages/tui'],
+  ['@earendil-works/pi-telemetry', 'packages/telemetry'],
   ['@earendil-works/pi-ai', 'packages/ai'],
   ['@earendil-works/pi-agent-core', 'packages/agent'],
-  ['@earendil-works/pi-storage-sqlite-node', 'packages/storage/sqlite-node'],
-  ['@earendil-works/pi-coding-agent', 'packages/coding-agent'],
+  ['@earendil-works/pi-session-backend-sqlite-node', 'packages/session-backends/sqlite-node'],
+  ['@earendil-works/pi-protocol', 'packages/protocol'],
+  ['@earendil-works/pi-client', 'packages/client'],
   ['@earendil-works/pi-server', 'packages/server'],
+  ['@earendil-works/pi-coding-agent', 'packages/coding-agent'],
 ] as const
 
 /** Replace copied npm workspace junctions so every link resolves inside staging. */

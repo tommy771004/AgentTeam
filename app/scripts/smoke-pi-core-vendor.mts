@@ -13,7 +13,7 @@ assert.equal(manifest.version, '0.0.3', 'vendor must retain the upstream monorep
 assert.equal(manifest.license, undefined, 'upstream monorepo license is represented by its LICENSE file')
 assert.deepEqual(manifest.workspaces, [
   'packages/*',
-  'packages/storage/*',
+  'packages/session-backends/*',
   'packages/coding-agent/examples/extensions/with-deps',
   'packages/coding-agent/examples/extensions/custom-provider-anthropic',
   'packages/coding-agent/examples/extensions/custom-provider-gitlab-duo',
@@ -25,6 +25,11 @@ const expectedPackages = new Map([
   ['ai', '@earendil-works/pi-ai'],
   ['agent', '@earendil-works/pi-agent-core'],
   ['coding-agent', '@earendil-works/pi-coding-agent'],
+  ['client', '@earendil-works/pi-client'],
+  ['protocol', '@earendil-works/pi-protocol'],
+  ['server', '@earendil-works/pi-server'],
+  ['session-backends/sqlite-node', '@earendil-works/pi-session-backend-sqlite-node'],
+  ['telemetry', '@earendil-works/pi-telemetry'],
   ['tui', '@earendil-works/pi-tui'],
 ])
 
@@ -35,7 +40,7 @@ for (const [directory, expectedName] of expectedPackages) {
     license?: string
   }
   assert.equal(packageJson.name, expectedName)
-  assert.equal(packageJson.version, '0.81.1')
+  assert.equal(packageJson.version, '0.84.3')
   assert.equal(packageJson.license, 'MIT')
 }
 

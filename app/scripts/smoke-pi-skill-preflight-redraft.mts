@@ -200,7 +200,21 @@ try {
     .flatMap((message) => message.payload?.entries || [])
     .filter(relevant)
   assert.deepEqual(liveEntries, entries.filter(relevant), 'live and replay preserve the same Skill redraft order')
-  assert.equal(JSON.stringify(entries).includes('Never reuse the intercepted call identity.'), false, 'Turn Record keeps immutable Skill identity, not the body')
+  const injected = entries[context].injection
+  assert.equal(injected.schemaVersion, 2)
+  assert.match(injected.context, /Never reuse the intercepted call identity\./)
+  assert.equal(sha256(injected.context), injected.contextDigest)
+  assert.equal(Buffer.byteLength(injected.context, 'utf8'), injected.contextBytes)
+  const providerContext = requests[1].messages.find((message: any) =>
+    JSON.stringify(message.content).includes('[HOST SKILL PREFLIGHT REDRAFT]'))
+  assert.ok(providerContext)
+  assert.ok(JSON.stringify(providerContext.content).includes(JSON.stringify(injected.context).slice(1, -1)), 'record reconstructs exact model-visible redraft context')
+  await writeFile(join(skillDir, 'SKILL.md'), 'Updated Skill no longer has the original instructions.')
+  send(4, 'sessions/record', { sessionId, limit: 100 })
+  const replayed = await waitFor(4)
+  assert.equal(replayed.error, undefined)
+  assert.equal(replayed.result.page.entries.find((entry: any) => entry.kind === 'skill-context').injection.context, injected.context,
+    'Skill updates cannot change the durable injected body')
   console.log('Skill preflight blocks the original effect, injects one immutable revision, and executes only a fresh redraft')
 } finally {
   host.stdin.end()

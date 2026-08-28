@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/earendil-works/pi.git",
+  "tag": "v0.84.3",
+  "treeSha256": "441444e99a87049ab53d2018e0002c167e126379bbe4e84eadd3b6813a03c929",
+  "fromCommit": "dd6bea41efa8caa7a10fe5a6401676dc5699f83f",
+  "toCommit": "4e58f324fae8ebfa98a3d45181fb248072a2afac",
+  "artifact": {
+    "path": "dist-electron/pi-host.js",
+    "sha256": "6f16e95f90af14d0a9b0b5506491f46c0d21660c0692bc1857ec7c25a1061960"
+  },
+  "decision": "GO",
+  "ready": true,
+  "failedCriteria": [],
+  "generatedAt": "2026-08-28T02:14:10.062Z"
+}

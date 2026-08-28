@@ -364,6 +364,7 @@ function rejected(input: {
  * the proposal on the other side of this boundary.
  */
 export function checkWorkingStateProposal(input: {
+  enabled?: boolean
   state: WorkingState
   proposal: WorkingStateProposal
   settlement: WorkingToolSettlement
@@ -377,6 +378,7 @@ export function checkWorkingStateProposal(input: {
   | { verdict: 'accepted' | 'rebased'; reason: string; check: WorkingStateCheck; state: WorkingState }
   | { verdict: 'rejected'; reason: string; check: WorkingStateCheck; state?: undefined } {
   if (!isWorkingState(input.state)) return rejected({ state: input.state, proposal: input.proposal, reason: 'working-state-malformed' })
+  if (input.enabled === false) return rejected({ state: input.state, proposal: input.proposal, reason: 'package-checker-disabled' })
   if (!isWorkingStateProposal(input.proposal)) return rejected({ state: input.state, proposal: input.proposal, reason: 'proposal-malformed' })
   if (input.proposal.baseRevision > input.state.revision) return rejected({ state: input.state, proposal: input.proposal, reason: 'future-base-revision' })
   if (input.proposal.runId !== input.state.runId) return rejected({ state: input.state, proposal: input.proposal, reason: 'proposal-run-mismatch' })
@@ -399,7 +401,7 @@ export function checkWorkingStateProposal(input: {
   if (input.evidenceStillApplicable === false) return rejected({ state: input.state, proposal: input.proposal, reason: 'execution-evidence-invalidated' })
   if (goal.completionPredicate?.kind !== 'file-content') return rejected({ state: input.state, proposal: input.proposal, reason: 'unsupported-goal-predicate' })
   if (input.proposal.tool !== 'write') return rejected({ state: input.state, proposal: input.proposal, reason: 'unsupported-goal-tool' })
-  if (!Number.isSafeInteger(input.evidenceSeq) || input.evidenceSeq < 1) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-sequence-malformed' })
+  if (!isEvidenceSequence(input.evidenceSeq)) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-sequence-malformed' })
   if (!isWorkingExecutionEvidence(input.evidence)) return rejected({ state: input.state, proposal: input.proposal, reason: 'execution-evidence-malformed' })
   const evidence = input.evidence
   if (evidence.evidenceId !== `execution:${evidence.receiptDigest}`) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-identity-mismatch' })
@@ -427,6 +429,28 @@ export function checkWorkingStateProposal(input: {
   const state = commitGoalState(input.state, goal.id, { status: 'done', evidenceRef })
   const reason = 'goal-predicate-verified'
   return acceptedStateCheck(input.state, input.proposal, state, stale, reason, evidenceRef)
+}
+
+function isEvidenceSequence(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 1
+}
+
+/** Host rechecks the environment; an old receipt is not a permanent completion. */
+export function invalidateCompletedWorkingGoal(state: WorkingState, goalId: string): { state: WorkingState; check: WorkingStateCheck } {
+  const goal = state.goals.find((item) => item.id === goalId)
+  if (!isWorkingState(state) || goal?.status !== 'done') throw new Error('Only a verified completed goal can be invalidated')
+  const prior = goal.evidence.at(-1)!
+  const next: WorkingState = {
+    ...state,
+    revision: state.revision + 1,
+    goals: state.goals.map((item) => item.id === goalId ? { ...item, status: 'pending', evidence: [] } : item),
+  }
+  return { state: next, check: {
+    schemaVersion: 1, runId: state.runId, baseRevision: state.revision,
+    goalId, proposalId: `recheck:${state.revision}:${goalId}`, tool: prior.tool, callId: prior.callId,
+    verdict: 'accepted', reason: 'completed-predicate-invalidated',
+    currentRevision: state.revision, committedRevision: next.revision, evidenceRef: prior,
+  } }
 }
 
 function commitGoalState(
@@ -631,11 +655,13 @@ function delegatedEvidenceFailure(
 
 /** Parent-only CAS Checker for one Host-observed child result. */
 export function checkDelegatedGoalObservation(input: {
+  enabled?: boolean
   state: WorkingState
   assignment: DelegatedGoalAssignment
   observation: DelegatedGoalObservation
 }): { check: DelegatedGoalCheck; state?: WorkingState } {
   const { state, assignment, observation } = input
+  if (input.enabled === false) return delegatedRejected(state, assignment, 'package-checker-disabled')
   if (!isWorkingState(state) || !isDelegatedGoalAssignment(assignment)) {
     return delegatedRejected(state, assignment, 'delegation-assignment-malformed')
   }

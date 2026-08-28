@@ -57,7 +57,7 @@ function frontmatterValue(frontmatter: string, key: string): string | undefined 
   return frontmatter.match(new RegExp(`^${escaped}:\\s*(.+?)\\s*$`, 'm'))?.[1]?.trim()
 }
 
-function parsePreflightSkill(raw: string, exactTool: string): PiPreflightSkillRevision | undefined {
+export function parsePreflightSkill(raw: string, exactTool?: string): PiPreflightSkillRevision | undefined {
   const normalized = raw.replaceAll('\r\n', '\n')
   if (!normalized.startsWith('---\n')) return undefined
   const boundary = normalized.indexOf('\n---\n', 4)
@@ -68,7 +68,7 @@ function parsePreflightSkill(raw: string, exactTool: string): PiPreflightSkillRe
     .split(',')
     .map((tool) => tool.trim().replace(/^['"]|['"]$/g, ''))
     .filter(Boolean)
-  if (!tools.includes(exactTool)) return undefined
+  if (!tools.length || exactTool !== undefined && !tools.includes(exactTool)) return undefined
   const id = frontmatterValue(frontmatter, 'name') || ''
   const version = Number(frontmatterValue(frontmatter, 'version'))
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id) || !Number.isSafeInteger(version) || version < 1) {
@@ -113,6 +113,9 @@ export async function selectFrozenPiPreflightSkills(input: {
   maxSkills?: 1 | 2
   secondSkillReason?: string
   contextBudgetBytes?: number
+  /** Immutable package-owned SKILL.md revisions, never written to live resources. */
+  overrides?: Readonly<Record<string, string>>
+  goalContext?: string
 }): Promise<PiPreflightSkillRevision[]> {
   const maxSkills = input.maxSkills || 1
   const budget = input.contextBudgetBytes || PI_PREFLIGHT_SKILL_CONTEXT_BUDGET_BYTES
@@ -121,17 +124,25 @@ export async function selectFrozenPiPreflightSkills(input: {
     throw new Error('A second preflight Skill requires an explicit reason and hard context budget')
   }
   const matches: PiPreflightSkillRevision[] = []
-  for (const relativePath of [...input.resourceView.manifest].sort()) {
-    const raw = await readFrozenSkill(input.resourceView, relativePath)
+  const paths = new Set([...input.resourceView.manifest, ...Object.keys(input.overrides || {}).map((id) => `${id}/SKILL.md`)])
+  for (const relativePath of [...paths].sort()) {
+    const id = relativePath.split('/')[0]
+    const raw = input.overrides?.[id] ?? await readFrozenSkill(input.resourceView, relativePath)
     if (raw === undefined) continue
     const selected = parsePreflightSkill(raw, input.exactTool)
-    if (selected) matches.push(selected)
+    if (selected && (!input.goalContext || skillMatchesGoal(selected, input.goalContext))) matches.push(selected)
   }
   const selected = matches.slice(0, maxSkills)
   if (selected.reduce((sum, skill) => sum + skill.bodyBytes, 0) > budget) {
     throw new Error('Selected preflight Skills exceed the hard context budget')
   }
   return selected
+}
+
+function skillMatchesGoal(skill: PiPreflightSkillRevision, context: string): boolean {
+  const terms = `${skill.id} ${skill.body}`.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || []
+  const normalized = context.toLowerCase()
+  return terms.some((term) => normalized.includes(term))
 }
 
 /** Host-only, bounded and symlink-free view of the files Pi may advertise. */

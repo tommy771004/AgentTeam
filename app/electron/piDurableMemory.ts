@@ -5,6 +5,22 @@ import {
 import type { PiMemory } from './piMemory.ts'
 import type { PiMemoryBridgeAccess, PiMemoryWriteReceipt } from './piPackBridges.ts'
 import { piSessionRunBinding, type PiToolContext } from './piToolHost.ts'
+import type { TurnRecordAppend } from '../src/agent/turnRecord.ts'
+
+type MemoryReadRecord = Omit<Extract<TurnRecordAppend, { kind: 'memory-recall' }>, 'at' | 'step' | 'turn'>
+type RecordRead = (sessionId: string, record: MemoryReadRecord) => void
+
+function recordMemoryRead(record: RecordRead | undefined, ctx: PiToolContext, items: DurableMemoryEntry[], revision: number): void {
+  if (!items.length) return
+  record?.(ctx.sessionId, {
+    kind: 'memory-recall', source: 'host', revision,
+    ...(ctx.callId ? { callId: ctx.callId } : {}),
+    items: items.map((item) => ({
+      id: item.id, logicalKey: item.logicalKey, scope: item.scope.kind,
+      memoryKind: item.kind, revision: item.revision,
+    })),
+  })
+}
 
 export type PiMemoryChange = {
   operation: 'upsert' | 'append' | 'delete' | 'clear'
@@ -96,16 +112,22 @@ async function commitRuntimeMemory(
   return write
 }
 
-export function createPiDurableMemoryBridge(store: DurableMemoryStore, publish?: PublishChange): PiMemoryBridgeAccess {
+export function createPiDurableMemoryBridge(store: DurableMemoryStore, publish?: PublishChange, recordRead?: RecordRead): PiMemoryBridgeAccess {
   return {
-    search: async (query, limit, ctx) => (await store.recall({ access: runtimeAccess(ctx), query, limit })).items.map(piMemoryProjection),
+    search: async (query, limit, ctx) => {
+      const result = await store.recall({ access: runtimeAccess(ctx), query, limit })
+      recordMemoryRead(recordRead, ctx, result.items, result.revision)
+      return result.items.map(piMemoryProjection)
+    },
     get: async (id, ctx) => {
       const access = runtimeAccess(ctx)
       // Project-specific value wins over a global value with the same key.
       const project = access.canonicalProject
-        ? await store.get({ access, scope: { kind: 'project', project: access.canonicalProject }, logicalKey: id }) : undefined
-      const found = project || await store.get({ access, scope: { kind: 'global' }, logicalKey: id })
-      return found ? piMemoryProjection(found) : undefined
+        ? await store.getSnapshot({ access, scope: { kind: 'project', project: access.canonicalProject }, logicalKey: id }) : undefined
+      const found = project?.entry ? project : await store.getSnapshot({ access, scope: { kind: 'global' }, logicalKey: id })
+      if (!found.entry) return undefined
+      recordMemoryRead(recordRead, ctx, [found.entry], found.revision)
+      return piMemoryProjection(found.entry)
     },
     set: async (input, ctx) => {
       const access = runtimeAccess(ctx)

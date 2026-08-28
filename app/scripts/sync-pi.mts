@@ -20,8 +20,12 @@ const forbidden = ['--branch', '--ref', '--latest', '--main', '--remote']
 assert.ok(!forbidden.some((flag) => process.argv.includes(flag)), 'Pi sync accepts explicit commits only; it never moves a branch')
 const fromCommit = requiredArg('--from-commit')
 const toCommit = requiredArg('--to-commit')
+const releaseSourceAsset = requiredArg('--release-source-asset')
+const releaseSourceSha256 = requiredArg('--release-source-sha256')
 assert.match(fromCommit, /^[0-9a-f]{40}$/)
 assert.match(toCommit, /^[0-9a-f]{40}$/)
+assert.match(releaseSourceAsset, /^pi-\d+\.\d+\.\d+-source\.tar\.gz$/)
+assert.match(releaseSourceSha256, /^[0-9a-f]{64}$/)
 assert.notEqual(fromCommit, toCommit, 'synchronization must advance to a different commit')
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..')
@@ -69,7 +73,10 @@ try {
     `vendor differs from the recorded fromCommit; reconcile Core Patch Ledger before syncing: ${baselineDifferences.slice(0, 20).join(', ')}`,
   )
 
-  execFileSync('npm', ['test'], { cwd: sourceRoot, stdio: 'inherit' })
+  execFileSync(process.platform === 'win32' ? 'bash.exe' : 'bash', ['test.sh'], {
+    cwd: sourceRoot,
+    stdio: 'inherit',
+  })
 
   const sourceFiles = await listPiVendorFiles(toSnapshot)
   const vendorFiles = await listPiVendorFiles(vendorRoot)
@@ -83,7 +90,11 @@ try {
     await cp(path.join(toSnapshot, relative), destination, { force: true })
   }
 
-  const packageJson = JSON.parse(await readFile(path.join(toSnapshot, 'package.json'), 'utf8')) as { version?: string }
+  const packageJson = JSON.parse(
+    await readFile(path.join(toSnapshot, 'packages/coding-agent/package.json'), 'utf8'),
+  ) as { version?: string }
+  assert.match(packageJson.version || '', /^\d+\.\d+\.\d+$/,
+    'Pi coding-agent package must declare a release version')
   let tag: string | null = null
   try { tag = git(['describe', '--tags', '--exact-match', toCommit]) || null } catch { /* untagged reviewed commit */ }
   const treeSha256 = await hashPiVendorTree(vendorRoot)
@@ -92,6 +103,10 @@ try {
     tag,
     commit: toCommit,
     packageVersion: packageJson.version,
+    releaseSourceArchive: {
+      asset: releaseSourceAsset,
+      sha256: releaseSourceSha256,
+    },
     treeSha256,
   }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
 
@@ -107,11 +122,15 @@ try {
     vendorUpdated: true,
     ledgerReconciled: true,
     upstreamTests: true,
-    upstreamTestCommand: 'npm test',
+    upstreamTestCommand: 'bash test.sh',
     generatedAt: new Date().toISOString(),
   }
   const output = arg('--output')
-  if (output) await writeFile(path.resolve(process.cwd(), output), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+  if (output) {
+    const outputPath = path.resolve(process.cwd(), output)
+    await mkdir(path.dirname(outputPath), { recursive: true })
+    await writeFile(outputPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+  }
   console.log(JSON.stringify(manifest))
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })

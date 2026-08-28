@@ -47,7 +47,9 @@ export type SkillInvocationTrace = {
 }
 
 export type SkillContextInjectionTrace = {
-  schemaVersion: 1
+  schemaVersion: 1 | 2
+  /** Exact bounded provider input; absent only in legacy schema v1. */
+  context?: string
   runId: string
   originalCallId: string
   tool: string
@@ -112,9 +114,12 @@ export function isSkillContextInjectionTrace(value: unknown): value is SkillCont
   if (!value || typeof value !== 'object') return false
   const trace = value as Record<string, unknown>
   return Object.keys(trace).every((key) => [
-    'schemaVersion', 'runId', 'originalCallId', 'tool', 'skills', 'contextBytes', 'contextDigest', 'freshCallRequired',
+    'schemaVersion', 'runId', 'originalCallId', 'tool', 'skills', 'context', 'contextBytes', 'contextDigest', 'freshCallRequired',
   ].includes(key))
-    && trace.schemaVersion === 1
+    && (trace.schemaVersion === 1
+      ? trace.context === undefined
+      : trace.schemaVersion === 2 && typeof trace.context === 'string'
+        && new TextEncoder().encode(trace.context).byteLength === trace.contextBytes)
     && bounded(trace.runId, 512)
     && bounded(trace.originalCallId, 512)
     && bounded(trace.tool, 256)

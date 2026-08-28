@@ -230,6 +230,7 @@ const stateDir = await mkdtemp(join(tmpdir(), 'pi-working-state-host-'))
 const agentDir = await mkdtemp(join(tmpdir(), 'pi-working-state-agent-'))
 const statePath = join(stateDir, 'state.json')
 let completions = 0
+let regressionPlan: Array<Array<{ path: string; content: string }> | null> | undefined
 const chunk = (delta: Record<string, unknown>, finish: string | null) => `data: ${JSON.stringify({
   id: 'chatcmpl-working-state',
   object: 'chat.completion.chunk',
@@ -244,9 +245,19 @@ const modelServer = createServer(async (request, response) => {
     return
   }
   for await (const part of request) void part
+  if (regressionPlan) {
+    const calls = regressionPlan.shift()
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    response.write(chunk(calls ? { role: 'assistant', tool_calls: calls.map((args, index) => ({
+      index, id: `regression-${regressionPlan!.length}-${index}`, type: 'function',
+      function: { name: 'write', arguments: JSON.stringify(args) },
+    })) } : { role: 'assistant', content: 'iteration finished' }, calls ? 'tool_calls' : 'stop'))
+    response.end('data: [DONE]\n\n')
+    return
+  }
   completions += 1
   response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive', 'cache-control': 'no-cache' })
-  if (completions === 1 || completions === 4 || completions === 6 || completions === 8 || completions === 10 || completions === 12) {
+  if ([1, 4, 6, 8, 10, 12].includes(completions)) {
     response.write(chunk({ role: 'assistant', content: completions === 1
       ? '寫入指定內容。'
       : completions === 4
@@ -625,6 +636,28 @@ try {
   assert.equal(checkpoint.workingState.goals[0].status, 'done')
   assert.deepEqual(checkpoint.manifest.workingState, checkpoint.workingState)
   assert.deepEqual(checkpoint.manifest.completedEffects, checkpoint.workingState.goals[0].evidence.map((item: { evidenceId: string }) => item.evidenceId))
+
+  regressionPlan = [
+    [{ path: 'regression-a.txt', content: 'correct a' }], null,
+    [{ path: 'regression-a.txt', content: 'WRONG' }, { path: 'regression-b.txt', content: 'correct b' }], null,
+  ]
+  send(30, 'sessions/create', { title: 'Completed predicate invalidation' })
+  const regressionSession = String((await waitFor(30)).result?.sessionId)
+  send(31, 'turn/submit', {
+    sessionId: regressionSession, runId: 'completed-predicate-regression', cwd: workspace,
+    prompt: 'Write correct a and correct b', profile, pattern: 'Goal-based', maxIterations: 2,
+    definitionOfDone: 'Both files retain their requested content',
+    workingGoals: ['a', 'b'].map((name) => ({ description: name,
+      completionPredicate: { kind: 'file-content', path: `regression-${name}.txt`, sha256: sha256(`correct ${name}`) },
+    })),
+  })
+  const regression = await waitFor(31)
+  assert.equal(regression.error, undefined)
+  assert.equal(await readFile(join(workspace, 'regression-a.txt'), 'utf8'), 'WRONG')
+  assert.equal(regression.result.orchestration.dodMet, false)
+  assert.deepEqual(regression.result.workingState.goals.map((goal: any) => goal.status), ['pending', 'done'])
+  assert.ok(regression.result.record.entries.some((entry: any) => entry.kind === 'state-check' && entry.check.reason === 'completed-predicate-invalidated'))
+  regressionPlan = undefined
 
   host.stdin.end()
   await once(host, 'exit')
