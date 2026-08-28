@@ -13,6 +13,7 @@ import {
   modelsFromCliProviders,
 } from '../agent/cliProviders'
 import type { CliProviderConfig } from '../agent/types'
+import { filterModelChoices } from './modelMenuSearch'
 
 type Panel = 'root' | 'model' | 'depth' | 'speed'
 
@@ -41,7 +42,7 @@ export function ModelDepthMenu({
 }) {
   const [open, setOpen] = useState(false)
   const [panel, setPanel] = useState<Panel>('root')
-  const [customModel, setCustomModel] = useState('')
+  const [modelQuery, setModelQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
 
   const dynamicModels = useMemo(
@@ -57,6 +58,11 @@ export function ModelDepthMenu({
         hint: m.providerName,
       })),
     [dynamicModels],
+  )
+
+  const filteredModelList = useMemo(
+    () => filterModelChoices(modelList, modelQuery),
+    [modelList, modelQuery],
   )
 
   const allowedDepths = useMemo(() => {
@@ -86,8 +92,9 @@ export function ModelDepthMenu({
   }, [open])
 
   useEffect(() => {
-    if (open) setCustomModel(model)
-  }, [open, model])
+    if (!open || panel !== 'model') return
+    setModelQuery('')
+  }, [open, panel])
 
   // 若目前深度不在允許列表，提示仍可顯示
   useEffect(() => {
@@ -158,15 +165,18 @@ export function ModelDepthMenu({
               </div>
               <div className="px-2 pb-2">
                 <input
-                  value={customModel}
-                  onChange={(e) => setCustomModel(e.target.value)}
+                  value={modelQuery}
+                  onChange={(e) => setModelQuery(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      onModelChange(customModel.trim())
+                    if (e.key === 'Enter' && modelQuery.trim()) {
+                      const exact = modelList.find((item) =>
+                        item.id.toLocaleLowerCase() === modelQuery.trim().toLocaleLowerCase(),
+                      )
+                      onModelChange(exact?.id || modelQuery.trim())
                       setPanel('root')
                     }
                   }}
-                  placeholder={globalModel || '自訂 model id'}
+                  placeholder="搜尋模型或輸入 model id"
                   className="w-full bg-inset border border-line rounded-control px-2 py-1.5 text-[12px] text-ink font-[family-name:var(--font-mono)] outline-none focus:border-line-strong"
                 />
               </div>
@@ -175,8 +185,12 @@ export function ModelDepthMenu({
                   <p className="px-3 py-3 text-[11px] text-ink-3 leading-relaxed">
                     尚無已授權 CLI 的模型清單。請到「設定 → CLI 授權」啟用本機 CLI，或直接在上方輸入 model id。
                   </p>
+                ) : !filteredModelList.length ? (
+                  <p className="px-3 py-3 text-[11px] text-ink-3 leading-relaxed">
+                    找不到符合「{modelQuery.trim()}」的模型；可按下方按鈕直接使用此 model id。
+                  </p>
                 ) : (
-                  modelList.map((m) => {
+                  filteredModelList.map((m) => {
                     const active = (model || globalModel) === m.id
                     return (
                       <button
@@ -205,12 +219,13 @@ export function ModelDepthMenu({
               <button
                 type="button"
                 className="mx-2 mb-2 mt-1 py-1.5 rounded-control border border-line bg-hover text-[12px] text-ink font-medium hover:bg-hover-2"
+                disabled={!modelQuery.trim()}
                 onClick={() => {
-                  onModelChange(customModel.trim())
+                  onModelChange(modelQuery.trim())
                   setPanel('root')
                 }}
               >
-                套用
+                {modelQuery.trim() ? `使用「${modelQuery.trim()}」` : '輸入自訂 model id'}
               </button>
             </div>
           )}

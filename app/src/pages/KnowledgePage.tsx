@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icon'
-import { ThemePage } from '../components/SectionNav'
 import {
   SettingsHeader,
   settingsBtnCls,
@@ -175,26 +174,13 @@ export function KnowledgePage() {
     }
   }
 
-  const [section, setSection] = useState('graph')
-
   return (
-    <ThemePage
-      title="知識圖譜"
-      sections={[
-        { id: 'graph', label: '任務圖譜', icon: 'hub' },
-        { id: 'codegraph', label: 'CodeGraph', icon: 'account_tree' },
-      ]}
-      activeId={section}
-      onChange={setSection}
-      narrow={false}
-    >
+    <div className="h-full min-h-0 bg-background p-3 md:p-5">
+      <div className="h-full min-h-0 overflow-y-auto custom-scrollbar">
+        <div className="flex min-h-full w-full flex-col pb-3">
       <SettingsHeader
-        title={section === 'codegraph' ? 'CodeGraph' : '任務圖譜'}
-        subtitle={
-          section === 'codegraph'
-            ? '本機程式碼索引 · 符號／呼叫路徑。'
-            : `階段：${graph.phase || '閒置'}${graph.source ? ` · ${graph.source}` : ''}`
-        }
+        title="知識圖譜"
+        subtitle={`任務實體 + CodeGraph 程式索引 · 階段：${graph.phase || '閒置'}${graph.source ? ` · ${graph.source}` : ''}`}
       />
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <span className="text-[11px] px-2.5 py-1 rounded-full border border-white/10 text-outline">
@@ -532,7 +518,9 @@ export function KnowledgePage() {
           </div>
         </div>
       </div>
-    </ThemePage>
+        </div>
+      </div>
+    </div>
   )
 }
 
