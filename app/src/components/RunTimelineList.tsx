@@ -16,6 +16,7 @@ import { Reveal } from './primitives/Reveal'
 import { ShimmerLabel } from './primitives/ShimmerLabel'
 import { groupTimelineItems, timelineToolKind, type TimelineDisplayEntry } from './timelineGrouping'
 import type { ProcessOperation } from '../lib/runPresentation'
+import { UnifiedDiffView } from './UnifiedDiffView'
 
 export type TimelineItem =
   | { id: string; kind: 'reasoning'; content: string; chars: number }
@@ -29,6 +30,7 @@ export type TimelineItem =
       title?: string
       settlement?: string
       detail?: string
+      diff?: string
       added?: number
       removed?: number
       approval?: string
@@ -124,7 +126,7 @@ function ToolTimelineRow({ row, open, toggle, index }: { row: Extract<TimelineIt
   const failed = row.settlement !== undefined && row.settlement !== 'success'
   const label = row.title || (pending ? `執行 ${row.tool}…` : failed ? `${row.tool} ${row.settlement}` : `已執行 ${row.tool}`)
   const search = isSearchTool(row.tool)
-  const expandable = Boolean(row.detail)
+  const expandable = Boolean(row.diff || row.detail)
   const rowClass = `agent-process-row group/tool flex w-full max-w-full min-w-0 items-center gap-2 text-left text-[12px] ${failed ? 'text-red' : 'text-ink-2'}`
   const rowContent = (
     <>
@@ -154,7 +156,13 @@ function ToolTimelineRow({ row, open, toggle, index }: { row: Extract<TimelineIt
         <div data-timeline-row="tool" data-tool-variant={search ? 'search' : 'coding'} className={rowClass}>{rowContent}</div>
       )}
       <Reveal open={open && expandable}>
-        <pre className="agent-process-detail ml-5 mt-0.5 whitespace-pre-wrap break-all text-[11px] text-ink-2 font-[family-name:var(--font-mono)] line-clamp-5">{row.detail}</pre>
+        {row.diff ? (
+          <div className="agent-process-detail ml-5 mt-1 overflow-hidden rounded-control border border-line">
+            <UnifiedDiffView diff={row.diff} maxHeightClass="max-h-[320px]" />
+          </div>
+        ) : (
+          <pre className="agent-process-detail ml-5 mt-0.5 whitespace-pre-wrap break-all text-[11px] text-ink-2 font-[family-name:var(--font-mono)] line-clamp-5">{row.detail}</pre>
+        )}
       </Reveal>
     </div>
   )

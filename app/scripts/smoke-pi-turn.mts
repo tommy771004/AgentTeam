@@ -8,7 +8,17 @@ import { spawn } from 'node:child_process'
 const stateDir = await mkdtemp(`${tmpdir()}/pi-turn-`)
 const host = spawn(process.execPath, ['--experimental-strip-types', 'electron/piHostEntry.ts'], {
   cwd: new URL('..', import.meta.url),
-  env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: `${stateDir}/state.json`, SUBAGENTS_PI_AGENT_DIR: `${stateDir}/agent` },
+  env: {
+    ...process.env,
+    SUBAGENTS_PI_HOST_STATE_PATH: `${stateDir}/state.json`,
+    SUBAGENTS_PI_AGENT_DIR: `${stateDir}/agent`,
+    SUBAGENTS_PI_NATIVE_AGENT_DIR: `${stateDir}/native-agent`,
+    SUBAGENTS_PI_SYNC_CLI_OAUTH: 'false',
+    SUBAGENTS_CODEX_AUTH_PATH: `${stateDir}/absent-codex.json`,
+    SUBAGENTS_CLAUDE_CREDENTIALS_PATH: `${stateDir}/absent-claude.json`,
+    PI_PROVIDER: '',
+    PI_MODEL: '',
+  },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 const output = createInterface({ input: host.stdout })

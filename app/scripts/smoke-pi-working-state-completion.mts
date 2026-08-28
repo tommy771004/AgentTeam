@@ -229,6 +229,7 @@ assert.equal(checkWorkingStateProposal({
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-working-state-host-'))
 const agentDir = await mkdtemp(join(tmpdir(), 'pi-working-state-agent-'))
 const statePath = join(stateDir, 'state.json')
+const checkpointDir = join(stateDir, 'run-checkpoints')
 let completions = 0
 let regressionPlan: Array<Array<{ path: string; content: string }> | null> | undefined
 const chunk = (delta: Record<string, unknown>, finish: string | null) => `data: ${JSON.stringify({
@@ -380,7 +381,12 @@ await writeFile(join(agentDir, 'auth.json'), JSON.stringify({ loopback: { type: 
 await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'loopback', defaultModel: 'smoke-model', defaultThinkingLevel: 'off' }))
 
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
-  env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: statePath, SUBAGENTS_PI_AGENT_DIR: agentDir },
+  env: {
+    ...process.env,
+    SUBAGENTS_PI_HOST_STATE_PATH: statePath,
+    SUBAGENTS_PI_CHECKPOINT_DIR: checkpointDir,
+    SUBAGENTS_PI_AGENT_DIR: agentDir,
+  },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 let hostStopped = false
@@ -663,7 +669,12 @@ try {
   await once(host, 'exit')
   hostStopped = true
   const restarted = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
-    env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: statePath, SUBAGENTS_PI_AGENT_DIR: agentDir },
+    env: {
+      ...process.env,
+      SUBAGENTS_PI_HOST_STATE_PATH: statePath,
+      SUBAGENTS_PI_CHECKPOINT_DIR: checkpointDir,
+      SUBAGENTS_PI_AGENT_DIR: agentDir,
+    },
     stdio: ['pipe', 'pipe', 'inherit'],
   })
   const restartedMessages: Array<Record<string, any>> = []

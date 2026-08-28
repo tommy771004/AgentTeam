@@ -29,8 +29,12 @@ const hostEntry = process.env.PI_HOST_ENTRY || resolve(import.meta.dirname, '../
 const hostArgs = hostEntry.endsWith('.ts') ? ['--experimental-strip-types', hostEntry] : [hostEntry]
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-host-protocol-'))
 const nativeAgentDir = join(stateDir, 'native-agent')
+const appAgentDir = join(stateDir, 'app-agent')
 const codexAuthPath = join(stateDir, 'codex-auth.json')
-await mkdir(nativeAgentDir, { recursive: true })
+await Promise.all([
+  mkdir(nativeAgentDir, { recursive: true }),
+  mkdir(appAgentDir, { recursive: true }),
+])
 const codexAccess = (accountId: string) => {
   const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')
   const payload = Buffer.from(JSON.stringify({
@@ -49,6 +53,7 @@ const host = spawn(process.execPath, hostArgs, {
     ...process.env,
     SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'),
     SUBAGENTS_PI_NATIVE_AGENT_DIR: nativeAgentDir,
+    SUBAGENTS_PI_AGENT_DIR: appAgentDir,
     SUBAGENTS_CODEX_AUTH_PATH: codexAuthPath,
     SUBAGENTS_CLAUDE_CREDENTIALS_PATH: join(stateDir, 'absent-claude.json'),
     SUBAGENTS_PI_SYNC_CLI_OAUTH: 'true',

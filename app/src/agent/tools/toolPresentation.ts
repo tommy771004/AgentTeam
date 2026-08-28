@@ -372,8 +372,42 @@ export function diffStats(presentation: ToolPresentation): DiffStat[] | undefine
   return stats.length > 0 ? stats : undefined
 }
 
+const MAX_PRESENTED_DIFF_LINES = 400
+
+/** Stable unified text carried by the Turn Record projection; no later workspace read. */
+export function presentedDiff(presentation: ToolPresentation): string | undefined {
+  if (presentation.card !== 'diff') return undefined
+  const rendered: string[] = []
+  for (const diff of presentation.diffs) {
+    const path = asPath(diff.path)
+    if (!path) continue
+    const oldLines = diff.oldText === null ? [] : toLines(diff.oldText)
+    const newLines = toLines(diff.newText)
+    let prefix = 0
+    while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) prefix++
+    let oldSuffix = oldLines.length
+    let newSuffix = newLines.length
+    while (oldSuffix > prefix && newSuffix > prefix && oldLines[oldSuffix - 1] === newLines[newSuffix - 1]) {
+      oldSuffix--
+      newSuffix--
+    }
+    rendered.push(
+      `--- ${diff.oldText === null ? '/dev/null' : `a/${path}`}`,
+      `+++ b/${path}`,
+      `@@ -1,${oldLines.length} +1,${newLines.length} @@`,
+      ...oldLines.slice(0, prefix).map((line) => ` ${line}`),
+      ...oldLines.slice(prefix, oldSuffix).map((line) => `-${line}`),
+      ...newLines.slice(prefix, newSuffix).map((line) => `+${line}`),
+      ...oldLines.slice(oldSuffix).map((line) => ` ${line}`),
+    )
+  }
+  if (rendered.length === 0) return undefined
+  if (rendered.length <= MAX_PRESENTED_DIFF_LINES) return rendered.join('\n')
+  return [...rendered.slice(0, MAX_PRESENTED_DIFF_LINES), `… diff 已截斷，另有 ${rendered.length - MAX_PRESENTED_DIFF_LINES} 行`].join('\n')
+}
+
 /** The summary a timeline row shows for one tool call: title, where, how much. */
-export type PresentedToolSummary = { title?: string; path?: string; added?: number; removed?: number }
+export type PresentedToolSummary = { title?: string; path?: string; diff?: string; added?: number; removed?: number }
 
 /**
  * One tool call's presented summary, from its own declaration and nothing
@@ -401,9 +435,11 @@ export function presentedToolSummary(
         : undefined
   const added = stats?.reduce((total, stat) => total + stat.added, 0)
   const removed = stats?.reduce((total, stat) => total + stat.removed, 0)
+  const diff = presentedDiff(presentation)
   return {
     ...(presentation.title ? { title: presentation.title } : {}),
     ...(locationPath ? { path: locationPath } : {}),
+    ...(diff ? { diff } : {}),
     ...(added !== undefined ? { added } : {}),
     ...(removed !== undefined ? { removed } : {}),
   }

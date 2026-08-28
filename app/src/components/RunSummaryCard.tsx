@@ -7,6 +7,7 @@ import { RunTimelineList, type TimelineItem } from './RunTimelineList'
 import { RunTaskRow } from './RunTaskRow'
 import { contextSummary, groupProcessOperations } from '../lib/runPresentation'
 import { formatTokensCompact, formatUsd } from '../agent/contextUsageView'
+import { UnifiedDiffView } from './UnifiedDiffView'
 
 /**
  * The persisted operations replay through the SAME timeline renderer the live
@@ -37,12 +38,72 @@ function timelineItems(operations: ThreadRunSummary['operations']): TimelineItem
   })
 }
 
+function RunChangedFilesCard({
+  files,
+  diff,
+  additions,
+  removals,
+}: Pick<ThreadRunSummary, 'files' | 'diff'> & { additions: number; removals: number }) {
+  const [diffOpen, setDiffOpen] = useState(false)
+  const [allFilesOpen, setAllFilesOpen] = useState(false)
+  if (!files.length && diff === undefined) return null
+  const visibleFiles = files.slice(0, allFilesOpen ? files.length : 3)
+
+  return (
+    <section data-testid="run-summary-diff" data-summary-changes className="mt-2 overflow-hidden rounded-card border border-line bg-surface shadow-card">
+      <button
+        type="button"
+        aria-expanded={diffOpen}
+        onClick={() => setDiffOpen((value) => !value)}
+        className="flex w-full items-center gap-3 border-b border-line px-3 py-2.5 text-left"
+      >
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-control bg-surface text-ink-2">
+          <Icon name="note_stack" size={18} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[12px] font-semibold text-ink">已編輯 {files.length} 個檔案</span>
+          {(additions > 0 || removals > 0) ? (
+            <span className="mt-0.5 block text-[11px] font-[family-name:var(--font-mono)] tabular-nums">
+              {additions > 0 ? <span className="text-green">+{additions}</span> : null}
+              {removals > 0 ? <span className="ml-1 text-red">−{removals}</span> : null}
+            </span>
+          ) : null}
+        </span>
+        <span className="text-[11px] font-medium text-ink-2">{diffOpen ? '收合' : '查看 diff'}</span>
+        {diff === undefined ? <span data-testid="run-summary-diff-empty" className="sr-only">沒有偵測到工作樹變更</span> : null}
+        <Icon name={diffOpen ? 'expand_less' : 'expand_more'} size={16} className="shrink-0 text-ink-3" />
+      </button>
+      {visibleFiles.map((file) => (
+        <div key={file.path} className="flex items-center gap-2 border-b border-line px-2.5 py-1.5 last:border-0">
+          <Icon name={file.action === 'create' ? 'note_add' : 'edit'} size={14} className="shrink-0 text-ink-3" />
+          <span className="min-w-0 flex-1 truncate text-[12px] text-ink font-[family-name:var(--font-mono)]" title={file.path}>{file.path.replace(/\\/g, '/')}</span>
+          <span className="shrink-0 text-[11px] font-[family-name:var(--font-mono)]">
+            {file.added != null ? <span className="text-green">+{file.added}</span> : null}
+            {file.removed != null ? <span className="ml-1 text-red">-{file.removed}</span> : null}
+          </span>
+        </div>
+      ))}
+      {files.length > 3 ? (
+        <button
+          type="button"
+          aria-expanded={allFilesOpen}
+          onClick={() => setAllFilesOpen((value) => !value)}
+          className="flex w-full items-center gap-2 border-b border-line px-3 py-2 text-left text-[11px] text-ink-2 hover:bg-hover-1"
+        >
+          <span className="flex-1">{allFilesOpen ? '只顯示前 3 個檔案' : `顯示另外 ${files.length - 3} 個檔案`}</span>
+          <Icon name={allFilesOpen ? 'expand_less' : 'expand_more'} size={15} className="text-ink-3" />
+        </button>
+      ) : null}
+      {diffOpen ? <UnifiedDiffView diff={diff || ''} testId="run-summary-diff-content" /> : null}
+    </section>
+  )
+}
+
 /** Persisted, collapsible record of what an agent did for one answer. */
 export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
   const navigate = useNavigate()
   // Context is visible at a glance; details remain one click away.
   const [open, setOpen] = useState(false)
-  const [diffOpen, setDiffOpen] = useState(false)
   const items = timelineItems(summary.operations)
   const additions = summary.files.reduce((total, file) => total + (file.added || 0), 0)
   const removals = summary.files.reduce((total, file) => total + (file.removed || 0), 0)
@@ -58,13 +119,16 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
     interruptReason: summary.interruptReason,
   })
   const outcome = summary.status ? lifecycle.label : ''
-  const label = summary.files.length
-    ? `已變更 ${summary.files.length} 個檔案`
-    : `執行過程 · ${summary.operations.length} 項`
+  const label = '執行過程'
+  const showExecutionSummary = Boolean(
+    items.length || summary.plan?.length || summary.agents?.length || summary.subDesign || !summary.files.length,
+  )
 
   return (
-    <section data-testid="run-summary-card" className="agent-summary-card w-full overflow-hidden rounded-card border bg-surface shadow-card">
-      <button
+    <>
+      {showExecutionSummary ? (
+        <section data-testid="run-summary-card" className="agent-summary-card w-full overflow-hidden rounded-card border bg-surface shadow-card">
+          <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -99,16 +163,10 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
             {outcome}
           </span>
         ) : null}
-        {(additions > 0 || removals > 0) ? (
-          <span className="shrink-0 text-[11px] font-[family-name:var(--font-mono)] tabular-nums">
-            {additions > 0 ? <span className="text-green">+{additions}</span> : null}
-            {removals > 0 ? <span className="ml-1 text-red">−{removals}</span> : null}
-          </span>
-        ) : null}
         <Icon name={open ? 'expand_less' : 'expand_more'} size={18} className="shrink-0 text-ink-3" />
-      </button>
+          </button>
 
-      {summary.subDesign ? (
+          {summary.subDesign ? (
         <div className="border-t border-line bg-accent-tint px-3.5 py-3 text-[11px] text-ink-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
             <div className="flex min-w-0 flex-1 items-center gap-1.5 font-medium">
@@ -127,10 +185,10 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
           {summary.subDesign.critique ? <div className="mt-1 text-ink-3">critique r{summary.subDesign.critique.revision} · {summary.subDesign.critique.verdict} · {summary.subDesign.critique.blockerCount} blockers</div> : null}
           {summary.subDesign.exports?.length ? <div className="mt-1 text-ink-3">exports · {summary.subDesign.exports.map((item) => `${item.format.toUpperCase()} r${item.revision}`).join(' · ')}</div> : null}
         </div>
-      ) : null}
+          ) : null}
 
-      {open ? (
-          <div className="agent-summary-content max-h-[420px] space-y-3 overflow-y-auto border-t border-line px-3.5 py-3 custom-scrollbar">
+          {open ? (
+            <div className="agent-summary-content max-h-[420px] space-y-3 overflow-y-auto border-t border-line px-3.5 py-3 custom-scrollbar">
           {items.length ? (
             <div className="agent-summary-trace space-y-1">
               <RunTimelineList rows={items} />
@@ -174,52 +232,11 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
               </div>
             </div>
           ) : null}
-
-          {summary.files.length ? (
-            <div className="agent-summary-section overflow-hidden rounded-card border border-line">
-              <div className="border-b border-line px-2.5 py-2 text-[11px] font-medium text-ink-2">變更檔案</div>
-              {summary.files.map((file) => (
-                <div key={file.path} className="flex items-center gap-2 border-b border-line px-2.5 py-1.5 last:border-0">
-                  <Icon name={file.action === 'create' ? 'note_add' : 'edit'} size={14} className="shrink-0 text-ink-3" />
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-ink font-[family-name:var(--font-mono)]" title={file.path}>{file.path.replace(/\\/g, '/')}</span>
-                  <span className="shrink-0 text-[11px] font-[family-name:var(--font-mono)]">
-                    {file.added != null ? <span className="text-green">+{file.added}</span> : null}
-                    {file.removed != null ? <span className="ml-1 text-red">-{file.removed}</span> : null}
-                  </span>
-                </div>
-              ))}
-              </div>
-            ) : null}
-
-          {summary.diff !== undefined ? (
-            <div data-testid="run-summary-diff" className="agent-summary-diff overflow-hidden rounded-card border border-line bg-inset">
-              <button
-                type="button"
-                aria-expanded={diffOpen}
-                onClick={() => setDiffOpen((value) => !value)}
-                className="agent-summary-diff-header flex w-full items-center gap-2 px-2.5 py-2 text-left text-[11px] font-medium text-ink-2"
-              >
-                <Icon name="difference" size={15} className="shrink-0 text-accent-ink" />
-                <span className="flex-1">檢視 Git Diff</span>
-                <Icon name={diffOpen ? 'expand_less' : 'expand_more'} size={15} className="shrink-0 text-ink-3" />
-              </button>
-              {diffOpen ? (
-                <pre data-testid="run-summary-diff-content" className="max-h-[360px] overflow-auto border-t border-line px-2.5 py-2 text-[11px] leading-relaxed text-ink-2 font-[family-name:var(--font-mono)] custom-scrollbar">
-                  {summary.diff || '沒有偵測到工作樹變更。'}
-                </pre>
-              ) : null}
             </div>
-          ) : (
-            <div data-testid="run-summary-diff-empty" className="agent-summary-diff overflow-hidden rounded-card border border-line bg-inset">
-              <div className="flex items-center gap-2 px-2.5 py-2 text-left text-[11px] font-medium text-ink-2">
-                <Icon name="difference" size={15} className="shrink-0 text-accent-ink" />
-                <span className="flex-1">檢視 Git Diff</span>
-                <span className="text-ink-3">沒有偵測到工作樹變更</span>
-              </div>
-            </div>
-          )}
-        </div>
+          ) : null}
+        </section>
       ) : null}
-    </section>
+      <RunChangedFilesCard files={summary.files} diff={summary.diff} additions={additions} removals={removals} />
+    </>
   )
 }

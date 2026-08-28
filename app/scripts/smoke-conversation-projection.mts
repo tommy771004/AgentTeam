@@ -102,11 +102,15 @@ assert.ok(presentedRow.kind === 'tool')
 assert.equal(presentedRow.title, '已編輯 b.ts', 'the title is what the tool declared')
 assert.equal(presentedRow.added, 1, 'the + count comes from the declared diff')
 assert.equal(presentedRow.removed, 1, 'the − count comes from the declared diff')
+assert.match(presentedRow.diff || '', /--- a\/src\/b\.ts/)
+assert.match(presentedRow.diff || '', /-const old/)
+assert.match(presentedRow.diff || '', /\+const new/)
 const foldedPresented = runTimelineRows({ rows: presented.map((row) => ({ ...row, step: 1 })), unloadedBefore: 0, steps: [] })
 const presentedMerged = foldedPresented[0]
 assert.ok(presentedMerged.kind === 'tool')
 assert.equal(presentedMerged.added, 1, 'the fold keeps the diff size on the merged line')
 assert.equal(presentedMerged.removed, 1, 'the fold keeps the diff size on the merged line')
+assert.equal(presentedMerged.diff, presentedRow.diff, 'the fold keeps the durable code diff on the expandable line')
 
 // A `notice` entry is written precisely so the user sees it — a run whose
 // skills went unavailable, say. It must read as its own text, never as the

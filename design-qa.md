@@ -58,6 +58,53 @@ Target: combined SubDesign conversation, lifecycle, artifact canvas, and directi
 
 - `npm run build` - passed
 - `npx oxlint` - passed (existing repository warnings only in the broad run)
+
+---
+
+# Task timeline diff disclosure - Design QA
+
+Reviewed: 2026-08-28
+
+## Visual comparison
+
+- Source visual truth: `/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/codex-clipboard-e60d883c-b675-4b6e-b7e8-ccbf4ef94f5a.png` (`2296 x 268`) and `/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/codex-clipboard-7a89bcae-4902-4844-ab9e-6f0967339c40.png` (`1496 x 428`).
+- Browser-rendered implementation: `.scratch/design-qa-inline-diff.png` (`953 x 887`) and `.scratch/design-qa-summary-diff.png` (`953 x 887`).
+- Viewport: `1280 x 720` CSS pixels, device scale factor 1. Focused component crops were compared at native density; the references are examples with different crops rather than pixel-identical full-screen mocks.
+- State: dark theme; one successful edit row expanded; terminal run summary expanded; changed-files card and Git diff expanded.
+- Full-view evidence: the task row, completion summary, changed-files list, disclosure actions, and diff remain inside their existing conversation width with no horizontal page overflow.
+- Focused evidence: both source/implementation pairs were opened together. The line-number gutter, red removal tint, green addition tint, monospaced code, file counts, per-file stats, three-file preview, and “顯示另外 N 個檔案” disclosure are visible. Focused comparison was required because the diff text is not legible in the full-page capture.
+
+## Comparison history
+
+1. The initial implementation increased the completion renderer and timeline merge complexity beyond the repository gate.
+2. The changed-files/diff area was extracted into one component, and tool-row merging into a bounded projection helper. The production build then passed.
+3. Browser interaction verified both diff disclosures, the additional-files disclosure, and all four fixture paths. Console errors: 0.
+4. Follow-up comparison removed unified-patch metadata (`---`, `+++`, and `@@`) from both disclosures while retaining it internally for line-number calculation. A fresh DOM check found no metadata noise and did find the expected source lines.
+5. The completion area initially nested the changed-files card inside an expanded execution card, repeating the file count and adding two borders. The changed-files card is now a standalone sibling after the assistant answer; when no plan, operations, agents, or SubDesign details exist, the empty execution wrapper is omitted entirely.
+
+## Findings
+
+- No actionable P0/P1/P2 differences remain. The references use a larger screenshot crop and richer language syntax colors; the implementation intentionally preserves AgentStudio's existing 11–12px timeline typography and semantic red/green diff tokens.
+- Fonts and typography: existing UI and mono families, weights, and compact hierarchy are preserved; code lines do not wrap.
+- Spacing and layout rhythm: the inline diff remains nested under its action; the final file list and Git diff share one bordered card directly below the assistant answer. There is no redundant execution-card shell in the files-only state.
+- Colors and visual tokens: existing surface, line, accent, red, green, and tint tokens are used; no new palette or gradient was introduced.
+- Image quality and assets: this flow contains no raster imagery; icons come from the existing `Icon` system.
+- Copy and content: “已編輯 N 個檔案”, “查看 diff”, and “顯示另外 N 個檔案” describe their states directly. The rendered diff contains only source context and changed lines, not patch transport metadata.
+
+## Primary interactions tested
+
+- Expand and collapse one durable edit-row diff.
+- Expand the terminal run summary.
+- Expand the integrated changed-files/Git-diff card.
+- Reveal the files beyond the first three.
+- Confirm line-numbered add/remove rendering, absence of `---` / `+++` / `@@` metadata, and zero browser console errors.
+- Confirm DOM order is assistant answer → changed-files card, and that the files-only fixture contains no “執行過程” wrapper.
+
+## Follow-up polish
+
+- P3: language-aware token highlighting could be added later if the product adopts a shared code highlighter; it is not required to understand the diff.
+
+final result: passed
 - `npm run smoke` - passed
 - `smoke-subdesign-studio.mts` - 9 tests passed
 - `git diff --check` - passed

@@ -218,6 +218,7 @@ export function ModelDepthMenu({
               </div>
               <button
                 type="button"
+                aria-label="套用"
                 className="mx-2 mb-2 mt-1 py-1.5 rounded-control border border-line bg-hover text-[12px] text-ink font-medium hover:bg-hover-2"
                 disabled={!modelQuery.trim()}
                 onClick={() => {

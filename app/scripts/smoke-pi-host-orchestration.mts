@@ -34,8 +34,22 @@ await writeFile(join(agentDir, 'models.json'), JSON.stringify({ providers: { loo
 await writeFile(join(agentDir, 'auth.json'), JSON.stringify({ loopback: { type: 'api_key', key: 'test-key' } }))
 await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'loopback', defaultModel: 'orchestration-model', defaultThinkingLevel: 'off' }))
 
+const hostEnv = {
+  ...process.env,
+  SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'),
+  SUBAGENTS_PI_CHECKPOINT_DIR: join(stateDir, 'run-checkpoints'),
+  SUBAGENTS_DURABLE_MEMORY_DB_PATH: join(stateDir, 'durable-memory.sqlite'),
+  SUBAGENTS_MEMORY_CONTROL_PACKAGE_PATH: join(stateDir, 'memory-control-packages.json'),
+  SUBAGENTS_PI_SETTINGS_MIGRATION_PATH: join(stateDir, 'pi-settings-migration.json'),
+  SUBAGENTS_PI_AGENT_DIR: agentDir,
+  SUBAGENTS_PI_NATIVE_AGENT_DIR: agentDir,
+  SUBAGENTS_PI_SYNC_CLI_OAUTH: 'false',
+  SUBAGENTS_CODEX_AUTH_PATH: join(stateDir, 'absent-codex.json'),
+  SUBAGENTS_CLAUDE_CREDENTIALS_PATH: join(stateDir, 'absent-claude.json'),
+}
+
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
-  env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'), SUBAGENTS_PI_AGENT_DIR: agentDir },
+  env: hostEnv,
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 const output = createInterface({ input: host.stdout })
@@ -207,7 +221,7 @@ try {
   await once(host, 'exit')
   hostStopped = true
   const restarted = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
-    env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'), SUBAGENTS_PI_AGENT_DIR: agentDir },
+    env: hostEnv,
     stdio: ['pipe', 'pipe', 'inherit'],
   })
   const restartedOutput = createInterface({ input: restarted.stdout })

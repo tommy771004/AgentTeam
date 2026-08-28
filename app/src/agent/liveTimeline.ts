@@ -123,12 +123,27 @@ export type RunTimelineRow = {
       /** Still being written — the current assistant line, not a settled one. */
       draft?: boolean
     }
-  | { kind: 'tool'; tool: string; callId: string; settlement?: string; detail?: string; title?: string; added?: number; removed?: number; approval?: string; approvalReason?: string }
+  | { kind: 'tool'; tool: string; callId: string; settlement?: string; detail?: string; diff?: string; title?: string; added?: number; removed?: number; approval?: string; approvalReason?: string }
   | { kind: 'notice'; content: string }
 )
 
 type TrajectoryRow = TrajectoryView['rows'][number]
 type TrajectoryToolRow = Extract<TrajectoryRow, { kind: 'tool' }>
+
+function mergeProjectedToolRow(
+  current: Extract<RunTimelineRow, { kind: 'tool' }>,
+  incoming: TrajectoryToolRow,
+): Extract<RunTimelineRow, { kind: 'tool' }> {
+  return {
+    ...current,
+    ...(incoming.settlement ? { settlement: incoming.settlement } : {}),
+    ...(current.detail ? {} : incoming.detail ? { detail: incoming.detail } : {}),
+    ...(current.diff ? {} : incoming.diff ? { diff: incoming.diff } : {}),
+    ...(current.approval ? {} : incoming.approval ? { approval: incoming.approval } : {}),
+    ...(current.approvalReason ? {} : incoming.approvalReason ? { approvalReason: incoming.approvalReason } : {}),
+    ...(incoming.timing ? { timing: incoming.timing } : {}),
+  }
+}
 
 function appendOrMergeToolRow(
   rows: RunTimelineRow[],
@@ -149,6 +164,7 @@ function appendOrMergeToolRow(
       ...(row.timing ? { timing: row.timing } : {}),
       ...(row.settlement ? { settlement: row.settlement } : {}),
       ...(row.detail ? { detail: row.detail } : {}),
+      ...(row.diff ? { diff: row.diff } : {}),
       ...(row.title ? { title: row.title } : {}),
       ...(row.added !== undefined ? { added: row.added } : {}),
       ...(row.removed !== undefined ? { removed: row.removed } : {}),
@@ -159,14 +175,7 @@ function appendOrMergeToolRow(
   }
   const merged = rows[existing]
   if (merged.kind !== 'tool') return
-  rows[existing] = {
-    ...merged,
-    ...(row.settlement ? { settlement: row.settlement } : {}),
-    ...(merged.detail ? {} : row.detail ? { detail: row.detail } : {}),
-    ...(merged.approval ? {} : row.approval ? { approval: row.approval } : {}),
-    ...(merged.approvalReason ? {} : row.approvalReason ? { approvalReason: row.approvalReason } : {}),
-    ...(row.timing ? { timing: row.timing } : {}),
-  }
+  rows[existing] = mergeProjectedToolRow(merged, row)
 }
 
 /**

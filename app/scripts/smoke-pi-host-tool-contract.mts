@@ -44,7 +44,20 @@ await writeFile(join(agentDir, 'models.json'), JSON.stringify({ providers: { loo
 await writeFile(join(agentDir, 'auth.json'), JSON.stringify({ loopback: { type: 'api_key', key: 'smoke' } }))
 await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'loopback', defaultModel: 'smoke-model', defaultThinkingLevel: 'off' }))
 
-const hostEnv = { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'), SUBAGENTS_PI_AGENT_DIR: agentDir }
+const hostEnvFor = (root: string) => ({
+  ...process.env,
+  SUBAGENTS_PI_HOST_STATE_PATH: join(root, 'state.json'),
+  SUBAGENTS_PI_CHECKPOINT_DIR: join(root, 'run-checkpoints'),
+  SUBAGENTS_DURABLE_MEMORY_DB_PATH: join(root, 'durable-memory.sqlite'),
+  SUBAGENTS_MEMORY_CONTROL_PACKAGE_PATH: join(root, 'memory-control-packages.json'),
+  SUBAGENTS_PI_SETTINGS_MIGRATION_PATH: join(root, 'pi-settings-migration.json'),
+  SUBAGENTS_PI_AGENT_DIR: agentDir,
+  SUBAGENTS_PI_NATIVE_AGENT_DIR: agentDir,
+  SUBAGENTS_PI_SYNC_CLI_OAUTH: 'false',
+  SUBAGENTS_CODEX_AUTH_PATH: join(root, 'absent-codex.json'),
+  SUBAGENTS_CLAUDE_CREDENTIALS_PATH: join(root, 'absent-claude.json'),
+})
+const hostEnv = hostEnvFor(stateDir)
 const startHost = (environment = hostEnv) => {
   const child = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], { env: environment, stdio: ['pipe', 'pipe', 'inherit'] })
   const lines = createInterface({ input: child.stdout })
@@ -180,7 +193,7 @@ try {
     settings: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: [] },
     queue: [], resources: [], extensions: [],
   }))
-  const malformedHost = startHost({ ...hostEnv, SUBAGENTS_PI_HOST_STATE_PATH: join(malformedStateDir, 'state.json') })
+  const malformedHost = startHost(hostEnvFor(malformedStateDir))
   try {
     malformedHost.send(17, 'initialize', { protocolVersion: 2, capabilities: ['tool-contract-v1'] })
     assert.equal((await malformedHost.wait(17)).error, undefined, 'malformed persisted contracts do not crash Host startup')

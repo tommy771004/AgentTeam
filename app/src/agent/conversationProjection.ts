@@ -35,6 +35,8 @@ export type ConversationRow =
       callId: string
       settlement?: string
       detail?: string
+      /** Durable code diff declared by the mutating tool call. */
+      diff?: string
       /** The tool's own declared title and diff size, when it declares them. */
       title?: string
       added?: number
@@ -74,6 +76,7 @@ function conversationToolCallRow(entry: ToolCallEntry): Extract<ConversationRow,
     ...(entry.path ? { detail: entry.path } : {}),
     ...(presented?.title ? { title: presented.title } : {}),
     ...(presented?.path && !entry.path ? { detail: presented.path } : {}),
+    ...(presented?.diff ? { diff: presented.diff } : {}),
     ...(presented?.added !== undefined ? { added: presented.added } : {}),
     ...(presented?.removed !== undefined ? { removed: presented.removed } : {}),
   }

@@ -72,6 +72,10 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function isVisibleSourceDiff(diffText) {
+  return diffText.trim().length > 0 && !/^(?:diff --git |--- |\+\+\+ |@@ )/m.test(diffText)
+}
+
 async function waitForPiApproval(page, timeout = 10000) {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
@@ -168,7 +172,7 @@ async function runPackagedFirstTask(executable, platform, userDataDir, smokeProj
     await diffContent.waitFor({ state: 'visible', timeout: 120000 })
     const diffText = await diffContent.innerText()
     const resultVisible = await page.locator('[data-testid="run-summary-card"]').count() > 0
-    const diffVisible = /^(?:diff --git |--- |\+\+\+ |@@ )/m.test(diffText)
+    const diffVisible = isVisibleSourceDiff(diffText)
     if (!resultVisible || !diffVisible) throw new Error('First task result or Git Diff was not visible')
     await app.close()
     app = undefined

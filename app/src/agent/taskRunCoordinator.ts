@@ -943,6 +943,12 @@ async function runFinalizationSequence(
     thr.pushBubble(tid, 'system', result.error || finalAgent.haltReason || '執行失敗')
   }
 
+  if (hasFinalAnswer) {
+    thr.pushBubble(tid, 'assistant', finalAnswer)
+  }
+  // Keep review evidence adjacent to the answer it belongs to. This mirrors
+  // the desktop conversation: the assistant result reads first, followed by
+  // the execution disclosure and its standalone changed-files card.
   try {
     await pushRunProcessSummary({
       thr,
@@ -957,10 +963,6 @@ async function runFinalizationSequence(
     })
   } catch {
     /* execution summary must not break the task lifecycle */
-  }
-
-  if (hasFinalAnswer) {
-    thr.pushBubble(tid, 'assistant', finalAnswer)
   }
   thr.setThreadRunning(tid, false, runId)
   thr.setAwaitingReply(tid, finalAgent.loopConfig?.nextState === 'Await User Input')
