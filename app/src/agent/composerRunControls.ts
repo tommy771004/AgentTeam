@@ -148,6 +148,7 @@ export function buildComposerRunInput(input: {
     extra: {
       ...buildComposerRunOverrides(input.settingsApprovalMode, input.selectedApprovalMode),
       agentMode: input.agentMode,
+      planCompletionAction: input.agentMode === 'plan' ? 'auto_start_build' : 'wait_for_user',
       thinkingDepth: input.thinkingDepth,
       speed: input.speed,
       temporary: input.temporary,

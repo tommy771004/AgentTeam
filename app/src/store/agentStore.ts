@@ -27,7 +27,59 @@ import {
   BUILTIN_RUNNER_CAPABILITIES,
   EXTERNAL_CLI_DOD_LABEL,
   EXTERNAL_CLI_RUNNER_CAPABILITIES,
+  EXTERNAL_ORCHESTRATED_RUNNER_CAPABILITIES,
 } from '../agent/runners/index.ts'
+import { runExternalCliOrchestration } from '../agent/externalCliOrchestration.ts'
+
+type CliExecutionOptions = Parameters<typeof runPromptViaLocalCli>[0] & {
+  loopType?: LoopType
+  maxIterations?: number
+}
+
+function externalCliOrchestrationConfig(opts: CliExecutionOptions) {
+  const enabled = (opts.loopType === 'Goal-based' || opts.agentMode === 'plan')
+    && (opts.maxIterations || 1) > 1
+  return {
+    enabled,
+    maxIterations: enabled ? Math.max(1, Math.min(20, Math.floor(opts.maxIterations || 1))) : 1,
+    capabilities: enabled ? EXTERNAL_ORCHESTRATED_RUNNER_CAPABILITIES : EXTERNAL_CLI_RUNNER_CAPABILITIES,
+  }
+}
+
+async function executeCliWithContinuation(input: {
+  opts: CliExecutionOptions
+  objective: string
+  runId: string
+  onLog: (line: string) => void
+}) {
+  const config = externalCliOrchestrationConfig(input.opts)
+  const execute = (prompt: string, agentMode = input.opts.agentMode) => runPromptViaLocalCli({
+    ...input.opts,
+    prompt,
+    agentMode,
+    runId: input.runId,
+    onLog: input.onLog,
+  })
+  if (!config.enabled) return { ...(await execute(input.objective)), iterations: 1, orchestrationStopReason: undefined }
+  return runExternalCliOrchestration({
+    objective: input.objective,
+    maxIterations: config.maxIterations,
+    initialAgentMode: input.opts.agentMode === 'plan' ? 'plan' : 'build',
+    execute: (prompt, _iteration, phase) => execute(prompt, phase),
+    onIteration: (event) => input.onLog(`external orchestration · iteration ${event.iteration} · ${event.phase} · ${event.detail}`),
+  })
+}
+
+function logExternalCliSelections(opts: CliExecutionOptions, pushLog: (message: string) => void): void {
+  const lines = [
+    opts.loopType ? `loopType: ${opts.loopType}` : '',
+    opts.model ? `model: ${opts.model}` : '',
+    opts.depth ? `depth: ${opts.depth}` : '',
+    opts.serviceTier ? `providerServiceTier: ${opts.serviceTier}` : '',
+    opts.approvalMode ? `approvalMode: ${opts.approvalMode}${opts.unattended ? ' · unattended' : ''}` : '',
+  ].filter(Boolean)
+  for (const line of lines) pushLog(line)
+}
 
 interface AgentStore {
   agent: AgentState
@@ -64,6 +116,7 @@ interface AgentStore {
     cwd?: string
     model?: string
     depth?: string
+    serviceTier?: RuntimeOverrides['providerServiceTier']
     agentMode?: string
     approvalMode?: ApprovalMode
     unattended?: boolean
@@ -74,6 +127,8 @@ interface AgentStore {
     configSnapshot?: CliConfigSnapshot
     /** Preserve loop type in agent state (not always Goal-based) */
     loopType?: LoopType
+    /** Host-owned process-iteration budget for external orchestration. */
+    maxIterations?: number
     /** Preserve schedule trigger lineage for scheduled CLI runs. */
     scheduleTrigger?: RuntimeOverrides['scheduleTrigger']
     /** Preserve Proactive matcher lineage for scheduled CLI runs. */
@@ -284,6 +339,8 @@ async function executePiHostTurn(
       thinkingLevel: piThinkingLevelForDepth(overrides.thinkingDepth),
       approvalMode: overrides.approvalMode,
       unattended: overrides.unattended,
+      agentMode: overrides.agentMode,
+      planCompletionAction: overrides.planCompletionAction,
     }).filter(([, value]) => value !== undefined),
   )
   const runtimeSettings = useSettingsStore.getState().settings
@@ -555,6 +612,9 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       let toolCalls: AgentState['toolCalls'] = []
       let draftChars = 0
       let lastUiPush = 0
+      const orchestration = externalCliOrchestrationConfig(opts)
+      const orchestrated = orchestration.enabled
+      const runnerCapabilities = orchestration.capabilities
 
       const baseLoop = {
         loopType: opts.loopType || ('Goal-based' as const),
@@ -562,7 +622,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         executionSequence: ['local-cli'],
         // Phase 5: never claim "CLI returned" as DoD met
         definitionOfDone: EXTERNAL_CLI_DOD_LABEL,
-        maxIterations: 1,
+        maxIterations: orchestration.maxIterations,
         fallbackProtocol: '',
         nextState: opts.nextState || ('Halt' as const),
       }
@@ -578,7 +638,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             result: extra?.result,
             loopConfig: baseLoop,
             executionKind: 'external',
-            runnerCapabilities: { ...EXTERNAL_CLI_RUNNER_CAPABILITIES },
+            runnerCapabilities: { ...runnerCapabilities },
             externalRunnerKind: opts.kind,
             steps: [
               {
@@ -720,10 +780,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       set({ showReport: false })
       const modelLabel = opts.model?.trim() || opts.kind
       pushLog(`Local CLI runner: ${opts.kind}${opts.runId ? ` · runId=${opts.runId}` : ''}`)
-      if (opts.loopType) pushLog(`loopType: ${opts.loopType}`)
-      if (opts.model) pushLog(`model: ${opts.model}`)
-      if (opts.depth) pushLog(`depth: ${opts.depth}`)
-      if (opts.approvalMode) pushLog(`approvalMode: ${opts.approvalMode}${opts.unattended ? ' · unattended' : ''}`)
+      logExternalCliSelections(opts, pushLog)
 
       try {
         try {
@@ -732,11 +789,9 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         } catch {
           /* ignore */
         }
-        const r = await runPromptViaLocalCli({
-          ...opts,
-          runId,
-          onLog: (line) => pushLog(line),
-        })
+        const r = await executeCliWithContinuation({ opts, objective: prompt, runId, onLog: pushLog })
+        const externalIterationCount = r.iterations
+        const orchestrationStopReason = r.orchestrationStopReason
         try {
           unsubStream?.()
         } catch {
@@ -802,6 +857,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             prompt,
             events: recordEvents,
             answer: r.output || '',
+            capabilities: { ...runnerCapabilities },
             settlement: r.ok
               ? (r.output || '').trim() ? 'answered' : 'empty'
               : r.terminalClassification === 'interrupted'
@@ -829,12 +885,12 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             trigger: 'local-cli',
             executionSequence: ['local-cli'],
             definitionOfDone: EXTERNAL_CLI_DOD_LABEL,
-            maxIterations: 1,
+            maxIterations: orchestration.maxIterations,
             fallbackProtocol: '',
             nextState: opts.nextState || 'Halt',
           },
           executionKind: 'external',
-          runnerCapabilities: { ...EXTERNAL_CLI_RUNNER_CAPABILITIES },
+          runnerCapabilities: { ...runnerCapabilities },
           externalRunnerKind: opts.kind,
           subAgents: [
             {
@@ -854,7 +910,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
               timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
               level: r.ok ? 'SUCCESS' : 'ERROR',
               message: r.ok
-                ? '外部 CLI 結束（未驗證內建 DoD）'
+                ? `外部 CLI 結束${orchestrated ? `（${externalIterationCount} iterations）` : ''}（未驗證內建 DoD）`
                 : [r.terminalClassification, r.error || 'failed'].filter(Boolean).join(' · '),
             },
           ],
@@ -881,7 +937,9 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             apiCredits: 0,
             executionMs: Date.now() - t0,
           },
-          haltReason: r.ok ? undefined : [r.terminalClassification, r.error].filter(Boolean).join(' · '),
+          haltReason: r.ok
+            ? orchestrationStopReason
+            : [r.terminalClassification, r.error].filter(Boolean).join(' · '),
           cliConfigSnapshot: opts.configSnapshot,
           externalRun: r.externalRun,
           scheduleTrigger: opts.scheduleTrigger,

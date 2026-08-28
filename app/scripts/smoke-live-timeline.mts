@@ -327,6 +327,9 @@ workingStore.setHostAvailable(true)
 workingStore.appendHostRecord(stateRecord.entries.slice(0, 1), stateV1.runId)
   assert.equal(useWorkingStateProjectionStore.getState().byRunId[stateV1.runId]?.revision, 2,
     'a stale live append cannot overwrite the reload snapshot')
+workingStore.appendHostRecord(stateRecord.entries, 'working-ui-resumed-run')
+assert.equal(useWorkingStateProjectionStore.getState().byRunId['working-ui-resumed-run']?.runId, stateV1.runId,
+  'a resumed execution id projects the original lifecycle ledger into its live panel')
 workingStore.setHostAvailable(false)
 assert.equal(useWorkingStateProjectionStore.getState().byRunId[stateV1.runId]?.verification, 'unverified',
   'Host loss fail-closed downgrades an existing verified projection')

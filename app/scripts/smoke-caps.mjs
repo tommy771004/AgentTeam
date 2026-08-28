@@ -311,7 +311,8 @@ await test('Phase 0: OpenCode CLI has explicit agent/file/JSON event contract', 
   const source = fs.readFileSync(path.join(appRoot, 'electron/localCliRunner.ts'), 'utf8')
   assert.match(source, /args\.push\('--agent', input\.agentMode\)/)
   assert.match(source, /args\.push\('--format', 'json'\)/)
-  assert.match(source, /args\.push\('--file', file\)/)
+  assert.match(source, /function opencodeArgv/)
+  assert.match(source, /args\.push\('--file', attachment\)/)
   assert.match(source, /normalizeOpenCodeEvent/)
   assert.match(source, /permissionRequest/)
 })
@@ -2379,6 +2380,7 @@ await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and r
   const view = fs.readFileSync(path.join(appRoot, 'src/components/WorkingStateView.tsx'), 'utf8')
   const progress = fs.readFileSync(path.join(appRoot, 'src/components/ExecutionStepsProgress.tsx'), 'utf8')
   const feed = fs.readFileSync(path.join(appRoot, 'src/components/RunProcessFeed.tsx'), 'utf8')
+  const runPanel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
   const archivePage = fs.readFileSync(path.join(appRoot, 'src/pages/RecordsPage.tsx'), 'utf8')
   const threadStore = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
   assert.match(app, /hydrateHostSessions\(sessions\)/)
@@ -2396,6 +2398,9 @@ await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and r
     'the renderer may inspect Working State but cannot edit or submit it')
   assert.doesNotMatch(feed, /WorkingStateView/,
     'the full Working State document must not appear in the conversation feed')
+  assert.match(runPanel, /useWorkingStateProjectionStore/)
+  assert.match(runPanel, /<WorkingStateView projection=\{projection\}/,
+    'the live run panel subscribes to the Host-owned Working State projection')
   assert.match(feed, /<ExecutionStepsProgress tasks=\{tasks\} \/>[\s\S]*data-run-timeline="record"/,
     'compact live step progress stays directly above the conversation timeline')
   assert.match(progress, /執行步驟：\{completed\}\/\{tasks\.length\}/)
@@ -2488,6 +2493,12 @@ await test('Ticket 09: Skill preflight retries are batch-bound and block paralle
   assert.match(toolHost, /Skill preflight batch identity conflict/)
   assert.match(toolHost, /markBatchNotExecuted/)
   assert.match(runtime, /installPiSkillPreflightBatchBarrier\(sessionId, created\.session\.agent\)/)
+  const stagedBundle = toolHost.slice(toolHost.indexOf('export function buildPiPackExtensionBundle'), toolHost.indexOf('export function commitPiPackExtensionBundle'))
+  assert.doesNotMatch(stagedBundle, /sessionBatchPackTools\.set/,
+    'constructing a replacement session cannot overwrite the live preflight catalog')
+  assert.ok(runtime.indexOf('commitPiPackExtensionBundle(sessionId, packBundle)') > runtime.indexOf('await existing.session.dispose?.()')
+    && runtime.indexOf('commitPiPackExtensionBundle(sessionId, packBundle)') < runtime.indexOf('sessionRuntimes.set(sessionId, runtime)'),
+  'the staged preflight catalog commits only after replacement succeeds and immediately before runtime publication')
   assert.match(record, /TURN_RECORD_FORMAT_VERSION = 11/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-skill-preflight-batch\.mts/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-skill-preflight-stop-replay\.mts/)

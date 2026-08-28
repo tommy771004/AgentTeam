@@ -18,7 +18,9 @@ import {
 import { resolveCliApproval } from '../src/agent/cliApproval.ts'
 import { materializeAttachments } from './attachmentStore.ts'
 import { wrapCommandInSandbox } from './cliFilesystemSandbox.ts'
+import { inspectCliProviderCapabilities } from './cliCapabilityRegistry.ts'
 import type { CliConfigSnapshot, ExternalRunRef } from '../src/agent/types.ts'
+import type { CliProviderCapabilitySnapshot } from '../src/agent/cliProviderCapabilities.ts'
 import { redactCliDisplayArgs, redactCliTelemetryText } from '../src/agent/cliCommandTelemetry.ts'
 import { externalLifecycleToStream } from '../src/agent/externalCliLifecycleProjection.ts'
 import {
@@ -93,12 +95,16 @@ export type LocalCliRunInput = {
   depth?: string
   /** Provider-specific reasoning variant, when explicitly configured. */
   thinkingVariant?: string
+  /** Provider latency/billing tier; never inferred from orchestration speed. */
+  serviceTier?: 'provider-default' | 'standard' | 'priority' | 'flex'
   /** Ask OpenCode to include reasoning blocks in its JSON stream. */
   showThinking?: boolean
   /** build | plan */
   agentMode?: string
   /** App-level approval policy, mapped only where the target CLI supports it. */
   approvalMode?: CliApprovalMode
+  /** Main-process capability revision frozen before argv construction. */
+  capabilitySnapshot?: CliProviderCapabilitySnapshot
   /** Automation must never receive permissive CLI flags. */
   unattended?: boolean
   conversationId?: string
@@ -168,6 +174,47 @@ export async function cancelExternalCliSession(runId: string): Promise<{
 
 export function getExternalCliSession(runId: string) {
   return getSupervisedExternalCliSession(runId)
+}
+
+async function admitCliCapabilities(input: LocalCliRunInput, binary: string, emit: (event: Omit<LocalCliStreamEvent, 'runId'>) => void): Promise<{
+  snapshot?: CliProviderCapabilitySnapshot
+  refusal?: string
+}> {
+  let snapshot: CliProviderCapabilitySnapshot | undefined
+  try {
+    snapshot = await inspectCliProviderCapabilities(input.kind, binary)
+    emit({
+      kind: 'status',
+      title: 'CLI capabilities',
+      detail: `${snapshot.version || input.kind} · revision ${snapshot.revision.slice(0, 12)}`,
+    })
+  } catch (error) {
+    emit({
+      kind: 'status',
+      title: 'CLI capabilities',
+      detail: `探測失敗，使用保守映射：${error instanceof Error ? error.message : String(error)}`,
+      ok: false,
+    })
+  }
+  const refusal = input.agentMode === 'plan' && snapshot?.agentMode.plan === 'unsupported'
+    ? `${input.kind} ${snapshot.version || ''} 未宣告可驗證的 Plan mode；已在啟動前安全停止。`.trim()
+    : undefined
+  if (refusal) emit({ kind: 'error', title: 'Plan mode 不支援', detail: refusal, ok: false })
+  const requestedTier = input.serviceTier && input.serviceTier !== 'provider-default'
+    ? input.serviceTier
+    : undefined
+  if (requestedTier) {
+    const supported = snapshot?.serviceTiers.includes(requestedTier) === true
+    emit({
+      kind: 'status',
+      title: 'Provider service tier',
+      detail: supported
+        ? `${requestedTier}（capability revision ${snapshot?.revision.slice(0, 12)}）`
+        : `${requestedTier} 未由目前 binary 宣告，採 provider default`,
+      ok: supported,
+    })
+  }
+  return { snapshot, refusal }
 }
 
 /** Return only live Host sessions for renderer projection rebuild after reload. */
@@ -309,87 +356,27 @@ export function buildLocalCliArgv(input: LocalCliRunInput): {
     input.unattended,
     input.agentMode,
   )
+  const approvalSupport = input.capabilitySnapshot?.approval[approval.mode]
+  const effectiveApprovalMode = approvalSupport === 'unsupported' ? 'always' : approval.mode
+  const permissive = approval.permissive && approvalSupport !== 'unsupported'
   const turns = String(maxTurnsForDepth(input.depth))
-  // Headless Electron has no TTY — permission prompts hang forever with zero output.
-  // Prefer non-blocking approval for all interactive CLI runs.
-  const headlessApprove = !plan
-
-  let args: string[] = []
-  switch (input.kind) {
-    case 'codex': {
-      args = [
-        'exec',
-        '--json',
-        '--color',
-        'never',
-        '--skip-git-repo-check',
-      ]
-      if (plan) args.push('-s', 'read-only')
-      else if (approval.permissive || headlessApprove)
-        args.push('--dangerously-bypass-approvals-and-sandbox')
-      else args.push('-s', 'workspace-write')
-      if (model) args.push('-m', model)
-      args.push('-c', `model_reasoning_effort=${effort}`)
-      args.push(prompt)
-      break
-    }
-    case 'claude': {
-      args = ['-p', '--output-format', 'stream-json', '--verbose']
-      if (model) args.push('--model', model)
-      if (plan) args.push('--permission-mode', 'plan')
-      else if (approval.permissive || headlessApprove)
-        args.push('--dangerously-skip-permissions')
-      else args.push('--permission-mode', 'acceptEdits')
-      args.push('--max-turns', turns)
-      args.push(prompt)
-      break
-    }
-    case 'grok': {
-      // -p/--single headless; streaming-json for process feed
-      args = [
-        '-p',
-        prompt,
-        '--output-format',
-        'streaming-json',
-        '--max-turns',
-        turns,
-        '--reasoning-effort',
-        effort,
-      ]
-      if (model) args.push('--model', model)
-      if (plan) args.push('--permission-mode', 'plan')
-      else if (approval.permissive || headlessApprove) args.push('--always-approve')
-      else args.push('--permission-mode', 'auto', '--always-approve')
-      break
-    }
-    case 'opencode': {
-      args = ['run']
-      if (model) args.push('--model', model)
-      if (input.agentMode === 'build' || input.agentMode === 'plan') {
-        args.push('--agent', input.agentMode)
-      }
-      if (input.thinkingVariant?.trim()) args.push('--variant', input.thinkingVariant.trim())
-      if (input.showThinking) args.push('--thinking')
-      args.push('--format', 'json')
-      for (const file of input.attachmentPaths || []) args.push('--file', file)
-      args.push(prompt)
-      break
-    }
-    case 'gemini': {
-      args = ['-p', prompt, '--output-format', 'json']
-      if (model) args.push('--model', model)
-      break
-    }
-    case 'cursor': {
-      args = ['-p', '--output-format', 'stream-json']
-      if (model) args.push('--model', model)
-      if ((approval.permissive || headlessApprove) && !plan) args.push('--force')
-      args.push(prompt)
-      break
-    }
-    default:
-      args = [prompt]
-  }
+  const requestedServiceTier = input.serviceTier && input.serviceTier !== 'provider-default'
+    ? input.serviceTier
+    : undefined
+  const effectiveServiceTier = requestedServiceTier
+    && input.capabilitySnapshot?.serviceTiers.includes(requestedServiceTier)
+    ? requestedServiceTier
+    : undefined
+  const args = providerArgv(input, {
+    prompt,
+    model,
+    effort,
+    plan,
+    permissive,
+    effectiveApprovalMode,
+    turns,
+    serviceTier: effectiveServiceTier,
+  })
 
   const displayCommand = [quoteShellArg(file), ...redactCliDisplayArgs(args, prompt).map((a) => quoteShellArg(a))].join(
     ' ',
@@ -444,6 +431,54 @@ async function preflightBinary(
   return { ok: true, path: found }
 }
 
+function materializedCliPrompt(input: LocalCliRunInput, cwd: string | undefined, runId: string) {
+  const materialized = materializeCliAttachments(input.attachments, cwd, runId)
+  return {
+    prompt: materialized.promptBlock
+      ? `${input.prompt.trim()}\n\n${materialized.promptBlock}`.trim()
+      : input.prompt,
+    paths: materialized.paths,
+    dir: materialized.dir,
+  }
+}
+
+function createCliEmitter(input: LocalCliRunInput, runId: string, activeSession: () => ExternalCliRunSession | undefined) {
+  return (event: Omit<LocalCliStreamEvent, 'runId'>) => {
+    try {
+      const projection = activeSession()?.snapshot()
+      input.onStream?.({
+        ...event,
+        runId,
+        sequence: event.sequence ?? projection?.eventCursor,
+        sessionPhase: event.sessionPhase ?? projection?.phase,
+        providerSessionId: event.providerSessionId ?? projection?.providerSessionId,
+      })
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function prepareCliAdmission(input: LocalCliRunInput, binary: string, runId: string, emit: (event: Omit<LocalCliStreamEvent, 'runId'>) => void): Promise<{
+  ok: true
+  binary: string
+  capabilitySnapshot?: CliProviderCapabilitySnapshot
+} | {
+  ok: false
+  result: LocalCliRunResult
+}> {
+  const preflight = await preflightBinary(input.kind, binary)
+  if (!preflight.ok) {
+    emit({ kind: 'error', title: 'CLI 找不到', detail: preflight.error })
+    return { ok: false, result: { ok: false, output: '', command: binary, kind: input.kind, code: 127, error: preflight.error, runId } }
+  }
+  const admittedBinary = preflight.path || binary
+  const capabilities = await admitCliCapabilities(input, admittedBinary, emit)
+  return capabilities.refusal
+    ? { ok: false, result: { ok: false, output: '', command: admittedBinary, kind: input.kind, code: 2, error: capabilities.refusal, runId } }
+    : { ok: true, binary: admittedBinary, capabilitySnapshot: capabilities.snapshot }
+}
+
 export async function runLocalCliAgent(
   input: LocalCliRunInput,
   dependencies: LocalCliRunDependencies = {},
@@ -454,47 +489,22 @@ export async function runLocalCliAgent(
   const cwd = input.cwd && path.isAbsolute(input.cwd) ? input.cwd : undefined
   const policy = normalizeExternalCliRunPolicy(input.externalCliPolicy)
   let activeSession: ExternalCliRunSession | undefined
-  const emit = (ev: Omit<LocalCliStreamEvent, 'runId'>) => {
-    try {
-      const projection = activeSession?.snapshot()
-      input.onStream?.({
-        ...ev,
-        runId,
-        sequence: ev.sequence ?? projection?.eventCursor,
-        sessionPhase: ev.sessionPhase ?? projection?.phase,
-        providerSessionId: ev.providerSessionId ?? projection?.providerSessionId,
-      })
-    } catch {
-      /* ignore */
-    }
-  }
+  const emit = createCliEmitter(input, runId, () => activeSession)
 
-  const pre = await preflightBinary(kind, bin)
-  if (!pre.ok) {
-    emit({ kind: 'error', title: 'CLI 找不到', detail: pre.error })
-    return {
-      ok: false,
-      output: '',
-      command: bin,
-      kind,
-      code: 127,
-      error: pre.error,
-      runId,
-    }
-  }
+  const admission = await prepareCliAdmission(input, bin, runId, emit)
+  if (!admission.ok) return admission.result
+  const capabilitySnapshot = admission.capabilitySnapshot
 
   // Materialize chat attachments so CLI tools/vision can open real files
-  const materialized = materializeCliAttachments(input.attachments, cwd, runId)
-  let prompt = input.prompt
-  if (materialized.promptBlock) {
-    prompt = `${prompt.trim()}\n\n${materialized.promptBlock}`.trim()
-  }
+  const materialized = materializedCliPrompt(input, cwd, runId)
+  const prompt = materialized.prompt
 
   const argv = buildLocalCliArgv({
     ...input,
     prompt,
-    binary: pre.path || bin,
+    binary: admission.binary,
     attachmentPaths: materialized.paths,
+    capabilitySnapshot,
   })
   let spawnFile = argv.file
   let spawnArgs = argv.args
@@ -766,6 +776,91 @@ export async function runLocalCliAgent(
       startedAt: new Date(sessionSnapshot.startedAt).toISOString(),
       finishedAt: terminal ? new Date(terminal.at).toISOString() : undefined,
     },
+  }
+}
+
+type LocalCliArgContext = {
+  prompt: string
+  model?: string
+  effort: string
+  plan: boolean
+  permissive: boolean
+  effectiveApprovalMode: 'always' | 'auto' | 'full'
+  turns: string
+  serviceTier?: string
+}
+
+function appendModelAndTier(args: string[], model?: string, serviceTier?: string, modelFlag = '--model'): void {
+  if (model) args.push(modelFlag, model)
+  if (serviceTier) args.push('--service-tier', serviceTier)
+}
+
+function codexArgv(context: LocalCliArgContext): string[] {
+  const args = ['exec', '--json', '--color', 'never', '--skip-git-repo-check']
+  if (context.plan) args.push('-s', 'read-only')
+  else if (context.permissive) args.push('--dangerously-bypass-approvals-and-sandbox')
+  else {
+    args.push('-s', 'workspace-write')
+    if (context.effectiveApprovalMode === 'auto') args.push('--approve-for-me')
+    else args.push('-c', 'approval_policy="untrusted"')
+  }
+  appendModelAndTier(args, context.model, context.serviceTier, '-m')
+  args.push('-c', `model_reasoning_effort=${context.effort}`, context.prompt)
+  return args
+}
+
+function claudeArgv(context: LocalCliArgContext): string[] {
+  const args = ['-p', '--output-format', 'stream-json', '--verbose']
+  appendModelAndTier(args, context.model, context.serviceTier)
+  if (context.plan) args.push('--permission-mode', 'plan')
+  else if (context.permissive) args.push('--dangerously-skip-permissions')
+  else args.push('--permission-mode', context.effectiveApprovalMode === 'always' ? 'manual' : 'auto')
+  args.push('--max-turns', context.turns, context.prompt)
+  return args
+}
+
+function grokArgv(context: LocalCliArgContext): string[] {
+  const args = ['-p', context.prompt, '--output-format', 'streaming-json', '--max-turns', context.turns, '--reasoning-effort', context.effort]
+  appendModelAndTier(args, context.model, context.serviceTier)
+  if (context.plan) args.push('--permission-mode', 'plan')
+  else if (context.permissive) args.push('--always-approve')
+  else args.push('--permission-mode', context.effectiveApprovalMode === 'always' ? 'default' : 'auto')
+  return args
+}
+
+function opencodeArgv(input: LocalCliRunInput, context: LocalCliArgContext): string[] {
+  const args = ['run']
+  appendModelAndTier(args, context.model, context.serviceTier)
+  if (input.agentMode === 'build' || input.agentMode === 'plan') args.push('--agent', input.agentMode)
+  if (input.thinkingVariant?.trim()) args.push('--variant', input.thinkingVariant.trim())
+  if (input.showThinking) args.push('--thinking')
+  args.push('--format', 'json')
+  for (const attachment of input.attachmentPaths || []) args.push('--file', attachment)
+  args.push(context.prompt)
+  return args
+}
+
+function simpleProviderArgv(kind: 'gemini' | 'cursor', context: LocalCliArgContext): string[] {
+  const args = kind === 'gemini'
+    ? ['-p', context.prompt, '--output-format', 'json']
+    : ['-p', '--output-format', 'stream-json']
+  appendModelAndTier(args, context.model, context.serviceTier)
+  if (kind === 'cursor') {
+    if (context.permissive && !context.plan) args.push('--force')
+    args.push(context.prompt)
+  }
+  return args
+}
+
+function providerArgv(input: LocalCliRunInput, context: LocalCliArgContext): string[] {
+  switch (input.kind) {
+    case 'codex': return codexArgv(context)
+    case 'claude': return claudeArgv(context)
+    case 'grok': return grokArgv(context)
+    case 'opencode': return opencodeArgv(input, context)
+    case 'gemini': return simpleProviderArgv('gemini', context)
+    case 'cursor': return simpleProviderArgv('cursor', context)
+    default: return [context.prompt]
   }
 }
 

@@ -6,6 +6,7 @@ export type MemoryControlRuntime = Readonly<{
   maxGoals: number
   fileContentChecker: boolean
   delegatedGoalChecker: boolean
+  maxEvidenceSequenceLag: number
   trigger: 'state-changing-or-contract-required' | 'contract-required'
   selection: 'exact-tool' | 'tool-and-goal'
   maxSkills: 1 | 2
@@ -25,6 +26,10 @@ function count(value: unknown, max: number): number {
 function checker(value: unknown): boolean {
   if (value !== 1) throw new Error('Memory-Control Checker is a mandatory Host invariant and cannot be disabled')
   return true
+}
+
+function checkerEvidenceLag(body: Readonly<Record<string, unknown>>): number {
+  return count(body.maxEvidenceSequenceLag ?? 64, 4_096)
 }
 
 function overrides(value: unknown): Readonly<Record<string, string>> {
@@ -47,7 +52,7 @@ export function compileMemoryControlRuntime(value: MemoryControlPackage, goalCou
   fields(skills, ['source', 'selection', 'maxSelectedSkills', 'overrides'])
   fields(working, ['schemaVersion', 'authority', 'optimisticConcurrency', 'maxGoals'])
   fields(policy, ['trigger', 'batchBarrier', 'maxSkills', 'secondSkillReason'])
-  fields(checks, ['fileContent', 'delegatedGoal', 'modelClaimsAreEvidence'])
+  fields(checks, ['fileContent', 'delegatedGoal', 'modelClaimsAreEvidence', 'maxEvidenceSequenceLag'])
   if (skills.source !== 'frozen-skill-resource-view'
     || (skills.selection !== 'exact-tool' && skills.selection !== 'tool-and-goal')
     || working.schemaVersion !== 1 || working.authority !== 'pi-core-host' || working.optimisticConcurrency !== true
@@ -64,6 +69,7 @@ export function compileMemoryControlRuntime(value: MemoryControlPackage, goalCou
     maxGoals,
     fileContentChecker: checker(checks.fileContent),
     delegatedGoalChecker: checker(checks.delegatedGoal),
+    maxEvidenceSequenceLag: checkerEvidenceLag(checks),
     trigger: policy.trigger,
     selection: skills.selection,
     // A second Skill remains opt-in with a recorded explicit justification.

@@ -1,5 +1,6 @@
 import { existsSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { planModeToolDecision } from '../src/agent/planPolicy.ts'
 import type { PiToolContractSource } from './piToolContract.ts'
 
 export type PiInvocationOrigin = 'model' | 'direct-protocol' | 'code-mode' | 'mcp'
@@ -22,6 +23,8 @@ export type PiInvocationContractIdentity = {
 }
 
 export type PiFrozenRunPolicy = Readonly<{
+  agentMode: 'build' | 'plan'
+  planCompletionAction: 'wait_for_user' | 'auto_start_build'
   approvalMode: 'always' | 'auto' | 'full'
   unattended: boolean
   approvalTimeoutMs: number
@@ -129,6 +132,8 @@ function freezeResourceView(value: unknown): PiFrozenRunPolicy['resourceView'] |
 }
 
 export function freezePiRunPolicy(input: {
+  agentMode?: unknown
+  planCompletionAction?: unknown
   approvalMode?: unknown
   unattended?: unknown
   approvalTimeoutMs?: unknown
@@ -149,6 +154,10 @@ export function freezePiRunPolicy(input: {
     : 'off'
   const resourceView = freezeResourceView(input.resourceView)
   return freezeDeep({
+    agentMode: input.agentMode === 'plan' ? 'plan' : 'build',
+    planCompletionAction: input.planCompletionAction === 'auto_start_build'
+      ? 'auto_start_build'
+      : 'wait_for_user',
     approvalMode: input.approvalMode === 'always' || input.approvalMode === 'full'
       ? input.approvalMode
       : 'auto',
@@ -193,6 +202,66 @@ function resolveExistingPath(path: string): string {
     resolved = resolve(cursor)
   }
   return tail.reduce((current, part) => resolve(current, part), resolved)
+}
+
+function planPolicyRefusal(input: {
+  tool: string
+  policy: PiFrozenRunPolicy
+  requirements?: PiToolPolicyRequirements
+}, normalized: Record<string, unknown>, root: string): string | undefined {
+  if (input.policy.agentMode !== 'plan') return undefined
+  const planArgs = { ...normalized }
+  for (const field of input.requirements?.pathArguments || []) {
+    const value = normalized[field]
+    if (typeof value === 'string' && value.trim()) planArgs[field] = relative(root, resolveExistingPath(value))
+  }
+  const decision = planModeToolDecision(input.tool, planArgs, input.requirements?.sideEffect === true)
+  return decision.allowed ? undefined : decision.reason || `Plan mode denies ${input.tool}`
+}
+
+function evaluateApprovalPolicy(input: {
+  tool: string
+  policy: PiFrozenRunPolicy
+  requirements?: PiToolPolicyRequirements
+}, matchesTool: (patterns: readonly string[]) => boolean, finish: (verdict: PiPolicyVerdict, reason: string) => PiPolicyEvaluation): PiPolicyEvaluation {
+  if (matchesTool(input.policy.approvalTools)) {
+    return input.policy.unattended
+      ? finish('deny', `Unattended restrictive approval denied for ${input.tool}`)
+      : finish('ask', `Restrictive run policy requires approval for ${input.tool}`)
+  }
+  if (input.requirements?.capabilityApproval) {
+    return input.policy.unattended
+      ? finish('deny', `Unattended approval denied: ${input.requirements.capabilityApproval}`)
+      : finish('ask', input.requirements.capabilityApproval)
+  }
+  const effectiveMode = input.policy.approvalMode === 'full' && input.policy.unattended
+    ? 'auto'
+    : input.policy.approvalMode
+  if (input.requirements?.approvalRequired && (effectiveMode !== 'full' || input.requirements.hitl)) {
+    return input.policy.unattended
+      ? finish('deny', `Unattended approval denied: ${input.requirements.approvalRequired}`)
+      : finish('ask', input.requirements.approvalRequired)
+  }
+  if (effectiveMode === 'always' && input.requirements?.sideEffect) {
+    return input.policy.unattended
+      ? finish('deny', `Unattended approval denied for side-effect tool ${input.tool}`)
+      : finish('ask', `Approval Mode requires approval for ${input.tool}`)
+  }
+  return finish('allow', 'Frozen Host run policy allows invocation')
+}
+
+function evaluatePostPathPolicy(input: {
+  tool: string
+  policy: PiFrozenRunPolicy
+  requirements?: PiToolPolicyRequirements
+}, normalized: Record<string, unknown>, root: string, matchesTool: (patterns: readonly string[]) => boolean, finish: (verdict: PiPolicyVerdict, reason: string) => PiPolicyEvaluation): PiPolicyEvaluation {
+  const planRefusal = planPolicyRefusal(input, normalized, root)
+  if (planRefusal) return finish('deny', planRefusal)
+  if (input.requirements?.outbound && input.policy.outbound.mode === 'required'
+    && !input.policy.outbound.restrictedViewRoot) {
+    return finish('deny', 'Outbound Guard required has no frozen Restricted Project View')
+  }
+  return evaluateApprovalPolicy(input, matchesTool, finish)
 }
 
 /**
@@ -299,36 +368,7 @@ export function evaluatePiInvocationPolicy(input: {
     normalized[field] = lexicalCandidate
   }
 
-  if (input.requirements?.outbound && input.policy.outbound.mode === 'required'
-    && !input.policy.outbound.restrictedViewRoot) {
-    return finish('deny', 'Outbound Guard required has no frozen Restricted Project View')
-  }
-
-  if (matchesTool(input.policy.approvalTools)) {
-    return input.policy.unattended
-      ? finish('deny', `Unattended restrictive approval denied for ${input.tool}`)
-      : finish('ask', `Restrictive run policy requires approval for ${input.tool}`)
-  }
-
-  if (input.requirements?.capabilityApproval) {
-    return input.policy.unattended
-      ? finish('deny', `Unattended approval denied: ${input.requirements.capabilityApproval}`)
-      : finish('ask', input.requirements.capabilityApproval)
-  }
-  const effectiveMode = input.policy.approvalMode === 'full' && input.policy.unattended
-    ? 'auto'
-    : input.policy.approvalMode
-  if (input.requirements?.approvalRequired && (effectiveMode !== 'full' || input.requirements.hitl)) {
-    return input.policy.unattended
-      ? finish('deny', `Unattended approval denied: ${input.requirements.approvalRequired}`)
-      : finish('ask', input.requirements.approvalRequired)
-  }
-  if (effectiveMode === 'always' && input.requirements?.sideEffect) {
-    return input.policy.unattended
-      ? finish('deny', `Unattended approval denied for side-effect tool ${input.tool}`)
-      : finish('ask', `Approval Mode requires approval for ${input.tool}`)
-  }
-  return finish('allow', 'Frozen Host run policy allows invocation')
+  return evaluatePostPathPolicy(input, normalized, root, matchesTool, finish)
 }
 
 /**

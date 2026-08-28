@@ -11,7 +11,7 @@
  * identical guarantees — this path runs no builtin Parse, evaluates no
  * Definition of Done, and never iterates.
  */
-import { EXTERNAL_CLI_RUNNER_CAPABILITIES } from './runners/types.ts'
+import { EXTERNAL_CLI_RUNNER_CAPABILITIES, type RunnerCapabilities } from './runners/types.ts'
 import type { PiTurnSettlement } from './piHostRun.ts'
 import { appendTurnRecord, type TurnRecord, type TurnRecordAppend } from './turnRecord.ts'
 
@@ -33,6 +33,7 @@ export type ExternalCliRecordInput = {
   events: readonly ExternalCliRecordEvent[]
   answer: string
   settlement: PiTurnSettlement
+  capabilities?: RunnerCapabilities
   startedAt?: number
   finishedAt?: number
 }
@@ -62,7 +63,7 @@ export function buildExternalCliRecord(input: ExternalCliRecordInput): TurnRecor
       step: 1,
       at,
       runner: input.runner,
-      capabilities: { ...EXTERNAL_CLI_RUNNER_CAPABILITIES },
+      capabilities: { ...(input.capabilities || EXTERNAL_CLI_RUNNER_CAPABILITIES) },
     },
     { kind: 'step-start', source: 'host', turn: 1, step: 1, at },
     { kind: 'user-text', source: 'user', content: input.prompt, turn: 1, step: 1, at },

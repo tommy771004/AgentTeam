@@ -233,7 +233,7 @@ export function ModelDepthMenu({
 
           {panel === 'speed' && (
             <div className="w-44 rounded-card border border-line bg-surface-container shadow-raised py-1 overflow-hidden">
-              <div className="px-3 py-2 text-[11px] text-ink-3 font-medium">速度</div>
+              <div className="px-3 py-2 text-[11px] text-ink-3 font-medium">執行節奏</div>
               {SPEED_MODES.map((s) => {
                 const active = speed === s.id
                 return (
@@ -272,13 +272,13 @@ export function ModelDepthMenu({
               onClick={() => setPanel(panel === 'depth' ? 'root' : 'depth')}
             />
             <MenuRow
-              label="速度"
+              label="執行節奏"
               value={speedDef.label}
               onClick={() => setPanel(panel === 'speed' ? 'root' : 'speed')}
             />
             <div className="mx-2 my-1 border-t border-line" />
             <p className="px-3 py-2 text-[10px] text-ink-3 leading-snug">
-              模型來自「設定 → CLI 授權」已啟用項目
+              執行節奏只調整迭代預算；供應商延遲層級在「設定 → CLI 授權」分開設定。
             </p>
           </div>
         </div>

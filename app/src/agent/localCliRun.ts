@@ -49,6 +49,22 @@ export type LocalCliAttachmentPayload = {
   textContent?: string
 }
 
+function logCliRunSelections(opts: {
+  cwd?: string
+  model?: string
+  depth?: string
+  serviceTier?: RuntimeOverrides['providerServiceTier']
+  onLog?: (line: string) => void
+}): void {
+  const lines = [
+    opts.cwd ? `cwd: ${opts.cwd}` : '',
+    opts.model ? `model: ${opts.model}` : '',
+    opts.depth ? `depth: ${opts.depth}` : '',
+    opts.serviceTier ? `provider service tier: ${opts.serviceTier}` : '',
+  ].filter(Boolean)
+  for (const line of lines) opts.onLog?.(line)
+}
+
 function logCliAttachments(
   attachments: LocalCliAttachmentPayload[] | undefined,
   onLog: ((line: string) => void) | undefined,
@@ -91,6 +107,7 @@ export async function runPromptViaLocalCli(opts: {
   cwd?: string
   model?: string
   depth?: string
+  serviceTier?: RuntimeOverrides['providerServiceTier']
   agentMode?: string
   approvalMode?: ApprovalMode
   unattended?: boolean
@@ -126,9 +143,7 @@ export async function runPromptViaLocalCli(opts: {
     }
   }
   opts.onLog?.(`▶ 透過本機 ${opts.kind} CLI 執行…`)
-  if (opts.cwd) opts.onLog?.(`cwd: ${opts.cwd}`)
-  if (opts.model) opts.onLog?.(`model: ${opts.model}`)
-  if (opts.depth) opts.onLog?.(`depth: ${opts.depth}`)
+  logCliRunSelections(opts)
   logCliAttachments(opts.attachments, opts.onLog)
   const approval = resolveCliApproval(
     opts.kind,
@@ -267,6 +282,7 @@ export async function runPromptViaLocalCli(opts: {
     cwd: (gated.cwd as string | undefined) ?? cwd,
     model: gated.model ?? opts.model,
     depth: opts.depth,
+    serviceTier: opts.serviceTier,
     agentMode: opts.agentMode,
     approvalMode: opts.approvalMode,
     unattended: opts.unattended,

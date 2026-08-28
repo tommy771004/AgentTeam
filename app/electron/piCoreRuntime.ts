@@ -8,12 +8,11 @@ import { classifyPiTurnSettlement, piTurnProviderError, piTurnStopReason, PI_TUR
 import { reducePiStepUsage, type PiReportedMessage } from '../src/agent/piStepUsage.ts'
 import type { PiRecordedMessage, PiStepTiming } from '../src/agent/turnRecord.ts'
 import { ensurePiPacksRegistered } from './piExtensionPacks/index.ts'
-import { piPackExtensionFactories } from './piToolHost.ts'
 import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, snapshotPiSkillResources } from './piSkills.ts'
 import { piCodingAgentModule as piCodingAgent } from './piVendor.ts'
 import { piCoreCompatibility } from './piCoreAdapter.ts'
 import { sanitizeModelRow, SUBSCRIPTION_PROVIDERS, type SubscriptionModelInfo, type SubscriptionProviderId } from '../src/agent/subscriptionCatalog.ts'
-import { bindPiSessionSkillResourceView, disposePiSkillPreflightSession, installPiSkillPreflightBatchBarrier, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, piSkillPreflightExtensionFactory, piWorkingStateWriteToolDefinition, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
+import { bindPiSessionSkillResourceView, buildPiPackExtensionBundle, commitPiPackExtensionBundle, disposePiSkillPreflightSession, installPiSkillPreflightBatchBarrier, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, piSkillPreflightExtensionFactory, piWorkingStateWriteToolDefinition, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
 import { buildPiMcpDynamicPacks } from './piExtensionPacks/mcpBridgePack.ts'
 
 type PiSessionRuntime = {
@@ -381,6 +380,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   const requestContext = { value: '', includeHistory: true }
   const piSkillsDir = skillSnapshot?.root
   const mcpDynamic = await buildPiMcpDynamicPacks()
+  const packBundle = buildPiPackExtensionBundle({ sessionId, cwd, temporaryChat: settings.temporaryChat }, mcpDynamic.packs)
   if (agentDir && typeof piCodingAgent.DefaultResourceLoader === 'function') {
     // The pack factories register the SubAgents extension tools next to the
     // hidden session-context factory, so the model sees one tool catalog
@@ -395,7 +395,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
       noSkills: true,
       additionalSkillPaths: piSkillsDir ? [piSkillsDir] : undefined,
       extensionFactories: [
-        ...piPackExtensionFactories({ sessionId, cwd, temporaryChat: settings.temporaryChat }, mcpDynamic.packs),
+        ...packBundle.factories,
         piSkillPreflightExtensionFactory({ sessionId }),
         // ADR-0047: builtin shell stays outside the external-CLI sandbox and
         // fail-closed under Outbound Guard `required` — enforced here where
@@ -529,6 +529,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
       await rm(existing.skillSnapshotRoot, { recursive: true, force: true })
     }
   }
+  commitPiPackExtensionBundle(sessionId, packBundle)
   sessionRuntimes.set(sessionId, runtime)
   return runtime
   } catch (error) {

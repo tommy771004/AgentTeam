@@ -640,6 +640,8 @@ try {
   const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8'))
   assert.equal(checkpoint.workingStateRevision, 2)
   assert.equal(checkpoint.workingState.goals[0].status, 'done')
+  assert.equal(checkpoint.governingPackage.revision, 1)
+  assert.match(checkpoint.governingPackage.digest, /^[a-f0-9]{64}$/)
   assert.deepEqual(checkpoint.manifest.workingState, checkpoint.workingState)
   assert.deepEqual(checkpoint.manifest.completedEffects, checkpoint.workingState.goals[0].evidence.map((item: { evidenceId: string }) => item.evidenceId))
 
@@ -716,6 +718,9 @@ try {
   assert.equal(resumed.result.workingState.revision, 2)
   assert.equal(resumed.result.workingState.runId, 'working-recovered-sibling-run')
   assert.equal(resumed.result.workingState.goals[0].status, 'done')
+  const resumedPackage = resumed.result.record.entries
+    .filter((entry: any) => entry.kind === 'memory-control-package').at(-1)?.packageIdentity
+  assert.deepEqual(resumedPackage, checkpoint.governingPackage, 'resume keeps the checkpoint package identity')
   assert.equal(await readFile(join(workspace, 'recover file.txt'), 'utf8'), 'recovered\n')
   const replayResults = resumed.result.record.entries.filter((entry: { kind?: string; callId?: string }) =>
     entry.kind === 'tool-result' && ['call_resume_overwrite', 'call_resume_bash', 'call_resume_read_extension', 'call_resume_mutating_extension'].includes(entry.callId || ''))

@@ -131,11 +131,11 @@ export const BASELINE_MEMORY_CONTROL_PACKAGE = createMemoryControlPackage({
   components: {
     experientialSkills: {
       id: 'experiential-skills', revision: 1,
-      body: { source: 'frozen-skill-resource-view', selection: 'exact-tool', maxSelectedSkills: 2 },
+      body: { source: 'frozen-skill-resource-view', selection: 'exact-tool', maxSelectedSkills: 2, overrides: {} },
     },
     workingMemorySpec: {
       id: 'verified-working-state', revision: 1,
-      body: { schemaVersion: 1, authority: 'pi-core-host', optimisticConcurrency: true },
+      body: { schemaVersion: 1, authority: 'pi-core-host', optimisticConcurrency: true, maxGoals: 100 },
     },
     invocationPolicy: {
       id: 'skill-preflight-policy', revision: 1,
@@ -143,7 +143,7 @@ export const BASELINE_MEMORY_CONTROL_PACKAGE = createMemoryControlPackage({
     },
     checkers: {
       id: 'host-working-state-checkers', revision: 1,
-      body: { fileContent: 1, delegatedGoal: 1, modelClaimsAreEvidence: false },
+      body: { fileContent: 1, delegatedGoal: 1, modelClaimsAreEvidence: false, maxEvidenceSequenceLag: 64 },
     },
   },
 })

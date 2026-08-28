@@ -6,7 +6,7 @@ import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatal
 import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
 import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage, type PiHostFinalizationClaimResult, type PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
-import { memoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS, type MemoryControlComponentKey, type MemoryControlJsonPatchOperation, type MemoryControlLineage, type MemoryControlPackage, type MemoryControlPackageAuthority, type MemoryControlPackageIdentity, type MemoryControlPackageReader } from '../src/agent/memoryControlPackage.ts'
+import { isMemoryControlPackageIdentity, memoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS, type MemoryControlComponentKey, type MemoryControlJsonPatchOperation, type MemoryControlLineage, type MemoryControlPackage, type MemoryControlPackageAuthority, type MemoryControlPackageIdentity, type MemoryControlPackageReader } from '../src/agent/memoryControlPackage.ts'
 import { createMemoryControlMetaCandidate, type MemoryControlDiagnosis } from '../src/agent/memoryControlMetaAgent.ts'
 import { baselineMemoryControlPackageReader } from './memoryControlPackageRepository.ts'
 import type { MemoryControlEvaluationAuthority } from './memoryControlEvaluationAuthority.ts'
@@ -63,6 +63,7 @@ export type PiHostResponse = {
     cursor?: number
     sessions?: unknown[]
     settings?: PiSettings
+    settingsRevision?: number
     config?: PiHostConfigStatus
     profile?: PiSettings
     sessionId?: string
@@ -271,7 +272,7 @@ import {
 } from './piSessionContext.ts'
 import { settlePiRunLearning, type PiRunLearningSettlement } from './piRunLearningSettlement.ts'
 import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
-import { runPiOrchestration, type PiLoopPattern } from './piOrchestrationExtension.ts'
+import { runPiOrchestration, type PiLoopPattern, type PiOrchestrationTurn } from './piOrchestrationExtension.ts'
 import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
 import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
 import { callPiMcpTool, listPiMcpTools, piMcpGenerationKey, reloadPiMcp, stopPiMcp } from './piMcpClient.ts'
@@ -312,6 +313,9 @@ import {
   setPiApprovalBridge,
   unbindPiSessionRun,
   bindPiSessionRun,
+  transitionPiSessionAgentMode,
+  tightenPiSessionApprovalMode,
+  tightenPiSessionUnattended,
   setPiPackSessionContractRefresh,
   setPiPolicyEvidenceBridge,
   setPiSkillPreflightBridge,
@@ -332,7 +336,17 @@ import {
 import { configurePiMessagingGateway } from './piExtensionPacks/integrations.ts'
 import { discoveredPiSkills, readPiSkillCatalog, selectFrozenPiPreflightSkills, syncPiSkillsFromRenderer, type PiSkillSyncResult } from './piSkills.ts'
 import { resolvePiAgentDir } from './piUserConfig.ts'
-import { setPiDelegationBridge, setPiMemoryBridge } from './piPackBridges.ts'
+import {
+  clearPiPlanGateCandidate,
+  clearPiContinuationItems,
+  consumePiPlanGateCandidate,
+  getPiContinuationItems,
+  setPiContinuationItems,
+  setPiDelegationBridge,
+  setPiMemoryBridge,
+  type PiPlanGateCandidate,
+} from './piPackBridges.ts'
+import { continuationSignature, normalizeContinuationItems, selectContinuationItem, type ContinuationItem } from '../src/agent/continuation.ts'
 import { setPiPlanAnnouncer as installPlanAnnouncer } from './piExtensionPacks/interactionPlanning.ts'
 import { isPiMcpInputSchema, piMcpModelToolName, piMcpModelToolNames, setPiMcpExtensionsLookup } from './piExtensionPacks/mcpBridgePack.ts'
 import { setPiCapabilityBridge, setPiCodeModeExecutor } from './piExtensionPacks/framework.ts'
@@ -488,24 +502,82 @@ function admitRequestedWorkingGoals(
   }
 }
 
+function resolveCheckpointGoverningPackage(
+  identity: unknown,
+  packages: MemoryControlPackageReader,
+): { package?: MemoryControlPackage; error?: string } {
+  if (!isMemoryControlPackageIdentity(identity)) return { error: 'resume checkpoint governing package is missing or malformed' }
+  let found: MemoryControlPackage
+  try {
+    found = packages.read({ schemaVersion: 1, revision: identity.revision })
+  } catch {
+    return { error: 'resume checkpoint governing package is unavailable' }
+  }
+  return found.id === identity.id && found.digest === identity.digest
+    ? { package: found }
+    : { error: 'resume checkpoint governing package identity mismatch' }
+}
+
+function validCheckpointWorkingState(checkpoint: {
+  workingState?: unknown
+  workingStateRevision?: number
+}): WorkingState | undefined {
+  return isWorkingState(checkpoint.workingState)
+    && checkpoint.workingStateRevision === checkpoint.workingState.revision
+    ? checkpoint.workingState
+    : undefined
+}
+
+function checkpointContinuationItems(checkpoint: {
+  continuationItems?: unknown
+}): { items?: ContinuationItem[]; error?: string } {
+  if (checkpoint.continuationItems === undefined) return {}
+  if (!Array.isArray(checkpoint.continuationItems)) return { error: 'resume checkpoint continuation backlog is malformed' }
+  const items = normalizeContinuationItems(checkpoint.continuationItems)
+  return items.length === checkpoint.continuationItems.length
+    ? { items }
+    : { error: 'resume checkpoint continuation backlog is malformed' }
+}
+
+function claimResumeCheckpoint(input: {
+  checkpoints?: CompactionCheckpointWriter
+  requestedRunId: string
+  checkpoint: import('../src/agent/compactionCheckpoint.ts').CompactionCheckpoint
+  checkpointState: WorkingState
+  governingPackage: MemoryControlPackage
+}): { state?: WorkingState; governingPackage?: MemoryControlPackage; continuationItems?: ContinuationItem[]; error?: string } {
+  const claim = input.checkpoints?.claimResume?.(input.requestedRunId)
+  if (!claim?.ok) return { error: `resume checkpoint refused: ${claim?.reason || 'claim-unavailable'}` }
+  const continuation = checkpointContinuationItems(input.checkpoint)
+  if (continuation.error) return { error: continuation.error }
+  return {
+    state: structuredClone(input.checkpointState),
+    governingPackage: input.governingPackage,
+    ...(continuation.items ? { continuationItems: continuation.items } : {}),
+  }
+}
+
 function resumeWorkingState(input: {
   request: { params?: Record<string, unknown> }
   session: SessionRecord
   runId: string
   checkpoints?: CompactionCheckpointWriter
-}): { state?: WorkingState; error?: string } {
+  packages: MemoryControlPackageReader
+}): { state?: WorkingState; governingPackage?: MemoryControlPackage; continuationItems?: ContinuationItem[]; error?: string } {
   const requestedRunId = input.request.params?.resumeFromRunId
   if (requestedRunId === undefined) return {}
   if (typeof requestedRunId !== 'string' || !requestedRunId.trim()) return { error: 'resumeFromRunId must be a non-empty run id' }
   const checkpoint = input.checkpoints?.load?.(requestedRunId)
   if (!checkpoint) return { error: 'resume checkpoint is missing' }
   if (checkpoint.replaySafe !== true || checkpoint.parkedAtToolBoundary !== true) return { error: 'resume checkpoint is not replay-safe' }
-  if (!isWorkingState(checkpoint.workingState)
-    || checkpoint.workingStateRevision !== checkpoint.workingState.revision) return { error: 'resume checkpoint Working State is missing or malformed' }
+  const checkpointState = validCheckpointWorkingState(checkpoint)
+  if (!checkpointState) return { error: 'resume checkpoint Working State is missing or malformed' }
+  const governing = resolveCheckpointGoverningPackage(checkpoint.governingPackage, input.packages)
+  if (!governing.package) return { error: governing.error }
   const durableState = workingStateFromTurnRecord(input.session.record)
   if (!durableState
     || durableState.revision !== checkpoint.workingStateRevision
-    || JSON.stringify(durableState) !== JSON.stringify(checkpoint.workingState)) return { error: 'resume Working State revision mismatch' }
+    || JSON.stringify(durableState) !== JSON.stringify(checkpointState)) return { error: 'resume Working State revision mismatch' }
   const checkpointSeq = checkpoint.manifest?.latestSeq
   if (!Number.isSafeInteger(checkpointSeq)) return { error: 'resume checkpoint effect boundary is missing' }
   // Tool contracts may gain new side-effecting verbs. Treat every later
@@ -514,9 +586,13 @@ function resumeWorkingState(input: {
     && entry.kind === 'tool-result'
     && entry.settlement === 'success')
   if (laterEffect) return { error: 'resume checkpoint has newer completed effects' }
-  const claim = input.checkpoints?.claimResume?.(requestedRunId)
-  if (!claim?.ok) return { error: `resume checkpoint refused: ${claim?.reason || 'claim-unavailable'}` }
-  return { state: structuredClone(checkpoint.workingState) }
+  return claimResumeCheckpoint({
+    checkpoints: input.checkpoints,
+    requestedRunId,
+    checkpoint,
+    checkpointState,
+    governingPackage: governing.package,
+  })
 }
 
 function fileWriteStateProposal(
@@ -892,6 +968,12 @@ function completedSideEffects(session: SessionRecord): string[] {
     .map((entry) => `${entry.tool}:${entry.callId}`)
 }
 
+function governingPackageForSession(session: SessionRecord): MemoryControlPackageIdentity | undefined {
+  return activeTurnRecorders.get(session.id)?.governingPackage
+    || [...(session.record?.entries || [])].reverse()
+      .find((entry) => entry.kind === 'memory-control-package')?.packageIdentity
+}
+
 function appendStandaloneCompactionRecord(
   session: SessionRecord,
   replaced: number,
@@ -977,6 +1059,7 @@ function compactHostSession(input: {
   const pressure = assessPiContextPressure(session.messages, input.prompt || '', input.contextWindow)
   const completedEffects = completedSideEffects(session)
   const workingState = workingStateFromTurnRecord(session.record)
+  const governingPackage = governingPackageForSession(session)
   const manifest = buildPiCompactionManifest(oldMessages, {
     sessionId: session.id,
     runId,
@@ -1007,6 +1090,8 @@ function compactHostSession(input: {
     contextWindow: input.contextWindow,
     manifest,
     ...(workingState ? { workingStateRevision: workingState.revision, workingState } : {}),
+    governingPackage,
+    continuationItems: getPiContinuationItems(session.id, runId),
   })
   const checkpointFailed = Boolean(input.checkpointWriter && checkpoint?.ok !== true)
   if (checkpointFailed && reason !== 'emergency') {
@@ -1369,6 +1454,8 @@ function commitCheckedWorkingState(input: {
     settlement,
     evidence: executionEvidence,
     evidenceSeq: terminalIndex >= 0 ? input.recorder.seqBase + terminalIndex : 0,
+    currentSequence: input.recorder.seqBase + input.recorder.entries.length - 1,
+    maxEvidenceSequenceLag: input.recorder.memoryControl.maxEvidenceSequenceLag,
     evidenceStillApplicable: input.evidenceStillApplicable,
     executionRunId: input.executionRunId,
   })
@@ -1572,6 +1659,287 @@ function frozenPolicyForInvocation(state: HostState, sessionId: string, cwd: str
     unattended: state.snapshot.settings.unattended,
     projectRoot: cwd,
   })
+}
+
+type PiAgentMode = 'build' | 'plan'
+type PiPlanCompletionAction = 'wait_for_user' | 'auto_start_build'
+
+function admittedAgentMode(profile: unknown): PiAgentMode {
+  return profile && typeof profile === 'object' && (profile as Record<string, unknown>).agentMode === 'plan'
+    ? 'plan'
+    : 'build'
+}
+
+function admittedPlanCompletionAction(profile: unknown): PiPlanCompletionAction {
+  return profile && typeof profile === 'object'
+    && (profile as Record<string, unknown>).planCompletionAction === 'auto_start_build'
+    ? 'auto_start_build'
+    : 'wait_for_user'
+}
+
+function admittedProfileObject(profile: unknown): Record<string, unknown> {
+  return profile && typeof profile === 'object' ? profile as Record<string, unknown> : {}
+}
+
+function admittedDefinitionOfDone(value: unknown): string | undefined {
+  return typeof value === 'string' ? value.trim().slice(0, 2_000) : undefined
+}
+
+function restoreContinuationItems(sessionId: string, runId: string, items?: ContinuationItem[]): void {
+  if (items) setPiContinuationItems(sessionId, runId, items)
+}
+
+function planGateDecision(candidate: PiPlanGateCandidate | undefined): { ok: true; candidate: PiPlanGateCandidate } | { ok: false; reason: string } {
+  if (!candidate) return { ok: false, reason: 'complete_plan 尚未提交結構化計畫' }
+  if (!candidate.summary.trim() || candidate.steps.length === 0 || candidate.acceptanceCriteria.length === 0) {
+    return { ok: false, reason: '計畫缺少 summary、steps 或 acceptance criteria' }
+  }
+  if (candidate.unresolvedQuestions.length > 0) return { ok: false, reason: '計畫仍有未決問題' }
+  if (candidate.requiresAdditionalAuthority) return { ok: false, reason: '計畫需要目前 run 尚未取得的額外權限' }
+  return { ok: true, candidate }
+}
+
+function planPhasePrompt(prompt: string, action: PiPlanCompletionAction): string {
+  return [
+    prompt,
+    '## Host Plan phase',
+    '目前只能分析、讀取及更新 .scratch/ 內的計畫文件，不可修改產品程式碼或執行其他副作用工具。',
+    '完成規劃後必須呼叫 complete_plan，提交 summary、steps、acceptanceCriteria、unresolvedQuestions 與 requiresAdditionalAuthority。',
+    action === 'auto_start_build'
+      ? 'Host 只有在 Plan Gate 通過後才會建立新的 Build phase，並在同一個 run 內自動開始實作。'
+      : 'Plan Gate 通過後停止，等待使用者另行開始 Build。',
+  ].join('\n\n')
+}
+
+function buildPhasePrompt(originalPrompt: string, candidate: PiPlanGateCandidate): string {
+  return [
+    originalPrompt,
+    '## Host Plan Gate passed: begin Build phase',
+    candidate.summary,
+    'Implementation steps:',
+    ...candidate.steps.map((step, index) => `${index + 1}. ${step}`),
+    'Acceptance criteria:',
+    ...candidate.acceptanceCriteria.map((criterion) => `- ${criterion}`),
+    '依照此計畫直接實作及驗證。不要重新停在規劃階段。',
+  ].join('\n')
+}
+
+function continuationPrompt(originalPrompt: string, item: import('../src/agent/continuation.ts').ContinuationItem): string {
+  return [
+    originalPrompt,
+    '## Host-selected next iteration item',
+    `${item.title}: ${item.description}`,
+    'Acceptance criteria:',
+    ...item.acceptanceCriteria.map((criterion) => `- ${criterion}`),
+    '直接完成此項目並驗證。若原始目標仍有未完成工作，settlement 前用 record_continuation_items 更新完整續行清單。不要送出新的使用者對話。',
+  ].join('\n')
+}
+
+type IterationControlState = {
+  effectiveAgentMode: PiAgentMode
+  priorContinuationSignature: string
+  repeatedContinuationCount: number
+  outcome?: PiOrchestrationTurn
+}
+
+function settlePlanIteration(input: {
+  sessionId: string
+  runId: string
+  settlement: PiOrchestrationTurn['settlement']
+  answer: string
+  action: PiPlanCompletionAction
+  orchestrationPrompt: string
+  goalAwarePrompt: string
+  approvalMode: string
+  iteration: number
+  publish: (phase: 'replan', iteration: number, detail: string) => void
+}): IterationControlState {
+  const gate = planGateDecision(consumePiPlanGateCandidate(input.sessionId, input.runId))
+  recordTurnEntry(input.sessionId, {
+    kind: 'notice',
+    source: 'host',
+    topic: gate.ok ? 'plan-gate-passed' : 'plan-gate-blocked',
+    text: gate.ok
+      ? JSON.stringify({ summary: gate.candidate.summary, steps: gate.candidate.steps.length, acceptanceCriteria: gate.candidate.acceptanceCriteria.length })
+      : gate.reason,
+  })
+  const unchanged = { effectiveAgentMode: 'plan' as const, priorContinuationSignature: '', repeatedContinuationCount: 0 }
+  if (input.action === 'wait_for_user') return { ...unchanged, outcome: { settlement: input.settlement, result: input.answer, continue: false } }
+  if (!gate.ok) {
+    input.publish('replan', input.iteration, gate.reason)
+    return {
+      ...unchanged,
+      outcome: {
+        settlement: input.settlement,
+        result: input.answer,
+        done: false,
+        nextPrompt: [input.orchestrationPrompt, '## Plan Gate blocked', gate.reason, '補齊計畫後再次呼叫 complete_plan。尚未通過前不可實作。'].join('\n\n'),
+      },
+    }
+  }
+  if (!transitionPiSessionAgentMode(input.sessionId, input.runId, 'plan', 'build')) {
+    throw new Error('Plan Gate passed but Host policy phase transition failed')
+  }
+  recordTurnEntry(input.sessionId, {
+    kind: 'notice',
+    source: 'host',
+    topic: 'agent-mode-transition',
+    text: JSON.stringify({ from: 'plan', to: 'build', approvalMode: input.approvalMode }),
+  })
+  input.publish('replan', input.iteration, 'Plan Gate passed; Build phase admitted')
+  return {
+    ...unchanged,
+    effectiveAgentMode: 'build',
+    outcome: { settlement: input.settlement, result: input.answer, done: false, nextPrompt: buildPhasePrompt(input.goalAwarePrompt, gate.candidate) },
+  }
+}
+
+function settleContinuationIteration(input: {
+  sessionId: string
+  runId: string
+  settlement: PiOrchestrationTurn['settlement']
+  answer: string
+  goalAwarePrompt: string
+  iteration: number
+  effectiveAgentMode: PiAgentMode
+  priorContinuationSignature: string
+  repeatedContinuationCount: number
+  publish: (phase: 'replan', iteration: number, detail: string) => void
+}): IterationControlState {
+  const continuationItems = getPiContinuationItems(input.sessionId, input.runId)
+  const selection = selectContinuationItem(continuationItems)
+  const unchanged = {
+    effectiveAgentMode: input.effectiveAgentMode,
+    priorContinuationSignature: input.priorContinuationSignature,
+    repeatedContinuationCount: input.repeatedContinuationCount,
+  }
+  if (selection.blockedReason) {
+    recordTurnEntry(input.sessionId, { kind: 'notice', source: 'host', topic: 'continuation-blocked', text: selection.blockedReason })
+    return { ...unchanged, outcome: { settlement: 'failed', result: `${input.answer}\n\n自動續行已停止：${selection.blockedReason}`.trim(), continue: false, done: false } }
+  }
+  if (!selection.item) return unchanged
+  const signature = continuationSignature(selection.item)
+  const repeated = signature === input.priorContinuationSignature ? input.repeatedContinuationCount + 1 : 0
+  if (repeated >= 2) {
+    const reason = `續行項目「${selection.item.title}」連續沒有更新，已停止避免無限迴圈。`
+    recordTurnEntry(input.sessionId, { kind: 'notice', source: 'host', topic: 'continuation-no-progress', text: reason })
+    return { ...unchanged, priorContinuationSignature: signature, repeatedContinuationCount: repeated, outcome: { settlement: 'failed', result: `${input.answer}\n\n${reason}`.trim(), continue: false, done: false } }
+  }
+  setPiContinuationItems(input.sessionId, input.runId, continuationItems.map((item) =>
+    item.id === selection.item!.id ? { ...item, status: 'running' as const } : item,
+  ))
+  recordTurnEntry(input.sessionId, {
+    kind: 'notice',
+    source: 'host',
+    topic: 'continuation-selected',
+    text: JSON.stringify({ id: selection.item.id, title: selection.item.title, priority: selection.item.priority, acceptanceCriteria: selection.item.acceptanceCriteria, effectiveFromIteration: input.iteration + 1 }),
+  })
+  input.publish('replan', input.iteration, `Next item: ${selection.item.title}`)
+  return {
+    ...unchanged,
+    priorContinuationSignature: signature,
+    repeatedContinuationCount: repeated,
+    outcome: { settlement: input.settlement, result: input.answer, done: false, nextPrompt: continuationPrompt(input.goalAwarePrompt, selection.item) },
+  }
+}
+
+function settleIterationControl(input: {
+  pattern: PiLoopPattern
+  done?: boolean
+  state: IterationControlState
+  plan: Parameters<typeof settlePlanIteration>[0]
+  continuation: Omit<Parameters<typeof settleContinuationIteration>[0], 'effectiveAgentMode' | 'priorContinuationSignature' | 'repeatedContinuationCount'>
+}): IterationControlState {
+  if (input.state.effectiveAgentMode === 'plan') return settlePlanIteration(input.plan)
+  if (input.pattern === 'Goal-based' && input.done === false) {
+    return settleContinuationIteration({ ...input.continuation, ...input.state })
+  }
+  return input.state
+}
+
+function publishDefinitionOfDone(input: {
+  definitionOfDone?: string
+  done?: boolean
+  iteration: number
+  iterationLimit: number
+  publish: (phase: 'dod' | 'replan', iteration: number, detail: string) => void
+}): void {
+  if (!input.definitionOfDone) return
+  input.publish('dod', input.iteration, input.done ? 'met' : 'unmet')
+  if (!input.done && input.iteration < input.iterationLimit) input.publish('replan', input.iteration, 'DoD unmet; retrying the Pi turn')
+}
+
+function iterationControlToolNames(mode: PiAgentMode, pattern: PiLoopPattern): string[] {
+  if (mode === 'plan') return ['complete_plan']
+  return pattern === 'Goal-based' ? ['record_continuation_items'] : []
+}
+
+function goalContinuationPrompt(prompt: string): string {
+  return [
+    prompt,
+    '## Goal continuation contract',
+    '若此 iteration 結束時原始目標仍有可實作或可改善的工作，先呼叫 record_continuation_items，提交完整 backlog。',
+    '每個項目必須留在 original-objective、帶 acceptance criteria，並明確標示是否需要額外權限。Host 會在 settlement 後選擇下一項，直接啟動內部 iteration，不會建立使用者訊息。',
+  ].join('\n\n')
+}
+
+function restrictActiveTools(current: readonly string[], latest: readonly string[]): string[] {
+  if (latest.length === 0) return [...current]
+  if (current.length === 0) return [...new Set(latest)]
+  const allowed = new Set(latest)
+  return current.filter((tool) => allowed.has(tool))
+}
+
+const APPROVAL_STRICTNESS = { always: 0, auto: 1, full: 2 } as const
+
+function stricterApprovalMode(
+  current: 'always' | 'auto' | 'full',
+  latest: 'always' | 'auto' | 'full',
+): 'always' | 'auto' | 'full' {
+  return APPROVAL_STRICTNESS[latest] < APPROVAL_STRICTNESS[current] ? latest : current
+}
+
+function refreshIterationSettings(input: {
+  current: PiSettings
+  latest: PiSettings
+  effectiveRevision: number
+  latestRevision: number
+  admittedProfile: Record<string, unknown>
+  sessionId: string
+  runId: string
+  iteration: number
+}): { settings: PiSettings; revision: number } {
+  if (input.latestRevision === input.effectiveRevision) {
+    return { settings: input.current, revision: input.effectiveRevision }
+  }
+  const approvalMode = stricterApprovalMode(input.current.approvalMode, input.latest.approvalMode)
+  const unattended = input.current.unattended || input.latest.unattended
+  const settings: PiSettings = {
+    ...input.current,
+    ...(!('provider' in input.admittedProfile) ? { provider: input.latest.provider } : {}),
+    ...(!('model' in input.admittedProfile) ? { model: input.latest.model } : {}),
+    ...(!('thinkingLevel' in input.admittedProfile) ? { thinkingLevel: input.latest.thinkingLevel } : {}),
+    activeTools: restrictActiveTools(input.current.activeTools, input.latest.activeTools),
+    approvalMode,
+    unattended,
+  }
+  tightenPiSessionApprovalMode(input.sessionId, input.runId, approvalMode)
+  if (unattended) tightenPiSessionUnattended(input.sessionId, input.runId)
+  recordTurnEntry(input.sessionId, {
+    kind: 'notice',
+    source: 'host',
+    topic: 'runtime-settings-effective',
+    text: JSON.stringify({
+      revision: input.latestRevision,
+      effectiveFromIteration: input.iteration,
+      model: settings.model,
+      thinkingLevel: settings.thinkingLevel,
+      approvalMode: settings.approvalMode,
+      unattended: settings.unattended,
+      activeTools: settings.activeTools,
+    }),
+  })
+  return { settings, revision: input.latestRevision }
 }
 
 function appendInvocationEvidence(sessionId: string, event: PiPolicyEvidenceEvent): void {
@@ -3296,10 +3664,15 @@ export function handlePiHostRequest(
       ? patternValue
       : 'Turn-based'
     const maxIterations = typeof input.params?.maxIterations === 'number' ? input.params.maxIterations : 1
-    const definitionOfDone = typeof input.params?.definitionOfDone === 'string' ? input.params.definitionOfDone.trim().slice(0, 2_000) : undefined
+    const definitionOfDone = admittedDefinitionOfDone(input.params?.definitionOfDone)
     // Same shared clamp as the renderer's config builder (loopBounds.ts):
     // both sides must agree or a requested budget silently diverges.
     const iterationLimit = clampPiIterations(maxIterations)
+    const requestedAgentMode = admittedAgentMode(input.params?.profile)
+    const planCompletionAction = admittedPlanCompletionAction(input.params?.profile)
+    let effectiveAgentMode: PiAgentMode = requestedAgentMode
+    const admittedProfile = admittedProfileObject(input.params?.profile)
+    let effectiveSettingsRevision = state.snapshot.cursor
     let turnSettings = state.snapshot.settings
     if (input.params?.profile && typeof input.params.profile === 'object') {
       try {
@@ -3330,11 +3703,13 @@ export function handlePiHostRequest(
       && (requestedWorkingGoal(input) !== undefined || admittedWorkingGoals !== undefined)) {
       return [errorResponse(id, 'invalid_request', 'resume cannot replace checkpoint Working State goals')]
     }
-    const resumed = resumeWorkingState({ request: input, session, runId, checkpoints: checkpointWriter })
+    const resumed = resumeWorkingState({
+      request: input, session, runId, checkpoints: checkpointWriter, packages: state.memoryControlPackages,
+    })
     if (resumed.error) return [errorResponse(id, 'invalid_request', resumed.error)]
     const initialWorkingState = resumed.state
       || workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input), admittedWorkingGoals)
-    const admittedPackage = admitMemoryControlEvaluationPackage(state, input.params)
+    const admittedPackage = admitTurnMemoryControlPackage(state, input.params, resumed.governingPackage)
     const governingPackage = memoryControlPackageIdentity(admittedPackage)
     const memoryControl = compileMemoryControlRuntime(admittedPackage, initialWorkingState.goals.length)
     const recorder: ActiveTurnRecorder = {
@@ -3372,11 +3747,20 @@ export function handlePiHostRequest(
       }),
     })
     activeTurnRecorders.set(sessionId, recorder)
+    clearPiPlanGateCandidate(sessionId)
+    clearPiContinuationItems(sessionId)
+    restoreContinuationItems(sessionId, runId, resumed.continuationItems)
     recordTurnEntry(sessionId, {
       kind: 'turn-start',
       source: 'host',
       runner: 'builtin',
       capabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
+    })
+    recordTurnEntry(sessionId, {
+      kind: 'notice',
+      source: 'host',
+      topic: 'agent-mode',
+      text: JSON.stringify({ requested: requestedAgentMode, effective: effectiveAgentMode, planCompletionAction }),
     })
     recordGoverningMemoryControlPackage(state, sessionId, governingPackage)
     let workingState = initialWorkingState
@@ -3405,11 +3789,6 @@ export function handlePiHostRequest(
     // capability changes what this turn can call, immediately.
     const unlockedTools = state.capabilities.activeTools(sessionId)
       .filter((tool) => workspaceTextSearchRun.available || !isWorkspaceTextSearchTool(tool))
-    const configuredActiveTools = turnSettings.activeTools
-      .filter((tool) => workspaceTextSearchRun.available || !isWorkspaceTextSearchTool(tool))
-    const turnVisibleActiveTools = turnSettings.activeTools.length > 0 && configuredActiveTools.length === 0
-      ? ['load_capability']
-      : configuredActiveTools
     const mcpCapabilityLoaded = state.capabilities.catalog(sessionId)
       .find((capability) => capability.id === 'mcp-bridge')?.deferred === false
     const previousModel = typeof session.profile?.model === 'string' ? session.profile.model : undefined
@@ -3456,6 +3835,8 @@ export function handlePiHostRequest(
       temporaryChat: contextPolicy.temporary,
       memoryAccess,
       frozenPolicy: freezePiRunPolicy({
+        agentMode: requestedAgentMode,
+        planCompletionAction,
         approvalMode: turnSettings.approvalMode,
         unattended: turnSettings.unattended,
         projectRoot: cwd,
@@ -3555,9 +3936,17 @@ export function handlePiHostRequest(
           },
         }]
       }
-      const orchestrationPrompt = pluginExecution
+      const baseOrchestrationPrompt = pluginExecution
         ? `${prompt}\n\n## Trusted provider stage result\n${JSON.stringify(pluginExecution)}`
         : prompt
+      const goalAwarePrompt = pattern === 'Goal-based'
+        ? goalContinuationPrompt(baseOrchestrationPrompt)
+        : baseOrchestrationPrompt
+      const orchestrationPrompt = requestedAgentMode === 'plan'
+        ? planPhasePrompt(goalAwarePrompt, planCompletionAction)
+        : goalAwarePrompt
+      let priorContinuationSignature = ''
+      let repeatedContinuationCount = 0
       const recalledResult = memoryAccess.memoryReadEnabled && !memoryAccess.temporary
         ? await state.memoryStore.recall({ access: memoryAccess, query: prompt, limit: 5 })
         : undefined
@@ -3593,6 +3982,18 @@ export function handlePiHostRequest(
           return { settlement: 'interrupted' as const, interruptReason: activeRunState.interrupt, result: '' }
         }
         if (activeRunState?.cancelled) return { settlement: 'cancelled' as const, result: '' }
+        const refreshedSettings = refreshIterationSettings({
+          current: turnSettings,
+          latest: state.snapshot.settings,
+          effectiveRevision: effectiveSettingsRevision,
+          latestRevision: state.snapshot.cursor,
+          admittedProfile,
+          sessionId,
+          runId,
+          iteration,
+        })
+        turnSettings = refreshedSettings.settings
+        effectiveSettingsRevision = refreshedSettings.revision
         publishOrchestration('iterate', iteration)
         recorder.step = iteration
         recorder.proposalState = workingState
@@ -3607,6 +4008,13 @@ export function handlePiHostRequest(
         }> = []
         recordTurnEntry(sessionId, { kind: 'step-start', source: 'host' })
         recordTurnEntry(sessionId, { kind: 'user-text', source: 'user', content: iteration === 1 ? prompt : iterationPrompt })
+        const iterationConfiguredActiveTools = turnSettings.activeTools
+          .filter((tool) => workspaceTextSearchRun.available || !isWorkspaceTextSearchTool(tool))
+        const iterationVisibleActiveTools = turnSettings.activeTools.length > 0 && iterationConfiguredActiveTools.length === 0
+          ? ['load_capability']
+          : iterationConfiguredActiveTools
+        const iterationControlTools = iterationControlToolNames(effectiveAgentMode, pattern)
+        const iterationUnlockedTools = [...new Set([...unlockedTools, ...iterationControlTools])]
         const turn = await runPiTurn(sessionId, cwd, iterationPrompt, session.messages, (event) => {
           // A tool call is the model asking; the audit records what the Host
           // then decided and did (ADR-0048).
@@ -3732,9 +4140,9 @@ export function handlePiHostRequest(
           // A restricted allowlist unions the unlocked capability tools; an
           // empty list already means everything is on.
           activeTools: turnSettings.activeTools.length
-            ? [...new Set([...turnVisibleActiveTools, ...unlockedTools])]
+            ? [...new Set([...iterationVisibleActiveTools, ...iterationUnlockedTools])]
             : turnSettings.activeTools,
-          unlockedTools,
+          unlockedTools: iterationUnlockedTools,
           mcpGenerationKey: mcpTurnGenerationKey,
           mcpCapabilityActive: mcpCapabilityLoaded,
         }, memoryContext, contextPolicy.referenceChatHistory, (registryContextWindow, runtimeSession) => {
@@ -3843,10 +4251,25 @@ export function handlePiHostRequest(
             turn.settlement,
             workingState,
           )
-          if (definitionOfDone) {
-            publishOrchestration('dod', iteration, done ? 'met' : 'unmet')
-            if (!done && iteration < iterationLimit) publishOrchestration('replan', iteration, 'DoD unmet; retrying the Pi turn')
-          }
+          const control = settleIterationControl({
+            pattern,
+            done,
+            state: { effectiveAgentMode, priorContinuationSignature, repeatedContinuationCount },
+            plan: {
+              sessionId, runId, settlement: turn.settlement, answer,
+              action: planCompletionAction, orchestrationPrompt, goalAwarePrompt,
+              approvalMode: turnSettings.approvalMode, iteration, publish: publishOrchestration,
+            },
+            continuation: {
+              sessionId, runId, settlement: turn.settlement, answer,
+              goalAwarePrompt, iteration, publish: publishOrchestration,
+            },
+          })
+          effectiveAgentMode = control.effectiveAgentMode
+          priorContinuationSignature = control.priorContinuationSignature
+          repeatedContinuationCount = control.repeatedContinuationCount
+          if (control.outcome) return control.outcome
+          publishDefinitionOfDone({ definitionOfDone, done, iteration, iterationLimit, publish: publishOrchestration })
           return { settlement: turn.settlement, result: answer, ...(done === undefined ? {} : { done }) }
         }
         const stoppedText = piTurnResultText(turn.settlement, turn.items)
@@ -3943,12 +4366,14 @@ export function handlePiHostRequest(
       }
         unbindWorkspaceTextSearchRun(sessionId, runId)
         unbindPiSessionRun(sessionId)
+      clearPiPlanGateCandidate(sessionId, runId)
+      clearPiContinuationItems(sessionId, runId)
       setPiPackSessionContractRefresh(sessionId)
       if (activeTurnRecorders.get(sessionId) === recorder) activeTurnRecorders.delete(sessionId)
       if (activeSessionRuns.get(sessionId)?.runId === runId) activeSessionRuns.delete(sessionId)
     })
   }
-  if (input.method === 'settings/get') return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config } }]
+  if (input.method === 'settings/get') return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config, settingsRevision: state.snapshot.cursor } }]
   if (input.method === 'settings/update') {
     return (async () => {
       const patch = validatePiSettingsPatch(input.params || {})
@@ -3982,7 +4407,7 @@ export function handlePiHostRequest(
       state.snapshot.settingsOrigin = 'managed'
       if (state.snapshot.config) state.snapshot.config = { ...state.snapshot.config, settingsSource: 'managed' }
       state.snapshot.cursor += 1
-      return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config } }]
+      return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config, settingsRevision: state.snapshot.cursor } }]
     })().catch((error) => {
       return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid settings')]
     })
@@ -4039,6 +4464,14 @@ function admitMemoryControlEvaluationPackage(
     throw new Error('Memory-Control evaluation package is not the active revision or its candidate')
   }
   return requested
+}
+
+function admitTurnMemoryControlPackage(
+  state: HostState,
+  params: Record<string, unknown> | undefined,
+  resumed?: MemoryControlPackage,
+): MemoryControlPackage {
+  return resumed || admitMemoryControlEvaluationPackage(state, params)
 }
 
 function readMemoryControlPackageView(

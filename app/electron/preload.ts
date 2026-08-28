@@ -1050,6 +1050,7 @@ const api = {
           defaultModel?: string
           defaultDepth?: string
           notes: string[]
+          capabilities?: import('../src/agent/cliProviderCapabilities.ts').CliProviderCapabilitySnapshot
         }>
         summary: string
       }>,
@@ -1083,6 +1084,7 @@ const api = {
       cwd?: string
       model?: string
       depth?: string
+      serviceTier?: 'provider-default' | 'standard' | 'priority' | 'flex'
       agentMode?: string
       approvalMode?: 'always' | 'auto' | 'full'
       unattended?: boolean

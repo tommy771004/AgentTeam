@@ -71,6 +71,8 @@ export type PersistedQueueItem = {
     RuntimeOverrides,
     | 'eventPreMatched'
     | 'approvalMode'
+    | 'agentMode'
+    | 'planCompletionAction'
     | 'attachedSkills'
     | 'unattended'
     | 'hitlTimeoutMs'
@@ -203,6 +205,8 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
       ? {
           eventPreMatched: o.eventPreMatched,
           approvalMode: o.approvalMode,
+          agentMode: o.agentMode,
+          planCompletionAction: o.planCompletionAction,
           attachedSkills: o.attachedSkills,
           unattended: o.unattended,
           hitlTimeoutMs: o.hitlTimeoutMs,

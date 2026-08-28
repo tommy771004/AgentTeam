@@ -327,12 +327,16 @@ export interface RuntimeOverrides {
   thinkingDepth?: 'fast' | 'standard' | 'deep' | 'max' | 'ultra'
   /** Composer-selected speed, frozen when the turn is submitted. */
   speed?: 'fast' | 'standard' | 'careful'
+  /** Provider latency/billing tier, frozen independently from orchestration speed. */
+  providerServiceTier?: ProviderServiceTier
   /** Inject skill bodies into prompt (cron / manual) */
   attachedSkills?: string[]
   /** Extra system context (e.g. MCP notes) */
   extraSystemContext?: string
   /** OpenCode-style primary agent */
   agentMode?: AgentMode
+  /** What the Host does after a structured Plan Gate passes. */
+  planCompletionAction?: 'wait_for_user' | 'auto_start_build'
   /** Per-run composer override; Settings remains the default for other runs. */
   approvalMode?: ApprovalMode
   /** Inherited OpenCode agent id for per-agent MCP restrictions. */
@@ -637,6 +641,8 @@ export interface CliModelOption {
   depths?: Array<'fast' | 'standard' | 'deep' | 'max' | 'ultra'>
 }
 
+export type ProviderServiceTier = 'provider-default' | 'standard' | 'priority' | 'flex'
+
 export interface CliProviderConfig {
   id: string
   kind: CliKind
@@ -646,11 +652,14 @@ export interface CliProviderConfig {
   apiKey?: string
   baseUrl?: string
   cliBinary?: string
+  /** Provider latency/billing tier; independent from orchestration speed. */
+  serviceTier?: ProviderServiceTier
   lastProbeAt?: string
   diagnostic?: {
     foundBinary: boolean
     binaryPath: string | null
     authNote: string
+    capabilities?: import('./cliProviderCapabilities.ts').CliProviderCapabilitySnapshot
   }
   models: CliModelOption[]
 }

@@ -54,10 +54,13 @@ export const useWorkingStateProjectionStore = create<WorkingStateProjectionStore
 
   appendHostRecord: (entries, runId) => set((state) => {
     const incoming = projectWorkingStateEntries(entries, state.hostAvailable)
-    if (incoming.verification === 'unavailable' || incoming.runId !== runId) return state
+    if (incoming.verification === 'unavailable') return state
     return {
       byRunId: {
         ...state.byRunId,
+        // A resumed turn has a fresh execution id while its Working State keeps
+        // the original lifecycle id. Alias the verified ledger to the live run
+        // instead of dropping the event at that boundary.
         [runId]: mergeWorkingStateProjection(state.byRunId[runId], incoming),
       },
     }

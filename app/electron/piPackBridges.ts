@@ -2,6 +2,7 @@ import type { PiMemory } from './piMemory.ts'
 import type { PiContextPacket } from './piDelegationExtension.ts'
 import type { PiToolContext } from './piToolHost.ts'
 import { DurableMemoryStoreError } from './durableMemoryStore.ts'
+import type { ContinuationItem } from '../src/agent/continuation.ts'
 
 /**
  * The bridges between extension packs and Host-owned state.
@@ -82,12 +83,23 @@ export function piDelegationBridge(): PiDelegationBridgeAccess | undefined {
 
 export type PiPlanStep = { id: string; title: string; status: 'pending' | 'in_progress' | 'done' }
 
+export type PiPlanGateCandidate = {
+  runId: string
+  summary: string
+  steps: string[]
+  acceptanceCriteria: string[]
+  unresolvedQuestions: string[]
+  requiresAdditionalAuthority: boolean
+}
+
 /**
  * The live plan per session. The durable copy is the Turn Record's `notice`
  * entry the tool appends, so a finished run replays its plans without this
  * map; this only carries what a RUNNING panel needs.
  */
 const livePlans = new Map<string, PiPlanStep[]>()
+const planGateCandidates = new Map<string, PiPlanGateCandidate>()
+const continuationItems = new Map<string, { runId: string; items: ContinuationItem[] }>()
 
 export function setPiLivePlan(sessionId: string, steps: PiPlanStep[]): void {
   livePlans.set(sessionId, steps.map((step) => ({ ...step })))
@@ -96,6 +108,38 @@ export function setPiLivePlan(sessionId: string, steps: PiPlanStep[]): void {
 export function getPiLivePlan(sessionId: string): PiPlanStep[] | undefined {
   const plan = livePlans.get(sessionId)
   return plan ? plan.map((step) => ({ ...step })) : undefined
+}
+
+export function setPiPlanGateCandidate(sessionId: string, candidate: PiPlanGateCandidate): void {
+  planGateCandidates.set(sessionId, structuredClone(candidate))
+}
+
+export function consumePiPlanGateCandidate(sessionId: string, runId: string): PiPlanGateCandidate | undefined {
+  const candidate = planGateCandidates.get(sessionId)
+  if (!candidate || candidate.runId !== runId) return undefined
+  planGateCandidates.delete(sessionId)
+  return structuredClone(candidate)
+}
+
+export function clearPiPlanGateCandidate(sessionId: string, runId?: string): void {
+  const candidate = planGateCandidates.get(sessionId)
+  if (!candidate || (runId && candidate.runId !== runId)) return
+  planGateCandidates.delete(sessionId)
+}
+
+export function setPiContinuationItems(sessionId: string, runId: string, items: readonly ContinuationItem[]): void {
+  continuationItems.set(sessionId, { runId, items: structuredClone(Array.from(items)) })
+}
+
+export function getPiContinuationItems(sessionId: string, runId: string): ContinuationItem[] {
+  const snapshot = continuationItems.get(sessionId)
+  return snapshot?.runId === runId ? structuredClone(snapshot.items) : []
+}
+
+export function clearPiContinuationItems(sessionId: string, runId?: string): void {
+  const snapshot = continuationItems.get(sessionId)
+  if (!snapshot || (runId && snapshot.runId !== runId)) return
+  continuationItems.delete(sessionId)
 }
 
 /* ── Tool output store ───────────────────────────────────────────────── */

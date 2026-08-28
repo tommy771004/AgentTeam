@@ -458,7 +458,9 @@ export function RunProcessFeed({
       className="agent-process-feed w-full space-y-3 py-2"
       aria-live="polite"
       aria-busy={lifecycle.live && !lifecycle.needsAttention}
+      data-run-id={runId}
       data-run-phase={lifecycle.phase}
+      data-record-count={recordEntries.length}
     >
       {/* Compact run status remains independently collapsible; the canonical
           Turn Record stays in the conversation itself, in recorded order. */}

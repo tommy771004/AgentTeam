@@ -1,5 +1,6 @@
 import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
-import { getPiLivePlan, setPiLivePlan, type PiPlanStep } from '../piPackBridges.ts'
+import { getPiLivePlan, setPiContinuationItems, setPiLivePlan, setPiPlanGateCandidate, type PiPlanStep } from '../piPackBridges.ts'
+import { normalizeContinuationItems } from '../../src/agent/continuation.ts'
 
 /**
  * Interaction and planning pack（互動與計畫包）.
@@ -113,6 +114,113 @@ const updatePlan: PiPackTool = {
   },
 }
 
+function stringList(value: unknown, limit: number): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim().slice(0, 500))
+    .slice(0, limit)
+}
+
+const completePlan: PiPackTool = {
+  name: 'complete_plan',
+  label: 'Complete Plan',
+  description: 'Submit a structured implementation plan to the Host Plan Gate',
+  promptSnippet: 'submit the completed plan to the Host gate before implementation begins',
+  parameters: {
+    type: 'object',
+    properties: {
+      summary: { type: 'string', description: 'Short statement of the planned implementation' },
+      steps: { type: 'array', items: { type: 'string' }, maxItems: 20 },
+      acceptanceCriteria: { type: 'array', items: { type: 'string' }, maxItems: 20 },
+      unresolvedQuestions: { type: 'array', items: { type: 'string' }, maxItems: 12 },
+      requiresAdditionalAuthority: { type: 'boolean' },
+    },
+    required: ['summary', 'steps', 'acceptanceCriteria', 'unresolvedQuestions', 'requiresAdditionalAuthority'],
+  },
+  execute: async (args, ctx) => {
+    if (!ctx.runId) {
+      return {
+        content: [{ type: 'text', text: 'Plan Gate 拒絕：缺少 Host run identity。' }],
+        details: { ok: false, gate: 'missing-run' },
+      }
+    }
+    const summary = String(args.summary || '').trim().slice(0, 1_000)
+    const steps = stringList(args.steps, 20)
+    const acceptanceCriteria = stringList(args.acceptanceCriteria, 20)
+    const unresolvedQuestions = stringList(args.unresolvedQuestions, 12)
+    const requiresAdditionalAuthority = args.requiresAdditionalAuthority === true
+    if (!summary || steps.length === 0 || acceptanceCriteria.length === 0) {
+      return {
+        content: [{ type: 'text', text: 'Plan Gate 拒絕：summary、steps、acceptanceCriteria 都必須完整。' }],
+        details: { ok: false, gate: 'incomplete' },
+      }
+    }
+    setPiPlanGateCandidate(ctx.sessionId, {
+      runId: ctx.runId,
+      summary,
+      steps,
+      acceptanceCriteria,
+      unresolvedQuestions,
+      requiresAdditionalAuthority,
+    })
+    const ready = unresolvedQuestions.length === 0 && !requiresAdditionalAuthority
+    return {
+      content: [{
+        type: 'text',
+        text: ready
+          ? 'Plan Gate candidate 已提交；Host 將在此回合 settlement 後驗證。'
+          : 'Plan Gate candidate 已提交，但仍有未決問題或需要額外權限，Host 不會自動進入 Build。',
+      }],
+      details: { ok: true, ready, unresolvedQuestions, requiresAdditionalAuthority },
+    }
+  },
+}
+
+const recordContinuationItems: PiPackTool = {
+  name: 'record_continuation_items',
+  label: 'Record Continuation Items',
+  description: 'Replace the Host-owned backlog of implementation or improvement items for the next internal iteration',
+  promptSnippet: 'record concrete remaining work before an unfinished Goal-based iteration settles',
+  parameters: {
+    type: 'object',
+    properties: {
+      items: {
+        type: 'array',
+        maxItems: 24,
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            title: { type: 'string' },
+            description: { type: 'string' },
+            acceptanceCriteria: { type: 'array', items: { type: 'string' }, maxItems: 16 },
+            priority: { type: 'number' },
+            dependencies: { type: 'array', items: { type: 'string' }, maxItems: 16 },
+            scope: { type: 'string', enum: ['original-objective', 'expanded'] },
+            requiresAdditionalAuthority: { type: 'boolean' },
+            status: { type: 'string', enum: ['candidate', 'running', 'completed', 'blocked', 'discarded'] },
+          },
+          required: ['id', 'title', 'description', 'acceptanceCriteria', 'scope', 'requiresAdditionalAuthority', 'status'],
+        },
+      },
+    },
+    required: ['items'],
+  },
+  execute: async (args, ctx) => {
+    if (!ctx.runId) return { content: [{ type: 'text', text: '續行清單拒絕：缺少 Host run identity。' }], details: { ok: false } }
+    const items = normalizeContinuationItems(args.items)
+    if (Array.isArray(args.items) && args.items.length > 0 && items.length === 0) {
+      return { content: [{ type: 'text', text: '續行清單拒絕：沒有完整且可驗證的項目。' }], details: { ok: false } }
+    }
+    setPiContinuationItems(ctx.sessionId, ctx.runId, items)
+    return {
+      content: [{ type: 'text', text: `續行清單已記錄（${items.length} 項）；Host 會在 iteration settlement 後決定是否直接續行。` }],
+      details: { ok: true, items },
+    }
+  },
+}
+
 /** The current plan for a session, for projections that read it directly. */
 export function piCurrentPlan(sessionId: string): PiPlanStep[] | undefined {
   return getPiLivePlan(sessionId)
@@ -135,6 +243,13 @@ export function buildInteractionPlanningPacks() {
       capability: 'planning',
       alwaysActive: true,
       tools: [updatePlan],
+    },
+    {
+      id: 'planning-control-pack',
+      name: 'Planning lifecycle controls',
+      description: 'Host-admitted Plan Gate and Goal continuation controls',
+      capability: 'planning-control',
+      tools: [completePlan, recordContinuationItems],
     },
   ]
 }

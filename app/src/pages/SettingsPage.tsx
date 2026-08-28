@@ -353,6 +353,45 @@ function memoryControlsDisabled(projection: { loading: boolean; error: string | 
   return projection.loading || Boolean(projection.error)
 }
 
+function ProviderServiceTierSettings({
+  provider,
+  onChange,
+}: {
+  provider: LlmSettings['cliProviders'][number]
+  onChange: (tier: LlmSettings['cliProviders'][number]['serviceTier']) => void
+}) {
+  const capabilities = provider.diagnostic?.capabilities
+  const tiers = capabilities?.serviceTiers || []
+  const selectedTier = provider.serviceTier || 'provider-default'
+  const selectedTierUnavailable = selectedTier !== 'provider-default' && !tiers.includes(selectedTier)
+  return (
+    <>
+      <label className="flex items-center justify-between gap-3 text-[11px] text-outline">
+        <span>Provider service tier</span>
+        <select
+          className={settingsInputCls + ' max-w-[190px]'}
+          value={selectedTier}
+          onChange={(event) => onChange(event.target.value as typeof provider.serviceTier)}
+        >
+          <option value="provider-default">Provider default</option>
+          {selectedTierUnavailable && (
+            <option value={selectedTier} disabled>{selectedTier}（目前 binary 不支援）</option>
+          )}
+          {tiers.map((tier) => <option key={tier} value={tier}>{tier}</option>)}
+        </select>
+      </label>
+      <p className="text-[10px] leading-relaxed text-outline/80">
+        與 Composer 的執行節奏分離；目前 binary 未宣告支援時不傳參數，安全回到 provider default。
+      </p>
+      <p className="text-[10px] leading-relaxed text-outline">
+        {capabilities
+          ? `實際能力 rev ${capabilities.revision.slice(0, 8)} · 核准 要求 ${capabilities.approval.always} / 自動 ${capabilities.approval.auto} / 完整 ${capabilities.approval.full} · Plan ${capabilities.agentMode.plan} · 推理 ${capabilities.thinkingEffort}`
+          : '尚未取得此 binary 的實際能力快照。'}
+      </p>
+    </>
+  )
+}
+
 export function SettingsPage() {
   const { settings, update, testConnection, exportBundle, importBundle } = useSettingsStore()
   const [section, setSection] = useState('general')
@@ -1996,6 +2035,14 @@ export function SettingsPage() {
                   <p className="text-[10px] text-outline font-[family-name:var(--font-mono)]">
                     模型：{(p.models || []).map((m) => m.id).join(', ') || '—'}
                   </p>
+                  <ProviderServiceTierSettings
+                    provider={p}
+                    onChange={(serviceTier) => {
+                      const next = [...(settings.cliProviders || [])]
+                      next[idx] = { ...p, serviceTier }
+                      set({ cliProviders: next })
+                    }}
+                  />
                 </div>
               ))}
             </SettingsGroup>

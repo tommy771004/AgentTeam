@@ -10,7 +10,12 @@
  * unattended run 禁用(無人可審計畫)。純邏輯部分供 smoke 鏡射。
  */
 
-export const PLAN_FILE_PREFIX = '.scratch/'
+import {
+  PLAN_FILE_PREFIX,
+  planModeToolDecision as decidePlanModeTool,
+} from './planPolicy.ts'
+
+export { PLAN_FILE_PREFIX }
 
 export const ENTER_PLAN_MODE_TOOL = 'enter_plan_mode'
 export const EXIT_PLAN_MODE_TOOL = 'exit_plan_mode'
@@ -36,28 +41,6 @@ export function resetPlanMode(): void {
   activeRuns.clear()
 }
 
-/** plan mode 下無條件拒絕的工具(寫入/副作用/不可檢查)。 */
-const PLAN_DENY_TOOLS = new Set([
-  'bash',
-  'workspace_delete',
-  'workspace_move',
-  'workspace_download',
-  'message_send',
-  'mcp_call',
-  'delegate_task',
-  'skill_save',
-  'design_artifact_export',
-  'design_artifact_patch',
-  'design_artifact_tweak',
-  'design_artifact_capture',
-  'content_publish',
-])
-
-function isPlanFilePath(p: string): boolean {
-  const norm = p.replace(/\\/g, '/').replace(/^\.\//, '').trim()
-  return norm.startsWith(PLAN_FILE_PREFIX) && !norm.includes('..')
-}
-
 /**
  * Plan mode 工具決策(純函式,smoke 鏡射):
  * - workspace_write / workspace_mkdir:僅 `.scratch/` 下放行
@@ -69,19 +52,5 @@ export function planModeToolDecision(
   input: Record<string, unknown>,
   sideEffectHint = false,
 ): { allowed: boolean; reason?: string } {
-  if (tool === 'workspace_write' || tool === 'workspace_mkdir') {
-    const p = String(input.path || '')
-    if (isPlanFilePath(p)) return { allowed: true }
-    return {
-      allowed: false,
-      reason: `Plan mode:只有 ${PLAN_FILE_PREFIX} 下的計畫文件可寫,「${p.slice(0, 80)}」被拒。先 exit_plan_mode 取得核准再實作。`,
-    }
-  }
-  if (PLAN_DENY_TOOLS.has(tool) || tool.startsWith('mcp_') || sideEffectHint) {
-    return {
-      allowed: false,
-      reason: `Plan mode:${tool} 屬副作用工具,規劃階段不可執行。完成計畫後呼叫 exit_plan_mode 請使用者核准。`,
-    }
-  }
-  return { allowed: true }
+  return decidePlanModeTool(tool, input, sideEffectHint)
 }

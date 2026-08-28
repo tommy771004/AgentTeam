@@ -48,6 +48,19 @@ function resolveCliBinary(kind: LocalRunnerKind, settings: LlmSettings): string 
   return p?.cliBinary || undefined
 }
 
+function resolveCliServiceTier(kind: LocalRunnerKind, settings: LlmSettings): RuntimeOverrides['providerServiceTier'] {
+  const mapId = kind === 'claude' ? 'anthropic' : kind === 'gemini' ? 'google' : kind
+  return (settings.cliProviders || []).find((provider) => provider.id === mapId || provider.id === kind)?.serviceTier
+    || 'provider-default'
+}
+
+function admittedCliServiceTier(
+  snapshot: RunDispatchSnapshot,
+  kind: LocalRunnerKind,
+): RuntimeOverrides['providerServiceTier'] {
+  return snapshot.overrides.providerServiceTier || resolveCliServiceTier(kind, snapshot.settings)
+}
+
 function isRunnerAuthorized(kind: LocalRunnerKind, settings: LlmSettings): boolean {
   const mapId = kind === 'claude' ? 'anthropic' : kind === 'gemini' ? 'google' : kind
   return (settings.cliProviders || []).some(
@@ -296,6 +309,7 @@ export async function dispatchThreadTask(
       cwd: projectRoot || undefined,
       model,
       depth,
+      serviceTier: admittedCliServiceTier(snapshot, kind),
       agentMode,
       approvalMode: snapshot.overrides.approvalMode || settings.approvalMode,
       unattended: snapshot.overrides.unattended === true,
@@ -304,6 +318,7 @@ export async function dispatchThreadTask(
       threadId: tid || undefined,
       configSnapshot,
       loopType: snapshot.forceLoopType,
+      maxIterations: snapshot.overrides.maxIterations,
       scheduleTrigger: snapshot.overrides.scheduleTrigger,
       eventTrigger: snapshot.overrides.eventTrigger,
       nextState: snapshot.overrides.nextState,

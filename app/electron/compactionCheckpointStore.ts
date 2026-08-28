@@ -45,6 +45,8 @@ export class JsonCompactionCheckpointStore {
         manifest: input.manifest ? structuredClone(input.manifest) : undefined,
         workingStateRevision: input.workingStateRevision,
         workingState: input.workingState ? structuredClone(input.workingState) : undefined,
+        governingPackage: input.governingPackage ? structuredClone(input.governingPackage) : undefined,
+        continuationItems: input.continuationItems ? structuredClone(input.continuationItems) : undefined,
       }
       const file = this.fileFor(runId, checkpoint.sequence || existing.length + 1)
       fs.mkdirSync(path.dirname(file), { recursive: true })

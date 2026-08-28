@@ -105,28 +105,41 @@ const directory = await mkdtemp(join(tmpdir(), 'memory-control-meta-agent-'))
 try {
   const repository = await JsonMemoryControlPackageRepository.open(join(directory, 'packages.json'))
   const active = repository.admitActive()
-  const governedTrace = structuredClone(traces.invocationPolicy)
-  for (const entry of governedTrace.entries) {
-    if (entry.kind === 'memory-control-package') entry.packageIdentity = { id: active.id, revision: active.revision, digest: active.digest }
-    if (entry.kind === 'skill-invocation') entry.invocation.packageIdentity = { id: active.id, revision: active.revision, digest: active.digest }
-    if (entry.kind === 'state-check') entry.packageIdentity = { id: active.id, revision: active.revision, digest: active.digest }
+  const governed = (trace: TurnRecord) => {
+    const result = structuredClone(trace)
+    for (const entry of result.entries) {
+      if (entry.kind === 'memory-control-package') entry.packageIdentity = { id: active.id, revision: active.revision, digest: active.digest }
+      if (entry.kind === 'skill-invocation') entry.invocation.packageIdentity = { id: active.id, revision: active.revision, digest: active.digest }
+      if (entry.kind === 'state-check') entry.packageIdentity = { id: active.id, revision: active.revision, digest: active.digest }
+    }
+    return result
   }
-  const candidateResult = await createMemoryControlMetaCandidate({
-    packages: repository,
-    record: governedTrace,
-    output: [{ op: 'replace', path: '/maxSkills', value: 1 }],
-  })
-  assert.equal(candidateResult.diagnosis.status, 'localized')
-  assert.equal(candidateResult.candidate.status, 'candidate')
-  assert.equal(repository.admitActive().revision, active.revision, 'Meta-Agent cannot activate its candidate')
-  for (const [key, component] of Object.entries(active.components)) {
-    if (key === 'invocationPolicy') continue
-    assert.equal(candidateResult.candidate.components[key as keyof typeof active.components].digest, component.digest)
+  const repairSkill = '---\nname: writer-repair\nversion: 1\npreflight-tools: write\n---\nRequire verified output.'
+  const candidateInputs = {
+    experientialSkills: [{ op: 'replace' as const, path: '/overrides', value: { 'writer-repair': repairSkill } }],
+    workingMemorySpec: [{ op: 'replace' as const, path: '/maxGoals', value: 64 }],
+    invocationPolicy: [{ op: 'replace' as const, path: '/maxSkills', value: 1 }],
+    checkers: [{ op: 'replace' as const, path: '/maxEvidenceSequenceLag', value: 128 }],
   }
-  const event = repository.lineage().events.at(-1)!
-  assert.equal(event.kind, 'candidate-created')
-  assert.equal(event.diagnosisComponent, 'invocationPolicy')
-  assert.match(event.reason, /meta-agent diagnosis [a-f0-9]{64}/)
+  const candidateResults = []
+  for (const component of Object.keys(candidateInputs) as Array<keyof typeof candidateInputs>) {
+    const result = await createMemoryControlMetaCandidate({
+      packages: repository, record: governed(traces[component]), output: candidateInputs[component],
+    })
+    candidateResults.push(result)
+    assert.equal(result.diagnosis.component, component)
+    assert.equal(result.candidate.status, 'candidate')
+    for (const [key, value] of Object.entries(active.components)) {
+      if (key === component) continue
+      assert.equal(result.candidate.components[key as keyof typeof active.components].digest, value.digest)
+    }
+  }
+  assert.equal(repository.admitActive().revision, active.revision, 'Meta-Agent cannot activate its candidates')
+  assert.deepEqual(repository.lineage().events.slice(-4).map((event) => event.diagnosisComponent), Object.keys(candidateInputs))
+  assert.ok(repository.lineage().events.slice(-4).every((event) => event.kind === 'candidate-created'
+    && /meta-agent diagnosis [a-f0-9]{64}/.test(event.reason)))
+
+  const governedTrace = governed(traces.invocationPolicy)
 
   const beforeRefusals = repository.lineage().packages.length
   for (const output of [
@@ -142,6 +155,7 @@ try {
   await assert.rejects(() => createMemoryControlMetaCandidate({ packages: repository, record: ambiguous, output: [{ op: 'replace', path: '/maxSkills', value: 1 }] }), /insufficient|ambiguous/i)
   assert.equal(repository.lineage().packages.length, beforeRefusals, 'refused output creates no candidate or application mutation')
   assert.equal(repository.admitActive().revision, active.revision)
+  const candidateResult = candidateResults.find((result) => result.diagnosis.component === 'invocationPolicy')!
   await repository.rejectCandidate({ revision: candidateResult.candidate.revision, reason: `meta-agent diagnosis ${candidateResult.diagnosis.diagnosisId} rejected by maintainer` })
   const rejection = repository.lineage().events.at(-1)!
   assert.equal(rejection.kind, 'candidate-rejected')

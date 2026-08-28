@@ -1799,6 +1799,7 @@ ipcMain.handle(
       cwd?: string
       model?: string
       depth?: string
+      serviceTier?: 'provider-default' | 'standard' | 'priority' | 'flex'
       agentMode?: string
       thinkingVariant?: string
       showThinking?: boolean

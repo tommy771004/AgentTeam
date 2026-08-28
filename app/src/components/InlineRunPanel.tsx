@@ -26,8 +26,10 @@ import { useRunContextUsage } from '../hooks/useRunContextUsage'
 import { useRunUsageRefresher } from '../hooks/useRunUsageRefresher'
 import type { TurnRecordEntry } from '../agent/turnRecord'
 import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
+import { useWorkingStateProjectionStore } from '../store/workingStateProjectionStore'
 import { loopTypeZh } from '../i18n/zh'
 import type { AgentState, ExecutionStep } from '../agent/types'
+import { WorkingStateView } from './WorkingStateView'
 
 /**
  * CloudCLI-style embedded run progress — no page navigation.
@@ -53,6 +55,12 @@ const RUNNER_GUARANTEE_LABEL = {
   reduced: 'Reduced guarantee',
   unavailable: 'Unavailable / degraded',
 } as const
+
+function LiveWorkingStateView({ runId, enabled }: { runId: string; enabled: boolean }) {
+  const projection = useWorkingStateProjectionStore((state) => state.byRunId[runId])
+  if (!enabled || !projection) return null
+  return <WorkingStateView projection={projection} />
+}
 
 function inlineRunnerPresentation(agent: AgentState, recordEntries: TurnRecordEntry[]) {
   const liveRecord = recordEntries.length
@@ -422,6 +430,8 @@ export function InlineRunPanel({
           live={live}
           startedAt={activity.startedAt}
         />
+
+        <LiveWorkingStateView runId={runId} enabled={isPiHost} />
 
         <PanelSection
           id="run-progress"

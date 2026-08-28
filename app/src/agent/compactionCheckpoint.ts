@@ -10,6 +10,8 @@
  */
 
 import type { WorkingState } from './workingState.ts'
+import type { MemoryControlPackageIdentity } from './memoryControlPackage.ts'
+import type { ContinuationItem } from './continuation.ts'
 
 export type CompactionReason = 'auto' | 'manual' | 'emergency' | 'interrupt'
 
@@ -76,6 +78,10 @@ export interface CompactionCheckpoint {
   manifest?: CompactionManifest
   workingStateRevision?: number
   workingState?: WorkingState
+  /** Package frozen for this lifecycle; resume must re-admit this exact identity. */
+  governingPackage?: MemoryControlPackageIdentity
+  /** Host-owned continuation backlog captured at the same clean tool boundary. */
+  continuationItems?: ContinuationItem[]
   /** Set the moment a resume claims this checkpoint; one claim, ever. */
   resumeClaimedAt?: string
 }
@@ -97,6 +103,8 @@ export type CompactionCheckpointSaveInput = {
   manifest?: CompactionManifest
   workingStateRevision?: number
   workingState?: WorkingState
+  governingPackage?: MemoryControlPackageIdentity
+  continuationItems?: ContinuationItem[]
 }
 
 export type CompactionCheckpointBridge = {

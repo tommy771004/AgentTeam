@@ -176,17 +176,24 @@ type ValueRule = (value: unknown) => boolean
 const integer = (minimum: number, maximum: number): ValueRule =>
   (value) => Number.isSafeInteger(value) && Number(value) >= minimum && Number(value) <= maximum
 const oneOf = (...values: readonly unknown[]): ValueRule => (value) => values.includes(value)
+const skillOverrides: ValueRule = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value)
+  && Object.keys(value as Record<string, unknown>).length <= 32
+  && Object.entries(value as Record<string, unknown>).every(([id, raw]) =>
+    /^[a-z0-9][a-z0-9-]{0,63}$/.test(id) && typeof raw === 'string'
+    && raw.trim().length > 0 && new TextEncoder().encode(raw).byteLength <= 16_384))
 
 const COMPONENT_PATCH_SCHEMA: Readonly<Record<MemoryControlComponentKey, Readonly<Record<string, ValueRule>>>> = frozen({
   experientialSkills: {
     '/source': oneOf('frozen-skill-resource-view'),
     '/selection': oneOf('exact-tool', 'tool-and-goal'),
     '/maxSelectedSkills': integer(1, 2),
+    '/overrides': skillOverrides,
   },
   workingMemorySpec: {
     '/schemaVersion': oneOf(1),
     '/authority': oneOf('pi-core-host'),
     '/optimisticConcurrency': oneOf(true),
+    '/maxGoals': integer(1, 100),
   },
   invocationPolicy: {
     '/trigger': oneOf('state-changing-or-contract-required', 'contract-required'),
@@ -197,6 +204,7 @@ const COMPONENT_PATCH_SCHEMA: Readonly<Record<MemoryControlComponentKey, Readonl
     '/fileContent': oneOf(1),
     '/delegatedGoal': oneOf(1),
     '/modelClaimsAreEvidence': oneOf(false),
+    '/maxEvidenceSequenceLag': integer(1, 4_096),
   },
 })
 
@@ -216,18 +224,20 @@ function validateMetaPatch(
   return frozen(output.map((raw) => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Meta-Agent JSON Patch operation is invalid')
     const operation = raw as Record<string, unknown>
-    if (Object.keys(operation).length !== 3 || operation.op !== 'replace' || typeof operation.path !== 'string' || !('value' in operation)) {
-      throw new Error('Meta-Agent output may only replace schema-declared component fields')
+    if (Object.keys(operation).length !== 3 || !['add', 'replace'].includes(String(operation.op)) || typeof operation.path !== 'string' || !('value' in operation)) {
+      throw new Error('Meta-Agent output may only add or replace schema-declared component fields')
     }
     const rule = allowed[operation.path]
-    if (!rule || !rule(operation.value) || seen.has(operation.path) || !Object.prototype.hasOwnProperty.call(currentBody, operation.path.slice(1))) {
+    const exists = Object.prototype.hasOwnProperty.call(currentBody, operation.path.slice(1))
+    if (!rule || !rule(operation.value) || seen.has(operation.path)
+      || operation.op === 'replace' && !exists || operation.op === 'add' && exists) {
       throw new Error('Meta-Agent JSON Patch violates the diagnosed component schema')
     }
-    if (canonicalMemoryControlEvaluationJson(currentBody[operation.path.slice(1)]) === canonicalMemoryControlEvaluationJson(operation.value)) {
+    if (exists && canonicalMemoryControlEvaluationJson(currentBody[operation.path.slice(1)]) === canonicalMemoryControlEvaluationJson(operation.value)) {
       throw new Error('Meta-Agent JSON Patch must change the diagnosed component')
     }
     seen.add(operation.path)
-    return frozen({ op: 'replace' as const, path: operation.path, value: structuredClone(operation.value) })
+    return frozen({ op: operation.op as 'add' | 'replace', path: operation.path, value: structuredClone(operation.value) })
   }))
 }
 

@@ -183,7 +183,10 @@ const app = await electron.launch({
 app.process().on('exit', (code, signal) => console.error(`electron exited code=${code} signal=${signal}`))
 app.process().stderr?.on('data', (chunk) => console.error(`electron stderr: ${chunk}`))
 
-const timeout = 120_000
+const configuredTimeout = Number(process.env.PI_HOST_E2E_TIMEOUT_MS)
+const timeout = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+  ? Math.max(1_000, configuredTimeout)
+  : 120_000
 
 const armFinalizeClaimGate = (runId, gateId) => {
   fs.rmSync(finalizeGateMarkerPath, { force: true })
@@ -259,20 +262,31 @@ const waitForRecoveredTimeline = async (page, runId, kind, description) => {
   while (Date.now() < deadline) {
     lastState = await page.evaluate(async (id) => ({
       feed: document.querySelectorAll('.agent-process-feed').length,
+      projectedRecordEntries: Number(
+        [...document.querySelectorAll('.agent-process-feed')]
+          .find((element) => element.getAttribute('data-run-id') === id)
+          ?.getAttribute('data-record-count') || 0,
+      ),
       recordTimeline: document.querySelectorAll('[data-run-timeline="record"]').length,
       stop: document.querySelectorAll('[aria-label="停止執行"]').length,
       host: await window.subagents?.piHost?.runs?.active?.(),
     }), runId)
     // The feed proves the restored same-thread run is projected. Active runs
-    // additionally retain stop control; terminal recovery intentionally does
-    // not render that control after the turn has settled, and the settled
-    // process shell is replaced by its recorded timeline.
+    // additionally retain stop control. A terminal turn cancelled before its
+    // first assistant/tool row can have a valid Host record whose visible
+    // timeline is empty, so terminal recovery is proven by the renderer's
+    // run-scoped record projection rather than by a row container.
     const timelineReady = kind === 'active'
       ? lastState.feed && lastState.stop
-      : lastState.recordTimeline
+      : lastState.projectedRecordEntries > 0
     if (timelineReady) return
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
+  lastState.attached = await page.evaluate(async (id) => (
+    window.subagents?.piHost?.runs?.attach?.(id, undefined, 200).catch((error) => ({
+      error: error instanceof Error ? error.message : String(error),
+    }))
+  ), runId)
   throw new Error(`${description}: timed out after ${timeout}ms; last state=${JSON.stringify(lastState)}`)
 }
 

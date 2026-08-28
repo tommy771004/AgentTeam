@@ -7,8 +7,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { JsonMemoryControlPackageRepository } from '../electron/memoryControlPackageRepository.ts'
+import { finalWorkingStateSatisfiesDoD } from '../electron/memoryControlEvaluationAuthority.ts'
 import { createCanonicalMemoryControlEvaluationExecutor, evaluateMemoryControlCandidate, sealMemoryControlEvaluationCorpus } from '../src/agent/memoryControlEvaluationGate.ts'
 import { canonicalMemoryControlEvaluationJson } from '../src/agent/memoryControlEvaluationContract.ts'
+import { createInitialWorkingState } from '../src/agent/workingState.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'memory-control-evaluation-'))
 const agentDir = join(root, 'agent')
@@ -17,6 +19,28 @@ const statePath = join(root, 'state.json')
 const corpusPath = join(root, 'evaluation-corpora.json')
 const token = 'ticket-12-evaluation-secret'
 const repository = await JsonMemoryControlPackageRepository.open(packagePath)
+
+const partialState = createInitialWorkingState({
+  runId: 'multi-goal-regression', objective: 'complete both goals',
+  goals: [{ description: 'first' }, { description: 'second' }],
+})
+const firstGoal = partialState.goals[0]
+const partiallyDone = {
+  ...partialState,
+  revision: 2,
+  goals: [
+    { ...firstGoal, status: 'done' as const, evidence: [{
+      seq: 2, evidenceId: `execution:${'a'.repeat(64)}`, runId: partialState.runId,
+      goalId: firstGoal.id, tool: 'write', callId: 'first', contractDigest: 'b'.repeat(64),
+      schemaDigest: 'c'.repeat(64), receiptDigest: 'a'.repeat(64),
+    }] },
+    partialState.goals[1],
+  ],
+}
+assert.equal(finalWorkingStateSatisfiesDoD([
+  { seq: 1, turn: 1, step: 1, kind: 'working-state', source: 'host', state: partialState },
+  { seq: 2, turn: 1, step: 1, kind: 'working-state', source: 'host', state: partiallyDone },
+] as any, partialState.runId), false, 'one accepted goal cannot satisfy a multi-goal DoD')
 const candidates = await Promise.all(['false-done', 'tokens'].map((name) => repository.createCandidate({
   expectedActiveRevision: 1, diagnosisComponent: 'invocationPolicy',
   patch: [{ op: 'replace', path: '/maxSkills', value: 1 }], reason: `source diagnosis ${name}`,

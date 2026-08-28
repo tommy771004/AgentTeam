@@ -247,6 +247,59 @@ export function bindPiSessionRun(sessionId: string, binding: {
 }
 
 /**
+ * Advance one admitted run from Plan to Build at an iteration boundary.
+ * The run id and expected mode form a CAS guard; every other frozen field is
+ * retained so a phase transition cannot accidentally drop a restriction.
+ */
+export function transitionPiSessionAgentMode(
+  sessionId: string,
+  runId: string,
+  expected: 'plan' | 'build',
+  next: 'plan' | 'build',
+): boolean {
+  const binding = sessionRuns.get(sessionId)
+  if (!binding?.frozenPolicy || binding.runId !== runId || binding.frozenPolicy.agentMode !== expected) return false
+  sessionRuns.set(sessionId, {
+    ...binding,
+    frozenPolicy: Object.freeze({ ...binding.frozenPolicy, agentMode: next }),
+  })
+  return true
+}
+
+const APPROVAL_STRICTNESS = { always: 0, auto: 1, full: 2 } as const
+
+/** Apply only an equal or stricter approval posture to an active run. */
+export function tightenPiSessionApprovalMode(
+  sessionId: string,
+  runId: string,
+  requested: 'always' | 'auto' | 'full',
+): boolean {
+  const binding = sessionRuns.get(sessionId)
+  if (!binding?.frozenPolicy || binding.runId !== runId) return false
+  const current = binding.frozenPolicy.approvalMode
+  if (APPROVAL_STRICTNESS[requested] > APPROVAL_STRICTNESS[current]) return false
+  sessionRuns.set(sessionId, {
+    ...binding,
+    approvalMode: requested,
+    frozenPolicy: Object.freeze({ ...binding.frozenPolicy, approvalMode: requested }),
+  })
+  return true
+}
+
+/** Attended may become unattended immediately; the reverse waits for a new run. */
+export function tightenPiSessionUnattended(sessionId: string, runId: string): boolean {
+  const binding = sessionRuns.get(sessionId)
+  if (!binding?.frozenPolicy || binding.runId !== runId) return false
+  if (binding.unattended && binding.frozenPolicy.unattended) return true
+  sessionRuns.set(sessionId, {
+    ...binding,
+    unattended: true,
+    frozenPolicy: Object.freeze({ ...binding.frozenPolicy, unattended: true }),
+  })
+  return true
+}
+
+/**
  * Patch a verified bash call so it executes inside this run's sandbox.
  *
  * Pi allows `event.input` to be mutated in place before execution, so the
@@ -961,7 +1014,7 @@ export function piSkillPreflightExtensionFactory(ctx: { sessionId: string }): {
 } {
   return {
     name: 'subagents-skill-preflight-context',
-    hidden: true,
+    hidden: true as const,
     factory: (pi) => {
       pi.on('context', (event) => {
         const pending = pendingSkillContexts.get(ctx.sessionId)
@@ -1436,15 +1489,21 @@ async function attestBuiltinWriteEffect(input: {
  * its `tool_call` hook is where the shared Approval Decision intercepts the
  * model's calls mid-turn, so a nested or direct call cannot slip past it.
  */
-export function piPackExtensionFactories(
+export type PiPackExtensionBundle = {
+  factories: Array<{ name: string; hidden: true; factory: (pi: InlineExtensionFactoryInput) => void }>
+  batchTools: Map<string, PiPackTool>
+}
+
+/** Build replacement resources without mutating the catalog used by the live session. */
+export function buildPiPackExtensionBundle(
   ctx: { sessionId: string; cwd: string; temporaryChat?: boolean },
   additionalPacks: ReadonlyArray<PiExtensionPack> = [],
-): Array<{ name: string; hidden: true; factory: (pi: InlineExtensionFactoryInput) => void }> {
+): PiPackExtensionBundle {
   const allPacks = [...piExtensionPacks(), ...additionalPacks]
-  sessionBatchPackTools.set(ctx.sessionId, new Map(allPacks.flatMap((pack) => pack.tools.map((tool) => [tool.name, tool]))))
-  return allPacks.map((pack) => ({
+  const batchTools = new Map(allPacks.flatMap((pack) => pack.tools.map((tool) => [tool.name, tool])))
+  const factories = allPacks.map((pack) => ({
     name: `subagents-${pack.id}`,
-    hidden: true,
+    hidden: true as const,
     factory: (pi: InlineExtensionFactoryInput) => {
       const byName = new Map(pack.tools.map((tool) => [tool.name, tool]))
       pi.on('tool_call', async (event) => {
@@ -1602,6 +1661,12 @@ export function piPackExtensionFactories(
       }
     },
   }))
+  return { factories, batchTools }
+}
+
+/** Commit the staged catalog only after its replacement Pi session is live. */
+export function commitPiPackExtensionBundle(sessionId: string, bundle: PiPackExtensionBundle): void {
+  sessionBatchPackTools.set(sessionId, bundle.batchTools)
 }
 
 /* ── Catalog projection ──────────────────────────────────────────────── */

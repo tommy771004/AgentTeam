@@ -77,6 +77,19 @@ export const EXTERNAL_CLI_RUNNER_CAPABILITIES: Readonly<RunnerCapabilities> = Ob
   checkers: false,
 })
 
+/** Multiple external processes coordinated by a Host-authored continuation envelope. */
+export const EXTERNAL_ORCHESTRATED_RUNNER_CAPABILITIES: Readonly<RunnerCapabilities> = Object.freeze({
+  parse: true,
+  validateDoD: false,
+  iterate: true,
+  continueGoal: true,
+  progressiveCapabilities: false,
+  runScopedProgress: true,
+  workingState: false,
+  skillPreflight: false,
+  checkers: false,
+})
+
 /** No Host record and no frozen run snapshot means no guarantee may be inferred. */
 export const UNAVAILABLE_RUNNER_CAPABILITIES: Readonly<RunnerCapabilities> = Object.freeze({
   parse: false,

@@ -358,6 +358,20 @@ function rejected(input: {
   }
 }
 
+function evidenceSequenceRejection(input: {
+  evidenceSeq: number
+  currentSequence?: number
+  maxEvidenceSequenceLag?: number
+}): string | undefined {
+  if (!isEvidenceSequence(input.evidenceSeq)) return 'evidence-sequence-malformed'
+  if (input.currentSequence === undefined || input.maxEvidenceSequenceLag === undefined) return undefined
+  if (!isEvidenceSequence(input.currentSequence) || !Number.isSafeInteger(input.maxEvidenceSequenceLag)
+    || input.maxEvidenceSequenceLag < 1 || input.currentSequence - input.evidenceSeq > input.maxEvidenceSequenceLag) {
+    return 'execution-evidence-too-old'
+  }
+  return undefined
+}
+
 /**
  * Goal-specific fail-closed Checker. Its caller supplies the trusted result
  * envelope received directly from Pi; model text and arguments can only make
@@ -370,6 +384,8 @@ export function checkWorkingStateProposal(input: {
   settlement: WorkingToolSettlement
   evidence: unknown
   evidenceSeq: number
+  currentSequence?: number
+  maxEvidenceSequenceLag?: number
   /** False when a later sibling effect changed the verified resource. */
   evidenceStillApplicable?: boolean
   /** Current continuation run; state.runId remains the stable lineage id. */
@@ -401,7 +417,8 @@ export function checkWorkingStateProposal(input: {
   if (input.evidenceStillApplicable === false) return rejected({ state: input.state, proposal: input.proposal, reason: 'execution-evidence-invalidated' })
   if (goal.completionPredicate?.kind !== 'file-content') return rejected({ state: input.state, proposal: input.proposal, reason: 'unsupported-goal-predicate' })
   if (input.proposal.tool !== 'write') return rejected({ state: input.state, proposal: input.proposal, reason: 'unsupported-goal-tool' })
-  if (!isEvidenceSequence(input.evidenceSeq)) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-sequence-malformed' })
+  const sequenceRejection = evidenceSequenceRejection(input)
+  if (sequenceRejection) return rejected({ state: input.state, proposal: input.proposal, reason: sequenceRejection })
   if (!isWorkingExecutionEvidence(input.evidence)) return rejected({ state: input.state, proposal: input.proposal, reason: 'execution-evidence-malformed' })
   const evidence = input.evidence
   if (evidence.evidenceId !== `execution:${evidence.receiptDigest}`) return rejected({ state: input.state, proposal: input.proposal, reason: 'evidence-identity-mismatch' })

@@ -10,6 +10,8 @@ import { app } from 'electron'
 import { runBash } from './shellBridge'
 import { scanOpenCodeAgents } from './opencodeBridge'
 import { executableLookupCommand, firstExecutablePath } from './platformProcess'
+import { inspectCliProviderCapabilities } from './cliCapabilityRegistry.ts'
+import type { CliProviderCapabilitySnapshot } from '../src/agent/cliProviderCapabilities.ts'
 
 export type DiscoveredModel = {
   id: string
@@ -32,6 +34,7 @@ export type DiscoveredCli = {
   defaultModel?: string
   defaultDepth?: string
   notes: string[]
+  capabilities?: CliProviderCapabilitySnapshot
 }
 
 const ALL: DiscoveredModel['depths'] = ['fast', 'standard', 'deep', 'max', 'ultra']
@@ -686,6 +689,14 @@ export async function discoverLocalClis(): Promise<{
   }
 
   const found = clis.filter((c) => c.foundBinary || c.hasAuth)
+  await Promise.all(clis.map(async (cli) => {
+    if (!cli.binaryPath) return
+    try {
+      cli.capabilities = await inspectCliProviderCapabilities(cli.id, cli.binaryPath)
+    } catch (error) {
+      cli.notes.push(`capability probe failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }))
   const summary = [
     `已掃描 ${clis.length} 個 CLI 來源，${found.length} 個可授權`,
     ...found.map((c) => `· ${c.name}: binary=${c.foundBinary ? 'yes' : 'no'} auth=${c.hasAuth} models=${c.models.length}`),
@@ -727,6 +738,7 @@ export function applyDiscoveryToProviders(
         foundBinary: d.foundBinary,
         binaryPath: d.binaryPath,
         authNote: d.authNote,
+        ...(d.capabilities ? { capabilities: d.capabilities } : {}),
       },
       enabled: Boolean(existing.enabled) || d.foundBinary || d.hasAuth,
       authorized: Boolean(existing.authorized) || d.hasAuth || d.foundBinary,

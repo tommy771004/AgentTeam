@@ -77,6 +77,16 @@ function packageMatches(entries: readonly TurnRecordEntry[], identity: MemoryCon
     && entry.packageIdentity.digest === identity.digest)
 }
 
+/** Goal-based DoD is the final Host-committed ledger, never an intermediate accepted check. */
+export function finalWorkingStateSatisfiesDoD(entries: readonly TurnRecordEntry[], runId: string): boolean {
+  const state = entries
+    .filter((entry): entry is Extract<TurnRecordEntry, { kind: 'working-state' }> =>
+      entry.kind === 'working-state' && entry.state.runId === runId)
+    .at(-1)?.state
+  return Boolean(state?.goals.length
+    && state.goals.every((goal) => goal.status === 'done' && goal.evidence.length > 0))
+}
+
 function runMetrics(run: MemoryControlEvaluationRun, task: CorpusTask, entries: TurnRecordEntry[]): MemoryControlRunMetrics {
   if (!packageMatches(entries, run.governingPackage)) throw new Error(`Memory-Control evaluation package is absent from Host trace: ${run.runId}`)
   const runBound = entries.some((entry) => entry.kind === 'working-state' && entry.state.runId === run.runId)
@@ -90,7 +100,7 @@ function runMetrics(run: MemoryControlEvaluationRun, task: CorpusTask, entries: 
   const skillInvocationPrecision = skills.size ? [...skills].filter((skill) => expected.allowedSkills.includes(skill)).length / skills.size : 1
   const settled = entries.some((entry) => entry.kind === 'turn-end' && entry.settlement === 'answered')
   const dodMet = task.loopType === 'Goal-based'
-    ? entries.some((entry) => entry.kind === 'state-check' && entry.check.runId === run.runId && (entry.check.verdict === 'accepted' || entry.check.verdict === 'rebased'))
+    ? finalWorkingStateSatisfiesDoD(entries, run.runId)
     : settled
   const evidenceComplete = requiredActionRecall === 1 && skillInvocationReach === 1
   const usage = projectContextUsage({ version: TURN_RECORD_FORMAT_VERSION, entries })
