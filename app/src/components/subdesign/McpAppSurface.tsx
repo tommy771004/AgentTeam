@@ -397,8 +397,8 @@ export function McpAppSurface(props: {
   // Sandboxed iframe — no Electron/Node authority, constrained CSP, no network
   // Note: sandbox attribute + srcDoc + csp meta ensure no top navigation / no external resources
   const srcDoc = props.html
-    ? `<!doctype html><meta http-equiv="Content-Security-Policy" content="${CSP_SANDBOX}"><meta charset="utf-8"><body style="margin:0;font-family:system-ui">${props.html}<script>window.addEventListener('error',()=>parent.postMessage({v:1,surfaceId:'${props.surfaceId}',kind:'${props.declaration.kind}',action:'error'},'*'));parent.postMessage({v:1,surfaceId:'${props.surfaceId}',kind:'${props.declaration.kind}',action:'ready'},'*')</script>`
-    : `<!doctype html><meta http-equiv="Content-Security-Policy" content="${CSP_SANDBOX}"><body style="display:grid;place-items:center;height:100vh;margin:0;font-family:system-ui;opacity:1"><div>Surface ${props.surfaceId} (${props.declaration.kind})</div>`
+    ? `<!doctype html><meta http-equiv="Content-Security-Policy" content="${CSP_SANDBOX}"><meta charset="utf-8"><body style="margin:0;font-family:&quot;Segoe WPC&quot;,&quot;Segoe UI&quot;,-apple-system,BlinkMacSystemFont,&quot;SF Pro Text&quot;,&quot;SF Pro Display&quot;,system-ui,sans-serif">${props.html}<script>window.addEventListener('error',()=>parent.postMessage({v:1,surfaceId:'${props.surfaceId}',kind:'${props.declaration.kind}',action:'error'},'*'));parent.postMessage({v:1,surfaceId:'${props.surfaceId}',kind:'${props.declaration.kind}',action:'ready'},'*')</script>`
+    : `<!doctype html><meta http-equiv="Content-Security-Policy" content="${CSP_SANDBOX}"><body style="display:grid;place-items:center;height:100vh;margin:0;font-family:&quot;Segoe WPC&quot;,&quot;Segoe UI&quot;,-apple-system,BlinkMacSystemFont,&quot;SF Pro Text&quot;,&quot;SF Pro Display&quot;,system-ui,sans-serif;opacity:1"><div>Surface ${props.surfaceId} (${props.declaration.kind})</div>`
 
   return (
     <div className="rounded-xl border border-neutral-800 overflow-hidden">

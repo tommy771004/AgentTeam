@@ -3215,7 +3215,7 @@ function createStoredZip(files: Array<{ name: string; data: Buffer }>): Buffer {
 function htmlDocumentForPdf(artifact: SubDesignArtifact, content: string): string {
   const body = artifact.renderer === 'html' || artifact.renderer === 'deck-html'
     ? content
-    : `<pre style="white-space:pre-wrap;font:12px/1.6 ui-monospace,monospace">${content.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</pre>`
+    : `<pre style="white-space:pre-wrap;font:12px/1.6 'Segoe WPC','Segoe UI',-apple-system,BlinkMacSystemFont,'SF Pro Text','SF Pro Display',system-ui,sans-serif">${content.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</pre>`
   const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">`
   return /<head[^>]*>/i.test(body)
     ? body.replace(/<head[^>]*>/i, (head) => `${head}${csp}`)

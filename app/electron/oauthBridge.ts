@@ -239,7 +239,7 @@ function waitForAuthCode(
         const err = url.searchParams.get('error')
         const code = url.searchParams.get('code')
         const state = url.searchParams.get('state')
-        const html = `<!doctype html><html><body style="font-family:system-ui;padding:2rem;background:#0b0f14;color:#e8eef6">
+        const html = `<!doctype html><html><body style="font-family:'Segoe WPC','Segoe UI',-apple-system,BlinkMacSystemFont,'SF Pro Text','SF Pro Display',system-ui,sans-serif;padding:2rem;background:#0b0f14;color:#e8eef6">
           <h2>${err ? '授權失敗' : '授權完成'}</h2>
           <p>${err ? err : '可以關閉此分頁，回到 SubAgents AI。'}</p>
           <script>setTimeout(()=>window.close(),800)</script>

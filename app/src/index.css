@@ -76,9 +76,13 @@
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.16), 0 8px 20px rgba(0, 0, 0, 0.1);
   --shadow-raised: 0 14px 36px rgba(0, 0, 0, 0.26), 0 0 0 1px rgba(237, 242, 237, 0.045) inset;
 
-  --font-sora: "Avenir Next", "Segoe UI", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
-  --font-inter: "Avenir Next", "Segoe UI", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "SF Mono", "Cascadia Mono", "Roboto Mono", ui-monospace, monospace;
+  /* Match Hermes Desktop's native UI stack. Keep every text role on the same
+     family, including content that previously opted into a display or mono
+     alias, so labels inside controls and technical surfaces remain cohesive. */
+  --font-hermes-ui: "Segoe WPC", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", emoji;
+  --font-sora: var(--font-hermes-ui);
+  --font-inter: var(--font-hermes-ui);
+  --font-mono: var(--font-hermes-ui);
 
   /* Continuous-ish radii (Apple prefers larger continuous curves) */
   --radius-DEFAULT: 0.5rem;
@@ -113,6 +117,13 @@ body {
   overflow: hidden;
   letter-spacing: -0.01em;
   font-size: var(--app-ui-font-size, 14px);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
 /* Preference-driven appearance (ChatGPT-style settings) */
