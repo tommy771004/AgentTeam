@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { PiSettings, PiThinkingLevel } from './piAgentProfile.ts'
+import { resolveUserPathValue } from './userEnvironment.ts'
 
 type JsonObject = Record<string, unknown>
 
@@ -41,12 +42,7 @@ type OAuthImport = {
 const PI_AGENT_FILES = ['settings.json', 'models.json', 'auth.json']
 
 function expandPath(value: string): string {
-  const trimmed = value.trim()
-  if (trimmed === '~') return os.homedir()
-  if (trimmed.startsWith(`~${path.sep}`) || trimmed.startsWith('~/')) {
-    return path.join(os.homedir(), trimmed.slice(2))
-  }
-  return path.resolve(trimmed)
+  return resolveUserPathValue(value)
 }
 
 function envPath(name: string): string | undefined {

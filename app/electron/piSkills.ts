@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { chmod, lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { resolveUserPathValue } from './userEnvironment.ts'
 
 /**
  * Host-owned skills（技能目錄）— one SKILL.md per skill, discovered by Pi's
@@ -27,9 +28,13 @@ export type PiSkillSyncResult =
   | { name: string; ok: true; status: PiSkillStatus; filePath: string; /** The on-disk (slugified) skill name. */ slug: string }
   | { name: string; ok: false; error: string }
 
-export function resolvePiSkillsDir(agentDir: string | undefined): string | undefined {
-  const configured = process.env.SUBAGENTS_PI_SKILLS_DIR?.trim()
-  if (configured) return configured
+export function resolvePiSkillsDir(
+  agentDir: string | undefined,
+  environment: NodeJS.ProcessEnv = process.env,
+  home = homedir(),
+): string | undefined {
+  const configured = environment.SUBAGENTS_PI_SKILLS_DIR?.trim()
+  if (configured) return resolveUserPathValue(configured, home)
   if (!agentDir) return undefined
   return join(agentDir, 'skills')
 }

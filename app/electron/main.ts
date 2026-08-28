@@ -248,31 +248,80 @@ import {
   type MemoryScope,
 } from './durableMemoryStore'
 import type { MemoryProjectionScope } from '../src/agent/memoryProjection'
+import { configuredUserPath } from './userEnvironment'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const memoryControlMaintainerToken = process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
 delete process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
-const piHostSupervisor = new PiHostSupervisor(() =>
-  utilityProcess.fork(path.join(__dirname, 'pi-host.js'), [], {
+const piHostSupervisor = new PiHostSupervisor(() => {
+  const userHome = app.getPath('home')
+  const userData = app.getPath('userData')
+  return utilityProcess.fork(path.join(__dirname, 'pi-host.js'), [], {
     serviceName: 'SubAgents Pi Core Host',
     env: {
       ...process.env,
       SUBAGENTS_PI_VENDOR_DIR: path.resolve(__dirname, '../../vendor/pi'),
-      SUBAGENTS_PI_AGENT_DIR: path.join(app.getPath('userData'), 'pi-agent'),
-      SUBAGENTS_PI_NATIVE_AGENT_DIR: path.join(app.getPath('home'), '.pi', 'agent'),
-      SUBAGENTS_PI_SYNC_CLI_OAUTH: 'true',
-      SUBAGENTS_CODEX_AUTH_PATH: path.join(app.getPath('home'), '.codex', 'auth.json'),
-      SUBAGENTS_CLAUDE_CREDENTIALS_PATH: path.join(app.getPath('home'), '.claude', '.credentials.json'),
-      SUBAGENTS_PI_HOST_STATE_PATH: path.join(app.getPath('userData'), 'pi-host-state.json'),
-      SUBAGENTS_DURABLE_MEMORY_DB_PATH: path.join(app.getPath('userData'), 'durable-memory.sqlite'),
-      SUBAGENTS_PI_CHECKPOINT_DIR: path.join(app.getPath('userData'), 'run-checkpoints'),
-      SUBAGENTS_PI_SETTINGS_MIGRATION_PATH: path.join(app.getPath('userData'), 'pi-settings-migration.json'),
-      SUBAGENTS_LEGACY_SETTINGS_PATH: settingsPath(),
+      SUBAGENTS_PI_AGENT_DIR: configuredUserPath(
+        process.env,
+        'SUBAGENTS_PI_AGENT_DIR',
+        path.join(userData, 'pi-agent'),
+        userHome,
+      ),
+      SUBAGENTS_PI_NATIVE_AGENT_DIR: configuredUserPath(
+        process.env,
+        'SUBAGENTS_PI_NATIVE_AGENT_DIR',
+        path.join(userHome, '.pi', 'agent'),
+        userHome,
+      ),
+      SUBAGENTS_PI_SYNC_CLI_OAUTH: process.env.SUBAGENTS_PI_SYNC_CLI_OAUTH || 'true',
+      SUBAGENTS_CODEX_AUTH_PATH: configuredUserPath(
+        process.env,
+        'SUBAGENTS_CODEX_AUTH_PATH',
+        path.join(userHome, '.codex', 'auth.json'),
+        userHome,
+      ),
+      SUBAGENTS_CLAUDE_CREDENTIALS_PATH: configuredUserPath(
+        process.env,
+        'SUBAGENTS_CLAUDE_CREDENTIALS_PATH',
+        path.join(userHome, '.claude', '.credentials.json'),
+        userHome,
+      ),
+      SUBAGENTS_PI_HOST_STATE_PATH: configuredUserPath(
+        process.env,
+        'SUBAGENTS_PI_HOST_STATE_PATH',
+        path.join(userData, 'pi-host-state.json'),
+        userHome,
+      ),
+      SUBAGENTS_DURABLE_MEMORY_DB_PATH: configuredUserPath(
+        process.env,
+        'SUBAGENTS_DURABLE_MEMORY_DB_PATH',
+        path.join(userData, 'durable-memory.sqlite'),
+        userHome,
+      ),
+      SUBAGENTS_PI_CHECKPOINT_DIR: configuredUserPath(
+        process.env,
+        'SUBAGENTS_PI_CHECKPOINT_DIR',
+        path.join(userData, 'run-checkpoints'),
+        userHome,
+      ),
+      SUBAGENTS_PI_SETTINGS_MIGRATION_PATH: configuredUserPath(
+        process.env,
+        'SUBAGENTS_PI_SETTINGS_MIGRATION_PATH',
+        path.join(userData, 'pi-settings-migration.json'),
+        userHome,
+      ),
+      SUBAGENTS_LEGACY_SETTINGS_PATH: configuredUserPath(
+        process.env,
+        'SUBAGENTS_LEGACY_SETTINGS_PATH',
+        settingsPath(),
+        userHome,
+      ),
       ...(memoryControlMaintainerToken
         ? { SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN: memoryControlMaintainerToken }
         : {}),
     },
-  }),
+  })
+},
   { requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1'] },
 )
 // Policy Admin / outbound policy dir default (node-safe modules read this env).

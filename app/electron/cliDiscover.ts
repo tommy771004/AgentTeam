@@ -93,8 +93,6 @@ async function which(bin: string): Promise<string | null> {
     home('.codex', 'plugins', '.plugin-appserver', bin),
     home('.opencode', 'bin', bin),
     home('.cursor', 'bin', bin),
-    `/usr/local/bin/${bin}`,
-    `/opt/homebrew/bin/${bin}`,
   ]
   for (const c of candidates) {
     if (c.includes('/') || c.includes('\\')) {

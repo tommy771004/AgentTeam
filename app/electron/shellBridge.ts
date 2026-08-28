@@ -13,6 +13,7 @@ import {
   spawnCommandSpec,
   terminateProcessTree,
 } from './platformProcess.ts'
+import { buildUserEnvironment } from './userEnvironment.ts'
 
 export type BashResult = {
   ok: boolean
@@ -32,7 +33,7 @@ type ActiveRun = {
 const activeRuns = new Map<string, ActiveRun>()
 
 function sanitizedChildEnvironment(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const environment = { ...process.env, ...overrides }
+  const environment = buildUserEnvironment(overrides)
   delete environment.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
   return environment
 }

@@ -6,6 +6,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { resolvePiSkillsDir } from '../electron/piSkills.ts'
 
 /**
  * Issues 02 + 16 + 17 — skills become Pi resources.
@@ -31,6 +32,10 @@ const agentDir = await mkdtemp(join(tmpdir(), 'pi-skills-agent-'))
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-skills-state-'))
 const workspace = await mkdtemp(join(tmpdir(), 'pi-skills-cwd-'))
 const skillsDir = join(agentDir, 'skills')
+assert.equal(
+  resolvePiSkillsDir(undefined, { SUBAGENTS_PI_SKILLS_DIR: '~/shared-skills' }, '/Users/skill-owner'),
+  '/Users/skill-owner/shared-skills',
+)
 await mkdir(skillsDir, { recursive: true })
 // A malformed skill written directly to disk must surface as a diagnostic,
 // not disappear.

@@ -14,6 +14,7 @@ import {
   spawnCommandSpec,
   terminateProcessTree,
 } from './platformProcess'
+import { buildUserEnvironment, interactiveUserShellSpec } from './userEnvironment'
 
 export type TermSessionInfo = {
   id: string
@@ -36,21 +37,16 @@ type Session = {
 const sessions = new Map<string, Session>()
 
 function sanitizedTerminalEnvironment(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const environment = { ...process.env, ...overrides }
+  const environment = buildUserEnvironment(overrides)
   delete environment.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
   return environment
 }
 
-function shellCmd(): CommandSpec {
+function shellCmd(environment: NodeJS.ProcessEnv): CommandSpec {
   if (isWindows) {
-    return spawnCommandSpec(process.env.COMSPEC || 'cmd.exe', ['/d'])
+    return spawnCommandSpec(environment.COMSPEC || 'cmd.exe', ['/d'])
   }
-  const sh = process.env.SHELL || '/bin/bash'
-  // interactive login-ish for prompt
-  return spawnCommandSpec(
-    sh,
-    sh.endsWith('zsh') || sh.endsWith('bash') ? ['-i'] : [],
-  )
+  return interactiveUserShellSpec(environment)
 }
 
 export function listTermSessions(): TermSessionInfo[] {
@@ -71,13 +67,14 @@ export function createTermSession(opts: {
   const id = `term_${randomUUID().slice(0, 8)}`
   const cwd =
     opts.cwd && path.isAbsolute(opts.cwd) ? opts.cwd : process.cwd()
-  const shell = shellCmd()
+  const environment = sanitizedTerminalEnvironment({
+    TERM: process.env.TERM || 'xterm-256color',
+    HOME: os.homedir(),
+  })
+  const shell = shellCmd(environment)
   const child = spawn(shell.file, shell.args, {
     cwd,
-    env: sanitizedTerminalEnvironment({
-      TERM: process.env.TERM || 'xterm-256color',
-      HOME: os.homedir(),
-    }),
+    env: environment,
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: !isWindows,
     windowsHide: true,

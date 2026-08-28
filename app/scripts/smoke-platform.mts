@@ -8,6 +8,13 @@ import {
   shellCommandSpec,
   spawnCommandSpec,
 } from '../electron/platformProcess.ts'
+import {
+  buildUserEnvironment,
+  configuredUserPath,
+  interactiveUserShellSpec,
+  resolveUserPathValue,
+  resolveUserShell,
+} from '../electron/userEnvironment.ts'
 
 let passed = 0
 
@@ -56,6 +63,42 @@ await test('macOS shell uses login bash', () => {
     file: '/bin/bash',
     args: ['-lc', 'pwd'],
   })
+})
+
+await test('GUI launch recovers the account shell and its executable PATH', () => {
+  const minimal = { HOME: '/Users/example', PATH: '/usr/bin:/bin' }
+  assert.equal(resolveUserShell(minimal, 'darwin', '/bin/zsh'), '/bin/zsh')
+  const environment = buildUserEnvironment({}, minimal, {
+    platform: 'darwin',
+    home: '/Users/example',
+    accountShell: '/bin/zsh',
+    captureLoginPath: () => '/Users/example/.nvm/current/bin:/opt/package-manager/bin:/usr/bin',
+  })
+  assert.equal(environment.SHELL, '/bin/zsh')
+  assert.equal(
+    environment.PATH,
+    '/Users/example/.nvm/current/bin:/opt/package-manager/bin:/usr/bin:/bin',
+  )
+  assert.deepEqual(interactiveUserShellSpec(environment, 'darwin'), {
+    file: '/bin/zsh',
+    args: ['-il'],
+  })
+  assert.equal(
+    buildUserEnvironment({ PATH: '/sandbox/bin' }, minimal, {
+      platform: 'darwin',
+      accountShell: '/bin/zsh',
+      captureLoginPath: () => '/must/not/leak',
+    }).PATH,
+    '/sandbox/bin',
+  )
+})
+
+await test('user-configured paths expand home without a fixed account name', () => {
+  assert.equal(resolveUserPathValue('~/skills', '/Users/example'), '/Users/example/skills')
+  assert.equal(
+    configuredUserPath({ SUBAGENTS_PI_AGENT_DIR: '~/custom-pi' }, 'SUBAGENTS_PI_AGENT_DIR', '/fallback', '/Users/example'),
+    '/Users/example/custom-pi',
+  )
 })
 
 await test('Windows npm shims use COMSPEC while native executables stay direct', () => {
