@@ -257,6 +257,8 @@ export interface RunContextPolicy {
    * explicit evidence.
    */
   outboundShellMode?: OutboundGuardMode
+  /** Provider policy identity returned by main's admitted Outbound view. */
+  outboundConnectionId?: string
   /**
    * Tool patterns this run's restrictive beforeTool hooks deny outright, and
    * the ones they force an approval on. Frozen with the run so a hook edited
@@ -333,6 +335,8 @@ export interface RuntimeOverrides {
   attachedSkills?: string[]
   /** Extra system context (e.g. MCP notes) */
   extraSystemContext?: string
+  /** Host-resolved instruction evidence frozen at external-run admission. */
+  instructionSnapshot?: import('./instructionSnapshot.ts').RecordedInstructionSnapshot
   /** Primary agent mode. */
   agentMode?: AgentMode
   /** What the Host does after a structured Plan Gate passes. */

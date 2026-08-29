@@ -1,16 +1,14 @@
 # External CLI real-machine qualification
 
-Qualified: 2026-08-28T14:35:54.702Z
+Qualified: 2026-08-29T11:37:51.658Z
 Machine: darwin/arm64
 
-| Provider | Installed | Execution | Terminal | Active checkpoint | Restart projection | Record |
-|---|---:|---|---|---:|---|---|
-| codex | yes | pass | success | yes | interrupted | turn-start, step-start, user-text, assistant-text, step-end, turn-end |
-| claude | yes | pass | success | yes | interrupted | turn-start, step-start, user-text, assistant-text, step-end, turn-end |
-| grok | yes | blocked-auth | process-exit-failure | yes | interrupted | turn-start, step-start, user-text, assistant-text, step-end, turn-end |
-| gemini | no | not installed | - | - | - | - |
-| cursor | no | not installed | - | - | - | - |
+| Provider | Status | Code | Installed | Attempted | Auth usable | Diagnostic | Exit code | Native proof | Checkpoint | Restart | Record |
+|---|---|---|---:|---:|---:|---|---:|---|---:|---|---|
+| codex | failed | native_discovery_unproven | yes | yes | yes | unknown | 0 | no | yes | interrupted | turn-start, step-start, instruction-snapshot, user-text, assistant-text, step-end, turn-end |
+| claude | blocked | auth_unavailable | yes | no | no | auth/login | - | no | - | - | - |
 
-The report stores only version, lifecycle classifications, event kinds, byte counts, and output hashes. Prompt/output bodies and credentials are excluded.
+The report stores only status/code, provider metadata, safe argv display values, cwd, lifecycle classifications, record metadata, byte counts, hashes, and source summaries. Prompt/output bodies and credentials are excluded.
 
-- grok: Provider CLI authentication is unavailable on this machine.
+- codex: native_discovery_unproven (record)
+- claude: auth_unavailable (auth)

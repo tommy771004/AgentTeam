@@ -7,6 +7,11 @@
  */
 
 export type ExecutionKind = 'loop' | 'external'
+export type RunnerInstructionDelivery = Readonly<{
+  mode: 'explicit' | 'native' | 'unverified'
+  exactSnapshot: boolean
+  detail: string
+}>
 
 /**
  * Every runner the product can dispatch to. One source of truth: the delegate
@@ -146,6 +151,12 @@ export function capabilitiesForRunner(runner?: string | null): RunnerCapabilitie
 
 export function executionKindForRunner(runner?: string | null): ExecutionKind {
   return isBuiltinRunner(runner) ? 'loop' : 'external'
+}
+
+export function instructionDeliveryForRunner(runner?: string | null): RunnerInstructionDelivery {
+  if (isBuiltinRunner(runner)) return Object.freeze({ mode: 'explicit', exactSnapshot: true, detail: 'Pi Host admission snapshot' })
+  if (runner === 'codex' || runner === 'claude') return Object.freeze({ mode: 'native', exactSnapshot: false, detail: 'global explicit + native filesystem discovery' })
+  return Object.freeze({ mode: 'unverified', exactSnapshot: false, detail: 'bounded explicit wrapper; provider discovery cannot be proven' })
 }
 
 /** Honest DoD label for external CLI — never "CLI returned" as if DoD met. */

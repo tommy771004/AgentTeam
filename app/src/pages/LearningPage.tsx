@@ -18,7 +18,6 @@ const SECTIONS = [
   { id: 'skills', label: '技能庫', icon: 'auto_awesome' },
   { id: 'drafts', label: '學習草稿', icon: 'rate_review' },
   { id: 'search', label: '跨會話搜尋', icon: 'manage_search' },
-  { id: 'prompt', label: '人格與上下文', icon: 'badge' },
   { id: 'plugins', label: '擴充能力', icon: 'extension' },
 ]
 
@@ -377,7 +376,6 @@ const META: Record<string, { title: string; subtitle: string }> = {
   skills: { title: '技能', subtitle: '用任務專用技能擴充 AgentStudio。' },
   drafts: { title: '學習草稿', subtitle: '成功執行後自動產生的技能草稿。' },
   search: { title: '跨會話搜尋', subtitle: '在記憶、技能與封存中檢索。' },
-  prompt: { title: '人格與上下文', subtitle: 'SOUL / AGENTS 穩定提示層。' },
   plugins: {
     title: '擴充能力',
     subtitle: '連線授權後，在「新任務」直接下指令即可。',
@@ -400,8 +398,6 @@ export function LearningPage() {
     skillDiagnostics,
     events,
     pendingDrafts,
-    soul,
-    agents,
     searchHits,
     searchSummary,
     setUserProfile,
@@ -409,8 +405,6 @@ export function LearningPage() {
     appendMemory,
     updateMemoryEntry,
     deleteMemoryEntry,
-    setSoul,
-    setAgents,
     approveDraft,
     rejectDraft,
     search,
@@ -431,8 +425,6 @@ export function LearningPage() {
   const [memEdit, setMemEdit] = useState('')
   const [note, setNote] = useState('')
   const [query, setQuery] = useState('')
-  const [soulEdit, setSoulEdit] = useState('')
-  const [agentsEdit, setAgentsEdit] = useState('')
   const [exportStatus, setExportStatus] = useState('')
 
   useEffect(() => {
@@ -449,10 +441,6 @@ export function LearningPage() {
     setMemEdit(memory.memory)
   }, [memory.userProfile, memory.memory])
 
-  useEffect(() => {
-    setSoulEdit(soul)
-    setAgentsEdit(agents)
-  }, [soul, agents])
 
   const meta = META[section] || META.memory
 
@@ -730,45 +718,6 @@ export function LearningPage() {
 
         {section === 'plugins' && <PluginMarketplace />}
 
-        {section === 'prompt' && (
-          <div className="space-y-4">
-            <div className="app-panel p-5 space-y-2">
-              <h2 className="font-semibold">SOUL.md — 人格（stable）</h2>
-              <textarea
-                className={ta}
-                rows={8}
-                value={soulEdit}
-                onChange={(e) => setSoulEdit(e.target.value)}
-              />
-              <button
-                type="button"
-                onClick={() => void setSoul(soulEdit)}
-                className="px-3 py-2 rounded-lg bg-primary-container text-on-primary-container text-xs font-semibold"
-              >
-                儲存人格
-              </button>
-            </div>
-            <div className="app-panel p-5 space-y-2">
-              <h2 className="font-semibold">AGENTS.md — 專案上下文（context）</h2>
-              <textarea
-                className={ta}
-                rows={10}
-                value={agentsEdit}
-                onChange={(e) => setAgentsEdit(e.target.value)}
-              />
-              <button
-                type="button"
-                onClick={() => void setAgents(agentsEdit)}
-                className="px-3 py-2 rounded-lg border border-primary/40 text-primary text-xs font-semibold"
-              >
-                儲存上下文
-              </button>
-            </div>
-            <p className="text-xs text-outline">
-              Hermes 原則：stable 層在對話中保持穩定；memory 屬 volatile 層可每輪更新。
-            </p>
-          </div>
-        )}
       </div>
     </ThemePage>
   )

@@ -18,13 +18,12 @@ import {
 } from '../components/settings/SettingsChrome'
 import { PolicyAdminSection } from '../components/settings/PolicyAdminSection'
 import { PiCoreSettingsSection } from '../components/settings/PiCoreSettingsSection'
-import { useSettingsStore } from '../store/settingsStore'
+import { getLegacyPersonalizationPresence, useSettingsStore } from '../store/settingsStore'
 import { useLearningStore } from '../store/learningStore'
 import { modelsGroupedByCliProvider } from '../agent/cliProviders'
 import { CLI_ADAPTERS, DISCOVERY_ONLY_AGENT_ADAPTERS } from '../agent/cliAdapters'
 import type {
   McpServerConfig,
-  PersonalityPreset,
   ThemePreference,
   ReducedMotionPreference,
   EnterBehavior,
@@ -66,6 +65,8 @@ import { recommendToolTuning } from '../agent/modelTuning'
 import { API_PROVIDER_PRESETS, apiProviderPreset, isSubscriptionProviderPreset } from '../agent/apiProviders'
 import { SubscriptionConnectionStatus } from '../components/settings/SubscriptionConnectionStatus'
 import { SubscriptionModelPicker } from '../components/settings/SubscriptionModelPicker'
+import { PersonalizationInstructionsSection } from '../components/settings/PersonalizationInstructionsSection'
+import { getLegacyInstructionDocs } from '../agent/hermes/promptBuilder'
 import {
   OAUTH_REDIRECT_URI,
   PLUGIN_OAUTH_PROVIDERS,
@@ -382,6 +383,7 @@ function ProviderServiceTierSettings({
 
 export function SettingsPage() {
   const { settings, update, testConnection, exportBundle, importBundle } = useSettingsStore()
+  const legacyPersonalizationPresence = getLegacyPersonalizationPresence()
   const [section, setSection] = useState('general')
   const [testMsg, setTestMsg] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
@@ -409,6 +411,7 @@ export function SettingsPage() {
   const bgJobs = useGatewayStore((s) => s.jobs)
   const projectRoot = useProjectStore((s) => s.root)
   const memory = useLearningStore((s) => s.memory)
+  const legacyInstructionDocs = getLegacyInstructionDocs()
   const memoryProjection = useLearningStore((s) => s.memoryProjection)
   const memoryDisabled = memoryControlsDisabled(memoryProjection)
   const loadLearning = useLearningStore((s) => s.load)
@@ -1201,54 +1204,16 @@ export function SettingsPage() {
 
         {section === 'personalization' && (
           <>
-            <SettingsGroup title="人格">
-              <SettingsRow
-                title="預設人格"
-                description="改變語氣，不改變模型能力"
-                control={
-                  <PillSelect
-                    value={settings.personality || 'default'}
-                    onChange={(v) =>
-                      set({ personality: v as PersonalityPreset })
-                    }
-                  >
-                    <option value="default">預設</option>
-                    <option value="none">無（中性）</option>
-                    <option value="friendly">友善</option>
-                    <option value="efficient">務實精簡</option>
-                    <option value="professional">專業</option>
-                    <option value="candid">直率</option>
-                    <option value="quirky">俏皮</option>
-                  </PillSelect>
-                }
-              />
-            </SettingsGroup>
-            <SettingsGroup title="自訂指令">
-              <SettingsStack
-                title="關於你"
-                description="職業、專案、偏好語言、常用工具…"
-              >
-                <textarea
-                  className={settingsInputCls + ' min-h-[96px] resize-y'}
-                  value={settings.customAboutUser || ''}
-                  onChange={(e) => set({ customAboutUser: e.target.value })}
-                  placeholder="寫下希望代理知道的背景…"
-                />
-              </SettingsStack>
-              <SettingsStack
-                title="希望如何回覆"
-                description="結構、語言、emoji、程式碼風格…"
-              >
-                <textarea
-                  className={settingsInputCls + ' min-h-[96px] resize-y'}
-                  value={settings.customResponseStyle || ''}
-                  onChange={(e) =>
-                    set({ customResponseStyle: e.target.value })
-                  }
-                  placeholder="例如：先結論再步驟、繁中、少 emoji…"
-                />
-              </SettingsStack>
-            </SettingsGroup>
+            <PersonalizationInstructionsSection
+              projectRoot={projectRoot || undefined}
+              legacy={{
+                ...(legacyPersonalizationPresence.personality ? { personality: settings.personality } : {}),
+                ...(legacyPersonalizationPresence.aboutUser ? { aboutUser: settings.customAboutUser } : {}),
+                ...(legacyPersonalizationPresence.responseStyle ? { responseStyle: settings.customResponseStyle } : {}),
+                ...(legacyInstructionDocs.soul !== undefined ? { soul: legacyInstructionDocs.soul } : {}),
+                ...(legacyInstructionDocs.agents !== undefined ? { agents: legacyInstructionDocs.agents } : {}),
+              }}
+            />
           </>
         )}
 
@@ -3780,7 +3745,9 @@ export function SettingsPage() {
             {bundleMsg}
           </p>
         )}
-        <p className="text-[11px] text-outline px-1 mt-2">變更會立即套用，無需儲存。</p>
+        <p className="text-[11px] text-outline px-1 mt-2">
+          {section === 'personalization' ? '個人化草稿需按「儲存 revision」才會由 Host commit，並從下一個 run 生效。' : '變更會立即套用，無需儲存。'}
+        </p>
       </>
     </ThemePage>
   )

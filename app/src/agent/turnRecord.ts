@@ -36,7 +36,8 @@ import {
   type SkillInvocationTrace,
 } from './skillPreflight.ts'
 import { isMemoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS, type MemoryControlLifecycleEvent, type MemoryControlPackageIdentity } from './memoryControlPackage.ts'
-import type { RunnerCapabilities } from './runners/types.ts'
+import type { RunnerCapabilities, RunnerInstructionDelivery } from './runners/types.ts'
+import type { RecordedInstructionSnapshot } from './instructionSnapshot.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
@@ -51,9 +52,10 @@ import type { RunnerCapabilities } from './runners/types.ts'
  * Version 9 adds the governing Memory-Control Package and Checker linkage.
  * Version 10 adds the bounded activation/rollback event governing the run.
  * Version 11 preserves exact bounded Skill redraft context after resource cleanup.
+ * Version 12 records the exact Host-owned instruction snapshot and runner delivery mode.
  */
-export const TURN_RECORD_FORMAT_VERSION = 11
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+export const TURN_RECORD_FORMAT_VERSION = 12
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -235,6 +237,7 @@ export type TurnRecordEntry = TurnRecordCoordinates &
          * builtin Parse, no DoD validation and no iterate.
          */
         capabilities?: RunnerCapabilities
+        instructionDelivery?: RunnerInstructionDelivery
       }
     | {
         kind: 'turn-end'
@@ -255,6 +258,10 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         timing?: PiStepTiming
       }
     | { kind: 'user-text'; source: 'user'; content: string }
+    /** Exact prompt handed to the provider after Host egress protection. */
+    | { kind: 'provider-prompt'; source: 'host'; content: string }
+    /** Exact persistent history handed to the provider for this turn. */
+    | { kind: 'provider-history'; source: 'host'; messages: PiRecordedMessage[] }
     | { kind: 'assistant-text'; source: 'model'; content: string }
     | {
         /**
@@ -325,6 +332,12 @@ export type TurnRecordEntry = TurnRecordCoordinates &
           memoryKind: 'memory' | 'profile' | 'document'
           revision: number
         }>
+      }
+    | {
+        /** Exact immutable standing instructions admitted for this Task run. */
+        kind: 'instruction-snapshot'
+        source: 'host'
+        snapshot: RecordedInstructionSnapshot
       }
     | {
         /** A candidate patch, never a completion fact; source stays accountable. */
@@ -409,6 +422,8 @@ const KINDS = new Set([
   'step-start',
   'step-end',
   'user-text',
+  'provider-prompt',
+  'provider-history',
   'assistant-text',
   'reasoning',
   'tool-call',
@@ -417,6 +432,7 @@ const KINDS = new Set([
   'approval',
   'compaction',
   'memory-recall',
+  'instruction-snapshot',
   'state-proposal',
   'state-check',
   'working-state',
@@ -531,6 +547,7 @@ function isDelegationContextEntry(entry: Record<string, unknown>): boolean | und
 
 function isHostContextEntry(entry: Record<string, unknown>): boolean {
   if (entry.kind === 'memory-recall') return isMemoryRecallEntry(entry)
+  if (entry.kind === 'instruction-snapshot') return isInstructionSnapshotEntry(entry)
   const workingStateEntry = isWorkingStateContextEntry(entry)
   if (workingStateEntry !== undefined) return workingStateEntry
   if (entry.kind === 'notice') return typeof entry.topic === 'string' && typeof entry.text === 'string'
@@ -540,6 +557,71 @@ function isHostContextEntry(entry: Record<string, unknown>): boolean {
     return entry.executionEvidence === undefined || isWorkingExecutionEvidence(entry.executionEvidence)
   }
   return true
+}
+
+function isInstructionSnapshotEntry(entry: Record<string, unknown>): boolean {
+  if (entry.source !== 'host' || !entry.snapshot || typeof entry.snapshot !== 'object') return false
+  const value = entry.snapshot as Record<string, unknown>
+  const usage = value.usage as Record<string, unknown> | undefined
+  return typeof value.id === 'string'
+    && Number.isSafeInteger(value.revision)
+    && typeof value.effectiveHash === 'string' && /^[a-f0-9]{64}$/.test(value.effectiveHash)
+    && typeof value.effectiveText === 'string'
+    && Array.isArray(value.sources) && value.sources.every(isRecordedInstructionSource)
+    && Array.isArray(value.diagnostics) && value.diagnostics.every(isRecordedInstructionDiagnostic)
+    && Boolean(usage)
+    && ['personalizationBytes', 'projectInstructionBytes', 'totalBytes', 'budgetBytes'].every((field) => Number.isSafeInteger(usage?.[field]) && Number(usage?.[field]) >= 0)
+    && (value.deliveryMode === 'explicit' || value.deliveryMode === 'native' || value.deliveryMode === 'unverified')
+    && typeof value.exactSnapshot === 'boolean'
+}
+
+function isRecordedInstructionSource(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const source = value as Record<string, unknown>
+  return isRecordedInstructionSourceIdentity(source)
+    && isRecordedInstructionSourceLocation(source)
+    && isRecordedInstructionSourceContent(source)
+    && isRecordedInstructionSourceStatus(source)
+}
+
+function isRecordedInstructionSourceIdentity(source: Record<string, unknown>): boolean {
+  return typeof source.id === 'string'
+    && typeof source.kind === 'string'
+    && (source.scope === 'global' || source.scope === 'project')
+    && typeof source.hash === 'string'
+    && /^[a-f0-9]{64}$/.test(source.hash)
+}
+
+function isRecordedInstructionSourceLocation(source: Record<string, unknown>): boolean {
+  return (source.path === undefined || typeof source.path === 'string')
+    && (source.parentPath === undefined || typeof source.parentPath === 'string')
+    && (source.directoryDepth === undefined || Number.isSafeInteger(source.directoryDepth))
+    && (source.includeDepth === undefined || (Number.isSafeInteger(source.includeDepth) && Number(source.includeDepth) >= 0))
+}
+
+function isRecordedInstructionSourceContent(source: Record<string, unknown>): boolean {
+  const bytes = Number(source.bytes)
+  return typeof source.content === 'string'
+    // `-1` is the explicit unknown-size sentinel for missing/unreadable
+    // transitive includes; it must remain distinguishable from a zero-byte
+    // source in a replayed Turn Record.
+    && Number.isSafeInteger(source.bytes) && bytes >= -1
+    && (bytes >= 0 || source.bytesKnown === false)
+    && (source.bytesKnown === undefined || typeof source.bytesKnown === 'boolean')
+    && Number.isSafeInteger(source.includedBytes) && Number(source.includedBytes) >= 0
+}
+
+function isRecordedInstructionSourceStatus(source: Record<string, unknown>): boolean {
+  return (source.metadataStatus === undefined || ['content', 'metadata', 'unavailable', 'unauthorized'].includes(String(source.metadataStatus)))
+    && (source.openable === undefined || typeof source.openable === 'boolean')
+    && (source.effectiveOrder === undefined || source.effectiveOrder === null || (Number.isSafeInteger(source.effectiveOrder) && Number(source.effectiveOrder) >= 1))
+    && ['applied', 'deduplicated', 'truncated', 'shadowed'].every((field) => typeof source[field] === 'boolean')
+}
+
+function isRecordedInstructionDiagnostic(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const diagnostic = value as Record<string, unknown>
+  return typeof diagnostic.code === 'string' && typeof diagnostic.message === 'string'
 }
 
 function isEntry(value: unknown): value is TurnRecordEntry {
@@ -552,26 +634,8 @@ function isEntry(value: unknown): value is TurnRecordEntry {
     if (typeof number !== 'number' || !Number.isFinite(number)) return false
   }
   if ((entry.kind === 'user-text' || entry.kind === 'assistant-text' || entry.kind === 'reasoning') && typeof entry.content !== 'string') return false
-  if ((entry.kind === 'tool-call' || entry.kind === 'tool-result' || entry.kind === 'tool-evidence' || entry.kind === 'approval')
-    && (typeof entry.tool !== 'string' || typeof entry.callId !== 'string')) return false
-  if (entry.kind === 'tool-call' || entry.kind === 'tool-result' || entry.kind === 'tool-evidence') {
-    const hasContractIdentity = entry.contractRevision !== undefined
-      || entry.contractDigest !== undefined
-      || entry.schemaDigest !== undefined
-      || entry.toolSource !== undefined
-      || entry.toolPack !== undefined
-      || entry.invocationOrigin !== undefined
-    if (hasContractIdentity) {
-      if (typeof entry.contractRevision !== 'number' || !Number.isInteger(entry.contractRevision) || entry.contractRevision < 1) return false
-      // Optional at the format boundary so records from the pre-digest build
-      // remain readable; the current Host writes it for every new invocation.
-      if (entry.contractDigest !== undefined && (typeof entry.contractDigest !== 'string' || !/^[a-f0-9]{64}$/.test(entry.contractDigest))) return false
-      if (typeof entry.schemaDigest !== 'string' || !/^[a-f0-9]{64}$/.test(entry.schemaDigest)) return false
-      if (entry.toolSource !== 'builtin' && entry.toolSource !== 'extension-pack' && entry.toolSource !== 'mcp') return false
-      if (entry.toolPack !== undefined && typeof entry.toolPack !== 'string') return false
-      if (entry.invocationOrigin !== 'model' && entry.invocationOrigin !== 'direct-protocol' && entry.invocationOrigin !== 'code-mode' && entry.invocationOrigin !== 'mcp') return false
-    }
-  }
+  if (!isProviderRecordEntry(entry)) return false
+  if (!isToolRecordEntry(entry)) return false
   if (entry.kind === 'tool-evidence') {
     if (typeof entry.runId !== 'string' || !['start', 'decision', 'update', 'result', 'settlement'].includes(String(entry.phase))) return false
     if (entry.parentRunId !== undefined && typeof entry.parentRunId !== 'string') return false
@@ -581,6 +645,36 @@ function isEntry(value: unknown): value is TurnRecordEntry {
   }
   if (!isHostContextEntry(entry)) return false
   return true
+}
+
+function isToolRecordEntry(entry: Record<string, unknown>): boolean {
+  const toolKinds = ['tool-call', 'tool-result', 'tool-evidence']
+  if (['tool-call', 'tool-result', 'tool-evidence', 'approval'].includes(String(entry.kind))
+    && (typeof entry.tool !== 'string' || typeof entry.callId !== 'string')) return false
+  if (!toolKinds.includes(String(entry.kind))) return true
+  const hasContractIdentity = ['contractRevision', 'contractDigest', 'schemaDigest', 'toolSource', 'toolPack', 'invocationOrigin']
+    .some((field) => entry[field] !== undefined)
+  if (!hasContractIdentity) return true
+  return typeof entry.contractRevision === 'number'
+    && Number.isInteger(entry.contractRevision) && entry.contractRevision >= 1
+    // Optional at the format boundary so records from the pre-digest build
+    // remain readable; the current Host writes it for every new invocation.
+    && (entry.contractDigest === undefined || (typeof entry.contractDigest === 'string' && /^[a-f0-9]{64}$/.test(entry.contractDigest)))
+    && typeof entry.schemaDigest === 'string' && /^[a-f0-9]{64}$/.test(entry.schemaDigest)
+    && ['builtin', 'extension-pack', 'mcp'].includes(String(entry.toolSource))
+    && (entry.toolPack === undefined || typeof entry.toolPack === 'string')
+    && ['model', 'direct-protocol', 'code-mode', 'mcp'].includes(String(entry.invocationOrigin))
+}
+
+function isProviderRecordEntry(entry: Record<string, unknown>): boolean {
+  if (entry.kind === 'provider-prompt') return entry.source === 'host' && typeof entry.content === 'string'
+  if (entry.kind !== 'provider-history') return true
+  if (entry.source !== 'host' || !Array.isArray(entry.messages)) return false
+  return !entry.messages.some((message) => {
+    if (!message || typeof message !== 'object') return true
+    const value = message as Record<string, unknown>
+    return !['user', 'assistant', 'tool'].includes(String(value.role)) || typeof value.content !== 'string'
+  })
 }
 
 /**
@@ -634,6 +728,7 @@ function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
 
 function isLegacySkillEntry(version: number, kind: string, entry: Record<string, unknown>): boolean {
   if (version < 11 && kind === 'skill-context' && (entry.injection as SkillContextInjectionTrace | undefined)?.schemaVersion === 2) return true
+  if (version < 12 && kind === 'instruction-snapshot') return true
   if (version < 6 && kind === 'skill-invocation') return true
   if (version < 7 && kind === 'skill-context') return true
   if (version < 7 && kind === 'tool-result' && entry.settlement === 'not-executed') return true
@@ -841,11 +936,11 @@ export function stepTimings(record: TurnRecord | undefined): PiStepTimingView[] 
 /** What the record says about the runner that drove it. */
 export function recordRunnerDeclaration(
   record: TurnRecord | undefined,
-): { runner: string; capabilities?: RunnerCapabilities } | undefined {
+): { runner: string; capabilities?: RunnerCapabilities; instructionDelivery?: RunnerInstructionDelivery } | undefined {
   for (const entry of turnRecordEntries(record)) {
     if (entry.kind !== 'turn-start') continue
     if (!entry.runner) continue
-    return { runner: entry.runner, ...(entry.capabilities ? { capabilities: entry.capabilities } : {}) }
+    return { runner: entry.runner, ...(entry.capabilities ? { capabilities: entry.capabilities } : {}), ...(entry.instructionDelivery ? { instructionDelivery: entry.instructionDelivery } : {}) }
   }
   return undefined
 }

@@ -7,6 +7,7 @@
  */
 
 import type { LlmSettings, PersonalityPreset } from '../types.ts'
+import { LEGACY_DEFAULT_AGENTS, LEGACY_DEFAULT_SOUL } from '../legacyInstructionDefaults.ts'
 import { memoryStore } from './memory.ts'
 import { skillsStore } from './skills.ts'
 import { pluginRegistry } from './plugins.ts'
@@ -27,10 +28,6 @@ export interface PromptLayers {
   packetDiagnostics?: ContextPacketDiagnostics
   packet?: ContextPacket
 }
-
-const DEFAULT_SOUL = `你是 AgentStudio 多代理團隊中的執行核心，風格精準、可審計、遵守安全規則。
-靈感來自 Hermes Agent 的閉環學習：善用技能索引與持久記憶，避免重複犯錯。
-使用繁體中文回覆使用者可見內容（程式碼與 JSON 鍵名可維持英文）。`
 
 const PERSONALITY_PROMPTS: Record<PersonalityPreset, string> = {
   default: '',
@@ -73,26 +70,49 @@ function buildPersonalizationBlock(settings?: Partial<LlmSettings> | null): stri
   return lines.join('\n')
 }
 
-const DEFAULT_AGENTS = `# AGENTS.md — 專案上下文
+let soulDoc = LEGACY_DEFAULT_SOUL
+let agentsDoc = LEGACY_DEFAULT_AGENTS
+let legacySoulPresent = false
+let legacyAgentsPresent = false
+let legacySoulRaw = ''
+let legacyAgentsRaw = ''
 
-## 產品
-AgentStudio 桌面代理：四種 Loop 模式、工具沙箱、HITL 安全閘道、Webhook、排程。
+export type LegacyInstructionHydration = Readonly<{
+  status: 'pending' | 'ready' | 'failed'
+  error?: string
+}>
 
-## 規則
-- 敏感資料需人工核准
-- 不可捏造外部事實；工具結果優先
-- Definition of Done 必須可量測
-`
+let legacyInstructionHydration: LegacyInstructionHydration = { status: 'pending' }
 
-let soulDoc = DEFAULT_SOUL
-let agentsDoc = DEFAULT_AGENTS
+export function beginLegacyInstructionHydration(): void {
+  legacyInstructionHydration = { status: 'pending' }
+}
+
+export function completeLegacyInstructionHydration(): void {
+  legacyInstructionHydration = { status: 'ready' }
+}
+
+export function failLegacyInstructionHydration(error: unknown): void {
+  legacyInstructionHydration = {
+    status: 'failed',
+    error: error instanceof Error ? error.message : String(error),
+  }
+}
+
+export function getLegacyInstructionHydration(): LegacyInstructionHydration {
+  return legacyInstructionHydration
+}
 
 export function setSoulDoc(text: string) {
-  soulDoc = text.trim() || DEFAULT_SOUL
+  legacySoulPresent = true
+  legacySoulRaw = text
+  soulDoc = text.trim() || LEGACY_DEFAULT_SOUL
 }
 
 export function setAgentsDoc(text: string) {
-  agentsDoc = text.trim() || DEFAULT_AGENTS
+  legacyAgentsPresent = true
+  legacyAgentsRaw = text
+  agentsDoc = text.trim() || LEGACY_DEFAULT_AGENTS
 }
 
 export function getSoulDoc() {
@@ -101,6 +121,14 @@ export function getSoulDoc() {
 
 export function getAgentsDoc() {
   return agentsDoc
+}
+
+/** Legacy migration source with presence preserved; defaults are not legacy data. */
+export function getLegacyInstructionDocs(): { soul?: string; agents?: string } {
+  return {
+    ...(legacySoulPresent ? { soul: legacySoulRaw } : {}),
+    ...(legacyAgentsPresent ? { agents: legacyAgentsRaw } : {}),
+  }
 }
 
 export type BuildPromptLayersOpts = {
@@ -141,7 +169,6 @@ export function buildPromptLayers(opts?: BuildPromptLayersOpts): PromptLayers {
     '# 身份（stable）',
     soulDoc,
     opts?.role ? `\n目前角色：${opts.role}` : '',
-    personalization ? `\n${personalization}` : '',
     '',
     '# 工具指引',
     '- 優先使用工具取得證據，再下結論。',
@@ -183,6 +210,7 @@ export function buildPromptLayers(opts?: BuildPromptLayersOpts): PromptLayers {
   const packetSource: ContextPacketSource = {
     objective: opts?.objective,
     projectGuidance: opts?.projectGuidance,
+    globalPersonalization: personalization || undefined,
     recentChat: opts?.recentChat,
     sessionRecall: opts?.sessionRecall,
     stepEvidence: opts?.stepEvidence,

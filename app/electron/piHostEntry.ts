@@ -17,6 +17,7 @@ import { MemoryStorageLifecycleError, storageLifecycleError } from './memoryStor
 import { JsonMemoryControlPackageRepository } from './memoryControlPackageRepository.ts'
 import { loadMemoryControlEvaluationAuthority } from './memoryControlEvaluationAuthority.ts'
 import { configurePiHostServiceTransport, resolvePiHostServiceResponse } from './piHostServices.ts'
+import { InstructionRepositoryError, SqliteInstructionRepository, UnavailableInstructionRepository } from './instructionRepository.ts'
 
 type ParentPort = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
@@ -54,6 +55,7 @@ const statePath = process.env.SUBAGENTS_PI_HOST_STATE_PATH || `${process.cwd()}/
 const checkpointDir = process.env.SUBAGENTS_PI_CHECKPOINT_DIR || path.join(path.dirname(statePath), 'run-checkpoints')
 const compactionCheckpoints = new JsonCompactionCheckpointStore(checkpointDir)
 const durableMemoryPath = process.env.SUBAGENTS_DURABLE_MEMORY_DB_PATH || path.join(path.dirname(statePath), 'durable-memory.sqlite')
+const instructionRepositoryPath = process.env.SUBAGENTS_INSTRUCTION_DB_PATH || path.join(path.dirname(statePath), 'instructions.sqlite')
 const memoryControlPackagePath = process.env.SUBAGENTS_MEMORY_CONTROL_PACKAGE_PATH
   || path.join(path.dirname(statePath), 'memory-control-packages.json')
 const publishStorageFailure = (error: unknown) => {
@@ -67,6 +69,17 @@ const publishStorageFailure = (error: unknown) => {
 }
 const { snapshot: storedState, memoryStore: durableMemoryStore } = await openPiHostStorage(statePath, durableMemoryPath)
   .catch((error) => { throw publishStorageFailure(error) })
+// Separate file, schema, lifecycle and protocol authority from durable memory.
+const instructionRepository = await SqliteInstructionRepository.open(instructionRepositoryPath).catch(async (error) => {
+  const failure = error instanceof InstructionRepositoryError
+    ? error
+    : new InstructionRepositoryError('io_error', error instanceof Error ? error.message : String(error), error)
+  // A valid but non-writable database still supports get/export recovery.
+  if (failure.code === 'read_only') {
+    try { return await SqliteInstructionRepository.openReadOnly(instructionRepositoryPath) } catch { /* typed degraded repository below */ }
+  }
+  return new UnavailableInstructionRepository(failure)
+})
 // Deliberately separate from DurableMemoryStore/SQLite: package lineage has
 // its own fail-closed repository and does not share memory migrations or CRUD.
 const memoryControlPackages = await JsonMemoryControlPackageRepository.open(memoryControlPackagePath)
@@ -196,7 +209,7 @@ const createConfiguredHost = (
   persist: Persist,
   refreshSubscriptionConfig: RefreshSubscriptionConfig,
   compactionCheckpoints: CompactionCheckpoints,
-) => createPiHostServer(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints, durableMemoryStore, memoryControlPackages, memoryControlMaintenanceToken, memoryControlEvaluationAuthority)
+) => createPiHostServer(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints, durableMemoryStore, memoryControlPackages, memoryControlMaintenanceToken, memoryControlEvaluationAuthority, instructionRepository)
 const createEntryHost = (
   send: HostSend,
   initialSnapshot: InitialSnapshot,
@@ -237,6 +250,7 @@ if (parentPort) {
       stopAllPiMcp()
       await disposeAllPiSessions()
       await durableMemoryStore.close()
+      await instructionRepository.close()
     } catch (error) {
       process.exitCode = 1
       console.error('[pi-host] bounded shutdown failed', publishStorageFailure(error))

@@ -22,6 +22,7 @@
 import { stepTimings, turnRecordEntries, type RecordedUsage, type TurnRecord } from './turnRecord.ts'
 import { computeUsageCostUsd } from './usagePricing.ts'
 import type { ModelPricing } from './types.ts'
+import { instructionDeliveryEvidence } from './instructionSnapshot.ts'
 
 /**
  * Estimated shares of the conversation's volume, by who produced it.
@@ -68,6 +69,23 @@ export type ContextUsage = {
   /** Summed from steps that were priced. Absent when none were. */
   costUsd?: number
   breakdown: ContextUsageBreakdown
+  /** Exact Host-recorded instruction slots for this run, absent on legacy/external records. */
+  instructions?: {
+    personalizationBytes: number
+    personalizationBudgetBytes?: number
+    projectInstructionBytes: number
+    projectInstructionBudgetBytes?: number
+    totalBytes: number
+    budgetBytes: number
+    lowerAuthorityAvailableBytes?: number
+    revision: number
+    effectiveHash: string
+    deliveryMode: 'explicit' | 'native' | 'unverified'
+    exactSnapshot: boolean
+    hashAvailable: boolean
+    sourceSummary: ReturnType<typeof instructionDeliveryEvidence>['sourceSummary']
+    limitationReason?: string
+  }
   /**
    * How full the context actually is: the prompt the most recent MEASURED step
    * sent, cache included.
@@ -192,6 +210,29 @@ function safeArgLength(args: unknown): number {
   }
 }
 
+function instructionUsageOf(entry: ReturnType<typeof turnRecordEntries>[number]): ContextUsage['instructions'] {
+  if (entry.kind !== 'instruction-snapshot') return undefined
+  const evidence = instructionDeliveryEvidence(entry.snapshot)
+  return {
+    ...entry.snapshot.usage,
+    revision: entry.snapshot.revision,
+    effectiveHash: entry.snapshot.effectiveHash,
+    deliveryMode: entry.snapshot.deliveryMode,
+    exactSnapshot: entry.snapshot.exactSnapshot,
+    hashAvailable: evidence.hashAvailable,
+    sourceSummary: evidence.sourceSummary,
+    ...(evidence.limitationReason ? { limitationReason: evidence.limitationReason } : {}),
+  }
+}
+
+function retainInstructionUsage(
+  holder: { value: ContextUsage['instructions'] },
+  entry: ReturnType<typeof turnRecordEntries>[number],
+): void {
+  const observed = instructionUsageOf(entry)
+  if (observed) holder.value = observed
+}
+
 export function projectContextUsage(
   record: TurnRecord | undefined,
   options: ContextUsageOptions = {},
@@ -203,12 +244,14 @@ export function projectContextUsage(
   const callIds = new Set<string>()
   const chars: ContextUsageBreakdown = { ...EMPTY_BREAKDOWN }
   let lastActivityAt = 0
+  const instructionUsage = { value: undefined as ContextUsage['instructions'] }
 
   for (const entry of entries) {
     if (entry.at > lastActivityAt) lastActivityAt = entry.at
     if (entry.kind === 'user-text') user += 1
     if (entry.kind === 'assistant-text') assistant += 1
     if (entry.kind === 'tool-call') callIds.add(entry.callId)
+    retainInstructionUsage(instructionUsage, entry)
     const volume = volumeOf(entry)
     if (volume) chars[volume.key] += volume.chars
   }
@@ -295,6 +338,7 @@ export function projectContextUsage(
     reported,
     ...(costUsd === undefined ? {} : { costUsd }),
     breakdown,
+    instructions: instructionUsage.value,
     ...(contextTokens === undefined ? {} : { contextTokens }),
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(contextWindow === undefined || contextTokens === undefined

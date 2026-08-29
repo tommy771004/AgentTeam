@@ -137,7 +137,7 @@ export function ThemePage({
         {subtitle && <p className="text-on-surface-variant text-sm mt-1">{subtitle}</p>}
       </div>
       <div
-        className={`flex-1 min-h-0 flex flex-col gap-0 pb-4 ${
+        className={`flex-1 min-h-0 flex flex-col gap-0 pb-4 overflow-y-auto lg:overflow-hidden ${
           immersive
             ? 'px-0 md:px-0'
             : 'lg:flex-row lg:gap-2 px-3 md:px-5'
@@ -174,7 +174,7 @@ export function ThemePage({
           </div>
         )}
         <div
-          className={`flex-1 min-h-0 min-w-0 overflow-y-auto custom-scrollbar ${
+          className={`flex-none min-w-0 overflow-visible lg:flex-1 lg:min-h-0 lg:overflow-y-auto custom-scrollbar ${
             immersive ? 'lg:px-0 lg:py-2' : 'lg:pl-6 lg:pr-4 lg:py-6'
           }`}
         >

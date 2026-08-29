@@ -8,6 +8,7 @@
 
 export type ContextSlotId =
   | 'projectGuidance'
+  | 'globalPersonalization'
   | 'objective'
   | 'failureLessons'
   | 'recentChat'
@@ -29,7 +30,8 @@ export type ContextSlotSpec = {
 
 /** Default slot order / budgets. Priority is independent of array order. */
 export const CONTEXT_SLOT_SPECS: readonly ContextSlotSpec[] = [
-  { id: 'projectGuidance', priority: 100, budgetChars: 8_000, heading: '## 專案指引（AGENTS / CLAUDE）' },
+  { id: 'projectGuidance', priority: 110, budgetChars: 8_000, heading: '## 專案指引（AGENTS / CLAUDE）' },
+  { id: 'globalPersonalization', priority: 100, budgetChars: 4_000, heading: '## 全域個人化指令' },
   { id: 'objective', priority: 95, budgetChars: 1_200, heading: '## 當前目標' },
   { id: 'failureLessons', priority: 90, budgetChars: 1_200, heading: '## 失敗教訓（同類 — 必須避開）' },
   { id: 'recentChat', priority: 80, budgetChars: 4_800, heading: '## 近期對話' },
@@ -47,6 +49,7 @@ export const CONTEXT_PACKET_TOTAL_BUDGET = 14_000
 export type ContextPacketSource = {
   objective?: string
   projectGuidance?: string
+  globalPersonalization?: string
   recentChat?: string
   sessionRecall?: string
   stepEvidence?: string
@@ -103,31 +106,23 @@ function clip(text: string, max: number): { text: string; requested: number; inc
   }
 }
 
+const CONTEXT_SOURCE_FIELDS: Record<ContextSlotId, keyof ContextPacketSource> = {
+  projectGuidance: 'projectGuidance',
+  globalPersonalization: 'globalPersonalization',
+  objective: 'objective',
+  failureLessons: 'failureLessons',
+  recentChat: 'recentChat',
+  sessionRecall: 'sessionRecall',
+  stepEvidence: 'stepEvidence',
+  memory: 'memory',
+  skillsContext: 'skillsContext',
+  pluginFragments: 'pluginFragments',
+  extraSystem: 'extraSystem',
+}
+
 function sourceFor(spec: ContextSlotSpec, src: ContextPacketSource): string {
-  switch (spec.id) {
-    case 'projectGuidance':
-      return src.projectGuidance || ''
-    case 'objective':
-      return src.objective || ''
-    case 'failureLessons':
-      return src.failureLessons || ''
-    case 'recentChat':
-      return src.recentChat || ''
-    case 'sessionRecall':
-      return src.sessionRecall || ''
-    case 'stepEvidence':
-      return src.stepEvidence || ''
-    case 'memory':
-      return src.memory || ''
-    case 'skillsContext':
-      return src.skillsContext || ''
-    case 'pluginFragments':
-      return src.pluginFragments || ''
-    case 'extraSystem':
-      return src.extraSystem || ''
-    default:
-      return ''
-  }
+  const value = src[CONTEXT_SOURCE_FIELDS[spec.id]]
+  return typeof value === 'string' ? value : ''
 }
 
 /**

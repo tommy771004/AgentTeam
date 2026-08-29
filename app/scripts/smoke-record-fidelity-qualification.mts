@@ -17,7 +17,7 @@ import {
   turnRecordEntries,
   type TurnRecord,
 } from '../src/agent/turnRecord.ts'
-import { BUILTIN_RUNNER_CAPABILITIES, EXTERNAL_CLI_RUNNER_CAPABILITIES } from '../src/agent/runners/types.ts'
+import { BUILTIN_RUNNER_CAPABILITIES, EXTERNAL_CLI_RUNNER_CAPABILITIES, instructionDeliveryForRunner } from '../src/agent/runners/types.ts'
 
 /**
  * Qualification for the Turn Record effort.
@@ -290,6 +290,7 @@ assert.deepEqual(recordRunnerDeclaration(external)?.capabilities, EXTERNAL_CLI_R
 assert.deepEqual(recordRunnerDeclaration(answeredRecord), {
   runner: 'builtin',
   capabilities: BUILTIN_RUNNER_CAPABILITIES,
+  instructionDelivery: instructionDeliveryForRunner('builtin'),
 }, 'the builtin Host freezes its verified Memory control guarantees')
 
 console.log('Turn Record fidelity qualified: settlements, restart, reload, paging, external parity, and the original defect')

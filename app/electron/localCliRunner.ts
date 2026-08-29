@@ -367,6 +367,7 @@ export function buildLocalCliArgv(input: LocalCliRunInput): {
     permissive,
     effectiveApprovalMode,
     turns,
+    maxTurnsSupported: input.capabilitySnapshot ? input.capabilitySnapshot.maxTurns !== 'unsupported' : true,
     serviceTier: effectiveServiceTier,
   })
 
@@ -671,7 +672,7 @@ export async function runLocalCliAgent(
       // `codex exec` appends piped stdin to the prompt and waits for EOF. It
       // is a one-shot command, so keeping this pipe open strands a completed
       // run until the durable session's idle deadline.
-      stdinMode: kind === 'codex' ? 'closed' : 'interactive',
+      stdinMode: stdinModeFor(kind),
       timeoutMs: policy.absoluteMs,
     })
   } finally {
@@ -682,9 +683,9 @@ export async function runLocalCliAgent(
         /* best-effort */
       }
     }
-  }
+}
 
-  // Flush residual line buffer
+// Flush residual line buffer
   streamState.flush()
   for (const cancel of [...operationTimeouts.values()].flat()) cancel()
 
@@ -774,6 +775,10 @@ export async function runLocalCliAgent(
   }
 }
 
+function stdinModeFor(kind: LocalCliKind): 'closed' | 'interactive' {
+  return kind === 'codex' ? 'closed' : 'interactive'
+}
+
 type LocalCliArgContext = {
   prompt: string
   model?: string
@@ -782,6 +787,7 @@ type LocalCliArgContext = {
   permissive: boolean
   effectiveApprovalMode: 'always' | 'auto' | 'full'
   turns: string
+  maxTurnsSupported: boolean
   serviceTier?: string
 }
 
@@ -810,7 +816,8 @@ function claudeArgv(context: LocalCliArgContext): string[] {
   if (context.plan) args.push('--permission-mode', 'plan')
   else if (context.permissive) args.push('--dangerously-skip-permissions')
   else args.push('--permission-mode', context.effectiveApprovalMode === 'always' ? 'manual' : 'auto')
-  args.push('--max-turns', context.turns, context.prompt)
+  if (context.maxTurnsSupported) args.push('--max-turns', context.turns)
+  args.push(context.prompt)
   return args
 }
 

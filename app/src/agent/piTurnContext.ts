@@ -4,8 +4,9 @@
  * Electron production dispatches the builtin turn straight to Pi Host
  * (runDispatch.ts). Pi Host recalls its own memory and discovers skills
  * through Pi's resource loader (ADR-0034), so this module now carries ONLY
- * what is not resource discovery: project guidance (AGENTS.md / CLAUDE.md),
- * recent chat history, and cross-session recall.
+ * what is not production resource discovery: recent chat history and
+ * cross-session recall. Project guidance remains only as a plain-browser
+ * compatibility fallback; Electron production resolves it inside Pi Host.
  *
  * The former skill-injection branch was the stopgap this effort scheduled
  * for removal (issue 18): it resolved renderer localStorage skills into
@@ -49,12 +50,16 @@ export async function buildPiTurnContext(input: PiTurnContextInput): Promise<PiT
 
   let projectGuidance = ''
   let projectGuidanceSummary = ''
-  try {
-    const docs = await resolveProjectContext(input.projectRoot)
-    projectGuidance = formatProjectGuidance(docs)
-    projectGuidanceSummary = summarizeProjectContext(docs)
-  } catch {
-    /* Guidance is additive; a missing bridge must not fail the turn. */
+  const hostOwnsInstructions = typeof window !== 'undefined'
+    && typeof window.subagents?.piHost?.instructions?.resolve === 'function'
+  if (!hostOwnsInstructions) {
+    try {
+      const docs = await resolveProjectContext(input.projectRoot)
+      projectGuidance = formatProjectGuidance(docs)
+      projectGuidanceSummary = summarizeProjectContext(docs)
+    } catch {
+      /* Browser degradation stays readable without claiming Host authority. */
+    }
   }
 
   // The objective travels in the 當前請求 slot below the packet; the bubble

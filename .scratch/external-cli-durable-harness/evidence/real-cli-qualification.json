@@ -1,17 +1,27 @@
 {
-  "schemaVersion": 1,
-  "qualifiedAt": "2026-08-28T14:35:54.702Z",
+  "schemaVersion": 2,
+  "qualificationMode": "real",
+  "evidenceRoot": "/Users/tommy/Documents/Proj/AgentTeam/.scratch/external-cli-durable-harness/evidence",
+  "qualifiedAt": "2026-08-29T11:37:51.658Z",
   "platform": "darwin",
   "architecture": "arm64",
   "providers": [
     {
       "provider": "codex",
+      "status": "failed",
+      "code": "native_discovery_unproven",
       "installed": true,
+      "attempted": true,
+      "stage": "complete",
+      "authUsable": true,
+      "unqualified": true,
+      "qualification": "failed",
       "version": "codex-cli 0.150.1",
       "ok": true,
-      "qualification": "pass",
+      "exitCode": 0,
+      "diagnostic": "unknown",
       "terminalClassification": "success",
-      "eventCount": 26,
+      "eventCount": 24,
       "eventKinds": [
         "status",
         "chunk",
@@ -22,86 +32,91 @@
       "outputBytes": 15,
       "outputSha256": "929cdd381610b65fce0fe34cb75acf9e5e77e889b29bd7c3a76cb6f419e372b0",
       "markerMatched": true,
+      "nativeDiscoveryMatched": false,
+      "markerCounts": {
+        "expected": 0,
+        "forbidden": 0,
+        "qualification": 1
+      },
+      "instructionDelivery": {
+        "mode": "native",
+        "exactSnapshot": false,
+        "effectiveHash": "f3a7b2c6a6c9343d40f2fb38772428838ab234ad567c1bf94f72da3a603b3efc",
+        "hashAvailable": true,
+        "sourceSummary": [
+          {
+            "id": "global-codex",
+            "kind": "global-custom",
+            "scope": "global",
+            "bytes": 0,
+            "hashAvailable": true,
+            "status": "degraded",
+            "effectiveOrder": null
+          },
+          {
+            "id": "project-codex",
+            "kind": "agents",
+            "scope": "project",
+            "path": "/var/folders/05/x61j217d49g9k0_kccntyzsr0000gn/T/agentteam-real-codex-ZYxsXG/project-VXYt5A/AGENTS.md",
+            "bytes": 19,
+            "hashAvailable": true,
+            "status": "applied",
+            "effectiveOrder": null
+          }
+        ],
+        "limitationReason": "provider-owned native discovery; exact effective text cannot be proven by Host",
+        "declaredDeliveryMode": "native"
+      },
+      "cwd": "/var/folders/05/x61j217d49g9k0_kccntyzsr0000gn/T/agentteam-real-codex-ZYxsXG/project-VXYt5A",
+      "argv": {
+        "command": "/opt/homebrew/bin/codex",
+        "args": [
+          "exec",
+          "--json",
+          "--color",
+          "never",
+          "--skip-git-repo-check",
+          "-s",
+          "read-only",
+          "-c",
+          "model_reasoning_effort=low",
+          "[prompt omitted]"
+        ]
+      },
       "checkpointCaptured": true,
       "restartClassification": "interrupted",
       "automaticRetry": false,
       "recordKinds": [
         "turn-start",
         "step-start",
+        "instruction-snapshot",
         "user-text",
         "assistant-text",
         "step-end",
         "turn-end"
-      ]
+      ],
+      "reason": {
+        "code": "native_discovery_unproven",
+        "stage": "record"
+      }
     },
     {
       "provider": "claude",
+      "status": "blocked",
+      "code": "auth_unavailable",
       "installed": true,
-      "version": "2.1.246 (Claude Code)",
-      "ok": true,
-      "qualification": "pass",
-      "terminalClassification": "success",
-      "eventCount": 31,
-      "eventKinds": [
-        "status",
-        "chunk",
-        "log",
-        "text",
-        "error",
-        "done"
-      ],
-      "outputBytes": 16,
-      "outputSha256": "a2d04b566b53f85455fbbe894b0d4bb784f22ce4ac03b312598946bb1c6a7eba",
-      "markerMatched": true,
-      "checkpointCaptured": true,
-      "restartClassification": "interrupted",
-      "automaticRetry": false,
-      "recordKinds": [
-        "turn-start",
-        "step-start",
-        "user-text",
-        "assistant-text",
-        "step-end",
-        "turn-end"
-      ]
-    },
-    {
-      "provider": "grok",
-      "installed": true,
-      "version": "grok 0.2.106 (bde89716f679) [stable]",
-      "ok": false,
+      "attempted": false,
+      "stage": "auth",
+      "authUsable": false,
+      "unqualified": true,
       "qualification": "blocked-auth",
-      "terminalClassification": "process-exit-failure",
-      "eventCount": 20,
-      "eventKinds": [
-        "status",
-        "chunk",
-        "log",
-        "error"
-      ],
-      "outputBytes": 1026,
-      "outputSha256": "0f8ee64674c65e8e1f02e5df17bd33f7b1c28facb113d32aa72fe8fa8811114b",
-      "markerMatched": false,
-      "checkpointCaptured": true,
-      "restartClassification": "interrupted",
-      "automaticRetry": false,
-      "recordKinds": [
-        "turn-start",
-        "step-start",
-        "user-text",
-        "assistant-text",
-        "step-end",
-        "turn-end"
-      ],
-      "error": "Provider CLI authentication is unavailable on this machine."
-    },
-    {
-      "provider": "gemini",
-      "installed": false
-    },
-    {
-      "provider": "cursor",
-      "installed": false
+      "version": "2.1.246 (Claude Code)",
+      "exitCode": null,
+      "diagnostic": "auth/login",
+      "reason": {
+        "code": "auth_unavailable",
+        "stage": "auth"
+      }
     }
   ]
 }

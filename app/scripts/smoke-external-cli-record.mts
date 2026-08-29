@@ -27,6 +27,12 @@ const external = buildExternalCliRecord({
   settlement: 'answered',
   startedAt: 1_000,
   finishedAt: 2_000,
+  instructionSnapshot: {
+    id: 'ins_cli', revision: 3, effectiveHash: 'b'.repeat(64), effectiveText: '全域規則', globalEffectiveText: '全域規則',
+    sources: [{ id: 'global', kind: 'global-custom', scope: 'global', revision: 3, bytes: 12, includedBytes: 12, droppedBytes: 0, hash: 'c'.repeat(64), applied: true, deduplicated: false, truncated: false, shadowed: false, content: '全域規則' }],
+    diagnostics: [], usage: { personalizationBytes: 12, projectInstructionBytes: 0, totalBytes: 12, budgetBytes: 1024 },
+    deliveryMode: 'native', exactSnapshot: false,
+  },
 })
 
 // Same entry kinds as a builtin turn, in the same order.
@@ -45,6 +51,15 @@ for (const kind of kindsOf(builtin)) {
   assert.ok(kindsOf(external).includes(kind), `an external run records ${kind} like a builtin one`)
 }
 assert.deepEqual(turnRecordEntries(external).map((entry) => entry.seq), turnRecordEntries(external).map((_, index) => index + 1))
+const instructionEvidence = turnRecordEntries(external).find((entry) => entry.kind === 'instruction-snapshot')
+assert.equal(instructionEvidence?.kind === 'instruction-snapshot' ? instructionEvidence.snapshot.effectiveHash : undefined, 'b'.repeat(64))
+assert.equal(instructionEvidence?.kind === 'instruction-snapshot' ? instructionEvidence.snapshot.exactSnapshot : true, false)
+assert.equal(turnRecordEntries(external).find((entry) => entry.kind === 'user-text')?.content, '修好那個測試')
+
+// A gate that fails before process invocation has no provider-visible prompt
+// and therefore must not persist the raw admitted text as a delivered turn.
+const preDispatchFailure = buildExternalCliRecord({ runner: 'codex', events: [], answer: '', settlement: 'failed' })
+assert.equal(turnRecordEntries(preDispatchFailure).some((entry) => entry.kind === 'user-text'), false)
 
 // Accountability survives the path change: the model asked, the Host reported.
 assert.equal(turnRecordEntries(external).find((entry) => entry.kind === 'tool-call')?.source, 'model')

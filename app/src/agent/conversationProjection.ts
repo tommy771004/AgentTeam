@@ -53,6 +53,8 @@ type ToolCallEntry = Extract<TurnRecordEntry, { kind: 'tool-call' }>
 type ApprovalEntry = Extract<TurnRecordEntry, { kind: 'approval' }>
 
 const NON_CONVERSATION_ENTRY_KINDS = new Set<TurnRecordEntry['kind']>([
+  'provider-prompt',
+  'provider-history',
   'tool-evidence',
   'state-proposal',
   'state-check',

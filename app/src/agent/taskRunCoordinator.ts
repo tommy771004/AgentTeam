@@ -32,6 +32,8 @@ import { findReplaySafeCheckpoint } from './runFork.ts'
 import {
   buildExternalCliDelegateContract,
   capabilitiesForRunner,
+  executionKindForRunner,
+  instructionDeliveryForRunner,
 } from './runners/types.ts'
 import { buildRunContextPolicy, resolveRunSettingsOverrides, snapshotRunSettings, withRunShellPolicy } from './runSettingsSnapshot.ts'
 import { normalizeExternalCliRunPolicy } from './externalCliRunSession.ts'
@@ -63,6 +65,122 @@ export type TaskRunResult = ExternalRunResult
 function rendererPresent(): boolean {
   if (typeof document === 'undefined') return false
   return document.visibilityState === 'visible'
+}
+
+export async function admitExternalInstructions(input: {
+  runner: string
+  projectRoot?: string
+  overrides: RuntimeOverrides
+  notice: (text: string) => void
+}): Promise<void> {
+  if (executionKindForRunner(input.runner) !== 'external') return
+  const delivery = instructionDeliveryForRunner(input.runner)
+  try {
+    const bridge = window.subagents?.piHost?.instructions
+    if (typeof bridge?.resolve !== 'function') {
+      input.notice('指令送達：unverified · Host instruction projection unavailable')
+      return
+    }
+    const projection = (await bridge.resolve({ projectRoot: input.projectRoot, workPath: input.projectRoot })).instructionSnapshot
+    input.overrides.instructionSnapshot = {
+      ...projection,
+      deliveryMode: delivery.mode,
+      exactSnapshot: delivery.exactSnapshot,
+    }
+    const explicitText = delivery.mode === 'native'
+      ? projection.globalEffectiveText
+      : projection.effectiveText
+    if (explicitText.trim()) {
+      input.overrides.extraSystemContext = [
+        input.overrides.extraSystemContext,
+        `## Host instruction delivery (${delivery.mode}; exact=${delivery.exactSnapshot}; hash=${projection.effectiveHash})\n${explicitText}`,
+      ].filter(Boolean).join('\n\n')
+    }
+    input.notice(`指令送達：${delivery.mode} · ${delivery.detail} · snapshot ${projection.id}`)
+  } catch (error) {
+    input.notice(`指令送達：unverified · ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/** Freeze external delivery before parking a run so restart cannot reread newer settings. */
+async function freezeExternalInstructionsForQueue(opts: ExternalRunOpts): Promise<ExternalRunOpts> {
+  if (!opts.runner || opts.runner === 'builtin' || opts.overrides?.instructionSnapshot) return opts
+  const overrides = { ...(opts.overrides || {}) }
+  await admitExternalInstructions({
+    runner: opts.runner,
+    projectRoot: opts.projectRoot || overrides.projectRoot,
+    overrides,
+    notice: () => {},
+  })
+  return { ...opts, overrides }
+}
+
+async function admitTaskInstructions(input: {
+  runner: string
+  projectRoot?: string
+  overrides: RuntimeOverrides
+  notice: (text: string) => void
+}): Promise<void> {
+  if (input.overrides.instructionSnapshot) {
+    const delivery = instructionDeliveryForRunner(input.runner)
+    input.notice(`指令送達：${delivery.mode} · frozen snapshot ${input.overrides.instructionSnapshot.id}`)
+    return
+  }
+  await admitExternalInstructions(input)
+}
+
+/** Complete the one-time renderer legacy handoff before any provider admission. */
+export async function admitLegacyInstructionMigration<T>(input: {
+  currentRevision: number
+  readiness: { status: 'pending' | 'ready' | 'failed'; error?: string }
+  retry: () => Promise<{ status: 'pending' | 'ready' | 'failed'; error?: string }>
+  getMigrationInput: () => T
+  migrate: (migrationInput: T) => Promise<unknown>
+}): Promise<'migrated' | 'skipped'> {
+  let readiness = input.readiness
+  if (readiness.status === 'failed') readiness = await input.retry()
+  if (readiness.status !== 'ready') {
+    throw new Error(`Legacy Hermes 尚未可讀，migration 保留 pending：${readiness.error || 'read not ready'}`)
+  }
+  if (input.currentRevision !== 0) return 'skipped'
+  await input.migrate(input.getMigrationInput())
+  return 'migrated'
+}
+
+async function ensureHostInstructionMigration(settings: LlmSettings): Promise<void> {
+  const bridge = window.subagents?.piHost?.instructions
+  if (typeof bridge?.get !== 'function' || typeof bridge.migrateLegacy !== 'function') return
+  const { useLearningStore } = await import('../store/learningStore.ts')
+  if (!useLearningStore.getState().loaded) await useLearningStore.getState().load()
+  const {
+    getLegacyInstructionDocs,
+    getLegacyInstructionHydration,
+  } = await import('./hermes/promptBuilder.ts')
+  const current = (await bridge.get()).instructions
+  const { getLegacyPersonalizationPresence } = await import('../store/settingsStore.ts')
+  await admitLegacyInstructionMigration({
+    currentRevision: current.revision,
+    readiness: getLegacyInstructionHydration(),
+    retry: async () => {
+      // A transient Hermes read must be retried through the owning store. Never
+      // turn a failed read into migrateLegacy({}), which would durably record a
+      // false "no legacy data" marker.
+      await useLearningStore.getState().reloadLegacyInstructionSource()
+      return getLegacyInstructionHydration()
+    },
+    getMigrationInput: () => {
+      const presence = getLegacyPersonalizationPresence()
+      const legacyDocs = getLegacyInstructionDocs()
+      return {
+        ...(presence.personality ? { personality: settings.personality } : {}),
+        ...(presence.aboutUser ? { aboutUser: settings.customAboutUser } : {}),
+        ...(presence.responseStyle ? { responseStyle: settings.customResponseStyle } : {}),
+        ...(legacyDocs.soul !== undefined ? { soul: legacyDocs.soul } : {}),
+        ...(legacyDocs.agents !== undefined ? { agents: legacyDocs.agents } : {}),
+      }
+    },
+    migrate: (migrationInput) => bridge.migrateLegacy(migrationInput),
+  })
 }
 
 /** Prevent re-entrant callers from starting the same lifecycle twice. */
@@ -1869,6 +1987,7 @@ async function coordinateTaskRun(
         }
       }
     } else if (policy === 'queue' && !opts._fromQueue) {
+      opts = await freezeExternalInstructionsForQueue(opts)
       const item = enqueueExternalRun({
         ...opts,
         runId,
@@ -1918,6 +2037,7 @@ async function coordinateTaskRun(
   if (!(await reserveRunCapacity(runId, opts.reuseThreadId, reserveKind))) {
     const retryCapacity = await checkRunCapacity(runId, opts.reuseThreadId)
     if (!opts._fromQueue && (opts.sourceKind ? resolveBusyPolicy(opts.sourceKind, useSettingsStore.getState().settings.followUpMode) : 'queue') === 'queue') {
+      opts = await freezeExternalInstructionsForQueue(opts)
       const item = enqueueExternalRun({ ...opts, runId, attachments, unattended: opts.unattended ?? isAutomationSource(opts) })
       if (item) return { path: 'builtin', status: 'skipped', error: `並行執行上限 ${retryCapacity.limit}，已加入佇列`, threadId: opts.reuseThreadId || null, runId, skipped: true, skipReason: 'queued', queued: true, queueId: item.id }
     }
@@ -2264,6 +2384,23 @@ async function coordinateTaskRun(
   // resolves the same way instead of falling back to the picker again.
   if (overrides.projectRoot) useThreadStore.getState().setThreadProject(tid, overrides.projectRoot)
 
+  // Migration is an admission precondition, not a Settings-page side effect.
+  // Existing users therefore cannot run once with silently missing legacy
+  // personalization merely because they have not opened Personalization yet.
+  await ensureHostInstructionMigration(settings)
+
+  // External adapters do not enter Pi's Host-owned turn admission. Resolve at
+  // this same canonical Task-run admission point and disclose the actual
+  // delivery mode. Codex/Claude keep native filesystem discovery, so only the
+  // DB-owned global portion is wrapped explicitly and project text is not
+  // duplicated.
+  await admitTaskInstructions({
+    runner: intendedRunner,
+    projectRoot: overrides.projectRoot,
+    overrides,
+    notice: (text) => thr.pushBubble(tid, 'system', text),
+  })
+
   // Outbound Data Gate: when protection is active, pin tools to a provider-specific
   // Sanitized Workspace (Restricted Project View) created in Electron main.
   // Ticket 17: required fails closed on missing root / prepare / policy (pure admission).
@@ -2359,6 +2496,7 @@ async function coordinateTaskRun(
         overrides.contextPolicySnapshot = withRunShellPolicy(admittedPolicy, {
           effectiveMode: mode,
           viewRoot: admission.viewRoot,
+          connectionId: prepare.connectionId,
         })
         // Ticket 18: pin local view root so tools resolve via single truth
         // even when a call site omits explicit projectRoot (main remains owner).

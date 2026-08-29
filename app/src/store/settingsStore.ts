@@ -19,6 +19,29 @@ export { SETTINGS_CUSTOM_MERGE_KEYS, type SettingsCustomMergeKey }
 
 const STORAGE_KEY = 'subagents.settings.v1'
 
+export type LegacyPersonalizationPresence = Readonly<{
+  personality: boolean
+  aboutUser: boolean
+  responseStyle: boolean
+}>
+
+const legacyPersonalizationPresence = { personality: false, aboutUser: false, responseStyle: false }
+
+function observeLegacyPersonalizationPresence(value: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return
+  const record = value as Record<string, unknown>
+  if (Object.prototype.hasOwnProperty.call(record, 'personality')) legacyPersonalizationPresence.personality = true
+  if (Object.prototype.hasOwnProperty.call(record, 'customAboutUser')) legacyPersonalizationPresence.aboutUser = true
+  if (Object.prototype.hasOwnProperty.call(record, 'customResponseStyle')) legacyPersonalizationPresence.responseStyle = true
+}
+
+try { observeLegacyPersonalizationPresence(JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')) } catch { /* no renderer storage */ }
+
+/** Preserve explicit blank legacy values instead of conflating them with absent keys. */
+export function getLegacyPersonalizationPresence(): LegacyPersonalizationPresence {
+  return { ...legacyPersonalizationPresence }
+}
+
 async function readCanonicalMemoryExport(): Promise<unknown> {
   const exportBundle = window.subagents?.piHost?.memoryProjection?.exportBundle
   if (!exportBundle) {
@@ -28,12 +51,8 @@ async function readCanonicalMemoryExport(): Promise<unknown> {
 }
 
 async function importNonMemoryHermes(incoming: unknown): Promise<void> {
-  const bridge = window.subagents?.hermes
-  if (bridge?.set) {
-    if (typeof bridge.get !== 'function') throw new Error('無法讀取既有 Hermes 資料，未套用匯入。')
-    const current = await bridge.get()
-    await bridge.set(preserveLegacyHermesMemory(current, incoming))
-    return
+  if (isElectronPiProduction()) {
+    throw new Error('Electron legacy Hermes 僅供一次性讀取；匯入請使用 Host Personalization contract。')
   }
   const current = JSON.parse(localStorage.getItem('subagents.hermes.v1') || 'null')
   localStorage.setItem('subagents.hermes.v1', JSON.stringify(preserveLegacyHermesMemory(current, incoming)))
@@ -131,10 +150,15 @@ function loadLocal(): LlmSettings {
   }
 }
 
+function stripLegacyPersonalization(s: LlmSettings): Omit<LlmSettings, 'personality' | 'customAboutUser' | 'customResponseStyle'> {
+  const { personality: _personality, customAboutUser: _aboutUser, customResponseStyle: _responseStyle, ...rest } = s
+  return rest
+}
+
 function saveLocal(s: LlmSettings) {
   // Electron persists custom-tool secrets through safeStorage in the main process;
   // don't duplicate those values in renderer localStorage.
-  const source = isElectronPiProduction() ? stripPiOwnedSettings(s) : s
+  const source = isElectronPiProduction() ? stripPiOwnedSettings(stripLegacyPersonalization(s)) : stripLegacyPersonalization(s)
   const local = window.subagents?.settings ? { ...source, customToolSecrets: {} } : source
   localStorage.setItem(STORAGE_KEY, JSON.stringify(local))
 }
@@ -187,6 +211,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       try {
         const remote = (await window.subagents.settings.get()) as Partial<LlmSettings> | null
         if (remote) {
+          observeLegacyPersonalizationPresence(remote)
           base = mergeSettings(loadLocal(), isElectronPiProduction() ? stripPiOwnedSettings(remote) : remote)
         } else {
           base = loadLocal()
@@ -299,13 +324,13 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     // Pi Host is the only runtime owner (ADR-0045/ADR-0046). Nothing in the
     // renderer executes settings any more; the bridge only persists them.
     if (!isElectronPiProduction()) {
-      if (window.subagents?.settings?.set) await window.subagents.settings.set(next)
+      if (window.subagents?.settings?.set) await window.subagents.settings.set(stripLegacyPersonalization(next))
     } else if (window.subagents?.settings?.set) {
       // Pi Host owns runtime settings, but the legacy bridge still persists
       // renderer-owned preferences (theme, layout, notifications, integrations,
       // and other UI settings). Keep it in sync so a later load/remount cannot
       // overwrite a newer local value with a stale disk snapshot.
-      await window.subagents.settings.set(stripPiOwnedSettings(next))
+      await window.subagents.settings.set(stripPiOwnedSettings(stripLegacyPersonalization(next)))
     }
     if (window.subagents?.piHost?.settings?.update) {
       const connectionChanged = ['apiProvider', 'baseUrl', 'apiKey', 'model']

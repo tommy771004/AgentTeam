@@ -155,6 +155,9 @@ export type PiRuntimeSettings = {
   model?: string
   thinkingLevel?: PiThinkingLevel
   activeTools?: string[]
+  /** Distinguishes an explicit empty/restricted intersection from Pi's legacy
+   * empty-list meaning "use the default tool set". */
+  activeToolsRestricted?: boolean
   /** Temporary chats read no memory and write none; pack tools honour it too. */
   temporaryChat?: boolean
   /** Capability ids preloaded for this turn (per-thread prefs ride in from the renderer). */
@@ -335,6 +338,37 @@ export async function persistPiLegacyCredential(provider: string, apiKey: string
   )
 }
 
+type PiMcpDynamicPacks = Awaited<ReturnType<typeof buildPiMcpDynamicPacks>>
+
+async function retireExistingPiSession(sessionId: string, existing?: PiSessionRuntime): Promise<void> {
+  if (existing) await disposePiSession(sessionId)
+}
+
+function configurePiToolOptions(options: Record<string, unknown>, settings: PiRuntimeSettings, mcpDynamic: PiMcpDynamicPacks): boolean {
+  const restricted = settings.activeToolsRestricted === true || Boolean(settings.activeTools?.length)
+  if (!restricted) return false
+  // A restricted allowlist must still ADMIT every pack tool into the registry,
+  // or load_capability could never reveal one mid-run. Being in the registry
+  // is not the same as being active: the active set below is what reaches the model.
+  options.tools = [...new Set([
+    ...(settings.activeTools || []),
+    ...piAllPackToolNames(),
+    ...mcpDynamic.tools.map((tool) => tool.modelName),
+  ])]
+  return true
+}
+
+function desiredPiTools(restricted: boolean, settings: PiRuntimeSettings, mcpDynamic: PiMcpDynamicPacks): string[] {
+  const selected = restricted ? (settings.activeTools || []) : Object.keys(TOOL_FACTORIES)
+  return [
+    ...selected,
+    ...piActivePackToolNames(settings.activeTools || [], settings.unlockedTools || []),
+    ...mcpDynamic.tools
+      .filter((tool) => settings.mcpCapabilityActive === true || (settings.unlockedTools || []).includes(tool.modelName) || (settings.activeTools || []).includes(tool.modelName))
+      .map((tool) => tool.modelName),
+  ]
+}
+
 async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string, settings: PiRuntimeSettings = {}) {
   const existing = sessionRuntimes.get(sessionId)
   const agentDir = resolvePiAgentDir()
@@ -349,6 +383,10 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   const activeToolsKey = JSON.stringify({ settings, cwd, skillSnapshotDigest: skillSnapshot?.digest, authRevision })
   if (skillSnapshot) bindPiSessionSkillResourceView(sessionId, skillSnapshot)
   if (existing && existing.activeToolsKey === activeToolsKey) return existing
+  // Settings can tighten the active tool contract between Goal-based
+  // iterations. Retire the previous AgentSession before reopening its
+  // persisted transcript so the new contract cannot race the old runtime.
+  await retireExistingPiSession(sessionId, existing)
   try {
   const sessionDir = agentDir ? join(agentDir, 'sessions') : undefined
   const sessionManager = sessionFile
@@ -393,6 +431,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
       // Default global/project discovery points at mutable source files.
       // Only the Host-created frozen snapshot may be advertised this turn.
       noSkills: true,
+      noContextFiles: true,
       additionalSkillPaths: piSkillsDir ? [piSkillsDir] : undefined,
       extensionFactories: [
         ...packBundle.factories,
@@ -443,17 +482,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
       captureDiscoveredPiSkills(resourceLoader.getSkills())
     }
   }
-  if (settings.activeTools?.length) {
-    // A restricted allowlist must still ADMIT every pack tool into the
-    // registry, or load_capability could never reveal one mid-run. Being in
-    // the registry is not the same as being active: the active set below is
-    // what reaches the model.
-    options.tools = [...new Set([
-      ...settings.activeTools,
-      ...piAllPackToolNames(),
-      ...mcpDynamic.tools.map((tool) => tool.modelName),
-    ])]
-  }
+  const restrictedTools = configurePiToolOptions(options, settings, mcpDynamic)
   if (settings.thinkingLevel) options.thinkingLevel = settings.thinkingLevel
   options.customTools = [piWorkingStateWriteToolDefinition({
     sessionId,
@@ -484,13 +513,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   // capability tools; an unrestricted run gets the Pi defaults plus every
   // always-on pack tool. Without this, Pi would auto-activate every
   // registered extension tool and the catalog would understate reality.
-  const desiredActive = [
-    ...(settings.activeTools?.length ? settings.activeTools : Object.keys(TOOL_FACTORIES)),
-    ...piActivePackToolNames(settings.activeTools || [], settings.unlockedTools || []),
-    ...mcpDynamic.tools
-      .filter((tool) => settings.mcpCapabilityActive === true || (settings.unlockedTools || []).includes(tool.modelName) || (settings.activeTools || []).includes(tool.modelName))
-      .map((tool) => tool.modelName),
-  ]
+  const desiredActive = desiredPiTools(restrictedTools, settings, mcpDynamic)
   try {
     created.session.setActiveToolsByName?.([...new Set(desiredActive)])
   } catch {

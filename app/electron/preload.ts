@@ -19,6 +19,9 @@ import type {
 import type { DurableMemoryBundle } from './durableMemoryStore'
 import type { MemoryImportApplyInput, MemoryImportMode, MemoryImportPreview, MemoryImportResult } from './durableMemoryImport'
 import type { MemoryStorageHealth } from './memoryStorageLifecycle'
+import type { LegacyInstructionMigrationInput, LegacyInstructionMigrationReport, PersonalizationExportBundle, PersonalizationImportPreview, PersonalizationInstructionSnapshot } from './instructionRepository'
+import type { InstructionSnapshot } from './instructionResolver'
+import type { ProjectInstructionWriteFailureCode } from './projectInstructionWriter'
 
 type PiHostThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 type PiHostSettings = {
@@ -84,6 +87,28 @@ const api = {
       profile: (role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) =>
         ipcRenderer.invoke('pi-host:settings:profile', role, taskOverride) as Promise<{ profile: unknown }>,
     },
+      instructions: {
+        get: () => ipcRenderer.invoke('pi-host:instructions:get') as Promise<{ instructions: PersonalizationInstructionSnapshot }>,
+        save: (input: { expectedRevision: number; globalCustomInstructions: string; advancedPersonalityInstructions?: string; personality?: string; aboutUser?: string; responseStyle?: string }) =>
+          ipcRenderer.invoke('pi-host:instructions:save', input) as Promise<{ instructions: PersonalizationInstructionSnapshot }>,
+        migrateLegacy: (input: LegacyInstructionMigrationInput) =>
+          ipcRenderer.invoke('pi-host:instructions:migrate-legacy', input) as Promise<{ instructions: PersonalizationInstructionSnapshot; instructionMigrationReport: LegacyInstructionMigrationReport }>,
+        resolve: (input: { projectRoot?: string; workPath?: string; fallbackFilenames?: string[] }) =>
+          ipcRenderer.invoke('pi-host:instructions:resolve', input) as Promise<{ instructionSnapshot: InstructionSnapshot }>,
+        authorizeInclude: (target: string) => ipcRenderer.invoke('pi-host:instructions:authorize-include', target) as Promise<{ authorizedIncludeTargets: readonly string[] }>,
+        projectWrite: (input: { projectRoot: string; target: 'AGENTS.md' | 'AGENTS.override.md' | 'CLAUDE.md'; expectedHash: string; content: string }) =>
+          ipcRenderer.invoke('pi-host:instructions:project-write', input) as Promise<
+            | { ok: true; instructions: PersonalizationInstructionSnapshot; projectInstructionWrite: { path: string; hash: string; bytes: number } }
+            | { ok: false; error: { code: ProjectInstructionWriteFailureCode; message: string } }
+          >,
+        projectRead: (input: { projectRoot: string; workPath?: string; target: 'AGENTS.md' | 'AGENTS.override.md' | 'CLAUDE.md' }) =>
+          ipcRenderer.invoke('pi-host:instructions:project-read', input) as Promise<{ path: string; hash: string; bytes: number; content: string }>,
+        openSource: (input: { projectRoot: string; workPath?: string; path: string }) =>
+          ipcRenderer.invoke('pi-host:instructions:open-source', input) as Promise<{ ok: boolean; path?: string; code?: string; error?: string }>,
+        exportBundle: () => ipcRenderer.invoke('pi-host:instructions:export') as Promise<{ bundle: PersonalizationExportBundle }>,
+        previewImport: (bundle: unknown) => ipcRenderer.invoke('pi-host:instructions:import-preview', bundle) as Promise<{ preview: PersonalizationImportPreview }>,
+        applyImport: (bundle: unknown, expectedRevision: number) => ipcRenderer.invoke('pi-host:instructions:import-apply', bundle, expectedRevision) as Promise<{ instructions: PersonalizationInstructionSnapshot }>,
+      },
       sessions: {
         create: (title?: string, threadId?: string) => ipcRenderer.invoke('pi-host:sessions:create', title, threadId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         createChild: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:sessions:create-child', input) as Promise<{ sessionId: string; sessions: unknown[] }>,
@@ -180,7 +205,7 @@ const api = {
         uninstall: (id: string) => ipcRenderer.invoke('pi-host:extensions:uninstall', id) as Promise<{ removed?: boolean }>,
       },
       turn: {
-        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: { memoryEnabled: boolean; memoryWriteEnabled: boolean; referenceChatHistory: boolean; temporary: boolean; project?: string; contextWindowTokens?: number; deniedTools?: string[]; approvalTools?: string[]; outboundShellMode?: 'required' | 'optional' | 'demo' | 'off'; viewRoot?: string; gitPolicy?: { branchPrefix?: string; allowForcePush: boolean; draftPr: boolean }; approvalTimeoutMs?: number }; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }; pluginExecution?: SubDesignPluginExecutionProjection }>,
+        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: { memoryEnabled: boolean; memoryWriteEnabled: boolean; referenceChatHistory: boolean; temporary: boolean; project?: string; contextWindowTokens?: number; deniedTools?: string[]; approvalTools?: string[]; outboundShellMode?: 'required' | 'optional' | 'demo' | 'off'; outboundConnectionId?: string; viewRoot?: string; gitPolicy?: { branchPrefix?: string; allowForcePush: boolean; draftPr: boolean }; approvalTimeoutMs?: number }; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }; pluginExecution?: SubDesignPluginExecutionProjection }>,
         cancel: (runId: string) => ipcRenderer.invoke('pi-host:turn:cancel', runId) as Promise<{ runId: string; settlement: string }>,
         interrupt: (input: { runId: string; reason?: 'user' | 'timeout' }) =>
           ipcRenderer.invoke('pi-host:turn:interrupt', input) as Promise<{ runId: string; settlement: string; interruptReason?: 'user' | 'timeout' }>,
@@ -745,8 +770,6 @@ const api = {
   },
   hermes: {
     get: () => ipcRenderer.invoke('hermes:get') as Promise<unknown | null>,
-    set: (data: unknown) =>
-      ipcRenderer.invoke('hermes:set', data) as Promise<{ ok: boolean }>,
   },
   mcp: {
     discover: (projectRoot?: string) => ipcRenderer.invoke('mcp:discover', projectRoot) as Promise<{

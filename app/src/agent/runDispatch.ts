@@ -214,7 +214,7 @@ export async function dispatchThreadTask(
     // associate the Host-owned live session with this conversation.
     if (tid) useThreadStore.getState().setExternalRun(tid, initialExternalRun)
     // Keep CLI follow-ups coherent with builtin runs. The current request is
-    // deliberately first, so the runner's prompt cap never cuts it off.
+    // deliberately last so instruction hierarchy cannot be reversed by old chat.
     let cliPrompt = subDesignContext ? `${subDesignContext}\n\n## Current request\n${text}` : text
     const continueContract = buildCliContinueGoalContract(snapshot.overrides, {
       projectRoot,
@@ -240,13 +240,21 @@ export async function dispatchThreadTask(
         .join('\n')
       if (history) {
         cliPrompt = [
-          cliPrompt,
           '## 近期對話歷史（Reference chat history）',
           history,
+          cliPrompt,
         ]
           .join('\n\n')
-          .slice(0, 12_000)
+        if (cliPrompt.length > 12_000) cliPrompt = cliPrompt.slice(-12_000)
       }
+    }
+    // The coordinator freezes Host-owned instructions in extraSystemContext.
+    // External runners receive that exact admitted wrapper in the actual CLI
+    // prompt; recording a snapshot without this join would be false delivery.
+    if (snapshot.overrides.extraSystemContext?.trim()) {
+      cliPrompt = [snapshot.overrides.extraSystemContext.trim(), cliPrompt]
+        .filter(Boolean)
+        .join('\n\n')
     }
     await agent.startLocalCliExecution({
       kind,
@@ -271,6 +279,7 @@ export async function dispatchThreadTask(
       externalCliContract: snapshot.overrides.externalCliContract,
       externalCliPolicy: snapshot.overrides.externalCliPolicy,
       requiredConnectors: snapshot.overrides.externalCliRequiredConnectors,
+      instructionSnapshot: snapshot.overrides.instructionSnapshot,
     })
     const a =
       useAgentStore.getState().getRunState(snapshot.runId) || useAgentStore.getState().agent

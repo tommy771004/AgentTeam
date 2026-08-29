@@ -132,6 +132,7 @@ interface AgentStore {
     eventTrigger?: RuntimeOverrides['eventTrigger']
     /** Preserve the requested post-execution state for CLI finalization. */
     nextState?: RuntimeOverrides['nextState']
+    instructionSnapshot?: RuntimeOverrides['instructionSnapshot']
     /** Per-run outbound target; falls back to settings.webhookTarget. */
     webhookTarget?: RuntimeOverrides['webhookTarget']
     /** External CLI delegate/continue contract; no parent transcript. */
@@ -851,7 +852,10 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           objective: prompt,
           turnRecord: buildExternalCliRecord({
             runner: opts.kind,
-            prompt,
+            // Only the prompt that crossed the CLI invocation boundary is
+            // model-visible evidence. A pre-dispatch gate failure leaves this
+            // undefined and must not record the raw admitted prompt.
+            prompt: r.deliveredPrompt,
             events: recordEvents,
             answer: r.output || '',
             capabilities: { ...runnerCapabilities },
@@ -863,6 +867,9 @@ export const useAgentStore = create<AgentStore>((set, get) => {
                   ? 'cancelled'
                   : 'failed',
             startedAt: t0,
+            // A failed pre-dispatch gate has no delivered snapshot. Never
+            // mislabel the raw admitted projection as provider-visible truth.
+            instructionSnapshot: r.deliveredInstructionSnapshot,
           }),
           status:
             r.ok

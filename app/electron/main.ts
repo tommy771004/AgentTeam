@@ -76,6 +76,7 @@ import {
   getOutboundRunViewMeta,
   getOutboundRunViewRoot,
   getOutboundStatus,
+  outboundPolicyDir,
   prepareOutboundRunView,
   readOutboundRunEvidence,
 } from './outboundBridge'
@@ -86,6 +87,8 @@ import {
   type FilesystemIsolationStatus,
 } from '../src/agent/outbound/cliSandbox.ts'
 import { parseDeployOutboundGuard, type OutboundGuardMode } from '../src/agent/outbound/outboundGate.ts'
+import { InstructionRepositoryError } from './instructionRepository.ts'
+import { InstructionSourceOpenError, openInstructionSource } from './instructionSourceOpen.ts'
 import {
   activatePolicyDraft,
   listActivePolicies,
@@ -218,6 +221,7 @@ import {
   updatePublicKeyFromEnv,
 } from './updateManager'
 import { PiHostSupervisor } from './piHostSupervisor'
+import type { ProjectInstructionWriteFailureCode } from './projectInstructionWriter'
 import { writeSettingsBundleExport } from './settingsBundleExportWrite'
 import type { MemoryImportApplyInput, MemoryImportMode } from './durableMemoryImport'
 import type { PiTurnSettlement } from '../src/agent/piHostRun'
@@ -280,6 +284,7 @@ const piHostSupervisor = new PiHostSupervisor(async () => {
         path.join(userData, 'pi-host-state.json'),
         userHome,
       ),
+      SUBAGENTS_OUTBOUND_POLICY_DIR: outboundPolicyDir(),
       SUBAGENTS_DURABLE_MEMORY_DB_PATH: configuredUserPath(
         process.env,
         'SUBAGENTS_DURABLE_MEMORY_DB_PATH',
@@ -311,7 +316,7 @@ const piHostSupervisor = new PiHostSupervisor(async () => {
   })
 },
   {
-    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1'],
+    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1', 'instructions-v1'],
     serviceHandler: runPiHostMainService,
   },
 )
@@ -1208,11 +1213,17 @@ function hermesPath() {
 
 ipcMain.handle('hermes:get', async () => {
   const file = hermesPath()
-  if (!fs.existsSync(file)) return null
+  let contents: string
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8'))
-  } catch {
-    return null
+    contents = fs.readFileSync(file, 'utf-8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null
+    throw new InstructionRepositoryError('io_error', 'Legacy Hermes 讀取失敗。', error)
+  }
+  try {
+    return JSON.parse(contents)
+  } catch (error) {
+    throw new InstructionRepositoryError('corrupt', 'Legacy Hermes JSON 格式無效。', error)
   }
 })
 
@@ -2118,36 +2129,6 @@ ipcMain.handle('term:killAll', async () => {
   return { ok: true }
 })
 
-ipcMain.handle('hermes:set', async (_evt, data: unknown) => {
-  fs.writeFileSync(hermesPath(), JSON.stringify(data, null, 2), 'utf-8')
-  // Also mirror MEMORY.md / USER.md into workspace for human edit
-  try {
-    const payload = data as {
-      memory?: { userProfile?: string; memory?: string }
-      soul?: string
-      agents?: string
-    }
-    const root = getDataDir('workspace')
-    const hermesDir = path.join(root, 'hermes')
-    fs.mkdirSync(hermesDir, { recursive: true })
-    if (payload.memory?.userProfile != null) {
-      fs.writeFileSync(path.join(hermesDir, 'USER.md'), `# USER.md\n\n${payload.memory.userProfile}\n`, 'utf-8')
-    }
-    if (payload.memory?.memory != null) {
-      fs.writeFileSync(path.join(hermesDir, 'MEMORY.md'), `# MEMORY.md\n\n${payload.memory.memory}\n`, 'utf-8')
-    }
-    if (payload.soul) {
-      fs.writeFileSync(path.join(hermesDir, 'SOUL.md'), payload.soul, 'utf-8')
-    }
-    if (payload.agents) {
-      fs.writeFileSync(path.join(hermesDir, 'AGENTS.md'), payload.agents, 'utf-8')
-    }
-  } catch {
-    /* non-fatal */
-  }
-  return { ok: true }
-})
-
 ipcMain.handle('app:platform', () => process.platform)
 
 ipcMain.handle('subdesign:harnessStatus', async (_evt, binaryPath?: string) => {
@@ -2174,6 +2155,69 @@ ipcMain.handle('pi-host:health', async () => piHostSupervisor.health())
 ipcMain.handle('pi-host:settings:get', async () => piHostSupervisor.getSettingsSnapshot())
 ipcMain.handle('pi-host:settings:update', async (_evt, patch: Record<string, unknown>) => piHostSupervisor.updateSettingsSnapshot(patch || {}))
 ipcMain.handle('pi-host:settings:profile', async (_evt, role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) => ({ profile: await piHostSupervisor.profile(role, taskOverride) }))
+ipcMain.handle('pi-host:instructions:get', async () => ({ instructions: await piHostSupervisor.getInstructions() }))
+ipcMain.handle('pi-host:instructions:save', async (_evt, input: Record<string, unknown>) => ({ instructions: await piHostSupervisor.saveInstructions(input || {}) }))
+ipcMain.handle('pi-host:instructions:migrate-legacy', async (_evt, input: Record<string, unknown>) => piHostSupervisor.migrateLegacyInstructions(input || {}))
+ipcMain.handle('pi-host:instructions:resolve', async (_evt, input: Record<string, unknown>) => ({ instructionSnapshot: await piHostSupervisor.resolveInstructions(input || {}) }))
+ipcMain.handle('pi-host:instructions:authorize-include', async (evt, target: string) => {
+  const exactTarget = String(target || '')
+  const owner = BrowserWindow.fromWebContents(evt.sender)
+  const options: Electron.MessageBoxOptions = {
+    type: 'warning',
+    buttons: ['取消', '授權 exact target'],
+    defaultId: 0,
+    cancelId: 0,
+    title: '授權專案外 include',
+    message: '這個專案要求讀取 canonical project boundary 外的本機檔案。',
+    detail: `${exactTarget}\n\n只有這個 canonical target 會被持久授權；其他路徑仍會拒絕。`,
+  }
+  const confirmation = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options)
+  if (confirmation.response !== 1) throw new Error('使用者取消 include authorization。')
+  return { authorizedIncludeTargets: await piHostSupervisor.authorizeInstructionInclude(exactTarget) }
+})
+const projectInstructionErrorCodes = new Set<ProjectInstructionWriteFailureCode>([
+  'invalid_target', 'invalid_content', 'project_missing', 'conflict', 'permission_denied',
+  'read_only', 'disk_full', 'rename_failure', 'encoding_failure', 'io_error', 'integrity_failure',
+])
+ipcMain.handle('pi-host:instructions:project-write', async (_evt, input: Record<string, unknown>) => {
+  try {
+    return { ok: true as const, ...(await piHostSupervisor.writeProjectInstruction(input || {})) }
+  } catch (error) {
+    const candidate = error as { code?: unknown; message?: unknown }
+    const code = typeof candidate.code === 'string' && projectInstructionErrorCodes.has(candidate.code as ProjectInstructionWriteFailureCode)
+      ? candidate.code as ProjectInstructionWriteFailureCode
+      : 'io_error'
+    return { ok: false as const, error: { code, message: typeof candidate.message === 'string' ? candidate.message : 'Project instruction write failed' } }
+  }
+})
+ipcMain.handle('pi-host:instructions:project-read', async (_evt, input: { projectRoot?: string; workPath?: string; target?: string }) => {
+  return piHostSupervisor.readProjectInstruction({
+    projectRoot: typeof input?.projectRoot === 'string' ? input.projectRoot : '',
+    workPath: typeof input?.workPath === 'string' ? input.workPath : undefined,
+    target: typeof input?.target === 'string' ? input.target : '',
+  })
+})
+ipcMain.handle('pi-host:instructions:open-source', async (_evt, input: { projectRoot?: string; workPath?: string; path?: string }) => {
+  try {
+    return await openInstructionSource({
+      projectRoot: typeof input?.projectRoot === 'string' ? input.projectRoot : '',
+      workPath: typeof input?.workPath === 'string' ? input.workPath : undefined,
+      path: typeof input?.path === 'string' ? input.path : '',
+      resolveCurrent: async (resolveInput) => {
+        const snapshot = await piHostSupervisor.resolveInstructions(resolveInput)
+        if (!snapshot) throw new Error('Instruction projection unavailable.')
+        return snapshot
+      },
+      shellOpen: (canonicalPath) => shell.openPath(canonicalPath),
+    })
+  } catch (error) {
+    if (error instanceof InstructionSourceOpenError) return { ok: false, code: error.code, error: error.message }
+    throw error
+  }
+})
+ipcMain.handle('pi-host:instructions:export', async () => ({ bundle: await piHostSupervisor.exportInstructions() }))
+ipcMain.handle('pi-host:instructions:import-preview', async (_evt, bundle: unknown) => ({ preview: await piHostSupervisor.previewInstructionImport(bundle) }))
+ipcMain.handle('pi-host:instructions:import-apply', async (_evt, bundle: unknown, expectedRevision: number) => ({ instructions: await piHostSupervisor.applyInstructionImport(bundle, expectedRevision) }))
 ipcMain.handle('pi-host:sessions:create', async (_evt, title?: string, threadId?: string) => piHostSupervisor.createSession(title, threadId))
 ipcMain.handle('pi-host:sessions:create-child', async (_evt, input: Record<string, unknown>) => piHostSupervisor.createChildSession(input || {}))
 ipcMain.handle('pi-host:sessions:list', async () => ({ sessions: await piHostSupervisor.listSessions() }))

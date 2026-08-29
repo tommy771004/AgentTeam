@@ -48,12 +48,13 @@ export function buildRunContextPolicy(
  */
 export function withRunShellPolicy(
   policy: RunContextPolicy,
-  input: { effectiveMode: OutboundGuardMode; viewRoot?: string },
+  input: { effectiveMode: OutboundGuardMode; viewRoot?: string; connectionId?: string },
 ): RunContextPolicy {
   const viewRoot = (input.viewRoot || '').trim()
   return {
     ...policy,
     outboundShellMode: input.effectiveMode,
+    ...(input.connectionId?.trim() ? { outboundConnectionId: input.connectionId.trim() } : {}),
     ...(viewRoot ? { viewRoot } : {}),
   }
 }

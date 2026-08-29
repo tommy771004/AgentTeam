@@ -11,9 +11,10 @@
  * identical guarantees — this path runs no builtin Parse, evaluates no
  * Definition of Done, and never iterates.
  */
-import { EXTERNAL_CLI_RUNNER_CAPABILITIES, type RunnerCapabilities } from './runners/types.ts'
+import { EXTERNAL_CLI_RUNNER_CAPABILITIES, instructionDeliveryForRunner, type RunnerCapabilities } from './runners/types.ts'
 import type { PiTurnSettlement } from './piHostRun.ts'
 import { appendTurnRecord, type TurnRecord, type TurnRecordAppend } from './turnRecord.ts'
+import type { RecordedInstructionSnapshot } from './instructionSnapshot.ts'
 
 /** The subset of a CLI stream event this builder reads. */
 export type ExternalCliRecordEvent = {
@@ -29,13 +30,15 @@ export type ExternalCliRecordEvent = {
 
 export type ExternalCliRecordInput = {
   runner: string
-  prompt: string
+  /** Prompt after the CLI invocation boundary; absent means pre-dispatch. */
+  prompt?: string
   events: readonly ExternalCliRecordEvent[]
   answer: string
   settlement: PiTurnSettlement
   capabilities?: RunnerCapabilities
   startedAt?: number
   finishedAt?: number
+  instructionSnapshot?: RecordedInstructionSnapshot
 }
 
 /**
@@ -64,9 +67,11 @@ export function buildExternalCliRecord(input: ExternalCliRecordInput): TurnRecor
       at,
       runner: input.runner,
       capabilities: { ...(input.capabilities || EXTERNAL_CLI_RUNNER_CAPABILITIES) },
+      instructionDelivery: instructionDeliveryForRunner(input.runner),
     },
     { kind: 'step-start', source: 'host', turn: 1, step: 1, at },
-    { kind: 'user-text', source: 'user', content: input.prompt, turn: 1, step: 1, at },
+    ...(input.instructionSnapshot ? [{ kind: 'instruction-snapshot' as const, source: 'host' as const, snapshot: input.instructionSnapshot, turn: 1, step: 1, at }] : []),
+    ...(input.prompt !== undefined ? [{ kind: 'user-text' as const, source: 'user' as const, content: input.prompt, turn: 1, step: 1, at }] : []),
   ]
 
   let call = 0

@@ -32,6 +32,19 @@ assert.deepEqual(buildLocalCliArgv({
   capabilitySnapshot: codex,
 }).args.filter((arg) => arg === '--service-tier' || arg === 'priority'), ['--service-tier', 'priority'])
 
+const claude246 = capabilitiesFromCliHelp({
+  ...common,
+  provider: 'claude',
+  help: '--permission-mode plan --output-format stream-json --max-budget-usd',
+})
+assert.equal(claude246.maxTurns, 'unsupported')
+assert.equal(buildLocalCliArgv({
+  kind: 'claude',
+  prompt: 'plan without unsupported flags',
+  agentMode: 'plan',
+  capabilitySnapshot: claude246,
+}).args.includes('--max-turns'), false, 'Claude versions without --max-turns must not receive it')
+
 const oldCursor = capabilitiesFromCliHelp({ ...common, provider: 'cursor', help: '--model' })
 assert.equal(oldCursor.approval.full, 'unsupported')
 const safeCursorArgs = buildLocalCliArgv({

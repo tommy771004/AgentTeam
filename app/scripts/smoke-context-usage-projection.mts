@@ -77,6 +77,28 @@ record = appendTurnRecord(record, [
 
 const full = projectContextUsage(record, { contextWindow: 200_000 })
 
+const instructionRecord = appendTurnRecord(record, [{
+  kind: 'instruction-snapshot', source: 'host', turn: 1, step: 1, at: 1,
+  snapshot: {
+    id: 'ins_test', revision: 7, effectiveHash: 'a'.repeat(64), effectiveText: '規則',
+    sources: [], diagnostics: [],
+    usage: { personalizationBytes: 120, projectInstructionBytes: 80, totalBytes: 200, budgetBytes: 1024 },
+    deliveryMode: 'explicit', exactSnapshot: true,
+  },
+}])
+assert.deepEqual(projectContextUsage(instructionRecord).instructions, {
+  personalizationBytes: 120,
+  projectInstructionBytes: 80,
+  totalBytes: 200,
+  budgetBytes: 1024,
+  revision: 7,
+  effectiveHash: 'a'.repeat(64),
+  deliveryMode: 'explicit',
+  exactSnapshot: true,
+  hashAvailable: true,
+  sourceSummary: [],
+}, 'live and replay usage reads exact instruction slots from the Turn Record')
+
 // Totals are the sum of what the steps measured, and nothing else.
 assert.equal(full.tokens.input, 10_000)
 assert.equal(full.tokens.output, 500)

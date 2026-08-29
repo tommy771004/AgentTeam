@@ -1,6 +1,7 @@
 import { PI_HOST_PROTOCOL_VERSION, type PiHostEvent, type PiHostMessage, type PiHostRequest, type PiHostResponse } from './piHostProtocol.ts'
 import type { PiHostFinalizationClaimResult, PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
+import type { ProjectInstructionWriteFailureCode } from './projectInstructionWriter.ts'
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
 import type { MemoryImportPreviewInput, MemoryImportApplyInput } from './durableMemoryImport.ts'
 import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
@@ -67,7 +68,7 @@ export class PiHostSupervisor {
     this.turnIdleTimeoutMs = options.turnIdleTimeoutMs ?? 5 * 60_000
     this.requestedCapabilities = options.requestedCapabilities
       ? [...options.requestedCapabilities]
-      : ['attachments-v1', 'tool-contract-v1']
+      : ['attachments-v1', 'tool-contract-v1', 'instructions-v1']
     this.serviceHandler = options.serviceHandler
   }
 
@@ -198,6 +199,77 @@ export class PiHostSupervisor {
     const response = await this.request('settings/profile', { role: role || {}, taskOverride: taskOverride || {} })
     if (response.error || !response.result?.profile) throw new Error(response.error?.message || 'Pi Host profile failed')
     return response.result.profile
+  }
+
+  async getInstructions(): Promise<NonNullable<PiHostResponse['result']>['instructions']> {
+    const response = await this.request('instructions/v1/get', {})
+    if (response.error || !response.result?.instructions) throw new Error(response.error?.message || 'Instruction projection failed')
+    return response.result.instructions
+  }
+
+  async saveInstructions(input: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>['instructions']> {
+    const response = await this.request('instructions/v1/save', input)
+    if (response.error || !response.result?.instructions) throw new Error(response.error?.message || 'Instruction save failed')
+    return response.result.instructions
+  }
+
+  async migrateLegacyInstructions(input: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('instructions/v1/migrate-legacy', input)
+    if (response.error || !response.result?.instructions || !response.result.instructionMigrationReport) throw new Error(response.error?.message || 'Legacy instruction migration failed')
+    return response.result
+  }
+
+  async resolveInstructions(input: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>['instructionSnapshot']> {
+    const response = await this.request('instructions/v1/resolve', input)
+    if (response.error || !response.result?.instructionSnapshot) throw new Error(response.error?.message || 'Instruction resolution failed')
+    return response.result.instructionSnapshot
+  }
+
+  async authorizeInstructionInclude(target: string): Promise<readonly string[]> {
+    const response = await this.request('instructions/v1/authorize-include', { target })
+    if (response.error || !response.result?.authorizedIncludeTargets) throw new Error(response.error?.message || 'Instruction include authorization failed')
+    return response.result.authorizedIncludeTargets
+  }
+
+  async writeProjectInstruction(input: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('instructions/v1/project-write', input)
+    if (response.error || !response.result?.projectInstructionWrite) {
+      const error = new Error(response.error?.message || 'Project instruction write failed') as Error & {
+        code?: ProjectInstructionWriteFailureCode
+        details?: NonNullable<PiHostResponse['error']>
+      }
+      error.name = 'ProjectInstructionWriteError'
+      if (response.error) {
+        error.code = response.error.code as ProjectInstructionWriteFailureCode
+        error.details = response.error
+      }
+      throw error
+    }
+    return response.result
+  }
+
+  async readProjectInstruction(input: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>['projectInstructionRead']> {
+    const response = await this.request('instructions/v1/project-read', input)
+    if (response.error || !response.result?.projectInstructionRead) throw new Error(response.error?.message || 'Project instruction read failed')
+    return response.result.projectInstructionRead
+  }
+
+  async exportInstructions(): Promise<NonNullable<PiHostResponse['result']>['instructionExport']> {
+    const response = await this.request('instructions/v1/export', {})
+    if (response.error || !response.result?.instructionExport) throw new Error(response.error?.message || 'Instruction export failed')
+    return response.result.instructionExport
+  }
+
+  async previewInstructionImport(bundle: unknown): Promise<NonNullable<PiHostResponse['result']>['instructionImportPreview']> {
+    const response = await this.request('instructions/v1/import-preview', { bundle })
+    if (response.error || !response.result?.instructionImportPreview) throw new Error(response.error?.message || 'Instruction import preview failed')
+    return response.result.instructionImportPreview
+  }
+
+  async applyInstructionImport(bundle: unknown, expectedRevision: number): Promise<NonNullable<PiHostResponse['result']>['instructions']> {
+    const response = await this.request('instructions/v1/import-apply', { bundle, expectedRevision })
+    if (response.error || !response.result?.instructions) throw new Error(response.error?.message || 'Instruction import failed')
+    return response.result.instructions
   }
 
   async createSession(title?: string, threadId?: string): Promise<NonNullable<PiHostResponse['result']>> {

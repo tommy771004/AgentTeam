@@ -12,6 +12,15 @@ import { baselineMemoryControlPackageReader } from './memoryControlPackageReposi
 import type { MemoryControlEvaluationAuthority } from './memoryControlEvaluationAuthority.ts'
 import { BUILTIN_RUNNER_CAPABILITIES } from '../src/agent/runners/types.ts'
 import { piToolFailureDetail } from './piToolFailureDetail.ts'
+import { InMemoryInstructionRepository, InstructionRepositoryError, type InstructionRepository, type LegacyInstructionMigrationReport, type PersonalizationImportPreview, type PersonalizationInstructionSnapshot } from './instructionRepository.ts'
+import { resolveInstructionSnapshot, writeProjectInstruction, type InstructionSnapshot } from './instructionResolver.ts'
+import { ProjectInstructionWriteError, readProjectInstruction } from './projectInstructionWriter.ts'
+import { mapSanitizedInstructionSnapshot } from '../src/agent/instructionSnapshot.ts'
+import { prepareLlmEgressMessages } from '../src/agent/outbound/llmEgress.ts'
+import { BUILTIN_BASELINE_POLICY, emptySupplementalPolicy } from '../src/agent/outbound/policySchema.ts'
+import { compileProviderSecurityProfile } from '../src/agent/outbound/policyMerge.ts'
+import { ensureLocalPolicyTree } from '../src/agent/outbound/policyStore.ts'
+import { connectionIdForBuiltinLlm } from '../src/agent/outbound/providerConnectionId.ts'
 
 /**
  * Version 2 retired the ambiguous `success` turn settlement for the closed
@@ -24,7 +33,7 @@ import { piToolFailureDetail } from './piToolFailureDetail.ts'
  * field. Durable memory is available only through negotiated memory-store-v1.
  */
 export const PI_HOST_PROTOCOL_VERSION = 5 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'capabilities'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
@@ -46,7 +55,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
   params: Record<string, unknown>
 }
 
@@ -106,6 +115,14 @@ export type PiHostResponse = {
     /** Structured payload of one tool execution (tools/pack). */
     item?: unknown
     memoryStore?: import('./durableMemoryStore.ts').DurableMemoryProtocolResult
+    instructions?: PersonalizationInstructionSnapshot
+    instructionSnapshot?: InstructionSnapshot
+    instructionImportPreview?: PersonalizationImportPreview
+    instructionMigrationReport?: LegacyInstructionMigrationReport
+    instructionExport?: import('./instructionRepository.ts').PersonalizationExportBundle
+    projectInstructionWrite?: { path: string; hash: string; bytes: number }
+    projectInstructionRead?: { path: string; hash: string; bytes: number; content: string }
+    authorizedIncludeTargets?: readonly string[]
     tool?: string
     code?: string
     content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>
@@ -133,6 +150,9 @@ export type PiHostResponse = {
   }
   error?: {
     code: 'invalid_request' | 'protocol_mismatch' | 'not_initialized' | 'unknown_method' | 'runtime_error' | 'forbidden' | 'quota_exceeded' | 'not_found' | 'unavailable' | 'closed' | 'invalid_bundle' | 'tool_contract_not_found' | 'tool_contract_unknown_tool' | 'tool_contract_stale' | 'tool_contract_session_mismatch' | 'tool_contract_inactive'
+      | 'conflict' | 'read_only' | 'busy' | 'io_error' | 'unsupported_schema' | 'corrupt' | 'integrity_failure' | 'migration_failed' | 'invalid_import'
+      | 'invalid_target' | 'invalid_content' | 'project_missing' | 'permission_denied'
+      | 'disk_full' | 'rename_failure' | 'encoding_failure'
     message: string
   }
 }
@@ -141,6 +161,34 @@ export type PiHostEvent =
   | {
       event: 'host/storage-health'
       payload: Extract<MemoryStorageHealth, { status: 'degraded' }>
+    }
+  | {
+      event: 'instruction/changed'
+      payload: {
+        version: 1
+        revision: number
+        operation: 'save' | 'import' | 'migration' | 'project-write' | 'filesystem-observed' | 'include-authorization'
+        /** Host facts that let an after-cursor consumer identify what changed without reading content from the event. */
+        projectIdentity?: string
+        workPath?: string
+        effectiveHash?: string
+        source?: {
+          identity: string
+          path?: string
+          hash: string
+          bytes: number
+        }
+        sources?: readonly {
+          id: string
+          scope: 'global' | 'project'
+          path?: string
+          parentPath?: string
+          hash: string
+          bytes: number
+          applied: boolean
+          metadataStatus: 'content' | 'metadata' | 'unavailable' | 'unauthorized'
+        }[]
+      }
     }
   | {
       event: 'host/ready'
@@ -269,7 +317,7 @@ import {
   buildPiTurnLearningCandidate,
   formatPiCompactionSummary,
   parsePiTurnContextPolicy,
-  selectPiMemoryContext,
+  selectPiMemoryContextWithinBytes,
 } from './piSessionContext.ts'
 import { settlePiRunLearning, type PiRunLearningSettlement } from './piRunLearningSettlement.ts'
 import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
@@ -378,7 +426,10 @@ type HostState = {
   toolContractNegotiated: boolean
   memoryStoreNegotiated: boolean
   memoryControlNegotiated: boolean
+  instructionRepositoryNegotiated: boolean
   memoryStore: DurableMemoryStore
+  instructionRepository: InstructionRepository
+  instructionProjections: Map<string, { signature: string; sourceRevisions: Map<string, { signature: string; revision: number }> }>
   memoryControlPackages: MemoryControlPackageReader
   memoryControlEvaluationAuthority?: MemoryControlEvaluationAuthority
   memoryControlMaintenanceToken?: string
@@ -693,6 +744,48 @@ const errorResponse = (
 /** A session is the serialization boundary for Pi turns. */
 const activeSessionRuns = new Map<string, { runId: string; cancelled: boolean; interrupt?: PiTurnInterruptReason }>()
 const PI_HOST_TOOL_UPDATE_MAX_BYTES = 16_384
+
+async function prepareHostLlmEgress(input: {
+  text: string
+  mode?: 'required' | 'optional' | 'demo' | 'off'
+  connectionId?: string
+  provider: string
+  runId: string
+}): Promise<string> {
+  if (!input.mode || input.mode === 'off') return input.text
+  const connectionId = input.connectionId || connectionIdForBuiltinLlm({ apiProvider: input.provider, baseUrl: '' })
+  const policyDir = process.env.SUBAGENTS_OUTBOUND_POLICY_DIR
+  const prepared = await prepareLlmEgressMessages({
+    effectiveMode: input.mode,
+    messages: [{ role: 'user', content: input.text }],
+    baselineProfile: compileProviderSecurityProfile(BUILTIN_BASELINE_POLICY, emptySupplementalPolicy(connectionId)),
+    loadCompanyProfile: async () => {
+      if (!policyDir) return { ok: false as const, reason: 'Pi Host outbound policy directory is unavailable' }
+      const loaded = await ensureLocalPolicyTree(policyDir, connectionId)
+      return loaded.ok ? { ok: true as const, profile: loaded.profile } : { ok: false as const, reason: loaded.reason }
+    },
+    cacheKey: input.runId,
+  })
+  if (!prepared.ok) throw new Error(`出站資料閘門拒絕 model prompt：${prepared.reason}`)
+  return prepared.messages[0]?.content || ''
+}
+
+export async function sanitizeInstructionSnapshotForProvider(input: {
+  snapshot: InstructionSnapshot
+  mode?: 'required' | 'optional' | 'demo' | 'off'
+  connectionId?: string
+  provider: string
+  runId: string
+}): Promise<InstructionSnapshot> {
+  if (!input.mode || input.mode === 'off') return input.snapshot
+  const effectiveText = await prepareHostLlmEgress({ ...input, text: input.snapshot.effectiveText })
+  const globalEffectiveText = await prepareHostLlmEgress({ ...input, text: input.snapshot.globalEffectiveText })
+  const sourceContents = await Promise.all(input.snapshot.sources.map((source) => source.content
+    ? prepareHostLlmEgress({ ...input, text: source.content })
+    : Promise.resolve(source.content)))
+  return mapSanitizedInstructionSnapshot(input.snapshot, { effectiveText, globalEffectiveText, sourceContents }, (text) =>
+    createHash('sha256').update(text).digest('hex'))
+}
 
 function isWithinProject(cwd: string, target: string): boolean {
   const projectRoot = resolveExistingPath(resolve(cwd))
@@ -1925,7 +2018,14 @@ function refreshIterationSettings(input: {
     ...(!('provider' in input.admittedProfile) ? { provider: input.latest.provider } : {}),
     ...(!('model' in input.admittedProfile) ? { model: input.latest.model } : {}),
     ...(!('thinkingLevel' in input.admittedProfile) ? { thinkingLevel: input.latest.thinkingLevel } : {}),
-    activeTools: restrictActiveTools(input.current.activeTools, input.latest.activeTools),
+    // An explicit per-turn allowlist was admitted and frozen before this
+    // refresh. Persisted settings are not authority to revoke that already
+    // approved profile; only profile-less turns tighten against latest state.
+    // This keeps explicit `grep` from being cleared by an unrelated cursor
+    // advance while preserving fail-closed empty intersections below.
+    activeTools: 'activeTools' in input.admittedProfile
+      ? input.current.activeTools
+      : restrictActiveTools(input.current.activeTools, input.latest.activeTools),
     approvalMode,
     unattended,
   }
@@ -2116,6 +2216,296 @@ function contractValidationFailure(input: {
   return [...(input.emit ? [] : events), errorResponse(input.id, 'invalid_request', input.reason)]
 }
 
+type DirectBuiltinToolDispatchInput = {
+  state: HostState
+  id: string | number
+  envelope: DirectToolEnvelope
+  toolName: PiBuiltinToolName
+  args: Record<string, unknown>
+  invocationOrigin: 'direct-protocol' | 'code-mode'
+  emit?: (message: PiHostMessage) => void
+  sideEffect: boolean
+  bashDecision?: ReturnType<typeof decideBashAction>
+  hasRunId: boolean
+}
+
+function directBuiltinToolRequirements(
+  toolName: PiBuiltinToolName,
+  sideEffect: boolean,
+  bashDecision: ReturnType<typeof decideBashAction> | undefined,
+): PiToolPolicyRequirements {
+  return {
+    ...(toolName !== 'bash' ? { pathArguments: ['path'] } : {}),
+    ...(toolName === 'bash' ? { outbound: true } : {}),
+    ...(sideEffect ? { sideEffect: true, approvalRequired: bashDecision?.reason || `${toolName} requires approval before execution` } : {}),
+    ...(bashDecision?.action === 'ask' ? { capabilityApproval: bashDecision.reason } : {}),
+  }
+}
+
+async function authorizeDirectBuiltinTool(
+  input: DirectBuiltinToolDispatchInput,
+): Promise<InvocationAuthorization | { ok: false; contractError: string }> {
+  const { envelope, state, toolName } = input
+  const foundIdentity = envelope.sessionId
+    ? contractIdentityForCurrentTool(state, envelope.sessionId, toolName)
+    : undefined
+  const builtinDefinition = piCoreRuntimeToolCatalog(envelope.cwd).find((candidate) => candidate.name === toolName)
+  const detachedIdentity: PiInvocationContractIdentity = {
+    contractRevision: 1,
+    contractDigest: schemaDigest({ compatibility: 'direct-builtin', tool: toolName, schema: builtinDefinition?.parameters || {} }),
+    schemaDigest: schemaDigest(builtinDefinition?.parameters || {}),
+    toolSource: 'builtin',
+  }
+  return authorizeContractInvocation({
+    state,
+    sessionId: envelope.sessionId || 'direct',
+    runId: envelope.runId,
+    callId: envelope.callId,
+    parentRunId: envelope.parentRunId,
+    cwd: envelope.cwd,
+    tool: toolName,
+    args: input.args,
+    origin: input.invocationOrigin,
+    approval: envelope.approval,
+    requirements: directBuiltinToolRequirements(input.toolName, input.sideEffect, input.bashDecision),
+    identity: foundIdentity?.identity || detachedIdentity,
+  })
+}
+
+function createBuiltinToolPublisher(input: DirectBuiltinToolDispatchInput): {
+  updates: PiHostEvent[]
+  publish: (event: PiHostEvent) => void
+} {
+  const updates: PiHostEvent[] = []
+  const publish = (event: PiHostEvent) => {
+    recordToolAudit(input.state, input.envelope.sessionId, event)
+    if (input.emit) input.emit(event)
+    else updates.push(event)
+  }
+  return { updates, publish }
+}
+
+function builtinToolAuthorizationFailure(input: {
+  id: string | number
+  envelope: DirectToolEnvelope
+  toolName: PiBuiltinToolName
+  authorization: InvocationAuthorization
+  identityPayload: Record<string, unknown>
+  updates: PiHostEvent[]
+  publish: (event: PiHostEvent) => void
+}): PiHostMessage[] {
+  const { authorization, envelope, id, identityPayload, publish, toolName, updates } = input
+  publish({ event: 'host/tool-decision', payload: {
+    runId: envelope.runId,
+    tool: toolName,
+    callId: envelope.callId,
+    parentRunId: envelope.parentRunId,
+    decision: authorization.decision,
+    ...(authorization.settlement ? { settlement: authorization.settlement } : {}),
+    reason: authorization.reason,
+    ...identityPayload,
+  } })
+  if (authorization.settlement) publish({ event: 'host/tool-result', payload: {
+    runId: envelope.runId,
+    tool: toolName,
+    callId: envelope.callId,
+    parentRunId: envelope.parentRunId,
+    settlement: authorization.settlement,
+    reason: authorization.reason,
+    ...identityPayload,
+  } })
+  return [...updates, errorResponse(id, 'invalid_request', authorization.decision === 'ask'
+    ? `Approval required: ${authorization.reason}`
+    : authorization.reason)]
+}
+
+function builtinToolDeniedResponse(input: {
+  id: string | number
+  envelope: DirectToolEnvelope
+  toolName: PiBuiltinToolName
+  decision: { reason: string }
+  authorization: InvocationAuthorization
+  identityPayload: Record<string, unknown>
+  updates: PiHostEvent[]
+  publish: (event: PiHostEvent) => void
+}): PiHostMessage[] {
+  const { authorization, decision, envelope, id, identityPayload, publish, toolName, updates } = input
+  authorization.evidence.result(false, decision.reason)
+  authorization.evidence.settle('denied', decision.reason)
+  publish({ event: 'host/tool-decision', payload: {
+    runId: envelope.runId,
+    tool: toolName,
+    callId: envelope.callId,
+    parentRunId: envelope.parentRunId,
+    decision: 'deny',
+    settlement: 'denied',
+    reason: decision.reason,
+    ...identityPayload,
+  } })
+  publish({ event: 'host/tool-result', payload: {
+    runId: envelope.runId,
+    tool: toolName,
+    callId: envelope.callId,
+    parentRunId: envelope.parentRunId,
+    settlement: 'denied',
+    reason: decision.reason,
+    ...identityPayload,
+  } })
+  return [...updates, errorResponse(id, 'invalid_request', `bash denied: ${decision.reason}`)]
+}
+
+function builtinToolScopeFailure(input: {
+  id: string | number
+  envelope: DirectToolEnvelope
+  toolName: PiBuiltinToolName
+  authorization: InvocationAuthorization
+  identityPayload: Record<string, unknown>
+  updates: PiHostEvent[]
+  publish: (event: PiHostEvent) => void
+}): PiHostMessage[] {
+  const { authorization, envelope, id, identityPayload, publish, toolName, updates } = input
+  const reason = `${toolName} path is outside the requested project scope`
+  authorization.evidence.result(false, reason)
+  authorization.evidence.settle('failed', reason)
+  publish({ event: 'host/tool-result', payload: {
+    runId: envelope.runId,
+    tool: toolName,
+    callId: envelope.callId,
+    parentRunId: envelope.parentRunId,
+    settlement: 'failed',
+    reason,
+    ...identityPayload,
+  } })
+  return [...updates, errorResponse(id, 'invalid_request', reason)]
+}
+
+function createBuiltinToolUpdateHandler(input: {
+  runId: string
+  toolName: PiBuiltinToolName
+  callId: string
+  projectRoot: string
+  hasRunId: boolean
+  publish: (event: PiHostEvent) => void
+}): (item: unknown) => void {
+  let updateBytes = 0
+  let updateTruncated = false
+  return (item: unknown) => {
+    if (!input.hasRunId || updateTruncated) return
+    const serialized = JSON.stringify(item)
+    const serializedBytes = Buffer.byteLength(serialized, 'utf8')
+    const remaining = PI_HOST_TOOL_UPDATE_MAX_BYTES - updateBytes
+    if (serializedBytes <= remaining) {
+      updateBytes += serializedBytes
+      input.publish({ event: 'host/tool-update', payload: { runId: input.runId, tool: input.toolName, callId: input.callId, item } })
+      return
+    }
+    updateTruncated = true
+    const spill = writeToolOutputSpill({ runId: input.runId, tool: input.toolName, output: serialized, projectRoot: input.projectRoot })
+    input.publish({ event: 'host/tool-update', payload: { runId: input.runId, tool: input.toolName, callId: input.callId, item: {
+      type: 'truncated',
+      content: Buffer.from(serialized, 'utf8').subarray(0, Math.max(0, remaining)).toString('utf8'),
+      originalBytes: serializedBytes,
+      spill,
+    } } })
+  }
+}
+
+async function executeAuthorizedBuiltinTool(input: {
+  id: string | number
+  envelope: DirectToolEnvelope
+  toolName: PiBuiltinToolName
+  executionArgs: Record<string, unknown>
+  executionRoot: string
+  hasRunId: boolean
+  authorization: InvocationAuthorization
+  identityPayload: Record<string, unknown>
+  updates: PiHostEvent[]
+  publish: (event: PiHostEvent) => void
+}): Promise<PiHostMessage[]> {
+  const scopedPath = typeof input.executionArgs.path === 'string' ? input.executionArgs.path : undefined
+  if (scopedPath && !isWithinProject(input.executionRoot, scopedPath)) {
+    return builtinToolScopeFailure({
+      id: input.id,
+      envelope: input.envelope,
+      toolName: input.toolName,
+      authorization: input.authorization,
+      identityPayload: input.identityPayload,
+      updates: input.updates,
+      publish: input.publish,
+    })
+  }
+  try {
+    const result = await executePiTool(input.toolName, input.executionRoot, input.executionArgs, {
+      runId: input.hasRunId ? input.envelope.runId : undefined,
+      onUpdate: createBuiltinToolUpdateHandler({
+        runId: input.envelope.runId,
+        toolName: input.toolName,
+        callId: input.envelope.callId,
+        projectRoot: input.executionRoot,
+        hasRunId: input.hasRunId,
+        publish: input.publish,
+      }),
+    })
+    const settlement = result.cancelled ? 'cancelled' as const : 'success' as const
+    input.authorization.evidence.update(result.cancelled ? 'Builtin execution cancelled' : 'Builtin execution completed')
+    input.authorization.evidence.result(!result.cancelled, result.cancelled ? 'cancelled' : 'result returned')
+    input.authorization.evidence.settle(settlement)
+    input.publish({ event: 'host/tool-result', payload: { runId: input.envelope.runId, tool: input.toolName, callId: input.envelope.callId, parentRunId: input.envelope.parentRunId, settlement, item: result, ...input.identityPayload } })
+    return result.cancelled
+      ? [...input.updates, { id: input.id, result: { runId: input.envelope.runId, settlement: 'cancelled' as const, tool: input.toolName, content: result.content } }]
+      : [...input.updates, { id: input.id, result: { tool: input.toolName, content: result.content } }]
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : `Pi ${input.toolName} failed`
+    input.authorization.evidence.result(false, reason)
+    input.authorization.evidence.settle('failed', reason)
+    input.publish({ event: 'host/tool-result', payload: { runId: input.envelope.runId, tool: input.toolName, callId: input.envelope.callId, parentRunId: input.envelope.parentRunId, settlement: 'failed', reason, ...input.identityPayload } })
+    return [...input.updates, errorResponse(input.id, 'invalid_request', reason)]
+  }
+}
+
+async function dispatchDirectBuiltinTool(input: DirectBuiltinToolDispatchInput): Promise<PiHostMessage[]> {
+  const { updates, publish } = createBuiltinToolPublisher(input)
+  const authorized = await authorizeDirectBuiltinTool(input)
+  if ('contractError' in authorized) return [errorResponse(input.id, 'invalid_request', authorized.contractError)]
+  const identityPayload = { ...authorized.identity, invocationOrigin: input.invocationOrigin }
+  publish({ event: 'host/tool-start', payload: {
+    runId: input.envelope.runId,
+    tool: input.toolName,
+    callId: input.envelope.callId,
+    parentRunId: input.envelope.parentRunId,
+    item: typeof authorized.args.path === 'string' ? { path: authorized.args.path } : undefined,
+    ...identityPayload,
+  } })
+  if (input.bashDecision?.action === 'deny') {
+    return builtinToolDeniedResponse({ ...input, authorization: authorized, decision: input.bashDecision, identityPayload, updates, publish })
+  }
+  if (!authorized.ok) return builtinToolAuthorizationFailure({ ...input, authorization: authorized, identityPayload, updates, publish })
+  if (input.sideEffect) publish({ event: 'host/tool-decision', payload: {
+    runId: input.envelope.runId,
+    tool: input.toolName,
+    callId: input.envelope.callId,
+    parentRunId: input.envelope.parentRunId,
+    decision: 'allow',
+    reason: authorized.reason,
+    ...identityPayload,
+  } })
+  const executionRoot = input.envelope.sessionId
+    ? frozenPolicyForInvocation(input.state, input.envelope.sessionId, input.envelope.cwd).outbound.restrictedViewRoot || input.envelope.cwd
+    : input.envelope.cwd
+  return executeAuthorizedBuiltinTool({
+    id: input.id,
+    envelope: input.envelope,
+    toolName: input.toolName,
+    executionArgs: authorized.args,
+    executionRoot,
+    hasRunId: input.hasRunId,
+    authorization: authorized,
+    identityPayload,
+    updates,
+    publish,
+  })
+}
+
 /**
  * Clock used to arm per-turn deadlines. Swapped by the deadline smoke so the
  * timeout path is driven by a fake clock instead of by real waiting.
@@ -2237,6 +2627,8 @@ function handleInitialization(
   state.memoryStoreNegotiated = Array.isArray(requestedCapabilities) && requestedCapabilities.includes('memory-store-v1')
   state.memoryControlNegotiated = requestedVersion === PI_HOST_PROTOCOL_VERSION
     && Array.isArray(requestedCapabilities) && requestedCapabilities.includes('memory-control-v1')
+  state.instructionRepositoryNegotiated = requestedVersion === PI_HOST_PROTOCOL_VERSION
+    && Array.isArray(requestedCapabilities) && requestedCapabilities.includes('instructions-v1')
   const result = readyResult(state.negotiatedProtocolVersion)
   return [
     { event: 'host/ready', payload: {
@@ -2654,6 +3046,231 @@ function frozenRunLearningCandidate(input: {
       canonicalProject: input.canonicalProject,
     },
   }
+}
+
+async function handleInstructionRequest(
+  state: HostState,
+  input: Partial<PiHostRequest>,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): Promise<PiHostMessage[] | undefined> {
+  if (!input.method?.startsWith('instructions/v1/')) return undefined
+  if (!state.instructionRepositoryNegotiated) {
+    return [errorResponse(id, 'protocol_mismatch', 'Instruction Repository requires current protocol and instructions-v1 negotiation')]
+  }
+  try {
+    const params = input.params || {}
+    if (input.method === 'instructions/v1/get') return [{ id, result: { instructions: await state.instructionRepository.read() } }]
+    if (input.method === 'instructions/v1/save') return await saveInstructionRequest(state, id, params, emit)
+    if (input.method === 'instructions/v1/migrate-legacy') return await migrateLegacyInstructionRequest(state, id, params, emit)
+    if (input.method === 'instructions/v1/resolve') return await resolveInstructionRequest(state, id, params, emit)
+    if (input.method === 'instructions/v1/authorize-include') return await authorizeInstructionIncludeRequest(state, id, params, emit)
+    if (input.method === 'instructions/v1/project-write') return await writeInstructionRequest(state, id, params, emit)
+    if (input.method === 'instructions/v1/project-read') return await readInstructionRequest(state, id, params)
+    if (input.method === 'instructions/v1/export') return [{ id, result: { instructionExport: await state.instructionRepository.exportBundle() } }]
+    if (input.method === 'instructions/v1/import-preview') return [{ id, result: { instructionImportPreview: await state.instructionRepository.previewImport(params.bundle) } }]
+    if (input.method === 'instructions/v1/import-apply') return await applyInstructionImportRequest(state, id, params, emit)
+    return [errorResponse(id, 'unknown_method', `Unknown instruction method: ${input.method}`)]
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Instruction Repository request failed'
+    if (error instanceof InstructionRepositoryError || error instanceof ProjectInstructionWriteError) {
+      return [errorResponse(id, error.code, message)]
+    }
+    return [errorResponse(id, 'invalid_request', message)]
+  }
+}
+
+async function migrateLegacyInstructionRequest(state: HostState, id: string | number, params: Record<string, unknown>, emit?: (message: PiHostMessage) => void): Promise<PiHostMessage[]> {
+  const migrated = await state.instructionRepository.migrateLegacy(params)
+  if (migrated.report.status === 'migrated') {
+    state.snapshot.cursor += 1
+    emit?.({ event: 'instruction/changed', payload: {
+      version: 1,
+      revision: state.snapshot.cursor,
+      operation: 'migration',
+      source: { identity: 'global:instruction-state', hash: migrated.instructions.hash, bytes: Buffer.byteLength(migrated.instructions.globalCustomInstructions, 'utf8') },
+    } })
+  }
+  return [{ id, result: { instructions: migrated.instructions, instructionMigrationReport: migrated.report } }]
+}
+
+async function authorizeInstructionIncludeRequest(state: HostState, id: string | number, params: Record<string, unknown>, emit?: (message: PiHostMessage) => void): Promise<PiHostMessage[]> {
+  const requested = typeof params.target === 'string' ? params.target : ''
+  if (!isAbsolute(requested) || !existsSync(requested)) throw new Error('include authorization requires an existing absolute target')
+  const target = realpathSync.native(requested)
+  const authorizedIncludeTargets = await state.instructionRepository.authorizeIncludeTarget(target)
+  state.snapshot.cursor += 1
+  emit?.({ event: 'instruction/changed', payload: { version: 1, revision: state.snapshot.cursor, operation: 'include-authorization' } })
+  return [{ id, result: { authorizedIncludeTargets } }]
+}
+
+async function saveInstructionRequest(state: HostState, id: string | number, params: Record<string, unknown>, emit?: (message: PiHostMessage) => void): Promise<PiHostMessage[]> {
+  const saved = await state.instructionRepository.save({
+    expectedRevision: Number(params.expectedRevision),
+    globalCustomInstructions: typeof params.globalCustomInstructions === 'string' ? params.globalCustomInstructions : '',
+    advancedPersonalityInstructions: typeof params.advancedPersonalityInstructions === 'string' ? params.advancedPersonalityInstructions : '',
+    ...(typeof params.personality === 'string' ? { personality: params.personality } : {}),
+    ...(typeof params.aboutUser === 'string' ? { aboutUser: params.aboutUser } : {}),
+    ...(typeof params.responseStyle === 'string' ? { responseStyle: params.responseStyle } : {}),
+  })
+  return publishInstructionMutation(state, id, saved, 'save', emit)
+}
+
+function observeInstructionProjection(
+  state: HostState,
+  snapshot: InstructionSnapshot,
+  emit?: (message: PiHostMessage) => void,
+): InstructionSnapshot {
+  const key = `${snapshot.projectIdentity || 'global'}\u0000${snapshot.workPath || ''}`
+  const signature = createHash('sha256').update(JSON.stringify({
+    effectiveHash: snapshot.effectiveHash,
+    globalEffectiveText: snapshot.globalEffectiveText,
+    usage: snapshot.usage,
+    sources: snapshot.sources.map(({ revision: _revision, ...source }) => source),
+    diagnostics: snapshot.diagnostics,
+  })).digest('hex')
+  const previous = state.instructionProjections.get(key)
+  if (previous?.signature !== signature) {
+    state.snapshot.cursor += 1
+    const event: PiHostEvent = { event: 'instruction/changed', payload: {
+      version: 1,
+      revision: state.snapshot.cursor,
+      operation: 'filesystem-observed',
+      ...(snapshot.projectIdentity ? { projectIdentity: snapshot.projectIdentity } : {}),
+      ...(snapshot.workPath ? { workPath: snapshot.workPath } : {}),
+      effectiveHash: snapshot.effectiveHash,
+      // Provenance metadata is enough for a renderer to decide whether it is
+      // looking at the right projection. Bodies stay in the after-cursor
+      // snapshot and never travel on an invalidation event.
+      sources: snapshot.sources.map((source) => ({
+        id: source.id,
+        scope: source.scope,
+        ...(source.path ? { path: source.path } : {}),
+        ...(source.parentPath ? { parentPath: source.parentPath } : {}),
+        hash: source.hash,
+        bytes: source.bytes,
+        applied: source.applied,
+        metadataStatus: source.metadataStatus,
+      })),
+    } }
+    emit?.(event)
+  }
+  const sourceRevisions = new Map<string, { signature: string; revision: number }>()
+  const sources = snapshot.sources.map((source) => {
+    const sourceKey = `${source.scope}:${source.path || source.id}:${source.parentPath || ''}`
+    const sourceSignature = createHash('sha256').update(JSON.stringify({ ...source, revision: undefined })).digest('hex')
+    const observed = previous?.sourceRevisions.get(sourceKey)
+    const revision = observed?.signature === sourceSignature ? observed.revision : state.snapshot.cursor
+    sourceRevisions.set(sourceKey, { signature: sourceSignature, revision })
+    return Object.freeze({ ...source, revision })
+  })
+  state.instructionProjections.set(key, { signature, sourceRevisions })
+  return Object.freeze({
+    ...snapshot,
+    revision: state.snapshot.cursor,
+    sources: Object.freeze(sources),
+  })
+}
+
+async function resolveInstructionRequest(state: HostState, id: string | number, params: Record<string, unknown>, emit?: (message: PiHostMessage) => void): Promise<PiHostMessage[]> {
+  const current = await state.instructionRepository.read()
+  const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined
+  const instructionSnapshot = await resolveInstructionSnapshot({
+    globalRevision: current.revision,
+    globalCustomInstructions: current.globalCustomInstructions,
+    advancedPersonalityInstructions: current.advancedPersonalityInstructions,
+    globalCustomInstructionsPresence: current.globalCustomInstructionsPresence,
+    advancedPersonalityInstructionsPresence: current.advancedPersonalityInstructionsPresence,
+    personality: current.personality,
+    aboutUser: current.aboutUser,
+    responseStyle: current.responseStyle,
+    projectRoot: typeof params.projectRoot === 'string' ? params.projectRoot : undefined,
+    workPath: typeof params.workPath === 'string' ? params.workPath : undefined,
+    fallbackFilenames: strings(params.fallbackFilenames),
+    authorizedIncludeTargets: await state.instructionRepository.listAuthorizedIncludeTargets(),
+  })
+  return [{ id, result: { instructionSnapshot: observeInstructionProjection(state, instructionSnapshot, emit) } }]
+}
+
+async function writeInstructionRequest(state: HostState, id: string | number, params: Record<string, unknown>, emit?: (message: PiHostMessage) => void): Promise<PiHostMessage[]> {
+  if (typeof params.expectedHash !== 'string') throw new Error('expectedHash is required for project instruction CAS')
+  // Validate repository health before committing the independent filesystem
+  // authority. After rename succeeds, acknowledgement/event publication has
+  // no fallible repository operation left.
+  const current = await state.instructionRepository.read()
+  const written = await writeProjectInstruction({ projectRoot: String(params.projectRoot || ''), target: String(params.target || ''), expectedHash: params.expectedHash, content: typeof params.content === 'string' ? params.content : '' })
+  return publishInstructionMutation(state, id, current, 'project-write', emit, written)
+}
+
+async function readInstructionRequest(state: HostState, id: string | number, params: Record<string, unknown>): Promise<PiHostMessage[]> {
+  const projectRoot = typeof params.projectRoot === 'string' ? params.projectRoot : ''
+  const workPath = typeof params.workPath === 'string' ? params.workPath : projectRoot
+  const target = typeof params.target === 'string' ? params.target : ''
+  const current = await state.instructionRepository.read()
+  const snapshot = await resolveInstructionSnapshot({
+    globalRevision: current.revision,
+    globalCustomInstructions: current.globalCustomInstructions,
+    advancedPersonalityInstructions: current.advancedPersonalityInstructions,
+    globalCustomInstructionsPresence: current.globalCustomInstructionsPresence,
+    advancedPersonalityInstructionsPresence: current.advancedPersonalityInstructionsPresence,
+    personality: current.personality,
+    aboutUser: current.aboutUser,
+    responseStyle: current.responseStyle,
+    projectRoot,
+    workPath,
+    authorizedIncludeTargets: await state.instructionRepository.listAuthorizedIncludeTargets(),
+  })
+  const canonicalRoot = snapshot.projectIdentity
+  if (!canonicalRoot) throw new ProjectInstructionWriteError('project_missing', '目前 canonical project root 不存在。')
+  const canonicalTarget = resolve(canonicalRoot, target)
+  const source = snapshot.sources.find((candidate) => candidate.scope === 'project' && candidate.path === canonicalTarget)
+  if (!source || !source.openable || source.metadataStatus !== 'content') {
+    throw new ProjectInstructionWriteError('invalid_target', '目前 Host projection 不允許讀取這個 project source。')
+  }
+  const read = await readProjectInstruction({ projectRoot: canonicalRoot, target })
+  return [{ id, result: { projectInstructionRead: read } }]
+}
+
+async function applyInstructionImportRequest(state: HostState, id: string | number, params: Record<string, unknown>, emit?: (message: PiHostMessage) => void): Promise<PiHostMessage[]> {
+  const preview = await state.instructionRepository.previewImport(params.bundle)
+  const imported = await state.instructionRepository.applyImport(preview, Number(params.expectedRevision))
+  if (preview.status === 'unchanged') return [{ id, result: { instructions: imported } }]
+  return publishInstructionMutation(state, id, imported, 'import', emit)
+}
+
+function publishInstructionMutation(
+  state: HostState,
+  id: string | number,
+  instructions: PersonalizationInstructionSnapshot,
+  operation: 'save' | 'import' | 'project-write',
+  emit?: (message: PiHostMessage) => void,
+  projectInstructionWrite?: { path: string; hash: string; bytes: number },
+): PiHostMessage[] {
+  state.snapshot.cursor += 1
+  const event: PiHostEvent = { event: 'instruction/changed', payload: {
+    version: 1,
+    revision: state.snapshot.cursor,
+    operation,
+    ...(projectInstructionWrite
+      ? {
+          projectIdentity: dirname(projectInstructionWrite.path),
+          source: {
+            identity: projectInstructionWrite.path,
+            path: projectInstructionWrite.path,
+            hash: projectInstructionWrite.hash,
+            bytes: projectInstructionWrite.bytes,
+          },
+        }
+      : {
+          source: {
+            identity: 'global:instruction-state',
+            hash: instructions.hash,
+            bytes: Buffer.byteLength(instructions.globalCustomInstructions, 'utf8'),
+          },
+        }),
+  } }
+  if (emit) emit(event)
+  return [...(emit ? [] : [event]), { id, result: { instructions, ...(projectInstructionWrite ? { projectInstructionWrite } : {}) } }]
 }
 
 export function handlePiHostRequest(
@@ -3158,142 +3775,22 @@ export function handlePiHostRequest(
     })
     const args = validation.arguments
     const { envelope } = split
-    const { runId, callId } = envelope
-    const updates: PiHostEvent[] = []
-    const publish = (event: PiHostEvent) => {
-      recordToolAudit(state, envelope.sessionId, event)
-      if (emit) emit(event)
-      else updates.push(event)
-    }
     const sideEffect = toolName === 'write' || toolName === 'edit' || toolName === 'bash'
     const bashDecision = toolName === 'bash'
       ? decideBashAction(String(args.command || ''), () => 'allow', state.snapshot.settings.bashRequireAsk ? 'ask' : 'allow')
       : undefined
-    return (async () => {
-      const foundIdentity = envelope.sessionId
-        ? contractIdentityForCurrentTool(state, envelope.sessionId, toolName)
-        : undefined
-      const builtinDefinition = piCoreRuntimeToolCatalog(envelope.cwd).find((candidate) => candidate.name === toolName)
-      const detachedIdentity: PiInvocationContractIdentity = {
-        contractRevision: 1,
-        contractDigest: schemaDigest({ compatibility: 'direct-builtin', tool: toolName, schema: builtinDefinition?.parameters || {} }),
-        schemaDigest: schemaDigest(builtinDefinition?.parameters || {}),
-        toolSource: 'builtin',
-      }
-      let executionArgs = args
-      const requirements: PiToolPolicyRequirements = {
-        ...(toolName !== 'bash' ? { pathArguments: ['path'] } : {}),
-        ...(toolName === 'bash' ? { outbound: true } : {}),
-        ...(sideEffect ? { sideEffect: true, approvalRequired: bashDecision?.reason || `${toolName} requires approval before execution` } : {}),
-        // A dangerous or unsplittable command asks REGARDLESS of Approval
-        // Mode. `approvalRequired` alone is bypassed by `full`, which would let
-        // the broad mode silently widen exactly the commands `bashRequireAsk`
-        // exists to stop; `capabilityApproval` is the channel that survives
-        // complete access, so the segment-aware decision travels on it.
-        ...(bashDecision?.action === 'ask' ? { capabilityApproval: bashDecision.reason } : {}),
-      }
-      const authorized = await authorizeContractInvocation({
-        state, sessionId: envelope.sessionId || 'direct', runId, callId,
-        parentRunId: envelope.parentRunId,
-        cwd: envelope.cwd,
-        tool: toolName,
-        args,
-        origin: invocationOrigin,
-        approval: envelope.approval,
-        requirements,
-        identity: foundIdentity?.identity || detachedIdentity,
-      })
-      if ('contractError' in authorized) return [errorResponse(id, 'invalid_request', authorized.contractError)]
-      const authorization: InvocationAuthorization = authorized
-      executionArgs = authorized.args
-      const identity = authorization.identity
-      const identityPayload = identity ? { ...identity, invocationOrigin } : {}
-      const scopedPath = typeof executionArgs.path === 'string' ? executionArgs.path : undefined
-      publish({ event: 'host/tool-start', payload: {
-        runId, tool: toolName, callId, parentRunId: envelope.parentRunId,
-        item: scopedPath ? { path: scopedPath } : undefined,
-        ...identityPayload,
-      } })
-      if (bashDecision?.action === 'deny') {
-        authorization?.evidence.result(false, bashDecision.reason)
-        authorization?.evidence.settle('denied', bashDecision.reason)
-        publish({ event: 'host/tool-decision', payload: { runId, tool: toolName, callId, parentRunId: envelope.parentRunId, decision: 'deny', settlement: 'denied', reason: bashDecision.reason, ...identityPayload } })
-        publish({ event: 'host/tool-result', payload: { runId, tool: toolName, callId, parentRunId: envelope.parentRunId, settlement: 'denied', reason: bashDecision.reason, ...identityPayload } })
-        return [...updates, errorResponse(id, 'invalid_request', `bash denied: ${bashDecision.reason}`)]
-      }
-      if (!authorization.ok) {
-        publish({ event: 'host/tool-decision', payload: {
-          runId, tool: toolName, callId, parentRunId: envelope.parentRunId,
-          decision: authorization.decision,
-          ...(authorization.settlement ? { settlement: authorization.settlement } : {}),
-          reason: authorization.reason,
-          ...identityPayload,
-        } })
-        if (authorization.settlement) publish({ event: 'host/tool-result', payload: {
-          runId, tool: toolName, callId, parentRunId: envelope.parentRunId,
-          settlement: authorization.settlement,
-          reason: authorization.reason,
-          ...identityPayload,
-        } })
-        return [...updates, errorResponse(id, 'invalid_request', authorization.decision === 'ask'
-          ? `Approval required: ${authorization.reason}`
-          : authorization.reason)]
-      }
-      if (sideEffect) publish({ event: 'host/tool-decision', payload: {
-        runId, tool: toolName, callId, parentRunId: envelope.parentRunId,
-        decision: 'allow', reason: authorization.reason, ...identityPayload,
-      } })
-      const executionRoot = envelope.sessionId
-        ? frozenPolicyForInvocation(state, envelope.sessionId, envelope.cwd).outbound.restrictedViewRoot || envelope.cwd
-        : envelope.cwd
-      if (scopedPath && !isWithinProject(executionRoot, scopedPath)) {
-        const reason = `${toolName} path is outside the requested project scope`
-        authorization?.evidence.result(false, reason)
-        authorization?.evidence.settle('failed', reason)
-        publish({ event: 'host/tool-result', payload: { runId, tool: toolName, callId, parentRunId: envelope.parentRunId, settlement: 'failed', reason, ...identityPayload } })
-        return [...updates, errorResponse(id, 'invalid_request', reason)]
-      }
-      let updateBytes = 0
-      let updateTruncated = false
-      try {
-        const result = await executePiTool(toolName, executionRoot, executionArgs, {
-          runId: typeof params.runId === 'string' ? runId : undefined,
-          onUpdate: (item) => {
-            if (typeof params.runId !== 'string' || updateTruncated) return
-            const serialized = JSON.stringify(item)
-            const serializedBytes = Buffer.byteLength(serialized, 'utf8')
-            const remaining = PI_HOST_TOOL_UPDATE_MAX_BYTES - updateBytes
-            if (serializedBytes <= remaining) {
-              updateBytes += serializedBytes
-              publish({ event: 'host/tool-update', payload: { runId, tool: toolName, callId, item } })
-            } else {
-              updateTruncated = true
-              const spill = writeToolOutputSpill({ runId, tool: toolName, output: serialized, projectRoot: executionRoot })
-              publish({ event: 'host/tool-update', payload: { runId, tool: toolName, callId, item: {
-                type: 'truncated',
-                content: Buffer.from(serialized, 'utf8').subarray(0, Math.max(0, remaining)).toString('utf8'),
-                originalBytes: serializedBytes,
-                spill,
-              } } })
-            }
-          },
-        })
-        const settlement = result.cancelled ? 'cancelled' as const : 'success' as const
-        authorization?.evidence.update(result.cancelled ? 'Builtin execution cancelled' : 'Builtin execution completed')
-        authorization?.evidence.result(!result.cancelled, result.cancelled ? 'cancelled' : 'result returned')
-        authorization?.evidence.settle(settlement)
-        publish({ event: 'host/tool-result', payload: { runId, tool: toolName, callId, parentRunId: envelope.parentRunId, settlement, item: result, ...identityPayload } })
-        return result.cancelled
-          ? [...updates, { id, result: { runId, settlement: 'cancelled' as const, tool: toolName, content: result.content } }]
-          : [...updates, { id, result: { tool: toolName, content: result.content } }]
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : `Pi ${toolName} failed`
-        authorization?.evidence.result(false, reason)
-        authorization?.evidence.settle('failed', reason)
-        publish({ event: 'host/tool-result', payload: { runId, tool: toolName, callId, parentRunId: envelope.parentRunId, settlement: 'failed', reason, ...identityPayload } })
-        return [...updates, errorResponse(id, 'invalid_request', reason)]
-      }
-    })()
+    return dispatchDirectBuiltinTool({
+      state,
+      id,
+      envelope,
+      toolName,
+      args,
+      invocationOrigin,
+      emit,
+      sideEffect,
+      bashDecision,
+      hasRunId: typeof params.runId === 'string',
+    })
   }
   if (input.method === 'state/snapshot') {
     return projectPiHostStateSnapshot(state, id)
@@ -3546,6 +4043,28 @@ export function handlePiHostRequest(
       temporary: contextPolicy.temporary,
       canonicalProject: canonicalWorkspace,
     }
+    // Admission starts resolution now and the resulting immutable value is
+    // captured by this closure for every iteration. Later saves/filesystem
+    // changes can only affect a separately admitted run.
+    const rawInstructionSnapshotPromise = Promise.all([
+      state.instructionRepository.read(),
+      state.instructionRepository.listAuthorizedIncludeTargets(),
+    ]).then(async ([instructions, authorizedIncludeTargets]) =>
+      observeInstructionProjection(state, await resolveInstructionSnapshot({
+        globalRevision: instructions.revision,
+        globalCustomInstructions: instructions.globalCustomInstructions,
+        advancedPersonalityInstructions: instructions.advancedPersonalityInstructions,
+        personality: instructions.personality,
+        aboutUser: instructions.aboutUser,
+        responseStyle: instructions.responseStyle,
+        projectRoot: canonicalWorkspace,
+        workPath: cwd,
+        fallbackFilenames: Array.isArray(input.params?.instructionFallbackFilenames)
+          ? input.params.instructionFallbackFilenames.filter((item): item is string => typeof item === 'string')
+          : undefined,
+        authorizedIncludeTargets,
+      }), emit),
+    )
     const patternValue = input.params?.pattern
     const pattern: PiLoopPattern = patternValue === 'Goal-based' || patternValue === 'Time-based' || patternValue === 'Proactive'
       ? patternValue
@@ -3569,6 +4088,20 @@ export function handlePiHostRequest(
         return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid Pi turn profile')]
       }
     }
+    // Pi historically interprets an empty activeTools array as unrestricted.
+    // Keep a separate admission fact so a profile-less settings intersection
+    // that becomes empty remains restrictive instead of widening to all tools.
+    let turnActiveToolsRestricted = turnSettings.activeTools.length > 0
+      || Object.prototype.hasOwnProperty.call(admittedProfile, 'activeTools')
+    const instructionSnapshotPromise = rawInstructionSnapshotPromise.then((snapshot) =>
+      sanitizeInstructionSnapshotForProvider({
+        snapshot,
+        mode: contextPolicy.outboundShellMode,
+        connectionId: contextPolicy.outboundConnectionId,
+        provider: turnSettings.provider,
+        runId,
+      }),
+    )
     const turnEvents: PiHostEvent[] = []
     // Reloads advance this key, but the value is frozen here for the whole
     // logical Host turn (including retries/iterations). Existing registered
@@ -3642,6 +4175,7 @@ export function handlePiHostRequest(
       source: 'host',
       runner: 'builtin',
       capabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
+      instructionDelivery: { mode: 'explicit', exactSnapshot: true, detail: 'Pi Host admission snapshot' },
     })
     recordTurnEntry(sessionId, {
       kind: 'notice',
@@ -3768,8 +4302,39 @@ export function handlePiHostRequest(
       else turnEvents.push(event)
     }
     publishOrchestration('parse', undefined, definitionOfDone || 'Pi turn settlement is the default DoD')
-    const pluginExecutionPromise = input.params?.pluginExecution
-      ? executeSubDesignProviderStage({
+    let providerHistory = session.messages
+    return instructionSnapshotPromise.then(async (instructionSnapshot) => {
+      // The immutable snapshot is admitted and recorded before any provider
+      // stage starts, including stages that stop the turn early.
+      recordTurnEntry(sessionId, { kind: 'instruction-snapshot', source: 'host', snapshot: instructionSnapshot })
+      if (contextPolicy.outboundShellMode && contextPolicy.outboundShellMode !== 'off') {
+        providerHistory = await Promise.all(session.messages.map(async (message) => ({
+          ...message,
+          content: await prepareHostLlmEgress({
+            text: message.content,
+            mode: contextPolicy.outboundShellMode,
+            connectionId: contextPolicy.outboundConnectionId,
+            provider: turnSettings.provider,
+            runId,
+          }),
+        })))
+        // Pi owns a persistent native conversation. Recreate it from the
+        // sanitized Host history so an older unprotected turn cannot re-enter
+        // a newly protected provider request through Pi's hidden history.
+        await disposePiSession(sessionId)
+        session.piSessionFile = undefined
+      }
+      // Keep the exact persistent context handed to Pi beside the admitted
+      // snapshot.  The session record must be able to reconstruct what the
+      // provider saw after history egress protection, rather than rereading
+      // the mutable session messages later.
+      recordTurnEntry(sessionId, {
+        kind: 'provider-history',
+        source: 'host',
+        messages: providerHistory.map((message) => ({ ...message })),
+      })
+      const pluginExecution = input.params?.pluginExecution
+        ? await executeSubDesignProviderStage({
           request: input.params.pluginExecution,
           runId,
           threadId: session.threadId || sessionId,
@@ -3793,9 +4358,10 @@ export function handlePiHostRequest(
             if (emit) emit(event)
             else turnEvents.push(event)
           },
-        })
-      : Promise.resolve(undefined)
-    return pluginExecutionPromise.then(async (pluginExecution) => {
+          })
+        : undefined
+      return { pluginExecution, instructionSnapshot }
+    }).then(async ({ pluginExecution, instructionSnapshot }) => {
       if (pluginExecution && shouldStopForProviderProjection(pluginExecution)) {
         const settlement = pluginExecution.state === 'cancelled' ? 'cancelled' as const : 'failed' as const
         publishOrchestration(settlement === 'cancelled' ? 'cancelled' : 'settlement', 0, pluginExecution.state)
@@ -3823,9 +4389,14 @@ export function handlePiHostRequest(
           },
         }]
       }
-      const baseOrchestrationPrompt = pluginExecution
-        ? `${prompt}\n\n## Trusted provider stage result\n${JSON.stringify(pluginExecution)}`
+      const requestWithInstructions = instructionSnapshot.effectiveText
+        ? `${instructionSnapshot.effectiveText}\n\n## 當前請求\n${prompt}`
         : prompt
+      const baseOrchestrationPrompt = [
+        instructionSnapshot.effectiveText,
+        pluginExecution ? `## Trusted provider stage result\n${JSON.stringify(pluginExecution)}` : '',
+        `## 當前請求\n${prompt}`,
+      ].filter(Boolean).join('\n\n')
       const goalAwarePrompt = pattern === 'Goal-based'
         ? goalContinuationPrompt(baseOrchestrationPrompt)
         : baseOrchestrationPrompt
@@ -3837,10 +4408,37 @@ export function handlePiHostRequest(
       const recalledResult = memoryAccess.memoryReadEnabled && !memoryAccess.temporary
         ? await state.memoryStore.recall({ access: memoryAccess, query: prompt, limit: 5 })
         : undefined
-      const selectedMemory = selectPiMemoryContext(recalledResult?.items.map(piMemoryProjection) || [])
+      const lowerAuthorityAvailableBytes = instructionSnapshot.usage.lowerAuthorityAvailableBytes
+        ?? Math.max(0, instructionSnapshot.usage.budgetBytes - instructionSnapshot.usage.totalBytes)
+      const selectedMemory = selectPiMemoryContextWithinBytes(
+        recalledResult?.items.map(piMemoryProjection) || [],
+        Math.min(3 * 1024, lowerAuthorityAvailableBytes),
+      )
       const recalledItems = recalledResult?.items.slice(0, selectedMemory.memories.length) || []
       memoryContext = selectedMemory.context
-      executionPrompt = memoryContext ? `${memoryContext}\n## Current request\n${prompt}` : prompt
+      executionPrompt = memoryContext ? `${memoryContext}\n${requestWithInstructions}` : requestWithInstructions
+      recordTurnEntry(sessionId, {
+        kind: 'notice',
+        source: 'host',
+        topic: 'instruction-context-budget',
+        text: JSON.stringify({
+          totalBudgetBytes: instructionSnapshot.usage.budgetBytes,
+          globalPersonalization: {
+            includedBytes: instructionSnapshot.usage.personalizationBytes,
+            budgetBytes: instructionSnapshot.usage.personalizationBudgetBytes,
+          },
+          projectInstructions: {
+            includedBytes: instructionSnapshot.usage.projectInstructionBytes,
+            budgetBytes: instructionSnapshot.usage.projectInstructionBudgetBytes,
+          },
+          learnedMemory: {
+            requestedBytes: selectedMemory.requestedBytes,
+            includedBytes: selectedMemory.includedBytes,
+            droppedBytes: selectedMemory.droppedBytes,
+          },
+          totalIncludedBytes: instructionSnapshot.usage.totalBytes + selectedMemory.includedBytes,
+        }),
+      })
       if (recalledItems.length && recalledResult) {
         recordTurnEntry(sessionId, {
           kind: 'memory-recall',
@@ -3881,6 +4479,7 @@ export function handlePiHostRequest(
         })
         turnSettings = refreshedSettings.settings
         effectiveSettingsRevision = refreshedSettings.revision
+        turnActiveToolsRestricted = turnActiveToolsRestricted || turnSettings.activeTools.length > 0
         publishOrchestration('iterate', iteration)
         recorder.step = iteration
         recorder.proposalState = workingState
@@ -3894,7 +4493,6 @@ export function handlePiHostRequest(
           canonicalPath?: string
         }> = []
         recordTurnEntry(sessionId, { kind: 'step-start', source: 'host' })
-        recordTurnEntry(sessionId, { kind: 'user-text', source: 'user', content: iteration === 1 ? prompt : iterationPrompt })
         const iterationConfiguredActiveTools = turnSettings.activeTools
           .filter((tool) => workspaceTextSearchRun.available || !isWorkspaceTextSearchTool(tool))
         const iterationVisibleActiveTools = turnSettings.activeTools.length > 0 && iterationConfiguredActiveTools.length === 0
@@ -3902,7 +4500,40 @@ export function handlePiHostRequest(
           : iterationConfiguredActiveTools
         const iterationControlTools = iterationControlToolNames(effectiveAgentMode, pattern)
         const iterationUnlockedTools = [...new Set([...unlockedTools, ...iterationControlTools])]
-        const turn = await runPiTurn(sessionId, cwd, iterationPrompt, session.messages, (event) => {
+        // This is the last Host-owned boundary before Pi dispatches to a
+        // remote model. Sanitize the complete iteration and recalled memory,
+        // not only project files prepared earlier by the renderer.
+        const providerPrompt = await prepareHostLlmEgress({
+          text: iterationPrompt,
+          mode: contextPolicy.outboundShellMode,
+          connectionId: contextPolicy.outboundConnectionId,
+          provider: turnSettings.provider,
+          runId,
+        })
+        const providerMemoryContext = await prepareHostLlmEgress({
+          text: memoryContext,
+          mode: contextPolicy.outboundShellMode,
+          connectionId: contextPolicy.outboundConnectionId,
+          provider: turnSettings.provider,
+          runId,
+        })
+        // Persist the exact bounded prompt sent to Pi.  The raw orchestration
+        // prompt may contain protected instruction text that must not be
+        // written to the Turn Record after provider sanitization.
+        const providerUserText = await prepareHostLlmEgress({
+          // The conversation projection is the user's request, while the
+          // provider-prompt entry below preserves the complete model payload.
+          // Keeping these separate prevents standing instructions from being
+          // rendered as if the user had typed them.
+          text: prompt,
+          mode: contextPolicy.outboundShellMode,
+          connectionId: contextPolicy.outboundConnectionId,
+          provider: turnSettings.provider,
+          runId,
+        })
+        recordTurnEntry(sessionId, { kind: 'user-text', source: 'user', content: providerUserText })
+        recordTurnEntry(sessionId, { kind: 'provider-prompt', source: 'host', content: providerPrompt })
+        const turn = await runPiTurn(sessionId, cwd, providerPrompt, providerHistory, (event) => {
           // A tool call is the model asking; the audit records what the Host
           // then decided and did (ADR-0048).
           // Each assistant message is recorded where it happened, so the
@@ -4026,13 +4657,14 @@ export function handlePiHostRequest(
           temporaryChat: contextPolicy.temporary === true,
           // A restricted allowlist unions the unlocked capability tools; an
           // empty list already means everything is on.
-          activeTools: turnSettings.activeTools.length
+          activeTools: turnActiveToolsRestricted
             ? [...new Set([...iterationVisibleActiveTools, ...iterationUnlockedTools])]
             : turnSettings.activeTools,
+          activeToolsRestricted: turnActiveToolsRestricted,
           unlockedTools: iterationUnlockedTools,
           mcpGenerationKey: mcpTurnGenerationKey,
           mcpCapabilityActive: mcpCapabilityLoaded,
-        }, memoryContext, contextPolicy.referenceChatHistory, (registryContextWindow, runtimeSession) => {
+        }, providerMemoryContext, contextPolicy.referenceChatHistory, (registryContextWindow, runtimeSession) => {
           const liveSession = runtimeSession as { getAllTools?: () => readonly unknown[]; getActiveToolNames?: () => readonly string[] } | undefined
           if (liveSession && typeof liveSession.getAllTools === 'function' && typeof liveSession.getActiveToolNames === 'function') {
             const publishContract = () => {
@@ -4260,6 +4892,7 @@ export function handlePiHostRequest(
       if (activeSessionRuns.get(sessionId)?.runId === runId) activeSessionRuns.delete(sessionId)
     })
   }
+  if (input.method.startsWith('instructions/v1/')) return handleInstructionRequest(state, input as Partial<PiHostRequest>, id, emit) as Promise<PiHostMessage[]>
   if (input.method === 'settings/get') return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config, settingsRevision: state.snapshot.cursor } }]
   if (input.method === 'settings/update') {
     return (async () => {
@@ -4355,7 +4988,8 @@ function handlePiHostLifecycleRequest(
   }
   if (method === 'lifecycle/shutdown') {
     state.shuttingDown = true
-    return state.memoryStore.close().then(async () => [{ id, result: { memoryHealth: await state.memoryStore.health() } }])
+    return Promise.all([state.memoryStore.close(), state.instructionRepository.close()])
+      .then(async () => [{ id, result: { memoryHealth: await state.memoryStore.health() } }])
   }
   return [errorResponse(id, 'closed', 'Pi Host is shutting down; new requests are refused')]
 }
@@ -4591,8 +5225,10 @@ export function createPiHostServer(
   suppliedMemoryControlPackages?: MemoryControlPackageReader,
   suppliedMemoryControlMaintenanceToken?: string,
   suppliedMemoryControlEvaluationAuthority?: MemoryControlEvaluationAuthority,
+  suppliedInstructionRepository?: InstructionRepository,
 ) {
   const memoryStore = suppliedMemoryStore || new InMemoryDurableMemoryStore()
+  const instructionRepository = suppliedInstructionRepository || new InMemoryInstructionRepository()
   const memoryControlPackages = suppliedMemoryControlPackages || baselineMemoryControlPackageReader()
   const memoryReady = Promise.resolve()
   const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [], attachments: initialSnapshot.attachments || [] }
@@ -4610,7 +5246,10 @@ export function createPiHostServer(
     toolContractNegotiated: false,
     memoryStoreNegotiated: false,
     memoryControlNegotiated: false,
+    instructionRepositoryNegotiated: false,
     memoryStore,
+    instructionRepository,
+    instructionProjections: new Map(),
     memoryControlPackages,
     memoryControlEvaluationAuthority: suppliedMemoryControlEvaluationAuthority,
     memoryControlMaintenanceToken: suppliedMemoryControlMaintenanceToken,

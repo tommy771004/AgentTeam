@@ -3,7 +3,16 @@ import { memoryStore } from '../agent/hermes/memory.ts'
 import { parseSkillMarkdown, skillsStore } from '../agent/hermes/skills.ts'
 import { learningLoop } from '../agent/hermes/learning.ts'
 import { searchSessions, summarizeSessionHits } from '../agent/hermes/sessionSearch.ts'
-import { getAgentsDoc, getSoulDoc, setAgentsDoc, setSoulDoc } from '../agent/hermes/promptBuilder.ts'
+import {
+  beginLegacyInstructionHydration,
+  completeLegacyInstructionHydration,
+  failLegacyInstructionHydration,
+  getAgentsDoc,
+  getLegacyInstructionHydration,
+  getSoulDoc,
+  setAgentsDoc,
+  setSoulDoc,
+} from '../agent/hermes/promptBuilder.ts'
 import { pluginRegistry, type PluginManifest } from '../agent/hermes/plugins.ts'
 import { PLUGIN_CATALOG, catalogItem, type PluginCatalogItem } from '../agent/hermes/pluginCatalog.ts'
 import {
@@ -133,6 +142,8 @@ interface LearningStore {
   memoryProjection: LearningMemoryProjection
 
   load: () => Promise<void>
+  /** Retry legacy Hermes extraction after a transient authority/read failure. */
+  reloadLegacyInstructionSource: () => Promise<boolean>
   loadSkillCatalog: (projectRoot?: string) => Promise<void>
   persist: () => Promise<void>
   refresh: () => void
@@ -150,8 +161,6 @@ interface LearningStore {
   nextMemoryPage: () => Promise<void>
   previousMemoryPage: () => Promise<void>
   invalidateMemoryRevision: (revision: number) => void
-  setSoul: (text: string) => Promise<void>
-  setAgents: (text: string) => Promise<void>
   approveDraft: (name: string) => Promise<void>
   rejectDraft: (name: string) => void
   search: (query: string, archive: ArchiveRecord[]) => Promise<void>
@@ -302,49 +311,70 @@ async function hydrateHostSkills(projectRoot?: string): Promise<void> {
   }
 }
 
+type HermesAuthorityPayload = {
+  memory?: MemoryBundle
+  skills?: Array<{ path: string; raw: string }>
+  soul?: unknown
+  agents?: unknown
+  plugins?: PluginManifest[]
+}
+
+async function readHermesAuthority(): Promise<HermesAuthorityPayload | null> {
+  if (isElectronPiProduction() && typeof window.subagents?.hermes?.get !== 'function') {
+    throw new Error('Electron legacy Hermes read bridge 尚未 ready，未進行 migration。')
+  }
+  if (window.subagents?.hermes?.get) {
+    const data = await window.subagents.hermes.get() as unknown
+    if (data !== null && (typeof data !== 'object' || Array.isArray(data))) {
+      throw new Error('Legacy Hermes 資料格式無效，未進行 migration。')
+    }
+    return data as HermesAuthorityPayload | null
+  }
+  const raw = localStorage.getItem('subagents.hermes.v1')
+  if (!raw) return null
+  const data = JSON.parse(raw) as unknown
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('Legacy Hermes localStorage 格式無效，未進行 migration。')
+  }
+  return data as HermesAuthorityPayload
+}
+
+function applyLegacyInstructionDocs(data: HermesAuthorityPayload | null): void {
+  if (data && Object.prototype.hasOwnProperty.call(data, 'soul') && typeof data.soul === 'string') setSoulDoc(data.soul)
+  if (data && Object.prototype.hasOwnProperty.call(data, 'agents') && typeof data.agents === 'string') setAgentsDoc(data.agents)
+}
+
+async function hydrateLegacyInstructionSource(): Promise<HermesAuthorityPayload | null> {
+  beginLegacyInstructionHydration()
+  try {
+    const data = await readHermesAuthority()
+    applyLegacyInstructionDocs(data)
+    completeLegacyInstructionHydration()
+    return data
+  } catch (error) {
+    failLegacyInstructionHydration(error)
+    return null
+  }
+}
+
 async function loadFromDisk() {
+  const data = await hydrateLegacyInstructionSource()
   if (isElectronPiProduction()) {
     // Pi Host owns durable memories/extensions; renderer only asks for bounded UI pages.
     // Skills: Pi Host owns the directory (ADR-0034), so the 技能庫 projects it
     // back in at boot. Without this, a full-state sync built from an unhydrated
     // store would reconcile REAL host skills away on the next mutation.
     await hydrateHostSkills()
+    // The Host owns the new instruction authority, but legacy SOUL/AGENTS are
+    // still migration inputs until cutover. Never hydrate the legacy memory
+    // bundle, which remains Host-owned.
     pluginRegistry.apply()
     return
   }
-  if (window.subagents?.hermes?.get) {
-    const data = (await window.subagents.hermes.get()) as {
-      memory?: MemoryBundle
-      skills?: Array<{ path: string; raw: string }>
-      soul?: string
-      agents?: string
-      plugins?: PluginManifest[]
-    } | null
+  if (data) {
     if (data?.memory) memoryStore.loadBundle(data.memory)
     if (data?.skills) skillsStore.loadAll(data.skills)
-    if (data?.soul) setSoulDoc(data.soul)
-    if (data?.agents) setAgentsDoc(data.agents)
     if (data?.plugins) pluginRegistry.loadFromArray(data.plugins)
-  } else {
-    try {
-      const raw = localStorage.getItem('subagents.hermes.v1')
-      if (raw) {
-        const data = JSON.parse(raw) as {
-          memory?: MemoryBundle
-          skills?: Array<{ path: string; raw: string }>
-          soul?: string
-          agents?: string
-          plugins?: PluginManifest[]
-        }
-        if (data.memory) memoryStore.loadBundle(data.memory)
-        if (data.skills) skillsStore.loadAll(data.skills)
-        if (data.soul) setSoulDoc(data.soul)
-        if (data.agents) setAgentsDoc(data.agents)
-        if (data.plugins) pluginRegistry.loadFromArray(data.plugins)
-      }
-    } catch {
-      /* ignore */
-    }
   }
   // Also try Electron plugins dir
   if (window.subagents?.plugins?.list) {
@@ -366,15 +396,12 @@ async function saveToDisk() {
   const payload = {
     memory: memoryStore.getBundle(),
     skills: skillsStore.exportAll(),
-    soul: getSoulDoc(),
-    agents: getAgentsDoc(),
     plugins: pluginRegistry.exportAll(),
   }
-  if (window.subagents?.hermes?.set) {
-    await window.subagents.hermes.set(payload)
-  } else {
-    localStorage.setItem('subagents.hermes.v1', JSON.stringify(payload))
-  }
+  // Legacy SOUL/AGENTS are read once for migration, then deliberately never
+  // written by the renderer again. Browser compatibility owns only this
+  // non-authoritative memory/skills/plugins cache.
+  localStorage.setItem('subagents.hermes.v1', JSON.stringify(payload))
 }
 
 function buildTokenRefreshDeps(getStore: () => LearningStore) {
@@ -567,6 +594,19 @@ export const useLearningStore = create<LearningStore>((set, get) => {
         plugins: pluginRegistry.list(),
       })
       await Promise.all(pluginRegistry.list().map((plugin) => get().checkPlugin(plugin.id)))
+    },
+
+    reloadLegacyInstructionSource: async () => {
+      const data = await hydrateLegacyInstructionSource()
+      const readiness = getLegacyInstructionHydration()
+      if (readiness.status === 'ready') {
+        set({ soul: getSoulDoc(), agents: getAgentsDoc() })
+        // The return value distinguishes a known-absent authority (data null)
+        // from a failed read; both are intentionally not represented by {}.
+        void data
+        return true
+      }
+      return false
     },
 
     loadSkillCatalog: async (projectRoot) => {
@@ -866,18 +906,6 @@ export const useLearningStore = create<LearningStore>((set, get) => {
       const result = await memoryApi().deletionCapability()
       if (result.operation !== 'deletion-capability') throw new Error('Host 刪除能力回應格式錯誤')
       return result.capability
-    },
-
-    setSoul: async (text) => {
-      setSoulDoc(text)
-      set({ soul: getSoulDoc() })
-      await get().persist()
-    },
-
-    setAgents: async (text) => {
-      setAgentsDoc(text)
-      set({ agents: getAgentsDoc() })
-      await get().persist()
     },
 
     approveDraft: async (name) => {

@@ -90,6 +90,7 @@ export type PersistedQueueItem = {
     | 'webhookTarget'
     | 'externalCliPolicy'
     | 'externalCliRequiredConnectors'
+    | 'instructionSnapshot'
   >
 }
 
@@ -224,6 +225,7 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
           webhookTarget: o.webhookTarget,
           externalCliPolicy: o.externalCliPolicy,
           externalCliRequiredConnectors: persistConnectorRequirements(o.externalCliRequiredConnectors),
+          instructionSnapshot: o.instructionSnapshot,
         }
       : undefined,
   }

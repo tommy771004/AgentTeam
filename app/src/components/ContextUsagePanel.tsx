@@ -147,6 +147,32 @@ function TokenGrid({
   )
 }
 
+function InstructionUsage({ instructions }: { instructions: NonNullable<ContextUsage['instructions']> }) {
+  return (
+    <div className="mt-3 bg-inset px-3 py-2 text-[10px] leading-relaxed text-ink-3">
+      <p className="text-ink-2">指令 context · revision {instructions.revision} 已於本 run admission 凍結 · {instructions.deliveryMode}{instructions.exactSnapshot ? ' · exact snapshot' : ' · 未能證明 exact'}</p>
+      <p className="mt-1">個人化 {formatTokens(instructions.personalizationBytes)} / {formatTokens(instructions.personalizationBudgetBytes ?? instructions.budgetBytes)} B · 專案 {formatTokens(instructions.projectInstructionBytes)} / {formatTokens(instructions.projectInstructionBudgetBytes ?? instructions.budgetBytes)} B</p>
+      <p className="mt-1">共同預算 {formatTokens(instructions.totalBytes)} / {formatTokens(instructions.budgetBytes)} B · lower-authority 可用 {formatTokens(instructions.lowerAuthorityAvailableBytes ?? Math.max(0, instructions.budgetBytes - instructions.totalBytes))} B</p>
+      <p className="mt-1 break-all">effective hash {instructions.hashAvailable ? instructions.effectiveHash.slice(0, 16) : 'unavailable'}</p>
+      {instructions.limitationReason && <p className="mt-1">限制：{instructions.limitationReason}</p>}
+      {instructions.sourceSummary.length > 0 && (
+        <div className="mt-1">
+          <p className="text-ink-2">來源摘要</p>
+          <ul className="mt-0.5 list-disc pl-4">
+            {instructions.sourceSummary.map((source) => (
+              <li key={source.id} className="break-all [overflow-wrap:anywhere]">
+                {source.scope}/{source.kind} · {source.status} · {source.bytes} B · hash {source.hashAvailable ? 'available' : 'unavailable'}{source.effectiveOrder === null ? '' : ` · order ${source.effectiveOrder}`}
+                {source.path ? ` · ${source.path}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="mt-1">執行期間的指令變更不會熱替換此 snapshot，將從下一個 run 生效。</p>
+    </div>
+  )
+}
+
 export function ContextUsagePanel({
   usage,
   fallbackTokens,
@@ -189,6 +215,7 @@ export function ContextUsagePanel({
           {fallbackTokens && fallbackTokens > 0 ? `${formatTokens(fallbackTokens)} tokens` : '執行中'}
         </p>
         <BreakdownBar breakdown={usage.breakdown} />
+        {usage.instructions && <InstructionUsage instructions={usage.instructions} />}
         <p className="mt-3 text-[10px] text-ink-3">
           {contextUsageActivityMicrocopy(usage)}
         </p>
@@ -252,6 +279,8 @@ export function ContextUsagePanel({
       )}
 
       <TokenGrid tokens={usage.tokens} reported={usage.reported} />
+
+      {usage.instructions && <InstructionUsage instructions={usage.instructions} />}
 
       <BreakdownBar breakdown={usage.breakdown} />
 

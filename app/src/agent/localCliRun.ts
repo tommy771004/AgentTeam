@@ -30,6 +30,7 @@ import {
   loadCompanyProfileViaOutboundIpc,
   prepareLlmEgressMessages,
 } from './outbound/llmEgress.ts'
+import { mapSanitizedInstructionSnapshot } from './instructionSnapshot.ts'
 import {
   detectFilesystemSandboxCapability,
   allocateForbiddenCanaryPath,
@@ -99,6 +100,57 @@ async function prepareCliOutboundPrompt(opts: {
     : { ok: false, reason: prepared.reason }
 }
 
+async function sha256Text(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function prepareCliInstructionRecord(opts: {
+  snapshot?: RuntimeOverrides['instructionSnapshot']
+  effectiveMode: ReturnType<typeof effectiveOutboundGuardFromSettings>
+  connectionId: string
+  runId?: string
+}): Promise<RuntimeOverrides['instructionSnapshot']> {
+  if (!opts.snapshot || !isProtectionActive(opts.effectiveMode)) return opts.snapshot
+  const prepared = await prepareLlmEgressMessages({
+    effectiveMode: opts.effectiveMode,
+    messages: [
+      { role: 'user', content: opts.snapshot.effectiveText },
+      { role: 'user', content: opts.snapshot.globalEffectiveText },
+      ...opts.snapshot.sources.map((source) => ({ role: 'user', content: source.content })),
+    ],
+    baselineProfile: compileProviderSecurityProfile(BUILTIN_BASELINE_POLICY, emptySupplementalPolicy(opts.connectionId)),
+    loadCompanyProfile: () => loadCompanyProfileViaOutboundIpc(opts.connectionId),
+    cacheKey: opts.runId ? `${opts.runId}:${opts.connectionId}` : `norun:${opts.connectionId}`,
+  })
+  if (!prepared.ok) throw new Error(prepared.reason)
+  return mapSanitizedInstructionSnapshot(opts.snapshot, {
+    effectiveText: prepared.messages[0]?.content || '',
+    globalEffectiveText: prepared.messages[1]?.content || '',
+    sourceContents: opts.snapshot.sources.map((_, index) => prepared.messages[index + 2]?.content || ''),
+  }, sha256Text)
+}
+
+async function prepareCliProtectedPayload(opts: {
+  prompt: string
+  snapshot?: RuntimeOverrides['instructionSnapshot']
+  effectiveMode: ReturnType<typeof effectiveOutboundGuardFromSettings>
+  connectionId: string
+  runId?: string
+}): Promise<
+  | { ok: true; prompt: string; snapshot?: RuntimeOverrides['instructionSnapshot'] }
+  | { ok: false; reason: string }
+> {
+  try {
+    const protectedPrompt = await prepareCliOutboundPrompt(opts)
+    if (!protectedPrompt.ok) return protectedPrompt
+    const snapshot = await prepareCliInstructionRecord(opts)
+    return { ok: true, prompt: protectedPrompt.prompt, snapshot }
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 export async function runPromptViaLocalCli(opts: {
   kind: LocalRunnerKind
   binary?: string
@@ -122,6 +174,7 @@ export async function runPromptViaLocalCli(opts: {
   /** Host-owned timing policy captured with the immutable task snapshot. */
   externalCliPolicy?: Partial<ExternalCliRunPolicy>
   requiredConnectors?: ExternalCliConnectorRequirement[]
+  instructionSnapshot?: RuntimeOverrides['instructionSnapshot']
   onLog?: (line: string) => void
 }): Promise<{
   ok: boolean
@@ -131,6 +184,9 @@ export async function runPromptViaLocalCli(opts: {
   terminalClassification?: ExternalCliTerminalClassification
   runId?: string
   externalRun?: ExternalRunRef
+  /** Exact prompt handed to the external CLI after the outbound gate. */
+  deliveredPrompt?: string
+  deliveredInstructionSnapshot?: RuntimeOverrides['instructionSnapshot']
 }> {
   if (!window.subagents?.cli?.runAgent) {
     return {
@@ -183,22 +239,24 @@ export async function runPromptViaLocalCli(opts: {
     cwd = viewMeta.viewRoot
   }
 
-  const protectedPrompt = await prepareCliOutboundPrompt({
+  const protectedPayload = await prepareCliProtectedPayload({
     prompt,
+    snapshot: opts.instructionSnapshot,
     effectiveMode,
     connectionId,
     runId: opts.runId,
   })
-  if (!protectedPrompt.ok) {
+  if (!protectedPayload.ok) {
     return {
       ok: false,
       output: '',
       command: '',
-      error: `出站資料閘門：無法建立公司保護設定檔（${protectedPrompt.reason}）`,
+      error: `出站資料閘門：無法建立公司保護設定檔（${protectedPayload.reason}）`,
       runId: opts.runId,
     }
   }
-  prompt = protectedPrompt.prompt
+  prompt = protectedPayload.prompt
+  const deliveredInstructionSnapshot = protectedPayload.snapshot
 
   // Required CLI needs verified filesystem sandbox; optional/demo may mark unverified.
   let isolationStatus = detectFilesystemSandboxCapability()
@@ -293,11 +351,7 @@ export async function runPromptViaLocalCli(opts: {
     attachments: (gated.attachments as typeof opts.attachments) ?? opts.attachments,
     externalCliContract: opts.externalCliContract,
   })
-  if (r.cancelled) {
-    opts.onLog?.('■ CLI 已取消')
-  } else {
-    opts.onLog?.(r.ok ? '✓ CLI 完成' : `✗ CLI 失敗：${r.error || r.code}`)
-  }
+  logLocalCliResult(r, opts.onLog)
   if (r.command) opts.onLog?.(`$ ${r.command.slice(0, 200)}`)
   return {
     ok: r.ok,
@@ -307,7 +361,19 @@ export async function runPromptViaLocalCli(opts: {
     runId: r.runId,
     terminalClassification: r.terminalClassification,
     externalRun: r.externalRun as ExternalRunRef | undefined,
+    // This field is only returned after the process invocation boundary. Any
+    // pre-dispatch gate failure returns above without claiming delivery.
+    deliveredPrompt: String(gated.prompt ?? prompt),
+    deliveredInstructionSnapshot,
   }
+}
+
+function logLocalCliResult(result: { cancelled?: boolean; ok: boolean; error?: string; code?: string | number | null }, onLog?: (line: string) => void): void {
+  if (result.cancelled) {
+    onLog?.('■ CLI 已取消')
+    return
+  }
+  onLog?.(result.ok ? '✓ CLI 完成' : `✗ CLI 失敗：${result.error || result.code}`)
 }
 
 /** Cancel active local CLI agent process (Electron) */
