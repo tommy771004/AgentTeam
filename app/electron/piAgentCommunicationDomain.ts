@@ -50,6 +50,18 @@ export type PiAgentCommunicationState = {
 
 type WaitOutcome = { outcome: 'message' | 'terminal' | 'steer' | 'timeout' | 'cancelled'; message?: AgentMessageEnvelope }
 type Waiter = { resolve: (outcome: WaitOutcome) => void; timer: ReturnType<typeof setTimeout> }
+type PreparedSpawnSpec = {
+  objective: string
+  role: string
+  profile: Record<string, unknown>
+  context: PiContextPacket
+  depth: number
+  childPolicy: AgentEffectivePolicy
+  childProfile: Record<string, unknown>
+  workspace: AgentAdmissionSnapshot['workspace']
+  rootAgentId: string
+  runId: string
+}
 
 const error = (
   id: string | number,
@@ -321,30 +333,9 @@ export class PiAgentCommunicationDomain {
     this.compactRetention(input.state)
     const duplicate = input.state.sessions.find((session) => session.agentAdmission?.spawnId === spawnId)
     if (duplicate) return this.spawnResponse(input.id, input.state, duplicate)
-    const rawObjective = stringValue(params.objective)
-    const objective = boundedAgentText(rawObjective, AGENT_MESSAGE_MAX_BYTES)
-    const role = boundedAgentText(stringValue(params.role), 512)
-    const profile = isRecord(params.profile) ? params.profile : undefined
-    const context = admittedContextPacket(params.context, rawObjective)
-    const depth = Number(params.depth)
-    if (!objective || !role || !profile || !context || !Number.isInteger(depth)) return this.rejectSpawn(input, parent, spawnId, 'objective, role, profile, context, and depth are required')
-    if (context.objective !== objective) return this.rejectSpawn(input, parent, spawnId, 'Context Packet must exactly identify the child objective, facts, and constraints')
-    if (depth !== (parent.depth || 0) + 1) return this.rejectSpawn(input, parent, spawnId, 'Child depth must be exactly parent depth + 1')
-    const budgetError = treeBudgetError(input.state, parent, depth)
-    if (budgetError) return this.rejectSpawn(input, parent, spawnId, budgetError)
-    const parentPolicy = parent.agentAdmission?.policy || profilePolicy(parent.profile, input.state.defaultPolicy)
-    const childPolicy = profilePolicy(profile, parentPolicy)
-    if (!isRestrictiveAgentPolicy(parentPolicy, childPolicy)) return this.rejectSpawn(input, parent, spawnId, 'Child effective policy would widen parent authority')
-    const childProfile = admittedChildProfile(profile, childPolicy)
-    const requestedWorkspace = workspaceFrom(params.workspace)
-    if (!requestedWorkspace) return this.rejectSpawn(input, parent, spawnId, 'Child workspace mode or write scope is invalid')
-    const preparedWorkspace = this.workspaceAuthority.prepare(requestedWorkspace, spawnId)
-    if (!preparedWorkspace.ok) return this.rejectSpawn(input, parent, spawnId, preparedWorkspace.reason)
-    const workspace = preparedWorkspace.workspace
-    if (params.detached === true && parent.agentAdmission?.detached !== true) return this.rejectSpawn(input, parent, spawnId, 'Detached work was not granted by parent admission')
-    const tree = rootIdentity(input.state.sessions, parent.id)
-    if (!tree) return this.rejectSpawn(input, parent, spawnId, 'Parent tree is unavailable')
-    const runId = stringValue(params.runId) || `${spawnId}:run:1`
+    const prepared = this.prepareSpawnSpec(input.state, params, parent, spawnId)
+    if (!prepared.ok) return this.rejectSpawn(input, parent, spawnId, prepared.reason)
+    const { objective, role, profile, context, depth, childPolicy, childProfile, workspace, rootAgentId, runId } = prepared.value
     let child
     try {
       child = createPiChildSession({ role, profile: childProfile, context, depth, maxDepth: MAX_TREE_DEPTH })
@@ -352,7 +343,7 @@ export class PiAgentCommunicationDomain {
       return this.rejectSpawn(input, parent, spawnId, cause instanceof Error ? cause.message : 'Invalid child admission')
     }
     const admission: AgentAdmissionSnapshot = {
-      version: 1, spawnId, parentAgentId, rootAgentId: tree.rootAgentId,
+      version: 1, spawnId, parentAgentId, rootAgentId,
       originTurn: Number.isInteger(params.originTurn) ? Number(params.originTurn) : originTurn(parent),
       ...(stringValue(params.originRunId) ? { originRunId: stringValue(params.originRunId) } : {}),
       objective: boundedAgentText(objective, AGENT_MESSAGE_MAX_BYTES), role, depth,
@@ -365,6 +356,41 @@ export class PiAgentCommunicationDomain {
       role: child.role, profile: child.profile, context: child.context, depth: child.depth,
       messages: [], agentAdmission: admission,
     }
+    return this.finishSpawnAdmission(input, parent, spawnId, runId, session, admission, childProfile, objective)
+  }
+
+  private prepareSpawnSpec(state: PiAgentCommunicationState, params: Record<string, unknown>, parent: SessionRecord, spawnId: string): { ok: true; value: PreparedSpawnSpec } | { ok: false; reason: string } {
+    const rawObjective = stringValue(params.objective)
+    const objective = boundedAgentText(rawObjective, AGENT_MESSAGE_MAX_BYTES)
+    const role = boundedAgentText(stringValue(params.role), 512)
+    const profile = isRecord(params.profile) ? params.profile : undefined
+    const context = admittedContextPacket(params.context, rawObjective)
+    const depth = Number(params.depth)
+    if (!profile) return { ok: false, reason: 'objective, role, profile, context, and depth are required' }
+    if (![objective, role, context].every(Boolean) || !Number.isInteger(depth)) return { ok: false, reason: 'objective, role, profile, context, and depth are required' }
+    if (context!.objective !== objective) return { ok: false, reason: 'Context Packet must exactly identify the child objective, facts, and constraints' }
+    if (depth !== (parent.depth || 0) + 1) return { ok: false, reason: 'Child depth must be exactly parent depth + 1' }
+    const budgetError = treeBudgetError(state, parent, depth)
+    if (budgetError) return { ok: false, reason: budgetError }
+    const parentPolicy = parent.agentAdmission?.policy || profilePolicy(parent.profile, state.defaultPolicy)
+    const childPolicy = profilePolicy(profile, parentPolicy)
+    if (!isRestrictiveAgentPolicy(parentPolicy, childPolicy)) return { ok: false, reason: 'Child effective policy would widen parent authority' }
+    const requestedWorkspace = workspaceFrom(params.workspace)
+    if (!requestedWorkspace) return { ok: false, reason: 'Child workspace mode or write scope is invalid' }
+    const preparedWorkspace = this.workspaceAuthority.prepare(requestedWorkspace, spawnId)
+    if (!preparedWorkspace.ok) return { ok: false, reason: preparedWorkspace.reason }
+    if (params.detached === true && parent.agentAdmission?.detached !== true) return { ok: false, reason: 'Detached work was not granted by parent admission' }
+    const tree = rootIdentity(state.sessions, parent.id)
+    if (!tree) return { ok: false, reason: 'Parent tree is unavailable' }
+    return { ok: true, value: {
+      objective, role, profile, context: context!, depth, childPolicy,
+      childProfile: admittedChildProfile(profile, childPolicy), workspace: preparedWorkspace.workspace,
+      rootAgentId: tree.rootAgentId, runId: stringValue(params.runId) || `${spawnId}:run:1`,
+    } }
+  }
+
+  private finishSpawnAdmission(input: { id: string | number; state: PiAgentCommunicationState }, parent: SessionRecord, spawnId: string, runId: string, session: SessionRecord, admission: AgentAdmissionSnapshot, childProfile: Record<string, unknown>, objective: string): PiHostMessage[] {
+    const workspace = admission.workspace
     const sessions = [...input.state.sessions, session]
     input.state.sessions = sessions
     if (!appendLifecycle(input.state, session.id, 'admitted')) {
@@ -469,21 +495,18 @@ export class PiAgentCommunicationDomain {
     const sender = input.state.sessions.find((session) => session.id === stringValue(params.senderAgentId))
     const receiver = input.state.sessions.find((session) => session.id === stringValue(params.receiverAgentId))
     if (!sender || !receiver) return error(input.id, 'senderAgentId and receiverAgentId are required')
-    if (receiver.archived) return error(input.id, 'Closed agents cannot receive follow-up work')
-    const tree = rootIdentity(input.state.sessions, receiver.id)
-    const authorized = sender.id === receiver.parentSessionId || sender.id === tree?.rootAgentId
-    if (!authorized || sender.id === receiver.id) return error(input.id, 'Only direct parent or root may assign follow-up work')
+    const authorizationError = this.followUpAuthorizationError(input.state, sender, receiver)
+    if (authorizationError) return error(input.id, authorizationError)
+    const tree = rootIdentity(input.state.sessions, receiver.id)!
     const content = boundedAgentText(stringValue(params.content), AGENT_MESSAGE_MAX_BYTES)
     if (!content) return error(input.id, 'Follow-up content is required')
-    const update = params.policy === undefined ? receiver.agentAdmission?.policy : normalizeAgentPolicy(params.policy)
+    const update = this.followUpPolicy(params, receiver)
     const current = receiver.agentAdmission?.policy || profilePolicy(receiver.profile, input.state.defaultPolicy)
     if (!update || !isRestrictiveAgentPolicy(current, update)) return error(input.id, 'Follow-up policy update would widen child authority')
     const messageId = stringValue(params.messageId) || randomUUID()
     const existing = projectedMailbox(receiver).find((message) => message.messageId === messageId)
     if (existing) return response(input.id, { message: existing, duplicate: true, started: false })
-    if (projectedMailbox(receiver).filter((message) => message.deliveryState !== 'acknowledged').length >= AGENT_MAILBOX_MAX_MESSAGES) {
-      return error(input.id, 'Agent mailbox queue_full')
-    }
+    if (this.mailboxIsFull(receiver)) return error(input.id, 'Agent mailbox queue_full')
     const message: AgentMessageEnvelope = {
       version: 1, messageId, rootAgentId: tree!.rootAgentId, senderAgentId: sender.id, receiverAgentId: receiver.id,
       originTurn: Number.isInteger(params.originTurn) ? Number(params.originTurn) : originTurn(sender),
@@ -492,25 +515,52 @@ export class PiAgentCommunicationDomain {
     }
     if (!appendEvent(input.state, receiver.id, { type: 'mail', message })) return error(input.id, 'Unable to record follow-up')
     if (receiver.agentAdmission) receiver.agentAdmission = { ...receiver.agentAdmission, policy: update }
-    if (input.state.activeSessionIds.has(receiver.id) && input.state.steer) {
-      const activeRunId = input.state.activeRunId?.(receiver.id)
-      try {
-        if (activeRunId && input.state.steer(receiver.id, content)) {
-          appendEvent(input.state, receiver.id, { type: 'follow-up-started', messageId, agentId: receiver.id, runId: activeRunId })
-          appendEvent(input.state, receiver.id, { type: 'mail-consumed', messageId, agentId: receiver.id })
-          input.state.commit(input.state.sessions, input.state.queue)
-          return response(input.id, { message: { ...message, deliveryState: 'consumed' }, duplicate: false, started: true, runId: activeRunId, delivery: 'safe-boundary' })
-        }
-      } catch {
-        /* Preserve the durable mail; settlement will drain it as a new turn. */
-      }
-    }
-    const busy = input.state.activeSessionIds.has(receiver.id)
-      || input.state.queue.some((run) => run.sessionId === receiver.id && (run.status === 'queued' || run.status === 'running'))
+    const steered = this.tryActiveFollowUp(input, receiver, content, message, messageId)
+    if (steered) return steered
+    const busy = this.agentHasActiveOrQueuedRun(input.state, receiver.id)
     if (busy) {
       input.state.commit(input.state.sessions, input.state.queue)
       return response(input.id, { message, duplicate: false, started: false, queued: true })
     }
+    return this.enqueueFollowUp(input, receiver, update, content, message, messageId)
+  }
+
+  private followUpAuthorizationError(state: PiAgentCommunicationState, sender: SessionRecord, receiver: SessionRecord): string | undefined {
+    if (receiver.archived) return 'Closed agents cannot receive follow-up work'
+    const tree = rootIdentity(state.sessions, receiver.id)
+    const authorized = sender.id === receiver.parentSessionId || sender.id === tree?.rootAgentId
+    return authorized && sender.id !== receiver.id ? undefined : 'Only direct parent or root may assign follow-up work'
+  }
+
+  private followUpPolicy(params: Record<string, unknown>, receiver: SessionRecord): AgentEffectivePolicy | undefined {
+    return params.policy === undefined ? receiver.agentAdmission?.policy : normalizeAgentPolicy(params.policy)
+  }
+
+  private mailboxIsFull(receiver: SessionRecord): boolean {
+    return projectedMailbox(receiver).filter((message) => message.deliveryState !== 'acknowledged').length >= AGENT_MAILBOX_MAX_MESSAGES
+  }
+
+  private agentHasActiveOrQueuedRun(state: PiAgentCommunicationState, agentId: string): boolean {
+    return state.activeSessionIds.has(agentId)
+      || state.queue.some((run) => run.sessionId === agentId && (run.status === 'queued' || run.status === 'running'))
+  }
+
+  private tryActiveFollowUp(input: { id: string | number; state: PiAgentCommunicationState }, receiver: SessionRecord, content: string, message: AgentMessageEnvelope, messageId: string): PiHostMessage[] | undefined {
+    if (!input.state.activeSessionIds.has(receiver.id) || !input.state.steer) return undefined
+    const activeRunId = input.state.activeRunId?.(receiver.id)
+    try {
+      if (!activeRunId || !input.state.steer(receiver.id, content)) return undefined
+      appendEvent(input.state, receiver.id, { type: 'follow-up-started', messageId, agentId: receiver.id, runId: activeRunId })
+      appendEvent(input.state, receiver.id, { type: 'mail-consumed', messageId, agentId: receiver.id })
+      input.state.commit(input.state.sessions, input.state.queue)
+      return response(input.id, { message: { ...message, deliveryState: 'consumed' }, duplicate: false, started: true, runId: activeRunId, delivery: 'safe-boundary' })
+    } catch {
+      return undefined // durable mail remains queued for settlement drain
+    }
+  }
+
+  private enqueueFollowUp(input: { id: string | number; params?: Record<string, unknown>; state: PiAgentCommunicationState }, receiver: SessionRecord, update: AgentEffectivePolicy, content: string, message: AgentMessageEnvelope, messageId: string): PiHostMessage[] {
+    const params = input.params || {}
     const runId = stringValue(params.runId) || `${messageId}:run`
     const outcome = enqueuePiHostRun({
       queue: input.state.queue,
@@ -601,10 +651,7 @@ export class PiAgentCommunicationDomain {
     if (!conflictId || !requestedBy || !['serialize', 'narrow-scope', 'transfer-lease', 'release-lease', 'isolate-worktree', 'cancel'].includes(action)) {
       return error(input.id, 'conflictId, requestedBy, and a supported action are required')
     }
-    const conflict = input.state.sessions
-      .flatMap((session) => collaborationEvents(session))
-      .find((event): event is Extract<AgentCollaborationEvent, { type: 'conflict' }> => event.type === 'conflict' && event.conflict.conflictId === conflictId)
-      ?.conflict
+    const conflict = this.findConflict(input.state.sessions, conflictId)
     if (!conflict || !conflict.choices.includes(action)) return error(input.id, 'Unknown conflict or unsupported resolution')
     const target = input.state.sessions.find((session) => session.id === conflict.requesterAgentId)
     const owner = input.state.sessions.find((session) => session.id === conflict.ownerAgentId)
@@ -612,49 +659,58 @@ export class PiAgentCommunicationDomain {
     if (!target || !owner || !tree) return error(input.id, 'Conflict agents are unavailable')
     const authorized = new Set([target.parentSessionId, conflict.parentAgentId, tree.rootAgentId].filter(Boolean))
     if (!authorized.has(requestedBy)) return error(input.id, 'Only the authorized parent or root may resolve this lease conflict', 'forbidden')
-    const prior = input.state.sessions
-      .flatMap((session) => collaborationEvents(session))
-      .find((event): event is Extract<AgentCollaborationEvent, { type: 'conflict-resolved' }> => event.type === 'conflict-resolved' && event.conflictId === conflictId)
+    const prior = this.findConflictResolution(input.state.sessions, conflictId)
     if (prior) return response(input.id, { conflictId, action: prior.action, agentId: prior.agentId, duplicate: true })
-
-    if (action === 'cancel') {
-      this.recordConflictResolution(input.state, conflict, requestedBy, action, conflict.revision)
-      const runId = `${target.agentAdmission?.spawnId || target.id}:run:1`
-      appendLifecycle(input.state, target.id, 'cancelled', runId, 'write-scope-conflict-cancelled')
-      this.recordCompletion(input.state, { sessionId: target.id, runId, settlement: 'cancelled', summary: 'Cancelled while resolving a write-scope conflict.' })
-      input.state.commit(input.state.sessions, input.state.queue)
-      return response(input.id, { conflictId, action, agentId: target.id, queued: false, duplicate: false })
-    }
-
-    if (action === 'serialize') {
-      this.recordConflictResolution(input.state, conflict, requestedBy, action, conflict.revision)
-      input.state.commit(input.state.sessions, input.state.queue)
-      return response(input.id, { conflictId, action, agentId: target.id, queued: false, waitingForAgentId: owner.id, duplicate: false })
-    }
-
-    if (action === 'narrow-scope') {
-      const scopes = Array.isArray(input.params?.scopes) ? input.params?.scopes.map(String) : []
-      const current = target.agentAdmission?.workspace
-      if (!current?.projectRoot) return error(input.id, 'Conflicted child has no project workspace')
-      const prepared = this.workspaceAuthority.prepare({ ...current, mode: 'shared-leased-write', scopes, revision: conflict.revision }, target.agentAdmission!.spawnId)
-      if (!prepared.ok) return error(input.id, prepared.reason)
-      target.agentAdmission = { ...target.agentAdmission!, workspace: prepared.workspace }
-    }
-
-    if (action === 'isolate-worktree') {
-      const projectRoot = target.agentAdmission?.workspace.projectRoot
-      if (!projectRoot) return error(input.id, 'Conflicted child has no project workspace')
-      const prepared = this.workspaceAuthority.prepare({ mode: 'isolated-worktree', projectRoot, scopes: [], revision: conflict.revision }, `${target.agentAdmission!.spawnId}-isolated`)
-      if (!prepared.ok) return error(input.id, prepared.reason)
-      target.agentAdmission = { ...target.agentAdmission!, workspace: prepared.workspace }
-    }
-
+    const immediate = this.resolveImmediateConflict(input, conflict, requestedBy, action, target, owner)
+    if (immediate) return immediate
+    const workspaceError = this.prepareConflictWorkspace(input, conflict, action, target)
+    if (workspaceError) return workspaceError
     if (action === 'transfer-lease' || action === 'release-lease') this.releaseWorkspaceLease(input.state, owner)
     const queued = this.queueBlockedChild(input.state, target)
     if (!queued.ok) return error(input.id, queued.reason)
     this.recordConflictResolution(input.state, conflict, requestedBy, action, queued.revision)
     input.state.commit(input.state.sessions, queued.queue)
     return response(input.id, { conflictId, action, agentId: target.id, runId: queued.runId, queued: true, duplicate: false })
+  }
+
+  private findConflict(sessions: readonly SessionRecord[], conflictId: string): AgentConflictEvent | undefined {
+    return sessions.flatMap((session) => collaborationEvents(session))
+      .find((event): event is Extract<AgentCollaborationEvent, { type: 'conflict' }> => event.type === 'conflict' && event.conflict.conflictId === conflictId)?.conflict
+  }
+
+  private findConflictResolution(sessions: readonly SessionRecord[], conflictId: string) {
+    return sessions.flatMap((session) => collaborationEvents(session))
+      .find((event): event is Extract<AgentCollaborationEvent, { type: 'conflict-resolved' }> => event.type === 'conflict-resolved' && event.conflictId === conflictId)
+  }
+
+  private resolveImmediateConflict(input: { id: string | number; state: PiAgentCommunicationState }, conflict: AgentConflictEvent, requestedBy: string, action: AgentConflictEvent['choices'][number], target: SessionRecord, owner: SessionRecord): PiHostMessage[] | undefined {
+    if (action === 'serialize') {
+      this.recordConflictResolution(input.state, conflict, requestedBy, action, conflict.revision)
+      input.state.commit(input.state.sessions, input.state.queue)
+      return response(input.id, { conflictId: conflict.conflictId, action, agentId: target.id, queued: false, waitingForAgentId: owner.id, duplicate: false })
+    }
+    if (action !== 'cancel') return undefined
+    this.recordConflictResolution(input.state, conflict, requestedBy, action, conflict.revision)
+    const runId = `${target.agentAdmission?.spawnId || target.id}:run:1`
+    appendLifecycle(input.state, target.id, 'cancelled', runId, 'write-scope-conflict-cancelled')
+    this.recordCompletion(input.state, { sessionId: target.id, runId, settlement: 'cancelled', summary: 'Cancelled while resolving a write-scope conflict.' })
+    input.state.commit(input.state.sessions, input.state.queue)
+    return response(input.id, { conflictId: conflict.conflictId, action, agentId: target.id, queued: false, duplicate: false })
+  }
+
+  private prepareConflictWorkspace(input: { id: string | number; params?: Record<string, unknown> }, conflict: AgentConflictEvent, action: AgentConflictEvent['choices'][number], target: SessionRecord): PiHostMessage[] | undefined {
+    if (action !== 'narrow-scope' && action !== 'isolate-worktree') return undefined
+    const admission = target.agentAdmission
+    const current = admission?.workspace
+    if (!admission || !current?.projectRoot) return error(input.id, 'Conflicted child has no project workspace')
+    const requested = action === 'narrow-scope'
+      ? { ...current, mode: 'shared-leased-write' as const, scopes: Array.isArray(input.params?.scopes) ? input.params.scopes.map(String) : [], revision: conflict.revision }
+      : { mode: 'isolated-worktree' as const, projectRoot: current.projectRoot, scopes: [], revision: conflict.revision }
+    const spawnId = action === 'isolate-worktree' ? `${admission.spawnId}-isolated` : admission.spawnId
+    const prepared = this.workspaceAuthority.prepare(requested, spawnId)
+    if (!prepared.ok) return error(input.id, prepared.reason)
+    target.agentAdmission = { ...admission, workspace: prepared.workspace }
+    return undefined
   }
 
   private queueBlockedChild(state: PiAgentCommunicationState, child: SessionRecord): { ok: true; queue: PiQueuedRun[]; runId: string; revision: number } | { ok: false; reason: string } {

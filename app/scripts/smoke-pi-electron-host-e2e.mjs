@@ -290,6 +290,19 @@ const waitForRecoveredTimeline = async (page, runId, kind, description) => {
   throw new Error(`${description}: timed out after ${timeout}ms; last state=${JSON.stringify(lastState)}`)
 }
 
+const waitForHostRelease = async (page, runId, kind) => {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    const retained = await page.evaluate(async (id) => {
+      const snapshot = await window.subagents?.piHost?.runs?.active?.()
+      return [...(snapshot?.activeRuns || []), ...(snapshot?.terminalRuns || [])].some((item) => item?.runId === id)
+    }, runId)
+    if (!retained) return
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  throw new Error(`${kind} Host ack retention release timed out after ${timeout}ms`)
+}
+
 const startScenario = async (page, kind, iteration) => {
   const token = `reattach-token-${kind}-${iteration}-${Date.now().toString(36)}`
   const objective = `Run ${kind} renderer reattach ${token}`
@@ -493,13 +506,7 @@ const runScenario = async (page, kind, iteration) => {
     : []
   assert.equal(matchingArchives.length, 1, `${kind} app archive is exactly once; runId=${runId}; records=${JSON.stringify(archiveRecords)}`)
 
-  await page.waitForFunction(async (id) => {
-    const snapshot = await window.subagents?.piHost?.runs?.active?.()
-    const all = [...(snapshot?.activeRuns || []), ...(snapshot?.terminalRuns || [])]
-    return !all.some((item) => item?.runId === id)
-  }, runId, { timeout, polling: 300 }).catch((error) => {
-    throw new Error(`${kind} Host ack retention release: ${error.message}`)
-  })
+  await waitForHostRelease(page, runId, kind)
   return { runId, threadId, token }
 }
 

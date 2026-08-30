@@ -4802,6 +4802,19 @@ function recordTerminalAgentLifecycle(
   if (event) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event })
 }
 
+function settleHostOwnedQueueItem(
+  state: HostState,
+  runId: string,
+  emit?: (message: PiHostMessage) => void,
+): void {
+  const queue = new PiRunQueue(24, state.snapshot.queue)
+  const existing = queue.snapshot().find((item) => item.runId === runId)
+  if (existing?.status !== 'running' || !queue.settle(runId)) return
+  state.snapshot.queue = queue.snapshot()
+  state.snapshot.cursor += 1
+  emit?.({ event: 'host/queue', payload: { cursor: state.snapshot.cursor, queueRevision: queue.revision() } })
+}
+
 
 function duplicateFollowUpResponse(state: HostState, request: unknown): PiHostMessage[] | undefined {
   if (!state.initialized || !request || typeof request !== 'object') return undefined
@@ -5775,6 +5788,7 @@ export function handlePiHostRequest(
       )
       recorder.step = orchestration.iterations || recorder.step
       recordTerminalAgentLifecycle(state, sessionId, runId, orchestration.settlement, recorder.entries)
+      settleHostOwnedQueueItem(state, runId, emit)
       recordTurnEntry(sessionId, {
         kind: 'turn-end',
         source: 'host',
@@ -5832,6 +5846,7 @@ export function handlePiHostRequest(
         recordTurnEntry(sessionId, { kind: 'notice', source: 'host', topic: 'host-error', text: reason })
         const failedLifecycle = agentLifecycleEventForSession(state.snapshot.sessions, sessionId, 'failed', runId, reason, recorder.entries)
         if (failedLifecycle) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event: failedLifecycle })
+        settleHostOwnedQueueItem(state, runId, emit)
         recordTurnEntry(sessionId, { kind: 'turn-end', source: 'host', settlement: 'failed' })
         session.record = appendTurnRecord(session.record, recorder.entries)
         const terminalSeq = session.record.entries.at(-1)?.seq

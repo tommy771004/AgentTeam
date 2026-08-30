@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
-type Message = { id?: number; result?: { sessionId?: string; queue?: Array<{ runId: string; status: string }> }; error?: { code: string; message: string } }
+type Message = { id?: number; result?: { sessionId?: string; queue?: Array<{ runId: string; status: string; revision?: number; createdAt?: number; updatedAt?: number; [key: string]: unknown }> }; error?: { code: string; message: string } }
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-host-queue-'))
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
   env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json') },
@@ -32,7 +32,11 @@ try {
   send(3, 'runs/enqueue', { runId: 'queued-run-1', sessionId, prompt: 'queued prompt', trigger: 'time', evidence: 'schedule-claim', profile: { model: 'm1' } })
   const enqueued = await waitFor(3)
   assert.equal(enqueued.error, undefined)
-  assert.deepEqual(enqueued.result?.queue, [{ runId: 'queued-run-1', sessionId, prompt: 'queued prompt', trigger: 'time', evidence: 'schedule-claim', profile: { model: 'm1' }, status: 'queued' }])
+  const accepted = enqueued.result?.queue?.[0]
+  assert.deepEqual({ ...accepted, revision: undefined, createdAt: undefined, updatedAt: undefined }, { runId: 'queued-run-1', sessionId, prompt: 'queued prompt', trigger: 'time', evidence: 'schedule-claim', profile: { model: 'm1' }, status: 'queued', revision: undefined, createdAt: undefined, updatedAt: undefined })
+  assert.equal(typeof accepted?.revision, 'number')
+  assert.equal(typeof accepted?.createdAt, 'number')
+  assert.equal(typeof accepted?.updatedAt, 'number')
   send(4, 'runs/enqueue', { runId: 'queued-run-1', sessionId, prompt: 'duplicate', trigger: 'interactive', profile: {} })
   assert.equal((await waitFor(4)).error?.code, 'invalid_request')
   send(5, 'runs/cancel', { runId: 'queued-run-1' })

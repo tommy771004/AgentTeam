@@ -8,6 +8,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
   type SetStateAction,
 } from 'react'
 import { Icon } from './Icon'
@@ -214,6 +215,50 @@ const FOLLOW_UP_STATE_LABEL: Record<PendingFollowUpProjection['state'], string> 
   cancelled: '已取消',
 }
 
+type FollowUpCardHandlers = Pick<CommandComposerProps, 'onEditPendingFollowUp' | 'onCancelPendingFollowUp' | 'onMovePendingFollowUp' | 'onQueueRejectedFollowUp'>
+
+function followUpActionLabel(action: PendingFollowUpProjection['action']): string {
+  if (action === 'steer') return '引導'
+  if (action === 'takeover') return '中止並接手'
+  return '排隊'
+}
+
+function FollowUpCardControls({ item, movable, movableIndex, handlers }: {
+  item: PendingFollowUpProjection; movable: readonly PendingFollowUpProjection[]; movableIndex: number; handlers: FollowUpCardHandlers
+}) {
+  const { onEditPendingFollowUp: onEdit, onCancelPendingFollowUp: onCancel, onMovePendingFollowUp: onMove, onQueueRejectedFollowUp: onQueueRejected } = handlers
+  const edit = () => {
+    const next = window.prompt('編輯排隊指令', item.text)
+    if (next?.trim() && next.trim() !== item.text) void onEdit?.(item, next.trim())
+  }
+  return <>
+    {item.reorderable && onMove ? <span className="flex shrink-0 items-center">
+      <button type="button" disabled={movableIndex <= 0} onClick={() => void onMove(item, 'up')} className="flex size-8 items-center justify-center text-ink-3 hover:text-ink disabled:opacity-25" aria-label={`上移：${item.text}`} title="上移"><Icon name="keyboard_arrow_up" size={16} /></button>
+      <button type="button" disabled={movableIndex < 0 || movableIndex === movable.length - 1} onClick={() => void onMove(item, 'down')} className="flex size-8 items-center justify-center text-ink-3 hover:text-ink disabled:opacity-25" aria-label={`下移：${item.text}`} title="下移"><Icon name="keyboard_arrow_down" size={16} /></button>
+    </span> : null}
+    {item.state === 'rejected' && item.action === 'steer' && onQueueRejected ? <button type="button" onClick={() => void onQueueRejected(item)} className="min-h-8 shrink-0 px-2 text-[12px] text-accent-ink hover:bg-hover-1" aria-label={`改為排隊：${item.text}`} title="改為排隊">改排隊</button> : null}
+    {item.editable && onEdit ? <button type="button" onClick={edit} className="flex size-8 shrink-0 items-center justify-center text-ink-3 hover:text-ink" aria-label={`編輯：${item.text}`} title="編輯"><Icon name="edit" size={14} /></button> : null}
+    {item.cancellable && onCancel ? <button type="button" onClick={() => void onCancel(item)} className="flex size-8 shrink-0 items-center justify-center text-ink-3 hover:text-red" aria-label={`刪除：${item.text}`} title="刪除"><Icon name="delete" size={14} /></button> : null}
+  </>
+}
+
+function PendingFollowUpCard({ item, items, expanded, onToggle, handlers }: {
+  item: PendingFollowUpProjection; items: readonly PendingFollowUpProjection[]; expanded: boolean; onToggle: () => void; handlers: FollowUpCardHandlers
+}) {
+  const movable = items.filter((candidate) => candidate.reorderable && candidate.sessionId === item.sessionId)
+  const movableIndex = movable.findIndex((candidate) => candidate.id === item.id)
+  const queuePosition = item.action === 'queue' && movableIndex >= 0 ? movableIndex + 1 : undefined
+  const title = item.reason ? `${item.text}\n${item.reason}` : item.text
+  return <div className="group flex min-w-0 max-w-full flex-wrap items-center gap-2 rounded-control px-2 py-1.5 hover:bg-hover-1">
+    <Icon name={item.action === 'steer' ? 'alt_route' : 'subdirectory_arrow_right'} size={15} className="shrink-0 text-ink-3" />
+    <button type="button" aria-expanded={expanded} onClick={onToggle} className={`min-h-8 min-w-0 flex-1 basis-40 text-left text-[13px] text-ink ${expanded ? 'basis-full whitespace-pre-wrap break-words' : 'truncate'}`} title={title}>{item.text}</button>
+    <span className={`shrink-0 text-[11px] ${item.action === 'steer' ? 'text-accent-ink' : 'text-ink-3'}`}>
+      {followUpActionLabel(item.action)}{queuePosition ? ` · 第 ${queuePosition} 位` : ''} · {FOLLOW_UP_STATE_LABEL[item.state]}{item.attachmentCount ? ` · 附件 ${item.attachmentCount}` : ''}
+    </span>
+    <FollowUpCardControls item={item} movable={movable} movableIndex={movableIndex} handlers={handlers} />
+  </div>
+}
+
 function PendingFollowUpCards({
   items,
   onEdit,
@@ -241,50 +286,7 @@ function PendingFollowUpCards({
         待處理後續指令 {items.length} 筆；最新狀態 {FOLLOW_UP_STATE_LABEL[items.at(-1)?.state || 'queued']}
       </span>
       <div className="space-y-1">
-        {items.map((item) => {
-          const movable = items.filter((candidate) => candidate.reorderable && candidate.sessionId === item.sessionId)
-          const movableIndex = movable.findIndex((candidate) => candidate.id === item.id)
-          const isExpanded = expanded.has(item.id)
-          return (
-          <div key={item.id} className="group flex min-w-0 max-w-full flex-wrap items-center gap-2 rounded-control px-2 py-1.5 hover:bg-hover-1">
-            <Icon name={item.action === 'steer' ? 'alt_route' : 'subdirectory_arrow_right'} size={15} className="shrink-0 text-ink-3" />
-            <button type="button" aria-expanded={isExpanded} onClick={() => toggleExpanded(item.id)} className={`min-h-8 min-w-0 flex-1 basis-40 text-left text-[13px] text-ink ${isExpanded ? 'basis-full whitespace-pre-wrap break-words' : 'truncate'}`} title={item.reason ? `${item.text}\n${item.reason}` : item.text}>
-              {item.text}
-            </button>
-            <span className={`shrink-0 text-[11px] ${item.action === 'steer' ? 'text-accent-ink' : 'text-ink-3'}`}>
-              {item.action === 'steer' ? '引導' : item.action === 'takeover' ? '中止並接手' : '排隊'} · {FOLLOW_UP_STATE_LABEL[item.state]}
-            </span>
-            {item.reorderable && onMove ? (
-              <span className="flex shrink-0 items-center">
-                <button type="button" disabled={movableIndex <= 0} onClick={() => void onMove(item, 'up')} className="flex size-8 items-center justify-center text-ink-3 hover:text-ink disabled:opacity-25" aria-label={`上移：${item.text}`} title="上移">
-                  <Icon name="keyboard_arrow_up" size={16} />
-                </button>
-                <button type="button" disabled={movableIndex < 0 || movableIndex === movable.length - 1} onClick={() => void onMove(item, 'down')} className="flex size-8 items-center justify-center text-ink-3 hover:text-ink disabled:opacity-25" aria-label={`下移：${item.text}`} title="下移">
-                  <Icon name="keyboard_arrow_down" size={16} />
-                </button>
-              </span>
-            ) : null}
-            {item.state === 'rejected' && item.action === 'steer' && onQueueRejected ? (
-              <button type="button" onClick={() => void onQueueRejected(item)} className="min-h-8 shrink-0 px-2 text-[12px] text-accent-ink hover:bg-hover-1" aria-label={`改為排隊：${item.text}`} title="改為排隊">
-                改排隊
-              </button>
-            ) : null}
-            {item.editable && onEdit ? (
-              <button type="button" onClick={() => {
-                const next = window.prompt('編輯排隊指令', item.text)
-                if (next?.trim() && next.trim() !== item.text) void onEdit(item, next.trim())
-              }} className="flex size-8 shrink-0 items-center justify-center text-ink-3 hover:text-ink" aria-label={`編輯：${item.text}`} title="編輯">
-                <Icon name="edit" size={14} />
-              </button>
-            ) : null}
-            {item.cancellable && onCancel ? (
-              <button type="button" onClick={() => void onCancel(item)} className="flex size-8 shrink-0 items-center justify-center text-ink-3 hover:text-red" aria-label={`刪除：${item.text}`} title="刪除">
-                <Icon name="delete" size={14} />
-              </button>
-            ) : null}
-          </div>
-          )
-        })}
+        {items.map((item) => <PendingFollowUpCard key={item.id} item={item} items={items} expanded={expanded.has(item.id)} onToggle={() => toggleExpanded(item.id)} handlers={{ onEditPendingFollowUp: onEdit, onCancelPendingFollowUp: onCancel, onMovePendingFollowUp: onMove, onQueueRejectedFollowUp: onQueueRejected }} />)}
       </div>
     </div>
   )
@@ -311,6 +313,163 @@ function ComposerActions({
       ) : null}
     </span>
   )
+}
+
+type ComposerKeyEvent = KeyboardEvent<HTMLTextAreaElement>
+
+function consumeMentionKey(event: ComposerKeyEvent, input: {
+  open: boolean; items: readonly (typeof DATA_SOURCES)[number][]; index: number
+  setIndex: (next: SetStateAction<number>) => void; close: () => void
+  select: (source: (typeof DATA_SOURCES)[number]) => void
+}): boolean {
+  if (!input.open) return false
+  if (event.key === 'Escape') { event.preventDefault(); input.close(); return true }
+  if (input.items.length === 0) return false
+  if (event.key === 'ArrowDown') { event.preventDefault(); input.setIndex((index) => Math.min(input.items.length - 1, index + 1)); return true }
+  if (event.key === 'ArrowUp') { event.preventDefault(); input.setIndex((index) => Math.max(0, index - 1)); return true }
+  if (event.key !== 'Tab' && (event.key !== 'Enter' || event.shiftKey)) return false
+  event.preventDefault()
+  const source = input.items[Math.min(input.index, input.items.length - 1)]
+  if (source) input.select(source)
+  return true
+}
+
+function consumeSlashKey(event: ComposerKeyEvent, input: {
+  open: boolean; items: readonly SlashCommand[]; index: number
+  setIndex: (next: SetStateAction<number>) => void; close: () => void
+  select: (command: SlashCommand) => void
+}): boolean {
+  if (!input.open) return false
+  if (event.key === 'Escape') { event.preventDefault(); input.close(); return true }
+  if (input.items.length === 0) return false
+  if (event.key === 'ArrowDown') { event.preventDefault(); input.setIndex((index) => Math.min(input.items.length - 1, index + 1)); return true }
+  if (event.key === 'ArrowUp') { event.preventDefault(); input.setIndex((index) => Math.max(0, index - 1)); return true }
+  if (event.key !== 'Tab' && (event.key !== 'Enter' || event.shiftKey)) return false
+  event.preventDefault()
+  const command = input.items[input.index]
+  if (command) input.select(command)
+  return true
+}
+
+function consumeHistoryKey(event: ComposerKeyEvent, input: {
+  menuOpen: boolean; element: HTMLTextAreaElement | null; value: string; historyIndex: number
+  browse: (direction: 'up' | 'down') => void
+}): boolean {
+  if (input.menuOpen || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return false
+  const atStart = !input.element || input.element.selectionStart === 0
+  const atEnd = !input.element || input.element.selectionStart === input.value.length
+  if (event.key === 'ArrowUp' && (atStart || !input.value.includes('\n'))) {
+    event.preventDefault(); input.browse('up'); return true
+  }
+  const canBrowseDown = atEnd || input.historyIndex >= 0 || !input.value.includes('\n')
+  if (event.key === 'ArrowDown' && canBrowseDown && (input.historyIndex >= 0 || !input.value)) {
+    event.preventDefault(); input.browse('down'); return true
+  }
+  return false
+}
+
+function consumeSubmitKey(event: ComposerKeyEvent, behavior: NonNullable<CommandComposerProps['enterBehavior']>, submit: () => void): boolean {
+  if (event.key !== 'Enter') return false
+  const modified = event.metaKey || event.ctrlKey
+  const shouldSubmit = behavior === 'cmdEnter' ? modified && !event.shiftKey : !event.shiftKey && !modified
+  if (shouldSubmit) { event.preventDefault(); submit() }
+  return true
+}
+
+function ComposerMentionMenu({ open, items, index, onIndex, onSelect }: {
+  open: boolean; items: readonly (typeof DATA_SOURCES)[number][]; index: number
+  onIndex: (index: number) => void; onSelect: (source: (typeof DATA_SOURCES)[number]) => void
+}) {
+  if (!open) return null
+  return <div className="absolute bottom-full left-0 right-0 z-[80] mb-2 overflow-hidden rounded-card bg-surface p-1 shadow-raised" role="listbox" aria-label="資料來源" style={{ animation: 'pop-in 180ms cubic-bezier(0.23,1,0.32,1) both' }}>
+    <div className="flex items-center gap-2 border-b border-line px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+      <Icon name="alternate_email" size={13} className="text-accent-ink" />資料來源
+      <span className="ml-auto normal-case tracking-normal font-normal">↑↓ 選擇 · Enter 插入</span>
+    </div>
+    <div className="relative py-1">
+      {items.length === 0 ? <div className="px-2 py-3 text-center text-[12px] text-ink-3">沒有相符的來源</div> : items.map((source, itemIndex) => {
+        const selected = itemIndex === Math.min(index, items.length - 1)
+        return <button key={source.key} type="button" role="option" aria-selected={selected} onMouseEnter={() => onIndex(itemIndex)} onClick={() => onSelect(source)} className={`relative z-10 flex h-9 w-full items-center gap-2.5 rounded-control px-2 text-left transition-colors ${selected ? 'bg-hover-2' : 'hover:bg-hover-2'}`}>
+          <span className="flex size-5.5 shrink-0 items-center justify-center rounded-[6px] bg-inset text-ink-2 shadow-hairline"><Icon name={source.icon} size={14} /></span>
+          <span className="shrink-0 text-[12.5px] font-medium text-ink">{source.name}</span>
+          <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">{source.desc}</span>
+        </button>
+      })}
+    </div>
+  </div>
+}
+
+function ComposerAttachments({ enabled, attachments, error, dragOver, fileRef, onAdd, onRemove }: {
+  enabled: boolean; attachments: readonly ChatAttachment[]; error: string | null; dragOver: boolean
+  fileRef: RefObject<HTMLInputElement | null>; onAdd: (files: FileList | null) => void; onRemove: (id: string) => void
+}) {
+  return <>
+    {enabled && attachments.length > 0 ? <div className="flex flex-wrap gap-2 px-3 pt-3">{attachments.map((attachment) => <ComposerAttachment key={attachment.id} attachment={attachment} onRemove={onRemove} />)}</div> : null}
+    {error || dragOver ? <p className={`px-3 pt-2 text-[11px] ${error ? 'text-red' : 'text-accent-ink'}`}>{error || '放開以加入附件'}</p> : null}
+    {enabled ? <input ref={fileRef} type="file" className="hidden" multiple accept="image/*,.txt,.md,.json,.csv,.ts,.tsx,.js,.jsx,.py,.log,.yml,.yaml,.xml,.html,.css,.sql" onChange={(event) => { onAdd(event.target.files); event.target.value = '' }} /> : null}
+  </>
+}
+
+function ComposerAttachment({ attachment, onRemove }: { attachment: ChatAttachment; onRemove: (id: string) => void }) {
+  const kind = attachment.kind === 'image' ? '圖片' : attachment.kind === 'text' ? '文字' : '檔案'
+  return <div className="relative group flex items-center gap-2 rounded-chip border border-line bg-field pl-1.5 pr-2 py-1.5 max-w-[220px] shadow-hairline">
+    {attachment.kind === 'image' && attachment.dataUrl
+      ? <img src={attachment.dataUrl} alt={attachment.name} className="w-10 h-10 rounded-control object-cover shrink-0 bg-inset" />
+      : <div className="w-10 h-10 rounded-control bg-inset flex items-center justify-center shrink-0"><Icon name={attachment.kind === 'text' ? 'description' : 'draft'} size={18} className="text-ink-3" /></div>}
+    <div className="min-w-0 flex-1"><p className="text-[11px] font-medium text-ink truncate" title={attachment.name}>{attachment.name}</p><p className="text-[10px] text-ink-3">{kind} · {formatBytes(attachment.size)}</p></div>
+    <button type="button" title="移除" onClick={() => onRemove(attachment.id)} className="w-6 h-6 rounded-control text-ink-3 hover:text-red hover:bg-red-tint flex items-center justify-center shrink-0"><Icon name="close" size={14} /></button>
+  </div>
+}
+
+function ComposerFooter({ quickActions, fileRef, disabled, attaching, attachmentCount, listening, onDictation, footerLeft, footerRight, hideHints, canAttach, commandCount, actionButton }: {
+  quickActions: CommandComposerProps['quickActions']; fileRef: RefObject<HTMLInputElement | null>; disabled?: boolean; attaching: boolean; attachmentCount: number
+  listening: boolean; onDictation: () => void; footerLeft: ReactNode; footerRight: ReactNode; hideHints: boolean; canAttach: boolean; commandCount: number; actionButton: ReactNode
+}) {
+  const quick = quickActions?.({ openFilePicker: () => fileRef.current?.click(), disabled: Boolean(disabled || attaching || attachmentCount >= MAX_ATTACHMENTS) })
+  return <div className="px-3 pb-2.5 flex items-center justify-between gap-2 min-h-[32px]">
+    <div className="flex items-center gap-2 min-w-0 flex-wrap">
+      {quick}
+      <button type="button" aria-label={listening ? '停止語音輸入' : '開始語音輸入'} aria-pressed={listening} onClick={onDictation} className={`flex size-7 items-center justify-center rounded-control transition-colors ${listening ? 'bg-accent-tint text-accent-ink' : 'text-ink-3 hover:bg-hover-2 hover:text-ink'}`} title={listening ? '停止語音輸入' : '語音輸入'}>
+        {listening ? <span className="flex h-3.5 items-center gap-[2.5px]">{[0, 1, 2].map((index) => <span key={index} className="w-[2.5px] rounded-full bg-current" style={{ height: '100%', animation: `eq-bounce 900ms ease-in-out ${index * 150}ms infinite` }} />)}</span> : <Icon name="mic" size={15} />}
+      </button>
+      {footerLeft}
+      {!hideHints && !footerLeft ? <ComposerHints canAttach={canAttach} /> : null}
+    </div>
+    <div className="flex items-center gap-2 shrink-0">{footerRight}{!footerRight && !hideHints ? <span className="text-[10px] text-accent-ink">{commandCount} 指令</span> : null}{actionButton}</div>
+  </div>
+}
+
+function ComposerHints({ canAttach }: { canAttach: boolean }) {
+  return <span className="text-[10px] text-ink-3 flex items-center gap-1.5"><kbd className="px-1 py-0.5 rounded bg-inset border border-line font-[family-name:var(--font-mono)]">⌘/</kbd><span>指令</span>{canAttach ? <><span className="opacity-40">·</span><Icon name="attach_file" size={12} /><span>貼圖/拖放</span></> : null}<span className="opacity-40">·</span><span>↑ 歷史</span></span>
+}
+
+type ComposerSurfaceProps = FollowUpCardHandlers & {
+  compact?: boolean; dragOver: boolean; primary: boolean; mode: ComposerMode; canAttach: boolean; running: boolean
+  pendingFollowUps: readonly PendingFollowUpProjection[]; showMentionMenu: boolean; mentionItems: readonly (typeof DATA_SOURCES)[number][]; mentionIndex: number
+  setMentionIndex: (index: number) => void; pickMention: (source: (typeof DATA_SOURCES)[number]) => void
+  showMenu: boolean; filtered: SlashCommand[]; safeIndex: number; applyCommand: (command: SlashCommand) => void; setActiveIndex: (index: number) => void; slashQuery: string | null
+  attachments: readonly ChatAttachment[]; attachError: string | null; fileRef: RefObject<HTMLInputElement | null>; addFiles: (files: FileList | null) => void; removeAttachment: (id: string) => void
+  selectedSkill: SlashCommand | null; setSelectedSkill: (skill: SlashCommand | null) => void; taRef: RefObject<HTMLTextAreaElement | null>; value: string; disabled?: boolean
+  onInput: (value: string) => void; onKeyDown: (event: ComposerKeyEvent) => void; onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void; onFocus: () => void
+  placeholder: string; hasFooter: boolean; actionButton: ReactNode; quickActions: CommandComposerProps['quickActions']; attaching: boolean; listening: boolean
+  toggleDictation: () => void; footerLeft: ReactNode; footerRight: ReactNode; hideHints: boolean; commandCount: number
+  onDragEnter: (event: DragEvent<HTMLDivElement>) => void; onDragOver: (event: DragEvent<HTMLDivElement>) => void; onDrop: (event: DragEvent<HTMLDivElement>) => void; onDragLeave: () => void
+}
+
+function ComposerSurface(props: ComposerSurfaceProps) {
+  return <div className={`agent-composer relative w-full max-w-full min-w-0 box-border border bg-surface ${props.compact ? 'rounded-control' : 'rounded-card'} ${props.dragOver ? 'border-accent/60 bg-accent-tint' : 'border-line'}`} data-composer={props.primary ? 'primary' : props.mode} onDragEnter={props.onDragEnter} onDragOver={props.onDragOver} onDragLeave={props.onDragLeave} onDrop={props.onDrop}>
+    <ComposerLoader active={props.running} />
+    <PendingFollowUpCards items={props.pendingFollowUps} onEdit={props.onEditPendingFollowUp} onCancel={props.onCancelPendingFollowUp} onMove={props.onMovePendingFollowUp} onQueueRejected={props.onQueueRejectedFollowUp} />
+    <ComposerMentionMenu open={props.showMentionMenu} items={props.mentionItems} index={props.mentionIndex} onIndex={props.setMentionIndex} onSelect={props.pickMention} />
+    <SlashCommandMenu open={props.showMenu} items={props.filtered} activeIndex={props.safeIndex} onSelect={props.applyCommand} onHover={props.setActiveIndex} anchor="bottom" query={props.slashQuery ?? ''} />
+    <ComposerAttachments enabled={props.canAttach} attachments={props.attachments} error={props.attachError} dragOver={props.dragOver} fileRef={props.fileRef} onAdd={props.addFiles} onRemove={props.removeAttachment} />
+    <div className={`flex items-end gap-2 ${props.compact ? 'p-2' : 'px-3 py-3 md:px-3.5'}`}>
+      <SelectedSkillChip skill={props.selectedSkill} onRemove={() => props.setSelectedSkill(null)} />
+      <textarea ref={props.taRef} value={props.value} disabled={props.disabled} onChange={(event) => props.onInput(event.target.value)} onKeyDown={props.onKeyDown} onPaste={props.onPaste} onFocus={props.onFocus} rows={2} placeholder={props.canAttach ? props.placeholder || '輸入任務，或貼上／拖放圖片…' : props.placeholder} className="composer-field flex-1 min-w-0 self-stretch border-0 bg-transparent shadow-none resize-none overflow-y-auto outline-none ring-0 focus:outline-none focus-visible:outline-none focus:ring-0 text-[14px] text-ink placeholder:text-ink-3 leading-relaxed font-[family-name:var(--font-inter)]" spellCheck={false} />
+      {!props.hasFooter ? <div className="flex shrink-0 pb-0.5">{props.actionButton}</div> : null}
+    </div>
+    {props.hasFooter ? <ComposerFooter quickActions={props.quickActions} fileRef={props.fileRef} disabled={props.disabled} attaching={props.attaching} attachmentCount={props.attachments.length} listening={props.listening} onDictation={props.toggleDictation} footerLeft={props.footerLeft} footerRight={props.footerRight} hideHints={props.hideHints} canAttach={props.canAttach} commandCount={props.commandCount} actionButton={props.actionButton} /> : null}
+  </div>
 }
 
 /**
@@ -643,103 +802,10 @@ export function CommandComposer({
     // IME 組字中（注音/中文確認、keyCode 229）：Enter 是「確認組字」不是送出，
     // 方向鍵與 Escape 也屬於組字操作，一律不觸發編輯器的快捷行為。
     if (e.nativeEvent.isComposing || e.keyCode === 229) return
-
-    if (showMentionMenu && mentionItems.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setMentionIndex((index) => Math.min(mentionItems.length - 1, index + 1))
-        return
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setMentionIndex((index) => Math.max(0, index - 1))
-        return
-      }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
-        e.preventDefault()
-        const source = mentionItems[Math.min(mentionIndex, mentionItems.length - 1)]
-        if (source) pickMention(source)
-        return
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setMentionOpen(false)
-        return
-      }
-    }
-
-    if (showMentionMenu && e.key === 'Escape') {
-      e.preventDefault()
-      setMentionOpen(false)
-      return
-    }
-
-    if (showMenu && filtered.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setActiveIndex((i) => Math.min(filtered.length - 1, i + 1))
-        return
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setActiveIndex((i) => Math.max(0, i - 1))
-        return
-      }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
-        e.preventDefault()
-        const cmd = filtered[safeIndex]
-        if (cmd) applyCommand(cmd)
-        return
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setMenuOpen(false)
-        setMentionOpen(false)
-        return
-      }
-    } else if (showMenu && e.key === 'Escape') {
-      e.preventDefault()
-      setMenuOpen(false)
-      setMentionOpen(false)
-      return
-    }
-
-    // History: ↑ when menu closed, cursor at start (or empty)
-    if (!showMenu && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-      const el = taRef.current
-      const atStart = !el || el.selectionStart === 0
-      const atEnd = !el || el.selectionStart === value.length
-      if (e.key === 'ArrowUp' && (atStart || !value.includes('\n'))) {
-        e.preventDefault()
-        browseHistory('up')
-        return
-      }
-      if (e.key === 'ArrowDown' && (atEnd || histIdx.current >= 0 || !value.includes('\n'))) {
-        if (histIdx.current >= 0 || !value) {
-          e.preventDefault()
-          browseHistory('down')
-          return
-        }
-      }
-    }
-
-    if (e.key === 'Enter') {
-      const mod = e.metaKey || e.ctrlKey
-      if (enterBehavior === 'cmdEnter') {
-        // ChatGPT: ⌘/Ctrl+Enter sends; bare Enter inserts newline
-        if (mod && !e.shiftKey) {
-          e.preventDefault()
-          void submit()
-        }
-        return
-      }
-      // Default: Enter sends; Shift+Enter newline
-      if (!e.shiftKey && !mod) {
-        e.preventDefault()
-        void submit()
-      }
-      return
-    }
+    if (consumeMentionKey(e, { open: showMentionMenu, items: mentionItems, index: mentionIndex, setIndex: setMentionIndex, close: () => setMentionOpen(false), select: pickMention })) return
+    if (consumeSlashKey(e, { open: showMenu, items: filtered, index: safeIndex, setIndex: setActiveIndex, close: () => { setMenuOpen(false); setMentionOpen(false) }, select: applyCommand })) return
+    if (consumeHistoryKey(e, { menuOpen: showMenu, element: taRef.current, value, historyIndex: histIdx.current, browse: browseHistory })) return
+    consumeSubmitKey(e, enterBehavior, () => void submit())
   }
 
   const onInput = (v: string) => {
@@ -813,242 +879,24 @@ export function CommandComposer({
   /** 底欄是否存在（模型選擇器等 footer 內容會渲染） */
   const hasFooter = composerHasFooter(footerLeft, footerRight, quickActions, hideHints)
 
-  return (
-    <div
-      className={`agent-composer relative w-full max-w-full min-w-0 box-border border bg-surface ${
-        compact ? 'rounded-control' : 'rounded-card'
-      } ${
-        dragOver
-          ? 'border-accent/60 bg-accent-tint'
-          : 'border-line'
-      }`}
-      data-composer={primary ? 'primary' : mode}
-      onDragEnter={(e) => {
-        if (!canAttach) return
-        e.preventDefault()
-        setDragOver(true)
-      }}
-      onDragOver={(e) => {
-        if (!canAttach) return
-        e.preventDefault()
-        setDragOver(true)
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={onDrop}
-    >
-      <ComposerLoader active={running} />
-      <PendingFollowUpCards
-        items={pendingFollowUps}
-        onEdit={onEditPendingFollowUp}
-        onCancel={onCancelPendingFollowUp}
-        onMove={onMovePendingFollowUp}
-        onQueueRejected={onQueueRejectedFollowUp}
-      />
-      {showMentionMenu && (
-        <div
-          className="absolute bottom-full left-0 right-0 z-[80] mb-2 overflow-hidden rounded-card bg-surface p-1 shadow-raised"
-          role="listbox"
-          aria-label="資料來源"
-          style={{ animation: 'pop-in 180ms cubic-bezier(0.23,1,0.32,1) both' }}
-        >
-          <div className="flex items-center gap-2 border-b border-line px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
-            <Icon name="alternate_email" size={13} className="text-accent-ink" />
-            資料來源
-            <span className="ml-auto normal-case tracking-normal font-normal">↑↓ 選擇 · Enter 插入</span>
-          </div>
-          <div className="relative py-1">
-            {mentionItems.length === 0 ? (
-              <div className="px-2 py-3 text-center text-[12px] text-ink-3">
-                沒有相符的來源
-              </div>
-            ) : (
-              mentionItems.map((source, index) => {
-                const selected = index === Math.min(mentionIndex, mentionItems.length - 1)
-                return (
-                  <button
-                    key={source.key}
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    onMouseEnter={() => setMentionIndex(index)}
-                    onClick={() => pickMention(source)}
-                    className={`relative z-10 flex h-9 w-full items-center gap-2.5 rounded-control px-2 text-left transition-colors ${
-                      selected ? 'bg-hover-2' : 'hover:bg-hover-2'
-                    }`}
-                  >
-                    <span className="flex size-5.5 shrink-0 items-center justify-center rounded-[6px] bg-inset text-ink-2 shadow-hairline">
-                      <Icon name={source.icon} size={14} />
-                    </span>
-                    <span className="shrink-0 text-[12.5px] font-medium text-ink">{source.name}</span>
-                    <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">{source.desc}</span>
-                  </button>
-                )
-              })
-            )}
-          </div>
-        </div>
-      )}
-
-      <SlashCommandMenu
-        open={showMenu}
-        items={filtered}
-        activeIndex={safeIndex}
-        onSelect={applyCommand}
-        onHover={setActiveIndex}
-        anchor="bottom"
-        query={slashQuery ?? ''}
-      />
-
-      {canAttach && attachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-3 pt-3">
-          {attachments.map((a) => (
-            <div
-              key={a.id}
-              className="relative group flex items-center gap-2 rounded-chip border border-line bg-field pl-1.5 pr-2 py-1.5 max-w-[220px] shadow-hairline"
-            >
-              {a.kind === 'image' && a.dataUrl ? (
-                <img
-                  src={a.dataUrl}
-                  alt={a.name}
-                  className="w-10 h-10 rounded-control object-cover shrink-0 bg-inset"
-                />
-              ) : (
-                <div className="w-10 h-10 rounded-control bg-inset flex items-center justify-center shrink-0">
-                  <Icon name={a.kind === 'text' ? 'description' : 'draft'} size={18} className="text-ink-3" />
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-medium text-ink truncate" title={a.name}>
-                  {a.name}
-                </p>
-                <p className="text-[10px] text-ink-3">
-                  {a.kind === 'image' ? '圖片' : a.kind === 'text' ? '文字' : '檔案'} ·{' '}
-                  {formatBytes(a.size)}
-                </p>
-              </div>
-              <button
-                type="button"
-                title="移除"
-                onClick={() => removeAttachment(a.id)}
-                className="w-6 h-6 rounded-control text-ink-3 hover:text-red hover:bg-red-tint flex items-center justify-center shrink-0"
-              >
-                <Icon name="close" size={14} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {(attachError || dragOver) && (
-        <p
-          className={`px-3 pt-2 text-[11px] ${
-            attachError ? 'text-red' : 'text-accent-ink'
-          }`}
-        >
-          {attachError || '放開以加入附件'}
-        </p>
-      )}
-
-      {canAttach && (
-        <input
-          ref={fileRef}
-          type="file"
-          className="hidden"
-          multiple
-          accept="image/*,.txt,.md,.json,.csv,.ts,.tsx,.js,.jsx,.py,.log,.yml,.yaml,.xml,.html,.css,.sql"
-          onChange={(e) => {
-            void addFiles(e.target.files)
-            e.target.value = ''
-          }}
-        />
-      )}
-
-      <div className={`flex items-end gap-2 ${compact ? 'p-2' : 'px-3 py-3 md:px-3.5'}`}>
-        <SelectedSkillChip skill={selectedSkill} onRemove={() => setSelectedSkill(null)} />
-        <textarea
-          ref={taRef}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          onFocus={() => {
-            if (value.startsWith('/')) setMenuOpen(true)
-            if (/(^|\s)@[\w-]*$/.test(value)) setMentionOpen(true)
-          }}
-          rows={compact ? 2 : 2}
-          placeholder={
-            canAttach
-              ? placeholder || '輸入任務，或貼上／拖放圖片…'
-              : placeholder
-          }
-          className="composer-field flex-1 min-w-0 self-stretch border-0 bg-transparent shadow-none resize-none overflow-y-auto outline-none ring-0 focus:outline-none focus-visible:outline-none focus:ring-0 text-[14px] text-ink placeholder:text-ink-3 leading-relaxed font-[family-name:var(--font-inter)]"
-          spellCheck={false}
-        />
-        {!hasFooter && <div className="flex shrink-0 pb-0.5">{actionButton}</div>}
-      </div>
-      {/* 附圖風格底欄：左操作 · 右模型/推理 · 最右送出/停止 */}
-      {hasFooter && (
-        <div className="px-3 pb-2.5 flex items-center justify-between gap-2 min-h-[32px]">
-          <div className="flex items-center gap-2 min-w-0 flex-wrap">
-            {quickActions?.({
-              openFilePicker: () => fileRef.current?.click(),
-              disabled: Boolean(disabled || attaching || attachments.length >= MAX_ATTACHMENTS),
-            })}
-            <button
-              type="button"
-              aria-label={listening ? '停止語音輸入' : '開始語音輸入'}
-              aria-pressed={listening}
-              onClick={toggleDictation}
-              className={`flex size-7 items-center justify-center rounded-control transition-colors ${
-                listening
-                  ? 'bg-accent-tint text-accent-ink'
-                  : 'text-ink-3 hover:bg-hover-2 hover:text-ink'
-              }`}
-              title={listening ? '停止語音輸入' : '語音輸入'}
-            >
-              {listening ? (
-                <span className="flex h-3.5 items-center gap-[2.5px]">
-                  {[0, 1, 2].map((index) => (
-                    <span
-                      key={index}
-                      className="w-[2.5px] rounded-full bg-current"
-                      style={{ height: '100%', animation: `eq-bounce 900ms ease-in-out ${index * 150}ms infinite` }}
-                    />
-                  ))}
-                </span>
-              ) : (
-                <Icon name="mic" size={15} />
-              )}
-            </button>
-            {footerLeft}
-            {!hideHints && !footerLeft && (
-              <span className="text-[10px] text-ink-3 flex items-center gap-1.5">
-                <kbd className="px-1 py-0.5 rounded bg-inset border border-line font-[family-name:var(--font-mono)]">
-                  ⌘/
-                </kbd>
-                <span>指令</span>
-                {canAttach && (
-                  <>
-                    <span className="opacity-40">·</span>
-                    <Icon name="attach_file" size={12} />
-                    <span>貼圖/拖放</span>
-                  </>
-                )}
-                <span className="opacity-40">·</span>
-                <span>↑ 歷史</span>
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {footerRight}
-            {!footerRight && !hideHints && (
-              <span className="text-[10px] text-accent-ink">{commandCount} 指令</span>
-            )}
-            {actionButton}
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  const allowDrag = (event: DragEvent<HTMLDivElement>) => {
+    if (!canAttach) return
+    event.preventDefault()
+    setDragOver(true)
+  }
+  const focusInput = () => {
+    if (value.startsWith('/')) setMenuOpen(true)
+    if (/(^|\s)@[\w-]*$/.test(value)) setMentionOpen(true)
+  }
+  return <ComposerSurface
+    compact={compact} dragOver={dragOver} primary={primary} mode={mode} canAttach={canAttach} running={running}
+    pendingFollowUps={pendingFollowUps} onEditPendingFollowUp={onEditPendingFollowUp} onCancelPendingFollowUp={onCancelPendingFollowUp} onMovePendingFollowUp={onMovePendingFollowUp} onQueueRejectedFollowUp={onQueueRejectedFollowUp}
+    showMentionMenu={showMentionMenu} mentionItems={mentionItems} mentionIndex={mentionIndex} setMentionIndex={setMentionIndex} pickMention={pickMention}
+    showMenu={showMenu} filtered={filtered} safeIndex={safeIndex} applyCommand={applyCommand} setActiveIndex={setActiveIndex} slashQuery={slashQuery}
+    attachments={attachments} attachError={attachError} fileRef={fileRef} addFiles={(files) => void addFiles(files)} removeAttachment={removeAttachment}
+    selectedSkill={selectedSkill} setSelectedSkill={setSelectedSkill} taRef={taRef} value={value} disabled={disabled} onInput={onInput} onKeyDown={onKeyDown} onPaste={onPaste} onFocus={focusInput}
+    placeholder={placeholder} hasFooter={hasFooter} actionButton={actionButton} quickActions={quickActions} attaching={attaching} listening={listening} toggleDictation={toggleDictation}
+    footerLeft={footerLeft} footerRight={footerRight} hideHints={hideHints} commandCount={commandCount}
+    onDragEnter={allowDrag} onDragOver={allowDrag} onDragLeave={() => setDragOver(false)} onDrop={onDrop}
+  />
 }

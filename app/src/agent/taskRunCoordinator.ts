@@ -193,7 +193,10 @@ async function ensureHostInstructionMigration(settings: LlmSettings): Promise<vo
 /** Prevent re-entrant callers from starting the same lifecycle twice. */
 const coordinatingRunIds = new Set<string>()
 const recoveredFinalizationClaims = new Set<string>()
-const PI_FINALIZATION_LEASE_MS = 120_000
+// A renderer can disappear immediately after winning the Host CAS. Keep the
+// lease long enough for heartbeat renewal, but short enough that recovery can
+// take over within one interactive retry window.
+const PI_FINALIZATION_LEASE_MS = 15_000
 const PI_FINALIZATION_RENEW_INTERVAL_MS = Math.floor(PI_FINALIZATION_LEASE_MS / 3)
 const rendererFinalizationClaimant = `renderer_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 /** RecoveryBootstrap uses this to decide whether it is safe to send Host ack. */
@@ -1995,6 +1998,13 @@ async function submitBuiltinBusyFollowUp(input: {
   const piHost = window.subagents?.piHost
   if (!piHost?.sessions?.list || !piHost.turn?.submit) {
     return { path: 'builtin', status: 'skipped', error: 'Pi Host follow-up bridge unavailable；原始指令尚未接受，請稍後重送。', threadId: input.opts.reuseThreadId, runId: input.runId, skipped: true, skipReason: 'busy' }
+  }
+  if (!piHost.runs?.list) {
+    // A partial/non-Electron bridge cannot be the queue authority. Queue mode
+    // falls through to the bounded renderer compatibility queue; true steer
+    // remains unavailable rather than being fabricated by abort-and-replace.
+    if (action === 'queue') return undefined
+    return { path: 'builtin', status: 'skipped', error: 'Pi Host steer capability unavailable；原始指令尚未接受，請改為排隊或稍後重送。', threadId: input.opts.reuseThreadId, runId: input.runId, skipped: true, skipReason: 'busy' }
   }
   try {
     const profile = builtinFollowUpProfile(input)

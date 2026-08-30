@@ -54,6 +54,61 @@ function agentMode(profile: Record<string, unknown>): 'build' | 'plan' | undefin
   return profile.agentMode === 'build' || profile.agentMode === 'plan' ? profile.agentMode : undefined
 }
 
+function queueHasWaitingRun(value: unknown): boolean {
+  return Array.isArray(value) && value.some((run) => run && typeof run === 'object' && (run as { status?: unknown }).status === 'queued')
+}
+
+function enumValue<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
+  return typeof value === 'string' && allowed.includes(value as T) ? value as T : undefined
+}
+
+function queuedRunOverrides(claimed: ClaimedRun, runner: RunnerId, projectRoot: string | undefined) {
+  const profile = claimed.profile
+  return {
+    runId: claimed.runId,
+    sourceKind: 'delegate' as const,
+    hostSessionId: claimed.sessionId,
+    model: typeof profile.model === 'string' ? profile.model : undefined,
+    thinkingDepth: thinkingDepth(profile),
+    speed: enumValue(profile.speed, ['fast', 'standard', 'careful'] as const),
+    providerServiceTier: enumValue(profile.providerServiceTier, ['provider-default', 'standard', 'priority', 'flex'] as const),
+    agentMode: agentMode(profile),
+    planCompletionAction: enumValue(profile.planCompletionAction, ['wait_for_user', 'auto_start_build'] as const),
+    approvalMode: enumValue(profile.approvalMode, ['always', 'auto', 'full'] as const),
+    unattended: profile.unattended === true,
+    preloadCapabilityIds: Array.isArray(profile.capabilities) ? profile.capabilities.map(String) : undefined,
+    temporary: true,
+    contextPolicySnapshot: {
+      memoryEnabled: false, memoryWriteEnabled: false, referenceChatHistory: false, temporary: true,
+      project: projectRoot,
+      outboundShellMode: enumValue(profile.outbound, ['off', 'demo', 'optional', 'required'] as const) || 'off',
+    },
+    externalCliContract: runner === 'builtin' ? undefined : buildExternalCliDelegateContract({ role: 'leaf' as const, unattended: profile.unattended === true }),
+  }
+}
+
+async function executeClaimedRun(claimed: ClaimedRun) {
+  const profile = claimed.profile
+  const runner = runnerFromProfile(profile)
+  const projectRoot = typeof profile.projectRoot === 'string' ? profile.projectRoot : undefined
+  const interactiveThreadId = claimed.trigger === 'interactive' && typeof profile.threadId === 'string' ? profile.threadId : undefined
+  return runTask({
+    sourceKind: interactiveThreadId ? 'queue-drain' : 'delegate',
+    runId: claimed.runId,
+    objective: claimed.prompt,
+    runner,
+    title: interactiveThreadId ? claimed.prompt.slice(0, 48) : `Agent · ${claimed.prompt.slice(0, 36)}`,
+    sourceLabel: interactiveThreadId ? 'Host 佇列 · 開始執行' : `Host Agent ${claimed.sessionId}`,
+    unattended: profile.unattended === true,
+    workerThread: !interactiveThreadId,
+    ...(interactiveThreadId ? { reuseThreadId: interactiveThreadId, attachments: attachments(profile) } : {}),
+    skipUserBubble: true,
+    projectRoot,
+    _fromQueue: true,
+    overrides: queuedRunOverrides(claimed, runner, projectRoot),
+  })
+}
+
 /**
  * Event-driven renderer adapter: the Host owns admission/queue/lifecycle;
  * runTask remains the sole renderer execution coordinator.
@@ -80,58 +135,13 @@ export function startHostAgentQueuePump(): () => void {
     let claimed: ClaimedRun | undefined
     try {
       const listed = await api.runs.list()
-      if (!Array.isArray(listed.queue) || !listed.queue.some((run) => (
-        run && typeof run === 'object' && (run as { status?: unknown }).status === 'queued'
-      ))) return
+      if (!queueHasWaitingRun(listed.queue)) return
       // Let the Host select the first claimable item. It skips an active
       // session without blocking ready work queued for other sessions.
       const response = await api.runs.claim()
       claimed = asClaimedRun(response.run)
       if (!claimed) return
-      const profile = claimed.profile
-      const runner = runnerFromProfile(profile)
-      const projectRoot = typeof profile.projectRoot === 'string' ? profile.projectRoot : undefined
-      const interactiveThreadId = claimed.trigger === 'interactive' && typeof profile.threadId === 'string'
-        ? profile.threadId
-        : undefined
-      const result = await runTask({
-        sourceKind: interactiveThreadId ? 'queue-drain' : 'delegate',
-        runId: claimed.runId,
-        objective: claimed.prompt,
-        runner,
-        title: interactiveThreadId ? claimed.prompt.slice(0, 48) : `Agent · ${claimed.prompt.slice(0, 36)}`,
-        sourceLabel: interactiveThreadId ? 'Host 佇列 · 開始執行' : `Host Agent ${claimed.sessionId}`,
-        unattended: profile.unattended === true,
-        workerThread: !interactiveThreadId,
-        ...(interactiveThreadId ? { reuseThreadId: interactiveThreadId, attachments: attachments(profile) } : {}),
-        skipUserBubble: true,
-        projectRoot,
-        _fromQueue: true,
-        overrides: {
-          runId: claimed.runId,
-          sourceKind: 'delegate',
-          hostSessionId: claimed.sessionId,
-          model: typeof profile.model === 'string' ? profile.model : undefined,
-          thinkingDepth: thinkingDepth(profile),
-          speed: profile.speed === 'fast' || profile.speed === 'standard' || profile.speed === 'careful' ? profile.speed : undefined,
-          providerServiceTier: profile.providerServiceTier === 'provider-default' || profile.providerServiceTier === 'standard' || profile.providerServiceTier === 'priority' || profile.providerServiceTier === 'flex' ? profile.providerServiceTier : undefined,
-          agentMode: agentMode(profile),
-          planCompletionAction: profile.planCompletionAction === 'wait_for_user' || profile.planCompletionAction === 'auto_start_build' ? profile.planCompletionAction : undefined,
-          approvalMode: profile.approvalMode === 'always' || profile.approvalMode === 'auto' || profile.approvalMode === 'full' ? profile.approvalMode : undefined,
-          unattended: profile.unattended === true,
-          preloadCapabilityIds: Array.isArray(profile.capabilities) ? profile.capabilities.map(String) : undefined,
-          temporary: true,
-          contextPolicySnapshot: {
-            memoryEnabled: false,
-            memoryWriteEnabled: false,
-            referenceChatHistory: false,
-            temporary: true,
-            project: projectRoot,
-            outboundShellMode: profile.outbound === 'off' || profile.outbound === 'demo' || profile.outbound === 'optional' || profile.outbound === 'required' ? profile.outbound : 'off',
-          },
-          externalCliContract: runner === 'builtin' ? undefined : buildExternalCliDelegateContract({ role: 'leaf', unattended: profile.unattended === true }),
-        },
-      })
+      const result = await executeClaimedRun(claimed)
       await api.runs.settle(claimed.runId, settlementFor(result.status))
     } catch {
       if (claimed) {

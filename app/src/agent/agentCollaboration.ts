@@ -132,22 +132,36 @@ const isStringList = (value: unknown, maxItems = 64) => Array.isArray(value)
 export function normalizeAgentPolicy(value: unknown): AgentEffectivePolicy | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const policy = value as Record<string, unknown>
-  if (!isOptionalBoundedString(policy.provider) || !isOptionalBoundedString(policy.model)) return undefined
-  if (policy.approvalMode !== undefined && !['full', 'auto', 'always'].includes(String(policy.approvalMode))) return undefined
-  if (policy.sandbox !== undefined && !['none', 'workspace-write', 'read-only'].includes(String(policy.sandbox))) return undefined
-  if (policy.outbound !== undefined && !['off', 'demo', 'optional', 'required'].includes(String(policy.outbound))) return undefined
-  if (policy.unattended !== undefined && typeof policy.unattended !== 'boolean') return undefined
-  if (!isStringList(policy.capabilities || []) || !isStringList(policy.mcpServers || [])) return undefined
-  return {
-    ...(policy.provider ? { provider: String(policy.provider) } : {}),
-    ...(policy.model ? { model: String(policy.model) } : {}),
-    ...(policy.approvalMode ? { approvalMode: policy.approvalMode as AgentEffectivePolicy['approvalMode'] } : {}),
-    ...(typeof policy.unattended === 'boolean' ? { unattended: policy.unattended } : {}),
-    ...(policy.sandbox ? { sandbox: policy.sandbox as AgentEffectivePolicy['sandbox'] } : {}),
-    ...(policy.outbound ? { outbound: policy.outbound as AgentEffectivePolicy['outbound'] } : {}),
+  if (!agentPolicyFieldsAreValid(policy)) return undefined
+  const normalized: AgentEffectivePolicy = {
     capabilities: [...(policy.capabilities as string[] || [])],
     mcpServers: [...(policy.mcpServers as string[] || [])],
   }
+  copyOptionalPolicyFields(policy, normalized)
+  return normalized
+}
+
+function optionalEnum(value: unknown, allowed: readonly string[]): boolean {
+  return value === undefined || allowed.includes(String(value))
+}
+
+function agentPolicyFieldsAreValid(policy: Record<string, unknown>): boolean {
+  const identityValid = isOptionalBoundedString(policy.provider) && isOptionalBoundedString(policy.model)
+  const enumsValid = optionalEnum(policy.approvalMode, ['full', 'auto', 'always'])
+    && optionalEnum(policy.sandbox, ['none', 'workspace-write', 'read-only'])
+    && optionalEnum(policy.outbound, ['off', 'demo', 'optional', 'required'])
+  const unattendedValid = policy.unattended === undefined || typeof policy.unattended === 'boolean'
+  return identityValid && enumsValid && unattendedValid
+    && isStringList(policy.capabilities || []) && isStringList(policy.mcpServers || [])
+}
+
+function copyOptionalPolicyFields(source: Record<string, unknown>, target: AgentEffectivePolicy): void {
+  if (source.provider) target.provider = String(source.provider)
+  if (source.model) target.model = String(source.model)
+  if (source.approvalMode) target.approvalMode = source.approvalMode as AgentEffectivePolicy['approvalMode']
+  if (typeof source.unattended === 'boolean') target.unattended = source.unattended
+  if (source.sandbox) target.sandbox = source.sandbox as AgentEffectivePolicy['sandbox']
+  if (source.outbound) target.outbound = source.outbound as AgentEffectivePolicy['outbound']
 }
 
 const APPROVAL_RANK = { full: 0, auto: 1, always: 2 } as const
@@ -170,22 +184,37 @@ function isAgentAdmissionSnapshot(value: unknown): value is AgentAdmissionSnapsh
   if (!value || typeof value !== 'object') return false
   const item = value as Record<string, unknown>
   const workspace = item.workspace as Record<string, unknown> | undefined
+  return admissionIdentityIsValid(item)
+    && admissionExecutionIsValid(item)
+    && admissionWorkspaceIsValid(workspace)
+}
+
+function positiveSafeInteger(value: unknown): boolean {
+  return Number.isSafeInteger(value) && Number(value) > 0
+}
+
+function admissionIdentityIsValid(item: Record<string, unknown>): boolean {
   return item.version === 1
-    && isBoundedString(item.spawnId)
-    && isBoundedString(item.parentAgentId)
-    && isBoundedString(item.rootAgentId)
-    && Number.isSafeInteger(item.originTurn) && Number(item.originTurn) >= 1
+    && [item.spawnId, item.parentAgentId, item.rootAgentId, item.role].every((field) => isBoundedString(field))
     && isOptionalBoundedString(item.originRunId)
     && isBoundedString(item.objective, AGENT_MESSAGE_MAX_BYTES)
-    && isBoundedString(item.role)
-    && Number.isSafeInteger(item.depth) && Number(item.depth) >= 1 && Number(item.depth) <= 8
+}
+
+function admissionExecutionIsValid(item: Record<string, unknown>): boolean {
+  const depth = Number(item.depth)
+  return positiveSafeInteger(item.originTurn)
+    && Number.isSafeInteger(depth) && depth >= 1 && depth <= 8
     && typeof item.detached === 'boolean'
     && ['builtin-agent', 'external-cli-process'].includes(String(item.executionKind))
     && Boolean(normalizeAgentPolicy(item.policy))
-    && Boolean(workspace) && ['shared-readonly', 'shared-leased-write', 'isolated-worktree'].includes(String(workspace?.mode))
-    && isStringList(workspace?.scopes || [])
-    && Number.isSafeInteger(workspace?.revision) && Number(workspace?.revision) >= 0
-    && Number.isSafeInteger(item.createdAt) && Number(item.createdAt) > 0
+    && positiveSafeInteger(item.createdAt)
+}
+
+function admissionWorkspaceIsValid(workspace: Record<string, unknown> | undefined): boolean {
+  if (!workspace) return false
+  return ['shared-readonly', 'shared-leased-write', 'isolated-worktree'].includes(String(workspace.mode))
+    && isStringList(workspace.scopes || [])
+    && Number.isSafeInteger(workspace.revision) && Number(workspace.revision) >= 0
 }
 
 export function isAgentMessageEnvelope(value: unknown): value is AgentMessageEnvelope {
@@ -217,29 +246,35 @@ function isAgentTerminalResult(value: unknown): value is AgentTerminalResult {
     && Number.isSafeInteger(item.createdAt) && Number(item.createdAt) > 0
 }
 
-function isSimpleAgentEvent(event: Record<string, unknown>): boolean | undefined {
-  if (event.type === 'spawned') return isBoundedString(event.agentId) && isBoundedString(event.runId) && isAgentAdmissionSnapshot(event.admission)
-  if (event.type === 'spawn-rejected') return isBoundedString(event.parentAgentId) && isBoundedString(event.spawnId) && isBoundedString(event.reason, 2_048)
-  if (event.type === 'mail') return isAgentMessageEnvelope(event.message)
-  if (event.type === 'mail-consumed' || event.type === 'mail-acked') return isBoundedString(event.messageId) && isBoundedString(event.agentId)
-  if (event.type === 'follow-up-started') return isBoundedString(event.messageId) && isBoundedString(event.agentId) && isBoundedString(event.runId)
-  if (event.type === 'completion') return isAgentTerminalResult(event.result) && isBoundedString(event.messageId)
-  return undefined
-}
-
 export function isAgentCollaborationEvent(value: unknown): value is AgentCollaborationEvent {
   if (!value || typeof value !== 'object') return false
   const event = value as Record<string, unknown>
-  const simple = isSimpleAgentEvent(event)
-  if (simple !== undefined) return simple
-  if (event.type === 'wait') return isBoundedString(event.agentId) && ['message', 'terminal', 'steer', 'timeout', 'cancelled'].includes(String(event.outcome)) && isOptionalBoundedString(event.messageId)
-  if (event.type === 'interrupt-requested' || event.type === 'closed') return isBoundedString(event.agentId) && isBoundedString(event.requestedBy) && isOptionalBoundedString(event.reason, 2_048)
-  if (event.type === 'lease-acquired' || event.type === 'lease-released') return isBoundedString(event.agentId) && isBoundedString(event.resource, PATH_MAX) && Number.isSafeInteger(event.revision)
-  if (event.type === 'adoption') return isBoundedString(event.agentId) && isBoundedString(event.resultId) && ['pending', 'accepted', 'stale', 'rejected'].includes(String(event.outcome)) && isBoundedString(event.reason, 2_048)
-  if (event.type === 'conflict-resolved') return isBoundedString(event.conflictId)
+  const validate = EVENT_VALIDATORS[String(event.type)]
+  return Boolean(validate?.(event))
+}
+
+type EventValidator = (event: Record<string, unknown>) => boolean
+const agentAndMessage: EventValidator = (event) => isBoundedString(event.messageId) && isBoundedString(event.agentId)
+const requestedAgentEvent: EventValidator = (event) => isBoundedString(event.agentId) && isBoundedString(event.requestedBy) && isOptionalBoundedString(event.reason, 2_048)
+const leaseEvent: EventValidator = (event) => isBoundedString(event.agentId) && isBoundedString(event.resource, PATH_MAX) && Number.isSafeInteger(event.revision)
+const EVENT_VALIDATORS: Record<string, EventValidator> = {
+  spawned: (event) => isBoundedString(event.agentId) && isBoundedString(event.runId) && isAgentAdmissionSnapshot(event.admission),
+  'spawn-rejected': (event) => isBoundedString(event.parentAgentId) && isBoundedString(event.spawnId) && isBoundedString(event.reason, 2_048),
+  mail: (event) => isAgentMessageEnvelope(event.message),
+  'mail-consumed': agentAndMessage,
+  'mail-acked': agentAndMessage,
+  'follow-up-started': (event) => agentAndMessage(event) && isBoundedString(event.runId),
+  completion: (event) => isAgentTerminalResult(event.result) && isBoundedString(event.messageId),
+  wait: (event) => isBoundedString(event.agentId) && ['message', 'terminal', 'steer', 'timeout', 'cancelled'].includes(String(event.outcome)) && isOptionalBoundedString(event.messageId),
+  'interrupt-requested': requestedAgentEvent,
+  closed: requestedAgentEvent,
+  'lease-acquired': leaseEvent,
+  'lease-released': leaseEvent,
+  adoption: (event) => isBoundedString(event.agentId) && isBoundedString(event.resultId) && ['pending', 'accepted', 'stale', 'rejected'].includes(String(event.outcome)) && isBoundedString(event.reason, 2_048),
+  'conflict-resolved': (event) => isBoundedString(event.conflictId)
     && ['serialize', 'narrow-scope', 'transfer-lease', 'release-lease', 'isolate-worktree', 'cancel'].includes(String(event.action))
-    && isBoundedString(event.requestedBy) && isBoundedString(event.agentId) && Number.isSafeInteger(event.revision)
-  return event.type === 'conflict' && isAgentConflictEvent(event.conflict)
+    && isBoundedString(event.requestedBy) && isBoundedString(event.agentId) && Number.isSafeInteger(event.revision),
+  conflict: (event) => isAgentConflictEvent(event.conflict),
 }
 
 function isAgentConflictEvent(value: unknown): value is AgentConflictEvent {

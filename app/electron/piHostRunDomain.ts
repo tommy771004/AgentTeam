@@ -70,6 +70,10 @@ function settleRun(input: RunDomainInput): PiHostMessage[] {
   const settlement = input.params?.settlement
   if (!runId || !input.isSettlement(settlement)) return [errorResponse(input.id, 'runId and settlement are required')]
   const queue = new PiRunQueue(24, input.snapshot.queue)
+  const existing = queue.snapshot().find((item) => item.runId === runId)
+  if (existing?.status === 'settled') {
+    return [{ id: input.id, result: { run: existing, queue: queue.snapshot(), settlement } }]
+  }
   const run = queue.settle(runId)
   if (!run) return [errorResponse(input.id, 'Unknown active Pi run')]
   if (!input.recordLifecycle(run.sessionId, agentLifecycleFromTurnSettlement(settlement), run.runId)) {

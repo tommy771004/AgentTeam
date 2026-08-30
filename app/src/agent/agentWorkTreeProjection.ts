@@ -35,25 +35,34 @@ function eventTurn(entry: Extract<TurnRecordEntry, { kind: 'agent-collaboration'
 function activity(entry: Extract<TurnRecordEntry, { kind: 'agent-collaboration' }>): AgentWorkActivity | undefined {
   const event = entry.event
   const base = { id: `agent-work-${entry.seq}`, seq: entry.seq }
-  if (event.type === 'mail') return {
-    ...base,
-    label: event.message.kind === 'completion' ? '回傳結果' : event.message.kind === 'follow-up' ? '收到後續任務' : '收到訊息',
-    detail: event.message.content,
-    tone: event.message.kind === 'completion' ? 'success' : 'neutral',
-    messageId: event.message.messageId,
+  switch (event.type) {
+    case 'mail': return mailActivity(base, event)
+    case 'completion': return { ...base, label: `執行 ${event.result.settlement}`, detail: event.result.summary, tone: event.result.settlement === 'completed' ? 'success' : 'failure' }
+    case 'conflict': return { ...base, label: '寫入範圍衝突', detail: `${event.conflict.resource} · owner ${event.conflict.ownerAgentId}`, tone: 'attention', conflictId: event.conflict.conflictId }
+    case 'conflict-resolved': return { ...base, label: `衝突處理：${event.action}`, detail: `revision ${event.revision}`, tone: event.action === 'cancel' ? 'failure' : 'success' }
+    case 'adoption': return adoptionActivity(base, event)
+    case 'lease-acquired': return { ...base, label: '取得寫入 lease', detail: event.resource, tone: 'active' }
+    case 'lease-released': return { ...base, label: '釋放寫入 lease', detail: event.resource, tone: 'neutral' }
+    case 'follow-up-started': return { ...base, label: '開始後續任務', detail: event.runId, tone: 'active', messageId: event.messageId }
+    case 'interrupt-requested': return { ...base, label: '要求安全中止', detail: event.reason, tone: 'attention' }
+    case 'closed': return { ...base, label: '已關閉', detail: event.reason, tone: 'neutral' }
+    case 'spawn-rejected': return { ...base, label: '建立子智慧體失敗', detail: event.reason, tone: 'failure' }
+    case 'wait': return { ...base, label: `等待結束：${event.outcome}`, tone: event.outcome === 'timeout' ? 'attention' : 'neutral' }
+    default: return undefined
   }
-  if (event.type === 'completion') return { ...base, label: `執行 ${event.result.settlement}`, detail: event.result.summary, tone: event.result.settlement === 'completed' ? 'success' : 'failure' }
-  if (event.type === 'conflict') return { ...base, label: '寫入範圍衝突', detail: `${event.conflict.resource} · owner ${event.conflict.ownerAgentId}`, tone: 'attention', conflictId: event.conflict.conflictId }
-  if (event.type === 'conflict-resolved') return { ...base, label: `衝突處理：${event.action}`, detail: `revision ${event.revision}`, tone: event.action === 'cancel' ? 'failure' : 'success' }
-  if (event.type === 'adoption') return { ...base, label: `Checker ${event.outcome}`, detail: event.reason, tone: event.outcome === 'accepted' ? 'success' : event.outcome === 'pending' ? 'attention' : 'failure' }
-  if (event.type === 'lease-acquired') return { ...base, label: '取得寫入 lease', detail: event.resource, tone: 'active' }
-  if (event.type === 'lease-released') return { ...base, label: '釋放寫入 lease', detail: event.resource, tone: 'neutral' }
-  if (event.type === 'follow-up-started') return { ...base, label: '開始後續任務', detail: event.runId, tone: 'active', messageId: event.messageId }
-  if (event.type === 'interrupt-requested') return { ...base, label: '要求安全中止', detail: event.reason, tone: 'attention' }
-  if (event.type === 'closed') return { ...base, label: '已關閉', detail: event.reason, tone: 'neutral' }
-  if (event.type === 'spawn-rejected') return { ...base, label: '建立子智慧體失敗', detail: event.reason, tone: 'failure' }
-  if (event.type === 'wait') return { ...base, label: `等待結束：${event.outcome}`, tone: event.outcome === 'timeout' ? 'attention' : 'neutral' }
-  return undefined
+}
+
+type ActivityBase = Pick<AgentWorkActivity, 'id' | 'seq'>
+
+function mailActivity(base: ActivityBase, event: Extract<AgentCollaborationEvent, { type: 'mail' }>): AgentWorkActivity {
+  const completion = event.message.kind === 'completion'
+  const label = completion ? '回傳結果' : event.message.kind === 'follow-up' ? '收到後續任務' : '收到訊息'
+  return { ...base, label, detail: event.message.content, tone: completion ? 'success' : 'neutral', messageId: event.message.messageId }
+}
+
+function adoptionActivity(base: ActivityBase, event: Extract<AgentCollaborationEvent, { type: 'adoption' }>): AgentWorkActivity {
+  const tone = event.outcome === 'accepted' ? 'success' : event.outcome === 'pending' ? 'attention' : 'failure'
+  return { ...base, label: `Checker ${event.outcome}`, detail: event.reason, tone }
 }
 
 function agentIdFor(event: AgentCollaborationEvent): string | undefined {
@@ -75,40 +84,74 @@ export function projectAgentWorkTree(entries: readonly TurnRecordEntry[], origin
   const rows = new Map<string, AgentWorkRow>()
   for (const entry of [...entries].sort((left, right) => left.seq - right.seq)) {
     if (entry.kind === 'agent-lifecycle') {
-      if (entry.turn !== originTurn) continue
-      const current = rows.get(entry.event.agentId)
-      rows.set(entry.event.agentId, {
-        agentId: entry.event.agentId,
-        ...(entry.event.parentAgentId ? { parentAgentId: entry.event.parentAgentId } : {}),
-        title: current?.title || entry.event.taskPath.split('/').at(-1) || 'Agent task',
-        role: current?.role || 'Agent',
-        executionKind: current?.executionKind || 'builtin-agent',
-        lifecycle: entry.event.state,
-        originTurn,
-        workspace: current?.workspace,
-        activities: current?.activities || [],
-      })
+      applyLifecycleEntry(rows, entry, originTurn)
       continue
     }
-    if (entry.kind !== 'agent-collaboration' || eventTurn(entry) !== originTurn) continue
-    const agentId = agentIdFor(entry.event)
-    if (!agentId) continue
-    const current = rows.get(agentId)
-    const spawned = entry.event.type === 'spawned' ? entry.event : undefined
-    const item = activity(entry)
-    rows.set(agentId, {
-      agentId,
-      ...(spawned ? { parentAgentId: spawned.admission.parentAgentId } : current?.parentAgentId ? { parentAgentId: current.parentAgentId } : {}),
-      title: spawned?.admission.objective || current?.title || 'Agent task',
-      role: spawned?.admission.role || current?.role || 'Agent',
-      executionKind: spawned?.admission.executionKind || current?.executionKind || 'builtin-agent',
-      lifecycle: lifecycleFromCompletion(entry.event) || current?.lifecycle || (spawned ? 'queued' : 'admitted'),
-      originTurn,
-      workspace: spawned?.admission.workspace || current?.workspace,
-      activities: item ? [...(current?.activities || []), item] : current?.activities || [],
-    })
+    if (entry.kind === 'agent-collaboration') applyCollaborationEntry(rows, entry, originTurn)
   }
   return [...rows.values()]
+}
+
+function applyLifecycleEntry(rows: Map<string, AgentWorkRow>, entry: Extract<TurnRecordEntry, { kind: 'agent-lifecycle' }>, originTurn: number): void {
+  if (entry.turn !== originTurn) return
+  const current = rows.get(entry.event.agentId)
+  rows.set(entry.event.agentId, {
+    agentId: entry.event.agentId,
+    ...(entry.event.parentAgentId ? { parentAgentId: entry.event.parentAgentId } : {}),
+    title: current?.title || entry.event.taskPath.split('/').at(-1) || 'Agent task',
+    role: current?.role || 'Agent',
+    executionKind: current?.executionKind || 'builtin-agent',
+    lifecycle: entry.event.state,
+    originTurn,
+    workspace: current?.workspace,
+    activities: current?.activities || [],
+  })
+}
+
+function applyCollaborationEntry(rows: Map<string, AgentWorkRow>, entry: Extract<TurnRecordEntry, { kind: 'agent-collaboration' }>, originTurn: number): void {
+  if (eventTurn(entry) !== originTurn) return
+  const agentId = agentIdFor(entry.event)
+  if (!agentId) return
+  const current = rows.get(agentId)
+  const spawned = entry.event.type === 'spawned' ? entry.event : undefined
+  const item = activity(entry)
+  rows.set(agentId, spawned
+    ? rowFromSpawn(agentId, spawned, current, item, originTurn)
+    : rowFromCollaboration(agentId, entry.event, current, item, originTurn))
+}
+
+function appendActivity(current: AgentWorkRow | undefined, item: AgentWorkActivity | undefined): AgentWorkActivity[] {
+  const activities = current?.activities || []
+  return item ? [...activities, item] : activities
+}
+
+function rowFromSpawn(agentId: string, spawned: Extract<AgentCollaborationEvent, { type: 'spawned' }>, current: AgentWorkRow | undefined, item: AgentWorkActivity | undefined, originTurn: number): AgentWorkRow {
+  return {
+    agentId,
+    parentAgentId: spawned.admission.parentAgentId,
+    title: spawned.admission.objective,
+    role: spawned.admission.role,
+    executionKind: spawned.admission.executionKind,
+    lifecycle: current?.lifecycle || 'queued',
+    originTurn,
+    workspace: spawned.admission.workspace,
+    activities: appendActivity(current, item),
+  }
+}
+
+function rowFromCollaboration(agentId: string, event: AgentCollaborationEvent, current: AgentWorkRow | undefined, item: AgentWorkActivity | undefined, originTurn: number): AgentWorkRow {
+  const lifecycle = lifecycleFromCompletion(event) || current?.lifecycle || 'admitted'
+  return {
+    agentId,
+    ...(current?.parentAgentId ? { parentAgentId: current.parentAgentId } : {}),
+    title: current?.title || 'Agent task',
+    role: current?.role || 'Agent',
+    executionKind: current?.executionKind || 'builtin-agent',
+    lifecycle,
+    originTurn,
+    workspace: current?.workspace,
+    activities: appendActivity(current, item),
+  }
 }
 
 export function latestConversationTurn(entries: readonly TurnRecordEntry[]): number {

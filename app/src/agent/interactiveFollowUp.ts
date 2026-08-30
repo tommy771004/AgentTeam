@@ -173,6 +173,7 @@ export function projectPendingFollowUps(queue: readonly unknown[], threadId: str
     seen.add(id)
     const state = projectedState(item)
     const mutable = item.action === 'queue' && state === 'queued'
+    const attachments = Array.isArray(item.profile.attachments) ? item.profile.attachments : []
     projected.push({
       id,
       runId: item.runId,
@@ -186,6 +187,7 @@ export function projectPendingFollowUps(queue: readonly unknown[], threadId: str
       editable: mutable,
       cancellable: mutable,
       reorderable: mutable,
+      attachmentCount: attachments.length,
       ...(item.targetRunId ? { targetRunId: item.targetRunId } : {}),
     })
   }

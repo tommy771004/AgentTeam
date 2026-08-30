@@ -112,7 +112,7 @@ try {
       onStop: () => actions.push('stop'),
       pendingFollowUps: [
         { ...base, id: 'steer-1', runId: 'steer-run', text: '先修正目前分析方向，不要重啟任務', action: 'steer', state: 'accepted', editable: false, cancellable: false, reorderable: false },
-        { ...base, id: 'queue-1', runId: 'queue-run-1', text: '完成後整理測試證據與變更摘要', action: 'queue', state: 'queued', editable: true, cancellable: true, reorderable: true },
+        { ...base, id: 'queue-1', runId: 'queue-run-1', text: '完成後整理測試證據與變更摘要', action: 'queue', state: 'queued', editable: true, cancellable: true, reorderable: true, attachmentCount: 2 },
         { ...base, id: 'queue-2', runId: 'queue-run-2', text: '接著檢查窄版畫面不應產生水平捲動', action: 'queue', state: 'queued', editable: true, cancellable: true, reorderable: true },
         { ...base, id: 'rejected-1', runId: 'rejected-run', text: '保留這筆未接受的原始指令', action: 'steer', state: 'rejected', editable: true, cancellable: true, reorderable: false, reason: 'active turn changed' },
       ],
@@ -123,7 +123,7 @@ try {
     }))
   })
   await composer.getByLabel('待處理的後續指令').waitFor()
-  assert.match(await composer.getByLabel('待處理的後續指令').innerText(), /先修正目前分析方向.*引導 · 已接受.*完成後整理測試證據.*排隊 · 排隊中.*保留這筆未接受.*未接受/s)
+  assert.match(await composer.getByLabel('待處理的後續指令').innerText(), /先修正目前分析方向.*引導 · 已接受.*完成後整理測試證據.*排隊 · 第 1 位 · 排隊中 · 附件 2.*接著檢查窄版.*排隊 · 第 2 位 · 排隊中.*保留這筆未接受.*未接受/s)
   assert.equal(await composer.getByRole('button', { name: '送出' }).count(), 1)
   assert.equal(await composer.getByRole('button', { name: '停止執行' }).count(), 1)
   assert.equal(await composer.locator('[aria-live="polite"]').filter({ hasText: '待處理後續指令 4 筆' }).count(), 1, 'queue changes announce one bounded summary')

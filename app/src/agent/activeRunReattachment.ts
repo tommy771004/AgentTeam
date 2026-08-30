@@ -217,20 +217,30 @@ async function restoreAttachment(
     : undefined
 }
 
+const TERMINAL_FINALIZATION_RETRY_MS = 1_000
+const TERMINAL_FINALIZATION_MAX_ATTEMPTS = 45
+
+async function hostStillRetainsTerminal(runs: RunsBridge, runId: string): Promise<boolean> {
+  const active = typeof runs.active === 'function' ? await runs.active().catch(() => undefined) : undefined
+  return Boolean(active?.terminalRuns?.some((item) => item.runId === runId))
+}
+
+async function finalizeTerminalAttachment(runs: RunsBridge, item: PendingFinalization): Promise<void> {
+  for (let attempt = 0; attempt < TERMINAL_FINALIZATION_MAX_ATTEMPTS; attempt += 1) {
+    try { await import('./taskRunCoordinator.ts').then(({ finalizeRecoveredPiHostRun }) => finalizeRecoveredPiHostRun(item)) } catch { /* retry only while Host retains the terminal */ }
+    const { isPiFinalizationAckable } = await import('./taskRunCoordinator.ts')
+    if (isPiFinalizationAckable(item.runId)) {
+      await runs.ack(item.runId).catch(() => undefined)
+      return
+    }
+    if (!(await hostStillRetainsTerminal(runs, item.runId))) return
+    await new Promise((resolve) => setTimeout(resolve, TERMINAL_FINALIZATION_RETRY_MS))
+  }
+}
+
 function finalizeTerminalAttachments(runs: RunsBridge, pending: PendingFinalization[]): void {
   if (pending.length === 0) return
-  void import('./taskRunCoordinator.ts')
-    .then(({ finalizeRecoveredPiHostRun, isPiFinalizationAckable }) => Promise.all(
-      pending.map(async (item) => {
-        try {
-          await finalizeRecoveredPiHostRun(item)
-        } catch {
-          // Claim/finalization transport errors leave the Host attachment pending.
-        }
-        if (isPiFinalizationAckable(item.runId)) await runs.ack(item.runId).catch(() => undefined)
-      }),
-    ))
-    .catch(() => undefined)
+  void Promise.all(pending.map((item) => finalizeTerminalAttachment(runs, item))).catch(() => undefined)
 }
 
 function subscribeDuringAttach(
