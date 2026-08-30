@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { MemoryImportPanel } from '../components/MemoryImportPanel'
+import { AgentTreeDiagnostic } from '../components/AgentTreeDiagnostic'
 import type { MemoryEntry } from '../agent/hermes/types'
 import { APPROVAL_MODE_DEFS } from '../agent/approvalModes'
 import { exportRunMetricsJsonl, metricsSummary, resetRunMetrics } from '../agent/metrics'
@@ -3163,6 +3164,9 @@ export function SettingsPage() {
                   </ul>
                 )}
               </div>
+            </SettingsGroup>
+            <SettingsGroup title="Agent task lifecycle">
+              <AgentTreeDiagnostic />
             </SettingsGroup>
           </>
         )}

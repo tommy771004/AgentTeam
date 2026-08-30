@@ -4,6 +4,7 @@ import type { PiHostFinalizationClaimResult, PiHostFinalizationCompleteResult } 
 import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
 import type { ProjectInstructionWriteFailureCode } from './projectInstructionWriter.ts'
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
+import type { AgentTreeSnapshot } from '../src/agent/agentTree.ts'
 import type { MemoryImportPreviewInput, MemoryImportApplyInput } from './durableMemoryImport.ts'
 import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
 import type { ReviewAdmissionSnapshot, ReviewRunnerKind, ReviewSnapshotRef } from '../src/agent/reviewContract.ts'
@@ -71,7 +72,7 @@ export class PiHostSupervisor {
     this.turnIdleTimeoutMs = options.turnIdleTimeoutMs ?? 5 * 60_000
     this.requestedCapabilities = options.requestedCapabilities
       ? [...options.requestedCapabilities]
-      : ['attachments-v1', 'tool-contract-v1', 'instructions-v1', 'review-v1']
+      : ['attachments-v1', 'tool-contract-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1']
     this.serviceHandler = options.serviceHandler
   }
 
@@ -398,6 +399,18 @@ export class PiHostSupervisor {
     const response = await this.request('sessions/list', {})
     if (response.error || !response.result?.sessions) throw new Error(response.error?.message || 'Pi session listing failed')
     return response.result.sessions
+  }
+
+  async listAgentTree(scope: { rootAgentId?: string; agentId?: string }): Promise<AgentTreeSnapshot> {
+    const response = await this.request('agents/list', scope)
+    if (response.error || !response.result?.rootAgentId || !response.result.agents) {
+      throw new Error(response.error?.message || 'Pi agent tree listing failed')
+    }
+    return {
+      rootAgentId: response.result.rootAgentId,
+      ...(response.result.selectedAgentId ? { selectedAgentId: response.result.selectedAgentId } : {}),
+      agents: response.result.agents,
+    }
   }
 
   async listQueuedRuns(): Promise<NonNullable<PiHostResponse['result']>['queue']> {

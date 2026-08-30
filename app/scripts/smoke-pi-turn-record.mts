@@ -54,13 +54,28 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
-assert.equal(TURN_RECORD_FORMAT_VERSION, 12, 'Exact instruction snapshot is an explicit Turn Record evolution')
+assert.equal(TURN_RECORD_FORMAT_VERSION, 13, 'Host-owned agent lifecycle is an explicit Turn Record evolution')
 const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
 assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')
 const migratedV2 = parseTurnRecord({ version: 2, entries: continued.entries })
 assert.equal(migratedV2.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV2.record.entries, continued.entries, 'v2 records migrate without losing their ordered history')
+
+const lifecycle = appendTurnRecord(undefined, [{
+  kind: 'agent-lifecycle',
+  source: 'host',
+  event: { agentId: 'child-1', rootAgentId: 'root-1', parentAgentId: 'root-1', taskPath: '/root/analyzer-child1', state: 'waiting-approval', runId: 'run-1' },
+  turn: 1,
+  step: 0,
+  at: 1,
+}])
+assert.equal(parseTurnRecord(lifecycle).record.entries[0]?.kind, 'agent-lifecycle')
+assert.throws(() => parseTurnRecord({ version: 12, entries: lifecycle.entries }), TurnRecordCorruptError, 'v12 cannot smuggle a v13 lifecycle entry')
+assert.throws(() => parseTurnRecord({
+  version: TURN_RECORD_FORMAT_VERSION,
+  entries: [{ ...lifecycle.entries[0], event: { ...lifecycle.entries[0].event, reason: 'x'.repeat(2_049) } }, continued.entries[0]],
+}), TurnRecordCorruptError, 'lifecycle metadata remains bounded')
 
 const recalled = appendTurnRecord(undefined, [{
   kind: 'memory-recall', source: 'host', revision: 7,
@@ -520,7 +535,9 @@ try {
   assert.deepEqual(replayedWorkingState, liveWorkingState, 'live and replay use the exact same sequenced state entry')
 
   const kinds = entries.map((entry) => entry.kind)
-  assert.equal(kinds[0], 'turn-start', 'the record opens with the turn')
+  assert.equal(kinds[0], 'agent-lifecycle', 'the record opens with Host admission before the first turn')
+  assert.equal(entries[0]?.kind === 'agent-lifecycle' ? entries[0].event.state : undefined, 'admitted')
+  assert.ok(kinds.indexOf('turn-start') < kinds.indexOf('user-text'), 'the turn still opens before model-visible work')
   assert.equal(kinds[kinds.length - 1], 'turn-end', 'and closes with it')
   assert.ok(kinds.includes('user-text'), 'the prompt is on the record')
   assert.ok(kinds.includes('assistant-text'), 'so is the answer')
@@ -529,7 +546,7 @@ try {
   // Sequence is monotonic, and every entry knows where it sits.
   assert.deepEqual(entries.map((entry) => entry.seq), entries.map((_, index) => index + 1))
   assert.ok(entries.every((entry) => entry.turn === 1), 'one turn, all entries')
-  assert.ok(entries.every((entry) => entry.step >= 1))
+  assert.ok(entries.every((entry) => entry.step >= 0))
   assert.ok(entries.every((entry) => typeof entry.at === 'number' && entry.at > 0))
 
   // ADR-0048: who is accountable is part of the record.

@@ -322,7 +322,7 @@ const piHostSupervisor = new PiHostSupervisor(async () => {
   })
 },
   {
-    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1'],
+    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1'],
     serviceHandler: runPiHostMainService,
   },
 )
@@ -2361,6 +2361,7 @@ ipcMain.handle('pi-host:sessions:create', async (_evt, title?: string, threadId?
 ipcMain.handle('pi-host:sessions:create-child', async (_evt, input: Record<string, unknown>) => piHostSupervisor.createChildSession(input || {}))
 ipcMain.handle('pi-host:sessions:list', async () => ({ sessions: await piHostSupervisor.listSessions() }))
 ipcMain.handle('pi-host:sessions:record', async (_evt, sessionId: string, before?: number, limit?: number) => ({ page: await piHostSupervisor.readSessionRecord(sessionId, before, limit) }))
+ipcMain.handle('pi-host:agents:list', async (_evt, scope: { rootAgentId?: string; agentId?: string }) => piHostSupervisor.listAgentTree(scope || {}))
 ipcMain.handle('pi-host:runs:list', async () => ({ queue: await piHostSupervisor.listQueuedRuns() }))
 ipcMain.handle('pi-host:runs:active', async () => piHostSupervisor.listAttachmentRuns())
 ipcMain.handle('pi-host:runs:attach', async (_evt, runId: string, before?: number, limit?: number) => ({ page: await piHostSupervisor.attachRun(runId, before, limit) }))

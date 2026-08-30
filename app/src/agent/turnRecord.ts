@@ -38,6 +38,7 @@ import {
 import { isMemoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS, type MemoryControlLifecycleEvent, type MemoryControlPackageIdentity } from './memoryControlPackage.ts'
 import type { RunnerCapabilities, RunnerInstructionDelivery } from './runners/types.ts'
 import type { RecordedInstructionSnapshot } from './instructionSnapshot.ts'
+import { isAgentLifecycleEvent, type AgentLifecycleEvent } from './agentLifecycle.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
@@ -53,9 +54,10 @@ import type { RecordedInstructionSnapshot } from './instructionSnapshot.ts'
  * Version 10 adds the bounded activation/rollback event governing the run.
  * Version 11 preserves exact bounded Skill redraft context after resource cleanup.
  * Version 12 records the exact Host-owned instruction snapshot and runner delivery mode.
+ * Version 13 records Host-owned agent tree lifecycle transitions.
  */
-export const TURN_RECORD_FORMAT_VERSION = 12
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+export const TURN_RECORD_FORMAT_VERSION = 13
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -245,6 +247,12 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         settlement: PiTurnSettlement
         interruptReason?: PiTurnInterruptReason
       }
+    | {
+        /** Host-authored tree/lifecycle change; UI and replay consume this same event. */
+        kind: 'agent-lifecycle'
+        source: 'host'
+        event: AgentLifecycleEvent
+      }
     | { kind: 'step-start'; source: 'host' }
     | {
         kind: 'step-end'
@@ -419,6 +427,7 @@ export class TurnRecordCorruptError extends Error {
 const KINDS = new Set([
   'turn-start',
   'turn-end',
+  'agent-lifecycle',
   'step-start',
   'step-end',
   'user-text',
@@ -546,6 +555,11 @@ function isDelegationContextEntry(entry: Record<string, unknown>): boolean | und
 }
 
 function isHostContextEntry(entry: Record<string, unknown>): boolean {
+  if (entry.kind === 'agent-lifecycle') {
+    return entry.source === 'host'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'event', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isAgentLifecycleEvent(entry.event)
+  }
   if (entry.kind === 'memory-recall') return isMemoryRecallEntry(entry)
   if (entry.kind === 'instruction-snapshot') return isInstructionSnapshotEntry(entry)
   const workingStateEntry = isWorkingStateContextEntry(entry)
@@ -718,12 +732,17 @@ function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
   const kind = String(entry.kind || '')
   if (version === 1 && kind === 'memory-recall') return true
   if (version <= 2 && kind === 'working-state') return true
-  if (version < 9 && (kind === 'memory-control-package'
-    || ((kind === 'state-check' || kind === 'delegation-check') && entry.packageIdentity !== undefined))) return true
-  if (version < 10 && kind === 'memory-control-package' && entry.lifecycleEvent !== undefined) return true
-  if (version < 10 && kind === 'memory-control-lifecycle') return true
+  if (isLegacyLifecycleEntry(version, kind, entry)) return true
   if (isLegacySkillEntry(version, kind, entry)) return true
   return version < 5 && ['delegation-assignment', 'delegation-observation', 'delegation-check'].includes(kind)
+}
+
+function isLegacyLifecycleEntry(version: number, kind: string, entry: Record<string, unknown>): boolean {
+  if (version < 13 && kind === 'agent-lifecycle') return true
+  if (version < 9 && kind === 'memory-control-package') return true
+  if (version < 9 && (kind === 'state-check' || kind === 'delegation-check') && entry.packageIdentity !== undefined) return true
+  if (version < 10 && kind === 'memory-control-package' && entry.lifecycleEvent !== undefined) return true
+  return version < 10 && kind === 'memory-control-lifecycle'
 }
 
 function isLegacySkillEntry(version: number, kind: string, entry: Record<string, unknown>): boolean {

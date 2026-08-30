@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
-type Message = { id?: number; result?: { queue?: Array<{ runId: string; status: string }> }; error?: { code: string; message: string } }
+type Message = { id?: number; result?: { sessionId?: string; queue?: Array<{ runId: string; status: string }> }; error?: { code: string; message: string } }
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-host-queue-'))
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
   env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json') },
@@ -27,14 +27,16 @@ const send = (id: number, method: string, params: Record<string, unknown> = {}) 
 try {
   send(1, 'initialize', { protocolVersion: 2 })
   await waitFor(1)
-  send(2, 'runs/enqueue', { runId: 'queued-run-1', sessionId: 'session-1', prompt: 'queued prompt', trigger: 'time', evidence: 'schedule-claim', profile: { model: 'm1' } })
-  const enqueued = await waitFor(2)
+  send(2, 'sessions/create', { title: 'scheduled queue' })
+  const sessionId = String((await waitFor(2)).result?.sessionId)
+  send(3, 'runs/enqueue', { runId: 'queued-run-1', sessionId, prompt: 'queued prompt', trigger: 'time', evidence: 'schedule-claim', profile: { model: 'm1' } })
+  const enqueued = await waitFor(3)
   assert.equal(enqueued.error, undefined)
-  assert.deepEqual(enqueued.result?.queue, [{ runId: 'queued-run-1', sessionId: 'session-1', prompt: 'queued prompt', trigger: 'time', evidence: 'schedule-claim', profile: { model: 'm1' }, status: 'queued' }])
-  send(3, 'runs/enqueue', { runId: 'queued-run-1', sessionId: 'session-1', prompt: 'duplicate', trigger: 'interactive', profile: {} })
-  assert.equal((await waitFor(3)).error?.code, 'invalid_request')
-  send(4, 'runs/cancel', { runId: 'queued-run-1' })
-  assert.equal((await waitFor(4)).result?.queue?.[0]?.status, 'interrupted')
+  assert.deepEqual(enqueued.result?.queue, [{ runId: 'queued-run-1', sessionId, prompt: 'queued prompt', trigger: 'time', evidence: 'schedule-claim', profile: { model: 'm1' }, status: 'queued' }])
+  send(4, 'runs/enqueue', { runId: 'queued-run-1', sessionId, prompt: 'duplicate', trigger: 'interactive', profile: {} })
+  assert.equal((await waitFor(4)).error?.code, 'invalid_request')
+  send(5, 'runs/cancel', { runId: 'queued-run-1' })
+  assert.equal((await waitFor(5)).result?.queue?.[0]?.status, 'interrupted')
 } finally {
   host.stdin.end()
   await once(host, 'exit')

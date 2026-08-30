@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
 import type { PiTurnSettlement } from '../src/agent/piHostRun'
 import type { TurnRecordPage } from '../src/agent/turnRecord'
+import type { AgentTreeSnapshot } from '../src/agent/agentTree'
 import type { UsageLedger, UsageLedgerEntry } from '../src/agent/usageLedger'
 import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
 import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from '../src/agent/subdesign/pluginExecution'
@@ -165,6 +166,10 @@ const api = {
         reset: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:reset', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         archive: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:archive', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
         compact: (sessionId: string) => ipcRenderer.invoke('pi-host:sessions:compact', sessionId) as Promise<{ sessionId: string; sessions: unknown[] }>,
+      },
+      agents: {
+        list: (scope: { rootAgentId?: string; agentId?: string }) =>
+          ipcRenderer.invoke('pi-host:agents:list', scope) as Promise<AgentTreeSnapshot>,
       },
       runs: {
         list: () => ipcRenderer.invoke('pi-host:runs:list') as Promise<{ queue: unknown[] }>,

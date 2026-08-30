@@ -12,6 +12,7 @@ import { createMemoryControlMetaCandidate, type MemoryControlDiagnosis } from '.
 import { baselineMemoryControlPackageReader } from './memoryControlPackageRepository.ts'
 import type { MemoryControlEvaluationAuthority } from './memoryControlEvaluationAuthority.ts'
 import { BUILTIN_RUNNER_CAPABILITIES } from '../src/agent/runners/types.ts'
+import { agentLifecycleFromTurnSettlement, type AgentLifecycleEvent } from '../src/agent/agentLifecycle.ts'
 import { piToolFailureDetail } from './piToolFailureDetail.ts'
 import { InMemoryInstructionRepository, InstructionRepositoryError, type InstructionRepository, type LegacyInstructionMigrationReport, type PersonalizationImportPreview, type PersonalizationInstructionSnapshot } from './instructionRepository.ts'
 import { resolveInstructionSnapshot, writeProjectInstruction, type InstructionSnapshot } from './instructionResolver.ts'
@@ -47,7 +48,7 @@ import type { ReviewDeliveryApproval, ReviewDeliveryIntent, ReviewDeliveryPrevie
  * field. Durable memory is available only through negotiated memory-store-v1.
  */
 export const PI_HOST_PROTOCOL_VERSION = 5 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'capabilities'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
@@ -69,7 +70,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
     | 'review/v1/finalize' | 'review/v1/read' | 'review/v1/payload-page' | 'review/v1/describe' | 'review/v1/files' | 'review/v1/file-diff' | 'review/v1/refresh' | 'review/v1/comments/list' | 'review/v1/draft/save' | 'review/v1/draft/delete' | 'review/v1/comment/transition' | 'review/v1/file-state/list' | 'review/v1/file-state/mark' | 'review/v1/state/inherit' | 'review/v1/feedback/prepare' | 'review/v1/feedback/claim' | 'review/v1/feedback/release' | 'review/v1/verification/list' | 'review/v1/verification/run' | 'review/v1/verification/output' | 'review/v1/mutation/preview' | 'review/v1/mutation/apply' | 'review/v1/delivery/preview' | 'review/v1/delivery/apply' | 'review/v1/artifact/export' | 'review/v1/artifact/import-preview' | 'review/v1/artifact/import-apply' | 'review/v1/artifact/rebind' | 'review/v1/artifact/retention' | 'review/v1/artifact/hard-delete'
   params: Record<string, unknown>
 }
@@ -87,6 +88,9 @@ export type PiHostResponse = {
     memoryControlDiagnosis?: MemoryControlDiagnosis
     cursor?: number
     sessions?: unknown[]
+    agents?: import('../src/agent/agentTree.ts').AgentTreeNode[]
+    rootAgentId?: string
+    selectedAgentId?: string
     settings?: PiSettings
     settingsRevision?: number
     config?: PiHostConfigStatus
@@ -250,6 +254,10 @@ export type PiHostEvent =
        */
       event: 'host/record-append'
       payload: { runId: string; sessionId: string; entries: TurnRecordEntry[] }
+    }
+  | {
+      event: 'host/agent-lifecycle'
+      payload: { sessionId: string; entry: TurnRecordEntry }
     }
   | {
       event: 'host/tool-update'
@@ -439,7 +447,9 @@ import { setPiPlanAnnouncer as installPlanAnnouncer } from './piExtensionPacks/i
 import { isPiMcpInputSchema, piMcpModelToolName, setPiMcpExtensionsLookup } from './piExtensionPacks/mcpBridgePack.ts'
 import { setPiCapabilityBridge, setPiCodeModeExecutor } from './piExtensionPacks/framework.ts'
 import { PiToolContractStore, schemaDigest, type PiTurnToolContract } from './piToolContract.ts'
-import { handlePiHostRunDomain } from './piHostRunDomain.ts'
+import { enqueuePiHostRun, handlePiHostRunDomain } from './piHostRunDomain.ts'
+import { handlePiHostAgentDomain } from './piHostAgentDomain.ts'
+import { agentLifecycleEventForSession, recordAgentLifecycle } from './piAgentLifecycleRecord.ts'
 import { handlePiHostSessionDomain } from './piHostSessionDomain.ts'
 import { handlePiHostToolDomain } from './piHostToolDomain.ts'
 import { validatePiToolArguments } from './piToolArguments.ts'
@@ -468,6 +478,7 @@ type HostState = {
   memoryControlNegotiated: boolean
   instructionRepositoryNegotiated: boolean
   reviewNegotiated: boolean
+  agentTreeNegotiated: boolean
   reviewArtifactStore: ReviewArtifactStore
   reviewWorkspaces: Map<string, ReviewWorkspaceBinding>
   reviewProjection: WorkspaceReviewProjection
@@ -901,6 +912,9 @@ type ActiveTurnRecorder = {
   publish?: (entry: TurnRecordEntry) => void
   /** Updates the Host attachment watermark without copying the entry. */
   onAppend?: (entry: TurnRecordEntry) => void
+  /** Follow-up runs queued while this turn is active begin at the next turn. */
+  deferredLifecycle?: AgentLifecycleEvent[]
+  pendingApprovalCount?: number
 }
 
 const activeTurnRecorders = new Map<string, ActiveTurnRecorder>()
@@ -917,6 +931,25 @@ function recordTurnEntry(
   // is the entry's real seq and not a live-only placeholder.
   recorder.publish?.({ ...appended, seq: recorder.seqBase + recorder.entries.length - 1 } as TurnRecordEntry)
   recorder.onAppend?.({ ...appended, seq: recorder.seqBase + recorder.entries.length - 1 } as TurnRecordEntry)
+}
+
+function recordInTurnAgentLifecycle(
+  state: HostState,
+  sessionId: string,
+  lifecycle: 'waiting-approval' | 'running',
+  runId: string,
+): void {
+  const recorder = activeTurnRecorders.get(sessionId)
+  if (!recorder) return
+  const event = agentLifecycleEventForSession(
+    state.snapshot.sessions,
+    sessionId,
+    lifecycle,
+    runId,
+    undefined,
+    recorder.entries,
+  )
+  if (event) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event })
 }
 
 function parentDelegationEntries(session: SessionRecord, recorder: ActiveTurnRecorder) {
@@ -1087,7 +1120,43 @@ function flushReasoning(sessionId: string): void {
 
 /** The next turn number for a session, read from what the record already holds. */
 function nextTurnNumber(record: TurnRecord | undefined): number {
-  return (record?.entries || []).reduce((highest, entry) => Math.max(highest, entry.turn), 0) + 1
+  // Admission/queue lifecycle can be recorded before a model turn exists;
+  // those entries share the upcoming turn coordinate and must not consume it.
+  return (record?.entries || []).reduce(
+    (highest, entry) => entry.kind === 'agent-lifecycle' ? highest : Math.max(highest, entry.turn),
+    0,
+  ) + 1
+}
+
+function publishAgentLifecycleEntry(
+  emit: ((message: PiHostMessage) => void) | undefined,
+  sessionId: string,
+  entry: TurnRecordEntry,
+): void {
+  if (!emit || entry.kind !== 'agent-lifecycle') return
+  emit({ event: 'host/agent-lifecycle', payload: { sessionId, entry } })
+  if (entry.event.runId) {
+    emit({ event: 'host/record-append', payload: { runId: entry.event.runId, sessionId, entries: [entry] } })
+  }
+}
+
+function flushDeferredAgentLifecycle(
+  state: HostState,
+  sessionId: string,
+  recorder: ActiveTurnRecorder,
+  emit?: (message: PiHostMessage) => void,
+): void {
+  for (const deferred of recorder.deferredLifecycle || []) {
+    recordAgentLifecycle(
+      state.snapshot.sessions,
+      sessionId,
+      deferred.state,
+      deferred.runId,
+      deferred.reason,
+      (entry) => publishAgentLifecycleEntry(emit, sessionId, entry),
+    )
+  }
+  recorder.deferredLifecycle = []
 }
 
 function compactionSourceHash(messages: PiRecordedMessage[]): string {
@@ -2674,12 +2743,10 @@ function handleInitialization(
   const requestedCapabilities = (input.params as { capabilities?: unknown } | undefined)?.capabilities
   state.toolContractNegotiated = !Array.isArray(requestedCapabilities) || requestedCapabilities.includes('tool-contract-v1')
   state.memoryStoreNegotiated = Array.isArray(requestedCapabilities) && requestedCapabilities.includes('memory-store-v1')
-  state.memoryControlNegotiated = requestedVersion === PI_HOST_PROTOCOL_VERSION
-    && Array.isArray(requestedCapabilities) && requestedCapabilities.includes('memory-control-v1')
-  state.instructionRepositoryNegotiated = requestedVersion === PI_HOST_PROTOCOL_VERSION
-    && Array.isArray(requestedCapabilities) && requestedCapabilities.includes('instructions-v1')
-  state.reviewNegotiated = requestedVersion === PI_HOST_PROTOCOL_VERSION
-    && Array.isArray(requestedCapabilities) && requestedCapabilities.includes('review-v1')
+  state.memoryControlNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'memory-control-v1')
+  state.instructionRepositoryNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'instructions-v1')
+  state.reviewNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'review-v1')
+  state.agentTreeNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'agent-tree-v1')
   const result = readyResult(state.negotiatedProtocolVersion)
   return [
     { event: 'host/ready', payload: {
@@ -2688,6 +2755,10 @@ function handleInitialization(
     } },
     { id, result },
   ]
+}
+
+function negotiatedV5Capability(version: unknown, requested: unknown, capability: PiHostCapability): boolean {
+  return version === PI_HOST_PROTOCOL_VERSION && Array.isArray(requested) && requested.includes(capability)
 }
 
 function durableMemoryScope(value: unknown): MemoryScope {
@@ -4365,8 +4436,32 @@ export function handlePiHostRequest(
     commitQueue: (queue) => { state.snapshot.queue = queue; state.snapshot.cursor += 1 },
     isSettlement: isPiTurnSettlement,
     handleAttachment: () => handleAttachmentRequest(state, input, id, emit),
+    recordLifecycle: (sessionId, lifecycle, runId, reason) => {
+      const recorded = recordAgentLifecycle(
+        state.snapshot.sessions,
+        sessionId,
+        lifecycle,
+        runId,
+        reason,
+        (entry) => publishAgentLifecycleEntry(emit, sessionId, entry),
+      )
+      if (recorded) state.snapshot.cursor += 1
+      return recorded
+    },
   })
   if (runResponse) return runResponse
+  if (input.method === 'agents/list' && !state.agentTreeNegotiated) {
+    return [errorResponse(id, 'protocol_mismatch', 'agent-tree-v1 capability was not negotiated')]
+  }
+  const agentResponse = handlePiHostAgentDomain({
+    method: input.method,
+    params: input.params,
+    id,
+    sessions: state.snapshot.sessions,
+    queue: state.snapshot.queue,
+    activeSessionIds: new Set(activeSessionRuns.keys()),
+  })
+  if (agentResponse) return agentResponse
   const sessionResponse = handlePiHostSessionDomain({
     method: input.method,
     params: input.params,
@@ -4377,6 +4472,7 @@ export function handlePiHostRequest(
       nextToolContractRevision: (sessionId) => state.toolContracts.nextRevision(sessionId),
       clearToolContracts: (sessionId) => state.toolContracts.clear(sessionId),
       clearCapabilities: (sessionId) => state.capabilities.clear(sessionId),
+      publishLifecycle: (sessionId, entry) => publishAgentLifecycleEntry(emit, sessionId, entry),
       commit: (sessions) => { state.snapshot.sessions = sessions; state.snapshot.cursor += 1 },
     },
     compact: (session) => handleManualSessionCompaction({ state, session, request: input, id, checkpointWriter, emit }),
@@ -4456,10 +4552,27 @@ export function handlePiHostRequest(
         return [{ id, result: { sessionId, runId: activeRun.runId, settlement: 'interrupted' as const, queued: 'steer' as const } }]
       }
       if (mode === 'queue') {
-        const queue = new PiRunQueue(24, state.snapshot.queue)
-        const outcome = queue.enqueue({ runId, sessionId, prompt, trigger: 'interactive', profile: {}, status: 'queued' })
-        if (!outcome.ok) return [errorResponse(id, 'invalid_request', `Pi run queue ${outcome.code}`)]
-        state.snapshot.queue = queue.snapshot(); state.snapshot.cursor += 1
+        const queuedLifecycle = agentLifecycleEventForSession(
+          state.snapshot.sessions,
+          sessionId,
+          'queued',
+          runId,
+          undefined,
+          activeRun ? activeTurnRecorders.get(sessionId)?.entries : undefined,
+        )
+        if (!queuedLifecycle) return [errorResponse(id, 'invalid_request', 'Illegal agent lifecycle transition')]
+        const outcome = enqueuePiHostRun({
+          queue: state.snapshot.queue,
+          run: { runId, sessionId, prompt, trigger: 'interactive', profile: {}, status: 'queued' },
+          recordLifecycle: () => {
+            const recorder = activeTurnRecorders.get(sessionId)
+            if (!recorder) return false
+            recorder.deferredLifecycle = [...(recorder.deferredLifecycle || []), queuedLifecycle]
+            return true
+          },
+        })
+        if (!outcome.ok) return [errorResponse(id, 'invalid_request', outcome.message)]
+        state.snapshot.queue = outcome.queue; state.snapshot.cursor += 1
         return [{ id, result: { sessionId, runId, settlement: 'interrupted' as const, queued: 'queue' as const, queue: state.snapshot.queue } }]
       }
       return [errorResponse(id, 'invalid_request', `Pi session already has an active run: ${activeRun.runId}`)]
@@ -4623,6 +4736,8 @@ export function handlePiHostRequest(
       capabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
       instructionDelivery: { mode: 'explicit', exactSnapshot: true, detail: 'Pi Host admission snapshot' },
     })
+    const runningLifecycle = agentLifecycleEventForSession(state.snapshot.sessions, sessionId, 'running', runId)
+    if (runningLifecycle) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event: runningLifecycle })
     recordTurnEntry(sessionId, {
       kind: 'notice',
       source: 'host',
@@ -5263,6 +5378,15 @@ export function handlePiHostRequest(
           : orchestration.settlement,
       )
       recorder.step = orchestration.iterations || recorder.step
+      const terminalLifecycle = agentLifecycleEventForSession(
+        state.snapshot.sessions,
+        sessionId,
+        agentLifecycleFromTurnSettlement(orchestration.settlement),
+        runId,
+        undefined,
+        recorder.entries,
+      )
+      if (terminalLifecycle) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event: terminalLifecycle })
       recordTurnEntry(sessionId, {
         kind: 'turn-end',
         source: 'host',
@@ -5283,8 +5407,9 @@ export function handlePiHostRequest(
         runId,
         orchestration.settlement,
         orchestration.result,
-        session.record.entries.at(-1)?.seq,
+        turnRecordSlice.entries.at(-1)?.seq,
       )
+      flushDeferredAgentLifecycle(state, sessionId, recorder, emit)
       return [...turnEvents, {
         id,
           result: {
@@ -5317,10 +5442,14 @@ export function handlePiHostRequest(
         const reason = error instanceof Error ? error.message : 'Pi Host turn failed'
         flushReasoning(sessionId)
         recordTurnEntry(sessionId, { kind: 'notice', source: 'host', topic: 'host-error', text: reason })
+        const failedLifecycle = agentLifecycleEventForSession(state.snapshot.sessions, sessionId, 'failed', runId, reason, recorder.entries)
+        if (failedLifecycle) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event: failedLifecycle })
         recordTurnEntry(sessionId, { kind: 'turn-end', source: 'host', settlement: 'failed' })
         session.record = appendTurnRecord(session.record, recorder.entries)
+        const terminalSeq = session.record.entries.at(-1)?.seq
+        flushDeferredAgentLifecycle(state, sessionId, recorder, emit)
         state.snapshot.cursor += 1
-        state.attachmentJournal.settle(runId, 'failed', reason, session.record.entries.at(-1)?.seq)
+        state.attachmentJournal.settle(runId, 'failed', reason, terminalSeq)
         return [...turnEvents, errorResponse(id, 'runtime_error', reason)]
       }).finally(() => {
       deadline?.cancel()
@@ -5711,6 +5840,7 @@ export function createPiHostServer(
     memoryControlNegotiated: false,
     instructionRepositoryNegotiated: false,
     reviewNegotiated: false,
+    agentTreeNegotiated: false,
     reviewArtifactStore,
     reviewWorkspaces,
     reviewProjection,
@@ -5802,10 +5932,20 @@ export function createPiHostServer(
       return { sessionId: childSessionId, delegationId: assignment.delegationId, objective: assignment.goal.description }
     },
     enqueueChildRun: async ({ runId, sessionId, prompt }) => {
-      const queue = new PiRunQueue(24, state.snapshot.queue)
-      const outcome = queue.enqueue({ runId, sessionId, prompt, trigger: 'interactive', profile: {}, status: 'queued' })
-      if (!outcome.ok) throw new Error(`Pi run queue ${outcome.code}`)
-      state.snapshot.queue = queue.snapshot()
+      const outcome = enqueuePiHostRun({
+        queue: state.snapshot.queue,
+        run: { runId, sessionId, prompt, trigger: 'interactive', profile: {}, status: 'queued' },
+        recordLifecycle: (targetSessionId, lifecycle, targetRunId, reason) => recordAgentLifecycle(
+          state.snapshot.sessions,
+          targetSessionId,
+          lifecycle,
+          targetRunId,
+          reason,
+          (entry) => publishAgentLifecycleEntry(send, targetSessionId, entry),
+        ),
+      })
+      if (!outcome.ok) throw new Error(outcome.message)
+      state.snapshot.queue = outcome.queue
       state.snapshot.cursor += 1
     },
     listRuns: () => [
@@ -5911,6 +6051,13 @@ export function createPiHostServer(
       // after this event can recover the same actionable approval from
       // runs/active or runs/attach. The journal owns redaction and bounds.
       state.attachmentJournal.setPendingApproval(request.runId, request)
+      const recorder = activeTurnRecorders.get(request.sessionId)
+      if (recorder) {
+        recorder.pendingApprovalCount = (recorder.pendingApprovalCount || 0) + 1
+        if (recorder.pendingApprovalCount === 1) {
+          recordInTurnAgentLifecycle(state, request.sessionId, 'waiting-approval', request.runId)
+        }
+      }
       const pendingApproval = state.attachmentJournal.get(request.runId)?.pendingApproval
       // Direct protocol/code-mode calls may not have a run attachment; retain
       // their existing event behavior while attached turns use the bounded
@@ -5919,6 +6066,13 @@ export function createPiHostServer(
     },
     resolved: (request) => {
       state.attachmentJournal.clearPendingApproval(request.runId, request.callId)
+      const recorder = activeTurnRecorders.get(request.sessionId)
+      if (recorder) {
+        recorder.pendingApprovalCount = Math.max(0, (recorder.pendingApprovalCount || 1) - 1)
+        if (recorder.pendingApprovalCount === 0) {
+          recordInTurnAgentLifecycle(state, request.sessionId, 'running', request.runId)
+        }
+      }
     },
   }, (record) => {
     const identity = modelToolContractIdentity(state, record.sessionId, record.tool)

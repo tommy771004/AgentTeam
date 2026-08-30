@@ -2,6 +2,7 @@ import { createPiChildSession, type PiContextPacket } from './piDelegationExtens
 import { disposePiSession, forkPiSession } from './piCoreRuntime.ts'
 import { pageTurnRecord, workingStateFromTurnRecord } from '../src/agent/turnRecord.ts'
 import type { PiHostMessage, SessionRecord } from './piHostProtocol.ts'
+import { recordAgentLifecycle } from './piAgentLifecycleRecord.ts'
 
 type SessionDomainState = {
   sessions: SessionRecord[]
@@ -9,6 +10,7 @@ type SessionDomainState = {
   nextToolContractRevision: (sessionId: string) => number
   clearToolContracts: (sessionId: string) => void
   clearCapabilities: (sessionId: string) => void
+  publishLifecycle?: (sessionId: string, entry: import('../src/agent/turnRecord.ts').TurnRecordEntry) => void
   commit: (sessions: SessionRecord[]) => void
 }
 
@@ -107,7 +109,13 @@ function createSession(input: Parameters<typeof handlePiHostSessionDomain>[0], s
     ...childMetadata,
     messages: [],
   }
-  input.state.commit([...sessions, session])
+  const nextSessions = [...sessions, session]
+  let admissionEntry: import('../src/agent/turnRecord.ts').TurnRecordEntry | undefined
+  if (!recordAgentLifecycle(nextSessions, session.id, 'admitted', undefined, undefined, (entry) => { admissionEntry = entry })) {
+    return [errorResponse(input.id, 'Unable to record agent admission')]
+  }
+  input.state.commit(nextSessions)
+  if (admissionEntry) input.state.publishLifecycle?.(session.id, admissionEntry)
   return [{ id: input.id, result: { sessionId: session.id, sessions: [session] } }]
 }
 
@@ -126,6 +134,12 @@ function forkSession(input: Parameters<typeof handlePiHostSessionDomain>[0], ses
     messages: source.messages.map((message) => ({ ...message })),
     piSessionFile: forkPiSession(sourceId),
   }
-  input.state.commit([...sessions, fork])
+  const nextSessions = [...sessions, fork]
+  let admissionEntry: import('../src/agent/turnRecord.ts').TurnRecordEntry | undefined
+  if (!recordAgentLifecycle(nextSessions, fork.id, 'admitted', undefined, undefined, (entry) => { admissionEntry = entry })) {
+    return [errorResponse(input.id, 'Unable to record agent admission')]
+  }
+  input.state.commit(nextSessions)
+  if (admissionEntry) input.state.publishLifecycle?.(fork.id, admissionEntry)
   return [{ id: input.id, result: { sessionId: fork.id, sessions: [fork] } }]
 }

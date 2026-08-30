@@ -28,7 +28,7 @@ output.on('line', (line) => messages.push(JSON.parse(line) as Record<string, any
 const waitFor = async (predicate: (message: Record<string, any>) => boolean) => { for (;;) { const found = messages.find(predicate); if (found) return found; await once(output, 'line') } }
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 try {
-  send(1, 'initialize', { protocolVersion: 2 }); await waitFor((m) => m.id === 1)
+  send(1, 'initialize', { protocolVersion: 5, capabilities: ['agent-tree-v1'] }); await waitFor((m) => m.id === 1)
   send(2, 'sessions/create', { title: 'steer queue' }); const sessionId = String((await waitFor((m) => m.id === 2)).result.sessionId)
   send(3, 'settings/update', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', approvalMode: 'full' }); await waitFor((m) => m.id === 3)
   send(4, 'turn/submit', { sessionId, runId: 'active-run', cwd: process.cwd(), prompt: 'long task', profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', approvalMode: 'full' } })
@@ -41,6 +41,13 @@ try {
   const queued = await waitFor((m) => m.id === 6)
   assert.equal(queued.result?.queued, 'queue'); assert.ok(queued.result?.queue?.some((item: any) => item.runId === 'queued-request'))
   assert.equal((await waitFor((m) => m.id === 4)).result?.settlement, 'answered')
+  send(7, 'sessions/record', { sessionId })
+  const queuedEntry = (await waitFor((m) => m.id === 7)).result?.page?.entries
+    ?.find((entry: any) => entry.kind === 'agent-lifecycle' && entry.event?.runId === 'queued-request')
+  assert.equal(queuedEntry?.event?.state, 'queued')
+  assert.equal(queuedEntry?.turn, 2, 'an active follow-up is attributed to the upcoming turn')
+  send(8, 'agents/list', { agentId: sessionId })
+  assert.equal((await waitFor((m) => m.id === 8)).result?.agents?.[0]?.lifecycle, 'queued')
 } finally {
   host.stdin.end(); await once(host, 'exit'); modelServer.close(); await rm(agentDir, { recursive: true, force: true }); await rm(stateDir, { recursive: true, force: true })
 }
